@@ -39,15 +39,22 @@ interface DataSourceOAuthCallbackProps {
   provider?: CloudDataSourceProvider;
 }
 
+const PROVIDER_NAME_KEYS: Record<CloudDataSourceProvider, string> = {
+  feishu: "admin.dataSourceTypeFeishu",
+  notion: "admin.dataSourceTypeNotion",
+  googledrive: "admin.dataSourceTypeGoogleDrive",
+};
+
 export default function FeishuDataSourceCallback({
   provider = "feishu",
 }: DataSourceOAuthCallbackProps) {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
+  const providerName = t(PROVIDER_NAME_KEYS[provider]);
   const [viewState, setViewState] = useState<CallbackViewState>({
     status: "loading",
-    title: t("admin.dataSourceCallbackLoadingTitle"),
-    subtitle: t("admin.dataSourceCallbackLoadingSubtitle"),
+    title: t("admin.dataSourceCallbackLoadingTitle", { providerName }),
+    subtitle: t("admin.dataSourceCallbackLoadingSubtitle", { providerName }),
   });
 
   useEffect(() => {
@@ -118,7 +125,7 @@ export default function FeishuDataSourceCallback({
         const connection = await finishCloudDataSourceOAuth(provider, code, state);
         setViewState({
           status: "success",
-          title: t("admin.dataSourceCallbackSuccessTitle"),
+          title: t("admin.dataSourceCallbackSuccessTitle", { providerName }),
           subtitle: t("admin.dataSourceCallbackSuccessSubtitle", {
             accountName: connection.accountName,
           }),
@@ -149,7 +156,7 @@ export default function FeishuDataSourceCallback({
     };
 
     void run();
-  }, [provider, searchParams, t]);
+  }, [provider, providerName, searchParams, t]);
 
   return (
     <div

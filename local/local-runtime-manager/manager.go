@@ -30,6 +30,7 @@ type RuntimeManager struct {
 	waitHostReady             func(context.Context, RuntimeConfig, []AlgorithmServiceSpec) error
 	runtimeReady              func(context.Context, RuntimeConfig, RuntimePaths) bool
 	processScanner            localProcessScanner
+	relocatePythonVenvs       func(RuntimeConfig, RuntimePaths) error
 	pollInterval              time.Duration
 	upTimeout                 time.Duration
 	downTimeout               time.Duration
@@ -65,6 +66,7 @@ func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 		waitHostReady:             waitForHostAlgorithmReadiness,
 		runtimeReady:              nil,
 		processScanner:            scanLocalRuntimeProcesses,
+		relocatePythonVenvs:       relocateDesktopPythonVenvs,
 		pollInterval:              2 * time.Second,
 		upTimeout:                 envDuration(localUpTimeoutEnvVar, time.Duration(defaultLocalUpTimeout)*time.Second),
 		downTimeout:               envDuration(localDownTimeoutEnvVar, time.Duration(defaultLocalDownTimeout)*time.Second),
@@ -96,6 +98,23 @@ func (m *RuntimeManager) progressf(format string, args ...any) {
 	_, _ = fmt.Fprintf(m.out, format+"\n", args...)
 }
 
+func (m *RuntimeManager) startupEvent(event, phase string, startedAt time.Time, eventErr error) {
+	payload := map[string]any{
+		"event":     event,
+		"phase":     phase,
+		"timestamp": m.now().UTC().Format(time.RFC3339Nano),
+	}
+	if !startedAt.IsZero() {
+		payload["elapsedMs"] = m.now().Sub(startedAt).Milliseconds()
+	}
+	if eventErr != nil {
+		payload["error"] = eventErr.Error()
+	}
+	if raw, err := json.Marshal(payload); err == nil {
+		m.progressf("[startup-event] %s", raw)
+	}
+}
+
 func randomHexToken() (string, error) {
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
@@ -104,15 +123,21 @@ func randomHexToken() (string, error) {
 	return hex.EncodeToString(raw), nil
 }
 
-func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) (resultErr error) {
+	startupStartedAt := m.now()
+	m.startupEvent("startup.started", "startup", startupStartedAt, nil)
+	defer func() {
+		if resultErr != nil {
+			m.startupEvent("startup.failed", "startup", startupStartedAt, resultErr)
+			return
+		}
+		m.startupEvent("startup.completed", "startup", startupStartedAt, nil)
+	}()
 	if err := validateRequestedRuntimeOwner(cfg); err != nil {
 		return err
 	}
 	freshCfg := cfg
 	if err := ensureRuntimeDirs(cfg, paths); err != nil {
-		return err
-	}
-	if err := relocateDesktopPythonVenvs(cfg, paths); err != nil {
 		return err
 	}
 	state, err := readOrNewState(paths, cfg)
@@ -128,27 +153,6 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if m.isExistingRuntimeRunning(ctx, state, stateCfg, paths) {
 		return m.reportExistingRuntime(ctx, state, stateCfg, paths)
 	}
-	if err := m.stopStaleRuntimeIfNeeded(ctx, state, stateCfg, paths); err != nil {
-		return err
-	}
-	if err := m.killStaleRuntimeProcesses(ctx, cfg, paths); err != nil {
-		return err
-	}
-	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
-		Profile:         cfg.Profile,
-		MaintenanceMode: cfg.MaintenanceMode,
-		OwnerToken:      cfg.OwnerToken,
-		RepoRoot:        paths.RepoRoot,
-		RuntimeRoot:     cfg.RuntimeRoot,
-		ResourcesRoot:   cfg.ResourcesRoot,
-	})
-	if err != nil {
-		return err
-	}
-	if err := ensureRuntimeDirs(freshCfg, paths); err != nil {
-		return err
-	}
-
 	releaseLock, err := acquireUpLock(paths)
 	if err != nil {
 		return err
@@ -188,6 +192,15 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := ensureRuntimeDirs(freshCfg, paths); err != nil {
 		return err
 	}
+	relocationStartedAt := m.now()
+	m.progressf("checking relocatable desktop Python environments")
+	m.startupEvent("phase.started", "python-relocation", relocationStartedAt, nil)
+	if err := m.relocatePythonVenvs(freshCfg, paths); err != nil {
+		m.startupEvent("phase.failed", "python-relocation", relocationStartedAt, err)
+		return fmt.Errorf("desktop Python relocation failed after %s: %w", m.now().Sub(relocationStartedAt).Round(time.Millisecond), err)
+	}
+	m.startupEvent("phase.completed", "python-relocation", relocationStartedAt, nil)
+	m.progressf("desktop Python environment check completed in %s", m.now().Sub(relocationStartedAt).Round(time.Millisecond))
 	cfg = freshCfg
 	plan := buildRuntimeProcessPlan(cfg)
 	if err := validatePinnedLocalPorts(cfg); err != nil {
@@ -232,6 +245,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	state.ProcessCompose.TokenFile = paths.RunDirTokenFile
 	state.Config = snapshotRuntimeConfig(cfg)
 	state = newStateWithServiceStatus(state, cfg, "starting")
+	state.OverallStatus = "starting"
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		return err
 	}
@@ -775,14 +789,34 @@ func (m *RuntimeManager) stopStaleRuntimeIfNeeded(ctx context.Context, state Run
 }
 
 func (m *RuntimeManager) killStaleRuntimeProcesses(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
-	records := discoverLocalRuntimeProcesses(paths, cfg, m.processScanner)
-	if len(records) == 0 {
-		return nil
+	startedAt := m.now()
+	for pass := 1; ; pass++ {
+		records, err := discoverLocalRuntimeProcessesChecked(paths, cfg, m.processScanner)
+		if err != nil {
+			return err
+		}
+		if len(records) == 0 {
+			if pass > 1 {
+				m.progressf("orphan process cleanup verified in %s", m.now().Sub(startedAt).Round(time.Millisecond))
+			}
+			return nil
+		}
+		m.progressf("stopping %d orphan local runtime process(es), pass %d: %s", len(records), pass, summarizeLocalProcessRecords(records))
+		if err := stopLocalProcessRecords(ctx, records); err != nil {
+			return err
+		}
+		cleanupLocalProcessRecords(paths, records)
+		if m.now().Sub(startedAt) >= 15*time.Second {
+			remaining, scanErr := discoverLocalRuntimeProcessesChecked(paths, cfg, m.processScanner)
+			if scanErr != nil {
+				return scanErr
+			}
+			if len(remaining) > 0 {
+				return fmt.Errorf("local runtime process cleanup timed out after 15s: %s", summarizeLocalProcessRecords(remaining))
+			}
+			return nil
+		}
 	}
-	m.progressf("stopping %d orphan local runtime process(es) for this repo", len(records))
-	err := stopLocalProcessRecords(ctx, records)
-	cleanupLocalProcessRecords(paths, records)
-	return err
 }
 
 func (m *RuntimeManager) stopProcessComposeSupervisor(ctx context.Context, paths RuntimePaths) error {
@@ -1183,7 +1217,6 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 	plan := buildRuntimeProcessPlan(cfg)
 
 	if m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
-		resp.OverallStatus = "ready"
 		s := resp.Services[processComposeServiceName]
 		s.Status = "running"
 		resp.Services[processComposeServiceName] = s
@@ -1215,9 +1248,7 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			}
 			resp.Services[spec.Name] = svc
 		}
-		if !hostHealthy {
-			resp.OverallStatus = "stale"
-		}
+		resp.OverallStatus = processComposeRuntimeStatus(state.OverallStatus, hostHealthy)
 	} else {
 		if m.checkRuntimeReady(ctx, cfg, paths) {
 			resp.OverallStatus = "ready"
@@ -1250,6 +1281,30 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 		return "", err
 	}
 	return string(b), nil
+}
+
+func updateProbedService(services map[string]RuntimeServiceState, name string, healthy bool) bool {
+	service := services[name]
+	service.Kind = "host-process"
+	if healthy {
+		service.Status = "running"
+		services[name] = service
+		return true
+	}
+	if service.Status == "running" || service.Status == "starting" {
+		service.Status = "stale"
+	} else {
+		service.Status = "stopped"
+	}
+	services[name] = service
+	return false
+}
+
+func processComposeRuntimeStatus(stateStatus string, hostHealthy bool) string {
+	if !hostHealthy {
+		return "stale"
+	}
+	return stateStatus
 }
 
 func (m *RuntimeManager) humanStatus(resp StatusResponse) string {

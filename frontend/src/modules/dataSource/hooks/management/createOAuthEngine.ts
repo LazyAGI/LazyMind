@@ -94,7 +94,9 @@ export function createOAuthEngine(ctx: ManagementContext) {
           provider: "notion",
           status: null,
         });
-      const cachedAccounts = ctx.notionAuthAccounts;
+      const cachedAccounts = Array.isArray(ctx.notionAuthAccounts)
+        ? ctx.notionAuthAccounts
+        : [];
       const nextAccounts = getCloudConnectionItems(response.data).map((item) =>
         mapCloudConnectionToNotionAccount(item, cachedAccounts),
       );
@@ -392,7 +394,7 @@ export function createOAuthEngine(ctx: ManagementContext) {
     const previousConnection = options?.previousConnection ?? ctx.oauthConnection;
 
     try {
-      if (!activeSetup?.appId.trim() || !activeSetup.appSecret.trim()) {
+      if (!activeSetup?.appId.trim()) {
         message.warning(
           provider === "feishu"
             ? t("admin.dataSourceFeishuCredentialRequired")
@@ -420,8 +422,15 @@ export function createOAuthEngine(ctx: ManagementContext) {
         scopes: provider === "feishu" ? FEISHU_DEFAULT_SCOPES : [],
         returnUrl: window.location.href,
       });
+      const draftFormValues =
+        options?.draftFormValues ??
+        (options?.draftWizardOpen === false ? {} : form.getFieldsValue(true));
 
       const existingDraft = peekFeishuDataSourceWizardDraft();
+      const draftSelectedType =
+        options?.draftSelectedType === "feishu" || options?.draftSelectedType === "notion"
+          ? options.draftSelectedType
+          : ctx.selectedType;
       const draft: FeishuDataSourceWizardDraft = {
         wizardOpen: false,
         openWizardAfterOAuth: options?.openWizardOnSuccess,
@@ -429,13 +438,13 @@ export function createOAuthEngine(ctx: ManagementContext) {
         authSelectProvider: existingDraft?.authSelectProvider,
         wizardStep: options?.draftWizardStep ?? ctx.wizardStep,
         wizardMode: options?.draftWizardMode ?? ctx.wizardMode,
-        selectedType: options?.draftSelectedType ?? ctx.selectedType,
+        selectedType: draftSelectedType,
         editingId: options?.draftEditingId ?? ctx.editingId,
         validatedAgentId: selectedAgent.agent_id || null,
         oauthState: "waiting",
         connectionVerified: previousVerified,
         oauthConnection: previousConnection,
-        formValues: options?.draftFormValues || form.getFieldsValue(true),
+        formValues: draftFormValues,
       };
 
       saveFeishuDataSourceWizardDraft(draft);
@@ -489,7 +498,9 @@ export function createOAuthEngine(ctx: ManagementContext) {
           restorePreviousOauthState(t("admin.dataSourceOauthWindowClosed"));
         }, 400);
 
-        oauthAttemptRef.current.timerId = timerId;
+        if (oauthAttemptRef.current) {
+          oauthAttemptRef.current.timerId = timerId;
+        }
         popup.focus();
         return true;
       }

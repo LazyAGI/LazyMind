@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { ApiOutlined, DatabaseOutlined, FolderOpenOutlined } from "@ant-design/icons";
+import { ApiOutlined, DatabaseOutlined, FolderOpenOutlined, GoogleOutlined } from "@ant-design/icons";
 
-export type CloudProviderType = "local" | "feishu" | "notion";
+export type CloudProviderType = "local" | "feishu" | "notion" | "googledrive";
 
 export const cloudProviderOptions: Array<{
   type: CloudProviderType;
@@ -24,8 +24,12 @@ export const cloudProviderOptions: Array<{
     icon: <DatabaseOutlined />,
     logoUrl: "https://www.google.com/s2/favicons?domain=notion.so&sz=96",
   },
+  {
+    type: "googledrive",
+    icon: <GoogleOutlined />,
+  },
 ];
 
 export const cloudAuthProviderOptions = cloudProviderOptions.filter(
-  (item) => item.type === "feishu" || item.type === "notion",
+  (item) => item.type !== "local",
 );

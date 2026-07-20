@@ -7,6 +7,7 @@ export const downloadStream = (data: Blob, fileName: string) => {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
 };
 
 export const downloadUrl = (url: string, target?: string) => {

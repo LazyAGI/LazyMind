@@ -20,6 +20,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/plugin"
 	"lazymind/core/state"
@@ -237,8 +238,12 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if len(dbDisabledTools) > 0 {
 		resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, dbDisabledTools)
 	}
+	resourceContext.DisabledTools = mergeDisabledToolNames(
+		resourceContext.DisabledTools, mentionedResources.ExcludedToolNames,
+	)
 	resourceContext.DisabledTools = applyMentionedTools(resourceContext.DisabledTools, mentionedResources.ToolNames)
 	reqBody := buildChatRequestBody(r.Context(), db, convID, sessionID, query, upstreamHistories, raw, resourceContext, userID, target.Seq)
+	applyExplicitResourceBindings(reqBody, mentionedResources)
 	if mentionedResources.ConversationContext != "" {
 		history, _ := reqBody["history"].([]map[string]string)
 		history = append(history, map[string]string{
@@ -267,6 +272,13 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if err := applyChatRuntimeConfigs(r.Context(), db, userID, reqBody); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
 		return
+	}
+	if toolConfig, err := loadChatToolConfig(r.Context(), db, userID); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat tool config failed", err), http.StatusInternalServerError)
+		return
+	} else if len(toolConfig) > 0 {
+		existing, _ := reqBody["tool_config"].(map[string]any)
+		reqBody["tool_config"] = mergeToolConfig(existing, toolConfig)
 	}
 	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
 	// resolvePluginModeWithFallback determines the effective plugin_mode for this request.
@@ -299,7 +311,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			reqBody["enable_subagent"] = v
 		}
 	}
-	if err := applyPluginSelection(r.Context(), db, userID, reqBody, mentionedResources.PluginRefs); err != nil {
+	if err := applyPluginSelection(
+		r.Context(), db, userID, reqBody, mentionedResources.PluginRefs,
+		mentionedResources.ExcludedPluginRefs,
+	); err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusForbidden)
 		return
 	}
@@ -498,13 +513,14 @@ func resumeFromDBOnly(db *gorm.DB, convID string, flusher http.Flusher, w http.R
 		return
 	}
 	writeSSEChunk(w, flusher, map[string]any{
-		"conversation_id": convID,
-		"seq":             last.Seq,
-		"message":         stripThinkTags(stripToolTags(last.Result)),
-		"delta":           stripThinkTags(stripToolTags(last.Result)),
-		"finish_reason":   "FINISH_REASON_STOP",
-		"history_id":      last.ID,
-		"tool_call_turns": last.ToolCallTurns,
+		"conversation_id":     convID,
+		"seq":                 last.Seq,
+		"message":             stripThinkTags(stripToolTags(last.Result)),
+		"delta":               stripThinkTags(stripToolTags(last.Result)),
+		"finish_reason":       "FINISH_REASON_STOP",
+		"history_id":          last.ID,
+		"tool_call_turns":     last.ToolCallTurns,
+		"thinking_duration_s": last.ThinkingDurationS,
 	})
 }
 
@@ -512,13 +528,14 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 	var last orm.ChatHistory
 	if err := db.Where("conversation_id = ?", convID).Order("seq DESC").First(&last).Error; err == nil && last.ID != "" {
 		writeSSEChunk(w, flusher, map[string]any{
-			"conversation_id": convID,
-			"seq":             last.Seq,
-			"message":         stripThinkTags(stripToolTags(last.Result)),
-			"delta":           stripThinkTags(stripToolTags(last.Result)),
-			"finish_reason":   "FINISH_REASON_STOP",
-			"history_id":      last.ID,
-			"tool_call_turns": last.ToolCallTurns,
+			"conversation_id":     convID,
+			"seq":                 last.Seq,
+			"message":             stripThinkTags(stripToolTags(last.Result)),
+			"delta":               stripThinkTags(stripToolTags(last.Result)),
+			"finish_reason":       "FINISH_REASON_STOP",
+			"history_id":          last.ID,
+			"tool_call_turns":     last.ToolCallTurns,
+			"thinking_duration_s": last.ThinkingDurationS,
 		})
 		return
 	}
@@ -534,13 +551,14 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			finish = "FINISH_REASON_STOP"
 		}
 		writeSSEChunk(w, flusher, map[string]any{
-			"conversation_id": convID,
-			"seq":             h.Seq,
-			"message":         stripThinkTags(stripToolTags(h.Result)),
-			"delta":           stripThinkTags(stripToolTags(h.Result)),
-			"finish_reason":   finish,
-			"history_id":      h.ID,
-			"tool_call_turns": h.ToolCallTurns,
+			"conversation_id":     convID,
+			"seq":                 h.Seq,
+			"message":             stripThinkTags(stripToolTags(h.Result)),
+			"delta":               stripThinkTags(stripToolTags(h.Result)),
+			"finish_reason":       finish,
+			"history_id":          h.ID,
+			"tool_call_turns":     h.ToolCallTurns,
+			"thinking_duration_s": h.ThinkingDurationS,
 		})
 	}
 }
@@ -977,18 +995,20 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		}
 	}
 	item := map[string]any{
-		"seq":             h.Seq,
-		"query":           h.RawContent,
-		"result":          stripThinkTags(stripToolTags(h.Result)),
-		"id":              h.ID,
-		"feed_back":       h.FeedBack,
-		"sources":         sources,
-		"input":           input,
-		"mentions":        mentions,
-		"reason":          h.Reason,
-		"expected_answer": h.ExpectedAnswer,
-		"create_time":     h.CreateTime.UTC().Format(time.RFC3339),
-		"tool_call_turns": h.ToolCallTurns,
+		"seq":               h.Seq,
+		"query":             h.RawContent,
+		"result":            stripThinkTags(stripToolTags(h.Result)),
+		"id":                h.ID,
+		"feed_back":         h.FeedBack,
+		"sources":           sources,
+		"input":             input,
+		"mentions":          mentions,
+		"reason":            h.Reason,
+		"expected_answer":   h.ExpectedAnswer,
+		"create_time":       h.CreateTime.UTC().Format(time.RFC3339),
+		"tool_call_turns":   h.ToolCallTurns,
+		"reasoning_content": extractThinkContent(h.Result),
+		"thinking_time_s":   h.ThinkingDurationS,
 	}
 	if askPending != nil {
 		item["ask_pending"] = askPending
@@ -1186,8 +1206,13 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	db.Where("conversation_id = ?", convID).Delete(&orm.ChatHistory{})
 	db.Where("conversation_id = ?", convID).Delete(&orm.MultiAnswersChatHistory{})
+	db.Where("conversation_id = ?", convID).Delete(&orm.ConversationArtifact{})
 	// Cascade-delete task center entries for this conversation.
 	db.Where("conversation_id = ?", convID).Delete(&orm.TaskCenterTask{})
+	if err := removeConversationArtifactFiles(userID, convID); err != nil {
+		log.Logger.Warn().Err(err).Str("conversation_id", convID).
+			Msg("remove main chat artifact files failed")
+	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
 
@@ -1251,10 +1276,19 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.MultiAnswersChatHistory{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.ConversationArtifact{}).Error; err != nil {
+			return err
+		}
 		return tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.TaskCenterTask{}).Error
 	}); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "batch delete conversations failed", err), http.StatusInternalServerError)
 		return
+	}
+	for _, conversationID := range ownedIDs {
+		if err := removeConversationArtifactFiles(userID, conversationID); err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", conversationID).
+				Msg("remove main chat artifact files failed")
+		}
 	}
 
 	writeConversationJSON(w, http.StatusOK, map[string]any{
@@ -1401,19 +1435,20 @@ func SetChatHistory(w http.ResponseWriter, r *http.Request) {
 	var exists orm.ChatHistory
 	if err := db.Where("id = ?", body.SetHistoryID).First(&exists).Error; err != nil {
 		target := orm.ChatHistory{
-			ID:              selected.ID,
-			Seq:             selected.Seq,
-			ConversationID:  selected.ConversationID,
-			RawContent:      selected.RawContent,
-			RetrievalResult: selected.RetrievalResult,
-			Content:         selected.Content,
-			Result:          selected.Result,
-			ToolCallTurns:   nonNegativeToolCallTurns(int64(selected.ToolCallTurns)),
-			FeedBack:        selected.FeedBack,
-			Reason:          selected.Reason,
-			Ext:             selected.Ext,
-			Version:         "2.3",
-			TimeMixin:       orm.TimeMixin{CreateTime: now, UpdateTime: now},
+			ID:                selected.ID,
+			Seq:               selected.Seq,
+			ConversationID:    selected.ConversationID,
+			RawContent:        selected.RawContent,
+			RetrievalResult:   selected.RetrievalResult,
+			Content:           selected.Content,
+			Result:            selected.Result,
+			ToolCallTurns:     nonNegativeToolCallTurns(int64(selected.ToolCallTurns)),
+			ThinkingDurationS: selected.ThinkingDurationS,
+			FeedBack:          selected.FeedBack,
+			Reason:            selected.Reason,
+			Ext:               selected.Ext,
+			Version:           "2.3",
+			TimeMixin:         orm.TimeMixin{CreateTime: now, UpdateTime: now},
 		}
 		if err := db.Create(&target).Error; err != nil {
 			common.ReplyErr(w, fmt.Sprintf("%s: %v", "set history failed", err), http.StatusInternalServerError)

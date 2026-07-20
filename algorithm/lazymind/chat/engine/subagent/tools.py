@@ -49,8 +49,7 @@ def _build_artifact_value(value: Any, content_type: str):
         text = str(value)
         if len(text.encode('utf-8', errors='replace')) > LARGE_ARTIFACT_THRESHOLD:
             abs_path = ctx.write_large_content(text, hint='artifact_text')
-            rel = os.path.relpath(abs_path, ctx.workspace_path)
-            return {'type': 'text', 'path': rel, 'size': os.path.getsize(abs_path)}, 'file'
+            return {'type': 'text', 'path': abs_path, 'size': os.path.getsize(abs_path)}, 'file'
         return {'text': text}, 'text'
     if content_type == 'json':
         if isinstance(value, str):
@@ -61,8 +60,7 @@ def _build_artifact_value(value: Any, content_type: str):
         serialized = json.dumps(value, ensure_ascii=False, default=str)
         if len(serialized.encode('utf-8', errors='replace')) > LARGE_ARTIFACT_THRESHOLD:
             abs_path = ctx.write_large_content(serialized, hint='artifact_json')
-            rel = os.path.relpath(abs_path, ctx.workspace_path)
-            return {'type': 'json', 'path': rel, 'size': os.path.getsize(abs_path)}, 'file'
+            return {'type': 'json', 'path': abs_path, 'size': os.path.getsize(abs_path)}, 'file'
         return {'data': value}, 'json'
     if content_type == 'image':
         src = str(value).strip()
@@ -82,19 +80,47 @@ def _build_artifact_value(value: Any, content_type: str):
             return {'path': dst_abs}, 'image'
         return {'path': src}, 'image'
     if content_type == 'file':
-        abs_path = str(value)
-        rel = ctx.copy_into_workspace(abs_path) if os.path.isabs(abs_path) else abs_path
-        size = 0
-        full = os.path.join(ctx.workspace_path, rel)
-        if os.path.exists(full):
-            size = os.path.getsize(full)
-        return {'filename': os.path.basename(rel), 'path': full, 'size': size}, 'file'
+        source = str(value).strip()
+        if not source:
+            raise ValueError('File artifact path must not be empty.')
+        if os.path.isabs(source):
+            source = os.path.realpath(source)
+            if not os.path.isfile(source):
+                raise FileNotFoundError(f'File artifact does not exist: {source}')
+            rel = ctx.copy_into_workspace(source)
+            full = os.path.realpath(os.path.join(ctx.workspace_path, rel))
+        else:
+            full = os.path.realpath(os.path.join(ctx.workspace_path, source))
+            workspace = os.path.realpath(ctx.workspace_path)
+            if os.path.commonpath([workspace, full]) != workspace:
+                raise ValueError('Relative file artifact path must stay inside the task workspace.')
+            if not os.path.isfile(full):
+                raise FileNotFoundError(f'File artifact does not exist in task workspace: {source}')
+        size = os.path.getsize(full)
+        return {'filename': os.path.basename(full), 'path': full, 'size': size}, 'file'
     if content_type == 'file_list':
         items = value if isinstance(value, list) else [value]
         paths: List[str] = []
         for item in items:
-            p = str(item)
-            paths.append(ctx.copy_into_workspace(p) if os.path.isabs(p) else p)
+            p = str(item).strip()
+            if not p:
+                continue
+            if os.path.isabs(p):
+                source = os.path.realpath(p)
+                if not os.path.isfile(source):
+                    raise FileNotFoundError(f'File-list artifact does not exist: {source}')
+                rel = ctx.copy_into_workspace(source)
+                paths.append(os.path.realpath(os.path.join(ctx.workspace_path, rel)))
+                continue
+            resolved = os.path.realpath(os.path.join(ctx.workspace_path, p))
+            workspace = os.path.realpath(ctx.workspace_path)
+            if os.path.commonpath([workspace, resolved]) != workspace:
+                raise ValueError('Relative file-list artifact path must stay inside the task workspace.')
+            if not os.path.isfile(resolved):
+                raise FileNotFoundError(f'File-list artifact does not exist in task workspace: {p}')
+            paths.append(resolved)
+        if not paths:
+            raise ValueError('File-list artifact must contain at least one existing file.')
         return {'paths': paths}, 'file_list'
     return {'text': str(value)}, 'text'
 
@@ -106,7 +132,7 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
     """Save an output artifact produced by this SubAgent.
 
     File-type values must be local absolute paths; the framework copies them into the
-    workspace and converts to relative paths. The same key may be saved multiple times
+    workspace and stores a normalized absolute path. The same key may be saved multiple times
     (each call appends a row with an incremented seq), which is how variable-count outputs
     such as per-image generation are streamed to the frontend.
 
@@ -217,7 +243,7 @@ def _write_artifact_draft(
             content = built.get('text', '')
         else:  # json, DB-inline
             content = json.dumps(built.get('data', ''), ensure_ascii=False)
-        ctx.write_draft(key, original_type, content, list_index)
+        ctx.write_draft(key, original_type, content, list_index, pending_commit=False)
     except Exception:
         pass  # draft write failure is non-fatal
 
@@ -572,7 +598,7 @@ def patch_artifact(
                     'Call save_artifact first to create the artifact before patching.'
                 ),
             })
-        ctx.write_draft(key, original_type, text, list_index)
+        ctx.write_draft(key, original_type, text, list_index, pending_commit=False)
         draft_result = (text, original_type)
 
     content, original_type = draft_result

@@ -39,6 +39,13 @@ func TestStripThinkTags(t *testing.T) {
 	}
 }
 
+func TestExtractThinkContent(t *testing.T) {
+	got := extractThinkContent("<think>first</think>answer<think>second</think>")
+	if got != "first\nsecond" {
+		t.Fatalf("extractThinkContent: got %q", got)
+	}
+}
+
 func TestBuildAssistantHistoryContentPassthrough(t *testing.T) {
 	// Result now contains think tags directly; buildAssistantHistoryContent passes it through.
 	history := orm.ChatHistory{

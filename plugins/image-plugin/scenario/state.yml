@@ -123,7 +123,20 @@ steps:
       {{runtime_instruction}}
 
       Your task:
-      0. Read WORKFLOW from workflow_routing (not from subject_analysis).
+      0. UPLOAD-FIRST OVERRIDE (highest priority):
+         - If the current user request contains one or more uploaded images, use
+           find_user_attachment and save those uploads directly as material_images
+           (sort_order=1..N, maximum 3).
+         - Once any uploaded image is found, do NOT call kb_search, web_search,
+           wikipedia, image_search_tool, or validate_image_ref, and do NOT append
+           any newly searched image to material_images.
+         - For EDIT_UPLOAD / FIND_AND_EDIT, also save the first upload as raw_source_image.
+         - For ANIMATE_UPLOAD / CREATE_ANIMATED, also save the first upload as
+           image_output with sort_order=1.
+         - Then write material_summary describing the uploaded materials and stop.
+           This override applies even if workflow_routing was classified imprecisely.
+      1. When there is no uploaded image, read WORKFLOW from workflow_routing
+         (not from subject_analysis).
          - CREATE_NEW / KB_STYLE / REFERENCE_GENERATE: collect 1–3 reference images for prompt writing.
          - FIND_AND_EDIT / EDIT_UPLOAD: prepare source image(s) for image editing.
          - CREATE_ANIMATED:
@@ -170,7 +183,8 @@ steps:
         validating the best subject photo as material_images, also save that same URL as
         image_output (first frame). Do NOT save prompt_used here.
       - Before stopping, write a concise Chinese summary (80–200 words) of what you collected:
-          - what you searched for and key findings from web_search / wikipedia
+          - for uploaded materials: which uploads were saved (do not claim a search was performed)
+          - otherwise: what you searched for and key findings from web_search / wikipedia
           - how many material_images were saved and which one was chosen as
             raw_source_image / image_output (if any)
           - why that image fits the user's request, or note gaps (e.g. no jersey photo found)
@@ -199,6 +213,10 @@ steps:
       - material: image_output
         required: false
     acceptance_criteria: |
+      If the current request has uploaded images, only those uploads may be saved as
+      material_images; no knowledge-base or web image search may be performed or appended.
+      For uploaded edit workflows, the first upload must also be raw_source_image.
+      For uploaded animated workflows, the first upload must also be image_output.
       For CREATE_NEW / KB_STYLE / REFERENCE_GENERATE: 1–3 validated material_images should be saved (never more than 3).
       For CREATE_ANIMATED: if the user asked to find a photo first, 1–3 material_images and
       one image_output must be saved; otherwise material_images optional (0–3).

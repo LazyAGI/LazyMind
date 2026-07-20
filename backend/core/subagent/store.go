@@ -126,6 +126,53 @@ func ListTasksByConversation(ctx context.Context, db *gorm.DB, convID string) ([
 	return tasks, nil
 }
 
+// ListTasksByConversationForUser returns tasks only when they belong to the
+// requesting user. Public Task Center APIs must use this ownership-scoped form.
+func ListTasksByConversationForUser(
+	ctx context.Context, db *gorm.DB, convID, userID string,
+) ([]orm.SubAgentTask, error) {
+	var tasks []orm.SubAgentTask
+	if err := db.WithContext(ctx).
+		Where("conversation_id = ? AND create_user_id = ?", convID, userID).
+		Order("seq_in_conversation ASC").Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+// ConversationArtifactRecord combines an artifact with the task metadata needed
+// by conversation-level download views.
+type ConversationArtifactRecord struct {
+	ArtifactID       string          `gorm:"column:artifact_id"`
+	TaskID           string          `gorm:"column:task_id"`
+	TriggerHistoryID string          `gorm:"column:trigger_history_id"`
+	WorkspacePath    string          `gorm:"column:workspace_path"`
+	Slot             string          `gorm:"column:slot"`
+	ContentType      string          `gorm:"column:content_type"`
+	Value            json.RawMessage `gorm:"column:value"`
+	Seq              int             `gorm:"column:seq"`
+	Caption          *string         `gorm:"column:caption"`
+	CreatedAt        time.Time       `gorm:"column:created_at"`
+}
+
+// ListArtifactsByConversationForUser loads visible artifacts and their task
+// metadata in one query, avoiding one artifact query per SubAgent task.
+func ListArtifactsByConversationForUser(
+	ctx context.Context, db *gorm.DB, convID, userID string,
+) ([]ConversationArtifactRecord, error) {
+	var records []ConversationArtifactRecord
+	err := db.WithContext(ctx).
+		Table("sub_agent_artifacts AS artifact").
+		Select(`artifact.id AS artifact_id, artifact.task_id, task.trigger_history_id,
+			task.workspace_path, artifact.slot, artifact.content_type, artifact.value,
+			artifact.seq, artifact.caption, artifact.created_at`).
+		Joins("JOIN sub_agent_tasks AS task ON task.id = artifact.task_id").
+		Where("task.conversation_id = ? AND task.create_user_id = ? AND artifact.hidden = ?", convID, userID, false).
+		Order("artifact.created_at ASC, artifact.id ASC").
+		Scan(&records).Error
+	return records, err
+}
+
 // UpdateStatus transitions a task to running and refreshes heartbeat.
 func UpdateStatus(ctx context.Context, db *gorm.DB, taskID, status string) error {
 	now := time.Now().UTC()

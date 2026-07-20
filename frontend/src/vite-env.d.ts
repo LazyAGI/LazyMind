@@ -23,6 +23,7 @@ declare global {
       resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
       selectFolder?: () => Promise<string | null> | string | null;
       exportDiagnostics?: () => Promise<string> | string;
+      notifyAppReady?: () => void;
     };
   }
 }

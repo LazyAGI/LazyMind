@@ -74,6 +74,8 @@ export interface ChatMessage {
   finish_reason?: string;
   inputs?: Query[];
   reasoning_content?: string;
+  thinking_duration_s?: number | string;
+  thinking_time_s?: number | string;
   history_id?: string;
   sources?: Source[];
   feed_back?: string;

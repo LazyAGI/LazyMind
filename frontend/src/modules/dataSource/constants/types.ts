@@ -73,7 +73,7 @@ export interface PendingOAuthAttempt {
   resolved: boolean;
   accountId?: string;
   appId?: string;
-  provider?: "feishu" | "notion";
+  provider?: "feishu" | "notion" | "googledrive";
   openWizardOnSuccess?: boolean;
   reopenSetupOnFailure?: boolean;
 }

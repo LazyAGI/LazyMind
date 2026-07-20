@@ -42,6 +42,7 @@ class ChatRuntimeOptions(BaseModel):
     mcp_config: Optional[List[Dict[str, Any]]] = None
     context_usage_preview: bool = False
     context_prompt_export: bool = False
+    context_preview_allow_llm_routing: bool = False
 
 
 class ChatPersonalizationOptions(BaseModel):
@@ -65,6 +66,13 @@ class ChatPluginOptions(BaseModel):
     allowed_plugin_refs: List[str] = Field(default_factory=list)
 
 
+class ExplicitResourceBindingsOptions(BaseModel):
+    skill_names: List[str] = Field(default_factory=list)
+    knowledge_base_ids: List[str] = Field(default_factory=list)
+    plugin_refs: List[str] = Field(default_factory=list)
+    mentions: List[Dict[str, str]] = Field(default_factory=list)
+
+
 class ChatRequest(BaseModel):
     message: ChatMessageOptions
     conversation: ChatConversationOptions = Field(default_factory=ChatConversationOptions)
@@ -73,3 +81,6 @@ class ChatRequest(BaseModel):
     personalization: ChatPersonalizationOptions = Field(default_factory=ChatPersonalizationOptions)
     agent: ChatAgentOptions = Field(default_factory=ChatAgentOptions)
     plugin: ChatPluginOptions = Field(default_factory=ChatPluginOptions)
+    explicit_resource_bindings: ExplicitResourceBindingsOptions = Field(
+        default_factory=ExplicitResourceBindingsOptions,
+    )

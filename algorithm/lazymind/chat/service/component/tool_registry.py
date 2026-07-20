@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import inspect
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
 import docstring_parser
 import lazyllm
 from lazyllm.tools.fs.supplier.feishu import FeishuFS
+from lazyllm.tools.fs.supplier.googledrive import GoogleDriveFS
 from lazyllm.tools.fs.supplier.notion import NotionFS
 from lazyllm.tools.tools.search import (
     ArxivSearch,
@@ -29,6 +31,8 @@ from lazymind.chat.engine.tools import (
     image_editor,
     image_generator,
     kb_tmp_search,
+    memory_editor,
+    read_memory,
     SkillManagementToolkit,
     list_data_sources,
     build_schedule_toolkit,
@@ -43,6 +47,7 @@ from lazymind.chat.engine.tools.ask_user import ask_user
 from lazymind.chat.engine.subagent.tools import find_user_attachment, read_user_attachment
 
 SystemPromptAppendix = dict[str, str | tuple[str, ...]]
+SystemPromptAppendixProvider = Callable[[], SystemPromptAppendix | None]
 SYSTEM_PROMPT_APPENDIX_SECTIONS = ('tool_policy', 'safety', 'output_contract', 'response_policy')
 
 IMAGE_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
@@ -114,14 +119,12 @@ ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
 }
 KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
-        "# Search Tool Rules (CRITICAL — follow strictly)\n"
-        "If only the `KBToolkit` gateway is available, you MUST activate it first by calling "
-        "its activation tool (e.g. `get_KBToolkit_methods`). If concrete methods such as "
-        "`KBToolkit_kb_search` are already available, call the appropriate search method directly. "
-        "A selected knowledge base is an explicit user instruction to search it, not merely permission "
-        "to search it. The presence of concrete `KBToolkit_kb_search` or "
-        "`KBToolkit_kb_keyword_search` methods means a knowledge base is selected. In that case, "
-        "your first substantive action for the turn MUST be one of those searches. Do not answer "
+        "# Selected Knowledge Base Rules (CRITICAL — follow strictly)\n"
+        "The user selected or @mentioned one or more knowledge bases in this request. "
+        "This is an explicit instruction to search them, not merely permission to do so. "
+        "Concrete methods such as `KBToolkit_kb_search` and `KBToolkit_kb_keyword_search` "
+        "are available, so call the appropriate search method directly. "
+        "Your first substantive action for the turn MUST be one of those searches. Do not answer "
         "from memory, announce that you could search later, ask whether you should search, or start "
         "a plugin before searching. Use the knowledge-base search method FIRST for every retrieval "
         "need — no exceptions. Do not skip it because you think the web might have "
@@ -167,6 +170,16 @@ WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'terms into one `query` with spaces, commas, punctuation, or list-like text.',
     ),
 }
+MEMORY_READER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# Conversation history versus persistent memory\n'
+        'Conversation history is already included in the model messages and is the authoritative '
+        'source for earlier turns in the current chat. Resolve short follow-ups and omitted subjects '
+        'from that history. Do not call `read_memory` to inspect, summarize, or recover the current '
+        'conversation. `read_memory` only reads optional cross-conversation notes or user-profile '
+        'content; an empty result never implies that chat history is missing.'
+    ),
+}
 CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Cloud document link rules\n'
@@ -176,7 +189,10 @@ CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         '`app.notion.com`), use the Notion file-system tools first. Prefer resolving the '
         'link, then reading with references when the task asks for analysis, summary, or '
         'linked-page context. Do not fall back to generic URL fetching for private Notion '
-        'pages unless Notion tools are unavailable or unauthorized.',
+        'pages unless Notion tools are unavailable or unauthorized.\n'
+        'When the user provides a Google Drive or Google Workspace document URL '
+        '(`drive.google.com` or `docs.google.com`), use the Google Drive file-system tools '
+        'instead of generic URL fetching.',
     ),
 }
 
@@ -198,10 +214,16 @@ class ToolConfig:
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
     required_config: list[str] | None = None
-    appendix_system_prompt: SystemPromptAppendix | None = None
+    appendix_system_prompt: SystemPromptAppendix | SystemPromptAppendixProvider | None = None
 
     def __post_init__(self) -> None:
-        for section, values in (self.appendix_system_prompt or {}).items():
+        if callable(self.appendix_system_prompt):
+            return
+        self._validate_appendix(self.appendix_system_prompt)
+
+    @staticmethod
+    def _validate_appendix(appendix: SystemPromptAppendix | None) -> None:
+        for section, values in (appendix or {}).items():
             if section not in SYSTEM_PROMPT_APPENDIX_SECTIONS:
                 raise ValueError(
                     f'unsupported appendix_system_prompt section {section!r}; '
@@ -228,30 +250,59 @@ _ACADEMIC_SEARCH_ENGINE_INSTANCES: list = [
 
 
 class WikipediaToolkit(WikipediaSearch):
-    """Search Wikipedia, then fetch one or more result contents when needed."""
+    """Search stable encyclopedic background and named entries in Wikipedia.
+
+    Use this for established concepts, people, places, organizations, and historical topics.
+    It is not a general web search engine and should not be used for current events, recent product
+    information, recommendations, industry developments, or broad open-web research.
+    """
 
 
 _CLOUD_FILE_TOOLKIT = {
     'name': 'CloudFileToolkit',
     'desc': (
         'Authenticated cloud files and documents. Use this Toolkit for Feishu/Lark '
-        'Wiki or Docs links (including *.feishu.cn/wiki/*), Notion links, and paths '
+        'Wiki or Docs links (including *.feishu.cn/wiki/*), Notion links, Google Drive '
+        'and Google Workspace document links, and paths '
         'inside connected cloud services; do not send those URLs to url_fetch. '
         'Expand this Toolkit, choose the supplier that owns the URL or path, then '
         'expand that supplier Toolkit and select its resolve, read, search, browse, '
-        'or write tool.'
+        'or write tool. For a Feishu Wiki URL, keep the complete URL as the locator: '
+        'the token after /wiki/ identifies a wiki node and is not a space_id or document_id.'
     ),
     'tools': [
         FeishuFS(space_id='dynamic', dynamic_auth=True),
         NotionFS(dynamic_auth=True),
+        GoogleDriveFS(dynamic_auth=True),
     ],
     'lazy': True,
+    'auto_activate': [
+        r'https?://[^\s/]+\.(?:feishu\.(?:cn|com)|larksuite\.com)(?:[/:?#]|$)',
+        r'https?://(?:[^\s/]+\.)?notion\.(?:so|site|com)(?:[/:?#]|$)',
+        r'https?://(?:drive|docs)\.google\.com(?:[/:?#]|$)',
+        r'飞书|(?<!\w)feishu(?!\w)',
+        r'谷歌云端硬盘|谷歌(?:文档|表格|幻灯片)|Google\s*云端硬盘',
+        r'(?<!\w)google\s+(?:drive|docs|sheets|slides)(?!\w)',
+    ],
 }
 
 
 def _temp_kb_key_source() -> Any:
     agentic_config = lazyllm.globals.get('agentic_config') or {}
     return agentic_config.get('files')
+
+
+def _kb_prompt_appendix() -> SystemPromptAppendix:
+    appendix: SystemPromptAppendix = {
+        'output_contract': (
+            *IMAGE_MARKDOWN_OUTPUT_APPENDIX['output_contract'],
+            *KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
+        ),
+    }
+    agentic_config = lazyllm.globals.get('agentic_config') or {}
+    if (agentic_config.get('filters') or {}).get('kb_id'):
+        appendix['tool_policy'] = KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX['tool_policy']
+    return appendix
 
 
 SKILL_TOOL_CONFIG = ToolConfig(
@@ -305,13 +356,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         description_en='Discover knowledge bases, inspect documents and statistics, and retrieve their content.',
         capability_id='knowledge_base_search',
         input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['knowledge_base'],
-        appendix_system_prompt={
-            'tool_policy': KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX['tool_policy'],
-            'output_contract': (
-                *IMAGE_MARKDOWN_OUTPUT_APPENDIX['output_contract'],
-                *KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
-            ),
-        },
+        appendix_system_prompt=_kb_prompt_appendix,
     ),
     ToolConfig(
         name='temp_kb',
@@ -321,7 +366,6 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         label_en='Temporary File Search',
         description_en='Search relevant content in temporary files uploaded by the user.',
         appendix_system_prompt={
-            'tool_policy': KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX['tool_policy'],
             'output_contract': KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
         },
     ),
@@ -364,10 +408,13 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(
         name='wikipedia',
         label='Wikipedia 搜索',
-        description='从 Wikipedia 搜索知识条目',
+        description='查询 Wikipedia 中稳定的百科背景和明确词条；不用于新闻、时效信息或开放网页搜索',
         tool=WikipediaToolkit(skip_auth=True), module='retrieval',
         label_en='Wikipedia Search',
-        description_en='Search Wikipedia knowledge entries.',
+        description_en=(
+            'Look up stable encyclopedic background and named Wikipedia entries; not for news, '
+            'current information, or open-web search.'
+        ),
     ),
     ToolConfig(
         name='web_search',
@@ -376,7 +423,9 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool={
             'name': 'WebSearchToolkit',
             'desc': (
-                'Search the web with the first available provider. Each search query must represent '
+                'Search the open web for current information, news, products, companies, '
+                'recommendations, industry developments, and broad research using the first '
+                'available provider. Each search query must represent '
                 'one search intent; issue separate calls for unrelated topics. Use get_content or '
                 'get_contents when result snippets are insufficient.'
             ),
@@ -385,7 +434,10 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         },
         module='retrieval',
         label_en='Web Search',
-        description_en='Search the internet using the first available search provider.',
+        description_en=(
+            'Search the open internet for current information and broad research using the first '
+            'available search provider.'
+        ),
         capability_id='web_search',
         equivalence_scope='provider_bound',
         input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['search_provider'],
@@ -479,6 +531,23 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool=vocab_learn, module='personalization',
         label_en='Vocabulary Learning',
         description_en='Learn user-specific vocabulary mappings and synonyms.',
+    ),
+    ToolConfig(
+        name='read_memory',
+        label='记忆读取',
+        description='读取当前的用户记忆或偏好内容',
+        tool=read_memory, module='personalization',
+        label_en='Memory Reading',
+        description_en='Read the current user memory and preferences.',
+        appendix_system_prompt=MEMORY_READER_TOOL_POLICY_APPENDIX,
+    ),
+    ToolConfig(
+        name='memory_editor',
+        label='记忆编辑',
+        description='记录和编辑跨会话的用户记忆和偏好',
+        tool=memory_editor, module='personalization',
+        label_en='Memory Editing',
+        description_en='Record and edit user memories and preferences across conversations.',
     ),
     ToolConfig(
         name='skill_editor',
@@ -641,13 +710,49 @@ def get_all_tool_groups(locale: str | None = None) -> list[dict]:
     return result
 
 
+_CAPABILITY_DENY_CUES = re.compile(
+    r'不要(?:使用|调用|查询|检索|搜索|启用|用)?|别(?:再)?(?:使用|调用|查询|检索|搜索|用)|'
+    r'不想(?:使用|调用|用)|不(?:使用|用)|无需|不能(?:用|使用)|'
+    r'禁止(?:使用|调用)|避免使用|排除|忽略|跳过|do\s+not\s+use|'
+    r'don[’\']t\s+use|never\s+use|without|exclude|ignore|avoid', re.I,
+)
+_CAPABILITY_ALLOW_CUES = re.compile(
+    r'可以(?:用|使用)|可(?:用|使用)|请(?:用|使用)|优先使用|允许使用|使用|调用|启用|'
+    r'can\s+use|may\s+use|please\s+use|use|enable', re.I,
+)
+_TOOL_CAPABILITY_TERMS: dict[str, tuple[str, ...]] = {
+    'kb': ('知识库', 'knowledge base'),
+}
+
+
+def _capability_is_denied(query: str, terms: tuple[str, ...]) -> bool:
+    """Return true only when every locally qualified occurrence is denied."""
+    decisions = []
+    lowered = query.lower()
+    for term in terms:
+        for match in re.finditer(re.escape(term.lower()), lowered):
+            prefix = query[max(0, match.start() - 40):match.start()]
+            prefix = re.split(r'[，,。；;！？!?\n]|但是|不过|然而|但', prefix)[-1]
+            denies = list(_CAPABILITY_DENY_CUES.finditer(prefix))
+            allows = list(_CAPABILITY_ALLOW_CUES.finditer(prefix))
+            if denies or allows:
+                decisions.append(
+                    bool(denies) and (not allows or denies[-1].end() >= allows[-1].end())
+                )
+    return bool(decisions) and all(decisions)
+
+
 def filter_tools(
     configs: list[ToolConfig],
     available_tools: list[str] | None = None,
+    user_query: str = '',
 ) -> list[ToolConfig]:
     result = []
     for cfg in configs:
         if available_tools is not None and cfg.name not in available_tools:
+            continue
+        terms = _TOOL_CAPABILITY_TERMS.get(cfg.name)
+        if terms and user_query and _capability_is_denied(user_query, terms):
             continue
         if not tool_is_active(cfg):
             continue
@@ -662,7 +767,13 @@ def collect_system_prompt_appendices(
     """Collect active tool prompt appendices with stable per-section deduplication."""
     collected: dict[str, list[str]] = {}
     seen: dict[str, set[str]] = {}
-    appendices = [cfg.appendix_system_prompt for cfg in configs if cfg.appendix_system_prompt]
+    appendices = []
+    for cfg in configs:
+        provider = cfg.appendix_system_prompt
+        appendix = provider() if callable(provider) else provider
+        if appendix:
+            ToolConfig._validate_appendix(appendix)
+            appendices.append(appendix)
     appendices.extend(extra_appendices)
     for appendix in appendices:
         for section, values in appendix.items():

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Form, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
 import {
   createFeishuAccountId,
   getOAuthStateFromConnection,
@@ -25,7 +26,12 @@ import { loadNotionAppSetup, persistNotionAppSetup } from "@/modules/dataSource/
 import { persistFeishuAppSetup } from "@/modules/dataSource/common/feishuAccounts";
 import type { CloudSetupIntent } from "@/modules/dataSource/hooks/management/context";
 import {
+  getCloudConnectionItems,
+  mapCloudConnectionToDataSourceConnection,
+} from "@/modules/dataSource/mappers/dataSourceConnection";
+import {
   CLOUD_DOCUMENTS_FEISHU_PATH,
+  CLOUD_DOCUMENTS_GOOGLE_DRIVE_PATH,
   CLOUD_DOCUMENTS_LOCAL_PATH,
   CLOUD_DOCUMENTS_PATH,
 } from "../utils/cloudDocumentUrls";
@@ -45,7 +51,18 @@ export function useCloudDocumentProviders() {
   const [notionAppSetup, setNotionAppSetup] = useState<FeishuAppSetup | null>(() =>
     loadNotionAppSetup(),
   );
+  const [feishuSecretConfigured, setFeishuSecretConfigured] = useState(() =>
+    Boolean(loadFeishuAppSetup()?.appSecret.trim()),
+  );
+  const [notionSecretConfigured, setNotionSecretConfigured] = useState(() =>
+    Boolean(loadNotionAppSetup()?.appSecret.trim()),
+  );
   const [notionOauthConnection, setNotionOauthConnection] =
+    useState<ManagementContext["notionOauthConnection"]>(null);
+  const [notionAuthAccounts, setNotionAuthAccounts] = useState<
+    FeishuAuthAccount[]
+  >([]);
+  const [googleDriveConnection, setGoogleDriveConnection] =
     useState<ManagementContext["notionOauthConnection"]>(null);
   const [oauthConnection, setOauthConnection] = useState<ManagementContext["oauthConnection"]>(null);
   const [oauthState, setOauthState] = useState<OAuthState>("pending");
@@ -62,10 +79,10 @@ export function useCloudDocumentProviders() {
   const loading = localSettings.loading || oauthLoading;
 
   const isFeishuSetupReady = Boolean(
-    feishuAppSetup?.appId.trim() && feishuAppSetup?.appSecret.trim(),
+    feishuAppSetup?.appId.trim() && (feishuAppSetup?.appSecret.trim() || feishuSecretConfigured),
   );
   const isNotionSetupReady = Boolean(
-    notionAppSetup?.appId.trim() && notionAppSetup?.appSecret.trim(),
+    notionAppSetup?.appId.trim() && (notionAppSetup?.appSecret.trim() || notionSecretConfigured),
   );
   const validFeishuAccounts = feishuAuthAccounts.filter(
     (account) =>
@@ -75,6 +92,9 @@ export function useCloudDocumentProviders() {
   const isNotionAuthValid =
     notionOauthConnection?.status === "connected" &&
     Boolean(notionOauthConnection.connectionId);
+  const isGoogleDriveAuthValid =
+    googleDriveConnection?.status === "connected" &&
+    Boolean(googleDriveConnection.connectionId);
 
   const ctx = {} as ManagementContext;
   Object.assign(ctx, {
@@ -136,6 +156,8 @@ export function useCloudDocumentProviders() {
     setOauthConnection,
     notionOauthConnection,
     setNotionOauthConnection,
+    notionAuthAccounts,
+    setNotionAuthAccounts,
     feishuAuthAccounts,
     setFeishuAuthAccounts,
     editingFeishuAccountId,
@@ -145,9 +167,9 @@ export function useCloudDocumentProviders() {
     notionAppSetup,
     setNotionAppSetup,
     oauthAttemptRef,
-    localScanChatEnabled: localSettings.localScanChatEnabled,
+    localScanChatEnabled: false,
     setLocalScanChatEnabled: () => undefined,
-    localScanChatSaving: localSettings.localScanChatSaving,
+    localScanChatSaving: false,
     setLocalScanChatSaving: () => undefined,
     validatedAgentId: null,
     setValidatedAgentId: () => undefined,
@@ -167,15 +189,69 @@ export function useCloudDocumentProviders() {
   });
   Object.assign(ctx, createOAuthEngine(ctx));
 
+  const refreshCloudAppCredential = async (
+    provider: Extract<CloudDataSourceProvider, "feishu" | "notion">,
+  ) => {
+    try {
+      const response =
+        await dataSourceCloudOauthApi.getOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGet({
+          provider,
+        });
+      const appId = (response.data.app_id || "").trim();
+      const secretConfigured = Boolean(response.data.secret_configured);
+      if (!appId || !secretConfigured) {
+        return;
+      }
+      const setup = { appId, appSecret: "" };
+      if (provider === "feishu") {
+        setFeishuAppSetup((current) =>
+          current?.appId === appId && current.appSecret.trim() ? current : setup,
+        );
+        setFeishuSecretConfigured(true);
+      } else {
+        setNotionAppSetup((current) =>
+          current?.appId === appId && current.appSecret.trim() ? current : setup,
+        );
+        setNotionSecretConfigured(true);
+      }
+    } catch (error) {
+      console.error(`Failed to refresh ${provider} app credentials`, error);
+    }
+  };
+
+  const refreshGoogleDriveConnection = async () => {
+    try {
+      const response =
+        await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
+          provider: "googledrive",
+          status: null,
+        });
+      const nextConnection = getCloudConnectionItems(response.data)
+        .map((item) => mapCloudConnectionToDataSourceConnection(item, "googledrive"))
+        .find(
+          (connection) =>
+            connection.status === "connected" && Boolean(connection.connectionId),
+        ) || null;
+      setGoogleDriveConnection(nextConnection);
+    } catch {
+      setGoogleDriveConnection(null);
+    }
+  };
+
   const refreshPageData = async () => {
     setOauthLoading(true);
     try {
-      await Promise.all([ctx.refreshFeishuAuthAccounts(), ctx.refreshNotionAuthConnection()]);
+      await Promise.all([
+        refreshCloudAppCredential("feishu"),
+        refreshCloudAppCredential("notion"),
+        ctx.refreshFeishuAuthAccounts(),
+        ctx.refreshNotionAuthConnection(),
+        refreshGoogleDriveConnection(),
+      ]);
     } finally {
       setOauthLoading(false);
     }
   };
-  useCloudDocumentProviders
   const openCloudSetupModal = (
     provider: CloudDataSourceProvider,
     intent: CloudSetupIntent = "auth",
@@ -214,9 +290,11 @@ export function useCloudDocumentProviders() {
       if (provider === "feishu") {
         persistFeishuAppSetup(nextSetup);
         setFeishuAppSetup(nextSetup);
+        setFeishuSecretConfigured(true);
       } else {
         persistNotionAppSetup(nextSetup);
         setNotionAppSetup(nextSetup);
+        setNotionSecretConfigured(true);
       }
       setFeishuSetupModalOpen(false);
       setFeishuSetupIntent(null);
@@ -231,7 +309,7 @@ export function useCloudDocumentProviders() {
         await ctx.startCloudOAuth(provider, {
           setup: nextSetup,
           draftWizardOpen: false,
-          draftSelectedType: provider,
+          draftSelectedType: provider === "googledrive" ? null : provider,
           draftWizardStep: 0,
           previousState: "pending",
           previousVerified: false,
@@ -256,6 +334,10 @@ export function useCloudDocumentProviders() {
 
   const handleManageLocalSource = () => {
     navigate(CLOUD_DOCUMENTS_LOCAL_PATH);
+  };
+
+  const handleManageGoogleDrive = () => {
+    navigate(CLOUD_DOCUMENTS_GOOGLE_DRIVE_PATH);
   };
 
   const handleOpenNotionSetup = () => {
@@ -329,15 +411,17 @@ export function useCloudDocumentProviders() {
     feishuSetupSubmitting,
     canCreateLocalSource: localSettings.canCreateLocalSource,
     localSourceCount: localSettings.localSourceCount,
-    localScanChatEnabled: localSettings.localScanChatEnabled,
     isFeishuAuthValid,
     isNotionAuthValid,
+    isGoogleDriveAuthValid,
     isFeishuSetupReady,
     isNotionSetupReady,
     validFeishuAccounts,
     notionOauthConnection,
+    googleDriveConnection,
     handleManageFeishuAuth,
     handleManageLocalSource,
+    handleManageGoogleDrive,
     handleOpenNotionSetup,
     openCloudSetupModal,
     handleSaveFeishuSetup,

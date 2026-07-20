@@ -48,6 +48,13 @@ import type {
 } from "./context";
 import type { CloudDataSourceProvider } from "@/modules/dataSource/common/feishuOAuth";
 
+type SyncCloudDataSourceProvider = Extract<CloudDataSourceProvider, SourceType>;
+
+const isSyncCloudProvider = (
+  provider: CloudDataSourceProvider,
+): provider is SyncCloudDataSourceProvider =>
+  provider === "feishu" || provider === "notion";
+
 export function createWizardSetup(ctx: ManagementContext) {
   const {
     t,
@@ -369,7 +376,7 @@ export function createWizardSetup(ctx: ManagementContext) {
           : t("admin.dataSourceNotionCredentialSaved"),
       );
 
-      if (shouldStartOAuth) {
+      if (shouldStartOAuth && isSyncCloudProvider(cloudSetupProvider)) {
         resetWizard();
         setWizardMode("create");
         setEditingId(null);

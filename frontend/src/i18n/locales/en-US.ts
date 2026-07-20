@@ -188,6 +188,7 @@ const enUS = {
       asr: "Speech to Text",
       tts: "Text to Speech",
       textToImage: "Text to Image",
+      textToVideo: "Text to Video",
       multimodalEmbedding: "Multimodal Embedding",
       imageEditing: "Image Editing",
       selfEvolution: "Self-evolution",
@@ -209,6 +210,8 @@ const enUS = {
       ttsSubtitle: "Reads answers aloud for voice output scenarios.",
       textToImageTitle: "Text to Image",
       textToImageSubtitle: "Generates images from prompts for creation and visualization.",
+      textToVideoTitle: "Text to Video",
+      textToVideoSubtitle: "Generates videos from prompts for dynamic content creation and multimedia workflows.",
       imageEditingTitle: "Image Editing",
       imageEditingSubtitle: "Edits existing images from prompts for targeted changes and visual adjustments.",
       selfEvolutionTitle: "LLM (Self-evolution)",
@@ -424,6 +427,24 @@ const enUS = {
       toolsModuleDesc: "Manage document parsing, search engines, academic retrieval, built-in system tools, and MCP services.",
       toolsCategoryTitle: "Search Engines",
       toolsCategoryDesc: "Manage keys for web search services such as Bing, Google Custom Search, Bocha, and Tavily.",
+      googleDriveTitle: "Google Drive Online Documents",
+      googleDriveDesc: "Connect personal or shared Google Drive for direct chat search and reading without ingesting files into the knowledge base.",
+      googleDriveConnect: "Connect Google Drive",
+      googleDriveReconnect: "Reauthorize",
+      googleDriveDisconnect: "Disconnect",
+      googleDriveConfigTitle: "Configure Google Drive OAuth",
+      googleDriveAuthorize: "Save and Authorize",
+      googleDriveConfigHint: "Enable the Drive API in Google Cloud Console and add this exact address to the OAuth Web client's authorized redirect URIs: {{callbackUrl}}",
+      googleDriveSetupGuideAction: "Setup Guide",
+      googleDriveClientIdRequired: "Enter the OAuth Client ID",
+      googleDriveClientSecretRequired: "Enter the OAuth Client Secret",
+      googleDriveSecretConfigured: "Saved; leave blank to keep the current secret",
+      googleDriveOAuthWindowTitle: "Google Drive Authorization",
+      googleDriveConnected: "Google Drive connected and enabled for chat search",
+      googleDriveDisconnected: "Google Drive disconnected",
+      googleDriveConnectFailed: "Failed to connect Google Drive",
+      googleDriveDisconnectFailed: "Failed to disconnect Google Drive",
+      googleDriveAccountFallback: "Google Drive account",
       searchEngineSearchPlaceholder: "Search search engines",
       academicCategoryTitle: "Academic Retrieval",
       academicCategoryDesc: "Manage academic paper retrieval services such as Sciverse for research Q&A and literature review.",
@@ -844,6 +865,14 @@ const enUS = {
     contextUsageUpdate: "Update estimate",
     contextUsageError: "Context usage is temporarily unavailable.",
     contextUsageRetry: "Retry",
+    contextUsageRuleOnlyWarning: "Rule-only estimate",
+    contextUsageRuleOnlyReason: "This request needs model-assisted analysis of its goals and resource constraints.",
+    contextUsageLlmTokenHint: "Model analysis uses a small number of tokens",
+    contextUsageUseLlm: "Analyze with model",
+    contextUsageLlmLoading: "Refining with the model…",
+    contextUsageLlmLoadingHint: "Analyzing the delivery goal and resource constraints",
+    contextUsageLlmEnhanced: "This estimate was refined with model-assisted routing",
+    contextUsageLlmEnhancedHint: "Goals and resource constraints have been recalculated",
     contextUsageChars: "{{count}} chars",
     contextUsageExport: "Export full prompt",
     contextUsageExportHint: "Includes the complete next-request ChatAgent context",
@@ -980,6 +1009,20 @@ const enUS = {
     askCardAutoSaveHint: "Answers are saved automatically, you can return at any time",
     askCardInputPlaceholder: "Enter your reply…",
     askCardOtherPlaceholder: "Please specify…",
+    artifactDownloadButton: "Download attachments",
+    artifactCollectorTitle: "Attachments and artifacts",
+    artifactCollectorDescription: "View downloadable files from this turn or the entire conversation.",
+    artifactCollectorCurrentTurnTab: "Current turn",
+    artifactCollectorConversationTab: "Conversation",
+    artifactCollectorNoFilesCurrentTurn: "No downloadable files in this turn.",
+    artifactCollectorNoFilesConversation: "No downloadable files in this conversation.",
+    artifactCollectorFiles: "file(s)",
+    artifactCollectorSelectAll: "Select All",
+    artifactCollectorDownload: "Download",
+    artifactCollectorDownloadSelected: "Download Selected",
+    artifactCollectorBatchFailed: "Batch download failed, please retry",
+    artifactCollectorDownloadFailed: "Failed to download {{filename}}",
+    artifactCollectorPartialFailed: "{{count}} file(s) failed and were skipped",
     pluginPanelTitle: "Plugin Panel",
     pluginStatusRunning: "Running",
     pluginStatusDone: "Done",
@@ -1272,6 +1315,7 @@ const enUS = {
     running: "Running",
     history: "History",
     artifacts: "Artifacts",
+    download: "Download",
     executionProcess: "Execution Process",
     estimatedSeconds: "~{{seconds}}s",
     empty: "No tasks",
@@ -1790,11 +1834,23 @@ const enUS = {
     dataSourceTypeNotion: "Notion",
     dataSourceTypeNotionDesc:
       "Connect Notion pages or databases, sync by authorization scope and serve chat.",
+    dataSourceTypeGoogleDrive: "Google Drive",
+    dataSourceGoogleDriveSetupHint:
+      "Authorize a Google Drive account for online chat search. Files are not imported into a knowledge base.",
+    dataSourceGoogleDriveConnected: "Connected {{account}}. Used for online chat search.",
+    dataSourceGoogleDriveAccountFallback: "Google Drive account",
+    dataSourceGoogleDriveBackProviders: "Back to Data Source Providers",
+    dataSourceGoogleDrivePageTitle: "Google Drive Account Authorization",
+    dataSourceGoogleDrivePageDesc:
+      "Manage Google Drive OAuth credentials and account connections for direct online document search in Chat.",
+    dataSourceGoogleDriveCallbackLabel: "Current OAuth callback URL",
+    dataSourceGoogleDriveHttpsHint:
+      "Register the exact URL above in the Google OAuth Web client. Use HTTPS in production; localhost or 127.0.0.1 may use HTTP under Google's local development rules.",
     dataSourceTypeDatabase: "External Database",
     dataSourceTypeDatabaseDesc:
       "Connect MySQL or PostgreSQL with a read-only account for direct chat queries.",
     dataSourceTypeStepIntro:
-      "Currently supports local files / directories, Feishu, and Notion data source access. Select one to continue.",
+      "Currently supports local files / directories, Feishu, Notion, Google Drive, and external databases. Select one to continue.",
     dataSourceAdminOnly: "Admin",
     dataSourceFeishuLockHint:
       "Set App ID / App Secret first before selecting Feishu as a data source",
@@ -2047,6 +2103,73 @@ const enUS = {
         finishAlt: "Select or enter a Feishu target path and finish authorization in the system",
       },
     },
+    dataSourceGoogleDriveSetupGuide: {
+      backTools: "Back to Google Drive Authorization",
+      title: "Cloud Document Provider - Google Drive Online Documents",
+      subtitle:
+        "Create a Google OAuth Web client in Google Cloud Console, then connect your Google Drive account in LazyMind for online search and reading.",
+      summaryAria: "Google Drive setup process overview",
+      summaryTitle: "Setup Flow",
+      openConsole: "Open Google Cloud Console",
+      openDriveApi: "Open Google Drive API",
+      openCredentials: "Open Credentials",
+      openAudience: "Open Google Auth Platform Audience",
+      callbackUrl: "Authorized redirect URI: {{uri}}",
+      steps: {
+        openConsoleTitle: "Create or select a Google Cloud project",
+        openConsoleDesc:
+          "Sign in to Google Cloud Console and create a new project or select an existing project that will hold the LazyMind OAuth configuration.",
+        enableApiTitle: "Enable Google Drive API",
+        enableApiDesc:
+          "In APIs and services, enable Google Drive API for the selected project. LazyMind calls the official Google Drive API for search, find, and read operations.",
+        consentTitle: "Configure OAuth consent screen",
+        consentDesc:
+          "Open Audience in Google Auth Platform, verify that the selected project owns the OAuth client, then configure the app audience and test users.",
+        consentUserType:
+          "Choose External for personal Google accounts, or Internal if your Google Workspace organization restricts the app to members.",
+        consentTestUsers:
+          "If the app is in Testing status, click Add users under Test users, add the email that will sign in to Google Drive, save, and wait about one minute before authorizing again.",
+        consentRetry:
+          "After access_denied, do not refresh the Google error page. Return to Cloud Documents in LazyMind and click Connect Google Drive again to create a new OAuth request.",
+        consentScopes:
+          "Add the Drive readonly scope: https://www.googleapis.com/auth/drive.readonly.",
+        credentialsTitle: "Create an OAuth Client ID",
+        credentialsDesc:
+          "Go to Credentials, click Create Credentials, and choose OAuth client ID.",
+        credentialsType:
+          "Application type must be Web application.",
+        credentialsName:
+          "Use a clear name such as LazyMind Google Drive so it is easy to identify later.",
+        redirectTitle: "Add the LazyMind callback URL",
+        redirectDesc:
+          "In Authorized redirect URIs, add the exact callback URL used by the frontend address you open in the browser.",
+        redirectOriginHint:
+          "If you open LazyMind with 127.0.0.1 or a deployment domain instead of localhost, replace the origin in the callback URL with that same browser origin.",
+        redirectHttpsHint:
+          "Use HTTPS for production domains. Local development may use an exactly registered http://localhost or http://127.0.0.1 URL in a Google Web OAuth client. Scheme, host, port, and path must all match.",
+        copyCredentialsTitle: "Copy Client ID and Client Secret",
+        copyCredentialsDesc:
+          "After the Web client is created, copy the OAuth Client ID and Client Secret. Keep the secret private.",
+        copyClientId:
+          "Client ID maps to the OAuth Client ID field in LazyMind.",
+        copyClientSecret:
+          "Client Secret maps to the OAuth Client Secret field in LazyMind.",
+        enterCredentialsTitle: "Register or sign in to LazyMind and enter credentials",
+        enterCredentialsDesc:
+          "Open LazyMind, register a new account if needed, then open Google Drive Authorization under Model Providers > Cloud Documents.",
+        enterCredentialsPath:
+          "Registration: {{registerUrl}}; Google Drive authorization: {{providerUrl}}.",
+        enterCredentialsSave:
+          "Open Google Drive Online Documents, click Connect Google Drive, paste Client ID and Client Secret, then click Save and Authorize.",
+        finishTitle: "Authorize and use Google Drive in chat",
+        finishDesc:
+          "Complete Google authorization in the popup. After the account is connected, LazyMind enables Google Drive tools for chat.",
+        finishChat:
+          "Open Chat and ask LazyMind to search Google Drive by keywords, or find files by filename pattern.",
+        finishNoIngestion:
+          "This searches the online Google Drive source directly and does not import files into a LazyMind knowledge base.",
+      },
+    },
     dataSourceNotionSetupGuide: {
       backCreateSource: "Back to New Data Source",
       backManagement: "Back to Data Source Management",
@@ -2082,7 +2205,7 @@ const enUS = {
         redirectDesc:
           "In the Redirect URIs section of integration settings, add LazyMind's OAuth callback URL. It must match the callback URL used by the system, otherwise authorization fails after redirect.",
         redirectProductionHint:
-          "For production deployments, replace 127.0.0.1 with the actual domain or IP address.",
+          "Use the current deployment domain over HTTPS in production. For local development, use the localhost or 127.0.0.1 URL shown on this page. The Redirect URI must exactly match the browser origin and the callback used by the system.",
         capabilitiesTitle: "Configure Integration Capabilities",
         capabilitiesDesc:
           "In integration settings, select the required capabilities such as Read content and Read comments. LazyMind needs at least Read content to read Notion content.",
@@ -2198,9 +2321,9 @@ const enUS = {
     dataSourceOauthSuccess: "OAuth succeeded. Account connection status updated.",
     dataSourceOauthFailedRetry: "OAuth failed. Please try again later.",
     dataSourceOauthSessionMissing:
-      "Authorization session expired. Please start Feishu OAuth again.",
+      "Authorization session expired. Please start OAuth again.",
     dataSourceOauthStateMismatch:
-      "Feishu authorization state verification failed. Please authorize again.",
+      "Authorization state verification failed. Please authorize again.",
     dataSourceOauthRequiredBeforeSave:
       "Feishu OAuth is not complete. Complete authorization before continuing configuration.",
     dataSourceOauthManualCallbackTitle: "Complete OAuth callback manually",
@@ -2487,16 +2610,16 @@ const enUS = {
         topologyArchivePath: "/mnt/team-share/ops-docs/historical-topology-diagram.pptx",
       },
     },
-    dataSourceCallbackLoadingTitle: "Finishing Feishu authorization",
+    dataSourceCallbackLoadingTitle: "Finishing {{providerName}} authorization",
     dataSourceCallbackLoadingSubtitle:
-      "Please wait while the system verifies authorization and writes it back to data source settings.",
-    dataSourceCallbackErrorTitle: "Feishu authorization not completed",
-    dataSourceCallbackErrorWithCode: "Feishu authorization failed: {{code}}",
+      "Please wait while the system verifies {{providerName}} authorization and updates the account settings.",
+    dataSourceCallbackErrorTitle: "{{providerName}} authorization not completed",
+    dataSourceCallbackErrorWithCode: "{{providerName}} authorization failed: {{code}}",
     dataSourceCallbackMissingParams:
       "Missing callback parameters. Please start account connection again.",
-    dataSourceCallbackSuccessTitle: "Feishu account connected",
+    dataSourceCallbackSuccessTitle: "{{providerName}} account connected",
     dataSourceCallbackSuccessSubtitle:
-      "Authorization verified for {{accountName}}. This page will stay open so you can verify the callback API.",
+      "Authorization verified for {{accountName}}. Returning to account management.",
     dataSourceCallbackBack: "Back to Data Source Management",
     groupManagement: "Group Management",
     groupDetail: "Group Detail",

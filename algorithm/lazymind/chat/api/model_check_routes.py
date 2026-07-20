@@ -1,9 +1,12 @@
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Body
+import httpx
 import lazyllm
 
 router = APIRouter()
+
+_OFFICIAL_DOUBAO_URL = 'https://ark.cn-beijing.volces.com/api/v3/'
 
 
 @router.post('/api/model/check', summary='Check model provider connectivity')
@@ -14,13 +17,23 @@ async def check_model_connection(
     api_key: Annotated[Optional[str], Body(description='Provider API key')] = None,
 ):
     try:
-        module = lazyllm.OnlineModule(
-            model=model,
-            source=source,
-            url=url,
-            api_key=api_key,
-        )
-        result = module('hi')
+        if url == _OFFICIAL_DOUBAO_URL:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f'{url}models',
+                    headers={'Authorization': f'Bearer {api_key}'},
+                )
+            if not (200 <= response.status_code < 300):
+                raise RuntimeError(f'HTTP {response.status_code}: {response.text}')
+            result = response.text
+        else:
+            module = lazyllm.OnlineModule(
+                model=model,
+                source=source,
+                url=url,
+                api_key=api_key,
+            )
+            result = module('hi')
         return {
             'success': True,
             'message': 'model connection is available',

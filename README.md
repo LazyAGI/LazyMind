@@ -149,6 +149,59 @@ make up
 
 Common deployment options:
 
+### Start the Container Stack on macOS with Colima
+
+If Docker Desktop is not available on your machine, you can use [Colima](https://github.com/abiosoft/colima) as the Docker runtime. If Homebrew is not installed, install it first:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+After installation, follow the terminal prompt to configure `PATH`. On Apple Silicon, this is usually:
+
+```bash
+echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+eval "$(/opt/homebrew/bin/brew shellenv)"
+brew --version
+```
+
+Install Colima and the Docker command-line tools:
+
+```bash
+brew install colima docker docker-compose docker-buildx
+```
+
+Start Colima:
+
+```bash
+colima start --runtime docker --vm-type vz --mount-type virtiofs --cpu 4 --memory 6 --disk 80
+```
+
+Verify the environment:
+
+```bash
+colima status
+docker version
+docker compose version
+```
+
+After the environment is ready, start the container stack from the project root:
+
+```bash
+make up
+```
+
+When finished, stop the container stack first, then stop Colima:
+
+```bash
+make down
+colima stop
+```
+
+### Startup Command Reference
+
+In addition to the Colima container stack, LazyMind also supports host-local runtime and other startup modes:
+
 | Scenario | Command |
 |----------|---------|
 | Build images and start | `make up-build` |

@@ -14,6 +14,8 @@
     Var InstallPurgeRadio
     Var InstalledVersion
     Var IsManualUpgrade
+    Var LegacyUninstallString
+    Var UpgradeUninstaller
   !else
     Var UninstallDataChoice
     Var UninstallKeepRadio
@@ -34,8 +36,12 @@
   LangString LMProgramOnly ${LANG_SIMPCHINESE} "只卸载程序（推荐）"
   LangString LMProgramAndData ${LANG_ENGLISH} "Uninstall the program and delete Local AppData"
   LangString LMProgramAndData ${LANG_SIMPCHINESE} "卸载程序并清除 Local AppData"
-  LangString LMCloseApp ${LANG_ENGLISH} "LazyMind or its local runtime is still running. Close it normally, then click Retry. Setup will not force-stop it."
-  LangString LMCloseApp ${LANG_SIMPCHINESE} "LazyMind 或本地运行时仍在运行。请正常关闭后点击“重试”；安装程序不会强制结束进程。"
+  LangString LMProcessScanFailed ${LANG_ENGLISH} "LazyMind process detection failed. Setup cannot safely continue."
+  LangString LMProcessScanFailed ${LANG_SIMPCHINESE} "LazyMind 进程检测失败，安装程序无法安全继续。"
+  LangString LMForceStopFailed ${LANG_ENGLISH} "Some LazyMind processes could not be force-closed. Setup cannot safely continue."
+  LangString LMForceStopFailed ${LANG_SIMPCHINESE} "部分 LazyMind 进程无法强制关闭，安装程序无法安全继续。"
+  LangString LMUpgradeRepairFailed ${LANG_ENGLISH} "The previous LazyMind uninstaller could not be updated for a safe upgrade. Setup cannot continue."
+  LangString LMUpgradeRepairFailed ${LANG_SIMPCHINESE} "无法更新旧版 LazyMind 卸载程序以安全升级，安装程序无法继续。"
   LangString LMPurgeFailed ${LANG_ENGLISH} "Local AppData could not be safely removed. No path outside LocalAppData\LazyMind was touched."
   LangString LMPurgeFailed ${LANG_SIMPCHINESE} "无法安全清除 Local AppData。未操作 LocalAppData\LazyMind 之外的任何路径。"
   LangString LMWarmupFailed ${LANG_ENGLISH} "LazyMind warmup failed or timed out. Retry retries warmup, Ignore skips it, and Abort cancels setup."
@@ -113,8 +119,11 @@
   StrCpy $IsManualUpgrade "0"
   StrCpy $InstallerHelper "$PLUGINSDIR\lazymind-installer-maintenance.exe"
   File /oname=$PLUGINSDIR\lazymind-installer-maintenance.exe "${BUILD_RESOURCES_DIR}\lazymind-installer-maintenance.exe"
+  StrCpy $UpgradeUninstaller "$PLUGINSDIR\lazymind-upgrade-uninstaller.exe"
+  File /oname=$PLUGINSDIR\lazymind-upgrade-uninstaller.exe "${UNINSTALLER_OUT_FILE}"
 
   ReadRegStr $InstalledVersion HKCU "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+  ReadRegStr $LegacyUninstallString HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
   ${If} $InstalledVersion != ""
     ${VersionCompare} $InstalledVersion "${VERSION}" $0
     ${If} $0 == "1"
@@ -146,18 +155,89 @@
 !macroend
 
 !macro customCheckAppRunning
+    ; Silent upgrade uninstallers call this macro before customUnInit. Always
+    ; initialize the helper here so the check does not depend on hook order.
+    InitPluginsDir
+    StrCpy $InstallerHelper "$PLUGINSDIR\lazymind-installer-maintenance.exe"
+    File /oname=$PLUGINSDIR\lazymind-installer-maintenance.exe "${BUILD_RESOURCES_DIR}\lazymind-installer-maintenance.exe"
+
+    StrCpy $2 0
   LMCheckStopped:
-    nsExec::ExecToStack '"$InstallerHelper" check-stopped'
+    nsExec::ExecToStack '"$InstallerHelper" check-stopped --install-dir "$INSTDIR"'
+    Pop $0
+    Pop $1
+    ${If} $0 == 10
+      DetailPrint "Running LazyMind processes: $1"
+      IntOp $2 $2 + 1
+      ${If} $2 > 3
+        DetailPrint "LazyMind processes restarted repeatedly after force-stop: $1"
+        MessageBox MB_OK|MB_ICONSTOP "$(LMForceStopFailed)$\r$\n$1" /SD IDOK
+        SetErrorLevel 7
+        Quit
+      ${EndIf}
+      Goto LMForceStop
+    ${ElseIf} $0 != 0
+      DetailPrint "LazyMind process detection failed: $1"
+      MessageBox MB_OK|MB_ICONSTOP "$(LMProcessScanFailed)$\r$\n$1" /SD IDOK
+      SetErrorLevel 6
+      Quit
+    ${EndIf}
+    Goto LMProcessCheckDone
+
+  LMForceStop:
+    DetailPrint "Force-closing running LazyMind processes..."
+    nsExec::ExecToStack '"$InstallerHelper" force-stop --install-dir "$INSTDIR"'
     Pop $0
     Pop $1
     ${If} $0 != 0
-      ${If} ${Silent}
-        SetErrorLevel 5
-        Quit
-      ${EndIf}
-      MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(LMCloseApp)$\r$\n$1" IDRETRY LMCheckStopped
+      DetailPrint "LazyMind force-stop failed: $1"
+      MessageBox MB_OK|MB_ICONSTOP "$(LMForceStopFailed)$\r$\n$1" /SD IDOK
+      SetErrorLevel 7
       Quit
     ${EndIf}
+    DetailPrint "LazyMind processes were force-closed: $1"
+    Goto LMCheckStopped
+
+  LMProcessCheckDone:
+    ; electron-builder invokes an existing uninstaller silently during an
+    ; upgrade. Older LazyMind uninstallers initialized their helper too late
+    ; and always failed that path. Replace only the old program uninstaller
+    ; with this build's fixed one before electron-builder invokes it.
+    !ifndef BUILD_UNINSTALLER
+      ${If} $LegacyUninstallString != ""
+      ${OrIf} $InstalledVersion != ""
+        DetailPrint "Updating the previous LazyMind uninstaller for upgrade compatibility..."
+        CreateDirectory "$INSTDIR"
+        ClearErrors
+        CopyFiles /SILENT "$UpgradeUninstaller" "$INSTDIR\${UNINSTALL_FILENAME}"
+        ${If} ${Errors}
+          Goto LMUpgradeRepairFailed
+        ${EndIf}
+        ; Repair stale registrations too: the previous install may have left
+        ; its registry entry after the uninstaller file was removed.
+        ClearErrors
+        WriteRegStr HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString" '"$INSTDIR\${UNINSTALL_FILENAME}"'
+        ${If} ${Errors}
+          Goto LMUpgradeRepairFailed
+        ${EndIf}
+        ClearErrors
+        ReadRegStr $0 HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
+        ${If} ${Errors}
+          Goto LMUpgradeRepairFailed
+        ${ElseIf} $0 != '"$INSTDIR\${UNINSTALL_FILENAME}"'
+          Goto LMUpgradeRepairFailed
+        ${EndIf}
+        Goto LMUpgradeRepairDone
+
+      LMUpgradeRepairFailed:
+        DetailPrint "Could not update the previous LazyMind uninstaller at $INSTDIR\${UNINSTALL_FILENAME}."
+        MessageBox MB_OK|MB_ICONSTOP "$(LMUpgradeRepairFailed)$\r$\n$INSTDIR\${UNINSTALL_FILENAME}" /SD IDOK
+        SetErrorLevel 8
+        Quit
+
+      LMUpgradeRepairDone:
+      ${EndIf}
+    !endif
 !macroend
 
 !macro customInstall
@@ -173,8 +253,45 @@
   ${EndIf}
 
   LMWarmupRetry:
-    ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --installer-warmup --timeout-seconds 900' $0
-    ${If} $0 != 0
+    ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --installer-warmup --timeout-seconds 900' $3
+    StrCpy $2 0
+    StrCpy $4 0
+
+  LMWarmupCheckStopped:
+    nsExec::ExecToStack '"$InstallerHelper" check-stopped --install-dir "$INSTDIR"'
+    Pop $0
+    Pop $1
+    ${If} $0 == 10
+      StrCpy $4 1
+      IntOp $2 $2 + 1
+      DetailPrint "Warmup left running LazyMind processes: $1"
+      ${If} $2 > 3
+        MessageBox MB_OK|MB_ICONSTOP "$(LMForceStopFailed)$\r$\n$1" /SD IDOK
+        SetErrorLevel 7
+        Quit
+      ${EndIf}
+      DetailPrint "Force-closing processes left by installer warmup..."
+      nsExec::ExecToStack '"$InstallerHelper" force-stop --install-dir "$INSTDIR"'
+      Pop $0
+      Pop $1
+      ${If} $0 != 0
+        MessageBox MB_OK|MB_ICONSTOP "$(LMForceStopFailed)$\r$\n$1" /SD IDOK
+        SetErrorLevel 7
+        Quit
+      ${EndIf}
+      Goto LMWarmupCheckStopped
+    ${ElseIf} $0 != 0
+      MessageBox MB_OK|MB_ICONSTOP "$(LMProcessScanFailed)$\r$\n$1" /SD IDOK
+      SetErrorLevel 6
+      Quit
+    ${EndIf}
+
+    ; Returning success while leaving processes behind is itself a warmup
+    ; failure, even though the processes were force-closed above.
+    ${If} $4 == 1
+      StrCpy $3 4
+    ${EndIf}
+    ${If} $3 != 0
       ${If} ${Silent}
         SetErrorLevel 4
         Quit

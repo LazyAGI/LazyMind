@@ -46,6 +46,14 @@ class SubAgentContext:
         return state
 
     def next_artifact_seq(self, key: str) -> int:
+        if key not in self._artifact_counts:
+            # Resume-safe: continue after the highest persisted revision instead
+            # of starting again at 1 and colliding in frontend slot/seq keys.
+            try:
+                next_persisted = self.db.next_artifact_seq(self.task_id, key)
+                self._artifact_counts[key] = max(0, int(next_persisted) - 1)
+            except Exception:
+                self._artifact_counts[key] = 0
         self._artifact_counts[key] = self._artifact_counts.get(key, 0) + 1
         return self._artifact_counts[key]
 
@@ -73,12 +81,22 @@ class SubAgentContext:
     def _drafts_dir(self) -> str:
         return os.path.join(self.workspace_path, 'drafts')
 
+    @staticmethod
+    def _validate_draft_key(key: str) -> str:
+        normalized = str(key or '').strip()
+        if (not normalized or normalized in {'.', '..'} or '/' in normalized
+                or '\\' in normalized or '\x00' in normalized or len(normalized) > 255):
+            raise ValueError('artifact key is not safe for draft storage')
+        return normalized
+
     def draft_path(self, key: str, list_index: Optional[int] = None) -> str:
         """Return the absolute path of the draft file for *key*."""
+        key = self._validate_draft_key(key)
         name = f'{key}_{list_index}.draft' if list_index is not None else f'{key}.draft'
         return os.path.join(self._drafts_dir(), name)
 
     def _meta_path(self, key: str, list_index: Optional[int] = None) -> str:
+        key = self._validate_draft_key(key)
         name = f'{key}_{list_index}.draft.meta' if list_index is not None else f'{key}.draft.meta'
         return os.path.join(self._drafts_dir(), name)
 
@@ -93,19 +111,26 @@ class SubAgentContext:
         original_type = 'text'
         if os.path.exists(meta):
             try:
-                original_type = json.loads(open(meta).read()).get('original_type', 'text')
+                with open(meta, 'r', encoding='utf-8') as meta_file:
+                    original_type = json.load(meta_file).get('original_type', 'text')
             except Exception:
                 pass
         return content, original_type
 
     def write_draft(self, key: str, original_type: str, content: str,
-                    list_index: Optional[int] = None) -> None:
-        """Write *content* to the draft file and record *original_type* in the sidecar."""
+                    list_index: Optional[int] = None,
+                    pending_commit: bool = True) -> None:
+        """Write a draft and record whether it differs from the committed revision."""
         os.makedirs(self._drafts_dir(), exist_ok=True)
         with open(self.draft_path(key, list_index), 'w', encoding='utf-8') as fh:
             fh.write(content)
         with open(self._meta_path(key, list_index), 'w', encoding='utf-8') as fh:
-            json.dump({'original_type': original_type}, fh)
+            json.dump({
+                'key': key,
+                'list_index': list_index,
+                'original_type': original_type,
+                'pending_commit': pending_commit,
+            }, fh)
 
     def delete_draft(self, key: str, list_index: Optional[int] = None) -> None:
         """Delete the draft file and its sidecar (silent if missing)."""
@@ -115,8 +140,8 @@ class SubAgentContext:
             except FileNotFoundError:
                 pass
 
-    def list_pending_drafts(self) -> List[Tuple[str, str, str]]:
-        """Return *(key, original_type, content)* for every draft that still exists."""
+    def list_pending_drafts(self) -> List[Tuple[str, Optional[int], str, str]]:
+        """Return *(key, list_index, original_type, content)* for dirty drafts."""
         drafts_dir = self._drafts_dir()
         if not os.path.isdir(drafts_dir):
             return []
@@ -125,25 +150,42 @@ class SubAgentContext:
             if not name.endswith('.draft'):
                 continue
             stem = name[:-len('.draft')]
-            # Reconstruct key (and optional list_index) from filename.
-            # Filenames: {key}.draft  or  {key}_{list_index}.draft
-            # We only need key for the flush call; list_index is encoded in the name.
-            key = stem
             path = os.path.join(drafts_dir, name)
             meta_path = path + '.meta'
             original_type = 'text'
+            pending_commit = True
+            key, list_index = self._parse_legacy_draft_stem(stem)
             if os.path.exists(meta_path):
                 try:
-                    original_type = json.loads(open(meta_path).read()).get('original_type', 'text')
+                    with open(meta_path, 'r', encoding='utf-8') as meta_file:
+                        metadata = json.load(meta_file)
+                    key = metadata.get('key', key)
+                    list_index = metadata.get('list_index', list_index)
+                    key = self._validate_draft_key(key)
+                    if list_index is not None:
+                        list_index = int(list_index)
+                    original_type = metadata.get('original_type', 'text')
+                    pending_commit = bool(metadata.get('pending_commit', True))
                 except Exception:
-                    pass
+                    continue
+            if not pending_commit:
+                continue
             try:
                 with open(path, 'r', encoding='utf-8') as fh:
                     content = fh.read()
             except OSError:
                 continue
-            results.append((key, original_type, content))
+            results.append((key, list_index, original_type, content))
         return results
+
+    @staticmethod
+    def _parse_legacy_draft_stem(stem: str) -> Tuple[str, Optional[int]]:
+        """Decode draft names written before key/list_index metadata existed."""
+        if '_' in stem:
+            prefix, suffix = stem.rsplit('_', 1)
+            if suffix.isdigit():
+                return prefix, int(suffix)
+        return stem, None
 
     def ensure_workspace(self) -> None:
         if self.workspace_path:

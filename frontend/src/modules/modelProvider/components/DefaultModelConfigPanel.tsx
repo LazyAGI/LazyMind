@@ -30,6 +30,7 @@ type ModelCapability =
   | "speech_to_text"
   | "tts"
   | "image_generator"
+  | "video_generator"
   | "embed_image"
   | "image_editor"
   | "evo_llm";
@@ -227,6 +228,11 @@ const moduleConfigs: ModuleConfig[] = [
     subtitleKey: "modelProvider.module.textToImageSubtitle",
   },
   {
+    key: "video_generator",
+    titleKey: "modelProvider.module.textToVideoTitle",
+    subtitleKey: "modelProvider.module.textToVideoSubtitle",
+  },
+  {
     key: "image_editor",
     titleKey: "modelProvider.module.imageEditingTitle",
     subtitleKey: "modelProvider.module.imageEditingSubtitle",
@@ -265,6 +271,7 @@ const selectedCapabilityByModelType: Record<string, ModelCapability> = {
   evo_llm: "evo_llm",
   stt: "speech_to_text",
   text2image: "image_generator",
+  text2video: "video_generator",
   image_editing: "image_editor",
 };
 
