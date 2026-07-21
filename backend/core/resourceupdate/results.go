@@ -186,16 +186,6 @@ func skillResultSelect(db *gorm.DB) *gorm.DB {
 		Select("id, skill_name, type, review_status, userid, requestid, skill_content, COALESCE(summary, '') AS summary, time")
 }
 
-func listPendingSkillReviewIDs(ctx context.Context, db *gorm.DB, userID string) ([]string, error) {
-	ids := make([]string, 0)
-	err := db.WithContext(ctx).
-		Table("skill_review_results").
-		Where("userid = ? AND review_status = ?", strings.TrimSpace(userID), reviewStatusPending).
-		Order("time ASC, id ASC").
-		Pluck("id", &ids).Error
-	return ids, err
-}
-
 func memoryResultSelect(db *gorm.DB) *gorm.DB {
 	return db.Table("memory_review").
 		Select("id, user_id, target, session_id, source_content, content, operations, state, review_status, time")

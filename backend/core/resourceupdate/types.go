@@ -49,7 +49,6 @@ type skillGenerateRequestJSON struct {
 	StartPreflightAt               string   `json:"start_preflight_at,omitempty"`
 	StartTriggerReason             string   `json:"start_trigger_reason,omitempty"`
 	SessionIDs                     []string `json:"session_ids,omitempty"`
-	PendingSkillIDs                []string `json:"pending_skill_ids"`
 	WindowFrozen                   bool     `json:"window_frozen"`
 }
 

@@ -53,13 +53,10 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 		Int("tool_call_count", request.ToolCallCount).
 		Msg(logEventSkillReviewCallStart)
 	resp, status, err := w.callers.Skill(ctx, algo.SkillReviewRequest{
-		RequestID:       request.RequestID,
-		UserID:          request.UserID,
-		SessionIDs:      request.SessionIDs,
-		PendingSkillIDs: request.PendingSkillIDs,
-		MinUserTurns:    w.cfg.MinUserTurns,
-		MinToolTurns:    w.cfg.MinToolTurns,
-		ModelConfigs:    modelConfigs,
+		RequestID:    request.RequestID,
+		UserID:       request.UserID,
+		SessionIDs:   request.SessionIDs,
+		ModelConfigs: modelConfigs,
 	})
 	if err != nil {
 		resourceUpdateWarn(logEventSkillReviewCallFailed, err).
@@ -191,20 +188,6 @@ func (w *Worker) freezeSkillRequest(ctx context.Context, task orm.ResourceUpdate
 			return request, permanentOutcome("invalid_skill_review_sessions", err.Error())
 		}
 		request.SessionIDs = validatedSessionIDs
-		if request.PendingSkillIDs == nil {
-			pendingSkillIDs, err := listPendingSkillReviewIDs(ctx, w.db, userID)
-			if err != nil {
-				return request, retryableOutcome("load_pending_skill_ids_failed", err)
-			}
-			request.PendingSkillIDs = normalizeStringIDs(pendingSkillIDs)
-			changed = true
-		} else {
-			normalizedPendingSkillIDs := normalizeStringIDs(request.PendingSkillIDs)
-			if !slices.Equal(normalizedPendingSkillIDs, request.PendingSkillIDs) {
-				changed = true
-			}
-			request.PendingSkillIDs = normalizedPendingSkillIDs
-		}
 		if changed {
 			if outcome := w.saveFrozenSkillRequest(ctx, task, request); outcome.Status != "" {
 				return request, outcome
@@ -268,13 +251,6 @@ func (w *Worker) freezeSkillRequest(ctx context.Context, task orm.ResourceUpdate
 			request.StartTriggerReason = "quantity"
 		}
 		request.WindowFrozen = true
-		if stats.QualifiedSessionCount >= stage.QuantityThreshold {
-			pendingSkillIDs, err := listPendingSkillReviewIDs(ctx, tx, userID)
-			if err != nil {
-				return err
-			}
-			request.PendingSkillIDs = normalizeStringIDs(pendingSkillIDs)
-		}
 		if strings.TrimSpace(request.RequestID) == "" {
 			request.RequestID = newSkillReviewRequestID()
 		} else {
