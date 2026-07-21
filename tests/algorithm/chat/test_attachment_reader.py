@@ -93,17 +93,14 @@ def test_parse_attachment_content_rejects_unsupported_suffix(tmp_path):
     bad.write_bytes(b'zip')
     try:
         ar.parse_attachment_content(str(bad))
-        assert False, 'expected ValueError'
+        raise AssertionError('expected ValueError')
     except ValueError as exc:
         assert 'Unsupported attachment type' in str(exc)
 
 
 def test_read_chat_document_text_joins_nodes(monkeypatch):
-    reader = SimpleNamespace(
-        __call__=lambda path: [
-            SimpleNamespace(text='line one'),
-            SimpleNamespace(text='line two'),
-        ],
-    )
+    def reader(_path):
+        return [SimpleNamespace(text='line one'), SimpleNamespace(text='line two')]
+
     monkeypatch.setattr(ar, '_get_document_reader', lambda: reader)
     assert ar.read_chat_document_text('/tmp/demo.pdf') == 'line one\n\nline two'

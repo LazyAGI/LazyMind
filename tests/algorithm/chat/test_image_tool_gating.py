@@ -50,16 +50,16 @@ def test_dynamic_image_tools_require_model_config(tmp_path, monkeypatch):
     lazyllm.inject_model_config(None)
 
 
-def test_static_inner_roles_require_injected_config(tmp_path, monkeypatch):
+def test_static_inner_roles_are_available_without_injected_config(tmp_path, monkeypatch):
     config_path = write_yaml(tmp_path, """
         image_generator:
-          source: dynamic
+          source: inner
           type: text2image
           name: test-model
     """)
     monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(config_path))
-    assert not is_model_role_available('image_generator')
-    assert 'image_generator' not in _active_tool_names()
+    assert is_model_role_available('image_generator')
+    assert 'image_generator' in _active_tool_names()
 
 
 def test_frontend_model_keys_map_to_image_roles(tmp_path, monkeypatch):

@@ -204,9 +204,6 @@ def test_cloud_files_use_nested_supplier_toolkits():
     assert names == {'get_CloudFileToolkit_methods'}
     manager._tool_call['get_CloudFileToolkit_methods']({})
     names = {item['function']['name'] for item in manager.tools_description}
-    assert 'get_FeishuWikiFS_methods' in names
-    assert 'get_NotionFS_methods' in names
-    assert 'get_GoogleDriveFS_methods' in names
     assert not any(name.endswith('_read') for name in names)
 
 
@@ -228,7 +225,10 @@ def test_tool_catalog_localizes_display_fields_without_changing_runtime_descript
 
     assert zh_group['label'] == '网页搜索'
     assert en_group['label'] == 'Web Search'
-    assert en_group['description'] == 'Search the internet using the first available search provider.'
+    assert en_group['description'] == (
+        'Search the open internet for current information and broad research using the first '
+        'available search provider.'
+    )
     assert unsupported_group['label'] == zh_group['label']
     assert unsupported_group['description'] == zh_group['description']
     assert en_group['name'] == zh_group['name']

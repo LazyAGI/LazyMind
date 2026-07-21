@@ -63,7 +63,7 @@ def test_kb_search_core_flow(monkeypatch):
     assert captured == {
         'payload': {
             'query': SEED_KEYWORD,
-            'filters': {'kb_id': DEFAULT_AGENTIC_CONFIG['kb_id']},
+            'filters': {'kb_id': [DEFAULT_AGENTIC_CONFIG['kb_id']]},
             'user_id': 'user-007',
         },
         'retrievers': ['retriever'],

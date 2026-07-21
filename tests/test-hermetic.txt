@@ -16,27 +16,13 @@ redis==7.0.1
 -r ../tests/backend/auth-service/requirements-test.txt
 -r ../algorithm/requirements.txt
 
-# Test runners and compatibility pins used by the current make test scope.
-pytest
-pytest-asyncio
+# Test runners and algorithm test extras used by the current make test scope.
+-r algorithm/requirements-test.txt
+
+# Compatibility pins shared by the current make test scope.
 aiosqlite
-httpx<0.28
 anyio<4.5
 
 # Build support for installing the in-tree lazyllm package.
 scikit-build-core
 pybind11
-
-# Algorithm test extras currently installed by CI for tests/algorithm.
-pypdf
-docx2txt
-EbookLib
-html2text
-olefile
-spacy
-bm25s
-PyStemmer
-nltk
-jieba
-sentencepiece
-psycopg2-binary

@@ -264,8 +264,9 @@ def _ordered_outcomes(text: str, *, current: bool) -> list[Outcome]:
     found.sort(key=lambda item: (item[0], item[1]))
     outcomes = list(dict.fromkeys(outcome for _, _, outcome in found))
     if 'create' in outcomes and 'plan' in outcomes and re.search(
-        r'(?:create|创建|生成|写)(?:一个|一份|\s+a|\s+an)?\s*(?:launch\s+)?'
-        r'(?:plan|roadmap|计划|路线图|方案)', routing_text, re.I,
+        r'(?:create|build)\s+(?:an?\s+)?(?:launch\s+|implementation\s+)?'
+        r'(?:plan|roadmap)|(?:创建|生成|写)(?:一个|一份)?\s*(?:计划|路线图|方案)',
+        routing_text, re.I,
     ):
         outcomes.remove('create')
     purpose = re.search(
@@ -712,7 +713,7 @@ def _apply_explicit_resources(
     elif excluded.knowledge_base_ids:
         updates['source_strategy'] = 'web' if _EXPLICIT_WEB.search(query) else 'model_knowledge'
     if resources.plugin_refs:
-        reasons.append('explicit workflow selection')
+        reasons.extend(('explicit plugin selection', 'explicit workflow selection'))
     assessment = profile.request_assessment
     issues = list(assessment.issues)
     questions = list(assessment.clarification_questions)
@@ -951,6 +952,7 @@ def resolve_task_profile(
     except Exception as exc:
         return replace(
             rule,
+            skill_mode='explicit' if rule.skill_mode == 'explicit' else 'suppress',
             source='fallback',
             router_latency_ms=int((time.monotonic() - started) * 1000),
             router_error=f'{type(exc).__name__}: {exc}'[:240],

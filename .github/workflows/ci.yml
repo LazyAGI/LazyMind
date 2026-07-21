@@ -168,8 +168,7 @@ jobs:
           CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install --no-cache-dir algorithm/lazyllm
           cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
           pip install -r algorithm/requirements.txt
-          pip install pypdf docx2txt EbookLib html2text olefile spacy bm25s PyStemmer nltk jieba sentencepiece psycopg2-binary
-          pip install pytest httpx
+          pip install -r tests/algorithm/requirements-test.txt
 
       - name: Verify lazyllm install
         run: |
