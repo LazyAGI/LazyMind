@@ -97,8 +97,8 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'FeishuWikiFS_copy': 'path1',
     'GoogleDriveFS_search': 'keywords',
     'GoogleDriveFS_find': 'pattern',
-    'advance_step': 'step_id',
-    'advance_step_and_hand_off': 'step_id',
+    'advance_step': 'steps',
+    'advance_step_and_hand_off': 'steps',
     'advance_steps': 'steps',
     'advance_steps_and_hand_off': 'steps',
 }
