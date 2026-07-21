@@ -12,7 +12,7 @@ from lazymind.review.memory_review.paths import (
 )
 from lazymind.review.memory_review.store import MemoryStore
 
-# Legacy target names kept for memory_editor / memory_reader / review callers.
+# Legacy target names kept for memory_reader / review callers.
 MEMORY_TARGET_PATHS = {
     'memory': LEGACY_MEMORY_PATH,
     'user_preference': LEGACY_USER_PREFERENCE_PATH,

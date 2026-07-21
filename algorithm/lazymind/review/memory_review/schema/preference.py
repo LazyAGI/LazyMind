@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
+import yaml
+
 from ..paths import REFERENCE_ROOT, normalize_memory_path, split_reference_ref
 from .common import parse_yaml_frontmatter, reject_unknown_keys
 
@@ -106,6 +108,25 @@ def render_preference_item(item: PreferenceItem) -> str:
     )
 
 
+def render_preference_index(content: str, items: list[PreferenceItem]) -> str:
+    frontmatter, _body = parse_yaml_frontmatter(content)
+    merged = dict(frontmatter or {})
+    merged['schema_version'] = 1
+    merged['updated_at'] = date.today().isoformat()
+    fm = yaml.safe_dump(merged, allow_unicode=True, sort_keys=False, default_flow_style=False).strip()
+    blocks = [render_preference_item(item).rstrip('\n') for item in items]
+    return '\n'.join(['---', fm, '---', '# Preference Index', *blocks]) + '\n'
+
+
+def remove_preference_item(content: str, name: str) -> str:
+    normalized_name = str(name or '').strip()
+    items = parse_preference_items(content)
+    kept = [item for item in items if item.name != normalized_name]
+    if len(kept) == len(items):
+        raise ValueError(f'preference item {normalized_name!r} not found.')
+    return render_preference_index(content, kept)
+
+
 def append_preference_item(content: str, item: PreferenceItem) -> str:
     error = validate_preference_item(item)
     if error:
@@ -113,12 +134,7 @@ def append_preference_item(content: str, item: PreferenceItem) -> str:
     existing = parse_preference_items(content)
     if any(entry.name == item.name for entry in existing):
         raise ValueError(f'preference item {item.name!r} already exists.')
-
-    base = content if content.endswith('\n') else f'{content}\n'
-    if not base.rstrip().endswith('# Preference Index'):
-        # Keep caller content; only ensure trailing newline before append.
-        pass
-    return f'{base}{render_preference_item(item)}'
+    return render_preference_index(content, [*existing, item])
 
 
 def preference_ref_path(ref: str) -> str:

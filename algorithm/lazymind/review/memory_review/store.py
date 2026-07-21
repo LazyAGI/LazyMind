@@ -128,6 +128,79 @@ class MemoryStore:
     def write_reference(self, name: str, content: str) -> None:
         self.write(build_reference_path(name), content)
 
+    def delete_reference(self, name: str) -> None:
+        path = build_reference_path(name)
+        if not is_reference_path(path):
+            raise MemoryPathError(f'invalid reference name: {name!r}')
+        try:
+            if hasattr(self.fs, 'rm'):
+                self.fs.rm(path)
+            elif hasattr(self.fs, 'delete'):
+                self.fs.delete(path)
+            else:
+                raise MemoryStoreError('remote filesystem does not support delete')
+        except MemoryPathError:
+            raise
+        except Exception as exc:
+            if self._is_not_found(exc):
+                return
+            raise MemoryStoreError(f'failed to delete {path}: {exc}') from exc
+
+    def apply_soul_field(self, field: str, value: str) -> str:
+        from .editors.soul import set_soul_field
+
+        updated = set_soul_field(self.read_soul(), field, value)
+        self.write_soul(updated)
+        return updated
+
+    def apply_profile_field(self, field: str, value: str) -> str:
+        from .editors.profile import set_profile_field
+
+        updated = set_profile_field(self.read_profile(), field, value)
+        self.write_profile(updated)
+        return updated
+
+    def add_preference_with_reference(
+        self,
+        *,
+        name: str,
+        summary: str,
+        scenario: str,
+        reason: str,
+    ):
+        from .editors.preference import add_preference_entry, preference_name_to_reference_name
+
+        preference_content, item, reference_content = add_preference_entry(
+            self.read_preference(),
+            name=name,
+            summary=summary,
+            scenario=scenario,
+            reason=reason,
+        )
+        reference_name = preference_name_to_reference_name(name)
+        self.write_reference(reference_name, reference_content)
+        try:
+            self.write_preference(preference_content)
+        except Exception:
+            try:
+                self.delete_reference(reference_name)
+            except Exception:
+                pass
+            raise
+        return item
+
+    def remove_preference_with_reference(self, name: str):
+        from .editors.preference import delete_preference_entry, reference_name_from_item
+
+        preference_content, item = delete_preference_entry(self.read_preference(), name=name)
+        reference_name = reference_name_from_item(item)
+        self.write_preference(preference_content)
+        try:
+            self.delete_reference(reference_name)
+        except Exception:
+            pass
+        return item
+
     def list_references(self) -> list[dict[str, Any]]:
         return [item for item in self.list_dir(REFERENCE_ROOT) if item.get('type') == 'file']
 
