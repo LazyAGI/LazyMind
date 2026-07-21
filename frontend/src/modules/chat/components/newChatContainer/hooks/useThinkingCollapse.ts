@@ -5,16 +5,25 @@ export function useThinkingCollapse() {
     Map<string, boolean>
   >(new Map());
 
-  const toggleThinkingCollapse = useCallback((key: string) => {
+  const toggleThinkingCollapse = useCallback((key: string, currentCollapsed = false) => {
     setThinkingCollapseMap((prev) => {
       const newMap = new Map(prev);
-      newMap.set(key, !(prev.get(key) || false));
+      newMap.set(key, !currentCollapsed);
       return newMap;
     });
   }, []);
 
+  const collapseAllThinking = useCallback(() => {
+    setThinkingCollapseMap((prev) => {
+      const next = new Map(prev);
+      for (const key of next.keys()) next.set(key, true);
+      return next;
+    });
+  }, []);
+
   const isThinkingCollapsed = useCallback(
-    (key: string) => thinkingCollapseMap.get(key) || false,
+    (key: string, defaultCollapsed = false) =>
+      thinkingCollapseMap.get(key) ?? defaultCollapsed,
     [thinkingCollapseMap],
   );
 
@@ -22,5 +31,6 @@ export function useThinkingCollapse() {
     thinkingCollapseMap,
     toggleThinkingCollapse,
     isThinkingCollapsed,
+    collapseAllThinking,
   };
 }

@@ -30,7 +30,7 @@ describe('runtime feature facade', () => {
       hideEvo: false,
       hideRegister: false,
       hideCloudAdmin: false,
-      localAutoLogin: false,
+      localLikeAutoLogin: false,
       useLocalGateway: false,
     });
   });
@@ -40,7 +40,7 @@ describe('runtime feature facade', () => {
       hideEvo: true,
       hideRegister: true,
       hideCloudAdmin: true,
-      localAutoLogin: true,
+      localLikeAutoLogin: true,
       allowFolderPicker: false,
       allowOpenLogDir: false,
       useLocalGateway: true,
@@ -49,7 +49,7 @@ describe('runtime feature facade', () => {
       hideEvo: true,
       hideRegister: true,
       hideCloudAdmin: true,
-      localAutoLogin: true,
+      localLikeAutoLogin: true,
       allowFolderPicker: true,
       allowOpenLogDir: true,
       useLocalGateway: true,
