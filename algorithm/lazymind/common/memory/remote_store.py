@@ -12,15 +12,12 @@ MEMORY_TARGET_PATHS = {
 
 
 class MemoryRemoteStore:
-    """Thin RemoteFS access layer for memory and user preference resources."""
+    """Read-only RemoteFS access to persistent memory documents."""
 
     def __init__(self, fs: Optional[RemoteFS] = None):
         self.fs = fs or RemoteFS()
 
     def read(self, target: str) -> str:
         path = MEMORY_TARGET_PATHS[target]
-        with self.fs.open(path, 'r', encoding='utf-8', errors='replace') as fh:
-            return fh.read()
-
-    def write(self, target: str, content: str) -> None:
-        self.fs.write(MEMORY_TARGET_PATHS[target], content)
+        with self.fs.open(path, 'r', encoding='utf-8', errors='replace') as handle:
+            return handle.read()
