@@ -3,7 +3,6 @@ import AppRouter from './router';
 import { BASENAME } from './globalState';
 
 function App() {
-  console.log('[App] render', { basename: BASENAME || undefined });
   return (
     <BrowserRouter
       basename={BASENAME || undefined}

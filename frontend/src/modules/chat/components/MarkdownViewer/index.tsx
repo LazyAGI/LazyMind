@@ -7,7 +7,7 @@ import "katex/dist/katex.min.css";
 import { Image, Popover } from "antd";
 import rehypeSanitize from "rehype-sanitize";
 import { useTranslation } from "react-i18next";
-import "./markdown.scss";
+import "../../../../components/MarkdownViewer/markdown.scss";
 import "./index.scss";
 import {
   createContext,

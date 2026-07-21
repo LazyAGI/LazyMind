@@ -152,7 +152,6 @@ const Detail = () => {
   }, [id, setCurrentDataset]);
 
   useEffect(() => {
-    console.log("searchParams", searchParams);
     getDetail();
     getImportingTotal();
     const unwrap = (
