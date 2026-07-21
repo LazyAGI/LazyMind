@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { listTasks } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
-import { CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
+import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 
 const SECTION_LIMIT = 5;
@@ -51,6 +51,7 @@ export default function Workbench({ active }: WorkbenchProps) {
   const completedToday = completed.filter(isTaskFinishedToday);
   const recent = completed.filter((task) => isTaskFinishedWithinDays(task, 7));
   const openConversation = (id: string) => {
+    selectChatConversationFilter('task');
     sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, id);
     navigate('/agent/chat/home');
   };

@@ -157,6 +157,13 @@ func TestMarketListDoesNotTreatPublisherSourceAsInstalled(t *testing.T) {
 		CreatedAt:     testutil.TimeFixture(),
 		UpdatedAt:     testutil.TimeFixture(),
 	})
+	testutil.MustCreate(t, db, &testutil.SkillMarketInstallRow{
+		MarketItemID: "market_item1",
+		UserID:       "admin_001",
+		SkillID:      "market_skill",
+		CreatedAt:    testutil.TimeFixture(),
+		UpdatedAt:    testutil.TimeFixture(),
+	})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -205,6 +212,87 @@ func TestMarketListSkipsDeletedMarketSource(t *testing.T) {
 	}
 	if resp.Code != 0 || resp.Data.Total != 0 || len(resp.Data.Items) != 0 {
 		t.Fatalf("unexpected market list response after source delete: %#v", resp)
+	}
+}
+
+func TestMarketTagsListsPublishedItemTags(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	fixtures := []struct {
+		skillID  string
+		revision string
+		tags     string
+		status   string
+	}{
+		{skillID: "market_debug_1", revision: "market_debug_rev1", tags: `["debugging"]`, status: "published"},
+		{skillID: "market_debug_2", revision: "market_debug_rev2", tags: `["debugging","research"]`, status: "published"},
+		{skillID: "market_draft", revision: "market_draft_rev1", tags: `["writing"]`, status: "draft"},
+		{skillID: "market_deleted", revision: "market_deleted_rev1", tags: `["obsolete"]`, status: "published"},
+	}
+	for index, fixture := range fixtures {
+		testutil.SeedSkillWithRevision(t, db, fixture.skillID, fixture.revision)
+		testutil.MustCreate(t, db, &testutil.SkillMarketItemRow{
+			ID:            fixture.skillID + "_item",
+			SourceSkillID: fixture.skillID,
+			Status:        fixture.status,
+			Tags:          []byte(fixture.tags),
+			SortOrder:     index,
+			CreatedAt:     testutil.TimeFixture(),
+			UpdatedAt:     testutil.TimeFixture(),
+		})
+	}
+	deletedAt := testutil.TimeFixture()
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "market_deleted").Update("deleted_at", deletedAt).Error; err != nil {
+		t.Fatalf("delete market source: %v", err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/skill-market/tags", nil)
+	rec := httptest.NewRecorder()
+
+	MarketTags(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			Tags []string `json:"tags"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Code != 0 || len(resp.Data.Tags) != 2 || resp.Data.Tags[0] != "debugging" || resp.Data.Tags[1] != "research" {
+		t.Fatalf("tags = %#v, want [debugging research]", resp.Data.Tags)
+	}
+
+	filterReq := httptest.NewRequest(http.MethodGet, "/api/core/skill-market?tags=research", nil)
+	filterReq.Header.Set("X-User-Id", "user_002")
+	filterRec := httptest.NewRecorder()
+	MarketList(filterRec, filterReq)
+	if filterRec.Code != http.StatusOK {
+		t.Fatalf("filtered status=%d body=%s, want 200", filterRec.Code, filterRec.Body.String())
+	}
+	var filtered struct {
+		Code int `json:"code"`
+		Data struct {
+			Items []struct {
+				MarketItemID string   `json:"market_item_id"`
+				Tags         []string `json:"tags"`
+			} `json:"items"`
+			Total int `json:"total"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(filterRec.Body).Decode(&filtered); err != nil {
+		t.Fatalf("decode filtered response: %v", err)
+	}
+	if filtered.Code != 0 || filtered.Data.Total != 1 || len(filtered.Data.Items) != 1 || filtered.Data.Items[0].MarketItemID != "market_debug_2_item" {
+		t.Fatalf("unexpected filtered response: %#v", filtered)
+	}
+	if got := filtered.Data.Items[0].Tags; len(got) != 2 || got[0] != "debugging" || got[1] != "research" {
+		t.Fatalf("filtered item tags = %#v", got)
 	}
 }
 

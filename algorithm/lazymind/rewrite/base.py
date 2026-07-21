@@ -5,9 +5,9 @@ import re
 from typing import Any, Dict, List, Literal, Optional
 
 from lazyllm import AutoModel
-from lazymind.chat.engine.tools.infra import (
-    validate_skill_content,
-    validate_user_preference_content,
+from lazymind.common.skill_document import (
+    SkillDocumentError,
+    require_valid_skill_document,
 )
 
 try:
@@ -128,11 +128,12 @@ def _validate_generated_content(task_type: RewriteTaskType, content: Any) -> str
         raise UnprocessableContentError("Generated field 'content' must be a string.")
 
     if task_type == 'skill':
-        validation_error = validate_skill_content(content)
-        if validation_error:
+        try:
+            require_valid_skill_document(content)
+        except SkillDocumentError as exc:
             raise UnprocessableContentError(
-                f'Generated SKILL.md is invalid: {validation_error}'
-            )
+                f'Generated SKILL.md is invalid: {exc}'
+            ) from exc
     elif task_type in ('memory', 'user_preference'):
         compact_content = ''.join(content.split())
         content_length = len(compact_content)
@@ -145,6 +146,9 @@ def _validate_generated_content(task_type: RewriteTaskType, content: Any) -> str
                 'concise entries.'
             )
         if task_type == 'user_preference':
+            from lazymind.chat.engine.tools.infra.user_preference_validation import (
+                validate_user_preference_content,
+            )
             validation_error = validate_user_preference_content(content)
             if validation_error:
                 raise UnprocessableContentError(

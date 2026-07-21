@@ -44,7 +44,11 @@ from lazymind.chat.engine.tools import (
 )
 from lazymind.model_config import is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
-from lazymind.chat.engine.subagent.tools import find_user_attachment, read_user_attachment
+from lazymind.chat.engine.subagent.tools import (
+    find_user_attachment,
+    read_user_attachment,
+    string_replace,
+)
 
 SystemPromptAppendix = dict[str, str | tuple[str, ...]]
 SystemPromptAppendixProvider = Callable[[], SystemPromptAppendix | None]
@@ -84,17 +88,31 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Attached file rules\n'
         'Attachments are listed for reference only — do NOT parse or read them automatically.\n'
-        '- `find_user_attachment(filename, turn=N)`: get path/url to pass to image tools, plugins, '
+        '- `find_user_attachment(filename, turn=N)`: get path/url to pass to image tools, workflows, '
         '`vision_extractor`, or `save_plugin_artifact`. Prefer this for images when the task is '
-        'visual (edit, generate, plugin) or you only need the file location.\n'
-        '- `read_user_attachment(filename, turn=N)`: extract TEXT — OCR for pdf/doc/docx/pptx, or a '
+        'visual (edit, generate, workflow) or you only need the file location.\n'
+        '- `read_user_attachment(filename, turn=N)`: extract TEXT — direct read for plain-text files, '
+        'OCR for pdf/doc/docx/pptx, or a '
         'text description via vision for images. Use only when you need document text or a textual '
         'answer about image content (e.g. "what does this document say", "describe this diagram").\n'
-        'Supported uploads: png, jpg, jpeg, pdf, doc, docx, pptx.\n'
+        'Supported uploads: images, pdf/doc/docx/pptx, and common plain-text/code/config files.\n'
         '- Default to the current turn (marked 当前轮次) when the user says '
         '"this image / 这张图 / 这个文件" without naming a turn.\n'
         '- For knowledge-base questions about indexed documents, you may also use '
         '`kb_tmp_search` or other `kb_*` tools when appropriate.',
+    ),
+}
+ATTACHMENT_EDIT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '- `string_replace`: safe transactional editing for plain-text attachments. You MUST first '
+        "call it with `action='preview'`, inspect every item in `matches` and the complete bounded "
+        "`diff`, and only then call `action='apply'` with the returned `preview_id`. Never apply when "
+        'the match locations or diff include unintended text. Literal mode supports multiline text '
+        'and treats LF/CRLF as equivalent. For patterns use `mode=regex`; DOTALL is opt-in via '
+        '`regex_flags`. `expected_replacements` is always enforced. Use `action=undo` to revert the '
+        'last applied edit. Repeated applies update one download artifact and continue from the current '
+        'draft; the original upload stays unchanged. Do not simulate edits with '
+        'read_user_attachment + save_chat_artifact.',
     ),
 }
 ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -126,7 +144,7 @@ KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         "are available, so call the appropriate search method directly. "
         "Your first substantive action for the turn MUST be one of those searches. Do not answer "
         "from memory, announce that you could search later, ask whether you should search, or start "
-        "a plugin before searching. Use the knowledge-base search method FIRST for every retrieval "
+        "a workflow before searching. Use the knowledge-base search method FIRST for every retrieval "
         "need — no exceptions. Do not skip it because you think the web might have "
         "better information, or because the topic seems general, popular, or common "
         "knowledge. The knowledge base is your primary evidence source.\n\n"
@@ -346,6 +364,15 @@ USER_ATTACHMENT_TOOL_CONFIGS = (
     ),
 )
 
+ATTACHMENT_EDIT_TOOL_CONFIG = ToolConfig(
+    name='string_replace',
+    label='替换附件文本',
+    description='预览、提交或撤销纯文本附件的多行/正则局部替换，并维护单一下载副本',
+    tool=string_replace,
+    module='attachment',
+    appendix_system_prompt=ATTACHMENT_EDIT_TOOL_POLICY_APPENDIX,
+)
+
 DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(
         name='kb',
@@ -507,7 +534,9 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(
         name='video_generator',
         label='文生视频',
+        label_en='Video Generator',
         description='根据文字描述生成视频，可选首帧参考图；同轮多次调用并行，视频侧最多同时3路',
+        description_en='Generate videos from text descriptions, with optional first-frame reference images.',
         tool=video_generator, module='content',
         model_role='video_generator',
         capability_id='video_generation',
@@ -518,7 +547,9 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(
         name='video_to_gif',
         label='视频转GIF',
+        label_en='GIF Converter',
         description='将本地视频转换为 GIF 动图；同轮多次调用并行，GIF 侧最多同时3路',
+        description_en='Convert local videos to GIF animations.',
         tool=video_to_gif, module='content',
         capability_id='video_to_gif',
         input_schema={'url': 'string'}, output_schema={'image': 'file'},
@@ -560,10 +591,10 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(
         name='local_fs',
         label='本地文件',
-        description='在配置的本地路径内进行 glob 匹配、grep 搜索、文件读取（只读）',
+        description='在配置的本地路径内进行 glob 匹配、grep 搜索、文件读取和精确文本替换',
         tool=LocalFileToolkit(), module='data',
         label_en='Local Files',
-        description_en='Run glob matching, grep searches, and read-only file access within configured local paths.',
+        description_en='Glob, grep, read, and perform exact text replacements within configured local paths.',
     ),
     ToolConfig(
         name='cloud_files', label='云文件', description='浏览、搜索和管理已连接的云文件系统',

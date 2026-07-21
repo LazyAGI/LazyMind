@@ -80,6 +80,85 @@ func TestPersistConversationArtifactRejectsInvalidOrDuplicateInput(t *testing.T)
 	}
 }
 
+func TestPersistConversationArtifactReplacesSameTurnArtifactWhenRequested(t *testing.T) {
+	db := newArtifactTestDB(t)
+	artifactID := "1bcd90de-5867-4d9a-ae4b-645a1e0a9bb2"
+	first := &ArtifactCreatedEvent{
+		ArtifactID: artifactID, Filename: "result.txt", ContentType: "text",
+		Value: json.RawMessage(`{"text":"first"}`), ReplaceExisting: true,
+	}
+	if _, err := persistConversationArtifact(
+		context.Background(), db.DB, "conversation-1", "history-1", "user-1", first,
+	); err != nil {
+		t.Fatalf("persist first replaceable artifact: %v", err)
+	}
+	second := &ArtifactCreatedEvent{
+		ArtifactID: artifactID, Filename: "result.txt", ContentType: "text",
+		Value: json.RawMessage(`{"text":"second"}`), ReplaceExisting: true,
+	}
+	dto, err := persistConversationArtifact(
+		context.Background(), db.DB, "conversation-1", "history-1", "user-1", second,
+	)
+	if err != nil {
+		t.Fatalf("replace artifact: %v", err)
+	}
+	if string(dto.Value) != `{"text":"second"}` {
+		t.Fatalf("replacement response value = %s", dto.Value)
+	}
+
+	var count int64
+	if err := db.Model(&orm.ConversationArtifact{}).Where("id = ?", artifactID).Count(&count).Error; err != nil {
+		t.Fatalf("count artifacts: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("artifact count = %d, want 1", count)
+	}
+	var stored orm.ConversationArtifact
+	if err := db.First(&stored, "id = ?", artifactID).Error; err != nil {
+		t.Fatalf("load replaced artifact: %v", err)
+	}
+	if string(stored.Value) != `{"text":"second"}` {
+		t.Fatalf("stored replacement value = %s", stored.Value)
+	}
+}
+
+func TestPersistConversationArtifactReplacesAcrossTurns(t *testing.T) {
+	db := newArtifactTestDB(t)
+	event := &ArtifactCreatedEvent{
+		ArtifactID: "917b73ea-53fb-4ad2-ad19-5a0546cb062f",
+		Filename:   "result.txt", ContentType: "text",
+		Value: json.RawMessage(`{"text":"first"}`), ReplaceExisting: true,
+	}
+	if _, err := persistConversationArtifact(
+		context.Background(), db.DB, "conversation-1", "history-1", "user-1", event,
+	); err != nil {
+		t.Fatalf("persist first artifact: %v", err)
+	}
+	event.Value = json.RawMessage(`{"text":"other turn"}`)
+	dto, err := persistConversationArtifact(
+		context.Background(), db.DB, "conversation-1", "history-2", "user-1", event,
+	)
+	if err != nil {
+		t.Fatalf("replace artifact from another turn: %v", err)
+	}
+	if dto.HistoryID != "history-1" {
+		t.Fatalf("replacement history = %q, want history-1", dto.HistoryID)
+	}
+
+	var stored orm.ConversationArtifact
+	if err := db.First(&stored, "id = ?", event.ArtifactID).Error; err != nil {
+		t.Fatalf("load replaced artifact: %v", err)
+	}
+	if stored.HistoryID != "history-1" || string(stored.Value) != `{"text":"other turn"}` {
+		t.Fatalf("stored replacement = history %q, value %s", stored.HistoryID, stored.Value)
+	}
+	if _, err := persistConversationArtifact(
+		context.Background(), db.DB, "conversation-2", "history-3", "user-1", event,
+	); err == nil || !strings.Contains(err.Error(), "scope mismatch") {
+		t.Fatalf("expected cross-conversation replacement error, got %v", err)
+	}
+}
+
 func TestPersistConversationArtifactUsesCharacterLimitsForUnicode(t *testing.T) {
 	db := newArtifactTestDB(t)
 	caption := strings.Repeat("说明", 1000)

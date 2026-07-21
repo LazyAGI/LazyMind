@@ -726,7 +726,7 @@ func wikiNodeObjectWithParent(node map[string]any, spaceID, fallbackToken, fallb
 		SpaceID:     resolvedSpaceID,
 		Name:        name,
 		IsDocument:  true,
-		IsContainer: hasChild || objType == "folder" || objType == "wiki" || objType == "space",
+		IsContainer: true,
 		HasChildren: hasChild,
 		Revision: firstNonEmpty(
 			openAPIString(node["obj_edit_time"]),

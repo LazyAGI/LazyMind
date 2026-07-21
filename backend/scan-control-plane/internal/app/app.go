@@ -60,6 +60,7 @@ type Components struct {
 	ParseWorkerRunner                 *worker.Runner
 	CrawlWorker                       *crawl.RunOnceWorker
 	CoreResultRunner                  *worker.ReconcilerRunner
+	BindingCleanupRunner              *worker.BindingCleanupRunner
 	TempCleanupRunner                 *worker.TempCleanupRunner
 	Metrics                           *observability.Registry
 	Logger                            *observability.Logger
@@ -183,6 +184,7 @@ func buildSQLComponents(cfg config.Config, opener DBOpener) (Components, error) 
 	}
 	adapters.CrawlWorker = crawlWorker
 	adapters.CoreResultRunner = buildCoreResultRunner(adapters, cfg)
+	adapters.BindingCleanupRunner = worker.NewBindingCleanupRunner(adapters.Repository, adapters.CoreResource, cfg.ParseWorkerGlobalConcurrency)
 	adapters.TempCleanupRunner = buildTempCleanupRunner(adapters, cfg)
 	if prewarmer, err := buildTargetSearchCachePrewarmer(adapters, cfg); err != nil {
 		return Components{}, err
@@ -740,6 +742,7 @@ type Runtime struct {
 	parseRunner          *worker.Runner
 	crawlWorker          *crawl.RunOnceWorker
 	reconcilerRunner     *worker.ReconcilerRunner
+	bindingCleanupRunner *worker.BindingCleanupRunner
 	tempCleanupRunner    *worker.TempCleanupRunner
 	targetCachePrewarmer *targetTreeCachePrewarmer
 	workerPollInterval   time.Duration
@@ -761,6 +764,7 @@ func NewRuntime(built Components, cfg config.Config) *Runtime {
 		parseRunner:          built.ParseWorkerRunner,
 		crawlWorker:          built.CrawlWorker,
 		reconcilerRunner:     built.CoreResultRunner,
+		bindingCleanupRunner: built.BindingCleanupRunner,
 		tempCleanupRunner:    built.TempCleanupRunner,
 		targetCachePrewarmer: built.TargetSearchCachePrewarmer,
 		workerPollInterval:   cfg.WorkerPollInterval,
@@ -787,6 +791,9 @@ func (r *Runtime) Start(ctx context.Context) {
 		}
 		if r.reconcilerRunner != nil {
 			_ = r.reconcilerRunner.RunPending(ctx, r.workerID+"-reconcile")
+		}
+		if r.bindingCleanupRunner != nil {
+			_ = r.bindingCleanupRunner.RunOnce(ctx)
 		}
 	})
 	if r.tempCleanupRunner != nil {

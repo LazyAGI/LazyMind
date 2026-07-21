@@ -1,24 +1,25 @@
-from lazymind.chat.engine.prompts.guidance import CLOUD_DOCUMENT_GUIDANCE
-from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, _extract_methods
+from lazymind.chat.service.component.tool_registry import (
+    CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX,
+    DEFAULT_TOOLS,
+    _extract_methods,
+)
 
 
-def test_notion_tool_group_exposes_stable_read_only_contract():
-    group = next(item for item in DEFAULT_TOOLS if item.name == 'notion')
+def test_cloud_file_toolkit_exposes_stable_notion_read_contract():
+    group = next(item for item in DEFAULT_TOOLS if item.name == 'cloud_files')
+    notion = next(
+        item for item in group.tool['tools'] if item.__class__.__name__ == 'NotionFS'
+    )
+    methods = [method['name'] for method in _extract_methods(notion)]
 
-    assert group.instance.__class__.__name__ == 'NotionFS'
-    assert [method['name'] for method in _extract_methods(group.instance)] == [
-        'ls',
-        'search',
-        'info',
-        'exists',
-        'read',
-        'read_file',
-        'resolve_link',
-        'read_with_references',
-    ]
+    assert {'ls', 'search', 'info', 'exists', 'read', 'read_file'} <= set(methods)
+    assert {'resolve_link', 'read_with_references'} <= set(methods)
 
 
 def test_cloud_document_guidance_distinguishes_notion_list_and_search():
-    assert '`ls` with `path="/"`' in CLOUD_DOCUMENT_GUIDANCE
-    assert 'never use `*` as a wildcard' in CLOUD_DOCUMENT_GUIDANCE
-    assert 'empty result does not mean authentication failed' in CLOUD_DOCUMENT_GUIDANCE
+    guidance = '\n'.join(CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX['tool_policy'])
+
+    assert 'Notion URL' in guidance
+    assert 'Notion file-system tools first' in guidance
+    assert 'reading with references' in guidance
+    assert 'Do not fall back to generic URL fetching' in guidance

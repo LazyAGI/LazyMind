@@ -113,6 +113,7 @@ type SkillMarketItem struct {
 	ID            string     `gorm:"column:id;type:varchar(36);primaryKey"`
 	SourceSkillID string     `gorm:"column:source_skill_id;type:varchar(36);not null"`
 	Status        string     `gorm:"column:status;type:varchar(32);not null;default:'draft'"`
+	Tags          []byte     `gorm:"column:tags;type:json;not null;default:'[]'"`
 	Icon          string     `gorm:"column:icon;type:text;not null;default:''"`
 	SortOrder     int        `gorm:"column:sort_order;not null;default:0"`
 	VersionNote   string     `gorm:"column:version_note;type:text;not null;default:''"`

@@ -110,3 +110,11 @@ func TestNormalizeUploadedTextFileSkipsUnsupportedExtension(t *testing.T) {
 		t.Fatalf("expected returned size %d, got %d", len(data), size)
 	}
 }
+
+func TestNormalizeUploadedTextFileSupportsCommonSourceAndConfigExtensions(t *testing.T) {
+	for _, name := range []string{"config.yaml", "app.toml", "main.py", "view.tsx", "query.sql", ".env"} {
+		if !shouldNormalizeUploadedTextFile("", name) {
+			t.Errorf("expected %q to be treated as a text upload", name)
+		}
+	}
+}

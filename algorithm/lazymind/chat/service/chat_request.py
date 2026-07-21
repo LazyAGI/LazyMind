@@ -33,6 +33,7 @@ class ChatRetrievalOptions(BaseModel):
 class ChatRuntimeOptions(BaseModel):
     debug: Optional[bool] = False
     reasoning: Optional[bool] = False
+    thinking_depth: str = 'medium'
     priority: Optional[int] = None
     trace: Optional[bool] = False
     environment_context: Optional[Dict[str, Any]] = None

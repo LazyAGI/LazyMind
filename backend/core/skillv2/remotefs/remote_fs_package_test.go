@@ -95,7 +95,7 @@ func TestRemoteFSNewPackage_FirstCommitCreatesRevisionOne(t *testing.T) {
 	handler.Content(write, httptest.NewRequest(
 		http.MethodPut,
 		remoteContentURL("skills/research/new-skill/SKILL.md", "user_001", "task-mkdir", ""),
-		strings.NewReader("# New Skill\n"),
+		strings.NewReader(testutil.SkillMD("new-skill", "New Skill")),
 	))
 	if write.Code != http.StatusOK {
 		t.Fatalf("write SKILL.md status=%d body=%s", write.Code, write.Body.String())

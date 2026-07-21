@@ -275,36 +275,21 @@ function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
   });
   const fileListImages = fileListItems.filter((item) => item.isImage);
   const fileListFiles = fileListItems.filter((item) => !item.isImage);
+  const previewImages = [...imageUrls, ...fileListImages].filter(
+    (image, index, items) =>
+      items.findIndex((candidate) => candidate.src === image.src) === index,
+  );
 
   const total =
-    imageUrls.length + fileListItems.length + files.length + texts.length;
+    previewImages.length + fileListFiles.length + files.length + texts.length;
 
   return (
     <CollapsibleSection title={`${t("taskCenter.artifacts")} (${total})`}>
       <div className="task-artifacts-inner">
-        {(imageUrls.length > 0 || fileListImages.length > 0) && (
+        {previewImages.length > 0 && (
           <div className="task-artifacts-grid">
             <Image.PreviewGroup>
-              {imageUrls.map((img) => (
-                <div className="task-artifact-preview" key={img.key}>
-                  <Image
-                    src={img.src}
-                    width={64}
-                    height={64}
-                    className="task-artifact-thumb"
-                  />
-                  <a
-                    href={img.src}
-                    download={img.filename}
-                    className="task-artifact-preview-download"
-                    title={`${t("taskCenter.download")} ${img.filename}`}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <DownloadOutlined />
-                  </a>
-                </div>
-              ))}
-              {fileListImages.map((img) => (
+              {previewImages.map((img) => (
                 <div className="task-artifact-preview" key={img.key}>
                   <Image
                     src={img.src}

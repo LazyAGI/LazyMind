@@ -29,6 +29,7 @@ const (
 	ScopeTypePartial    ScopeType = "partial"
 	ScopeTypeDelta      ScopeType = "delta"
 	ScopeTypeWatchEvent ScopeType = "watch_event"
+	ScopeTypeCleanup    ScopeType = "cleanup"
 
 	ExportFormatOriginal ExportFormat = "original"
 	ExportFormatMarkdown ExportFormat = "markdown"

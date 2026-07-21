@@ -57,9 +57,9 @@ def _description(plugin_enabled: bool) -> str:
     scopes = (
         '- conversation: persists for later turns in this conversation.\n'
         if not plugin_enabled else
-        '- conversation: persists after the current plugin run ends.\n'
-        '- plugin_session: applies only to the active plugin run.\n'
-        '- plugin_step: applies only to one canonical step_id from the authoritative plugin context.\n'
+        '- conversation: persists after the current workflow run ends.\n'
+        '- plugin_session: applies only to the active workflow run.\n'
+        '- plugin_step: applies only to one canonical step_id from the authoritative workflow context.\n'
     )
     return f'''Update durable user intent by applying a minimal patch.
 
@@ -70,9 +70,9 @@ Do not record assistant inferences, tool results, task progress, or one-off word
 
 Available scopes for this turn:
 {scopes}
-Do not choose a plugin scope merely because a plugin is active. Use conversation when
-the requirement must survive after the plugin ends. Plugin step discovery and lifecycle
-belong to the plugin framework; do not invent a step_id.
+Do not choose a workflow scope merely because a workflow is active. Use conversation when
+the requirement must survive after the workflow ends. Workflow step discovery and lifecycle
+belong to the workflow framework; do not invent a step_id.
 
 Args:
     scope (str): One of the available scopes listed above.
@@ -81,7 +81,7 @@ Args:
         from the current user request. Use set only for goal, deliverable, or
         execution_mode. Use add/remove/supersede for list fields.
     step_id (str, optional): Required only for plugin_step; use a canonical id already
-        present in the authoritative plugin context.
+        present in the authoritative workflow context.
 
 Returns:
     A concise confirmation of the accepted intent patch.

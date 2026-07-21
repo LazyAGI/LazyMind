@@ -32,11 +32,34 @@ func TestCreateSkillFromUploadedZip_RequiresSkillMD(t *testing.T) {
 	assertNoSkillTruthRows(t, db)
 }
 
+func TestCreateSkillFromUploadedZip_RequiresFrontmatterMetadata(t *testing.T) {
+	for name, content := range map[string][]byte{
+		"frontmatter": []byte("# Skill\n"),
+		"name":        []byte("---\ndescription: description\n---\n# Skill\n"),
+		"description": []byte("---\nname: skill\n---\n# Skill\n"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := newSkillV2TestDB(t)
+			zipPath := filepath.Join(t.TempDir(), name+".zip")
+			writeSkillZip(t, zipPath, map[string][]byte{"SKILL.md": content})
+			uploadStore := newFakeUploadStore()
+			uploadID := "upload_missing_" + name
+			uploadStore.Put(UploadSession{UploadID: uploadID, OwnerUserID: "user_001", State: "completed", StoredPath: zipPath, Filename: name + ".zip"})
+			svc := newCreateSkillValidationService(t, db, uploadStore)
+
+			if _, err := svc.CreateSkill(context.Background(), validCreateSkillRequest(uploadID)); err == nil {
+				t.Fatal("CreateSkill succeeded")
+			}
+			assertNoSkillTruthRows(t, db)
+		})
+	}
+}
+
 func TestCreateSkillFromUploadedZip_AllowsSingleTopLevelDirectory(t *testing.T) {
 	db := newSkillV2TestDB(t)
 	zipPath := filepath.Join(t.TempDir(), "wrapped.zip")
 	writeSkillZip(t, zipPath, map[string][]byte{
-		"openclaw-openclaw-changelog-update/SKILL.md":        []byte("# OpenClaw\n"),
+		"openclaw-openclaw-changelog-update/SKILL.md":        externalSkillMD("openclaw-openclaw-changelog-update", "OpenClaw changelog update"),
 		"openclaw-openclaw-changelog-update/references/a.md": []byte("# A\n"),
 	})
 	uploadStore := newFakeUploadStore()
@@ -160,7 +183,7 @@ func TestCreateSkillFromUploadedZip_SupportsChineseFileNames(t *testing.T) {
 	db := newSkillV2TestDB(t)
 	zipPath := filepath.Join(t.TempDir(), "skill.zip")
 	writeSkillZip(t, zipPath, map[string][]byte{
-		"SKILL.md":   []byte("# 论文精读\n"),
+		"SKILL.md":   externalSkillMD("论文精读", "用于阅读和总结论文的技能"),
 		"参考资料/示例.md": []byte("# 示例\n\n中文路径正文。\n"),
 	})
 	uploadStore := newFakeUploadStore()

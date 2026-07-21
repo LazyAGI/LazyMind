@@ -567,8 +567,9 @@ type promptItemOpenAPIResponse struct {
 }
 
 type promptFacetOpenAPIResponse struct {
-	Scopes     map[string]int64 `json:"scopes"`
-	Categories map[string]int64 `json:"categories"`
+	Scopes        map[string]int64 `json:"scopes"`
+	Categories    map[string]int64 `json:"categories"`
+	CategoryTotal int64            `json:"category_total"`
 }
 
 type promptListOpenAPIResponse struct {
@@ -806,6 +807,7 @@ type datasetQueryParams struct {
 	OrderBy   string   `query:"order_by"`
 	Keyword   string   `query:"keyword"`
 	Tags      []string `query:"tags"`
+	Source    string   `query:"source" enum:"manual,cloud" desc:"Filter datasets by creation source."`
 }
 
 type createDatasetQueryParams struct {
@@ -1358,10 +1360,10 @@ type skillSourceOpenAPIRequest struct {
 }
 
 type skillCreateManagedOpenAPIRequest struct {
-	Name        string                    `json:"name"`
-	Category    string                    `json:"category"`
+	Name        string                    `json:"name,omitempty" desc:"Legacy inline-create field. ZIP and URL imports derive name from SKILL.md frontmatter."`
+	Category    string                    `json:"category,omitempty" desc:"Legacy inline-create field. ZIP and URL imports use External."`
 	Source      skillSourceOpenAPIRequest `json:"source"`
-	Description string                    `json:"description,omitempty"`
+	Description string                    `json:"description,omitempty" desc:"Legacy inline-create field. ZIP and URL imports derive description from SKILL.md frontmatter."`
 	Tags        []string                  `json:"tags,omitempty"`
 	AutoEvo     *bool                     `json:"auto_evo,omitempty"`
 	IsEnabled   *bool                     `json:"is_enabled,omitempty"`
@@ -1751,7 +1753,8 @@ type marketInstallOpenAPIResponse struct {
 
 type marketPublishOpenAPIRequest struct {
 	Name     string                    `json:"name"`
-	Category string                    `json:"category"`
+	Tags     []string                  `json:"tags" desc:"Marketplace discovery tags."`
+	Category string                    `json:"category,omitempty" desc:"Deprecated compatibility field; converted to one marketplace tag when tags is empty."`
 	Source   skillSourceOpenAPIRequest `json:"source"`
 }
 
@@ -1762,7 +1765,8 @@ type marketPublishOpenAPIResponse struct {
 
 type marketEditOpenAPIRequest struct {
 	Name        *string                    `json:"name,omitempty"`
-	Category    *string                    `json:"category,omitempty"`
+	Tags        []string                   `json:"tags,omitempty" desc:"Marketplace discovery tags."`
+	Category    *string                    `json:"category,omitempty" desc:"Deprecated compatibility field; converted to one marketplace tag when tags is omitted."`
 	Description *string                    `json:"description,omitempty"`
 	Source      *skillSourceOpenAPIRequest `json:"source,omitempty"`
 	VersionNote *string                    `json:"version_note,omitempty"`
@@ -1773,6 +1777,7 @@ type marketItemOpenAPIResponse struct {
 	MarketItemID     string                      `json:"market_item_id"`
 	SourceSkillID    string                      `json:"source_skill_id,omitempty"`
 	Status           string                      `json:"status,omitempty"`
+	Tags             []string                    `json:"tags"`
 	Installed        bool                        `json:"installed,omitempty"`
 	InstalledSkillID string                      `json:"installed_skill_id,omitempty"`
 	Icon             string                      `json:"icon,omitempty"`
@@ -2664,6 +2669,14 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Skill organize task accepted", skillOrganizeOpenAPIResponse{})},
 		},
 		{
+			Method:      "GET",
+			Path:        "/skill-organize/tasks",
+			Summary:     "List current user's Skill organize tasks",
+			Tags:        []string{"skills"},
+			QueryParams: skillReviewTaskListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Skill organize task list", skillReviewTaskListOpenAPIResponse{})},
+		},
+		{
 			Method:      "POST",
 			Path:        "/skills",
 			Summary:     "Create directory skill",
@@ -3054,6 +3067,13 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"skill-market"},
 			QueryParams: skillListQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Market skill list", marketListOpenAPIResponse{})},
+		},
+		{
+			Method:    "GET",
+			Path:      "/skill-market/tags",
+			Summary:   "List published market skill tags",
+			Tags:      []string{"skill-market"},
+			Responses: map[int]openAPIResponse{200: resp("Market skill tag list", skillTagsOpenAPIResponse{})},
 		},
 		{
 			Method:     "GET",
