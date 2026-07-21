@@ -19,6 +19,7 @@ Deliverable = Literal[
     'artifact', 'execution_result',
 ]
 SkillMode = Literal['suppress', 'candidates', 'explicit']
+ThinkingDepth = Literal['low', 'medium', 'high']
 
 OUTCOMES = {
     'answer', 'learn', 'research', 'analyze', 'transform',
@@ -110,38 +111,91 @@ class TaskProfile:
 
 
 _SIGNALS: tuple[tuple[Outcome, re.Pattern[str]], ...] = (
-    ('answer', re.compile(r'解释一下|回答我|告诉我什么是|explain\s+(?:what|why|how)', re.I)),
-    ('learn', re.compile(r'教我|入门|学会|从零(?:到一|开始)|零基础|教程|how\s+to|teach\s+me|learn', re.I)),
-    ('research', re.compile(r'调研|调查|研究一下|深入研究|资料汇总|research|investigate|deep\s+dive', re.I)),
+    ('answer', re.compile(
+        r'解释一下|回答我|告诉我什么是|什么意思|啥意思|怎么理解|'
+        r'介绍一下|科普一下|讲讲|说说|是干嘛的|有什么用|'
+        r'原理是什么|怎么回事|帮我算|算算|求一下|列一下|'
+        r'explain\s+(?:what|why|how)|tell\s+me\s+about', re.I,
+    )),
+    ('learn', re.compile(
+        r'教我|带我(?:学|做)|手把手|一步一步教|入门|学会|从零(?:到一|开始)|'
+        r'零基础|教程|辅导我|陪练|考考我|给我出题|从哪里开始|前置知识|'
+        r'how\s+to|teach\s+me|'
+        r'help\s+me\s+learn|guide\s+me\s+through|learn', re.I,
+    )),
+    ('research', re.compile(
+        r'调研|调查|研究一下|深入研究|资料汇总|搜集|检索|找资料|'
+        r'背景调查|盘点一下|梳理现状|行业扫描|市场扫描|查证|核实|'
+        r'事实核查|找出处|research|investigate|deep\s+dive|fact.?check|verify\s+the\s+claim|'
+        r'find\s+sources|scan\s+the\s+market', re.I,
+    )),
     ('analyze', re.compile(
         r'分析|评价|评估|审查|审阅|批评|比较|对比|找出.{0,12}(?:规律|模式)|'
-        r'analy[sz]e|review|critique|compare', re.I,
+        r'拆解一下|解读一下|找漏洞|挑毛病|给反馈|复盘|归因|审计|'
+        r'检查(?:一致性|逻辑)|analy[sz]e|review|critique|compare|assess|evaluate|audit|'
+        r'pros\s+and\s+cons', re.I,
     )),
     ('transform', re.compile(
         r'总结|摘要|翻译|改写|重写|润色|提取|抽取|转成|转换成|格式化|整理(?:这|以下|附件|文件)|'
-        r'summari[sz]e|translate|rewrite|extract|reformat|convert', re.I,
+        r'精简|压缩一下|扩写|续写|补全|校对|优化表达|换一种说法|'
+        r'改得.{0,8}(?:正式|口语|专业)|做成(?:表格|列表|JSON|Markdown)|结构化|'
+        r'分类|打标签|合并|拆分|去重|脱敏|转录|'
+        r'summari[sz]e|translate|rewrite|extract|reformat|convert|paraphrase|proofread|polish|'
+        r'shorten|expand|normalize', re.I,
     )),
     ('decide', re.compile(
         r'怎么选|如何选|值不值得|哪个好|哪一个好|是否应该|要不要|该不该|.{1,20}还是.{1,20}|'
-        r'帮我选择|推荐哪个|versus|\bvs\b|should\s+i', re.I,
+        r'帮我选择|推荐哪个|应该选|该选|给我推荐|推荐(?:一个|一款|几个)|适合我的|'
+        r'最合适|先做哪个|优先做|排优先级|有没有必要|值得买|怎么取舍|'
+        r'versus|\bvs\b|should\s+i|recommend|which\s+fits|is\s+it\s+worth', re.I,
     )),
-    ('plan', re.compile(r'制定.{0,8}计划|规划|路线图|实施步骤|行动方案|roadmap|action\s+plan', re.I)),
+    ('plan', re.compile(
+        r'制定.{0,8}计划|给我.{0,6}计划|做个.{0,6}计划|规划|路线图|实施步骤|'
+        r'行动方案|实施方案|迁移方案|应急预案|制定.{0,8}策略|设计.{0,8}流程|'
+        r'帮我排期|列个待办|拆成任务|'
+        r'给出里程碑|下一步怎么做|roadmap|action\s+plan|timeline|milestones|'
+        r'implementation\s+(?:plan|strategy)', re.I,
+    )),
     ('diagnose', re.compile(
         r'为什么.{0,20}(?:失败|不行|很差|变慢|下降)|排查|排障|定位.{0,20}问题|'
-        r'(?:变慢|失败|下降|异常).{0,12}(?:原因|问题)|找出.{0,12}原因|diagnos|troubleshoot', re.I,
+        r'(?:变慢|失败|下降|异常).{0,12}(?:原因|问题)|找出.{0,12}原因|'
+        r'报错|坏了|挂了|崩了|卡住|打不开|连不上|跑不起来|不生效|没反应|'
+        r'结果不对|数据对不上|内存泄漏|超时|闪退|白屏|帮我看看.{0,12}错误|'
+        r'diagnos|troubleshoot|what\s+went\s+wrong|why\s+isn[\x27’]?t.{0,20}working', re.I,
     )),
     ('execute', re.compile(
         r'替我|帮我(?:发送|发布|修改|运行|删除|安装|部署)|直接(?:发送|发布|修改|运行|部署)|'
         r'^(?:发送|发布|修改|运行|删除|安装|部署)|(?:然后|再|并且|并)(?:发送|发布|修改|运行|删除|安装|部署)|'
-        r'execute|deploy\s+it', re.I,
+        r'帮我(?:修复|更新|升级|替换|重构|新增|添加|移除|重命名|移动|复制|'
+        r'上传|下载|导入|导出|提交|推送|合并|回滚|配置|连接|同步|迁移|'
+        r'启动|停止|重启|回复|转发|预约|取消|邀请|批准|填写)|'
+        r'^(?:修复|更新|升级|新增|添加|移除|重命名|上传|提交|推送|合并|回滚|'
+        r'配置|迁移|启动|停止|重启)|execute|deploy\s+it|fix\s+(?:this|the)|'
+        r'(?:把|将).{0,30}(?:修复|更新|升级|替换|重构|新增|添加|移除|重命名|移动|'
+        r'提交|推送|合并|回滚|配置|迁移)|update\s+(?:this|the)|'
+        r'\bcommit\b|\bpush\b|\bmerge\b|\brevert\b|\brename\b|\bupload\b', re.I,
     )),
-    ('create', re.compile(r'创建|生成|写一份|制作一份|产出|create|generate|draft', re.I)),
+    ('create', re.compile(
+        r'创建|生成|写一份|写个|帮我写|制作一份|做一个|设计一个|画一个|'
+        r'起草|拟一份|想几个|给.{0,4}个点子|搭一个原型|实现一个|补一个测试|'
+        r'产出|create|generate|draft|design|compose|implement|brainstorm|mock\s+up|\bwrite\b', re.I,
+    )),
 )
 _CURRENT = re.compile(
-    r'最新|现在|当前|今年|近期|主流|价格|政策|法规|排名|榜单|可用|202[4-9]|latest|current|today|recent|price', re.I,
+    r'最新|截至(?:今天|目前|现在)|当前|今年|近期|这(?:两天|周|个月)|本(?:月|季度)|'
+    r'现在.{0,12}(?:发展|有哪些|还能|是否|价格|排名|榜单)|'
+    r'实时|最新版|新版本|近期更新|刚发布|官方最新|主流|价格|排名|榜单|'
+    r'20\d{2}年|latest|current|today|recent|real.?time|newest\s+version|price', re.I,
 )
-_EXPLICIT_WEB = re.compile(r'联网|网上搜索|搜索资料|查资料|查一下|web\s+search|browse|look\s+up', re.I)
-_SKILL_EXPLICIT = re.compile(r'skill|技能(?:库|包|文件|管理)?|SKILL\.md', re.I)
+_EXPLICIT_WEB = re.compile(
+    r'联网|上网查|网上搜索|搜索资料|搜一下|查资料|查一下|Google\s*一下|'
+    r'查(?:官方文档|新闻)|web\s+search|browse|look\s+up', re.I,
+)
+_SKILL_EXPLICIT = re.compile(
+    r'(?:使用|调用|启用|创建|修改|编辑|开发|管理).{0,16}(?:skill|技能包|SKILL\.md)|'
+    r'(?:skill|技能包|SKILL\.md).{0,16}(?:使用|调用|启用|创建|修改|编辑|开发|管理)|'
+    r'\$[a-z0-9][\w./-]*', re.I,
+)
 _OPEN_ENDED = re.compile(
     r'如何|怎么|有哪些|帮我看看|给我.*方案|'
     r'我(?:现在|目前)?想(?:搞|做|弄|了解|看看).{0,20}(?:相关|方面|方向|东西|内容)|'
@@ -158,7 +212,10 @@ _PLATFORM_CAPABILITY_QUERY = re.compile(
     re.I,
 )
 _REQUEST_REVIEW_HINT = re.compile(
-    r'全部|所有|必须|不能|至少|最多|保证|确保|同时|既要|又要|all|must|never|at\s+least|at\s+most|guarantee',
+    r'全部|所有|必须|不能|至少|最多|保证|确保|同时|既要|又要|只要|仅限|仅使用|'
+    r'不要假设|不要编造|必须引用|只引用|不超过|恰好|按.{0,12}格式|先别执行|'
+    r'只做分析|修改前|未经确认|不要影响|向后兼容|不得引入|'
+    r'all|must|never|at\s+least|at\s+most|guarantee|exactly|do\s+not\s+assume',
     re.I,
 )
 
@@ -177,30 +234,50 @@ _DELIVERABLE_BY_OUTCOME: dict[Outcome, Deliverable] = {
 
 
 def _ordered_outcomes(text: str, *, current: bool) -> list[Outcome]:
+    # Do not route on an explicitly rejected action ("不要总结，直接翻译"). Keep the
+    # original text for assessment so contradictory constraints are still visible there.
+    routing_text = re.sub(
+        r'(?:不要|不用|无需|别|不是(?:要)?|不需要)\s*'
+        r'(?:再)?(?:解释|学习|调研|研究|分析|评估|总结|翻译|改写|选择|推荐|规划|'
+        r'制定计划|创建|生成|写|制作|执行|发送|发布|修改|运行|删除|安装|部署|'
+        r'排查|诊断|修复)',
+        '', text, flags=re.I,
+    )
     found: list[tuple[int, int, Outcome]] = []
     priority = {
         'execute': 0, 'diagnose': 1, 'transform': 2, 'research': 3, 'analyze': 4,
         'decide': 5, 'plan': 6, 'learn': 7, 'create': 8, 'answer': 9,
     }
     for outcome, pattern in _SIGNALS:
-        for match in pattern.finditer(text):
+        for match in pattern.finditer(routing_text):
             found.append((match.start(), priority[outcome], outcome))
             break
     learn_match = re.search(
-        r'(?:如何|怎么).{0,12}(?:制作|搭建|学习|学|做出|使用)|how\s+(?:do|can)\s+i', text, re.I,
+        r'(?:如何|怎么).{0,12}(?:制作|搭建|学习|学|做出|使用)|how\s+(?:do|can)\s+i',
+        routing_text, re.I,
     )
     if learn_match:
         found.append((learn_match.start(), priority['learn'], 'learn'))
-    research_match = re.search(r'有哪些|主流|现状|发展到哪|landscape', text, re.I)
+    research_match = re.search(r'有哪些|主流|现状|发展到哪|landscape', routing_text, re.I)
     if current and research_match:
         found.append((research_match.start(), priority['research'], 'research'))
     found.sort(key=lambda item: (item[0], item[1]))
     outcomes = list(dict.fromkeys(outcome for _, _, outcome in found))
     if 'create' in outcomes and 'plan' in outcomes and re.search(
-        r'(?:create|创建|生成|写)(?:一个|一份|\s+a|\s+an)?\s*(?:launch\s+)?'
-        r'(?:plan|roadmap|计划|路线图|方案)', text, re.I,
+        r'(?:create|build)\s+(?:an?\s+)?(?:launch\s+|implementation\s+)?'
+        r'(?:plan|roadmap)|(?:创建|生成|写)(?:一个|一份)?\s*(?:计划|路线图|方案)',
+        routing_text, re.I,
     ):
         outcomes.remove('create')
+    purpose = re.search(
+        r'(?:目的|目标|重点|最终|最后|真正需要|我需要的)(?:是|在于|：|:)?(.{0,80})$',
+        routing_text, re.I,
+    )
+    if purpose:
+        purpose_outcomes = _ordered_outcomes(purpose.group(1), current=current)
+        if purpose_outcomes:
+            selected = purpose_outcomes[0]
+            outcomes = [selected, *(item for item in outcomes if item != selected)]
     return outcomes
 
 
@@ -275,7 +352,15 @@ def _subject_and_input(text: str, has_attachments: bool) -> tuple[str, str]:
         ('system', r'系统|服务|网站|API|system'),
     )
     subject = next((kind for kind, pattern in subjects if re.search(pattern, text, re.I)), 'topic')
-    if has_attachments:
+    input_signals = sum((
+        bool(has_attachments),
+        bool(re.search(r'https?://|www\.', text, re.I)),
+        bool(re.search(r'知识库|knowledge\s*base', text, re.I)),
+        bool(re.search(r'以下|这段|如下|```|<[^>]+>', text, re.I)),
+    ))
+    if input_signals > 1:
+        input_mode = 'mixed'
+    elif has_attachments:
         input_mode = 'attachment'
     elif re.search(r'https?://|www\.', text, re.I):
         input_mode = 'url'
@@ -286,6 +371,13 @@ def _subject_and_input(text: str, has_attachments: bool) -> tuple[str, str]:
     else:
         input_mode = 'query_only'
     return subject, input_mode
+
+
+_CONTEXT_REFERENCE = re.compile(
+    r'^(?:继续|接着|按(?:刚才|上面|前面|第[一二三四五六七八九十\d]+个)|就用这个|'
+    r'再(?:短|长|正式|口语|专业|详细|简单).{0,8}|那(?:就)?帮我|把(?:刚才|上面|前面)那个|'
+    r'为什么[？?]?$|continue|use\s+that|the\s+second\s+one)', re.I,
+)
 
 
 def _assess_request(
@@ -328,7 +420,8 @@ def _assess_request(
                 f'{left_match.group(0)} / {right_match.group(0)}', 'high',
             ))
     attachment_reference = re.search(
-        r'这个文件|这份(?:文档|财报|论文|报告|合同|文件)|这篇(?:文章|论文|报告)|附件|这张图|'
+        r'这个文件|上面(?:的)?文件|这份(?:文档|财报|论文|报告|合同|文件)|'
+        r'这篇(?:文章|论文|报告)|附件|这张图|'
         r'attached\s+(?:file|document|image)', text, re.I,
     )
     if attachment_reference and not has_attachments:
@@ -337,7 +430,9 @@ def _assess_request(
             attachment_reference.group(0), 'high',
         ))
         questions.append(ClarificationQuestion('Please attach the referenced file before I continue.'))
-    ambiguous_target = re.search(r'旧文件|那些文件|把它处理掉|do\s+it', text, re.I)
+    ambiguous_target = re.search(
+        r'旧文件|那些文件|相关文件|把它处理掉|把那个弄一下|处理一下|do\s+it|fix\s+it', text, re.I,
+    )
     if 'execute' in outcomes and ambiguous_target:
         issues.append(RequestIssue(
             'ambiguous_term', 'The external action target is not uniquely identified.',
@@ -350,10 +445,25 @@ def _assess_request(
             'unverifiable_success_criterion', 'The requested guaranteed outcome cannot be verified or assured.',
             guarantee.group(0), 'medium',
         ))
+    destructive_broad_target = re.search(
+        r'(?:删除|清空|覆盖|回滚).{0,8}(?:全部|所有|整个|一切)|'
+        r'(?:delete|remove|wipe).{0,8}(?:all|everything|entire)', text, re.I,
+    )
+    if 'execute' in outcomes and destructive_broad_target:
+        issues.append(RequestIssue(
+            'unsafe_or_overbroad_action',
+            'The requested destructive action has an overbroad target and requires confirmation.',
+            destructive_broad_target.group(0), 'high',
+        ))
+        questions.append(ClarificationQuestion(
+            'Which exact items should be changed, and should the destructive action proceed?',
+        ))
     if not issues:
         return RequestAssessment()
     blocking = any(issue.impact == 'high' for issue in issues)
-    status = 'contradictory' if any(
+    status = 'unsafe' if any(
+        issue.issue_type == 'unsafe_or_overbroad_action' for issue in issues
+    ) else 'contradictory' if any(
         issue.issue_type in {'conflicting_requirements', 'mathematical_inconsistency'} for issue in issues
     ) else 'underspecified' if any(issue.issue_type == 'missing_input' for issue in issues) else 'ambiguous'
     return RequestAssessment(
@@ -372,7 +482,14 @@ def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskPro
     explicit_skill = bool(_SKILL_EXPLICIT.search(text))
     current = bool(_CURRENT.search(text) or _EXPLICIT_WEB.search(text))
     # Fast-moving AI product/how-to requests require current evidence even without "latest".
-    ai_how_to = bool(re.search(r'(?:AI|人工智能|大模型).{0,12}(?:视频|工具|产品|平台)', text, re.I))
+    ai_how_to = bool(re.search(
+        r'(?:如何|怎么|教我|教程|使用|制作|搭建).{0,20}'
+        r'(?:AI|人工智能|大模型).{0,12}(?:视频|工具|产品|平台)|'
+        r'(?:现在|目前)?想(?:搞|做|弄|了解|看看).{0,20}'
+        r'(?:AI|人工智能|大模型).{0,12}(?:视频|工具|产品|平台)|'
+        r'(?:AI|人工智能|大模型).{0,12}(?:视频|工具|产品|平台).{0,20}'
+        r'(?:如何|怎么|教程|使用|制作|搭建)', text, re.I,
+    ))
     current = current or ai_how_to
     matches = _ordered_outcomes(text, current=current)
 
@@ -400,7 +517,9 @@ def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskPro
     )
     subject_kind, input_mode = _subject_and_input(text, has_attachments)
     source_strategy = (
-        'provided_content_only' if primary in {'analyze', 'transform'} and input_mode != 'query_only'
+        'mixed' if input_mode == 'mixed'
+        else 'web' if input_mode == 'url'
+        else 'provided_content_only' if primary in {'analyze', 'transform'} and input_mode != 'query_only'
         else 'web' if current or 'research' in matches
         else 'model_knowledge'
     )
@@ -594,7 +713,7 @@ def _apply_explicit_resources(
     elif excluded.knowledge_base_ids:
         updates['source_strategy'] = 'web' if _EXPLICIT_WEB.search(query) else 'model_knowledge'
     if resources.plugin_refs:
-        reasons.append('explicit workflow selection')
+        reasons.extend(('explicit plugin selection', 'explicit workflow selection'))
     assessment = profile.request_assessment
     issues = list(assessment.issues)
     questions = list(assessment.clarification_questions)
@@ -614,7 +733,7 @@ _CLASSIFIER_PROMPT = '''Resolve only the uncertain parts of a rule-generated tas
 Return one compact JSON object and nothing else. Do not output reasoning, analysis, markdown, or
 fields whose rule-proposed value is acceptable. Allowed optional keys:
 primary_outcome, secondary_outcomes, complexity, freshness, skill_mode, request_status,
-interaction_need, confidence.
+interaction_need, request_issues, clarification_questions, confidence.
 Use only these enum values:
 primary_outcome/secondary_outcomes: answer, learn, research, analyze, transform, decide, plan,
 create, execute, diagnose;
@@ -690,7 +809,14 @@ def _validate_llm_profile(
     subject_kind = rule.subject_kind
     input_mode = rule.input_mode
     source_strategy = rule.source_strategy
-    execution_scope = rule.execution_scope
+    if primary == 'research' or freshness == 'current':
+        source_strategy = 'web' if source_strategy == 'model_knowledge' else source_strategy
+    if primary == 'execute':
+        execution_scope = rule.execution_scope if rule.primary_outcome == 'execute' else 'external_action'
+    elif primary == 'create':
+        execution_scope = 'create_artifact'
+    else:
+        execution_scope = 'chat_only'
     allowed_subjects = {
         'topic', 'document', 'code', 'data', 'image', 'audio', 'video',
         'conversation', 'system', 'external_resource',
@@ -735,12 +861,16 @@ def _validate_llm_profile(
         freshness = 'current'
     if rule.skill_mode == 'explicit':
         skill_mode = 'explicit'
+    primary_subtype = (
+        rule.outcome_subtype if primary == rule.primary_outcome else _outcome_subtype(primary, query)
+    )
     profile = TaskProfile(
         primary_outcome=primary, secondary_outcomes=secondary, complexity=complexity,
-        outcome_subtype=str(raw.get('outcome_subtype') or rule.outcome_subtype)[:40] or None,
-        secondary_subtypes=tuple(str(x)[:40] for x in (raw.get('secondary_subtypes') or [])[:2]),
+        outcome_subtype=primary_subtype,
+        secondary_subtypes=tuple(_outcome_subtype(item, query) for item in secondary),
         subject_kind=subject_kind, input_mode=input_mode, source_strategy=source_strategy,
-        freshness=freshness, research_required=bool(raw.get('research_required')) or rule.research_required,
+        freshness=freshness,
+        research_required=rule.research_required or primary == 'research' or freshness == 'current',
         deliverable_kind=deliverable, secondary_deliverables=secondary_deliverables,
         execution_scope=execution_scope, request_assessment=assessment,
         skill_mode=skill_mode, confidence=confidence, reasons=reasons, source='llm',
@@ -755,12 +885,39 @@ def resolve_task_profile(
     intent: Any = None,
     classifier: Callable[[str], Any] | None = None,
     enable_llm_fallback: bool = True,
+    thinking_depth: ThinkingDepth = 'low',
     has_attachments: bool = False,
     explicit_resources: ExplicitResourceBindings | dict[str, Any] | None = None,
 ) -> TaskProfile:
     rule, needs_llm = _rule_profile(query, has_attachments=has_attachments)
+    if history and _CONTEXT_REFERENCE.search(str(query or '').strip()):
+        rule = replace(
+            rule,
+            input_mode='conversation_context',
+            confidence=min(rule.confidence, 0.65),
+            reasons=tuple(dict.fromkeys((*rule.reasons, 'conversation-context reference')))[:4],
+        )
+        needs_llm = True
     resources = _normalize_explicit_resources(explicit_resources)
     rule = _apply_explicit_resources(rule, resources, query)
+    depth = thinking_depth if thinking_depth in {'low', 'medium', 'high'} else 'low'
+    simple_stable_answer = (
+        rule.primary_outcome == 'answer'
+        and not rule.secondary_outcomes
+        and rule.complexity == 'simple'
+        and rule.freshness == 'stable'
+        and rule.request_assessment.status == 'ready'
+        and rule.confidence >= 0.9
+    )
+    if depth == 'medium':
+        needs_llm = needs_llm or (
+            rule.complexity == 'open_ended'
+            or rule.primary_outcome in {'research', 'decide', 'execute', 'diagnose'}
+            or rule.input_mode in {'conversation_context', 'mixed'}
+            or rule.freshness == 'current'
+        )
+    elif depth == 'high':
+        needs_llm = needs_llm or not simple_stable_answer
     review_reasons = []
     if len({rule.primary_outcome, *rule.secondary_outcomes}) > 1:
         review_reasons.append('请求包含多个可能竞争的目标')
@@ -768,6 +925,10 @@ def resolve_task_profile(
         review_reasons.append('规则无法高置信度确定主要目标')
     if rule.request_assessment.status != 'ready' and not review_reasons:
         review_reasons.append('请求约束需要进一步分析')
+    if needs_llm and depth == 'medium' and not review_reasons:
+        review_reasons.append('中等思考深度要求复核开放、时效、决策或执行类请求')
+    if needs_llm and depth == 'high' and not review_reasons:
+        review_reasons.append('高思考深度要求复核非简单事实请求')
     if needs_llm:
         rule = replace(
             rule,
@@ -789,11 +950,14 @@ def resolve_task_profile(
             routing_review_reason='',
         )
     except Exception as exc:
-        return fallback_task_profile(
-            query,
-            error=exc,
-            latency_ms=int((time.monotonic() - started) * 1000),
-            explicit_resources=resources,
+        return replace(
+            rule,
+            skill_mode='explicit' if rule.skill_mode == 'explicit' else 'suppress',
+            source='fallback',
+            router_latency_ms=int((time.monotonic() - started) * 1000),
+            router_error=f'{type(exc).__name__}: {exc}'[:240],
+            routing_review_required=True,
+            routing_review_reason='模型路由失败，当前结果使用规则安全回退',
         )
 
 
@@ -810,13 +974,6 @@ def fallback_task_profile(
     rule = _apply_explicit_resources(rule, resources, query)
     return replace(
         rule,
-        primary_outcome='answer',
-        secondary_outcomes=(),
-        outcome_subtype='fact',
-        secondary_subtypes=(),
-        deliverable_kind='direct_answer',
-        secondary_deliverables=(),
-        skill_mode='explicit' if rule.explicit_resources.skill_names else 'suppress',
         source='fallback',
         router_latency_ms=max(0, int(latency_ms)),
         router_error=f'{type(error).__name__}: {error}'[:240],

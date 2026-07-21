@@ -165,6 +165,7 @@ class LocalFileToolkit:
             capture_output=True, text=True, timeout=_RG_TIMEOUT, cwd=cwd,
         )
 
+    @handle_tool_errors
     def ls(self, path: Optional[str] = None, max_entries: int = 200) -> Dict[str, Any]:
         """List available local directories or one directory level.
 
@@ -215,6 +216,7 @@ class LocalFileToolkit:
             'entries': entries,
         })
 
+    @handle_tool_errors
     def glob(self, pattern: str, path: Optional[str] = None) -> Dict[str, Any]:
         """Find local files whose names match a glob pattern.
 
@@ -248,6 +250,7 @@ class LocalFileToolkit:
             'matches': matches[:200],
         })
 
+    @handle_tool_errors
     def grep(
         self,
         pattern: str,
@@ -377,6 +380,7 @@ class LocalFileToolkit:
             'matches': matches,
         })
 
+    @handle_tool_errors
     def read(
         self,
         filepath: str,

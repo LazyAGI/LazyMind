@@ -153,7 +153,7 @@ ORTHOGONAL_TEMPLATES = (
     ('调研最新AI工具', 'research', 'topic', 'query_only', 'web', False),
     ('比较这两个数据库', 'analyze', 'data', 'query_only', 'model_knowledge', False),
     ('把这段代码改写成函数', 'transform', 'code', 'inline_content', 'provided_content_only', False),
-    ('分析这个网址 https://example.com', 'analyze', 'topic', 'url', 'provided_content_only', False),
+    ('分析这个网址 https://example.com', 'analyze', 'topic', 'url', 'web', False),
     ('创建一份演示文稿', 'create', 'topic', 'query_only', 'model_knowledge', False),
     ('发布这份报告', 'execute', 'document', 'query_only', 'model_knowledge', False),
     ('网站变慢，找出原因', 'diagnose', 'system', 'query_only', 'model_knowledge', False),
@@ -539,6 +539,8 @@ def test_dynamic_prompt_builder_injects_only_selected_contracts() -> None:
     ).input('如何制作AI视频', source='user').build()
 
     assert '# Learning requests' in bundle.system_prompt
+    assert '# Task profile interpretation' in bundle.system_prompt
+    assert 'provisional guidance' in bundle.system_prompt
     assert '# Current research' in bundle.system_prompt
     assert 'Deliver a tutorial' in bundle.system_prompt
     assert '# Decision and planning requests' not in bundle.system_prompt
@@ -776,6 +778,133 @@ def test_platform_capability_questions_stay_on_fast_rule_path(query: str) -> Non
     assert profile.primary_outcome == 'answer'
     assert profile.complexity == 'simple'
     assert profile.confidence >= 0.9
+
+
+@pytest.mark.parametrize(('query', 'expected'), [
+    ('帮我写一封邮件', 'create'),
+    ('做一个登录页', 'create'),
+    ('想几个产品名字', 'create'),
+    ('帮我排优先级', 'decide'),
+    ('推荐一款适合我的相机', 'decide'),
+    ('这个服务跑不起来', 'diagnose'),
+    ('页面白屏了', 'diagnose'),
+    ('核实这个说法的出处', 'research'),
+    ('帮我搜集竞品资料', 'research'),
+    ('给我一个迁移计划', 'plan'),
+    ('帮我重命名这个文件', 'execute'),
+    ('提交并推送这次修改', 'execute'),
+    ('把这段话精简一下', 'transform'),
+    ('给这份方案挑毛病', 'analyze'),
+    ('这个术语是什么意思', 'answer'),
+])
+def test_common_natural_language_phrasings_are_covered(query: str, expected: str) -> None:
+    assert resolve_task_profile(query, enable_llm_fallback=False).primary_outcome == expected
+
+
+def test_rejected_outcome_does_not_win_routing() -> None:
+    profile = resolve_task_profile('不用分析，直接告诉我结论', enable_llm_fallback=False)
+    assert profile.primary_outcome == 'answer'
+    assert 'analyze' not in profile.secondary_outcomes
+
+
+def test_explicit_final_goal_wins_over_preparatory_step() -> None:
+    profile = resolve_task_profile(
+        '先分析三个方案，最终告诉我应该选哪个', enable_llm_fallback=False,
+    )
+    assert profile.primary_outcome == 'decide'
+    assert profile.secondary_outcomes == ('analyze',)
+
+
+def test_ordinary_skill_concept_does_not_select_runtime_skill() -> None:
+    profile = resolve_task_profile('如何提升沟通技能', enable_llm_fallback=False)
+    assert profile.skill_mode != 'explicit'
+
+
+def test_attachment_and_url_are_mixed_inputs() -> None:
+    profile = resolve_task_profile(
+        '分析附件并参考 https://example.com',
+        enable_llm_fallback=False,
+        has_attachments=True,
+    )
+    assert profile.input_mode == 'mixed'
+    assert profile.source_strategy == 'mixed'
+
+
+def test_conversation_reference_requests_model_review() -> None:
+    profile = resolve_task_profile(
+        '继续',
+        history=[{'role': 'user', 'content': '分析这个方案'}],
+        enable_llm_fallback=False,
+    )
+    assert profile.input_mode == 'conversation_context'
+    assert profile.routing_review_required is True
+
+
+def test_overbroad_destructive_action_is_blocked() -> None:
+    assessment = resolve_task_profile(
+        '删除所有文件', enable_llm_fallback=False,
+    ).request_assessment
+    assert assessment.status == 'unsafe'
+    assert assessment.interaction_need == 'blocking'
+
+
+def test_classifier_failure_preserves_deterministic_compound_route() -> None:
+    profile = resolve_task_profile(
+        '调研这个市场，然后制定实施计划', classifier=lambda _: 'invalid',
+    )
+    assert profile.source == 'fallback'
+    assert profile.primary_outcome == 'research'
+    assert profile.secondary_outcomes == ('plan',)
+
+
+def test_classifier_correction_recomputes_dependent_profile_fields() -> None:
+    profile = resolve_task_profile(
+        '帮我看看这个方向',
+        classifier=lambda _: json.dumps({
+            'primary_outcome': 'research',
+            'secondary_outcomes': [],
+            'freshness': 'current',
+            'confidence': 0.9,
+        }),
+    )
+    assert profile.primary_outcome == 'research'
+    assert profile.outcome_subtype == 'quick_research'
+    assert profile.deliverable_kind == 'research_report'
+    assert profile.source_strategy == 'web'
+    assert profile.research_required is True
+
+
+def test_medium_depth_reviews_semantically_sensitive_requests() -> None:
+    calls = []
+    profile = resolve_task_profile(
+        '推荐一款适合我的相机',
+        thinking_depth='medium',
+        classifier=lambda prompt: calls.append(prompt) or '{}',
+    )
+    assert len(calls) == 1
+    assert profile.source == 'llm'
+
+
+def test_high_depth_reviews_nontrivial_requests() -> None:
+    calls = []
+    profile = resolve_task_profile(
+        '帮我写一封邮件',
+        thinking_depth='high',
+        classifier=lambda prompt: calls.append(prompt) or '{}',
+    )
+    assert len(calls) == 1
+    assert profile.source == 'llm'
+
+
+def test_high_depth_skips_stable_simple_facts() -> None:
+    calls = []
+    profile = resolve_task_profile(
+        '什么是帧率',
+        thinking_depth='high',
+        classifier=lambda prompt: calls.append(prompt) or '{}',
+    )
+    assert calls == []
+    assert profile.source == 'rules'
 
 
 def test_classifier_requests_only_compact_optional_overrides() -> None:

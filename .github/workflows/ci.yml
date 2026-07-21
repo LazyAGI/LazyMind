@@ -1,4 +1,4 @@
-# CI: pull_request_target -> lint, doc_check -> wait_approve (env: protest) -> tests
+# CI: run lint, documentation checks, and tests for pushes and pull requests.
 name: CI
 
 on:
@@ -9,7 +9,7 @@ on:
       - "**.md"
       - ".git*"
       - "docs/**"
-  pull_request_target:
+  pull_request:
     branches: [main, master, 'dev/*']
     paths-ignore:
       - "**.md"
@@ -24,10 +24,11 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
 
       - name: Set up Python
@@ -46,10 +47,10 @@ jobs:
   doc_check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -59,22 +60,14 @@ jobs:
       - name: Doc check
         run: pip install pytest && python -m pytest tests/doc_check/ -v
 
-  # Requires environment "protest" in repo Settings → Environments (add protection for manual approval)
-  wait_approve:
+  test-frontend:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
-    environment: protest
-    steps:
-      - run: echo "Approved, proceeding to tests"
-
-  test-frontend:
-    needs: [wait_approve]
-    runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -84,13 +77,13 @@ jobs:
         run: cd tests/frontend && npm install && npm test
 
   test-auth-service:
-    needs: [wait_approve]
+    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-python@v5
         with:
@@ -106,13 +99,13 @@ jobs:
         run: python -m pytest tests/backend/auth-service/ -v
 
   test-backend-core:
-    needs: [wait_approve]
+    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-go@v5
         with:
@@ -122,13 +115,14 @@ jobs:
         run: cd tests/backend/core && go mod tidy && go test ./... -v
 
   test-evo-cli:
-    needs: [wait_approve]
+    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           submodules: true
 
       - uses: actions/setup-python@v5
@@ -148,13 +142,16 @@ jobs:
         run: python -m pytest tests/evo/ tests/test_cli.py -v
 
   test-algorithm:
-    needs: [wait_approve]
+    needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      LAZYLLM_INIT_DOC: "1"
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           submodules: true
 
       - uses: actions/setup-python@v5
@@ -168,8 +165,7 @@ jobs:
           CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install --no-cache-dir algorithm/lazyllm
           cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
           pip install -r algorithm/requirements.txt
-          pip install pypdf docx2txt EbookLib html2text olefile spacy bm25s PyStemmer nltk jieba sentencepiece psycopg2-binary
-          pip install pytest httpx
+          pip install -r tests/algorithm/requirements-test.txt
 
       - name: Verify lazyllm install
         run: |

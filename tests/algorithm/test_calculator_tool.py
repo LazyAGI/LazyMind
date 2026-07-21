@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from lazymind.chat.engine.tools import calculator as calculator_mod
+from lazymind.chat.engine.tools.calculator import calculator
+from lazymind.chat.engine.tools.infra import safe_evaluate_expression
 
 
 class TestSafeCalculator:
     def test_basic_arithmetic(self):
-        result = calculator_mod.calculator('(12 * 13) / 6')
+        result = calculator('(12 * 13) / 6')
         assert result == {
             'success': True,
             'tool': 'calculator',
@@ -20,7 +21,7 @@ class TestSafeCalculator:
         }
 
     def test_math_functions_and_constants(self):
-        result = calculator_mod.calculator('sqrt(2) + sin(pi / 2)')
+        result = calculator('sqrt(2) + sin(pi / 2)')
         assert result['success'] is True
         assert result['tool'] == 'calculator'
         assert result['result']['expression'] == 'sqrt(2) + sin(pi / 2)'
@@ -28,18 +29,18 @@ class TestSafeCalculator:
 
     def test_rejects_code_execution(self):
         for expression in (
-            "__import__('os').getcwd()",
-            "open('/etc/passwd').read()",
-            "().__class__",
-            "lambda: 1",
-            "[x for x in (1,)]",
+            '__import__(\'os\').getcwd()',
+            'open(\'/etc/passwd\').read()',
+            '().__class__',
+            'lambda: 1',
+            '[x for x in (1,)]',
         ):
-            result = calculator_mod.calculator(expression)
+            result = calculator(expression)
             assert result['success'] is False
             assert 'error' in result
 
     def test_rejects_empty_expression(self):
-        result = calculator_mod.calculator('   ')
+        result = calculator('   ')
         assert result['success'] is False
 
 
@@ -52,4 +53,4 @@ class TestSafeCalculator:
     ],
 )
 def test_safe_evaluate_cases(expression, expected):
-    assert calculator_mod.safe_evaluate_expression(expression) == expected
+    assert safe_evaluate_expression(expression) == expected
