@@ -145,8 +145,6 @@ jobs:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      LAZYLLM_INIT_DOC: "1"
     permissions:
       contents: read
     steps:
@@ -174,4 +172,6 @@ jobs:
           python -c "from lazyllm import fc_register; print('fc_register OK')"
 
       - name: Test
+        env:
+          LAZYLLM_INIT_DOC: "1"
         run: python -m pytest tests/algorithm/ -v
