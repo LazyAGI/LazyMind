@@ -1033,6 +1033,12 @@ const enUS = {
     pluginPanelExpandShort: "Expand",
     pluginPanelShrinkShort: "Shrink",
     pluginRailConversation: "Chat",
+    slots: {
+      rawData: "Raw data",
+      download: "Download",
+      viewContent: "View content",
+      contentLoadFailed: "Failed to load content",
+    },
     pluginStatusRunning: "Running",
     pluginStatusDone: "Done",
     pluginStatusWaiting: "Waiting for approval",

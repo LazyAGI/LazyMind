@@ -795,6 +795,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           <TaskCenter
             sessionId={sessionId}
             onClose={pluginPanelExpanded ? undefined : () => setIsTaskPanelCollapsed(true)}
+            showHeader={!pluginPanelExpanded}
           />
         </div>
       )}

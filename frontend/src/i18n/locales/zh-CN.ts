@@ -1019,6 +1019,12 @@ const zhCN = {
     pluginDismissedBtnLabel: "已移除",
     pluginDismissedLoading: "加载中…",
     pluginNoDismissed: "暂无已移除的 工作流",
+    slots: {
+      rawData: "原始数据",
+      download: "下载",
+      viewContent: "查看内容",
+      contentLoadFailed: "内容加载失败",
+    },
     greetingMorning: "上午好",
     greetingAfternoon: "下午好",
     greetingSuffix: "，有什么我能帮你的吗？",

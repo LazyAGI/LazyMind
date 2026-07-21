@@ -211,6 +211,36 @@ func TestHandoffStepName_PrefersLabelThenID(t *testing.T) {
 	}
 }
 
+func TestEnforceWorkflowConversationSettings_EnablesApprovalMode(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.DB.AutoMigrate(&orm.Conversation{}); err != nil {
+		t.Fatalf("migrate conversation: %v", err)
+	}
+	disabled := false
+	auto := "auto"
+	conversation := orm.Conversation{
+		ID: "conv-settings", DisplayName: "Workflow chat",
+		EnablePlugin: &disabled, PluginMode: &auto,
+	}
+	if err := db.DB.Create(&conversation).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if err := enforceWorkflowConversationSettings(ctx, db.DB, conversation.ID); err != nil {
+		t.Fatalf("enforce settings: %v", err)
+	}
+	var got orm.Conversation
+	if err := db.DB.First(&got, "id = ?", conversation.ID).Error; err != nil {
+		t.Fatalf("reload conversation: %v", err)
+	}
+	if got.EnablePlugin == nil || !*got.EnablePlugin {
+		t.Fatalf("workflow was not enabled: %#v", got.EnablePlugin)
+	}
+	if got.PluginMode == nil || *got.PluginMode != "dynamic" {
+		t.Fatalf("plugin mode: %#v", got.PluginMode)
+	}
+}
+
 func TestAppendHandoffHistorySummary_SkipsInlineExecution(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
