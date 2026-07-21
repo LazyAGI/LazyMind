@@ -13,11 +13,10 @@ export const WRITER_ARTIFACT_SLOT_IDS = new Set([
   'writing_context',
   'outline',
   'section_instructions',
-  'draft_sections',
+  'draft_blocks',
   'draft_document',
-  'review_report',
-  'review_summary',
-  'writing_output',
+  'final_document',
+  'final_document_md',
 ]);
 
 export function unwrapArtifactPayload(raw: unknown): unknown {
@@ -129,12 +128,35 @@ function asString(value: unknown): string {
   return formatDisplayValue(value);
 }
 
-function joinBlockContent(blocks: unknown): string {
-  return asArray(blocks)
-    .map((block) => {
-      const record = asRecord(block);
-      return record ? asString(record.content) : '';
-    })
+function writerBlockToMarkdown(value: unknown, fallbackLevel = 2): string {
+  const block = asRecord(value);
+  if (!block) return '';
+  const type = asString(block.type);
+  const content = typeof block.content === 'string' ? block.content.trim() : '';
+  const numbering = asRecord(block.numbering);
+  const configuredLevel = Number(numbering?.level);
+  const level = Number.isFinite(configuredLevel)
+    ? Math.min(Math.max(configuredLevel, 1), 6)
+    : Math.min(Math.max(fallbackLevel, 1), 6);
+
+  let own = content;
+  if (content && type === 'heading') own = `${'#'.repeat(level)} ${content}`;
+  if (content && type === 'list_item') own = `${numbering?.ordered === true ? '1.' : '-'} ${content}`;
+  if (content && type === 'quote') own = content.split('\n').map((line) => `> ${line}`).join('\n');
+  if (content && type === 'code') own = `\`\`\`\n${content}\n\`\`\``;
+  if (type === 'divider') own = '---';
+
+  const children = asArray(block.children)
+    .map((child) => writerBlockToMarkdown(child, level + 1))
+    .filter(Boolean);
+  return [own, ...children].filter(Boolean).join('\n\n');
+}
+
+function writerDocumentToMarkdown(value: unknown): string {
+  const document = asRecord(value);
+  if (!document) return '';
+  return asArray(document.blocks)
+    .map((block) => writerBlockToMarkdown(block))
     .filter(Boolean)
     .join('\n\n');
 }
@@ -323,37 +345,6 @@ function DetailValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
   );
 }
 
-function OutlineNodesList({ nodes }: { nodes: unknown }) {
-  const items = asArray(nodes);
-  if (!items.length) return null;
-
-  return (
-    <div className='writer-artifact__node-list'>
-      {items.map((node, index) => {
-        const item = asRecord(node);
-        if (!item) return null;
-        const title = asString(item.title) || asString(item.section_title) || tr('chat.writer.sectionNumber', { index: index + 1 });
-        return (
-          <div key={`${asString(item.node_id) || asString(item.section_id) || title}-${index}`} className='writer-artifact__card'>
-            <div className='writer-artifact__card-header'>
-              <span className='writer-artifact__step-badge'>{index + 1}</span>
-              <span className='writer-artifact__card-title'>{title}</span>
-              {asString(item.level) && (
-                <span className='writer-artifact__chip'>L{asString(item.level)}</span>
-              )}
-            </div>
-            {asString(item.instruction) && (
-              <p className='writer-artifact__paragraph'>{asString(item.instruction)}</p>
-            )}
-            {!isEmptyValue(item.constraints) && (
-              <StructuredValue value={item.constraints} />
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 function RemainingDetails({
   data,
@@ -378,22 +369,6 @@ function RemainingDetails({
   );
 }
 
-function BlockDetails({ blocks }: { blocks: unknown }) {
-  const metadata = asArray(blocks)
-    .map((block) => omitConsumedFields(block, { content: true }))
-    .filter((block) => !isEmptyValue(block));
-
-  if (!metadata.length) return null;
-  return (
-    <section className='writer-artifact__details-section'>
-      <div className='writer-artifact__section-heading'>
-        <span className='writer-artifact__section-heading-mark' />
-        <span>{tr('chat.writer.contentStructure')}</span>
-      </div>
-      <DetailValue value={metadata} />
-    </section>
-  );
-}
 
 function WritingTaskView({ data }: { data: unknown }) {
   const record = asRecord(data);
@@ -529,19 +504,45 @@ function WritingContextView({ data }: { data: unknown }) {
   );
 }
 
-function OutlineView({ data }: { data: unknown }) {
+
+function WriterDocumentView({ data }: { data: unknown }) {
   const record = asRecord(data);
-  const nodes = asArray(record?.nodes);
-  if (!nodes.length) {
-    return <div className='writer-artifact__empty'>{tr('chat.writer.noOutline')}</div>;
-  }
+  if (!record) return null;
+  const content = writerDocumentToMarkdown(record);
   return (
-    <div className='writer-artifact writer-artifact--outline'>
-      {asString(record?.outline_id) && (
-        <MetaRow label={tr('chat.writer.fields.outlineId')} value={asString(record?.outline_id)} />
+    <div className='writer-artifact writer-artifact--draft-document'>
+      <div className='writer-artifact__card-header'>
+        {asString(record.title) && (
+          <span className='writer-artifact__document-title'>{asString(record.title)}</span>
+        )}
+        {asString(record.stage) && <span className='writer-artifact__chip'>{asString(record.stage)}</span>}
+      </div>
+      {content ? <MarkdownBlock content={content} /> : (
+        <div className='writer-artifact__empty'>{tr('chat.writer.noDraftContent')}</div>
       )}
-      <OutlineNodesList nodes={nodes} />
-      <RemainingDetails data={record} omit={{ nodes: true, outline_id: true }} title={tr('chat.writer.outlineInformation')} />
+      <RemainingDetails
+        data={record}
+        omit={{ title: true, stage: true, blocks: true }}
+        title={tr('chat.writer.documentInformation')}
+      />
+    </div>
+  );
+}
+
+function WriterBlockView({ data }: { data: unknown }) {
+  const record = asRecord(data);
+  if (!record) return null;
+  const content = writerBlockToMarkdown(record);
+  return (
+    <div className='writer-artifact writer-artifact--draft-section'>
+      {content ? <MarkdownBlock content={content} /> : (
+        <div className='writer-artifact__empty'>{tr('chat.writer.sectionGenerating')}</div>
+      )}
+      <RemainingDetails
+        data={record}
+        omit={{ content: true, children: true }}
+        title={tr('chat.writer.sectionInformation')}
+      />
     </div>
   );
 }
@@ -593,184 +594,16 @@ function SectionInstructionsView({ data }: { data: unknown }) {
   );
 }
 
-function DraftSectionView({ data }: { data: unknown }) {
-  const record = asRecord(data);
-  if (!record) return null;
 
-  const title = asString(record.title);
-  const sectionId = asString(record.section_id);
-  const content = asString(record.content) || joinBlockContent(record.blocks);
-  const hasDraftBody = Boolean(title || sectionId || content);
-  const isOutlineShape = !isEmptyValue(record.outline_id) && !isEmptyValue(record.nodes);
-
-  if (isOutlineShape && !hasDraftBody) {
-    return (
-      <div className='writer-artifact writer-artifact--draft-section'>
-        <div className='writer-artifact__section'>
-          <div className='writer-artifact__section-title'>{tr('chat.writer.relatedOutline')}</div>
-          <MetaRow label={tr('chat.writer.fields.outlineId')} value={asString(record.outline_id)} />
-        </div>
-        <div className='writer-artifact__section'>
-          <div className='writer-artifact__section-title'>{tr('chat.writer.sectionStructure')}</div>
-          <OutlineNodesList nodes={record.nodes} />
-        </div>
-        {!isEmptyValue(record.meta) && (
-          <div className='writer-artifact__section'>
-            <div className='writer-artifact__section-title'>{tr('chat.writer.creationNotes')}</div>
-            <StructuredValue value={record.meta} />
-          </div>
-        )}
-        <RemainingDetails
-          data={record}
-          omit={{ outline_id: true, nodes: true, meta: true }}
-          title={tr('chat.writer.otherInformation')}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className='writer-artifact writer-artifact--draft-section'>
-      {(title || sectionId) && (
-        <div className='writer-artifact__document-title'>{title || sectionId}</div>
-      )}
-      {content ? (
-        <MarkdownBlock content={content} />
-      ) : (
-        <div className='writer-artifact__empty'>{tr('chat.writer.sectionGenerating')}</div>
-      )}
-      <BlockDetails blocks={record.blocks} />
-      <RemainingDetails
-        data={record}
-        omit={{ title: true, content: true, blocks: true, section_id: true }}
-        title={tr('chat.writer.sectionInformation')}
-      />
-    </div>
-  );
-}
-
-function DraftDocumentView({ data }: { data: unknown }) {
-  const record = asRecord(data);
-  const sections = asArray(record?.sections);
-  if (!sections.length) {
-    const fallback = joinBlockContent(record?.blocks);
-    if (fallback) {
-      return (
-        <div className='writer-artifact writer-artifact--draft-document'>
-          {asString(record?.title) && (
-            <div className='writer-artifact__document-title'>{asString(record?.title)}</div>
-          )}
-          <MarkdownBlock content={fallback} />
-          <BlockDetails blocks={record?.blocks} />
-          <RemainingDetails
-            data={record}
-            omit={{ title: true, content: true, blocks: true, sections: true }}
-            title={tr('chat.writer.documentInformation')}
-          />
-        </div>
-      );
-    }
-    return <div className='writer-artifact__empty'>{tr('chat.writer.noDraftContent')}</div>;
-  }
-  return (
-    <div className='writer-artifact writer-artifact--draft-document'>
-      {asString(record?.title) && (
-        <div className='writer-artifact__document-title'>{asString(record?.title)}</div>
-      )}
-      {sections.map((section, index) => {
-        const item = asRecord(section);
-        if (!item) return null;
-        const title = asString(item.title) || tr('chat.writer.sectionNumber', { index: index + 1 });
-        const content = asString(item.content) || joinBlockContent(item.blocks);
-        return (
-          <section key={`${title}-${index}`} className='writer-artifact__document-section'>
-            <div className='writer-artifact__document-section-heading'>
-              <span className='writer-artifact__step-badge'>{index + 1}</span>
-              <span>{title}</span>
-            </div>
-            <MarkdownBlock content={content} />
-            <BlockDetails blocks={item.blocks} />
-            <RemainingDetails
-              data={item}
-              omit={{ title: true, content: true, blocks: true }}
-              title={tr('chat.writer.sectionInformation')}
-            />
-          </section>
-        );
-      })}
-      <RemainingDetails
-        data={record}
-        omit={{ title: true, content: true, blocks: true, sections: true }}
-        title={tr('chat.writer.documentInformation')}
-      />
-    </div>
-  );
-}
-
-function ReviewReportView({ data }: { data: unknown }) {
-  const record = asRecord(data);
-  const result = asRecord(record?.result) ?? record;
-  if (!result) return null;
-
-  const passed = result.is_passed;
-  const score = result.score;
-  const summary = asString(result.summary);
-  const issues = asArray(result.issues);
-
-  return (
-    <div className='writer-artifact writer-artifact--review'>
-      <div className='writer-artifact__review-header'>
-        {typeof passed === 'boolean' && (
-          <span className={`writer-artifact__status-badge writer-artifact__status-badge--${passed ? 'pass' : 'fail'}`}>
-            {passed ? tr('chat.writer.passed') : tr('chat.writer.failed')}
-          </span>
-        )}
-        {typeof score === 'number' && (
-          <span className='writer-artifact__score'>{tr('chat.writer.scoreValue', { score })}</span>
-        )}
-      </div>
-      {summary && <p className='writer-artifact__paragraph'>{summary}</p>}
-      {issues.length > 0 && (
-        <div className='writer-artifact__section'>
-          <div className='writer-artifact__section-title'>{tr('chat.writer.fields.issues')}</div>
-          <div className='writer-artifact__issues'>
-            {issues.map((issue, index) => {
-              const item = asRecord(issue);
-              if (!item) return null;
-              const severity = asString(item.severity) || 'medium';
-              return (
-                <div key={`${asString(item.category)}-${index}`} className='writer-artifact__issue'>
-                  <div className='writer-artifact__issue-meta'>
-                    <span className={`writer-artifact__severity writer-artifact__severity--${severity}`}>
-                      {severity}
-                    </span>
-                    <span className='writer-artifact__issue-category'>{asString(item.category)}</span>
-                  </div>
-                  <p className='writer-artifact__paragraph'>{asString(item.description)}</p>
-                  <RemainingDetails
-                    data={item}
-                    omit={{ severity: true, category: true, description: true }}
-                    title={tr('chat.writer.issueDetails')}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-      <RemainingDetails
-        data={result}
-        omit={{ is_passed: true, score: true, summary: true, issues: true }}
-        title={tr('chat.writer.reviewDetails')}
-      />
-      {record && record !== result && (
-        <RemainingDetails data={record} omit={{ result: true }} title={tr('chat.writer.reportInformation')} />
-      )}
-    </div>
-  );
-}
-
-function WritingOutputView({ data, hideDownload = false }: { data: unknown; hideDownload?: boolean }) {
+function FinalDocumentMarkdownView({
+  data,
+  hideDownload = false,
+  filename = 'final_document.md',
+}: {
+  data: unknown;
+  hideDownload?: boolean;
+  filename?: string;
+}) {
   const record = asRecord(data);
   const content = asString(record?.content);
   if (!content) {
@@ -782,7 +615,7 @@ function WritingOutputView({ data, hideDownload = false }: { data: unknown; hide
         <div className='writer-artifact__output-toolbar'>
           <ArtifactDownloadButton
             label={tr('chat.writer.downloadMarkdown')}
-            filename='writing_output.md'
+            filename={filename}
             content={content}
           />
         </div>
@@ -821,17 +654,17 @@ export function WriterArtifactContent({
     case 'writing_context':
       return <WritingContextView data={payload} />;
     case 'outline':
-      return <OutlineView data={payload} />;
+      return <WriterDocumentView data={payload} />;
     case 'section_instructions':
       return <SectionInstructionsView data={payload} />;
-    case 'draft_sections':
-      return <DraftSectionView data={payload} />;
+    case 'draft_blocks':
+      return <WriterBlockView data={payload} />;
     case 'draft_document':
-      return <DraftDocumentView data={payload} />;
-    case 'review_report':
-      return <ReviewReportView data={payload} />;
-    case 'writing_output':
-      return <WritingOutputView data={payload} hideDownload={hideDownload} />;
+      return <WriterDocumentView data={payload} />;
+    case 'final_document':
+      return <WriterDocumentView data={payload} />;
+    case 'final_document_md':
+      return <FinalDocumentMarkdownView data={payload} hideDownload={hideDownload} />;
     default:
       return <GenericStructuredView data={payload} />;
   }

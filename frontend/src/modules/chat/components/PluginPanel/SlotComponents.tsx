@@ -1911,7 +1911,7 @@ function SlotMarkdownFile({
             const objectUrl = URL.createObjectURL(blob);
             const anchor = document.createElement('a');
             anchor.href = objectUrl;
-            anchor.download = name.toLowerCase().endsWith('.md') ? name : `${name.replace(/\.[^.]+$/, '') || 'writing_output'}.md`;
+            anchor.download = name.toLowerCase().endsWith('.md') ? name : `${name.replace(/\.[^.]+$/, '') || 'final_document'}.md`;
             anchor.click();
             URL.revokeObjectURL(objectUrl);
           }}
@@ -1930,8 +1930,8 @@ function SlotMarkdownFile({
         ) : null}
       </div>
       <div className='plugin-slot__artifact-body'>
-        {resolvedSlotId === 'writing_output_md' ? (
-          <WriterArtifactContent slotId='writing_output' data={{ content }} hideDownload />
+        {resolvedSlotId === 'final_document_md' ? (
+          <WriterArtifactContent slotId={resolvedSlotId} data={{ content }} hideDownload />
         ) : (
           <div className='writer-artifact__markdown'>
             <MarkdownViewer>{content}</MarkdownViewer>

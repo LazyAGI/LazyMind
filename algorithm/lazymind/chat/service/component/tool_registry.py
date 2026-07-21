@@ -415,14 +415,14 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ),
     ToolConfig(
         name='writer_create', label='AI 写作',
-        description='从资料画像和大纲构建章节草稿与最终成稿',
+        description='基于统一 Writer IR 从资料画像和大纲构建章节草稿与最终成稿',
         tool=WriterCreateToolkit(), module='content', label_en='AI Writing',
-        description_en='Create structured long-form writing from source material.',
+        description_en='Create structured long-form writing with the unified Writer IR.',
     ),
     ToolConfig(
-        name='writer_revision', label='AI 修订', description='结构化定位、规划和修改已有草稿',
+        name='writer_revision', label='AI 修订', description='基于 Writer IR 结构化定位、规划和修改已有文档',
         tool=WriterRevisionToolkit(), module='content', label_en='AI Revision',
-        description_en='Revise existing drafts through a validated patch workflow.',
+        description_en='Revise WriterDocument artifacts through a validated patch workflow.',
     ),
     ToolConfig(
         name='calculator',

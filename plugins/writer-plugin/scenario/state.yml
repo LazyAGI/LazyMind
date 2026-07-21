@@ -98,22 +98,22 @@ steps:
     prompt: |
       {{runtime_instruction}}
 
-      This step writes the draft body section by section, then merges them into the complete document.
+      This step writes the draft body as WriterBlock artifacts, then combines them into a draft-stage WriterDocument.
 
-      Call get_artifact to retrieve the file paths of writing_task, writing_context_after_outline, outline, and section_instructions. Use writing_context_after_outline wherever a tool expects writing_context_path. Prepare a draft_section_paths list to record every non-empty section path returned by the tool.
+      Call get_artifact to retrieve the file paths of writing_task, writing_context_after_outline, outline, and section_instructions. Use writing_context_after_outline wherever a tool expects writing_context_path. Prepare a draft_block_paths list to record every non-empty block path returned by the tool.
 
-      Call writer_generate_draft_section(writing_task_path=<writing_task path>, section_instructions_path=<section_instructions path>, writing_context_path=<writing_context path>) to produce the next section. Internally, the tool decides which section to write based on the section files already produced. When the tool returns a non-empty path, append it to draft_section_paths and continue calling the same tool to produce the next section.
+      Call writer_generate_draft_block(writing_task_path=<writing_task path>, section_instructions_path=<section_instructions path>, writing_context_path=<writing_context path>) to produce the next draft WriterBlock. Internally, the tool decides which block to write based on the block files already produced. When the tool returns a non-empty path, append it to draft_block_paths and continue calling the same tool to produce the next block.
 
-      When the tool returns an empty string, all section drafts have been generated. Take the last path in draft_section_paths and call writer_assemble_draft_document(draft_sections_anchor_path=<last draft_section path>, writing_context_path=<writing_context path>, outline_path=<outline path>) to obtain the draft_document path.
+      When the tool returns an empty string, all draft blocks have been generated. Take the last path in draft_block_paths and call writer_generate_draft_document(draft_blocks_anchor_path=<last draft block path>, writing_context_path=<writing_context path>, outline_path=<outline path>) to obtain the draft_document path.
 
       After the draft document is generated, call writer_update_writing_context(content_artifact_path=<draft_document path>, writing_context_path=<original writing_context path>) and obtain the updated writing_context path.
 
-      Once all generation operations in this step are complete, in the order of draft_section_paths, call save_artifact(content_type='file', key='draft_sections') for each section draft path, then call save_artifact(content_type='file', key='draft_document') to save the draft_document path, and finally call save_artifact(content_type='file', key='writing_context_after_draft') to save the updated context as a new material.
+      Once all generation operations in this step are complete, in the order of draft_block_paths, call save_artifact(content_type='file', key='draft_blocks') for each block path, then call save_artifact(content_type='file', key='draft_document') to save the draft WriterDocument path, and finally call save_artifact(content_type='file', key='writing_context_after_draft') to save the updated context as a new material.
 
       If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
     tools:
-      - writer_generate_draft_section
-      - writer_assemble_draft_document
+      - writer_generate_draft_block
+      - writer_generate_draft_document
       - writer_update_writing_context
     inputs:
       - material: writing_task
@@ -125,31 +125,31 @@ steps:
       - material: section_instructions
         required: true
     outputs:
-      - material: draft_sections
+      - material: draft_blocks
       - material: draft_document
       - material: writing_context_after_draft
     acceptance_criteria: |
-      All three artifacts present: draft_sections, draft_document, writing_context_after_draft.
+      All three artifacts present: draft_blocks, draft_document, writing_context_after_draft.
 
   finalize_report:
     label: Finalize Report
     prompt: |
       {{runtime_instruction}}
 
-      This step renders the generated draft into the final structured output and Markdown file. Retrieve draft_document and writing_context_after_draft, then call writer_generate_writing_output(draft_path=<draft path>, writing_context_path=<context path>). The tool returns writing_output and writing_output_md. This workflow intentionally performs no separate audit or revision pass.
+      This step converts the draft WriterDocument into a final-stage WriterDocument and renders its Markdown file. Retrieve draft_document and writing_context_after_draft, then call writer_generate_final_document(draft_path=<draft path>, writing_context_path=<context path>). The tool returns final_document and final_document_md. This workflow intentionally performs no separate audit or revision pass.
 
-      Once the generation operations in this step are complete, call save_artifact(content_type='file', key='writing_output') and save_artifact(content_type='file', key='writing_output_md') for the two paths to persist them as the artifacts of the current step.
+      Once generation is complete, call save_artifact(content_type='file', key='final_document') and save_artifact(content_type='file', key='final_document_md') for the two paths.
 
       If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
     tools:
-      - writer_generate_writing_output
+      - writer_generate_final_document
     inputs:
       - material: draft_document
         required: true
       - material: writing_context_after_draft
         required: true
     outputs:
-      - material: writing_output
-      - material: writing_output_md
+      - material: final_document
+      - material: final_document_md
     acceptance_criteria: |
-      Both artifacts present: writing_output, writing_output_md.
+      Both artifacts present: final_document, final_document_md.

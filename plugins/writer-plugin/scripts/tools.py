@@ -15,6 +15,7 @@ from lazyllm.tools.writer.utils import save_artifact_json
 
 from lazymind.chat.engine.subagent.context import require_context
 from lazymind.chat.engine.tools.writer import (
+    WriterCreateToolkit,
     WriterToolkitBase,
     writer_schema,
 )
@@ -100,13 +101,13 @@ def _collect_resources(user_input: str) -> str:
 
 def writer_build_writing_task(query: str) -> str:
     """Build a WritingTask artifact and return its file path."""
-    content = WriterToolkitBase().build_writing_task(query=query)
+    content = WriterCreateToolkit().build_writing_task(query=query)
     return _save_json_artifact('writing_task', content, writer_schema('task.WritingTask'))
 
 
 def writer_profile_resources(writing_task_path: str, user_input: str) -> str:
     """Profile resources for a writing task and return the artifact file path."""
-    content = WriterToolkitBase().profile_resources(
+    content = WriterCreateToolkit().profile_resources(
         writing_task_json=_read_json_string(writing_task_path),
         user_input=user_input,
         resources_json=_collect_resources(user_input),
@@ -116,7 +117,7 @@ def writer_profile_resources(writing_task_path: str, user_input: str) -> str:
 
 def writer_create_writing_context(writing_task_path: str, resource_profiles_path: str) -> str:
     """Create a WritingContext artifact and return its file path."""
-    content = WriterToolkitBase().create_writing_context(
+    content = WriterCreateToolkit().create_writing_context(
         writing_task_json=_read_json_string(writing_task_path),
         resource_profiles_json=_read_json_string(resource_profiles_path),
     )
@@ -125,11 +126,11 @@ def writer_create_writing_context(writing_task_path: str, resource_profiles_path
 
 def writer_generate_outline(writing_task_path: str, writing_context_path: str) -> str:
     """Generate an outline artifact and return its file path."""
-    content = WriterToolkitBase().generate_outline(
+    content = WriterCreateToolkit().generate_outline(
         writing_task_json=_read_json_string(writing_task_path),
         writing_context_json=_read_json_string(writing_context_path),
     )
-    return _save_json_artifact('outline', content, writer_schema('writing.WritingOutline'))
+    return _save_json_artifact('outline', content, WriterToolkitBase.WRITER_IR_SCHEMA)
 
 
 def writer_generate_section_instructions(
@@ -137,10 +138,9 @@ def writer_generate_section_instructions(
     writing_context_path: str,
 ) -> str:
     """Generate section instructions and return the artifact file path."""
-    content = WriterToolkitBase().generate_section_instructions(
+    content = WriterCreateToolkit().generate_section_instructions(
         outline_json=_read_json_string(outline_path),
         writing_context_json=_read_json_string(writing_context_path),
-        review_report_json='',
     )
     return _save_json_artifact(
         'section_instructions',
@@ -149,89 +149,88 @@ def writer_generate_section_instructions(
     )
 
 
-def writer_generate_draft_section(
+def writer_generate_draft_block(
     writing_task_path: str,
     section_instructions_path: str,
     writing_context_path: str,
 ) -> str:
-    """Generate the next draft section and return its file path, or empty string when complete."""
+    """Generate the next draft WriterBlock and return its path, or empty string when complete."""
     section_instructions = _read_json_file(section_instructions_path)
     instructions = section_instructions.get('instructions') if isinstance(section_instructions, dict) else None
     if not isinstance(instructions, list):
         raise TypeError('section_instructions_path must point to a SectionInstructionList artifact.')
 
-    draft_sections_dir = _workspace_root() / 'draft_sections'
-    draft_sections_dir.mkdir(parents=True, exist_ok=True)
-    previous_paths = sorted(str(path) for path in draft_sections_dir.glob('draft_section_*.json'))
+    draft_blocks_dir = _workspace_root() / 'draft_blocks'
+    draft_blocks_dir.mkdir(parents=True, exist_ok=True)
+    previous_paths = sorted(str(path) for path in draft_blocks_dir.glob('draft_block_*.json'))
     next_index = len(previous_paths)
     if next_index >= len(instructions):
         return ''
 
-    previous_sections = [_read_json_file(path) for path in previous_paths]
-    section_content = WriterToolkitBase().generate_draft_section(
+    previous_blocks = [_read_json_file(path) for path in previous_paths]
+    block_content = WriterCreateToolkit().generate_draft_section(
         writing_task_json=_read_json_string(writing_task_path),
         section_instruction_json=json.dumps(instructions[next_index], ensure_ascii=False),
         writing_context_json=_read_json_string(writing_context_path),
-        previous_sections_json=json.dumps(previous_sections, ensure_ascii=False),
+        previous_blocks_json=json.dumps(previous_blocks, ensure_ascii=False),
     )
     return _save_json_artifact(
-        f'draft_section_{next_index + 1}',
-        section_content,
-        writer_schema('writing.DraftSection'),
-        directory=draft_sections_dir,
+        f'draft_block_{next_index + 1}',
+        block_content,
+        WriterToolkitBase.WRITER_BLOCK_SCHEMA,
+        directory=draft_blocks_dir,
     )
 
 
-def writer_assemble_draft_document(
-    draft_sections_anchor_path: str,
+def writer_generate_draft_document(
+    draft_blocks_anchor_path: str,
     writing_context_path: str,
     outline_path: str = '',
 ) -> str:
-    """Assemble draft section artifacts into a draft document artifact path."""
-    anchor = Path(draft_sections_anchor_path)
-    draft_sections_dir = anchor if anchor.is_dir() else anchor.parent
-    draft_section_paths = sorted(str(path) for path in draft_sections_dir.glob('draft_section_*.json'))
-    if not draft_section_paths:
-        raise ValueError('draft_sections_anchor_path must point to a generated draft section file or directory.')
+    """Combine draft WriterBlock artifacts into a draft WriterDocument path."""
+    anchor = Path(draft_blocks_anchor_path)
+    draft_blocks_dir = anchor if anchor.is_dir() else anchor.parent
+    draft_block_paths = sorted(str(path) for path in draft_blocks_dir.glob('draft_block_*.json'))
+    if not draft_block_paths:
+        raise ValueError('draft_blocks_anchor_path must point to a generated draft block file or directory.')
 
-    draft_sections = [_read_json_file(path) for path in draft_section_paths]
-    content = WriterToolkitBase().assemble_draft_document(
-        draft_sections_json=json.dumps(draft_sections, ensure_ascii=False),
+    draft_blocks = [_read_json_file(path) for path in draft_block_paths]
+    content = WriterCreateToolkit().generate_draft_document(
+        draft_blocks_json=json.dumps(draft_blocks, ensure_ascii=False),
         writing_context_json=_read_json_string(writing_context_path),
         outline_json=_read_json_string(outline_path) if outline_path else '',
     )
-    return _save_json_artifact('draft_document', content, writer_schema('writing.DraftDocument'))
+    return _save_json_artifact('draft_document', content, WriterToolkitBase.WRITER_IR_SCHEMA)
 
 
 def writer_update_writing_context(content_artifact_path: str, writing_context_path: str) -> str:
     """Update WritingContext from a content artifact and return the new context path."""
-    content = WriterToolkitBase().update_writing_context(
+    content = WriterCreateToolkit().update_writing_context(
         content_artifact_json=_read_json_string(content_artifact_path),
         writing_context_json=_read_json_string(writing_context_path),
     )
     return _save_json_artifact('writing_context', content, writer_schema('context.WritingContext'))
 
 
-def writer_generate_writing_output(
+def writer_generate_final_document(
     draft_path: str,
     writing_context_path: str,
 ) -> dict:
-    """Generate final writing output and return structured/markdown artifact paths."""
-    content = WriterToolkitBase().generate_writing_output(
+    """Generate final WriterDocument and Markdown artifact paths."""
+    content = WriterCreateToolkit().generate_final_document(
         draft_document_json=_read_json_string(draft_path),
-        review_report_json='{}',
         writing_context_json=_read_json_string(writing_context_path),
     )
     payload = _json_loads(content, {})
-    output_path = save_artifact_json(
-        payload.get('writing_output') or {},
-        str(_workspace_root() / 'writing_output.json'),
-        schema_name=writer_schema('writing.WritingOutput'),
+    final_document_path = save_artifact_json(
+        payload.get('final_document') or {},
+        str(_workspace_root() / 'final_document.json'),
+        schema_name=WriterToolkitBase.WRITER_IR_SCHEMA,
         created_by='writer-plugin-wrapper',
     )
-    markdown_path = _workspace_root() / 'writing_output.md'
-    markdown_path.write_text(str(payload.get('writing_output_md') or ''), encoding='utf-8')
+    markdown_path = _workspace_root() / 'final_document.md'
+    markdown_path.write_text(str(payload.get('final_document_md') or ''), encoding='utf-8')
     return {
-        'writing_output': output_path,
-        'writing_output_md': str(markdown_path),
+        'final_document': final_document_path,
+        'final_document_md': str(markdown_path),
     }

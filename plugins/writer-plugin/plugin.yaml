@@ -27,10 +27,10 @@ tool_scripts:
       - writer_create_writing_context
       - writer_generate_outline
       - writer_generate_section_instructions
-      - writer_generate_draft_section
-      - writer_assemble_draft_document
+      - writer_generate_draft_block
+      - writer_generate_draft_document
       - writer_update_writing_context
-      - writer_generate_writing_output
+      - writer_generate_final_document
 
 steps:
   - id: build_context
@@ -71,8 +71,8 @@ slots:
     label: Section Instructions
     type: text
     cardinality: single
-  - id: draft_sections
-    label: Draft Sections
+  - id: draft_blocks
+    label: Draft Blocks
     type: text
     cardinality: list
     ordered: true
@@ -80,12 +80,12 @@ slots:
     label: Full Draft
     type: text
     cardinality: single
-  - id: writing_output
-    label: Final Report
+  - id: final_document
+    label: Final Document
     type: text
     cardinality: single
-  - id: writing_output_md
-    label: Final Report (Markdown)
+  - id: final_document_md
+    label: Final Document (Markdown)
     type: file
     cardinality: single
 
@@ -124,7 +124,7 @@ ui:
       label: Final Report
       layout: list
       slots:
-        - id: writing_output_md
+        - id: final_document_md
 
 i18n:
   zh-CN:
@@ -147,7 +147,7 @@ i18n:
       writing_context: {label: 写作上下文}
       outline: {label: 大纲}
       section_instructions: {label: 章节规划}
-      draft_sections: {label: 章节草稿}
+      draft_blocks: {label: 章节草稿}
       draft_document: {label: 完整初稿}
-      writing_output: {label: 最终成稿}
-      writing_output_md: {label: 最终成稿（Markdown）}
+      final_document: {label: 最终成稿}
+      final_document_md: {label: 最终成稿（Markdown）}

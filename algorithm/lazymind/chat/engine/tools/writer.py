@@ -35,6 +35,7 @@ def writer_schema(name: str) -> str:
 
 
 def writer_artifact_schema(name: str) -> str:
+    """Return the schema identifier used by non-model writer artifacts."""
     return f'{WRITER_ARTIFACT_SCHEMA_PREFIX}.{name}'
 
 
@@ -103,54 +104,20 @@ def _extract_feishu_resources(user_input: str) -> list[dict]:
     return resources
 
 
-def _infer_content_schema(data: Any) -> str:
-    if isinstance(data, dict):
-        if 'outline_id' in data and 'nodes' in data:
-            return writer_schema('writing.WritingOutline')
-        if 'draft_id' in data and 'sections' in data:
-            return writer_schema('writing.DraftDocument')
-        if 'section_id' in data and 'blocks' in data:
-            return writer_schema('writing.DraftSection')
-        if 'output_id' in data and 'content' in data:
-            return writer_schema('writing.WritingOutput')
-        if 'target' in data and 'result' in data:
-            return writer_schema('quality.ReviewReport')
-    return writer_artifact_schema('content')
-
-
 class WriterToolkitBase:
-    """Common writer tools.
+    """Adapters for LazyLLM's unified WriterDocument/WriterBlock tool APIs."""
 
-    All public methods accept text or JSON strings and return text or JSON strings.
-    File paths are an internal implementation detail used only to call the
-    underlying lazyllm writer tools.
-    """
-
+    WRITER_IR_SCHEMA = f'{WRITER_DATA_MODEL_SCHEMA_PREFIX}.writer_ir.WriterDocument'
+    WRITER_BLOCK_SCHEMA = f'{WRITER_DATA_MODEL_SCHEMA_PREFIX}.writer_ir.WriterBlock'
     __public_apis__: list[str] = []
 
     def build_writing_task(self, query: str) -> str:
-        """Build a writing task from the user's original request.
-
-        Args:
-            query: The user's writing request.
-
-        Returns:
-            WritingTask as a JSON string.
-        """
+        """Build a writing task from the user's original request."""
         task = WritingTask(query=query, task_type='write')
         return _json_dumps(task.model_dump())
 
     def profile_resources(self, writing_task_json: str, user_input: str, resources_json: str = '[]') -> str:
-        """Profile writing resources.
-
-        Args:
-            writing_task_json: WritingTask JSON string.
-            user_input: Original user request, used to discover Feishu links.
-            resources_json: Optional JSON array of InputResource objects.
-
-        Returns:
-            ResourceProfile list as a JSON string.
-        """
+        """Profile writing resources."""
         root = _temp_root()
         task_data = _json_loads(writing_task_json, {})
         resources = _json_loads(resources_json, [])
@@ -160,7 +127,9 @@ class WriterToolkitBase:
             raise TypeError('resources_json must be a JSON array.')
         resources = resources + _extract_feishu_resources(user_input)
 
-        task_path = _write_input_artifact(root, 'writing_task.json', task_data, writer_schema('task.WritingTask'))
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', task_data, writer_schema('task.WritingTask'),
+        )
         input_resources = [InputResource.model_validate(item) for item in resources]
         result = WriterResourceTools(
             llm=AutoModel(model='llm'),
@@ -168,236 +137,8 @@ class WriterToolkitBase:
         ).profile_resources(task=task_path, input_resources=input_resources)
         return _json_dumps(_primary_data(result))
 
-    def create_writing_context(
-        self,
-        writing_task_json: str,
-        resource_profiles_json: str = '[]',
-        doc_ir_json: str = '',
-    ) -> str:
-        """Create writing context from task, resource profiles, and optional DocIR."""
-        root = _temp_root()
-        task_path = _write_input_artifact(
-            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
-        )
-        profiles_path = _write_input_artifact(
-            root, 'resource_profiles.json', _json_loads(resource_profiles_json, []),
-            writer_schema('resource.ResourceProfile'),
-        )
-        doc_ir_path = None
-        if doc_ir_json:
-            doc_ir_path = _write_input_artifact(
-                root, 'doc_ir.json', _json_loads(doc_ir_json, {}), writer_schema('docir.DocIR'),
-            )
-        result = WriterContextTools(
-            llm=None,
-            artifact_store=str(root),
-        ).create_writing_context(
-            task=task_path,
-            resource_profiles=profiles_path,
-            doc_ir=doc_ir_path,
-        )
-        return _json_dumps(_primary_data(result))
-
-    def generate_outline(self, writing_task_json: str, writing_context_json: str) -> str:
-        """Generate a writing outline as JSON."""
-        root = _temp_root()
-        task_path = _write_input_artifact(
-            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
-        )
-        context_path = _write_input_artifact(
-            root, 'writing_context.json', _json_loads(writing_context_json, {}),
-            writer_schema('context.WritingContext'),
-        )
-        result = WriterPlanningTools(
-            llm=AutoModel(model='llm'),
-            artifact_store=str(root),
-        ).generate_outline(task=task_path, context=context_path)
-        return _json_dumps(_primary_data(result))
-
-    def generate_section_instructions(
-        self,
-        outline_json: str,
-        writing_context_json: str,
-        review_report_json: str = '',
-    ) -> str:
-        """Generate section instructions as JSON."""
-        root = _temp_root()
-        outline_path = _write_input_artifact(
-            root, 'outline.json', _json_loads(outline_json, {}), writer_schema('writing.WritingOutline'),
-        )
-        context_path = _write_input_artifact(
-            root, 'writing_context.json', _json_loads(writing_context_json, {}),
-            writer_schema('context.WritingContext'),
-        )
-        execution_results = _json_loads(review_report_json, None) if review_report_json else None
-        result = WriterPlanningTools(
-            llm=AutoModel(model='llm'),
-            artifact_store=str(root),
-        ).generate_section_instructions(
-            outline=outline_path,
-            context=context_path,
-            execution_results=execution_results,
-        )
-        return _json_dumps(_primary_data(result))
-
-    def generate_draft_section(
-        self,
-        writing_task_json: str,
-        section_instruction_json: str,
-        writing_context_json: str,
-        previous_sections_json: str = '[]',
-    ) -> str:
-        """Generate one draft section as JSON."""
-        root = _temp_root()
-        task_path = _write_input_artifact(
-            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
-        )
-        context_path = _write_input_artifact(
-            root, 'writing_context.json', _json_loads(writing_context_json, {}),
-            writer_schema('context.WritingContext'),
-        )
-        instruction_data = _json_loads(section_instruction_json, {})
-        instruction = SectionInstruction.model_validate(instruction_data)
-        previous_sections = _json_loads(previous_sections_json, [])
-        result = WriterDraftingTools(
-            llm=AutoModel(model='llm'),
-            artifact_store=str(root),
-        ).generate_draft_section(
-            task=task_path,
-            section_instruction=instruction,
-            context=context_path,
-            previous_sections=previous_sections,
-        )
-        return _json_dumps(_primary_data(result))
-
-    def assemble_draft_document(
-        self,
-        draft_sections_json: str,
-        writing_context_json: str,
-        outline_json: str = '',
-    ) -> str:
-        """Assemble draft sections into a draft document JSON string."""
-        root = _temp_root()
-        sections_data = _json_loads(draft_sections_json, [])
-        if not isinstance(sections_data, list) or not sections_data:
-            raise ValueError('draft_sections_json must be a non-empty JSON array.')
-        section_paths = []
-        sections_dir = root / 'draft_sections'
-        sections_dir.mkdir(parents=True, exist_ok=True)
-        for idx, section in enumerate(sections_data, start=1):
-            section_paths.append(_write_input_artifact(
-                sections_dir, f'draft_section_{idx}.json', section, writer_schema('writing.DraftSection'),
-            ))
-        context_path = _write_input_artifact(
-            root, 'writing_context.json', _json_loads(writing_context_json, {}),
-            writer_schema('context.WritingContext'),
-        )
-        outline_path = None
-        if outline_json:
-            outline_path = _write_input_artifact(
-                root, 'outline.json', _json_loads(outline_json, {}), writer_schema('writing.WritingOutline'),
-            )
-        result = WriterDraftingTools(
-            llm=None,
-            artifact_store=str(root),
-        ).generate_draft_document(
-            draft_sections=section_paths,
-            context=context_path,
-            outline=outline_path,
-        )
-        return _json_dumps(_primary_data(result))
-
-    def update_writing_context(self, content_artifact_json: str, writing_context_json: str) -> str:
-        """Update writing context from a content artifact JSON string."""
-        root = _temp_root()
-        content_data = _json_loads(content_artifact_json, {})
-        content_path = _write_input_artifact(
-            root, 'content_artifact.json', content_data, _infer_content_schema(content_data),
-        )
-        context_path = _write_input_artifact(
-            root, 'writing_context.json', _json_loads(writing_context_json, {}),
-            writer_schema('context.WritingContext'),
-        )
-        result = WriterContextTools(
-            llm=None,
-            artifact_store=str(root),
-        ).update_writing_context(artifacts=content_path, context=context_path)
-        return _json_dumps(_primary_data(result))
-
-    def check_consistency(self, draft_document_json: str, writing_context_json: str) -> str:
-        """Review a draft document.
-
-        Returns:
-            JSON string with `review_report` and `review_summary`.
-        """
-        root = _temp_root()
-        draft_path = _write_input_artifact(
-            root, 'draft_document.json', _json_loads(draft_document_json, {}),
-            writer_schema('writing.DraftDocument'),
-        )
-        context_path = _write_input_artifact(
-            root, 'writing_context.json', _json_loads(writing_context_json, {}),
-            writer_schema('context.WritingContext'),
-        )
-        result = WriterQualityTools(
-            llm=AutoModel(model='llm'),
-            artifact_store=str(root),
-        ).validate_draft_document(
-            draft_document=draft_path,
-            context=context_path,
-        )
-        return _json_dumps({
-            'review_report': _primary_data(result),
-            'review_summary': result.get('summary') or '',
-        })
-
-    def generate_writing_output(
-        self,
-        draft_document_json: str,
-        review_report_json: str,
-        writing_context_json: str,
-    ) -> str:
-        """Generate final writing output.
-
-        Returns:
-            JSON string with `writing_output` and `writing_output_md`.
-        """
-        root = _temp_root()
-        draft_path = _write_input_artifact(
-            root, 'draft_document.json', _json_loads(draft_document_json, {}),
-            writer_schema('writing.DraftDocument'),
-        )
-        _json_loads(review_report_json, {})
-        context_path = _write_input_artifact(
-            root, 'writing_context.json', _json_loads(writing_context_json, {}),
-            writer_schema('context.WritingContext'),
-        )
-        result = WriterDraftingTools(
-            llm=None,
-            artifact_store=str(root),
-        ).generate_writing_output(
-            draft=draft_path,
-            context=context_path,
-        )
-        output_path = result.get('output_file_path') or ''
-        markdown = ''
-        if output_path:
-            with open(output_path, 'r', encoding='utf-8') as fh:
-                markdown = fh.read()
-        return _json_dumps({
-            'writing_output': _primary_data(result),
-            'writing_output_md': markdown,
-        })
-
     def build_revise_task(self, query: str, target_document_json: str = '') -> str:
-        """Build a revise-type WritingTask from the user's revision request.
-
-        Args:
-            query: The user's revision request.
-
-        Returns:
-            WritingTask (task_type='revise') as a JSON string.
-        """
+        """Build a revise-type WritingTask from the user's revision request."""
         target_document = None
         if target_document_json:
             target_document = TargetDocument.model_validate(
@@ -411,104 +152,13 @@ class WriterToolkitBase:
         )
         return _json_dumps(task.model_dump())
 
-    def draft_to_doc_ir(self, draft_document_json: str) -> str:
-        """Convert a DraftDocument into a DocIR JSON string."""
-        root = _temp_root()
-        draft_path = _write_input_artifact(
-            root, 'draft_document.json', _json_loads(draft_document_json, {}),
-            writer_schema('writing.DraftDocument'),
-        )
-        result = WriterRevisionTools(
-            llm=None, artifact_store=str(root),
-        ).draft_to_doc_ir(draft=draft_path)
-        return _json_dumps(_primary_data(result))
-
-    def locate_revision_target(
-        self,
-        writing_task_json: str,
-        doc_ir_json: str,
-        writing_context_json: str,
-    ) -> str:
-        """Locate revision target blocks and return LocateResult JSON."""
-        root = _temp_root()
-        task_path = _write_input_artifact(
-            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
-        )
-        doc_ir_path = _write_input_artifact(
-            root, 'doc_ir.json', _json_loads(doc_ir_json, {}), writer_schema('docir.DocIR'),
-        )
-        context_path = _write_input_artifact(
-            root, 'writing_context.json', _json_loads(writing_context_json, {}),
-            writer_schema('context.WritingContext'),
-        )
-        result = WriterRevisionTools(
-            llm=AutoModel(model='llm'), artifact_store=str(root),
-        ).locate_revision_target(task=task_path, doc_ir=doc_ir_path, context=context_path)
-        return _json_dumps(_primary_data(result))
-
-    def generate_modify_plan(
-        self,
-        writing_task_json: str,
-        doc_ir_json: str,
-        locate_result_json: str,
-        writing_context_json: str,
-    ) -> str:
-        """Generate a ModifyPlan JSON from the located revision targets."""
-        root = _temp_root()
-        task_path = _write_input_artifact(
-            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
-        )
-        doc_ir_path = _write_input_artifact(
-            root, 'doc_ir.json', _json_loads(doc_ir_json, {}), writer_schema('docir.DocIR'),
-        )
-        locate_path = _write_input_artifact(
-            root, 'locate_result.json', _json_loads(locate_result_json, {}),
-            writer_schema('revision.LocateResult'),
-        )
-        context_path = _write_input_artifact(
-            root, 'writing_context.json', _json_loads(writing_context_json, {}),
-            writer_schema('context.WritingContext'),
-        )
-        result = WriterRevisionTools(
-            llm=AutoModel(model='llm'), artifact_store=str(root),
-        ).generate_modify_plan(
-            task=task_path, doc_ir=doc_ir_path, locate_result=locate_path, context=context_path,
-        )
-        return _json_dumps(_primary_data(result))
-
-    def generate_patch_set(
-        self,
-        doc_ir_json: str,
-        modify_plan_json: str,
-        writing_context_json: str,
-    ) -> str:
-        """Generate a PatchSet JSON from a modify plan."""
-        root = _temp_root()
-        doc_ir_path = _write_input_artifact(
-            root, 'doc_ir.json', _json_loads(doc_ir_json, {}), writer_schema('docir.DocIR'),
-        )
-        modify_plan_path = _write_input_artifact(
-            root, 'modify_plan.json', _json_loads(modify_plan_json, {}),
-            writer_schema('revision.ModifyPlan'),
-        )
-        context_path = _write_input_artifact(
-            root, 'writing_context.json', _json_loads(writing_context_json, {}),
-            writer_schema('context.WritingContext'),
-        )
-        result = WriterRevisionTools(
-            llm=AutoModel(model='llm'), artifact_store=str(root),
-        ).generate_patch_set(
-            doc_ir=doc_ir_path, modify_plan=modify_plan_path, context=context_path,
-        )
-        return _json_dumps(_primary_data(result))
-
     def validate_patch_set(
         self,
         patch_set_json: str,
         writing_context_json: str,
         writing_task_json: str,
     ) -> str:
-        """Validate a PatchSet and return the AuditResult JSON (patch_set_review)."""
+        """Validate a PatchSet and return its audit result."""
         root = _temp_root()
         patch_set_path = _write_input_artifact(
             root, 'patch_set.json', _json_loads(patch_set_json, {}), writer_schema('revision.PatchSet'),
@@ -530,65 +180,300 @@ class WriterToolkitBase:
             'patch_set_review_summary': result.get('summary') or '',
         })
 
-    def apply_patch(
+    def create_writing_context(
         self,
-        doc_ir_json: str,
-        patch_set_json: str,
+        writing_task_json: str,
+        resource_profiles_json: str = '[]',
+        writer_document_json: str = '',
+    ) -> str:
+        """Create context from a task, profiles, and an optional WriterDocument."""
+        root = _temp_root()
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+        )
+        profiles_path = _write_input_artifact(
+            root, 'resource_profiles.json', _json_loads(resource_profiles_json, []),
+            writer_schema('resource.ResourceProfile'),
+        )
+        document_path = None
+        if writer_document_json:
+            document_path = _write_input_artifact(
+                root, 'writer_document.json', _json_loads(writer_document_json, {}), self.WRITER_IR_SCHEMA,
+            )
+        result = WriterContextTools(llm=None, artifact_store=str(root)).create_writing_context(
+            task=task_path,
+            resource_profiles=profiles_path,
+            document=document_path,
+        )
+        return _json_dumps(_primary_data(result))
+
+    def generate_outline(self, writing_task_json: str, writing_context_json: str) -> str:
+        """Generate an outline-stage WriterDocument as JSON."""
+        root = _temp_root()
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+        )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterPlanningTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).generate_outline(task=task_path, context=context_path)
+        return _json_dumps(_primary_data(result))
+
+    def generate_section_instructions(
+        self,
+        outline_json: str,
         writing_context_json: str,
     ) -> str:
-        """Apply a PatchSet to a DocIR.
-
-        Returns:
-            JSON string with `patch_result` and `revised_doc_ir`.
-        """
+        """Generate section instructions from an outline-stage WriterDocument."""
         root = _temp_root()
-        doc_ir_path = _write_input_artifact(
-            root, 'doc_ir.json', _json_loads(doc_ir_json, {}), writer_schema('docir.DocIR'),
+        outline_path = _write_input_artifact(
+            root, 'outline.json', _json_loads(outline_json, {}), self.WRITER_IR_SCHEMA,
         )
-        patch_set_path = _write_input_artifact(
-            root, 'patch_set.json', _json_loads(patch_set_json, {}), writer_schema('revision.PatchSet'),
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterPlanningTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).generate_section_instructions(
+            outline=outline_path,
+            context=context_path,
+        )
+        return _json_dumps(_primary_data(result))
+
+    def generate_draft_section(
+        self,
+        writing_task_json: str,
+        section_instruction_json: str,
+        writing_context_json: str,
+        previous_blocks_json: str = '[]',
+    ) -> str:
+        """Generate one draft-stage WriterBlock as JSON."""
+        root = _temp_root()
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+        )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        instruction = SectionInstruction.model_validate(_json_loads(section_instruction_json, {}))
+        previous_blocks = _json_loads(previous_blocks_json, [])
+        result = WriterDraftingTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).generate_draft_section(
+            task=task_path,
+            section_instruction=instruction,
+            context=context_path,
+            previous_blocks=previous_blocks,
+        )
+        return _json_dumps(_primary_data(result))
+
+    def generate_draft_document(
+        self,
+        draft_blocks_json: str,
+        writing_context_json: str,
+        outline_json: str = '',
+    ) -> str:
+        """Combine draft WriterBlocks into a draft-stage WriterDocument."""
+        root = _temp_root()
+        blocks_data = _json_loads(draft_blocks_json, [])
+        if not isinstance(blocks_data, list) or not blocks_data:
+            raise ValueError('draft_blocks_json must be a non-empty JSON array.')
+        blocks_dir = root / 'draft_blocks'
+        blocks_dir.mkdir(parents=True, exist_ok=True)
+        block_paths = [
+            _write_input_artifact(
+                blocks_dir, f'draft_block_{idx}.json', block, self.WRITER_BLOCK_SCHEMA,
+            )
+            for idx, block in enumerate(blocks_data, start=1)
+        ]
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        outline_path = None
+        if outline_json:
+            outline_path = _write_input_artifact(
+                root, 'outline.json', _json_loads(outline_json, {}), self.WRITER_IR_SCHEMA,
+            )
+        result = WriterDraftingTools(llm=None, artifact_store=str(root)).generate_draft_document(
+            draft_blocks=block_paths,
+            context=context_path,
+            outline=outline_path,
+        )
+        return _json_dumps(_primary_data(result))
+
+    def update_writing_context(self, content_artifact_json: str, writing_context_json: str) -> str:
+        """Update context from a WriterDocument or WriterBlock."""
+        root = _temp_root()
+        content_data = _json_loads(content_artifact_json, {})
+        schema_name = self.WRITER_IR_SCHEMA if 'document_id' in content_data else self.WRITER_BLOCK_SCHEMA
+        content_path = _write_input_artifact(root, 'writer_content.json', content_data, schema_name)
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterContextTools(llm=None, artifact_store=str(root)).update_writing_context(
+            artifacts=content_path,
+            context=context_path,
+        )
+        return _json_dumps(_primary_data(result))
+
+    def check_consistency(self, draft_document_json: str, writing_context_json: str) -> str:
+        """Validate a draft-stage WriterDocument."""
+        root = _temp_root()
+        draft_path = _write_input_artifact(
+            root, 'draft_document.json', _json_loads(draft_document_json, {}), self.WRITER_IR_SCHEMA,
+        )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterQualityTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).validate_draft_document(draft_document=draft_path, context=context_path)
+        return _json_dumps({
+            'review_report': _primary_data(result),
+            'review_summary': result.get('summary') or '',
+        })
+
+    def generate_final_document(self, draft_document_json: str, writing_context_json: str) -> str:
+        """Return both a final WriterDocument and its rendered Markdown."""
+        root = _temp_root()
+        draft_path = _write_input_artifact(
+            root, 'draft_document.json', _json_loads(draft_document_json, {}), self.WRITER_IR_SCHEMA,
+        )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterDraftingTools(llm=None, artifact_store=str(root)).generate_final_document(
+            draft=draft_path,
+            context=context_path,
+        )
+        output_path = result.get('output_file_path') or ''
+        markdown = ''
+        if output_path:
+            with open(output_path, 'r', encoding='utf-8') as fh:
+                markdown = fh.read()
+        return _json_dumps({
+            'final_document': _primary_data(result),
+            'final_document_md': markdown,
+        })
+
+    def locate_revision_target(
+        self,
+        writing_task_json: str,
+        writer_document_json: str,
+        writing_context_json: str,
+    ) -> str:
+        """Locate the WriterDocument blocks affected by a revision task."""
+        root = _temp_root()
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+        )
+        document_path = _write_input_artifact(
+            root, 'writer_document.json', _json_loads(writer_document_json, {}), self.WRITER_IR_SCHEMA,
         )
         context_path = _write_input_artifact(
             root, 'writing_context.json', _json_loads(writing_context_json, {}),
             writer_schema('context.WritingContext'),
         )
         result = WriterRevisionTools(
-            llm=None, artifact_store=str(root),
-        ).apply_patch(doc_ir=doc_ir_path, patch_set=patch_set_path, context=context_path)
-        artifact_paths = (result.get('metadata') or {}).get('artifact_paths') or {}
-        revised_doc_ir_path = artifact_paths.get('revised_doc_ir', '')
-        return _json_dumps({
-            'patch_result': _primary_data(result),
-            'revised_doc_ir': _read_artifact_data(revised_doc_ir_path) if revised_doc_ir_path else {},
-        })
-
-    def doc_ir_to_draft(self, doc_ir_json: str) -> str:
-        """Convert a (revised) DocIR back into a DraftDocument JSON string."""
-        root = _temp_root()
-        doc_ir_path = _write_input_artifact(
-            root, 'doc_ir.json', _json_loads(doc_ir_json, {}), writer_schema('docir.DocIR'),
-        )
-        result = WriterRevisionTools(
-            llm=None, artifact_store=str(root),
-        ).doc_ir_to_draft(doc_ir=doc_ir_path)
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).locate_revision_target(task=task_path, document=document_path, context=context_path)
         return _json_dumps(_primary_data(result))
 
+    def generate_modify_plan(
+        self,
+        writing_task_json: str,
+        writer_document_json: str,
+        locate_result_json: str,
+        writing_context_json: str,
+    ) -> str:
+        """Generate a structured modification plan for the located targets."""
+        root = _temp_root()
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+        )
+        document_path = _write_input_artifact(
+            root, 'writer_document.json', _json_loads(writer_document_json, {}), self.WRITER_IR_SCHEMA,
+        )
+        locate_path = _write_input_artifact(
+            root, 'locate_result.json', _json_loads(locate_result_json, {}),
+            writer_schema('revision.LocateResult'),
+        )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterRevisionTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).generate_modify_plan(
+            task=task_path,
+            document=document_path,
+            locate_result=locate_path,
+            context=context_path,
+        )
+        return _json_dumps(_primary_data(result))
 
-class WriterToolkitBase2:
-    """Reserved toolkit for the unified WriterDocument implementation.
+    def generate_patch_set(
+        self,
+        writer_document_json: str,
+        modify_plan_json: str,
+        writing_context_json: str,
+    ) -> str:
+        """Generate a WriterDocument patch set from a modification plan."""
+        root = _temp_root()
+        document_path = _write_input_artifact(
+            root, 'writer_document.json', _json_loads(writer_document_json, {}), self.WRITER_IR_SCHEMA,
+        )
+        plan_path = _write_input_artifact(
+            root, 'modify_plan.json', _json_loads(modify_plan_json, {}),
+            writer_schema('revision.ModifyPlan'),
+        )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterRevisionTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).generate_patch_set(document=document_path, modify_plan=plan_path, context=context_path)
+        return _json_dumps(_primary_data(result))
 
-    V2 must follow WriterToolkitBase's actual adapter pattern: expose one explicit
-    method for every underlying LazyLLM writer-tool function, including its JSON
-    conversion and artifact-path handling. It must not collapse a workflow stage
-    into a single generic callback.
-
-    Concrete methods will be added only after the LazyLLM Writer IR tools and
-    their public signatures are stable. Keeping __public_apis__ empty prevents an
-    incomplete V2 adapter from being registered or replacing the current toolkit.
-    """
-
-    WRITER_IR_SCHEMA = f'{WRITER_DATA_MODEL_SCHEMA_PREFIX}.writer_ir.WriterDocument'
-    __public_apis__: list[str] = []
+    def apply_patch(
+        self,
+        writer_document_json: str,
+        patch_set_json: str,
+        writing_context_json: str,
+    ) -> str:
+        """Apply a validated patch set and return the revised WriterDocument."""
+        root = _temp_root()
+        document_path = _write_input_artifact(
+            root, 'writer_document.json', _json_loads(writer_document_json, {}), self.WRITER_IR_SCHEMA,
+        )
+        patch_path = _write_input_artifact(
+            root, 'patch_set.json', _json_loads(patch_set_json, {}), writer_schema('revision.PatchSet'),
+        )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterRevisionTools(llm=None, artifact_store=str(root)).apply_patch(
+            document=document_path,
+            patch_set=patch_path,
+            context=context_path,
+        )
+        artifact_paths = (result.get('metadata') or {}).get('artifact_paths') or {}
+        revised_path = artifact_paths.get('revised_document', '')
+        return _json_dumps({
+            'patch_result': _primary_data(result),
+            'revised_document': _read_artifact_data(revised_path) if revised_path else {},
+        })
 
 
 class WriterCreateToolkit(WriterToolkitBase):
@@ -602,21 +487,21 @@ class WriterCreateToolkit(WriterToolkitBase):
     __public_apis__ = [
         'build_writing_task', 'profile_resources', 'create_writing_context',
         'generate_outline', 'generate_section_instructions',
-        'generate_draft_section', 'assemble_draft_document',
+        'generate_draft_section', 'generate_draft_document',
         'update_writing_context', 'check_consistency',
-        'generate_writing_output',
+        'generate_final_document',
     ]
 
 
 class WriterRevisionToolkit(WriterToolkitBase):
     """Revise an existing draft through a validated structured patch workflow.
 
-    Build the revision task, convert the draft to DocIR, locate the target,
-    generate and validate a patch set, apply it, then convert back to a draft.
+    Build a revision task against WriterDocument, locate the target, generate
+    and validate a patch set, then apply it to produce a revised WriterDocument.
     """
 
     __public_apis__ = [
-        'build_revise_task', 'draft_to_doc_ir', 'locate_revision_target',
+        'build_revise_task', 'locate_revision_target',
         'generate_modify_plan', 'generate_patch_set', 'validate_patch_set',
-        'apply_patch', 'doc_ir_to_draft',
+        'apply_patch',
     ]

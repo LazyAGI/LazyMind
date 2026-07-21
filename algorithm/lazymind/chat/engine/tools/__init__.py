@@ -17,7 +17,7 @@ from .skill_editor import SkillManagementToolkit
 from .system_query import list_data_sources
 from .vocab_learn import vocab_learn
 from .web_search import url_fetch
-from .writer import WriterCreateToolkit, WriterRevisionToolkit
+from .writer import WriterCreateToolkit, WriterRevisionToolkit, WriterToolkitBase
 
 __all__ = [
     'build_schedule_toolkit',
@@ -40,4 +40,5 @@ __all__ = [
     'url_fetch',
     'WriterCreateToolkit',
     'WriterRevisionToolkit',
+    'WriterToolkitBase',
 ]
