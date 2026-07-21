@@ -211,6 +211,8 @@
   .ant-popover-content {
     .ant-popover-inner {
       padding: 0;
+      border: 1px solid rgba(218, 226, 239, 0.82);
+      box-shadow: 0 16px 42px rgba(39, 61, 98, 0.16);
     }
   }
 }

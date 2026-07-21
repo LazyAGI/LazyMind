@@ -24,6 +24,7 @@ export interface ImageUploadImperativeProps {
   clear: () => void;
   uploadFiles: (files: File[]) => void;
   getUploadingCount: () => number;
+  openFileDialog: () => void;
 }
 
 interface Props {
@@ -83,6 +84,7 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
     const [files, setFiles] = useState<FileItem[]>([]);
     const [uploadingCount, setUploadingCount] = useState(0);
     const filesRef = useRef<FileItem[]>(files);
+    const uploadRootRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
       filesRef.current = files;
@@ -247,6 +249,9 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
       getFiles: () => files,
       clear: () => commitFiles([]),
       getUploadingCount: () => uploadingCount,
+      openFileDialog: () => {
+        uploadRootRef.current?.querySelector<HTMLInputElement>('input[type="file"]')?.click();
+      },
       uploadFiles: (droppedFiles: File[]) => {
         if (disabled) {
           if (disabledReason) {
@@ -337,11 +342,13 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
     }
 
     return (
-      <Upload {...uploadProps}>
-        <Tooltip placement="top" title={t("chat.uploadTooltipLimit")}>
-          {icon}
-        </Tooltip>
-      </Upload>
+      <div ref={uploadRootRef} style={{ display: "contents" }}>
+        <Upload {...uploadProps}>
+          <Tooltip placement="top" title={t("chat.uploadTooltipLimit")}>
+            {icon}
+          </Tooltip>
+        </Upload>
+      </div>
     );
   },
 );

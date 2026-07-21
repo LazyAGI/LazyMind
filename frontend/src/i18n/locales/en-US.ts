@@ -903,6 +903,9 @@ const enUS = {
     taskCenterAdded: "Already in Task Center",
     addToTaskCenterSuccess: "Added to Task Center",
     promptTemplate: "Common Phrases",
+    addResource: "Add",
+    addResourceTooltip: "Add files, knowledge bases, and more (or type @)",
+    addAttachment: "Attachment",
     skillDeposit: "Save Experience",
     skillDepositReadyTooltip:
       "Save this conversation as reusable experience",

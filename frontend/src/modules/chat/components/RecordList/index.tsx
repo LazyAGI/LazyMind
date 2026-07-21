@@ -50,7 +50,10 @@ import {
 } from "@/modules/chat/utils/conversationActivity";
 import {
   CHAT_CONVERSATION_ACTIVITY_EVENT,
+  CHAT_CONVERSATION_FILTER_EVENT,
+  CHAT_CONVERSATION_FILTER_KEY,
   type ChatConversationActivityDetail,
+  type ChatConversationFilter,
 } from "@/modules/chat/constants/chat";
 import "./index.scss";
 import { downloadStream } from "@/modules/chat/utils/download";
@@ -143,7 +146,15 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const [taskConvIds, setTaskConvIds] = useState<Set<string>>(new Set());
     // convTypeFilter: which conversation types to show. Default = normal only (no task convs).
     // Values: 'normal' = non-task, 'task' = task. Multiple values allowed.
-    const [convTypeFilter, setConvTypeFilter] = useState<string[]>(['normal']);
+    const [convTypeFilter, setConvTypeFilter] = useState<string[]>(() => {
+      try {
+        return sessionStorage.getItem(CHAT_CONVERSATION_FILTER_KEY) === "task"
+          ? ["task"]
+          : ["normal"];
+      } catch {
+        return ["normal"];
+      }
+    });
     const [filterPopoverOpen, setFilterPopoverOpen] = useState(false);
     const scrollableTargetId = compact
       ? "sidebarConversationScrollableDiv"
@@ -163,6 +174,29 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         })
         .catch(() => {});
     }, []);
+
+    useEffect(() => {
+      const handleFilterChange = (event: Event) => {
+        const filter = (
+          event as CustomEvent<{ filter?: ChatConversationFilter }>
+        ).detail?.filter;
+        if (filter !== "normal" && filter !== "task") return;
+        const next = [filter];
+        setConvTypeFilter(next);
+        setFilterPopoverOpen(false);
+        getHistory({ isFirst: true, filterOverride: next, searchText: keyword });
+      };
+      window.addEventListener(
+        CHAT_CONVERSATION_FILTER_EVENT,
+        handleFilterChange,
+      );
+      return () =>
+        window.removeEventListener(
+          CHAT_CONVERSATION_FILTER_EVENT,
+          handleFilterChange,
+        );
+    }, [keyword]);
+
     const groupedHistoryList = useMemo(() => {
       const groups: Record<ConversationGroup, Conversation[]> = {
         today: [],
@@ -610,6 +644,14 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                                     return;
                                   }
                                   setConvTypeFilter(next);
+                                  try {
+                                    sessionStorage.setItem(
+                                      CHAT_CONVERSATION_FILTER_KEY,
+                                      next.length === 1 ? next[0] : "all",
+                                    );
+                                  } catch {
+                                    // Ignore storage errors.
+                                  }
                                   getHistory({ isFirst: true, filterOverride: next, searchText: keyword });
                                 }}
                                 style={{ display: 'flex', flexDirection: 'column', gap: 8 }}

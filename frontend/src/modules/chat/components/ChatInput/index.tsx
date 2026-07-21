@@ -10,16 +10,17 @@ import {
   type ReactNode,
 } from "react";
 import { RcFile } from "antd/es/upload";
-import { Badge, Button, message, Select, Spin, Tooltip } from "antd";
+import { Button, message, Select, Spin, Tooltip } from "antd";
 import {
+  BookOutlined,
   BulbOutlined,
   CloseOutlined,
   CommentOutlined,
   EditOutlined,
+  PaperClipOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
 import { debounce } from "lodash";
-import AttachmentIcon from "../../assets/icons/attachment_icon.svg?react";
 import SendIcon from "../../assets/icons/send_icon.svg?react";
 import AddIcon from "../../assets/icons/add.svg?react";
 
@@ -38,7 +39,7 @@ import { resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl
 import "./index.scss";
 
 import { ChatConfig } from "../ChatConfigs";
-import ChatSelector from "../ChatSelector";
+import ChatSelector, { type ChatSelectorImperativeProps } from "../ChatSelector";
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import { appendPromptToDraft } from "../PromptModal/promptLibrary";
 import ChatConfigModal from "./ChatConfigModal";
@@ -456,7 +457,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onSend,
       placeholder,
       openHistory,
-      openNewChat,
       isChatContent,
       showHistoryList,
       showHistoryButton = true,
@@ -491,6 +491,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       runInBackground = false,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
+    const knowledgeSelectorRef = useRef<ChatSelectorImperativeProps | null>(null);
     const promptRef = useRef<PromptImperativeProps>(null);
     const batchChatRef = useRef<BatchChatImperativeProps | null>(null);
     const innerRef = useRef<HTMLDivElement>(null);
@@ -507,6 +508,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const [mentions, setMentions] = useState<ChatMention[]>([]);
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialPluginSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
+    const [addMenuOpen, setAddMenuOpen] = useState(false);
     const disabledNoticeId = useId();
     const previousSessionIdRef = useRef<string | undefined>(undefined);
     const hasSentMessageRef = useRef(false);
@@ -710,12 +712,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       return normalizedCiteMessage ? [normalizedCiteMessage] : [];
     }, [citeMessage, citeMessages]);
     const isPromptPolishing = Boolean(polishingSuggestionKey);
-    const documentFileCount = fileList.filter(
-      (item) => !allowedImageTypes.includes(item.suffix),
-    ).length;
-    const uploadBadgeCount = isUploading
-      ? Math.max(documentFileCount, 1)
-      : documentFileCount;
     const isSendDisabled =
       disabled || isPromptPolishing || !value?.trim() || isUploading;
     const shouldShowPromptSuggestions =
@@ -1081,34 +1077,93 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
               <div className="input-bottom-actions">
                 <div className="input-bottom-actions-left">
-                  {isChatContent && (
-                    <div
-                      className={`input-bottom-actions-left-item${isPromptPolishing ? " is-disabled" : ""}`}
-                      aria-disabled={isPromptPolishing}
-                      onClick={() => {
-                        if (isPromptPolishing) {
+                  <div className="chat-add-resource">
+                    <Popover
+                      trigger="click"
+                      open={addMenuOpen}
+                      onOpenChange={(open) => {
+                        if (open && (disabled || isPromptPolishing)) {
+                          if (disabledReason) {
+                            message.warning(disabledReason);
+                          }
                           return;
                         }
-                        setThink(false);
-                        clearMultiData();
-                        clearPendingMessage();
-                        openNewChat?.();
-                        setContextUsageReset((current) => current + 1);
-                        setNewMessage(true);
+                        setAddMenuOpen(open);
                       }}
+                      placement="topLeft"
+                      classNames={{ root: "chat-add-resource-popover" }}
+                      content={
+                        <div className="chat-add-resource-menu">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddMenuOpen(false);
+                              fileListRef.current?.openFileDialog();
+                            }}
+                          >
+                            <PaperClipOutlined />
+                            {t("chat.addAttachment")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddMenuOpen(false);
+                              knowledgeSelectorRef.current?.open(document.body);
+                            }}
+                          >
+                            <BookOutlined />
+                            {t("chat.knowledgeBase")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddMenuOpen(false);
+                              promptRef.current?.onOpen();
+                            }}
+                          >
+                            <CommentOutlined />
+                            {t("chat.promptTemplate")}
+                          </button>
+                        </div>
+                      }
                     >
-                      <AddIcon />
-                      {t("chat.newChat")}
+                      <Tooltip title={t("chat.addResourceTooltip")}>
+                        <div
+                          className={`input-bottom-actions-left-item${addMenuOpen ? " selected" : ""}${disabled || isPromptPolishing ? " is-disabled" : ""}`}
+                          role="button"
+                          tabIndex={disabled || isPromptPolishing ? -1 : 0}
+                          aria-disabled={disabled || isPromptPolishing}
+                        >
+                          <AddIcon />
+                          {t("chat.addResource")}
+                        </div>
+                      </Tooltip>
+                    </Popover>
+                    <div className="chat-add-resource-hidden-selector">
+                      <ChatSelector
+                        ref={knowledgeSelectorRef}
+                        chatConfig={chatConfig ?? {}}
+                        refreshKey={knowledgeRefreshKey}
+                        embeddingReady={embeddingReady}
+                        multimodalEmbeddingReady={multimodalEmbeddingReady}
+                        rerankReady={rerankReady}
+                        onChange={onKnowledgeBaseChange}
+                      />
                     </div>
-                  )}
-                  <ChatSelector
-                    chatConfig={chatConfig ?? {}}
-                    refreshKey={knowledgeRefreshKey}
-                    embeddingReady={embeddingReady}
-                    multimodalEmbeddingReady={multimodalEmbeddingReady}
-                    rerankReady={rerankReady}
-                    onChange={onKnowledgeBaseChange}
-                  />
+                    <div className="chat-add-resource-hidden-upload">
+                      <ImageUpload
+                        updateFiles={updateImageList}
+                        listNum={fileList.length}
+                        ref={fileListRef}
+                        types={allowedUploadTypes}
+                        max={MAX_UPLOAD_FILES}
+                        onBeforeAddFiles={onBeforeAddFiles}
+                        disabled={disabled || isPromptPolishing}
+                        disabledReason={isPromptPolishing ? t("chat.promptPolishing") : disabledReason}
+                        icon={<span />}
+                      />
+                    </div>
+                  </div>
                   <Select
                     aria-label={t("chat.thinkingDepth")}
                     className="chat-thinking-depth-select"
@@ -1132,24 +1187,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       {t("chat.chatHistory")}
                     </div>
                   )}
-                  <div
-                    className={`input-bottom-actions-left-item${disabled || isPromptPolishing ? " is-disabled" : ""}`}
-                    aria-disabled={disabled || isPromptPolishing}
-                    onClick={() => {
-                      if (isPromptPolishing) {
-                        return;
-                      }
-                      if (disabled) {
-                        if (disabledReason) {
-                          message.warning(disabledReason);
-                        }
-                        return;
-                      }
-                      promptRef.current?.onOpen();
-                    }}
-                  >
-                    {t("chat.promptTemplate")}
-                  </div>
                   {isChatContent && (
                     <Tooltip title={skillDepositTooltip}>
                       <div
@@ -1249,37 +1286,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           ...contextRuntimeSettings,
                         };
                       }}
-                    />
-                  </div>
-                  <div className="input-bottom-actions-right-item">
-                    <ImageUpload
-                      updateFiles={updateImageList}
-                      listNum={fileList.length}
-                      ref={fileListRef}
-                      types={allowedUploadTypes}
-                      max={MAX_UPLOAD_FILES}
-                      onBeforeAddFiles={onBeforeAddFiles}
-                      disabled={disabled || isPromptPolishing}
-                      disabledReason={
-                        isPromptPolishing
-                          ? t("chat.promptPolishing")
-                          : disabledReason
-                      }
-                      icon={
-                        <Badge
-                          count={uploadBadgeCount}
-                          dot={isUploading && !documentFileCount}
-                          size="small"
-                          className="chat-upload-document-badge"
-                        >
-                          <Button
-                            aria-label={t("chat.upload")}
-                            icon={<AttachmentIcon />}
-                            type="text"
-                            disabled={disabled || isPromptPolishing}
-                          />
-                        </Badge>
-                      }
                     />
                   </div>
                   <div className="input-bottom-actions-right-item">

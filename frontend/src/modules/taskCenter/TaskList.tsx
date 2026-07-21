@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { listTasks } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
-import { CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
+import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 
 const PAGE_SIZE = 20;
@@ -101,6 +101,7 @@ export default function TaskList({ active }: TaskListProps) {
   ];
 
   const openConversation = (id: string) => {
+    selectChatConversationFilter('task');
     sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, id);
     navigate('/agent/chat/home');
   };
