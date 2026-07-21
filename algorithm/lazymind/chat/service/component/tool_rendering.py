@@ -73,7 +73,6 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'read_reference': 'rel_path',
     'run_script': 'rel_path',
     'read_file': 'path',
-    'string_replace': 'filename / filepath',
     'list_dir': 'path',
     'search_in_files': 'pattern',
     'make_dir': 'path',
@@ -131,7 +130,6 @@ _REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
     'external_db_query': 'rows',
     'run_script': 'stdout',
     'read_file': 'content',
-    'string_replace': 'filename / filepath',
     'list_dir': 'path',
     'search_in_files': 'status',
     'make_dir': 'path',
@@ -193,7 +191,6 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'read_reference': 'Reading skill reference material from {value} for review.',
     'run_script': 'Running the selected skill helper script at {value} now.',
     'read_file': 'Reading file content from {value} for review now.',
-    'string_replace': 'Replacing exact text in local file {value} now.',
     'list_dir': 'Listing folder contents from {value} for review now.',
     'search_in_files': 'Searching project files for matches to {value} now.',
     'make_dir': 'Preparing folder {value} for the requested use now.',
@@ -333,7 +330,6 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'ask_user': 'Please answer the questions below.',
     'run_script': 'Skill helper script at {value} finished running successfully.',
     'read_file': 'File content from {value} was loaded successfully now.',
-    'string_replace': 'Exact text in local file {value} was replaced successfully.',
     'list_dir': 'Folder contents from {value} were retrieved successfully now.',
     'search_in_files': 'Project file matches for {value} were found successfully.',
     'make_dir': 'Folder {value} is ready for the requested use.',
@@ -406,7 +402,6 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'ask_user': '请您回答下面的问题',
     'run_script': '技能 {value} 的预定义脚本已成功运行。',
     'read_file': '已成功加载文件 {value} 的内容。',
-    'string_replace': '已成功替换本地文件 {value} 中的精确文本。',
     'list_dir': '已成功获取文件夹 {value} 的内容。',
     'search_in_files': '已找到项目文件中与 {value} 匹配的内容。',
     'make_dir': '文件夹 {value} 已准备好。',
@@ -476,7 +471,6 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'read_reference': 'Skill reference material from {value} could not be read.',
     'run_script': 'Skill helper script at {value} did not finish.',
     'read_file': 'File content from {value} could not be read.',
-    'string_replace': 'Exact text in local file {value} could not be replaced.',
     'list_dir': 'Folder contents from {value} could not be listed.',
     'search_in_files': 'Project file search for {value} could not finish.',
     'make_dir': 'Folder {value} could not be prepared for use.',
@@ -546,7 +540,6 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'read_reference': '未能读取 {value} 技能参考资料。',
     'run_script': '技能 {value} 的预定义脚本未能运行完成。',
     'read_file': '未能读取文件 {value} 的内容。',
-    'string_replace': '未能替换本地文件 {value} 中的精确文本。',
     'list_dir': '未能列出文件夹 {value} 的内容。',
     'search_in_files': '未能完成项目文件中与 {value} 相关的搜索。',
     'make_dir': '未能创建文件夹 {value}。',
@@ -1176,28 +1169,7 @@ def _render_preview_template(
     return _ensure_trailing_newline(template.format_map(_SafeFormatContext(context)))
 
 
-def _tool_call_preview(
-    tool_name: str,
-    preview_value: str,
-    language: str = 'en',
-    arguments: Any = None,
-) -> str:
-    if _tool_name_is(tool_name, 'string_replace') and isinstance(arguments, dict):
-        action = str(arguments.get('action') or 'preview').strip().lower()
-        filename = preview_value or str(arguments.get('filename') or 'the attachment')
-        if language == 'zh':
-            messages = {
-                'preview': f'正在预览文件 **{filename}** 的文本替换，不会修改文件。',
-                'apply': f'正在提交文件 **{filename}** 已验证的替换预览。',
-                'undo': f'正在撤销文件 **{filename}** 的上一次替换。',
-            }
-        else:
-            messages = {
-                'preview': f'Previewing the text replacement in **{filename}** without changing the file.',
-                'apply': f'Applying the validated replacement preview to **{filename}**.',
-                'undo': f'Undoing the most recent replacement in **{filename}**.',
-            }
-        return _ensure_trailing_newline(messages.get(action, messages['preview']))
+def _tool_call_preview(tool_name: str, preview_value: str, language: str = 'en') -> str:
     return _render_preview_template(
         tool_name,
         preview_value,
@@ -1276,29 +1248,6 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
             ),
             result,
         )
-    if _tool_name_is(tool_name, 'string_replace'):
-        payload = _tool_result_mapping(result) or {}
-        action = str(payload.get('action') or '').strip().lower()
-        replacements = payload.get('replacements')
-        if language == 'zh':
-            if action == 'preview' or payload.get('status') == 'preview':
-                return _ensure_trailing_newline(
-                    f'替换预览已生成，共匹配 **{replacements}** 处；文件尚未修改。'
-                )
-            if action == 'undo':
-                return _ensure_trailing_newline('已撤销上一次替换，并更新下载文件。')
-            return _ensure_trailing_newline(
-                f'已提交验证后的替换，共修改 **{replacements}** 处。'
-            )
-        if action == 'preview' or payload.get('status') == 'preview':
-            return _ensure_trailing_newline(
-                f'Replacement preview is ready with **{replacements}** match(es); no file was changed.'
-            )
-        if action == 'undo':
-            return _ensure_trailing_newline('The previous replacement was undone and the download was updated.')
-        return _ensure_trailing_newline(
-            f'The validated replacement was applied to **{replacements}** match(es).'
-        )
     payload = result.get('result') if isinstance(result, dict) and isinstance(result.get('result'), dict) else result
     if isinstance(payload, dict) and payload.get('total') == 0 and _tool_name_starts(tool_name, 'kb_'):
         msg = _resolve_tool_key(tool_name, _KB_EMPTY_RESULT_MESSAGES)
@@ -1342,7 +1291,7 @@ def _tool_call_frame_text(tool_call: dict[str, Any], language: str = 'en') -> tu
             suffix = f', plus {len(clean_urls) - 2} more' if len(clean_urls) > 2 else ''
             preview = f'Fetching **{len(clean_urls)}** web pages concurrently: **{sample}**{suffix}.\n'
     else:
-        preview = _tool_call_preview(tool_name, preview_value, language, arguments)
+        preview = _tool_call_preview(tool_name, preview_value, language)
     text = (
         f'<{_TOOL_PREVIEW_TAG} id="{escape(tool_call_id, quote=True)}">{preview}</{_TOOL_PREVIEW_TAG}>'
         f'<{_TOOL_CALL_TAG}>{json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}</{_TOOL_CALL_TAG}>'

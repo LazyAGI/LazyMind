@@ -118,17 +118,3 @@ func TestNormalizeUploadedTextFileSupportsCommonSourceAndConfigExtensions(t *tes
 		}
 	}
 }
-
-func TestNormalizeUploadedTextFileRejectsNULBytes(t *testing.T) {
-	t.Setenv(uploadTextUTF8ConvertEnv, "true")
-
-	path := filepath.Join(t.TempDir(), "fake.txt")
-	data := []byte("plain\x00binary")
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
-
-	if _, err := normalizeUploadedTextFileInPlace(path, "fake.txt", int64(len(data))); err == nil {
-		t.Fatal("expected NUL-containing text upload to be rejected")
-	}
-}

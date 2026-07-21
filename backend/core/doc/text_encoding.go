@@ -9,6 +9,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"lazymind/core/common"
+
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/encoding/korean"
@@ -19,24 +21,6 @@ import (
 )
 
 const uploadTextUTF8ConvertEnv = "LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED"
-
-// Keep this list aligned with frontend allowedTextTypes and algorithm CHAT_TEXT_EXTENSIONS.
-var uploadTextUTF8Extensions = map[string]struct{}{
-	".txt": {}, ".md": {}, ".markdown": {}, ".csv": {}, ".tsv": {},
-	".json": {}, ".jsonl": {}, ".ndjson": {}, ".xml": {},
-	".yaml": {}, ".yml": {}, ".toml": {}, ".ini": {}, ".cfg": {}, ".conf": {},
-	".log": {}, ".sql": {}, ".html": {}, ".htm": {},
-	".css": {}, ".scss": {}, ".sass": {}, ".less": {},
-	".py": {}, ".pyi": {}, ".js": {}, ".jsx": {}, ".mjs": {}, ".cjs": {},
-	".ts": {}, ".tsx": {}, ".java": {}, ".c": {}, ".h": {}, ".cc": {},
-	".cpp": {}, ".cxx": {}, ".hpp": {}, ".cs": {}, ".go": {}, ".rs": {},
-	".rb": {}, ".php": {}, ".swift": {}, ".kt": {}, ".kts": {}, ".scala": {},
-	".sh": {}, ".bash": {}, ".zsh": {}, ".fish": {}, ".ps1": {}, ".bat": {}, ".cmd": {},
-	".vue": {}, ".svelte": {}, ".tex": {}, ".rst": {}, ".properties": {}, ".env": {},
-	".gradle": {}, ".groovy": {}, ".lua": {}, ".r": {}, ".dart": {},
-	".ex": {}, ".exs": {}, ".erl": {}, ".hrl": {}, ".clj": {}, ".cljs": {},
-	".edn": {}, ".fs": {}, ".fsx": {}, ".vb": {}, ".asm": {}, ".s": {},
-}
 
 func uploadTextUTF8ConvertEnabled() bool {
 	raw := strings.ToLower(strings.TrimSpace(os.Getenv(uploadTextUTF8ConvertEnv)))
@@ -55,8 +39,7 @@ func shouldNormalizeUploadedTextFile(path, originalFilename string) bool {
 	if name == "" {
 		name = filepath.Base(path)
 	}
-	_, ok := uploadTextUTF8Extensions[strings.ToLower(filepath.Ext(name))]
-	return ok
+	return common.IsTextFileExtension(filepath.Ext(name))
 }
 
 func normalizeUploadedTextFileInPlace(path, originalFilename string, currentSize int64) (int64, error) {
@@ -68,16 +51,13 @@ func normalizeUploadedTextFileInPlace(path, originalFilename string, currentSize
 	if err != nil {
 		return 0, fmt.Errorf("read uploaded text file: %w", err)
 	}
-	if utf8.Valid(data) && !bytes.ContainsRune(data, '\x00') {
+	if utf8.Valid(data) {
 		return int64(len(data)), nil
 	}
 
 	decoded, err := decodeUploadedTextToUTF8(data)
 	if err != nil {
 		return 0, err
-	}
-	if bytes.ContainsRune(decoded, '\x00') {
-		return 0, fmt.Errorf("uploaded text file contains NUL bytes")
 	}
 	if err := replaceFileAtomically(path, decoded); err != nil {
 		return 0, err

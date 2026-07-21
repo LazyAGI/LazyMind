@@ -1209,7 +1209,6 @@ const enUS = {
     batch: "Batch",
     uploadSizeLimit5MB: "Uploaded file size cannot exceed 5 MB",
     uploadSizeLimit100MB: "Uploaded file size cannot exceed 100 MB",
-    uploadTextSizeLimit20MB: "Plain-text files cannot exceed 20 MB",
     maxThreeFilesAndImages: "You can upload up to 3 files or images",
     fileUploadFailedRetry: "File upload failed, please try again",
     uploadProgressLog: "Upload progress: {{percentage}}%",

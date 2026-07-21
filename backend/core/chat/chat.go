@@ -160,7 +160,7 @@ type TaskCreatedEvent struct {
 }
 
 // ArtifactCreatedEvent is emitted by the main Agent's artifact tools.
-// Core binds it to the authoritative conversation and history IDs of this request.
+// Core binds new artifacts to the request and keeps an existing artifact's history on replacement.
 type ArtifactCreatedEvent struct {
 	ArtifactID      string          `json:"artifact_id"`
 	Filename        string          `json:"filename"`

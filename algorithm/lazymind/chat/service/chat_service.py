@@ -27,6 +27,7 @@ from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     ASK_USER_TOOL_CONFIG,
+    ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
     USER_ATTACHMENT_TOOL_CONFIGS,
     collect_system_prompt_appendices,
@@ -192,12 +193,10 @@ def _build_user_attachment_tools(has_files: bool) -> list:
     """Register attachment lookup, reading, and text editing when uploads exist."""
     if not has_files:
         return []
-    from lazymind.chat.engine.subagent.tools import (
-        find_user_attachment,
-        read_user_attachment,
-        string_replace,
-    )
-    return [find_user_attachment, read_user_attachment, string_replace]
+    return [
+        *(config.tool for config in USER_ATTACHMENT_TOOL_CONFIGS),
+        ATTACHMENT_EDIT_TOOL_CONFIG.tool,
+    ]
 
 
 def _build_ask_user_tool() -> list:
@@ -474,7 +473,10 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     mcp_tools = await _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
     # User attachment tools are only meaningful when the user has uploaded files.
     attachment_tools = _build_user_attachment_tools(bool(files_map))
-    attachment_configs = list(USER_ATTACHMENT_TOOL_CONFIGS) if attachment_tools else []
+    attachment_configs = (
+        [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
+        if attachment_tools else []
+    )
     # ask_user is a ChatAgent-only stop-tool. It is NOT in DEFAULT_TOOLS so SubAgents
     # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.
     # Auto plugin mode is non-interactive by contract: ask_user must be absent,

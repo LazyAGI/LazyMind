@@ -46,7 +46,7 @@ interface FileItem extends RcFile {
 
 export const allowedImageTypes = [".png", ".jpg", ".jpeg"];
 export const allowedFileTypes = [".pdf", ".docx", ".doc", ".pptx"];
-// Keep this list aligned with algorithm CHAT_TEXT_EXTENSIONS and core uploadTextUTF8Extensions.
+// Keep this list aligned with algorithm CHAT_TEXT_EXTENSIONS and core common textFileExtensions.
 export const allowedTextTypes = [
   ".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".jsonl", ".ndjson",
   ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".log", ".sql",
@@ -151,12 +151,6 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
       if (allowedFileTypes.includes(ext)) {
         if (currentFileSizeMB > 100) {
           message.error(t("chat.uploadSizeLimit100MB"));
-          return false;
-        }
-      }
-      if (allowedTextTypes.includes(ext)) {
-        if (currentFileSizeMB > 20) {
-          message.error(t("chat.uploadTextSizeLimit20MB"));
           return false;
         }
       }

@@ -1184,7 +1184,6 @@ const zhCN = {
     batch: "批量",
     uploadSizeLimit5MB: "上传文件大小不能超过 5 MB",
     uploadSizeLimit100MB: "上传文件大小不能超过 100 MB",
-    uploadTextSizeLimit20MB: "纯文本文件大小不能超过 20 MB",
     maxThreeFilesAndImages: "最多只能上传 3 个文件或图片",
     fileUploadFailedRetry: "文件上传失败，请重试",
     uploadProgressLog: "上传进度: {{percentage}}%",

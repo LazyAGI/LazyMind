@@ -101,7 +101,7 @@ def test_local_fs_string_replace_requires_expected_match_count(monkeypatch, tmp_
 
     assert ambiguous['success'] is False
     assert ambiguous['error']['type'] == 'ValueError'
-    assert 'found 2' in ambiguous['error']['reason']
+    assert 'found at least 2' in ambiguous['error']['reason']
     assert target.read_text(encoding='utf-8') == original
 
     replaced = LocalFileToolkit().string_replace(
@@ -111,26 +111,21 @@ def test_local_fs_string_replace_requires_expected_match_count(monkeypatch, tmp_
     assert target.read_text(encoding='utf-8') == 'changed\nchanged\n'
 
 
-def test_local_fs_string_replace_rejects_non_text_and_disallowed_files(monkeypatch, tmp_path):
+def test_local_fs_string_replace_rejects_non_text_content_and_disallowed_files(monkeypatch, tmp_path):
     allowed = tmp_path / 'allowed'
     allowed.mkdir()
     binary = allowed / 'binary.txt'
-    known_binary = allowed / 'document.pdf'
     hidden = allowed / 'hidden.log'
     binary.write_bytes(b'before\x00after')
-    known_binary.write_bytes(b'before after')
     hidden.write_text('before', encoding='utf-8')
-    _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['txt', 'pdf'])])
+    _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['txt'])])
 
     binary_result = LocalFileToolkit().string_replace(str(binary), 'before', 'changed')
-    known_binary_result = LocalFileToolkit().string_replace(str(known_binary), 'before', 'changed')
     hidden_result = LocalFileToolkit().string_replace(str(hidden), 'before', 'changed')
 
     assert binary_result['success'] is False
     assert binary_result['error']['type'] == 'ValueError'
     assert binary.read_bytes() == b'before\x00after'
-    assert known_binary_result['success'] is False
-    assert known_binary.read_bytes() == b'before after'
     assert hidden_result['success'] is False
     assert hidden_result['error']['type'] == 'PermissionError'
     assert hidden.read_text(encoding='utf-8') == 'before'

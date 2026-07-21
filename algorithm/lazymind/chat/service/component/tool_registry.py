@@ -96,6 +96,14 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'text description via vision for images. Use only when you need document text or a textual '
         'answer about image content (e.g. "what does this document say", "describe this diagram").\n'
         'Supported uploads: images, pdf/doc/docx/pptx, and common plain-text/code/config files.\n'
+        '- Default to the current turn (marked 当前轮次) when the user says '
+        '"this image / 这张图 / 这个文件" without naming a turn.\n'
+        '- For knowledge-base questions about indexed documents, you may also use '
+        '`kb_tmp_search` or other `kb_*` tools when appropriate.',
+    ),
+}
+ATTACHMENT_EDIT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
         '- `string_replace`: safe transactional editing for plain-text attachments. You MUST first '
         "call it with `action='preview'`, inspect every item in `matches` and the complete bounded "
         "`diff`, and only then call `action='apply'` with the returned `preview_id`. Never apply when "
@@ -104,11 +112,7 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         '`regex_flags`. `expected_replacements` is always enforced. Use `action=undo` to revert the '
         'last applied edit. Repeated applies update one download artifact and continue from the current '
         'draft; the original upload stays unchanged. Do not simulate edits with '
-        'read_user_attachment + save_chat_artifact.\n'
-        '- Default to the current turn (marked 当前轮次) when the user says '
-        '"this image / 这张图 / 这个文件" without naming a turn.\n'
-        '- For knowledge-base questions about indexed documents, you may also use '
-        '`kb_tmp_search` or other `kb_*` tools when appropriate.',
+        'read_user_attachment + save_chat_artifact.',
     ),
 }
 ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -358,14 +362,15 @@ USER_ATTACHMENT_TOOL_CONFIGS = (
             'output_contract': IMAGE_MARKDOWN_OUTPUT_APPENDIX['output_contract'],
         },
     ),
-    ToolConfig(
-        name='string_replace',
-        label='替换附件文本',
-        description='预览、提交或撤销纯文本附件的多行/正则局部替换，并维护单一下载副本',
-        tool=string_replace,
-        module='attachment',
-        appendix_system_prompt=ATTACHED_FILES_TOOL_POLICY_APPENDIX,
-    ),
+)
+
+ATTACHMENT_EDIT_TOOL_CONFIG = ToolConfig(
+    name='string_replace',
+    label='替换附件文本',
+    description='预览、提交或撤销纯文本附件的多行/正则局部替换，并维护单一下载副本',
+    tool=string_replace,
+    module='attachment',
+    appendix_system_prompt=ATTACHMENT_EDIT_TOOL_POLICY_APPENDIX,
 )
 
 DEFAULT_TOOLS: list[ToolConfig] = [

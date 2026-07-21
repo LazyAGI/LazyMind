@@ -11,7 +11,7 @@ SENSITIVE_FILTER_RESPONSE_TEXT = 'Sorry, I have not learned how to answer this q
 
 IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg')
 CHAT_DOCUMENT_EXTENSIONS = ('.pdf', '.doc', '.docx', '.pptx')
-# Keep this list aligned with frontend allowedTextTypes and core uploadTextUTF8Extensions.
+# Keep this list aligned with frontend allowedTextTypes and core common textFileExtensions.
 CHAT_TEXT_EXTENSIONS = (
     '.txt', '.md', '.markdown', '.csv', '.tsv', '.json', '.jsonl', '.ndjson',
     '.xml', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.log', '.sql',

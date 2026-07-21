@@ -232,45 +232,6 @@ def test_skill_reference_rendering_preserves_explicit_tool_failure():
     assert '未能读取 **reference.md** 技能参考资料。' in result_text
 
 
-def test_string_replace_rendering_distinguishes_preview_apply_and_undo():
-    preview_call, preview_value = _tool_call_frame_text({
-        'id': 'call-preview',
-        'function': {
-            'name': 'string_replace',
-            'arguments': {'filename': 'paper.txt', 'action': 'preview'},
-        },
-    }, language='zh')
-    assert preview_value == 'paper.txt'
-    assert '不会修改文件' in preview_call
-
-    preview_result = _tool_result_frame_text({
-        'id': 'call-preview',
-        'name': 'string_replace',
-        'result': {
-            'success': True,
-            'result': {'status': 'preview', 'action': 'preview', 'replacements': 1},
-        },
-    }, language='zh', preview_value=preview_value)
-    assert '文件尚未修改' in preview_result
-
-    apply_result = _tool_result_frame_text({
-        'id': 'call-apply',
-        'name': 'string_replace',
-        'result': {
-            'success': True,
-            'result': {'status': 'ok', 'action': 'apply', 'replacements': 1},
-        },
-    }, language='zh', preview_value='paper.txt')
-    assert '已提交验证后的替换' in apply_result
-
-    undo_result = _tool_result_frame_text({
-        'id': 'call-undo',
-        'name': 'string_replace',
-        'result': {'success': True, 'result': {'status': 'ok', 'action': 'undo'}},
-    }, language='zh', preview_value='paper.txt')
-    assert '已撤销上一次替换' in undo_result
-
-
 def test_create_skill_rendering_uses_single_segment_name_and_preserves_failure():
     call_text, preview_value = _tool_call_frame_text({
         'id': 'call-create-skill',

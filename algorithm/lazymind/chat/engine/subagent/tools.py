@@ -10,7 +10,7 @@ from lazymind.chat.engine.attachment_reader import (
     is_chat_text_file,
     parse_attachment_content,
 )
-from lazymind.chat.engine.tools.infra import tool_error, tool_success
+from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_error, tool_success
 from lazymind.chat.engine.tools.attachment_edit import (
     AttachmentEditDraft,
     effective_attachment_path,
@@ -23,7 +23,6 @@ _CONTENT_TYPES = {'text', 'json', 'image', 'file', 'file_list'}
 
 UPLOAD_MARKER = '/var/lib/lazymind/uploads/'
 SUBAGENT_MARKER = '/data/subagent/'
-_MAX_ATTACHMENT_EDIT_BYTES = 20 * 1024 * 1024
 
 
 def _is_valid_image_ref(path: str) -> bool:
@@ -1061,13 +1060,13 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
     })
 
 
+@handle_tool_errors
 def string_replace(
     filename: str,
     old_string: Optional[str] = None,
     new_string: Optional[str] = None,
     expected_replacements: int = 1,
     turn: Optional[int] = None,
-    output_filename: Optional[str] = None,
     mode: Literal['literal', 'regex'] = 'literal',
     regex_flags: str = 'MULTILINE',
     action: Literal['preview', 'apply', 'undo'] = 'preview',
@@ -1086,7 +1085,6 @@ def string_replace(
         new_string: Replacement text. Regex mode supports Python-style backreferences.
         expected_replacements: Required match count, 1-100. A mismatch never changes the draft.
         turn: Optional attachment turn number; omit to search newest attachments first.
-        output_filename: Optional download filename; defaults to the original filename.
         mode: 'literal' (default) or 'regex'.
         regex_flags: Comma-separated IGNORECASE, MULTILINE, and/or DOTALL for regex mode.
         action: 'preview' (default), 'apply', or 'undo'.
@@ -1097,97 +1095,76 @@ def string_replace(
     """
     matched, err = _resolve_attachment(filename, turn)
     if err:
-        return tool_success('string_replace', {'status': 'error', 'message': err})
+        raise ValueError(err)
     if not os.path.isfile(matched):
-        return tool_success('string_replace', {
-            'status': 'error',
-            'message': f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
-        })
+        raise FileNotFoundError(
+            f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk."
+        )
     if not is_chat_text_file(matched):
-        return tool_success('string_replace', {
-            'status': 'error',
-            'message': 'string_replace supports uploaded plain-text/code/config files only.',
-        })
-    size = os.path.getsize(matched)
-    if size > _MAX_ATTACHMENT_EDIT_BYTES:
-        return tool_success('string_replace', {
-            'status': 'error',
-            'message': 'Text attachment exceeds the 20 MiB editing limit.',
-        })
-
+        raise ValueError('string_replace supports uploaded plain-text/code/config files only')
     normalized_action = str(action or 'preview').strip().lower()
-    try:
-        draft = AttachmentEditDraft.for_current_conversation(matched)
-        if normalized_action == 'preview':
-            if old_string is None or new_string is None:
-                raise ValueError('old_string and new_string are required for preview')
-            preview = draft.create_preview(
-                old_string,
-                new_string,
-                expected_replacements,
-                mode,
-                regex_flags,
-                output_filename or os.path.basename(matched),
-            )
-            return tool_success('string_replace', {
-                'status': 'preview',
-                'action': 'preview',
-                'source_filename': os.path.basename(matched),
-                **preview,
-                'requires_apply': True,
-                'message': (
-                    'Preview only; no file was changed. Verify every match and the diff, then call '
-                    "string_replace with action='apply' and this preview_id."
-                ),
-            })
-        if normalized_action == 'apply':
-            if not preview_id:
-                raise ValueError('preview_id is required for apply; run preview first')
-            had_previous_edit = os.path.isfile(draft.draft_path)
-            preview, content, revision = draft.apply_preview(preview_id)
-            artifact = draft.publish(str(preview.get('output_filename') or draft.filename), content)
-            artifact_result = artifact.get('result', {}) if isinstance(artifact, dict) else {}
-            return tool_success('string_replace', {
-                'status': 'ok',
-                'action': 'apply',
-                'source_filename': os.path.basename(matched),
-                'filename': artifact_result.get('filename') or preview.get('output_filename'),
-                'artifact_id': artifact_result.get('artifact_id'),
-                'replacements': preview.get('replacements'),
-                'matches': preview.get('matches'),
-                'diff': preview.get('diff'),
-                'mode': preview.get('mode'),
-                'bytes': len(content),
-                'revision': revision,
-                'undo_available': True,
-                'original_unchanged': True,
-                'continues_previous_edit': had_previous_edit,
-                'message': artifact_result.get('message') or 'Applied the validated preview.',
-            })
-        if normalized_action == 'undo':
-            content, diff, revision, filename = draft.undo(output_filename)
-            artifact = draft.publish(filename, content)
-            artifact_result = artifact.get('result', {}) if isinstance(artifact, dict) else {}
-            return tool_success('string_replace', {
-                'status': 'ok',
-                'action': 'undo',
-                'source_filename': os.path.basename(matched),
-                'filename': artifact_result.get('filename') or filename,
-                'artifact_id': artifact_result.get('artifact_id'),
-                'diff': diff,
-                'bytes': len(content),
-                'revision': revision,
-                'undo_available': revision > 0,
-                'original_unchanged': True,
-                'message': 'Reverted the most recent applied edit and updated the download artifact.',
-            })
-        raise ValueError("action must be 'preview', 'apply', or 'undo'")
-    except Exception as exc:
+    draft = AttachmentEditDraft.for_current_conversation(matched)
+    if normalized_action == 'preview':
+        if old_string is None or new_string is None:
+            raise ValueError('old_string and new_string are required for preview')
+        preview = draft.create_preview(
+            old_string,
+            new_string,
+            expected_replacements,
+            mode,
+            regex_flags,
+        )
         return tool_success('string_replace', {
-            'status': 'error',
-            'action': normalized_action,
-            'message': str(exc),
+            'status': 'preview',
+            'action': 'preview',
+            'source_filename': os.path.basename(matched),
+            **preview,
+            'requires_apply': True,
+            'message': (
+                'Preview only; no file was changed. Verify every match and the diff, then call '
+                "string_replace with action='apply' and this preview_id."
+            ),
         })
+    if normalized_action == 'apply':
+        if not preview_id:
+            raise ValueError('preview_id is required for apply; run preview first')
+        had_previous_edit = os.path.isfile(draft.draft_path)
+        preview, content, revision = draft.apply_preview(preview_id)
+        artifact = draft.publish()['result']
+        return tool_success('string_replace', {
+            'status': 'ok',
+            'action': 'apply',
+            'source_filename': os.path.basename(matched),
+            'filename': artifact['filename'],
+            'artifact_id': artifact['artifact_id'],
+            'replacements': preview['replacements'],
+            'matches': preview['matches'],
+            'diff': preview['diff'],
+            'mode': preview['mode'],
+            'bytes': len(content),
+            'revision': revision,
+            'undo_available': True,
+            'original_unchanged': True,
+            'continues_previous_edit': had_previous_edit,
+            'message': artifact['message'],
+        })
+    if normalized_action == 'undo':
+        content, diff, revision = draft.undo()
+        artifact = draft.publish()['result']
+        return tool_success('string_replace', {
+            'status': 'ok',
+            'action': 'undo',
+            'source_filename': os.path.basename(matched),
+            'filename': artifact['filename'],
+            'artifact_id': artifact['artifact_id'],
+            'diff': diff,
+            'bytes': len(content),
+            'revision': revision,
+            'undo_available': revision > 0,
+            'original_unchanged': True,
+            'message': 'Reverted the most recent applied edit and updated the download artifact.',
+        })
+    raise ValueError("action must be 'preview', 'apply', or 'undo'")
 
 
 def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:

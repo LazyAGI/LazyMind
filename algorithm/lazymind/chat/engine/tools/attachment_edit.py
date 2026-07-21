@@ -4,19 +4,18 @@ from dataclasses import dataclass
 import hashlib
 import json
 import os
-import tempfile
 import uuid
 
 import lazyllm
 
 from lazymind.chat.engine.tools.chat_artifact import (
     chat_agent_workspace,
-    save_chat_file_bytes,
-    validate_chat_artifact_filename,
+    save_chat_file,
 )
 from lazymind.chat.engine.tools.text_edit import (
     build_text_diff,
     build_text_replacement,
+    write_file_atomically,
 )
 
 
@@ -65,33 +64,8 @@ class AttachmentEditDraft:
         return hashlib.sha256(content).hexdigest()
 
     @staticmethod
-    def _write_bytes(path: str, content: bytes) -> None:
-        parent = os.path.dirname(path)
-        os.makedirs(parent, exist_ok=True)
-        temp_path = ''
-        try:
-            with tempfile.NamedTemporaryFile(
-                dir=parent,
-                prefix=f'.{os.path.basename(path)}.',
-                suffix='.tmp',
-                delete=False,
-            ) as output:
-                temp_path = output.name
-                output.write(content)
-                output.flush()
-                os.fsync(output.fileno())
-            os.replace(temp_path, path)
-            temp_path = ''
-        finally:
-            if temp_path:
-                try:
-                    os.unlink(temp_path)
-                except FileNotFoundError:
-                    pass
-
-    @classmethod
-    def _write_json(cls, path: str, value: dict) -> None:
-        cls._write_bytes(
+    def _write_json(path: str, value: dict) -> None:
+        write_file_atomically(
             path,
             json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8'),
         )
@@ -99,10 +73,7 @@ class AttachmentEditDraft:
     @staticmethod
     def _read_json(path: str) -> dict:
         with open(path, 'r', encoding='utf-8') as source:
-            value = json.load(source)
-        if not isinstance(value, dict):
-            raise ValueError('Invalid attachment edit state')
-        return value
+            return json.load(source)
 
     def _read_current(self) -> bytes:
         with open(self.effective_path, 'rb') as source:
@@ -115,9 +86,7 @@ class AttachmentEditDraft:
         expected_replacements: int,
         mode: str,
         regex_flags: str,
-        output_filename: str,
     ) -> dict:
-        output_filename = validate_chat_artifact_filename(output_filename)
         current = self._read_current()
         replacement = build_text_replacement(
             current,
@@ -128,14 +97,9 @@ class AttachmentEditDraft:
             regex_flags=regex_flags,
         )
         preview_id = str(uuid.uuid4())
-        preview_dir = os.path.join(self.root, 'previews')
-        candidate_path = os.path.join(preview_dir, f'{preview_id}.bin')
-        metadata_path = os.path.join(preview_dir, f'{preview_id}.json')
         metadata = {
             'preview_id': preview_id,
             'source_sha256': self._sha256(current),
-            'candidate_sha256': self._sha256(replacement.content),
-            'output_filename': output_filename,
             'mode': mode,
             'regex_flags': regex_flags,
             'replacements': replacement.replacements,
@@ -144,85 +108,62 @@ class AttachmentEditDraft:
             'bytes_before': len(current),
             'bytes_after': len(replacement.content),
         }
-        self._write_bytes(candidate_path, replacement.content)
-        self._write_json(metadata_path, metadata)
+        write_file_atomically(os.path.join(self.root, 'preview.bin'), replacement.content)
+        self._write_json(os.path.join(self.root, 'preview.json'), metadata)
         return metadata
 
     def apply_preview(self, preview_id: str) -> tuple[dict, bytes, int]:
-        try:
-            normalized_id = str(uuid.UUID(str(preview_id or '').strip()))
-        except (ValueError, AttributeError) as exc:
-            raise ValueError('preview_id must be a valid preview returned by this tool') from exc
-        preview_dir = os.path.join(self.root, 'previews')
-        metadata_path = os.path.join(preview_dir, f'{normalized_id}.json')
-        candidate_path = os.path.join(preview_dir, f'{normalized_id}.bin')
+        metadata_path = os.path.join(self.root, 'preview.json')
+        candidate_path = os.path.join(self.root, 'preview.bin')
         if not os.path.isfile(metadata_path) or not os.path.isfile(candidate_path):
-            raise ValueError('Preview not found or already applied; request a new preview')
+            raise ValueError('Preview not found, stale, or already applied; request a new preview')
         metadata = self._read_json(metadata_path)
+        if preview_id != metadata.get('preview_id'):
+            raise ValueError('Preview is stale because a newer preview was created; request a new preview')
         current = self._read_current()
         if self._sha256(current) != metadata.get('source_sha256'):
             raise ValueError('Preview is stale because the draft changed; request a new preview')
         with open(candidate_path, 'rb') as source:
             candidate = source.read()
-        if self._sha256(candidate) != metadata.get('candidate_sha256'):
-            raise ValueError('Preview candidate failed integrity validation')
 
         state = self._read_json(self.state_path) if os.path.isfile(self.state_path) else {'revisions': []}
-        revisions = state.get('revisions')
-        if not isinstance(revisions, list):
-            raise ValueError('Invalid attachment edit revision state')
+        revisions = state['revisions']
         undo_id = str(uuid.uuid4())
-        undo_relpath = os.path.join('undo', f'{undo_id}.bin')
-        self._write_bytes(os.path.join(self.root, undo_relpath), current)
-        revisions.append({'path': undo_relpath, 'sha256': self._sha256(current)})
+        undo_relpath = f'undo/{undo_id}.bin'
+        write_file_atomically(os.path.join(self.root, undo_relpath), current)
+        revisions.append(undo_id)
         state['revisions'] = revisions
-        state['output_filename'] = metadata.get('output_filename') or self.filename
-        self._write_bytes(self.draft_path, candidate)
+        write_file_atomically(self.draft_path, candidate)
         self._write_json(self.state_path, state)
-        try:
-            os.unlink(candidate_path)
-            os.unlink(metadata_path)
-        except FileNotFoundError:
-            pass
+        os.unlink(candidate_path)
+        os.unlink(metadata_path)
         return metadata, candidate, len(revisions)
 
-    def undo(self, output_filename: str | None = None) -> tuple[bytes, str, int, str]:
+    def undo(self) -> tuple[bytes, str, int]:
         if not os.path.isfile(self.state_path):
             raise ValueError('No applied attachment edit is available to undo')
         state = self._read_json(self.state_path)
-        revisions = state.get('revisions')
-        if not isinstance(revisions, list) or not revisions:
+        revisions = state['revisions']
+        if not revisions:
             raise ValueError('No applied attachment edit is available to undo')
         current = self._read_current()
-        revision = revisions.pop()
-        root = os.path.realpath(self.root)
-        undo_path = os.path.realpath(os.path.join(root, str(revision.get('path') or '')))
-        if os.path.commonpath((root, undo_path)) != root or not os.path.isfile(undo_path):
-            raise ValueError('Attachment undo state is invalid')
+        undo_id = revisions.pop()
+        undo_path = os.path.join(self.root, 'undo', f'{undo_id}.bin')
         with open(undo_path, 'rb') as source:
             previous = source.read()
-        if self._sha256(previous) != revision.get('sha256'):
-            raise ValueError('Attachment undo state failed integrity validation')
         before = current.decode('utf-8', errors='strict')
         after = previous.decode('utf-8', errors='strict')
         diff = build_text_diff(before, after)
-        self._write_bytes(self.draft_path, previous)
+        write_file_atomically(self.draft_path, previous)
         state['revisions'] = revisions
-        if output_filename:
-            state['output_filename'] = output_filename
         self._write_json(self.state_path, state)
         os.unlink(undo_path)
-        return (
-            previous,
-            diff,
-            len(revisions),
-            str(state.get('output_filename') or self.filename),
-        )
+        return previous, diff, len(revisions)
 
-    def publish(self, filename: str, content: bytes) -> dict:
-        return save_chat_file_bytes(
-            filename,
-            content,
+    def publish(self) -> dict:
+        return save_chat_file(
+            self.filename,
+            self.draft_path,
             caption=f'Edited copy of {self.filename}',
             artifact_id=self.artifact_id,
             replace_existing=True,

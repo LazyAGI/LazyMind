@@ -31,11 +31,6 @@ from lazymind.chat.engine.tools.text_edit import replace_exact_text_file
 
 _RG_BINARY = shutil.which('rg') or ''
 _RG_TIMEOUT = 30
-_KNOWN_BINARY_EXTENSIONS = frozenset({
-    'pdf', 'doc', 'docx', 'ppt', 'pptx', 'pptm', 'xls', 'xlsx',
-    'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'tif',
-    'epub', 'mp3', 'mp4',
-})
 
 
 @dataclass(frozen=True)
@@ -453,8 +448,6 @@ class LocalFileToolkit:
         if not os.path.isfile(safe_path):
             raise FileNotFoundError(f'File not found: {filepath}')
         self._ensure_visible_file(scope, safe_path)
-        if self._file_extension(safe_path) in _KNOWN_BINARY_EXTENSIONS:
-            raise ValueError(f'File is not a text file: {filepath}')
 
         replacement = replace_exact_text_file(
             safe_path,
