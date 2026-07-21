@@ -50,9 +50,10 @@ def _load_skill_review_modules():
         'lazymind.common',
         'lazymind.common.integrations',
         'lazymind.common.integrations.remote_fs',
-        'lazymind.common.skill_document',
-        'lazymind.common.skill_remote_store',
-        'lazymind.common.skill_storage_key',
+        'lazymind.common.skill',
+        'lazymind.common.skill.document',
+        'lazymind.common.skill.remote_store',
+        'lazymind.common.skill.storage_key',
         'lazymind.config',
         'lazymind.model_config',
         'lazymind.review',
@@ -103,8 +104,9 @@ def _load_skill_review_modules():
         'lazymind.common.integrations.remote_fs': _module(
             'lazymind.common.integrations.remote_fs', RemoteFS=object
         ),
-        'lazymind.common.skill_remote_store': _module(
-            'lazymind.common.skill_remote_store', SkillRemoteStore=object
+        'lazymind.common.skill': _package('lazymind.common.skill'),
+        'lazymind.common.skill.remote_store': _module(
+            'lazymind.common.skill.remote_store', SkillRemoteStore=object
         ),
         'lazymind.config': _module(
             'lazymind.config',
@@ -141,12 +143,12 @@ def _load_skill_review_modules():
     try:
         sys.modules.update(fake_modules)
         _load_module(
-            'lazymind.common.skill_document',
-            'lazymind/common/skill_document.py',
+            'lazymind.common.skill.document',
+            'lazymind/common/skill/document.py',
         )
         _load_module(
-            'lazymind.common.skill_storage_key',
-            'lazymind/common/skill_storage_key.py',
+            'lazymind.common.skill.storage_key',
+            'lazymind/common/skill/storage_key.py',
         )
         config = _load_module(
             'lazymind.review.skill_review.config',

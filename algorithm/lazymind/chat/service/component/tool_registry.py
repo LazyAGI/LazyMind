@@ -31,9 +31,6 @@ from lazymind.chat.engine.tools import (
     image_editor,
     image_generator,
     kb_tmp_search,
-    memory_editor,
-    episode_create,
-    read_memory,
     SkillManagementToolkit,
     list_data_sources,
     build_schedule_toolkit,
@@ -43,6 +40,7 @@ from lazymind.chat.engine.tools import (
     vision_extractor,
     vocab_learn,
 )
+from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.model_config import is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
 from lazymind.chat.engine.subagent.tools import find_user_attachment, read_user_attachment
@@ -171,14 +169,19 @@ WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'terms into one `query` with spaces, commas, punctuation, or list-like text.',
     ),
 }
-MEMORY_READER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+MEMORY_TOOLS_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Conversation history versus persistent memory\n'
         'Conversation history is already included in the model messages and is the authoritative '
         'source for earlier turns in the current chat. Resolve short follow-ups and omitted subjects '
-        'from that history. Do not call `read_memory` to inspect, summarize, or recover the current '
-        'conversation. `read_memory` only reads optional cross-conversation notes or user-profile '
-        'content; an empty result never implies that chat history is missing.'
+        'from that history. Do not call `MemoryTools_read_memory` to inspect, summarize, or recover '
+        'the current conversation. `MemoryTools_read_memory` only reads optional cross-conversation '
+        'notes or user-profile content; an empty result never implies that chat history is missing.',
+        'Call `MemoryTools_episode_create` only when the user explicitly asks to record, remember, '
+        'or save a historical event. Do not call it merely because information seems useful. '
+        'use_memory=false does not disable explicit Episode creation. There is no general memory '
+        'or user-profile write API. Never claim that information was saved unless '
+        'MemoryTools_episode_create succeeded in the current turn.',
     ),
 }
 CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -538,34 +541,13 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         description_en='Learn user-specific vocabulary mappings and synonyms.',
     ),
     ToolConfig(
-        name='read_memory',
-        label='记忆读取',
-        description='读取当前的用户记忆或偏好内容',
-        tool=read_memory, module='personalization',
-        label_en='Memory Reading',
-        description_en='Read the current user memory and preferences.',
-        appendix_system_prompt=MEMORY_READER_TOOL_POLICY_APPENDIX,
-    ),
-    ToolConfig(
-        name='episode_create',
-        label='历史事件记录',
-        description='记录不可变的历史决策、进展、结果、阻塞或事件',
-        tool=episode_create, module='personalization',
-        label_en='Episode Creation',
-        description_en='Record immutable historical decisions, progress, results, blockers, or events.',
-        appendix_system_prompt={'tool_policy': (
-            'Call episode_create only when the user explicitly asks to record, remember, or save a '
-            'historical event. Do not call it merely because information seems useful. '
-            'use_memory=false does not disable explicit Episode creation.',
-        )},
-    ),
-    ToolConfig(
-        name='memory_editor',
-        label='记忆编辑',
-        description='记录和编辑跨会话的用户记忆和偏好',
-        tool=memory_editor, module='personalization',
-        label_en='Memory Editing',
-        description_en='Record and edit user memories and preferences across conversations.',
+        name='memory',
+        label='记忆',
+        description='读取跨会话记忆，并记录不可变的历史事件',
+        tool=MemoryTools(), module='personalization',
+        label_en='Memory',
+        description_en='Read cross-conversation memory and record immutable historical events.',
+        appendix_system_prompt=MEMORY_TOOLS_POLICY_APPENDIX,
     ),
     ToolConfig(
         name='skill_editor',

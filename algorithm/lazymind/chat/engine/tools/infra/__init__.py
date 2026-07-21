@@ -18,10 +18,6 @@ from .kb_opensearch_client import (
 from .github_skill_installer import (
     GitHubSkillInstaller,
 )
-from .memory_remote_store import (
-    MEMORY_TARGET_PATHS,
-    MemoryRemoteStore,
-)
 from .user_preference_validation import (
     parse_user_preference_frontmatter,
     validate_user_preference_content,
@@ -70,8 +66,6 @@ __all__ = [
     'Suggestion',
     'ActionPlanningModule',
     'ChatHistoryRecord',
-    'MEMORY_TARGET_PATHS',
-    'MemoryRemoteStore',
     'SynonymCandidate',
     'VocabSuggestion',
     'VocabEvolutionRequest',

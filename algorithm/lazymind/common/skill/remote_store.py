@@ -3,18 +3,18 @@ from __future__ import annotations
 import mimetypes
 from typing import Dict, Mapping, Optional
 
-from lazymind.common.skill_document import (
+from .document import (
     require_skill_name,
     require_valid_skill_document,
 )
-from lazymind.common.skill_storage_key import (
+from .storage_key import (
     SKILL_STORAGE_CATEGORIES,
     parse_skill_key,
     parse_skill_storage_key,
     require_skill_storage_category,
 )
 from lazymind.common.integrations.remote_fs import RemoteFS
-from lazymind.common.skill_paths import normalize_skill_package_path, relative_to_package
+from .paths import normalize_skill_package_path, relative_to_package
 from lazymind.config import config
 
 

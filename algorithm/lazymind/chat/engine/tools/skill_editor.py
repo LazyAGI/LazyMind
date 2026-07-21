@@ -13,14 +13,14 @@ from lazymind.chat.engine.tools.infra.skill_operations import (
     edit_skill_file,
     patch_skill_file,
 )
-from lazymind.common.skill_document import (
+from lazymind.common.skill.document import (
     SkillDocumentError,
     parse_skill_document,
     require_skill_name,
     require_valid_skill_document,
 )
-from lazymind.common.skill_remote_store import SkillRemoteStore
-from lazymind.common.skill_storage_key import (
+from lazymind.common.skill.remote_store import SkillRemoteStore
+from lazymind.common.skill.storage_key import (
     EXTERNAL_SKILL_CATEGORY,
     INTERNAL_SKILL_CATEGORY,
     parse_skill_key,

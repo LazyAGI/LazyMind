@@ -17,6 +17,7 @@ class MemoryReviewPayload(BaseModel):
 
     task_id: str = Field(..., description='Core resource update task ID for this review run')
     user_id: str = Field(..., description='Backend user ID being reviewed')
+    conversation_id: str = Field(..., description='Source conversation ID being reviewed')
     history: List[Dict[str, Any]] = Field(
         default_factory=list,
         description='Chat history passed by backend for review',
@@ -29,6 +30,16 @@ class MemoryReviewPayload(BaseModel):
         ),
     )
 
+    @model_validator(mode='before')
+    @classmethod
+    def preserve_missing_conversation_as_business_error(cls, data):
+        if isinstance(data, dict) and (
+            'conversation_id' not in data or data.get('conversation_id') is None
+        ):
+            data = dict(data)
+            data['conversation_id'] = ''
+        return data
+
     @model_validator(mode='after')
     def validate_payload(self) -> 'MemoryReviewPayload':
         self.task_id = str(self.task_id).strip()
@@ -39,6 +50,7 @@ class MemoryReviewPayload(BaseModel):
         self.user_id = str(self.user_id).strip()
         if not self.user_id:
             raise ValueError("'user_id' must be non-empty.")
+        self.conversation_id = str(self.conversation_id).strip()
         if not any(
             message.get('role') == 'user'
             and str(message.get('content', '')).strip()
@@ -50,18 +62,43 @@ class MemoryReviewPayload(BaseModel):
 
 @router.post(
     '/api/chat/memory_review',
-    summary='Review backend-provided history for memory or user_preference edits',
+    summary='Review backend-provided history for Episode creation',
     response_model=MemoryReviewResult,
+    response_model_exclude_none=True,
 )
 async def memory_review(payload: MemoryReviewPayload):
+    if not payload.conversation_id:
+        return MemoryReviewResult(
+            status='failed',
+            task_id=payload.task_id,
+            outcome='failed',
+            retryable=False,
+            error={
+                'code': 'missing_context',
+                'message': 'conversation_id is required.',
+            },
+        ).model_dump(exclude_none=True)
     try:
         result = review_memory(
             task_id=payload.task_id,
             user_id=payload.user_id,
+            conversation_id=payload.conversation_id,
             history=payload.history,
             llm_config=payload.llm_config,
         )
     except Exception as exc:
         LOG.exception(f'[MemoryReview] memory review failed: {exc}')
-        return JSONResponse(status_code=500, content={'status': 'failed'})
-    return result.model_dump()
+        return JSONResponse(
+            status_code=500,
+            content={
+                'status': 'failed',
+                'task_id': payload.task_id,
+                'outcome': 'failed',
+                'retryable': False,
+                'error': {
+                    'code': 'internal_error',
+                    'message': 'Memory Review failed unexpectedly.',
+                },
+            },
+        )
+    return result.model_dump(exclude_none=True)

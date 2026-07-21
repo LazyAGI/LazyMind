@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from lazymind.common.skill_document import (
+from lazymind.common.skill.document import (
     SkillDocumentError,
     parse_skill_document,
 )
