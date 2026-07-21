@@ -27,7 +27,7 @@ const (
 var localFSScanHTTPClient = &http.Client{Timeout: localFSScanRequestTimeout}
 var allowedFileExtensions = map[string]bool{
 	"pdf": true, "doc": true, "docx": true,
-	"csv": true, "xls": true, "xlsx": true,
+	"xls": true, "xlsx": true, "ipynb": true, "mbox": true,
 }
 
 type scanSourceListResponse struct {
@@ -231,7 +231,7 @@ func normalizeFileExtension(ext string) string {
 	e := strings.TrimSpace(ext)
 	e = strings.TrimPrefix(e, ".")
 	e = strings.ToLower(e)
-	if !allowedFileExtensions[e] {
+	if !allowedFileExtensions[e] && !common.IsTextFileExtension(e) {
 		return ""
 	}
 	return e

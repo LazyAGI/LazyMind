@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { message, Modal } from "antd";
-import { InfoCircleOutlined } from "@ant-design/icons";
+import { Button, Input, message, Modal, Select, Tooltip } from "antd";
+import { AppstoreOutlined, SearchOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import PluginInstalledView from "./PluginInstalledView";
 import { AgentAppsAuth } from "@/components/auth";
@@ -33,6 +33,7 @@ import {
 import { mapMarketSkillRecordToAsset } from "./skillMarketMockData";
 import NewPluginModal from "@/modules/plugin/components/NewPluginModal";
 import { shouldShowSkillMessageCenter } from "./collaborationVisibility";
+import { renderSkillCategoryIcon } from "./skillCategoryIcon";
 import "./index.scss";
 
 const DEFAULT_MARKET_PAGE_SIZE = 8;
@@ -50,6 +51,8 @@ export default function SkillManagementSection() {
   >(new Map());
   const [memoryTableBodyHeight, setMemoryTableBodyHeight] = useState<number>();
   const [marketKeyword, setMarketKeyword] = useState("");
+  const [marketSearchExpanded, setMarketSearchExpanded] = useState(false);
+  const [marketCategoryExpanded, setMarketCategoryExpanded] = useState(false);
   const [debouncedMarketKeyword, setDebouncedMarketKeyword] = useState("");
   const [adminPublishOpen, setAdminPublishOpen] = useState(false);
   const [marketCatalogAssets, setMarketCatalogAssets] = useState<MarketSkillAsset[]>([]);
@@ -376,6 +379,13 @@ export default function SkillManagementSection() {
     manualSkillReviewLoading ||
     manualSkillReviewButtonBusy ||
     manualSkillReviewCount <= 0;
+  const manualSkillReviewDisabledReason = manualSkillReviewLoading
+    ? t("admin.memorySkillReviewDisabledLoading")
+    : manualSkillReviewButtonBusy
+      ? t("admin.memorySkillReviewDisabledRunning")
+      : manualSkillReviewCount <= 0
+        ? t("admin.memorySkillReviewDisabledEmpty")
+        : undefined;
 
   const tableScroll = memoryTableBodyHeight
     ? { x: 1070, y: memoryTableBodyHeight }
@@ -542,7 +552,7 @@ export default function SkillManagementSection() {
         setOrganizeSubmitting(true);
         try {
           const result = await organizeSkills(
-            skills.map((skill) => skill.id),
+            skills.map((skill) => `skills/${skill.category}/${skill.name}`),
           );
           if (!result.taskId || result.status !== "running") {
             throw new Error("Skill organize task was not accepted");
@@ -645,6 +655,92 @@ export default function SkillManagementSection() {
   };
 
   const installingUid = marketInstallingId || [...builtinSkillEnableLoading][0];
+  const marketFilters = (
+    <div className="memory-skill-market-toolbar-filters">
+      <div className="memory-skill-market-category-popover">
+        <Tooltip title={t("admin.memoryCategory")}>
+          <Button
+            aria-label={t("admin.memoryCategory")}
+            aria-expanded={marketCategoryExpanded}
+            className={marketCategory !== "all" ? "is-active" : undefined}
+            icon={<AppstoreOutlined />}
+            onClick={() => setMarketCategoryExpanded((expanded) => !expanded)}
+          />
+        </Tooltip>
+        {marketCategoryExpanded ? (
+          <div className="memory-skill-category-bar is-popover">
+            <button
+              type="button"
+              className={`memory-skill-category-pill ${marketCategory === "all" ? "is-active" : ""}`}
+              onClick={() => {
+                setMarketCategory("all");
+                setMarketListPage(1);
+                setMarketCategoryExpanded(false);
+              }}
+            >
+              <AppstoreOutlined />
+              {t("admin.memorySkillCategoryAll")}
+            </button>
+            {marketCategories.map((item) => (
+              <button
+                key={item}
+                type="button"
+                className={`memory-skill-category-pill ${marketCategory === item ? "is-active" : ""}`}
+                onClick={() => {
+                  setMarketCategory(item);
+                  setMarketListPage(1);
+                  setMarketCategoryExpanded(false);
+                }}
+              >
+                {renderSkillCategoryIcon(item)}
+                {item}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="memory-skill-market-search-popover">
+        <Tooltip title={t("admin.memorySkillMarketSearchPlaceholder")}>
+          <Button
+            aria-label={t("admin.memorySkillMarketSearchPlaceholder")}
+            aria-expanded={marketSearchExpanded}
+            icon={<SearchOutlined />}
+            onClick={() => setMarketSearchExpanded((expanded) => !expanded)}
+          />
+        </Tooltip>
+        {marketSearchExpanded ? (
+          <Input.Search
+            autoFocus
+            allowClear
+            value={marketKeyword}
+            onChange={(event) => setMarketKeyword(event.target.value)}
+            onSearch={(value) => {
+              const nextKeyword = value.trim();
+              setMarketKeyword(value);
+              setDebouncedMarketKeyword(nextKeyword);
+              setMarketListPage(1);
+            }}
+            placeholder={t("admin.memorySkillMarketSearchPlaceholder")}
+            className="memory-skill-market-search"
+          />
+        ) : null}
+      </div>
+      <Select
+        value={marketSkillSource}
+        className="memory-skill-market-source"
+        options={[
+          { value: "all", label: t("admin.memorySkillMarketSourceAll") },
+          { value: "builtin", label: t("admin.memorySkillMarketSourceBuiltin") },
+          { value: "admin", label: t("admin.memorySkillMarketSourceAdmin") },
+        ]}
+        onChange={(value) => {
+          setMarketSkillSource(value);
+          setMarketListPage(1);
+        }}
+      />
+      <Button onClick={handleMarketReset}>{t("admin.memoryReset")}</Button>
+    </div>
+  );
 
   return (
     <div className="memory-skill-management">
@@ -664,8 +760,8 @@ export default function SkillManagementSection() {
           setOrganizeMode(true);
         }}
         manualSkillReviewCount={manualSkillReviewCount}
-        manualSkillReviewLoading={manualSkillReviewLoading}
-        manualSkillReviewRunning={manualSkillReviewButtonBusy}
+        manualSkillReviewDisabled={manualSkillReviewButtonDisabled}
+        manualSkillReviewDisabledReason={manualSkillReviewDisabledReason}
         onSkillReviewClick={handleSkillReviewClick}
         messageCenterCount={messageCenterCount}
         onMessageCenterClick={handleSkillMessageCenter}
@@ -674,6 +770,7 @@ export default function SkillManagementSection() {
           hideUserGroupSurfaces,
         })}
         isAdmin={isAdmin}
+        marketFilters={marketFilters}
         onAdminPublish={() => setAdminPublishOpen(true)}
         onNewPlugin={() => setNewPluginOpen(true)}
       />
@@ -715,39 +812,11 @@ export default function SkillManagementSection() {
 
       {skillView === "market" ? (
         <div className="memory-skill-market-panel">
-          <div className="memory-skill-view-market-desc">
-            <span className="memory-skill-view-market-desc__icon" aria-hidden="true">
-              <InfoCircleOutlined />
-            </span>
-            <p className="memory-skill-view-market-desc__text">
-              {t("admin.memorySkillViewMarketHelp")}
-            </p>
-          </div>
           <SkillMarketView
             t={t}
             loading={marketCatalogLoading}
             skillAssets={marketSkillAssets}
             installedSkills={skillAssets}
-            keyword={marketKeyword}
-            onKeywordChange={setMarketKeyword}
-            onSearch={(value) => {
-              const nextKeyword = value.trim();
-              setMarketKeyword(value);
-              setDebouncedMarketKeyword(nextKeyword);
-              setMarketListPage(1);
-            }}
-            source={marketSkillSource}
-            onSourceChange={(value) => {
-              setMarketSkillSource(value);
-              setMarketListPage(1);
-            }}
-            category={marketCategory}
-            onCategoryChange={(value) => {
-              setMarketCategory(value);
-              setMarketListPage(1);
-            }}
-            categories={marketCategories}
-            onReset={handleMarketReset}
             onInstall={handleMarketInstall}
             onDetail={handleMarketDetail}
             installingUid={installingUid}

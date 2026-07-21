@@ -11,6 +11,10 @@ import (
 func (c *FeishuConnector) rawObject(authConnectionID string, object Object) connector.RawObject {
 	mimeType := object.MimeType
 	fileExtension := object.FileExtension
+	isContainer := object.IsContainer
+	if object.Kind == ObjectKindWikiNode {
+		isContainer = true
+	}
 	if isMarkdownExportObject(object) {
 		mimeType = firstNonEmpty(mimeType, "text/markdown")
 		fileExtension = ".md"
@@ -24,7 +28,7 @@ func (c *FeishuConnector) rawObject(authConnectionID string, object Object) conn
 		SearchName:        strings.ToLower(displayName(object.Name, object.Token)),
 		ObjectType:        objectType(object),
 		IsDocument:        object.IsDocument,
-		IsContainer:       object.IsContainer,
+		IsContainer:       isContainer,
 		HasChildren:       object.HasChildren,
 		Bindable:          isBindableObject(object),
 		BindingTargetType: bindingTargetType(object),

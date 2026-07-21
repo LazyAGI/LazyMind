@@ -12,7 +12,7 @@ func (e *DefaultEngine) AddBinding(ctx context.Context, callerID, sourceID strin
 		return BindingMutationResponse{}, mapStoreError(err)
 	}
 	now := e.clock().UTC()
-	prepared, err := e.prepareCreateBinding(ctx, sourceID, src.DatasetID, src.Name, callerID, src.TenantID, "", 0, input, now)
+	prepared, err := e.prepareCreateBinding(ctx, sourceID, src.DatasetID, src.Name, callerID, "", src.TenantID, "", 0, input, now)
 	if err != nil {
 		return BindingMutationResponse{}, err
 	}

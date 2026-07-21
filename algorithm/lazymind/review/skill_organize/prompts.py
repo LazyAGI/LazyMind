@@ -15,7 +15,7 @@ The library grows over time, so it may contain duplicated skills, overlapping de
 
 Your task is NOT to rewrite skills. Your task is to decide how this small batch of existing skills should be organized so future skill retrieval and injection become clearer.
 
-You will receive compact Skill Summaries, not full SKILL.md files. Each summary contains the skill name, category, frontmatter description, and the first sentence of important workflow steps. Use these summaries to produce an organize plan only. Do not generate final SKILL.md content in this stage.
+You will receive compact Skill Summaries, not full SKILL.md files. Each summary contains the full storage key, skill name, storage category, frontmatter description, and the first sentence of important workflow steps. Use these summaries to produce an organize plan only. Do not generate final SKILL.md content in this stage.
 
 # What You Are Optimizing
 
@@ -36,8 +36,8 @@ Most of the value should come from clearer descriptions and from merging truly d
 
 # Principles
 
-- Source preservation: every output plan item must point back to source_names from the input. Do not invent source skills.
-- Exclusive assignment: each input skill must be assigned to exactly one plan item. Do not put the same source name in both a merge/refactor/keep item and a delete_duplicate item.
+- Source preservation: every output plan item must point back to source_keys from the input. Do not invent source skills.
+- Exclusive assignment: each input skill must be assigned to exactly one plan item. Do not put the same source key in both a merge/refactor/keep item and a delete_duplicate item.
 - No new capabilities: do not introduce a capability, workflow, tool, or domain that is not supported by the summaries.
 - Description first: prefer improving description over changing steps.
 - Experience preservation: assume the existing SOP/steps contain useful experience. Preserve them unless there is a clear reason not to.
@@ -45,7 +45,8 @@ Most of the value should come from clearer descriptions and from merging truly d
 - Merge conservatively: merge only when skills have substantially the same capability boundary, target object/action space, and completion condition. Similar style is not enough.
 - Delete conservatively: delete_duplicate only for duplicate or superseded skills whose useful capability is covered elsewhere in this plan.
 - No split/replace/global rebuild: this module does not split a skill into many skills, replace a skill with a newly invented one, run embedding clustering, or redesign the whole library.
-- Identity: use skill names as the organize identity. Do not output or depend on filesystem paths.
+- Identity: use the full `internal/name` or `external/name` storage key as the source identity. Skill names alone are not unique across categories.
+- Storage category is deterministic and must never be generated. For refactor, it comes from the sole source key. For merge only, target_source_key selects one source package and therefore the target storage category.
 
 # Action Selection Guide
 
@@ -84,9 +85,9 @@ Return ONLY valid JSON:
   "plans": [
     {{
       "type": "keep | refactor | merge | delete_duplicate",
-      "source_names": ["..."],
+      "source_keys": ["internal/name | external/name"],
+      "target_source_key": "merge only: one source key retained as the target package",
       "target_name": "kebab-case-name",
-      "target_category": "category",
       "target_description": "...",
       "step_handling_policy": "keep_steps | minimally_adjust_steps | merge_and_deduplicate_existing_steps | none",
       "reason": "..."
@@ -96,13 +97,13 @@ Return ONLY valid JSON:
 
 # Field Requirements
 
-- Every input skill name must appear in exactly one plan.source_names across the whole output.
-- A source name must never appear in more than one plan item.
-- source_names must only use names from the input.
-- keep: one source skill, target fields may equal the source identity, step_handling_policy should be keep_steps or none.
-- refactor: one source skill, target_name is required, step_handling_policy must be keep_steps or minimally_adjust_steps.
-- merge: two or more source skills, target_name is required, step_handling_policy must be merge_and_deduplicate_existing_steps. Do not also emit delete_duplicate items for any source_names used by this merge.
-- delete_duplicate: one source skill, target fields may be empty, step_handling_policy should be none, reason must explain which separately kept/refactored skill covers it.
+- Every input skill key must appear in exactly one plan.source_keys across the whole output.
+- A source key must never appear in more than one plan item.
+- source_keys must only use full keys from the input.
+- keep: one source skill; target_source_key must be empty; step_handling_policy should be keep_steps or none.
+- refactor: one source skill; target_source_key must be empty; target_name is required; step_handling_policy must be keep_steps or minimally_adjust_steps.
+- merge: two or more source skills; target_source_key must be one of source_keys and selects the package/category to retain; target_name is required; step_handling_policy must be merge_and_deduplicate_existing_steps. Cross-category merge is allowed. Do not also emit delete_duplicate items for any source_keys used by this merge.
+- delete_duplicate: one source skill; target_source_key and target fields may be empty; step_handling_policy should be none; reason must explain which separately kept/refactored skill covers it.
 - target_name must be kebab-case English.
 - Do not output path fields such as source_paths or target_path.
 - Output should use the same natural language as the source skills for descriptions.
@@ -122,14 +123,14 @@ You receive one organize plan item plus its source SKILL.md files.
 Generate only the new or updated target SKILL.md for human review.
 
 Deletion and keep decisions are handled by deterministic code from the organize plan. Do not output delete paths.
-The target path is determined by code from the plan's target name/category. Do not output a path.
+The target storage key is determined by code from the sole source key for refactor, or from target_source_key for merge, together with target_name. Do not output a path or storage category.
 
 # Principles
 
-- The plan is authoritative: keep its action, source names, target name/category, description, and step policy.
+- The plan is authoritative: keep its action, source keys, merge target source key, target name, description, and step policy.
 - Do not create unsupported capabilities, tools, workflows, or risk controls.
 - Preserve existing SOP/steps by default. Change steps only when the plan explicitly requires minimal adjustment or merge deduplication.
-- The content must be a complete valid SKILL.md with YAML frontmatter name/category/description and Markdown body.
+- The content must be a complete valid SKILL.md with YAML frontmatter name/description and Markdown body. A legacy frontmatter category, when present, is document content and never controls storage.
 
 # Action Rules
 

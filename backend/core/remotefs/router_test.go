@@ -73,14 +73,14 @@ func TestPersonalResourceTaskModes(t *testing.T) {
 	db := newRemoteFSTestDB(t)
 	handler := NewHandler(db.DB)
 
-	writeReview := httptest.NewRequest(http.MethodPut, "/remote-fs/content?path=memory/memory.md&user_id=u1&task_id=review_1", strings.NewReader("review draft"))
+	writeReview := httptest.NewRequest(http.MethodPut, "/remote-fs/content?path=memory/memory.md&user_id=u1&task_id=memory_review_1", strings.NewReader("review draft"))
 	writeReviewRec := httptest.NewRecorder()
 	handler.Content(writeReviewRec, writeReview)
 	if writeReviewRec.Code != http.StatusOK {
 		t.Fatalf("expected review write status 200, got %d body=%s", writeReviewRec.Code, writeReviewRec.Body.String())
 	}
 
-	readReview := httptest.NewRequest(http.MethodGet, "/remote-fs/content?path=memory/memory.md&user_id=u1&task_id=review_1", nil)
+	readReview := httptest.NewRequest(http.MethodGet, "/remote-fs/content?path=memory/memory.md&user_id=u1&task_id=memory_review_1", nil)
 	readReviewRec := httptest.NewRecorder()
 	handler.Content(readReviewRec, readReview)
 	if readReviewRec.Code != http.StatusOK || readReviewRec.Body.String() != "review draft" {

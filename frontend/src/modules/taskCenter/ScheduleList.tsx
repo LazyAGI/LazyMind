@@ -33,7 +33,7 @@ import type { Schedule, Task, TaskListResponse } from './api';
 import { KnowledgeBaseServiceApi } from '@/modules/chat/utils/request';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { axiosInstance, BASE_URL, localizeErrorCode } from '@/components/request';
-import { CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
+import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 
 /* ── KnowledgeSelect: reusable KB selector with embedding guard ────────── */
 interface KnowledgeSelectProps {
@@ -236,6 +236,7 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
   useEffect(() => { void fetch(page); }, [fetch, page]);
 
   const handleOpenConversation = (conversationId: string) => {
+    selectChatConversationFilter('task');
     sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
     navigate('/agent/chat/home');
   };

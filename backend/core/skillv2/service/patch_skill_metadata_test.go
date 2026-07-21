@@ -120,7 +120,7 @@ func TestPatchSkillEnableCommitsDraftForDisabledDraftSkill(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("seed draft row: %v", err)
 	}
-	seedSkillMDDraftEntry(t, db, "skill-draft", "h_draft_skill", "# Web research\n")
+	seedSkillMDDraftEntry(t, db, "skill-draft", "h_draft_skill", string(externalSkillMD("Web research", "Web research skill")))
 	svc := NewSkillService(SkillServiceDeps{
 		DB:        db,
 		BlobStore: NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
@@ -345,14 +345,15 @@ func seedSkillWithHeadRevision(t *testing.T, db *gorm.DB, skillID, revisionID st
 		t.Fatalf("seed revision: %v", err)
 	}
 	blobHash := "h_skill_" + revisionID
+	content := externalSkillMD("论文精读", "原始描述")
 	if err := db.Create(&testSkillV2BlobRow{
 		Hash:           blobHash,
-		Size:           12,
+		Size:           int64(len(content)),
 		Mime:           "text/markdown",
 		FileType:       "markdown",
 		Binary:         false,
 		StorageBackend: "postgres",
-		Content:        []byte("# 论文精读\n"),
+		Content:        content,
 		CreatedAt:      now,
 	}).Error; err != nil {
 		t.Fatalf("seed blob: %v", err)

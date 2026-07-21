@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from functools import lru_cache
+
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from lazymind.config import config
 import lazymind.router.config  # noqa: F401 — registers router config keys
@@ -36,29 +38,44 @@ def _build_engine(raw_url: str, *, pool_size: int = 5, max_overflow: int = 10):
     )
 
 
-_engine = _build_engine(config['core_database_url'] or '')
+def _database_url() -> str:
+    raw_url = str(config['core_database_url'] or '').strip()
+    if not raw_url:
+        raise RuntimeError('core_database_url is required when the router database is used')
+    return raw_url
 
-AsyncSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
-    bind=_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+
+@lru_cache(maxsize=1)
+def get_engine() -> AsyncEngine:
+    """Create the primary engine on first use, not while importing modules."""
+    return _build_engine(_database_url())
+
+
+@lru_cache(maxsize=1)
+def _get_session_factory() -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(bind=get_engine(), class_=AsyncSession, expire_on_commit=False)
+
+
+def AsyncSessionLocal() -> AsyncSession:
+    return _get_session_factory()()
+
 
 # Dedicated small pool for heartbeat and instance-cleanup queries so that
 # long-running business operations (skill_review, health probing) cannot
 # starve the heartbeat writer and cause false-positive instance timeouts.
-_heartbeat_engine = _build_engine(
-    config['core_database_url'] or '',
-    pool_size=2,
-    max_overflow=1,
-)
-
-HeartbeatSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
-    bind=_heartbeat_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+@lru_cache(maxsize=1)
+def _get_heartbeat_engine() -> AsyncEngine:
+    return _build_engine(_database_url(), pool_size=2, max_overflow=1)
 
 
-def get_engine():
-    return _engine
+@lru_cache(maxsize=1)
+def _get_heartbeat_session_factory() -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(
+        bind=_get_heartbeat_engine(),
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+
+def HeartbeatSessionLocal() -> AsyncSession:
+    return _get_heartbeat_session_factory()()

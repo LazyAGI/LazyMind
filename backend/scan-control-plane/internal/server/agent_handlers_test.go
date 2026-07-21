@@ -235,8 +235,34 @@ func TestAgentRegisterQueuesLocalWatcherStartCommands(t *testing.T) {
 	if command.Payload["type"] != "start_source" || command.Payload[agentCommandRootKey()] != "/workspace/docs" || command.Payload["skip_initial_scan"] != true {
 		t.Fatalf("start_source payload does not match file-watcher contract: %+v", command.Payload)
 	}
-	if command.Payload["tenant_id"] != "tenant-1" || command.Payload["source_id"] != "source-1" {
+	if command.Payload["tenant_id"] != "tenant-1" || command.Payload["source_id"] != "source-1" || command.Payload["binding_id"] != "binding-1" {
 		t.Fatalf("start_source payload lost source identity: %+v", command.Payload)
+	}
+}
+
+func TestAgentReportEventRoutesToSpecifiedBindingOnly(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	agents := &agentStoreStub{bindings: []store.Binding{
+		{SourceID: "source-1", BindingID: "binding-1", BindingGeneration: 1, AgentID: "agent-1", SyncMode: "watch", Status: "ACTIVE"},
+		{SourceID: "source-1", BindingID: "binding-2", BindingGeneration: 1, AgentID: "agent-1", SyncMode: "watch", Status: "ACTIVE"},
+	}}
+	scheduler := &watchSchedulerStub{}
+	handler := NewHandler(WithAgentStore(agents), WithScheduleEngine(scheduler), WithAgentToken("agent-token"), WithClock(func() time.Time { return now }))
+	req := agentRequest(t, "/api/v1/agents/events", map[string]any{
+		"agent_id": "agent-1",
+		"events":   []map[string]any{{"source_id": "source-1", "binding_id": "binding-2", "event_type": "modified", "path": "/workspace/docs/a.md", "occurred_at": now.Format(time.RFC3339Nano)}},
+	})
+	resp := httptest.NewRecorder()
+
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("report event: status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if len(scheduler.requests) != 1 || scheduler.requests[0].Binding.BindingID != "binding-2" {
+		t.Fatalf("binding-scoped event fanned out to other paths: %+v", scheduler.requests)
 	}
 }
 

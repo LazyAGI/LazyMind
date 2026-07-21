@@ -68,7 +68,7 @@ func seedFiftyRevisions(t *testing.T, db *testutil.TestDB, skillID, headRevision
 			CreatedAt:        testutil.TimeFixture(),
 		})
 		hash := "h_skill_" + revisionID
-		testutil.SeedTextBlob(t, db, hash, "# "+revisionID+"\n")
+		testutil.SeedTextBlob(t, db, hash, testutil.SkillMD("论文精读", "revision "+revisionID))
 		testutil.SeedRevisionEntry(t, db, revisionID, "SKILL.md", "file", hash, "markdown")
 	}
 	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", skillID).Update("head_revision_id", headRevisionID).Error; err != nil {

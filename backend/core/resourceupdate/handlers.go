@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"gorm.io/gorm"
@@ -315,11 +316,11 @@ func (w *Worker) handleMemoryGenerate(ctx context.Context, task orm.ResourceUpda
 	if sessionID == "" {
 		return permanentOutcome("missing_session_id", "session_id required")
 	}
-	memoryContent, userContent := memoryReviewContentsFromRequest(request)
 	llmConfig, err := w.loadLLMConfig(ctx, w.db, userID)
 	if err != nil {
 		return retryableOutcome("load_llm_config_failed", err)
 	}
+	reviewTaskID := "memory_review_" + strings.TrimSpace(task.ID)
 	resourceUpdateInfo(logEventMemoryReviewCallStart).
 		Str("task_id", task.ID).
 		Str("user_id", userID).
@@ -328,10 +329,9 @@ func (w *Worker) handleMemoryGenerate(ctx context.Context, task orm.ResourceUpda
 		Str("session_id", sessionID).
 		Msg(logEventMemoryReviewCallStart)
 	resp, status, err := w.callers.Memory(ctx, algo.MemoryReviewRequest{
+		TaskID:    reviewTaskID,
 		UserID:    userID,
 		History:   decodeHistory(request.History),
-		Memory:    memoryContent,
-		User:      userContent,
 		LLMConfig: llmConfig,
 	})
 	if err != nil {
@@ -343,9 +343,13 @@ func (w *Worker) handleMemoryGenerate(ctx context.Context, task orm.ResourceUpda
 			Int("http_status", status).
 			Str("reason", "request_failed").
 			Msg(logEventMemoryReviewCallFailed)
+		message := fmt.Sprintf("http_status=%d: %v", status, err)
+		if status == http.StatusUnprocessableEntity {
+			return permanentOutcome("memory_review_invalid_request", message)
+		}
 		return retryableOutcome("memory_review_call_failed", fmt.Errorf("http_status=%d: %w", status, err))
 	}
-	if status != 200 || resp == nil || strings.TrimSpace(resp.Status) != "success" {
+	if status != http.StatusOK || resp == nil || strings.TrimSpace(resp.Status) != "success" || strings.TrimSpace(resp.TaskID) != reviewTaskID {
 		resourceUpdateWarn(logEventMemoryReviewCallFailed, nil).
 			Str("task_id", task.ID).
 			Str("user_id", userID).
@@ -353,9 +357,10 @@ func (w *Worker) handleMemoryGenerate(ctx context.Context, task orm.ResourceUpda
 			Str("session_id", sessionID).
 			Int("http_status", status).
 			Str("response_status", safeMemoryStatus(resp)).
+			Str("response_task_id", safeMemoryTaskID(resp)).
 			Str("reason", "unexpected_response").
 			Msg(logEventMemoryReviewCallFailed)
-		return retryableOutcome("memory_review_unexpected_response", fmt.Errorf("http_status=%d status=%q", status, safeMemoryStatus(resp)))
+		return retryableOutcome("memory_review_unexpected_response", fmt.Errorf("http_status=%d status=%q task_id=%q", status, safeMemoryStatus(resp), safeMemoryTaskID(resp)))
 	}
 	resourceUpdateInfo(logEventMemoryReviewCallDone).
 		Str("task_id", task.ID).
@@ -364,23 +369,7 @@ func (w *Worker) handleMemoryGenerate(ctx context.Context, task orm.ResourceUpda
 		Str("session_id", sessionID).
 		Int("http_status", status).
 		Msg(logEventMemoryReviewCallDone)
-	return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone}
-}
-
-func memoryReviewContentsFromRequest(request memoryGenerateRequestJSON) (string, string) {
-	memoryContent := request.Memory
-	userContent := request.User
-	switch strings.TrimSpace(request.Target) {
-	case orm.ResourceUpdateResourceTypeMemory:
-		if memoryContent == "" {
-			memoryContent = request.CurrentContent
-		}
-	case orm.ResourceUpdateResourceTypeUserPreference:
-		if userContent == "" {
-			userContent = request.CurrentContent
-		}
-	}
-	return memoryContent, userContent
+	return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone, ResultID: reviewTaskID}
 }
 
 func decodeHistory(raw json.RawMessage) any {
@@ -444,6 +433,13 @@ func safeMemoryStatus(resp *algo.MemoryReviewResponse) string {
 		return ""
 	}
 	return resp.Status
+}
+
+func safeMemoryTaskID(resp *algo.MemoryReviewResponse) string {
+	if resp == nil {
+		return ""
+	}
+	return resp.TaskID
 }
 
 func (w *Worker) stageFor(index int) Stage {

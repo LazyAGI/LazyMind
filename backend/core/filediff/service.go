@@ -9,6 +9,7 @@ import (
 
 const defaultMaxTextBytes = 512 * 1024
 const maxInlineDiffCells = 20000
+const wholeLineChangeThresholdPercent = 70
 
 func CompareContent(old Content, next Content, opts Options) (FileDiff, error) {
 	maxBytes := defaultMaxTextBytes
@@ -128,29 +129,34 @@ func highlightedDiffLine(typ, text string, oldLine, newLine int, class string) D
 }
 
 func changedLinePair(oldText, newText string, oldLine, newLine int) (DiffEntryLine, DiffEntryLine) {
-	oldHTML, newHTML := inlineDiffHTML(oldText, newText)
+	oldHTML, newHTML, wholeLineReplacement := inlineDiffHTML(oldText, newText)
 	deletion := diffLine("DELETION", oldText, oldLine, 0)
 	addition := diffLine("ADDITION", newText, 0, newLine)
 	deletion.HTML = oldHTML
 	addition.HTML = newHTML
+	deletion.wholeLineReplacement = wholeLineReplacement
+	addition.wholeLineReplacement = wholeLineReplacement
 	return deletion, addition
 }
 
-func inlineDiffHTML(oldText, newText string) (string, string) {
+func inlineDiffHTML(oldText, newText string) (string, string, bool) {
 	oldRunes := []rune(oldText)
 	newRunes := []rune(newText)
 	if len(oldRunes) == 0 {
-		return "", wrapDiffSpan("diff-addition", html.EscapeString(newText))
+		return "", wrapDiffSpan("diff-addition", html.EscapeString(newText)), false
 	}
 	if len(newRunes) == 0 {
-		return wrapDiffSpan("diff-deletion", html.EscapeString(oldText)), ""
+		return wrapDiffSpan("diff-deletion", html.EscapeString(oldText)), "", false
 	}
 	if len(oldRunes)*len(newRunes) > maxInlineDiffCells {
-		return wrapDiffSpan("diff-deletion", html.EscapeString(oldText)), wrapDiffSpan("diff-addition", html.EscapeString(newText))
+		oldChanged, newChanged := changedRuneCounts(oldRunes, newRunes)
+		return wrapDiffSpan("diff-deletion", html.EscapeString(oldText)), wrapDiffSpan("diff-addition", html.EscapeString(newText)), isWholeLineReplacement(oldText, newText, oldChanged, newChanged)
 	}
 
 	oldChanged, newChanged := changedRuneMasks(oldRunes, newRunes)
-	return renderInlineDiffHTML(oldRunes, oldChanged, "diff-deletion"), renderInlineDiffHTML(newRunes, newChanged, "diff-addition")
+	oldChangedCount := countChangedRunes(oldChanged)
+	newChangedCount := countChangedRunes(newChanged)
+	return renderInlineDiffHTML(oldRunes, oldChanged, "diff-deletion"), renderInlineDiffHTML(newRunes, newChanged, "diff-addition"), isWholeLineReplacement(oldText, newText, oldChangedCount, newChangedCount)
 }
 
 func changedRuneMasks(oldRunes, newRunes []rune) ([]bool, []bool) {
@@ -221,39 +227,159 @@ func wrapDiffSpan(class, escapedText string) string {
 }
 
 func insertHunkHeaders(lines []DiffEntryLine) []DiffEntryLine {
-	hasChange := false
-	for _, line := range lines {
-		if startsDiffHunk(line) {
-			hasChange = true
-			break
-		}
-	}
-	if !hasChange {
+	blocks := buildHunkBlocks(lines)
+	if len(blocks) == 0 {
 		return nil
 	}
 
-	out := make([]DiffEntryLine, 0, len(lines)+1)
-	hunkIndex := 1
-	out = append(out, newHunkHeader(hunkIndex))
-	seenChange := false
-	contextSinceChange := false
-	for _, line := range lines {
-		if startsDiffHunk(line) {
-			if seenChange && contextSinceChange {
-				hunkIndex++
-				out = append(out, newHunkHeader(hunkIndex))
-			}
-			seenChange = true
-			contextSinceChange = false
-			out = append(out, line)
-			continue
-		}
-		if seenChange {
-			contextSinceChange = true
-		}
-		out = append(out, line)
+	out := make([]DiffEntryLine, 0, len(lines)+len(blocks))
+	for index, block := range blocks {
+		out = append(out, newHunkHeader(index+1))
+		out = append(out, block...)
 	}
 	updateHunkHeaders(out)
+	return out
+}
+
+func changedRuneCounts(oldRunes, newRunes []rune) (int, int) {
+	if len(oldRunes) == 0 || len(newRunes) == 0 {
+		return len(oldRunes), len(newRunes)
+	}
+	if len(oldRunes)*len(newRunes) <= maxInlineDiffCells {
+		oldChanged, newChanged := changedRuneMasks(oldRunes, newRunes)
+		return countChangedRunes(oldChanged), countChangedRunes(newChanged)
+	}
+
+	prefix := 0
+	for prefix < len(oldRunes) && prefix < len(newRunes) && oldRunes[prefix] == newRunes[prefix] {
+		prefix++
+	}
+	suffix := 0
+	for suffix < len(oldRunes)-prefix && suffix < len(newRunes)-prefix && oldRunes[len(oldRunes)-1-suffix] == newRunes[len(newRunes)-1-suffix] {
+		suffix++
+	}
+	return len(oldRunes) - prefix - suffix, len(newRunes) - prefix - suffix
+}
+
+func countChangedRunes(changed []bool) int {
+	count := 0
+	for _, isChanged := range changed {
+		if isChanged {
+			count++
+		}
+	}
+	return count
+}
+
+func isWholeLineReplacement(oldText, newText string, oldChanged, newChanged int) bool {
+	oldLength := utf8.RuneCountInString(oldText)
+	newLength := utf8.RuneCountInString(newText)
+	oldPrefix := markdownListPrefix(oldText)
+	if oldPrefix != "" && oldPrefix == markdownListPrefix(newText) {
+		prefixLength := utf8.RuneCountInString(oldPrefix)
+		oldLength -= prefixLength
+		newLength -= prefixLength
+	}
+	if oldLength <= 0 || newLength <= 0 {
+		return false
+	}
+	return oldChanged*100 >= oldLength*wholeLineChangeThresholdPercent &&
+		newChanged*100 >= newLength*wholeLineChangeThresholdPercent
+}
+
+func markdownListPrefix(text string) string {
+	index := 0
+	for index < len(text) && (text[index] == ' ' || text[index] == '\t') {
+		index++
+	}
+	markerStart := index
+	if index < len(text) && (text[index] == '-' || text[index] == '*' || text[index] == '+') {
+		index++
+	} else {
+		for index < len(text) && text[index] >= '0' && text[index] <= '9' {
+			index++
+		}
+		if index == markerStart || index >= len(text) || (text[index] != '.' && text[index] != ')') {
+			return ""
+		}
+		index++
+	}
+	if index >= len(text) || text[index] != ' ' {
+		return ""
+	}
+	return text[:index+1]
+}
+
+func buildHunkBlocks(lines []DiffEntryLine) [][]DiffEntryLine {
+	var blocks [][]DiffEntryLine
+	var leadingContext []DiffEntryLine
+	for index := 0; index < len(lines); {
+		if !startsDiffHunk(lines[index]) {
+			if len(blocks) == 0 {
+				leadingContext = append(leadingContext, lines[index])
+			} else {
+				blocks[len(blocks)-1] = append(blocks[len(blocks)-1], lines[index])
+			}
+			index++
+			continue
+		}
+
+		runStart := index
+		for index < len(lines) && startsDiffHunk(lines[index]) {
+			index++
+		}
+		runBlocks := splitChangedRun(lines[runStart:index])
+		if len(leadingContext) > 0 && len(runBlocks) > 0 {
+			runBlocks[0] = append(append([]DiffEntryLine{}, leadingContext...), runBlocks[0]...)
+			leadingContext = nil
+		}
+		blocks = append(blocks, runBlocks...)
+	}
+	return blocks
+}
+
+func splitChangedRun(lines []DiffEntryLine) [][]DiffEntryLine {
+	var blocks [][]DiffEntryLine
+	var wholeReplacements []DiffEntryLine
+	flushWholeReplacements := func() {
+		if len(wholeReplacements) == 0 {
+			return
+		}
+		blocks = append(blocks, deletionsBeforeAdditions(wholeReplacements))
+		wholeReplacements = nil
+	}
+
+	for index := 0; index < len(lines); {
+		if lines[index].Type == "DELETION" && index+1 < len(lines) && lines[index+1].Type == "ADDITION" {
+			pair := lines[index : index+2]
+			if lines[index].wholeLineReplacement && lines[index+1].wholeLineReplacement {
+				wholeReplacements = append(wholeReplacements, pair...)
+			} else {
+				flushWholeReplacements()
+				blocks = append(blocks, append([]DiffEntryLine{}, pair...))
+			}
+			index += 2
+			continue
+		}
+		wholeReplacements = append(wholeReplacements, lines[index])
+		index++
+	}
+	flushWholeReplacements()
+	return blocks
+}
+
+func deletionsBeforeAdditions(lines []DiffEntryLine) []DiffEntryLine {
+	out := make([]DiffEntryLine, 0, len(lines))
+	for _, line := range lines {
+		if line.Type == "DELETION" {
+			out = append(out, line)
+		}
+	}
+	for _, line := range lines {
+		if line.Type != "DELETION" {
+			out = append(out, line)
+		}
+	}
 	return out
 }
 

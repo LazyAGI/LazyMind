@@ -1,7 +1,9 @@
 from __future__ import annotations
 import asyncio
+import hashlib
 import json
 import re
+import threading
 import time
 from typing import Any, Dict, List, Optional, Union
 import lazyllm
@@ -17,7 +19,6 @@ from lazymind.chat.config import (
 )
 from lazymind.chat.engine.prompts import (
     add_standard_system_sections,
-    fallback_task_profile,
     resolve_task_profile,
     select_skill_candidates,
     selected_prompt_modules,
@@ -26,6 +27,7 @@ from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     ASK_USER_TOOL_CONFIG,
+    ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
     USER_ATTACHMENT_TOOL_CONFIGS,
     collect_system_prompt_appendices,
@@ -76,6 +78,10 @@ _CITE_MESSAGE_PATTERN = re.compile(
     r'<cite_message>([\s\S]*?)</cite_message>\s*',
     re.IGNORECASE,
 )
+_MCP_TOOL_CACHE_TTL_SECONDS = 300
+_TASK_PROFILE_ROUTER_TIMEOUT_SECONDS = 20
+_mcp_tool_cache: dict[str, tuple[float, list[Any]]] = {}
+_mcp_tool_cache_lock = threading.Lock()
 
 
 def _normalize_cite_message_query_for_agent(query: str) -> tuple[str, str]:
@@ -120,34 +126,47 @@ def check_sensitive_content(
     return sensitive_word if has_sensitive else None
 
 
-def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
-    """Build MCP tool list from mcp_config. Skip individual servers on failure with a warning."""
-    tools = []
-    for server in mcp_config:
-        url = server.get('url')
-        if not url:
-            LOG.warning(
-                f"[MCP] skipped server {server.get('name')}: missing 'url' field"
-            )
-            continue
-        try:
-            client = MCPClient(
-                command_or_url=url,
-                headers=server.get('headers'),
-                timeout=server.get('timeout', 5),
-                transport=server.get('transport', 'auto'),
-            )
-            allowed = server.get('allowed_tools') or None
-            mcp_tools = client.get_tools(allowed_tools=allowed)
-            tools.extend(mcp_tools)
-            LOG.info(
-                f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}"
-            )
-        except Exception as e:
-            LOG.warning(
-                f"[MCP] failed to connect {server.get('name')}: {e}"
-            )
-    return tools
+def _mcp_server_cache_key(server: Dict[str, Any]) -> str:
+    encoded = json.dumps(server, ensure_ascii=False, sort_keys=True, default=str).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _load_mcp_server_tools(server: Dict[str, Any]) -> list:
+    url = server.get('url')
+    if not url:
+        LOG.warning(f"[MCP] skipped server {server.get('name')}: missing 'url' field")
+        return []
+    cache_key = _mcp_server_cache_key(server)
+    now = time.monotonic()
+    with _mcp_tool_cache_lock:
+        cached = _mcp_tool_cache.get(cache_key)
+        if cached and now - cached[0] < _MCP_TOOL_CACHE_TTL_SECONDS:
+            LOG.info(f"[MCP] reused cached tools from {server.get('name')}")
+            return list(cached[1])
+    try:
+        client = MCPClient(
+            command_or_url=url,
+            headers=server.get('headers'),
+            timeout=server.get('timeout', 5),
+            transport=server.get('transport', 'auto'),
+        )
+        allowed = server.get('allowed_tools') or None
+        mcp_tools = client.get_tools(allowed_tools=allowed)
+        with _mcp_tool_cache_lock:
+            _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
+        LOG.info(f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}")
+        return mcp_tools
+    except Exception as e:
+        LOG.warning(f"[MCP] failed to connect {server.get('name')}: {e}")
+        return []
+
+
+async def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
+    """Load MCP schemas concurrently and reuse unchanged schemas briefly."""
+    groups = await asyncio.gather(*(
+        asyncio.to_thread(_load_mcp_server_tools, server) for server in mcp_config
+    ))
+    return [tool for group in groups for tool in group]
 
 
 def _build_subagent_chat_tools() -> list:
@@ -172,11 +191,13 @@ def _build_chat_artifact_tools() -> list:
 
 
 def _build_user_attachment_tools(has_files: bool) -> list:
-    """Register find_user_attachment / read_user_attachment when the conversation has uploads."""
+    """Register attachment lookup, reading, and text editing when uploads exist."""
     if not has_files:
         return []
-    from lazymind.chat.engine.subagent.tools import find_user_attachment, read_user_attachment
-    return [find_user_attachment, read_user_attachment]
+    return [
+        *(config.tool for config in USER_ATTACHMENT_TOOL_CONFIGS),
+        ATTACHMENT_EDIT_TOOL_CONFIG.tool,
+    ]
 
 
 def _build_ask_user_tool() -> list:
@@ -198,7 +219,109 @@ def _should_register_ask_user(agentic_config: Dict[str, Any]) -> bool:
     )
 
 
+def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
+    query, _ = _normalize_cite_message_query_for_agent(request.message.query)
+    user_input, _ = _normalize_cite_message_query_for_agent(request.message.user_query or query)
+    explicit_resources = request.explicit_resource_bindings.model_dump()
+    selected_kb_ids = _normalize_kb_id_filter((request.retrieval.filters or {}).get('kb_id'))
+    if selected_kb_ids and not explicit_resources['knowledge_base_ids']:
+        explicit_resources['knowledge_base_ids'] = (
+            selected_kb_ids if isinstance(selected_kb_ids, list) else [selected_kb_ids]
+        )
+    active_plugin_ref = str(
+        (request.plugin.plugin_context or {}).get('plugin_ref') or ''
+    ).strip()
+    if active_plugin_ref and not explicit_resources['plugin_refs']:
+        explicit_resources['plugin_refs'] = [active_plugin_ref]
+    thinking_depth = (
+        request.runtime.thinking_depth
+        if request.runtime.thinking_depth in ('low', 'medium', 'high') else 'medium'
+    )
+    return {
+        'query': user_input.strip(),
+        'history': normalize_history_for_agent(list(request.message.history or [])),
+        'intent': request.conversation.intent_context,
+        'has_attachments': bool(request.message.files),
+        'explicit_resources': explicit_resources,
+        'thinking_depth': thinking_depth,
+    }
+
+
+def _resolve_task_profile_with_model(inputs: dict[str, Any]) -> Any:
+    def classify(prompt: str) -> Any:
+        router_llm = AutoModel(model='llm')
+        return router_llm(
+            prompt,
+            response_format={'type': 'json_object'},
+            stream_output=False,
+            timeout=_TASK_PROFILE_ROUTER_TIMEOUT_SECONDS,
+        )
+
+    return resolve_task_profile(
+        **inputs,
+        classifier=classify,
+        enable_llm_fallback=True,
+    )
+
+
 async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingResponse]:
+    if not _cfg['dynamic_prompt_modules']:
+        return await _handle_chat_impl(request)
+
+    inputs = _task_profile_inputs(request)
+    provisional = resolve_task_profile(
+        **inputs,
+        classifier=None,
+        enable_llm_fallback=False,
+    )
+    if not provisional.routing_review_required:
+        return await _handle_chat_impl(request, task_profile_override=provisional)
+
+    from lazymind.chat.plugin.plugin_manager import is_plugin_driver_turn
+    raw_query = str(request.message.query or '')
+    if (
+        not is_plugin_driver_turn(request.plugin.plugin_context)
+        and check_sensitive_content(raw_query)
+    ):
+        return await _handle_chat_impl(request, task_profile_override=provisional)
+
+    inject_model_config(request.runtime.llm_config)
+
+    async def resolve_and_continue():
+        started = time.time()
+        routing_task = asyncio.create_task(asyncio.to_thread(
+            _resolve_task_profile_with_model, inputs,
+        ))
+        for status_delta in ('正在', '分析', '用户意图', '，请稍后'):
+            yield log_and_emit_frame(
+                {'think': status_delta, 'text': None, 'sources': []},
+                round(time.time() - started, 3),
+                raw_query,
+                request.conversation.session_id,
+                tag='TASK_PROFILE',
+            )
+            await asyncio.sleep(0.08)
+        profile = await routing_task
+        response = await _handle_chat_impl(request, task_profile_override=profile)
+        if isinstance(response, StreamingResponse):
+            async for chunk in response.body_iterator:
+                yield chunk
+            return
+        yield sse_line(response_payload(200, 'success', response, time.time() - started))
+
+    if request.runtime.context_usage_preview or request.runtime.context_prompt_export:
+        profile = provisional
+        if request.runtime.context_preview_allow_llm_routing:
+            profile = await asyncio.to_thread(_resolve_task_profile_with_model, inputs)
+        return await _handle_chat_impl(request, task_profile_override=profile)
+    return StreamingResponse(resolve_and_continue(), media_type='text/event-stream')
+
+
+async def _handle_chat_impl(
+    request: ChatRequest,
+    *,
+    task_profile_override: Any = None,
+) -> Union[Dict[str, Any], StreamingResponse]:
     message = request.message
     conversation = request.conversation
     retrieval = request.retrieval
@@ -338,38 +461,26 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     inject_reader_config(ocr_config=runtime.ocr_config)
     lazyllm.globals['agentic_config'] = agentic_config
 
+    thinking_depth = (
+        runtime.thinking_depth
+        if runtime.thinking_depth in ('low', 'medium', 'high') else 'medium'
+    )
     task_profile = None
     if _cfg['dynamic_prompt_modules']:
-        is_context_preview = runtime.context_usage_preview or runtime.context_prompt_export
-        preview_allows_llm = bool(runtime.context_preview_allow_llm_routing)
-        allow_routing_model = (
-            _cfg['task_profile_llm_fallback']
-            and (not is_context_preview or preview_allows_llm)
-        )
-        routing_model = AutoModel(model='llm') if allow_routing_model else None
         profile_started = time.monotonic()
-        try:
-            task_profile = await asyncio.wait_for(
-                asyncio.to_thread(
-                    resolve_task_profile,
-                    language_query,
-                    history=agent_history,
-                    intent=conversation.intent_context,
-                    classifier=routing_model,
-                    enable_llm_fallback=allow_routing_model,
-                    has_attachments=bool(files_map),
-                    explicit_resources=explicit_resource_payload,
-                ),
-                timeout=max(1, _cfg['task_profile_llm_timeout']),
-            )
-        except asyncio.TimeoutError as exc:
-            task_profile = fallback_task_profile(
+        task_profile = task_profile_override
+        if task_profile is None:
+            task_profile = resolve_task_profile(
                 language_query,
-                error=exc,
-                latency_ms=int((time.monotonic() - profile_started) * 1000),
+                history=agent_history,
+                intent=conversation.intent_context,
+                classifier=None,
+                enable_llm_fallback=False,
+                thinking_depth=thinking_depth,
                 has_attachments=bool(files_map),
                 explicit_resources=explicit_resource_payload,
             )
+        profile_latency_ms = int((time.monotonic() - profile_started) * 1000)
         LOG.info(
             '[ChatServer] [TASK_PROFILE] [sid=%s] source=%s outcome=%s deliverable=%s '
             'modules_dynamic=true skill_mode=%s latency_ms=%s error=%s',
@@ -378,7 +489,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             task_profile.primary_outcome,
             task_profile.deliverable_kind,
             task_profile.skill_mode,
-            task_profile.router_latency_ms,
+            profile_latency_ms,
             task_profile.router_error,
         )
 
@@ -465,10 +576,13 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     # Respect enable_subagent flag: when false, suppress create_subagent and related tools.
     enable_subagent = agentic_config.get('enable_subagent', True)
     subagent_tools = _build_subagent_chat_tools() if enable_subagent else []
-    mcp_tools = _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
+    mcp_tools = await _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
     # User attachment tools are only meaningful when the user has uploaded files.
     attachment_tools = _build_user_attachment_tools(bool(files_map))
-    attachment_configs = list(USER_ATTACHMENT_TOOL_CONFIGS) if attachment_tools else []
+    attachment_configs = (
+        [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
+        if attachment_tools else []
+    )
     # ask_user is a ChatAgent-only stop-tool. It is NOT in DEFAULT_TOOLS so SubAgents
     # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.
     # Auto plugin mode is non-interactive by contract: ask_user must be absent,
@@ -555,6 +669,21 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         'backend.turn', priority=60, authoritative=True, content_kind='state',
         skip_if=lambda: _eff_current_seq is None,
     )
+    prompt_builder.runtime(
+        'chat_task_routing_review', 'Task Routing Review', (
+            'The fast rule-only task profile was not conclusive. Independently determine the '
+            'user\'s actual goal, needed capabilities, and best response strategy before acting. '
+            'The provisional task profile is guidance, not an authoritative decision. Do not '
+            'announce or explain this routing analysis to the user; begin the useful response or '
+            'tool work directly. Uncertainty reported by rules: '
+            f'{task_profile.routing_review_reason if task_profile else "unknown"}'
+        ),
+        'backend.task_profile', priority=65, content_kind='instruction',
+        skip_if=lambda: not (
+            task_profile is not None
+            and task_profile.routing_review_required
+        ),
+    )
     prompt_bundle = prompt_builder.input(
         content=language_query,
         source='user',
@@ -580,6 +709,19 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             keep_full_turns=_cfg['agentic_keep_full_turns'],
             fs=FS,
             skills_dir=_cfg['skill_fs_url'],
+            max_retries={
+                'low': _cfg['agentic_max_rounds_low'],
+                'medium': _cfg['agentic_max_rounds_medium'],
+                'high': _cfg['agentic_max_rounds_high'],
+            }.get(thinking_depth, _cfg['agentic_max_rounds_medium']),
+            tool_failure_limits={
+                'url_fetch': 2,
+                'kb_search': 2,
+                'kb_tmp_search': 2,
+                'list_knowledge_bases': 2,
+                'list_knowledge_base_documents': 2,
+                'aggregate_knowledge_base_documents': 2,
+            },
         ),
     )
     executor = AgentExecutor()
@@ -594,17 +736,22 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                 prompt_markdown = '\n'.join([
                     '> ⚠️ This is a rule-only prompt preview and may be inaccurate.',
                     f'> Reason: {task_profile.routing_review_reason}',
-                    '> Confirm model-assisted routing in the context preview to refine it.',
+                    '> ChatAgent will resolve this uncertainty when the request executes.',
                     '',
                     prompt_markdown,
                 ])
             return {'prompt_markdown': prompt_markdown}
         report = await estimate_context_usage(plan, agent_context)
         report_data = report_to_dict(report)
-        requires_llm = bool(task_profile and task_profile.routing_review_required)
+        llm_enhanced = runtime.context_preview_allow_llm_routing
+        requires_llm = bool(
+            not llm_enhanced and task_profile and task_profile.routing_review_required
+        )
         report_data.update({
-            'preview_accuracy': 'rule_only' if requires_llm else (
-                'llm_enhanced' if runtime.context_preview_allow_llm_routing else 'deterministic'
+            'preview_accuracy': (
+                'llm_enhanced' if llm_enhanced
+                else 'rule_only' if requires_llm
+                else 'deterministic'
             ),
             'requires_llm': requires_llm,
             'llm_reason': task_profile.routing_review_reason if requires_llm else '',

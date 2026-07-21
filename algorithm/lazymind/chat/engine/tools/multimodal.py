@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import lazyllm
@@ -81,6 +82,12 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
     raw = str(url or '').strip()
     if not raw:
         return tool_error('vision_extractor', 'url is required')
+    if Path(raw.split('?', 1)[0]).suffix.lower() == '.pdf':
+        return tool_error(
+            'vision_extractor',
+            'vision_extractor only supports image files; use kb_tmp_search to read PDF content',
+            error_type='UnsupportedFileType',
+        )
 
     local_path = resolve_tool_image_path(raw)
     if not local_path:

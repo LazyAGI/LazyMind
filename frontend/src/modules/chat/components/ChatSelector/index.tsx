@@ -133,10 +133,11 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
 
     useImperativeHandle(ref, () => ({
       open: () => {
+        if (isEmbeddingDisabled) return;
         setOpen(true);
       },
       close: () => setOpen(false),
-    }));
+    }), [isEmbeddingDisabled]);
 
     useEffect(() => {
       getKnowledgeBaseList();
@@ -447,6 +448,8 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
           content={renderContent()}
           classNames={{ root: "knowledgePopover" }}
           trigger="click"
+          placement="topLeft"
+          align={{ offset: [-12, -10] }}
           open={open}
           onOpenChange={(bool) => {
             if (isEmbeddingDisabled) return;

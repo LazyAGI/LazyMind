@@ -55,6 +55,7 @@ import {
   getSkillReviewSummary,
   listIncomingSkillShares,
   listOutgoingSkillShares,
+  listSkillReviewResultsByRequest,
   listSkillReviewTasks,
   listSkillShareTargets,
   listSkillAssetsPage,

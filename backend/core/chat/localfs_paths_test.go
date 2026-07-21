@@ -55,7 +55,7 @@ func TestApplyLocalFSPathsForChatAddsActiveLocalBindings(t *testing.T) {
 			_ = json.NewDecoder(r.Body)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"bindings": []map[string]any{
-					{"binding_id": "bind-2a", "connector_type": "local_fs", "target_type": "local_path", "target_ref": "/Users/me/projects", "status": "ACTIVE", "chat_enabled": true, "include_extensions": []string{"pdf"}},
+					{"binding_id": "bind-2a", "connector_type": "local_fs", "target_type": "local_path", "target_ref": "/Users/me/projects", "status": "ACTIVE", "chat_enabled": true, "include_extensions": []string{"pdf", "md", "txt", "go", "tsx", "toml"}},
 					{"binding_id": "bind-2b", "connector_type": "local_fs", "target_type": "local_path", "target_ref": "/Users/me/downloads", "status": "ACTIVE", "chat_enabled": true, "include_extensions": []string{"doc", "docx"}},
 					{"binding_id": "bind-2c", "connector_type": "local_fs", "target_type": "local_path", "target_ref": "/tmp/paused", "status": "PAUSED", "chat_enabled": true, "include_extensions": []string{"txt"}},
 					{"binding_id": "bind-2d", "connector_type": "local_fs", "target_type": "local_path", "target_ref": "/tmp/disabled", "status": "ACTIVE", "chat_enabled": false, "include_extensions": []string{"xls"}},
@@ -82,7 +82,7 @@ func TestApplyLocalFSPathsForChatAddsActiveLocalBindings(t *testing.T) {
 	// source-1: one local_fs binding but no include_extensions → filtered out.
 	// source-2: two chat_enabled=true local_fs bindings with extensions.
 	want := []map[string]any{
-		{"source_id": "source-2", "paths": []string{"/Users/me/projects", "/Users/me/downloads"}, "file_extensions": []string{"doc", "docx", "pdf"}},
+		{"source_id": "source-2", "paths": []string{"/Users/me/projects", "/Users/me/downloads"}, "file_extensions": []string{"doc", "docx", "go", "md", "pdf", "toml", "tsx", "txt"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("local_fs_sources = %#v, want %#v", got, want)

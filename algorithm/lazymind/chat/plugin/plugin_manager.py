@@ -321,7 +321,7 @@ def is_plugin_driver_turn(plugin_context: Any) -> bool:
 
 
 _COLD_START_PLUGIN_PROMPT = (
-    '## Available Plugins\n'
+    '## Available Workflows\n'
     'IMPORTANT: Only trigger a plugin when the capability matches the '
     "user's PRIMARY and DIRECT intent — the main goal they are asking for "
     'right now. Never trigger a plugin for a sub-step that the model has '
@@ -338,7 +338,7 @@ _COLD_START_PLUGIN_PROMPT = (
     'If it returns need_information, use ask_user only when that tool is available.\n\n'
     'CRITICAL — explicit plugin start requests:\n'
     'If the user explicitly asks to start, launch, or enable a plugin (e.g. '
-    '"启动绘图插件", "打开图片生成插件", "启动图片插件", "start the image plugin"), '
+    '"启动绘图工作流", "打开图片生成工作流", "启动图片工作流", "start the image workflow"), '
     'you MUST call the matching `trigger_<plugin_id>_plugin` tool in this same '
     'response before any other action. Do NOT reply with text only, do NOT call '
     '`image_generator` / `image_editor` / `video_generator` / `video_to_gif` directly, '
@@ -548,7 +548,7 @@ def _trigger_plugin_steps(
     cfg = _agentic_config()
     session_id = str(cfg.get('plugin_session_id') or '')
     if not session_id:
-        raise ValueError('batch advancement requires an active plugin session.')
+        raise ValueError('batch advancement requires an active workflow session.')
     focused_tab = cfg.get('focused_tab')
     targets: List[Dict[str, Any]] = []
     seen: set[str] = set()
@@ -685,7 +685,7 @@ def _build_step_name_index(plugin_id: str) -> str:
     if not entries:
         return ''
     return (
-        '## Plugin Step Name Index [AUTHORITATIVE]\n'
+        '## Workflow Step Name Index [AUTHORITATIVE]\n'
         'Use this compact id/name list only to match a user-named target boundary. '
         'It does not imply reachability or execution order.\n'
         + ', '.join(entries)
@@ -724,8 +724,8 @@ def _evaluate_plugin_preflight(
     previous_json = json.dumps(previous or {}, ensure_ascii=False)
     prompt = f'''You are a plugin launch preflight evaluator. Return exactly one JSON object and no prose.
 
-Plugin id: {plugin_id}
-Plugin name: {plugin_name}
+Workflow id: {plugin_id}
+Workflow name: {plugin_name}
 Description: {description}
 When to use: {when_to_use}
 Valid first steps: {json.dumps(first_steps, ensure_ascii=False)}
@@ -958,8 +958,8 @@ def build_cold_start_tools(
                     return json.dumps({
                         'status': 'preflight_failed',
                         'outcome': 'preflight_failed',
-                        'reason': 'an active plugin session already exists',
-                        'error': 'an active plugin session already exists',
+                        'reason': 'an active workflow session already exists',
+                        'error': 'an active workflow session already exists',
                     }, ensure_ascii=False)
                 previous = cfg.get('plugin_preflight_context')
                 if not isinstance(previous, dict) or previous.get('plugin_id') != resolved_plugin_id:
@@ -1213,7 +1213,7 @@ def _commit_prepared_plugin(
     summary = _wait_for_go_task(step_id, result)
     spec = plugin_loader.get_plugin(plugin_id)
     if spec is None:
-        raise RuntimeError(f'Plugin {plugin_id!r} disappeared after launch was prepared.')
+        raise RuntimeError(f'Workflow {plugin_id!r} disappeared after launch was prepared.')
     labels = {
         sid: scfg.get('label', '')
         for sid, scfg in (spec._steps or {}).items()
@@ -1225,7 +1225,7 @@ def _commit_prepared_plugin(
         current_step=step_id,
         rewind_steps=[],
         step_labels=labels,
-    ) + '\n\n---\nPlugin scenario:\n' + str(prepared.get('scenario') or '')
+    ) + '\n\n---\nWorkflow scenario:\n' + str(prepared.get('scenario') or '')
 
 
 def build_cold_advance_tools(plugin_mode: str = 'dynamic') -> List[Any]:
@@ -1382,7 +1382,7 @@ async def _enforce_prepared_plugin_advance(
     retry_prompt = (
         PromptBuilder.for_role(AgentRole.CHAT)
         .runtime(
-            'plugin_launch_correction', 'Mandatory Plugin Launch Correction', correction,
+            'plugin_launch_correction', 'Mandatory Workflow Launch Correction', correction,
             'plugin.runtime',
             authoritative=True,
             content_kind='instruction',
@@ -1554,7 +1554,7 @@ def build_advance_step_and_hand_off_tool(
         else 'Use this tool to start the selected next step.\n'
     )
     advance_step_and_hand_off.__doc__ = (
-        'Start the next plugin step asynchronously and end the current ReAct turn.\n\n'
+        'Start the next workflow step asynchronously and end the current ReAct turn.\n\n'
         + selection_guidance
         + 'Terminal steps are also boundaries; after a\n'
         'terminal task succeeds, the plugin event loop completes the session.\n\n'
@@ -1668,7 +1668,7 @@ def build_advance_step_tool(
         )
 
     advance_step.__doc__ = (
-        'Advance the active plugin step synchronously and return the result.\n\n'
+        'Advance the active workflow step synchronously and return the result.\n\n'
         'Use this tool in continuous/uninterrupted mode, or when the target step is\n'
         'annotated `[default approval: not required]` and the user did not override it.\n'
         'Continuous mode is active when the user intent contains phrases like\n'
@@ -1712,7 +1712,7 @@ def build_advance_steps_and_hand_off_tool(
         return submission.message
 
     advance_steps_and_hand_off.__doc__ = (
-        'Atomically start two or more independent Ready plugin steps and end the current turn.\n\n'
+        'Atomically start two or more independent Ready workflow steps and end the current turn.\n\n'
         'Use one call when Go reports multiple Ready steps that should start now. Go evaluates all\n'
         'items against the same projection and either queues every item or rejects the entire batch.\n'
         'Never include a downstream step that needs an output from another item in this batch.\n'
@@ -1764,7 +1764,7 @@ def build_advance_steps_tool(
         )
 
     advance_steps.__doc__ = (
-        'Atomically start two or more independent Ready plugin steps and wait for all results.\n\n'
+        'Atomically start two or more independent Ready workflow steps and wait for all results.\n\n'
         'Prefer this over repeated advance_step calls whenever the authoritative Ready list contains\n'
         'multiple steps that should run now. The batch is all-or-rejected and increments state_version\n'
         'once. Never batch a downstream dependency or a previously attempted target.\n\n'
@@ -1801,7 +1801,7 @@ def _append_step_transition_hint(
     return (
         f'{summary}\n\n'
         '---\n'
-        'Plugin state after this step:\n'
+        'Workflow state after this step:\n'
         f'- Current step: {current_step}\n'
         '- The next advance_step call in this same turn must follow this live state:\n\n'
         f'{choices_doc}\n\n'
@@ -1885,7 +1885,7 @@ def build_query_tools() -> List[Any]:
     """Build read-only plugin state query tools for ChatAgent."""
 
     def list_plugin_steps(session_id: Optional[str] = None) -> str:
-        """List all steps and their current status in the active plugin session.
+        """List all steps and their current status in the active workflow session.
 
         Use this when the user asks "where are we in the pipeline" or
         "which steps are done / failed".  Read-only — does not trigger execution.
@@ -1893,7 +1893,7 @@ def build_query_tools() -> List[Any]:
         cfg = _agentic_config()
         sid = session_id or cfg.get('plugin_session_id', '')
         if not sid:
-            return 'No active plugin session.'
+            return 'No active workflow session.'
         try:
             import httpx
             from lazymind.config import config as _cfg
@@ -1916,7 +1916,7 @@ def build_query_tools() -> List[Any]:
                     runs[-1].append(s)
                 else:
                     runs.append([s])
-            lines = ['## Plugin session steps']
+            lines = ['## Workflow session steps']
             for run in runs:
                 latest = run[-1]
                 if latest.get('status') == 'succeeded':
@@ -1943,7 +1943,7 @@ def build_query_tools() -> List[Any]:
         cfg = _agentic_config()
         session_id = cfg.get('plugin_session_id', '')
         if not session_id:
-            return 'No active plugin session.'
+            return 'No active workflow session.'
         try:
             from lazymind.chat.engine.subagent.db import TaskQueryDB
             artifacts = TaskQueryDB().get_step_artifacts(session_id, step_id)
@@ -1965,7 +1965,7 @@ def build_query_tools() -> List[Any]:
         cfg = _agentic_config()
         session_id = cfg.get('plugin_session_id', '')
         if not session_id:
-            return 'No active plugin session.'
+            return 'No active workflow session.'
         try:
             import httpx
             from lazymind.config import config as _cfg
@@ -2042,7 +2042,7 @@ def _build_preflight_context_section(preflight: Any) -> str:
     if not visible:
         return ''
     return (
-        '## Plugin Preflight Context [AUTHORITATIVE]\n'
+        '## Workflow Preflight Context [AUTHORITATIVE]\n'
         'This durable snapshot survives history compaction. Preserve original_intent, '
         'merge new answers into normalized_request, and pass the consolidated result to '
         'trigger_<plugin>(request_context).\n'
@@ -2054,13 +2054,13 @@ def _build_cold_execution_policy(plugin_mode: str) -> str:
     """Return request-local guidance for choosing the first advancement tool."""
     if plugin_mode == 'auto':
         return (
-            '## Current Plugin Launch Policy [AUTHORITATIVE]\n'
+            '## Current Workflow Launch Policy [AUTHORITATIVE]\n'
             'After a trigger returns ready, call the only available advancement tool named '
             'in launch_plan. Do not make an approval or continuation decision.'
         )
     return (
-        '## Current Plugin Launch Policy [AUTHORITATIVE]\n'
-        'After a trigger returns ready, it provides a compact index of every plugin step, '
+        '## Current Workflow Launch Policy [AUTHORITATIVE]\n'
+        'After a trigger returns ready, it provides a compact index of every workflow step, '
         'the valid first step, and that first step\'s default approval. Match any user-named '
         'target boundary against the full id/name index. The index contains names only and '
         'does not imply order or reachability.\n'
@@ -2304,7 +2304,7 @@ def resolve_plugin_injection(
 
 
 def _catalog_intro(entry: Dict[str, Any]) -> str:
-    lines = [f'## Plugin: {entry.get("plugin_id") or entry.get("name") or "plugin"}']
+    lines = [f'## Workflow: {entry.get("plugin_id") or entry.get("name") or "workflow"}']
     if entry.get('description'):
         lines.append(str(entry['description']))
     if entry.get('when_to_use'):
@@ -2370,11 +2370,11 @@ def _build_step_status_section(
             if target and when:
                 route_hints.setdefault(target, []).append(when)
 
-        lines = ['## Plugin Step Status [AUTHORITATIVE — queried at request time]']
+        lines = ['## Workflow Step Status [AUTHORITATIVE — queried at request time]']
         lines.append('> Any step-status information in the conversation history is OUTDATED. Use only this section.')
 
         if current_step:
-            lines.append(f'\nCurrent plugin step state: **{_label(current_step)}**')
+            lines.append(f'\nCurrent workflow step state: **{_label(current_step)}**')
             lines.append(
                 'This is the step the session is currently positioned at; it is not automatically '
                 'the next action target. If the user clearly wants to proceed and does not modify '
@@ -2418,7 +2418,7 @@ def _build_mode_guidance(
     """Return the request-local execution policy selected by application code."""
     if plugin_mode == 'auto':
         return (
-            '## Current Plugin Execution Policy [AUTHORITATIVE]\n\n'
+            '## Current Workflow Execution Policy [AUTHORITATIVE]\n\n'
             'Only asynchronous advancement tools are available. Use '
             '`advance_steps_and_hand_off` exactly once when two or more independent Ready '
             'steps should start now; use `advance_step_and_hand_off` for one Ready step. '
@@ -2431,7 +2431,7 @@ def _build_mode_guidance(
     global_rules = (
         '\n\n## Step decision rules (READ BEFORE EVERY ACTION)\n\n'
         '### Rule 0 — Intent capture from latest user query (highest priority)\n'
-        'At the beginning of each plugin turn, compare the latest user query with the inherited intent.\n'
+        'At the beginning of each workflow turn, compare the latest user query with the inherited intent.\n'
         'If it contains explicit constraints/emphasis or a named execution boundary (e.g.\n'
         '"必须/不要/只能/执行到 X/做到 X/完成 X 后确认/until X"),\n'
         'you MUST call `intentwrite` with the minimal intent delta FIRST,\n'
@@ -2465,7 +2465,7 @@ def _build_mode_guidance(
         '### Rule 3 — Approval precedence and workflow advancement\n'
         'Select the advancement tool with this priority:\n'
         '  1. Explicit intent in the latest query or persisted session intent wins. Match a\n'
-        '     user-named target against the compact "Plugin Step Name Index". If that boundary\n'
+        '     user-named target against the compact "Workflow Step Name Index". If that boundary\n'
         '     is a currently valid next step, use `advance_step_and_hand_off` for it. If it is\n'
         '     another known step and the user requests continuous execution until that boundary,\n'
         '     use `advance_step` or `advance_steps` for prerequisite Ready frontiers. Do NOT hand off an\n'
@@ -2479,7 +2479,7 @@ def _build_mode_guidance(
         '     boundary, use `advance_steps_and_hand_off`.\n'
         'After an `advance_step` result, repeat this decision for the next target. This lets\n'
         'automatic steps continue until the workflow reaches a step that requires approval.\n\n'
-        'If the user clearly asks to proceed with the existing plugin workflow and\n'
+        'If the user clearly asks to proceed with the existing workflow and\n'
         'does not add new requirements, corrections, or dissatisfaction signals:\n'
         '  - If continuous mode is NOT active: apply the target step\'s default approval.\n'
         '  - If continuous mode IS active (Rule 4) and the user set a target boundary:\n'
@@ -2493,11 +2493,11 @@ def _build_mode_guidance(
         'the user explicitly limits the work to a subset, start all Ready steps that advance\n'
         'the requested workflow in one plural-tool call.\n'
         'Do NOT reply only with prose such as "正在生成..." without calling a tool.\n'
-        'Do NOT pass the current plugin step state unless it is explicitly listed\n'
+        'Do NOT pass the current workflow step state unless it is explicitly listed\n'
         'as a valid forward or previously-attempted target.\n'
     )
     common = (
-        '\n\n## Plugin execution guidance\n\n'
+        '\n\n## Workflow execution guidance\n\n'
         'Tools for step advancement:\n'
         '- `advance_step_and_hand_off`: Start a step asynchronously and end the current turn.\n'
         '- `advance_steps_and_hand_off`: Atomically start multiple Ready steps and end the turn.\n'
@@ -2522,7 +2522,7 @@ def _build_mode_guidance(
             'Before executing continuous mode, determine whether the latest user query sets\n'
             'an explicit target boundary with phrases like "执行到 X", "做到 X", "到 X 为止",\n'
             '"生成到 X", "until X", or "up to X". Match X against the full compact\n'
-            '"Plugin Step Name Index". Use detailed conditions, routing, and default approval\n'
+            '"Workflow Step Name Index". Use detailed conditions, routing, and default approval\n'
             'only from the currently reachable steps shown by the step tools/status. The full\n'
             'name index does not imply reachability or execution order.\n'
             'A target boundary has higher priority than generic uninterrupted phrases. For\n'

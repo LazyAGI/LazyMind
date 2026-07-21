@@ -13,6 +13,7 @@ import httpx
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from lazymind.config import config
 import lazymind.router.config  # noqa: F401 — registers router config keys
@@ -23,22 +24,21 @@ from lazymind.router.db.models import (
     RouterChildProcess,
     RouterInstance,
 )
-from lazymind.router.db.client import get_engine
 
 logger = logging.getLogger(__name__)
 
 
-def _is_sqlite_engine() -> bool:
-    """Return True if the current DB engine is SQLite."""
-    return get_engine().dialect.name == 'sqlite'
+def _dialect_name(session: AsyncSession) -> str:
+    """Return the dialect used by the session's injected database bind."""
+    return session.get_bind().dialect.name
 
 
 def _upsert_instance(instance_id: str, host: str, pid: int,
-                     port_range_start: int, port_range_end: int):
+                     port_range_start: int, port_range_end: int, *, dialect_name: str):
     """Build a dialect-appropriate INSERT ... ON CONFLICT DO NOTHING for RouterInstance."""
     values = dict(instance_id=instance_id, host=host, pid=pid,
                   port_range_start=port_range_start, port_range_end=port_range_end)
-    if _is_sqlite_engine():
+    if dialect_name == 'sqlite':
         return sqlite_insert(RouterInstance).values(**values).on_conflict_do_nothing(
             index_elements=['instance_id']
         )
@@ -47,12 +47,12 @@ def _upsert_instance(instance_id: str, host: str, pid: int,
     )
 
 
-def _upsert_child_process(instance_id: str, algo_id: str, host: str, port: int, pid: int):
+def _upsert_child_process(instance_id: str, algo_id: str, host: str, port: int, pid: int, *, dialect_name: str):
     """Build a dialect-appropriate UPSERT for RouterChildProcess."""
     values = dict(instance_id=instance_id, algorithm_id=algo_id,
                   host=host, port=port, pid=pid, status='starting', failures=0)
     set_vals = {'pid': pid, 'status': 'starting', 'failures': 0}
-    if _is_sqlite_engine():
+    if dialect_name == 'sqlite':
         return sqlite_insert(RouterChildProcess).values(**values).on_conflict_do_update(
             index_elements=['host', 'port'],
             set_=set_vals,
@@ -156,6 +156,7 @@ class ProcessManager:
                         pid=os.getpid(),
                         port_range_start=claimed_start,
                         port_range_end=claimed_end,
+                        dialect_name=_dialect_name(session),
                     )
                     await session.execute(stmt)
                     await session.commit()
@@ -264,6 +265,7 @@ class ProcessManager:
                 host=self._host,
                 port=port,
                 pid=proc.pid,
+                dialect_name=_dialect_name(session),
             )
             await session.execute(stmt)
             await session.commit()
@@ -275,7 +277,14 @@ class ProcessManager:
         if start > end:
             return
         async with AsyncSessionLocal() as session:
-            await session.execute(_upsert_instance(self._instance_id, self._host, os.getpid(), start, end))
+            await session.execute(_upsert_instance(
+                self._instance_id,
+                self._host,
+                os.getpid(),
+                start,
+                end,
+                dialect_name=_dialect_name(session),
+            ))
             await session.commit()
 
     async def stop_algorithm(self, algo_id: str) -> None:

@@ -291,7 +291,7 @@ func (r *SQLRepository) DeleteSource(ctx context.Context, sourceID string, delet
 		}
 		for _, row := range bindings {
 			binding := bindingFromORM(row)
-			deleted, cleanup, err := r.softDeleteBindingTx(ctx, tx, binding.SourceID, binding.BindingID, deletedAt)
+			deleted, cleanup, err := r.deleteBindingImmediatelyTx(ctx, tx, binding.SourceID, binding.BindingID, deletedAt)
 			if err != nil {
 				return err
 			}

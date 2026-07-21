@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
 	corestore "lazymind/core/store"
@@ -30,6 +32,39 @@ func newPromptTestDB(t *testing.T) *orm.DB {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	return db
+}
+
+func TestPromptUsageUpsertQualifiesPostgresUsageCount(t *testing.T) {
+	db, err := gorm.Open(postgres.New(postgres.Config{
+		DSN: "host=localhost user=postgres dbname=core sslmode=disable",
+	}), &gorm.Config{
+		DryRun:                 true,
+		DisableAutomaticPing:   true,
+		SkipDefaultTransaction: true,
+	})
+	if err != nil {
+		t.Fatalf("open postgres dry-run db: %v", err)
+	}
+
+	now := time.Date(2026, time.July, 17, 8, 0, 0, 0, time.UTC)
+	state := orm.PromptUserState{
+		ID:             "pus_test",
+		PromptID:       "preset-document-summary",
+		UsageCount:     1,
+		LastUsedAt:     &now,
+		CreateUserID:   "u1",
+		CreateUserName: "Prompt Tester",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	statement := db.Clauses(promptUsageConflictClause(now)).Create(&state).Statement
+	if statement.Error != nil {
+		t.Fatalf("build postgres upsert: %v", statement.Error)
+	}
+	sql := statement.SQL.String()
+	if !strings.Contains(sql, `"prompt_user_states"."usage_count" +`) {
+		t.Fatalf("usage_count is not qualified in postgres upsert: %s", sql)
+	}
 }
 
 func TestPolishPromptCallsRewrite(t *testing.T) {
@@ -167,8 +202,16 @@ func TestPromptLibraryFavoriteAndUsage(t *testing.T) {
 		}
 	}
 	for i := 0; i < 2; i++ {
-		if rec := request(UsePrompt, "u1"); rec.Code != http.StatusOK {
+		rec := request(UsePrompt, "u1")
+		if rec.Code != http.StatusOK {
 			t.Fatalf("use attempt %d failed: status=%d body=%s", i+1, rec.Code, rec.Body.String())
+		}
+		var stateResp promptStateResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &stateResp); err != nil {
+			t.Fatalf("decode use attempt %d response: %v", i+1, err)
+		}
+		if stateResp.ID != "preset-general-qa" || !stateResp.IsFavorite || stateResp.UsageCount != int64(i+1) || stateResp.LastUsedAt == nil {
+			t.Fatalf("unexpected use attempt %d response: %#v", i+1, stateResp)
 		}
 	}
 
@@ -209,6 +252,88 @@ func TestPromptLibraryFavoriteAndUsage(t *testing.T) {
 	}
 	if len(otherResp.Prompts) != 0 {
 		t.Fatalf("favorite state leaked across users: %#v", otherResp.Prompts)
+	}
+}
+
+func TestPromptLibraryFacetsRespectCategoryAndScope(t *testing.T) {
+	db := newPromptTestDB(t)
+	corestore.Init(db.DB, nil, nil)
+	t.Cleanup(func() { corestore.Init(nil, nil, nil) })
+
+	now := time.Date(2026, time.July, 17, 9, 0, 0, 0, time.UTC)
+	states := []orm.PromptUserState{
+		{
+			ID:             "pus_general",
+			PromptID:       "preset-general-qa",
+			IsFavorite:     true,
+			UsageCount:     2,
+			LastUsedAt:     &now,
+			CreateUserID:   "u1",
+			CreateUserName: "Prompt Tester",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+		{
+			ID:             "pus_document",
+			PromptID:       "preset-document-summary",
+			IsFavorite:     true,
+			CreateUserID:   "u1",
+			CreateUserName: "Prompt Tester",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}
+	if err := db.Create(&states).Error; err != nil {
+		t.Fatalf("create prompt states: %v", err)
+	}
+
+	request := func(query string) promptListResponse {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/core/prompts?"+query, nil)
+		req.Header.Set("X-User-Id", "u1")
+		rec := httptest.NewRecorder()
+		ListPrompts(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list prompts failed: status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var response promptListResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode prompt list: %v", err)
+		}
+		return response
+	}
+
+	generalAll := request("category=general&scope=all")
+	if generalAll.Total != 1 || len(generalAll.Prompts) != 1 || generalAll.Prompts[0].ID != "preset-general-qa" {
+		t.Fatalf("unexpected general prompt list: %#v", generalAll)
+	}
+	if generalAll.Facets.Scopes["all"] != 1 || generalAll.Facets.Scopes["recent"] != 1 || generalAll.Facets.Scopes["favorite"] != 1 || generalAll.Facets.Scopes["custom"] != 0 {
+		t.Fatalf("unexpected general scope facets: %#v", generalAll.Facets.Scopes)
+	}
+	if generalAll.Facets.CategoryTotal != 3 || generalAll.Facets.Categories["general"] != 1 || generalAll.Facets.Categories["document_processing"] != 1 || generalAll.Facets.Categories["information_extraction"] != 1 {
+		t.Fatalf("unexpected all-scope category facets: %#v", generalAll.Facets)
+	}
+
+	generalFavorite := request("category=general&scope=favorite")
+	if generalFavorite.Total != 1 || len(generalFavorite.Prompts) != 1 {
+		t.Fatalf("unexpected favorite general list: %#v", generalFavorite)
+	}
+	if generalFavorite.Facets.CategoryTotal != 2 || generalFavorite.Facets.Categories["general"] != 1 || generalFavorite.Facets.Categories["document_processing"] != 1 || generalFavorite.Facets.Categories["information_extraction"] != 0 {
+		t.Fatalf("unexpected favorite category facets: %#v", generalFavorite.Facets)
+	}
+	if generalFavorite.Facets.Scopes["all"] != 1 || generalFavorite.Facets.Scopes["recent"] != 1 || generalFavorite.Facets.Scopes["favorite"] != 1 {
+		t.Fatalf("scope facets must ignore the selected scope: %#v", generalFavorite.Facets.Scopes)
+	}
+
+	informationFavorite := request("category=information_extraction&scope=favorite")
+	if informationFavorite.Total != 0 || len(informationFavorite.Prompts) != 0 {
+		t.Fatalf("unexpected favorite information extraction list: %#v", informationFavorite)
+	}
+	if informationFavorite.Facets.Scopes["all"] != 1 || informationFavorite.Facets.Scopes["recent"] != 0 || informationFavorite.Facets.Scopes["favorite"] != 0 {
+		t.Fatalf("unexpected information extraction scope facets: %#v", informationFavorite.Facets.Scopes)
+	}
+	if informationFavorite.Facets.CategoryTotal != 2 || informationFavorite.Facets.Categories["general"] != 1 || informationFavorite.Facets.Categories["document_processing"] != 1 {
+		t.Fatalf("category facets must ignore the selected category: %#v", informationFavorite.Facets)
 	}
 }
 

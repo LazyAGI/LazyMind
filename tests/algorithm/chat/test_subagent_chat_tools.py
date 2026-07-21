@@ -6,8 +6,7 @@ get_subagent_artifacts).  All external HTTP calls are monkeypatched.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-from unittest.mock import patch
+from typing import Any, Dict
 
 import lazymind.chat.engine.tools.subagent_chat_tools as sct
 
@@ -43,6 +42,7 @@ def _patch_list_tasks(monkeypatch, tasks=None):
 def _r(result):
     """Unwrap tool_success envelope: {success, tool, result: {...}} → inner dict."""
     return result.get('result', result)
+
 
 def test_resolve_task_by_exact_title():
     task = sct._resolve_task('素材收集', _TASKS)
@@ -92,10 +92,10 @@ def test_create_subagent_manual_returns_immediately(monkeypatch):
         agent_type='research',
         title='素材收集',
         objective='gather refs',
-        output_artifact_keys=['refs'],
+        output_slots=['refs'],
     )
     assert _r(result)['status'] == 'ok'
-    assert '后台执行' in _r(result)['message']
+    assert 'started in the background' in _r(result)['message']
     # Must have emitted exactly one task_created event.
     assert write_calls[0][0] == 'task_created'
     assert write_calls[0][1]['title'] == '素材收集'
@@ -113,38 +113,45 @@ def test_create_subagent_auto_polls_and_returns_summary(monkeypatch):
 
     poll_count = [0]
 
-    def fake_get_core_api(path):
-        poll_count[0] += 1
-        if poll_count[0] < 3:
-            return {'status': 'running'}
-        return {'status': 'succeeded', 'summary': '完成了'}
+    class FakeDB:
+        def get_task_status(self, _task_id):
+            poll_count[0] += 1
+            if poll_count[0] < 3:
+                return {'status': 'running'}
+            return {'status': 'succeeded', 'summary': '完成了'}
 
-    monkeypatch.setattr(sct, 'get_core_api', fake_get_core_api)
+    monkeypatch.setattr(sct, 'TaskQueryDB', FakeDB)
+    monkeypatch.setattr(sct, '_fetch_task_artifacts', lambda _task_id: [])
     monkeypatch.setattr(sct.time, 'sleep', lambda s: None)
 
     result = sct.create_subagent(
         agent_type='test',
         title='测试任务',
         objective='do it',
-        output_artifact_keys=['out'],
+        output_slots=['out'],
     )
     assert _r(result)['status'] == 'ok'
-    assert '已完成' in _r(result)['message']
+    assert 'completed' in _r(result)['message']
     assert poll_count[0] >= 3
 
 
 def test_create_subagent_auto_failed_task(monkeypatch):
     _patch_config(monkeypatch)
     monkeypatch.setattr(sct, '_write_agent_data', lambda tag, **kw: None)
-    monkeypatch.setattr(sct, 'get_core_api',
-                        lambda path: {'status': 'failed', 'current_phase': '出错了'})
+
+    class FakeDB:
+        def get_task_status(self, _task_id):
+            return {'status': 'failed', 'current_phase': '出错了'}
+
+    monkeypatch.setattr(sct, 'TaskQueryDB', FakeDB)
+
     monkeypatch.setattr(sct.time, 'sleep', lambda s: None)
 
     result = sct.create_subagent(
-        agent_type='test', title='失败任务', objective='fail', output_artifact_keys=['x'],
+        agent_type='test', title='失败任务', objective='fail', output_slots=['x'],
     )
-    assert _r(result)['status'] == 'ok'
-    assert '失败' in _r(result)['message']
+    assert _r(result)['status'] == 'failed'
+    assert 'failed' in _r(result)['message']
 
 
 def test_create_subagent_auto_emits_heartbeat(monkeypatch):
@@ -155,13 +162,15 @@ def test_create_subagent_auto_emits_heartbeat(monkeypatch):
 
     poll_count = [0]
 
-    def fake_get(path):
-        poll_count[0] += 1
-        if poll_count[0] < 2:
-            return {'status': 'running'}
-        return {'status': 'succeeded'}
+    class FakeDB:
+        def get_task_status(self, _task_id):
+            poll_count[0] += 1
+            if poll_count[0] < 2:
+                return {'status': 'running'}
+            return {'status': 'succeeded'}
 
-    monkeypatch.setattr(sct, 'get_core_api', fake_get)
+    monkeypatch.setattr(sct, 'TaskQueryDB', FakeDB)
+    monkeypatch.setattr(sct, '_fetch_task_artifacts', lambda _task_id: [])
 
     # Force heartbeat: patch time.time so that elapsed time jumps past _HEARTBEAT_INTERVAL
     # between the initial timestamp and the first poll check.
@@ -178,7 +187,7 @@ def test_create_subagent_auto_emits_heartbeat(monkeypatch):
     monkeypatch.setattr(sct.time, 'sleep', lambda s: None)
 
     sct.create_subagent(
-        agent_type='test', title='hb', objective='hb', output_artifact_keys=['x'],
+        agent_type='test', title='hb', objective='hb', output_slots=['x'],
     )
     assert 'heartbeat' in write_calls
 
@@ -205,7 +214,7 @@ def test_list_subagents_filtered_by_status(monkeypatch):
 def test_list_subagents_empty(monkeypatch):
     _patch_list_tasks(monkeypatch, tasks=[])
     result = sct.list_subagents()
-    assert '暂无' in _r(result)['message']
+    assert 'No SubAgent tasks' in _r(result)['message']
 
 
 # ---------------------------------------------------------------------------

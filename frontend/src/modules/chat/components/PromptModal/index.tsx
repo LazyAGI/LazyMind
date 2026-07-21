@@ -68,7 +68,7 @@ interface PromptCategoryFormValues {
   name: string; // 用户自定义分类名称
 }
 
-type PromptScope = "all" | "recent" | "favorite" | "custom";
+type PromptScope = "all" | "recent" | "favorite";
 type PromptSort = "updated_desc" | "usage_desc" | "name_asc";
 type PromptLayout = "grid" | "list";
 
@@ -79,7 +79,6 @@ const CATEGORY_KEYS = [
   "structured_analysis",
   "report_generation",
   "data_analysis",
-  "custom",
 ] as const;
 
 const CATEGORY_ICONS = {
@@ -198,7 +197,7 @@ function PromptModalComponent(
 
   const scopeOptions = useMemo(
     () =>
-      (["all", "recent", "favorite", "custom"] as PromptScope[]).map((key) => ({
+      (["all", "recent", "favorite"] as PromptScope[]).map((key) => ({
         value: key,
         label: `${t(`chat.promptScope.${key}`)} (${facets.scopes?.[key] ?? 0})`,
       })),
@@ -207,7 +206,7 @@ function PromptModalComponent(
 
   function openCreateForm() {
     setEditingPrompt(null);
-    form.setFieldsValue({ display_name: "", content: "", category: "custom" });
+    form.setFieldsValue({ display_name: "", content: "", category: "general" });
     setFormVisible(true);
   }
 
@@ -277,7 +276,7 @@ function PromptModalComponent(
     form.setFieldsValue({
       display_name: prompt.display_name ?? "",
       content: prompt.content ?? "",
-      category: prompt.category ?? "custom",
+      category: prompt.category === "custom" ? "general" : prompt.category ?? "general",
     });
     setFormVisible(true);
   }
@@ -612,13 +611,7 @@ function PromptModalComponent(
                   </div>
                 ) : null}
                 {!loading && !loadError && prompts.length === 0 ? (
-                  <Empty description={t("chat.noPromptMatched")}>
-                    {scope === "custom" || category === "custom" ? (
-                      <Button type="primary" icon={<PlusOutlined />} onClick={openCreateForm}>
-                        {t("chat.newTemplate")}
-                      </Button>
-                    ) : null}
-                  </Empty>
+                  <Empty description={t("chat.noPromptMatched")} />
                 ) : null}
                 {!loading && !loadError && prompts.length > 0 ? (
                   <div className={`prompt-library-grid ${layout}`}>

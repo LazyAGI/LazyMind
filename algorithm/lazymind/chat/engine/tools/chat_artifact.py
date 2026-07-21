@@ -117,7 +117,7 @@ def save_chat_artifact(
     safe_name = _safe_filename(filename, normalized_type)
     normalized_caption = _normalize_caption(caption)
     if normalized_type == 'file':
-        return _save_chat_file(safe_name, str(content or ''), normalized_caption)
+        return save_chat_file(safe_name, str(content or ''), normalized_caption)
     if normalized_type == 'json':
         value = {'data': content}
     else:
@@ -148,20 +148,28 @@ def save_chat_artifact(
     })
 
 
-def _save_chat_file(
+def save_chat_file(
     filename: str,
     path: str,
     caption: Optional[str],
+    artifact_id: Optional[str] = None,
+    replace_existing: bool = False,
 ) -> Dict[str, Any]:
+    filename = _safe_filename(filename, 'file')
     user_id, conversation_id = _current_artifact_scope()
     source = _resolve_source_file(path, user_id, conversation_id)
-    artifact_id = str(uuid.uuid4())
+    artifact_id = artifact_id or str(uuid.uuid4())
     destination_dir = _published_file_directory(user_id, conversation_id, artifact_id)
     destination = os.path.join(destination_dir, filename)
-    temporary = destination + '.tmp'
+    temporary = destination + f'.{uuid.uuid4().hex}.tmp'
+    created_directory = False
 
     try:
-        os.makedirs(destination_dir, exist_ok=False)
+        if replace_existing:
+            os.makedirs(destination_dir, exist_ok=True)
+        else:
+            os.makedirs(destination_dir, exist_ok=False)
+            created_directory = True
         shutil.copy2(source, temporary)
         os.replace(temporary, destination)
         size = os.path.getsize(destination)
@@ -173,9 +181,15 @@ def _save_chat_file(
             content_type='file',
             value=value,
             caption=caption,
+            replace_existing=replace_existing,
         )
     except Exception:
-        shutil.rmtree(destination_dir, ignore_errors=True)
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        if created_directory:
+            shutil.rmtree(destination_dir, ignore_errors=True)
         raise
 
     return tool_success('save_chat_artifact', {

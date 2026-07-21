@@ -58,7 +58,7 @@ def resolve_remote_plugin(entry: Dict[str, Any]) -> tuple[str, 'PluginSpec']:
     if not final_dir.exists():
         tmp_dir = Path(tempfile.mkdtemp(prefix='plugin-', dir=str(cache_root)))
         try:
-            from lazymind.chat.integrations.remote_fs import RemoteFS
+            from lazymind.common.integrations.remote_fs import RemoteFS
             RemoteFS().materialize_dir(remote_root, str(tmp_dir), revision_id=revision_id)
             rows = []
             for file_path in sorted(p for p in tmp_dir.rglob('*') if p.is_file()):
@@ -453,7 +453,7 @@ def get_plugin_intro(plugin_id: str) -> str:
     plugin_id_val = spec.plugin_id
     description = (spec.yaml.get('description') or '').strip()
     when_to_use = (spec.yaml.get('when_to_use') or '').strip()
-    lines = [f'## Plugin: {plugin_id_val}']
+    lines = [f'## Workflow: {plugin_id_val}']
     if description:
         lines.append(description)
     if when_to_use:

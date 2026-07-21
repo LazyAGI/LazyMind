@@ -50,6 +50,7 @@ type Engine interface {
 
 type CreateSourceRequest struct {
 	CallerID          string         `json:"-"`
+	CallerName        string         `json:"-"`
 	TenantID          string         `json:"-"`
 	RequestID         string         `json:"request_id"`
 	Name              string         `json:"name"`

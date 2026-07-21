@@ -1,4 +1,4 @@
-"""Plugin creation tool for use in chat conversations.
+"""Workflow creation tool for use in chat conversations.
 
 Provides create_plugin_draft: a three-step workflow that creates a plugin draft
 via the Go core API and triggers AI generation.
@@ -49,7 +49,7 @@ def create_plugin_draft(
     a Markdown link to the plugin editor using the editor_url in the result.
 
     Args:
-        name: Plugin display name (e.g. "合同审阅助手").
+        name: Workflow display name (e.g. "合同审阅助手").
         description: One-paragraph description of what the plugin does.
             This becomes the AI generation seed. Should be detailed enough
             to capture inputs, outputs, and main steps.

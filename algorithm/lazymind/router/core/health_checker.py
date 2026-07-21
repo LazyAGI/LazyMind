@@ -151,14 +151,15 @@ class HealthChecker:
                 try:
                     await self._pm.ensure_instance_registered()
                     from lazymind.router.core.process_manager import _upsert_child_process
-                    stmt = _upsert_child_process(
-                        instance_id=self._pm.instance_id,
-                        algo_id=algo_id,
-                        host=self._pm.host,
-                        port=port,
-                        pid=proc.pid,
-                    )
                     async with AsyncSessionLocal() as session:
+                        stmt = _upsert_child_process(
+                            instance_id=self._pm.instance_id,
+                            algo_id=algo_id,
+                            host=self._pm.host,
+                            port=port,
+                            pid=proc.pid,
+                            dialect_name=session.get_bind().dialect.name,
+                        )
                         await session.execute(stmt)
                         await session.commit()
                 except Exception as exc:

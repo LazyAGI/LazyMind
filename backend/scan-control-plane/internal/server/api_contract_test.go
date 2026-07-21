@@ -37,7 +37,7 @@ func TestCreateSourceHandlerRequiresBindingsArray(t *testing.T) {
 	if engine.createCalls != 1 {
 		t.Fatalf("expected create source call, got %d", engine.createCalls)
 	}
-	if engine.lastCreate.CallerID != "user-1" || engine.lastCreate.TenantID != "tenant-1" || len(engine.lastCreate.Bindings) != 1 {
+	if engine.lastCreate.CallerID != "user-1" || engine.lastCreate.CallerName != "User One" || engine.lastCreate.TenantID != "tenant-1" || len(engine.lastCreate.Bindings) != 1 {
 		t.Fatalf("create request did not use caller and bindings[]: %+v", engine.lastCreate)
 	}
 	if engine.lastCreate.Bindings[0].TargetRef != "/workspace/docs" {
@@ -555,6 +555,42 @@ func TestSyncHandlerAllowsMissingRequestIDAndEmptyBody(t *testing.T) {
 	}
 }
 
+func TestBatchSourceAccessByDatasetUsesSourceAccessChecker(t *testing.T) {
+	t.Parallel()
+
+	engine := &serverSourceEngineStub{}
+	handler := NewHandler(WithSourceEngine(engine), WithAccessChecker(denySourceReadAccess{}))
+	req := httptest.NewRequest(http.MethodPost, "/api/scan/internal/source-access/by-dataset:batch", strings.NewReader(`{"dataset_ids":["dataset-1","missing","dataset-1"],"action":"read"}`))
+	setAPIContractActor(req)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected OK, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Items []struct {
+			DatasetID string `json:"dataset_id"`
+			SourceID  string `json:"source_id"`
+			Exists    bool   `json:"exists"`
+			Allowed   bool   `json:"allowed"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("expected two unique items, got %+v", resp.Items)
+	}
+	if got := resp.Items[0]; got.DatasetID != "dataset-1" || got.SourceID != "source-1" || !got.Exists || got.Allowed {
+		t.Fatalf("expected source-backed dataset to be denied, got %+v", got)
+	}
+	if got := resp.Items[1]; got.DatasetID != "missing" || got.Exists || !got.Allowed {
+		t.Fatalf("expected dataset without source to remain allowed, got %+v", got)
+	}
+}
+
 func TestGenerateTasksHandlerAcceptsManualPullSelection(t *testing.T) {
 	t.Parallel()
 
@@ -608,6 +644,7 @@ func setAPIContractActor(req *http.Request) {
 
 func setAPIContractActorRole(req *http.Request, role string) {
 	req.Header.Set("X-User-ID", "user-1")
+	req.Header.Set("X-User-Name", "User One")
 	req.Header.Set("X-Tenant-ID", "tenant-1")
 	req.Header.Set("X-User-Role", role)
 }
@@ -676,6 +713,14 @@ type blockLocalAccess struct {
 
 func (blockLocalAccess) ShouldBlockLocalSourceAccess(context.Context, access.Actor, access.LocalSourceAccessRequest) bool {
 	return true
+}
+
+type denySourceReadAccess struct {
+	allowAccess
+}
+
+func (denySourceReadAccess) CanReadSource(context.Context, access.Actor, string) error {
+	return access.NewError(access.ErrCodeForbidden, "access denied")
 }
 
 func TestOpenAPIContractCoversScanAPIAndDoesNotExposeLegacyPaths(t *testing.T) {
@@ -913,6 +958,9 @@ func (s *serverSourceEngineStub) GetSource(context.Context, sourceengine.GetSour
 func (s *serverSourceEngineStub) GetSourceByDatasetID(_ context.Context, datasetID string) (sourceengine.GetSourceResponse, error) {
 	s.getByDatasetCalls++
 	s.lastGetDatasetID = datasetID
+	if datasetID == "missing" {
+		return sourceengine.GetSourceResponse{}, sourceengine.NewError(sourceengine.ErrCodeSourceNotFound, "source not found")
+	}
 	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
 	return sourceengine.GetSourceResponse{
 		Source: sourceengine.SourceResponse{

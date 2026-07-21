@@ -130,7 +130,7 @@ func (e *DefaultEngine) newSource(sourceID, datasetID string, req CreateSourceRe
 func (e *DefaultEngine) prepareCreateBindings(ctx context.Context, sourceID, datasetID string, req CreateSourceRequest, now time.Time) ([]preparedBinding, error) {
 	prepared := make([]preparedBinding, 0, len(req.Bindings))
 	for index, input := range req.Bindings {
-		item, err := e.prepareCreateBinding(ctx, sourceID, datasetID, req.Name, req.CallerID, req.TenantID, req.RequestID, index, input, now)
+		item, err := e.prepareCreateBinding(ctx, sourceID, datasetID, req.Name, req.CallerID, req.CallerName, req.TenantID, req.RequestID, index, input, now)
 		if err != nil {
 			return prepared, err
 		}

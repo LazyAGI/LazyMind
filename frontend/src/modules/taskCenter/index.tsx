@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import Workbench from './Workbench';
 import TaskList from './TaskList';
 import ScheduleList from './ScheduleList';
-import { CHAT_NEW_RUN_IN_BACKGROUND_KEY, CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
+import { CHAT_NEW_RUN_IN_BACKGROUND_KEY, CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import './index.scss';
 
 type TaskCenterTab = 'workbench' | 'tasks' | 'schedules';
@@ -17,6 +17,7 @@ export default function TaskCenterPage() {
   const [activeTab, setActiveTab] = useState<TaskCenterTab>('workbench');
 
   const handleNewTask = () => {
+    selectChatConversationFilter('task');
     sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
     sessionStorage.setItem(CHAT_NEW_RUN_IN_BACKGROUND_KEY, '1');
     navigate('/agent/chat/home');
@@ -36,7 +37,7 @@ export default function TaskCenterPage() {
         </div>
       </header>
       <Tabs className='task-center-tabs' activeKey={activeTab} onChange={(key: string) => setActiveTab(key as TaskCenterTab)} items={[
-        { key: 'workbench', label: t('taskCenter.workbench'), children: <Workbench active={activeTab === 'workbench'} onViewAll={() => setActiveTab('tasks')} /> },
+        { key: 'workbench', label: t('taskCenter.workbench'), children: <Workbench active={activeTab === 'workbench'} /> },
         { key: 'tasks', label: t('taskCenter.allTasks'), children: <TaskList active={activeTab === 'tasks'} /> },
         { key: 'schedules', label: t('taskCenter.schedulePlans'), children: <ScheduleList active={activeTab === 'schedules'} /> },
       ]} />

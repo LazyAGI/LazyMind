@@ -31,6 +31,26 @@ func TestAgentThreadEventsRouteWinsOverGenericThreadRoute(t *testing.T) {
 	}
 }
 
+func TestSkillMarketTagsRouteWinsOverItemRoute(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/skill-market/tags", nil)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatal("expected skill market tags route to match")
+	}
+
+	gotTemplate, err := match.Route.GetPathTemplate()
+	if err != nil {
+		t.Fatalf("get matched route template: %v", err)
+	}
+	if want := "/skill-market/tags"; gotTemplate != want {
+		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+}
+
 func TestAgentThreadMessagesRouteWinsOverGenericThreadRoute(t *testing.T) {
 	r := mux.NewRouter()
 	r.UseEncodedPath()
@@ -259,6 +279,7 @@ func TestDeprecatedReviewResultRoutesAreNotRegistered(t *testing.T) {
 		path   string
 	}{
 		{http.MethodGet, "/skill-review-results"},
+		{http.MethodGet, "/skill-review-results/review-1"},
 		{http.MethodPost, "/skill-review-results/review-1:accept"},
 		{http.MethodPost, "/skill-review-results/review-1:reject"},
 		{http.MethodPost, "/memory-review-results/review-2:accept"},
@@ -286,7 +307,6 @@ func TestManualSkillReviewRoutesAreRegistered(t *testing.T) {
 		{http.MethodGet, "/skill-review:summary", "/skill-review:summary"},
 		{http.MethodPost, "/skill-review:run", "/skill-review:run"},
 		{http.MethodGet, "/skill-review/tasks", "/skill-review/tasks"},
-		{http.MethodGet, "/skill-review-results/review-1", "/skill-review-results/{review_result_id}"},
 	}
 	for _, tc := range cases {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
