@@ -512,6 +512,34 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 .schedule-grid.large { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .schedule-grid.compact { overflow: hidden; border: 1px solid $border; border-radius: 11px; }
 
+.schedule-group-list { display: grid; gap: 16px; }
+.schedule-group-section {
+  padding: 16px;
+  border: 1px solid $border;
+  border-radius: 12px;
+  background: #fff;
+
+  > header { display: flex; margin-bottom: 14px; align-items: center; justify-content: space-between; }
+  > header > div { display: flex; align-items: baseline; gap: 10px; }
+  > header h3 { margin: 0; font-size: 16px; }
+  > header span { color: $muted; font-size: 12px; }
+}
+
+.schedule-card[draggable='true'] { cursor: grab; }
+.schedule-card-identity small { display: block; margin-top: 5px; color: $blue; font-size: 11px; }
+
+.batch-task-editor { display: grid; max-height: 62vh; gap: 12px; overflow: auto; }
+.batch-task-card {
+  display: grid;
+  padding: 13px;
+  gap: 10px;
+  border: 1px solid $border;
+  border-radius: 10px;
+  background: #fafbfc;
+
+  > header { display: flex; align-items: center; justify-content: space-between; }
+}
+
 .schedule-card {
   min-width: 0;
   overflow: hidden;

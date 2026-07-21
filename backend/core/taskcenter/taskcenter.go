@@ -89,7 +89,7 @@ func CancelTask(ctx context.Context, db *gorm.DB, userID, id string) error {
 
 func isTerminal(status string) bool {
 	switch status {
-	case "succeeded", "failed", "canceled":
+	case "succeeded", "failed", "skipped", "canceled":
 		return true
 	}
 	return false
@@ -239,6 +239,12 @@ func loadStepsForConversation(ctx context.Context, db *gorm.DB, convID string) [
 //     - No row, task is recent → still running → keep "running".
 func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) string {
 	if isTerminal(t.Status) {
+		return t.Status
+	}
+	if t.Status == "waiting_inputs" {
+		return "waiting"
+	}
+	if t.Status == "waiting" || t.Status == "pending" {
 		return t.Status
 	}
 	if t.PluginSessionID != nil && *t.PluginSessionID != "" {

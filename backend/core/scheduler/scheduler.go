@@ -163,6 +163,7 @@ func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) {
 				return
 			case <-ticker.C:
 				fireSchedules(ctx, db, chatBaseURL)
+				resumeWaitingTasks(ctx, db)
 			}
 		}
 	}()
@@ -193,6 +194,7 @@ func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
 }
 
 func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.Time) {
+	scheduledAt := s.NextRunAt.UTC()
 	// Compute next run time first so we can CAS before creating any records.
 	next, err := nextCronTime(s.CronExpr, s.Timezone)
 	if err != nil {
@@ -212,6 +214,20 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 		// Another instance already fired this schedule tick; skip entirely.
 		return
 	}
+	// Materialize the scheduled occurrence before dispatching. Downstream schedules
+	// use this durable row as the expected-input barrier, including same-time fires.
+	now := time.Now().UTC()
+	fire := orm.ScheduleFire{ID: common.GeneratePrefixedID("fire_", 36), ScheduleID: s.ID, ScheduledFireAt: scheduledAt, LogicalSlotKey: s.ID + ":" + scheduledAt.Format(time.RFC3339), Status: "planned", Attempt: 1, CreatedAt: now, UpdatedAt: now}
+	if err := db.WithContext(ctx).Create(&fire).Error; err != nil {
+		return
+	}
+
+	var depCount int64
+	db.WithContext(ctx).Model(&orm.ScheduleDependency{}).Where("target_schedule_id = ? AND enabled = true", s.ID).Count(&depCount)
+	if depCount > 0 {
+		createWaitingScheduledTask(ctx, db, s, fire)
+		return
+	}
 
 	// CAS won — now create conversation and task. Only increment run_count after
 	// the task record is successfully persisted so the counter stays in sync.
@@ -226,17 +242,23 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 	}
 	taskTitle = truncateRunes(taskTitle, 40, "...")
 	task := &orm.TaskCenterTask{
-		UserID:         s.UserID,
-		ConversationID: convID,
-		TaskType:       "scheduled",
-		Title:          &taskTitle,
-		Status:         "running",
-		ScheduleID:     &s.ID,
+		UserID:            s.UserID,
+		ConversationID:    convID,
+		TaskType:          "scheduled",
+		Title:             &taskTitle,
+		Status:            "running",
+		ScheduleID:        &s.ID,
+		GroupID:           s.GroupID,
+		ScheduledFireAt:   &scheduledAt,
+		LogicalSlotKey:    fire.LogicalSlotKey,
+		TriggerType:       "scheduled",
+		DefinitionVersion: s.DefinitionVersion,
 	}
 	if err := taskcenter.CreateTask(ctx, db, task); err != nil {
 		fmt.Printf("[Scheduler] CreateTask failed for schedule %s: %v\n", s.ID, err)
 		return
 	}
+	db.WithContext(ctx).Model(&orm.ScheduleFire{}).Where("id = ?", fire.ID).Updates(map[string]any{"task_id": task.ID, "status": "running", "updated_at": time.Now().UTC()})
 
 	// Task persisted — now it's safe to increment run_count.
 	db.WithContext(ctx).Model(&orm.UserSchedule{}).
@@ -309,7 +331,7 @@ func renderPromptTemplate(tpl string, t time.Time) string {
 // sendScheduledChatRequest fires a chat request for a scheduled task in a background
 // goroutine. Status is no longer written here; resolveTaskStatus derives it on read
 // from chat_histories (present = completed, absent + old = failed).
-func sendScheduledChatRequest(userID, convID, taskID string, _ *gorm.DB, reqBody map[string]any) {
+func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBody map[string]any) {
 	coreURL := common.CoreSelfEndpoint() + "/conversations:chat"
 	body, _ := json.Marshal(reqBody)
 	reqCtx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
@@ -337,25 +359,29 @@ func sendScheduledChatRequest(userID, convID, taskID string, _ *gorm.DB, reqBody
 		}
 	}
 	resp.Body.Close()
+	finalizeTaskOutput(context.Background(), db, taskID, convID)
 }
 
 // ── API handlers ──────────────────────────────────────────────────────────────
 
 type scheduleResponse struct {
-	ID             string     `json:"id"`
-	UserID         string     `json:"user_id"`
-	Name           string     `json:"name"`
-	Remark         string     `json:"remark"`
-	CronExpr       string     `json:"cron_expr"`
-	Timezone       string     `json:"timezone"`
-	PromptTemplate string     `json:"prompt_template"`
-	KbIDs          []string   `json:"kb_ids"`
-	FileIDs        []string   `json:"file_ids"`
-	Enabled        bool       `json:"enabled"`
-	RunCount       int        `json:"run_count"`
-	LastRunAt      *time.Time `json:"last_run_at,omitempty"`
-	NextRunAt      time.Time  `json:"next_run_at"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID             string               `json:"id"`
+	UserID         string               `json:"user_id"`
+	Name           string               `json:"name"`
+	Remark         string               `json:"remark"`
+	CronExpr       string               `json:"cron_expr"`
+	Timezone       string               `json:"timezone"`
+	PromptTemplate string               `json:"prompt_template"`
+	KbIDs          []string             `json:"kb_ids"`
+	FileIDs        []string             `json:"file_ids"`
+	GroupID        *string              `json:"group_id,omitempty"`
+	GroupPosition  int                  `json:"group_position"`
+	Dependencies   []dependencyResponse `json:"dependencies"`
+	Enabled        bool                 `json:"enabled"`
+	RunCount       int                  `json:"run_count"`
+	LastRunAt      *time.Time           `json:"last_run_at,omitempty"`
+	NextRunAt      time.Time            `json:"next_run_at"`
+	CreatedAt      time.Time            `json:"created_at"`
 }
 
 func toScheduleResponse(s orm.UserSchedule) scheduleResponse {
@@ -379,6 +405,8 @@ func toScheduleResponse(s orm.UserSchedule) scheduleResponse {
 		PromptTemplate: s.PromptTemplate,
 		KbIDs:          kbIDs,
 		FileIDs:        fileIDs,
+		GroupID:        s.GroupID,
+		GroupPosition:  s.GroupPosition,
 		Enabled:        s.Enabled,
 		RunCount:       s.RunCount,
 		LastRunAt:      s.LastRunAt,
@@ -398,9 +426,19 @@ func ListSchedulesHandler(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	ids := make([]string, 0, len(rows))
+	for _, s := range rows {
+		ids = append(ids, s.ID)
+	}
+	deps := loadDependencies(db, userID, ids)
 	items := make([]scheduleResponse, 0, len(rows))
 	for _, s := range rows {
-		items = append(items, toScheduleResponse(s))
+		item := toScheduleResponse(s)
+		item.Dependencies = deps[s.ID]
+		if item.Dependencies == nil {
+			item.Dependencies = []dependencyResponse{}
+		}
+		items = append(items, item)
 	}
 	common.ReplyJSON(w, map[string]any{"items": items, "total": len(items)})
 }
@@ -409,13 +447,15 @@ func ListSchedulesHandler(w http.ResponseWriter, r *http.Request) {
 func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	var body struct {
-		Name           string   `json:"name"`
-		Remark         string   `json:"remark"`
-		CronExpr       string   `json:"cron_expr"`
-		Timezone       string   `json:"timezone"`
-		PromptTemplate string   `json:"prompt_template"`
-		KbIDs          []string `json:"kb_ids"`
-		FileIDs        []string `json:"file_ids"`
+		Name           string            `json:"name"`
+		Remark         string            `json:"remark"`
+		CronExpr       string            `json:"cron_expr"`
+		Timezone       string            `json:"timezone"`
+		PromptTemplate string            `json:"prompt_template"`
+		KbIDs          []string          `json:"kb_ids"`
+		FileIDs        []string          `json:"file_ids"`
+		GroupID        *string           `json:"group_id"`
+		Dependencies   []dependencyInput `json:"dependencies"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body: "+err.Error(), http.StatusBadRequest)
@@ -450,10 +490,16 @@ func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		PromptTemplate: body.PromptTemplate,
 		KbIDs:          kbIDsJSON,
 		FileIDs:        fileIDsJSON,
+		GroupID:        body.GroupID,
 		Enabled:        true,
 	}
 	db := store.DB()
-	if err := CreateSchedule(r.Context(), db, s); err != nil {
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := CreateSchedule(r.Context(), tx, s); err != nil {
+			return err
+		}
+		return replaceDependencies(tx, userID, s.ID, body.Dependencies)
+	}); err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -508,13 +554,15 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	id := strings.TrimPrefix(r.URL.Path, "/schedules/")
 	var body struct {
-		Name           string   `json:"name"`
-		Remark         string   `json:"remark"`
-		CronExpr       string   `json:"cron_expr"`
-		Timezone       string   `json:"timezone"`
-		PromptTemplate string   `json:"prompt_template"`
-		KbIDs          []string `json:"kb_ids"`
-		FileIDs        []string `json:"file_ids"`
+		Name           string            `json:"name"`
+		Remark         string            `json:"remark"`
+		CronExpr       string            `json:"cron_expr"`
+		Timezone       string            `json:"timezone"`
+		PromptTemplate string            `json:"prompt_template"`
+		KbIDs          []string          `json:"kb_ids"`
+		FileIDs        []string          `json:"file_ids"`
+		GroupID        *string           `json:"group_id"`
+		Dependencies   []dependencyInput `json:"dependencies"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body: "+err.Error(), http.StatusBadRequest)
@@ -567,12 +615,25 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 			s.FileIDs = string(b)
 		}
 	}
-	if len(updates) == 0 {
+	if body.GroupID != nil {
+		updates["group_id"] = body.GroupID
+		s.GroupID = body.GroupID
+	}
+	if len(updates) == 0 && body.Dependencies == nil {
 		common.ReplyJSON(w, toScheduleResponse(s))
 		return
 	}
-	if err := db.WithContext(r.Context()).Model(&orm.UserSchedule{}).
-		Where("id = ? AND user_id = ?", id, userID).Updates(updates).Error; err != nil {
+	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if len(updates) > 0 {
+			if err := tx.Model(&orm.UserSchedule{}).Where("id = ? AND user_id = ?", id, userID).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		if body.Dependencies != nil {
+			return replaceDependencies(tx, userID, id, body.Dependencies)
+		}
+		return nil
+	}); err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -594,6 +655,23 @@ func RunNowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
+	var depCount int64
+	db.Model(&orm.ScheduleDependency{}).Where("target_schedule_id = ? AND enabled = true", s.ID).Count(&depCount)
+	if depCount > 0 {
+		fire := orm.ScheduleFire{ID: common.GeneratePrefixedID("fire_", 36), ScheduleID: s.ID, ScheduledFireAt: now, LogicalSlotKey: s.ID + ":manual:" + now.Format(time.RFC3339Nano), Status: "planned", Attempt: 1, CreatedAt: now, UpdatedAt: now}
+		if err := db.Create(&fire).Error; err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		taskID := createWaitingScheduledTask(r.Context(), db, s, fire)
+		if taskID == "" {
+			common.ReplyErr(w, "failed to create waiting task", http.StatusInternalServerError)
+			return
+		}
+		db.Model(&orm.UserSchedule{}).Where("id = ?", s.ID).Update("last_run_at", now)
+		common.ReplyJSON(w, map[string]any{"task_id": taskID, "conversation_id": "", "status": "waiting_inputs"})
+		return
+	}
 	convID := createTaskConversation(r.Context(), db, s.UserID, s.PromptTemplate)
 	if convID == "" {
 		common.ReplyErr(w, "failed to create task conversation", http.StatusInternalServerError)

@@ -28,8 +28,8 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 dayjs.extend(utc);
 dayjs.extend(timezone);
-import { cancelSchedule, createSchedule, enableSchedule, listSchedules, listScheduleTasks, runScheduleNow, updateSchedule } from './api';
-import type { Schedule, Task, TaskListResponse } from './api';
+import { batchCreateAutomationGroup, cancelSchedule, createAutomationGroup, createSchedule, enableSchedule, listAutomationGroups, listSchedules, listScheduleTasks, moveSchedule, runScheduleNow, updateSchedule } from './api';
+import type { AutomationGroup, BatchScheduleDraft, Schedule, Task, TaskListResponse } from './api';
 import { KnowledgeBaseServiceApi } from '@/modules/chat/utils/request';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { axiosInstance, BASE_URL, localizeErrorCode } from '@/components/request';
@@ -346,6 +346,13 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   const [kbOptions, setKbOptions] = useState<{ value: string; label: string }[]>([]);
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
   const [viewMode, setViewMode] = useState<'large' | 'compact'>('large');
+  const [workspaceView, setWorkspaceView] = useState<'tasks' | 'groups'>('tasks');
+  const [groups, setGroups] = useState<AutomationGroup[]>([]);
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [batchModalOpen, setBatchModalOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [batchGroupName, setBatchGroupName] = useState('');
+  const [batchTasks, setBatchTasks] = useState<BatchScheduleDraft[]>([]);
   const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null);
   const [scheduleNameInput, setScheduleNameInput] = useState('');
   // Filter state
@@ -364,6 +371,8 @@ export default function ScheduleList({ active }: ScheduleListProps) {
     try {
       const resp = await listSchedules(statusFilter === 'all' || statusFilter === 'disabled');
       setSchedules(resp.items ?? []);
+      const groupResp = await listAutomationGroups();
+      setGroups(groupResp.items ?? []);
     } catch {
       // API errors are reported by the shared request interceptor.
     } finally {
@@ -438,6 +447,8 @@ export default function ScheduleList({ active }: ScheduleListProps) {
       remark: record.remark,
       cron_expr: record.cron_expr,
       kb_ids: record.kb_ids ?? [],
+      group_id: record.group_id,
+      source_schedule_ids: record.dependencies?.map((dependency) => dependency.source_schedule_id) ?? [],
     });
     setScheduleNameInput(record.name || '');
     setFileList([]);
@@ -450,6 +461,10 @@ export default function ScheduleList({ active }: ScheduleListProps) {
     try {
       const values = await form.validateFields();
       setSubmitting(true);
+      const mentionedSourceIDs = schedules
+        .filter((schedule) => schedule.id !== editTarget?.id && schedule.name && values.prompt_template.includes(`@${schedule.name}`))
+        .map((schedule) => schedule.id);
+      const sourceScheduleIDs = Array.from(new Set<string>([...(values.source_schedule_ids ?? []), ...mentionedSourceIDs]));
       const payload = {
         name: scheduleNameInput.trim(),
         remark: values.remark ?? '',
@@ -458,6 +473,14 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         timezone: localTimezone.current,
         kb_ids: values.kb_ids ?? [],
         file_ids: uploadedPaths,
+        group_id: values.group_id,
+        dependencies: sourceScheduleIDs.map((sourceId: string) => ({
+          source_schedule_id: sourceId,
+          window_type: 'between_target_fires',
+          content_types: ['final_answer', 'artifacts'],
+          incomplete_policy: 'wait_then_run_with_warning',
+          max_wait_seconds: 7200,
+        })),
       };
       if (editTarget) {
         await updateSchedule(editTarget.id, payload);
@@ -491,9 +514,59 @@ export default function ScheduleList({ active }: ScheduleListProps) {
     setModalOpen(true);
   };
 
+  const handleCreateEmptyGroup = async () => {
+    if (!newGroupName.trim()) return;
+    await createAutomationGroup({ name: newGroupName.trim(), timezone: localTimezone.current });
+    setNewGroupName(''); setGroupModalOpen(false); message.success('任务组已创建'); void fetchSchedules();
+  };
+
+  const openBatchModal = () => {
+    setBatchGroupName('');
+    setBatchTasks([{ client_key: `task_${Date.now()}`, name: '', cron_expr: buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)), prompt_template: '', dependencies: [] }]);
+    setBatchModalOpen(true);
+  };
+
+  const handleBatchCreate = async () => {
+    if (!batchGroupName.trim() || batchTasks.some((task) => !task.name.trim() || !task.prompt_template.trim())) {
+      message.warning('请填写任务组名称和每个任务的名称、任务内容'); return;
+    }
+    setSubmitting(true);
+    try {
+      await batchCreateAutomationGroup({ group: { name: batchGroupName.trim(), timezone: localTimezone.current }, tasks: batchTasks });
+      message.success('任务组和关联任务已创建'); setBatchModalOpen(false); void fetchSchedules();
+    } finally { setSubmitting(false); }
+  };
+
+  const renderScheduleCard = (schedule: Schedule) => (
+    <article
+      draggable={workspaceView === 'groups'}
+      onDragStart={(event) => event.dataTransfer.setData('text/schedule-id', schedule.id)}
+      className={`schedule-card ${schedule.enabled ? '' : 'is-disabled'}`}
+      key={schedule.id}
+      onClick={() => setSelectedSchedule(schedule)}
+    >
+      <div className='schedule-card-identity'>
+        <span className='schedule-icon'><CalendarOutlined /></span>
+        <div><h3>{schedule.name || schedule.prompt_template.slice(0, 24)}</h3><p>{schedule.prompt_template}</p>{schedule.dependencies?.length ? <small>收集：{schedule.dependencies.map((dependency) => dependency.source_name).join('、')} · 上次执行至本次执行</small> : null}</div>
+        <span className={`schedule-status-chip ${schedule.enabled ? 'enabled' : 'disabled'}`}>{schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</span>
+      </div>
+      <div className='schedule-card-timing'>
+        <strong><CalendarOutlined /> {describeCron(schedule.cron_expr, t)}</strong>
+        <span>{t('taskCenter.nextRunAt')}：{schedule.next_run_at ? dayjs(schedule.next_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>
+        {viewMode === 'large' && <span>{t('taskCenter.lastRun')}：{schedule.last_run_at ? dayjs(schedule.last_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>}
+      </div>
+      <div className='schedule-card-actions' onClick={(event) => event.stopPropagation()}>
+        <label><Switch size='small' checked={schedule.enabled} onChange={(checked) => void (checked ? handleEnable(schedule.id) : handleDisable(schedule.id))} /> {schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</label>
+        <span>{t('taskCenter.scheduleRunTotal', { total: schedule.run_count ?? 0 })}</span>
+        <div><Button className='schedule-run-button' icon={<PlayCircleOutlined />} onClick={() => void handleRunNow(schedule.id)}>{viewMode === 'large' ? t('taskCenter.scheduleRunNow') : null}</Button><Button icon={<EllipsisOutlined />} aria-label={t('taskCenter.scheduleEdit')} onClick={() => handleOpenEdit(schedule)} /></div>
+      </div>
+    </article>
+  );
+
   return (
     <div className='schedule-plans'>
       <div className='schedule-toolbar'>
+        <Segmented value={workspaceView} onChange={(value) => setWorkspaceView(value as 'tasks' | 'groups')} options={[{ value: 'tasks', label: '任务视图' }, { value: 'groups', label: '任务组视图' }]} />
         <Input
           prefix={<SearchOutlined style={{ color: '#bbb' }} />}
           placeholder={t('taskCenter.scheduleSearchPlaceholder')}
@@ -518,6 +591,8 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           { value: 'large', label: t('taskCenter.largeCards'), icon: <AppstoreOutlined /> },
           { value: 'compact', label: t('taskCenter.smallCards'), icon: <UnorderedListOutlined /> },
         ]} />
+        <Button icon={<PlusOutlined />} onClick={() => setGroupModalOpen(true)}>新建空任务组</Button>
+        <Button icon={<PlusOutlined />} onClick={openBatchModal}>新建一组任务</Button>
         <Button type='primary' icon={<PlusOutlined />} onClick={handleOpenModal}>{t('taskCenter.newSchedule')}</Button>
       </div>
       <Spin spinning={loading}>
@@ -526,27 +601,20 @@ export default function ScheduleList({ active }: ScheduleListProps) {
             <div><h2>{t('taskCenter.scheduleBoardTitle')}</h2><p>{t('taskCenter.scheduleBoardDescription')}</p></div>
             <span>{t('taskCenter.scheduleBoardCount', { total: displaySchedules.length })}</span>
           </header>
-          {displaySchedules.length ? (
+          {workspaceView === 'tasks' && displaySchedules.length ? (
             <div className={`schedule-grid ${viewMode}`}>
-              {displaySchedules.map((schedule) => (
-                <article className={`schedule-card ${schedule.enabled ? '' : 'is-disabled'}`} key={schedule.id} onClick={() => setSelectedSchedule(schedule)}>
-                  <div className='schedule-card-identity'>
-                    <span className='schedule-icon'><CalendarOutlined /></span>
-                    <div><h3>{schedule.name || schedule.prompt_template.slice(0, 24)}</h3><p>{schedule.prompt_template}</p></div>
-                    <span className={`schedule-status-chip ${schedule.enabled ? 'enabled' : 'disabled'}`}>{schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</span>
-                  </div>
-                  <div className='schedule-card-timing'>
-                    <strong><CalendarOutlined /> {describeCron(schedule.cron_expr, t)}</strong>
-                    <span>{t('taskCenter.nextRunAt')}：{schedule.next_run_at ? dayjs(schedule.next_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>
-                    {viewMode === 'large' && <span>{t('taskCenter.lastRun')}：{schedule.last_run_at ? dayjs(schedule.last_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>}
-                  </div>
-                  <div className='schedule-card-actions' onClick={(event) => event.stopPropagation()}>
-                    <label><Switch size='small' checked={schedule.enabled} onChange={(checked) => void (checked ? handleEnable(schedule.id) : handleDisable(schedule.id))} /> {schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</label>
-                    <span>{t('taskCenter.scheduleRunTotal', { total: schedule.run_count ?? 0 })}</span>
-                    <div><Button className='schedule-run-button' icon={<PlayCircleOutlined />} onClick={() => void handleRunNow(schedule.id)}>{viewMode === 'large' ? t('taskCenter.scheduleRunNow') : null}</Button><Button icon={<EllipsisOutlined />} aria-label={t('taskCenter.scheduleEdit')} onClick={() => handleOpenEdit(schedule)} /></div>
-                  </div>
-                </article>
-              ))}
+              {displaySchedules.map(renderScheduleCard)}
+            </div>
+          ) : workspaceView === 'groups' ? (
+            <div className='schedule-group-list'>
+              {[...groups.map((group) => ({ id: group.id, name: group.name })), { id: '', name: '其他任务' }].map((group) => {
+                const items = displaySchedules.filter((schedule) => (schedule.group_id || '') === group.id).sort((a, b) => (a.group_position || 0) - (b.group_position || 0));
+                if (!group.id && items.length === 0) return null;
+                return <section className='schedule-group-section' key={group.id || 'ungrouped'} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const scheduleId = event.dataTransfer.getData('text/schedule-id'); if (scheduleId) void moveSchedule(scheduleId, group.id || undefined, items.length).then(fetchSchedules); }}>
+                  <header><div><h3>{group.name}</h3><span>{items.length} 个任务</span></div>{group.id ? <Button size='small' onClick={() => { form.setFieldValue('group_id', group.id); handleOpenModal(); form.setFieldValue('group_id', group.id); }}>添加任务</Button> : null}</header>
+                  {items.length ? <div className={`schedule-grid ${viewMode}`}>{items.map(renderScheduleCard)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description='拖动任务到这里，或添加新任务' />}
+                </section>;
+              })}
             </div>
           ) : <Empty className='schedule-empty' description={t('taskCenter.empty')} />}
         </section>
@@ -644,7 +712,29 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           <Form.Item name='cron_expr' label={t('taskCenter.scheduleExecutionTime')} rules={[{ required: true }]}>
             <VisualScheduler />
           </Form.Item>
+          <Form.Item name='group_id' label='所属任务组（可选）'>
+            <Select allowClear options={groups.map((group) => ({ value: group.id, label: group.name }))} placeholder='其他任务' />
+          </Form.Item>
+          <Form.Item name='source_schedule_ids' label='收集其他任务的结果（可选）'>
+            <Select mode='multiple' allowClear optionFilterProp='label' options={schedules.filter((schedule) => schedule.id !== editTarget?.id).map((schedule) => ({ value: schedule.id, label: `${schedule.name || schedule.prompt_template.slice(0, 24)}${schedule.group_id ? ` · ${groups.find((group) => group.id === schedule.group_id)?.name || ''}` : ''}` }))} placeholder='选择一个或多个来源任务' />
+          </Form.Item>
         </Form>
+      </Modal>
+      <Modal title='新建空任务组' open={groupModalOpen} onCancel={() => setGroupModalOpen(false)} onOk={() => void handleCreateEmptyGroup()} okText='创建'>
+        <Input value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder='任务组名称' maxLength={128} />
+      </Modal>
+      <Modal title='新建一组关联任务' width={760} open={batchModalOpen} onCancel={() => setBatchModalOpen(false)} onOk={() => void handleBatchCreate()} confirmLoading={submitting} okText='一次性创建'>
+        <Input value={batchGroupName} onChange={(event) => setBatchGroupName(event.target.value)} placeholder='任务组名称' style={{ marginBottom: 16 }} />
+        <div className='batch-task-editor'>
+          {batchTasks.map((task, index) => <section className='batch-task-card' key={task.client_key}>
+            <header><strong>任务 {index + 1}</strong>{batchTasks.length > 1 ? <Button type='link' danger onClick={() => setBatchTasks((current) => current.filter((item) => item.client_key !== task.client_key))}>删除</Button> : null}</header>
+            <Input value={task.name} onChange={(event) => setBatchTasks((current) => current.map((item) => item.client_key === task.client_key ? { ...item, name: event.target.value } : item))} placeholder='任务名称' />
+            <Input.TextArea value={task.prompt_template} onChange={(event) => setBatchTasks((current) => current.map((item) => item.client_key === task.client_key ? { ...item, prompt_template: event.target.value } : item))} placeholder='希望 LazyMind 做什么？' rows={2} />
+            <VisualScheduler value={task.cron_expr} onChange={(cronExpr) => setBatchTasks((current) => current.map((item) => item.client_key === task.client_key ? { ...item, cron_expr: cronExpr } : item))} />
+            {index > 0 ? <Select mode='multiple' allowClear placeholder='收集之前任务的结果（可选）' value={(task.dependencies || []).map((dependency: any) => dependency.source_client_key)} options={batchTasks.slice(0, index).map((source) => ({ value: source.client_key, label: source.name || `任务 ${batchTasks.indexOf(source) + 1}` }))} onChange={(keys: string[]) => setBatchTasks((current) => current.map((item) => item.client_key === task.client_key ? { ...item, dependencies: keys.map((key) => ({ source_client_key: key, source_schedule_id: '', window_type: 'between_target_fires', content_types: ['final_answer', 'artifacts'], incomplete_policy: 'wait_then_run_with_warning', max_wait_seconds: 7200 })) } : item))} /> : null}
+          </section>)}
+          <Button block icon={<PlusOutlined />} onClick={() => setBatchTasks((current) => [...current, { client_key: `task_${Date.now()}`, name: '', cron_expr: buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)), prompt_template: '', dependencies: [] }])}>添加任务</Button>
+        </div>
       </Modal>
     </div>
   );
