@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from lazymind.common.skill_document import require_skill_name
+from .document import require_skill_name
 
 
 class SkillStorageCategory(StrEnum):

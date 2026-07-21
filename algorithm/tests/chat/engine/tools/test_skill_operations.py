@@ -9,8 +9,8 @@ from lazymind.chat.engine.tools.infra.skill_operations import (
     fuzzy_find_and_replace,
 )
 from lazymind.chat.engine.tools.skill_editor import SkillManagementToolkit
-from lazymind.common.skill_paths import normalize_skill_package_path, relative_to_package
-from lazymind.common.skill_remote_store import SkillRemoteStore
+from lazymind.common.skill.paths import normalize_skill_package_path, relative_to_package
+from lazymind.common.skill.remote_store import SkillRemoteStore
 
 
 @pytest.mark.parametrize('path', ['/x', '../x', 'refs/../x', 'refs//x', r'refs\x', ''])

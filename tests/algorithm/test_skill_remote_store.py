@@ -1,7 +1,7 @@
 import pytest
 
-from lazymind.common.skill_remote_store import SkillRemoteStore
-from lazymind.common.skill_storage_key import (
+from lazymind.common.skill.remote_store import SkillRemoteStore
+from lazymind.common.skill.storage_key import (
     parse_skill_storage_key,
     require_skill_storage_category,
 )

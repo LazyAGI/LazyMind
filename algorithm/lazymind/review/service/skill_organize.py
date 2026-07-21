@@ -8,8 +8,8 @@ from typing import Any
 import lazyllm
 from lazyllm import AutoModel, LOG
 
-from lazymind.common.skill_remote_store import SkillRemoteStore
-from lazymind.common.skill_storage_key import parse_skill_storage_key
+from lazymind.common.skill.remote_store import SkillRemoteStore
+from lazymind.common.skill.storage_key import parse_skill_storage_key
 from lazymind.model_config import inject_model_config
 from lazymind.review.skill_organize.config import (
     STAGE_DRAFT,

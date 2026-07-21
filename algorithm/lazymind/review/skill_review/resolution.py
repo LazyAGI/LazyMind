@@ -7,8 +7,8 @@ from uuid import uuid4
 
 from lazyllm import LOG, ThreadPoolExecutor
 
-from lazymind.common.skill_document import require_valid_skill_document
-from lazymind.common.skill_storage_key import parse_skill_storage_key
+from lazymind.common.skill.document import require_valid_skill_document
+from lazymind.common.skill.storage_key import parse_skill_storage_key
 from lazymind.review.skill_review.config import DEFAULT_STAGE_WORKERS, STAGE_FILES, STAGE_RESOLUTION
 from lazymind.review.skill_review.json_call import call_json
 from lazymind.review.skill_review.reports import finish_stage_report, stage_error, start_stage, write_json_file
