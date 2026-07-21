@@ -2,6 +2,7 @@ package schedule
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -44,6 +45,32 @@ func TestCheckpointScheduleEngineEnqueuesManualRunAndAllowsDistinctActiveManualS
 	}
 	if !second.Created || second.Run.RunID == first.Run.RunID {
 		t.Fatalf("expected distinct active manual scopes to queue separately, first=%+v second=%+v", first, second)
+	}
+}
+
+func TestCheckpointScheduleEngineForcesDeletingBindingToCleanupScope(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := scheduleTestTime()
+	due := now.Add(-time.Minute)
+	repo := newScheduleStore(store.Binding{Status: "DELETING", SyncMode: SyncModeScheduled}, &due, now)
+	engine := NewCheckpointScheduleEngine(repo, repo, WithClock(func() time.Time { return now }), WithIDGenerator(scheduleIDs()))
+
+	manual, err := engine.EnqueueManualSync(ctx, ManualSyncRequest{SourceID: "source-1", BindingID: "binding-1", ScopeType: connector.ScopeTypePartial})
+	if err != nil {
+		t.Fatalf("enqueue cleanup sync: %v", err)
+	}
+	if manual.Run.ScopeType != string(connector.ScopeTypeCleanup) || len(manual.Run.ScopeRef) != 0 {
+		t.Fatalf("deleting binding manual run was not forced to cleanup: %+v", manual.Run)
+	}
+
+	intents, err := engine.EnqueueDueSyncRuns(ctx, 10)
+	if err != nil {
+		t.Fatalf("enqueue scheduled cleanup: %v", err)
+	}
+	if len(intents) != 1 || intents[0].Run.ScopeType != string(connector.ScopeTypeCleanup) {
+		t.Fatalf("deleting binding due run was not cleanup scoped: %+v", intents)
 	}
 }
 
@@ -363,6 +390,38 @@ func TestCheckpointScheduleEngineFinishSuccessGeneratesPendingParseTasks(t *test
 	call := planner.calls[0]
 	if call.sourceID != "source-1" || call.bindingID != "binding-1" || call.runID != claimed.RunID {
 		t.Fatalf("pending task generation call lost sync context: %+v", call)
+	}
+}
+
+func TestCheckpointScheduleEngineRetriesCleanupWhenTaskPlanningFails(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := scheduleTestTime()
+	repo := newScheduleStore(store.Binding{Status: "DELETING", SyncMode: SyncModeManual}, nil, now)
+	plannerErr := errors.New("planner unavailable")
+	planner := &pendingTaskPlannerStub{err: plannerErr}
+	engine := NewCheckpointScheduleEngine(repo, repo, WithClock(func() time.Time { return now }), WithIDGenerator(scheduleIDs()), WithRetryBackoff(func(int64) time.Duration { return time.Minute }), WithTaskPlanner(planner))
+	intent, err := engine.EnqueueManualSync(ctx, ManualSyncRequest{SourceID: "source-1", BindingID: "binding-1"})
+	if err != nil {
+		t.Fatalf("enqueue cleanup: %v", err)
+	}
+	repo.claimRun(t, intent.Run.RunID, "worker-a")
+
+	_, ok, err := engine.FinishRun(ctx, FinishRunRequest{RunID: intent.Run.RunID, WorkerID: "worker-a", Coverage: store.JSON{"complete": true, "covered_target_root": true, "scope_type": string(connector.ScopeTypeCleanup)}})
+	if !ok || !errors.Is(err, plannerErr) {
+		t.Fatalf("finish cleanup should report planner error: ok=%v err=%v", ok, err)
+	}
+	if len(repo.runs) != 2 {
+		t.Fatalf("cleanup planner failure should enqueue a retry: %+v", repo.runs)
+	}
+	for runID, run := range repo.runs {
+		if runID == intent.Run.RunID {
+			continue
+		}
+		if run.Status != store.SyncRunStatusPending || run.ScopeType != string(connector.ScopeTypeCleanup) || !run.StartedAt.Equal(now.Add(time.Minute)) {
+			t.Fatalf("unexpected cleanup retry: %+v", run)
+		}
 	}
 }
 
@@ -751,7 +810,7 @@ func (s *scheduleStore) GetSyncCheckpoint(context.Context, string) (store.SyncCh
 }
 
 func (s *scheduleStore) ListDueSyncCheckpoints(_ context.Context, now time.Time, limit int) ([]store.SyncCheckpoint, error) {
-	if limit == 0 || s.checkpoint.NextSyncAt == nil || s.checkpoint.NextSyncAt.After(now) || s.binding.Status != "ACTIVE" {
+	if limit == 0 || s.checkpoint.NextSyncAt == nil || s.checkpoint.NextSyncAt.After(now) || (s.binding.Status != "ACTIVE" && s.binding.Status != "DELETING") {
 		return nil, nil
 	}
 	return []store.SyncCheckpoint{s.checkpoint}, nil
@@ -861,9 +920,10 @@ type pendingTaskPlannerCall struct {
 
 type pendingTaskPlannerStub struct {
 	calls []pendingTaskPlannerCall
+	err   error
 }
 
 func (p *pendingTaskPlannerStub) GeneratePendingTasks(_ context.Context, sourceID, bindingID, runID string) error {
 	p.calls = append(p.calls, pendingTaskPlannerCall{sourceID: sourceID, bindingID: bindingID, runID: runID})
-	return nil
+	return p.err
 }

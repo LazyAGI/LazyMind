@@ -21,6 +21,13 @@ func TestRollback_MovesHeadWithoutCreatingRevision(t *testing.T) {
 		t.Fatalf("unexpected rollback response: %#v", resp)
 	}
 	testutil.AssertHeadRevision(t, db, "skill1", "rev1")
+	var skill testutil.SkillRow
+	if err := db.Where("id = ?", "skill1").Take(&skill).Error; err != nil {
+		t.Fatalf("query rolled back skill: %v", err)
+	}
+	if skill.SkillName != "论文精读" || skill.Description != "用于阅读和总结论文的技能" || skill.RelativeRoot != "research/论文精读" {
+		t.Fatalf("rolled back metadata not synchronized: %#v", skill)
+	}
 	if got := testutil.CountRows(t, db, "skill_revisions", "skill_id = ?", "skill1"); got != 2 {
 		t.Fatalf("revision count = %d, want 2", got)
 	}
@@ -47,7 +54,7 @@ func TestRollback_CommitCreatesNextRevisionFromRolledBackHead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DraftStatus returned error: %v", err)
 	}
-	testutil.SeedTextBlob(t, db, "h_branch", "# branch\n")
+	testutil.SeedTextBlob(t, db, "h_branch", testutil.SkillMD("branch", "branch description"))
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_branch")
 	commit, err := service.CommitDraft(context.Background(), CommitDraftRequest{SkillID: "skill1", UserID: "user_001", DraftVersion: status.DraftVersion})
 	if err != nil {
@@ -147,9 +154,14 @@ func seedSecondRevision(t *testing.T, db *testutil.TestDB, skillID, parentRevisi
 		CreatedAt:        testutil.TimeFixture(),
 	})
 	hash := "h_skill_" + revisionID
-	testutil.SeedTextBlob(t, db, hash, "# v2\n")
+	testutil.SeedTextBlob(t, db, hash, testutil.SkillMD("论文精读-v2", "第二版描述"))
 	testutil.SeedRevisionEntry(t, db, revisionID, "SKILL.md", "file", hash, "markdown")
-	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", skillID).Update("head_revision_id", revisionID).Error; err != nil {
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", skillID).Updates(map[string]any{
+		"head_revision_id": revisionID,
+		"skill_name":       "论文精读-v2",
+		"description":      "第二版描述",
+		"relative_root":    "research/论文精读-v2",
+	}).Error; err != nil {
 		t.Fatalf("update head revision: %v", err)
 	}
 	if err := db.Model(&testutil.SkillDraftRow{}).Where("skill_id = ?", skillID).Update("base_revision_id", revisionID).Error; err != nil {

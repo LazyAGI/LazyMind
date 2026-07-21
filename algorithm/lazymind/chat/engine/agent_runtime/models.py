@@ -44,6 +44,8 @@ class AgentExecutionOptions:
     fs: Any = None
     skills_dir: Optional[str] = None
     extra_stop_condition: Optional[Callable[..., Any]] = None
+    max_retries: Optional[int] = None
+    tool_failure_limits: Optional[dict[str, int]] = None
 
 
 @dataclass

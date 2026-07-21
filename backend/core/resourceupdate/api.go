@@ -235,6 +235,14 @@ func RunSkillReview(w http.ResponseWriter, r *http.Request) {
 }
 
 func ListSkillReviewTasks(w http.ResponseWriter, r *http.Request) {
+	listSkillTasks(w, r, orm.ResourceUpdateTaskTypeGenerateReview, "skill review task")
+}
+
+func ListSkillOrganizeTasks(w http.ResponseWriter, r *http.Request) {
+	listSkillTasks(w, r, orm.ResourceUpdateTaskTypeOrganizeSkill, "skill organize task")
+}
+
+func listSkillTasks(w http.ResponseWriter, r *http.Request, taskType, errorLabel string) {
 	db, userID, ok := requestDBAndUser(w, r)
 	if !ok {
 		return
@@ -243,21 +251,29 @@ func ListSkillReviewTasks(w http.ResponseWriter, r *http.Request) {
 	pageSize := parsePositiveQueryInt(r.URL.Query().Get("page_size"), 20, 1000)
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 	requestID := strings.TrimSpace(r.URL.Query().Get("requestid"))
-	resp, err := buildSkillReviewTaskList(r.Context(), db, userID, status, requestID, page, pageSize)
+	resp, err := buildSkillTaskList(r.Context(), db, userID, taskType, status, requestID, page, pageSize)
 	if err != nil {
-		mapReviewError(w, err, "skill review task")
+		mapReviewError(w, err, errorLabel)
 		return
 	}
 	common.ReplyOK(w, resp)
 }
 
 func buildSkillReviewTaskList(ctx context.Context, db *gorm.DB, userID, status, requestID string, page, pageSize int) (skillReviewTaskListResponse, error) {
+	return buildSkillTaskList(ctx, db, userID, orm.ResourceUpdateTaskTypeGenerateReview, status, requestID, page, pageSize)
+}
+
+func buildSkillOrganizeTaskList(ctx context.Context, db *gorm.DB, userID, status, requestID string, page, pageSize int) (skillReviewTaskListResponse, error) {
+	return buildSkillTaskList(ctx, db, userID, orm.ResourceUpdateTaskTypeOrganizeSkill, status, requestID, page, pageSize)
+}
+
+func buildSkillTaskList(ctx context.Context, db *gorm.DB, userID, taskType, status, requestID string, page, pageSize int) (skillReviewTaskListResponse, error) {
 	var tasks []orm.ResourceUpdateTask
 	if err := db.WithContext(ctx).
 		Where(
 			"user_id = ? AND task_type = ? AND resource_type = ? AND trigger_type = ?",
 			strings.TrimSpace(userID),
-			orm.ResourceUpdateTaskTypeGenerateReview,
+			taskType,
 			orm.ResourceUpdateResourceTypeSkill,
 			orm.ResourceUpdateTriggerTypeManual,
 		).
@@ -388,21 +404,6 @@ type skillReviewStatsCounts struct {
 	UpdatedCount int64
 	SkippedCount int64
 	FailedCount  int64
-}
-
-func findSkillReviewStatsRow(ctx context.Context, db *gorm.DB, userID, idOrRequestID string) (skillReviewStatsRow, error) {
-	key := strings.TrimSpace(idOrRequestID)
-	if key == "" {
-		return skillReviewStatsRow{}, errReviewInvalid
-	}
-	var row skillReviewStatsRow
-	err := db.WithContext(ctx).
-		Table("skill_review_stats").
-		Select("id, requestid, userid, status, started_at, duration_ms, summary").
-		Where("userid = ? AND (id = ? OR requestid = ?)", strings.TrimSpace(userID), key, key).
-		Order("started_at DESC, id DESC").
-		Take(&row).Error
-	return row, err
 }
 
 func skillReviewStatsToResponse(row skillReviewStatsRow) skillReviewStatsResponse {
@@ -560,20 +561,6 @@ func summaryArrayLen(summary map[string]any, keys ...string) int64 {
 		}
 	}
 	return 0
-}
-
-func GetSkillReviewResult(w http.ResponseWriter, r *http.Request) {
-	db, userID, ok := requestDBAndUser(w, r)
-	if !ok {
-		return
-	}
-	statsID := common.PathVar(r, "review_result_id")
-	row, err := findSkillReviewStatsRow(r.Context(), db, userID, statsID)
-	if err != nil {
-		mapReviewError(w, err, "query skill review result")
-		return
-	}
-	common.ReplyOK(w, skillReviewStatsToResponse(row))
 }
 
 func AcceptSkillReviewResult(w http.ResponseWriter, r *http.Request) {

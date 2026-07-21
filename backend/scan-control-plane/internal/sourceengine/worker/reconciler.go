@@ -132,7 +132,8 @@ func (r *CoreResultReconciler) loadExecutionContext(ctx context.Context, task st
 }
 
 func validateReconcilerFreshness(exec reconcilerExecutionContext) error {
-	if exec.binding.Status != "ACTIVE" {
+	cleanupDelete := exec.binding.Status == "DELETING" && exec.task.TaskAction == "DELETE"
+	if exec.binding.Status != "ACTIVE" && !cleanupDelete {
 		return errors.New("binding is not active")
 	}
 	if exec.binding.BindingGeneration != exec.task.BindingGeneration {

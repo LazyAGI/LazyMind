@@ -105,7 +105,13 @@ class CloudAuthConnectionRepository:
             if normalized_modes:
                 q = q.filter(~CloudAuthConnection.auth_mode.in_(normalized_modes))
         if status:
-            q = q.filter(CloudAuthConnection.status == status.strip().upper())
+            statuses = tuple(
+                value.strip().upper()
+                for value in status.split(',')
+                if value and value.strip()
+            )
+            if statuses:
+                q = q.filter(CloudAuthConnection.status.in_(statuses))
         return q.order_by(CloudAuthConnection.updated_at.desc(), CloudAuthConnection.created_at.desc()).all()
 
     @classmethod

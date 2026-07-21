@@ -465,17 +465,12 @@ The YAML frontmatter should include:
 
 * name
 * description
-* category
 
 The description should be a single concise routing sentence derived from the outline's applicable_scenario.
 It should describe:
 * when the skill applies;
 * the reusable capability it provides;
 Keep the description consistent with the applicable_scenario and do not narrow it to specific trajectories, tools, projects, or implementations.
-
-The category should:
-* be a concise lowercase classification for the skill, such as `research`, `coding`, `writing`, `data-analysis`, `tool-use`, `planning`, `debugging`, `review`, or `general`
-* describe the reusable task family, not the source trajectory, user, project, or implementation detail
 
 # Markdown Structure
 
@@ -531,13 +526,14 @@ def resolution_prompt(candidate: dict[str, Any], global_skill_summaries: str) ->
         'the same reusable workflow as one existing skill. Choose type="new" when the candidate '
         'is a distinct workflow, even if it has a similar topic, category, tool family, or wording.\n\n'
         'Patch decisions are conservative:\n'
-        '- patch_skill_name MUST exactly match the Name of one provided existing skill;\n'
-        '- do not invent skill names;\n'
+        '- patch_skill_key MUST exactly match the full key shown in bold for one provided existing skill '
+        '(for example, "internal/example" or "external/example");\n'
+        '- do not invent skill keys;\n'
         '- do not patch merely because the category or broad subject is similar;\n'
         '- choose new when the target object, action space, completion condition, or procedure differs materially.\n\n'
         'Return ONLY valid JSON with these keys:\n'
         '- type: "new" or "patch"\n'
-        '- patch_skill_name: required when type="patch"; otherwise use an empty string\n'
+        '- patch_skill_key: required when type="patch"; otherwise use an empty string\n'
         '- reason: concise reason for the decision\n\n'
         f'GLOBAL_SKILL_SUMMARIES:\n{global_skill_summaries}\n\n'
         f'CANDIDATE_SKILL:\n{json.dumps(candidate, ensure_ascii=False, indent=2)}'
@@ -547,7 +543,7 @@ def resolution_prompt(candidate: dict[str, Any], global_skill_summaries: str) ->
 def merge_skill_patch_prompt(
     candidate: dict[str, Any],
     *,
-    patch_skill_name: str,
+    target_skill_key: str,
     existing_skill_content: str,
     decision_reason: str = '',
 ) -> str:
@@ -556,7 +552,7 @@ def merge_skill_patch_prompt(
         'Use the same language as CANDIDATE_SKILL for all natural-language fields and Markdown content. '
         'The only exception is `skill_name`, which must remain concise English kebab-case.\n\n'
         'You receive:\n'
-        '1. TARGET_SKILL_NAME: the existing skill selected for patching. This is the old/current name.\n'
+        '1. TARGET_SKILL_KEY: the full storage key of the existing skill selected for patching.\n'
         '2. EXISTING_SKILL: the full current SKILL.md content.\n'
         '3. CANDIDATE_SKILL: the newly mined candidate skill.\n'
         '4. DECISION_REASON: why the candidate should patch the target skill.\n\n'
@@ -565,18 +561,18 @@ def merge_skill_patch_prompt(
         'the candidate. Do not add one-off task details, identifiers, temporary paths, session data, '
         'or source trajectory metadata.\n\n'
         'Frontmatter requirements:\n'
-        f'- by default keep frontmatter name "{patch_skill_name}";\n'
+        '- by default keep the existing SKILL.md frontmatter name;\n'
         '- you MAY change the frontmatter name when the merged reusable workflow is better represented by a clearer, '
         'more accurate concise English kebab-case skill name;\n'
         '- rename only for semantic clarity or boundary correction, not for cosmetic wording churn;\n'
         '- if you rename, ensure the Markdown body and description consistently describe the renamed skill boundary;\n'
-        '- keep or refine description/category only when the merged workflow boundary requires it;\n'
+        '- keep or refine the description only when the merged workflow boundary requires it;\n'
         '- include a non-empty Markdown body.\n\n'
         'Return ONLY valid JSON with these keys:\n'
         '- summary: concise description of what changed\n'
-        '- skill_name: the final frontmatter name after patching, which may equal TARGET_SKILL_NAME_OLD or a rename\n'
+        '- skill_name: the final frontmatter name after patching, which may keep the existing name or use a rename\n'
         '- skill_content: the complete patched SKILL.md content\n\n'
-        f'TARGET_SKILL_NAME_OLD:\n{patch_skill_name}\n\n'
+        f'TARGET_SKILL_KEY:\n{target_skill_key}\n\n'
         f'DECISION_REASON:\n{decision_reason}\n\n'
         f'EXISTING_SKILL:\n{existing_skill_content}\n\n'
         f'CANDIDATE_SKILL:\n{json.dumps(candidate, ensure_ascii=False, indent=2)}'

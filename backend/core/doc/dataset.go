@@ -449,12 +449,17 @@ func AllDatasetTags(w http.ResponseWriter, r *http.Request) {
 
 	groupIDs := acl.ResolveUserGroupIDs(userID)
 	seen := map[string]struct{}{}
+	visible := make([]orm.Dataset, 0, len(datasets))
 	// Keep JSON stable: return [] instead of null when empty.
 	tags := make([]string, 0)
 	for _, ds := range datasets {
 		if len(datasetACLForUserWithGroups(&ds, userID, groupIDs)) == 0 {
 			continue
 		}
+		visible = append(visible, ds)
+	}
+	visible = filterDatasetsByScanSourceAccess(r, visible, acl.PermissionDatasetRead)
+	for _, ds := range visible {
 		for _, t := range parseDatasetTags(ds.Ext) {
 			if _, ok := seen[t]; ok {
 				continue
@@ -578,6 +583,7 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 			}
 			candidates = append(candidates, ds)
 		}
+		candidates = filterDatasetsByScanSourceAccess(r, candidates, acl.PermissionDatasetRead)
 
 		if len(candidates) > 0 {
 			candidateIDs := make([]string, len(candidates))
@@ -1091,6 +1097,12 @@ func GetDataset(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(common.ForbiddenBody))
 		return
 	}
+	if !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetRead) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(common.ForbiddenBody))
+		return
+	}
 
 	algo := parseDatasetAlgo(ds.Ext)
 	parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), fetchParsersByAlgoID(r.Context(), algo.AlgoID))
@@ -1143,7 +1155,7 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) {
+	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, "delete") {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(common.ForbiddenBody))
@@ -1317,7 +1329,7 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) {
+	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetWrite) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(common.ForbiddenBody))
@@ -1486,7 +1498,7 @@ func SetDefault(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) {
+	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetRead) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(common.ForbiddenBody))
@@ -1543,7 +1555,7 @@ func UnsetDefault(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) {
+	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetRead) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(common.ForbiddenBody))

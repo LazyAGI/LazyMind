@@ -291,7 +291,7 @@ def add_standard_system_sections(
         excluded_lines = [
             *(f'- Skill: {value}' for value in excluded.skill_names),
             *(f'- Knowledge base: {value}' for value in excluded.knowledge_base_ids),
-            *(f'- Plugin: {value}' for value in excluded.plugin_refs),
+            *(f'- Workflow: {value}' for value in excluded.plugin_refs),
         ]
         if excluded_lines:
             builder.runtime(

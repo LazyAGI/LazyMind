@@ -88,9 +88,9 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Attached file rules\n'
         'Attachments are listed for reference only — do NOT parse or read them automatically.\n'
-        '- `find_user_attachment(filename, turn=N)`: get path/url to pass to image tools, plugins, '
+        '- `find_user_attachment(filename, turn=N)`: get path/url to pass to image tools, workflows, '
         '`vision_extractor`, or `save_plugin_artifact`. Prefer this for images when the task is '
-        'visual (edit, generate, plugin) or you only need the file location.\n'
+        'visual (edit, generate, workflow) or you only need the file location.\n'
         '- `read_user_attachment(filename, turn=N)`: extract TEXT — direct read for plain-text files, '
         'OCR for pdf/doc/docx/pptx, or a '
         'text description via vision for images. Use only when you need document text or a textual '
@@ -140,7 +140,7 @@ KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         "are available, so call the appropriate search method directly. "
         "Your first substantive action for the turn MUST be one of those searches. Do not answer "
         "from memory, announce that you could search later, ask whether you should search, or start "
-        "a plugin before searching. Use the knowledge-base search method FIRST for every retrieval "
+        "a workflow before searching. Use the knowledge-base search method FIRST for every retrieval "
         "need — no exceptions. Do not skip it because you think the web might have "
         "better information, or because the topic seems general, popular, or common "
         "knowledge. The knowledge base is your primary evidence source.\n\n"
@@ -529,7 +529,9 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(
         name='video_generator',
         label='文生视频',
+        label_en='Video Generator',
         description='根据文字描述生成视频，可选首帧参考图；同轮多次调用并行，视频侧最多同时3路',
+        description_en='Generate videos from text descriptions, with optional first-frame reference images.',
         tool=video_generator, module='content',
         model_role='video_generator',
         capability_id='video_generation',
@@ -540,7 +542,9 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(
         name='video_to_gif',
         label='视频转GIF',
+        label_en='GIF Converter',
         description='将本地视频转换为 GIF 动图；同轮多次调用并行，GIF 侧最多同时3路',
+        description_en='Convert local videos to GIF animations.',
         tool=video_to_gif, module='content',
         capability_id='video_to_gif',
         input_schema={'url': 'string'}, output_schema={'image': 'file'},

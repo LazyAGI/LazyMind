@@ -387,7 +387,7 @@ export default function StateGraphView({ data }: { data: StateGraphData }) {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Legend />
       <div className='sgv-scroll' style={{ flex: 1, overflow: 'auto', background: '#f5f5f5' }}>
-        <svg ref={svgRef} width={svgW} height={svgH} style={{ display: 'block', background: '#f5f5f5', minWidth: '100%' }} aria-label='Plugin workflow graph'>
+        <svg ref={svgRef} width={svgW} height={svgH} style={{ display: 'block', background: '#f5f5f5', minWidth: '100%' }} aria-label='Workflow graph'>
           <defs>
             <marker id='arr-green' markerWidth={8} markerHeight={8} refX={7} refY={3} orient='auto'><path d='M0,0 L0,6 L8,3 z' fill='#52c41a' /></marker>
             <marker id='arr-blue'  markerWidth={8} markerHeight={8} refX={7} refY={3} orient='auto'><path d='M0,0 L0,6 L8,3 z' fill='#1677ff' /></marker>

@@ -53,6 +53,52 @@ func TestReviewSkillUsesRegisteredChatRoute(t *testing.T) {
 	}
 }
 
+func TestReviewMemoryMatchesAlgorithmContract(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":  "success",
+			"task_id": "memory_review_core-task-1",
+		})
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+
+	response, status, err := ReviewMemory(context.Background(), MemoryReviewRequest{
+		TaskID:    "memory_review_core-task-1",
+		UserID:    "user-1",
+		History:   []map[string]any{{"role": "user", "content": "hello"}},
+		LLMConfig: map[string]any{"chat": map[string]any{"model": "demo"}},
+	})
+	if err != nil {
+		t.Fatalf("ReviewMemory() error = %v", err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("ReviewMemory() status = %d, want %d", status, http.StatusOK)
+	}
+	if gotPath != "/api/chat/memory_review" {
+		t.Fatalf("ReviewMemory() path = %q, want %q", gotPath, "/api/chat/memory_review")
+	}
+	if len(gotBody) != 4 || gotBody["task_id"] != "memory_review_core-task-1" || gotBody["user_id"] != "user-1" {
+		t.Fatalf("ReviewMemory() body = %#v", gotBody)
+	}
+	if _, ok := gotBody["history"]; !ok {
+		t.Fatalf("ReviewMemory() omitted history: %#v", gotBody)
+	}
+	if _, ok := gotBody["llm_config"]; !ok {
+		t.Fatalf("ReviewMemory() omitted llm_config: %#v", gotBody)
+	}
+	if response == nil || response.Status != "success" || response.TaskID != "memory_review_core-task-1" {
+		t.Fatalf("ReviewMemory() response = %#v", response)
+	}
+}
+
 func TestSkillOrganizeRequestMatchesAlgorithmContract(t *testing.T) {
 	body, err := json.Marshal(SkillOrganizeRequest{
 		RequestID: "org-request-1",

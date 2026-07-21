@@ -92,9 +92,9 @@ func (r *SQLRepository) ClaimDueSyncRun(ctx context.Context, workerID string, no
 				JOIN source_bindings b ON b.binding_id = c.binding_id
 				WHERE c.binding_id = source_sync_runs.binding_id
 				  AND c.binding_generation = source_sync_runs.binding_generation
-				  AND b.status = ?
+				  AND (b.status = ? OR (b.status = ? AND source_sync_runs.scope_type = ?))
 				  AND (c.lock_owner IS NULL OR c.lock_owner = '' OR c.lock_until IS NULL OR c.lock_until <= ?)
-			)`, "ACTIVE", now).
+			)`, "ACTIVE", "DELETING", "cleanup", now).
 			Order("started_at, run_id").
 			Limit(1).
 			First(&taskModel).Error
@@ -254,4 +254,3 @@ func queryActiveSyncRunORM(db *gorm.DB, bindingID string, generation int64) (Syn
 	}
 	return syncRunFromORM(model), true, nil
 }
-

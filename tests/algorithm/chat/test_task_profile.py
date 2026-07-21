@@ -723,18 +723,11 @@ def test_colloquial_resource_denials_are_executed_without_clarification() -> Non
         assert profile.request_assessment.status == 'ready'
 
 
-def test_ambiguous_resource_preference_uses_llm_intent_result() -> None:
-    result = {
-        'primary_outcome': 'analyze', 'secondary_outcomes': [],
-        'complexity': 'open_ended', 'freshness': 'stable',
-        'research_required': False, 'deliverable_kind': 'analysis_report',
-        'secondary_deliverables': [], 'skill_mode': 'suppress',
-        'source_strategy': 'knowledge_base', 'confidence': 0.88,
-        'reasons': ['resource preference'], 'excluded_resource_refs': ['kb-internal'],
-    }
+def test_ambiguous_resource_preference_does_not_use_llm() -> None:
+    calls = []
     profile = resolve_task_profile(
         '分析方案，尽量别依赖内部库，外部库你看着办',
-        classifier=lambda _: json.dumps(result),
+        classifier=lambda prompt: calls.append(prompt),
         explicit_resources={
             'knowledge_base_ids': ['kb-internal', 'kb-external'],
             'mentions': [
@@ -745,13 +738,14 @@ def test_ambiguous_resource_preference_uses_llm_intent_result() -> None:
             ],
         },
     )
-    assert profile.source == 'llm'
-    assert profile.explicit_resources.knowledge_base_ids == ('kb-external',)
-    assert profile.excluded_resources.knowledge_base_ids == ('kb-internal',)
+    assert calls == []
+    assert profile.source == 'rules'
+    assert profile.explicit_resources.knowledge_base_ids == ('kb-internal', 'kb-external')
+    assert not profile.excluded_resources.knowledge_base_ids
     assert profile.request_assessment.status == 'ready'
 
 
-def test_rule_only_preview_marks_when_llm_review_would_be_needed() -> None:
+def test_rule_only_resource_preference_does_not_request_llm_review() -> None:
     calls = []
     profile = resolve_task_profile(
         '分析方案，尽量别依赖内部库，外部库你看着办',
@@ -768,8 +762,33 @@ def test_rule_only_preview_marks_when_llm_review_would_be_needed() -> None:
         },
     )
     assert calls == []
-    assert profile.routing_review_required is True
-    assert '资源' in profile.routing_review_reason
+    assert profile.routing_review_required is False
+
+
+@pytest.mark.parametrize('query', [
+    '你有哪些技能', '你们支持哪些知识库和文档资源', '平台有什么数据集和数据库能力',
+    '你能做什么', 'What skills do you have?',
+])
+def test_platform_capability_questions_stay_on_fast_rule_path(query: str) -> None:
+    calls = []
+    profile = resolve_task_profile(query, classifier=lambda prompt: calls.append(prompt))
+    assert calls == []
+    assert profile.primary_outcome == 'answer'
+    assert profile.complexity == 'simple'
+    assert profile.confidence >= 0.9
+
+
+def test_classifier_requests_only_compact_optional_overrides() -> None:
+    prompts = []
+    profile = resolve_task_profile(
+        '我想搞点AI相关的东西',
+        classifier=lambda prompt: prompts.append(prompt) or '{}',
+    )
+    assert profile.source == 'llm'
+    assert len(prompts) == 1
+    assert 'fields whose rule-proposed value is acceptable' in prompts[0]
+    assert 'deliverable_kind' not in prompts[0]
+    assert 'excluded_resource_refs' not in prompts[0]
 
 
 def test_llm_classification_cannot_override_explicit_resources() -> None:

@@ -13,6 +13,7 @@ import (
 	"lazymind/core/algo"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/log"
 	"lazymind/core/modelconfig"
 	corestore "lazymind/core/store"
 
@@ -86,8 +87,9 @@ type promptItemResponse struct {
 }
 
 type promptFacetResponse struct {
-	Scopes     map[string]int64 `json:"scopes"`
-	Categories map[string]int64 `json:"categories"`
+	Scopes        map[string]int64 `json:"scopes"`
+	Categories    map[string]int64 `json:"categories"`
+	CategoryTotal int64            `json:"category_total"`
 }
 
 type promptListResponse struct {
@@ -590,16 +592,21 @@ func ListPrompts(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		keywordItems = append(keywordItems, item)
-		facets.Scopes["all"]++
-		facets.Categories[item.Category]++
-		if item.UsageCount > 0 {
-			facets.Scopes["recent"]++
+		if category == "" || item.Category == category {
+			facets.Scopes["all"]++
+			if item.UsageCount > 0 {
+				facets.Scopes["recent"]++
+			}
+			if item.IsFavorite {
+				facets.Scopes["favorite"]++
+			}
+			if item.Source == "custom" {
+				facets.Scopes["custom"]++
+			}
 		}
-		if item.IsFavorite {
-			facets.Scopes["favorite"]++
-		}
-		if item.Source == "custom" {
-			facets.Scopes["custom"]++
+		if promptMatchesScope(item, scope) {
+			facets.Categories[item.Category]++
+			facets.CategoryTotal++
 		}
 	}
 	filtered := make([]promptItemResponse, 0, len(keywordItems))
@@ -667,6 +674,22 @@ func UnfavoritePrompt(w http.ResponseWriter, r *http.Request) {
 	setPromptFavorite(w, r, false)
 }
 
+func promptUsageConflictClause(now time.Time) clause.OnConflict {
+	return clause.OnConflict{
+		Columns: []clause.Column{{Name: "create_user_id"}, {Name: "prompt_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"usage_count": gorm.Expr(
+				"? + ?",
+				clause.Column{Table: orm.PromptUserState{}.TableName(), Name: "usage_count"},
+				1,
+			),
+			"last_used_at": now,
+			"updated_at":   now,
+			"deleted_at":   nil,
+		}),
+	}
+}
+
 func UsePrompt(w http.ResponseWriter, r *http.Request) {
 	promptID := promptNameFromPath(r)
 	userID := corestore.UserID(r)
@@ -690,23 +713,20 @@ func UsePrompt(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	if err := corestore.DB().Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "create_user_id"}, {Name: "prompt_id"}},
-		DoUpdates: clause.Assignments(map[string]any{
-			"usage_count":  gorm.Expr("usage_count + ?", 1),
-			"last_used_at": now,
-			"updated_at":   now,
-			"deleted_at":   nil,
-		}),
-	}).Create(&state).Error; err != nil {
+	if err := corestore.DB().Clauses(promptUsageConflictClause(now)).Create(&state).Error; err != nil {
+		log.Logger.Error().Err(err).Str("prompt_id", promptID).Msg("record prompt usage failed")
 		common.ReplyErr(w, "record prompt usage failed", http.StatusInternalServerError)
 		return
 	}
-	_ = corestore.DB().Where("create_user_id = ? AND prompt_id = ?", userID, promptID).First(&state).Error
+	var savedState orm.PromptUserState
+	if err := corestore.DB().Where("create_user_id = ? AND prompt_id = ?", userID, promptID).First(&savedState).Error; err != nil {
+		common.ReplyErr(w, "query prompt usage failed", http.StatusInternalServerError)
+		return
+	}
 	writePromptJSON(w, http.StatusOK, promptStateResponse{
 		ID:         promptID,
-		IsFavorite: state.IsFavorite,
-		UsageCount: state.UsageCount,
-		LastUsedAt: state.LastUsedAt,
+		IsFavorite: savedState.IsFavorite,
+		UsageCount: savedState.UsageCount,
+		LastUsedAt: savedState.LastUsedAt,
 	})
 }

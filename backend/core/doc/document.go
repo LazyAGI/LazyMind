@@ -56,6 +56,9 @@ func requireDatasetPermission(r *http.Request, datasetID string, action string) 
 	if !canAccessDataset(&ds, userID, action) {
 		return &ds, userID, false
 	}
+	if !datasetAllowedByScanSource(r, ds.ID, action) {
+		return &ds, userID, false
+	}
 	return &ds, userID, true
 }
 
@@ -913,7 +916,7 @@ func SearchAllDocuments(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	datasetIDs, err := accessibleDatasetIDs(r.Context(), userID)
+	datasetIDs, err := accessibleDatasetIDs(r, userID)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "search documents failed", err), http.StatusInternalServerError)
 		return
@@ -985,7 +988,7 @@ func ListDocumentsByDatasets(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "dataset_ids required", http.StatusBadRequest)
 		return
 	}
-	readableDatasetIDs, err := readableRequestedDatasetIDs(r.Context(), userID, datasetIDs)
+	readableDatasetIDs, err := readableRequestedDatasetIDs(r, userID, datasetIDs)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query datasets failed", err), http.StatusInternalServerError)
 		return
@@ -1805,16 +1808,22 @@ func normalizeKeywordList(keywordList []string) []string {
 	return out
 }
 
-func accessibleDatasetIDs(ctx context.Context, userID string) ([]string, error) {
+func accessibleDatasetIDs(r *http.Request, userID string) ([]string, error) {
+	ctx := r.Context()
 	var datasets []orm.Dataset
 	if err := store.DB().WithContext(ctx).Where("deleted_at IS NULL").Find(&datasets).Error; err != nil {
 		return nil, err
 	}
-	ids := make([]string, 0, len(datasets))
+	visible := make([]orm.Dataset, 0, len(datasets))
 	for _, ds := range datasets {
 		if canAccessDataset(&ds, userID, acl.PermissionDatasetRead) {
-			ids = append(ids, ds.ID)
+			visible = append(visible, ds)
 		}
+	}
+	visible = filterDatasetsByScanSourceAccess(r, visible, acl.PermissionDatasetRead)
+	ids := make([]string, 0, len(visible))
+	for _, ds := range visible {
+		ids = append(ids, ds.ID)
 	}
 	return ids, nil
 }
@@ -2345,10 +2354,11 @@ func normalizeDocumentDatasetIDs(ids []string) []string {
 	return out
 }
 
-func readableRequestedDatasetIDs(ctx context.Context, userID string, datasetIDs []string) ([]string, error) {
+func readableRequestedDatasetIDs(r *http.Request, userID string, datasetIDs []string) ([]string, error) {
 	if len(datasetIDs) == 0 {
 		return nil, nil
 	}
+	ctx := r.Context()
 	var datasets []orm.Dataset
 	if err := store.DB().WithContext(ctx).Where("id IN ? AND deleted_at IS NULL", datasetIDs).Find(&datasets).Error; err != nil {
 		return nil, err
@@ -2357,15 +2367,20 @@ func readableRequestedDatasetIDs(ctx context.Context, userID string, datasetIDs 
 	for _, ds := range datasets {
 		byID[ds.ID] = ds
 	}
-	out := make([]string, 0, len(datasetIDs))
+	visible := make([]orm.Dataset, 0, len(datasetIDs))
 	for _, id := range datasetIDs {
 		ds, ok := byID[id]
 		if !ok {
 			continue
 		}
 		if canAccessDataset(&ds, userID, acl.PermissionDatasetRead) {
-			out = append(out, id)
+			visible = append(visible, ds)
 		}
+	}
+	visible = filterDatasetsByScanSourceAccess(r, visible, acl.PermissionDatasetRead)
+	out := make([]string, 0, len(visible))
+	for _, ds := range visible {
+		out = append(out, ds.ID)
 	}
 	return out, nil
 }

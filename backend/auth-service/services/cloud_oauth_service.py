@@ -10,7 +10,12 @@ from core.cloud_crypto import decrypt_json, encrypt_json
 from core.database import SessionLocal
 from core.errors import AppException, ErrorCodes, raise_error
 from repositories import CloudAuthConnectionRepository
-from services.cloud_oauth_provider import CloudAccountProfile, CloudOAuthProvider, CloudTokenPayload
+from services.cloud_oauth_provider import (
+    CloudAccountProfile,
+    CloudOAuthProvider,
+    CloudProviderError,
+    CloudTokenPayload,
+)
 from services.providers import FeishuOAuthProvider, GoogleDriveOAuthProvider, NotionOAuthProvider
 
 
@@ -59,6 +64,8 @@ def _parse_dt(raw: Any) -> datetime | None:
 
 def _truncate_error(err: Exception) -> str:
     msg = str(err or '').strip()
+    if isinstance(err, AppException) and err.extra:
+        msg = f'{msg}: {err.extra}' if msg else err.extra
     if len(msg) > 1000:
         return msg[:1000]
     return msg
@@ -811,6 +818,11 @@ class CloudOAuthService:
                 raise_error(ErrorCodes.CLOUD_TOKEN_UNAVAILABLE, extra_msg=_truncate_error(exc))
             if not token.access_token:
                 raise_error(ErrorCodes.CLOUD_TOKEN_UNAVAILABLE, extra_msg='empty access_token')
+            if provider_impl.provider_name() == 'feishu' and not token.refresh_token:
+                row.status = 'ERROR'
+                row.last_error = 'provider returned empty refresh_token'
+                CloudAuthConnectionRepository.save(db, row)
+                raise_error(ErrorCodes.CLOUD_TOKEN_UNAVAILABLE, extra_msg=row.last_error)
 
             reauthorize_connection_id = (auth_state_payload.get('reauthorize_connection_id') or '').strip()
             reauthorize_account_id = (auth_state_payload.get('reauthorize_provider_account_id') or '').strip()
@@ -1209,6 +1221,23 @@ class CloudOAuthService:
         return refreshed
 
     @staticmethod
+    def _record_refresh_failure(db, row, exc: Exception) -> bool:
+        retryable = isinstance(exc, CloudProviderError) and exc.retryable
+        requires_reauth = (
+            isinstance(exc, CloudProviderError) and exc.requires_reauth
+        ) or (
+            isinstance(exc, AppException)
+            and 'refresh_token is missing' in (exc.extra or '').lower()
+        )
+        if requires_reauth:
+            row.status = 'EXPIRED'
+        elif not retryable:
+            row.status = 'ERROR'
+        row.last_error = _truncate_error(exc)
+        CloudAuthConnectionRepository.save(db, row)
+        return retryable
+
+    @staticmethod
     def _ensure_connection_owner(row, *, tenant_id: str | None, user_id: str | None) -> None:
         expected_tenant = _reserved_tenant_id(tenant_id)
         expected_user = _normalize_owner_user_id(user_id)
@@ -1326,8 +1355,6 @@ class CloudOAuthService:
                     )
                 else:
                     raise_error(ErrorCodes.CLOUD_AUTH_MODE_INVALID, extra_msg=row.auth_mode)
-            except AppException:
-                raise
             except Exception as exc:
                 if mode == 'oauth_user':
                     recovered = self._recover_refreshed_oauth_token(connection_id, user_id=user_id, tenant_id=tenant_id)
@@ -1343,9 +1370,9 @@ class CloudOAuthService:
                             'expires_at': token_payload.expires_at,
                             'status': 'ACTIVE',
                         }
-                row.status = 'ERROR'
-                row.last_error = _truncate_error(exc)
-                CloudAuthConnectionRepository.save(db, row)
+                self._record_refresh_failure(db, row, exc)
+                if isinstance(exc, AppException):
+                    raise
                 raise_error(ErrorCodes.CLOUD_TOKEN_UNAVAILABLE, extra_msg=_truncate_error(exc))
 
             row.status = 'ACTIVE'
@@ -1364,16 +1391,16 @@ class CloudOAuthService:
             'status': row.status,
         }
 
-    def _refresh_connection_for_health_check(self, connection_id: str) -> str:
+    def _refresh_connection_for_health_check(self, connection_id: str) -> tuple[str, bool]:
         with SessionLocal() as db:
             row = CloudAuthConnectionRepository.get_by_id(db, connection_id)
             if row is None:
                 raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
             status = (row.status or '').strip().upper()
             if status in {'PENDING', 'REVOKED'}:
-                return status
+                return status, False
             if (row.auth_mode or '').strip().lower() != 'oauth_user':
-                return status
+                return status, False
             provider_impl = self._provider(row.provider)
             credential = self._decrypt_payload(row.credential_ciphertext, field_name='credential')
             auth_state_payload = self._decrypt_payload(row.auth_state_ciphertext, field_name='auth_state')
@@ -1384,11 +1411,9 @@ class CloudOAuthService:
                     auth_state_payload=auth_state_payload,
                 )
             except Exception as exc:
-                row.status = 'ERROR'
-                row.last_error = _truncate_error(exc)
-                CloudAuthConnectionRepository.save(db, row)
+                retryable = self._record_refresh_failure(db, row, exc)
                 self._cache_delete(connection_id)
-                return row.status
+                return row.status, retryable
             auth_state_payload.update({
                 'access_token': token_payload.access_token,
                 'access_expires_at': _iso(token_payload.expires_at),
@@ -1401,13 +1426,13 @@ class CloudOAuthService:
             row.last_used_at = _utcnow()
             CloudAuthConnectionRepository.save(db, row)
         self._cache_set(connection_id, row.provider, token_payload)
-        return 'ACTIVE'
+        return 'ACTIVE', False
 
     def check_connection_health(self, connection_id: str) -> dict[str, Any]:
         connection_id = (connection_id or '').strip()
         if not connection_id:
             return {'connection_id': '', 'checked': False, 'status': '', 'last_error': 'connection_id is required'}
-        status = self._refresh_connection_for_health_check(connection_id)
+        status, retryable = self._refresh_connection_for_health_check(connection_id)
         with SessionLocal() as db:
             row = CloudAuthConnectionRepository.get_by_id(db, connection_id)
             if row is None:
@@ -1422,6 +1447,7 @@ class CloudOAuthService:
                 'checked': status not in {'PENDING', 'REVOKED'},
                 'status': row.status or status,
                 'last_error': row.last_error or '',
+                'retryable': retryable,
             }
 
     def run_health_check_once(
@@ -1435,25 +1461,33 @@ class CloudOAuthService:
                 db,
                 provider=provider,
                 auth_mode='oauth_user',
-                statuses=('ACTIVE', 'EXPIRED', 'ERROR'),
+                statuses=('ACTIVE', 'ERROR'),
                 limit=batch_size,
             )
             connection_ids = [row.connection_id for row in rows]
         checked = 0
         active = 0
+        expired = 0
         error = 0
+        retryable_errors = 0
         for connection_id in connection_ids:
             result = self.check_connection_health(connection_id)
             if result.get('checked'):
                 checked += 1
             if result.get('status') == 'ACTIVE':
                 active += 1
+            elif result.get('status') == 'EXPIRED':
+                expired += 1
             elif result.get('status') == 'ERROR':
                 error += 1
+            if result.get('retryable'):
+                retryable_errors += 1
         return {
             'checked': checked,
             'active': active,
+            'expired': expired,
             'error': error,
+            'retryable_errors': retryable_errors,
             'candidate_count': len(connection_ids),
         }
 

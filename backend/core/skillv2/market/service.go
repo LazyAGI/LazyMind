@@ -21,6 +21,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	skillmetadata "lazymind/core/skillv2/metadata"
 	skillsearch "lazymind/core/skillv2/search"
 )
 
@@ -64,7 +65,7 @@ type GetInstalledTreeRequest struct {
 type PublishRequest struct {
 	AdminUserID string
 	Name        string
-	Category    string
+	Tags        []string
 	Source      SourceInput
 }
 
@@ -83,7 +84,8 @@ type PublishResponse struct {
 type EditRequest struct {
 	AdminUserID  string
 	MarketItemID string
-	VersionNote  string
+	VersionNote  *string
+	Tags         *[]string
 }
 
 type EditResponse struct {
@@ -139,19 +141,15 @@ func (s *Service) Install(ctx context.Context, req InstallRequest) (InstallRespo
 			out.SkillID = installedSkillID
 			return nil
 		}
-		sourceOwned, err := sourceSkillOwnedByUser(ctx, tx, item.SourceSkillID, req.UserID)
-		if err != nil {
+		if err := detachLegacyPublisherSource(ctx, tx, item, req.UserID, now); err != nil {
 			return err
-		}
-		if sourceOwned {
-			if err := recordMarketInstall(ctx, tx, item.ID, req.UserID, item.SourceSkillID, now); err != nil {
-				return err
-			}
-			out.SkillID = item.SourceSkillID
-			return nil
 		}
 		skillID, _, err := copyHeadRevision(ctx, tx, item.SourceSkillID, req.UserID, req.UserName, "market_install", req.UserID)
 		if err != nil {
+			return err
+		}
+		installedTags, _ := json.Marshal(normalizeMarketTags(decodeMarketTags(item.Tags)))
+		if err := tx.Model(&skillRow{}).Where("id = ?", skillID).Update("tags", installedTags).Error; err != nil {
 			return err
 		}
 		if err := skillsearch.RebuildSkillTx(ctx, tx, skillID, now); err != nil {
@@ -172,6 +170,7 @@ func existingInstalledSkillID(ctx context.Context, tx *gorm.DB, marketItemID, us
 		Table("skill_market_installs AS installs").
 		Select("installs.*").
 		Joins("JOIN skills AS skills ON skills.id = installs.skill_id AND skills.owner_user_id = installs.user_id AND skills.deleted_at IS NULL").
+		Joins("JOIN skill_market_items AS market_items ON market_items.id = installs.market_item_id AND market_items.source_skill_id <> installs.skill_id").
 		Where("installs.market_item_id = ? AND installs.user_id = ?", marketItemID, userID).
 		Limit(1).
 		Find(&row)
@@ -184,17 +183,21 @@ func existingInstalledSkillID(ctx context.Context, tx *gorm.DB, marketItemID, us
 	return row.SkillID, nil
 }
 
-func sourceSkillOwnedByUser(ctx context.Context, tx *gorm.DB, skillID, userID string) (bool, error) {
-	var source skillRow
-	result := tx.WithContext(ctx).
-		Select("id").
-		Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", skillID, userID).
-		Limit(1).
-		Find(&source)
-	if result.Error != nil {
-		return false, result.Error
+func detachLegacyPublisherSource(ctx context.Context, tx *gorm.DB, item skillMarketItemRow, userID string, now time.Time) error {
+	if item.CreatedBy == nil || strings.TrimSpace(*item.CreatedBy) != strings.TrimSpace(userID) {
+		return nil
 	}
-	return result.RowsAffected > 0, nil
+	result := tx.WithContext(ctx).Model(&skillRow{}).
+		Where("id = ? AND owner_user_id = ?", item.SourceSkillID, userID).
+		Updates(map[string]any{
+			"owner_user_id":   marketSourceOwnerID(item.ID),
+			"owner_user_name": "skill-market",
+			"updated_at":      now,
+		})
+	if result.Error != nil || result.RowsAffected == 0 {
+		return result.Error
+	}
+	return skillsearch.RebuildSkillTx(ctx, tx, item.SourceSkillID, now)
 }
 
 func recordMarketInstall(ctx context.Context, tx *gorm.DB, marketItemID, userID, skillID string, now time.Time) error {
@@ -230,24 +233,49 @@ func (s *Service) GetInstalledTree(ctx context.Context, req GetInstalledTreeRequ
 }
 
 func (s *Service) Publish(ctx context.Context, req PublishRequest) (PublishResponse, error) {
+	files, err := filesFromSource(req)
+	if err != nil {
+		return PublishResponse{}, err
+	}
+	meta, err := skillmetadata.FromFiles(files)
+	if err != nil {
+		return PublishResponse{}, err
+	}
+	tags, _ := json.Marshal(normalizeMarketTags(req.Tags))
+	normalizedName := strings.ToLower(strings.TrimSpace(meta.Name))
 	var out PublishResponse
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if tx.Dialector.Name() == "postgres" {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", normalizedName).Error; err != nil {
+				return err
+			}
+		}
+		var conflicts int64
+		if err := tx.Table("skill_market_items AS market_items").
+			Joins("JOIN skills AS skills ON skills.id = market_items.source_skill_id AND skills.deleted_at IS NULL").
+			Where("LOWER(TRIM(skills.skill_name)) = ?", normalizedName).
+			Count(&conflicts).Error; err != nil {
+			return err
+		}
+		if conflicts > 0 {
+			return fmt.Errorf("skill market name already exists")
+		}
 		sourceSkillID := newID()
 		revisionID := newID()
 		marketItemID := newID()
 		now := time.Now()
-		tags, _ := json.Marshal([]string{})
 		adminID := req.AdminUserID
 		if err := tx.Create(&skillRow{
 			ID:                 sourceSkillID,
-			OwnerUserID:        req.AdminUserID,
-			OwnerUserName:      req.AdminUserID,
+			OwnerUserID:        marketSourceOwnerID(marketItemID),
+			OwnerUserName:      "skill-market",
 			CreateUserID:       req.AdminUserID,
 			CreateUserName:     req.AdminUserID,
-			Category:           req.Category,
-			SkillName:          req.Name,
-			Tags:               tags,
-			RelativeRoot:       path.Join(req.Category, req.Name),
+			Category:           skillmetadata.ExternalCategory,
+			SkillName:          meta.Name,
+			Description:        meta.Description,
+			Tags:               []byte(`[]`),
+			RelativeRoot:       path.Join(skillmetadata.ExternalCategory, meta.Name),
 			SkillMDPath:        "SKILL.md",
 			HeadRevisionID:     &revisionID,
 			Version:            1,
@@ -257,10 +285,6 @@ func (s *Service) Publish(ctx context.Context, req PublishRequest) (PublishRespo
 			CreatedAt:          now,
 			UpdatedAt:          now,
 		}).Error; err != nil {
-			return err
-		}
-		files, err := filesFromSource(req)
-		if err != nil {
 			return err
 		}
 		entries, treeHash, err := entriesFromFiles(ctx, tx, revisionID, files, s.blobStore)
@@ -292,6 +316,7 @@ func (s *Service) Publish(ctx context.Context, req PublishRequest) (PublishRespo
 			ID:            marketItemID,
 			SourceSkillID: sourceSkillID,
 			Status:        "published",
+			Tags:          tags,
 			CreatedBy:     &adminID,
 			UpdatedBy:     &adminID,
 			PublishedAt:   &now,
@@ -311,9 +336,34 @@ func (s *Service) Publish(ctx context.Context, req PublishRequest) (PublishRespo
 
 func (s *Service) Edit(ctx context.Context, req EditRequest) (EditResponse, error) {
 	now := time.Now()
-	updates := map[string]any{"version_note": req.VersionNote, "updated_by": req.AdminUserID, "updated_at": now}
+	updates := map[string]any{"updated_by": req.AdminUserID, "updated_at": now}
+	if req.VersionNote != nil {
+		updates["version_note"] = strings.TrimSpace(*req.VersionNote)
+	}
+	if req.Tags != nil {
+		tags, _ := json.Marshal(normalizeMarketTags(*req.Tags))
+		updates["tags"] = tags
+	}
 	err := s.db.WithContext(ctx).Model(&skillMarketItemRow{}).Where("id = ?", req.MarketItemID).Updates(updates).Error
 	return EditResponse{MarketItemID: req.MarketItemID}, err
+}
+
+func (s *Service) ValidateNameAvailable(ctx context.Context, name, excludeMarketItemID string) error {
+	query := s.db.WithContext(ctx).
+		Table("skill_market_items AS market_items").
+		Joins("JOIN skills AS skills ON skills.id = market_items.source_skill_id AND skills.deleted_at IS NULL").
+		Where("LOWER(TRIM(skills.skill_name)) = ?", strings.ToLower(strings.TrimSpace(name)))
+	if strings.TrimSpace(excludeMarketItemID) != "" {
+		query = query.Where("market_items.id <> ?", excludeMarketItemID)
+	}
+	var conflicts int64
+	if err := query.Count(&conflicts).Error; err != nil {
+		return err
+	}
+	if conflicts > 0 {
+		return fmt.Errorf("skill market name already exists")
+	}
+	return nil
 }
 
 func (s *Service) Unpublish(ctx context.Context, req UnpublishRequest) (UnpublishResponse, error) {
@@ -403,8 +453,14 @@ func copyHeadRevision(ctx context.Context, tx *gorm.DB, sourceSkillID, ownerUser
 	if source.HeadRevisionID == nil {
 		return "", "", fmt.Errorf("source skill has no head revision")
 	}
+	meta, err := skillmetadata.FromRevision(ctx, tx, *source.HeadRevisionID)
+	if err != nil {
+		return "", "", err
+	}
 	var conflicts int64
-	if err := tx.Model(&skillRow{}).Where("owner_user_id = ? AND category = ? AND skill_name = ? AND deleted_at IS NULL", ownerUserID, source.Category, source.SkillName).Count(&conflicts).Error; err != nil {
+	if err := tx.Model(&skillRow{}).
+		Where("owner_user_id = ? AND category = ? AND skill_name = ? AND deleted_at IS NULL", ownerUserID, skillmetadata.ExternalCategory, meta.Name).
+		Count(&conflicts).Error; err != nil {
 		return "", "", err
 	}
 	if conflicts > 0 {
@@ -432,7 +488,10 @@ func copyHeadRevision(ctx context.Context, tx *gorm.DB, sourceSkillID, ownerUser
 	copy.CreateUserID = createdBy
 	copy.CreateUserName = ownerUserName
 	copy.HeadRevisionID = &revisionID
-	copy.RelativeRoot = path.Join(source.Category, source.SkillName)
+	copy.Category = skillmetadata.ExternalCategory
+	copy.SkillName = meta.Name
+	copy.Description = meta.Description
+	copy.RelativeRoot = path.Join(copy.Category, copy.SkillName)
 	copy.Version = 1
 	copy.CreatedAt = now
 	copy.UpdatedAt = now
@@ -660,11 +719,36 @@ func cleanSkillPath(name string) (string, error) {
 }
 
 func defaultSkillFiles(name string) map[string][]byte {
+	quotedName, _ := json.Marshal(strings.TrimSpace(name))
 	return map[string][]byte{
-		"SKILL.md":        []byte("# " + name + "\n\n用于阅读和总结论文。\n"),
+		"SKILL.md":        []byte("---\nname: " + string(quotedName) + "\ndescription: 用于阅读和总结论文。\n---\n# " + name + "\n"),
 		"references/a.md": []byte("# 参考资料\n\n这是参考资料。\n"),
 		"scripts/run.py":  []byte("print(\"hello skill\")\n"),
 	}
+}
+
+func normalizeMarketTags(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	tags := make([]string, 0, len(values))
+	for _, value := range values {
+		tag := strings.TrimSpace(value)
+		if tag == "" {
+			continue
+		}
+		if _, ok := seen[tag]; ok {
+			continue
+		}
+		seen[tag] = struct{}{}
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+	return tags
+}
+
+func decodeMarketTags(raw []byte) []string {
+	var tags []string
+	_ = json.Unmarshal(raw, &tags)
+	return tags
 }
 
 func classifyFile(filePath string, data []byte) (string, string, bool) {
@@ -787,6 +871,7 @@ type skillMarketItemRow struct {
 	ID            string     `gorm:"column:id;type:varchar(36);primaryKey"`
 	SourceSkillID string     `gorm:"column:source_skill_id;type:varchar(36);not null"`
 	Status        string     `gorm:"column:status;type:text;not null;default:'draft'"`
+	Tags          []byte     `gorm:"column:tags;type:json;not null;default:'[]'"`
 	Icon          string     `gorm:"column:icon;type:text;not null;default:''"`
 	SortOrder     int        `gorm:"column:sort_order;not null;default:0"`
 	VersionNote   string     `gorm:"column:version_note;type:text;not null;default:''"`
@@ -808,3 +893,7 @@ type skillMarketInstallRow struct {
 }
 
 func (skillMarketInstallRow) TableName() string { return "skill_market_installs" }
+
+func marketSourceOwnerID(marketItemID string) string {
+	return "skill-market:" + marketItemID
+}

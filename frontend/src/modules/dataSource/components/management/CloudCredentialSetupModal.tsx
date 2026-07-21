@@ -103,7 +103,7 @@ export default function CloudCredentialSetupModal({
         ) : (
           <p style={{ marginTop: 12, marginBottom: 0 }}>
             <a
-              href={`${CLOUD_DOCUMENTS_NOTION_SETUP_PATH}?from=create-source`}
+              href={CLOUD_DOCUMENTS_NOTION_SETUP_PATH}
               target="_blank"
               rel="noreferrer"
             >

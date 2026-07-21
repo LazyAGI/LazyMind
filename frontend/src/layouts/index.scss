@@ -217,15 +217,15 @@
   }
 
   .sider-new-task-button.ant-btn {
-    background: #1677ff;
-    color: #ffffff;
-    box-shadow: 0 4px 12px rgba(22, 119, 255, 0.2);
+    background: #eaf3ff;
+    color: #0958d9;
+    box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.14);
 
     &:hover,
     &:focus-visible {
-      background: #0f6de8 !important;
-      color: #ffffff !important;
-      box-shadow: 0 5px 14px rgba(22, 119, 255, 0.28);
+      background: #dbeafe !important;
+      color: #0958d9 !important;
+      box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.24);
     }
   }
 

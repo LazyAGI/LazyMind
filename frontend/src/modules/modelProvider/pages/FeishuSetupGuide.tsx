@@ -6,12 +6,9 @@ import {
 } from "@ant-design/icons";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import "./feishuSetupGuide.scss";
-import {
-  CLOUD_DOCUMENTS_FEISHU_PATH,
-  CLOUD_DOCUMENTS_PATH,
-} from "../utils/cloudDocumentUrls";
+import { CLOUD_DOCUMENTS_FEISHU_PATH } from "../utils/cloudDocumentUrls";
 
 const { Paragraph, Text } = Typography;
 
@@ -127,12 +124,9 @@ function buildGuideSteps(t: TFunction, permissionSeparator: string): GuideStep[]
 export default function FeishuSetupGuide() {
   const { i18n, t } = useTranslation();
   const navigate = useNavigate();
-  const location = useLocation();
   const pageRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLElement | null>(null);
   const stepRefs = useRef<Array<HTMLElement | null>>([]);
-  const isFromCreateSource =
-    new URLSearchParams(location.search).get("from") === "create-source";
   const orderedGuideSteps = buildGuideSteps(
     t,
     i18n.language === "zh-CN" ? "、" : ", ",
@@ -164,15 +158,9 @@ export default function FeishuSetupGuide() {
             type="link"
             icon={<ArrowLeftOutlined />}
             className="feishu-setup-guide-back"
-            onClick={() =>
-              navigate(
-                isFromCreateSource ? "/data-sources" : CLOUD_DOCUMENTS_FEISHU_PATH,
-              )
-            }
+            onClick={() => navigate(CLOUD_DOCUMENTS_FEISHU_PATH)}
           >
-            {isFromCreateSource
-              ? t("admin.dataSourceFeishuSetupGuide.backCreateSource")
-              : t("admin.dataSourceFeishuSetupGuide.backAccounts")}
+            {t("admin.dataSourceFeishuSetupGuide.backAccounts")}
           </Button>
           <h1>{t("admin.dataSourceFeishuSetupGuide.title")}</h1>
           <Paragraph className="feishu-setup-guide-subtitle">

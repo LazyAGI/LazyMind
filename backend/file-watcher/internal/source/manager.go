@@ -63,9 +63,10 @@ func NewManager(
 func (m *manager) StartSource(ctx context.Context, req internal.StartSourceRequest) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	key := runtimeKey(req.SourceID, req.BindingID)
 
-	if _, exists := m.runtimes[req.SourceID]; exists {
-		m.log.Info("source already running, skip start", zap.String("source_id", req.SourceID))
+	if _, exists := m.runtimes[key]; exists {
+		m.log.Info("source binding already running, skip start", zap.String("source_id", req.SourceID), zap.String("binding_id", req.BindingID))
 		return nil
 	}
 
@@ -86,14 +87,15 @@ func (m *manager) StartSource(ctx context.Context, req internal.StartSourceReque
 		tenantID = m.cfg.TenantID
 	}
 	rt := internal.SourceRuntime{
-		SourceID: req.SourceID,
-		TenantID: tenantID,
-		RootPath: publicRootPath,
-		Status:   internal.SourceRuntimeStatusStarting,
+		SourceID:  req.SourceID,
+		BindingID: req.BindingID,
+		TenantID:  tenantID,
+		RootPath:  publicRootPath,
+		Status:    internal.SourceRuntimeStatusStarting,
 	}
 
 	entry := &runtimeEntry{runtime: rt, cancel: cancel}
-	m.runtimes[req.SourceID] = entry
+	m.runtimes[key] = entry
 
 	go func() {
 		if !req.SkipInitialScan {
@@ -102,20 +104,20 @@ func (m *manager) StartSource(ctx context.Context, req internal.StartSourceReque
 				zap.String("root_path", publicRootPath),
 			)
 		}
-		if err := m.watcher.Start(sourceCtx, req.SourceID, tenantID, runtimeRootPath); err != nil {
+		if err := m.watcher.Start(sourceCtx, req.SourceID, req.BindingID, tenantID, runtimeRootPath); err != nil {
 			m.log.Error("watcher start failed",
 				zap.String("source_id", req.SourceID),
 				zap.Error(err),
 			)
-			m.setStatus(req.SourceID, internal.SourceRuntimeStatusError)
+			m.setStatus(key, internal.SourceRuntimeStatusError)
 			return
 		}
 		m.log.Info("source lifecycle watcher start done",
 			zap.String("source_id", req.SourceID),
 		)
-		m.setWatcherEnabled(req.SourceID, true)
-		m.setStatus(req.SourceID, internal.SourceRuntimeStatusWatching)
-		m.setStatus(req.SourceID, internal.SourceRuntimeStatusRunning)
+		m.setWatcherEnabled(key, true)
+		m.setStatus(key, internal.SourceRuntimeStatusWatching)
+		m.setStatus(key, internal.SourceRuntimeStatusRunning)
 		m.log.Info("source started", zap.String("source_id", req.SourceID))
 	}()
 
@@ -126,19 +128,40 @@ func (m *manager) StopSource(_ context.Context, sourceID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	entry, ok := m.runtimes[sourceID]
-	if !ok {
+	found := false
+	for key, entry := range m.runtimes {
+		if entry.runtime.SourceID != sourceID {
+			continue
+		}
+		found = true
+		entry.cancel()
+		_ = m.watcher.Stop(entry.runtime.SourceID, entry.runtime.BindingID)
+		entry.runtime.WatcherEnabled = false
+		entry.runtime.Status = internal.SourceRuntimeStatusStopped
+		delete(m.runtimes, key)
+	}
+	if !found {
 		m.log.Info("source already stopped", zap.String("source_id", sourceID))
 		return nil
 	}
 
+	m.log.Info("source stopped", zap.String("source_id", sourceID))
+	return nil
+}
+
+func (m *manager) stopBinding(sourceID, bindingID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := runtimeKey(sourceID, bindingID)
+	entry, ok := m.runtimes[key]
+	if !ok {
+		return nil
+	}
 	entry.cancel()
-	_ = m.watcher.Stop(sourceID)
+	_ = m.watcher.Stop(sourceID, bindingID)
 	entry.runtime.WatcherEnabled = false
 	entry.runtime.Status = internal.SourceRuntimeStatusStopped
-	delete(m.runtimes, sourceID)
-
-	m.log.Info("source stopped", zap.String("source_id", sourceID))
+	delete(m.runtimes, key)
 	return nil
 }
 
@@ -149,7 +172,7 @@ func (m *manager) ListRuntimes() []internal.SourceRuntime {
 	result := make([]internal.SourceRuntime, 0, len(m.runtimes))
 	for _, e := range m.runtimes {
 		rt := e.runtime
-		health := m.watcher.Health(rt.SourceID)
+		health := m.watcher.Health(rt.SourceID, rt.BindingID)
 		rt.WatcherEnabled = health.Enabled
 		rt.WatcherHealthy = health.Healthy
 		rt.WatcherLastError = health.LastError
@@ -179,22 +202,31 @@ func (m *manager) HandleCommand(ctx context.Context, cmd internal.Command) (any,
 		}
 		return nil, m.StartSource(ctx, internal.StartSourceRequest{
 			SourceID:        cmd.SourceID,
-			TenantID:        m.resolveTenantID(cmd.SourceID, cmd.TenantID),
+			BindingID:       cmd.BindingID,
+			TenantID:        m.resolveTenantID(cmd.SourceID, cmd.BindingID, cmd.TenantID),
 			RootPath:        cmd.RootPath,
 			SkipInitialScan: cmd.SkipInitialScan,
 		})
 	case internal.CommandStopSource:
+		if cmd.BindingID != "" {
+			return nil, m.stopBinding(cmd.SourceID, cmd.BindingID)
+		}
 		return nil, m.StopSource(ctx, cmd.SourceID)
 	case internal.CommandScanSource:
 		return legacyDisabledResult(cmd.Type), nil
 	case internal.CommandReloadSource:
-		_ = m.StopSource(ctx, cmd.SourceID)
+		if cmd.BindingID != "" {
+			_ = m.stopBinding(cmd.SourceID, cmd.BindingID)
+		} else {
+			_ = m.StopSource(ctx, cmd.SourceID)
+		}
 		if err := m.ensureSourceDirs(cmd.SourceID); err != nil {
 			return nil, err
 		}
 		return nil, m.StartSource(ctx, internal.StartSourceRequest{
 			SourceID:        cmd.SourceID,
-			TenantID:        m.resolveTenantID(cmd.SourceID, cmd.TenantID),
+			BindingID:       cmd.BindingID,
+			TenantID:        m.resolveTenantID(cmd.SourceID, cmd.BindingID, cmd.TenantID),
 			RootPath:        cmd.RootPath,
 			SkipInitialScan: cmd.SkipInitialScan,
 		})
@@ -207,14 +239,19 @@ func (m *manager) HandleCommand(ctx context.Context, cmd internal.Command) (any,
 	}
 }
 
-func (m *manager) resolveTenantID(sourceID, fallback string) string {
+func (m *manager) resolveTenantID(sourceID, bindingID, fallback string) string {
 	if fallback != "" {
 		return fallback
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if entry, ok := m.runtimes[sourceID]; ok && entry.runtime.TenantID != "" {
+	if entry, ok := m.runtimes[runtimeKey(sourceID, bindingID)]; ok && entry.runtime.TenantID != "" {
 		return entry.runtime.TenantID
+	}
+	for _, entry := range m.runtimes {
+		if entry.runtime.SourceID == sourceID && entry.runtime.TenantID != "" {
+			return entry.runtime.TenantID
+		}
 	}
 	return m.cfg.TenantID
 }
@@ -259,14 +296,23 @@ func (m *manager) ensureSourceDirs(sourceID string) error {
 func (m *manager) Stats() (sourceCount, watchCount, taskCount int) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	sourceCount = len(m.runtimes)
-	for sourceID := range m.runtimes {
-		health := m.watcher.Health(sourceID)
+	sources := make(map[string]struct{}, len(m.runtimes))
+	for _, entry := range m.runtimes {
+		sources[entry.runtime.SourceID] = struct{}{}
+		health := m.watcher.Health(entry.runtime.SourceID, entry.runtime.BindingID)
 		if health.Enabled && health.Healthy {
 			watchCount++
 		}
 	}
+	sourceCount = len(sources)
 	return
+}
+
+func runtimeKey(sourceID, bindingID string) string {
+	if bindingID == "" {
+		return sourceID
+	}
+	return sourceID + "\x00" + bindingID
 }
 
 func legacyDisabledResult(commandType internal.CommandType) map[string]any {

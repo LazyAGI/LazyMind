@@ -16,6 +16,13 @@ func TestDefaultConfigUsesPrivateTempDir(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigPrewarmsTargetSearchCacheDaily(t *testing.T) {
+	cfg := defaultConfig()
+	if cfg.TargetSearchCachePrewarmInterval != 24*time.Hour {
+		t.Fatalf("target search cache prewarm interval = %s, want %s", cfg.TargetSearchCachePrewarmInterval, 24*time.Hour)
+	}
+}
+
 func TestLoadConfigFromEnv(t *testing.T) {
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN", "postgres://scan-control-plane")
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_CORE_BASE_URL", "http://core.test")

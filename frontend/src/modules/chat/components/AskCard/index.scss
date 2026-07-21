@@ -162,33 +162,7 @@
   &__choice-label {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
     cursor: default;
-  }
-
-  &__choice-edit-icon {
-    font-size: 11px;
-    color: #9aa3bc;
-    opacity: 0;
-    transition: opacity 0.15s;
-    cursor: pointer;
-    flex-shrink: 0;
-
-    &:hover {
-      color: #4e6ef2;
-    }
-  }
-
-  // Show edit icon when the containing Radio/Checkbox row is hovered.
-  .ant-radio-wrapper:hover &__choice-edit-icon,
-  .ant-checkbox-wrapper:hover &__choice-edit-icon {
-    opacity: 1;
-  }
-
-  &__choice-input {
-    width: 140px;
-    font-size: 13px;
-    border-radius: 6px !important;
   }
 
   &__other-input {

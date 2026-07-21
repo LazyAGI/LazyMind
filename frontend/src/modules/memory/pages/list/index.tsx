@@ -62,7 +62,7 @@ export default function MemoryManagementListPage() {
         <div>
           <div className="memory-page-title-row">
             <h2 className="admin-page-title">{t("admin.memoryManagement")}</h2>
-            <Tooltip placement="top" title={t("admin.memoryManagementHelp")}>
+            <Tooltip placement="top" title={t("admin.memoryManagementSubtitle")}>
               <button
                 aria-label={t("admin.memoryManagementHelpAriaLabel")}
                 className="memory-page-title-help"
@@ -72,9 +72,6 @@ export default function MemoryManagementListPage() {
               </button>
             </Tooltip>
           </div>
-          <p className="memory-page-subtitle">
-            {t("admin.memoryManagementSubtitle")}
-          </p>
         </div>
         <Space>
           {showGlossaryInboxUi && activeTab === "glossary" ? (

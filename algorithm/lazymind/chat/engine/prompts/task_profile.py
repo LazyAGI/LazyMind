@@ -149,6 +149,14 @@ _OPEN_ENDED = re.compile(
     re.I,
 )
 _SIMPLE_FACT = re.compile(r'^(?:什么是|解释一下|定义|谁是|多少|what\s+is|define)', re.I)
+_PLATFORM_CAPABILITY_QUERY = re.compile(
+    r'(?:你|你们|平台|系统|LazyMind).{0,12}(?:有|支持|具备|提供|能做).{0,12}'
+    r'(?:能力|功能|资源|技能|skill|知识库|文档|数据集|数据库|db|工具)?|'
+    r'(?:有哪些|有什么|支持哪些).{0,8}'
+    r'(?:能力|功能|资源|技能|skill|知识库|文档|数据集|数据库|db|工具)|'
+    r'what\s+(?:can\s+you\s+do|skills|capabilities|resources).{0,12}',
+    re.I,
+)
 _REQUEST_REVIEW_HINT = re.compile(
     r'全部|所有|必须|不能|至少|最多|保证|确保|同时|既要|又要|all|must|never|at\s+least|at\s+most|guarantee',
     re.I,
@@ -360,6 +368,7 @@ def _assess_request(
 
 def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskProfile, bool]:
     text = str(query or '').strip()
+    platform_capability_query = bool(_PLATFORM_CAPABILITY_QUERY.search(text))
     explicit_skill = bool(_SKILL_EXPLICIT.search(text))
     current = bool(_CURRENT.search(text) or _EXPLICIT_WEB.search(text))
     # Fast-moving AI product/how-to requests require current evidence even without "latest".
@@ -373,12 +382,16 @@ def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskPro
     else:
         primary, secondary = 'answer', ()
 
-    is_simple_fact = (
+    is_simple_fact = platform_capability_query or (
         bool(_SIMPLE_FACT.search(text)) and matches in ([], ['answer']) and not current
     )
     open_ended = bool(_OPEN_ENDED.search(text)) and not is_simple_fact
     complexity: Complexity = 'compound' if len(matches) > 1 else 'open_ended' if open_ended else 'simple'
-    confidence = 0.92 if matches or is_simple_fact else 0.55 if open_ended else 0.8
+    confidence = (
+        0.96 if platform_capability_query
+        else 0.92 if matches or is_simple_fact
+        else 0.55 if open_ended else 0.8
+    )
     deliverable = _DELIVERABLE_BY_OUTCOME[primary]
     secondary_deliverables = tuple(_DELIVERABLE_BY_OUTCOME[item] for item in secondary)
     research_required = current or 'research' in matches
@@ -537,7 +550,7 @@ def _apply_explicit_resources(
     query: str,
     model_excluded_refs: tuple[str, ...] = (),
 ) -> TaskProfile:
-    resources, excluded, policy_ambiguous = _resource_usage_policy(query, resources)
+    resources, excluded, _ = _resource_usage_policy(query, resources)
     if model_excluded_refs:
         all_resources = ExplicitResourceBindings(
             skill_names=resources.skill_names + excluded.skill_names,
@@ -565,7 +578,6 @@ def _apply_explicit_resources(
             plugin_refs=tuple(x for x in all_resources.plugin_refs if x in denied_refs),
             mentions=tuple(x for x in all_resources.mentions if x.resource_ref in denied_refs),
         )
-        policy_ambiguous = False
     updates: dict[str, Any] = {
         'explicit_resources': resources,
         'excluded_resources': excluded,
@@ -582,7 +594,7 @@ def _apply_explicit_resources(
     elif excluded.knowledge_base_ids:
         updates['source_strategy'] = 'web' if _EXPLICIT_WEB.search(query) else 'model_knowledge'
     if resources.plugin_refs:
-        reasons.append('explicit plugin selection')
+        reasons.append('explicit workflow selection')
     assessment = profile.request_assessment
     issues = list(assessment.issues)
     questions = list(assessment.clarification_questions)
@@ -594,67 +606,47 @@ def _apply_explicit_resources(
         ]
         if not issues and assessment.status == 'ambiguous':
             updates['request_assessment'] = RequestAssessment()
-    if policy_ambiguous and not any(
-        issue.issue_type == 'ambiguous_resource_policy' for issue in issues
-    ):
-        issues.append(RequestIssue(
-            'ambiguous_resource_policy',
-            'The request contains a resource-use preference that cannot be mapped reliably.',
-            'resource usage wording',
-            'medium',
-        ))
-        questions.append(ClarificationQuestion(
-            'Which mentioned resources should I use, and which should I avoid?',
-        ))
-    if policy_ambiguous:
-        updates['request_assessment'] = RequestAssessment(
-            status='ambiguous',
-            issues=tuple(issues[:4]),
-            interaction_need='blocking',
-            assumptions_allowed=False,
-            clarification_questions=tuple(questions[:2]),
-        )
     updates['reasons'] = tuple(dict.fromkeys(reasons))[:6]
     return replace(profile, **updates)
 
 
-_CLASSIFIER_PROMPT = '''Classify the user's desired outcome. Return JSON only, with keys:
-primary_outcome, secondary_outcomes, complexity, freshness, research_required,
-deliverable_kind, secondary_deliverables, outcome_subtype, secondary_subtypes,
-subject_kind, input_mode, source_strategy, execution_scope, skill_mode, confidence, reasons,
-request_status, interaction_need, request_issues, clarification_questions, excluded_resource_refs.
-Use only the allowed enum values supplied in this schema:
+_CLASSIFIER_PROMPT = '''Resolve only the uncertain parts of a rule-generated task profile.
+Return one compact JSON object and nothing else. Do not output reasoning, analysis, markdown, or
+fields whose rule-proposed value is acceptable. Allowed optional keys:
+primary_outcome, secondary_outcomes, complexity, freshness, skill_mode, request_status,
+interaction_need, confidence.
+Use only these enum values:
 primary_outcome/secondary_outcomes: answer, learn, research, analyze, transform, decide, plan,
 create, execute, diagnose;
 complexity: simple, compound, open_ended; freshness: stable, current, unknown;
-deliverable_kind/secondary_deliverables: direct_answer, tutorial, research_report, comparison,
-decision_brief, analysis_report, transformed_content, action_plan, diagnostic_report, artifact,
-execution_result; subject_kind: topic, document, code, data, image, audio, video, conversation,
-system, external_resource; input_mode: query_only, inline_content, attachment, url, knowledge_base,
-conversation_context, mixed; source_strategy: model_knowledge, provided_content_only, knowledge_base,
-web, academic, connected_source, mixed; execution_scope: chat_only, create_artifact,
-workspace_change, external_action; request_status: ready, underspecified, ambiguous, contradictory,
+request_status: ready, underspecified, ambiguous, contradictory,
 infeasible, unsafe; interaction_need: none, optional, blocking.
-skill_mode: suppress, candidates, explicit. Use suppress for ordinary learning/how-to requests.
-When explicit resource bindings are supplied, excluded_resource_refs may contain only their exact
-resource_ref values. Use it when the user asks not to use a mentioned resource; do not treat a clear
-exclusion as a contradiction. A mentioned resource not excluded remains allowed.
-Detect conflicting requirements, missing critical inputs, infeasible scope, and unverifiable success
-criteria before execution. Ask only when different interpretations materially change the result.
-Reasons and request issues must be short observable labels, not private reasoning. Maximum two
-secondary items, four reasons, four issues, and two clarification questions.'''
+skill_mode: suppress, candidates, explicit. Keep the response under 80 tokens. An empty object is
+valid when no override is needed.'''
 
 
 def _classifier_input(
     query: str, history: list[dict] | None, intent: Any, has_attachments: bool,
-    resources: ExplicitResourceBindings,
+    resources: ExplicitResourceBindings, rule: TaskProfile, review_reasons: list[str],
 ) -> str:
     recent = [
         str(item.get('content') or '')[:1000]
         for item in (history or []) if isinstance(item, dict) and item.get('role') == 'user'
     ][-3:]
+    proposed = {
+        'primary_outcome': rule.primary_outcome,
+        'secondary_outcomes': rule.secondary_outcomes,
+        'complexity': rule.complexity,
+        'freshness': rule.freshness,
+        'skill_mode': rule.skill_mode,
+        'request_status': rule.request_assessment.status,
+        'interaction_need': rule.request_assessment.interaction_need,
+    }
     return (
-        f'{_CLASSIFIER_PROMPT}\n\nExplicit conversation intent:\n'
+        f'{_CLASSIFIER_PROMPT}\n\nUnresolved questions:\n'
+        f'{json.dumps(review_reasons, ensure_ascii=False)}\n\n'
+        f'Rule-proposed profile:\n{json.dumps(proposed, ensure_ascii=False)}\n\n'
+        f'Explicit conversation intent:\n'
         f'{json.dumps(intent or {}, ensure_ascii=False)[:2000]}\n\n'
         f'Recent user messages:\n{json.dumps(recent, ensure_ascii=False)}\n\n'
         f'Attachments available: {has_attachments}\n\n'
@@ -680,25 +672,25 @@ def _extract_json(value: Any) -> dict[str, Any]:
 def _validate_llm_profile(
     raw: dict[str, Any], rule: TaskProfile, resources: ExplicitResourceBindings, query: str,
 ) -> TaskProfile:
-    primary = str(raw.get('primary_outcome') or '')
-    complexity = str(raw.get('complexity') or '')
-    freshness = str(raw.get('freshness') or '')
-    deliverable = str(raw.get('deliverable_kind') or '')
-    skill_mode = str(raw.get('skill_mode') or '')
+    primary = str(raw.get('primary_outcome') or rule.primary_outcome)
+    complexity = str(raw.get('complexity') or rule.complexity)
+    freshness = str(raw.get('freshness') or rule.freshness)
+    deliverable = _DELIVERABLE_BY_OUTCOME[primary] if primary in OUTCOMES else ''
+    skill_mode = str(raw.get('skill_mode') or rule.skill_mode)
     if primary not in OUTCOMES or complexity not in COMPLEXITIES or freshness not in FRESHNESS:
         raise ValueError('classifier returned an invalid task enum')
     if deliverable not in DELIVERABLES or skill_mode not in SKILL_MODES:
         raise ValueError('classifier returned an invalid delivery enum')
-    secondary = tuple(str(x) for x in (raw.get('secondary_outcomes') or [])[:2])
-    secondary_deliverables = tuple(str(x) for x in (raw.get('secondary_deliverables') or [])[:2])
+    secondary = tuple(str(x) for x in raw.get('secondary_outcomes', rule.secondary_outcomes)[:2])
+    secondary_deliverables = tuple(_DELIVERABLE_BY_OUTCOME[x] for x in secondary if x in OUTCOMES)
     if any(x not in OUTCOMES for x in secondary) or any(x not in DELIVERABLES for x in secondary_deliverables):
         raise ValueError('classifier returned an invalid secondary enum')
-    reasons = tuple(str(x).strip()[:80] for x in (raw.get('reasons') or [])[:4] if str(x).strip())
-    confidence = min(1.0, max(0.0, float(raw.get('confidence', 0.5))))
-    subject_kind = str(raw.get('subject_kind') or rule.subject_kind)
-    input_mode = str(raw.get('input_mode') or rule.input_mode)
-    source_strategy = str(raw.get('source_strategy') or rule.source_strategy)
-    execution_scope = str(raw.get('execution_scope') or rule.execution_scope)
+    reasons = rule.reasons
+    confidence = min(1.0, max(0.0, float(raw.get('confidence', rule.confidence))))
+    subject_kind = rule.subject_kind
+    input_mode = rule.input_mode
+    source_strategy = rule.source_strategy
+    execution_scope = rule.execution_scope
     allowed_subjects = {
         'topic', 'document', 'code', 'data', 'image', 'audio', 'video',
         'conversation', 'system', 'external_resource',
@@ -753,11 +745,7 @@ def _validate_llm_profile(
         execution_scope=execution_scope, request_assessment=assessment,
         skill_mode=skill_mode, confidence=confidence, reasons=reasons, source='llm',
     )
-    excluded_refs = tuple(
-        str(value).strip() for value in (raw.get('excluded_resource_refs') or [])[:12]
-        if str(value).strip()
-    )
-    return _apply_explicit_resources(profile, resources, query, excluded_refs)
+    return _apply_explicit_resources(profile, resources, query)
 
 
 def resolve_task_profile(
@@ -773,16 +761,7 @@ def resolve_task_profile(
     rule, needs_llm = _rule_profile(query, has_attachments=has_attachments)
     resources = _normalize_explicit_resources(explicit_resources)
     rule = _apply_explicit_resources(rule, resources, query)
-    needs_llm = needs_llm or any(
-        issue.issue_type == 'ambiguous_resource_policy'
-        for issue in rule.request_assessment.issues
-    )
     review_reasons = []
-    if any(
-        issue.issue_type == 'ambiguous_resource_policy'
-        for issue in rule.request_assessment.issues
-    ):
-        review_reasons.append('资源的允许或排除关系需要语义判断')
     if len({rule.primary_outcome, *rule.secondary_outcomes}) > 1:
         review_reasons.append('请求包含多个可能竞争的目标')
     if rule.confidence < 0.75:
@@ -799,7 +778,9 @@ def resolve_task_profile(
         return rule
     started = time.monotonic()
     try:
-        result = classifier(_classifier_input(query, history, intent, has_attachments, resources))
+        result = classifier(_classifier_input(
+            query, history, intent, has_attachments, resources, rule, review_reasons,
+        ))
         profile = _validate_llm_profile(_extract_json(result), rule, resources, query)
         return replace(
             profile,
@@ -827,10 +808,6 @@ def fallback_task_profile(
     rule, needed_llm = _rule_profile(query, has_attachments=has_attachments)
     resources = _normalize_explicit_resources(explicit_resources)
     rule = _apply_explicit_resources(rule, resources, query)
-    needed_llm = needed_llm or any(
-        issue.issue_type == 'ambiguous_resource_policy'
-        for issue in rule.request_assessment.issues
-    )
     return replace(
         rule,
         primary_outcome='answer',

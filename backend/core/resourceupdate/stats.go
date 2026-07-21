@@ -40,6 +40,11 @@ func CountSkillReviewHistoryStats(ctx context.Context, db *gorm.DB, userID strin
 		Joins("JOIN conversations AS c ON c.id = ch.conversation_id").
 		Where("c.create_user_id = ?", userID).
 		Where("c.deleted_at IS NULL").
+		Where(`NOT EXISTS (
+			SELECT 1
+			FROM plugin_sessions AS ps
+			WHERE ps.conversation_id = c.id
+		)`).
 		Where("c.updated_at >= ? AND c.updated_at < ?", start, end).
 		Order("ch.conversation_id ASC, ch.create_time ASC, ch.seq ASC").
 		Scan(&rows).Error
