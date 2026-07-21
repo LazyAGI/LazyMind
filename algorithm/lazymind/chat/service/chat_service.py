@@ -78,6 +78,7 @@ _CITE_MESSAGE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _MCP_TOOL_CACHE_TTL_SECONDS = 300
+_TASK_PROFILE_ROUTER_TIMEOUT_SECONDS = 20
 _mcp_tool_cache: dict[str, tuple[float, list[Any]]] = {}
 _mcp_tool_cache_lock = threading.Lock()
 
@@ -215,7 +216,107 @@ def _should_register_ask_user(agentic_config: Dict[str, Any]) -> bool:
     )
 
 
+def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
+    query, _ = _normalize_cite_message_query_for_agent(request.message.query)
+    user_input, _ = _normalize_cite_message_query_for_agent(request.message.user_query or query)
+    explicit_resources = request.explicit_resource_bindings.model_dump()
+    selected_kb_ids = _normalize_kb_id_filter((request.retrieval.filters or {}).get('kb_id'))
+    if selected_kb_ids and not explicit_resources['knowledge_base_ids']:
+        explicit_resources['knowledge_base_ids'] = (
+            selected_kb_ids if isinstance(selected_kb_ids, list) else [selected_kb_ids]
+        )
+    active_plugin_ref = str(
+        (request.plugin.plugin_context or {}).get('plugin_ref') or ''
+    ).strip()
+    if active_plugin_ref and not explicit_resources['plugin_refs']:
+        explicit_resources['plugin_refs'] = [active_plugin_ref]
+    thinking_depth = (
+        request.runtime.thinking_depth
+        if request.runtime.thinking_depth in ('low', 'medium', 'high') else 'medium'
+    )
+    return {
+        'query': user_input.strip(),
+        'history': normalize_history_for_agent(list(request.message.history or [])),
+        'intent': request.conversation.intent_context,
+        'has_attachments': bool(request.message.files),
+        'explicit_resources': explicit_resources,
+        'thinking_depth': thinking_depth,
+    }
+
+
+def _resolve_task_profile_with_model(inputs: dict[str, Any]) -> Any:
+    def classify(prompt: str) -> Any:
+        router_llm = AutoModel(model='llm')
+        return router_llm(
+            prompt,
+            response_format={'type': 'json_object'},
+            stream_output=False,
+            timeout=_TASK_PROFILE_ROUTER_TIMEOUT_SECONDS,
+        )
+
+    return resolve_task_profile(
+        **inputs,
+        classifier=classify,
+        enable_llm_fallback=True,
+    )
+
+
 async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingResponse]:
+    if not _cfg['dynamic_prompt_modules']:
+        return await _handle_chat_impl(request)
+
+    inputs = _task_profile_inputs(request)
+    provisional = resolve_task_profile(
+        **inputs,
+        classifier=None,
+        enable_llm_fallback=False,
+    )
+    if not provisional.routing_review_required:
+        return await _handle_chat_impl(request, task_profile_override=provisional)
+
+    from lazymind.chat.plugin.plugin_manager import is_plugin_driver_turn
+    raw_query = str(request.message.query or '')
+    if (
+        not is_plugin_driver_turn(request.plugin.plugin_context)
+        and check_sensitive_content(raw_query)
+    ):
+        return await _handle_chat_impl(request, task_profile_override=provisional)
+
+    inject_model_config(request.runtime.llm_config)
+
+    async def resolve_and_continue():
+        started = time.time()
+        routing_task = asyncio.create_task(asyncio.to_thread(
+            _resolve_task_profile_with_model, inputs,
+        ))
+        for status_delta in ('正在', '分析', '用户意图', '，请稍后'):
+            yield log_and_emit_frame(
+                {'think': status_delta, 'text': None, 'sources': []},
+                round(time.time() - started, 3),
+                raw_query,
+                request.conversation.session_id,
+                tag='TASK_PROFILE',
+            )
+            await asyncio.sleep(0.08)
+        profile = await routing_task
+        response = await _handle_chat_impl(request, task_profile_override=profile)
+        if isinstance(response, StreamingResponse):
+            async for chunk in response.body_iterator:
+                yield chunk
+            return
+        yield sse_line(response_payload(200, 'success', response, time.time() - started))
+
+    if request.runtime.context_usage_preview or request.runtime.context_prompt_export:
+        profile = await asyncio.to_thread(_resolve_task_profile_with_model, inputs)
+        return await _handle_chat_impl(request, task_profile_override=profile)
+    return StreamingResponse(resolve_and_continue(), media_type='text/event-stream')
+
+
+async def _handle_chat_impl(
+    request: ChatRequest,
+    *,
+    task_profile_override: Any = None,
+) -> Union[Dict[str, Any], StreamingResponse]:
     message = request.message
     conversation = request.conversation
     retrieval = request.retrieval
@@ -362,15 +463,18 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     task_profile = None
     if _cfg['dynamic_prompt_modules']:
         profile_started = time.monotonic()
-        task_profile = resolve_task_profile(
-            language_query,
-            history=agent_history,
-            intent=conversation.intent_context,
-            classifier=None,
-            enable_llm_fallback=False,
-            has_attachments=bool(files_map),
-            explicit_resources=explicit_resource_payload,
-        )
+        task_profile = task_profile_override
+        if task_profile is None:
+            task_profile = resolve_task_profile(
+                language_query,
+                history=agent_history,
+                intent=conversation.intent_context,
+                classifier=None,
+                enable_llm_fallback=False,
+                thinking_depth=thinking_depth,
+                has_attachments=bool(files_map),
+                explicit_resources=explicit_resource_payload,
+            )
         profile_latency_ms = int((time.monotonic() - profile_started) * 1000)
         LOG.info(
             '[ChatServer] [TASK_PROFILE] [sid=%s] source=%s outcome=%s deliverable=%s '
