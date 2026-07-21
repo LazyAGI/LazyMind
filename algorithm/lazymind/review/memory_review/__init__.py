@@ -14,6 +14,12 @@ from .errors import (
     MemoryStoreError,
     MemoryValidationError,
 )
+from .injection import (
+    ChatMemoryContext,
+    load_chat_memory_context,
+    profile_languages,
+    truncate_preference_index,
+)
 from .migrate import (
     MigrationResult,
     detect_legacy_format,
@@ -52,6 +58,7 @@ from .store import MemoryStore
 
 __all__ = [
     'AGENTS_ROOT',
+    'ChatMemoryContext',
     'LEGACY_MEMORY_PATH',
     'LEGACY_USER_PREFERENCE_PATH',
     'MEMORY_ROOT',
@@ -78,10 +85,13 @@ __all__ = [
     'is_memory_path',
     'is_reference_path',
     'is_memory_tree_initialized',
+    'load_chat_memory_context',
     'migrate_legacy_memory',
     'normalize_memory_path',
     'parse_preference_items',
+    'profile_languages',
     'split_reference_ref',
+    'truncate_preference_index',
     'validate_preference_index',
     'validate_profile_content',
     'validate_reference_content',

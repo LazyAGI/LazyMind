@@ -103,11 +103,42 @@ def test_recent_user_language_beats_ui_locale_for_ambiguous_follow_up():
 
 
 def test_saved_language_preference_beats_current_request_language():
+    profile = (
+        '---\n'
+        'schema_version: 1\n'
+        'locale:\n'
+        '  languages: ["zh-CN"]\n'
+        '---\n'
+    )
     prompt = build_system_prompt(
         False,
         current_query='Explain the result briefly.',
-        user_preference='首选语言：中文',
+        profile=profile,
         environment_context={'locale': 'en-US'},
     )
 
-    assert 'Selected response language for this turn: Chinese (explicit saved user preference)' in prompt
+    assert 'Selected response language for this turn: Chinese (profile locale.languages)' in prompt
+
+
+def test_system_prompt_injects_soul_profile_preference():
+    prompt = build_system_prompt(
+        False,
+        soul='---\nschema_version: 1\nidentity:\n  name: "LazyMind"\n---\n',
+        profile='---\nschema_version: 1\nidentity:\n  preferred_name: "Alice"\n---\n',
+        preference=(
+            '---\nschema_version: 1\nupdated_at: 2026-07-20\n---\n'
+            '# Preference Index\n'
+            '- name: pref.response.detail\n'
+            '  summary: Prefer concise answers.\n'
+            '  ref: references/response.md\n'
+        ),
+    )
+
+    assert '## Agent Soul' in prompt
+    assert '## User Profile' in prompt
+    assert '## User Preference Index' in prompt
+    assert 'Alice' in prompt
+    assert 'pref.response.detail' in prompt
+    assert '`read_memory_reference`' in prompt
+    assert '## Agent Working Memory' not in prompt
+    assert 'agent_persona' not in prompt

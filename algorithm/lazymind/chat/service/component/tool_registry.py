@@ -33,6 +33,7 @@ from lazymind.chat.engine.tools import (
     kb_tmp_search,
     memory_editor,
     read_memory,
+    read_memory_reference,
     SkillManagementToolkit,
     list_data_sources,
     build_schedule_toolkit,
@@ -540,6 +541,14 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         label_en='Memory Reading',
         description_en='Read the current user memory and preferences.',
         appendix_system_prompt=MEMORY_READER_TOOL_POLICY_APPENDIX,
+    ),
+    ToolConfig(
+        name='read_memory_reference',
+        label='记忆主题读取',
+        description='按需读取用户偏好索引引用的主题文件',
+        tool=read_memory_reference, module='personalization',
+        label_en='Memory Reference Reading',
+        description_en='Read detailed preference reference files on demand.',
     ),
     ToolConfig(
         name='memory_editor',
