@@ -19,9 +19,7 @@ import TaskCenterPage from "@/modules/taskCenter";
 import UserManagement from "@/modules/admin/pages/user";
 import GroupManagement from "@/modules/admin/pages/group";
 import GroupDetail from "@/modules/admin/pages/group/detail.tsx";
-import DataSourceManagement from "@/modules/dataSource";
 import DatabaseConnectionsPage from "@/modules/dataSource/database";
-import DataSourceDetail from "@/modules/dataSource/detail";
 import DataSourceFeishuCallback from "@/modules/dataSource/common/feishuCallback";
 import CloudDocumentsPage from "@/modules/modelProvider/pages/CloudDocumentsPage";
 import FeishuAccountPage from "@/modules/modelProvider/pages/FeishuAccountPage";
@@ -141,30 +139,6 @@ export default function AppRouter() {
               element={<Knowledge />}
             />
           </Route>
-          <Route path="data-sources" element={<DataSourceManagement />} />
-          <Route
-            path="data-sources/docs/google-drive-setup"
-            element={
-              <Navigate
-                to="/cloud-documents/docs/google-drive-setup"
-                replace
-              />
-            }
-          />
-          <Route
-            path="data-sources/providers/google-drive"
-            element={
-              <Navigate
-                to="/cloud-documents/google-drive"
-                replace
-              />
-            }
-          />
-          <Route
-            path="data-sources/database-connections"
-            element={<Navigate to="/databases" replace />}
-          />
-          <Route path="data-sources/:id" element={<DataSourceDetail />} />
           <Route path="dataset-management" element={<DatasetListPage />} />
           <Route
             path="dataset-management/:datasetId"

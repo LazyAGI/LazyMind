@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from lazyllm import LOG, ThreadPoolExecutor
 
+from lazymind.common.skill_document import require_valid_skill_document
+from lazymind.common.skill_storage_key import parse_skill_storage_key
 from lazymind.review.skill_review.config import DEFAULT_STAGE_WORKERS, STAGE_FILES, STAGE_RESOLUTION
 from lazymind.review.skill_review.json_call import call_json
 from lazymind.review.skill_review.reports import finish_stage_report, stage_error, start_stage, write_json_file
@@ -22,7 +24,7 @@ _RESOLUTION_DECISION_SCHEMA = {
     'type': 'object',
     'properties': {
         'type': {'type': 'string', 'enum': ['new', 'patch']},
-        'patch_skill_name': {'type': 'string'},
+        'patch_skill_key': {'type': 'string'},
         'reason': {'type': ['string', 'null']},
     },
     'required': ['type'],
@@ -51,7 +53,7 @@ def resolve_skill_action(
     if not skill_manager or not skill_summaries.strip():
         return _new_resolution(candidate)
 
-    available_skill_names = _extract_skill_names(skill_summaries)
+    available_skill_keys = _extract_skill_keys(skill_summaries)
     payload = call_json(
         llm,
         resolution_prompt(candidate.model_dump(), skill_summaries),
@@ -62,18 +64,20 @@ def resolve_skill_action(
     if resolution_type != 'patch':
         return _new_resolution(candidate)
 
-    patch_skill_name = str(payload.get('patch_skill_name') or '').strip()
-    if not patch_skill_name:
-        raise ValueError('patch resolution requires patch_skill_name')
-    if available_skill_names and patch_skill_name not in available_skill_names:
-        raise ValueError(f'patch_skill_name {patch_skill_name!r} is not in global skill summaries')
+    patch_skill_key = str(payload.get('patch_skill_key') or '').strip()
+    if not patch_skill_key:
+        raise ValueError('patch resolution requires patch_skill_key')
+    if patch_skill_key not in available_skill_keys:
+        raise ValueError(f'patch_skill_key {patch_skill_key!r} is not in global skill summaries')
+    category, name = parse_skill_storage_key(patch_skill_key)
+    patch_skill_key = f'{category}/{name}'
 
-    existing_skill_content = _read_skill_content(skill_manager, patch_skill_name)
+    existing_skill_content = _read_skill_content(skill_manager, patch_skill_key)
     merge_payload = call_json(
         llm,
         merge_skill_patch_prompt(
             candidate.model_dump(),
-            patch_skill_name=patch_skill_name,
+            target_skill_key=patch_skill_key,
             existing_skill_content=existing_skill_content,
             decision_reason=reason,
         ),
@@ -89,7 +93,8 @@ def resolve_skill_action(
     _validate_patched_skill_name(patched_skill, patched_skill_name)
     return SkillReviewResolution(
         id=str(uuid4()),
-        skill_name=patch_skill_name,
+        skill_name=patched_skill_name,
+        target_skill_key=patch_skill_key,
         type='patch',
         skill_content=patched_skill,
         summary=summary or None,
@@ -188,26 +193,13 @@ def _read_skill_content(skill_manager, skill_name: str) -> str:
 
 
 def _validate_patched_skill_name(skill_content: str, skill_name: str) -> None:
-    from lazymind.chat.engine.tools.infra.skill_validation import parse_skill_frontmatter
-
-    frontmatter, _ = parse_skill_frontmatter(skill_content)
-    content_name = str(frontmatter.get('name') or '').strip()
-    if not content_name:
-        raise ValueError('skill_content frontmatter must include name')
-    if content_name != skill_name:
-        raise ValueError(
-            f'skill_content frontmatter name {content_name!r} does not match skill_name {skill_name!r}'
-        )
+    require_valid_skill_document(skill_content, expected_name=skill_name)
 
 
-def _extract_skill_names(skill_summaries: str) -> set[str]:
-    names: set[str] = set()
+def _extract_skill_keys(skill_summaries: str) -> set[str]:
+    keys: set[str] = set()
     for match in re.finditer(r'^\s*-\s+\*\*([^*]+)\*\*', skill_summaries, flags=re.MULTILINE):
         value = match.group(1).strip()
         if value:
-            names.add(value.rsplit('/', 1)[-1])
-    for match in re.finditer(r'^\s*-\s+Name:\s*(.+?)\s*$', skill_summaries, flags=re.MULTILINE):
-        value = match.group(1).strip()
-        if value:
-            names.add(value)
-    return names
+            keys.add(value)
+    return keys

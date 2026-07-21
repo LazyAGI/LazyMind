@@ -567,8 +567,9 @@ type promptItemOpenAPIResponse struct {
 }
 
 type promptFacetOpenAPIResponse struct {
-	Scopes     map[string]int64 `json:"scopes"`
-	Categories map[string]int64 `json:"categories"`
+	Scopes        map[string]int64 `json:"scopes"`
+	Categories    map[string]int64 `json:"categories"`
+	CategoryTotal int64            `json:"category_total"`
 }
 
 type promptListOpenAPIResponse struct {

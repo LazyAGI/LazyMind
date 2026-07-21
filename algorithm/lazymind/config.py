@@ -121,16 +121,18 @@ config.add('web_search_timeout', int, 10, 'WEB_SEARCH_TIMEOUT', description='Web
 config.add('url_fetch_max_length', int, 4000, 'URL_FETCH_MAX_LENGTH',
            description='Maximum readable text length returned by url_fetch.')
 config.add('max_retries', int, 20, 'MAX_RETRIES', description='Max retries for agentic function call loop.')
+config.add('agentic_max_rounds_low', int, 6, 'AGENTIC_MAX_ROUNDS_LOW',
+           description='Maximum ChatAgent ReAct rounds in low thinking-depth mode.')
+config.add('agentic_max_rounds_medium', int, 20, 'AGENTIC_MAX_ROUNDS_MEDIUM',
+           description='Maximum ChatAgent ReAct rounds in medium thinking-depth mode.')
+config.add('agentic_max_rounds_high', int, 60, 'AGENTIC_MAX_ROUNDS_HIGH',
+           description='Maximum ChatAgent ReAct rounds in high thinking-depth mode.')
 config.add('agentic_workspace', str, './workspace', 'AGENTIC_WORKSPACE',
            description='Workspace directory for agentic tools.')
 config.add('agentic_keep_full_turns', int, 3, 'AGENTIC_KEEP_FULL_TURNS',
            description='Number of full turns retained in agentic history.')
 config.add('dynamic_prompt_modules', bool, True, 'DYNAMIC_PROMPT_MODULES',
            description='Enable per-turn task profiling and progressive prompt-module disclosure.')
-config.add('task_profile_llm_fallback', bool, True, 'TASK_PROFILE_LLM_FALLBACK',
-           description='Use the configured LLM to classify ambiguous per-turn task profiles.')
-config.add('task_profile_llm_timeout', int, 8, 'TASK_PROFILE_LLM_TIMEOUT',
-           description='Maximum seconds to wait for ambiguous task-profile classification.')
 config.add('agentic_stream_chunk_size', int, 24, 'AGENTIC_STREAM_CHUNK_SIZE',
            description='Fallback chunk size for final streamed agentic text.')
 config.add('review_max_retries', int, 5, 'REVIEW_MAX_RETRIES', description='Max retries for background review agent.')

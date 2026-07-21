@@ -18,7 +18,17 @@ import {
 
 const { Paragraph, Text, Title } = Typography;
 
-function renderPayloadBlock(t: TFunction, label: string, payload?: { summary?: string; data?: unknown }) {
+function PayloadBlock({
+  t,
+  label,
+  payload,
+}: {
+  t: TFunction;
+  label: string;
+  payload?: { summary?: string; data?: unknown };
+}) {
+  const [isJsonExpanded, setIsJsonExpanded] = useState(false);
+
   if (!payload?.summary && payload?.data === undefined) {
     return (
       <Paragraph className="self-evolution-eval-empty">
@@ -31,8 +41,18 @@ function renderPayloadBlock(t: TFunction, label: string, payload?: { summary?: s
     <>
       {payload?.summary && <Paragraph className="self-evolution-eval-payload-summary">{payload.summary}</Paragraph>}
       {payload?.data !== undefined && (
-        <details className="self-evolution-eval-payload-json">
-          <summary>{t("selfEvolutionRun.observation.viewLabelJson", { label })}</summary>
+        <details
+          className="self-evolution-eval-payload-json"
+          onToggle={(event) => setIsJsonExpanded(event.currentTarget.open)}
+        >
+          <summary>
+            {t(
+              isJsonExpanded
+                ? "selfEvolutionRun.observation.hideLabelJson"
+                : "selfEvolutionRun.observation.viewLabelJson",
+              { label },
+            )}
+          </summary>
           <pre>{stringifyResultPayload(payload.data)}</pre>
         </details>
       )}
@@ -168,11 +188,19 @@ function TraceInspectorPanel({
         </div>
         <div className="self-evolution-eval-inspector-section">
           <h4>{t("selfEvolutionRun.observation.inputSection")}</h4>
-          {renderPayloadBlock(t, t("selfEvolutionRun.observation.inputLabel"), node.input?.summary || inputData !== undefined ? { summary: node.input?.summary, data: inputData } : undefined)}
+          <PayloadBlock
+            t={t}
+            label={t("selfEvolutionRun.observation.inputLabel")}
+            payload={node.input?.summary || inputData !== undefined ? { summary: node.input?.summary, data: inputData } : undefined}
+          />
         </div>
         <div className="self-evolution-eval-inspector-section">
           <h4>{t("selfEvolutionRun.observation.outputSection")}</h4>
-          {renderPayloadBlock(t, t("selfEvolutionRun.observation.outputLabel"), node.output)}
+          <PayloadBlock
+            t={t}
+            label={t("selfEvolutionRun.observation.outputLabel")}
+            payload={node.output}
+          />
         </div>
         <div className="self-evolution-eval-inspector-section">
           <h4>{t("selfEvolutionRun.observation.retrievedDocsSection")}</h4>

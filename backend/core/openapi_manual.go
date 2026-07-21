@@ -265,7 +265,7 @@ func manualSchemas() map[string]any {
 		"PromptPolishRequest":             objReq([]string{"content", "user_instruct"}, prop("content", strSchema()), prop("user_instruct", strSchema())),
 		"PromptPolishResponse":            obj(prop("content", strSchema())),
 		"PromptItem":                      obj(prop("name", strSchema()), prop("id", strSchema()), prop("content", strSchema()), prop("display_name", strSchema()), prop("category", strSchema()), prop("source", strSchema()), prop("is_favorite", boolSchema()), prop("usage_count", int64Schema()), prop("last_used_at", strSchema()), prop("created_at", strSchema()), prop("updated_at", strSchema())),
-		"PromptFacets":                    obj(prop("scopes", obj()), prop("categories", obj())),
+		"PromptFacets":                    obj(prop("scopes", obj()), prop("categories", obj()), prop("category_total", int64Schema())),
 		"PromptListResponse":              obj(prop("prompts", array(refSchema("PromptItem"))), prop("custom_categories", array(refSchema("PromptCategory"))), prop("next_page_token", strSchema()), prop("total", int64Schema()), prop("facets", refSchema("PromptFacets"))),
 		"PromptStateResponse":             obj(prop("id", strSchema()), prop("is_favorite", boolSchema()), prop("usage_count", int64Schema()), prop("last_used_at", strSchema())),
 		"ToolMethod":                      obj(prop("name", strSchema()), prop("summary", strSchema())),

@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Empty, Spin, Tag, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
-import { useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import {
   fetchThreadGateContent,
   getCatalogApiErrorMessage,
   isCanceledRequest,
   isEmptyResultPayload,
   stringifyResultPayload,
+  type SelfEvolutionRouteState,
 } from "../shared";
 import "../index.scss";
 import type {
@@ -26,6 +27,7 @@ const { Paragraph, Text, Title } = Typography;
 export function SelfEvolutionObservationPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const { threadId, kind } = useParams<ObservationRouteParams>();
   const { isMenuCollapsed, toggleMenu } =
     useOutletContext<ObservationPageLayoutContext>();
@@ -92,7 +94,9 @@ export function SelfEvolutionObservationPage() {
     isEmptyResultPayload(state.data);
   const backToDetail = () => {
     if (threadId) {
-      navigate(`/self-evolution/detail/${encodeURIComponent(threadId)}`);
+      navigate(`/self-evolution/detail/${encodeURIComponent(threadId)}`, {
+        state: location.state as SelfEvolutionRouteState | null,
+      });
       return;
     }
     navigate("/self-evolution");

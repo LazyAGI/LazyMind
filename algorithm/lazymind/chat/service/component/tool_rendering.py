@@ -53,15 +53,15 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'url_fetch': 'urls / url',
     'vocab_learn': 'suggestions.word <-> suggestions.synonym',
     'vision_extractor': 'url',
-    'skill_editor': 'category/name',
-    'SkillManagementToolkit_create_skill': 'category/name',
+    'skill_editor': 'name',
+    'SkillManagementToolkit_create_skill': 'name',
     'SkillManagementToolkit_install_skill': 'github_url',
     'SkillManagementToolkit_edit_file': 'path',
     'SkillManagementToolkit_patch_file': 'path',
     'SkillManagementToolkit_create_file': 'path',
     'SkillManagementToolkit_delete_file': 'path',
-    'SkillManagementToolkit_rename_skill': 'category/name',
-    'SkillManagementToolkit_remove_skill': 'category/name',
+    'SkillManagementToolkit_rename_skill': 'name',
+    'SkillManagementToolkit_remove_skill': 'name',
     'list_knowledge_bases': 'keyword',
     'list_knowledge_base_documents': 'knowledge_base_ids / keyword',
     'list_data_sources': 'keyword',
@@ -220,7 +220,7 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'advance_steps': 'Starting the Ready step batch {value}.',
     'advance_steps_and_hand_off': 'Starting the Ready step batch {value} and handing off.',
     'regex:get_(.+)_methods': 'Expanding the {match} Toolkit.',
-    'regex:trigger_(.+)_plugin': 'Checking whether the {match} plugin fits this request.',
+    'regex:trigger_(.+)_plugin': 'Checking whether the {match} workflow fits this request.',
 }
 _TOOL_CALL_FALLBACK_TEMPLATE = 'Calling {tool_name} to handle the request.'
 _TOOL_CALL_PREVIEW_TEMPLATES['ask_user'] = 'Gathering questions for you, please wait…'
@@ -289,7 +289,7 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'advance_steps': '正在批量启动可执行步骤 {value}...',
     'advance_steps_and_hand_off': '正在批量启动可执行步骤 {value} 并交出控制权...',
     'regex:get_(.+)_methods': '正在展开{match}工具箱。',
-    'regex:trigger_(.+)_plugin': '正在检查 {match} 插件是否适合当前需求...',
+    'regex:trigger_(.+)_plugin': '正在检查 {match} 工作流是否适合当前需求...',
 }
 _ZH_TOOL_CALL_FALLBACK_TEMPLATE = '正在调用工具 {tool_name}...'
 _ZH_TOOL_CALL_PREVIEW_TEMPLATES['ask_user'] = '我正在组织问题，请稍后'
@@ -356,13 +356,13 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_copy': 'Feishu file was copied from {value} to the target path successfully.',
     'GoogleDriveFS_search': 'Google Drive search results for {value} are ready.',
     'GoogleDriveFS_find': 'Google Drive files matching {value} were found.',
-    'advance_step': 'Plugin launched.',
-    'advance_step_and_hand_off': 'Step queued. Plugin launched.',
-    'advance_steps': 'Plugin step batch launched.',
-    'advance_steps_and_hand_off': 'Plugin step batch queued and launched.',
+    'advance_step': 'Workflow launched.',
+    'advance_step_and_hand_off': 'Step queued. Workflow launched.',
+    'advance_steps': 'Workflow step batch launched.',
+    'advance_steps_and_hand_off': 'Workflow step batch queued and launched.',
     'regex:get_(.+)_methods': 'The {match} Toolkit has been expanded.',
     'regex:trigger_(.+)_plugin': (
-        'Plugin preflight completed. Result: {result.outcome}. Reason: {result.reason}.'
+        'Workflow preflight completed. Result: {result.outcome}. Reason: {result.reason}.'
     ),
 }
 
@@ -426,13 +426,13 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_copy': '已成功将飞书文件从 {value} 复制到目标路径。',
     'GoogleDriveFS_search': '已查询到 {value} 的 Google Drive 搜索结果。',
     'GoogleDriveFS_find': '已找到文件名匹配 {value} 的 Google Drive 文件。',
-    'advance_step': '插件已启动',
-    'advance_step_and_hand_off': '步骤已排队，插件已启动',
-    'advance_steps': '插件步骤已批量启动',
-    'advance_steps_and_hand_off': '插件步骤已批量排队并启动',
+    'advance_step': '工作流已启动',
+    'advance_step_and_hand_off': '步骤已排队，工作流已启动',
+    'advance_steps': '工作流步骤已批量启动',
+    'advance_steps_and_hand_off': '工作流步骤已批量排队并启动',
     'regex:get_(.+)_methods': '已经展开{match}工具箱。',
     'regex:trigger_(.+)_plugin': (
-        '插件启动检查已完成，结果是 {result.outcome}，原因是 {result.reason}。'
+        '工作流启动检查已完成，结果是 {result.outcome}，原因是 {result.reason}。'
     ),
 }
 
@@ -501,7 +501,7 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'advance_steps_and_hand_off': 'Step batch {value} could not be queued.',
     'regex:get_(.+)_methods': 'The {match} Toolkit could not be expanded.',
     'regex:trigger_(.+)_plugin': (
-        'Plugin preflight completed. Result: {result.outcome}. Reason: {result.reason}.'
+        'Workflow preflight completed. Result: {result.outcome}. Reason: {result.reason}.'
     ),
 }
 
@@ -570,7 +570,7 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'advance_steps_and_hand_off': '步骤批次 {value} 排队失败',
     'regex:get_(.+)_methods': '未能展开{match}工具箱。',
     'regex:trigger_(.+)_plugin': (
-        '插件启动检查已完成，结果是 {result.outcome}，原因是 {result.reason}。'
+        '工作流启动检查已完成，结果是 {result.outcome}，原因是 {result.reason}。'
     ),
 }
 

@@ -119,6 +119,28 @@ func TestOpenAPISpecRevisionSchemasIncludeHeadMarker(t *testing.T) {
 	}
 }
 
+func TestOpenAPISpecPromptFacetsIncludeCategoryTotal(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	for _, schemaName := range []string{"promptFacetOpenAPIResponse", "PromptFacets"} {
+		properties := schemaPropertiesForTest(t, schemas, schemaName)
+		categoryTotal, ok := properties["category_total"].(map[string]any)
+		if !ok || categoryTotal["type"] != "integer" || categoryTotal["format"] != "int64" {
+			t.Fatalf("schema %s category_total property = %#v, want int64", schemaName, properties["category_total"])
+		}
+	}
+}
+
 func TestOpenAPISpecIncludesAgentEvoContracts(t *testing.T) {
 	r := mux.NewRouter()
 	registerCoreRoutes(r)

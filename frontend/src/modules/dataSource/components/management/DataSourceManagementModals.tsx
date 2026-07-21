@@ -1,12 +1,11 @@
 import { Alert, Button, Input, Modal, Space, Tag, Typography } from "antd";
 import { ArrowRightOutlined, FileTextOutlined, PlusOutlined } from "@ant-design/icons";
-import type { DataSourceManagementVm } from "../../hooks/useDataSourceManagement";
 import type { SyncKnowledgeBaseCreationVm } from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";
 import DataSourceProviderPicker from "./DataSourceProviderPicker";
 import CloudCredentialSetupModal from "./CloudCredentialSetupModal";
 
 type SourceCreationModalsVm = Pick<
-  DataSourceManagementVm,
+  SyncKnowledgeBaseCreationVm,
   | "t"
   | "feishuSetupForm"
   | "cloudSetupProvider"

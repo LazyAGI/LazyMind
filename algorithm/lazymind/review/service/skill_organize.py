@@ -8,8 +8,8 @@ from typing import Any
 import lazyllm
 from lazyllm import AutoModel, LOG
 
-from lazymind.chat.engine.tools.infra.skill_remote_store import SkillRemoteStore
-from lazymind.chat.engine.tools.infra.skill_validation import parse_skill_frontmatter
+from lazymind.common.skill_remote_store import SkillRemoteStore
+from lazymind.common.skill_storage_key import parse_skill_storage_key
 from lazymind.model_config import inject_model_config
 from lazymind.review.skill_organize.config import (
     STAGE_DRAFT,
@@ -24,8 +24,14 @@ from lazymind.review.skill_organize.materializer import materialize_fs_draft
 from lazymind.review.skill_organize.parser import parse_skill_summaries
 from lazymind.review.skill_organize.planner import build_organize_plan
 from lazymind.review.skill_organize.reports import write_stage_file
-from lazymind.review.skill_organize.schemas import SkillFsDraft, SkillOrganizeRequest, SkillOrganizeResult, SourceSkill
-from lazymind.review.skill_organize.validator import validate_source_skills
+from lazymind.review.skill_organize.schemas import (
+    SkillFsDraft,
+    SkillFsDraftItem,
+    SkillOrganizeRequest,
+    SkillOrganizeResult,
+    SourceSkill,
+)
+from lazymind.review.skill_organize.validator import validate_fs_draft, validate_source_skills
 
 _MISSING = object()
 ORG_STAGE_PLAN = 'organize_plan'
@@ -191,7 +197,7 @@ def _run_skill_organize(
             started_at,
             started_perf,
             {
-                'delete_count': len(draft.delete_names),
+                'delete_count': len(draft.delete_keys),
                 'upsert_count': len(draft.upsert_skills),
             },
         )
@@ -299,9 +305,9 @@ def _build_organize_result(
         'status': 'completed',
         'plans': plan.get('plans', []),
         'fs_draft': {
-            'delete_names': draft.get('delete_names', []),
-            'upsert_names': [
-                item.get('name')
+            'delete_keys': draft.get('delete_keys', []),
+            'upsert_keys': [
+                item.get('target_key')
                 for item in draft.get('upsert_skills', [])
                 if isinstance(item, dict)
             ],
@@ -317,54 +323,77 @@ def _build_organize_result(
 def _load_source_skills(request: SkillOrganizeRequest, store: SkillRemoteStore) -> list[SourceSkill]:
     result: list[SourceSkill] = []
     for item in request.skills:
-        category, name = _resolve_skill_identity(item)
+        category, name = parse_skill_storage_key(item)
         files = store.list_files(category, name)
         content = files.get('SKILL.md')
         if not isinstance(content, str) or not content.strip():
             raise ValueError(f'skill {name!r} does not contain SKILL.md')
-        frontmatter, _ = parse_skill_frontmatter(content)
         result.append(SourceSkill(
-            name=str(frontmatter.get('name') or name).strip(),
-            category=str(frontmatter.get('category') or category).strip(),
+            key=f'{category}/{name}',
+            category=category,
+            name=name,
             content=content,
         ))
     return result
 
 
 def _apply_fs_draft(draft: SkillFsDraft, store: SkillRemoteStore, source_skills: list[SourceSkill]) -> dict:
-    upserted_names: list[str] = []
-    deleted_names: list[str] = []
-    source_by_name = {item.name: item for item in source_skills}
+    validate_fs_draft(draft, source_skills)
+    source_by_key = {item.key: item for item in source_skills}
+    upsert_operations: list[tuple[SkillFsDraftItem, str, str, str, str]] = []
+    same_key_snapshots: dict[str, tuple[dict[str, str], dict[str, str]]] = {}
+    delete_operations: list[tuple[str, str, str]] = []
 
     for item in draft.upsert_skills:
-        name = item.name
-        source = source_by_name.get(name)
-        category = item.category or (source.category if source else '')
-        if not category:
-            raise ValueError(f'category is required to upsert skill {name!r}')
-        package_dir = store.package_dir(category, name)
-        if store.fs.exists(package_dir):
-            before = store.list_files(category, name)
+        source_category, source_name = parse_skill_storage_key(item.source_key)
+        target_storage_category, target_name = parse_skill_storage_key(item.target_key)
+        source_dir = store.package_dir(source_category, source_name)
+        if not store.fs.exists(source_dir):
+            raise FileNotFoundError(f'Skill package {item.source_key} does not exist.')
+        if item.source_key == item.target_key:
+            before = store.list_files(source_category, source_name)
             after = dict(before)
             after['SKILL.md'] = item.content
-            store.replace_files(category, name, before, after)
+            same_key_snapshots[item.source_key] = (before, after)
         else:
-            store.create(category, name, item.content)
-        upserted_names.append(name)
+            target_dir = store.package_dir(target_storage_category, target_name)
+            if store.fs.exists(target_dir):
+                raise FileExistsError(f'Skill package {item.target_key} already exists.')
+        upsert_operations.append(
+            (item, source_category, source_name, target_storage_category, target_name)
+        )
 
-    for name in draft.delete_names:
-        source = source_by_name.get(name)
-        if source is None:
-            raise ValueError(f'cannot delete unknown source skill {name!r}')
-        category = source.category
-        if not category:
-            raise ValueError(f'category is required to delete skill {name!r}')
+    for key in draft.delete_keys:
+        category, name = parse_skill_storage_key(key)
+        if key not in source_by_key:
+            raise ValueError(f'cannot delete unknown source skill {key!r}')
+        if not store.fs.exists(store.package_dir(category, name)):
+            raise FileNotFoundError(f'Skill package {key} does not exist.')
+        delete_operations.append((key, category, name))
+
+    upserted_keys: list[str] = []
+    deleted_keys: list[str] = []
+    for item, source_category, source_name, target_storage_category, target_name in upsert_operations:
+        if item.source_key == item.target_key:
+            before, after = same_key_snapshots[item.source_key]
+            store.replace_files(source_category, source_name, before, after)
+        else:
+            store.rename(
+                source_category,
+                source_name,
+                target_storage_category,
+                target_name,
+                skill_content=item.content,
+            )
+        upserted_keys.append(item.target_key)
+
+    for key, category, name in delete_operations:
         store.remove(category, name)
-        deleted_names.append(name)
+        deleted_keys.append(key)
 
     return {
-        'deleted_names': deleted_names,
-        'upserted_names': upserted_names,
+        'deleted_keys': deleted_keys,
+        'upserted_keys': upserted_keys,
     }
 
 
@@ -385,13 +414,6 @@ def _restore_agentic_config(previous: object) -> None:
         lazyllm.globals.pop('agentic_config', None)
     else:
         lazyllm.globals['agentic_config'] = previous
-
-
-def _resolve_skill_identity(value: str) -> tuple[str, str]:
-    parts = [part.strip() for part in str(value or '').split('/')]
-    if len(parts) != 2 or not all(parts):
-        raise ValueError(f'skill must use category/name format, got {value!r}')
-    return parts[0], parts[1]
 
 
 def build_skill_organize_taskid(requestid: str) -> str:

@@ -45,6 +45,7 @@ import {
   CHAT_NEW_RUN_IN_BACKGROUND_KEY,
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
+  selectChatConversationFilter,
 } from "@/modules/chat/constants/chat";
 import { runtimeFeatures } from "@/runtime/features";
 import { shouldHideLocalUserControls } from "@/runtime/localSession";
@@ -335,6 +336,7 @@ export default function MainLayout() {
   };
 
   const handleNewChat = (runInBackground = false) => {
+    selectChatConversationFilter(runInBackground ? "task" : "normal");
     try {
       sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
       sessionStorage.setItem(

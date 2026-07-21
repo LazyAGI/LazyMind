@@ -1,10 +1,5 @@
 import { message } from "antd";
 import { getLocalizedErrorMessage } from "@/components/request";
-import { dataSourceScanApi } from "../../api/clients";
-import {
-  deleteDatabaseConnection,
-  updateDatabaseConnection,
-} from "../../api/databaseConnections";
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
   finishFeishuDataSourceOAuth,
@@ -20,11 +15,9 @@ import {
 } from "../../utils/schedule";
 import type {
   DataSourceItem,
-  DetailDocumentItem,
   SourceType,
 } from "../../constants/types";
 import { parseFeishuOAuthCallbackInput } from "../../utils/feishuAccount";
-import { mapScanSyncDetail } from "../../mappers/scanDocument";
 import {
   CLOUD_DOCUMENTS_FEISHU_SETUP_PATH,
   CLOUD_DOCUMENTS_NOTION_SETUP_PATH,
@@ -240,12 +233,12 @@ export function createWizardFlow(ctx: ManagementContext) {
 
   const handleOpenFeishuGuideFromAuthSelect = () => {
     saveFeishuDataSourceWizardDraft(buildAuthSelectWizardDraft("feishu"));
-    navigate(`${CLOUD_DOCUMENTS_FEISHU_SETUP_PATH}?from=create-source`);
+    navigate(CLOUD_DOCUMENTS_FEISHU_SETUP_PATH);
   };
 
   const handleOpenNotionGuideFromAuthSelect = () => {
     saveFeishuDataSourceWizardDraft(buildAuthSelectWizardDraft("notion"));
-    navigate(`${CLOUD_DOCUMENTS_NOTION_SETUP_PATH}?from=create-source`);
+    navigate(CLOUD_DOCUMENTS_NOTION_SETUP_PATH);
   };
 
   const handleSubmitManualOauthCallback = async () => {
@@ -284,121 +277,6 @@ export function createWizardFlow(ctx: ManagementContext) {
       }
     } finally {
       setManualOauthSubmitting(false);
-    }
-  };
-
-  const openDetailPage = (record: DataSourceItem) => {
-    if (record.type === "database") {
-      navigate("/databases");
-      return;
-    }
-
-    const detailDocuments: DetailDocumentItem[] =
-      record.detailDocuments ||
-      record.fileCandidates.map((item) => ({
-        id: item.id,
-        name: item.name,
-        path: item.path,
-        size: item.size,
-        tags: [],
-        updateState: item.updateState,
-        syncDetail: mapScanSyncDetail(item.updateState, t),
-        parseStatus: item.updateState === "deleted" ? "deleted" : "parsed",
-        sourceUpdatedAt: record.lastSync,
-        updatedAt: record.lastSync,
-      }));
-
-    navigate(`/data-sources/${record.id}`, {
-      state: {
-        source: {
-          id: record.id,
-          name: record.name,
-          target: record.target,
-          rootPath: record.rootPath,
-          targetRef: record.targetRef,
-          targetRefs: record.targetRefs,
-          targetType: record.targetType,
-          targetTypes: record.targetTypes,
-          sourceType: record.type,
-          documentCount: record.documentCount,
-          parsedDocumentCount: record.parsedDocumentCount,
-          status: record.status,
-          lastSync: record.lastSync,
-          addCount: record.addCount,
-          deleteCount: record.deleteCount,
-          changeCount: record.changeCount,
-          storageUsed: record.storageUsed || "0 B",
-          documents: detailDocuments,
-          scanManaged: record.scanManaged,
-          tenantId: record.tenantId,
-          agentId: record.agentId,
-          bindingId: record.bindingId,
-          bindingIds: record.bindingIds,
-          bindingTreeKey: record.bindingTreeKey,
-          bindingTreeKeys: record.bindingTreeKeys,
-          configVersion: record.configVersion,
-        },
-      },
-    });
-  };
-
-  const getDatabaseConnectionId = (record: DataSourceItem) =>
-    record.databaseConnectionId || record.id.replace(/^database:/, "");
-
-  const openDatabaseConnectionConfig = (record: DataSourceItem) => {
-    if (!record.databaseConnection) {
-      message.error(t("admin.dataSourceDatabaseConfigMissing"));
-      return;
-    }
-    ctx.setDatabaseEditingConnection(record.databaseConnection);
-  };
-
-  const closeDatabaseConnectionConfig = () => {
-    if (ctx.databaseEditSaving) {
-      return;
-    }
-    ctx.setDatabaseEditingConnection(null);
-  };
-
-  const handleSaveDatabaseConnectionConfig = async (
-    payload: Parameters<typeof updateDatabaseConnection>[1],
-  ) => {
-    if (!ctx.databaseEditingConnection || ctx.databaseEditSaving) {
-      return;
-    }
-    ctx.setDatabaseEditSaving(true);
-    try {
-      await updateDatabaseConnection(ctx.databaseEditingConnection.id, payload);
-      message.success(t("admin.dataSourceDatabaseUpdated"));
-      ctx.setDatabaseEditingConnection(null);
-      await ctx.refreshSources(false, { page: ctx.sourceListPage });
-    } catch {
-    } finally {
-      ctx.setDatabaseEditSaving(false);
-    }
-  };
-
-  const executeDeleteDatabaseConnection = async (record: DataSourceItem) => {
-    try {
-      await deleteDatabaseConnection(getDatabaseConnectionId(record));
-      message.success(t("admin.dataSourceDatabaseDeleted"));
-      await ctx.refreshSources(false, { page: ctx.sourceListPage });
-    } catch (error) {
-      throw error;
-    }
-  };
-
-  const executeDeleteSource = async (record: DataSourceItem) => {
-    try {
-      await dataSourceScanApi.deleteSource({ sourceId: record.id });
-      message.success(t("admin.dataSourceDeleteSuccess"));
-      const nextPage =
-        ctx.sources.length <= 1 && ctx.sourceListPage > 1
-          ? ctx.sourceListPage - 1
-          : ctx.sourceListPage;
-      await Promise.all([ctx.refreshSources(false, { page: nextPage })]);
-    } catch (error) {
-      throw error;
     }
   };
 
@@ -472,12 +350,6 @@ export function createWizardFlow(ctx: ManagementContext) {
     handleOpenFeishuGuideFromAuthSelect,
     handleOpenNotionGuideFromAuthSelect,
     handleSubmitManualOauthCallback,
-    openDetailPage,
-    openDatabaseConnectionConfig,
-    closeDatabaseConnectionConfig,
-    handleSaveDatabaseConnectionConfig,
-    executeDeleteSource,
-    executeDeleteDatabaseConnection,
     handleNextStep,
   };
 }

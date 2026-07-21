@@ -159,6 +159,8 @@ export type SelfEvolutionPageView = "home" | "detail";
 
 export type SelfEvolutionRouteState = {
   openWorkbench?: boolean;
+  activeWorkbenchTab?: "messages" | "processes" | "artifacts" | null;
+  selectedViewStage?: ThreadEventStage;
 };
 
 export type KnowledgeBaseOption = {

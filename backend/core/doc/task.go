@@ -476,6 +476,12 @@ func UploadTempFile(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "save upload file failed", http.StatusInternalServerError)
 			return
 		}
+		size, normalizeErr := normalizeUploadedTextFileInPlace(finalPath, fh.Filename, size)
+		if normalizeErr != nil {
+			_ = os.Remove(finalPath)
+			common.ReplyErr(w, fmt.Sprintf("%s: %v", "normalize upload text encoding failed", normalizeErr), http.StatusBadRequest)
+			return
+		}
 		contentType := fh.Header.Get("Content-Type")
 		row := orm.UploadedFile{UploadFileID: uploadFileID, DatasetID: "", TenantID: "", TaskID: "", DocumentID: "", Status: UploadedFileStateUploaded, Ext: mustJSON(uploadedFileExt{StoredPath: finalPath, StoredName: storedName, OriginalFilename: fh.Filename, FileSize: size, ContentType: contentType}), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
 		if err := store.DB().WithContext(r.Context()).Create(&row).Error; err != nil {
@@ -1227,6 +1233,10 @@ func completeUploadInternal(ctx context.Context, session orm.UploadSession, args
 
 	switch meta.UploadScope {
 	case uploadScopeTemp:
+		totalSize, err = normalizeUploadedTextFileInPlace(mergedPath, meta.OriginalFilename, totalSize)
+		if err != nil {
+			return CompleteUploadResponse{}, http.StatusBadRequest, fmt.Errorf("normalize upload text encoding failed: %w", err)
+		}
 		finalDir := buildTempUploadFileDir(firstNonEmpty(meta.CreateUserID, session.CreateUserID), session.UploadID)
 		if err := os.MkdirAll(finalDir, 0o755); err != nil {
 			return CompleteUploadResponse{}, http.StatusInternalServerError, fmt.Errorf("create final dir failed")

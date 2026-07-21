@@ -24,6 +24,61 @@
   padding-bottom: 8px;
 }
 
+.memory-skill-market-toolbar-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+
+  .memory-skill-market-search {
+    width: clamp(200px, 17vw, 260px);
+  }
+
+}
+
+.memory-skill-market-category-popover,
+.memory-skill-market-search-popover {
+  position: relative;
+  flex: 0 0 32px;
+}
+
+.memory-skill-market-category-popover {
+  > .ant-btn.is-active {
+    border-color: #1677ff;
+    color: #1677ff;
+    background: #e6f4ff;
+  }
+
+  .memory-skill-category-bar.is-popover {
+    position: absolute;
+    top: 40px;
+    right: 0;
+    z-index: 20;
+    width: max-content;
+    max-width: 420px;
+    padding: 8px;
+    border: 1px solid #e5eaf2;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 8px 24px rgba(31, 35, 41, 0.12);
+  }
+}
+
+.memory-skill-market-search-popover {
+  .memory-skill-market-search {
+    position: absolute;
+    top: 40px;
+    right: 0;
+    z-index: 20;
+    padding: 8px;
+    border: 1px solid #e5eaf2;
+    border-radius: 8px;
+    background: #fff;
+    box-sizing: content-box;
+    box-shadow: 0 8px 24px rgba(31, 35, 41, 0.12);
+  }
+}
+
 .memory-skill-create-split {
   display: inline-flex;
   align-items: stretch;
@@ -234,6 +289,20 @@
   }
 }
 
+.memory-skill-insight-card-tooltip {
+  display: inline-flex;
+
+  .memory-skill-insight-card:disabled {
+    pointer-events: none;
+  }
+
+  &:focus-visible {
+    border-radius: 6px;
+    outline: 2px solid #1677ff;
+    outline-offset: 2px;
+  }
+}
+
 .memory-skill-view-tabs {
   display: inline-flex;
   align-items: flex-end;
@@ -273,39 +342,6 @@
       height: 2px;
       background: #1677ff;
     }
-  }
-}
-
-.memory-skill-view-market-desc {
-  display: flex;
-  flex-shrink: 0;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #f8fafc;
-
-  &__icon {
-    flex: 0 0 auto;
-    width: 24px;
-    height: 24px;
-    margin-top: 1px;
-    border-radius: 999px;
-    background: #eef4ff;
-    color: #2f6bff;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-  }
-
-  &__text {
-    margin: 0;
-    flex: 1;
-    min-width: 0;
-    font-size: 13px;
-    line-height: 1.6;
-    color: #667085;
   }
 }
 
@@ -666,6 +702,7 @@
 
 .memory-skill-tile-desc {
   margin: 0;
+  min-height: calc(2em * 1.55);
   color: #667085;
   font-size: 13px;
   line-height: 1.55;
@@ -888,6 +925,16 @@
     padding-bottom: 0;
   }
 
+  .memory-skill-market-toolbar-filters {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+
+    .memory-skill-market-search {
+      flex: 1 1 240px;
+      width: auto;
+    }
+  }
+
   .memory-skill-view-tabs {
     flex-wrap: wrap;
     gap: 20px;
@@ -925,6 +972,10 @@
 
   .memory-skill-insight-card {
     max-width: none;
+    width: 100%;
+  }
+
+  .memory-skill-insight-card-tooltip {
     width: 100%;
   }
 

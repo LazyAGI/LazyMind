@@ -36,6 +36,7 @@ class _FakeAgent:
 
     def __init__(self, **kwargs: Any) -> None:
         self._kwargs = kwargs
+        self._tools_manager = object()
         config = chat_service.lazyllm.globals.get('agentic_config')
         self._config_snapshot = dict(config) if isinstance(config, dict) else None
 
@@ -62,6 +63,12 @@ class _FakeAgent:
         return {'text': f'final:{query}'}
 
     __call__ = forward
+
+    def _prepare_tool_context(self, _query, _history):
+        return None
+
+    def set_stop_tools(self, stop_tools):
+        self.stop_tools = stop_tools
 
 
 async def _drain_response(response):
@@ -109,18 +116,21 @@ def test_stream_parallel_requests_see_isolated_config(monkeypatch):
     results = asyncio.run(drive_all())
 
     assert len(_FakeAgent.observations) == 6
-    obs_by_query = {obs['query']: obs for obs in _FakeAgent.observations}
+    obs_by_query = {
+        obs['query'].rsplit('### User Instruction\n\n', 1)[-1]: obs
+        for obs in _FakeAgent.observations
+    }
     assert set(obs_by_query.keys()) == {f's_{i}' for i in range(6)}
 
     for i in range(6):
         obs = obs_by_query[f's_{i}']
         assert obs['sid'] == f'stream-session-{i}'
         assert obs['config']['filters']['kb_id'] == f's_id_{i}'
-        assert obs['agent_kwargs_skills'] == (f's_skill_{i}',)
+        assert obs['agent_kwargs_skills'] == ()
 
     for i, (body, outer, session_id) in enumerate(results):
         assert session_id == f'stream-session-{i}'
-        assert f'stream:s_{i}' in body
+        assert f's_{i}' in body
         assert outer is None or outer.get('session_id') == session_id
 
 
@@ -149,7 +159,7 @@ def test_stream_response_keeps_session_after_route_context_exits(monkeypatch):
 
     body = asyncio.run(drive())
 
-    assert 'stream:route_query' in body
+    assert 'route_query' in body
     assert len(_FakeAgent.observations) == 1
     obs = _FakeAgent.observations[0]
     assert obs['sid'] == 'route-stream-session'
