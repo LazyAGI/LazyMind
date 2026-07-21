@@ -145,6 +145,8 @@ jobs:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      LAZYLLM_INIT_DOC: "1"
     permissions:
       contents: read
     steps:
