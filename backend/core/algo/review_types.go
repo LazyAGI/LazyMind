@@ -43,13 +43,13 @@ type SkillOrganizeData struct {
 }
 
 type MemoryReviewRequest struct {
+	TaskID    string         `json:"task_id"`
 	UserID    string         `json:"user_id"`
 	History   any            `json:"history"`
-	Memory    string         `json:"memory"`
-	User      string         `json:"user"`
 	LLMConfig map[string]any `json:"llm_config"`
 }
 
 type MemoryReviewResponse struct {
 	Status string `json:"status"`
+	TaskID string `json:"task_id"`
 }

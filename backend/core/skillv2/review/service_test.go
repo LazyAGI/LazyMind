@@ -208,7 +208,7 @@ func TestCommit_RejectHunkCreatesFormalRevisionAndClearsDraft(t *testing.T) {
 	if err := db.Where("hash = ?", *entry.BlobHash).Take(&blob).Error; err != nil {
 		t.Fatalf("query committed blob: %v", err)
 	}
-	if string(blob.Content) != "# 论文精读\n" {
+	if string(blob.Content) != testutil.SkillMD("论文精读", "用于阅读和总结论文的技能") {
 		t.Fatalf("committed content = %q, want base content", string(blob.Content))
 	}
 	if got := testutil.CountRows(t, db, "skill_draft_review_action_items", "review_session_id = ?", file.ReviewID); got != 0 {
@@ -219,6 +219,45 @@ func TestCommit_RejectHunkCreatesFormalRevisionAndClearsDraft(t *testing.T) {
 	}
 	if got := testutil.CountRows(t, db, "skill_draft_review_sessions", "id = ?", file.ReviewID); got != 0 {
 		t.Fatalf("review sessions = %d, want 0", got)
+	}
+}
+
+func TestCommit_AcceptedFrontmatterSynchronizesPublishedMetadata(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	testutil.SeedTextBlob(t, db, "h_renamed_skill", testutil.SkillMD("论文精读 Pro", "专业论文阅读技能"))
+	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_renamed_skill")
+	svc := newTestService(t, db)
+	file := prepareSkillFile(t, svc, db)
+	hunkIDs := collectHunkIDs(file.DiffEntryLines)
+	items := make([]ActionItem, 0, len(hunkIDs))
+	for _, hunkID := range hunkIDs {
+		items = append(items, ActionItem{Path: "SKILL.md", HunkID: hunkID, Decision: decisionAccepted})
+	}
+	action, err := svc.Action(context.Background(), ActionRequest{
+		SkillID:               "skill1",
+		UserID:                "user_001",
+		ReviewID:              file.ReviewID,
+		ExpectedReviewVersion: file.ReviewVersion,
+		Items:                 items,
+	})
+	if err != nil {
+		t.Fatalf("Action returned error: %v", err)
+	}
+	if _, err := svc.Commit(context.Background(), CommitRequest{
+		SkillID:               "skill1",
+		UserID:                "user_001",
+		ReviewID:              file.ReviewID,
+		ExpectedReviewVersion: action.ReviewVersion,
+	}); err != nil {
+		t.Fatalf("Commit returned error: %v", err)
+	}
+	var skill testutil.SkillRow
+	if err := db.Where("id = ?", "skill1").Take(&skill).Error; err != nil {
+		t.Fatalf("query published skill: %v", err)
+	}
+	if skill.SkillName != "论文精读 Pro" || skill.Description != "专业论文阅读技能" || skill.RelativeRoot != "research/论文精读 Pro" {
+		t.Fatalf("published metadata not synchronized: %#v", skill)
 	}
 }
 
@@ -233,15 +272,16 @@ func newTestService(t *testing.T, db *testutil.TestDB) *Service {
 func seedDraftReviewFixture(t *testing.T, db *testutil.TestDB) {
 	t.Helper()
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
-	testutil.SeedTextBlob(t, db, "h_skill_draft", "# 专业写作助手\n\n帮用户改写文章。\n")
+	testutil.SeedTextBlob(t, db, "h_skill_draft", testutil.SkillMD("论文精读", "用于阅读和总结论文的技能")+"\n帮用户改写文章。\n")
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_skill_draft")
 }
 
 func seedTwoHunkDraftReviewFixture(t *testing.T, db *testutil.TestDB) {
 	t.Helper()
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
-	base := "title\nold one\nkeep\nold two\nend\n"
-	draft := "title\nnew one\nkeep\nnew two\nend\n"
+	frontmatter := "---\nname: 论文精读\ndescription: 用于阅读和总结论文的技能\n---\n"
+	base := frontmatter + "title\nold one\nkeep\nold two\nend\n"
+	draft := frontmatter + "title\nnew one\nkeep\nnew two\nend\n"
 	testutil.SeedTextBlob(t, db, "h_skill_base_two_hunks", base)
 	testutil.SeedTextBlob(t, db, "h_skill_draft_two_hunks", draft)
 	if err := db.Model(&testutil.SkillRevisionEntryRow{}).

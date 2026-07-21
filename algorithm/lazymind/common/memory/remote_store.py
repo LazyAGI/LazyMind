@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from lazymind.chat.integrations.remote_fs import RemoteFS
+from lazymind.common.integrations.remote_fs import RemoteFS
 from lazymind.review.memory_review.paths import (
     LEGACY_MEMORY_PATH,
     LEGACY_USER_PREFERENCE_PATH,

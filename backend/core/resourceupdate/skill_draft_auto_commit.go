@@ -74,11 +74,6 @@ func (w *Worker) handleAutoCommitSkillDraft(ctx context.Context, task orm.Resour
 			return err
 		}
 		revisionID = resp.RevisionID
-		if strings.HasPrefix(request.TaskID, "review_") {
-			if err := acceptSkillReviewResultsForDraftTask(ctx, tx, task.UserID, request.TaskID); err != nil {
-				return err
-			}
-		}
 		return nil
 	})
 	if errors.Is(err, errSkillDraftAutoCommitStale) || errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, errReviewConflict) {
@@ -88,27 +83,6 @@ func (w *Worker) handleAutoCommitSkillDraft(ctx context.Context, task orm.Resour
 		return retryableOutcome("skill_draft_auto_commit_failed", err)
 	}
 	return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone, ResultID: revisionID}
-}
-
-func acceptSkillReviewResultsForDraftTask(ctx context.Context, tx *gorm.DB, userID, taskID string) error {
-	requestID := strings.TrimSpace(taskID)
-	var stats struct {
-		RequestID string `gorm:"column:requestid"`
-	}
-	err := tx.WithContext(ctx).Table("skill_review_stats").
-		Select("requestid").
-		Where("userid = ? AND (id = ? OR requestid = ?)", strings.TrimSpace(userID), requestID, requestID).
-		Order("started_at DESC, id DESC").
-		Take(&stats).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-	if strings.TrimSpace(stats.RequestID) != "" {
-		requestID = strings.TrimSpace(stats.RequestID)
-	}
-	return tx.WithContext(ctx).Table("skill_review_results").
-		Where("userid = ? AND requestid = ? AND review_status = ?", strings.TrimSpace(userID), requestID, reviewStatusPending).
-		Update("review_status", reviewStatusAccepted).Error
 }
 
 func newSkillV2RevisionService(db *gorm.DB) *skillrevision.Service {

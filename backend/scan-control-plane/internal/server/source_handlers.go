@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/lazymind/scan_control_plane/internal/access"
 	sourceengine "github.com/lazymind/scan_control_plane/internal/sourceengine/source"
@@ -32,6 +33,7 @@ func (h *Handler) createSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.CallerID = actor.UserID
+	req.CallerName = actor.UserName
 	req.TenantID = actor.TenantID
 	if err := h.checkBindingTargetInputs(r, actor, "", req.Bindings); err != nil {
 		writeError(w, err)
@@ -163,6 +165,103 @@ func (h *Handler) batchGetSourcesByDatasetIDs(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, map[string]any{"source_map": result})
 }
 
+
+type sourceAccessByDatasetBatchRequest struct {
+	DatasetIDs []string `json:"dataset_ids"`
+	Action     string   `json:"action"`
+}
+
+type sourceAccessByDatasetBatchResponse struct {
+	Items []sourceAccessByDatasetItem `json:"items"`
+}
+
+type sourceAccessByDatasetItem struct {
+	DatasetID string `json:"dataset_id"`
+	SourceID  string `json:"source_id,omitempty"`
+	Exists    bool   `json:"exists"`
+	Allowed   bool   `json:"allowed"`
+}
+
+func (h *Handler) batchSourceAccessByDataset(w http.ResponseWriter, r *http.Request) {
+	if h.sources == nil {
+		writeError(w, missingDependency("source engine"))
+		return
+	}
+	actor, err := actorFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var req sourceAccessByDatasetBatchRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, invalidJSON(err))
+		return
+	}
+	action, err := sourceAccessAction(req.Action)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	items := make([]sourceAccessByDatasetItem, 0, len(req.DatasetIDs))
+	for _, datasetID := range uniqueSourceAccessDatasetIDs(req.DatasetIDs) {
+		item := sourceAccessByDatasetItem{DatasetID: datasetID, Allowed: true}
+		sourceResp, err := h.sources.GetSourceByDatasetID(r.Context(), datasetID)
+		if err != nil {
+			if sourceengine.ErrorCodeOf(err) == sourceengine.ErrCodeSourceNotFound {
+				items = append(items, item)
+				continue
+			}
+			writeError(w, err)
+			return
+		}
+		item.Exists = true
+		item.SourceID = sourceResp.Source.SourceID
+		item.Allowed = h.sourceAccessAllowed(r, actor, sourceResp.Source.SourceID, action)
+		items = append(items, item)
+	}
+	writeJSON(w, http.StatusOK, sourceAccessByDatasetBatchResponse{Items: items})
+}
+
+func (h *Handler) sourceAccessAllowed(r *http.Request, actor access.Actor, sourceID string, action access.SourceAction) bool {
+	switch action {
+	case access.SourceActionWrite:
+		return h.access.CanWriteSource(r.Context(), actor, sourceID) == nil
+	case access.SourceActionDelete:
+		return h.access.CanDeleteSource(r.Context(), actor, sourceID) == nil
+	default:
+		return h.access.CanReadSource(r.Context(), actor, sourceID) == nil
+	}
+}
+
+func sourceAccessAction(action string) (access.SourceAction, error) {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "", string(access.SourceActionRead):
+		return access.SourceActionRead, nil
+	case string(access.SourceActionWrite), "upload":
+		return access.SourceActionWrite, nil
+	case string(access.SourceActionDelete):
+		return access.SourceActionDelete, nil
+	default:
+		return "", sourceengine.FieldError("action", "must be read, write, upload, or delete")
+	}
+}
+
+func uniqueSourceAccessDatasetIDs(datasetIDs []string) []string {
+	out := make([]string, 0, len(datasetIDs))
+	seen := make(map[string]struct{}, len(datasetIDs))
+	for _, datasetID := range datasetIDs {
+		datasetID = strings.TrimSpace(datasetID)
+		if datasetID == "" {
+			continue
+		}
+		if _, ok := seen[datasetID]; ok {
+			continue
+		}
+		seen[datasetID] = struct{}{}
+		out = append(out, datasetID)
+	}
+	return out
+}
 
 func (h *Handler) triggerSourceSync(w http.ResponseWriter, r *http.Request) {
 	if h.sources == nil {

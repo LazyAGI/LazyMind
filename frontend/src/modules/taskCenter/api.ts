@@ -50,10 +50,12 @@ export interface TaskListResponse {
   page_size: number;
   status_counts?: {
     all: number;
+    pending: number;
     waiting: number;
     running: number;
     succeeded: number;
     failed: number;
+    canceled: number;
   };
 }
 

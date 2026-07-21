@@ -55,13 +55,7 @@ func (s *Scanner) RunOnce(ctx context.Context) (ScannerRunResult, error) {
 	}
 	now := s.clock().UTC()
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		expired, created, err := scanSkillReviewResults(ctx, tx, now)
-		if err != nil {
-			return err
-		}
-		result.SkillResultsExpired = expired
-		result.SkillTasksCreated = created
-		created, err = scanAutoEvoSkillDrafts(ctx, tx, now)
+		created, err := scanAutoEvoSkillDrafts(ctx, tx, now)
 		if err != nil {
 			return err
 		}
@@ -109,7 +103,7 @@ func ScanPendingResultsForResource(ctx context.Context, db *gorm.DB, resourceTyp
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		switch resourceType {
 		case orm.ResourceUpdateResourceTypeSkill:
-			return scanSkillReviewResultsForResource(ctx, tx, userID, resourceID, now)
+			return nil
 		case orm.ResourceUpdateResourceTypeMemory:
 			return scanMemoryReviewResultsForResource(ctx, tx, orm.ResourceUpdateResourceTypeMemory, userID, resourceID, now)
 		case orm.ResourceUpdateResourceTypeUserPreference:

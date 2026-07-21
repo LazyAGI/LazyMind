@@ -103,9 +103,15 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   gap: 11px;
   border-right: 1px solid $border-light;
 
-  > div { display: flex; align-items: baseline; gap: 12px; }
+  > div { display: flex; align-items: baseline; gap: 8px; }
   span:not(.metric-icon) { color: $muted; font-size: 13px; }
-  strong { font-size: 24px; line-height: 1; font-weight: 670; }
+  strong {
+    color: #344054;
+    font-size: 19px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
 }
 
 .metric-icon {
@@ -417,6 +423,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 .status-running > .anticon, .status-all > .anticon { color: $blue; }
 .status-succeeded > .anticon { color: $green; }
 .status-failed > .anticon { color: $red; }
+.status-pending > .anticon, .status-canceled > .anticon { color: #8c95a3; }
 
 .task-table .ant-table {
   overflow: hidden;

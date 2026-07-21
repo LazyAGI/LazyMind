@@ -95,6 +95,7 @@ type ChatRetrievalOptions struct {
 type ChatRuntimeOptions struct {
 	Debug                         bool           `json:"debug,omitempty"`
 	Reasoning                     bool           `json:"reasoning"`
+	ThinkingDepth                 string         `json:"thinking_depth,omitempty"`
 	Priority                      *int           `json:"priority,omitempty"`
 	Trace                         bool           `json:"trace,omitempty"`
 	EnvironmentContext            map[string]any `json:"environment_context,omitempty"`
@@ -402,6 +403,12 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	req.Retrieval.Filters = datasetFiltersFromAny(body["filters"])
 	if reasoning, ok := body["reasoning"].(bool); ok {
 		req.Runtime.Reasoning = reasoning
+	}
+	if depth, ok := body["thinking_depth"].(string); ok {
+		depth = strings.ToLower(strings.TrimSpace(depth))
+		if depth == "low" || depth == "medium" || depth == "high" {
+			req.Runtime.ThinkingDepth = depth
+		}
 	}
 	if databases, ok := body["databases"].([]any); ok {
 		req.Retrieval.Databases = databases

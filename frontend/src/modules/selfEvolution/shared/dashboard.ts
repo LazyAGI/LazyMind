@@ -70,9 +70,12 @@ export function buildEvoProcessDashboard(
   const activities = visibleActivityEvents.map(buildEventActivity);
   const caseProgressGroups = buildCaseProgressGroups(sortedEvents);
   const latestStage = cutoverCompleted ? "abtest" : checkpoint?.completedStage || getLastItem(visibleActivityEvents.filter((event) => event.stage))?.stage;
+  const latestActiveOverview = getLastItem(
+    overview.filter((item) => ["running", "failed", "canceled"].includes(item.step.status)),
+  );
   const activeOverview =
+    latestActiveOverview ||
     (latestStage ? overview.find((item) => item.stage === latestStage) : undefined) ||
-    overview.find((item) => ["running", "failed", "canceled"].includes(item.step.status)) ||
     overview.find((item) => item.step.status === "pending") ||
     getLastItem(overview);
   const recentActivities = activities.slice().reverse();

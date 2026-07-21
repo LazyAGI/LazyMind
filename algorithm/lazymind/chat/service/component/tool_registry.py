@@ -31,11 +31,6 @@ from lazymind.chat.engine.tools import (
     image_editor,
     image_generator,
     kb_tmp_search,
-    preference_editor,
-    profile_editor,
-    read_memory,
-    read_memory_reference,
-    soul_editor,
     SkillManagementToolkit,
     list_data_sources,
     build_schedule_toolkit,
@@ -45,6 +40,7 @@ from lazymind.chat.engine.tools import (
     vision_extractor,
     vocab_learn,
 )
+from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.model_config import is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
 from lazymind.chat.engine.subagent.tools import find_user_attachment, read_user_attachment
@@ -173,14 +169,19 @@ WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'terms into one `query` with spaces, commas, punctuation, or list-like text.',
     ),
 }
-MEMORY_READER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+MEMORY_TOOLS_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Conversation history versus persistent memory\n'
         'Conversation history is already included in the model messages and is the authoritative '
         'source for earlier turns in the current chat. Resolve short follow-ups and omitted subjects '
-        'from that history. Do not call `read_memory` to inspect, summarize, or recover the current '
-        'conversation. `read_memory` only reads optional cross-conversation notes or user-profile '
-        'content; an empty result never implies that chat history is missing.'
+        'from that history. Do not call `MemoryTools_read_memory` to inspect, summarize, or recover '
+        'the current conversation. `MemoryTools_read_memory` only reads optional cross-conversation '
+        'notes or user-profile content; an empty result never implies that chat history is missing.',
+        'Call `MemoryTools_episode_create` only when the user explicitly asks to record, remember, '
+        'or save a historical event. Do not call it merely because information seems useful. '
+        'use_memory=false does not disable explicit Episode creation. There is no general memory '
+        'or user-profile write API. Never claim that information was saved unless '
+        'MemoryTools_episode_create succeeded in the current turn.',
     ),
 }
 CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -510,7 +511,9 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(
         name='video_generator',
         label='文生视频',
+        label_en='Video Generator',
         description='根据文字描述生成视频，可选首帧参考图；同轮多次调用并行，视频侧最多同时3路',
+        description_en='Generate videos from text descriptions, with optional first-frame reference images.',
         tool=video_generator, module='content',
         model_role='video_generator',
         capability_id='video_generation',
@@ -521,7 +524,9 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(
         name='video_to_gif',
         label='视频转GIF',
+        label_en='GIF Converter',
         description='将本地视频转换为 GIF 动图；同轮多次调用并行，GIF 侧最多同时3路',
+        description_en='Convert local videos to GIF animations.',
         tool=video_to_gif, module='content',
         capability_id='video_to_gif',
         input_schema={'url': 'string'}, output_schema={'image': 'file'},
@@ -536,45 +541,13 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         description_en='Learn user-specific vocabulary mappings and synonyms.',
     ),
     ToolConfig(
-        name='read_memory',
-        label='记忆读取',
-        description='读取当前的用户记忆或偏好内容',
-        tool=read_memory, module='personalization',
-        label_en='Memory Reading',
-        description_en='Read the current user memory and preferences.',
-        appendix_system_prompt=MEMORY_READER_TOOL_POLICY_APPENDIX,
-    ),
-    ToolConfig(
-        name='read_memory_reference',
-        label='记忆主题读取',
-        description='按需读取用户偏好索引引用的主题文件',
-        tool=read_memory_reference, module='personalization',
-        label_en='Memory Reference Reading',
-        description_en='Read detailed preference reference files on demand.',
-    ),
-    ToolConfig(
-        name='soul_editor',
-        label='Soul 编辑',
-        description='更新 Agent Soul 预置字段',
-        tool=soul_editor, module='personalization',
-        label_en='Soul Editing',
-        description_en='Update preset fields in the agent soul document.',
-    ),
-    ToolConfig(
-        name='profile_editor',
-        label='画像编辑',
-        description='更新用户 profile 预置字段',
-        tool=profile_editor, module='personalization',
-        label_en='Profile Editing',
-        description_en='Update preset fields in the user profile document.',
-    ),
-    ToolConfig(
-        name='preference_editor',
-        label='偏好编辑',
-        description='新增或删除 preference 索引条目',
-        tool=preference_editor, module='personalization',
-        label_en='Preference Editing',
-        description_en='Add or delete preference index entries.',
+        name='memory',
+        label='记忆',
+        description='读取跨会话记忆，并记录不可变的历史事件',
+        tool=MemoryTools(), module='personalization',
+        label_en='Memory',
+        description_en='Read cross-conversation memory and record immutable historical events.',
+        appendix_system_prompt=MEMORY_TOOLS_POLICY_APPENDIX,
     ),
     ToolConfig(
         name='skill_editor',

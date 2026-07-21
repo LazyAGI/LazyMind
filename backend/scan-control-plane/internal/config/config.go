@@ -64,7 +64,7 @@ func defaultConfig() Config {
 		LocalFSDefaultAgentID:             "file-watcher-local-001",
 		TempDir:                           filepath.Join(os.TempDir(), "scan-control-plane", "sourceengine"),
 		TempTTL:                           24 * time.Hour,
-		TargetSearchCachePrewarmInterval:  10 * time.Minute,
+		TargetSearchCachePrewarmInterval:  24 * time.Hour,
 		TargetSearchCachePrewarmStagger:   10 * time.Second,
 		WorkerLeaseTTL:                    60 * time.Second,
 		WorkerMaxBackoff:                  10 * time.Minute,

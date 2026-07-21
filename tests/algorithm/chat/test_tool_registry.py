@@ -119,6 +119,33 @@ def test_catalog_exposes_modules_without_registering_module_gateways():
     assert not any('utility' in name for name in names)
 
 
+def test_memory_tools_are_registered_as_one_eager_group():
+    from lazyllm.tools.agent.toolsManager import ToolManager
+
+    configs = [
+        cfg for cfg in DEFAULT_TOOLS
+        if cfg.name in {'memory', 'read_memory', 'episode_create'}
+    ]
+
+    assert [cfg.name for cfg in configs] == ['memory']
+    config = configs[0]
+    assert [method['name'] for method in _tool_group('memory')['methods']] == [
+        'read_memory',
+        'episode_create',
+    ]
+    manager = ToolManager([config.tool])
+    assert {item['function']['name'] for item in manager.tools_description} == {
+        'MemoryTools_read_memory',
+        'MemoryTools_episode_create',
+    }
+    assert not hasattr(config.tool, 'memory_editor')
+    memory_policy = '\n'.join(config.appendix_system_prompt['tool_policy'])
+    assert 'There is no general memory or user-profile write API' in memory_policy
+    assert 'Never claim that information was saved unless MemoryTools_episode_create succeeded' in (
+        memory_policy
+    )
+
+
 def test_shared_prompt_appendix_is_reused_and_deduplicated():
     configs = [
         cfg for cfg in DEFAULT_TOOLS

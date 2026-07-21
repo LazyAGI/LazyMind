@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, AsyncIterator, Tuple
 
 import lazyllm
@@ -8,6 +9,118 @@ import lazyllm.tools.agent as _agent_mod
 from lazymind.config import config as _cfg
 
 from .models import AgentRunPlan
+
+
+class ToolCallGuard:
+    """Stop selected tools from looping after failures without limiting successful work."""
+
+    def __init__(self, manager: Any, failure_limits: dict[str, int] | None = None):
+        self._manager = manager
+        self._failure_limits = dict(failure_limits or {})
+        self._failed_signatures: set[str] = set()
+        self._consecutive_failures: dict[str, int] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._manager, name)
+
+    @staticmethod
+    def _signature(tool_call: dict[str, Any]) -> str:
+        function = tool_call.get('function') or {}
+        arguments = function.get('arguments', {})
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except Exception:
+                arguments = arguments.strip()
+        try:
+            normalized = json.dumps(
+                arguments, ensure_ascii=False, sort_keys=True, separators=(',', ':'),
+            )
+        except (TypeError, ValueError):
+            normalized = str(arguments)
+        return f"{function.get('name', '')}:{normalized}"
+
+    @staticmethod
+    def _failed(result: Any) -> bool:
+        if not isinstance(result, dict):
+            return False
+        if result.get('ok') is False:
+            return True
+        value = result.get('value')
+        if isinstance(value, dict):
+            if value.get('success') is False:
+                return True
+            payload = value.get('result')
+            if isinstance(payload, dict):
+                total = payload.get('total')
+                succeeded = payload.get('succeeded')
+                if isinstance(total, int) and total > 0 and succeeded == 0:
+                    return True
+        return False
+
+    @staticmethod
+    def _blocked(name: str, message: str) -> dict[str, Any]:
+        return {
+            'ok': False,
+            'value': None,
+            'msg': f'[Repeated Tool Failure] {name}: {message}',
+        }
+
+    def __call__(self, tools: Any, verbose: bool = False) -> Any:
+        tool_calls = [tools] if isinstance(tools, dict) else list(tools or [])
+        results: list[Any] = [None] * len(tool_calls)
+        pending: list[dict[str, Any]] = []
+        pending_indices: list[int] = []
+        pending_signatures: dict[str, int] = {}
+        duplicate_indices: dict[int, int] = {}
+        for index, tool_call in enumerate(tool_calls):
+            function = tool_call.get('function') or {}
+            name = str(function.get('name') or '')
+            signature = self._signature(tool_call)
+            guarded = name in self._failure_limits
+            if guarded and signature in self._failed_signatures:
+                results[index] = self._blocked(
+                    name, 'this exact call already failed; do not retry it with the same arguments.',
+                )
+                lazyllm.LOG.info(f'[ToolCallGuard] blocked repeated failed call: {name}')
+                continue
+            if guarded and signature in pending_signatures:
+                duplicate_indices[index] = pending_signatures[signature]
+                lazyllm.LOG.info(f'[ToolCallGuard] merged duplicate tool call: {name}')
+                continue
+            failures = self._consecutive_failures.get(name, 0)
+            limit = self._failure_limits.get(name)
+            if limit is not None and failures >= limit:
+                results[index] = self._blocked(
+                    name,
+                    f'{failures} consecutive attempts failed. Stop changing parameters and use '
+                    'another grounded source or explain that the evidence is unavailable.',
+                )
+                continue
+            pending.append(tool_call)
+            pending_indices.append(index)
+            if guarded:
+                pending_signatures[signature] = index
+        if pending:
+            pending_results = self._manager(pending, verbose=verbose)
+            for index, tool_call, result in zip(pending_indices, pending, pending_results):
+                results[index] = result
+                name = str((tool_call.get('function') or {}).get('name') or '')
+                if name in self._failure_limits:
+                    if self._failed(result):
+                        self._consecutive_failures[name] = (
+                            self._consecutive_failures.get(name, 0) + 1
+                        )
+                        self._failed_signatures.add(self._signature(tool_call))
+                    else:
+                        self._consecutive_failures[name] = 0
+                        prefix = f'{name}:'
+                        self._failed_signatures = {
+                            item for item in self._failed_signatures if not item.startswith(prefix)
+                        }
+        for duplicate_index, original_index in duplicate_indices.items():
+            results[duplicate_index] = results[original_index]
+        return results
 
 
 def _tool_name(tool: Any) -> str:
@@ -37,7 +150,7 @@ class AgentExecutor:
         options = plan.execution_options
         kwargs = {
             'stream': True,
-            'max_retries': _cfg['max_retries'],
+            'max_retries': options.max_retries or _cfg['max_retries'],
             'enable_builtin_tools': False,
             'force_summarize': True,
             'force_summarize_context': plan.force_summarize_context,
@@ -56,6 +169,9 @@ class AgentExecutor:
             tools=_deduplicate_tools(plan.tools),
             prompt=plan.prompt.system_prompt,
             **kwargs,
+        )
+        agent._tools_manager = ToolCallGuard(
+            agent._tools_manager, options.tool_failure_limits,
         )
         agent.set_stop_tools(plan.stop_tools)
         return agent

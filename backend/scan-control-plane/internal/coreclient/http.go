@@ -51,7 +51,7 @@ func (c *HTTPCoreClient) CreateDataset(ctx context.Context, req CreateDatasetReq
 		req.DisplayName = req.Name
 	}
 	var out CreateDatasetResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/datasets", req, &out, req.CreatedBy, ""); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, "/datasets", req, &out, req.CreatedBy, req.UserName); err != nil {
 		if resp, ok := recoverCreateDatasetConflict(err); ok {
 			return resp, nil
 		}
@@ -89,7 +89,7 @@ func (c *HTTPCoreClient) CreateBindingRootDocument(ctx context.Context, req Crea
 		"idempotency_key": req.IdempotencyKey,
 	}
 	endpoint := "/datasets/" + url.PathEscape(req.DatasetID) + "/documents"
-	if err := c.doJSON(ctx, http.MethodPost, endpoint, body, &out, req.UserID, ""); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, endpoint, body, &out, req.UserID, req.UserName); err != nil {
 		if resp, ok := recoverBindingRootConflict(err); ok {
 			return resp, nil
 		}
@@ -305,7 +305,7 @@ func (c *HTTPCoreClient) uploadContent(ctx context.Context, req SubmitParseTaskR
 	}
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
-	c.setAuthHeaders(httpReq, req.UserID)
+	c.setAuthHeaders(httpReq, req.UserID, "")
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return "", err
@@ -396,7 +396,7 @@ func (c *HTTPCoreClient) doJSON(ctx context.Context, method, endpoint string, in
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
 	httpReq.Header.Set("Accept", "application/json")
-	c.setAuthHeaders(httpReq, userID)
+	c.setAuthHeaders(httpReq, userID, userName)
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return err
@@ -415,12 +415,17 @@ func (c *HTTPCoreClient) doJSON(ctx context.Context, method, endpoint string, in
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-func (c *HTTPCoreClient) setAuthHeaders(req *http.Request, userID string) {
-	if strings.TrimSpace(userID) == "" {
+func (c *HTTPCoreClient) setAuthHeaders(req *http.Request, userID, userName string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
 		userID = "scan-control-plane"
 	}
+	userName = strings.TrimSpace(userName)
+	if userName == "" {
+		userName = userID
+	}
 	req.Header.Set("X-User-Id", userID)
-	req.Header.Set("X-User-Name", userID)
+	req.Header.Set("X-User-Name", userName)
 }
 
 func (c *HTTPCoreClient) endpoint(endpoint string) string {

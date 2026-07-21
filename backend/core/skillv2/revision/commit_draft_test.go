@@ -12,7 +12,7 @@ import (
 func TestCommitDraft_CreatesInitialRevisionWithoutHead(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	seedCreateDraftSkill(t, db, "skill-new")
-	testutil.SeedTextBlob(t, db, "h_skill_new", "# New Skill\n")
+	testutil.SeedTextBlob(t, db, "h_skill_new", testutil.SkillMD("new-skill", "New skill"))
 	testutil.SeedDraftEntry(t, db, "skill-new", "SKILL.md", "upsert", "file", "h_skill_new")
 	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
@@ -80,10 +80,17 @@ func seedCreateDraftSkill(t *testing.T, db *testutil.TestDB, skillID string) {
 func TestCommitDraft_CreatesOneRevisionForMultipleFiles(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
-	testutil.SeedTextBlob(t, db, "h_skill_draft", "# 草稿\n")
+	testutil.SeedTextBlob(t, db, "h_skill_draft", testutil.SkillMD("论文精读草稿", "草稿描述"))
 	testutil.SeedTextBlob(t, db, "h_ref_draft", "# 草稿资料\n")
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_skill_draft")
 	testutil.SeedDraftEntry(t, db, "skill1", "references/a.md", "upsert", "file", "h_ref_draft")
+	var beforePublish testutil.SkillRow
+	if err := db.Where("id = ?", "skill1").Take(&beforePublish).Error; err != nil {
+		t.Fatalf("query skill before publish: %v", err)
+	}
+	if beforePublish.SkillName != "论文精读" {
+		t.Fatalf("draft metadata changed published skill name to %q", beforePublish.SkillName)
+	}
 	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
 	resp, err := service.CommitDraft(context.Background(), CommitDraftRequest{SkillID: "skill1", UserID: "user_001", DraftVersion: 1})
@@ -99,12 +106,55 @@ func TestCommitDraft_CreatesOneRevisionForMultipleFiles(t *testing.T) {
 		{Path: "references/a.md", EntryType: "file", FileType: "markdown", HasBlob: true},
 	})
 	testutil.AssertNoDraftEntries(t, db, "skill1")
+	var skill testutil.SkillRow
+	if err := db.Where("id = ?", "skill1").Take(&skill).Error; err != nil {
+		t.Fatalf("query skill: %v", err)
+	}
+	if skill.SkillName != "论文精读草稿" || skill.Description != "草稿描述" || skill.RelativeRoot != "research/论文精读草稿" {
+		t.Fatalf("published metadata not synchronized: %#v", skill)
+	}
 	var draft testutil.SkillDraftRow
 	if err := db.Where("skill_id = ?", "skill1").Take(&draft).Error; err != nil {
 		t.Fatalf("query draft: %v", err)
 	}
 	if draft.BaseRevisionID == nil || *draft.BaseRevisionID != resp.RevisionID {
 		t.Fatalf("base_revision_id = %v, want %q", draft.BaseRevisionID, resp.RevisionID)
+	}
+}
+
+func TestCommitDraft_NameConflictRollsBackAndKeepsDraft(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	testutil.SeedSkillWithRevision(t, db, "skill2", "rev2")
+	testutil.SeedTextBlob(t, db, "h_conflict", testutil.SkillMD("论文精读-skill2", "冲突描述"))
+	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_conflict")
+	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	if _, err := service.CommitDraft(context.Background(), CommitDraftRequest{SkillID: "skill1", UserID: "user_001", DraftVersion: 1}); err == nil || !strings.Contains(err.Error(), "skill name conflict") {
+		t.Fatalf("CommitDraft error = %v, want skill name conflict", err)
+	}
+	testutil.AssertHeadRevision(t, db, "skill1", "rev1")
+	if got := testutil.CountRows(t, db, "skill_draft_entries", "skill_id = ?", "skill1"); got != 1 {
+		t.Fatalf("draft entry count = %d, want 1", got)
+	}
+}
+
+func TestCommitDraft_InvalidFrontmatterRollsBackAndKeepsDraft(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	testutil.SeedTextBlob(t, db, "h_invalid_frontmatter", "# Missing frontmatter\n")
+	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_invalid_frontmatter")
+	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	if _, err := service.CommitDraft(context.Background(), CommitDraftRequest{SkillID: "skill1", UserID: "user_001", DraftVersion: 1}); err == nil || !strings.Contains(err.Error(), "frontmatter") {
+		t.Fatalf("CommitDraft error = %v, want invalid frontmatter", err)
+	}
+	testutil.AssertHeadRevision(t, db, "skill1", "rev1")
+	if got := testutil.CountRows(t, db, "skill_revisions", "skill_id = ?", "skill1"); got != 1 {
+		t.Fatalf("revision count = %d, want 1", got)
+	}
+	if got := testutil.CountRows(t, db, "skill_draft_entries", "skill_id = ?", "skill1"); got != 1 {
+		t.Fatalf("draft entry count = %d, want 1", got)
 	}
 }
 
@@ -146,7 +196,7 @@ func TestCommitDraft_ConcurrentCommitOnlyOneSucceeds(t *testing.T) {
 	if err := db.Model(&testutil.SkillDraftRow{}).Where("skill_id = ?", "skill1").Update("version", 3).Error; err != nil {
 		t.Fatalf("update draft version: %v", err)
 	}
-	testutil.SeedTextBlob(t, db, "h_draft", "# 并发提交\n")
+	testutil.SeedTextBlob(t, db, "h_draft", testutil.SkillMD("并发提交", "并发提交描述"))
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_draft")
 	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
@@ -203,7 +253,7 @@ func TestCommitDraft_BlobWriteFailureRollsBack(t *testing.T) {
 func TestCommitDraft_ReplacedBlobCleanupRespectsReferences(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
-	testutil.SeedTextBlob(t, db, "h_new", "# 新内容\n")
+	testutil.SeedTextBlob(t, db, "h_new", testutil.SkillMD("新内容", "新内容描述"))
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_new")
 	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 

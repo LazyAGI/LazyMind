@@ -48,14 +48,19 @@ def _load_tool_registry_module():
         'image_editor',
         'image_generator',
         'kb_tmp_search',
-        'memory_editor',
-        'read_memory',
         'skill_editor',
         'url_fetch',
         'vision_extractor',
         'vocab_learn',
     ):
         fake_tools.__dict__[name] = lambda *args, **kwargs: None
+
+    fake_memory = types.ModuleType('lazymind.chat.engine.tools.memory')
+
+    class FakeMemoryTools:
+        __public_apis__ = ['read_memory', 'episode_create']
+
+    fake_memory.MemoryTools = FakeMemoryTools
 
     fake_model_config = types.ModuleType('lazymind.model_config')
     fake_model_config.is_model_role_available = lambda _role: True
@@ -66,6 +71,7 @@ def _load_tool_registry_module():
         'lazyllm.tools.fs.supplier.notion': fake_notion,
         'lazyllm.tools.tools.search': fake_search,
         'lazymind.chat.engine.tools': fake_tools,
+        'lazymind.chat.engine.tools.memory': fake_memory,
         'lazymind.model_config': fake_model_config,
     }
     old_modules = {name: sys.modules.get(name) for name in modules}

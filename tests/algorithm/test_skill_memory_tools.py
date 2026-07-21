@@ -1,26 +1,24 @@
 import importlib
+import pytest
 
-memory_reader_mod = importlib.import_module('lazymind.chat.engine.tools.memory_reader')
+memory_mod = importlib.import_module('lazymind.chat.engine.tools.memory')
+memory_reader_mod = memory_mod
 skill_editor_mod = importlib.import_module('lazymind.chat.engine.tools.skill_editor')
 
 
+def _memory_tools():
+    return memory_mod.MemoryTools()
+
+
 class FakeMemoryStore:
-    def __init__(self, contents=None, read_error=None, write_error=None):
+    def __init__(self, contents=None, read_error=None):
         self.contents = dict(contents or {})
         self.read_error = read_error
-        self.write_error = write_error
-        self.writes = []
 
     def read(self, target):
         if self.read_error:
             raise self.read_error
         return self.contents[target]
-
-    def write(self, target, content):
-        if self.write_error:
-            raise self.write_error
-        self.writes.append((target, content))
-        self.contents[target] = content
 
 
 class FakeSkillStore:
@@ -30,11 +28,9 @@ class FakeSkillStore:
         self.packages = dict(packages or {})
         self.calls = []
 
-    def resolve_existing_identity(self, name, category=None):
-        self.calls.append(('resolve_existing_identity', name, category))
+    def resolve_existing_identity(self, name):
+        self.calls.append(('resolve_existing_identity', name))
         raw_name = str(name or '').strip()
-        if category:
-            return {'category': category, 'name': raw_name.rsplit('/', 1)[-1]}
         if '/' in raw_name:
             resolved_category, resolved_name = raw_name.split('/', 1)
             return {'category': resolved_category, 'name': resolved_name}
@@ -44,10 +40,10 @@ class FakeSkillStore:
             if skill_name == raw_name
         ]
         if not matches:
-            return {'error': f"Skill {raw_name!r} was not found; provide category or full skill key."}
+            return {'error': f'Skill {raw_name!r} was not found; provide the full skill key.'}
         if len(matches) > 1:
-            first = f"{matches[0]['category']}/{matches[0]['name']}"
-            return {'error': f"Ambiguous skill name {raw_name!r}; use the full skill key such as {first!r}."}
+            first = '{}/{}'.format(matches[0]['category'], matches[0]['name'])
+            return {'error': f'Ambiguous skill name {raw_name!r}; use the full skill key such as {first!r}.'}
         return matches[0]
 
     def list_files(self, category, name):
@@ -78,20 +74,78 @@ class FakeSkillStore:
         self.packages.pop((category, name), None)
         return {'action': 'remove'}
 
+@pytest.mark.parametrize(
+    ('raw_message', 'secret'),
+    [
+        ("headers={'Authorization': 'Bearer sk-header'}", 'sk-header'),
+        ('Authorization=Bearer sk-equals', 'sk-equals'),
+        ('request failed with Bearer sk-bare', 'sk-bare'),
+        ('http_auth={"username":"admin","password":"sk-dict"}', 'sk-dict'),
+        ('basic_auth: (admin, sk-basic)', 'sk-basic'),
+    ],
+)
+def test_memory_error_sanitizer_redacts_common_auth_formats(raw_message, secret):
+    sanitized = memory_mod._safe_exception_message(RuntimeError(raw_message))
 
+    assert secret not in sanitized
+    assert '<redacted>' in sanitized
+
+
+def test_memory_tool_exception_log_does_not_include_raw_exception(monkeypatch):
+    calls = {'error': [], 'exception': []}
+    fake_log = type(
+        'FakeLog',
+        (),
+        {
+            'error': lambda _self, message: calls['error'].append(message),
+            'exception': lambda _self, message: calls['exception'].append(message),
+        },
+    )()
+    monkeypatch.setattr(memory_mod.lazyllm, 'LOG', fake_log)
+
+    memory_mod._log_tool_exception(
+        'read_memory',
+        RuntimeError('Authorization: Bearer secret-value'),
+    )
+
+    assert calls['exception'] == []
+    assert len(calls['error']) == 1
+    assert 'Authorization: <redacted>' in calls['error'][0]
+    assert 'secret-value' not in calls['error'][0]
 def test_read_memory_reads_remote_fs(monkeypatch):
+    assert not hasattr(memory_mod.MemoryRemoteStore, 'write')
     store = FakeMemoryStore({'memory': 'remote memory'})
     monkeypatch.setattr(memory_reader_mod, 'MemoryRemoteStore', lambda: store)
+    lazyllm = importlib.import_module('lazyllm')
+    sentinel = object()
+    previous = lazyllm.globals.get('agentic_config', sentinel)
+    lazyllm.globals['agentic_config'] = {'memory_tool_results': []}
+    try:
+        result = _memory_tools().read_memory('memory')
 
-    result = memory_reader_mod.read_memory('memory')
-
-    assert result['success'] is True
-    assert result['tool'] == 'read_memory'
-    assert result['result'] == {
-        'target': 'memory',
-        'content': 'remote memory',
-        'content_length': len('remote memory'),
-    }
+        assert result['success'] is True
+        assert result['tool'] == 'read_memory'
+        assert result['result'] == {
+            'target': 'memory',
+            'content': 'remote memory',
+            'content_length': len('remote memory'),
+        }
+        assert lazyllm.globals['agentic_config']['memory_tool_results'] == [{
+            'tool': 'read_memory',
+            'success': True,
+            'mutation': False,
+            'result': {
+                'status': 'read',
+                'target': 'memory',
+                'content_length': len('remote memory'),
+            },
+            'retryable': False,
+        }]
+    finally:
+        if previous is sentinel:
+            lazyllm.globals.pop('agentic_config', None)
+        else:
+            lazyllm.globals['agentic_config'] = previous
 
 
 def test_skill_editor_create_file_tools_remove_core_paths():
@@ -106,13 +160,13 @@ def test_skill_editor_create_file_tools_remove_core_paths():
     content = (
         '---\n'
         'name: new_skill\n'
-        'category: drafts\n'
+        'category: upstream-value\n'
         'description: A test skill.\n'
         '---\n'
         'Use this skill for tests.\n'
     )
     store = FakeSkillStore({
-        ('writing', 'existing'): {
+        ('internal', 'existing'): {
             'SKILL.md': existing_content,
             'references/old.md': 'old reference\n',
         },
@@ -121,31 +175,27 @@ def test_skill_editor_create_file_tools_remove_core_paths():
 
     create_result = tool_group.create_skill(
         'new_skill',
-        category='drafts',
         content=content,
     )
     patch_result = tool_group.patch_file(
-        'existing',
-        category='writing',
+        'internal/existing',
         path='SKILL.md',
         old_text='Use this skill for tests.',
         new_text='Use this skill for focused tests.',
         reason='patch skill body',
     )
     file_create_result = tool_group.create_file(
-        'writing/existing',
-        category='writing',
+        'internal/existing',
         path='scripts/check.py',
         content='print("ok")\n',
         reason='new helper script',
     )
     delete_result = tool_group.delete_file(
-        'existing',
-        category='writing',
+        'internal/existing',
         path='references/old.md',
         reason='remove stale reference',
     )
-    remove_result = tool_group.remove_skill('existing', category='writing')
+    remove_result = tool_group.remove_skill('internal/existing')
 
     assert create_result['success'] is True
     assert create_result['tool'] == 'create_skill'
@@ -176,11 +226,11 @@ def test_skill_editor_create_file_tools_remove_core_paths():
         'status': 'removed',
         'message': 'Skill package change was written.',
     }
-    assert ('create', 'drafts', 'new_skill', content) in store.calls
-    assert ('remove', 'writing', 'existing') in store.calls
+    assert ('create', 'internal', 'new_skill', content) in store.calls
+    assert ('remove', 'internal', 'existing') in store.calls
     replace_calls = [call for call in store.calls if call[0] == 'replace_files']
     assert replace_calls == [
-        ('replace_files', 'writing', 'existing',
+        ('replace_files', 'internal', 'existing',
          {'SKILL.md': existing_content, 'references/old.md': 'old reference\n'},
          {
              'SKILL.md': existing_content.replace(
@@ -189,7 +239,7 @@ def test_skill_editor_create_file_tools_remove_core_paths():
              ),
              'references/old.md': 'old reference\n',
          }),
-        ('replace_files', 'writing', 'existing',
+        ('replace_files', 'internal', 'existing',
          {
              'SKILL.md': existing_content.replace(
                  'Use this skill for tests.',
@@ -205,7 +255,7 @@ def test_skill_editor_create_file_tools_remove_core_paths():
              'references/old.md': 'old reference\n',
              'scripts/check.py': 'print("ok")\n',
          }),
-        ('replace_files', 'writing', 'existing',
+        ('replace_files', 'internal', 'existing',
          {
              'SKILL.md': existing_content.replace(
                  'Use this skill for tests.',
@@ -224,6 +274,19 @@ def test_skill_editor_create_file_tools_remove_core_paths():
     ]
 
 
+def test_skill_editor_removes_full_key_from_any_safe_category():
+    store = FakeSkillStore({
+        ('research3', 'web-research'): {'SKILL.md': '# Web Research\n'},
+    })
+    tool_group = skill_editor_mod.SkillManagementToolkit(store=store)
+
+    result = tool_group.remove_skill('research3/web-research')
+
+    assert result['success'] is True
+    assert result['tool'] == 'remove_skill'
+    assert store.calls == [('remove', 'research3', 'web-research')]
+
+
 def test_skill_editor_renames_package():
     existing_content = (
         '---\n'
@@ -234,21 +297,117 @@ def test_skill_editor_renames_package():
         'Use this skill for tests.\n'
     )
     store = FakeSkillStore({
-        ('writing', 'existing'): {'SKILL.md': existing_content, 'references/doc.md': 'doc\n'},
+        ('internal', 'existing'): {'SKILL.md': existing_content, 'references/doc.md': 'doc\n'},
     })
 
     result = skill_editor_mod.SkillManagementToolkit(store=store).rename_skill(
-        'existing',
-        category='writing',
+        'internal/existing',
         new_name='renamed',
-        new_category='drafts',
     )
 
     assert result['success'] is True
     assert result['result']['status'] == 'renamed'
-    assert result['result']['old'] == {'category': 'writing', 'name': 'existing'}
-    assert result['result']['new'] == {'category': 'drafts', 'name': 'renamed'}
+    assert result['result']['old'] == {'category': 'internal', 'name': 'existing'}
+    assert result['result']['new'] == {'category': 'internal', 'name': 'renamed'}
     rename_calls = [call for call in store.calls if call[0] == 'rename']
-    assert rename_calls[0][1:5] == ('writing', 'existing', 'drafts', 'renamed')
+    assert rename_calls[0][1:5] == ('internal', 'existing', 'internal', 'renamed')
     assert 'name: renamed' in rename_calls[0][5]
-    assert 'category: drafts' in rename_calls[0][5]
+    assert 'category: writing' in rename_calls[0][5]
+
+
+def test_skill_editor_create_accepts_missing_category_and_rejects_multilevel_name():
+    content = (
+        '---\n'
+        'name: category-free\n'
+        'description: A category-free skill.\n'
+        '---\n'
+        'Use this skill for tests.\n'
+    )
+    store = FakeSkillStore()
+    toolkit = skill_editor_mod.SkillManagementToolkit(store=store)
+
+    created = toolkit.create_skill('category-free', content=content)
+    slash = toolkit.create_skill('internal/category-free', content=content)
+    backslash = toolkit.create_skill(r'internal\category-free', content=content)
+
+    assert created['success'] is True
+    assert ('create', 'internal', 'category-free', content) in store.calls
+    assert slash['success'] is False
+    assert backslash['success'] is False
+
+
+def test_skill_editor_patch_allows_frontmatter_category_changes_without_moving_package():
+    existing_content = (
+        '---\n'
+        'name: existing\n'
+        'category: writing\n'
+        'description: Existing skill.\n'
+        '---\n'
+        'Use this skill for tests.\n'
+    )
+    store = FakeSkillStore({
+        ('internal', 'existing'): {'SKILL.md': existing_content},
+    })
+
+    result = skill_editor_mod.SkillManagementToolkit(store=store).patch_file(
+        'internal/existing',
+        path='SKILL.md',
+        old_text='category: writing',
+        new_text='category: arbitrary-upstream-value',
+    )
+
+    assert result['success'] is True
+    assert ('internal', 'existing') in store.packages
+    assert 'category: arbitrary-upstream-value' in store.packages[('internal', 'existing')]['SKILL.md']
+
+
+def test_skill_editor_patch_resolves_unique_name_and_requires_full_key_when_ambiguous():
+    unique_content = (
+        '---\n'
+        'name: unique\n'
+        'description: Unique skill.\n'
+        '---\n'
+        'Before unique.\n'
+    )
+    shared_content = (
+        '---\n'
+        'name: shared\n'
+        'description: Shared skill.\n'
+        '---\n'
+        'Before shared.\n'
+    )
+    store = FakeSkillStore({
+        ('internal', 'unique'): {'SKILL.md': unique_content},
+        ('internal', 'shared'): {'SKILL.md': shared_content},
+        ('external', 'shared'): {'SKILL.md': shared_content},
+    })
+    toolkit = skill_editor_mod.SkillManagementToolkit(store=store)
+
+    unique_result = toolkit.patch_file(
+        'unique',
+        path='SKILL.md',
+        old_text='Before unique.',
+        new_text='After unique.',
+    )
+    ambiguous_result = toolkit.patch_file(
+        'shared',
+        path='SKILL.md',
+        old_text='Before shared.',
+        new_text='Wrong target.',
+    )
+    exact_result = toolkit.patch_file(
+        'external/shared',
+        path='SKILL.md',
+        old_text='Before shared.',
+        new_text='After external.',
+    )
+
+    assert unique_result['success'] is True
+    assert 'After unique.' in store.packages[('internal', 'unique')]['SKILL.md']
+    assert ambiguous_result['success'] is False
+    assert "Ambiguous skill name 'shared'" in ambiguous_result['error']['reason']
+    assert 'Wrong target.' not in store.packages[('internal', 'shared')]['SKILL.md']
+    assert 'Wrong target.' not in store.packages[('external', 'shared')]['SKILL.md']
+    assert exact_result['success'] is True
+    assert 'Before shared.' in store.packages[('internal', 'shared')]['SKILL.md']
+    assert 'After external.' in store.packages[('external', 'shared')]['SKILL.md']

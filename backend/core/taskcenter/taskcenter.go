@@ -349,10 +349,12 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	resolved := make([]resolvedRow, 0, len(rows))
 	statusCounts := map[string]int{
 		"all":       0,
+		"pending":   0,
 		"waiting":   0,
 		"running":   0,
 		"succeeded": 0,
 		"failed":    0,
+		"canceled":  0,
 	}
 	for _, row := range rows {
 		t := row.TaskCenterTask

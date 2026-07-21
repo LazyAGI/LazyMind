@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from lazymind.chat.integrations.remote_fs import RemoteFS
+from lazymind.common.integrations.remote_fs import RemoteFS
 
 from .defaults import default_preference_md, default_profile_md
 from .errors import MemoryStoreError

@@ -1,5 +1,6 @@
-import { Dropdown } from "antd";
+import { Dropdown, Tooltip } from "antd";
 import type { MenuProps } from "antd";
+import type { ReactNode } from "react";
 import {
   ApartmentOutlined,
   BellOutlined,
@@ -23,13 +24,14 @@ interface SkillManagementToolbarProps {
   organizeDisabled: boolean;
   onOrganizeSkills: () => void;
   manualSkillReviewCount: number;
-  manualSkillReviewLoading: boolean;
-  manualSkillReviewRunning: boolean;
+  manualSkillReviewDisabled: boolean;
+  manualSkillReviewDisabledReason?: string;
   onSkillReviewClick: () => void;
   messageCenterCount: number;
   onMessageCenterClick: () => void;
   showMessageCenter: boolean;
   isAdmin: boolean;
+  marketFilters?: ReactNode;
   onAdminPublish?: () => void;
   onNewPlugin?: () => void;
 }
@@ -52,13 +54,14 @@ export default function SkillManagementToolbar({
   organizeDisabled,
   onOrganizeSkills,
   manualSkillReviewCount,
-  manualSkillReviewLoading,
-  manualSkillReviewRunning,
+  manualSkillReviewDisabled,
+  manualSkillReviewDisabledReason,
   onSkillReviewClick,
   messageCenterCount,
   onMessageCenterClick,
   showMessageCenter,
   isAdmin,
+  marketFilters,
   onAdminPublish,
   onNewPlugin,
 }: SkillManagementToolbarProps) {
@@ -134,21 +137,29 @@ export default function SkillManagementToolbar({
         </span>
       </button>
 
-      <button
-        type="button"
-        className="memory-skill-insight-card is-review"
-        onClick={onSkillReviewClick}
-        disabled={manualSkillReviewLoading || manualSkillReviewRunning}
-        title={t("admin.memorySkillReviewCardHint")}
-      >
-        <span className="memory-skill-insight-card__icon">
-          <ClockCircleOutlined />
-          <InsightCount count={manualSkillReviewCount} />
+      <Tooltip title={manualSkillReviewDisabledReason} trigger={["hover", "focus"]}>
+        <span
+          className="memory-skill-insight-card-tooltip"
+          tabIndex={manualSkillReviewDisabled ? 0 : undefined}
+          aria-label={manualSkillReviewDisabledReason}
+        >
+          <button
+            type="button"
+            className="memory-skill-insight-card is-review"
+            onClick={onSkillReviewClick}
+            disabled={manualSkillReviewDisabled}
+            title={manualSkillReviewDisabled ? undefined : t("admin.memorySkillReviewCardHint")}
+          >
+            <span className="memory-skill-insight-card__icon">
+              <ClockCircleOutlined />
+              <InsightCount count={manualSkillReviewCount} />
+            </span>
+            <span className="memory-skill-insight-card__title">
+              {t("admin.memorySkillReviewCardTitle")}
+            </span>
+          </button>
         </span>
-        <span className="memory-skill-insight-card__title">
-          {t("admin.memorySkillReviewCardTitle")}
-        </span>
-      </button>
+      </Tooltip>
 
       {showMessageCenter ? (
         <button
@@ -176,10 +187,17 @@ export default function SkillManagementToolbar({
 
     if (skillView === "market" && isAdmin) {
       return (
-        <button type="button" className="memory-skill-market-publish" onClick={onAdminPublish}>
-          {t("admin.memorySkillAdminPublishButton")}
-        </button>
+        <>
+          {marketFilters}
+          <button type="button" className="memory-skill-market-publish" onClick={onAdminPublish}>
+            {t("admin.memorySkillAdminPublishButton")}
+          </button>
+        </>
       );
+    }
+
+    if (skillView === "market") {
+      return marketFilters;
     }
 
     if (skillView === "plugins") {

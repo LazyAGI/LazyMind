@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from lazymind.chat.integrations.remote_fs import RemoteFS
+from lazymind.common.integrations.remote_fs import RemoteFS
 
 from .defaults import default_preference_md, default_profile_md, default_soul_md
 from .errors import MemoryNotFoundError, MemoryPathError, MemoryStoreError, MemoryValidationError
