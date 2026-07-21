@@ -7,6 +7,9 @@ export const CHAT_SELECT_CONVERSATION_EVENT = "lazymind:chat-select-conversation
 export const CHAT_AUTO_ADVANCE_EVENT = "lazymind:chat-auto-advance";
 export const CHAT_CONVERSATION_ACTIVITY_EVENT =
   "lazymind:chat-conversation-activity";
+export const PLUGIN_PANEL_EXPANDED_EVENT = "lazymind:plugin-panel-expanded";
+export const PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX =
+  "lazymind:plugin-panel-expanded:";
 
 export type ChatConversationFilter = "normal" | "task";
 

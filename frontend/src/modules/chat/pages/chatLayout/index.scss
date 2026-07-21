@@ -8,6 +8,134 @@
   align-items: center;
   overflow: hidden;
 
+  .chat-conversation-pane {
+    display: flex;
+    min-width: 0;
+    height: 100%;
+    flex: 1;
+  }
+
+  &--plugin-expanded {
+    padding-top: 49px;
+
+    .chat-conversation-pane,
+    .right-box--expanded-tab {
+      position: absolute;
+      top: 49px;
+      right: 0;
+      bottom: 0;
+      width: clamp(320px, 27vw, 440px);
+      min-width: 320px;
+      z-index: 30;
+      border-left: 1px solid #dfe6ef;
+      background: #fff;
+    }
+
+    .chat-conversation-pane {
+      .chat-box {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .message-container {
+        padding: 8px 10px;
+        margin-bottom: 8px;
+      }
+
+      .chat-content,
+      .chat-item {
+        gap: 12px;
+      }
+
+      .chat-assistant-msg-single-answer-wrap,
+      .chat-assistant-msg-multi-answer-wrap {
+        gap: 0;
+
+        > .chat-avatar {
+          display: none;
+        }
+
+        .chat-bot {
+          padding: 8px 10px;
+          border-radius: 8px;
+          box-shadow: 0 1px 8px rgb(182 212 228 / 18%);
+        }
+
+        .chat-bot-box-multi {
+          padding-right: 0;
+        }
+      }
+
+      .chat-item {
+        --chat-gap: 10px;
+      }
+    }
+
+    .chat-conversation-pane--hidden { display: none; }
+
+    .right-box--expanded-tab {
+      height: auto;
+      padding: 16px;
+      overflow: hidden;
+    }
+
+    .right-box--tab-hidden {
+      visibility: hidden;
+      pointer-events: none;
+    }
+  }
+
+  .expanded-rail-tabs {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: clamp(320px, 27vw, 440px);
+    height: 49px;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 24px;
+    border-left: 1px solid #dfe6ef;
+    border-bottom: 1px solid #e5e7eb;
+    background: #fff;
+    z-index: 40;
+
+    button {
+      position: relative;
+      border: 0;
+      background: transparent;
+      color: #667085;
+      padding: 0 8px;
+      cursor: pointer;
+      font-size: 14px;
+
+      &.active { color: #2563eb; }
+      &.active::after {
+        content: '';
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        height: 2px;
+        background: #2563eb;
+      }
+
+      span {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 17px;
+        height: 17px;
+        margin-left: 4px;
+        padding: 0 5px;
+        border-radius: 9px;
+        background: #356df3;
+        color: #fff;
+        font-size: 11px;
+      }
+    }
+  }
+
   .drag-overlay {
     position: absolute;
     top: 0;
@@ -111,6 +239,38 @@
       font-weight: 600;
       line-height: 22px;
     }
+  }
+
+  // Keep this after the base .right-box rule: equal-specificity declarations in
+  // that rule otherwise reset the expanded tab back to relative positioning.
+  &--plugin-expanded > .right-box.right-box--expanded-tab {
+    position: absolute;
+    top: 49px;
+    right: 0;
+    bottom: 0;
+    width: clamp(320px, 27vw, 440px);
+    min-width: 320px;
+    height: auto;
+    padding: 16px;
+    display: flex;
+    visibility: visible;
+    overflow: hidden;
+    z-index: 30;
+    background: #fff;
+
+    > .task-center {
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+    }
+
+    > .right-box-resize-handle {
+      display: none;
+    }
+  }
+
+  &--plugin-expanded > .right-box.right-box--expanded-tab.right-box--tab-hidden {
+    display: none;
   }
 
   .task-panel-restore-btn {

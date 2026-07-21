@@ -9,10 +9,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -127,8 +129,121 @@ type PluginChatContext struct {
 	UserID              string
 	PluginMode          string // "auto" | "dynamic"
 	ChatSessionID       string
+	TriggerHistoryID    string
 	HistoryFilesPerTurn map[string][]string
 	HandOff             *bool
+}
+
+type handoffBatchStep struct {
+	StepID string
+	Status string
+}
+
+func terminalPluginStepStatus(status string) bool {
+	return status == subagent.StatusSucceeded || status == subagent.StatusFailed ||
+		status == subagent.StatusInterrupted || status == subagent.StatusCanceled
+}
+
+func handoffStepName(stepID string, labels map[string]string) string {
+	label := strings.TrimSpace(labels[stepID])
+	if label == "" || label == stepID {
+		return stepID
+	}
+	return fmt.Sprintf("%s（%s）", label, stepID)
+}
+
+func joinedHandoffStepNames(ids []string, labels map[string]string) string {
+	sort.Strings(ids)
+	names := make([]string, 0, len(ids))
+	for _, id := range ids {
+		names = append(names, handoffStepName(id, labels))
+	}
+	return strings.Join(names, "、")
+}
+
+// appendHandoffHistorySummary writes once after every SubTask launched by the same handoff
+// turn is terminal. Parallel step statuses are merged into one concise history sentence.
+func appendHandoffHistorySummary(
+	ctx context.Context,
+	db *gorm.DB,
+	pctx *PluginChatContext,
+	sessionCompleted bool,
+) error {
+	if db == nil || pctx == nil || strings.TrimSpace(pctx.TriggerHistoryID) == "" {
+		return nil
+	}
+	handOff := true
+	if pctx.HandOff != nil {
+		handOff = *pctx.HandOff
+	}
+	if !handOff {
+		return nil
+	}
+	labels := map[string]string{}
+	var session orm.PluginSession
+	if db.WithContext(ctx).Where("id = ?", pctx.SessionID).First(&session).Error == nil {
+		if graph, err := loadSessionGraph(ctx, db, &session); err == nil {
+			for id, node := range graph.Nodes {
+				labels[id] = node.Label
+			}
+		}
+	}
+
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var batch []handoffBatchStep
+		if err := tx.Table("plugin_session_steps AS steps").
+			Select("steps.step_id, steps.status").
+			Joins("JOIN sub_agent_tasks AS tasks ON tasks.id = steps.task_id").
+			Where("steps.session_id = ? AND steps.validity <> ? AND tasks.trigger_history_id = ?",
+				pctx.SessionID, "stale", pctx.TriggerHistoryID).
+			Scan(&batch).Error; err != nil {
+			return err
+		}
+		if len(batch) == 0 {
+			return nil
+		}
+		for _, step := range batch {
+			if !terminalPluginStepStatus(step.Status) {
+				return nil
+			}
+		}
+
+		var history orm.ChatHistory
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND conversation_id = ?", pctx.TriggerHistoryID, pctx.ConvID).
+			First(&history).Error; err != nil {
+			return err
+		}
+		marker := fmt.Sprintf("<!-- plugin-handoff-summary:%s -->", pctx.TriggerHistoryID)
+		if strings.Contains(history.Result, marker) {
+			return nil
+		}
+
+		groups := map[string][]string{}
+		for _, step := range batch {
+			groups[step.Status] = append(groups[step.Status], step.StepID)
+		}
+		parts := make([]string, 0, 4)
+		if ids := groups[subagent.StatusSucceeded]; len(ids) > 0 {
+			parts = append(parts, "已完成 "+joinedHandoffStepNames(ids, labels))
+		}
+		interrupted := append(groups[subagent.StatusInterrupted], groups[subagent.StatusCanceled]...)
+		if len(interrupted) > 0 {
+			parts = append(parts, "用户中断了 "+joinedHandoffStepNames(interrupted, labels))
+		}
+		if ids := groups[subagent.StatusFailed]; len(ids) > 0 {
+			parts = append(parts, "执行失败 "+joinedHandoffStepNames(ids, labels))
+		}
+		text := strings.Join(parts, "；") + "。"
+		if sessionCompleted {
+			text += " 工作流已完成。"
+		}
+		block := fmt.Sprintf("\n\n%s\n%s", marker, text)
+		return tx.Model(&orm.ChatHistory{}).Where("id = ?", history.ID).Updates(map[string]any{
+			"result":      strings.TrimSpace(history.Result) + block,
+			"update_time": time.Now(),
+		}).Error
+	})
 }
 
 func conversationPreflight(ctx context.Context, db *gorm.DB, convID string) (map[string]any, map[string]any) {
@@ -546,6 +661,9 @@ func OnSubAgentDone(
 				sessionCompleted = session.Status == SessionStatusCompleted
 			}
 		}
+	}
+	if err := appendHandoffHistorySummary(ctx, db, pctx, sessionCompleted); err != nil {
+		fmt.Printf("[plugin] persist handoff history summary failed task=%s err=%v\n", taskID, err)
 	}
 
 	if stepFailed {
