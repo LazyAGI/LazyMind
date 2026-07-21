@@ -37,7 +37,8 @@ describe('router contract', () => {
     expect(routePaths).toContain('/');
     expect(routePaths).toContain('agent/chat');
     expect(routePaths).toContain('lib/knowledge');
-    expect(routePaths).toContain('data-sources');
+    expect(routePaths).toContain('databases');
+    expect(routePaths).toContain('cloud-documents');
     expect(routePaths).toContain('model-providers');
     expect(routePaths).toContain('memory-management');
     expect(routePaths).toContain('self-evolution');
