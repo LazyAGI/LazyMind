@@ -124,3 +124,37 @@ def test_task_profile_review_emits_ephemeral_pseudo_stream(monkeypatch):
     assert '，请稍后' in body
     assert body.endswith('final\n\n')
     assert request.message.history == original_history
+
+
+def test_context_usage_preview_only_uses_model_when_explicitly_requested(monkeypatch):
+    model_calls = []
+
+    def fake_model_resolve(inputs):
+        model_calls.append(inputs)
+        return chat_service.resolve_task_profile(
+            inputs['query'], enable_llm_fallback=False,
+        )
+
+    async def fake_impl(_request, *, task_profile_override=None):
+        return task_profile_override
+
+    monkeypatch.setattr(chat_service, '_resolve_task_profile_with_model', fake_model_resolve)
+    monkeypatch.setattr(chat_service, '_handle_chat_impl', fake_impl)
+
+    def request(allow_llm):
+        return ChatRequest(
+            message={'query': '推荐一款适合我的相机', 'history': []},
+            conversation={'session_id': 'sid-preview'},
+            runtime={
+                'thinking_depth': 'high',
+                'context_usage_preview': True,
+                'context_preview_allow_llm_routing': allow_llm,
+            },
+        )
+
+    rule_profile = asyncio.run(chat_service.handle_chat(request(False)))
+    assert rule_profile.routing_review_required is True
+    assert model_calls == []
+
+    asyncio.run(chat_service.handle_chat(request(True)))
+    assert len(model_calls) == 1

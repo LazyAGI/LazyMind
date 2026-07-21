@@ -307,7 +307,9 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         yield sse_line(response_payload(200, 'success', response, time.time() - started))
 
     if request.runtime.context_usage_preview or request.runtime.context_prompt_export:
-        profile = await asyncio.to_thread(_resolve_task_profile_with_model, inputs)
+        profile = provisional
+        if request.runtime.context_preview_allow_llm_routing:
+            profile = await asyncio.to_thread(_resolve_task_profile_with_model, inputs)
         return await _handle_chat_impl(request, task_profile_override=profile)
     return StreamingResponse(resolve_and_continue(), media_type='text/event-stream')
 
@@ -735,9 +737,16 @@ async def _handle_chat_impl(
             return {'prompt_markdown': prompt_markdown}
         report = await estimate_context_usage(plan, agent_context)
         report_data = report_to_dict(report)
-        requires_llm = bool(task_profile and task_profile.routing_review_required)
+        llm_enhanced = runtime.context_preview_allow_llm_routing
+        requires_llm = bool(
+            not llm_enhanced and task_profile and task_profile.routing_review_required
+        )
         report_data.update({
-            'preview_accuracy': 'rule_only' if requires_llm else 'deterministic',
+            'preview_accuracy': (
+                'llm_enhanced' if llm_enhanced
+                else 'rule_only' if requires_llm
+                else 'deterministic'
+            ),
             'requires_llm': requires_llm,
             'llm_reason': task_profile.routing_review_reason if requires_llm else '',
         })
