@@ -1060,6 +1060,28 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
     })
 
 
+def _publish_attachment_edit(draft: AttachmentEditDraft) -> Dict[str, Any]:
+    """Publish through the owning Agent's artifact channel."""
+    ctx = get_context()
+    if ctx is None:
+        return draft.publish()['result']
+    artifact_key = ctx.output_slots[0] if ctx.output_slots else 'edited_attachment'
+    published = save_artifact(
+        artifact_key,
+        draft.draft_path,
+        content_type='file',
+        source_tool='string_replace',
+        caption=f'Edited copy of {draft.filename}',
+    )
+    if not published.get('success'):
+        raise RuntimeError(str(published.get('error') or 'Could not publish edited attachment'))
+    return {
+        'artifact_key': artifact_key,
+        'filename': draft.filename,
+        'message': f"Saved edited attachment '{draft.filename}' as SubAgent artifact '{artifact_key}'.",
+    }
+
+
 @handle_tool_errors
 def string_replace(
     filename: str,
@@ -1130,13 +1152,12 @@ def string_replace(
             raise ValueError('preview_id is required for apply; run preview first')
         had_previous_edit = os.path.isfile(draft.draft_path)
         preview, content, revision = draft.apply_preview(preview_id)
-        artifact = draft.publish()['result']
+        artifact = _publish_attachment_edit(draft)
         return tool_success('string_replace', {
             'status': 'ok',
             'action': 'apply',
             'source_filename': os.path.basename(matched),
-            'filename': artifact['filename'],
-            'artifact_id': artifact['artifact_id'],
+            **artifact,
             'replacements': preview['replacements'],
             'matches': preview['matches'],
             'diff': preview['diff'],
@@ -1146,17 +1167,15 @@ def string_replace(
             'undo_available': True,
             'original_unchanged': True,
             'continues_previous_edit': had_previous_edit,
-            'message': artifact['message'],
         })
     if normalized_action == 'undo':
         content, diff, revision = draft.undo()
-        artifact = draft.publish()['result']
+        artifact = _publish_attachment_edit(draft)
         return tool_success('string_replace', {
             'status': 'ok',
             'action': 'undo',
             'source_filename': os.path.basename(matched),
-            'filename': artifact['filename'],
-            'artifact_id': artifact['artifact_id'],
+            **artifact,
             'diff': diff,
             'bytes': len(content),
             'revision': revision,

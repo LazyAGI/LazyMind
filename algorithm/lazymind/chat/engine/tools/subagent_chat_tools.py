@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import lazyllm
 
+from lazymind.chat.engine.subagent import SUBAGENT_ATTACHMENT_CONTEXT_KEY
 from lazymind.chat.engine.subagent.db import TaskQueryDB
 from lazymind.chat.engine.tools.infra import tool_success
 from lazyllm.tools.agent.base import _write_agent_data
@@ -75,6 +76,24 @@ def _mode() -> str:
     return mode if mode in ('auto', 'manual') else 'auto'
 
 
+def _current_attachment_context() -> Dict[str, Any]:
+    """Snapshot the parent conversation fields required by attachment tools."""
+    cfg = _agentic_config()
+    files = list(cfg.get('files') or [])
+    history_files_per_turn = {
+        str(turn): list(paths or [])
+        for turn, paths in (cfg.get('history_files_per_turn') or {}).items()
+    }
+    if not files and not history_files_per_turn:
+        return {}
+    return {
+        'files': files,
+        'history_files_per_turn': history_files_per_turn,
+        'user_id': str(cfg.get('user_id') or '').strip(),
+        'conversation_id': str(cfg.get('conversation_id') or '').strip(),
+    }
+
+
 def create_subagent(
     agent_type: str,
     title: str,
@@ -122,7 +141,12 @@ def create_subagent(
         acknowledgement that the task is running in the background.
     """
     mode = _mode()
-    params = params or {}
+    params = dict(params or {})
+    attachment_context = _current_attachment_context()
+    if attachment_context:
+        params[SUBAGENT_ATTACHMENT_CONTEXT_KEY] = attachment_context
+    else:
+        params.pop(SUBAGENT_ATTACHMENT_CONTEXT_KEY, None)
     input_slots = input_slots or []
     output_slots = output_slots or []
 

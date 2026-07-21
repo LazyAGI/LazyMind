@@ -24,6 +24,7 @@ from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
 from lazymind.chat.service.component.tool_registry import (
+    ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
     USER_ATTACHMENT_TOOL_CONFIGS,
     collect_system_prompt_appendices,
@@ -35,7 +36,7 @@ from lazyllm.tools.tool_config_inject import inject_tool_config
 from .context import SubAgentContext, set_context, LARGE_TOOL_RESULT_THRESHOLD
 from .db import SubAgentDB
 from . import tools as subagent_tools
-from . import SUBAGENT_CORE_TOOL_NAMES
+from . import SUBAGENT_ATTACHMENT_CONTEXT_KEY, SUBAGENT_CORE_TOOL_NAMES
 
 
 def _build_artifact_context_section(
@@ -144,25 +145,27 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
     return [cfg.tool for cfg in filter_tools(DEFAULT_TOOLS)]
 
 
-def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
+def _build_subagent_tools(
+    extra_tools: Optional[List[Any]],
+    attachment_configs: Optional[List[Any]] = None,
+) -> List[Any]:
     """Combine mandatory SubAgent infra tools with optional domain tools.
 
-    save_artifact, get_artifact, list_artifacts, list_knowledge_bases,
-    read_user_attachment, and find_user_attachment are always included regardless of
-    the explicit tools list — they are the SubAgent's core interface and must never
-    be stripped by plugin tool configurations.
+    Artifact and knowledge tools are always included. Attachment tools are included
+    as one group when the parent task carries attachment context, so the runtime tool
+    list and its system prompt stay consistent.
     """
     base = [
         subagent_tools.save_artifact,
         subagent_tools.get_artifact,
         subagent_tools.list_artifacts,
         subagent_tools.list_knowledge_bases,
-        subagent_tools.read_user_attachment,
-        subagent_tools.find_user_attachment,
         subagent_tools.find_artifact,
         subagent_tools.patch_artifact,
         subagent_tools.discard_draft,
     ]
+    if attachment_configs:
+        base.extend(config.tool for config in attachment_configs)
     if extra_tools:
         base.extend(extra_tools)
     return base
@@ -246,9 +249,65 @@ _STRUCTURED_PARAM_KEYS = {
     # avoids duplicating large/internal representations while preserving arbitrary
     # task parameters supplied by plugin and ordinary SubAgent callers.
     'history_files_per_turn',
+    SUBAGENT_ATTACHMENT_CONTEXT_KEY,
     'partial_indices',
     'required_output_artifact_keys',
 }
+
+
+def _attachment_context(params: Dict[str, Any]) -> Dict[str, Any]:
+    value = params.get(SUBAGENT_ATTACHMENT_CONTEXT_KEY)
+    return value if isinstance(value, dict) else {}
+
+
+def _history_files_per_turn(params: Dict[str, Any]) -> Dict[str, List[str]]:
+    context = _attachment_context(params)
+    return context.get('history_files_per_turn') or params.get('history_files_per_turn') or {}
+
+
+def _build_agentic_config(
+    task: Dict[str, Any],
+    params: Dict[str, Any],
+    effective_agent_type: str,
+) -> Dict[str, Any]:
+    """Restore the request context needed by tools inside every SubAgent."""
+    parent = params.get('parent_agentic_config')
+    agentic_config = dict(parent) if isinstance(parent, dict) else {}
+    attachment_context = _attachment_context(params)
+    history_files_per_turn = (
+        attachment_context.get('history_files_per_turn')
+        or params.get('history_files_per_turn')
+        or agentic_config.get('history_files_per_turn')
+        or {}
+    )
+    all_files = attachment_context.get('files') or agentic_config.get('files')
+    if not isinstance(all_files, list):
+        all_files = [path for paths in history_files_per_turn.values() for path in paths]
+    filters = dict(params.get('filters') or agentic_config.get('filters') or {})
+    agentic_config.update({
+        'query': str(params.get('user_input') or task.get('objective') or ''),
+        'files': all_files,
+        'history_files_per_turn': history_files_per_turn,
+        'filters': filters,
+        'user_id': str(
+            attachment_context.get('user_id')
+            or params.get('user_id')
+            or agentic_config.get('user_id')
+            or ''
+        ).strip(),
+        'conversation_id': str(
+            task.get('conversation_id') or agentic_config.get('conversation_id') or ''
+        ).strip(),
+        'is_subagent': True,
+        'agent_type': effective_agent_type,
+    })
+    if effective_agent_type == 'plugin_step':
+        agentic_config.update({
+            'plugin_id': params.get('plugin_id', ''),
+            'plugin_session_id': params.get('session_id', ''),
+            'plugin_step': params.get('step_id', ''),
+        })
+    return agentic_config
 
 
 def _build_subagent_plan(
@@ -323,7 +382,7 @@ def _build_subagent_plan(
                 content_kind='instruction',
             )
     # Inject user attachment context so the SubAgent knows which files were uploaded.
-    history_files_per_turn: Dict[str, List[str]] = ctx.params.get('history_files_per_turn') or {}
+    history_files_per_turn = _history_files_per_turn(ctx.params)
     attachment_section = render_attachment_content(
         normalize_attachments(history_files_per_turn),
         role=AgentRole.SUBAGENT,
@@ -559,51 +618,28 @@ async def run_subagent_stream(
         inject_tool_config(tool_config)
         set_context(ctx)
 
-        # For plugin_step tasks: inject plugin context into agentic_config so that
-        # save_artifact can resolve sort_order → list_index via the Go core API.
-        if effective_agent_type == 'plugin_step':
-            parent_agentic_config = params.get('parent_agentic_config')
-            agentic_config = dict(parent_agentic_config) if isinstance(parent_agentic_config, dict) else {}
-            history_files_per_turn = (
-                params.get('history_files_per_turn')
-                or agentic_config.get('history_files_per_turn')
-                or {}
-            )
-            all_files = agentic_config.get('files')
-            if not isinstance(all_files, list):
-                all_files = [p for paths in history_files_per_turn.values() for p in paths]
-            filters = dict(params.get('filters') or agentic_config.get('filters') or {})
-            agentic_config.update({
-                'plugin_id': params.get('plugin_id', ''),
-                'plugin_session_id': params.get('session_id', ''),
-                'plugin_step': params.get('step_id', ''),
-                'query': str(params.get('user_input') or ctx.objective),
-                'files': all_files,
-                'history_files_per_turn': history_files_per_turn,
-                'filters': filters,
-                'user_id': str(params.get('user_id') or agentic_config.get('user_id') or '').strip(),
-                'conversation_id': str(
-                    task.get('conversation_id') or agentic_config.get('conversation_id') or ''
-                ).strip(),
-                'is_subagent': True,
-                'agent_type': effective_agent_type,
-            })
-            lazyllm.globals['agentic_config'] = agentic_config
-            # Materialize session bucket before Parallel-based tools (e.g. kb_search).
-            _ = lazyllm.globals._data
+        agentic_config = _build_agentic_config(task, params, effective_agent_type)
+        lazyllm.globals['agentic_config'] = agentic_config
+        # Materialize session bucket before Parallel-based tools (e.g. kb_search).
+        _ = lazyllm.globals._data
 
         yield _sse({'type': 'task_start', 'task_id': task_id})
 
         llm = AutoModel(model='llm')
         runtime_tools = _resolve_runtime_tools(tools, plugin_id=params.get('plugin_id') or None)
-        subagent_tools_all = _build_subagent_tools(runtime_tools)
+        attachment_configs = (
+            [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
+            if agentic_config.get('files') or agentic_config.get('history_files_per_turn')
+            else []
+        )
+        subagent_tools_all = _build_subagent_tools(runtime_tools, attachment_configs)
         runtime_configs = _tool_configs_for_runtime_tools(runtime_tools)
         plan = _build_subagent_plan(
             ctx,
             db,
             tools=subagent_tools_all,
             tool_prompt_appendices=collect_system_prompt_appendices(
-                runtime_configs + list(USER_ATTACHMENT_TOOL_CONFIGS),
+                runtime_configs + attachment_configs,
             ),
             resume=resume,
         )
