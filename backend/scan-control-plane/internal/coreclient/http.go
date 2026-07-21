@@ -85,6 +85,7 @@ func (c *HTTPCoreClient) CreateBindingRootDocument(ctx context.Context, req Crea
 	}
 	body := map[string]any{
 		"display_name":    req.Name,
+		"type":            "FOLDER",
 		"p_id":            req.ParentDocumentID,
 		"idempotency_key": req.IdempotencyKey,
 	}

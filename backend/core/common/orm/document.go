@@ -16,6 +16,7 @@ type Document struct {
 
 	DatasetID        string          `gorm:"column:dataset_id;type:varchar(255);not null;index"`
 	DisplayName      string          `gorm:"column:display_name;type:varchar(512);not null;default:''"`
+	DocumentType     string          `gorm:"column:document_type;type:varchar(64)"`
 	PID              string          `gorm:"column:p_id;type:varchar(255);not null;default:'';index"`
 	Tags             json.RawMessage `gorm:"column:tags;type:json"`
 	FileID           string          `gorm:"column:file_id;type:varchar(128);not null;default:''"`

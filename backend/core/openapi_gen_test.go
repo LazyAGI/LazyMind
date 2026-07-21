@@ -65,6 +65,33 @@ func TestOpenAPISpecCoversAllRegisteredRoutes(t *testing.T) {
 	}
 }
 
+func TestOpenAPISpecIncludesSkillMarketDelete(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+
+	for _, path := range []string{
+		"/api/core/admin/skill-market/{market_item_id}",
+		"/api/core/skill-market/admin/items/{market_item_id}",
+	} {
+		op := openAPIOperationForTest(t, spec, "delete", path)
+		if got := openAPIObjectResponseRefForTest(t, op); got != "#/components/schemas/marketDeleteOpenAPIResponse" {
+			t.Fatalf("DELETE %s response ref = %q", path, got)
+		}
+		if _, ok := openAPIParameterNamesForTest(t, op)["market_item_id"]; !ok {
+			t.Fatalf("DELETE %s missing market_item_id path parameter", path)
+		}
+	}
+}
+
 func TestOpenAPISpecIncludesDatasetSourceFilter(t *testing.T) {
 	r := mux.NewRouter()
 	registerCoreRoutes(r)

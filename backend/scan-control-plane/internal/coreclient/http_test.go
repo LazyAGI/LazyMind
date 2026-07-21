@@ -92,7 +92,7 @@ func TestHTTPCoreClientResourceRoutesUseCoreDocumentAPIs(t *testing.T) {
 	if datasetUserName != "User One" {
 		t.Fatalf("dataset create should carry caller user name, got %q", datasetUserName)
 	}
-	if rootDocBody["display_name"] != "Binding" || rootDocBody["p_id"] != "" || rootDocBody["idempotency_key"] != "binding-root-1" {
+	if rootDocBody["display_name"] != "Binding" || rootDocBody["type"] != "FOLDER" || rootDocBody["p_id"] != "" || rootDocBody["idempotency_key"] != "binding-root-1" {
 		t.Fatalf("binding root request should create a top-level Core document: %+v", rootDocBody)
 	}
 	if rootUserID != "user-1" {

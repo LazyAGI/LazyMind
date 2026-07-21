@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
+
 from core.cloud_crypto import decrypt_json, encrypt_json
 from core.database import SessionLocal
 from core.errors import AppException, ErrorCodes, raise_error
@@ -263,10 +265,15 @@ class CloudOAuthService:
         reauthorize_provider_account_id: str = '',
         reauthorize_provider_tenant_key: str = '',
         status: str = 'ACTIVE',
+        reuse_existing: bool = False,
     ) -> str:
         connection_id = self._new_connection_id()
+        normalized_owner = _normalize_owner_user_id(owner_user_id)
+        normalized_provider = (provider or '').strip().lower()
+        normalized_auth_mode = (auth_mode or '').strip().lower()
+        normalized_client_id = (client_id or '').strip()
         credential = {
-            'client_id': client_id,
+            'client_id': normalized_client_id,
             'client_secret': client_secret,
             'redirect_uri': (redirect_uri or '').strip(),
             'scope': (scope or '').strip(),
@@ -283,20 +290,82 @@ class CloudOAuthService:
             'reauthorize_provider_account_id': (reauthorize_provider_account_id or '').strip(),
             'reauthorize_provider_tenant_key': (reauthorize_provider_tenant_key or '').strip(),
         }
+        credential_ciphertext = self._encrypt_payload(credential, field_name='credential')
+        auth_state_ciphertext = self._encrypt_payload(auth_state_payload, field_name='auth_state')
+
+        def update_existing(db, row) -> str:
+            row.client_id = normalized_client_id
+            row.credential_ciphertext = credential_ciphertext
+            row.auth_state_ciphertext = auth_state_ciphertext
+            row.scope = (scope or '').strip()
+            row.status = (status or '').strip().upper() or 'ACTIVE'
+            row.last_error = ''
+            row.last_used_at = None
+            CloudAuthConnectionRepository.save(db, row)
+            return row.connection_id
+
         with SessionLocal() as db:
-            CloudAuthConnectionRepository.create(
-                db,
-                connection_id=connection_id,
-                tenant_id=_reserved_tenant_id(tenant_id),
-                owner_user_id=owner_user_id,
-                provider=(provider or '').strip().lower(),
-                auth_mode=auth_mode,
-                credential_ciphertext=self._encrypt_payload(credential, field_name='credential'),
-                auth_state_ciphertext=self._encrypt_payload(auth_state_payload, field_name='auth_state'),
-                scope=(scope or '').strip(),
-                status=status,
-                last_error='',
-            )
+            if reuse_existing:
+                row = CloudAuthConnectionRepository.find_by_client_identity(
+                    db,
+                    owner_user_id=normalized_owner,
+                    provider=normalized_provider,
+                    auth_mode=normalized_auth_mode,
+                    client_id=normalized_client_id,
+                )
+                if row is None:
+                    legacy_rows = CloudAuthConnectionRepository.list_without_client_identity(
+                        db,
+                        owner_user_id=normalized_owner,
+                        provider=normalized_provider,
+                        auth_mode=normalized_auth_mode,
+                    )
+                    for candidate in legacy_rows:
+                        try:
+                            saved_credential = self._decrypt_payload(
+                                candidate.credential_ciphertext,
+                                field_name='credential',
+                            )
+                        except AppException:
+                            continue
+                        if (saved_credential.get('client_id') or '').strip() == normalized_client_id:
+                            row = candidate
+                            break
+                if row is not None:
+                    connection_id = update_existing(db, row)
+                    self._cache_delete(connection_id)
+                    return connection_id
+
+            try:
+                CloudAuthConnectionRepository.create(
+                    db,
+                    connection_id=connection_id,
+                    tenant_id=_reserved_tenant_id(tenant_id),
+                    owner_user_id=normalized_owner,
+                    provider=normalized_provider,
+                    auth_mode=normalized_auth_mode,
+                    client_id=normalized_client_id,
+                    credential_ciphertext=credential_ciphertext,
+                    auth_state_ciphertext=auth_state_ciphertext,
+                    scope=(scope or '').strip(),
+                    status=status,
+                    last_error='',
+                )
+            except IntegrityError:
+                if not reuse_existing:
+                    raise
+                db.rollback()
+                row = CloudAuthConnectionRepository.find_by_client_identity(
+                    db,
+                    owner_user_id=normalized_owner,
+                    provider=normalized_provider,
+                    auth_mode=normalized_auth_mode,
+                    client_id=normalized_client_id,
+                )
+                if row is None:
+                    raise
+                connection_id = update_existing(db, row)
+                self._cache_delete(connection_id)
         return connection_id
 
     def _connection_payload(self, row) -> dict[str, Any]:
@@ -514,6 +583,7 @@ class CloudOAuthService:
             client_id=cid,
             client_secret=csec,
             provider_options=provider_options,
+            reuse_existing=True,
         )
         return {
             'connection_id': connection_id,
@@ -912,6 +982,7 @@ class CloudOAuthService:
                         status='REVOKED',
                     )
             if existing is not None and existing.connection_id != row.connection_id:
+                existing.client_id = row.client_id
                 existing.credential_ciphertext = row.credential_ciphertext
                 existing.auth_state_ciphertext = row.auth_state_ciphertext
                 existing.display_name = row.display_name
@@ -1142,6 +1213,21 @@ class CloudOAuthService:
             )
             normalized_client_id = (requested_client_id or '').strip()
             if requested_client_id is not None and normalized_client_id:
+                mode = (row.auth_mode or '').strip().lower()
+                if mode in {'tenant', 'service_account'}:
+                    existing = CloudAuthConnectionRepository.find_by_client_identity(
+                        db,
+                        owner_user_id=row.owner_user_id or '',
+                        provider=row.provider or '',
+                        auth_mode=mode,
+                        client_id=normalized_client_id,
+                    )
+                    if existing is not None and existing.connection_id != row.connection_id:
+                        raise_error(
+                            ErrorCodes.CLOUD_CREDENTIAL_INVALID,
+                            extra_msg='a connection with this client_id already exists',
+                        )
+                row.client_id = normalized_client_id
                 credential['client_id'] = normalized_client_id
 
             requested_client_secret = next(
