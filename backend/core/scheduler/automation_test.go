@@ -42,6 +42,22 @@ func TestReplaceDependenciesRejectsCycle(t *testing.T) {
 	}
 }
 
+func TestReplaceDependenciesRejectsMoreFrequentTarget(t *testing.T) {
+	db := automationTestDB(t)
+	now := time.Now().UTC()
+	for id, cronExpr := range map[string]string{"weekly": "0 9 * * 1", "daily": "0 9 * * *"} {
+		if err := db.Create(&orm.UserSchedule{ID: id, UserID: "u", CronExpr: cronExpr, Timezone: "UTC", PromptTemplate: id, KbIDs: "[]", FileIDs: "[]", Enabled: true, NextRunAt: now, CreatedAt: now}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := replaceDependencies(db, "u", "daily", []dependencyInput{{SourceScheduleID: "weekly"}}); err != errDependencyTooSparse {
+		t.Fatalf("expected frequency validation error, got %v", err)
+	}
+	if err := replaceDependencies(db, "u", "weekly", []dependencyInput{{SourceScheduleID: "daily"}}); err != nil {
+		t.Fatalf("expected weekly target to accept daily source: %v", err)
+	}
+}
+
 func TestFinalizeTaskOutputStoresPlainChatAnswer(t *testing.T) {
 	db := automationTestDB(t)
 	now := time.Now().UTC()

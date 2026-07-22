@@ -1274,7 +1274,7 @@ const zhCN = {
     newTask: "新建任务",
     workbench: "工作台",
     allTasks: "全部任务",
-    schedulePlans: "定时计划",
+    schedulePlans: "定时任务",
     taskDetail: "任务详情",
     openConversation: "打开任务对话",
     noDescription: "暂无任务说明",

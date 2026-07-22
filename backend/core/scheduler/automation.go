@@ -62,6 +62,16 @@ func replaceDependencies(tx *gorm.DB, userID, targetID string, deps []dependency
 		if err := tx.Model(&orm.UserSchedule{}).Where("id = ? AND user_id = ?", d.SourceScheduleID, userID).Count(&count).Error; err != nil || count == 0 {
 			return gorm.ErrRecordNotFound
 		}
+		var source, target orm.UserSchedule
+		if err := tx.Select("id", "cron_expr").Where("id = ? AND user_id = ?", d.SourceScheduleID, userID).First(&source).Error; err != nil {
+			return err
+		}
+		if err := tx.Select("id", "cron_expr").Where("id = ? AND user_id = ?", targetID, userID).First(&target).Error; err != nil {
+			return err
+		}
+		if scheduleAnnualFrequency(target.CronExpr) > scheduleAnnualFrequency(source.CronExpr) {
+			return errDependencyTooSparse
+		}
 		if wouldCreateCycle(tx, userID, d.SourceScheduleID, targetID) {
 			return errDependencyCycle
 		}
@@ -76,10 +86,29 @@ func replaceDependencies(tx *gorm.DB, userID, targetID string, deps []dependency
 }
 
 var errDependencyCycle = &dependencyError{"dependency would create a cycle"}
+var errDependencyTooSparse = &dependencyError{"target schedule must run no more frequently than its source schedule"}
 
 type dependencyError struct{ message string }
 
 func (e *dependencyError) Error() string { return e.message }
+
+func scheduleAnnualFrequency(expr string) int {
+	interval, _, cronExpr, err := parseCadenceExpr(expr)
+	if err != nil {
+		return 1 << 30
+	}
+	fields := strings.Fields(cronExpr)
+	if len(fields) != 5 {
+		return 1 << 30
+	}
+	if fields[2] != "*" {
+		return len(strings.Split(fields[2], ",")) * 12 / interval
+	}
+	if fields[4] != "*" {
+		return len(strings.Split(fields[4], ",")) * 52 / interval
+	}
+	return 365
+}
 
 func wouldCreateCycle(db *gorm.DB, userID, sourceID, targetID string) bool {
 	// Adding source -> target is invalid when target already reaches source.
@@ -255,8 +284,8 @@ func BatchCreateHandler(w http.ResponseWriter, r *http.Request) {
 			Dependencies   []dependencyInput `json:"dependencies"`
 		} `json:"tasks"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Group.Name) == "" || len(body.Tasks) == 0 {
-		common.ReplyErr(w, "group name and tasks required", 400)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Group.Name) == "" {
+		common.ReplyErr(w, "group name required", 400)
 		return
 	}
 	created := map[string]string{}

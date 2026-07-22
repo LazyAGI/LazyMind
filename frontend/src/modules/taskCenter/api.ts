@@ -200,6 +200,8 @@ export interface BatchScheduleDraft {
   remark?: string;
   cron_expr: string;
   prompt_template: string;
+  kb_ids?: string[];
+  file_ids?: string[];
   dependencies?: Array<ScheduleDependency & { source_client_key?: string }>;
 }
 

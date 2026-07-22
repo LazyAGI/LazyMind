@@ -75,28 +75,79 @@ func nextCronTime(expr, tz string) (time.Time, error) {
 	if err != nil {
 		loc = time.UTC
 	}
-	fields := strings.Fields(expr)
+	interval, cadenceUnit, cronExpr, err := parseCadenceExpr(expr)
+	if err != nil {
+		return time.Time{}, err
+	}
+	fields := strings.Fields(cronExpr)
 	if len(fields) != 5 {
 		return time.Time{}, fmt.Errorf("cron expression must have 5 fields (minute hour dom month dow)")
 	}
 	// Use a simple tick-forward: start from now + 1 minute, advance up to 1 year.
 	now := time.Now().In(loc)
 	t := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), 0, 0, loc).Add(time.Minute)
-	for i := 0; i < 525600; i++ { // max 1 year of minutes
-		if matchCron(t, fields) {
+	for i := 0; i < 5*525600; i++ { // cover long month cadences up to roughly four years
+		if matchCron(t, fields) && matchCadence(t, interval, cadenceUnit) {
 			return t, nil
 		}
 		t = t.Add(time.Minute)
 	}
-	return time.Time{}, fmt.Errorf("cron expression produces no future times within 1 year")
+	return time.Time{}, fmt.Errorf("cron expression produces no future times within 5 years")
+}
+
+func parseCadenceExpr(expr string) (int, string, string, error) {
+	if !strings.HasPrefix(expr, "@every:") {
+		return 1, "", expr, nil
+	}
+	parts := strings.SplitN(strings.TrimPrefix(expr, "@every:"), ";", 2)
+	if len(parts) != 2 {
+		return 0, "", "", fmt.Errorf("invalid cadence expression")
+	}
+	meta := strings.Split(parts[0], ":")
+	if len(meta) != 2 || (meta[1] != "week" && meta[1] != "month") {
+		return 0, "", "", fmt.Errorf("invalid cadence metadata")
+	}
+	interval, err := strconv.Atoi(meta[0])
+	if err != nil || interval < 1 || interval > 52 {
+		return 0, "", "", fmt.Errorf("cadence interval must be between 1 and 52")
+	}
+	return interval, meta[1], parts[1], nil
+}
+
+func matchCadence(t time.Time, interval int, unit string) bool {
+	if interval <= 1 {
+		return true
+	}
+	if unit == "month" {
+		return (t.Year()*12+int(t.Month())-1)%interval == 0
+	}
+	year, week := t.ISOWeek()
+	return (year*53+week-1)%interval == 0
 }
 
 func matchCron(t time.Time, fields []string) bool {
 	return matchField(fields[0], t.Minute(), 0, 59) &&
 		matchField(fields[1], t.Hour(), 0, 23) &&
-		matchField(fields[2], t.Day(), 1, 31) &&
+		matchDayOfMonth(fields[2], t) &&
 		matchField(fields[3], int(t.Month()), 1, 12) &&
 		matchField(fields[4], int(t.Weekday()), 0, 6)
+}
+
+// matchDayOfMonth additionally accepts -1 through -4 for the last through
+// fourth-to-last day of the month. This keeps month-end schedules stable across
+// months with different lengths without expanding them into multiple schedules.
+func matchDayOfMonth(field string, t time.Time) bool {
+	if matchField(field, t.Day(), 1, 31) {
+		return true
+	}
+	lastDay := time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, t.Location()).Day()
+	for _, part := range strings.Split(field, ",") {
+		offset, err := strconv.Atoi(part)
+		if err == nil && offset >= -4 && offset <= -1 && t.Day() == lastDay+offset+1 {
+			return true
+		}
+	}
+	return false
 }
 
 func matchField(field string, val, min, max int) bool {
