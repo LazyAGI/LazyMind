@@ -1474,6 +1474,48 @@ func TestSourceTreeParentKeyCanSelectSiblingBindingRoot(t *testing.T) {
 	}
 }
 
+func TestSourceTreeParentKeyPrefersRequestedBindingWhenRootsMatch(t *testing.T) {
+	t.Parallel()
+
+	base := newTreeReadRepo()
+	repo := &treeReadRepoWithObject{treeReadRepo: base}
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{
+		{
+			BindingID: "binding-1",
+			SourceID:  "source-1",
+			TreeKey:   "shared-root",
+			Status:    "DELETING",
+		},
+		{
+			BindingID: "binding-2",
+			SourceID:  "source-1",
+			TreeKey:   "shared-root",
+			Status:    "ACTIVE",
+		},
+	}
+	repo.objects = []ObjectWithState{
+		indexedObject("source-1", "binding-1", "shared-root", "old-doc", "shared-root", "Old.md", true, false),
+		indexedObject("source-1", "binding-2", "shared-root", "new-doc", "shared-root", "New.md", true, false),
+	}
+	engine := NewDBSourceTreeQueryEngine(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10})
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-2",
+		TreeKey:   "shared-root",
+		UseCache:  boolPtr(true),
+		ParentKey: "shared-root",
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list requested binding root children: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].BindingID != "binding-2" || page.Items[0].ObjectKey != "new-doc" {
+		t.Fatalf("expected children from requested binding, got %+v", page.Items)
+	}
+}
+
 func TestSourceTreeCachedChildrenExposeDocumentUpdateState(t *testing.T) {
 	t.Parallel()
 

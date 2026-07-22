@@ -287,8 +287,15 @@ func (e *DBSourceTreeQueryEngine) resolveBindingForRequestedParent(ctx context.C
 	if len(bindings) <= 1 {
 		return fallback, false, nil
 	}
-	reader, hasReader := e.repo.(sourceObjectReader)
+	ordered := make([]store.Binding, 0, len(bindings))
+	ordered = append(ordered, fallback)
 	for _, binding := range bindings {
+		if binding.BindingID != fallback.BindingID {
+			ordered = append(ordered, binding)
+		}
+	}
+	reader, hasReader := e.repo.(sourceObjectReader)
+	for _, binding := range ordered {
 		for _, ref := range refs {
 			objectKey := normalizeSourceNodeKey(ref, binding)
 			if objectKey == "" {

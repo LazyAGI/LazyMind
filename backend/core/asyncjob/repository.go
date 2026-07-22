@@ -15,7 +15,7 @@ import (
 	"lazymind/core/common/orm"
 )
 
-var ErrJobTypeRequired = errors.New("asyncjob: job_type is required")
+var ErrJobTypeRequired = errors.New("async job_type is required")
 
 var reusableStatuses = []string{
 	string(StatusPending),

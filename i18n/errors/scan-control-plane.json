@@ -1,41 +1,1234 @@
 {
-  "AGENT_NOT_AVAILABLE": { "en-US": "Agent is not available", "zh-CN": "Agent 不可用" },
-  "AGENT_NOT_FOUND": { "en-US": "Agent not found", "zh-CN": "Agent 不存在" },
-  "ALREADY_EXISTS": { "en-US": "Resource already exists", "zh-CN": "资源已存在" },
-  "AUTH_CONNECTION_INVALID": { "en-US": "Authentication connection is invalid", "zh-CN": "认证连接无效" },
-  "BINDING_INACTIVE": { "en-US": "Data source binding is inactive", "zh-CN": "数据源绑定未启用" },
-  "BINDING_NOT_FOUND": { "en-US": "Data source binding not found", "zh-CN": "数据源绑定不存在" },
-  "BINDING_TARGET_DUPLICATED": { "en-US": "Data source binding target is duplicated", "zh-CN": "数据源绑定目标重复" },
-  "CANCELED": { "en-US": "Operation was canceled", "zh-CN": "操作已取消" },
-  "CONNECTOR_NOT_FOUND": { "en-US": "Connector not found", "zh-CN": "连接器不存在" },
-  "CORE_SUBMIT_FAILED": { "en-US": "Failed to submit task to core service", "zh-CN": "向 core 服务提交任务失败" },
-  "CORE_TASK_FAILED": { "en-US": "Core service task failed", "zh-CN": "core 服务任务执行失败" },
-  "FORBIDDEN": { "en-US": "Forbidden", "zh-CN": "无权访问" },
-  "GENERATION_CONFLICT": { "en-US": "Binding generation conflict", "zh-CN": "绑定版本冲突" },
-  "IDEMPOTENCY_KEY_REUSED": { "en-US": "Idempotency key was reused with different request data", "zh-CN": "幂等键已被其他请求数据使用" },
-  "INTERNAL_ERROR": { "en-US": "Internal server error", "zh-CN": "服务器内部错误" },
-  "INVALID_ARGUMENT": { "en-US": "Invalid argument", "zh-CN": "参数无效" },
-  "INVALID_REQUEST": { "en-US": "Invalid request", "zh-CN": "请求无效" },
-  "INVALID_TARGET": { "en-US": "Invalid data source target", "zh-CN": "数据源目标无效" },
-  "NOT_FOUND": { "en-US": "Resource not found", "zh-CN": "资源不存在" },
-  "OBJECT_NOT_FOUND": { "en-US": "Source object not found", "zh-CN": "源对象不存在" },
-  "PARSE_BATCH_OBJECT_LIMIT_EXCEEDED": { "en-US": "Parse batch object limit exceeded", "zh-CN": "解析批次对象数量超过限制" },
-  "PERMISSION_DENIED": { "en-US": "Permission denied", "zh-CN": "权限不足" },
-  "RATE_LIMITED": { "en-US": "Request rate limit exceeded", "zh-CN": "请求频率超过限制" },
-  "RESULT_TOO_LARGE": { "en-US": "Result is too large", "zh-CN": "结果数据过大" },
-  "SOURCE_NOT_FOUND": { "en-US": "Data source not found", "zh-CN": "数据源不存在" },
-  "SOURCE_VERSION_CONFLICT": { "en-US": "Data source version conflict", "zh-CN": "数据源版本冲突" },
-  "TARGET_NOT_FOUND": { "en-US": "Data source target not found", "zh-CN": "数据源目标不存在" },
-  "TASK_NOT_FOUND": { "en-US": "Task not found", "zh-CN": "任务不存在" },
-  "TASK_NOT_RETRYABLE": { "en-US": "Task cannot be retried", "zh-CN": "任务无法重试" },
-  "TASK_SUPERSEDED": { "en-US": "Task has been superseded", "zh-CN": "任务已被新任务取代" },
-  "TRANSIENT": { "en-US": "Temporary service error", "zh-CN": "临时服务错误" },
-  "TRANSIENT_SOURCE_ERROR": { "en-US": "Temporary data source error", "zh-CN": "数据源暂时不可用" },
-  "UNAUTHORIZED": { "en-US": "Unauthorized", "zh-CN": "未认证" },
-  "UNKNOWN": { "en-US": "Unknown error", "zh-CN": "未知错误" },
-  "UNSUPPORTED": { "en-US": "Operation is not supported", "zh-CN": "不支持该操作" },
-  "UNSUPPORTED_DELTA": { "en-US": "Incremental synchronization is not supported", "zh-CN": "不支持增量同步" },
-  "UNSUPPORTED_EXPORT": { "en-US": "Export operation is not supported", "zh-CN": "不支持导出操作" },
-  "UNSUPPORTED_LIST_MODE": { "en-US": "List mode is not supported", "zh-CN": "不支持该列表模式" },
-  "VERSION_MISMATCH": { "en-US": "Source object version mismatch", "zh-CN": "源对象版本不匹配" }
+  "ACCESS_CHECKER_NOT_CONFIGURED": {
+    "en-US": "Access checker is not configured",
+    "zh-CN": "访问检查器未配置"
+  },
+  "ACCESS_STORE_NOT_CONFIGURED": {
+    "en-US": "Access store is not configured",
+    "zh-CN": "访问控制存储未配置"
+  },
+  "ACCESS_TOKEN_IS_EMPTY": {
+    "en-US": "Access token is empty",
+    "zh-CN": "访问令牌为空"
+  },
+  "ACTION_MUST_BE_READ_WRITE_UPLOAD_OR_DELETE": {
+    "en-US": "Action: must be read, write, upload, or delete",
+    "zh-CN": "操作类型必须是 read、write、upload 或 delete"
+  },
+  "ADDRESS_REQUIRED": {
+    "en-US": "Address is required",
+    "zh-CN": "监听地址为必填项"
+  },
+  "ADMIN_SERVICE_NOT_CONFIGURED": {
+    "en-US": "Admin service is not configured",
+    "zh-CN": "管理服务未配置"
+  },
+  "AGENT_BASE_URL_MUST_INCLUDE_SCHEME_AND_HOST": {
+    "en-US": "Agent base URL must include a scheme and host",
+    "zh-CN": "Agent 基础 URL 必须包含协议和主机名"
+  },
+  "AGENT_BASE_URL_REQUIRED": {
+    "en-US": "Agent base url is required",
+    "zh-CN": "Agent 基础 URL为必填项"
+  },
+  "AGENT_CLIENT_NOT_CONFIGURED": {
+    "en-US": "Agent client is not configured",
+    "zh-CN": "Agent 客户端未配置"
+  },
+  "AGENT_COMMAND_NOT_FOUND": {
+    "en-US": "Agent command not found",
+    "zh-CN": "Agent 命令不存在"
+  },
+  "AGENT_ID_AND_PATH_ARE_REQUIRED_TO_BUILD_OBJECT_KEY": {
+    "en-US": "Agent_id and path are required to build object_key",
+    "zh-CN": "生成 object_key 需要 agent_id 和 path"
+  },
+  "AGENT_ID_AND_PATH_PROVIDER_META_ARE_REQUIRED": {
+    "en-US": "Agent_id and path provider meta are required",
+    "zh-CN": "提供方元数据中必须包含 agent_id 和 path"
+  },
+  "AGENT_ID_REQUIRED": {
+    "en-US": "Agent_id is required",
+    "zh-CN": "agent_id为必填项"
+  },
+  "AGENT_NOT_AVAILABLE": {
+    "en-US": "Agent is not available",
+    "zh-CN": "Agent 不可用"
+  },
+  "AGENT_NOT_FOUND": {
+    "en-US": "Agent not found",
+    "zh-CN": "Agent 不存在"
+  },
+  "AGENT_STORE_NOT_CONFIGURED": {
+    "en-US": "Agent store is not configured",
+    "zh-CN": "Agent 存储未配置"
+  },
+  "AGENT_TOKEN_NOT_CONFIGURED": {
+    "en-US": "Agent token is not configured",
+    "zh-CN": "Agent 令牌未配置"
+  },
+  "ALREADY_EXISTS": {
+    "en-US": "Resource already exists",
+    "zh-CN": "资源已存在"
+  },
+  "APPLY_RUNTIME_SCHEMA_REPAIR": {
+    "en-US": "Failed to apply the runtime schema repair",
+    "zh-CN": "应用运行时数据库结构修复失败"
+  },
+  "APPLY_SCAN_CONTROL_PLANE_BASELINE_MIGRATION_FAILED": {
+    "en-US": "Failed to apply the scan-control-plane baseline migration",
+    "zh-CN": "应用 Scan Control Plane 基线迁移失败"
+  },
+  "AUTH_CONNECTION_CLIENT_NOT_CONFIGURED": {
+    "en-US": "Auth connection client is not configured",
+    "zh-CN": "认证连接客户端未配置"
+  },
+  "AUTH_CONNECTION_ID_REQUIRED": {
+    "en-US": "Auth_connection_id is required",
+    "zh-CN": "auth_connection_id为必填项"
+  },
+  "AUTH_CONNECTION_INVALID": {
+    "en-US": "Authentication connection is invalid",
+    "zh-CN": "认证连接无效"
+  },
+  "AUTH_CONNECTION_VERIFIER_NOT_CONFIGURED": {
+    "en-US": "Auth connection verifier is not configured",
+    "zh-CN": "认证连接校验器未配置"
+  },
+  "AUTH_SERVICE_ADMIN_VERIFIER_NOT_CONFIGURED": {
+    "en-US": "Auth service admin verifier is not configured",
+    "zh-CN": "认证服务管理员校验器未配置"
+  },
+  "AUTH_SERVICE_BASE_URL_REQUIRED": {
+    "en-US": "Auth service base url is required",
+    "zh-CN": "认证服务基础 URL为必填项"
+  },
+  "AUTH_SERVICE_INTERNAL_TOKEN_REQUIRED": {
+    "en-US": "Auth service internal token is required",
+    "zh-CN": "认证服务内部令牌为必填项"
+  },
+  "AUTH_SERVICE_VALIDATE_FAILED": {
+    "en-US": "Auth service validate failed",
+    "zh-CN": "认证服务校验失败"
+  },
+  "BASE_URL_MUST_INCLUDE_SCHEME_AND_HOST": {
+    "en-US": "Base URL must include a scheme and host",
+    "zh-CN": "基础 URL 必须包含协议和主机名"
+  },
+  "BEGIN_SCAN_CONTROL_PLANE_DB_BOOTSTRAP": {
+    "en-US": "Failed to begin the scan-control-plane database bootstrap",
+    "zh-CN": "启动 Scan Control Plane 数据库初始化事务失败"
+  },
+  "BINDINGS_AT_LEAST_ONE_BINDING_REQUIRED": {
+    "en-US": "Bindings: at least one binding is required",
+    "zh-CN": "至少需要一个数据源绑定"
+  },
+  "BINDING_CLEANUP_PENDING": {
+    "en-US": "Data source binding cleanup is still pending",
+    "zh-CN": "数据源绑定仍在清理中"
+  },
+  "BINDING_DOES_NOT_BELONG_TO_SOURCE": {
+    "en-US": "The binding does not belong to the data source",
+    "zh-CN": "该绑定不属于此数据源"
+  },
+  "BINDING_GENERATION_CHANGED": {
+    "en-US": "Binding generation changed",
+    "zh-CN": "绑定代次已变更"
+  },
+  "BINDING_GENERATION_MUST_BE_POSITIVE": {
+    "en-US": "Binding_generation must be positive",
+    "zh-CN": "binding_generation必须为正数"
+  },
+  "BINDING_GENERATION_STALE": {
+    "en-US": "Data source binding generation is stale",
+    "zh-CN": "数据源绑定代次已过期"
+  },
+  "BINDING_IDENTITY_REQUIRED": {
+    "en-US": "Binding identity is required",
+    "zh-CN": "绑定标识为必填项"
+  },
+  "BINDING_ID_REQUIRED": {
+    "en-US": "binding_id is required",
+    "zh-CN": "缺少 binding_id"
+  },
+  "BINDING_ID_REQUIRED_WHEN_SOURCE_HAS_MULTIPLE_BINDINGS": {
+    "en-US": "Binding_id is required when source has multiple bindings",
+    "zh-CN": "数据源有多个绑定时必须提供 binding_id"
+  },
+  "BINDING_INACTIVE": {
+    "en-US": "Data source binding is inactive",
+    "zh-CN": "数据源绑定未启用"
+  },
+  "BINDING_NOT_FOUND": {
+    "en-US": "Data source binding not found",
+    "zh-CN": "数据源绑定不存在"
+  },
+  "BINDING_NOT_DELETING": {
+    "en-US": "Data source binding is not being deleted",
+    "zh-CN": "数据源绑定不处于删除状态"
+  },
+  "BINDING_SYNC_MODE_FILE_EVENTS_UNSUPPORTED": {
+    "en-US": "The binding sync mode does not support file events",
+    "zh-CN": "该绑定的同步模式不支持文件事件"
+  },
+  "BINDING_TARGET_DUPLICATED": {
+    "en-US": "Data source binding target is duplicated",
+    "zh-CN": "数据源绑定目标重复"
+  },
+  "CALENDAR_MUST_BE_WEEKLY": {
+    "en-US": "Calendar must be weekly",
+    "zh-CN": "调度日历必须为 weekly"
+  },
+  "CALLER_ID_REQUIRED": {
+    "en-US": "Caller_id is required",
+    "zh-CN": "caller_id为必填项"
+  },
+  "CANCELED": {
+    "en-US": "Operation was canceled",
+    "zh-CN": "操作已取消"
+  },
+  "CHAT_ENABLED_REQUIRED": {
+    "en-US": "Chat_enabled is required",
+    "zh-CN": "chat_enabled为必填项"
+  },
+  "CHILD_OBJECT_DEPTH_INVALID": {
+    "en-US": "Child source object depth must be positive",
+    "zh-CN": "子级源对象深度必须为正数"
+  },
+  "COMMIT_SCAN_CONTROL_PLANE_DB_BOOTSTRAP": {
+    "en-US": "Failed to commit the scan-control-plane database bootstrap",
+    "zh-CN": "提交 Scan Control Plane 数据库初始化事务失败"
+  },
+  "COMPENSATION_POLL_INTERVAL_MUST_BE_POSITIVE": {
+    "en-US": "Compensation poll interval must be positive",
+    "zh-CN": "补偿轮询间隔必须为正数"
+  },
+  "CONFIGURE_AGENT_CLIENT": {
+    "en-US": "Failed to configure the Agent client",
+    "zh-CN": "配置 Agent 客户端失败"
+  },
+  "CONFIGURE_AUTH_SERVICE_ADMIN_VERIFIER": {
+    "en-US": "Failed to configure the auth service administrator verifier",
+    "zh-CN": "配置认证服务管理员校验器失败"
+  },
+  "CONFIGURE_AUTH_SERVICE_CLIENT": {
+    "en-US": "Failed to configure the auth service client",
+    "zh-CN": "配置认证服务客户端失败"
+  },
+  "CONFIGURE_CORE_CLIENT": {
+    "en-US": "Failed to configure the Core service client",
+    "zh-CN": "配置 Core 服务客户端失败"
+  },
+  "CONFIGURE_FEISHU_CLIENT": {
+    "en-US": "Failed to configure the Feishu client",
+    "zh-CN": "配置飞书客户端失败"
+  },
+  "CONFIGURE_TARGET_SEARCH_CACHE_STATE_REDIS": {
+    "en-US": "Failed to configure Redis for target search cache state",
+    "zh-CN": "为目标搜索缓存状态配置 Redis 失败"
+  },
+  "CONFIGURE_TARGET_SEARCH_CACHE_STATE_SQLITE": {
+    "en-US": "Failed to configure SQLite for target search cache state",
+    "zh-CN": "为目标搜索缓存状态配置 SQLite 失败"
+  },
+  "CONNECTOR_DOES_NOT_SUPPORT_SEARCH": {
+    "en-US": "The connector does not support search",
+    "zh-CN": "该连接器不支持搜索"
+  },
+  "CONNECTOR_IS_ALREADY_REGISTERED": {
+    "en-US": "Connector is already registered",
+    "zh-CN": "connector已注册"
+  },
+  "CONNECTOR_IS_NIL": {
+    "en-US": "Connector is nil",
+    "zh-CN": "connector未初始化"
+  },
+  "CONNECTOR_NOT_FOUND": {
+    "en-US": "Connector not found",
+    "zh-CN": "连接器不存在"
+  },
+  "CONNECTOR_REGISTRY_NOT_CONFIGURED": {
+    "en-US": "Connector registry is not configured",
+    "zh-CN": "连接器注册表未配置"
+  },
+  "CONNECTOR_TYPE_DOES_NOT_MATCH_CONNECTOR_SPEC": {
+    "en-US": "connector_type does not match the connector specification",
+    "zh-CN": "connector_type 与连接器规格不匹配"
+  },
+  "CONNECTOR_TYPE_MUST_BE_LOCAL_FS": {
+    "en-US": "connector_type must be local_fs",
+    "zh-CN": "connector_type 必须为 local_fs"
+  },
+  "CONNECTOR_TYPE_REQUIRED": {
+    "en-US": "Connector_type is required",
+    "zh-CN": "connector_type为必填项"
+  },
+  "CONNECTOR_TYPE_UNSUPPORTED": {
+    "en-US": "Connector type is not supported",
+    "zh-CN": "不支持该连接器类型"
+  },
+  "CONTENT_STORE_REQUIRED_TO_OPEN_CONTENT_URI": {
+    "en-US": "Content store is required to open content_uri",
+    "zh-CN": "打开 content_uri 需要配置内容存储"
+  },
+  "CONTENT_URI_IS_NOT_A_VALID_FILE_URI": {
+    "en-US": "Content_uri is not a valid file uri",
+    "zh-CN": "content_uri 不是有效的文件 URI"
+  },
+  "CONTENT_URI_MUST_USE_FILE_OR_SCAN_TEMP_SCHEME": {
+    "en-US": "Content_uri must use file or scan-temp scheme",
+    "zh-CN": "content_uri 必须使用 file 或 scan-temp 协议"
+  },
+  "CONTENT_URI_MUST_USE_SCAN_TEMP_SCHEME": {
+    "en-US": "Content_uri must use scan-temp scheme",
+    "zh-CN": "content_uri 必须使用 scan-temp 协议"
+  },
+  "CONTENT_URI_OR_CONTENT_READER_REQUIRED_FOR_CREATE": {
+    "en-US": "Content_uri or content reader is required for create",
+    "zh-CN": "创建时必须提供 content_uri 或内容读取器"
+  },
+  "CONTENT_URI_OR_CONTENT_READER_REQUIRED_FOR_REPARSE": {
+    "en-US": "Content_uri or content reader is required for reparse",
+    "zh-CN": "重新解析时必须提供 content_uri 或内容读取器"
+  },
+  "CONTENT_URI_REQUIRED": {
+    "en-US": "Content_uri is required",
+    "zh-CN": "content_uri为必填项"
+  },
+  "CORE_BASE_URL_MUST_INCLUDE_SCHEME_AND_HOST": {
+    "en-US": "Core service base URL must include a scheme and host",
+    "zh-CN": "Core 服务基础 URL 必须包含协议和主机名"
+  },
+  "CORE_BASE_URL_REQUIRED": {
+    "en-US": "Core base url is required",
+    "zh-CN": "Core 服务基础 URL为必填项"
+  },
+  "CORE_CLIENT_DOES_NOT_SUPPORT_DATASET_DELETION": {
+    "en-US": "The Core service client does not support dataset deletion",
+    "zh-CN": "Core 服务客户端不支持删除数据集"
+  },
+  "CORE_CREATE_BINDING_ROOT_RETURNED_EMPTY_DOCUMENT_ID": {
+    "en-US": "Core service returned an empty document_id when creating the binding root",
+    "zh-CN": "Core 服务创建绑定根节点时返回了空的 document_id"
+  },
+  "CORE_CREATE_TASK_RETURNED_EMPTY_TASK_ID": {
+    "en-US": "Core service returned an empty task_id when creating a task",
+    "zh-CN": "Core 服务创建任务时返回了空的 task_id"
+  },
+  "CORE_RESULT_POLL_INTERVAL_MUST_BE_POSITIVE": {
+    "en-US": "Core result poll interval must be positive",
+    "zh-CN": "Core 结果轮询间隔必须为正数"
+  },
+  "CORE_RESULT_RECONCILER_REQUIRED": {
+    "en-US": "Core result reconciler is required",
+    "zh-CN": "Core 结果协调器为必填项"
+  },
+  "CORE_SUBMIT_FAILED": {
+    "en-US": "Failed to submit task to core service",
+    "zh-CN": "向 core 服务提交任务失败"
+  },
+  "CORE_TASK_FAILED": {
+    "en-US": "Core service task failed",
+    "zh-CN": "core 服务任务执行失败"
+  },
+  "CORE_TASK_NOT_FOUND": {
+    "en-US": "Core task not found",
+    "zh-CN": "Core 任务不存在"
+  },
+  "CORE_UPLOAD_RETURNED_EMPTY_UPLOAD_FILE_ID": {
+    "en-US": "Core service returned an empty upload_file_id after upload",
+    "zh-CN": "Core 服务上传后返回了空的 upload_file_id"
+  },
+  "COULD_NOT_ALLOCATE_TEMP_OBJECT_TOKEN": {
+    "en-US": "Could not allocate temp object token",
+    "zh-CN": "无法分配临时对象令牌"
+  },
+  "CRAWL_LIST_REQUEST_INTERVAL_MUST_BE_NON_NEGATIVE": {
+    "en-US": "Crawl list request interval must be non-negative",
+    "zh-CN": "抓取列表请求间隔不能为负数"
+  },
+  "CRAWL_REQUEST_KIND_IS_UNSUPPORTED": {
+    "en-US": "Crawl request kind is unsupported",
+    "zh-CN": "不支持该抓取请求类型"
+  },
+  "CURRENT_LEVEL_HAS_MORE_ITEMS_THAN_MAX_ITEMS": {
+    "en-US": "Current level has more items than max_items",
+    "zh-CN": "当前层级的项目数量超过 max_items"
+  },
+  "CURSOR_IS_INVALID": {
+    "en-US": "Cursor is invalid",
+    "zh-CN": "cursor无效"
+  },
+  "CURSOR_MUST_BE_EMPTY_FOR_ALL_CURRENT_LEVEL": {
+    "en-US": "Cursor must be empty for all_current_level",
+    "zh-CN": "使用 all_current_level 时 cursor 必须为空"
+  },
+  "DATASET_ID_AND_CORE_TASK_ID_ARE_REQUIRED": {
+    "en-US": "Dataset_id and core_task_id are required",
+    "zh-CN": "必须提供 dataset_id 和 core_task_id"
+  },
+  "DATASET_ID_AND_DISPLAY_NAME_ARE_REQUIRED": {
+    "en-US": "Dataset_id and display_name are required",
+    "zh-CN": "必须提供 dataset_id 和 display_name"
+  },
+  "DATASET_ID_REQUIRED": {
+    "en-US": "Dataset_id is required",
+    "zh-CN": "dataset_id为必填项"
+  },
+  "DATA_SOURCE_NAME_ALREADY_EXISTS": {
+    "en-US": "A data source with this name already exists",
+    "zh-CN": "已存在同名数据源"
+  },
+  "DAYS_MUST_NOT_BE_EMPTY": {
+    "en-US": "Days must not be empty",
+    "zh-CN": "星期列表不能为空"
+  },
+  "DB_DRIVER_MUST_BE_POSTGRES_OR_SQLITE": {
+    "en-US": "Db driver must be postgres or sqlite",
+    "zh-CN": "数据库驱动必须是 postgres 或 sqlite"
+  },
+  "DB_DSN_REQUIRED": {
+    "en-US": "Db dsn is required",
+    "zh-CN": "数据库 DSN为必填项"
+  },
+  "DB_JOB_QUEUE_STORE_REQUIRED": {
+    "en-US": "Db job queue store is required",
+    "zh-CN": "数据库任务队列存储为必填项"
+  },
+  "DB_OPENER_REQUIRED_FOR_SQL_REPOSITORY": {
+    "en-US": "A database opener is required for the SQL repository",
+    "zh-CN": "SQL 仓储需要数据库连接器"
+  },
+  "DEAD_LETTER_NOT_FOUND": {
+    "en-US": "Dead-letter task not found",
+    "zh-CN": "死信任务不存在"
+  },
+  "DECODE_FEISHU_API_DATA_FAILED": {
+    "en-US": "Decode feishu api data failed",
+    "zh-CN": "解析飞书 API 数据失败"
+  },
+  "DECODE_FEISHU_API_RESPONSE_FAILED": {
+    "en-US": "Decode feishu api response failed",
+    "zh-CN": "解析飞书 API 响应失败"
+  },
+  "DECODE_NOTION_API_RESPONSE_FAILED": {
+    "en-US": "Failed to decode the Notion API response",
+    "zh-CN": "解析 Notion API 响应失败"
+  },
+  "DEFAULT_DATASET_ALGO_ID_REQUIRED": {
+    "en-US": "Default dataset algo id is required",
+    "zh-CN": "默认数据集算法 ID为必填项"
+  },
+  "DEFAULT_DATASET_ALGO_NAME_REQUIRED": {
+    "en-US": "Default dataset algo name is required",
+    "zh-CN": "默认数据集算法名称为必填项"
+  },
+  "DELETE_TASK_IS_OBSOLETE": {
+    "en-US": "Delete task is obsolete",
+    "zh-CN": "delete task已失效"
+  },
+  "DISPLAY_NAME_REQUIRED": {
+    "en-US": "Display_name is required",
+    "zh-CN": "display_name为必填项"
+  },
+  "DOCUMENT_CHANGED": {
+    "en-US": "Document changed",
+    "zh-CN": "document已变更"
+  },
+  "DOCUMENT_ID_REQUIRED": {
+    "en-US": "Document_id is required",
+    "zh-CN": "document_id为必填项"
+  },
+  "DOCUMENT_NOT_FOUND": {
+    "en-US": "Document not found",
+    "zh-CN": "文档不存在"
+  },
+  "DOCUMENT_STATE_GENERATION_IS_STALE": {
+    "en-US": "Document state generation is stale",
+    "zh-CN": "文档状态代次已过期"
+  },
+  "DOCUMENT_STATE_HAS_NO_PENDING_ACTION": {
+    "en-US": "The document state has no pending action",
+    "zh-CN": "文档状态中没有待执行操作"
+  },
+  "DOCUMENT_STATE_INSERT_NOT_VISIBLE": {
+    "en-US": "Inserted document state is not visible",
+    "zh-CN": "新写入的文档状态不可见"
+  },
+  "DOCUMENT_STATE_NOT_FOUND": {
+    "en-US": "Document state not found",
+    "zh-CN": "文档状态不存在"
+  },
+  "DRIVE_OBJECT_IS_NOT_FOUND_IN_TARGET": {
+    "en-US": "The drive object was not found in the target",
+    "zh-CN": "目标中不存在该云盘对象"
+  },
+  "DRIVE_SHORTCUT_TARGET_IS_MISSING": {
+    "en-US": "The drive shortcut target is missing",
+    "zh-CN": "云盘快捷方式缺少目标对象"
+  },
+  "DRIVE_TOKEN_REQUIRED": {
+    "en-US": "Drive token is required",
+    "zh-CN": "飞书云盘令牌为必填项"
+  },
+  "DROP_LEGACY_SCAN_CONTROL_PLANE_TABLE_FAILED": {
+    "en-US": "Failed to drop a legacy scan-control-plane table",
+    "zh-CN": "删除旧版 Scan Control Plane 数据表失败"
+  },
+  "ENSURE_SCAN_CONTROL_PLANE_MIGRATION_MARKER_TABLE": {
+    "en-US": "Failed to ensure the scan-control-plane migration marker table",
+    "zh-CN": "创建或检查 Scan Control Plane 迁移标记表失败"
+  },
+  "EXPORTED_VERSION_CHANGED": {
+    "en-US": "Exported version changed",
+    "zh-CN": "导出版本已变更"
+  },
+  "EXPORTED_VERSION_DOES_NOT_MATCH_REQUESTED_SOURCE_VERSION": {
+    "en-US": "The exported version does not match the requested source_version",
+    "zh-CN": "导出版本与请求的 source_version 不匹配"
+  },
+  "FEISHU_API_RETURNED_NON_JSON_RESPONSE": {
+    "en-US": "Feishu API returned a non-JSON response",
+    "zh-CN": "飞书 API 返回了非 JSON 响应"
+  },
+  "FEISHU_BASE_URL_REQUIRED": {
+    "en-US": "Feishu base url is required",
+    "zh-CN": "飞书基础 URL为必填项"
+  },
+  "FEISHU_CLIENTS_ARE_NOT_CONFIGURED": {
+    "en-US": "Feishu clients are not configured",
+    "zh-CN": "飞书客户端未配置"
+  },
+  "FEISHU_PAGINATION_CURSOR_IS_EMPTY": {
+    "en-US": "Feishu pagination cursor is empty",
+    "zh-CN": "飞书分页游标为空"
+  },
+  "FILE_URI_MUST_BE_LOCAL": {
+    "en-US": "File uri must be local",
+    "zh-CN": "文件 URI 必须指向本地文件"
+  },
+  "FORBIDDEN": {
+    "en-US": "Forbidden",
+    "zh-CN": "无权访问"
+  },
+  "GENERATE_TASKS_MAX_OBJECTS_PER_REQUEST_MUST_BE_POSITIVE": {
+    "en-US": "Generate tasks max objects per request must be positive",
+    "zh-CN": "单次任务生成的最大对象数必须为正数"
+  },
+  "GENERATION_CONFLICT": {
+    "en-US": "Binding generation conflict",
+    "zh-CN": "绑定版本冲突"
+  },
+  "IDEMPOTENCY_KEY_DATASET_ID_AND_NAME_ARE_REQUIRED": {
+    "en-US": "Idempotency_key, dataset_id, and name are required",
+    "zh-CN": "必须提供 idempotency_key、dataset_id 和 name"
+  },
+  "IDEMPOTENCY_KEY_NAME_AND_CREATED_BY_ARE_REQUIRED": {
+    "en-US": "Idempotency_key, name, and created_by are required",
+    "zh-CN": "必须提供 idempotency_key、name 和 created_by"
+  },
+  "IDEMPOTENCY_KEY_REUSED": {
+    "en-US": "Idempotency key was reused with different request data",
+    "zh-CN": "幂等键已被其他请求数据使用"
+  },
+  "INTERNAL_ERROR": {
+    "en-US": "Internal server error",
+    "zh-CN": "服务器内部错误"
+  },
+  "INVALID_AGENT_TOKEN": {
+    "en-US": "Invalid agent token",
+    "zh-CN": "Agent 令牌无效"
+  },
+  "INVALID_ARGUMENT": {
+    "en-US": "Invalid argument",
+    "zh-CN": "参数无效"
+  },
+  "INVALID_JSON_REQUEST_BODY": {
+    "en-US": "Invalid JSON request body",
+    "zh-CN": "请求体不是有效的 JSON"
+  },
+  "INVALID_REQUEST": {
+    "en-US": "Invalid request",
+    "zh-CN": "请求无效"
+  },
+  "INVALID_SCAN_TEMP_TOKEN": {
+    "en-US": "Invalid scan temporary token",
+    "zh-CN": "Scan 临时令牌无效"
+  },
+  "INVALID_SCAN_TEMP_URI": {
+    "en-US": "Invalid scan temporary URI",
+    "zh-CN": "Scan 临时 URI 无效"
+  },
+  "INVALID_TARGET": {
+    "en-US": "Invalid data source target",
+    "zh-CN": "数据源目标无效"
+  },
+  "INVALID_TIME_TOKEN": {
+    "en-US": "Invalid time token",
+    "zh-CN": "时间值无效"
+  },
+  "KEYWORD_REQUIRED": {
+    "en-US": "Keyword is required",
+    "zh-CN": "搜索关键词为必填项"
+  },
+  "LIST_MODE_UNSUPPORTED_FOR_SEARCH": {
+    "en-US": "list_mode is not supported for search",
+    "zh-CN": "搜索不支持该 list_mode"
+  },
+  "LIST_SCAN_CONTROL_PLANE_COLUMNS": {
+    "en-US": "Failed to list scan-control-plane columns",
+    "zh-CN": "查询 Scan Control Plane 数据列失败"
+  },
+  "LIST_SCAN_CONTROL_PLANE_TABLES": {
+    "en-US": "Failed to list scan-control-plane tables",
+    "zh-CN": "查询 Scan Control Plane 数据表失败"
+  },
+  "LOCAL_DATA_SOURCES_CAN_ONLY_BE_ACCESSED_BY_ADMINISTRATORS": {
+    "en-US": "Local data sources can only be accessed by administrators",
+    "zh-CN": "仅管理员可以访问本地数据源"
+  },
+  "LOCAL_FS_AGENT_CLIENT_NOT_CONFIGURED": {
+    "en-US": "Local_fs agent client is not configured",
+    "zh-CN": "local_fs Agent 客户端未配置"
+  },
+  "LOCAL_FS_PAGINATION_CURSOR_IS_EMPTY": {
+    "en-US": "Local_fs pagination cursor is empty",
+    "zh-CN": "local_fs 分页游标为空"
+  },
+  "LOCAL_FS_ROOT_PAGINATION_CURSOR_IS_EMPTY": {
+    "en-US": "Local_fs root pagination cursor is empty",
+    "zh-CN": "local_fs 根目录分页游标为空"
+  },
+  "LOCAL_FS_TARGET_SEARCH_CACHE_PREWARM_FAILED": {
+    "en-US": "Local_fs target search cache prewarm failed",
+    "zh-CN": "local_fs 目标搜索缓存预热失败"
+  },
+  "LOCK_SCAN_CONTROL_PLANE_DB_BOOTSTRAP": {
+    "en-US": "Failed to lock the scan-control-plane database bootstrap",
+    "zh-CN": "锁定 Scan Control Plane 数据库初始化失败"
+  },
+  "MARSHAL_OPENAPI_YAML_FAILED": {
+    "en-US": "Marshal openapi yaml failed",
+    "zh-CN": "序列化 OpenAPI YAML 失败"
+  },
+  "MAX_ITEMS_EXCEEDS_SERVICE_LIMIT": {
+    "en-US": "Max_items exceeds service limit",
+    "zh-CN": "max_items 超过服务限制"
+  },
+  "MAX_ITEMS_REQUIRED_FOR_ALL_CURRENT_LEVEL": {
+    "en-US": "Max_items is required for all_current_level",
+    "zh-CN": "使用 all_current_level 时必须提供 max_items"
+  },
+  "MAX_PAGE_SIZE_MUST_BE_POSITIVE": {
+    "en-US": "Max_page_size must be positive",
+    "zh-CN": "max_page_size必须为正数"
+  },
+  "MIGRATE_SQLITE_REPOSITORY": {
+    "en-US": "Failed to migrate the SQLite repository",
+    "zh-CN": "迁移 SQLite 仓储失败"
+  },
+  "MISSING_CALLER": {
+    "en-US": "Missing caller",
+    "zh-CN": "缺少调用方身份"
+  },
+  "MUST_BE_A_JSON_OBJECT": {
+    "en-US": "Must be a json object",
+    "zh-CN": "必须是 JSON 对象"
+  },
+  "MUST_USE_HH_MM_SS": {
+    "en-US": "Must use hh:mm:ss",
+    "zh-CN": "时间格式必须为 hh:mm:ss"
+  },
+  "NAME_REQUIRED": {
+    "en-US": "Name is required",
+    "zh-CN": "名称为必填项"
+  },
+  "NAME_SUPPORTS_CHINESE_ENGLISH_NUMBERS_UP_TO_100_CHARACTERS": {
+    "en-US": "Name: supports chinese/english, numbers, -, _, ., up to 100 characters",
+    "zh-CN": "名称仅支持中英文、数字、-、_、.，且最多 100 个字符"
+  },
+  "NOTION_API_REQUEST_FAILED": {
+    "en-US": "The Notion API request failed",
+    "zh-CN": "Notion API 请求失败"
+  },
+  "NOTION_EXPORT_CONTENT_IS_EMPTY": {
+    "en-US": "Notion export content is empty",
+    "zh-CN": "Notion 导出内容为空"
+  },
+  "NOTION_OBJECT_ID_REQUIRED": {
+    "en-US": "Notion object id is required",
+    "zh-CN": "Notion 对象 ID为必填项"
+  },
+  "NOT_FOUND": {
+    "en-US": "Resource not found",
+    "zh-CN": "资源不存在"
+  },
+  "NO_DUE_PARSE_TASK": {
+    "en-US": "No parse task is due",
+    "zh-CN": "当前没有到期的解析任务"
+  },
+  "OBJECT_IS_NOT_EXPORTABLE": {
+    "en-US": "The object cannot be exported",
+    "zh-CN": "该对象不可导出"
+  },
+  "OBJECT_IS_NOT_SELECTABLE": {
+    "en-US": "The object cannot be selected",
+    "zh-CN": "该对象不可选择"
+  },
+  "OBJECT_KEY_DOES_NOT_INCLUDE_A_LOCAL_PATH": {
+    "en-US": "object_key does not include a local path",
+    "zh-CN": "object_key 中不包含本地路径"
+  },
+  "OBJECT_KEY_REQUIRED": {
+    "en-US": "Object_key is required",
+    "zh-CN": "object_key为必填项"
+  },
+  "OBJECT_NOT_FOUND": {
+    "en-US": "Source object not found",
+    "zh-CN": "源对象不存在"
+  },
+  "OBJECT_PARENT_SELF_REFERENCE": {
+    "en-US": "A source object cannot be its own parent",
+    "zh-CN": "源对象不能将自身设为父对象"
+  },
+  "OPEN_SQL_REPOSITORY": {
+    "en-US": "Failed to open the SQL repository",
+    "zh-CN": "打开 SQL 仓储失败"
+  },
+  "OPERATION_COMPENSATION_NOT_RETRYABLE": {
+    "en-US": "Operation compensation cannot be retried",
+    "zh-CN": "操作补偿无法重试"
+  },
+  "OPERATION_NOT_FOUND": {
+    "en-US": "Operation not found",
+    "zh-CN": "操作记录不存在"
+  },
+  "ORM_REPOSITORY_NOT_INITIALIZED": {
+    "en-US": "Database repository is not initialized",
+    "zh-CN": "数据库仓储未初始化"
+  },
+  "PAGE_SIZE_EXCEEDS_CONNECTOR_MAX_PAGE_SIZE": {
+    "en-US": "Page_size exceeds connector max_page_size",
+    "zh-CN": "page_size 超过连接器的 max_page_size"
+  },
+  "PAGE_SIZE_MUST_BE_POSITIVE": {
+    "en-US": "Page_size must be positive",
+    "zh-CN": "page_size必须为正数"
+  },
+  "PARENT_DOCUMENT_ID_REQUIRED_FOR_CREATE": {
+    "en-US": "Parent_document_id is required for create",
+    "zh-CN": "创建时必须提供 parent_document_id"
+  },
+  "PARSE_ACTION_UNSUPPORTED": {
+    "en-US": "Parse action is not supported",
+    "zh-CN": "不支持该解析操作"
+  },
+  "PARSE_BATCH_OBJECT_LIMIT_EXCEEDED": {
+    "en-US": "Parse batch object limit exceeded",
+    "zh-CN": "解析批次对象数量超过限制"
+  },
+  "PARSE_DEAD_LETTER_AFTER_MUST_BE_POSITIVE": {
+    "en-US": "Parse dead letter after must be positive",
+    "zh-CN": "解析任务死信阈值必须为正数"
+  },
+  "PARSE_TASK_GENERATION_IS_STALE": {
+    "en-US": "Parse task generation is stale",
+    "zh-CN": "解析任务代次已过期"
+  },
+  "PARSE_TASK_IDEMPOTENCY_KEY_DATASET_ID_DISPLAY_NAME_AND_ACTION_ARE_REQUIRED": {
+    "en-US": "Parse task idempotency_key, dataset_id, display_name, and action are required",
+    "zh-CN": "解析任务必须提供 idempotency_key、dataset_id、display_name 和 action"
+  },
+  "PARSE_TASK_IS_OBSOLETE": {
+    "en-US": "Parse task is obsolete",
+    "zh-CN": "parse task已失效"
+  },
+  "PARSE_TASK_QUERY_NOT_CONFIGURED": {
+    "en-US": "Parse task query is not configured",
+    "zh-CN": "解析任务查询服务未配置"
+  },
+  "PARSE_WORKER_GLOBAL_CONCURRENCY_MUST_BE_POSITIVE": {
+    "en-US": "Parse worker global concurrency must be positive",
+    "zh-CN": "解析 Worker 全局并发数必须为正数"
+  },
+  "PARSE_WORKER_REQUIRED": {
+    "en-US": "Parse worker is required",
+    "zh-CN": "解析 Worker为必填项"
+  },
+  "PARSE_WORKER_SOURCE_CONCURRENCY_MUST_BE_POSITIVE": {
+    "en-US": "Parse worker source concurrency must be positive",
+    "zh-CN": "解析 Worker 单数据源并发数必须为正数"
+  },
+  "PATH_IS_OUTSIDE_LOCAL_FS_PUBLIC_ROOT": {
+    "en-US": "Path is outside local_fs public root",
+    "zh-CN": "路径超出 local_fs 公共根目录"
+  },
+  "PERMISSION_DENIED": {
+    "en-US": "Permission denied",
+    "zh-CN": "权限不足"
+  },
+  "PORT_MUST_BE_BETWEEN_1_AND_65535": {
+    "en-US": "Port must be between 1 and 65535",
+    "zh-CN": "端口必须在 1 到 65535 之间"
+  },
+  "PROVIDER_OBJECT_KIND_IS_UNSUPPORTED": {
+    "en-US": "Provider object kind is unsupported",
+    "zh-CN": "不支持提供方对象类型"
+  },
+  "PROVIDER_OBJECT_KIND_REQUIRED": {
+    "en-US": "Provider object kind is required",
+    "zh-CN": "提供方对象类型为必填项"
+  },
+  "PROVIDER_OPTION_REQUIRED": {
+    "en-US": "A required provider option is missing",
+    "zh-CN": "缺少必需的提供方配置项"
+  },
+  "PROVIDER_TOKEN_REQUIRED": {
+    "en-US": "Provider token is required",
+    "zh-CN": "提供方令牌为必填项"
+  },
+  "RATE_LIMITED": {
+    "en-US": "Request rate limit exceeded",
+    "zh-CN": "请求频率超过限制"
+  },
+  "READ_SCAN_CONTROL_PLANE_BASELINE_MIGRATION_FAILED": {
+    "en-US": "Failed to read the scan-control-plane baseline migration",
+    "zh-CN": "读取 Scan Control Plane 基线迁移失败"
+  },
+  "READ_SCAN_CONTROL_PLANE_MIGRATION_MARKER": {
+    "en-US": "Failed to read the scan-control-plane migration marker",
+    "zh-CN": "读取 Scan Control Plane 迁移标记失败"
+  },
+  "RECORD_SCAN_CONTROL_PLANE_MIGRATION_MARKER": {
+    "en-US": "Failed to record the scan-control-plane migration marker",
+    "zh-CN": "记录 Scan Control Plane 迁移标记失败"
+  },
+  "REDIS_PING_FAILED": {
+    "en-US": "Redis ping failed",
+    "zh-CN": "redis ping失败"
+  },
+  "REDIS_URL_MUST_NOT_BE_CONFIGURED_WHEN_LAZYMIND_STATE_BACKEND_SQLITE": {
+    "en-US": "Redis url must not be configured when lazymind_state_backend=sqlite",
+    "zh-CN": "lazymind_state_backend=sqlite 时不能配置 Redis URL"
+  },
+  "REDIS_URL_SCHEME_MUST_BE_REDIS": {
+    "en-US": "Redis url scheme must be redis",
+    "zh-CN": "Redis URL 协议必须是 redis"
+  },
+  "REQUEST_ID_IS_ALREADY_IN_PROGRESS": {
+    "en-US": "A request with this request_id is already in progress",
+    "zh-CN": "该 request_id 对应的请求正在处理中"
+  },
+  "REQUEST_ID_REQUIRED": {
+    "en-US": "Request_id is required",
+    "zh-CN": "request_id为必填项"
+  },
+  "REQUEST_ID_WAS_REUSED_WITH_A_DIFFERENT_PAYLOAD": {
+    "en-US": "request_id was reused with a different payload",
+    "zh-CN": "request_id 被用于不同的请求内容"
+  },
+  "RESULT_JSON_INVALID": {
+    "en-US": "Result JSON is invalid",
+    "zh-CN": "结果 JSON 无效"
+  },
+  "RESULT_TOO_LARGE": {
+    "en-US": "Result is too large",
+    "zh-CN": "结果数据过大"
+  },
+  "RULES_MUST_NOT_BE_EMPTY": {
+    "en-US": "Rules must not be empty",
+    "zh-CN": "调度规则不能为空"
+  },
+  "ROOT_OBJECT_DEPTH_INVALID": {
+    "en-US": "Root source object depth must be 0",
+    "zh-CN": "根源对象深度必须为 0"
+  },
+  "SCAN_CONTROL_PLANE_DATABASE_STATE_UNSUPPORTED": {
+    "en-US": "The scan-control-plane database state is not supported",
+    "zh-CN": "不支持当前 Scan Control Plane 数据库状态"
+  },
+  "SCAN_SCAN_CONTROL_PLANE_COLUMN": {
+    "en-US": "Failed to scan a scan-control-plane column",
+    "zh-CN": "读取 Scan Control Plane 数据列失败"
+  },
+  "SCAN_SCAN_CONTROL_PLANE_COLUMNS": {
+    "en-US": "Failed to scan scan-control-plane columns",
+    "zh-CN": "读取 Scan Control Plane 数据列集合失败"
+  },
+  "SCAN_SCAN_CONTROL_PLANE_TABLE": {
+    "en-US": "Failed to scan a scan-control-plane table",
+    "zh-CN": "读取 Scan Control Plane 数据表失败"
+  },
+  "SCAN_SCAN_CONTROL_PLANE_TABLES": {
+    "en-US": "Failed to scan scan-control-plane tables",
+    "zh-CN": "读取 Scan Control Plane 数据表集合失败"
+  },
+  "SCAN_TEMP_OBJECT_NOT_FOUND": {
+    "en-US": "Scan temp object not found",
+    "zh-CN": "Scan 临时对象不存在"
+  },
+  "SCHEDULE_DAY_UNSUPPORTED": {
+    "en-US": "The schedule contains an unsupported day",
+    "zh-CN": "调度计划中包含不支持的星期值"
+  },
+  "SCHEDULE_ENGINE_NOT_CONFIGURED": {
+    "en-US": "Schedule engine is not configured",
+    "zh-CN": "调度引擎未配置"
+  },
+  "SCHEDULE_NEXT_SYNC_TIME_NOT_FOUND": {
+    "en-US": "The schedule policy produced no next synchronization time",
+    "zh-CN": "调度策略无法生成下一次同步时间"
+  },
+  "SCHEDULE_POLICY_INVALID": {
+    "en-US": "Schedule policy is invalid",
+    "zh-CN": "调度策略无效"
+  },
+  "SCHEDULE_POLICY_MUST_BE_VALID_JSON": {
+    "en-US": "Schedule_policy must be valid json",
+    "zh-CN": "schedule_policy 必须是有效的 JSON"
+  },
+  "SCHEDULE_POLICY_REQUIRED": {
+    "en-US": "Schedule_policy is required",
+    "zh-CN": "schedule_policy为必填项"
+  },
+  "SCHEDULE_POLICY_REQUIRED_FOR_SCHEDULED_SYNC": {
+    "en-US": "Schedule_policy: required for scheduled sync",
+    "zh-CN": "定时同步必须提供 schedule_policy"
+  },
+  "SCHEDULE_RULE_INVALID": {
+    "en-US": "A schedule rule is invalid",
+    "zh-CN": "调度规则无效"
+  },
+  "SCHEDULE_TIMEZONE_UNSUPPORTED": {
+    "en-US": "Schedule timezone is not supported",
+    "zh-CN": "不支持该调度时区"
+  },
+  "SEARCH_NAME_REQUIRED": {
+    "en-US": "search_name is required",
+    "zh-CN": "缺少 search_name"
+  },
+  "SCHEDULE_TIME_INVALID": {
+    "en-US": "Schedule time is invalid",
+    "zh-CN": "调度时间无效"
+  },
+  "SCOPE_TYPE_UNSUPPORTED": {
+    "en-US": "Scope_type is not supported",
+    "zh-CN": "不支持scope_type"
+  },
+  "SOURCE_DOCUMENT_ID_REQUIRED_FOR_DELETE": {
+    "en-US": "Source_document_id is required for delete",
+    "zh-CN": "删除时必须提供 source_document_id"
+  },
+  "SOURCE_DOCUMENT_ID_REQUIRED_FOR_REPARSE": {
+    "en-US": "Source_document_id is required for reparse",
+    "zh-CN": "重新解析时必须提供 source_document_id"
+  },
+  "SOURCE_DOCUMENT_QUERY_NOT_CONFIGURED": {
+    "en-US": "Source document query is not configured",
+    "zh-CN": "源文档查询服务未配置"
+  },
+  "SOURCE_ENGINE_NOT_CONFIGURED": {
+    "en-US": "Source engine is not configured",
+    "zh-CN": "数据源引擎未配置"
+  },
+  "SOURCE_ID_REQUIRED": {
+    "en-US": "Source_id is required",
+    "zh-CN": "source_id为必填项"
+  },
+  "SOURCE_IS_NOT_ACTIVE": {
+    "en-US": "Source is not active",
+    "zh-CN": "source未启用"
+  },
+  "SOURCE_NOT_FOUND": {
+    "en-US": "Data source not found",
+    "zh-CN": "数据源不存在"
+  },
+  "SOURCE_READ_REFRESH_FAILED": {
+    "en-US": "Source read refresh failed",
+    "zh-CN": "刷新数据源读取状态失败"
+  },
+  "SOURCE_TREE_CONNECTOR_REGISTRY_NOT_CONFIGURED": {
+    "en-US": "Source tree connector registry is not configured",
+    "zh-CN": "源树连接器注册表未配置"
+  },
+  "SOURCE_TREE_QUERY_ENGINE_NOT_CONFIGURED": {
+    "en-US": "Source tree query engine is not configured",
+    "zh-CN": "源树查询引擎未配置"
+  },
+  "SOURCE_VERSION_CHANGED": {
+    "en-US": "Source version changed",
+    "zh-CN": "数据源版本已变更"
+  },
+  "SOURCE_VERSION_CONFLICT": {
+    "en-US": "Data source version conflict",
+    "zh-CN": "数据源版本冲突"
+  },
+  "SOURCE_VERSION_REQUIRED": {
+    "en-US": "Source_version is required",
+    "zh-CN": "source_version为必填项"
+  },
+  "SPACE_ID_REQUIRED": {
+    "en-US": "Space_id is required",
+    "zh-CN": "space_id为必填项"
+  },
+  "STATE_GENERATION_CHANGED": {
+    "en-US": "State generation changed",
+    "zh-CN": "状态代次已变更"
+  },
+  "STATUS_UNSUPPORTED": {
+    "en-US": "Status is not supported",
+    "zh-CN": "不支持该状态"
+  },
+  "SYNC_MODE_REQUIRED": {
+    "en-US": "Sync_mode is required",
+    "zh-CN": "sync_mode为必填项"
+  },
+  "SYNC_MODE_UNSUPPORTED": {
+    "en-US": "sync_mode is not supported",
+    "zh-CN": "不支持该 sync_mode"
+  },
+  "SYNC_CHECKPOINT_GENERATION_STALE": {
+    "en-US": "Synchronization checkpoint generation is stale",
+    "zh-CN": "同步检查点代次已过期"
+  },
+  "SYNC_CHECKPOINT_NOT_FOUND": {
+    "en-US": "Synchronization checkpoint not found",
+    "zh-CN": "同步检查点不存在"
+  },
+  "SYNC_RUN_COVERAGE_IS_INCOMPLETE": {
+    "en-US": "Synchronization run coverage is incomplete",
+    "zh-CN": "本次同步运行的覆盖范围不完整"
+  },
+  "SYNC_RUN_DID_NOT_SUCCEED": {
+    "en-US": "The synchronization run did not succeed",
+    "zh-CN": "本次同步运行未成功完成"
+  },
+  "SYNC_RUN_DOES_NOT_MATCH_SOURCE_BINDING": {
+    "en-US": "The synchronization run does not match the data source binding",
+    "zh-CN": "同步运行与数据源绑定不匹配"
+  },
+  "SYNC_RUN_GENERATION_IS_STALE": {
+    "en-US": "Sync run generation is stale",
+    "zh-CN": "同步运行代次已过期"
+  },
+  "SYNC_RUN_NOT_FOUND": {
+    "en-US": "Synchronization run not found",
+    "zh-CN": "同步运行不存在"
+  },
+  "TARGET_CACHE_PAGINATION_CURSOR_DID_NOT_ADVANCE": {
+    "en-US": "Target cache pagination cursor did not advance",
+    "zh-CN": "目标缓存分页游标未向后推进"
+  },
+  "TARGET_CACHE_PAGINATION_CURSOR_IS_EMPTY": {
+    "en-US": "Target cache pagination cursor is empty",
+    "zh-CN": "目标缓存分页游标为空"
+  },
+  "TARGET_NOT_FOUND": {
+    "en-US": "Data source target not found",
+    "zh-CN": "数据源目标不存在"
+  },
+  "TARGET_PATH_IS_NOT_READABLE": {
+    "en-US": "Target path is not readable",
+    "zh-CN": "目标路径不可读"
+  },
+  "TARGET_PATH_IS_OUTSIDE_ALLOWED_PREFIXES": {
+    "en-US": "Target path is outside allowed prefixes",
+    "zh-CN": "目标路径不在允许的路径前缀内"
+  },
+  "TARGET_PATH_IS_OUTSIDE_LOCAL_FS_PUBLIC_ROOT": {
+    "en-US": "Target path is outside local_fs public root",
+    "zh-CN": "目标路径超出 local_fs 公共根目录"
+  },
+  "TARGET_PATH_MUST_BE_ABSOLUTE_AFTER_AGENT_NORMALIZATION": {
+    "en-US": "Target path must be absolute after agent normalization",
+    "zh-CN": "Agent 规范化后的目标路径必须是绝对路径"
+  },
+  "TARGET_PATH_WAS_NOT_FOUND": {
+    "en-US": "Target path was not found",
+    "zh-CN": "目标路径不存在"
+  },
+  "TARGET_REF_REQUIRED": {
+    "en-US": "Target_ref is required",
+    "zh-CN": "target_ref为必填项"
+  },
+  "TARGET_SEARCH_CACHE_BUILD_FAILED": {
+    "en-US": "Target search cache build failed",
+    "zh-CN": "构建目标搜索缓存失败"
+  },
+  "TARGET_SEARCH_CACHE_PREWARM_FAILED": {
+    "en-US": "Target search cache prewarm failed",
+    "zh-CN": "目标搜索缓存预热失败"
+  },
+  "TARGET_SEARCH_CACHE_PREWARM_INTERVAL_MUST_BE_POSITIVE": {
+    "en-US": "Target search cache prewarm interval must be positive",
+    "zh-CN": "目标搜索缓存预热间隔必须为正数"
+  },
+  "TARGET_SEARCH_CACHE_PREWARM_STAGGER_MUST_BE_POSITIVE": {
+    "en-US": "Target search cache prewarm stagger must be positive",
+    "zh-CN": "目标搜索缓存预热错峰间隔必须为正数"
+  },
+  "TARGET_SEARCH_CACHE_STATE_BACKEND_UNSUPPORTED": {
+    "en-US": "Target search cache state backend is not supported",
+    "zh-CN": "不支持该目标搜索缓存状态后端"
+  },
+  "TARGET_TREE_ENGINE_NOT_CONFIGURED": {
+    "en-US": "Target tree engine is not configured",
+    "zh-CN": "目标树引擎未配置"
+  },
+  "TARGET_TYPES_REQUIRED": {
+    "en-US": "Target_types is required",
+    "zh-CN": "target_types为必填项"
+  },
+  "TARGET_TYPE_REQUIRED": {
+    "en-US": "Target_type is required",
+    "zh-CN": "target_type为必填项"
+  },
+  "TARGET_TYPE_UNSUPPORTED": {
+    "en-US": "Target_type is not supported",
+    "zh-CN": "不支持target_type"
+  },
+  "TASK_NOT_FOUND": {
+    "en-US": "Task not found",
+    "zh-CN": "任务不存在"
+  },
+  "TASK_NOT_RETRYABLE": {
+    "en-US": "Task cannot be retried",
+    "zh-CN": "任务无法重试"
+  },
+  "TASK_PLANNER_NOT_CONFIGURED": {
+    "en-US": "Task planner is not configured",
+    "zh-CN": "任务规划器未配置"
+  },
+  "TASK_SUPERSEDED": {
+    "en-US": "Task has been superseded",
+    "zh-CN": "任务已被新任务取代"
+  },
+  "TASK_WAS_REPLACED": {
+    "en-US": "Task was replaced",
+    "zh-CN": "task已被替换"
+  },
+  "TEMP_DIR_REQUIRED": {
+    "en-US": "Temp dir is required",
+    "zh-CN": "临时目录为必填项"
+  },
+  "TEMP_OBJECT_READER_REQUIRED": {
+    "en-US": "Temp object reader is required",
+    "zh-CN": "临时对象读取器为必填项"
+  },
+  "TEMP_OBJECT_STORE_IS_NIL": {
+    "en-US": "Temp object store is nil",
+    "zh-CN": "临时对象存储未初始化"
+  },
+  "TEMP_OBJECT_STORE_REQUIRED_FOR_FEISHU_EXPORT": {
+    "en-US": "Temporary object storage is required for Feishu export",
+    "zh-CN": "飞书导出需要临时对象存储"
+  },
+  "TEMP_OBJECT_STORE_REQUIRED_FOR_LOCAL_FS_EXPORT": {
+    "en-US": "Temporary object storage is required for local_fs export",
+    "zh-CN": "local_fs 导出需要临时对象存储"
+  },
+  "TEMP_OBJECT_STORE_REQUIRED_FOR_NOTION_EXPORT": {
+    "en-US": "Temporary object storage is required for Notion export",
+    "zh-CN": "Notion 导出需要临时对象存储"
+  },
+  "TEMP_TTL_MUST_BE_POSITIVE": {
+    "en-US": "Temp ttl must be positive",
+    "zh-CN": "临时对象 TTL必须为正数"
+  },
+  "TIMEZONE_REQUIRED": {
+    "en-US": "Timezone is required",
+    "zh-CN": "时区为必填项"
+  },
+  "TRANSIENT": {
+    "en-US": "Temporary service error",
+    "zh-CN": "临时服务错误"
+  },
+  "TRANSIENT_SOURCE_ERROR": {
+    "en-US": "Temporary data source error",
+    "zh-CN": "数据源暂时不可用"
+  },
+  "TREE_KEY_REQUIRED": {
+    "en-US": "tree_key is required",
+    "zh-CN": "缺少 tree_key"
+  },
+  "UNAUTHORIZED": {
+    "en-US": "Unauthorized",
+    "zh-CN": "未认证"
+  },
+  "UNEXPECTED_HTTP_STATUS": {
+    "en-US": "The upstream service returned an unexpected HTTP status",
+    "zh-CN": "上游服务返回了非预期的 HTTP 状态码"
+  },
+  "UNKNOWN": {
+    "en-US": "Unknown error",
+    "zh-CN": "未知错误"
+  },
+  "UNKNOWN_SCAN_CONTROL_PLANE_DATABASE_SCHEMA_DETECTED_REFUSING_TO_RESET_AUTOMATICALLY": {
+    "en-US": "Unknown scan-control-plane database schema detected; refusing to reset automatically",
+    "zh-CN": "检测到未知的 Scan Control Plane 数据库结构，已拒绝自动重置"
+  },
+  "UNSUPPORTED": {
+    "en-US": "Operation is not supported",
+    "zh-CN": "不支持该操作"
+  },
+  "UNSUPPORTED_DELTA": {
+    "en-US": "Incremental synchronization is not supported",
+    "zh-CN": "不支持增量同步"
+  },
+  "UNSUPPORTED_EXPORT": {
+    "en-US": "Export operation is not supported",
+    "zh-CN": "不支持导出操作"
+  },
+  "UNSUPPORTED_EXPORT_FORMAT": {
+    "en-US": "The requested export format is not supported",
+    "zh-CN": "不支持请求的导出格式"
+  },
+  "UNSUPPORTED_LIST_MODE": {
+    "en-US": "List mode is not supported",
+    "zh-CN": "不支持该列表模式"
+  },
+  "USER_ID_REQUIRED": {
+    "en-US": "User_id is required",
+    "zh-CN": "user_id为必填项"
+  },
+  "VERSION_MISMATCH": {
+    "en-US": "Source object version mismatch",
+    "zh-CN": "源对象版本不匹配"
+  },
+  "WIKI_NODE_REF_IS_INVALID": {
+    "en-US": "Wiki node ref is invalid",
+    "zh-CN": "wiki node ref无效"
+  },
+  "WIKI_SPACES_PAGINATION_CURSOR_IS_EMPTY": {
+    "en-US": "Wiki spaces pagination cursor is empty",
+    "zh-CN": "Wiki 空间分页游标为空"
+  },
+  "WIKI_SPACE_ID_AND_NODE_TOKEN_ARE_REQUIRED": {
+    "en-US": "Wiki space_id and node token are required",
+    "zh-CN": "必须提供 Wiki space_id 和节点令牌"
+  },
+  "WIKI_SPACE_ID_REQUIRED": {
+    "en-US": "Wiki space_id is required",
+    "zh-CN": "Wiki space_id为必填项"
+  },
+  "WIKI_SPACE_IS_NOT_FOUND": {
+    "en-US": "Wiki space is not found",
+    "zh-CN": "wiki space不存在"
+  },
+  "WIKI_TARGET_REF_MUST_INCLUDE_SPACE_ID_AND_NODE_TOKEN": {
+    "en-US": "Wiki target_ref must include space_id and node_token",
+    "zh-CN": "Wiki target_ref 必须包含 space_id 和 node_token"
+  },
+  "WORKER_LEASE_TTL_MUST_BE_POSITIVE": {
+    "en-US": "Worker lease ttl must be positive",
+    "zh-CN": "Worker 租约 TTL必须为正数"
+  },
+  "WORKER_MAX_BACKOFF_MUST_BE_POSITIVE": {
+    "en-US": "Worker max backoff must be positive",
+    "zh-CN": "Worker 最大退避时间必须为正数"
+  },
+  "WORKER_POLL_INTERVAL_MUST_BE_POSITIVE": {
+    "en-US": "Worker poll interval must be positive",
+    "zh-CN": "Worker 轮询间隔必须为正数"
+  }
 }

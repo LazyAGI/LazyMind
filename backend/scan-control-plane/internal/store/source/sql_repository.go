@@ -268,7 +268,6 @@ WHERE rowid IN (
 	return r.orm.Exec(statement).Error
 }
 
-
 func (r *SQLRepository) ormDB(ctx context.Context) *gorm.DB {
 	if r.orm == nil {
 		return nil
@@ -360,7 +359,15 @@ func (r *SQLRepository) Migrate(ctx context.Context) error {
 	if r.orm == nil {
 		return nil
 	}
-	return r.orm.WithContext(ctx).Exec(
+	for _, statement := range []string{
 		"ALTER TABLE source_bindings ADD COLUMN IF NOT EXISTS chat_enabled BOOLEAN NOT NULL DEFAULT TRUE",
-	).Error
+		"ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_binding_id_fkey",
+		"ALTER TABLE parse_tasks DROP CONSTRAINT IF EXISTS parse_tasks_binding_id_fkey",
+		"ALTER TABLE source_sync_runs DROP CONSTRAINT IF EXISTS source_sync_runs_binding_id_fkey",
+	} {
+		if err := r.orm.WithContext(ctx).Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
