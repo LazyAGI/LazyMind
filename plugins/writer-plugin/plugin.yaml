@@ -36,8 +36,7 @@ steps:
   - id: build_context
   - id: generate_outline
   - id: plan_sections
-  - id: generate_draft
-  - id: finalize_report
+  - id: generate_document
 
 slots:
   - id: writing_task
@@ -53,6 +52,10 @@ slots:
     type: text
     cardinality: single
     summary_max_chars: 600
+  - id: context_ir
+    label: Context Result
+    type: file
+    cardinality: single
   - id: writing_context_after_outline
     label: Writing Context After Outline
     type: text
@@ -70,6 +73,10 @@ slots:
   - id: section_instructions
     label: Section Instructions
     type: text
+    cardinality: single
+  - id: section_plan_ir
+    label: Section Plan Result
+    type: file
     cardinality: single
   - id: draft_blocks
     label: Draft Blocks
@@ -96,7 +103,7 @@ ui:
       label: Context
       layout: list
       slots:
-        - id: writing_context
+        - id: context_ir
 
     - id: outline
       step_id: generate_outline
@@ -110,43 +117,36 @@ ui:
       label: Plan Sections
       layout: list
       slots:
-        - id: section_instructions
-
-    - id: draft
-      step_id: generate_draft
-      label: Draft
-      layout: list
-      slots:
-        - id: draft_document
+        - id: section_plan_ir
 
     - id: result
-      step_id: finalize_report
-      label: Final Report
+      step_id: generate_document
+      label: Final Document
       layout: list
       slots:
-        - id: final_document_md
+        - id: final_document
 
 i18n:
   zh-CN:
     name: AI 写作
     steps:
-      build_context: {label: 意图解析}
+      build_context: {label: 构造上下文}
       generate_outline: {label: 生成大纲}
       plan_sections: {label: 规划章节}
-      generate_draft: {label: 撰写初稿}
-      finalize_report: {label: 最终成稿}
+      generate_document: {label: 撰写成稿}
     tabs:
       context: {label: 构造上下文}
       outline: {label: 生成大纲}
       plan_sections: {label: 规划章节}
-      draft: {label: 生成初稿}
-      result: {label: 最终成稿}
+      result: {label: 撰写成稿}
     slots:
       writing_task: {label: 写作任务}
       resource_profiles: {label: 资源画像}
       writing_context: {label: 写作上下文}
+      context_ir: {label: 上下文构造结果}
       outline: {label: 大纲}
       section_instructions: {label: 章节规划}
+      section_plan_ir: {label: 章节规划结果}
       draft_blocks: {label: 章节草稿}
       draft_document: {label: 完整初稿}
       final_document: {label: 最终成稿}

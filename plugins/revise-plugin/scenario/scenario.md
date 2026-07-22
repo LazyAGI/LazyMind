@@ -11,11 +11,11 @@ single internal document representation and PatchSet as the modification contrac
 2. **build_context** — build and display the revision context from the immutable
    source IR and the user's request without changing the document.
 3. **revise_document** — locate the requested scope, generate a PatchSet, apply
-   it to source_ir, and expose the resulting WriterDocument as candidate_ir.
-4. **write_back** — translate the same PatchSet into provider-native block
-   operations, write it to Feishu, and re-read the persisted WriterDocument.
+   it to source_ir and keep the resulting WriterDocument as internal candidate_ir, translate
+   the same PatchSet into provider-native block operations, write it to Feishu,
+   and re-read the persisted WriterDocument.
 
-Feishu is never modified by `load_document`, `build_context`, or `revise_document`.
+Feishu is modified only by `revise_document`, after the local candidate is generated.
 
 ## Intent Recognition
 
@@ -37,9 +37,8 @@ without document mutation, or requests without a Feishu target document.
 ### Current interaction boundary
 
 The current version executes one revision request from source document through
-write-back without an intermediate human-edit or confirmation branch. candidate_ir
-is for displaying the generated result only. Direct user editing will be added as
-a separate capability with an explicit way to produce a new PatchSet.
+write-back without an intermediate confirmation branch. candidate_ir remains an
+internal local artifact; the UI displays synced_snapshot re-read from Feishu.
 
 ## Feishu authorization
 
@@ -52,9 +51,9 @@ After the condition is fixed, retry `load_document`.
 ## Artifact contract
 
 - `source_ir` is immutable and records the initially loaded document.
-- `candidate_ir` is the WriterDocument preview produced by applying patch_set locally.
+- `candidate_ir` is the internal WriterDocument produced by applying patch_set locally.
 - `patch_set` is the only modification contract used for remote write-back.
-- `synced_snapshot` is created only after successful final write-back.
+- `synced_snapshot` is created only after successful write-back and is the IR displayed by the UI.
 
 All structured artifacts are passed as file paths, following writer-plugin:
 `get_artifact` returns a path, plugin-local tools read it, and their returned
@@ -67,5 +66,5 @@ trip. The LazyLLM adapter decides which structural operations are supported;
 unsupported operations must be rejected instead of being flattened or silently
 losing formatting.
 
-The plugin passes source_ir and patch_set to WriterResourceTools. It does not
-inspect NativePatchOperation and does not call FeishuFS directly.
+The revise_document tool passes source_ir and patch_set to WriterResourceTools.
+It does not inspect NativePatchOperation and does not call FeishuFS directly.

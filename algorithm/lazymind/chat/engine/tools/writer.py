@@ -13,6 +13,8 @@ from lazyllm.tools.writer.data_models import (
     InputResource,
     SectionInstruction,
     TargetDocument,
+    WriterBlock,
+    WriterDocument,
     WritingTask,
 )
 from lazyllm.tools.writer.tools import (
@@ -37,6 +39,24 @@ def writer_schema(name: str) -> str:
 def writer_artifact_schema(name: str) -> str:
     """Return the schema identifier used by non-model writer artifacts."""
     return f'{WRITER_ARTIFACT_SCHEMA_PREFIX}.{name}'
+
+
+def build_writer_status_ir(status: str, content: str, *, source: str) -> str:
+    """Build a non-editable WriterDocument for a UI-visible workflow status."""
+    document = WriterDocument(
+        document_id=f'{source}-status-{status}',
+        stage='final',
+        blocks=[WriterBlock(
+            node_id=f'{source}-status-{status}-message',
+            type='paragraph',
+            content=content,
+            stage='final',
+            editable=False,
+        )],
+        metadata={'source': source, 'kind': 'step_status', 'status': status},
+        ui_editable=False,
+    )
+    return document.model_dump_json()
 
 
 def _json_dumps(value: Any) -> str:

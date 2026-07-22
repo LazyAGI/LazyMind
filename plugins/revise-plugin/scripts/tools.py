@@ -12,12 +12,17 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from lazyllm.tools.writer.data_models import TargetDocument
+from lazyllm.tools.writer.data_models import TargetDocument, WriterDocument
 from lazyllm.tools.writer.tools import WriterResourceTools
 from lazyllm.tools.writer.utils import save_artifact_json
 
 from lazymind.chat.engine.subagent.context import require_context
-from lazymind.chat.engine.tools.writer import WriterRevisionToolkit, WriterToolkitBase, writer_schema
+from lazymind.chat.engine.tools.writer import (
+    WriterRevisionToolkit,
+    WriterToolkitBase,
+    build_writer_status_ir,
+    writer_schema,
+)
 
 
 _FEISHU_URL_RE = re.compile(
@@ -55,6 +60,12 @@ def _json_loads(value: str, default: Any = None) -> Any:
         return default
     result = json.loads(text)
     return result.get('data') if isinstance(result, dict) and 'data' in result else result
+
+
+def _writer_document_json(value: str, *, ui_editable: bool) -> str:
+    document = WriterDocument.model_validate(_json_loads(value, {}))
+    document.ui_editable = ui_editable
+    return document.model_dump_json()
 
 
 def _save_json_artifact(
@@ -97,7 +108,8 @@ def revise_load_document(user_input: str) -> dict:
 
     return {
         'source_ir': _save_json_artifact(
-            'source_ir', loaded_document_json, WriterToolkitBase.WRITER_IR_SCHEMA, directory=root,
+            'source_ir', _writer_document_json(loaded_document_json, ui_editable=False),
+            WriterToolkitBase.WRITER_IR_SCHEMA, directory=root,
         ),
     }
 
@@ -120,11 +132,21 @@ def revise_build_context(user_input: str, source_ir_path: str) -> dict:
         'revision_context': _save_json_artifact(
             'revision_context', context_json, writer_schema('context.WritingContext'), directory=root,
         ),
+        'revision_context_ir': _save_json_artifact(
+            'revision_context_ir',
+            build_writer_status_ir(
+                'context_ready',
+                '已成功构造写作修改上下文',
+                source='revise-plugin',
+            ),
+            WriterToolkitBase.WRITER_IR_SCHEMA,
+            directory=root,
+        ),
     }
 
 
 def revise_generate_revision(base_ir_path: str, revision_context_path: str, query: str) -> dict:
-    """Delegate the complete revision pipeline to common writer tools."""
+    """Revise the document, write the PatchSet to Feishu, and return all artifacts."""
     root = _run_root('revision')
     writer = WriterRevisionToolkit()
     base_ir = _read_json_string(base_ir_path)
@@ -153,6 +175,19 @@ def revise_generate_revision(base_ir_path: str, revision_context_path: str, quer
         writing_context_json=context,
     ), {})
 
+    write_back = WriterResourceTools(
+        llm=None,
+        artifact_store=str(root),
+    ).apply_patch_to_document(
+        source_document=_read_json_file(base_ir_path),
+        patch_set=_json_loads(patch_set, {}),
+    )
+    write_result_json = _read_json_string(_result_path(write_back))
+    artifact_paths = (write_back.get('metadata') or {}).get('artifact_paths') or {}
+    persisted_document_path = str(artifact_paths.get('persisted_document') or '')
+    if not persisted_document_path:
+        raise ValueError(f'LazyLLM writer tool did not return persisted_document: {write_back!r}')
+
     return {
         'revise_task': _save_json_artifact(
             'revise_task', task, writer_schema('task.WritingTask'), directory=root,
@@ -171,33 +206,19 @@ def revise_generate_revision(base_ir_path: str, revision_context_path: str, quer
             writer_schema('revision.PatchResult'), directory=root,
         ),
         'candidate_ir': _save_json_artifact(
-            'candidate_ir', json.dumps(applied.get('revised_document') or {}, ensure_ascii=False),
+            'candidate_ir', _writer_document_json(
+                json.dumps(applied.get('revised_document') or {}, ensure_ascii=False),
+                ui_editable=True,
+            ),
             WriterToolkitBase.WRITER_IR_SCHEMA, directory=root,
         ),
-    }
-
-
-def revise_write_back(source_ir_path: str, patch_set_path: str) -> dict:
-    """Apply the generated PatchSet to Feishu and return the persisted WriterDocument."""
-    root = _run_root('write-back')
-    result = WriterResourceTools(
-        llm=None,
-        artifact_store=str(root),
-    ).apply_patch_to_document(
-        source_document=_read_json_file(source_ir_path),
-        patch_set=_read_json_file(patch_set_path),
-    )
-    write_result_json = _read_json_string(_result_path(result))
-    artifact_paths = (result.get('metadata') or {}).get('artifact_paths') or {}
-    persisted_document_path = str(artifact_paths.get('persisted_document') or '')
-    if not persisted_document_path:
-        raise ValueError(f'LazyLLM writer tool did not return persisted_document: {result!r}')
-    return {
         'write_result': _save_json_artifact(
             'write_result', write_result_json, writer_schema('revision.PatchResult'), directory=root,
         ),
         'synced_snapshot': _save_json_artifact(
-            'synced_snapshot', _read_json_string(persisted_document_path),
+            'synced_ir', _writer_document_json(
+                _read_json_string(persisted_document_path), ui_editable=False,
+            ),
             WriterToolkitBase.WRITER_IR_SCHEMA, directory=root,
         ),
     }

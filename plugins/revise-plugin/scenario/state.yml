@@ -11,9 +11,6 @@ transitions:
     - to: revise_document
 
   revise_document:
-    - to: write_back
-
-  write_back:
     - to: __end__
 
 steps:
@@ -43,14 +40,15 @@ steps:
       source_ir is present and contains a WriterDocument.
 
   build_context:
-    label: Build Revision Context
+    label: Build Context
     prompt: |
       {{runtime_instruction}}
 
       Retrieve source_ir, then call
       revise_build_context(user_input="{{user_input}}", source_ir_path=<source_ir path>).
-      Persist revision_context with content_type='file'. This is a separate visible
-      step so the user can see that the source has been understood before revision.
+      Persist revision_context and revision_context_ir under their exact keys with
+      content_type='file'. revision_context_ir is the UI-visible WriterDocument for
+      this step.
 
       Do not revise the document and do not write to Feishu in this step.
     tools:
@@ -60,11 +58,13 @@ steps:
         required: true
     outputs:
       - material: revision_context
+      - material: revision_context_ir
     acceptance_criteria: |
-      revision_context is present and was built from the loaded source IR.
+      revision_context and revision_context_ir are present, and the context was built
+      from the loaded source IR.
 
   revise_document:
-    label: Generate Revision
+    label: Revise Document
     prompt: |
       {{runtime_instruction}}
 
@@ -72,13 +72,22 @@ steps:
       revise_generate_revision(base_ir_path=<source_ir path>,
       revision_context_path=<revision_context path>, query="{{user_input}}").
 
+      The tool locates and modifies the requested content, applies the PatchSet locally,
+      writes the same PatchSet back to Feishu, and re-reads the persisted document before
+      returning. This is the only step allowed to mutate the Feishu document.
+
       Persist every returned value under its exact key in one save_artifacts call.
       Use content_type='file' for revise_task, locate_result, modify_plan, patch_set,
-      patch_result, and candidate_ir. Do not save them through separate tool calls.
+      patch_result, candidate_ir, write_result, and synced_snapshot.
+      Do not save them through separate tool calls.
 
-      candidate_ir is a preview of applying patch_set to source_ir. Do not treat edits to
-      candidate_ir as write-back instructions; this version writes only the generated
-      PatchSet and then advances directly to write_back.
+      candidate_ir is the local result kept for internal traceability and is not displayed.
+      The automatic Feishu write-back uses only the generated PatchSet. The UI displays
+      synced_snapshot, which is re-read from Feishu after the write succeeds and therefore
+      always represents the synchronized remote IR.
+
+      On a remote conflict, do not overwrite the document; stop and ask the user to
+      restart from the latest Feishu content.
     tools:
       - revise_generate_revision
     inputs:
@@ -93,35 +102,8 @@ steps:
       - material: patch_set
       - material: patch_result
       - material: candidate_ir
-    acceptance_criteria: |
-      All revision artifacts through candidate_ir are present and patch_set targets source_ir.
-
-  write_back:
-    label: Apply PatchSet to Feishu
-    prompt: |
-      {{runtime_instruction}}
-
-      This is the only step allowed to mutate the Feishu document. Retrieve source_ir and
-      patch_set. Call revise_write_back(source_ir_path=<source_ir path>,
-      patch_set_path=<patch_set path>).
-
-      LazyLLM translates each PatchHunk through the provider adapter, writes supported
-      structured blocks without flattening them, and re-reads the persisted WriterDocument.
-      Persist write_result and synced_snapshot together in one save_artifacts call with
-      content_type='file'.
-
-      On a remote conflict, do not overwrite the document; stop and ask the user to
-      restart from the latest Feishu content.
-    tools:
-      - revise_write_back
-    inputs:
-      - material: source_ir
-        required: true
-      - material: patch_set
-        required: true
-    outputs:
       - material: write_result
       - material: synced_snapshot
     acceptance_criteria: |
-      write_result reports success and synced_snapshot represents the Feishu state after
-      all changed blocks were written.
+      All local revision artifacts are present, write_result reports success,
+      and synced_snapshot represents the persisted Feishu state.

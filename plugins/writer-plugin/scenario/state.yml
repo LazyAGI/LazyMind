@@ -11,12 +11,9 @@ transitions:
     - to: plan_sections
 
   plan_sections:
-    - to: generate_draft
+    - to: generate_document
 
-  generate_draft:
-    - to: finalize_report
-
-  finalize_report:
+  generate_document:
     - to: __end__
 
 steps:
@@ -25,13 +22,14 @@ steps:
     prompt: |
       {{runtime_instruction}}
 
-      This step produces three artifacts: writing_task, resource_profiles, and writing_context.
+      This step produces four artifacts: writing_task, resource_profiles, writing_context,
+      and a UI-visible WriterDocument named context_ir.
 
       Step 1: Call writer_build_writing_task(query="{{user_input}}") to get the writing_task path, then persist it with save_artifact(content_type='file', key='writing_task').
 
       Step 2: Call writer_profile_resources(writing_task_path=<writing_task path>, user_input="{{user_input}}") to get the resource_profiles path, then persist it with save_artifact(content_type='file', key='resource_profiles').
 
-      Step 3: Call writer_create_writing_context(writing_task_path=<writing_task path>, resource_profiles_path=<resource_profiles path>) to get the writing_context path, then persist it with save_artifact(content_type='file', key='writing_context').
+      Step 3: Call writer_create_writing_context(writing_task_path=<writing_task path>, resource_profiles_path=<resource_profiles path>). It returns writing_context and context_ir paths. Persist both returned paths under their exact keys with content_type='file'.
 
       If any of the above tool calls fails, do not perform any extra fallback — stop the step immediately. In particular, do not write content yourself to persist.
     tools:
@@ -42,8 +40,9 @@ steps:
       - material: writing_task
       - material: resource_profiles
       - material: writing_context
+      - material: context_ir
     acceptance_criteria: |
-      All three artifacts present: writing_task, resource_profiles, writing_context.
+      All four artifacts present: writing_task, resource_profiles, writing_context, context_ir.
 
   generate_outline:
     label: Generate Outline
@@ -78,7 +77,7 @@ steps:
 
       This step generates writing instructions for every top-level section in the outline in a single batch. Call get_artifact to retrieve writing_context_after_outline and outline, and pass writing_context_after_outline wherever the tool expects writing_context_path. When this step is rerun, use the runtime instruction as additional planning guidance.
 
-      Then call writer_generate_section_instructions(outline_path=<outline path>, writing_context_path=<writing_context_after_outline path>) and persist the returned path with save_artifact(content_type='file', key='section_instructions').
+      Then call writer_generate_section_instructions(outline_path=<outline path>, writing_context_path=<writing_context_after_outline path>). It returns section_instructions and section_plan_ir paths. Persist both returned paths under their exact keys with content_type='file'.
 
       If any of the above tool calls fails, do not perform any extra fallback — stop the step immediately. In particular, do not write content yourself to persist.
     tools:
@@ -90,31 +89,37 @@ steps:
         required: true
     outputs:
       - material: section_instructions
+      - material: section_plan_ir
     acceptance_criteria: |
-      Artifact present: section_instructions.
+      Both artifacts present: section_instructions, section_plan_ir.
 
-  generate_draft:
-    label: Generate Draft
+  generate_document:
+    label: Write Final Document
     prompt: |
       {{runtime_instruction}}
 
-      This step writes the draft body as WriterBlock artifacts, then combines them into a draft-stage WriterDocument.
+      This step performs the complete authoring pipeline: write WriterBlock artifacts,
+      assemble the draft WriterDocument, update the writing context, convert the draft to
+      the final WriterDocument, and render Markdown. There is no separate finalize step.
 
       Call get_artifact to retrieve the file paths of writing_task, writing_context_after_outline, outline, and section_instructions. Use writing_context_after_outline wherever a tool expects writing_context_path. Prepare a draft_block_paths list to record every non-empty block path returned by the tool.
 
       Call writer_generate_draft_block(writing_task_path=<writing_task path>, section_instructions_path=<section_instructions path>, writing_context_path=<writing_context path>) to produce the next draft WriterBlock. Internally, the tool decides which block to write based on the block files already produced. When the tool returns a non-empty path, append it to draft_block_paths and continue calling the same tool to produce the next block.
 
-      When the tool returns an empty string, all draft blocks have been generated. Take the last path in draft_block_paths and call writer_generate_draft_document(draft_blocks_anchor_path=<last draft block path>, writing_context_path=<writing_context path>, outline_path=<outline path>) to obtain the draft_document path.
+      When the tool returns an empty string, all draft blocks have been generated. If draft_block_paths is non-empty, take its last path as draft_blocks_anchor_path. If it is empty because a retry is resuming already-generated block files, use an empty string as draft_blocks_anchor_path. Call writer_generate_draft_document(draft_blocks_anchor_path=<resolved anchor>, writing_context_path=<writing_context path>, outline_path=<outline path>) to obtain the draft_document path.
 
       After the draft document is generated, call writer_update_writing_context(content_artifact_path=<draft_document path>, writing_context_path=<original writing_context path>) and obtain the updated writing_context path.
 
-      Once all generation operations in this step are complete, in the order of draft_block_paths, call save_artifact(content_type='file', key='draft_blocks') for each block path, then call save_artifact(content_type='file', key='draft_document') to save the draft WriterDocument path, and finally call save_artifact(content_type='file', key='writing_context_after_draft') to save the updated context as a new material.
+      Then call writer_generate_final_document(draft_path=<draft_document path>, writing_context_path=<updated writing_context path>). The tool returns final_document and final_document_md paths.
+
+      Once all generation operations are complete, in the order of draft_block_paths, call save_artifact(content_type='file', key='draft_blocks') for each block path. Then persist draft_document, the updated context as writing_context_after_draft, final_document, and final_document_md under their exact keys. Merging the workflow steps must not remove any pre-existing artifacts.
 
       If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
     tools:
       - writer_generate_draft_block
       - writer_generate_draft_document
       - writer_update_writing_context
+      - writer_generate_final_document
     inputs:
       - material: writing_task
         required: true
@@ -128,28 +133,8 @@ steps:
       - material: draft_blocks
       - material: draft_document
       - material: writing_context_after_draft
-    acceptance_criteria: |
-      All three artifacts present: draft_blocks, draft_document, writing_context_after_draft.
-
-  finalize_report:
-    label: Finalize Report
-    prompt: |
-      {{runtime_instruction}}
-
-      This step converts the draft WriterDocument into a final-stage WriterDocument and renders its Markdown file. Retrieve draft_document and writing_context_after_draft, then call writer_generate_final_document(draft_path=<draft path>, writing_context_path=<context path>). The tool returns final_document and final_document_md. This workflow intentionally performs no separate audit or revision pass.
-
-      Once generation is complete, call save_artifact(content_type='file', key='final_document') and save_artifact(content_type='file', key='final_document_md') for the two paths.
-
-      If any of the above tool calls fails, stop the step and preserve the tool error message for outer-layer retry handling.
-    tools:
-      - writer_generate_final_document
-    inputs:
-      - material: draft_document
-        required: true
-      - material: writing_context_after_draft
-        required: true
-    outputs:
       - material: final_document
       - material: final_document_md
     acceptance_criteria: |
-      Both artifacts present: final_document, final_document_md.
+      draft_blocks, draft_document, writing_context_after_draft, final_document,
+      and final_document_md are all present.

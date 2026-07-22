@@ -7,8 +7,8 @@ Help users compose structured long-form writing, including articles, reports, te
 1. **build_context** — parse the writing intent, target audience, core sub-topics, style, and factual consensus
 2. **generate_outline** — produce a structured outline based on the context
 3. **plan_sections** — generate per-chapter writing instructions from the outline
-4. **generate_draft** — serially draft the full document per the section instructions
-5. **finalize_report** — render the generated draft into the final structured output and Markdown file
+4. **generate_document** — serially draft the full document, assemble the final
+   WriterDocument, and render its Markdown file in one step
 
 There is no separate audit or patch-revision pass. Every step supports a full rerun; revision of an existing document is handled by the dedicated document-revision plugin.
 
@@ -76,8 +76,7 @@ The AI Writer plugin is a general fallback. If another skill or plugin more prec
 | Re-parse the writing intent | build_context | `advance_step(step_id='build_context', user_input=<note>)` |
 | Unhappy with the outline, regenerate it | generate_outline | `advance_step(step_id='generate_outline', user_input=<note>)` |
 | Re-plan the section instructions | plan_sections | `advance_step(step_id='plan_sections', user_input=<note>)` |
-| Redraft the document | generate_draft | `advance_step(step_id='generate_draft', user_input=<note>)` |
-| Produce the final report again | finalize_report | `advance_step(step_id='finalize_report', user_input=<note>)` |
+| Rewrite the final document | generate_document | `advance_step(step_id='generate_document', user_input=<note>)` |
 | Satisfied with the final result | (no action — DriverAgent marks DONE automatically) | — |
 
 When the user or DriverAgent indicates the problem originates from a prior step, use `advance_step` with that prior step's `step_id` to rewind and redo it. The available prior steps are listed dynamically by `advance_step`'s Rewind list and need not be enumerated here.
@@ -90,7 +89,7 @@ When the user or DriverAgent indicates the problem originates from a prior step,
   - Cold start: "Parsing your writing request, please wait…"
   - Regenerating the outline: "Regenerating the outline…"
 - Concrete writing content (section drafts, final report, etc.) is produced by the tools the subagent collaborates with; the main Agent does not need to re-state the body.
-- Never reproduce, rewrite, summarize, or independently generate the outline, draft, or final document in the chat answer. Those user-visible deliverables are rendered once in the plugin panel. After `finalize_report` succeeds, reply with only a short completion status that directs the user to the final-result tab.
+- Never reproduce, rewrite, summarize, or independently generate the outline or final document in the chat answer. Those user-visible deliverables are rendered once in the plugin panel. After `generate_document` succeeds, reply with only a short completion status that directs the user to the final-result tab.
 - Requests to revise an existing document do not belong to this plugin; route them to the dedicated document-revision workflow.
 
 ## Artifact Handoff

@@ -17,6 +17,7 @@ from lazymind.chat.engine.subagent.context import require_context
 from lazymind.chat.engine.tools.writer import (
     WriterCreateToolkit,
     WriterToolkitBase,
+    build_writer_status_ir,
     writer_schema,
 )
 
@@ -115,13 +116,24 @@ def writer_profile_resources(writing_task_path: str, user_input: str) -> str:
     return _save_json_artifact('resource_profiles', content, writer_schema('resource.ResourceProfile'))
 
 
-def writer_create_writing_context(writing_task_path: str, resource_profiles_path: str) -> str:
-    """Create a WritingContext artifact and return its file path."""
+def writer_create_writing_context(writing_task_path: str, resource_profiles_path: str) -> dict:
+    """Create the internal WritingContext and its UI-visible status IR."""
     content = WriterCreateToolkit().create_writing_context(
         writing_task_json=_read_json_string(writing_task_path),
         resource_profiles_json=_read_json_string(resource_profiles_path),
     )
-    return _save_json_artifact('writing_context', content, writer_schema('context.WritingContext'))
+    return {
+        'writing_context': _save_json_artifact(
+            'writing_context', content, writer_schema('context.WritingContext'),
+        ),
+        'context_ir': _save_json_artifact(
+            'context_ir',
+            build_writer_status_ir(
+                'context_ready', '已成功构造写作上下文', source='writer-plugin',
+            ),
+            WriterToolkitBase.WRITER_IR_SCHEMA,
+        ),
+    }
 
 
 def writer_generate_outline(writing_task_path: str, writing_context_path: str) -> str:
@@ -130,23 +142,32 @@ def writer_generate_outline(writing_task_path: str, writing_context_path: str) -
         writing_task_json=_read_json_string(writing_task_path),
         writing_context_json=_read_json_string(writing_context_path),
     )
-    return _save_json_artifact('outline', content, WriterToolkitBase.WRITER_IR_SCHEMA)
+    return _save_json_artifact('outline_ir', content, WriterToolkitBase.WRITER_IR_SCHEMA)
 
 
 def writer_generate_section_instructions(
     outline_path: str,
     writing_context_path: str,
-) -> str:
-    """Generate section instructions and return the artifact file path."""
+) -> dict:
+    """Generate internal section instructions and a UI-visible status IR."""
     content = WriterCreateToolkit().generate_section_instructions(
         outline_json=_read_json_string(outline_path),
         writing_context_json=_read_json_string(writing_context_path),
     )
-    return _save_json_artifact(
-        'section_instructions',
-        content,
-        writer_schema('planning.SectionInstructionList'),
-    )
+    return {
+        'section_instructions': _save_json_artifact(
+            'section_instructions',
+            content,
+            writer_schema('planning.SectionInstructionList'),
+        ),
+        'section_plan_ir': _save_json_artifact(
+            'section_plan_ir',
+            build_writer_status_ir(
+                'sections_planned', '已成功规划写作章节', source='writer-plugin',
+            ),
+            WriterToolkitBase.WRITER_IR_SCHEMA,
+        ),
+    }
 
 
 def writer_generate_draft_block(
@@ -188,7 +209,7 @@ def writer_generate_draft_document(
     outline_path: str = '',
 ) -> str:
     """Combine draft WriterBlock artifacts into a draft WriterDocument path."""
-    anchor = Path(draft_blocks_anchor_path)
+    anchor = Path(draft_blocks_anchor_path) if draft_blocks_anchor_path else _workspace_root() / 'draft_blocks'
     draft_blocks_dir = anchor if anchor.is_dir() else anchor.parent
     draft_block_paths = sorted(str(path) for path in draft_blocks_dir.glob('draft_block_*.json'))
     if not draft_block_paths:
@@ -224,7 +245,7 @@ def writer_generate_final_document(
     payload = _json_loads(content, {})
     final_document_path = save_artifact_json(
         payload.get('final_document') or {},
-        str(_workspace_root() / 'final_document.json'),
+        str(_workspace_root() / 'final_document_ir.json'),
         schema_name=WriterToolkitBase.WRITER_IR_SCHEMA,
         created_by='writer-plugin-wrapper',
     )

@@ -4,7 +4,8 @@ description: >
   Revise an existing Feishu document through a WriterDocument-first workflow. The plugin
   reuses the user's chat-enabled Feishu OAuth connection, loads the document as
   WriterDocument, builds revision context, generates and applies a PatchSet, and
-  writes that same PatchSet back to Feishu through provider-native block operations.
+  writes that same PatchSet back to Feishu in the revision step through
+  provider-native block operations.
 
 when_to_use: >
   Use this plugin when the user provides a Feishu document link and asks to
@@ -19,13 +20,11 @@ tool_scripts:
       - revise_load_document
       - revise_build_context
       - revise_generate_revision
-      - revise_write_back
 
 steps:
   - id: load_document
   - id: build_context
   - id: revise_document
-  - id: write_back
 
 slots:
   - id: source_ir
@@ -34,6 +33,10 @@ slots:
     cardinality: single
   - id: revision_context
     label: Revision Context
+    type: file
+    cardinality: single
+  - id: revision_context_ir
+    label: Revision Context Result
     type: file
     cardinality: single
   - id: revise_task
@@ -83,26 +86,13 @@ ui:
       label: Revision Context
       layout: list
       slots:
-        - id: revision_context
+        - id: revision_context_ir
 
     - id: revision
       step_id: revise_document
       label: Revision
       layout: list
       slots:
-        - id: revise_task
-        - id: locate_result
-        - id: modify_plan
-        - id: patch_set
-        - id: patch_result
-        - id: candidate_ir
-
-    - id: write_back
-      step_id: write_back
-      label: Write-back Result
-      layout: list
-      slots:
-        - id: write_result
         - id: synced_snapshot
 
 i18n:
@@ -110,17 +100,16 @@ i18n:
     name: 文档局部修改
     steps:
       load_document: {label: 读取飞书文档}
-      build_context: {label: 构建上下文}
+      build_context: {label: 构造上下文}
       revise_document: {label: 修改文档}
-      write_back: {label: 写回飞书}
     tabs:
       source: {label: 原始文档}
-      context: {label: 构建上下文}
-      revision: {label: 修改过程}
-      write_back: {label: 写回结果}
+      context: {label: 构造上下文}
+      revision: {label: 修改文档}
     slots:
       source_ir: {label: 原始 IR}
       revision_context: {label: 上下文}
+      revision_context_ir: {label: 上下文构造结果}
       revise_task: {label: 修改任务}
       locate_result: {label: 定位结果}
       modify_plan: {label: 修改计划}

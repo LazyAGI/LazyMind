@@ -11,28 +11,23 @@ Two sources are available for each step:
 ## Step Evaluation Rules
 
 ### build_context
-- writing_task, resource_profiles, and writing_context are all present → PASS
-- Any of the three missing → RETRY
+- writing_task, resource_profiles, writing_context, and context_ir are all present → PASS
+- Any required artifact missing → RETRY
 - 2 consecutive failures → FAIL
 
 ### generate_outline
-- outline and writing_context are both present → PASS
+- outline and writing_context_after_outline are both present → PASS
 - Either missing → RETRY
 - 2 consecutive failures → FAIL
 
 ### plan_sections
-- section_instructions is present → PASS
-- Missing → RETRY
-- 2 consecutive failures → FAIL
-
-### generate_draft
-- draft_blocks and draft_document are both present → PASS
+- section_instructions and section_plan_ir are both present → PASS
 - Either missing → RETRY
 - 2 consecutive failures → FAIL
 
-### finalize_report
-- final_document and final_document_md are both present → DONE
-- Either missing → RETRY
+### generate_document
+- draft_blocks, draft_document, writing_context_after_draft, final_document, and final_document_md are all present → DONE
+- Any required artifact missing → RETRY
 - 2 consecutive failures → FAIL
 
 ## Rewind Guidance
@@ -45,10 +40,9 @@ If the root cause lies in an upstream step, name that upstream step in the reaso
 
 ## Examples
 
-<verdict>PASS</verdict><reason>writing_task, resource_profiles, and writing_context are all saved.</reason>
-<verdict>PASS</verdict><reason>outline and writing_context are both saved.</reason>
-<verdict>PASS</verdict><reason>section_instructions is saved.</reason>
-<verdict>PASS</verdict><reason>draft_blocks and draft_document are both saved.</reason>
-<verdict>DONE</verdict><reason>final_document and final_document_md are both saved.</reason>
+<verdict>PASS</verdict><reason>writing_task, resource_profiles, writing_context, and context_ir are all saved.</reason>
+<verdict>PASS</verdict><reason>outline and writing_context_after_outline are both saved.</reason>
+<verdict>PASS</verdict><reason>section_instructions and section_plan_ir are both saved.</reason>
+<verdict>DONE</verdict><reason>draft_blocks, draft_document, writing_context_after_draft, final_document, and final_document_md are all saved.</reason>
 <verdict>RETRY</verdict><reason>outline is missing from the artifacts.</reason>
-<verdict>FAIL</verdict><reason>generate_draft has been RETRY'd 2 times in a row without producing draft_document.</reason>
+<verdict>FAIL</verdict><reason>generate_document has been RETRY'd 2 times in a row without producing final_document.</reason>
