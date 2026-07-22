@@ -22,17 +22,23 @@ class EpisodeSource(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     kind: Literal['chat_explicit', 'memory_review']
-    task_id: str
+    task_id: str | None = None
     conversation_id: str
     message_ids: list[str] = Field(default_factory=list)
 
-    @field_validator('task_id', 'conversation_id')
+    @field_validator('conversation_id')
     @classmethod
     def _required_context(cls, value: str) -> str:
         normalized = str(value).strip()
         if not normalized:
             raise ValueError('must not be blank')
         return normalized
+
+    @field_validator('task_id')
+    @classmethod
+    def _optional_task_id(cls, value: str | None) -> str | None:
+        normalized = str(value or '').strip()
+        return normalized or None
 
     @field_validator('message_ids')
     @classmethod
@@ -105,16 +111,11 @@ def build_episode_idempotency_key(
     *,
     user_id: str,
     conversation_id: str,
-    task_id: str,
-    episode_type: EpisodeType | str,
     summary: str,
 ) -> str:
-    type_value = episode_type.value if isinstance(episode_type, EpisodeType) else str(episode_type)
     identity = {
         'user_id': str(user_id).strip(),
         'conversation_id': str(conversation_id).strip(),
-        'task_id': str(task_id).strip(),
-        'episode_type': type_value.strip().casefold(),
         'summary': normalize_episode_summary(summary),
     }
     raw = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(',', ':'))

@@ -9,6 +9,7 @@ from lazymind.common.memory import (
     MEMORY_TARGET_PATHS,
     EpisodeConflictError,
     EpisodeCreateInput,
+    EpisodeReadError,
     EpisodeSource,
     EpisodeType,
     MemoryRemoteStore,
@@ -217,7 +218,6 @@ class MemoryTools:
         config = _agentic_config()
         required_context = (
             ('user_id', str(config.get('user_id') or '').strip()),
-            ('task_id', str(config.get('task_id') or '').strip()),
             ('conversation_id', str(config.get('conversation_id') or '').strip()),
         )
         values: dict[str, str] = {}
@@ -238,7 +238,8 @@ class MemoryTools:
                 )
             values[field] = value
 
-        is_review = values['task_id'].startswith('memory_review_')
+        task_id = str(config.get('task_id') or '').strip()
+        is_review = task_id.startswith('memory_review_')
         timestamp_field = 'review_started_at_ms' if is_review else 'episode_occurred_at_ms'
         occurred_at_ms = config.get(timestamp_field)
         if isinstance(occurred_at_ms, bool):
@@ -270,7 +271,7 @@ class MemoryTools:
                 summary=summary,
                 source=EpisodeSource(
                     kind='memory_review' if is_review else 'chat_explicit',
-                    task_id=values['task_id'],
+                    task_id=task_id if is_review else None,
                     conversation_id=values['conversation_id'],
                     message_ids=[],
                 ),
@@ -293,8 +294,6 @@ class MemoryTools:
         idempotency_key = build_episode_idempotency_key(
             user_id=values['user_id'],
             conversation_id=values['conversation_id'],
-            task_id=values['task_id'],
-            episode_type=item.episode_type,
             summary=item.summary,
         )
 
@@ -302,7 +301,6 @@ class MemoryTools:
             store = get_episode_store()
         except Exception as exc:
             _log_tool_exception('episode_create', exc)
-            safe_message = _safe_exception_message(exc)
             transient = _is_transient(exc)
             return _record_tool_result(
                 {
@@ -311,9 +309,9 @@ class MemoryTools:
                     'error': {
                         'code': 'storage_unavailable' if transient else 'storage_failed',
                         'message': (
-                            f'Episode storage is temporarily unavailable: {safe_message}'
+                            'Episode storage is temporarily unavailable.'
                             if transient
-                            else f'Failed to initialize Episode storage: {safe_message}'
+                            else 'Failed to initialize Episode storage.'
                         ),
                         'detail': {'exception_type': type(exc).__name__},
                     },
@@ -328,6 +326,30 @@ class MemoryTools:
 
         try:
             create_result = store.create(values['user_id'], item)
+        except EpisodeReadError as exc:
+            root_exc = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
+            _log_tool_exception('episode_create', root_exc)
+            return _record_tool_result(
+                {
+                    'success': False,
+                    'tool': 'episode_create',
+                    'error': {
+                        'code': exc.code,
+                        'message': (
+                            'Episode storage is temporarily unavailable.'
+                            if exc.retryable
+                            else 'Failed to read existing Episodes.'
+                        ),
+                        'detail': {'exception_type': type(root_exc).__name__},
+                    },
+                    'retryable': exc.retryable,
+                },
+                mutation=False,
+                ledger_result={
+                    'status': 'failed',
+                    'idempotency_key': idempotency_key,
+                },
+            )
         except EpisodeConflictError as exc:
             _log_tool_exception('episode_create', exc)
             return _record_tool_result(

@@ -9,8 +9,10 @@ import pytest
 from lazyllm.tools.rag.store import SegmentStore, SegmentStoreConflictError
 from lazyllm.tools.agent.toolsManager import ToolManager
 
+import lazymind.common.memory.episode_store as episode_store_module
 from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.common.memory import (
+    EpisodeConflictError,
     EpisodeCreateInput,
     EpisodeSource,
     EpisodeStore,
@@ -23,6 +25,8 @@ from lazymind.common.memory import (
 class FakeSegmentStore:
     def __init__(self):
         self.rows = {}
+        self.strict_gets = []
+        self.patch_calls = []
         self.search_calls = []
         self.scores = {}
 
@@ -34,7 +38,8 @@ class FakeSegmentStore:
             self.rows[item['id']] = copy.deepcopy(item)
         return True
 
-    def get(self, _collection, filters):
+    def get(self, _collection, filters, *, strict=False):
+        self.strict_gets.append(strict)
         result = []
         for item in self.rows.values():
             if filters.get('id') and item['id'] != filters['id']:
@@ -53,6 +58,7 @@ class FakeSegmentStore:
         *,
         query_fields=None,
         match_mode=None,
+        strict=False,
     ):
         self.search_calls.append({
             'collection': collection,
@@ -61,6 +67,7 @@ class FakeSegmentStore:
             'filters': copy.deepcopy(filters),
             'query_fields': copy.deepcopy(query_fields),
             'match_mode': match_mode,
+            'strict': strict,
         })
         result = []
         for item in self.get(collection, filters):
@@ -69,6 +76,12 @@ class FakeSegmentStore:
         return result[:topk]
 
     def patch(self, collection, filters, set_fields=None, inc_fields=None):
+        self.patch_calls.append({
+            'collection': collection,
+            'filters': copy.deepcopy(filters),
+            'set_fields': copy.deepcopy(set_fields),
+            'inc_fields': copy.deepcopy(inc_fields),
+        })
         matches = self.get(collection, filters)
         for match in matches:
             row = self.rows[match['id']]
@@ -121,6 +134,73 @@ def test_episode_summary_and_tokenizer_use_stable_unicode_normalization():
     assert 'v1' in tokens
 
 
+def test_default_episode_store_requires_sqlite_path(monkeypatch):
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'segment_store_type', 'SQLiteStore')
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'segment_store_uri_or_path', '')
+
+    with pytest.raises(
+        ValueError,
+        match='LAZYMIND_SEGMENT_STORE_URI_OR_PATH is required for SQLite segment store',
+    ):
+        EpisodeStore()
+
+
+def test_default_episode_store_requires_opensearch_uri(monkeypatch):
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'segment_store_type', 'opensearch')
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'segment_store_uri_or_path', '')
+
+    with pytest.raises(
+        ValueError,
+        match='LAZYMIND_SEGMENT_STORE_URI_OR_PATH is required for OpenSearch segment store',
+    ):
+        EpisodeStore()
+
+
+def test_episode_store_config_supports_sqlite(monkeypatch, tmp_path):
+    db_path = tmp_path / 'episodes.db'
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'segment_store_type', 'SQLiteStore')
+    monkeypatch.setitem(
+        episode_store_module._cfg._impl,
+        'segment_store_uri_or_path',
+        str(db_path),
+    )
+
+    assert episode_store_module._store_config() == {
+        'type': 'SQLiteStore',
+        'kwargs': {'db_path': str(db_path)},
+    }
+
+
+def test_episode_store_config_supports_opensearch(monkeypatch):
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'segment_store_type', 'opensearch')
+    monkeypatch.setitem(
+        episode_store_module._cfg._impl,
+        'segment_store_uri_or_path',
+        'https://opensearch.test:9200',
+    )
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'segment_store_user', 'user')
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'segment_store_password', 'password')
+
+    config = episode_store_module._store_config()
+
+    assert config['type'] == 'opensearch'
+    assert config['kwargs']['uris'] == 'https://opensearch.test:9200'
+    assert config['kwargs']['client_kwargs']['user'] == 'user'
+    assert config['kwargs']['client_kwargs']['password'] == 'password'
+
+
+def test_default_episode_store_rejects_elasticsearch(monkeypatch):
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'segment_store_type', 'elasticsearch')
+    monkeypatch.setitem(
+        episode_store_module._cfg._impl,
+        'segment_store_uri_or_path',
+        'https://elasticsearch.test:9200',
+    )
+
+    with pytest.raises(ValueError, match="Unsupported segment store type: 'elasticsearch'"):
+        EpisodeStore()
+
+
 def test_single_create_is_idempotent_when_only_time_and_summary_format_change():
     backend = FakeSegmentStore()
     store = EpisodeStore(backend, clock_ms=lambda: 1_800_000_000_000)
@@ -151,15 +231,149 @@ def test_store_false_create_result_is_not_reported_as_created():
         store.create('user-1', _episode())
 
 
-def test_idempotency_key_is_tenant_conversation_task_and_type_scoped():
+def test_list_by_conversation_is_tenant_scoped_and_oldest_first():
+    backend = FakeSegmentStore()
+    recorded_times = iter([2000, 1000, 3000, 4000])
+    store = EpisodeStore(backend, clock_ms=lambda: next(recorded_times))
+
+    later = store.create('user-1', _episode('稍后记录', occurred_at_ms=100)).id
+    earlier = store.create('user-1', _episode('更早记录', occurred_at_ms=200)).id
+    store.create('user-1', _episode('其他会话', conversation_id='conv-2'))
+    store.create('user-2', _episode('其他用户'))
+
+    records = store.list_by_conversation('user-1', 'conv-1')
+
+    assert [record.id for record in records] == [earlier, later]
+    assert all(record.user_id == 'user-1' for record in records)
+    assert all(record.source.conversation_id == 'conv-1' for record in records)
+    assert backend.strict_gets and all(backend.strict_gets)
+
+
+def test_list_by_conversation_ignores_malformed_rows_from_other_conversations():
+    backend = FakeSegmentStore()
+    store = EpisodeStore(backend)
+    expected = store.create('user-1', _episode('目标会话记录'))
+    unrelated = store.create(
+        'user-1',
+        _episode('其他会话记录', conversation_id='conv-2'),
+    )
+    backend.rows[unrelated.id]['metadata']['thread_key'] = 'corrupted-thread-key'
+
+    records = store.list_by_conversation('user-1', 'conv-1')
+
+    assert [record.id for record in records] == [expected.id]
+
+
+def test_idempotency_key_is_tenant_conversation_and_summary_scoped():
     backend = FakeSegmentStore()
     store = EpisodeStore(backend)
 
     baseline = store.create('user-1', _episode())
     assert store.create('user-2', _episode()).id != baseline.id
     assert store.create('user-1', _episode(conversation_id='conv-2')).id != baseline.id
-    assert store.create('user-1', _episode(task_id='task-2')).id != baseline.id
-    assert store.create('user-1', _episode(episode_type=EpisodeType.RESULT)).id != baseline.id
+    assert store.create('user-1', _episode(task_id='task-2')).id == baseline.id
+    assert store.create('user-1', _episode(episode_type=EpisodeType.RESULT)).id == baseline.id
+    assert len(backend.rows) == 3
+
+
+def test_create_reuses_oldest_legacy_id_for_same_conversation_summary():
+    backend = FakeSegmentStore()
+    store = EpisodeStore(backend, clock_ms=lambda: 2000)
+    created = store.create('user-1', _episode('采用 SegmentStore'))
+    template = backend.rows.pop(created.id)
+
+    later = copy.deepcopy(template)
+    later['id'] = 'ep_legacy_later'
+    later['metadata']['recorded_at_ms'] = 2000
+    later['metadata']['source']['task_id'] = 'legacy-task-later'
+    earlier = copy.deepcopy(template)
+    earlier['id'] = 'ep_legacy_earlier'
+    earlier['metadata']['recorded_at_ms'] = 1000
+    earlier['metadata']['source']['task_id'] = 'legacy-task-earlier'
+    backend.rows[later['id']] = later
+    backend.rows[earlier['id']] = earlier
+
+    result = store.create(
+        'user-1',
+        _episode('  采用  SegmentStore  ', task_id='new-task', episode_type=EpisodeType.RESULT),
+    )
+
+    assert result.status == 'idempotent'
+    assert result.id == 'ep_legacy_earlier'
+    assert result.idempotency_key == created.id
+    assert set(backend.rows) == {'ep_legacy_later', 'ep_legacy_earlier'}
+
+
+def test_create_conflict_strictly_verifies_same_tenant_and_identity():
+    seed_backend = FakeSegmentStore()
+    seed_store = EpisodeStore(seed_backend)
+    created = seed_store.create('user-1', _episode())
+
+    class RacingSegmentStore(FakeSegmentStore):
+        def __init__(self, row):
+            super().__init__()
+            self.rows[row['id']] = copy.deepcopy(row)
+            self._first_get = True
+
+        def get(self, collection, filters, *, strict=False):
+            if self._first_get:
+                self._first_get = False
+                self.strict_gets.append(strict)
+                return []
+            return super().get(collection, filters, strict=strict)
+
+        def create(self, _collection, data):
+            raise SegmentStoreConflictError(data[0]['id'])
+
+    backend = RacingSegmentStore(seed_backend.rows[created.id])
+    result = EpisodeStore(backend).create('user-1', _episode())
+
+    assert result.status == 'idempotent'
+    assert result.id == created.id
+    assert backend.strict_gets == [True, True]
+
+
+@pytest.mark.parametrize(
+    ('mutate_row', 'message'),
+    [
+        (
+            lambda row: row['metadata'].__setitem__('user_id', 'user-2'),
+            'outside the current tenant identity',
+        ),
+        (
+            lambda row: row['metadata'].__setitem__('summary', '不同的 Episode 内容'),
+            'different idempotent content',
+        ),
+    ],
+)
+def test_create_conflict_rejects_wrong_tenant_or_identity(mutate_row, message):
+    seed_backend = FakeSegmentStore()
+    created = EpisodeStore(seed_backend).create('user-1', _episode())
+    conflicting_row = copy.deepcopy(seed_backend.rows[created.id])
+    mutate_row(conflicting_row)
+
+    class RacingSegmentStore(FakeSegmentStore):
+        def __init__(self):
+            super().__init__()
+            self.rows[conflicting_row['id']] = conflicting_row
+            self._first_get = True
+
+        def get(self, collection, filters, *, strict=False):
+            if self._first_get:
+                self._first_get = False
+                self.strict_gets.append(strict)
+                return []
+            return super().get(collection, filters, strict=strict)
+
+        def create(self, _collection, data):
+            raise SegmentStoreConflictError(data[0]['id'])
+
+    backend = RacingSegmentStore()
+
+    with pytest.raises(EpisodeConflictError, match=message):
+        EpisodeStore(backend).create('user-1', _episode())
+
+    assert backend.strict_gets == [True, True]
 
 
 def test_episode_input_requires_thread_key_to_match_source_conversation():
@@ -193,6 +407,85 @@ def test_search_uses_content_any_and_hard_filters_weak_unrelated_candidate():
     assert backend.search_calls[-1]['query_fields'] == ['content']
     assert backend.search_calls[-1]['match_mode'] == 'any'
     assert backend.search_calls[-1]['filters'] == {'user_id': 'user-1'}
+    assert backend.search_calls[-1]['strict'] is True
+
+
+def test_search_converts_strict_backend_failure_to_safe_episode_error():
+    class FailingSearchStore(FakeSegmentStore):
+        def search(self, *args, strict=False, **kwargs):
+            assert strict is True
+            raise ConnectionError(
+                'OpenSearch unavailable at '
+                'https://admin:secret@opensearch.internal:9200/private-index'
+            )
+
+    with pytest.raises(episode_store_module.EpisodeReadError) as captured:
+        EpisodeStore(FailingSearchStore()).search('user-1', 'mars apple')
+
+    assert captured.value.code == 'storage_unavailable'
+    assert captured.value.retryable is True
+    assert str(captured.value) == 'Failed to load existing Episodes.'
+    assert 'opensearch.internal' not in str(captured.value)
+
+
+def test_search_ranks_by_coverage_recency_and_hit_count(monkeypatch):
+    day_ms = 86_400_000
+    now_ms = 2_000_000_000_000
+    backend = FakeSegmentStore()
+    store = EpisodeStore(backend)
+    high_coverage = store.create(
+        'user-1',
+        _episode('mars apple banana', occurred_at_ms=now_ms - 100 * day_ms),
+    )
+    recent = store.create(
+        'user-1',
+        _episode('mars apple recent', conversation_id='conv-2', occurred_at_ms=now_ms),
+    )
+    popular = store.create(
+        'user-1',
+        _episode(
+            'mars apple popular',
+            conversation_id='conv-3',
+            occurred_at_ms=now_ms - 10 * day_ms,
+        ),
+    )
+    backend.rows[popular.id]['metadata']['hit_count'] = 10
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'episode_relevance_weight', 0.8)
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'episode_recency_weight', 0.1)
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'episode_hit_weight', 0.1)
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'episode_half_life_days', 10.0)
+    monkeypatch.setitem(episode_store_module._cfg._impl, 'episode_hit_saturation', 10)
+
+    results = store.search('user-1', 'mars apple banana', now_ms=now_ms)
+
+    assert [item.episode.id for item in results] == [high_coverage.id, popular.id, recent.id]
+
+
+def test_increment_hits_uses_atomic_patch_with_tenant_scope():
+    backend = FakeSegmentStore()
+    store = EpisodeStore(backend)
+    own = store.create('user-1', _episode())
+    other = store.create('user-2', _episode())
+
+    result = store.increment_hits('user-1', [own.id, other.id, own.id])
+
+    assert result == {own.id: True, other.id: False}
+    assert backend.rows[own.id]['metadata']['hit_count'] == 1
+    assert backend.rows[other.id]['metadata']['hit_count'] == 0
+    assert backend.patch_calls == [
+        {
+            'collection': episode_store_module.EPISODE_COLLECTION,
+            'filters': {'id': own.id, 'user_id': 'user-1'},
+            'set_fields': None,
+            'inc_fields': {'hit_count': 1},
+        },
+        {
+            'collection': episode_store_module.EPISODE_COLLECTION,
+            'filters': {'id': other.id, 'user_id': 'user-1'},
+            'set_fields': None,
+            'inc_fields': {'hit_count': 1},
+        },
+    ]
 
 
 def test_search_requires_all_short_query_terms_and_exact_identifiers():
@@ -260,6 +553,30 @@ def test_sqlite_episode_contract_recalls_natural_question_and_keeps_tenant_scope
     assert all(result.episode.user_id == 'user-1' for result in results)
 
 
+def test_sqlite_conversation_list_and_exact_dedup_keep_tenant_scope(tmp_path):
+    backend = SegmentStore({
+        'type': 'SQLiteStore',
+        'kwargs': {'db_path': str(tmp_path / 'conversation-episodes.db')},
+    })
+    store = EpisodeStore(backend)
+    first = store.create('user-1', _episode('采用蓝色发布'))
+    duplicate = store.create(
+        'user-1',
+        _episode('  采用蓝色发布  ', task_id='task-2', episode_type=EpisodeType.RESULT),
+    )
+    second = store.create('user-1', _episode('发布验证已经完成'))
+    store.create('user-1', _episode('其他会话记录', conversation_id='conv-2'))
+    store.create('user-2', _episode('其他用户记录'))
+
+    records = store.list_by_conversation('user-1', 'conv-1')
+
+    assert duplicate.status == 'idempotent'
+    assert duplicate.id == first.id
+    assert [record.id for record in records] == [first.id, second.id]
+    assert all(record.user_id == 'user-1' for record in records)
+    assert all(record.source.conversation_id == 'conv-1' for record in records)
+
+
 @pytest.mark.parametrize(
     ('query', 'summary'),
     [
@@ -316,7 +633,7 @@ def test_episode_create_uses_runtime_context_even_when_retrieval_is_disabled(mon
     store = EpisodeStore(backend, clock_ms=lambda: 1_800_000_000_000)
     lazyllm.globals['agentic_config'] = {
         'user_id': 'user-1',
-        'task_id': 'task-1',
+        'task_id': 'chat-session-task-1',
         'conversation_id': 'conv-1',
         'episode_occurred_at_ms': 1_700_000_000_000,
         'use_memory': False,
@@ -336,7 +653,7 @@ def test_episode_create_uses_runtime_context_even_when_retrieval_is_disabled(mon
     assert stored['occurred_at_ms'] == 1_700_000_000_000
     assert stored['source'] == {
         'kind': 'chat_explicit',
-        'task_id': 'task-1',
+        'task_id': None,
         'conversation_id': 'conv-1',
         'message_ids': [],
     }
@@ -409,7 +726,7 @@ def test_episode_create_exposes_safe_retryable_storage_failure(monkeypatch):
 
     def unavailable_store():
         raise ConnectionError(
-            'backend temporarily unavailable '
+            'backend temporarily unavailable https://opensearch.internal:9200/private-index '
             'Authorization: Bearer secret-value '
             'http_auth=(admin, admin-secret)'
         )
@@ -421,10 +738,7 @@ def test_episode_create_exposes_safe_retryable_storage_failure(monkeypatch):
     assert result['success'] is False
     assert result['error'] == {
         'code': 'storage_unavailable',
-        'message': (
-            'Episode storage is temporarily unavailable: backend temporarily unavailable '
-            'Authorization: <redacted> http_auth=<redacted>'
-        ),
+        'message': 'Episode storage is temporarily unavailable.',
         'detail': {'exception_type': 'ConnectionError'},
     }
     assert result['retryable'] is True
@@ -432,6 +746,42 @@ def test_episode_create_exposes_safe_retryable_storage_failure(monkeypatch):
     assert ledger_error == result['error']
     assert 'secret-value' not in str(result)
     assert 'admin-secret' not in str(ledger_error)
+    assert 'opensearch.internal' not in str(result)
+
+
+def test_episode_create_marks_dedup_lookup_failure_as_retryable_without_mutation(monkeypatch):
+    class FailingLookupStore(FakeSegmentStore):
+        def get(self, _collection, _filters, *, strict=False):
+            assert strict is True
+            raise ConnectionError(
+                'OpenSearch temporarily unavailable token=secret-value '
+                'https://opensearch.internal:9200/private-index'
+            )
+
+    backend = FailingLookupStore()
+    store = EpisodeStore(backend)
+    lazyllm.globals['agentic_config'] = {
+        'user_id': 'user-1',
+        'task_id': 'memory_review_conv-1',
+        'conversation_id': 'conv-1',
+        'review_started_at_ms': 1_700_000_000_000,
+        'memory_tool_results': [],
+    }
+    memory_module = __import__('lazymind.chat.engine.tools.memory', fromlist=['get_episode_store'])
+    monkeypatch.setattr(memory_module, 'get_episode_store', lambda: store)
+
+    result = MemoryTools().episode_create('需要保存', 'decision')
+
+    assert result['success'] is False
+    assert result['error']['code'] == 'storage_unavailable'
+    assert result['error']['message'] == 'Episode storage is temporarily unavailable.'
+    assert result['retryable'] is True
+    ledger = lazyllm.globals['agentic_config']['memory_tool_results'][-1]
+    assert ledger['mutation'] is False
+    assert ledger['retryable'] is True
+    assert not backend.rows
+    assert 'secret-value' not in str(result)
+    assert 'opensearch.internal' not in str(result)
 
 
 def test_episode_create_does_not_retry_ambiguous_write_timeout(monkeypatch):
@@ -497,3 +847,41 @@ def test_episode_retry_ledger_uses_same_key_so_later_success_can_resolve_failure
     assert stored['source']['kind'] == 'memory_review'
     assert stored['source']['task_id'] == 'memory_review_conv-1'
     assert stored['source']['conversation_id'] == 'conv-1'
+
+
+def test_chat_episode_is_reused_by_review_with_different_task_and_type(monkeypatch):
+    backend = FakeSegmentStore()
+    store = EpisodeStore(backend, clock_ms=lambda: 1_800_000_000_000)
+    memory_module = __import__('lazymind.chat.engine.tools.memory', fromlist=['get_episode_store'])
+    monkeypatch.setattr(memory_module, 'get_episode_store', lambda: store)
+    tools = MemoryTools()
+
+    lazyllm.globals['agentic_config'] = {
+        'user_id': 'user-1',
+        'conversation_id': 'conv-1',
+        'episode_occurred_at_ms': 1_700_000_000_000,
+        'memory_tool_results': [],
+    }
+    chat_result = tools.episode_create('采用蓝色发布', 'decision')
+
+    lazyllm.globals['agentic_config'] = {
+        'user_id': 'user-1',
+        'task_id': 'memory_review_core-task-1',
+        'conversation_id': 'conv-1',
+        'review_started_at_ms': 1_700_000_100_000,
+        'memory_tool_results': [],
+    }
+    review_result = tools.episode_create('  采用蓝色发布  ', 'result')
+
+    assert chat_result['result']['status'] == 'created'
+    assert review_result['result']['status'] == 'idempotent'
+    assert review_result['result']['id'] == chat_result['result']['id']
+    assert len(backend.rows) == 1
+    stored = backend.rows[chat_result['result']['id']]['metadata']
+    assert stored['episode_type'] == 'decision'
+    assert stored['source'] == {
+        'kind': 'chat_explicit',
+        'task_id': None,
+        'conversation_id': 'conv-1',
+        'message_ids': [],
+    }
