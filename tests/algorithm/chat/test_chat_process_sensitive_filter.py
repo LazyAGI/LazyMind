@@ -47,6 +47,16 @@ def test_sensitive_filter_whitelist_span_exempts_nested_red_match(tmp_path):
     assert match.word == '木耳'
 
 
+def test_sensitive_filter_exempts_multiple_whitelist_spans(tmp_path):
+    filter_ = SensitiveFilter(*_word_files(
+        tmp_path,
+        red='交警\n木耳',
+        whitelist='路口交警\n黑木耳',
+    ))
+
+    assert filter_.evaluate('路口交警推荐黑木耳炒肉') is None
+
+
 def test_sensitive_filter_continues_after_whitelisted_match(tmp_path):
     filter_ = SensitiveFilter(*_word_files(
         tmp_path,
@@ -64,7 +74,7 @@ def test_sensitive_filter_matches_injected_gray_words_as_whole_tokens(tmp_path):
     filter_ = SensitiveFilter(*_word_files(
         tmp_path,
         red='redword',
-        gray='口交\n傻逼\nSB',
+        gray='口交\n傻逼\nSB\nJB\nAV\nSEX\nDICK',
         whitelist='路口交警',
     ))
 
@@ -72,6 +82,9 @@ def test_sensitive_filter_matches_injected_gray_words_as_whole_tokens(tmp_path):
     match = filter_.evaluate('你是傻逼')
     assert match is not None
     assert (match.word, match.tier, match.start, match.end) == ('傻逼', 'gray', 2, 4)
+    assert filter_.evaluate('SB/JB').word == 'SB'
+    for query in ('USB接口', 'JAVA教程', 'UNISEX', 'DICKENS'):
+        assert filter_.evaluate(query) is None
 
 
 @pytest.mark.parametrize('missing_tier', ['red', 'gray', 'whitelist'])

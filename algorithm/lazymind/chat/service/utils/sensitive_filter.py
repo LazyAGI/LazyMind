@@ -88,10 +88,24 @@ class SensitiveFilter:
         for word, start, end in self._gray_tokenizer.tokenize(text):
             if word not in self._gray_word_set:
                 continue
+            if word.isascii() and not self._has_ascii_word_boundaries(text, start, end):
+                continue
             if self._is_covered(start, end, whitelist_spans):
                 continue
             return SensitiveMatch(word=word, tier='gray', start=start, end=end)
         return None
+
+    @staticmethod
+    def _has_ascii_word_boundaries(text: str, start: int, end: int) -> bool:
+        def is_ascii_word_character(character: str) -> bool:
+            return character.isascii() and (
+                character.isalnum() or character == '_'
+            )
+
+        return not (
+            (start > 0 and is_ascii_word_character(text[start - 1]))
+            or (end < len(text) and is_ascii_word_character(text[end]))
+        )
 
     @staticmethod
     def _is_covered(

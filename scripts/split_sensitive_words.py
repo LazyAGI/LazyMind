@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import unicodedata
 from pathlib import Path
 
 
@@ -91,6 +92,14 @@ def _render_words(words: list[str] | tuple[str, ...]) -> str:
     return ''.join(f'{word}\n' for word in words)
 
 
+def _contains_special_character(word: str) -> bool:
+    return any(
+        character.isspace()
+        or unicodedata.category(character)[0] in {'P', 'S'}
+        for character in word
+    )
+
+
 def split_words(source: Path, output_dir: Path) -> dict:
     raw_content = source.read_text(encoding='utf-8')
     seen: set[str] = set()
@@ -111,7 +120,7 @@ def split_words(source: Path, output_dir: Path) -> dict:
         if word in CATEGORY_HEADINGS:
             removed_headings.append(word)
             continue
-        if '*' in word or '-' in word:
+        if _contains_special_character(word):
             special_candidates.append(word)
         if word in APPROVED_GRAY_WORDS:
             gray_words.append(word)

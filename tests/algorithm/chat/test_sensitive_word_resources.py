@@ -17,7 +17,8 @@ def test_split_script_generates_reviewable_tiered_resources(tmp_path):
     source = tmp_path / 'sensitive_words.txt'
     output_dir = tmp_path / 'resources'
     source.write_text(
-        '屏蔽词库\n普通红词\n口交\nSB\nJB\njb\nsb\n傻逼\n含*号\n普通红词\n',
+        '屏蔽词库\n普通红词\n口交\nSB\nJB\njb\nsb\n傻逼\n'
+        '含*号\n专/业\n六?四\n法.轮\n六●四\n普通红词\n',
         encoding='utf-8',
     )
 
@@ -35,7 +36,7 @@ def test_split_script_generates_reviewable_tiered_resources(tmp_path):
     )
 
     assert (output_dir / 'sensitive_red.txt').read_text(encoding='utf-8') == (
-        '普通红词\n含*号\n'
+        '普通红词\n含*号\n专/业\n六?四\n法.轮\n六●四\n'
     )
     assert (output_dir / 'sensitive_gray.txt').read_text(encoding='utf-8') == (
         '口交\nSB\nJB\njb\nsb\n傻逼\n'
@@ -48,7 +49,13 @@ def test_split_script_generates_reviewable_tiered_resources(tmp_path):
         (output_dir / 'sensitive_words_report.json').read_text(encoding='utf-8')
     )
     assert report['removed_headings'] == ['屏蔽词库']
-    assert report['special_character_candidates'] == ['含*号']
+    assert report['special_character_candidates'] == [
+        '含*号',
+        '专/业',
+        '六?四',
+        '法.轮',
+        '六●四',
+    ]
     assert report['duplicate_count'] == 1
 
     subprocess.run(
