@@ -773,8 +773,8 @@ class CloudOAuthService:
                     )
                 )
             if not reauthorize_target_id:
-                # Check ACTIVE first so a stale PENDING/ERROR cannot bypass
-                # the "one ACTIVE connection per app" constraint.
+                # Check ACTIVE first — scope by client_id so App X does not
+                # block App Y from creating its own connection.
                 active = CloudAuthConnectionRepository.list_for_owner(
                     db,
                     owner_user_id=normalized_owner,
@@ -782,15 +782,25 @@ class CloudOAuthService:
                     auth_mode='oauth_user',
                     status='ACTIVE',
                 )
-                if active:
+                active_same_app = [
+                    r for r in active
+                    if self._extract_app_key(r)[3] == normalized_client_id
+                ]
+                if active_same_app:
                     raise_error(
                         ErrorCodes.CLOUD_CREDENTIAL_INVALID,
                         extra_msg='an active connection already exists for this app',
                     )
-                if incomplete_rows:
+                # Scope incomplete rows to the same client_id so App Y's
+                # "new account" flow never reuses App X's PENDING/ERROR.
+                same_app_rows = [
+                    r for r in incomplete_rows
+                    if self._extract_app_key(r)[3] == normalized_client_id
+                ]
+                if same_app_rows:
                     # Reuse the first PENDING/ERROR connection — refresh its
                     # oauth_state so the new authorize_url is bound to this record.
-                    reused = incomplete_rows[0]
+                    reused = same_app_rows[0]
                     reused_connection_id = reused.connection_id
                     auth_state = self._decrypt_payload(
                         reused.auth_state_ciphertext, field_name='auth_state'
@@ -807,8 +817,8 @@ class CloudOAuthService:
                     reused.last_error = ''
                     reused.scope = scope_value
                     CloudAuthConnectionRepository.save(db, reused)
-                    # Revoke any other incomplete connections to prevent duplicates.
-                    for extra in incomplete_rows[1:]:
+                    # Revoke extras from the same app to prevent duplicates.
+                    for extra in same_app_rows[1:]:
                         extra.status = 'REVOKED'
                         extra.last_error = 'superseded by new authorization attempt'
                         CloudAuthConnectionRepository.save(db, extra)
