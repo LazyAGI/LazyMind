@@ -6,7 +6,7 @@ import inspect
 import lazyllm
 import pytest
 
-from lazyllm.tools.rag.store import SegmentStore, SegmentStoreConflictError
+from lazyllm.tools.rag.store import BUILDIN_GLOBAL_META_DESC, create_segment_store
 from lazyllm.tools.agent.toolsManager import ToolManager
 
 import lazymind.common.memory.episode_store as episode_store_module
@@ -26,27 +26,27 @@ class FakeSegmentStore:
     def __init__(self):
         self.rows = {}
         self.strict_gets = []
-        self.patch_calls = []
+        self.counter_calls = []
         self.search_calls = []
         self.scores = {}
 
     def create(self, _collection, data):
         for item in data:
-            if item['id'] in self.rows:
-                raise SegmentStoreConflictError(item['id'])
+            if item['uid'] in self.rows:
+                raise FileExistsError(item['uid'])
         for item in data:
-            self.rows[item['id']] = copy.deepcopy(item)
+            self.rows[item['uid']] = copy.deepcopy(item)
         return True
 
-    def get(self, _collection, filters, *, strict=False):
-        self.strict_gets.append(strict)
+    def get(self, _collection, criteria=None, **kwargs):
+        self.strict_gets.append(kwargs.get('raise_on_error', False))
         result = []
         for item in self.rows.values():
-            if filters.get('id') and item['id'] != filters['id']:
-                continue
-            if filters.get('user_id') and item['metadata']['user_id'] != filters['user_id']:
-                continue
-            result.append(copy.deepcopy(item))
+            for field, expected in (criteria or {}).items():
+                if item.get(field) != expected:
+                    break
+            else:
+                result.append(copy.deepcopy(item))
         return result
 
     def search(
@@ -58,7 +58,7 @@ class FakeSegmentStore:
         *,
         query_fields=None,
         match_mode=None,
-        strict=False,
+        raise_on_error=False,
     ):
         self.search_calls.append({
             'collection': collection,
@@ -67,31 +67,41 @@ class FakeSegmentStore:
             'filters': copy.deepcopy(filters),
             'query_fields': copy.deepcopy(query_fields),
             'match_mode': match_mode,
-            'strict': strict,
+            'raise_on_error': raise_on_error,
         })
         result = []
         for item in self.get(collection, filters):
-            item['score'] = self.scores.get(item['id'], 1.0)
+            item['score'] = self.scores.get(item['uid'], 1.0)
             result.append(item)
         return result[:topk]
 
-    def patch(self, collection, filters, set_fields=None, inc_fields=None):
-        self.patch_calls.append({
+    def increment_counters(self, collection, criteria, increments):
+        self.counter_calls.append({
             'collection': collection,
-            'filters': copy.deepcopy(filters),
-            'set_fields': copy.deepcopy(set_fields),
-            'inc_fields': copy.deepcopy(inc_fields),
+            'criteria': copy.deepcopy(criteria),
+            'increments': copy.deepcopy(increments),
         })
-        matches = self.get(collection, filters)
+        matches = self.get(collection, criteria)
         for match in matches:
-            row = self.rows[match['id']]
-            row['metadata']['hit_count'] += (inc_fields or {}).get('hit_count', 0)
+            row = self.rows[match['uid']]
+            counters = row.setdefault('counters', {})
+            for name, value in increments.items():
+                counters[name] = counters.get(name, 0) + value
         return len(matches)
 
-    def delete(self, collection, filters):
-        for item in self.get(collection, filters):
-            del self.rows[item['id']]
+    def delete(self, collection, criteria):
+        for item in self.get(collection, criteria):
+            del self.rows[item['uid']]
         return True
+
+
+def _sqlite_store(db_path):
+    store = create_segment_store({
+        'type': 'SQLiteStore',
+        'kwargs': {'db_path': str(db_path)},
+    })
+    store.connect(global_metadata_desc=BUILDIN_GLOBAL_META_DESC)
+    return store
 
 
 def _episode(
@@ -201,6 +211,41 @@ def test_default_episode_store_rejects_elasticsearch(monkeypatch):
         EpisodeStore()
 
 
+def test_injected_episode_store_does_not_read_default_configuration(monkeypatch):
+    backend = FakeSegmentStore()
+    monkeypatch.setattr(
+        episode_store_module,
+        '_create_default_store',
+        lambda: (_ for _ in ()).throw(AssertionError('default config should not be read')),
+    )
+
+    store = EpisodeStore(backend)
+
+    assert store._store is backend
+
+
+def test_default_episode_store_uses_factory_and_connects_adapter(monkeypatch):
+    class DefaultStore(FakeSegmentStore):
+        supports_counters = True
+
+        def connect(self, **kwargs):
+            self.connect_kwargs = kwargs
+
+    backend = DefaultStore()
+    config = {'type': 'SQLiteStore', 'kwargs': {'db_path': '/tmp/episodes.db'}}
+    monkeypatch.setattr(episode_store_module, '_store_config', lambda: config)
+    monkeypatch.setattr(
+        episode_store_module,
+        'create_segment_store',
+        lambda received: backend if received is config else None,
+    )
+
+    store = EpisodeStore()
+
+    assert store._store is backend
+    assert backend.connect_kwargs == {'global_metadata_desc': BUILDIN_GLOBAL_META_DESC}
+
+
 def test_single_create_is_idempotent_when_only_time_and_summary_format_change():
     backend = FakeSegmentStore()
     store = EpisodeStore(backend, clock_ms=lambda: 1_800_000_000_000)
@@ -214,10 +259,11 @@ def test_single_create_is_idempotent_when_only_time_and_summary_format_change():
     assert retry.idempotency_key == first.idempotency_key == first.id
     assert first.id.startswith('ep_')
     assert len(backend.rows) == 1
-    stored = backend.rows[first.id]['metadata']
+    stored = backend.rows[first.id]['meta']
     assert stored['occurred_at_ms'] == 1000
     assert stored['recorded_at_ms'] == 1_800_000_000_000
     assert stored['summary'] == 'Use  SegmentStore V1'
+    assert {'id', 'user_id', 'hit_count'}.isdisjoint(stored)
 
 
 def test_store_false_create_result_is_not_reported_as_created():
@@ -257,11 +303,29 @@ def test_list_by_conversation_ignores_malformed_rows_from_other_conversations():
         'user-1',
         _episode('其他会话记录', conversation_id='conv-2'),
     )
-    backend.rows[unrelated.id]['metadata']['thread_key'] = 'corrupted-thread-key'
+    backend.rows[unrelated.id]['meta']['thread_key'] = 'corrupted-thread-key'
 
     records = store.list_by_conversation('user-1', 'conv-1')
 
     assert [record.id for record in records] == [expected.id]
+
+
+def test_episode_hit_count_reads_new_counter_before_legacy_fields():
+    backend = FakeSegmentStore()
+    store = EpisodeStore(backend)
+    created = store.create('user-1', _episode('兼容旧命中计数'))
+    row = backend.rows[created.id]
+    row['meta']['hit_count'] = 3
+    row['number'] = 5
+    row['counters']['hit_count'] = 7
+
+    assert store.list_by_conversation('user-1', 'conv-1')[0].hit_count == 7
+
+    row['counters'] = {}
+    assert store.list_by_conversation('user-1', 'conv-1')[0].hit_count == 5
+
+    row['number'] = None
+    assert store.list_by_conversation('user-1', 'conv-1')[0].hit_count == 3
 
 
 def test_idempotency_key_is_tenant_conversation_and_summary_scoped():
@@ -283,15 +347,15 @@ def test_create_reuses_oldest_legacy_id_for_same_conversation_summary():
     template = backend.rows.pop(created.id)
 
     later = copy.deepcopy(template)
-    later['id'] = 'ep_legacy_later'
-    later['metadata']['recorded_at_ms'] = 2000
-    later['metadata']['source']['task_id'] = 'legacy-task-later'
+    later['uid'] = later['doc_id'] = 'ep_legacy_later'
+    later['meta']['recorded_at_ms'] = 2000
+    later['meta']['source']['task_id'] = 'legacy-task-later'
     earlier = copy.deepcopy(template)
-    earlier['id'] = 'ep_legacy_earlier'
-    earlier['metadata']['recorded_at_ms'] = 1000
-    earlier['metadata']['source']['task_id'] = 'legacy-task-earlier'
-    backend.rows[later['id']] = later
-    backend.rows[earlier['id']] = earlier
+    earlier['uid'] = earlier['doc_id'] = 'ep_legacy_earlier'
+    earlier['meta']['recorded_at_ms'] = 1000
+    earlier['meta']['source']['task_id'] = 'legacy-task-earlier'
+    backend.rows[later['uid']] = later
+    backend.rows[earlier['uid']] = earlier
 
     result = store.create(
         'user-1',
@@ -312,18 +376,18 @@ def test_create_conflict_strictly_verifies_same_tenant_and_identity():
     class RacingSegmentStore(FakeSegmentStore):
         def __init__(self, row):
             super().__init__()
-            self.rows[row['id']] = copy.deepcopy(row)
+            self.rows[row['uid']] = copy.deepcopy(row)
             self._first_get = True
 
-        def get(self, collection, filters, *, strict=False):
+        def get(self, collection, criteria=None, **kwargs):
             if self._first_get:
                 self._first_get = False
-                self.strict_gets.append(strict)
+                self.strict_gets.append(kwargs.get('raise_on_error', False))
                 return []
-            return super().get(collection, filters, strict=strict)
+            return super().get(collection, criteria, **kwargs)
 
         def create(self, _collection, data):
-            raise SegmentStoreConflictError(data[0]['id'])
+            raise FileExistsError(data[0]['uid'])
 
     backend = RacingSegmentStore(seed_backend.rows[created.id])
     result = EpisodeStore(backend).create('user-1', _episode())
@@ -337,11 +401,11 @@ def test_create_conflict_strictly_verifies_same_tenant_and_identity():
     ('mutate_row', 'message'),
     [
         (
-            lambda row: row['metadata'].__setitem__('user_id', 'user-2'),
+            lambda row: row.__setitem__('kb_id', 'user-2'),
             'outside the current tenant identity',
         ),
         (
-            lambda row: row['metadata'].__setitem__('summary', '不同的 Episode 内容'),
+            lambda row: row['meta'].__setitem__('summary', '不同的 Episode 内容'),
             'different idempotent content',
         ),
     ],
@@ -355,18 +419,18 @@ def test_create_conflict_rejects_wrong_tenant_or_identity(mutate_row, message):
     class RacingSegmentStore(FakeSegmentStore):
         def __init__(self):
             super().__init__()
-            self.rows[conflicting_row['id']] = conflicting_row
+            self.rows[conflicting_row['uid']] = conflicting_row
             self._first_get = True
 
-        def get(self, collection, filters, *, strict=False):
+        def get(self, collection, criteria=None, **kwargs):
             if self._first_get:
                 self._first_get = False
-                self.strict_gets.append(strict)
+                self.strict_gets.append(kwargs.get('raise_on_error', False))
                 return []
-            return super().get(collection, filters, strict=strict)
+            return super().get(collection, criteria, **kwargs)
 
         def create(self, _collection, data):
-            raise SegmentStoreConflictError(data[0]['id'])
+            raise FileExistsError(data[0]['uid'])
 
     backend = RacingSegmentStore()
 
@@ -406,14 +470,14 @@ def test_search_uses_content_any_and_hard_filters_weak_unrelated_candidate():
     assert results[0].score <= 1.0
     assert backend.search_calls[-1]['query_fields'] == ['content']
     assert backend.search_calls[-1]['match_mode'] == 'any'
-    assert backend.search_calls[-1]['filters'] == {'user_id': 'user-1'}
-    assert backend.search_calls[-1]['strict'] is True
+    assert backend.search_calls[-1]['filters'] == {'kb_id': 'user-1'}
+    assert backend.search_calls[-1]['raise_on_error'] is True
 
 
 def test_search_converts_strict_backend_failure_to_safe_episode_error():
     class FailingSearchStore(FakeSegmentStore):
-        def search(self, *args, strict=False, **kwargs):
-            assert strict is True
+        def search(self, *args, raise_on_error=False, **kwargs):
+            assert raise_on_error is True
             raise ConnectionError(
                 'OpenSearch unavailable at '
                 'https://admin:secret@opensearch.internal:9200/private-index'
@@ -449,7 +513,7 @@ def test_search_ranks_by_coverage_recency_and_hit_count(monkeypatch):
             occurred_at_ms=now_ms - 10 * day_ms,
         ),
     )
-    backend.rows[popular.id]['metadata']['hit_count'] = 10
+    backend.rows[popular.id]['counters']['hit_count'] = 10
     monkeypatch.setitem(episode_store_module._cfg._impl, 'episode_relevance_weight', 0.8)
     monkeypatch.setitem(episode_store_module._cfg._impl, 'episode_recency_weight', 0.1)
     monkeypatch.setitem(episode_store_module._cfg._impl, 'episode_hit_weight', 0.1)
@@ -461,7 +525,7 @@ def test_search_ranks_by_coverage_recency_and_hit_count(monkeypatch):
     assert [item.episode.id for item in results] == [high_coverage.id, popular.id, recent.id]
 
 
-def test_increment_hits_uses_atomic_patch_with_tenant_scope():
+def test_increment_hits_uses_atomic_counter_with_tenant_scope():
     backend = FakeSegmentStore()
     store = EpisodeStore(backend)
     own = store.create('user-1', _episode())
@@ -470,20 +534,18 @@ def test_increment_hits_uses_atomic_patch_with_tenant_scope():
     result = store.increment_hits('user-1', [own.id, other.id, own.id])
 
     assert result == {own.id: True, other.id: False}
-    assert backend.rows[own.id]['metadata']['hit_count'] == 1
-    assert backend.rows[other.id]['metadata']['hit_count'] == 0
-    assert backend.patch_calls == [
+    assert backend.rows[own.id]['counters']['hit_count'] == 1
+    assert backend.rows[other.id]['counters']['hit_count'] == 0
+    assert backend.counter_calls == [
         {
             'collection': episode_store_module.EPISODE_COLLECTION,
-            'filters': {'id': own.id, 'user_id': 'user-1'},
-            'set_fields': None,
-            'inc_fields': {'hit_count': 1},
+            'criteria': {'uid': own.id, 'kb_id': 'user-1'},
+            'increments': {'hit_count': 1},
         },
         {
             'collection': episode_store_module.EPISODE_COLLECTION,
-            'filters': {'id': other.id, 'user_id': 'user-1'},
-            'set_fields': None,
-            'inc_fields': {'hit_count': 1},
+            'criteria': {'uid': other.id, 'kb_id': 'user-1'},
+            'increments': {'hit_count': 1},
         },
     ]
 
@@ -538,10 +600,7 @@ def test_structured_numeric_identifier_requires_same_order_and_separators():
 
 
 def test_sqlite_episode_contract_recalls_natural_question_and_keeps_tenant_scope(tmp_path):
-    backend = SegmentStore({
-        'type': 'SQLiteStore',
-        'kwargs': {'db_path': str(tmp_path / 'episodes.db')},
-    })
+    backend = _sqlite_store(tmp_path / 'episodes.db')
     store = EpisodeStore(backend)
     relevant = store.create('user-1', _episode('项目验证码是火星苹果42'))
     store.create('user-1', _episode('今天讨论了部署窗口'))
@@ -554,10 +613,7 @@ def test_sqlite_episode_contract_recalls_natural_question_and_keeps_tenant_scope
 
 
 def test_sqlite_conversation_list_and_exact_dedup_keep_tenant_scope(tmp_path):
-    backend = SegmentStore({
-        'type': 'SQLiteStore',
-        'kwargs': {'db_path': str(tmp_path / 'conversation-episodes.db')},
-    })
+    backend = _sqlite_store(tmp_path / 'conversation-episodes.db')
     store = EpisodeStore(backend)
     first = store.create('user-1', _episode('采用蓝色发布'))
     duplicate = store.create(
@@ -577,6 +633,33 @@ def test_sqlite_conversation_list_and_exact_dedup_keep_tenant_scope(tmp_path):
     assert all(record.source.conversation_id == 'conv-1' for record in records)
 
 
+def test_sqlite_episode_counter_legacy_reads_and_reset_complete_lifecycle(tmp_path):
+    backend = _sqlite_store(tmp_path / 'episode-lifecycle.db')
+    store = EpisodeStore(backend)
+    created = store.create('user-1', _episode('完整生命周期'))
+
+    assert store.increment_hits('user-1', [created.id]) == {created.id: True}
+    assert store.list_by_conversation('user-1', 'conv-1')[0].hit_count == 1
+
+    row = backend.get(
+        episode_store_module.EPISODE_COLLECTION,
+        {'uid': created.id, 'kb_id': 'user-1'},
+        raise_on_error=True,
+    )[0]
+    row['counters'] = {}
+    row['number'] = 6
+    row['meta']['hit_count'] = 4
+    assert backend.upsert(episode_store_module.EPISODE_COLLECTION, [row]) is True
+    assert store.list_by_conversation('user-1', 'conv-1')[0].hit_count == 6
+
+    row['number'] = None
+    assert backend.upsert(episode_store_module.EPISODE_COLLECTION, [row]) is True
+    assert store.list_by_conversation('user-1', 'conv-1')[0].hit_count == 4
+
+    assert store.reset_episode('user-1') is True
+    assert store.list_by_conversation('user-1', 'conv-1') == []
+
+
 @pytest.mark.parametrize(
     ('query', 'summary'),
     [
@@ -588,10 +671,7 @@ def test_sqlite_conversation_list_and_exact_dedup_keep_tenant_scope(tmp_path):
 def test_sqlite_episode_contract_recalls_exact_alphanumeric_identifier(
     tmp_path, query, summary,
 ):
-    backend = SegmentStore({
-        'type': 'SQLiteStore',
-        'kwargs': {'db_path': str(tmp_path / f'{query}.db')},
-    })
+    backend = _sqlite_store(tmp_path / f'{query}.db')
     store = EpisodeStore(backend)
     relevant = store.create('user-1', _episode(summary))
 
@@ -647,8 +727,9 @@ def test_episode_create_uses_runtime_context_even_when_retrieval_is_disabled(mon
     assert result['success'] is True
     assert result['result']['status'] == 'created'
     assert result['result']['id'].startswith('ep_')
-    stored = next(iter(backend.rows.values()))['metadata']
-    assert stored['user_id'] == 'user-1'
+    row = next(iter(backend.rows.values()))
+    stored = row['meta']
+    assert row['kb_id'] == 'user-1'
     assert stored['thread_key'] == 'conv-1'
     assert stored['occurred_at_ms'] == 1_700_000_000_000
     assert stored['source'] == {
@@ -751,8 +832,8 @@ def test_episode_create_exposes_safe_retryable_storage_failure(monkeypatch):
 
 def test_episode_create_marks_dedup_lookup_failure_as_retryable_without_mutation(monkeypatch):
     class FailingLookupStore(FakeSegmentStore):
-        def get(self, _collection, _filters, *, strict=False):
-            assert strict is True
+        def get(self, _collection, _criteria=None, *, raise_on_error=False):
+            assert raise_on_error is True
             raise ConnectionError(
                 'OpenSearch temporarily unavailable token=secret-value '
                 'https://opensearch.internal:9200/private-index'
@@ -841,7 +922,7 @@ def test_episode_retry_ledger_uses_same_key_so_later_success_can_resolve_failure
     assert ledger[0]['result']['status'] == 'failed'
     assert ledger[0]['result']['idempotency_key'] == saved['result']['idempotency_key']
     assert ledger[1]['result']['idempotency_key'] == saved['result']['idempotency_key']
-    stored = backend.rows[saved['result']['id']]['metadata']
+    stored = backend.rows[saved['result']['id']]['meta']
     assert stored['thread_key'] == 'conv-1'
     assert stored['occurred_at_ms'] == 1_700_000_000_000
     assert stored['source']['kind'] == 'memory_review'
@@ -877,7 +958,7 @@ def test_chat_episode_is_reused_by_review_with_different_task_and_type(monkeypat
     assert review_result['result']['status'] == 'idempotent'
     assert review_result['result']['id'] == chat_result['result']['id']
     assert len(backend.rows) == 1
-    stored = backend.rows[chat_result['result']['id']]['metadata']
+    stored = backend.rows[chat_result['result']['id']]['meta']
     assert stored['episode_type'] == 'decision'
     assert stored['source'] == {
         'kind': 'chat_explicit',
