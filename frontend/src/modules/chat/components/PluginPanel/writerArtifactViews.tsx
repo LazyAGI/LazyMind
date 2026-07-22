@@ -262,7 +262,9 @@ function StructuredValue({ value }: { value: unknown }) {
   );
 }
 
-type OmitSpec = Record<string, true | OmitSpec>;
+interface OmitSpec {
+  [key: string]: true | OmitSpec;
+}
 
 function omitConsumedFields(value: unknown, spec: OmitSpec): unknown {
   const record = asRecord(value);
