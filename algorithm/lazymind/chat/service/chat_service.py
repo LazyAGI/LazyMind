@@ -15,7 +15,9 @@ from lazymind.chat.config import (
     MAX_CONCURRENCY,
     RAG_MODE,
     SENSITIVE_FILTER_RESPONSE_TEXT,
-    SENSITIVE_WORDS_PATH,
+    SENSITIVE_GRAY_WORDS_PATH,
+    SENSITIVE_RED_WORDS_PATH,
+    SENSITIVE_WHITELIST_PATH,
 )
 from lazymind.chat.engine.prompts import (
     add_standard_system_sections,
@@ -53,6 +55,7 @@ from lazymind.chat.engine.tools.intent_writer import (
 )
 from lazymind.chat.service.utils import (
     SensitiveFilter,
+    SensitiveMatch,
     log_and_emit_frame,
     register_image_url,
     response_payload,
@@ -69,7 +72,11 @@ from lazyllm.tools.mcp.client import MCPClient
 from lazymind.config import config as _cfg
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
-sensitive_filter = SensitiveFilter(SENSITIVE_WORDS_PATH)
+sensitive_filter = SensitiveFilter(
+    SENSITIVE_RED_WORDS_PATH,
+    SENSITIVE_GRAY_WORDS_PATH,
+    SENSITIVE_WHITELIST_PATH,
+)
 
 # Maps conversation_id → session_id for active chat sessions.
 # Used by task-cancel endpoint to cancel ChatAgent by conversation_id.
@@ -80,6 +87,7 @@ _CITE_MESSAGE_PATTERN = re.compile(
 )
 _MCP_TOOL_CACHE_TTL_SECONDS = 300
 _TASK_PROFILE_ROUTER_TIMEOUT_SECONDS = 20
+_SENSITIVE_MATCH_UNSET = object()
 _mcp_tool_cache: dict[str, tuple[float, list[Any]]] = {}
 _mcp_tool_cache_lock = threading.Lock()
 
@@ -117,13 +125,8 @@ def _normalize_kb_id_filter(raw_kb_id: Any) -> str | list[str] | None:
     return None
 
 
-def check_sensitive_content(
-    query: str,
-) -> Optional[str]:
-    if not sensitive_filter.loaded:
-        return None
-    has_sensitive, sensitive_word = sensitive_filter.check(query)
-    return sensitive_word if has_sensitive else None
+def check_sensitive_content(query: str) -> Optional[SensitiveMatch]:
+    return sensitive_filter.evaluate(query)
 
 
 def _mcp_server_cache_key(server: Dict[str, Any]) -> str:
@@ -279,11 +282,23 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
 
     from lazymind.chat.plugin.plugin_manager import is_plugin_driver_turn
     raw_query = str(request.message.query or '')
-    if (
-        not is_plugin_driver_turn(request.plugin.plugin_context)
-        and check_sensitive_content(raw_query)
-    ):
-        return await _handle_chat_impl(request, task_profile_override=provisional)
+    filter_query, _ = _normalize_cite_message_query_for_agent(raw_query)
+    skip_sensitive_filter = (
+        is_plugin_driver_turn(request.plugin.plugin_context)
+        or request.runtime.context_usage_preview
+        or request.runtime.context_prompt_export
+    )
+    sensitive_match = (
+        None
+        if skip_sensitive_filter
+        else check_sensitive_content(filter_query)
+    )
+    if sensitive_match is not None:
+        return await _handle_chat_impl(
+            request,
+            task_profile_override=provisional,
+            sensitive_match_override=sensitive_match,
+        )
 
     inject_model_config(request.runtime.llm_config)
 
@@ -302,7 +317,11 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             )
             await asyncio.sleep(0.08)
         profile = await routing_task
-        response = await _handle_chat_impl(request, task_profile_override=profile)
+        response = await _handle_chat_impl(
+            request,
+            task_profile_override=profile,
+            sensitive_match_override=sensitive_match,
+        )
         if isinstance(response, StreamingResponse):
             async for chunk in response.body_iterator:
                 yield chunk
@@ -313,7 +332,11 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         profile = provisional
         if request.runtime.context_preview_allow_llm_routing:
             profile = await asyncio.to_thread(_resolve_task_profile_with_model, inputs)
-        return await _handle_chat_impl(request, task_profile_override=profile)
+        return await _handle_chat_impl(
+            request,
+            task_profile_override=profile,
+            sensitive_match_override=sensitive_match,
+        )
     return StreamingResponse(resolve_and_continue(), media_type='text/event-stream')
 
 
@@ -321,6 +344,7 @@ async def _handle_chat_impl(
     request: ChatRequest,
     *,
     task_profile_override: Any = None,
+    sensitive_match_override: SensitiveMatch | None | object = _SENSITIVE_MATCH_UNSET,
 ) -> Union[Dict[str, Any], StreamingResponse]:
     message = request.message
     conversation = request.conversation
@@ -362,15 +386,21 @@ async def _handle_chat_impl(
         cited_message_context = user_cited_context
     language_query = user_input.strip()
     is_driver_turn = is_plugin_driver_turn(plugin.plugin_context)
-    sensitive_word = (
-        None if is_driver_turn or runtime.context_usage_preview or runtime.context_prompt_export
-        else check_sensitive_content(query)
+    skip_sensitive_filter = (
+        is_driver_turn or runtime.context_usage_preview or runtime.context_prompt_export
     )
-    if sensitive_word:
+    if skip_sensitive_filter:
+        sensitive_match = None
+    elif sensitive_match_override is _SENSITIVE_MATCH_UNSET:
+        sensitive_match = check_sensitive_content(query)
+    else:
+        sensitive_match = sensitive_match_override
+    if sensitive_match is not None:
         cost = round(time.time() - start_time, 3)
         LOG.warning(
             f'[ChatServer] [SENSITIVE_FILTER_BLOCKED] [query={query[:50]}...] '
-            f'[sensitive_word={sensitive_word}] [session_id={conversation.session_id}]'
+            f'[sensitive_word={sensitive_match.word}] [tier={sensitive_match.tier}] '
+            f'[session_id={conversation.session_id}]'
         )
         return single_event_stream_response(response_payload(
             200,
