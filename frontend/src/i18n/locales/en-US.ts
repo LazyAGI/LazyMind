@@ -1076,8 +1076,12 @@ const enUS = {
     slots: {
       rawData: "Raw data",
       download: "Download",
+      downloadOriginalFile: "Download original file",
       viewContent: "View content",
       contentLoadFailed: "Failed to load content",
+    },
+    writer: {
+      downloadMarkdown: "Download Markdown",
     },
     pluginStatusRunning: "Running",
     pluginStatusDone: "Done",

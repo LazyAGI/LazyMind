@@ -17,6 +17,7 @@ import type {
   InnerTabsNode,
 } from '@/modules/chat/store/pluginPanel';
 import { SlotRenderer, SlotEditingContext } from './SlotComponents';
+import { WriterIRToolbarTargetContext } from './WriterIRControl';
 import './PluginPanel.scss';
 
 /** Parse a JSON intent context string and return the text field, or '' if empty/invalid. */
@@ -381,6 +382,37 @@ function getTabSlotRevisions(
     return slots.filter((s) => s.slot === artifactKey && s.step_id === tab.id);
   }
   return slots.filter((s) => s.slot === artifactKey && s.selected);
+}
+
+function isJsonArtifactRevision(slot: SlotRevision): boolean {
+  if (slot.content_type === 'json') return true;
+  const raw = slot.artifact_value;
+  if (!raw || typeof raw !== 'object') return false;
+  if (raw.type === 'json') return true;
+  const source = String(raw.filename ?? raw.name ?? raw.path ?? raw.url ?? '');
+  return source.split(/[?#]/, 1)[0].toLowerCase().endsWith('.json');
+}
+
+/** Prefer the structured WriterDocument over its Markdown export when both exist. */
+function resolveWriterFinalSlotDefs(tab: TabDef, session: PluginSession): SlotDef[] {
+  if (session.plugin_id !== 'writer-plugin') return tab.slots;
+  const declaredSlotIds = new Set(tab.slots.map((slot) => slot.id));
+
+  return tab.slots.flatMap((slotDef) => {
+    if (!slotDef.id.endsWith('_md')) return [slotDef];
+    const irSlotId = slotDef.id.slice(0, -3);
+    const hasIRArtifact = getTabSlotRevisions(session, tab, irSlotId)
+      .some(isJsonArtifactRevision);
+    if (!hasIRArtifact) return [slotDef];
+    if (declaredSlotIds.has(irSlotId)) return [];
+
+    return [{
+      ...slotDef,
+      id: irSlotId,
+      label: slotDef.label.replace(/\s*[（(]\s*markdown\s*[）)]/i, '').trim() || irSlotId,
+      type: 'text',
+    }];
+  });
 }
 
 /** Get all distinct sort_orders present across the participating slots. */
@@ -804,6 +836,85 @@ function SortableImageList({
   );
 }
 
+function NamedTabSlot({
+  slotDef,
+  revisions,
+  session,
+  onRefresh,
+  onReference,
+  onFocusSortOrder,
+  onAddItem,
+}: {
+  slotDef: SlotDef;
+  revisions: SlotRevision[];
+  session: PluginSession;
+  onRefresh?: () => void;
+  onReference?: (slot: SlotRevision) => void;
+  onFocusSortOrder?: (sortOrder: number | undefined) => void;
+  onAddItem: () => void;
+}) {
+  const { t } = useTranslation();
+  const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null);
+  const slotLabel = slotDef.label ?? slotDef.id;
+  const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
+  const isDraggable = Boolean(slotDef.ordered);
+
+  return (
+    <WriterIRToolbarTargetContext.Provider value={toolbarTarget}>
+      <div className='plugin-panel__named-slot'>
+        <div className='plugin-panel__slot-heading'>
+          {(slotDef.label || slotDef.id) && (
+            <span className='plugin-panel__slot-label'>{slotLabel}</span>
+          )}
+          <div
+            className='plugin-panel__slot-toolbar writer-ir'
+            ref={setToolbarTarget}
+          />
+        </div>
+        {revisions.length === 0 ? (
+          <div
+            className='plugin-panel__slot-placeholder'
+            aria-label={`${slotLabel} pending`}
+          >
+            <span>—</span>
+          </div>
+        ) : isImageList ? (
+          <SortableImageList
+            revisions={revisions}
+            session={session}
+            slotDef={slotDef}
+            isDraggable={isDraggable}
+            onRefresh={onRefresh}
+            onReference={onReference}
+            onFocusSortOrder={onFocusSortOrder}
+            onAddItem={onAddItem}
+          />
+        ) : (
+          revisions.map((rev) => (
+            <div
+              key={`${rev.slot_id}-${rev.list_index ?? -1}`}
+              onClick={() => onFocusSortOrder?.(rev.sort_order)}
+              role='button'
+              tabIndex={0}
+              aria-label={t('chat.pluginContentItemAria', { index: rev.sort_order ?? '' })}
+            >
+              <SlotRenderer
+                slot={rev}
+                expectedType={slotDef.type}
+                sessionId={session.session_id}
+                slotId={slotDef.id}
+                revisionCount={rev.revision_count}
+                onRefresh={onRefresh}
+                onReference={onReference}
+              />
+            </div>
+          ))
+        )}
+      </div>
+    </WriterIRToolbarTargetContext.Provider>
+  );
+}
+
 function TabSlotGrid({
   tab,
   session,
@@ -817,7 +928,6 @@ function TabSlotGrid({
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
 }) {
-  const { t } = useTranslation();
   const addFileInputRef = useRef<HTMLInputElement>(null);
   const addingSlotIdRef = useRef<string>('');
   const addingSlotTypeRef = useRef<string>('');
@@ -862,7 +972,7 @@ function TabSlotGrid({
     const filtered = slotDefs.filter((s) => visible.has(s.id));
     return filtered.length > 0 ? filtered : slotDefs;
   };
-  const visibleSlots = resolveVisibleSlots(tab.slots);
+  const visibleSlots = resolveVisibleSlots(resolveWriterFinalSlotDefs(tab, session));
   return (
     <div className={`plugin-panel__tab-content plugin-panel__tab-content--${tab.layout ?? 'vertical'}`}>
       {/* Hidden file input for adding new items */}
@@ -881,54 +991,17 @@ function TabSlotGrid({
         if (hideEmpty && revisions.length === 0) {
           return null;
         }
-        const slotLabel = slotDef.label ?? slotDef.id;
-        const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
-        const isDraggable = Boolean(slotDef.ordered);
         return (
-          <div key={slotDef.id} className='plugin-panel__named-slot'>
-            {(slotDef.label || slotDef.id) && (
-              <span className='plugin-panel__slot-label'>{slotLabel}</span>
-            )}
-            {revisions.length === 0 ? (
-              <div
-                className='plugin-panel__slot-placeholder'
-                aria-label={`${slotLabel} pending`}
-              >
-                <span>—</span>
-              </div>
-            ) : isImageList ? (
-              <SortableImageList
-                revisions={revisions}
-                session={session}
-                slotDef={slotDef}
-                isDraggable={isDraggable}
-                onRefresh={onRefresh}
-                onReference={onReference}
-                onFocusSortOrder={onFocusSortOrder}
-                onAddItem={() => handleAddItem(slotDef.id, slotDef.type)}
-              />
-            ) : (
-              revisions.map((rev) => (
-                <div
-                  key={`${rev.slot_id}-${rev.list_index ?? -1}`}
-                  onClick={() => onFocusSortOrder?.(rev.sort_order)}
-                  role='button'
-                  tabIndex={0}
-                  aria-label={t('chat.pluginContentItemAria', { index: rev.sort_order ?? '' })}
-                >
-                  <SlotRenderer
-                    slot={rev}
-                    expectedType={slotDef.type}
-                    sessionId={session.session_id}
-                    slotId={slotDef.id}
-                    revisionCount={rev.revision_count}
-                    onRefresh={onRefresh}
-                    onReference={onReference}
-                  />
-                </div>
-              ))
-            )}
-          </div>
+          <NamedTabSlot
+            key={slotDef.id}
+            slotDef={slotDef}
+            revisions={revisions}
+            session={session}
+            onRefresh={onRefresh}
+            onReference={onReference}
+            onFocusSortOrder={onFocusSortOrder}
+            onAddItem={() => handleAddItem(slotDef.id, slotDef.type)}
+          />
         );
       })}
     </div>

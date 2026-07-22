@@ -17,7 +17,10 @@ export const WRITER_ARTIFACT_SLOT_IDS = new Set([
   'draft_document',
   'review_report',
   'review_summary',
+  'final_document',
+  'final_document_md',
   'writing_output',
+  'writing_output_md',
 ]);
 
 export function unwrapArtifactPayload(raw: unknown): unknown {

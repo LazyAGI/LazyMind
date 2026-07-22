@@ -1735,9 +1735,10 @@ function SlotJsonFile({
 
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
+  const showArtifactActions = !WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
   const canEditWriterIR = Boolean(sessionId && slotId)
     && !readOnly
-    && loadedSourceKey === sourceKey;
+    && (loadedSourceKey === sourceKey || writerEditing);
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
   const showVersionBadge =
     revisionCount !== undefined && revisionCount > 0 && Boolean(sessionId && slotId);
@@ -1856,7 +1857,7 @@ function SlotJsonFile({
             />
           )}
         </div>
-        <div className='plugin-slot__artifact-actions'>
+        <div className='plugin-slot__artifact-actions' hidden={!showArtifactActions}>
           <span
             title={writerEditing ? tr('chat.writerIR.finishEditingFirst') : undefined}
             tabIndex={writerEditing ? 0 : undefined}
@@ -1911,6 +1912,7 @@ function SlotInlineStructured({
   const [writerEditing, setWriterEditing] = useState(false);
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
+  const showArtifactActions = !WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
   const canEditWriterIR = Boolean(sessionId && slotId) && !readOnly;
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
   const showVersionBadge =
@@ -1975,7 +1977,7 @@ function SlotInlineStructured({
             />
           )}
         </div>
-        <div className='plugin-slot__artifact-actions'>
+        <div className='plugin-slot__artifact-actions' hidden={!showArtifactActions}>
           <span
             title={writerEditing ? tr('chat.writerIR.finishEditingFirst') : undefined}
             tabIndex={writerEditing ? 0 : undefined}
@@ -2063,6 +2065,7 @@ function SlotMarkdownFile({
   const showVersionBadge =
     revisionCount !== undefined && revisionCount > 0 && Boolean(sessionId && slotId);
   const resolvedSlotId = slotId ?? slot.slot;
+  const showArtifactActions = !WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
 
   if (!hasSource) {
     return (
@@ -2090,7 +2093,7 @@ function SlotMarkdownFile({
 
   return (
     <div className='plugin-slot plugin-slot--artifact'>
-      <div className='writer-artifact__output-toolbar'>
+      <div className='writer-artifact__output-toolbar' hidden={!showArtifactActions}>
         <button
           type='button'
           className='plugin-slot__file-action-btn writer-artifact__download-btn'
