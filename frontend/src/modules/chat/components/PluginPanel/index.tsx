@@ -16,7 +16,7 @@ import type {
   CompositeColumnNode,
   InnerTabsNode,
 } from '@/modules/chat/store/pluginPanel';
-import { SlotRenderer, SlotEditingContext } from './SlotComponents';
+import { SlotRenderer, SlotDownloadContext, SlotEditingContext } from './SlotComponents';
 import { WriterIRToolbarTargetContext } from './WriterIRControl';
 import './PluginPanel.scss';
 
@@ -1334,13 +1334,15 @@ export function PluginPanel({
                 role='tabpanel'
                 hidden={idx !== activeTabIdx}
               >
-                <TabSlotGrid
-                  tab={tab}
-                  session={session}
-                  onRefresh={refresh}
-                  onReference={onReference}
-                  onFocusSortOrder={handleFocusSortOrder}
-                />
+                <SlotDownloadContext.Provider value={idx === tabs.length - 1}>
+                  <TabSlotGrid
+                    tab={tab}
+                    session={session}
+                    onRefresh={refresh}
+                    onReference={onReference}
+                    onFocusSortOrder={handleFocusSortOrder}
+                  />
+                </SlotDownloadContext.Provider>
               </div>
             ))
           ) : (
