@@ -52,9 +52,9 @@ def build_preference_reference_content(
 
     description = summary_text.replace('"', '\\"')
     body = (
-        '## 应用场景\n'
+        '## Application Scenarios\n'
         f'{scenario_text}\n\n'
-        '## 理由\n'
+        '## Reasons\n'
         f'{reason_text}\n'
     )
     content = (

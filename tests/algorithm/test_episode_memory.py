@@ -298,7 +298,6 @@ def test_memory_tools_registers_as_eager_container_with_episode_schema():
     }
 
     assert set(descriptions) == {
-        'MemoryTools_read_memory',
         'MemoryTools_read_memory_reference',
         'MemoryTools_soul_editor',
         'MemoryTools_profile_editor',

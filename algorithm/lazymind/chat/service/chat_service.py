@@ -22,7 +22,7 @@ from lazymind.chat.engine.prompts import (
     select_skill_candidates,
     selected_prompt_modules,
 )
-from lazymind.chat.engine.memory import load_chat_memory_context
+from lazymind.common.memory import load_memory_context
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
@@ -344,8 +344,6 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         'has_subagents': bool(agent.has_subagents),
         'conversation_id': conversation_id,
         'query': query or '',
-        'memory': personalization.memory or '',
-        'user_preference': personalization.user_preference or '',
     }
     # Inject per-conversation plugin flags from Go (resolved from conversations table).
     # enable_plugin=None means "not set"; default to True so behaviour is unchanged
@@ -382,7 +380,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
 
     memory_context = None
     if personalization.use_memory:
-        memory_context = load_chat_memory_context()
+        memory_context = load_memory_context()
         agentic_config['soul'] = memory_context.soul
         agentic_config['profile'] = memory_context.profile
         agentic_config['preference'] = memory_context.preference

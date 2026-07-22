@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from lazymind.chat.engine.tools.infra import tool_error, tool_success
 from lazymind.common.memory import (
-    MEMORY_TARGET_PATHS,
     PREFERENCE_PATH,
     PROFILE_PATH,
     SOUL_PATH,
@@ -18,16 +17,12 @@ from lazymind.common.memory import (
     MemoryNotFoundError,
     MemoryRemoteStore,
     MemoryStoreError,
-    PROFILE_EDITABLE_FIELDS,
-    SOUL_EDITABLE_FIELDS,
     build_episode_idempotency_key,
     get_episode_store,
     preference_name_to_reference_name,
     split_reference_ref,
 )
 
-
-MemoryReadTarget = Literal['memory', 'user_preference']
 _TRANSIENT_MARKERS = (
     'backend down',
     'connection',
@@ -241,7 +236,6 @@ class MemoryTools:
     """Persistent memory APIs for Chat and Memory Review agents."""
 
     __public_apis__ = [
-        'read_memory',
         'read_memory_reference',
         'soul_editor',
         'profile_editor',
@@ -251,83 +245,6 @@ class MemoryTools:
 
     def __lazy_source__(self) -> bool:
         return False
-
-    def read_memory(self, target: MemoryReadTarget) -> Dict[str, Any]:
-        """Read the agent's current working memory or user profile text.
-
-        This reads optional persistent, cross-conversation notes. It does NOT
-        read the current conversation history, which is already present in the
-        model's messages. Never call this tool to recall earlier turns in the
-        current chat, summarize the conversation, or resolve a follow-up
-        question. Empty persistent memory does not mean that conversation
-        history is unavailable. Use this tool only when the user explicitly
-        asks about saved memory/profile content or when persistent
-        cross-conversation notes are specifically needed.
-
-        Args:
-            target: Selects the document to read. Use 'memory' for agent
-                working memory, or 'user_preference' for user profile and
-                preference text.
-        """
-        raw_target = str(target).strip()
-        if raw_target not in MEMORY_TARGET_PATHS:
-            return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'read_memory',
-                    'error': {
-                        'code': 'invalid_arguments',
-                        'message': (
-                            f'Unknown target {raw_target!r}; expected one of '
-                            '\'memory\', \'user_preference\'.'
-                        ),
-                        'detail': {'target': raw_target},
-                    },
-                    'retryable': False,
-                },
-                mutation=False,
-            )
-        try:
-            content = MemoryRemoteStore().read(raw_target)
-        except Exception as exc:
-            _log_tool_exception('read_memory', exc)
-            safe_message = _safe_exception_message(exc)
-            transient = _is_transient(exc)
-            return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'read_memory',
-                    'error': {
-                        'code': 'storage_unavailable' if transient else 'storage_read_failed',
-                        'message': f'Failed to read {raw_target} via RemoteFS: {safe_message}',
-                        'detail': {
-                            'target': raw_target,
-                            'exception_type': type(exc).__name__,
-                        },
-                    },
-                    'retryable': transient,
-                },
-                mutation=False,
-            )
-        result = {
-            'target': raw_target,
-            'content': content,
-            'content_length': len(content),
-        }
-        return _record_tool_result(
-            {
-                'success': True,
-                'tool': 'read_memory',
-                'result': result,
-                'retryable': False,
-            },
-            mutation=False,
-            ledger_result={
-                'status': 'read',
-                'target': raw_target,
-                'content_length': len(content),
-            },
-        )
 
     def read_memory_reference(self, refs: Union[str, List[str]]) -> Dict[str, Any]:
         """Read detailed user-preference reference files on demand.
@@ -388,25 +305,20 @@ class MemoryTools:
         })
 
     def soul_editor(self, field: str, value: str) -> Dict[str, Any]:
-        """Update one preset field in the agent soul document.
+        """Update one existing leaf value in the agent soul document.
 
         Use this only when the user explicitly asks to change the assistant's
         default identity, mission, interaction style, or epistemic behavior.
         Do not use it for user-specific facts; those belong in profile or
-        preference editors. Only preset soul fields are supported.
+        preference editors. Only fields already present in the loaded soul
+        document can be updated; keys cannot be added or renamed.
 
         Args:
-            field: Dot-path of the soul field to update.
+            field: Dot-path of an existing soul leaf field.
             value: New non-empty string value for the field.
         """
         raw_field = str(field or '').strip()
         raw_value = str(value if value is not None else '')
-        if raw_field not in SOUL_EDITABLE_FIELDS:
-            supported = ', '.join(sorted(SOUL_EDITABLE_FIELDS))
-            return _map_memory_exception(
-                'soul_editor',
-                ValueError(f'unsupported soul field {raw_field!r}; expected one of: {supported}.'),
-            )
 
         store = MemoryRemoteStore().store
         try:
@@ -425,29 +337,24 @@ class MemoryTools:
         )
 
     def profile_editor(self, field: str, value: str) -> Dict[str, Any]:
-        """Update one preset field in the user profile document.
+        """Update one existing leaf value in the user profile document.
 
         Use this for stable user facts such as preferred name, locale, role,
         organization, or accessibility needs. Do not use it for long-form
         behavioral preferences; those belong in ``preference_editor``.
+        Only fields already present in the loaded profile document can be
+        updated; keys cannot be added or renamed. Value type follows the
+        currently stored leaf (string/null or string list).
 
         For list fields, pass a JSON string array such as
         ``["zh-CN","en-US"]`` or a comma-separated list.
 
         Args:
-            field: Dot-path of the profile field to update.
+            field: Dot-path of an existing profile leaf field.
             value: Serialized value for the field.
         """
         raw_field = str(field or '').strip()
         raw_value = '' if value is None else str(value)
-        if raw_field not in PROFILE_EDITABLE_FIELDS:
-            supported = ', '.join(sorted(PROFILE_EDITABLE_FIELDS))
-            return _map_memory_exception(
-                'profile_editor',
-                ValueError(
-                    f'unsupported profile field {raw_field!r}; expected one of: {supported}.'
-                ),
-            )
 
         store = MemoryRemoteStore().store
         try:

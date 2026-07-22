@@ -130,7 +130,6 @@ def test_memory_tools_are_registered_as_one_eager_group():
     assert [cfg.name for cfg in configs] == ['memory']
     config = configs[0]
     assert [method['name'] for method in _tool_group('memory')['methods']] == [
-        'read_memory',
         'read_memory_reference',
         'soul_editor',
         'profile_editor',
@@ -139,7 +138,6 @@ def test_memory_tools_are_registered_as_one_eager_group():
     ]
     manager = ToolManager([config.tool])
     assert {item['function']['name'] for item in manager.tools_description} == {
-        'MemoryTools_read_memory',
         'MemoryTools_read_memory_reference',
         'MemoryTools_soul_editor',
         'MemoryTools_profile_editor',

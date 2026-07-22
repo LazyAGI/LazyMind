@@ -113,7 +113,7 @@ def test_soul_editor_updates_supported_field():
     assert '更直接的助手' in fs.files[SOUL_PATH]
 
 
-def test_soul_editor_rejects_unsupported_field():
+def test_soul_editor_rejects_missing_field():
     fs = FakeRemoteFS({
         SOUL_PATH: default_soul_md(),
         PROFILE_PATH: default_profile_md(),
@@ -123,7 +123,20 @@ def test_soul_editor_rejects_unsupported_field():
     with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore', lambda *args, **kwargs: remote):
         payload = tools.soul_editor('identity.email', 'x@y.com')
     assert payload['success'] is False
-    assert 'unsupported soul field' in payload['error']['reason']
+    assert 'does not exist in soul' in payload['error']['reason']
+
+
+def test_profile_editor_rejects_new_key():
+    fs = FakeRemoteFS({
+        SOUL_PATH: default_soul_md(),
+        PROFILE_PATH: default_profile_md(),
+        PREFERENCE_PATH: default_preference_md(),
+    })
+    tools, remote = _tools_with_store(fs)
+    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore', lambda *args, **kwargs: remote):
+        payload = tools.profile_editor('identity.nickname', 'Neo')
+    assert payload['success'] is False
+    assert 'does not exist in profile' in payload['error']['reason']
 
 
 def test_profile_editor_updates_list_field():

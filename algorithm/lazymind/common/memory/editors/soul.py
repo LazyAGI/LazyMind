@@ -1,35 +1,35 @@
 from __future__ import annotations
 
+from ..schema.common import parse_yaml_frontmatter
 from ..schema.soul import validate_soul_content
-from .common import update_frontmatter_document
-
-SOUL_EDITABLE_FIELDS: frozenset[str] = frozenset({
-    'identity.name',
-    'identity.role',
-    'identity.description',
-    'mission.primary_goal',
-    'mission.success_definition',
-    'interaction.relationship_mode',
-    'interaction.default_tone',
-    'interaction.initiative_level',
-    'interaction.challenge_level',
-    'interaction.decision_mode',
-    'epistemic.uncertainty_style',
-    'epistemic.verification_mode',
-})
+from .common import (
+    coerce_value_to_existing_type,
+    editable_fields_from_frontmatter,
+    get_nested_field,
+    update_frontmatter_document,
+)
 
 
 def set_soul_field(content: str, field: str, value: str) -> str:
     normalized_field = str(field or '').strip()
-    if normalized_field not in SOUL_EDITABLE_FIELDS:
+    frontmatter, _body = parse_yaml_frontmatter(content)
+    if not frontmatter:
+        raise ValueError('soul must contain YAML frontmatter.')
+
+    editable = editable_fields_from_frontmatter(frontmatter)
+    if normalized_field not in editable:
+        supported = ', '.join(sorted(editable)) or '(none)'
         raise ValueError(
-            f'unsupported soul field {normalized_field!r}; '
-            f'expected one of: {", ".join(sorted(SOUL_EDITABLE_FIELDS))}.'
+            f'field {normalized_field!r} does not exist in soul; '
+            f'editable fields from the loaded document: {supported}.'
         )
-    text = str(value if value is not None else '').strip()
-    if not text:
-        raise ValueError(f'soul field {normalized_field!r} requires a non-empty value.')
-    updated = update_frontmatter_document(content, normalized_field, text)
+
+    existing = get_nested_field(frontmatter, normalized_field)
+    parsed = coerce_value_to_existing_type(existing, value)
+    if not isinstance(parsed, str) or not parsed.strip():
+        raise ValueError(f'soul field {normalized_field!r} requires a non-empty string value.')
+
+    updated = update_frontmatter_document(content, normalized_field, parsed)
     error = validate_soul_content(updated)
     if error:
         raise ValueError(error)

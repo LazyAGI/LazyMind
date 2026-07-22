@@ -11,10 +11,6 @@ SOUL_PATH = 'memory/agents/soul.md'
 PROFILE_PATH = 'memory/users/profile.md'
 PREFERENCE_PATH = 'memory/users/preference.md'
 
-# Legacy RemoteFS paths used before the structured memory tree.
-LEGACY_MEMORY_PATH = 'memory/memory.md'
-LEGACY_USER_PREFERENCE_PATH = 'memory/user.md'
-
 _REFERENCE_NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
 
 

@@ -174,9 +174,9 @@ MEMORY_TOOLS_POLICY_APPENDIX: SystemPromptAppendix = {
         '# Conversation history versus persistent memory\n'
         'Conversation history is already included in the model messages and is the authoritative '
         'source for earlier turns in the current chat. Resolve short follow-ups and omitted subjects '
-        'from that history. Do not call `MemoryTools_read_memory` to inspect, summarize, or recover '
-        'the current conversation. `MemoryTools_read_memory` only reads optional cross-conversation '
-        'notes or user-profile content; an empty result never implies that chat history is missing.',
+        'from that history. Persistent memory (soul / profile / preference index) is injected when '
+        'available; use `MemoryTools_read_memory_reference` only for preference reference details '
+        'that are not covered by the injected summaries.',
         'Call `MemoryTools_episode_create` only when the user explicitly asks to record, remember, '
         'or save a historical event. Do not call it merely because information seems useful. '
         'use_memory=false does not disable explicit Episode creation. Never claim that information '

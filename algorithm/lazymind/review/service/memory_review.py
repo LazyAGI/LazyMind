@@ -99,10 +99,10 @@ def _summarize_tool_errors(
 
 def _multiple_failure_code(failures: List[Dict[str, Any]]) -> str:
     tools = {str(entry.get('tool') or '') for entry in failures}
-    if tools == {'read_memory'}:
-        return 'multiple_read_failures'
     if tools.issubset(_WRITE_TOOLS):
         return 'multiple_write_failures'
+    if tools and tools.isdisjoint(_WRITE_TOOLS):
+        return 'multiple_read_failures'
     return 'multiple_tool_failures'
 
 
@@ -163,7 +163,7 @@ def review_memory(
     failed_writes = _unresolved_write_failures(write_results)
     read_failures = [
         entry for entry in ledger
-        if entry.get('tool') == 'read_memory' and entry.get('success') is not True
+        if entry.get('tool') not in _WRITE_TOOLS and entry.get('success') is not True
     ]
     unresolved_ids = {id(entry) for entry in [*failed_writes, *read_failures]}
     unresolved_failures = [entry for entry in ledger if id(entry) in unresolved_ids]

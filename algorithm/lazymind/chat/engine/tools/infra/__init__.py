@@ -19,12 +19,7 @@ from .github_skill_installer import (
     GitHubSkillInstaller,
 )
 from lazymind.common.memory.remote_store import (
-    MEMORY_TARGET_PATHS,
     MemoryRemoteStore,
-)
-from .user_preference_validation import (
-    parse_user_preference_frontmatter,
-    validate_user_preference_content,
 )
 from .suggestion import (
     Suggestion,
@@ -70,7 +65,6 @@ __all__ = [
     'Suggestion',
     'ActionPlanningModule',
     'ChatHistoryRecord',
-    'MEMORY_TARGET_PATHS',
     'MemoryRemoteStore',
     'SynonymCandidate',
     'VocabSuggestion',
@@ -89,7 +83,6 @@ __all__ = [
     'handle_tool_errors',
     'norm_vocab_text',
     'opensearch_search',
-    'parse_user_preference_frontmatter',
     'post_core_api',
     'prepare_vocab_candidates',
     'resolve_index',
@@ -103,5 +96,4 @@ __all__ = [
     'tool_error',
     'tool_failure',
     'tool_success',
-    'validate_user_preference_content',
 ]

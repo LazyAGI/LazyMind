@@ -5,34 +5,34 @@ from typing import Optional
 
 from lazyllm import LOG
 
-from lazymind.common.memory.defaults import (
+from .defaults import (
     default_preference_md,
     default_profile_md,
     default_soul_md,
 )
-from lazymind.common.memory.schema.common import parse_yaml_frontmatter
-from lazymind.common.memory.schema.preference import (
+from .schema.common import parse_yaml_frontmatter
+from .schema.preference import (
     parse_preference_items,
     render_preference_item,
 )
-from lazymind.common.memory.store import MemoryStore
+from .store import MemoryStore
 
-# Phase-1 injection cap from the memory design: at most 100 preference index items.
-MAX_PREFERENCE_INJECT_ITEMS = 100
+# Cap preference index items when preparing prompt/runtime context.
+MAX_PREFERENCE_CONTEXT_ITEMS = 100
 
 
 @dataclass(frozen=True)
-class ChatMemoryContext:
+class MemoryContext:
     soul: str
     profile: str
     preference: str
 
 
-def load_chat_memory_context(store: Optional[MemoryStore] = None) -> ChatMemoryContext:
-    """Load soul / profile / preference for chat system-prompt injection.
+def load_memory_context(store: Optional[MemoryStore] = None) -> MemoryContext:
+    """Load soul / profile / preference for prompt injection and tools.
 
-    References are intentionally excluded; the model reads them on demand.
-    RemoteFS failures fall back to defaults so chat startup does not break
+    References are intentionally excluded; callers read them on demand.
+    RemoteFS failures fall back to defaults so request startup does not break
     while the backend memory tree is still rolling out.
     """
     memory_store = store or MemoryStore()
@@ -43,7 +43,7 @@ def load_chat_memory_context(store: Optional[MemoryStore] = None) -> ChatMemoryC
         default_preference_md(),
         label='preference',
     )
-    return ChatMemoryContext(
+    return MemoryContext(
         soul=soul,
         profile=profile,
         preference=truncate_preference_index(preference),
@@ -53,7 +53,7 @@ def load_chat_memory_context(store: Optional[MemoryStore] = None) -> ChatMemoryC
 def truncate_preference_index(
     content: str,
     *,
-    max_items: int = MAX_PREFERENCE_INJECT_ITEMS,
+    max_items: int = MAX_PREFERENCE_CONTEXT_ITEMS,
 ) -> str:
     """Keep preference frontmatter and at most ``max_items`` index entries."""
     text = content if isinstance(content, str) else ''
@@ -92,5 +92,5 @@ def _safe_read(loader, default: str, *, label: str) -> str:
         value = loader()
         return value if isinstance(value, str) else default
     except Exception as exc:
-        LOG.warning(f'[MemoryInjection] failed to load {label}: {exc}')
+        LOG.warning(f'[MemoryContext] failed to load {label}: {exc}')
         return default

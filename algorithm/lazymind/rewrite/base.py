@@ -145,15 +145,6 @@ def _validate_generated_content(task_type: RewriteTaskType, content: Any) -> str
                 'or less after removing whitespace, keeping only the most important '
                 'concise entries.'
             )
-        if task_type == 'user_preference':
-            from lazymind.chat.engine.tools.infra.user_preference_validation import (
-                validate_user_preference_content,
-            )
-            validation_error = validate_user_preference_content(content)
-            if validation_error:
-                raise UnprocessableContentError(
-                    f'Generated user_preference is invalid: {validation_error}'
-                )
     elif task_type == 'polish' and not content.strip():
         raise UnprocessableContentError("Generated field 'content' must be a non-empty string.")
     return content

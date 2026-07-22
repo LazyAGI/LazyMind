@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+from .context import (
+    MAX_PREFERENCE_CONTEXT_ITEMS,
+    MemoryContext,
+    load_memory_context,
+    profile_languages,
+    truncate_preference_index,
+)
 from .defaults import (
     default_preference_md,
     default_profile_md,
     default_soul_md,
 )
 from .editors import (
-    PROFILE_EDITABLE_FIELDS,
-    SOUL_EDITABLE_FIELDS,
     add_preference_entry,
     delete_preference_entry,
-    parse_profile_value,
     preference_name_to_reference_name,
     set_profile_field,
     set_soul_field,
@@ -40,8 +44,6 @@ from .models import (
 )
 from .paths import (
     AGENTS_ROOT,
-    LEGACY_MEMORY_PATH,
-    LEGACY_USER_PREFERENCE_PATH,
     MEMORY_ROOT,
     PREFERENCE_PATH,
     PROFILE_PATH,
@@ -59,7 +61,7 @@ from .ranking import (
     informative_query_terms,
     tokenize_episode_text,
 )
-from .remote_store import MEMORY_TARGET_PATHS, MEMORY_TREE_PATHS, MemoryRemoteStore
+from .remote_store import MemoryRemoteStore
 from .schema import (
     PreferenceItem,
     append_preference_item,
@@ -75,11 +77,9 @@ from .store import MemoryStore
 __all__ = [
     'AGENTS_ROOT',
     'EPISODE_COLLECTION',
-    'LEGACY_MEMORY_PATH',
-    'LEGACY_USER_PREFERENCE_PATH',
+    'MAX_PREFERENCE_CONTEXT_ITEMS',
     'MEMORY_ROOT',
-    'MEMORY_TARGET_PATHS',
-    'MEMORY_TREE_PATHS',
+    'MemoryContext',
     'MemoryNotFoundError',
     'MemoryPathError',
     'MemoryRemoteStore',
@@ -87,11 +87,9 @@ __all__ = [
     'MemoryStoreError',
     'MemoryValidationError',
     'PREFERENCE_PATH',
-    'PROFILE_EDITABLE_FIELDS',
     'PROFILE_PATH',
     'PreferenceItem',
     'REFERENCE_ROOT',
-    'SOUL_EDITABLE_FIELDS',
     'SOUL_PATH',
     'USERS_ROOT',
     'EpisodeConflictError',
@@ -115,16 +113,18 @@ __all__ = [
     'informative_query_terms',
     'is_memory_path',
     'is_reference_path',
+    'load_memory_context',
     'normalize_episode_summary',
     'normalize_memory_path',
     'parse_preference_items',
-    'parse_profile_value',
     'preference_name_to_reference_name',
+    'profile_languages',
     'remove_preference_item',
     'set_profile_field',
     'set_soul_field',
     'split_reference_ref',
     'tokenize_episode_text',
+    'truncate_preference_index',
     'validate_preference_index',
     'validate_preference_name',
     'validate_profile_content',

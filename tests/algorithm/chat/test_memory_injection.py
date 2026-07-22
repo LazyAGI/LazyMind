@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from lazymind.common.memory.defaults import default_preference_md
-from lazymind.chat.engine.memory import (
-    load_chat_memory_context,
+from lazymind.common.memory import (
+    load_memory_context,
     profile_languages,
     truncate_preference_index,
 )
+from lazymind.common.memory.defaults import default_preference_md
 from lazymind.common.memory.schema import PreferenceItem, append_preference_item
 from lazymind.common.memory.store import MemoryStore
 
@@ -80,7 +80,7 @@ def test_profile_languages():
     assert profile_languages(profile) == ['zh-CN', 'en-US']
 
 
-def test_load_chat_memory_context_reads_store_without_references():
+def test_load_memory_context_reads_store_without_references():
     fs = FakeRemoteFS({
         'memory/agents/soul.md': (
             '---\n'
@@ -128,14 +128,14 @@ def test_load_chat_memory_context_reads_store_without_references():
             'long detail body\n'
         ),
     })
-    ctx = load_chat_memory_context(MemoryStore(fs))
+    ctx = load_memory_context(MemoryStore(fs))
     assert 'LazyMind' in ctx.soul
     assert 'Alice' in ctx.profile
     assert 'pref.response.detail' in ctx.preference
     assert 'long detail body' not in ctx.preference
 
 
-def test_load_chat_memory_context_falls_back_on_store_errors():
+def test_load_memory_context_falls_back_on_store_errors():
     class BrokenStore(MemoryStore):
         def read_soul(self):
             raise RuntimeError('backend down')
@@ -146,7 +146,7 @@ def test_load_chat_memory_context_falls_back_on_store_errors():
         def read_preference(self):
             raise RuntimeError('backend down')
 
-    ctx = load_chat_memory_context(BrokenStore(FakeRemoteFS()))
+    ctx = load_memory_context(BrokenStore(FakeRemoteFS()))
     assert 'schema_version: 1' in ctx.soul
     assert 'schema_version: 1' in ctx.profile
     assert '# Preference Index' in ctx.preference
