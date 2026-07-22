@@ -12,6 +12,8 @@ import {
   WRITER_ARTIFACT_SLOT_IDS,
   unwrapArtifactPayload,
 } from './writerArtifactViews';
+import { WriterIRControl } from './WriterIRControl';
+import { isWriterDocument, type WriterDocument } from './writerIR';
 import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
 import i18n from '@/i18n';
 import { useTranslation } from 'react-i18next';
@@ -129,16 +131,27 @@ function useSlotImageUrl(raw: Record<string, unknown> | undefined) {
   return { displayUrl, pending, hasSource: Boolean(pathForSign) };
 }
 
-function useArtifactFileUrl(raw: Record<string, unknown> | undefined) {
+function useArtifactFileUrl(
+  raw: Record<string, unknown> | undefined,
+  refreshToken: string | number = 0,
+) {
   const pathForSign = String(raw?.path ?? raw?.url ?? '').trim();
   const apiUrlRaw = raw?.url ? String(raw.url).trim() : '';
+  const stablePath = raw?.path
+    ? String(raw.path).trim()
+    : apiUrlRaw.split(/[?#]/, 1)[0];
+  const sourceKey = `${stablePath}\n${refreshToken}`;
   const [url, setUrl] = useState('');
   const [resolving, setResolving] = useState(Boolean(pathForSign));
+  const [resolvedSourceKey, setResolvedSourceKey] = useState(
+    pathForSign ? '' : sourceKey,
+  );
 
   useEffect(() => {
     if (!pathForSign) {
       setUrl('');
       setResolving(false);
+      setResolvedSourceKey(sourceKey);
       return;
     }
 
@@ -157,12 +170,14 @@ function useArtifactFileUrl(raw: Record<string, unknown> | undefined) {
       .then((resolved) => {
         if (!cancelled) {
           setUrl(resolved);
+          setResolvedSourceKey(sourceKey);
           setResolving(false);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setUrl('');
+          setResolvedSourceKey(sourceKey);
           setResolving(false);
         }
       });
@@ -170,9 +185,15 @@ function useArtifactFileUrl(raw: Record<string, unknown> | undefined) {
     return () => {
       cancelled = true;
     };
-  }, [pathForSign, apiUrlRaw]);
+  }, [apiUrlRaw, pathForSign, refreshToken, sourceKey]);
 
-  return { url, resolving, hasSource: Boolean(pathForSign) };
+  const sourceResolved = resolvedSourceKey === sourceKey;
+  return {
+    url: sourceResolved ? url : '',
+    resolving: resolving || !sourceResolved,
+    hasSource: Boolean(pathForSign),
+    sourceKey,
+  };
 }
 
 function isSpaFallbackHtml(content: string): boolean {
@@ -1200,6 +1221,11 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh, re
   // Flag to skip onBlur save when user presses Escape.
   const cancelledRef = useRef(false);
 
+  useEffect(
+    () => () => notifyEditing(editingKey, false),
+    [editingKey, notifyEditing],
+  );
+
   // Detect large-content offload: {"type":"text"|"json","path":"...","size":N}
   const isOffloaded = raw && typeof raw === 'object' && raw.path && (raw.type === 'text' || raw.type === 'json');
 
@@ -1539,6 +1565,10 @@ function getInlineStructuredArtifactPayload(slot: SlotRevision): unknown | null 
     return null;
   }
 
+  if (isWriterDocument(record)) {
+    return record;
+  }
+
   if (record.data !== undefined) {
     const payload = unwrapArtifactPayload(raw);
     if (payload !== null && payload !== undefined && typeof payload === 'object') {
@@ -1560,14 +1590,38 @@ function getInlineStructuredArtifactPayload(slot: SlotRevision): unknown | null 
   return null;
 }
 
+function replaceStructuredArtifactPayload(
+  source: unknown,
+  document: WriterDocument,
+): unknown {
+  if (isWriterDocument(source)) return document;
+  if (
+    source
+    && typeof source === 'object'
+    && !Array.isArray(source)
+    && Object.prototype.hasOwnProperty.call(source, 'data')
+  ) {
+    return { ...(source as Record<string, unknown>), data: document };
+  }
+  return document;
+}
+
+function ensureJsonFilename(name: string): string {
+  const trimmed = name.trim() || 'writer-document.json';
+  return trimmed.toLowerCase().endsWith('.json') ? trimmed : `${trimmed}.json`;
+}
+
 function shouldRenderInlineStructuredContent(
   slot: SlotRevision,
   expectedType?: 'image' | 'file' | 'text',
   slotId?: string,
 ): boolean {
-  if (expectedType !== 'text') return false;
   const payload = getInlineStructuredArtifactPayload(slot);
   if (payload === null) return false;
+  if (isWriterDocument(payload)) {
+    return expectedType !== 'image' && expectedType !== 'file';
+  }
+  if (expectedType !== 'text') return false;
   if (slot.content_type === 'json') return true;
   const resolvedSlotId = slotId ?? slot.slot;
   return WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
@@ -1577,12 +1631,13 @@ function shouldRenderJsonFileAsContent(
   slot: SlotRevision,
   expectedType?: 'image' | 'file' | 'text',
 ): boolean {
-  if (expectedType !== 'text') return false;
-  if (isJsonArtifactFile(slot)) return true;
   const raw = slot.artifact_value;
   if (!raw || typeof raw !== 'object') return false;
+  const declaredJson = slot.content_type === 'json' || raw.type === 'json';
+  if (expectedType !== 'text' && !declaredJson) return false;
+  if (isJsonArtifactFile(slot)) return true;
   const hasPath = Boolean(String(raw.path ?? raw.url ?? '').trim());
-  return hasPath && (slot.content_type === 'json' || raw.type === 'json');
+  return hasPath && declaredJson;
 }
 
 function shouldRenderMarkdownFileAsContent(
@@ -1598,6 +1653,7 @@ interface SlotJsonFileProps {
   slotId?: string;
   revisionCount?: number;
   onRefresh?: () => void;
+  readOnly?: boolean;
 }
 
 function SlotJsonFile({
@@ -1606,30 +1662,52 @@ function SlotJsonFile({
   slotId,
   revisionCount,
   onRefresh,
+  readOnly,
 }: SlotJsonFileProps) {
   const raw = slot.artifact_value;
-  const name: string = raw?.filename ?? raw?.name ?? slotId ?? slot.slot;
-  const { url, resolving, hasSource } = useArtifactFileUrl(raw);
+  const name = String(raw?.filename ?? raw?.name ?? slotId ?? slot.slot);
+  const [reloadToken, setReloadToken] = useState(0);
+  const { url, resolving, hasSource, sourceKey } = useArtifactFileUrl(
+    raw,
+    `${slot.revision}:${reloadToken}`,
+  );
+  const { patchSlotItemValue } = usePluginStore();
+  const { setEditing: notifyEditing } = useContext(SlotEditingContext);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [payload, setPayload] = useState<unknown>(null);
+  const [sourceJson, setSourceJson] = useState<unknown>(null);
+  const [loadedSourceKey, setLoadedSourceKey] = useState('');
   const [showRaw, setShowRaw] = useState(false);
+  const [writerEditing, setWriterEditing] = useState(false);
+
+  useEffect(() => {
+    if (!hasSource) return;
+    setLoading(true);
+    setError(null);
+  }, [hasSource, sourceKey]);
 
   useEffect(() => {
     if (!hasSource) {
       setLoading(false);
       setError(localizeErrorCode('2000509'));
+      setPayload(null);
+      setSourceJson(null);
+      setLoadedSourceKey('');
       return;
     }
-    if (resolving || !url) {
+    if (resolving) return;
+    if (!url) {
+      setLoading(false);
+      setError(localizeErrorCode('2000509'));
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
 
-    fetch(url)
+    fetch(url, { signal: controller.signal })
       .then((response) => {
         if (!response.ok) {
           throw new Error(localizeErrorCode('2000509'));
@@ -1637,30 +1715,65 @@ function SlotJsonFile({
         return response.json();
       })
       .then((json) => {
-        if (!cancelled) {
-          setPayload(unwrapArtifactPayload(json));
-          setLoading(false);
-        }
+        setSourceJson(json);
+        setPayload(unwrapArtifactPayload(json));
+        setLoadedSourceKey(sourceKey);
+        setLoading(false);
       })
-      .catch(() => {
-        if (!cancelled) {
-          setError(localizeErrorCode('2000509'));
-          setLoading(false);
-        }
+      .catch((fetchError: unknown) => {
+        if (fetchError instanceof DOMException && fetchError.name === 'AbortError') return;
+        setError(localizeErrorCode('2000509'));
+        setLoading(false);
       });
 
-    return () => {
-      cancelled = true;
-    };
-  }, [hasSource, resolving, url]);
+    return () => controller.abort();
+  }, [hasSource, reloadToken, resolving, sourceKey, url]);
 
   const handleToggleRaw = useCallback(() => {
     setShowRaw((value) => !value);
   }, []);
 
   const apiListIndex = slot.list_index ?? -1;
+  const resolvedSlotId = slotId ?? slot.slot;
+  const canEditWriterIR = Boolean(sessionId && slotId)
+    && !readOnly
+    && loadedSourceKey === sourceKey;
+  const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
   const showVersionBadge =
     revisionCount !== undefined && revisionCount > 0 && Boolean(sessionId && slotId);
+
+  const handleSaveWriterDocument = useCallback(async (document: WriterDocument) => {
+    if (!sessionId || !slotId || readOnly) {
+      throw new Error(tr('chat.writerIR.saveFailed'));
+    }
+
+    const serialized = replaceStructuredArtifactPayload(sourceJson, document);
+    const filename = ensureJsonFilename(name);
+    const file = new File(
+      [JSON.stringify(serialized, null, 2)],
+      filename,
+      { type: 'application/json' },
+    );
+    const storedPath = await uploadFileInChunks(file);
+    const nextValue: Record<string, unknown> = {
+      ...(raw && typeof raw === 'object' ? raw : {}),
+      type: 'json',
+      path: storedPath,
+      filename,
+      size: file.size,
+    };
+    delete nextValue.url;
+
+    await patchSlotItemValue(sessionId, slotId, apiListIndex, nextValue, 'file');
+    setSourceJson(serialized);
+    setPayload(document);
+    onRefresh?.();
+  }, [apiListIndex, name, onRefresh, patchSlotItemValue, raw, readOnly, sessionId, slotId, sourceJson]);
+
+  const handleWriterEditingChange = useCallback((editing: boolean) => {
+    setWriterEditing(editing);
+    notifyEditing(editingKey, editing);
+  }, [editingKey, notifyEditing]);
 
   if (!hasSource) {
     return (
@@ -1670,7 +1783,7 @@ function SlotJsonFile({
     );
   }
 
-  if (loading || resolving) {
+  if ((loading || resolving) && payload === null) {
     return (
       <div className='plugin-slot plugin-slot--artifact plugin-slot--pending'>
         <span className='plugin-slot__placeholder'>{tr('common.loading')}</span>
@@ -1678,28 +1791,58 @@ function SlotJsonFile({
     );
   }
 
-  if (error || payload === null) {
+  if (payload === null) {
     return (
       <div className='plugin-slot plugin-slot--artifact plugin-slot--error'>
         <span className='plugin-slot__placeholder'>{error ?? tr('chat.slots.contentLoadFailed')}</span>
+        <button
+          className='plugin-slot__file-action-btn'
+          type='button'
+          onClick={() => setReloadToken((value) => value + 1)}
+        >
+          {tr('common.retry')}
+        </button>
       </div>
     );
   }
 
-  const resolvedSlotId = slotId ?? slot.slot;
-
   return (
     <div className='plugin-slot plugin-slot--artifact'>
       <div className='plugin-slot__artifact-body'>
+        {loadedSourceKey !== sourceKey && !error && (
+          <div className='writer-ir__notice writer-ir__notice--warning' role='status'>
+            {tr('chat.writerIR.refreshing')}
+          </div>
+        )}
+        {error && loadedSourceKey !== sourceKey && (
+          <div className='writer-ir__notice writer-ir__notice--error' role='alert'>
+            <span>{tr('chat.writerIR.refreshFailed')}</span>
+            <button
+              className='plugin-slot__file-action-btn'
+              type='button'
+              onClick={() => setReloadToken((value) => value + 1)}
+            >
+              {tr('common.retry')}
+            </button>
+          </div>
+        )}
         {showRaw ? (
           <pre className='writer-artifact__raw'>{JSON.stringify(payload, null, 2)}</pre>
+        ) : isWriterDocument(payload) ? (
+          <WriterIRControl
+            document={payload}
+            sourceRevision={loadedSourceKey}
+            readOnly={!canEditWriterIR}
+            onSave={canEditWriterIR ? handleSaveWriterDocument : undefined}
+            onEditingChange={handleWriterEditingChange}
+          />
         ) : (
           <WriterArtifactContent slotId={resolvedSlotId} data={payload} />
         )}
       </div>
       <div className='plugin-slot__artifact-footer'>
         <div className='plugin-slot__artifact-footer-left'>
-          {showVersionBadge && (
+          {showVersionBadge && !writerEditing && (
             <SlotVersionPopover
               sessionId={sessionId!}
               slotId={slotId!}
@@ -1714,21 +1857,30 @@ function SlotJsonFile({
           )}
         </div>
         <div className='plugin-slot__artifact-actions'>
-          <button
-            className='plugin-slot__file-action-btn'
-            onClick={handleToggleRaw}
-            type='button'
+          <span
+            title={writerEditing ? tr('chat.writerIR.finishEditingFirst') : undefined}
+            tabIndex={writerEditing ? 0 : undefined}
+            aria-label={writerEditing ? tr('chat.writerIR.finishEditingFirst') : undefined}
           >
-            {showRaw ? tr('chat.slots.viewContent') : tr('chat.slots.rawData')}
-          </button>
-          <a
-            href={url}
-            download={name}
-            className='plugin-slot__file-action-btn'
-            onClick={(e) => e.stopPropagation()}
-          >
-            {tr('chat.slots.download')}
-          </a>
+            <button
+              className='plugin-slot__file-action-btn'
+              onClick={handleToggleRaw}
+              type='button'
+              disabled={writerEditing}
+            >
+              {showRaw ? tr('chat.slots.viewContent') : tr('chat.slots.rawData')}
+            </button>
+          </span>
+          {url && (
+            <a
+              href={url}
+              download={name}
+              className='plugin-slot__file-action-btn'
+              onClick={(e) => e.stopPropagation()}
+            >
+              {tr('chat.slots.download')}
+            </a>
+          )}
         </div>
       </div>
     </div>
@@ -1741,6 +1893,7 @@ interface SlotInlineStructuredProps {
   slotId?: string;
   revisionCount?: number;
   onRefresh?: () => void;
+  readOnly?: boolean;
 }
 
 function SlotInlineStructured({
@@ -1749,17 +1902,37 @@ function SlotInlineStructured({
   slotId,
   revisionCount,
   onRefresh,
+  readOnly,
 }: SlotInlineStructuredProps) {
   const payload = getInlineStructuredArtifactPayload(slot);
+  const { patchSlotItemValue } = usePluginStore();
+  const { setEditing: notifyEditing } = useContext(SlotEditingContext);
   const [showRaw, setShowRaw] = useState(false);
+  const [writerEditing, setWriterEditing] = useState(false);
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
+  const canEditWriterIR = Boolean(sessionId && slotId) && !readOnly;
+  const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
   const showVersionBadge =
     revisionCount !== undefined && revisionCount > 0 && Boolean(sessionId && slotId);
 
   const handleToggleRaw = useCallback(() => {
     setShowRaw((value) => !value);
   }, []);
+
+  const handleSaveWriterDocument = useCallback(async (document: WriterDocument) => {
+    if (!sessionId || !slotId || readOnly) {
+      throw new Error(tr('chat.writerIR.saveFailed'));
+    }
+    const serialized = replaceStructuredArtifactPayload(slot.artifact_value, document);
+    await patchSlotItemValue(sessionId, slotId, apiListIndex, serialized, 'json');
+    onRefresh?.();
+  }, [apiListIndex, onRefresh, patchSlotItemValue, readOnly, sessionId, slot, slotId]);
+
+  const handleWriterEditingChange = useCallback((editing: boolean) => {
+    setWriterEditing(editing);
+    notifyEditing(editingKey, editing);
+  }, [editingKey, notifyEditing]);
 
   if (payload === null) {
     return (
@@ -1774,13 +1947,21 @@ function SlotInlineStructured({
       <div className='plugin-slot__artifact-body'>
         {showRaw ? (
           <pre className='writer-artifact__raw'>{JSON.stringify(payload, null, 2)}</pre>
+        ) : isWriterDocument(payload) ? (
+          <WriterIRControl
+            document={payload}
+            sourceRevision={slot.revision}
+            readOnly={!canEditWriterIR}
+            onSave={canEditWriterIR ? handleSaveWriterDocument : undefined}
+            onEditingChange={handleWriterEditingChange}
+          />
         ) : (
           <WriterArtifactContent slotId={resolvedSlotId} data={payload} />
         )}
       </div>
       <div className='plugin-slot__artifact-footer'>
         <div className='plugin-slot__artifact-footer-left'>
-          {showVersionBadge && (
+          {showVersionBadge && !writerEditing && (
             <SlotVersionPopover
               sessionId={sessionId!}
               slotId={slotId!}
@@ -1795,13 +1976,20 @@ function SlotInlineStructured({
           )}
         </div>
         <div className='plugin-slot__artifact-actions'>
-          <button
-            className='plugin-slot__file-action-btn'
-            onClick={handleToggleRaw}
-            type='button'
+          <span
+            title={writerEditing ? tr('chat.writerIR.finishEditingFirst') : undefined}
+            tabIndex={writerEditing ? 0 : undefined}
+            aria-label={writerEditing ? tr('chat.writerIR.finishEditingFirst') : undefined}
           >
-            {showRaw ? tr('chat.slots.viewContent') : tr('chat.slots.rawData')}
-          </button>
+            <button
+              className='plugin-slot__file-action-btn'
+              onClick={handleToggleRaw}
+              type='button'
+              disabled={writerEditing}
+            >
+              {showRaw ? tr('chat.slots.viewContent') : tr('chat.slots.rawData')}
+            </button>
+          </span>
         </div>
       </div>
     </div>
@@ -2188,6 +2376,7 @@ export function SlotRenderer({
         slotId={slotId}
         revisionCount={revisionCount}
         onRefresh={onRefresh}
+        readOnly={readOnly}
       />
     );
   }
@@ -2199,6 +2388,7 @@ export function SlotRenderer({
         slotId={slotId}
         revisionCount={revisionCount}
         onRefresh={onRefresh}
+        readOnly={readOnly}
       />
     );
   }

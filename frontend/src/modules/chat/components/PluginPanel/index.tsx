@@ -1,17 +1,11 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Popconfirm } from 'antd';
-import { FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
+import { Popconfirm, Tooltip } from 'antd';
 import { usePluginSession } from '@/modules/chat/hooks/usePlugin';
 import { usePluginStore } from '@/modules/chat/store/pluginPanel';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { PluginSessionApi } from '@/modules/chat/utils/request';
 import StateGraphModal from '@/components/StateGraphModal';
-import {
-  PLUGIN_PANEL_EXPANDED_EVENT,
-  PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX,
-} from '@/modules/chat/constants/chat';
 import type {
   PluginSession,
   SlotRevision,
@@ -169,7 +163,7 @@ function AutoSlotGrid({
           <div className='plugin-panel__slot-items'>
             {revisions.map((rev) => (
               <SlotRenderer
-                key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}
+                key={`${rev.slot_id}-${rev.list_index ?? -1}`}
                 slot={rev}
                 sessionId={session.session_id}
                 slotId={slotId}
@@ -475,6 +469,7 @@ function InnerTabsCell({
             {rev ? (
               <SlotRenderer
                 slot={rev}
+                expectedType={def?.type}
                 sessionId={session.session_id}
                 slotId={slotId}
                 revisionCount={rev.revision_count}
@@ -574,6 +569,7 @@ function CompositeSlotGrid({
                 {rev ? (
                   <SlotRenderer
                     slot={rev}
+                    expectedType={def?.type}
                     sessionId={session.session_id}
                     slotId={slotId}
                     revisionCount={rev.revision_count}
@@ -913,7 +909,7 @@ function TabSlotGrid({
             ) : (
               revisions.map((rev) => (
                 <div
-                  key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}
+                  key={`${rev.slot_id}-${rev.list_index ?? -1}`}
                   onClick={() => onFocusSortOrder?.(rev.sort_order)}
                   role='button'
                   tabIndex={0}
@@ -944,25 +940,6 @@ const STATUS_KEY: Record<string, string> = {
   waiting: 'chat.pluginStatusWaiting',
 };
 
-function readPersistedExpanded(conversationId: string): boolean {
-  try {
-    return localStorage.getItem(`${PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX}${conversationId}`) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-function persistExpanded(conversationId: string, expanded: boolean) {
-  try {
-    localStorage.setItem(
-      `${PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX}${conversationId}`,
-      String(expanded),
-    );
-  } catch {
-    // The live layout state still works when browser storage is unavailable.
-  }
-}
-
 export function PluginPanel({
   conversationId,
   onSendMessage,
@@ -989,31 +966,13 @@ export function PluginPanel({
   const [ui, setUI] = useState<PluginUI>({});
   const [dismissing, setDismissing] = useState(false);
   const [stateGraphOpen, setStateGraphOpen] = useState(false);
-  const [expanded, setExpanded] = useState(() => readPersistedExpanded(conversationId));
-  const initialExpandedRef = useRef(expanded);
-
-  const setExpandedMode = useCallback((nextExpanded: boolean) => {
-    if (nextExpanded) setCollapsed(false);
-    setExpanded(nextExpanded);
-    persistExpanded(conversationId, nextExpanded);
-    window.dispatchEvent(new CustomEvent(PLUGIN_PANEL_EXPANDED_EVENT, {
-      detail: { conversationId, expanded: nextExpanded },
-    }));
-  }, [conversationId]);
-
-  useEffect(() => {
-    window.dispatchEvent(new CustomEvent(PLUGIN_PANEL_EXPANDED_EVENT, {
-      detail: { conversationId, expanded: initialExpandedRef.current },
-    }));
-    return () => {
-      window.dispatchEvent(new CustomEvent(PLUGIN_PANEL_EXPANDED_EVENT, {
-        detail: { conversationId, expanded: false },
-      }));
-    };
-  }, [conversationId]);
+  // Track which slots are currently being edited; destructive/navigation actions
+  // stay disabled until each editor saves or cancels.
+  const editingSlots = useRef<Set<string>>(new Set());
+  const [anySlotEditing, setAnySlotEditing] = useState(false);
 
   const handleDismiss = useCallback(async () => {
-    if (!session || dismissing) return;
+    if (!session || dismissing || anySlotEditing) return;
     setDismissing(true);
     try {
       await PluginSessionApi().dismissSession(session.session_id);
@@ -1023,10 +982,7 @@ export function PluginPanel({
     } catch {
       setDismissing(false);
     }
-  }, [session, dismissing, refresh, t, onDismissed, bumpDismissedRefresh, conversationId]);
-  // Track which text slots are currently being edited; disable footer buttons while any are.
-  const editingSlots = useRef<Set<string>>(new Set());
-  const [anySlotEditing, setAnySlotEditing] = useState(false);
+  }, [session, dismissing, anySlotEditing, refresh, t, onDismissed, bumpDismissedRefresh, conversationId]);
   const [intentOpen, setIntentOpen] = useState(false);
 
   const handleSlotEditingChange = useCallback((key: string, editing: boolean) => {
@@ -1037,6 +993,11 @@ export function PluginPanel({
     }
     setAnySlotEditing(editingSlots.current.size > 0);
   }, []);
+
+  useEffect(() => {
+    editingSlots.current.clear();
+    setAnySlotEditing(false);
+  }, [session?.session_id]);
 
   useEffect(() => {
     if (!session?.plugin_id) return;
@@ -1109,6 +1070,8 @@ export function PluginPanel({
     session.status === 'completed';
   const displayStatus = autoRunning ? 'active' : session.status;
   const buttonsDisabled = displayStatus === 'active' || anySlotEditing || autoRunning;
+  const dismissDisabled = dismissing || anySlotEditing;
+  const collapseDisabled = anySlotEditing && !collapsed;
   // "继续" is only shown in waiting/active; completed shows rollback step picker instead.
   const showContinue = displayStatus === 'waiting' || displayStatus === 'active';
 
@@ -1142,10 +1105,10 @@ export function PluginPanel({
     onSendMessage?.(`${t('chat.pluginRollbackPrefix')}${stepId}`);
   }
 
-  const panel = (
+  return (
     <SlotEditingContext.Provider value={{ setEditing: handleSlotEditingChange }}>
     <div
-      className={`plugin-panel plugin-panel--${displayStatus}${collapsed ? ' plugin-panel--collapsed' : ''}${expanded ? ' plugin-panel--expanded' : ''}`}
+      className={`plugin-panel plugin-panel--${displayStatus}${collapsed ? ' plugin-panel--collapsed' : ''}`}
       data-session-id={session.session_id}
       aria-label={t('chat.pluginPanelTitle')}
     >
@@ -1192,57 +1155,74 @@ export function PluginPanel({
               )}
             </div>
           )}
-          <button
-            type='button'
-            className='plugin-panel__expand-btn'
-            onClick={() => setExpandedMode(!expanded)}
-            aria-label={t(expanded ? 'chat.pluginPanelShrink' : 'chat.pluginPanelExpand')}
-            title={t(expanded ? 'chat.pluginPanelShrink' : 'chat.pluginPanelExpand')}
-          >
-            {expanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-            <span>{t(expanded ? 'chat.pluginPanelShrinkShort' : 'chat.pluginPanelExpandShort')}</span>
-          </button>
-          {!expanded && <Popconfirm
-            title={t('chat.pluginDismissConfirmTitle')}
-            description={t('chat.pluginDismissConfirmDesc')}
-            onConfirm={handleDismiss}
-            okText={t('chat.pluginDismissConfirmOk')}
-            cancelText={t('chat.pluginDismissConfirmCancel')}
-            okButtonProps={{ danger: true, size: 'small' }}
-            cancelButtonProps={{ size: 'small' }}
-            disabled={dismissing}
+          <Tooltip
+            title={anySlotEditing ? t('chat.pluginFinishEditingFirst') : undefined}
             placement='bottomRight'
           >
-            <button
-              type='button'
-              className='plugin-panel__dismiss-btn'
-              disabled={dismissing}
-              aria-label={t('chat.pluginDismissBtn')}
-              title={t('chat.pluginDismissBtn')}
+            <span
+              className='plugin-panel__header-action-wrap'
+              tabIndex={anySlotEditing ? 0 : undefined}
+              aria-label={anySlotEditing ? t('chat.pluginFinishEditingFirst') : undefined}
             >
-              <svg width='12' height='12' viewBox='0 0 12 12' fill='none' xmlns='http://www.w3.org/2000/svg' aria-hidden='true'>
-                <path d='M2 2L10 10M10 2L2 10' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' />
-              </svg>
-            </button>
-          </Popconfirm>}
-          {!expanded && <button
-            type='button'
-            className='plugin-panel__collapse-btn'
-            onClick={() => setCollapsed((c) => !c)}
-            aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
-            title={collapsed ? 'Expand' : 'Collapse'}
+              <Popconfirm
+                title={t('chat.pluginDismissConfirmTitle')}
+                description={t('chat.pluginDismissConfirmDesc')}
+                onConfirm={handleDismiss}
+                okText={t('chat.pluginDismissConfirmOk')}
+                cancelText={t('chat.pluginDismissConfirmCancel')}
+                okButtonProps={{ danger: true, size: 'small' }}
+                cancelButtonProps={{ size: 'small' }}
+                disabled={dismissDisabled}
+                placement='bottomRight'
+              >
+                <button
+                  type='button'
+                  className='plugin-panel__dismiss-btn'
+                  disabled={dismissDisabled}
+                  aria-label={t('chat.pluginDismissBtn')}
+                  title={anySlotEditing ? undefined : t('chat.pluginDismissBtn')}
+                >
+                  <svg width='12' height='12' viewBox='0 0 12 12' fill='none' xmlns='http://www.w3.org/2000/svg' aria-hidden='true'>
+                    <path d='M2 2L10 10M10 2L2 10' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' />
+                  </svg>
+                </button>
+              </Popconfirm>
+            </span>
+          </Tooltip>
+          <Tooltip
+            title={collapseDisabled ? t('chat.pluginFinishEditingFirst') : undefined}
+            placement='bottomRight'
           >
-            <svg
-              width='12'
-              height='12'
-              viewBox='0 0 12 12'
-              fill='none'
-              xmlns='http://www.w3.org/2000/svg'
-              className={`plugin-panel__collapse-icon${collapsed ? ' plugin-panel__collapse-icon--up' : ''}`}
+            <span
+              className='plugin-panel__header-action-wrap'
+              tabIndex={collapseDisabled ? 0 : undefined}
+              aria-label={collapseDisabled ? t('chat.pluginFinishEditingFirst') : undefined}
             >
-              <path d='M2 4L6 8L10 4' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
-            </svg>
-          </button>}
+              <button
+                type='button'
+                className='plugin-panel__collapse-btn'
+                onClick={() => setCollapsed((c) => !c)}
+                disabled={collapseDisabled}
+                aria-label={collapsed ? t('chat.pluginPanelExpand') : t('chat.pluginPanelCollapse')}
+                title={collapseDisabled
+                  ? undefined
+                  : collapsed
+                    ? t('chat.pluginPanelExpand')
+                    : t('chat.pluginPanelCollapse')}
+              >
+                <svg
+                  width='12'
+                  height='12'
+                  viewBox='0 0 12 12'
+                  fill='none'
+                  xmlns='http://www.w3.org/2000/svg'
+                  className={`plugin-panel__collapse-icon${collapsed ? ' plugin-panel__collapse-icon--up' : ''}`}
+                >
+                  <path d='M2 4L6 8L10 4' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
+                </svg>
+              </button>
+            </span>
+          </Tooltip>
         </div>
       </div>
 
@@ -1284,7 +1264,7 @@ export function PluginPanel({
 
       {/* Body */}
       {!collapsed && (
-        <div className='plugin-panel__body'>
+        <div className='plugin-panel__body' key={session.session_id}>
           {hasTabs ? (
             tabs.map((tab, idx) => (
               <div
@@ -1393,10 +1373,4 @@ export function PluginPanel({
     )}
     </SlotEditingContext.Provider>
   );
-
-  if (expanded) {
-    const host = document.querySelector('.detail-container');
-    if (host) return createPortal(panel, host);
-  }
-  return panel;
 }
