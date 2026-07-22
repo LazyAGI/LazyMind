@@ -23,16 +23,14 @@ steps:
       {{runtime_instruction}}
 
       Read the Feishu document URL from the user's request and establish the immutable
-      source plus editable working state. Do not build revision context in this
+      source WriterDocument. Do not build revision context in this
       step; build_context is a separate user-visible step.
 
       Call revise_load_document(user_input="{{user_input}}"). The tool directly calls
       LazyLLM WriterResourceTools.document_to_docir through the existing chat-enabled
-      Feishu credential and returns three file paths.
+      Feishu credential and returns the source_ir file path.
 
-      Persist all returned paths in one save_artifacts call. Use content_type='file'
-      and exactly these keys: source_ir, working_ir, and remote_snapshot. Do not
-      save them through separate tool calls.
+      Persist source_ir with content_type='file'.
 
       Never ask the model to copy or reconstruct document content. Preserve LazyLLM/FS
       authorization and access errors unchanged so the platform authorization layer can
@@ -41,10 +39,8 @@ steps:
       - revise_load_document
     outputs:
       - material: source_ir
-      - material: working_ir
-      - material: remote_snapshot
     acceptance_criteria: |
-      source_ir, working_ir, and remote_snapshot are all present.
+      source_ir is present and contains a WriterDocument.
 
   build_context:
     label: Build Revision Context
@@ -68,47 +64,25 @@ steps:
       revision_context is present and was built from the loaded source IR.
 
   revise_document:
-    label: Revise and Confirm DocIR
+    label: Generate Revision
     prompt: |
       {{runtime_instruction}}
 
-      This is an interactive, resumable revision step. It stays interrupted while the
-      user reviews or edits candidate_ir, and succeeds only after the user explicitly
-      confirms the current IR by clicking Continue or saying to finish the modification.
-
-      First inspect the latest user input and existing artifacts.
-
-      CONFIRMATION PATH:
-      If the user explicitly confirms the currently displayed candidate_ir, do not call
-      revise_generate_revision again. Retrieve candidate_ir to ensure it exists, then
-      save_artifact(key='revision_confirmed', content_type='text', value='true'). Finish
-      this step so write_back becomes ready.
-
-      INITIAL OR ADDITIONAL-REQUIREMENT PATH:
-      Retrieve revision_context. For the base IR, use the currently selected candidate_ir
-      when it already exists; get_artifact resolves the latest frontend human revision.
-      Otherwise use working_ir from load_document. Call
-      revise_generate_revision(base_ir_path=<selected IR path>,
+      Retrieve source_ir and revision_context. Call
+      revise_generate_revision(base_ir_path=<source_ir path>,
       revision_context_path=<revision_context path>, query="{{user_input}}").
 
       Persist every returned value under its exact key in one save_artifacts call.
       Use content_type='file' for revise_task, locate_result, modify_plan, patch_set,
       patch_result, and candidate_ir. Do not save them through separate tool calls.
 
-      After the artifacts are saved, call ask_user to pause and ask the user to review
-      the revised IR. Explain that they may edit the IR directly, provide an additional
-      modification request, or click Continue to write the confirmed version back to
-      Feishu. Calling ask_user must leave this step resumable; do not advance to
-      write_back before explicit confirmation.
-
-      When resumed with another modification request, repeat this same path using the
-      latest selected candidate_ir. Each save creates a new Artifact revision. Do not
-      rewind this step and do not create a graph self-loop, because rewinding would mark
-      the current candidate and its human revisions stale.
+      candidate_ir is a preview of applying patch_set to source_ir. Do not treat edits to
+      candidate_ir as write-back instructions; this version writes only the generated
+      PatchSet and then advances directly to write_back.
     tools:
       - revise_generate_revision
     inputs:
-      - material: working_ir
+      - material: source_ir
         required: true
       - material: revision_context
         required: true
@@ -119,37 +93,31 @@ steps:
       - material: patch_set
       - material: patch_result
       - material: candidate_ir
-      - material: revision_confirmed
     acceptance_criteria: |
-      Before pausing for review, all revision artifacts through candidate_ir are present.
-      The step may succeed only when revision_confirmed is present and candidate_ir is the
-      exact version selected by the user.
+      All revision artifacts through candidate_ir are present and patch_set targets source_ir.
 
   write_back:
-    label: Write Confirmed IR to Feishu
+    label: Apply PatchSet to Feishu
     prompt: |
       {{runtime_instruction}}
 
-      This is the only step allowed to mutate the Feishu document. Retrieve the latest
-      selected candidate_ir and the original remote_snapshot. Call
-      revise_write_back(candidate_ir_path=<candidate_ir path>,
-      remote_snapshot_path=<remote_snapshot path>).
+      This is the only step allowed to mutate the Feishu document. Retrieve source_ir and
+      patch_set. Call revise_write_back(source_ir_path=<source_ir path>,
+      patch_set_path=<patch_set path>).
 
-      LazyLLM re-reads Feishu, checks every changed block against the original Writer IR,
-      refuses stale or unsupported changes, and writes supported structured blocks without
-      flattening them to plain text. Persist write_result and synced_snapshot together in one save_artifacts
-      call with content_type='file'.
+      LazyLLM translates each PatchHunk through the provider adapter, writes supported
+      structured blocks without flattening them, and re-reads the persisted WriterDocument.
+      Persist write_result and synced_snapshot together in one save_artifacts call with
+      content_type='file'.
 
       On a remote conflict, do not overwrite the document; stop and ask the user to
       restart from the latest Feishu content.
     tools:
       - revise_write_back
     inputs:
-      - material: candidate_ir
+      - material: source_ir
         required: true
-      - material: revision_confirmed
-        required: true
-      - material: remote_snapshot
+      - material: patch_set
         required: true
     outputs:
       - material: write_result

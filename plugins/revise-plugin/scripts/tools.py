@@ -17,11 +17,7 @@ from lazyllm.tools.writer.tools import WriterResourceTools
 from lazyllm.tools.writer.utils import save_artifact_json
 
 from lazymind.chat.engine.subagent.context import require_context
-from lazymind.chat.engine.tools.writer import (
-    WriterToolkitBase,
-    writer_artifact_schema,
-    writer_schema,
-)
+from lazymind.chat.engine.tools.writer import WriterRevisionToolkit, WriterToolkitBase, writer_schema
 
 
 _FEISHU_URL_RE = re.compile(
@@ -93,22 +89,15 @@ def _feishu_url(user_input: str) -> str:
 
 
 def revise_load_document(user_input: str) -> dict:
-    """Load the immutable source and editable starting IR from Feishu."""
+    """Load the immutable source WriterDocument from Feishu."""
     root = _run_root('load')
     target = TargetDocument(uri=_feishu_url(user_input), adapter='feishu')
     result = WriterResourceTools(llm=None, artifact_store=str(root)).document_to_docir(target)
-    loaded_doc_ir_json = _read_json_string(_result_path(result))
+    loaded_document_json = _read_json_string(_result_path(result))
 
-    source_ir_path = _save_json_artifact(
-        'source_ir', loaded_doc_ir_json, writer_schema('docir.DocIR'), directory=root,
-    )
     return {
-        'source_ir': source_ir_path,
-        'working_ir': _save_json_artifact(
-            'working_ir', loaded_doc_ir_json, writer_schema('docir.DocIR'), directory=root,
-        ),
-        'remote_snapshot': _save_json_artifact(
-            'remote_snapshot', loaded_doc_ir_json, writer_schema('docir.DocIR'), directory=root,
+        'source_ir': _save_json_artifact(
+            'source_ir', loaded_document_json, WriterToolkitBase.WRITER_IR_SCHEMA, directory=root,
         ),
     }
 
@@ -116,7 +105,7 @@ def revise_load_document(user_input: str) -> dict:
 def revise_build_context(user_input: str, source_ir_path: str) -> dict:
     """Build the model context for revision as its own observable plugin step."""
     root = _run_root('context')
-    writer = WriterToolkitBase()
+    writer = WriterRevisionToolkit()
     target = TargetDocument(uri=_feishu_url(user_input), adapter='feishu')
     revise_task_json = writer.build_revise_task(
         query=user_input,
@@ -125,7 +114,7 @@ def revise_build_context(user_input: str, source_ir_path: str) -> dict:
     context_json = writer.create_writing_context(
         writing_task_json=revise_task_json,
         resource_profiles_json='[]',
-        doc_ir_json=_read_json_string(source_ir_path),
+        writer_document_json=_read_json_string(source_ir_path),
     )
     return {
         'revision_context': _save_json_artifact(
@@ -137,15 +126,32 @@ def revise_build_context(user_input: str, source_ir_path: str) -> dict:
 def revise_generate_revision(base_ir_path: str, revision_context_path: str, query: str) -> dict:
     """Delegate the complete revision pipeline to common writer tools."""
     root = _run_root('revision')
-    writer = WriterToolkitBase()
+    writer = WriterRevisionToolkit()
     base_ir = _read_json_string(base_ir_path)
     context = _read_json_string(revision_context_path)
 
     task = writer.build_revise_task(query=query)
-    located = writer.locate_revision_target(task, base_ir, context)
-    plan = writer.generate_modify_plan(task, base_ir, located, context)
-    patch_set = writer.generate_patch_set(base_ir, plan, context)
-    applied = _json_loads(writer.apply_patch(base_ir, patch_set, context), {})
+    located = writer.locate_revision_target(
+        writing_task_json=task,
+        writer_document_json=base_ir,
+        writing_context_json=context,
+    )
+    plan = writer.generate_modify_plan(
+        writing_task_json=task,
+        writer_document_json=base_ir,
+        locate_result_json=located,
+        writing_context_json=context,
+    )
+    patch_set = writer.generate_patch_set(
+        writer_document_json=base_ir,
+        modify_plan_json=plan,
+        writing_context_json=context,
+    )
+    applied = _json_loads(writer.apply_patch(
+        writer_document_json=base_ir,
+        patch_set_json=patch_set,
+        writing_context_json=context,
+    ), {})
 
     return {
         'revise_task': _save_json_artifact(
@@ -165,29 +171,33 @@ def revise_generate_revision(base_ir_path: str, revision_context_path: str, quer
             writer_schema('revision.PatchResult'), directory=root,
         ),
         'candidate_ir': _save_json_artifact(
-            'candidate_ir', json.dumps(applied.get('revised_doc_ir') or {}, ensure_ascii=False),
-            writer_schema('docir.DocIR'), directory=root,
+            'candidate_ir', json.dumps(applied.get('revised_document') or {}, ensure_ascii=False),
+            WriterToolkitBase.WRITER_IR_SCHEMA, directory=root,
         ),
     }
 
 
-def revise_write_back(candidate_ir_path: str, remote_snapshot_path: str) -> dict:
-    """Delegate optimistic DocIR write-back to LazyLLM WriterResourceTools."""
+def revise_write_back(source_ir_path: str, patch_set_path: str) -> dict:
+    """Apply the generated PatchSet to Feishu and return the persisted WriterDocument."""
     root = _run_root('write-back')
     result = WriterResourceTools(
         llm=None,
         artifact_store=str(root),
-    ).write_docir_to_document(
-        source_doc_ir=remote_snapshot_path,
-        revised_doc_ir=candidate_ir_path,
+    ).apply_patch_to_document(
+        source_document=_read_json_file(source_ir_path),
+        patch_set=_read_json_file(patch_set_path),
     )
     write_result_json = _read_json_string(_result_path(result))
-    candidate_ir_json = _read_json_string(candidate_ir_path)
+    artifact_paths = (result.get('metadata') or {}).get('artifact_paths') or {}
+    persisted_document_path = str(artifact_paths.get('persisted_document') or '')
+    if not persisted_document_path:
+        raise ValueError(f'LazyLLM writer tool did not return persisted_document: {result!r}')
     return {
         'write_result': _save_json_artifact(
-            'write_result', write_result_json, writer_artifact_schema('write_result'), directory=root,
+            'write_result', write_result_json, writer_schema('revision.PatchResult'), directory=root,
         ),
         'synced_snapshot': _save_json_artifact(
-            'synced_snapshot', candidate_ir_json, writer_schema('docir.DocIR'), directory=root,
+            'synced_snapshot', _read_json_string(persisted_document_path),
+            WriterToolkitBase.WRITER_IR_SCHEMA, directory=root,
         ),
     }

@@ -145,7 +145,7 @@ def writer_generate_section_instructions(
     return _save_json_artifact(
         'section_instructions',
         content,
-        writer_schema('writing.SectionInstructionList'),
+        writer_schema('planning.SectionInstructionList'),
     )
 
 

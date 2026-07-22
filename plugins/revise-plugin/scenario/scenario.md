@@ -2,19 +2,18 @@
 
 ## Scenario
 
-Revise part of an existing Feishu document while keeping DocIR as the single
-editing representation and Artifact revisions as the version history.
+Revise part of an existing Feishu document while keeping WriterDocument as the
+single internal document representation and PatchSet as the modification contract.
 
 1. **load_document** — reuse the current user's chat-enabled Feishu OAuth
-   connection, read the document, and store `source_ir`, `working_ir`, and a
-   block-level remote snapshot.
+   connection, read the document, and store it as the immutable `source_ir`
+   WriterDocument.
 2. **build_context** — build and display the revision context from the immutable
    source IR and the user's request without changing the document.
 3. **revise_document** — locate the requested scope, generate a PatchSet, apply
-   it to the selected DocIR, and expose every generated artifact to the frontend.
-   This step deliberately pauses for user review.
-4. **write_back** — after explicit confirmation, re-read the remote blocks,
-   detect conflicts, and write only the changed supported blocks to Feishu.
+   it to source_ir, and expose the resulting WriterDocument as candidate_ir.
+4. **write_back** — translate the same PatchSet into provider-native block
+   operations, write it to Feishu, and re-read the persisted WriterDocument.
 
 Feishu is never modified by `load_document`, `build_context`, or `revise_document`.
 
@@ -35,21 +34,12 @@ Examples:
 Do not invoke it for new-document writing, read-only summarization, translation
 without document mutation, or requests without a Feishu target document.
 
-### Active session
+### Current interaction boundary
 
-While `revise_document` is waiting:
-
-- A frontend edit creates a Human Revision of `candidate_ir`; do not run the
-  algorithm merely because the artifact changed.
-- An additional chat instruction resumes `revise_document`. The step reads the
-  latest selected candidate, including human edits, and creates a new AI
-  revision.
-- “继续”, “完成修改”, or the Continue button resumes the step in confirmation
-  mode. It saves `revision_confirmed` without regenerating the patch.
-
-The revision interaction remains inside one resumable step. Do not rewind
-`revise_document`: backend rewind invalidates outputs of the previous attempt,
-including human revisions derived from `candidate_ir`.
+The current version executes one revision request from source document through
+write-back without an intermediate human-edit or confirmation branch. candidate_ir
+is for displaying the generated result only. Direct user editing will be added as
+a separate capability with an explicit way to produce a new PatchSet.
 
 ## Feishu authorization
 
@@ -62,20 +52,20 @@ After the condition is fixed, retry `load_document`.
 ## Artifact contract
 
 - `source_ir` is immutable and records the initially loaded document.
-- `working_ir` is the first editable DocIR version produced by loading.
-- `candidate_ir` is the selected version shown by the frontend IR control.
-- Every algorithm rerun and every frontend edit creates a new Artifact revision.
-- `remote_snapshot` points to the source DocIR used by LazyLLM for optimistic
-  concurrency checking.
+- `candidate_ir` is the WriterDocument preview produced by applying patch_set locally.
+- `patch_set` is the only modification contract used for remote write-back.
 - `synced_snapshot` is created only after successful final write-back.
 
 All structured artifacts are passed as file paths, following writer-plugin:
 `get_artifact` returns a path, plugin-local tools read it, and their returned
 paths are persisted with `save_artifact(content_type='file')`.
 
-## Current write-back boundary
+## Write-back boundary
 
 Writer IR blocks and their provider bindings must survive the complete round
 trip. The LazyLLM adapter decides which structural operations are supported;
 unsupported operations must be rejected instead of being flattened or silently
 losing formatting.
+
+The plugin passes source_ir and patch_set to WriterResourceTools. It does not
+inspect NativePatchOperation and does not call FeishuFS directly.
