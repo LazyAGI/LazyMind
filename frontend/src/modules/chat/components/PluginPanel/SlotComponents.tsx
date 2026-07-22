@@ -1541,6 +1541,12 @@ function isJsonArtifactFile(slot: SlotRevision): boolean {
   return name.endsWith('.json') || path.endsWith('.json');
 }
 
+function isWriterIrArtifactFile(slot: SlotRevision): boolean {
+  const raw = slot.artifact_value;
+  const name = String(raw?.filename ?? raw?.name ?? '').toLowerCase();
+  return name.endsWith('_ir.json');
+}
+
 function isMarkdownArtifactFile(slot: SlotRevision): boolean {
   const raw = slot.artifact_value;
   const name = String(raw?.filename ?? raw?.name ?? '').toLowerCase();
@@ -1633,6 +1639,7 @@ function shouldRenderJsonFileAsContent(
 ): boolean {
   const raw = slot.artifact_value;
   if (!raw || typeof raw !== 'object') return false;
+  if (isWriterIrArtifactFile(slot)) return true;
   const declaredJson = slot.content_type === 'json' || raw.type === 'json';
   if (expectedType !== 'text' && !declaredJson) return false;
   if (isJsonArtifactFile(slot)) return true;
