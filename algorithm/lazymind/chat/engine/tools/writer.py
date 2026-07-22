@@ -29,16 +29,10 @@ from lazyllm.tools.writer.utils import save_artifact_json
 
 
 WRITER_DATA_MODEL_SCHEMA_PREFIX = 'lazyllm.tools.writer.data_models'
-WRITER_ARTIFACT_SCHEMA_PREFIX = 'lazyllm.tools.writer.artifacts'
 
 
 def writer_schema(name: str) -> str:
     return f'{WRITER_DATA_MODEL_SCHEMA_PREFIX}.{name}'
-
-
-def writer_artifact_schema(name: str) -> str:
-    """Return the schema identifier used by non-model writer artifacts."""
-    return f'{WRITER_ARTIFACT_SCHEMA_PREFIX}.{name}'
 
 
 def build_writer_status_ir(status: str, content: str, *, source: str) -> str:

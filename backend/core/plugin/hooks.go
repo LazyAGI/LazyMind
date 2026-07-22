@@ -99,7 +99,7 @@ func onArtifact(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID
 		return
 	}
 	rev := OnArtifactEvent(ctx, db, taskID, artifactKey, pctx)
-	if rev == nil || subagent.EventHooks == nil {
+	if rev == nil {
 		return
 	}
 	// Slot revision is now durable. Notify the conversation stream so the
@@ -125,7 +125,7 @@ func notifyPluginArtifactUpdated(
 	listIndex *int,
 	changeSource string,
 ) {
-	if db == nil || subagent.EventHooks == nil {
+	if db == nil {
 		return
 	}
 	session, err := GetSession(ctx, db, sessionID)
