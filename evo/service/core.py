@@ -13,6 +13,7 @@ from evo.artifact_runtime import ArtifactCommit, ArtifactDraft, ArtifactKey
 from evo.message_intent import MessageIntent, MessageRequest, MessageTurnResult
 from evo.operations import evo_flow_definition
 from evo.operations.repair.trace import RepairTraceStore
+from evo.repair_model import EvoModelConfigError, resolve_evo_model
 
 from .contracts import CommandRequest, ControlRequest, ServiceError, ThreadCreate
 from .projections import ProjectionService
@@ -64,6 +65,10 @@ class EvoService:
             if isinstance(request, ThreadCreate)
             else ThreadCreate.model_validate(request)
         )
+        try:
+            resolve_evo_model(request.llm_config.get('evo_llm'))
+        except EvoModelConfigError as exc:
+            raise ServiceError(422, exc.detail()) from exc
         thread_id = await self._new_thread_id()
         seed = _seed_values(thread_id, request)
         keys = tuple(ArtifactKey.scalar(artifact_id) for artifact_id in A.SEEDS)
