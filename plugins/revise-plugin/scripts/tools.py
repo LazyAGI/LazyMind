@@ -208,7 +208,7 @@ def revise_generate_revision(base_ir_path: str, revision_context_path: str, quer
         'candidate_ir': _save_json_artifact(
             'candidate_ir', _writer_document_json(
                 json.dumps(applied.get('revised_document') or {}, ensure_ascii=False),
-                ui_editable=True,
+                ui_editable=False,
             ),
             WriterToolkitBase.WRITER_IR_SCHEMA, directory=root,
         ),
@@ -217,7 +217,7 @@ def revise_generate_revision(base_ir_path: str, revision_context_path: str, quer
         ),
         'synced_snapshot': _save_json_artifact(
             'synced_ir', _writer_document_json(
-                _read_json_string(persisted_document_path), ui_editable=False,
+                _read_json_string(persisted_document_path), ui_editable=True,
             ),
             WriterToolkitBase.WRITER_IR_SCHEMA, directory=root,
         ),
