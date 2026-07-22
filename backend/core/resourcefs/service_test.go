@@ -170,6 +170,47 @@ func TestServiceDraftCommitRevisionRollback(t *testing.T) {
 	}
 }
 
+func TestWriteDraftMarksConversationDraftForAutoCommit(t *testing.T) {
+	tests := []struct {
+		name       string
+		autoEvo    bool
+		taskID     string
+		wantStatus string
+	}{
+		{name: "auto update conversation", autoEvo: true, taskID: "session-1", wantStatus: draftStatusAutoPending},
+		{name: "manual update conversation", autoEvo: false, taskID: "session-1", wantStatus: draftStatusPendingConfirm},
+		{name: "memory review", autoEvo: true, taskID: "memory_review_1", wantStatus: draftStatusPendingConfirm},
+		{name: "manual editor", autoEvo: true, taskID: "", wantStatus: draftStatusPendingConfirm},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newResourceFSTestDB(t)
+			service := NewService(ServiceDeps{DB: db.DB})
+			ref := ResourceRef{UserID: "u1", ResourceType: ResourceTypeMemory}
+			state, err := service.EnsureResource(context.Background(), ref, "v1")
+			if err != nil {
+				t.Fatalf("EnsureResource returned error: %v", err)
+			}
+			if err := db.Model(&orm.PersonalResource{}).Where("id = ?", state.ID).Update("auto_evo", tt.autoEvo).Error; err != nil {
+				t.Fatalf("set auto_evo: %v", err)
+			}
+			draft, err := service.WriteDraft(context.Background(), WriteDraftRequest{
+				Ref:                  ref,
+				Content:              "v2",
+				ExpectedDraftVersion: state.DraftVersion,
+				TaskID:               tt.taskID,
+				UpdatedBy:            "u1",
+			})
+			if err != nil {
+				t.Fatalf("WriteDraft returned error: %v", err)
+			}
+			if draft.DraftStatus != tt.wantStatus {
+				t.Fatalf("draft status = %q, want %q", draft.DraftStatus, tt.wantStatus)
+			}
+		})
+	}
+}
+
 func TestRollbackRejectsPendingDraft(t *testing.T) {
 	for _, resourceType := range []ResourceType{ResourceTypeMemory, ResourceTypeUserPreference} {
 		t.Run(string(resourceType), func(t *testing.T) {

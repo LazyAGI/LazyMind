@@ -240,6 +240,10 @@ func (s *Service) WriteDraft(ctx context.Context, req WriteDraftRequest) (DraftR
 			return err
 		}
 		nextVersion := draft.Version + 1
+		draftStatus := draftStatusPendingConfirm
+		if resource.AutoEvo && shouldAutoCommitPersonalDraft(req.TaskID) {
+			draftStatus = draftStatusAutoPending
+		}
 		updatedBy := nullableString(req.UpdatedBy)
 		conversationID := nullableString(req.ConversationID)
 		update := map[string]any{
@@ -251,7 +255,7 @@ func (s *Service) WriteDraft(ctx context.Context, req WriteDraftRequest) (DraftR
 			"mime":             blob.Mime,
 			"file_type":        blob.FileType,
 			"binary":           blob.Binary,
-			"draft_status":     "pending_confirm",
+			"draft_status":     draftStatus,
 			"draft_updated_at": now,
 			"task_id":          strings.TrimSpace(req.TaskID),
 			"conversation_id":  conversationID,
@@ -270,7 +274,7 @@ func (s *Service) WriteDraft(ctx context.Context, req WriteDraftRequest) (DraftR
 			Ref:            req.Ref,
 			Path:           mustPath(req.Ref.ResourceType),
 			DraftVersion:   nextVersion,
-			DraftStatus:    "pending_confirm",
+			DraftStatus:    draftStatus,
 			BaseRevisionID: valueOrEmpty(resource.HeadRevisionID),
 			BlobHash:       blob.Hash,
 			ContentHash:    blob.Hash,
@@ -279,6 +283,11 @@ func (s *Service) WriteDraft(ctx context.Context, req WriteDraftRequest) (DraftR
 		return nil
 	})
 	return out, normalizeGormErr(err)
+}
+
+func shouldAutoCommitPersonalDraft(taskID string) bool {
+	taskID = strings.TrimSpace(taskID)
+	return taskID != "" && !strings.HasPrefix(taskID, "memory_review_")
 }
 
 func (s *Service) UpdateMetadata(ctx context.Context, req UpdateMetadataRequest) (MetadataResponse, error) {

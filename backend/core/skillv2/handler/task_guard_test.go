@@ -53,6 +53,12 @@ func TestMaintenanceTaskStatusIsScopedToCurrentUser(t *testing.T) {
 func TestSkillOrganizeDraftConflictDoesNotCallAlgorithm(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
+		"category":      "internal",
+		"relative_root": "internal/论文精读",
+	}).Error; err != nil {
+		t.Fatalf("mark internal skill: %v", err)
+	}
 	testutil.SeedTextBlob(t, db, "draft_hash", "draft")
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "draft_hash")
 	oldDB := store.DB()
@@ -70,7 +76,7 @@ func TestSkillOrganizeDraftConflictDoesNotCallAlgorithm(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
 		"requestid":"org_test",
-		"skills":["skills/research/论文精读"]
+		"skills":["skills/internal/论文精读"]
 	}`))
 	req.Header.Set("X-User-Id", "user_001")
 	rec := httptest.NewRecorder()
@@ -78,7 +84,7 @@ func TestSkillOrganizeDraftConflictDoesNotCallAlgorithm(t *testing.T) {
 	if rec.Code != http.StatusConflict || called {
 		t.Fatalf("status=%d called=%v body=%s", rec.Code, called, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "skill_organize_draft_conflict") || !strings.Contains(rec.Body.String(), "skills/research/论文精读") {
+	if !strings.Contains(rec.Body.String(), "skill_organize_draft_conflict") || !strings.Contains(rec.Body.String(), "skills/internal/论文精读") {
 		t.Fatalf("missing conflict detail: %s", rec.Body.String())
 	}
 }

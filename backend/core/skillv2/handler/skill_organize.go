@@ -19,9 +19,10 @@ import (
 )
 
 const (
-	maxSkillOrganizeSkills = 20
-	skillOrganizeBaseDir   = "skills"
-	skillOrganizeIDPrefix  = "org_"
+	maxSkillOrganizeSkills        = 20
+	skillOrganizeBaseDir          = "skills"
+	skillOrganizeInternalCategory = "internal"
+	skillOrganizeIDPrefix         = "org_"
 )
 
 var (
@@ -58,6 +59,13 @@ func SubmitSkillOrganize(w http.ResponseWriter, r *http.Request) {
 	normalized, err := normalizeSkillOrganizeRequest(req)
 	if err != nil {
 		replyError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	normalized.Skills = filterInternalSkillOrganizePaths(normalized.Skills)
+	if len(normalized.Skills) == 0 {
+		common.ReplyErrWithData(w, "no internal skills selected", map[string]any{
+			"code": "skill_organize_no_internal_skills",
+		}, http.StatusBadRequest)
 		return
 	}
 	skillIDs, err := resolveSkillOrganizeIDs(r.Context(), db, userID, normalized.Skills)
@@ -186,6 +194,17 @@ func skillOrganizeResponseStatusAccepted(status string) bool {
 	default:
 		return false
 	}
+}
+
+func filterInternalSkillOrganizePaths(skillPaths []string) []string {
+	internal := make([]string, 0, len(skillPaths))
+	for _, skillPath := range skillPaths {
+		parts := strings.Split(skillPath, "/")
+		if len(parts) == 3 && parts[1] == skillOrganizeInternalCategory {
+			internal = append(internal, skillPath)
+		}
+	}
+	return internal
 }
 
 func resolveSkillOrganizeIDs(ctx context.Context, db *gorm.DB, userID string, skillPaths []string) ([]string, error) {

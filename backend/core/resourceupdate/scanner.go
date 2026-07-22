@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -26,6 +27,7 @@ type ScannerRunResult struct {
 	SkillResultsExpired        int
 	SkillTasksCreated          int
 	SkillDraftTasksCreated     int
+	PersonalDraftTasksCreated  int
 	MemoryTasksCreated         int
 	UserPreferenceTasksCreated int
 }
@@ -60,6 +62,11 @@ func (s *Scanner) RunOnce(ctx context.Context) (ScannerRunResult, error) {
 			return err
 		}
 		result.SkillDraftTasksCreated = created
+		created, err = scanAutoEvoPersonalDrafts(ctx, tx, now)
+		if err != nil {
+			return err
+		}
+		result.PersonalDraftTasksCreated = created
 		created, err = scanMemoryReviewResults(ctx, tx, orm.ResourceUpdateResourceTypeMemory, now)
 		if err != nil {
 			return err
@@ -72,16 +79,70 @@ func (s *Scanner) RunOnce(ctx context.Context) (ScannerRunResult, error) {
 		result.UserPreferenceTasksCreated = created
 		return nil
 	})
-	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.SkillDraftTasksCreated > 0 || result.MemoryTasksCreated > 0 || result.UserPreferenceTasksCreated > 0) {
+	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.SkillDraftTasksCreated > 0 || result.PersonalDraftTasksCreated > 0 || result.MemoryTasksCreated > 0 || result.UserPreferenceTasksCreated > 0) {
 		resourceUpdateInfo(logEventResultScanDone).
 			Int("skill_results_expired", result.SkillResultsExpired).
 			Int("skill_tasks_created", result.SkillTasksCreated).
 			Int("skill_draft_tasks_created", result.SkillDraftTasksCreated).
+			Int("personal_draft_tasks_created", result.PersonalDraftTasksCreated).
 			Int("memory_tasks_created", result.MemoryTasksCreated).
 			Int("user_preference_tasks_created", result.UserPreferenceTasksCreated).
 			Msg(logEventResultScanDone)
 	}
 	return result, err
+}
+
+func scanAutoEvoPersonalDrafts(ctx context.Context, tx *gorm.DB, now time.Time) (int, error) {
+	var rows []struct {
+		ResourceID   string `gorm:"column:resource_id"`
+		ResourceType string `gorm:"column:resource_type"`
+		UserID       string `gorm:"column:user_id"`
+		TaskID       string `gorm:"column:task_id"`
+		DraftVersion int64  `gorm:"column:draft_version"`
+	}
+	if err := tx.WithContext(ctx).
+		Table("personal_resources AS r").
+		Select("r.id AS resource_id, r.resource_type, r.user_id, d.task_id, d.version AS draft_version").
+		Joins("JOIN personal_resource_drafts AS d ON d.resource_id = r.id").
+		Where("r.auto_evo = ? AND d.task_id <> '' AND d.draft_status IN ?", true, []string{"pending_confirm", "auto_pending"}).
+		Order("r.user_id ASC, r.id ASC").
+		Find(&rows).Error; err != nil {
+		return 0, err
+	}
+
+	created := 0
+	for _, row := range rows {
+		if strings.HasPrefix(strings.TrimSpace(row.TaskID), "memory_review_") {
+			continue
+		}
+		requestBody, err := json.Marshal(personalDraftAutoCommitRequestJSON{TaskID: row.TaskID, DraftVersion: row.DraftVersion})
+		if err != nil {
+			return 0, err
+		}
+		task := orm.ResourceUpdateTask{
+			ID:           common.GenerateID(),
+			TaskType:     orm.ResourceUpdateTaskTypeAutoCommitPersonalDraft,
+			ResourceType: strings.TrimSpace(row.ResourceType),
+			UserID:       strings.TrimSpace(row.UserID),
+			ResourceID:   strings.TrimSpace(row.ResourceID),
+			TriggerType:  orm.ResourceUpdateTriggerTypeAutoEvoEnabled,
+			TriggerID:    fmt.Sprintf("personal_draft:%s:%s:%d", row.ResourceID, row.TaskID, row.DraftVersion),
+			Status:       orm.ResourceUpdateTaskStatusPending,
+			RequestJSON:  requestBody,
+			NextRunAt:    now,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+		result := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&task)
+		if result.Error != nil {
+			return 0, result.Error
+		}
+		if result.RowsAffected == 0 {
+			continue
+		}
+		created++
+	}
+	return created, nil
 }
 
 func ScanPendingResultsForResource(ctx context.Context, db *gorm.DB, resourceType, userID, resourceID string) error {

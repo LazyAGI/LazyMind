@@ -259,6 +259,70 @@ func TestAutoEvoCreateDraftCommitsInitialRevisionAfterEditorIdle(t *testing.T) {
 	}
 }
 
+func TestAutoEvoPersonalDraftScannerCommitsConversationDraft(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	createSkillReviewResultsTable(t, db)
+	createMemoryReviewTable(t, db)
+	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+	insertPersonalResource(t, db, "memory-auto-draft", "user-1", orm.ResourceUpdateResourceTypeMemory, "old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
+	insertPersonalResource(t, db, "memory-review-draft", "user-2", orm.ResourceUpdateResourceTypeMemory, "review old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
+	insertPersonalResource(t, db, "memory-manual-draft", "user-3", orm.ResourceUpdateResourceTypeMemory, "manual old", 1, false, 0, now.Add(-time.Hour), now.Add(-time.Hour))
+
+	setPersonalDraft := func(resourceID, content, taskID, status string) {
+		t.Helper()
+		hash := evolution.HashContent(content)
+		if err := db.Create(&orm.PersonalResourceBlob{
+			Hash: hash, Size: int64(len(content)), Mime: "text/markdown; charset=utf-8", FileType: "markdown",
+			StorageBackend: "postgres", Content: []byte(content), CreatedAt: now,
+		}).Error; err != nil {
+			t.Fatalf("insert personal draft blob: %v", err)
+		}
+		if err := db.Model(&orm.PersonalResourceDraft{}).Where("resource_id = ?", resourceID).Updates(map[string]any{
+			"blob_hash": hash, "content_hash": hash, "size": int64(len(content)), "task_id": taskID,
+			"draft_status": status, "draft_updated_at": now, "version": 2, "updated_at": now,
+		}).Error; err != nil {
+			t.Fatalf("update personal draft: %v", err)
+		}
+	}
+	setPersonalDraft("memory-auto-draft", "new", "session-1", "pending_confirm")
+	setPersonalDraft("memory-review-draft", "review new", "memory_review_1", "pending_confirm")
+	setPersonalDraft("memory-manual-draft", "manual new", "session-3", "pending_confirm")
+
+	scanner := NewScanner(db, Config{}, "personal-draft-scanner")
+	scanner.clock = func() time.Time { return now }
+	scanResult, err := scanner.RunOnce(context.Background())
+	if err != nil || scanResult.PersonalDraftTasksCreated != 1 {
+		t.Fatalf("scan personal drafts: result=%#v err=%v", scanResult, err)
+	}
+	repeatScan, err := scanner.RunOnce(context.Background())
+	if err != nil || repeatScan.PersonalDraftTasksCreated != 0 {
+		t.Fatalf("repeat scan duplicated personal draft task: result=%#v err=%v", repeatScan, err)
+	}
+
+	worker := NewWorker(db, Config{WorkerBatchSize: 1, WorkerLockTTL: time.Minute}, "personal-draft-worker")
+	worker.clock = func() time.Time { return now }
+	result, err := worker.RunOnce(context.Background())
+	if err != nil || result.Done != 1 {
+		t.Fatalf("commit personal draft: result=%#v err=%v", result, err)
+	}
+	if content, _ := readPersonalResourceHeadContent(t, db, "memory-auto-draft"); content != "new" {
+		t.Fatalf("committed content = %q, want new", content)
+	}
+	var committedDraft orm.PersonalResourceDraft
+	if err := db.Take(&committedDraft, "resource_id = ?", "memory-auto-draft").Error; err != nil {
+		t.Fatalf("read committed draft: %v", err)
+	}
+	if committedDraft.DraftStatus != "" || committedDraft.TaskID != "" || committedDraft.DraftUpdatedAt != nil {
+		t.Fatalf("committed draft was not reset: %#v", committedDraft)
+	}
+	if content, _ := readPersonalResourceHeadContent(t, db, "memory-review-draft"); content != "review old" {
+		t.Fatalf("memory review draft was committed: %q", content)
+	}
+	if content, _ := readPersonalResourceHeadContent(t, db, "memory-manual-draft"); content != "manual old" {
+		t.Fatalf("manual draft was committed: %q", content)
+	}
+}
+
 func TestAutoEvoDraftDefersWhenEditorStatusIsUnavailable(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	now := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
