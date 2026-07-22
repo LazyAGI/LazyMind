@@ -321,7 +321,15 @@ const MessageList: React.FC<MessageListProps> = ({
 				  <div className="chat-collected-input" key={`${source.task_id}-${sourceIndex}`}>
 					<div className="chat-collected-input-title">
 					  {source.conversation_id ? (
-						<a href={`/agent/chat?conversation_id=${encodeURIComponent(source.conversation_id)}`}>
+						<a
+						  href={`/agent/chat/home?conversation_id=${encodeURIComponent(source.conversation_id)}`}
+						  onClick={(event) => {
+							event.preventDefault();
+							window.dispatchEvent(new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
+							  detail: { conversationId: source.conversation_id, source: "collected-input" },
+							}));
+						  }}
+						>
 						  @{source.source_name || source.task_id}
 						</a>
 					  ) : `@${source.source_name || source.task_id}`}

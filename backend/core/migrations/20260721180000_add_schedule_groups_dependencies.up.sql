@@ -23,13 +23,6 @@ CREATE TABLE public.schedule_dependencies (
 CREATE INDEX idx_schedule_dependencies_target ON public.schedule_dependencies(target_schedule_id);
 CREATE INDEX idx_schedule_dependencies_source ON public.schedule_dependencies(source_schedule_id);
 
-CREATE TABLE public.schedule_fires (
-    id varchar(36) PRIMARY KEY, schedule_id varchar(36) NOT NULL, scheduled_fire_at timestamptz NOT NULL,
-    logical_slot_key varchar(160) NOT NULL, status varchar(24) NOT NULL, task_id varchar(36),
-    attempt integer NOT NULL DEFAULT 1, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL,
-    CONSTRAINT uk_schedule_fire UNIQUE (schedule_id, scheduled_fire_at, attempt)
-);
-
 ALTER TABLE public.task_center_tasks ADD COLUMN group_id varchar(36);
 ALTER TABLE public.task_center_tasks ADD COLUMN scheduled_fire_at timestamptz;
 ALTER TABLE public.task_center_tasks ADD COLUMN logical_slot_key varchar(160) NOT NULL DEFAULT '';
@@ -42,6 +35,8 @@ ALTER TABLE public.task_center_tasks ADD COLUMN dependency_status varchar(32) NO
 ALTER TABLE public.task_center_tasks ADD COLUMN has_late_inputs boolean NOT NULL DEFAULT false;
 ALTER TABLE public.task_center_tasks DROP CONSTRAINT IF EXISTS chk_tct_status;
 ALTER TABLE public.task_center_tasks ADD CONSTRAINT chk_tct_status CHECK (status IN ('pending','waiting_inputs','running','waiting','succeeded','failed','skipped','canceled'));
+CREATE INDEX idx_task_center_schedule_execution
+    ON public.task_center_tasks(schedule_id, scheduled_fire_at, created_at);
 
 CREATE TABLE public.task_run_outputs (
     id varchar(36) PRIMARY KEY, task_id varchar(36) NOT NULL UNIQUE, conversation_id varchar(36) NOT NULL,
@@ -58,3 +53,33 @@ CREATE TABLE public.task_run_inputs (
 );
 CREATE INDEX idx_task_run_inputs_downstream ON public.task_run_inputs(downstream_task_id);
 CREATE INDEX idx_task_run_inputs_upstream ON public.task_run_inputs(upstream_task_id);
+CREATE UNIQUE INDEX uk_task_run_input_snapshot
+    ON public.task_run_inputs(downstream_task_id, dependency_id, upstream_task_id);
+
+-- Keep task conversations and derived run counts consistent with soft-deleted
+-- task-center executions that may already exist when this migration is applied.
+UPDATE public.conversations c
+SET deleted_at = COALESCE(c.deleted_at, NOW()),
+    updated_at = NOW()
+WHERE c.is_task_conv = true
+  AND EXISTS (
+      SELECT 1
+      FROM public.task_center_tasks t
+      WHERE t.conversation_id = c.id
+        AND t.archived_at IS NOT NULL
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM public.task_center_tasks t
+      WHERE t.conversation_id = c.id
+        AND t.archived_at IS NULL
+  );
+
+UPDATE public.user_schedules s
+SET run_count = (
+    SELECT COUNT(*)
+    FROM public.task_center_tasks t
+    WHERE t.schedule_id = s.id
+      AND t.user_id = s.user_id
+      AND t.archived_at IS NULL
+);
