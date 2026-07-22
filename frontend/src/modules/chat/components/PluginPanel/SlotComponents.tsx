@@ -1736,8 +1736,10 @@ function SlotJsonFile({
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
   const showArtifactActions = !WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
+  const writerDocument = isWriterDocument(payload) ? payload : null;
   const canEditWriterIR = Boolean(sessionId && slotId)
     && !readOnly
+    && writerDocument?.ui_editable === true
     && (loadedSourceKey === sourceKey || writerEditing);
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
   const showVersionBadge =
@@ -1829,9 +1831,9 @@ function SlotJsonFile({
         )}
         {showRaw ? (
           <pre className='writer-artifact__raw'>{JSON.stringify(payload, null, 2)}</pre>
-        ) : isWriterDocument(payload) ? (
+        ) : writerDocument ? (
           <WriterIRControl
-            document={payload}
+            document={writerDocument}
             sourceRevision={loadedSourceKey}
             readOnly={!canEditWriterIR}
             onSave={canEditWriterIR ? handleSaveWriterDocument : undefined}
@@ -1913,7 +1915,10 @@ function SlotInlineStructured({
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
   const showArtifactActions = !WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
-  const canEditWriterIR = Boolean(sessionId && slotId) && !readOnly;
+  const writerDocument = isWriterDocument(payload) ? payload : null;
+  const canEditWriterIR = Boolean(sessionId && slotId)
+    && !readOnly
+    && writerDocument?.ui_editable === true;
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
   const showVersionBadge =
     revisionCount !== undefined && revisionCount > 0 && Boolean(sessionId && slotId);
@@ -1949,9 +1954,9 @@ function SlotInlineStructured({
       <div className='plugin-slot__artifact-body'>
         {showRaw ? (
           <pre className='writer-artifact__raw'>{JSON.stringify(payload, null, 2)}</pre>
-        ) : isWriterDocument(payload) ? (
+        ) : writerDocument ? (
           <WriterIRControl
-            document={payload}
+            document={writerDocument}
             sourceRevision={slot.revision}
             readOnly={!canEditWriterIR}
             onSave={canEditWriterIR ? handleSaveWriterDocument : undefined}
