@@ -154,6 +154,7 @@ const KnowledgePage: FC = () => {
   const syncCreateVm = useSyncKnowledgeBaseCreation({
     onSuccess: () => {
       getTableData();
+      createKnowledgeRef.current?.onClose();
     },
   });
   const cloudSourceRequestSeqRef = useRef(0);

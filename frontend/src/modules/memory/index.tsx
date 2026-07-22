@@ -3036,6 +3036,9 @@ export default function MemoryManagement() {
 
   const openSkillCreateModal = (source: SkillCreateSource) => {
     if (source === "zip") {
+      if (skillSaving) {
+        return;
+      }
       setPendingSkillSourceUrl("");
       skillZipInputRef.current?.click();
       return;
@@ -3059,10 +3062,12 @@ export default function MemoryManagement() {
     openModal("add");
   };
 
-  const handleSkillZipFileSelected = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleSkillZipFileSelected = async (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file) {
+    if (!file || skillSaving) {
       return;
     }
     const name = file.name.toLowerCase();
@@ -3076,10 +3081,31 @@ export default function MemoryManagement() {
       return;
     }
 
-    setPendingSkillPackageFile(file);
-    setPendingSkillSourceUrl("");
-    message.success(t("admin.memoryUploadSkillSuccess"));
-    openModal("add");
+    const inferredName =
+      file.name.replace(/\.(zip|tgz|tar|gz)$/i, "").trim() ||
+      t("admin.memorySkillUploadDefaultName");
+
+    try {
+      setSkillSaving(true);
+      const upload = await uploadSkillTempFile(file);
+      await createSkillAsset({
+        name: inferredName,
+        description: t("admin.memorySkillUploadPersonalDesc"),
+        category: "personal",
+        tags: [],
+        isEnabled: true,
+        source: { type: "uploaded_zip", uploadId: upload.uploadId },
+      });
+      await Promise.all([refreshSkillAssets(), refreshSkillCategories()]);
+      message.success(
+        t("admin.memorySkillUploadSuccess", { name: inferredName }),
+      );
+    } catch (error) {
+      console.error("Upload skill package failed:", error);
+      message.error(t("admin.memorySkillUploadFailed"));
+    } finally {
+      setSkillSaving(false);
+    }
   };
 
   const closeModal = () => {
@@ -4945,7 +4971,10 @@ export default function MemoryManagement() {
       }
 
       const normalizedSkillTags = normalizeTagValues(draft.tags);
-      if (normalizedSkillTags.length > SKILL_TAG_MAX_COUNT) {
+      if (
+        modalMode !== "edit" &&
+        normalizedSkillTags.length > SKILL_TAG_MAX_COUNT
+      ) {
         message.warning(
           t("admin.memorySkillTagMaxCount", {
             count: SKILL_TAG_MAX_COUNT,
@@ -4973,11 +5002,9 @@ export default function MemoryManagement() {
 
           await patchSkillAsset(
             payload.id,
-            buildSkillPatchPayload(payload, {
+            buildSkillUpdatePayload({
               name: payload.name,
               description: payload.description,
-              tags: payload.tags,
-              category: payload.category,
             }),
           );
           setChangeProposals((previous) =>
