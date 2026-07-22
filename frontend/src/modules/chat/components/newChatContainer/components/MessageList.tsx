@@ -326,7 +326,7 @@ const MessageList: React.FC<MessageListProps> = ({
 						  onClick={(event) => {
 							event.preventDefault();
 							window.dispatchEvent(new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
-							  detail: { conversationId: source.conversation_id, source: "collected-input" },
+							  detail: { conversationId: source.conversation_id, source: "mention" },
 							}));
 						  }}
 						>
