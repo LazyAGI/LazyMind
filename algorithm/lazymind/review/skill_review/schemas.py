@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -13,8 +12,7 @@ class SkillReviewRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     requestid: str = Field(..., min_length=1)
-    start_time: datetime
-    end_time: datetime
+    session_ids: List[str] = Field(..., min_length=1)
     user_id: Optional[str] = None
     min_user_turns: int = Field(default=2, ge=0)
     min_tool_turns: int = Field(default=5, ge=0)
@@ -22,9 +20,12 @@ class SkillReviewRequest(BaseModel):
     model_configs: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode='after')
-    def validate_time_range(self) -> 'SkillReviewRequest':
-        if self.start_time > self.end_time:
-            raise ValueError('start_time must be earlier than or equal to end_time')
+    def normalize_scope(self) -> 'SkillReviewRequest':
+        self.session_ids = list(dict.fromkeys(
+            item for item in (str(value).strip() for value in self.session_ids) if item
+        ))
+        if not self.session_ids:
+            raise ValueError('session_ids must contain at least one non-empty id')
         normalized_user_id = str(self.user_id).strip() if self.user_id is not None else ''
         self.user_id = normalized_user_id or None
         return self
@@ -120,13 +121,12 @@ class CandidateSkill(BaseModel):
 
 
 class CandidateSkillLLMOutput(BaseModel):
-    skill_name: str
-    applicable_scenario: str
+    name: str
     content: str
 
     @model_validator(mode='after')
     def validate_content(self) -> 'CandidateSkillLLMOutput':
-        _validate_candidate_document(self.skill_name, self.content)
+        _validate_candidate_document(self.name, self.content)
         return self
 
 

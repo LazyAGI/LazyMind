@@ -69,6 +69,7 @@ var roleTypeCache sync.Map
 var runtimeRoleByModelType = map[string]string{
 	"stt":           "speech_to_text",
 	"text2image":    "image_generator",
+	"text2video":    "video_generator",
 	"image_editing": "image_editor",
 }
 
