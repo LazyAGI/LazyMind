@@ -134,17 +134,6 @@ def _validate_generated_content(task_type: RewriteTaskType, content: Any) -> str
             raise UnprocessableContentError(
                 f'Generated SKILL.md is invalid: {exc}'
             ) from exc
-    elif task_type in ('memory', 'user_preference'):
-        compact_content = ''.join(content.split())
-        content_length = len(compact_content)
-        if content_length > _MAX_MANAGED_CONTENT_CHARS:
-            raise UnprocessableContentError(
-                f'Generated content exceeds {_MAX_MANAGED_CONTENT_CHARS} characters '
-                f'after removing whitespace; current length is {content_length}. '
-                f'Reduce the content length to {_MAX_MANAGED_CONTENT_CHARS} characters '
-                'or less after removing whitespace, keeping only the most important '
-                'concise entries.'
-            )
     elif task_type == 'polish' and not content.strip():
         raise UnprocessableContentError("Generated field 'content' must be a non-empty string.")
     return content

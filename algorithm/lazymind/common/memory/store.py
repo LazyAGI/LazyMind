@@ -5,8 +5,6 @@ from typing import Any, Optional
 
 from lazymind.common.integrations.remote_fs import RemoteFS
 
-from .defaults import default_preference_md, default_profile_md, default_soul_md
-from .errors import MemoryNotFoundError, MemoryPathError, MemoryStoreError, MemoryValidationError
 from .paths import (
     AGENTS_ROOT,
     MEMORY_ROOT,
@@ -22,7 +20,7 @@ from .paths import (
     normalize_memory_path,
     split_reference_ref,
 )
-from .schema import (
+from .validation import (
     validate_preference_index,
     validate_profile_content,
     validate_reference_content,
@@ -45,8 +43,8 @@ class MemoryStore:
                 return fh.read()
         except Exception as exc:
             if self._is_not_found(exc):
-                raise MemoryNotFoundError(f'memory path not found: {normalized}') from exc
-            raise MemoryStoreError(f'failed to read {normalized}: {exc}') from exc
+                raise FileNotFoundError(f'memory path not found: {normalized}') from exc
+            raise RuntimeError(f'failed to read {normalized}: {exc}') from exc
 
     def write(self, path: str, content: str, *, validate: bool = True) -> None:
         normalized = self._require_file_path(path)
@@ -58,24 +56,24 @@ class MemoryStore:
             if parent in {AGENTS_ROOT, USERS_ROOT, REFERENCE_ROOT}:
                 self._ensure_dir(parent)
             self.fs.write(normalized, text)
-        except MemoryValidationError:
+        except ValueError:
             raise
         except Exception as exc:
-            raise MemoryStoreError(f'failed to write {normalized}: {exc}') from exc
+            raise RuntimeError(f'failed to write {normalized}: {exc}') from exc
 
     def exists(self, path: str) -> bool:
         normalized = normalize_memory_path(path)
         if not is_memory_path(normalized):
-            raise MemoryPathError(f'unsupported memory path: {path!r}')
+            raise ValueError(f'unsupported memory path: {path!r}')
         try:
             return bool(self.fs.exists(normalized))
         except Exception as exc:
-            raise MemoryStoreError(f'failed to check exists for {normalized}: {exc}') from exc
+            raise RuntimeError(f'failed to check exists for {normalized}: {exc}') from exc
 
     def list_dir(self, path: str) -> list[dict[str, Any]]:
         normalized = normalize_memory_path(path)
         if normalized not in {MEMORY_ROOT, AGENTS_ROOT, USERS_ROOT, REFERENCE_ROOT}:
-            raise MemoryPathError(f'unsupported memory directory: {path!r}')
+            raise ValueError(f'unsupported memory directory: {path!r}')
         try:
             if not self.fs.exists(normalized):
                 return []
@@ -83,7 +81,7 @@ class MemoryStore:
         except Exception as exc:
             if self._is_not_found(exc):
                 return []
-            raise MemoryStoreError(f'failed to list {normalized}: {exc}') from exc
+            raise RuntimeError(f'failed to list {normalized}: {exc}') from exc
 
         items: list[dict[str, Any]] = []
         for entry in entries or []:
@@ -101,13 +99,13 @@ class MemoryStore:
         return sorted(items, key=lambda item: (item['type'] != 'dir', item['name']))
 
     def read_soul(self) -> str:
-        return self._read_or_default(SOUL_PATH, default_soul_md())
+        return self.read(SOUL_PATH)
 
     def read_profile(self) -> str:
-        return self._read_or_default(PROFILE_PATH, default_profile_md())
+        return self.read(PROFILE_PATH)
 
     def read_preference(self) -> str:
-        return self._read_or_default(PREFERENCE_PATH, default_preference_md())
+        return self.read(PREFERENCE_PATH)
 
     def read_reference(self, ref: str) -> str:
         path, anchor = split_reference_ref(ref)
@@ -131,34 +129,50 @@ class MemoryStore:
     def delete_reference(self, name: str) -> None:
         path = build_reference_path(name)
         if not is_reference_path(path):
-            raise MemoryPathError(f'invalid reference name: {name!r}')
+            raise ValueError(f'invalid reference name: {name!r}')
         try:
             if hasattr(self.fs, 'rm'):
                 self.fs.rm(path)
             elif hasattr(self.fs, 'delete'):
                 self.fs.delete(path)
             else:
-                raise MemoryStoreError('remote filesystem does not support delete')
-        except MemoryPathError:
+                raise RuntimeError('remote filesystem does not support delete')
+        except ValueError:
             raise
         except Exception as exc:
             if self._is_not_found(exc):
                 return
-            raise MemoryStoreError(f'failed to delete {path}: {exc}') from exc
+            raise RuntimeError(f'failed to delete {path}: {exc}') from exc
 
-    def apply_soul_field(self, field: str, value: str) -> str:
+    def apply_soul_field(self, field: str, value: str) -> dict[str, Any]:
         from .editors.soul import set_soul_field
+        from .result import memory_ok
 
-        updated = set_soul_field(self.read_soul(), field, value)
-        self.write_soul(updated)
-        return updated
+        loaded = self._read_document(SOUL_PATH, label='soul')
+        if not loaded.get('ok'):
+            return loaded
+        edited = set_soul_field(loaded['content'], field, value)
+        if not edited.get('ok'):
+            return edited
+        written = self._write_document(SOUL_PATH, edited['content'])
+        if not written.get('ok'):
+            return written
+        return memory_ok(content=edited['content'])
 
-    def apply_profile_field(self, field: str, value: str) -> str:
+    def apply_profile_field(self, field: str, value: str) -> dict[str, Any]:
         from .editors.profile import set_profile_field
+        from .result import memory_ok
 
-        updated = set_profile_field(self.read_profile(), field, value)
-        self.write_profile(updated)
-        return updated
+        loaded = self._read_document(PROFILE_PATH, label='profile')
+        if not loaded.get('ok'):
+            return loaded
+        edited = set_profile_field(loaded['content'], field, value)
+        if not edited.get('ok'):
+            return edited
+        written = self._write_document(PROFILE_PATH, edited['content'])
+        if not written.get('ok'):
+            return written
+        return memory_ok(content=edited['content'])
 
     def add_preference_with_reference(
         self,
@@ -167,64 +181,101 @@ class MemoryStore:
         summary: str,
         scenario: str,
         reason: str,
-    ):
-        from .editors.preference import add_preference_entry, preference_name_to_reference_name
+    ) -> dict[str, Any]:
+        from .editors.preference import add_preference_entry
+        from .result import memory_ok
 
-        preference_content, item, reference_content = add_preference_entry(
-            self.read_preference(),
+        loaded = self._read_document(PREFERENCE_PATH, label='preference')
+        if not loaded.get('ok'):
+            return loaded
+        edited = add_preference_entry(
+            loaded['content'],
             name=name,
             summary=summary,
             scenario=scenario,
             reason=reason,
         )
-        reference_name = preference_name_to_reference_name(name)
-        self.write_reference(reference_name, reference_content)
-        try:
-            self.write_preference(preference_content)
-        except Exception:
+        if not edited.get('ok'):
+            return edited
+        reference_name = edited['reference_name']
+        written_ref = self._write_document(
+            build_reference_path(reference_name),
+            edited['reference_content'],
+        )
+        if not written_ref.get('ok'):
+            return written_ref
+        written_pref = self._write_document(PREFERENCE_PATH, edited['content'])
+        if not written_pref.get('ok'):
             try:
                 self.delete_reference(reference_name)
             except Exception:
                 pass
-            raise
-        return item
+            return written_pref
+        return memory_ok(item=edited['item'])
 
-    def remove_preference_with_reference(self, name: str):
+    def remove_preference_with_reference(self, name: str) -> dict[str, Any]:
         from .editors.preference import delete_preference_entry, reference_name_from_item
+        from .result import memory_ok
 
-        preference_content, item = delete_preference_entry(self.read_preference(), name=name)
-        reference_name = reference_name_from_item(item)
-        self.write_preference(preference_content)
+        loaded = self._read_document(PREFERENCE_PATH, label='preference')
+        if not loaded.get('ok'):
+            return loaded
+        edited = delete_preference_entry(loaded['content'], name=name)
+        if not edited.get('ok'):
+            return edited
+        written = self._write_document(PREFERENCE_PATH, edited['content'])
+        if not written.get('ok'):
+            return written
+        reference_name = reference_name_from_item(edited['item'])
         try:
             self.delete_reference(reference_name)
         except Exception:
             pass
-        return item
+        return memory_ok(item=edited['item'])
 
     def list_references(self) -> list[dict[str, Any]]:
         return [item for item in self.list_dir(REFERENCE_ROOT) if item.get('type') == 'file']
 
-    def ensure_defaults(self) -> None:
-        for path, factory in (
-            (SOUL_PATH, default_soul_md),
-            (PROFILE_PATH, default_profile_md),
-            (PREFERENCE_PATH, default_preference_md),
-        ):
-            if not self.exists(path):
-                self.write(path, factory(), validate=True)
-        self._ensure_dir(REFERENCE_ROOT)
+    def _read_document(self, path: str, *, label: str) -> dict[str, Any]:
+        from .result import memory_err, memory_ok
 
-    def _read_or_default(self, path: str, default: str) -> str:
         try:
-            return self.read(path)
-        except MemoryNotFoundError:
-            return default
+            return memory_ok(content=self.read(path))
+        except FileNotFoundError:
+            return memory_err(f'{label} document not found.', type='not_found')
+        except RuntimeError as exc:
+            return memory_err(str(exc), type='store')
+
+    def _write_document(self, path: str, content: str) -> dict[str, Any]:
+        from .result import memory_err, memory_ok
+
+        try:
+            self.write(path, content)
+            return memory_ok()
+        except ValueError as exc:
+            return memory_err(str(exc), type='validation')
+        except RuntimeError as exc:
+            message = str(exc).strip()
+            if message.lower() == 'conflict':
+                return memory_err(
+                    'There are pending changes. Please resolve them before modifying.',
+                    type='conflict',
+                )
+            return memory_err(message, type='store')
+        except Exception as exc:
+            message = str(exc).strip()
+            if message.lower() == 'conflict':
+                return memory_err(
+                    'There are pending changes. Please resolve them before modifying.',
+                    type='conflict',
+                )
+            return memory_err(f'failed to write {path}: {exc}', type='store')
 
     def _require_file_path(self, path: str) -> str:
         normalized = normalize_memory_path(path)
         if is_fixed_memory_file(normalized) or is_reference_path(normalized):
             return normalized
-        raise MemoryPathError(f'unsupported memory file path: {path!r}')
+        raise ValueError(f'unsupported memory file path: {path!r}')
 
     def _validate(self, path: str, content: str) -> None:
         if path == SOUL_PATH:
@@ -238,7 +289,7 @@ class MemoryStore:
         else:
             error = f'unsupported memory file path: {path!r}'
         if error:
-            raise MemoryValidationError(error)
+            raise ValueError(error)
 
     def _ensure_dir(self, path: str) -> None:
         try:

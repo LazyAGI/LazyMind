@@ -4,11 +4,6 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
 from lazymind.chat.engine.tools.memory import MemoryTools
-from lazymind.common.memory.defaults import (
-    default_preference_md,
-    default_profile_md,
-    default_soul_md,
-)
 from lazymind.common.memory.paths import (
     PREFERENCE_PATH,
     PROFILE_PATH,
@@ -17,6 +12,57 @@ from lazymind.common.memory.paths import (
     normalize_memory_path,
 )
 from lazymind.common.memory.store import MemoryStore
+
+SAMPLE_SOUL = (
+    '---\n'
+    'schema_version: 1\n'
+    'identity:\n'
+    '  name: "LazyMind"\n'
+    '  role: "personal_ai_assistant"\n'
+    '  description: "面向研究、分析和复杂任务的个人智能助手"\n'
+    'mission:\n'
+    '  primary_goal: "帮助用户准确、高效地思考并完成工作"\n'
+    '  success_definition: "输出可靠、可执行且符合用户真实目标的结果"\n'
+    'interaction:\n'
+    '  relationship_mode: "collaborator"\n'
+    '  default_tone: "warm_direct"\n'
+    '  initiative_level: "proactive"\n'
+    '  challenge_level: "constructive"\n'
+    '  decision_mode: "recommend_then_confirm"\n'
+    'epistemic:\n'
+    '  uncertainty_style: "explicit"\n'
+    '  verification_mode: "when_material"\n'
+    '---\n'
+)
+
+SAMPLE_PROFILE = (
+    '---\n'
+    'schema_version: 1\n'
+    'identity:\n'
+    '  preferred_name: null\n'
+    '  aliases: []\n'
+    '  pronouns: null\n'
+    'locale:\n'
+    '  languages: ["zh-CN"]\n'
+    '  timezone: "Asia/Shanghai"\n'
+    '  region: "CN"\n'
+    'professional:\n'
+    '  roles: []\n'
+    '  organization: null\n'
+    '  industry: null\n'
+    '  expertise_domains: []\n'
+    'accessibility:\n'
+    '  communication_needs: []\n'
+    '---\n'
+)
+
+SAMPLE_PREFERENCE = (
+    '---\n'
+    'schema_version: 1\n'
+    'updated_at: 2026-07-20\n'
+    '---\n'
+    '# Preference Index\n'
+)
 
 
 class FakeRemoteFS:
@@ -87,25 +133,24 @@ class FakeRemoteFS:
         return _Handle(self.files[normalized])
 
 
-class FakeMemoryRemoteStore:
+class FakeMemoryStore(MemoryStore):
     def __init__(self, fs: FakeRemoteFS):
-        self.fs = fs
-        self.store = MemoryStore(fs)
+        super().__init__(fs)
 
 
 def _tools_with_store(fs: FakeRemoteFS):
-    remote = FakeMemoryRemoteStore(fs)
-    return MemoryTools(), remote
+    store = FakeMemoryStore(fs)
+    return MemoryTools(), store
 
 
 def test_soul_editor_updates_supported_field():
     fs = FakeRemoteFS({
-        SOUL_PATH: default_soul_md(),
-        PROFILE_PATH: default_profile_md(),
-        PREFERENCE_PATH: default_preference_md(),
+        SOUL_PATH: SAMPLE_SOUL,
+        PROFILE_PATH: SAMPLE_PROFILE,
+        PREFERENCE_PATH: SAMPLE_PREFERENCE,
     })
-    tools, remote = _tools_with_store(fs)
-    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore', lambda *args, **kwargs: remote):
+    tools, store = _tools_with_store(fs)
+    with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
         payload = tools.soul_editor('identity.description', '更直接的助手')
 
     assert payload['success'] is True
@@ -115,38 +160,40 @@ def test_soul_editor_updates_supported_field():
 
 def test_soul_editor_rejects_missing_field():
     fs = FakeRemoteFS({
-        SOUL_PATH: default_soul_md(),
-        PROFILE_PATH: default_profile_md(),
-        PREFERENCE_PATH: default_preference_md(),
+        SOUL_PATH: SAMPLE_SOUL,
+        PROFILE_PATH: SAMPLE_PROFILE,
+        PREFERENCE_PATH: SAMPLE_PREFERENCE,
     })
-    tools, remote = _tools_with_store(fs)
-    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore', lambda *args, **kwargs: remote):
+    tools, store = _tools_with_store(fs)
+    with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
         payload = tools.soul_editor('identity.email', 'x@y.com')
     assert payload['success'] is False
+    assert payload['error']['type'] == 'validation'
     assert 'does not exist in soul' in payload['error']['reason']
 
 
 def test_profile_editor_rejects_new_key():
     fs = FakeRemoteFS({
-        SOUL_PATH: default_soul_md(),
-        PROFILE_PATH: default_profile_md(),
-        PREFERENCE_PATH: default_preference_md(),
+        SOUL_PATH: SAMPLE_SOUL,
+        PROFILE_PATH: SAMPLE_PROFILE,
+        PREFERENCE_PATH: SAMPLE_PREFERENCE,
     })
-    tools, remote = _tools_with_store(fs)
-    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore', lambda *args, **kwargs: remote):
+    tools, store = _tools_with_store(fs)
+    with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
         payload = tools.profile_editor('identity.nickname', 'Neo')
     assert payload['success'] is False
+    assert payload['error']['type'] == 'validation'
     assert 'does not exist in profile' in payload['error']['reason']
 
 
 def test_profile_editor_updates_list_field():
     fs = FakeRemoteFS({
-        SOUL_PATH: default_soul_md(),
-        PROFILE_PATH: default_profile_md(),
-        PREFERENCE_PATH: default_preference_md(),
+        SOUL_PATH: SAMPLE_SOUL,
+        PROFILE_PATH: SAMPLE_PROFILE,
+        PREFERENCE_PATH: SAMPLE_PREFERENCE,
     })
-    tools, remote = _tools_with_store(fs)
-    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore', lambda *args, **kwargs: remote):
+    tools, store = _tools_with_store(fs)
+    with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
         payload = tools.profile_editor('locale.languages', '["zh-CN","en-US"]')
 
     assert payload['success'] is True
@@ -156,12 +203,12 @@ def test_profile_editor_updates_list_field():
 
 def test_preference_editor_add_and_delete():
     fs = FakeRemoteFS({
-        SOUL_PATH: default_soul_md(),
-        PROFILE_PATH: default_profile_md(),
-        PREFERENCE_PATH: default_preference_md(),
+        SOUL_PATH: SAMPLE_SOUL,
+        PROFILE_PATH: SAMPLE_PROFILE,
+        PREFERENCE_PATH: SAMPLE_PREFERENCE,
     })
-    tools, remote = _tools_with_store(fs)
-    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore', lambda *args, **kwargs: remote):
+    tools, store = _tools_with_store(fs)
+    with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
         added = tools.preference_editor(
             'add',
             name='pref.response.concise',

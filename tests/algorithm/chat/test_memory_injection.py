@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 from lazymind.common.memory import (
+    MAX_PREFERENCE_CONTEXT_CHARS,
     load_memory_context,
     profile_languages,
     truncate_preference_index,
 )
-from lazymind.common.memory.defaults import default_preference_md
-from lazymind.common.memory.schema import PreferenceItem, append_preference_item
+from lazymind.common.memory.validation import PreferenceItem, append_preference_item
 from lazymind.common.memory.store import MemoryStore
+
+SAMPLE_PREFERENCE = (
+    '---\n'
+    'schema_version: 1\n'
+    'updated_at: 2026-07-20\n'
+    '---\n'
+    '# Preference Index\n'
+)
 
 
 class FakeRemoteFS:
@@ -51,7 +59,7 @@ class FakeRemoteFS:
 
 
 def test_truncate_preference_index_keeps_frontmatter_and_cap():
-    content = default_preference_md()
+    content = SAMPLE_PREFERENCE
     for idx in range(105):
         content = append_preference_item(
             content,
@@ -67,6 +75,23 @@ def test_truncate_preference_index_keeps_frontmatter_and_cap():
     assert 'pref.item.0' in truncated
     assert 'pref.item.99' in truncated
     assert 'pref.item.100' not in truncated
+
+
+def test_truncate_preference_index_caps_total_chars():
+    content = SAMPLE_PREFERENCE
+    for idx in range(120):
+        content = append_preference_item(
+            content,
+            PreferenceItem(
+                name=f'pref.long.{idx}',
+                summary='x' * 100,
+                ref=f'references/topic.md#item-{idx}',
+            ),
+        )
+    truncated = truncate_preference_index(content, max_items=100, max_chars=10_000)
+    assert len(truncated) <= MAX_PREFERENCE_CONTEXT_CHARS
+    assert truncated.startswith('---\n')
+    assert '# Preference Index' in truncated
 
 
 def test_profile_languages():
@@ -135,7 +160,7 @@ def test_load_memory_context_reads_store_without_references():
     assert 'long detail body' not in ctx.preference
 
 
-def test_load_memory_context_falls_back_on_store_errors():
+def test_load_memory_context_uses_empty_on_store_errors():
     class BrokenStore(MemoryStore):
         def read_soul(self):
             raise RuntimeError('backend down')
@@ -147,6 +172,6 @@ def test_load_memory_context_falls_back_on_store_errors():
             raise RuntimeError('backend down')
 
     ctx = load_memory_context(BrokenStore(FakeRemoteFS()))
-    assert 'schema_version: 1' in ctx.soul
-    assert 'schema_version: 1' in ctx.profile
-    assert '# Preference Index' in ctx.preference
+    assert ctx.soul == ''
+    assert ctx.profile == ''
+    assert ctx.preference == ''

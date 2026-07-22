@@ -51,7 +51,6 @@ def _load_rewrite_module():
         ns._apply_user_preference_edit_operations = preference._apply_user_preference_edit_operations
         ns._PROMPT_BUILDERS = base._PROMPT_BUILDERS
         ns.RewriteTaskType = base.RewriteTaskType
-        ns._compact_memory_to_recent_week = memory._compact_memory_to_recent_week
         ns._format_inputs_block = base._format_inputs_block
         ns._validate_generated_content = base._validate_generated_content
         ns.rewrite_content = base.rewrite_content
@@ -71,7 +70,6 @@ UnprocessableContentError = rewrite.UnprocessableContentError
 _apply_memory_edit_operations = rewrite._apply_memory_edit_operations
 _apply_user_preference_edit_operations = rewrite._apply_user_preference_edit_operations
 _PROMPT_BUILDERS = rewrite._PROMPT_BUILDERS
-_compact_memory_to_recent_week = rewrite._compact_memory_to_recent_week
 _format_inputs_block = rewrite._format_inputs_block
 _validate_generated_content = rewrite._validate_generated_content
 rewrite_content = rewrite.rewrite_content
@@ -310,33 +308,6 @@ def test_memory_edit_operations_can_replace_existing_day_block():
     )
 
     assert edited == '- 2026-05-14\n  我们讨论了:\n  - new summary'
-
-
-def test_memory_compaction_keeps_recent_week_and_summarizes_older_records():
-    older_days = []
-    for day in range(1, 15):
-        older_days.append(
-            f'- 2026-05-{day:02d}\n'
-            '  我们讨论了:\n'
-            f'  - old topic {day} ' + ('detail ' * 20)
-        )
-    recent_days = (
-        '- 2026-05-20\n'
-        '  用户在做:\n'
-        '  - recent task\n'
-        '- 2026-05-21\n'
-        '  状态/冲突:\n'
-        '  - recent status'
-    )
-
-    compacted = _compact_memory_to_recent_week('\n'.join(older_days + [recent_days]))
-
-    assert '一周前摘要' in compacted
-    assert '2026-05-01' in compacted
-    assert '- 2026-05-20' in compacted
-    assert '- 2026-05-21' in compacted
-    summary_line = next(line for line in compacted.splitlines() if '2026-05-01' in line)
-    assert len(summary_line.strip()[2:]) <= 500
 
 
 def test_user_preference_edit_operations_can_clear_all_content_via_replace_all():

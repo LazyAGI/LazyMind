@@ -18,9 +18,6 @@ from .kb_opensearch_client import (
 from .github_skill_installer import (
     GitHubSkillInstaller,
 )
-from lazymind.common.memory.remote_store import (
-    MemoryRemoteStore,
-)
 from .suggestion import (
     Suggestion,
     dump_suggestion,
@@ -65,7 +62,6 @@ __all__ = [
     'Suggestion',
     'ActionPlanningModule',
     'ChatHistoryRecord',
-    'MemoryRemoteStore',
     'SynonymCandidate',
     'VocabSuggestion',
     'VocabEvolutionRequest',

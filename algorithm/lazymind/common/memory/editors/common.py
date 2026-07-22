@@ -5,7 +5,8 @@ from typing import Any
 
 import yaml
 
-from ..schema.common import parse_yaml_frontmatter
+from ..result import memory_err, memory_ok
+from ..validation.common import parse_yaml_frontmatter
 
 
 def render_yaml_frontmatter(frontmatter: dict[str, Any]) -> str:
@@ -110,3 +111,58 @@ def update_frontmatter_document(content: str, field: str, value: Any) -> str:
     if body and body.strip():
         return f'{rendered}{body}'
     return rendered
+
+
+def set_existing_frontmatter_field(
+    content: str,
+    field: str,
+    value: str,
+    *,
+    entity: str,
+    validate,
+    require_non_empty_string: bool = False,
+) -> dict[str, Any]:
+    """Update one existing frontmatter leaf; keys cannot be added or renamed.
+
+    Editable fields are discovered from the loaded RemoteFS document. Returns a
+    structured result: ``{'ok': True, 'content': ...}`` or
+    ``{'ok': False, 'error': ..., 'type': ...}``.
+    """
+    normalized_field = str(field or '').strip()
+    if not normalized_field:
+        return memory_err('field is required.', type='validation')
+
+    frontmatter, _body = parse_yaml_frontmatter(content)
+    if not frontmatter:
+        return memory_err(f'{entity} must contain YAML frontmatter.', type='validation')
+
+    editable = editable_fields_from_frontmatter(frontmatter)
+    if normalized_field not in editable:
+        supported = ', '.join(sorted(editable)) or '(none)'
+        return memory_err(
+            f'field {normalized_field!r} does not exist in {entity}; '
+            f'editable fields from the loaded document: {supported}.',
+            type='validation',
+        )
+
+    try:
+        existing = get_nested_field(frontmatter, normalized_field)
+        parsed = coerce_value_to_existing_type(existing, value)
+    except ValueError as exc:
+        return memory_err(str(exc), type='validation')
+
+    if require_non_empty_string and (not isinstance(parsed, str) or not parsed.strip()):
+        return memory_err(
+            f'{entity} field {normalized_field!r} requires a non-empty string value.',
+            type='validation',
+        )
+
+    try:
+        updated = update_frontmatter_document(content, normalized_field, parsed)
+    except ValueError as exc:
+        return memory_err(str(exc), type='validation')
+
+    error = validate(updated)
+    if error:
+        return memory_err(error, type='validation')
+    return memory_ok(content=updated)

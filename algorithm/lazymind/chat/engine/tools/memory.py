@@ -14,9 +14,7 @@ from lazymind.common.memory import (
     EpisodeCreateInput,
     EpisodeSource,
     EpisodeType,
-    MemoryNotFoundError,
-    MemoryRemoteStore,
-    MemoryStoreError,
+    MemoryStore,
     build_episode_idempotency_key,
     get_episode_store,
     preference_name_to_reference_name,
@@ -118,26 +116,27 @@ def _log_tool_exception(tool: str, exc: Exception) -> None:
     )
 
 
-def _memory_write_error(tool_name: str, exc: Exception) -> Dict[str, Any]:
-    message = str(exc).strip()
-    if message.lower() == 'conflict':
+def _memory_write_error(tool_name: str, message: str) -> Dict[str, Any]:
+    text = str(message or '').strip()
+    if text.lower() == 'conflict':
         return tool_error(
             tool_name,
             'There are pending changes. Please resolve them before modifying.',
+            error_type='conflict',
         )
-    return tool_error(tool_name, f'Failed to write via RemoteFS: {message}')
+    return tool_error(tool_name, f'Failed to write via RemoteFS: {text}', error_type='store')
 
 
 def _memory_applied(tool_name: str, **result: Any) -> Dict[str, Any]:
     return tool_success(tool_name, {'status': 'applied', **result})
 
 
-def _map_memory_exception(tool_name: str, exc: Exception) -> Dict[str, Any]:
-    if isinstance(exc, ValueError):
-        return tool_error(tool_name, str(exc))
-    if isinstance(exc, MemoryStoreError):
-        return tool_error(tool_name, str(exc))
-    return tool_error(tool_name, f'{tool_name} failed: {exc}')
+def _memory_result_error(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    error_type = str(result.get('type') or 'validation')
+    reason = str(result.get('error') or f'{tool_name} failed.')
+    if error_type in {'store', 'conflict'}:
+        return _memory_write_error(tool_name, reason)
+    return tool_error(tool_name, reason, error_type=error_type)
 
 
 # Per-reference read limits: truncate when either bound is reached first.
@@ -215,9 +214,9 @@ def _normalize_refs(refs: Union[str, List[str]]) -> list[str]:
     return normalized
 
 
-def _read_single_reference(store: MemoryRemoteStore, raw_ref: str) -> dict[str, Any]:
+def _read_single_reference(store: MemoryStore, raw_ref: str) -> dict[str, Any]:
     path, anchor = split_reference_ref(raw_ref)
-    content = store.store.read_reference(raw_ref)
+    content = store.read_reference(raw_ref)
     truncated_content, truncated = truncate_reference_content(content)
     if truncated:
         truncated_content = f'{truncated_content.rstrip()}{_REFERENCE_TRUNCATION_WARNING}'
@@ -269,7 +268,7 @@ class MemoryTools:
                 f'got {len(normalized_refs)}.',
             )
 
-        store = MemoryRemoteStore()
+        store = MemoryStore()
         items: list[dict[str, Any]] = []
         for raw_ref in normalized_refs:
             try:
@@ -281,20 +280,23 @@ class MemoryTools:
                 )
             try:
                 items.append(_read_single_reference(store, raw_ref))
-            except MemoryNotFoundError:
+            except FileNotFoundError:
                 return tool_error(
                     'read_memory_reference',
                     f'Reference not found for ref={raw_ref!r}.',
+                    error_type='not_found',
                 )
-            except MemoryStoreError as exc:
+            except RuntimeError as exc:
                 return tool_error(
                     'read_memory_reference',
                     f'Failed to read {raw_ref!r}: {exc}',
+                    error_type='store',
                 )
             except Exception as exc:
                 return tool_error(
                     'read_memory_reference',
                     f'Failed to read {raw_ref!r}: {exc}',
+                    error_type='store',
                 )
 
         truncated_count = sum(1 for item in items if item.get('truncated'))
@@ -319,21 +321,19 @@ class MemoryTools:
         """
         raw_field = str(field or '').strip()
         raw_value = str(value if value is not None else '')
+        if not raw_field:
+            return tool_error('soul_editor', 'field is required.', error_type='validation')
 
-        store = MemoryRemoteStore().store
-        try:
-            updated = store.apply_soul_field(raw_field, raw_value)
-        except Exception as exc:
-            if str(exc).strip().lower() == 'conflict':
-                return _memory_write_error('soul_editor', exc)
-            return _map_memory_exception('soul_editor', exc)
+        result = MemoryStore().apply_soul_field(raw_field, raw_value)
+        if not result.get('ok'):
+            return _memory_result_error('soul_editor', result)
 
         return _memory_applied(
             'soul_editor',
             field=raw_field,
             path=SOUL_PATH,
             value=raw_value.strip(),
-            content_length=len(updated),
+            content_length=len(result['content']),
         )
 
     def profile_editor(self, field: str, value: str) -> Dict[str, Any]:
@@ -355,21 +355,19 @@ class MemoryTools:
         """
         raw_field = str(field or '').strip()
         raw_value = '' if value is None else str(value)
+        if not raw_field:
+            return tool_error('profile_editor', 'field is required.', error_type='validation')
 
-        store = MemoryRemoteStore().store
-        try:
-            updated = store.apply_profile_field(raw_field, raw_value)
-        except Exception as exc:
-            if str(exc).strip().lower() == 'conflict':
-                return _memory_write_error('profile_editor', exc)
-            return _map_memory_exception('profile_editor', exc)
+        result = MemoryStore().apply_profile_field(raw_field, raw_value)
+        if not result.get('ok'):
+            return _memory_result_error('profile_editor', result)
 
         return _memory_applied(
             'profile_editor',
             field=raw_field,
             path=PROFILE_PATH,
             value=raw_value,
-            content_length=len(updated),
+            content_length=len(result['content']),
         )
 
     def preference_editor(
@@ -397,45 +395,47 @@ class MemoryTools:
         raw_op = str(op or '').strip().lower()
         raw_name = str(name or '').strip()
         if raw_op not in {'add', 'delete'}:
-            return _map_memory_exception(
+            return tool_error(
                 'preference_editor',
-                ValueError("op must be 'add' or 'delete'."),
+                "op must be 'add' or 'delete'.",
+                error_type='validation',
             )
         if not raw_name:
-            return _map_memory_exception('preference_editor', ValueError('name is required.'))
+            return tool_error('preference_editor', 'name is required.', error_type='validation')
 
-        store = MemoryRemoteStore().store
-        try:
-            if raw_op == 'add':
-                item = store.add_preference_with_reference(
-                    name=raw_name,
-                    summary=summary,
-                    scenario=scenario,
-                    reason=reason,
-                )
-                return _memory_applied(
-                    'preference_editor',
-                    op='add',
-                    name=item.name,
-                    summary=item.summary,
-                    ref=item.ref,
-                    path=PREFERENCE_PATH,
-                    reference_name=preference_name_to_reference_name(item.name),
-                )
-
-            item = store.remove_preference_with_reference(raw_name)
+        store = MemoryStore()
+        if raw_op == 'add':
+            result = store.add_preference_with_reference(
+                name=raw_name,
+                summary=summary,
+                scenario=scenario,
+                reason=reason,
+            )
+            if not result.get('ok'):
+                return _memory_result_error('preference_editor', result)
+            item = result['item']
             return _memory_applied(
                 'preference_editor',
-                op='delete',
+                op='add',
                 name=item.name,
+                summary=item.summary,
                 ref=item.ref,
                 path=PREFERENCE_PATH,
                 reference_name=preference_name_to_reference_name(item.name),
             )
-        except Exception as exc:
-            if str(exc).strip().lower() == 'conflict':
-                return _memory_write_error('preference_editor', exc)
-            return _map_memory_exception('preference_editor', exc)
+
+        result = store.remove_preference_with_reference(raw_name)
+        if not result.get('ok'):
+            return _memory_result_error('preference_editor', result)
+        item = result['item']
+        return _memory_applied(
+            'preference_editor',
+            op='delete',
+            name=item.name,
+            ref=item.ref,
+            path=PREFERENCE_PATH,
+            reference_name=preference_name_to_reference_name(item.name),
+        )
 
     def episode_create(
         self,

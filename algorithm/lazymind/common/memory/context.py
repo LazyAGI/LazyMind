@@ -5,13 +5,8 @@ from typing import Optional
 
 from lazyllm import LOG
 
-from .defaults import (
-    default_preference_md,
-    default_profile_md,
-    default_soul_md,
-)
-from .schema.common import parse_yaml_frontmatter
-from .schema.preference import (
+from .validation.common import parse_yaml_frontmatter
+from .validation.preference import (
     parse_preference_items,
     render_preference_item,
 )
@@ -19,6 +14,7 @@ from .store import MemoryStore
 
 # Cap preference index items when preparing prompt/runtime context.
 MAX_PREFERENCE_CONTEXT_ITEMS = 100
+MAX_PREFERENCE_CONTEXT_CHARS = 10_000
 
 
 @dataclass(frozen=True)
@@ -32,17 +28,13 @@ def load_memory_context(store: Optional[MemoryStore] = None) -> MemoryContext:
     """Load soul / profile / preference for prompt injection and tools.
 
     References are intentionally excluded; callers read them on demand.
-    RemoteFS failures fall back to defaults so request startup does not break
-    while the backend memory tree is still rolling out.
+    Missing or unreadable RemoteFS documents become empty strings so Chat
+    startup does not depend on algorithm-side templates.
     """
     memory_store = store or MemoryStore()
-    soul = _safe_read(memory_store.read_soul, default_soul_md(), label='soul')
-    profile = _safe_read(memory_store.read_profile, default_profile_md(), label='profile')
-    preference = _safe_read(
-        memory_store.read_preference,
-        default_preference_md(),
-        label='preference',
-    )
+    soul = _safe_read(memory_store.read_soul, label='soul')
+    profile = _safe_read(memory_store.read_profile, label='profile')
+    preference = _safe_read(memory_store.read_preference, label='preference')
     return MemoryContext(
         soul=soul,
         profile=profile,
@@ -54,13 +46,18 @@ def truncate_preference_index(
     content: str,
     *,
     max_items: int = MAX_PREFERENCE_CONTEXT_ITEMS,
+    max_chars: int = MAX_PREFERENCE_CONTEXT_CHARS,
 ) -> str:
-    """Keep preference frontmatter and at most ``max_items`` index entries."""
+    """Keep preference frontmatter with bounded item count and total characters."""
     text = content if isinstance(content, str) else ''
     if max_items < 0:
         raise ValueError('max_items must be >= 0')
+    if max_chars < 1:
+        raise ValueError('max_chars must be >= 1')
+    if not text.strip():
+        return text
     items = parse_preference_items(text)
-    if len(items) <= max_items:
+    if len(items) <= max_items and len(text) <= max_chars:
         return text
 
     frontmatter, _body = parse_yaml_frontmatter(text)
@@ -72,8 +69,21 @@ def truncate_preference_index(
     if updated_at is not None:
         header_lines.append(f'updated_at: {updated_at}')
     header_lines.extend(['---', '# Preference Index'])
+    body_lines = list(header_lines)
+    base_text = '\n'.join(body_lines) + '\n'
+    if len(base_text) > max_chars:
+        return base_text[:max_chars]
+
     blocks = [render_preference_item(item).rstrip('\n') for item in kept]
-    return '\n'.join(header_lines + blocks) + '\n'
+    result_lines = list(body_lines)
+    current_text = base_text
+    for block in blocks:
+        candidate = '\n'.join(result_lines + [block]) + '\n'
+        if len(candidate) > max_chars:
+            break
+        result_lines.append(block)
+        current_text = candidate
+    return current_text
 
 
 def profile_languages(profile: str) -> list[str]:
@@ -87,10 +97,10 @@ def profile_languages(profile: str) -> list[str]:
     return [str(item).strip() for item in languages if str(item).strip()]
 
 
-def _safe_read(loader, default: str, *, label: str) -> str:
+def _safe_read(loader, *, label: str) -> str:
     try:
         value = loader()
-        return value if isinstance(value, str) else default
+        return value if isinstance(value, str) else ''
     except Exception as exc:
         LOG.warning(f'[MemoryContext] failed to load {label}: {exc}')
-        return default
+        return ''

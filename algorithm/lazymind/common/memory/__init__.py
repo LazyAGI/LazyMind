@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 from .context import (
+    MAX_PREFERENCE_CONTEXT_CHARS,
     MAX_PREFERENCE_CONTEXT_ITEMS,
     MemoryContext,
     load_memory_context,
     profile_languages,
     truncate_preference_index,
-)
-from .defaults import (
-    default_preference_md,
-    default_profile_md,
-    default_soul_md,
 )
 from .editors import (
     add_preference_entry,
@@ -25,12 +21,6 @@ from .episode_store import (
     EpisodeConflictError,
     EpisodeStore,
     get_episode_store,
-)
-from .errors import (
-    MemoryNotFoundError,
-    MemoryPathError,
-    MemoryStoreError,
-    MemoryValidationError,
 )
 from .models import (
     EpisodeCreateInput,
@@ -61,8 +51,8 @@ from .ranking import (
     informative_query_terms,
     tokenize_episode_text,
 )
-from .remote_store import MemoryRemoteStore
-from .schema import (
+from .result import is_memory_ok, memory_err, memory_ok
+from .validation import (
     PreferenceItem,
     append_preference_item,
     parse_preference_items,
@@ -77,15 +67,11 @@ from .store import MemoryStore
 __all__ = [
     'AGENTS_ROOT',
     'EPISODE_COLLECTION',
+    'MAX_PREFERENCE_CONTEXT_CHARS',
     'MAX_PREFERENCE_CONTEXT_ITEMS',
     'MEMORY_ROOT',
     'MemoryContext',
-    'MemoryNotFoundError',
-    'MemoryPathError',
-    'MemoryRemoteStore',
     'MemoryStore',
-    'MemoryStoreError',
-    'MemoryValidationError',
     'PREFERENCE_PATH',
     'PROFILE_PATH',
     'PreferenceItem',
@@ -104,16 +90,16 @@ __all__ = [
     'append_preference_item',
     'build_episode_idempotency_key',
     'build_reference_path',
-    'default_preference_md',
-    'default_profile_md',
-    'default_soul_md',
     'delete_preference_entry',
     'episode_query_coverage',
     'get_episode_store',
     'informative_query_terms',
+    'is_memory_ok',
     'is_memory_path',
     'is_reference_path',
     'load_memory_context',
+    'memory_err',
+    'memory_ok',
     'normalize_episode_summary',
     'normalize_memory_path',
     'parse_preference_items',
