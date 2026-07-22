@@ -1,11 +1,17 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Popconfirm } from 'antd';
+import { FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
 import { usePluginSession } from '@/modules/chat/hooks/usePlugin';
 import { usePluginStore } from '@/modules/chat/store/pluginPanel';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { PluginSessionApi } from '@/modules/chat/utils/request';
 import StateGraphModal from '@/components/StateGraphModal';
+import {
+  PLUGIN_PANEL_EXPANDED_EVENT,
+  PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX,
+} from '@/modules/chat/constants/chat';
 import type {
   PluginSession,
   SlotRevision,
@@ -939,6 +945,25 @@ const STATUS_KEY: Record<string, string> = {
   waiting: 'chat.pluginStatusWaiting',
 };
 
+function readPersistedExpanded(conversationId: string): boolean {
+  try {
+    return localStorage.getItem(`${PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX}${conversationId}`) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function persistExpanded(conversationId: string, expanded: boolean) {
+  try {
+    localStorage.setItem(
+      `${PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX}${conversationId}`,
+      String(expanded),
+    );
+  } catch {
+    // The live layout state still works when browser storage is unavailable.
+  }
+}
+
 export function PluginPanel({
   conversationId,
   pollIntervalMs = 3000,
@@ -965,6 +990,28 @@ export function PluginPanel({
   const [ui, setUI] = useState<PluginUI>({});
   const [dismissing, setDismissing] = useState(false);
   const [stateGraphOpen, setStateGraphOpen] = useState(false);
+  const [expanded, setExpanded] = useState(() => readPersistedExpanded(conversationId));
+  const initialExpandedRef = useRef(expanded);
+
+  const setExpandedMode = useCallback((nextExpanded: boolean) => {
+    if (nextExpanded) setCollapsed(false);
+    setExpanded(nextExpanded);
+    persistExpanded(conversationId, nextExpanded);
+    window.dispatchEvent(new CustomEvent(PLUGIN_PANEL_EXPANDED_EVENT, {
+      detail: { conversationId, expanded: nextExpanded },
+    }));
+  }, [conversationId]);
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent(PLUGIN_PANEL_EXPANDED_EVENT, {
+      detail: { conversationId, expanded: initialExpandedRef.current },
+    }));
+    return () => {
+      window.dispatchEvent(new CustomEvent(PLUGIN_PANEL_EXPANDED_EVENT, {
+        detail: { conversationId, expanded: false },
+      }));
+    };
+  }, [conversationId]);
 
   const handleDismiss = useCallback(async () => {
     if (!session || dismissing) return;
@@ -1083,10 +1130,10 @@ export function PluginPanel({
     onSendMessage?.(`${t('chat.pluginRollbackPrefix')}${stepId}`);
   }
 
-  return (
+  const panel = (
     <SlotEditingContext.Provider value={{ setEditing: handleSlotEditingChange }}>
     <div
-      className={`plugin-panel plugin-panel--${displayStatus}${collapsed ? ' plugin-panel--collapsed' : ''}`}
+      className={`plugin-panel plugin-panel--${displayStatus}${collapsed ? ' plugin-panel--collapsed' : ''}${expanded ? ' plugin-panel--expanded' : ''}`}
       data-session-id={session.session_id}
       aria-label={t('chat.pluginPanelTitle')}
     >
@@ -1133,7 +1180,17 @@ export function PluginPanel({
               )}
             </div>
           )}
-          <Popconfirm
+          <button
+            type='button'
+            className='plugin-panel__expand-btn'
+            onClick={() => setExpandedMode(!expanded)}
+            aria-label={t(expanded ? 'chat.pluginPanelShrink' : 'chat.pluginPanelExpand')}
+            title={t(expanded ? 'chat.pluginPanelShrink' : 'chat.pluginPanelExpand')}
+          >
+            {expanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+            <span>{t(expanded ? 'chat.pluginPanelShrinkShort' : 'chat.pluginPanelExpandShort')}</span>
+          </button>
+          {!expanded && <Popconfirm
             title={t('chat.pluginDismissConfirmTitle')}
             description={t('chat.pluginDismissConfirmDesc')}
             onConfirm={handleDismiss}
@@ -1155,8 +1212,8 @@ export function PluginPanel({
                 <path d='M2 2L10 10M10 2L2 10' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' />
               </svg>
             </button>
-          </Popconfirm>
-          <button
+          </Popconfirm>}
+          {!expanded && <button
             type='button'
             className='plugin-panel__collapse-btn'
             onClick={() => setCollapsed((c) => !c)}
@@ -1173,7 +1230,7 @@ export function PluginPanel({
             >
               <path d='M2 4L6 8L10 4' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
             </svg>
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -1324,4 +1381,10 @@ export function PluginPanel({
     )}
     </SlotEditingContext.Provider>
   );
+
+  if (expanded) {
+    const host = document.querySelector('.detail-container');
+    if (host) return createPortal(panel, host);
+  }
+  return panel;
 }

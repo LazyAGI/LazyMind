@@ -1097,7 +1097,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
             message.success(t("knowledge.parseTaskCreated"));
           })
           .catch((error) => {
-            console.log(error);
+            console.error(error);
           })
           .finally(() => {
             setCurrentNode(null);

@@ -8,6 +8,21 @@
   overflow: hidden;
   transition: border-color 0.2s;
 
+  &--expanded {
+    position: absolute;
+    inset: 16px calc(clamp(320px, 27vw, 440px) + 16px) 16px 16px;
+    z-index: 100;
+    border-color: #dbe4f0;
+    border-radius: 12px;
+    box-shadow: 0 8px 28px rgba(15, 23, 42, 0.1);
+
+    .plugin-panel__body {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+    }
+  }
+
   &--active  { border-color: #d0e4ff; }
   &--completed { border-color: #d0f0e0; }
   &--waiting { border-color: #ffe8c0; }
@@ -230,7 +245,8 @@
     }
   }
 
-  &__collapse-btn {
+  &__collapse-btn,
+  &__expand-btn {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -248,6 +264,30 @@
     &:hover {
       background: #f3f4f6;
       color: #374151;
+    }
+  }
+
+  &__expand-btn {
+    width: auto;
+    height: 28px;
+    padding: 0 9px;
+    gap: 5px;
+    border: 1px solid #c7d2e3;
+    background: #fff;
+    color: #52647a;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+
+    .anticon {
+      font-size: 15px;
+    }
+
+    &:hover {
+      border-color: #2f6bff;
+      background: #eef4ff;
+      color: #2f6bff;
     }
   }
 
@@ -2552,4 +2592,3 @@
     }
   }
 }
-

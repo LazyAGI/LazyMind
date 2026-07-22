@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { normalizeDataSourceParseStatus } from '../../frontend/src/modules/dataSource/shared.ts';
+import { normalizeDataSourceParseStatus } from '../../frontend/src/modules/dataSource/utils/status.ts';
 
 describe('data source parse status normalization', () => {
   it('shows cloud queued and running work as downloading', () => {
@@ -85,7 +85,7 @@ describe('cloud OAuth provider wording', () => {
 
   it('builds the Notion callback URL from the current application origin', () => {
     const guideSource = readFileSync(
-      new URL('../../frontend/src/modules/dataSource/NotionSetupGuide.tsx', import.meta.url),
+      new URL('../../frontend/src/modules/modelProvider/pages/NotionSetupGuide.tsx', import.meta.url),
       'utf8',
     );
 

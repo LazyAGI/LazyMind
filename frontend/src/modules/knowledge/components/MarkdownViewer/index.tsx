@@ -9,7 +9,7 @@ import "katex/dist/katex.min.css";
 import { Popover } from "antd";
 import Rendering from "../Rendering";
 
-import "./markdown.scss";
+import "../../../../components/MarkdownViewer/markdown.scss";
 import "./index.scss";
 
 const MarkdownViewer = (props: any) => {

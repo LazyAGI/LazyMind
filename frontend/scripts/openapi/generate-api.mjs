@@ -101,6 +101,18 @@ function patchBasePath(outputDir) {
   }
 }
 
+function removeUnusedGeneratedFiles(outputDir) {
+  const unusedFiles = ["git_push.sh"];
+
+  for (const filename of unusedFiles) {
+    const filePath = path.resolve(outputDir, filename);
+    if (fs.existsSync(filePath)) {
+      fs.rmSync(filePath);
+      console.log(`🧹 Removed unused generated file ${path.relative(cwdPath, filePath)}`);
+    }
+  }
+}
+
 let updated = false;
 const openApiGeneratorCommand = resolveOpenApiGeneratorCommand();
 for (const api of selectedApis) {
@@ -127,6 +139,7 @@ for (const api of selectedApis) {
       { stdio: "inherit", cwd: cwdPath },
     );
     patchBasePath(api.output);
+    removeUnusedGeneratedFiles(api.output);
     cache[api.name] = currentHash;
     updated = true;
   } catch (error) {
