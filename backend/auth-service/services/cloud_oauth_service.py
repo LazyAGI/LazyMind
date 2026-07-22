@@ -1231,6 +1231,13 @@ class CloudOAuthService:
                 'reauthorize_provider_account_id': '',
                 'reauthorize_provider_tenant_key': '',
             }
+            # Extract app_id before clearing the credential so we can scope
+            # the PENDING cleanup to the same app only.
+            deleted_credential = self._decrypt_payload(
+                row.credential_ciphertext, field_name='credential'
+            )
+            deleted_app_id = (deleted_credential.get('client_id') or '').strip()
+
             row.credential_ciphertext = self._encrypt_payload(empty_credential, field_name='credential')
             row.auth_state_ciphertext = self._encrypt_payload(empty_auth_state, field_name='auth_state')
             row.status = 'REVOKED'
@@ -1239,18 +1246,26 @@ class CloudOAuthService:
             CloudAuthConnectionRepository.save(db, row)
 
             # Also revoke any PENDING connections for the same app so they
-            # do not appear as orphaned entries after the ACTIVE is deleted.
-            pending_rows = CloudAuthConnectionRepository.list_for_owner(
-                db,
-                owner_user_id=(row.owner_user_id or '').strip(),
-                provider=(row.provider or '').strip(),
-                auth_mode=(row.auth_mode or '').strip(),
-                status='PENDING',
-            )
-            for pending_row in pending_rows:
-                pending_row.status = 'REVOKED'
-                pending_row.last_error = 'parent connection deleted by owner'
-                CloudAuthConnectionRepository.save(db, pending_row)
+            # do not appear as orphaned entries after the parent is deleted.
+            # Scope by client_id to avoid accidentally revoking PENDING
+            # connections belonging to a different Feishu app.
+            if deleted_app_id:
+                pending_rows = CloudAuthConnectionRepository.list_for_owner(
+                    db,
+                    owner_user_id=(row.owner_user_id or '').strip(),
+                    provider=(row.provider or '').strip(),
+                    auth_mode=(row.auth_mode or '').strip(),
+                    status='PENDING',
+                )
+                for pending_row in pending_rows:
+                    pending_credential = self._decrypt_payload(
+                        pending_row.credential_ciphertext, field_name='credential'
+                    )
+                    pending_app_id = (pending_credential.get('client_id') or '').strip()
+                    if pending_app_id == deleted_app_id:
+                        pending_row.status = 'REVOKED'
+                        pending_row.last_error = 'parent connection deleted by owner'
+                        CloudAuthConnectionRepository.save(db, pending_row)
 
         self._cache_delete(connection_id)
         return {
