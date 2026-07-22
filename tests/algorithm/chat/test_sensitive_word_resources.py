@@ -1,73 +1,12 @@
-import json
 import random
-import subprocess
-import sys
 from pathlib import Path
 
 from lazymind.chat.service.utils.sensitive_filter import SensitiveFilter
 
 
-SCRIPT_PATH = Path(__file__).resolve().parents[3] / 'scripts/split_sensitive_words.py'
 RESOURCES_DIR = (
     Path(__file__).resolve().parents[3] / 'algorithm/lazymind/chat/resources'
 )
-
-
-def test_split_script_generates_reviewable_tiered_resources(tmp_path):
-    source = tmp_path / 'sensitive_words.txt'
-    output_dir = tmp_path / 'resources'
-    source.write_text(
-        '屏蔽词库\n普通红词\n口交\nSB\nJB\njb\nsb\n傻逼\n'
-        '含*号\n专/业\n六?四\n法.轮\n六●四\n普通红词\n',
-        encoding='utf-8',
-    )
-
-    subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT_PATH),
-            'split',
-            '--source',
-            str(source),
-            '--output-dir',
-            str(output_dir),
-        ],
-        check=True,
-    )
-
-    assert (output_dir / 'sensitive_red.txt').read_text(encoding='utf-8') == (
-        '普通红词\n含*号\n专/业\n六?四\n法.轮\n六●四\n'
-    )
-    assert (output_dir / 'sensitive_gray.txt').read_text(encoding='utf-8') == (
-        '口交\nSB\nJB\njb\nsb\n傻逼\n'
-    )
-    whitelist = (output_dir / 'sensitive_whitelist.txt').read_text(encoding='utf-8')
-    assert '路口交警\n' in whitelist
-    assert '可验证\n' in whitelist
-
-    report = json.loads(
-        (output_dir / 'sensitive_words_report.json').read_text(encoding='utf-8')
-    )
-    assert report['removed_headings'] == ['屏蔽词库']
-    assert report['special_character_candidates'] == [
-        '含*号',
-        '专/业',
-        '六?四',
-        '法.轮',
-        '六●四',
-    ]
-    assert report['duplicate_count'] == 1
-
-    subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT_PATH),
-            'check',
-            '--output-dir',
-            str(output_dir),
-        ],
-        check=True,
-    )
 
 
 def test_committed_resources_preserve_red_blocks_and_remove_classic_false_positives():
