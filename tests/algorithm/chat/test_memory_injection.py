@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from lazymind.review.memory_review.defaults import default_preference_md
-from lazymind.review.memory_review.injection import (
+from lazymind.common.memory.defaults import default_preference_md
+from lazymind.chat.engine.memory import (
     load_chat_memory_context,
     profile_languages,
     truncate_preference_index,
 )
-from lazymind.review.memory_review.schema import PreferenceItem, append_preference_item
-from lazymind.review.memory_review.store import MemoryStore
+from lazymind.common.memory.schema import PreferenceItem, append_preference_item
+from lazymind.common.memory.store import MemoryStore
 
 
 class FakeRemoteFS:

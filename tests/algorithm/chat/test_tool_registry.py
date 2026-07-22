@@ -131,19 +131,26 @@ def test_memory_tools_are_registered_as_one_eager_group():
     config = configs[0]
     assert [method['name'] for method in _tool_group('memory')['methods']] == [
         'read_memory',
+        'read_memory_reference',
+        'soul_editor',
+        'profile_editor',
+        'preference_editor',
         'episode_create',
     ]
     manager = ToolManager([config.tool])
     assert {item['function']['name'] for item in manager.tools_description} == {
         'MemoryTools_read_memory',
+        'MemoryTools_read_memory_reference',
+        'MemoryTools_soul_editor',
+        'MemoryTools_profile_editor',
+        'MemoryTools_preference_editor',
         'MemoryTools_episode_create',
     }
     assert not hasattr(config.tool, 'memory_editor')
     memory_policy = '\n'.join(config.appendix_system_prompt['tool_policy'])
-    assert 'There is no general memory or user-profile write API' in memory_policy
-    assert 'Never claim that information was saved unless MemoryTools_episode_create succeeded' in (
-        memory_policy
-    )
+    assert 'Never claim that information was saved unless' in memory_policy
+    assert 'MemoryTools_episode_create' in memory_policy
+    assert 'preference_editor' in memory_policy
 
 
 def test_shared_prompt_appendix_is_reused_and_deduplicated():
@@ -229,11 +236,14 @@ def test_cloud_files_use_nested_supplier_toolkits():
     manager = ToolManager([config.tool])
     names = {item['function']['name'] for item in manager.tools_description}
     assert names == {'get_CloudFileToolkit_methods'}
-    manager._tool_call['get_CloudFileToolkit_methods']({})
-    names = {item['function']['name'] for item in manager.tools_description}
-    assert 'get_FeishuWikiFS_methods' in names
-    assert 'get_NotionFS_methods' in names
-    assert 'get_GoogleDriveFS_methods' in names
+    result = manager._tool_call['get_CloudFileToolkit_methods']({})
+    assert 'get_FeishuWikiFS_methods' in result
+    assert 'get_NotionFS_methods' in result
+    assert 'get_GoogleDriveFS_methods' in result
+    tool_names = set(manager._tool_call)
+    assert 'get_FeishuWikiFS_methods' in tool_names
+    assert 'get_NotionFS_methods' in tool_names
+    assert 'get_GoogleDriveFS_methods' in tool_names
     assert not any(name.endswith('_read') for name in names)
 
 
@@ -255,7 +265,10 @@ def test_tool_catalog_localizes_display_fields_without_changing_runtime_descript
 
     assert zh_group['label'] == '网页搜索'
     assert en_group['label'] == 'Web Search'
-    assert en_group['description'] == 'Search the internet using the first available search provider.'
+    assert en_group['description'] == (
+        'Search the open internet for current information and broad research '
+        'using the first available search provider.'
+    )
     assert unsupported_group['label'] == zh_group['label']
     assert unsupported_group['description'] == zh_group['description']
     assert en_group['name'] == zh_group['name']

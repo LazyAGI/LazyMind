@@ -2,7 +2,6 @@ import importlib
 import pytest
 
 memory_mod = importlib.import_module('lazymind.chat.engine.tools.memory')
-memory_reader_mod = memory_mod
 skill_editor_mod = importlib.import_module('lazymind.chat.engine.tools.skill_editor')
 
 
@@ -112,10 +111,11 @@ def test_memory_tool_exception_log_does_not_include_raw_exception(monkeypatch):
     assert len(calls['error']) == 1
     assert 'Authorization: <redacted>' in calls['error'][0]
     assert 'secret-value' not in calls['error'][0]
+
+
 def test_read_memory_reads_remote_fs(monkeypatch):
-    assert not hasattr(memory_mod.MemoryRemoteStore, 'write')
     store = FakeMemoryStore({'memory': 'remote memory'})
-    monkeypatch.setattr(memory_reader_mod, 'MemoryRemoteStore', lambda: store)
+    monkeypatch.setattr(memory_mod, 'MemoryRemoteStore', lambda: store)
     lazyllm = importlib.import_module('lazyllm')
     sentinel = object()
     previous = lazyllm.globals.get('agentic_config', sentinel)

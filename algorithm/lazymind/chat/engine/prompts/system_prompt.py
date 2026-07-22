@@ -5,7 +5,7 @@ import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
-from lazymind.review.memory_review.injection import profile_languages
+from lazymind.chat.engine.memory import profile_languages
 
 from .guidance import (
     ANALYSIS_GUIDANCE,

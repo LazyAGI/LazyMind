@@ -3,16 +3,17 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from lazymind.common.integrations.remote_fs import RemoteFS
-from lazymind.review.memory_review.paths import (
+
+from .paths import (
     LEGACY_MEMORY_PATH,
     LEGACY_USER_PREFERENCE_PATH,
     PREFERENCE_PATH,
     PROFILE_PATH,
     SOUL_PATH,
 )
-from lazymind.review.memory_review.store import MemoryStore
+from .store import MemoryStore
 
-# Legacy target names kept for memory_reader / review callers.
+# Legacy target names kept for MemoryTools.read_memory / review callers.
 MEMORY_TARGET_PATHS = {
     'memory': LEGACY_MEMORY_PATH,
     'user_preference': LEGACY_USER_PREFERENCE_PATH,

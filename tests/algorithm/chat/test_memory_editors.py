@@ -1,26 +1,22 @@
 from __future__ import annotations
 
-import importlib
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
-from lazymind.review.memory_review.defaults import (
+from lazymind.chat.engine.tools.memory import MemoryTools
+from lazymind.common.memory.defaults import (
     default_preference_md,
     default_profile_md,
     default_soul_md,
 )
-from lazymind.review.memory_review.paths import (
+from lazymind.common.memory.paths import (
     PREFERENCE_PATH,
     PROFILE_PATH,
     SOUL_PATH,
     build_reference_path,
     normalize_memory_path,
 )
-from lazymind.review.memory_review.store import MemoryStore
-
-soul_editor_mod = importlib.import_module('lazymind.chat.engine.tools.soul_editor')
-profile_editor_mod = importlib.import_module('lazymind.chat.engine.tools.profile_editor')
-preference_editor_mod = importlib.import_module('lazymind.chat.engine.tools.preference_editor')
+from lazymind.common.memory.store import MemoryStore
 
 
 class FakeRemoteFS:
@@ -97,15 +93,20 @@ class FakeMemoryRemoteStore:
         self.store = MemoryStore(fs)
 
 
+def _tools_with_store(fs: FakeRemoteFS):
+    remote = FakeMemoryRemoteStore(fs)
+    return MemoryTools(), remote
+
+
 def test_soul_editor_updates_supported_field():
     fs = FakeRemoteFS({
         SOUL_PATH: default_soul_md(),
         PROFILE_PATH: default_profile_md(),
         PREFERENCE_PATH: default_preference_md(),
     })
-    remote = FakeMemoryRemoteStore(fs)
-    with patch.object(soul_editor_mod, 'MemoryRemoteStore', lambda *args, **kwargs: remote):
-        payload = soul_editor_mod.soul_editor('identity.description', '更直接的助手')
+    tools, remote = _tools_with_store(fs)
+    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore', lambda *args, **kwargs: remote):
+        payload = tools.soul_editor('identity.description', '更直接的助手')
 
     assert payload['success'] is True
     assert payload['result']['status'] == 'applied'
@@ -118,9 +119,9 @@ def test_soul_editor_rejects_unsupported_field():
         PROFILE_PATH: default_profile_md(),
         PREFERENCE_PATH: default_preference_md(),
     })
-    remote = FakeMemoryRemoteStore(fs)
-    with patch.object(soul_editor_mod, 'MemoryRemoteStore', lambda *args, **kwargs: remote):
-        payload = soul_editor_mod.soul_editor('identity.email', 'x@y.com')
+    tools, remote = _tools_with_store(fs)
+    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore', lambda *args, **kwargs: remote):
+        payload = tools.soul_editor('identity.email', 'x@y.com')
     assert payload['success'] is False
     assert 'unsupported soul field' in payload['error']['reason']
 
@@ -131,9 +132,9 @@ def test_profile_editor_updates_list_field():
         PROFILE_PATH: default_profile_md(),
         PREFERENCE_PATH: default_preference_md(),
     })
-    remote = FakeMemoryRemoteStore(fs)
-    with patch.object(profile_editor_mod, 'MemoryRemoteStore', lambda *args, **kwargs: remote):
-        payload = profile_editor_mod.profile_editor('locale.languages', '["zh-CN","en-US"]')
+    tools, remote = _tools_with_store(fs)
+    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore', lambda *args, **kwargs: remote):
+        payload = tools.profile_editor('locale.languages', '["zh-CN","en-US"]')
 
     assert payload['success'] is True
     assert payload['result']['status'] == 'applied'
@@ -146,9 +147,9 @@ def test_preference_editor_add_and_delete():
         PROFILE_PATH: default_profile_md(),
         PREFERENCE_PATH: default_preference_md(),
     })
-    remote = FakeMemoryRemoteStore(fs)
-    with patch.object(preference_editor_mod, 'MemoryRemoteStore', lambda *args, **kwargs: remote):
-        added = preference_editor_mod.preference_editor(
+    tools, remote = _tools_with_store(fs)
+    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore', lambda *args, **kwargs: remote):
+        added = tools.preference_editor(
             'add',
             name='pref.response.concise',
             summary='回答要简洁',
@@ -160,7 +161,7 @@ def test_preference_editor_add_and_delete():
         assert 'pref.response.concise' in fs.files[PREFERENCE_PATH]
         assert build_reference_path('response-concise') in fs.files
 
-        deleted = preference_editor_mod.preference_editor('delete', name='pref.response.concise')
+        deleted = tools.preference_editor('delete', name='pref.response.concise')
         assert deleted['success'] is True
         assert 'pref.response.concise' not in fs.files[PREFERENCE_PATH]
         assert build_reference_path('response-concise') not in fs.files

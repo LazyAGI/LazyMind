@@ -179,9 +179,9 @@ MEMORY_TOOLS_POLICY_APPENDIX: SystemPromptAppendix = {
         'notes or user-profile content; an empty result never implies that chat history is missing.',
         'Call `MemoryTools_episode_create` only when the user explicitly asks to record, remember, '
         'or save a historical event. Do not call it merely because information seems useful. '
-        'use_memory=false does not disable explicit Episode creation. There is no general memory '
-        'or user-profile write API. Never claim that information was saved unless '
-        'MemoryTools_episode_create succeeded in the current turn.',
+        'use_memory=false does not disable explicit Episode creation. Never claim that information '
+        'was saved unless `MemoryTools_episode_create` or a structured memory editor '
+        '(`soul_editor` / `profile_editor` / `preference_editor`) succeeded in the current turn.',
     ),
 }
 CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -543,10 +543,13 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(
         name='memory',
         label='记忆',
-        description='读取跨会话记忆，并记录不可变的历史事件',
+        description='读取跨会话记忆，编辑 soul/profile/preference，并记录不可变历史事件',
         tool=MemoryTools(), module='personalization',
         label_en='Memory',
-        description_en='Read cross-conversation memory and record immutable historical events.',
+        description_en=(
+            'Read cross-conversation memory, edit soul/profile/preference, '
+            'and record immutable historical events.'
+        ),
         appendix_system_prompt=MEMORY_TOOLS_POLICY_APPENDIX,
     ),
     ToolConfig(

@@ -22,7 +22,7 @@ from lazymind.chat.engine.prompts import (
     select_skill_candidates,
     selected_prompt_modules,
 )
-from lazymind.review.memory_review import load_chat_memory_context
+from lazymind.chat.engine.memory import load_chat_memory_context
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,

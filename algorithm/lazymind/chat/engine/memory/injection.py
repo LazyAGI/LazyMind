@@ -5,10 +5,17 @@ from typing import Optional
 
 from lazyllm import LOG
 
-from .defaults import default_preference_md, default_profile_md, default_soul_md
-from .schema.common import parse_yaml_frontmatter
-from .schema.preference import parse_preference_items, render_preference_item
-from .store import MemoryStore
+from lazymind.common.memory.defaults import (
+    default_preference_md,
+    default_profile_md,
+    default_soul_md,
+)
+from lazymind.common.memory.schema.common import parse_yaml_frontmatter
+from lazymind.common.memory.schema.preference import (
+    parse_preference_items,
+    render_preference_item,
+)
+from lazymind.common.memory.store import MemoryStore
 
 # Phase-1 injection cap from the memory design: at most 100 preference index items.
 MAX_PREFERENCE_INJECT_ITEMS = 100

@@ -4,14 +4,14 @@ from unittest.mock import patch
 
 import pytest
 
-from lazymind.chat.engine.tools.memory_reference_reader import (
+from lazymind.chat.engine.tools.memory import (
     MAX_REFERENCE_READ_COUNT,
     MAX_REFERENCE_READ_LINES,
-    read_memory_reference,
+    MemoryTools,
     truncate_reference_content,
 )
-from lazymind.review.memory_review.errors import MemoryNotFoundError, MemoryStoreError
-from lazymind.review.memory_review.paths import REFERENCE_ROOT
+from lazymind.common.memory.errors import MemoryNotFoundError, MemoryStoreError
+from lazymind.common.memory.paths import REFERENCE_ROOT
 
 
 def test_truncate_reference_content_by_line_count():
@@ -38,12 +38,13 @@ def test_truncate_reference_content_keeps_short_text():
 
 def test_read_memory_reference_returns_section_content():
     ref = 'references/response.md#pref-response-technical-detail'
-    with patch('lazymind.chat.engine.tools.memory_reference_reader.MemoryRemoteStore') as store_cls:
+    tools = MemoryTools()
+    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore') as store_cls:
         store_cls.return_value.store.read_reference.return_value = (
             '## Pref Response Technical Detail\n'
             'Explain motivations and tradeoffs.\n'
         )
-        payload = read_memory_reference(ref)
+        payload = tools.read_memory_reference(ref)
 
     assert payload['success'] is True
     item = payload['result']['items'][0]
@@ -60,12 +61,13 @@ def test_read_memory_reference_reads_multiple_refs():
         'references/response.md#tone',
         'references/response.md#structure',
     ]
-    with patch('lazymind.chat.engine.tools.memory_reference_reader.MemoryRemoteStore') as store_cls:
+    tools = MemoryTools()
+    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore') as store_cls:
         store_cls.return_value.store.read_reference.side_effect = [
             '## Tone\nconcise\n',
             '## Structure\nconclusion-first\n',
         ]
-        payload = read_memory_reference(refs)
+        payload = tools.read_memory_reference(refs)
 
     assert payload['success'] is True
     assert payload['result']['ref_count'] == 2
@@ -75,9 +77,10 @@ def test_read_memory_reference_reads_multiple_refs():
 
 def test_read_memory_reference_appends_warning_when_truncated():
     long_content = '\n'.join(f'line {idx}' for idx in range(MAX_REFERENCE_READ_LINES + 5)) + '\n'
-    with patch('lazymind.chat.engine.tools.memory_reference_reader.MemoryRemoteStore') as store_cls:
+    tools = MemoryTools()
+    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore') as store_cls:
         store_cls.return_value.store.read_reference.return_value = long_content
-        payload = read_memory_reference('references/response.md')
+        payload = tools.read_memory_reference('references/response.md')
 
     item = payload['result']['items'][0]
     assert item['truncated'] is True
@@ -86,37 +89,39 @@ def test_read_memory_reference_appends_warning_when_truncated():
 
 
 def test_read_memory_reference_rejects_empty_refs():
-    payload = read_memory_reference('   ')
+    payload = MemoryTools().read_memory_reference('   ')
     assert payload['success'] is False
     assert 'refs is required' in payload['error']['reason']
 
 
 def test_read_memory_reference_rejects_too_many_refs():
     refs = [f'references/topic-{idx}.md' for idx in range(MAX_REFERENCE_READ_COUNT + 1)]
-    payload = read_memory_reference(refs)
+    payload = MemoryTools().read_memory_reference(refs)
     assert payload['success'] is False
     assert 'At most' in payload['error']['reason']
 
 
 def test_read_memory_reference_rejects_invalid_ref():
-    payload = read_memory_reference('memory/users/profile.md')
+    payload = MemoryTools().read_memory_reference('memory/users/profile.md')
     assert payload['success'] is False
     assert 'Invalid ref' in payload['error']['reason']
 
 
 def test_read_memory_reference_handles_not_found():
-    with patch('lazymind.chat.engine.tools.memory_reference_reader.MemoryRemoteStore') as store_cls:
+    tools = MemoryTools()
+    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore') as store_cls:
         store_cls.return_value.store.read_reference.side_effect = MemoryNotFoundError('missing')
-        payload = read_memory_reference('references/missing.md')
+        payload = tools.read_memory_reference('references/missing.md')
 
     assert payload['success'] is False
     assert 'Reference not found' in payload['error']['reason']
 
 
 def test_read_memory_reference_handles_store_error():
-    with patch('lazymind.chat.engine.tools.memory_reference_reader.MemoryRemoteStore') as store_cls:
+    tools = MemoryTools()
+    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore') as store_cls:
         store_cls.return_value.store.read_reference.side_effect = MemoryStoreError('remote down')
-        payload = read_memory_reference('references/response.md')
+        payload = tools.read_memory_reference('references/response.md')
 
     assert payload['success'] is False
     assert 'Failed to read' in payload['error']['reason']
@@ -127,9 +132,10 @@ def test_read_memory_reference_handles_store_error():
     'references/response.md#tone',
 ])
 def test_read_memory_reference_accepts_single_ref_string(ref):
-    with patch('lazymind.chat.engine.tools.memory_reference_reader.MemoryRemoteStore') as store_cls:
+    tools = MemoryTools()
+    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore') as store_cls:
         store_cls.return_value.store.read_reference.return_value = 'content'
-        payload = read_memory_reference(ref)
+        payload = tools.read_memory_reference(ref)
 
     assert payload['success'] is True
     store_cls.return_value.store.read_reference.assert_called_once_with(ref)
@@ -137,9 +143,10 @@ def test_read_memory_reference_accepts_single_ref_string(ref):
 
 def test_read_memory_reference_deduplicates_repeated_refs():
     ref = 'references/response.md'
-    with patch('lazymind.chat.engine.tools.memory_reference_reader.MemoryRemoteStore') as store_cls:
+    tools = MemoryTools()
+    with patch('lazymind.chat.engine.tools.memory.MemoryRemoteStore') as store_cls:
         store_cls.return_value.store.read_reference.return_value = 'content'
-        payload = read_memory_reference([ref, ref])
+        payload = tools.read_memory_reference([ref, ref])
 
     assert payload['success'] is True
     assert payload['result']['ref_count'] == 1

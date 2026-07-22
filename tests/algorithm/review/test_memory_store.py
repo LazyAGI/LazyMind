@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from lazymind.review.memory_review.defaults import (
+from lazymind.common.memory.defaults import (
     default_preference_md,
     default_profile_md,
     default_soul_md,
 )
-from lazymind.review.memory_review.errors import MemoryPathError, MemoryValidationError
-from lazymind.review.memory_review.migrate import migrate_legacy_memory
-from lazymind.review.memory_review.paths import (
+from lazymind.common.memory.errors import MemoryPathError, MemoryValidationError
+from lazymind.common.memory.paths import (
     PREFERENCE_PATH,
     PROFILE_PATH,
     REFERENCE_ROOT,
@@ -19,7 +18,7 @@ from lazymind.review.memory_review.paths import (
     normalize_memory_path,
     split_reference_ref,
 )
-from lazymind.review.memory_review.schema import (
+from lazymind.common.memory.schema import (
     PreferenceItem,
     append_preference_item,
     parse_preference_items,
@@ -28,7 +27,7 @@ from lazymind.review.memory_review.schema import (
     validate_reference_content,
     validate_soul_content,
 )
-from lazymind.review.memory_review.store import MemoryStore
+from lazymind.common.memory.store import MemoryStore
 
 
 class FakeRemoteFS:
@@ -181,33 +180,6 @@ def test_memory_store_rejects_invalid_path_and_content():
         assert False, 'expected MemoryValidationError'
     except MemoryValidationError:
         pass
-
-
-def test_migrate_legacy_memory():
-    fs = FakeRemoteFS({
-        'memory/memory.md': 'old working memory note\n',
-        'memory/user.md': (
-            '---\n'
-            'agent_persona: Helper\n'
-            'preferred_name: Alice\n'
-            'response_style: concise\n'
-            '---\n'
-            'Prefer bullet points.\n'
-        ),
-    })
-    store = MemoryStore(fs)
-    result = migrate_legacy_memory(store)
-    assert result.migrated is True
-    assert 'Alice' in store.read_profile()
-    assert 'Helper' in store.read_soul()
-    assert store.exists(build_reference_path('legacy-memory'))
-    assert store.exists(build_reference_path('legacy-preferences'))
-    assert 'pref.legacy.user_preference' in store.read_preference()
-
-    # Second run should not overwrite.
-    second = migrate_legacy_memory(store)
-    assert second.migrated is False
-    assert any('already initialized' in warning for warning in second.warnings)
 
 
 def test_validate_reference_content():
