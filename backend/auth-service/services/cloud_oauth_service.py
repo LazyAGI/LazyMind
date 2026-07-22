@@ -824,8 +824,9 @@ class CloudOAuthService:
                         CloudAuthConnectionRepository.save(db, extra)
             elif not reauthorize_account_id:
                 # Reauthorize target is PENDING (no provider account yet).
-                # Reuse it directly instead of creating a new child connection
-                # so the connection_id stays stable and no duplicates appear.
+                # Reuse it directly instead of creating a new child connection.
+                # Only touch rows from the same app (client_id).
+                target_app_id = normalized_client_id
                 for row in incomplete_rows:
                     if row.connection_id == reauthorize_target_id:
                         auth_state = self._decrypt_payload(
@@ -844,15 +845,19 @@ class CloudOAuthService:
                         row.scope = scope_value
                         CloudAuthConnectionRepository.save(db, row)
                         reused_connection_id = row.connection_id
-                    else:
+                    elif self._extract_app_key(row)[3] == target_app_id:
                         row.status = 'REVOKED'
                         row.last_error = 'superseded by new authorization attempt'
                         CloudAuthConnectionRepository.save(db, row)
             else:
                 # Reauthorize target is ACTIVE/EXPIRED/ERROR — normal
-                # reauthorize flow: revoke other PENDING/ERROR, keep target.
+                # reauthorize flow: revoke other PENDING/ERROR from the
+                # same app only, keep target.
+                target_app_id = normalized_client_id
                 for row in incomplete_rows:
                     if row.connection_id == reauthorize_target_id:
+                        continue
+                    if self._extract_app_key(row)[3] != target_app_id:
                         continue
                     row.status = 'REVOKED'
                     row.last_error = 'superseded by new authorization attempt'
@@ -1036,7 +1041,23 @@ class CloudOAuthService:
                         **provider_account_lookup,
                         status='REVOKED',
                     )
-            if existing is not None and existing.connection_id != row.connection_id:
+            # Only merge when the existing connection belongs to the same
+            # app (client_id).  Different apps keep independent rows even
+            # if the same Feishu user authorized both.
+            is_different_app = False
+            if existing is not None:
+                existing_client_id = (
+                    decrypt_json(existing.credential_ciphertext).get('client_id') or ''
+                ).strip()
+                new_client_id = (credential.get('client_id') or '').strip()
+                is_different_app = bool(
+                    existing_client_id and new_client_id and existing_client_id != new_client_id
+                )
+            if (
+                existing is not None
+                and existing.connection_id != row.connection_id
+                and not is_different_app
+            ):
                 existing.credential_ciphertext = row.credential_ciphertext
                 existing.auth_state_ciphertext = row.auth_state_ciphertext
                 existing.display_name = row.display_name
