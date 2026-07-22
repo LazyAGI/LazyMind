@@ -213,7 +213,7 @@ export function useSyncPicker({
             sourceId: detailSource.id,
             sourceTreeChildrenRequest: {
               binding_id: treeNode.bindingId || detailSource.bindingId,
-              tree_key: detailSource.bindingTreeKey,
+              tree_key: treeNode.treeKey || detailSource.bindingTreeKey,
               parent_key: candidate,
               include_documents: true,
               include_containers: true,
