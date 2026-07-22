@@ -34,6 +34,7 @@ export interface CreateKnowledgeBaseModalProps {
 
 export interface CreateKnowledgeBaseModalRef {
   onOpen: (tab?: CreateTab) => void;
+  onClose: () => void;
 }
 
 const CreateKnowledgeBaseModal = forwardRef<
@@ -52,6 +53,7 @@ const CreateKnowledgeBaseModal = forwardRef<
 
   useImperativeHandle(ref, () => ({
     onOpen,
+    onClose: onCancel,
   }));
 
   useEffect(() => {

@@ -143,6 +143,21 @@ export interface SkillOrganizeRunRecord {
   taskId: string;
 }
 
+export type SkillOrganizeTaskStatus =
+  | "pending"
+  | "running"
+  | "done"
+  | "failed"
+  | "skipped";
+
+export interface SkillOrganizeTaskRecord {
+  task: ResourceUpdateTaskRecord | null;
+  requestId: string;
+  status: SkillOrganizeTaskStatus;
+  runStatus: string;
+  resultCount: number;
+}
+
 export interface ShareSkillPayload {
   targetUserIds: string[];
   targetGroupIds?: string[];
@@ -896,6 +911,51 @@ export async function organizeSkills(
   };
 }
 
+export async function getSkillOrganizeTask(
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<SkillOrganizeTaskRecord | null> {
+  const response = await axiosInstance.get(`${coreBasePath}/skill-organize/tasks`, {
+    params: {
+      requestid: requestId.trim(),
+      page: 1,
+      page_size: 1,
+    },
+    signal,
+  });
+  const payload = unwrapEnvelope<unknown>(response.data);
+  const raw = toRawObject(payload);
+  const items = Array.isArray(raw?.items) ? raw.items : [];
+  const record = normalizeSkillReviewTaskStatus(items[0]);
+  if (!record) {
+    return null;
+  }
+  return {
+    ...record,
+    status: record.status as SkillOrganizeTaskStatus,
+  };
+}
+
+const skillOrganizeTerminalStatuses = new Set<SkillOrganizeTaskStatus>([
+  "done",
+  "failed",
+  "skipped",
+]);
+
+export async function waitForSkillOrganize(
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<SkillOrganizeTaskRecord> {
+  while (!signal?.aborted) {
+    const task = await getSkillOrganizeTask(requestId, signal);
+    if (task && skillOrganizeTerminalStatuses.has(task.status)) {
+      return task;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 2000));
+  }
+  throw new DOMException("Polling canceled", "AbortError");
+}
+
 export async function listSkillTags(): Promise<string[]> {
   const response = await skillsApi.apiCoreSkillsTagsGet();
   const payload = unwrapEnvelope<{ tags?: string[] }>(response.data);
@@ -1443,6 +1503,18 @@ const buildHeadDraftDiffRequest = (skillId: string, path?: string) => ({
   ...(path ? { path } : {}),
 });
 
+const buildRevisionDiffRequest = (
+  skillId: string,
+  oldRevisionId: string,
+  newRevisionId: string,
+  path?: string,
+) => ({
+  old: { type: "revision", skill_id: skillId, revision_id: oldRevisionId },
+  new: { type: "revision", skill_id: skillId, revision_id: newRevisionId },
+  context_lines: 3,
+  ...(path ? { path } : {}),
+});
+
 export async function compareSkillTreeDiff(skillId: string): Promise<SkillDiffTreeRecord> {
   const response = await skillDiffApi.apiCoreSkillDiffTreePost({
     diffOpenAPIRequest: buildHeadDraftDiffRequest(skillId),
@@ -1460,6 +1532,36 @@ export async function compareSkillFileDiff(
   });
   const payload = unwrapEnvelope<DiffFileOpenAPIResponse | Record<string, unknown>>(response.data);
   return normalizeDiffFile(payload);
+}
+
+export async function compareSkillRevisionTreeDiff(
+  skillId: string,
+  oldRevisionId: string,
+  newRevisionId: string,
+): Promise<SkillDiffTreeRecord> {
+  const response = await skillDiffApi.apiCoreSkillDiffTreePost({
+    diffOpenAPIRequest: buildRevisionDiffRequest(skillId, oldRevisionId, newRevisionId),
+  });
+  return normalizeDiffTree(unwrapEnvelope<DiffTreeOpenAPIResponse>(response.data));
+}
+
+export async function compareSkillRevisionFileDiff(
+  skillId: string,
+  oldRevisionId: string,
+  newRevisionId: string,
+  path: string,
+): Promise<SkillDiffFileRecord> {
+  const response = await skillDiffApi.apiCoreSkillDiffFilePost({
+    diffOpenAPIRequest: buildRevisionDiffRequest(
+      skillId,
+      oldRevisionId,
+      newRevisionId,
+      path,
+    ),
+  });
+  return normalizeDiffFile(
+    unwrapEnvelope<DiffFileOpenAPIResponse | Record<string, unknown>>(response.data),
+  );
 }
 
 export async function submitSkillDraftReviewActions(

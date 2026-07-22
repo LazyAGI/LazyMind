@@ -17,6 +17,7 @@ import {
   listSkillMarketTags,
   listTrashedSkillAssetsPage,
   organizeSkills,
+  waitForSkillOrganize,
   emptySkillTrash,
   purgeSkillAsset,
   restoreSkillAsset,
@@ -43,6 +44,7 @@ const MAX_SKILL_ORGANIZE_SELECTION = 20;
 export default function SkillManagementSection() {
   const listContentRef = useRef<HTMLDivElement>(null);
   const marketRequestIdRef = useRef(0);
+  const organizePollingControllerRef = useRef<AbortController | null>(null);
   const navigate = useNavigate();
   const [newPluginOpen, setNewPluginOpen] = useState(false);
   const [organizeMode, setOrganizeMode] = useState(false);
@@ -128,6 +130,13 @@ export default function SkillManagementSection() {
     }, 300);
     return () => window.clearTimeout(timer);
   }, [marketKeyword]);
+
+  useEffect(
+    () => () => {
+      organizePollingControllerRef.current?.abort();
+    },
+    [],
+  );
 
   useEffect(() => {
     setMarketListPage(1);
@@ -561,20 +570,39 @@ export default function SkillManagementSection() {
       okText: t("admin.memorySkillOrganizeConfirmSubmit"),
       cancelText: t("common.cancel"),
       onOk: async () => {
+        organizePollingControllerRef.current?.abort();
+        const pollingController = new AbortController();
+        organizePollingControllerRef.current = pollingController;
         setOrganizeSubmitting(true);
         try {
           const result = await organizeSkills(
             skills.map((skill) => `skills/${skill.category}/${skill.name}`),
           );
-          if (!result.taskId || result.status !== "running") {
+          if (!result.requestId || !result.taskId) {
             throw new Error("Skill organize task was not accepted");
           }
+          const task = await waitForSkillOrganize(
+            result.requestId,
+            pollingController.signal,
+          );
+          if (task.status === "failed") {
+            throw new Error("Skill organize task failed");
+          }
+          if (task.status === "skipped") {
+            message.warning(t("admin.memorySkillOrganizeSkipped"));
+            cancelSkillOrganize();
+            return;
+          }
+          await refreshSkillAssets({ page: skillListPage });
           message.success(
             t("admin.memorySkillOrganizeSuccess", { count: skills.length }),
           );
           cancelSkillOrganize();
         } catch (error) {
-          console.error("Submit skill organize task failed:", error);
+          if (pollingController.signal.aborted) {
+            return;
+          }
+          console.error("Skill organize task failed:", error);
           const reasonCode = String(
             (error as { response?: { data?: { data?: { code?: unknown } } } })
               ?.response?.data?.data?.code ?? "",
@@ -587,7 +615,12 @@ export default function SkillManagementSection() {
             message.error(t("admin.memorySkillOrganizeFailed"));
           }
         } finally {
-          setOrganizeSubmitting(false);
+          if (organizePollingControllerRef.current === pollingController) {
+            organizePollingControllerRef.current = null;
+          }
+          if (!pollingController.signal.aborted) {
+            setOrganizeSubmitting(false);
+          }
         }
       },
     });
