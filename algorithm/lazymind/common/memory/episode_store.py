@@ -7,7 +7,11 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Callable, Optional
 
-from lazyllm.tools.rag.store import SegmentStore, SegmentStoreConflictError
+from lazyllm.tools.rag.store import (
+    BUILDIN_GLOBAL_META_DESC,
+    LazyLLMStoreBase,
+    create_segment_store,
+)
 
 from lazymind.config import config as _cfg
 
@@ -17,6 +21,7 @@ from .models import (
     EpisodeRecord,
     EpisodeSearchResult,
     build_episode_idempotency_key,
+    normalize_episode_summary,
 )
 from .ranking import episode_query_coverage, informative_query_terms, tokenize_episode_text
 
@@ -28,12 +33,43 @@ class EpisodeConflictError(RuntimeError):
     pass
 
 
+class EpisodeReadError(RuntimeError):
+    code: str
+    retryable: bool
+
+    _TRANSIENT_MARKERS = (
+        'backend down',
+        'connection',
+        'rate limit',
+        'temporarily unavailable',
+        'temporary failure',
+        'timed out',
+        'timeout',
+        'unavailable',
+    )
+
+    @classmethod
+    def from_exception(cls, exc: Exception) -> EpisodeReadError:
+        retryable = isinstance(exc, (ConnectionError, TimeoutError))
+        if not retryable:
+            message = str(exc).casefold()
+            retryable = any(marker in message for marker in cls._TRANSIENT_MARKERS)
+        error = cls('Failed to load existing Episodes.')
+        error.retryable = retryable
+        error.code = 'storage_unavailable' if retryable else 'storage_read_failed'
+        return error
+
+
 def _store_config() -> dict:
     store_type = _cfg['segment_store_type']
     path = _cfg['segment_store_uri_or_path']
     if store_type == 'SQLiteStore':
+        if not path:
+            raise ValueError('LAZYMIND_SEGMENT_STORE_URI_OR_PATH is required for SQLite segment store')
         return {'type': 'SQLiteStore', 'kwargs': {'db_path': path}}
     if store_type == 'opensearch':
+        if not path:
+            raise ValueError('LAZYMIND_SEGMENT_STORE_URI_OR_PATH is required for OpenSearch segment store')
         return {'type': 'opensearch', 'kwargs': {
             'uris': path,
             'client_kwargs': {
@@ -47,15 +83,23 @@ def _store_config() -> dict:
     raise ValueError(f'Unsupported segment store type: {store_type!r}')
 
 
+def _create_default_store() -> LazyLLMStoreBase:
+    store = create_segment_store(_store_config())
+    store.connect(global_metadata_desc=BUILDIN_GLOBAL_META_DESC)
+    if not store.supports_counters:
+        raise ValueError(f'{type(store).__name__} does not support named counters')
+    return store
+
+
 class EpisodeStore:
     def __init__(
         self,
-        segment_store: Optional[SegmentStore] = None,
+        segment_store: Optional[LazyLLMStoreBase] = None,
         collection: str = EPISODE_COLLECTION,
         *,
         clock_ms: Callable[[], int] | None = None,
     ):
-        self._store = segment_store or SegmentStore(_store_config())
+        self._store = segment_store if segment_store is not None else _create_default_store()
         self.collection = collection
         self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
 
@@ -63,16 +107,34 @@ class EpisodeStore:
     def _segment(record: EpisodeRecord) -> dict:
         metadata = record.model_dump(mode='json')
         metadata.pop('id', None)
+        metadata.pop('user_id', None)
+        hit_count = int(metadata.pop('hit_count', 0))
         return {
-            'id': record.id,
+            'uid': record.id,
+            'doc_id': record.id,
+            'group': 'episode',
             'content': tokenize_episode_text(record.summary),
-            'metadata': metadata,
+            'meta': metadata,
+            'global_meta': {},
+            'kb_id': record.user_id,
+            'counters': {'hit_count': hit_count},
         }
 
     @staticmethod
     def _record(segment: dict) -> EpisodeRecord:
-        metadata = dict(segment['metadata'])
-        metadata['id'] = segment['id']
+        metadata = dict(segment.get('meta') or {})
+        legacy_metadata = segment.get('metadata') or {}
+        if not metadata and legacy_metadata:
+            metadata = dict(legacy_metadata)
+        metadata['id'] = segment.get('uid') or segment.get('id')
+        metadata['user_id'] = segment.get('kb_id') or metadata.get('user_id')
+        counters = segment.get('counters') or {}
+        if 'hit_count' in counters:
+            metadata['hit_count'] = counters['hit_count']
+        elif segment.get('number') is not None:
+            metadata['hit_count'] = segment.get('number')
+        else:
+            metadata['hit_count'] = metadata.get('hit_count', 0)
         return EpisodeRecord.model_validate(metadata)
 
     @staticmethod
@@ -80,10 +142,16 @@ class EpisodeStore:
         return build_episode_idempotency_key(
             user_id=record.user_id,
             conversation_id=record.source.conversation_id,
-            task_id=record.source.task_id,
-            episode_type=record.episode_type,
             summary=record.summary,
         )
+
+    def _strict_get(self, filters: dict) -> list[dict]:
+        try:
+            return self._store.get(self.collection, filters, raise_on_error=True)
+        except EpisodeReadError:
+            raise
+        except Exception as exc:
+            raise EpisodeReadError.from_exception(exc) from exc
 
     def create(self, user_id: str, item: EpisodeCreateInput) -> EpisodeCreateResult:
         normalized_user_id = str(user_id).strip()
@@ -93,10 +161,19 @@ class EpisodeStore:
         episode_id = build_episode_idempotency_key(
             user_id=normalized_user_id,
             conversation_id=create_input.source.conversation_id,
-            task_id=create_input.source.task_id,
-            episode_type=create_input.episode_type,
             summary=create_input.summary,
         )
+        normalized_summary = normalize_episode_summary(create_input.summary)
+        for existing in self.list_by_conversation(
+            normalized_user_id,
+            create_input.source.conversation_id,
+        ):
+            if normalize_episode_summary(existing.summary) == normalized_summary:
+                return EpisodeCreateResult(
+                    status='idempotent',
+                    id=existing.id,
+                    idempotency_key=episode_id,
+                )
         record = EpisodeRecord(
             **create_input.model_dump(),
             id=episode_id,
@@ -108,11 +185,11 @@ class EpisodeStore:
             if not created:
                 raise RuntimeError('SegmentStore did not confirm Episode creation.')
             status = 'created'
-        except SegmentStoreConflictError as exc:
-            existing = self._store.get(
-                self.collection,
-                {'id': episode_id, 'user_id': normalized_user_id},
-            )
+        except FileExistsError as exc:
+            existing = self._strict_get({
+                'uid': episode_id,
+                'kb_id': normalized_user_id,
+            })
             if not existing:
                 raise EpisodeConflictError(
                     'Episode id already exists outside the current tenant identity.'
@@ -129,6 +206,40 @@ class EpisodeStore:
             idempotency_key=episode_id,
         )
 
+    def list_by_conversation(
+        self,
+        user_id: str,
+        conversation_id: str,
+    ) -> list[EpisodeRecord]:
+        normalized_user_id = str(user_id).strip()
+        normalized_conversation_id = str(conversation_id).strip()
+        if not normalized_user_id:
+            raise ValueError('user_id is required')
+        if not normalized_conversation_id:
+            raise ValueError('conversation_id is required')
+        try:
+            segments = self._strict_get({'kb_id': normalized_user_id})
+            records = [
+                self._record(segment)
+                for segment in segments
+                if str(
+                    ((segment.get('meta') or segment.get('metadata') or {}).get('source') or {}).get(
+                        'conversation_id',
+                        '',
+                    )
+                ).strip() == normalized_conversation_id
+            ]
+        except EpisodeReadError:
+            raise
+        except Exception as exc:
+            raise EpisodeReadError.from_exception(exc) from exc
+        records.sort(key=lambda record: (
+            record.recorded_at_ms,
+            record.occurred_at_ms,
+            record.id,
+        ))
+        return records
+
     def search(
         self,
         user_id: str,
@@ -141,21 +252,30 @@ class EpisodeStore:
         if not normalized_user_id or not query_terms:
             return []
         prepared = ' '.join(query_terms)
-        candidates = self._store.search(
-            self.collection,
-            prepared,
-            topk=_cfg['episode_candidate_topk'],
-            filters={'user_id': normalized_user_id},
-            query_fields=['content'],
-            match_mode='any',
-        )
+        try:
+            candidates = self._store.search(
+                self.collection,
+                prepared,
+                topk=_cfg['episode_candidate_topk'],
+                filters={'kb_id': normalized_user_id},
+                query_fields=['content'],
+                match_mode='any',
+                raise_on_error=True,
+            )
+        except EpisodeReadError:
+            raise
+        except Exception as exc:
+            raise EpisodeReadError.from_exception(exc) from exc
         current_ms = now_ms or self._clock_ms()
         ranked: list[EpisodeSearchResult] = []
         for candidate in candidates:
             bm25_score = float(candidate.get('score', 0) or 0)
             if bm25_score <= 0:
                 continue
-            record = self._record(candidate)
+            try:
+                record = self._record(candidate)
+            except Exception as exc:
+                raise EpisodeReadError.from_exception(exc) from exc
             coverage = episode_query_coverage(query, record.summary)
             if coverage is None:
                 continue
@@ -198,17 +318,17 @@ class EpisodeStore:
     def increment_hits(self, user_id: str, episode_ids: list[str]) -> dict[str, bool]:
         result: dict[str, bool] = {}
         for episode_id in dict.fromkeys(episode_ids):
-            result[episode_id] = self._store.patch(
+            result[episode_id] = self._store.increment_counters(
                 self.collection,
-                {'id': episode_id, 'user_id': user_id},
-                inc_fields={'hit_count': 1},
+                {'uid': episode_id, 'kb_id': user_id},
+                {'hit_count': 1},
             ) == 1
         return result
 
     def reset_episode(self, user_id: str) -> bool:
         if not str(user_id).strip():
             raise ValueError('user_id is required')
-        return self._store.delete(self.collection, {'user_id': str(user_id).strip()})
+        return self._store.delete(self.collection, {'kb_id': str(user_id).strip()})
 
 
 @lru_cache(maxsize=1)

@@ -1,6 +1,7 @@
 from .episode_store import (
     EPISODE_COLLECTION,
     EpisodeConflictError,
+    EpisodeReadError,
     EpisodeStore,
     get_episode_store,
 )
@@ -25,6 +26,7 @@ __all__ = [
     'EPISODE_COLLECTION',
     'MEMORY_TARGET_PATHS',
     'EpisodeConflictError',
+    'EpisodeReadError',
     'EpisodeCreateInput',
     'EpisodeCreateResult',
     'EpisodeRecord',
