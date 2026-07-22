@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -6,8 +6,11 @@ import {
   Empty,
   Modal,
   Skeleton,
+  Spin,
   Tabs,
   Tag,
+  Tooltip,
+  Tree,
   message,
 } from "antd";
 import { FileSearchOutlined, RollbackOutlined } from "@ant-design/icons";
@@ -23,10 +26,12 @@ import {
 } from '../preferenceApi';
 import {
   getSkillRevisionFile,
+  getSkillRevisionTree,
   listSkillRevisions,
   rollbackSkill,
   RollbackConflictError as SkillRollbackConflictError,
   type SkillRevisionRecord,
+  type SkillTreeNodeRecord,
 } from '../skillApi';
 import {
   buildDiffLinesWithInline,
@@ -34,6 +39,12 @@ import {
   parseMarkdownFrontMatter,
 } from "../shared";
 import { DiffLineContent } from "./DiffLineContent";
+import {
+  buildAntTreeData,
+  flattenSkillTree,
+  pickDefaultFilePath,
+  type SkillTreeFileItem,
+} from "./skillPackage/skillTreeUtils";
 
 interface ResourceVersionDrawerProps {
   open: boolean;
@@ -47,6 +58,7 @@ interface ResourceVersionDrawerProps {
 
 type RevisionListItem = {
   revisionId: string;
+  parentRevisionId: string;
   revisionNo: number;
   changeSource: string;
   createdAt: string;
@@ -135,10 +147,77 @@ function VersionContentPanel({
   );
 }
 
+function SkillRevisionContentPanel({
+  tree,
+  selectedPath,
+  content,
+  loading,
+  t,
+  onSelect,
+}: {
+  tree: SkillTreeNodeRecord | null;
+  selectedPath: string;
+  content: string;
+  loading: boolean;
+  t: ResourceVersionDrawerProps["t"];
+  onSelect: (file: SkillTreeFileItem) => void;
+}) {
+  const files = useMemo(() => (tree ? flattenSkillTree(tree) : []), [tree]);
+  const selectedFile = files.find((file) => file.path === selectedPath) || null;
+  const treeData = useMemo(
+    () =>
+      tree
+        ? buildAntTreeData(tree, new Map(), (file) => (
+            <Tooltip title={file.name} placement="right">
+              <span className="memory-version-skill-tree-name">{file.name}</span>
+            </Tooltip>
+          ))
+        : [],
+    [tree],
+  );
+
+  return (
+    <div className="memory-version-skill-package">
+      <aside className="memory-version-skill-tree">
+        <div className="memory-version-content-panel-head">
+          {t("admin.memorySkillPackageTreeTitle")}
+        </div>
+        <Tree
+          blockNode
+          showIcon
+          defaultExpandAll
+          treeData={treeData}
+          selectedKeys={selectedPath ? [selectedPath] : []}
+          onSelect={(keys) => {
+            const path = String(keys[0] || "");
+            const file = files.find((item) => item.path === path);
+            if (file) onSelect(file);
+          }}
+        />
+      </aside>
+      <div className="memory-version-skill-content">
+        <div className="memory-version-content-panel-head">{selectedPath || "-"}</div>
+        {loading ? (
+          <div className="memory-version-file-loading"><Spin /></div>
+        ) : selectedFile?.binary ? (
+          <Alert showIcon type="info" message={t("admin.memoryVersionBinaryFileHint")} />
+        ) : (
+          <VersionContentPanel label={selectedPath || "-"} content={content} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function RevisionDetail({
   revision,
   content,
   previousContent,
+  isSkillResource,
+  revisionTree,
+  selectedFilePath,
+  selectedFileContent,
+  fileLoading,
   loading,
   error,
   canRollback,
@@ -146,10 +225,16 @@ function RevisionDetail({
   t,
   onRetry,
   onRollback,
+  onSelectFile,
 }: {
   revision: RevisionListItem | null;
   content: string;
   previousContent: string;
+  isSkillResource: boolean;
+  revisionTree: SkillTreeNodeRecord | null;
+  selectedFilePath: string;
+  selectedFileContent: string;
+  fileLoading: boolean;
   loading: boolean;
   error: string;
   canRollback: boolean;
@@ -157,6 +242,7 @@ function RevisionDetail({
   t: ResourceVersionDrawerProps["t"];
   onRetry: () => void;
   onRollback: () => void;
+  onSelectFile: (file: SkillTreeFileItem) => void;
 }) {
   const currentSkill = useMemo(
     () => parseMarkdownFrontMatter(content),
@@ -249,7 +335,18 @@ function RevisionDetail({
             key: "content",
             label: t("admin.memoryVersionTabAfter"),
             children: (
-              <VersionContentPanel label={t("admin.memoryVersionTabAfter")} content={bodyContent} />
+              isSkillResource ? (
+                <SkillRevisionContentPanel
+                  tree={revisionTree}
+                  selectedPath={selectedFilePath}
+                  content={selectedFileContent}
+                  loading={fileLoading}
+                  t={t}
+                  onSelect={onSelectFile}
+                />
+              ) : (
+                <VersionContentPanel label={t("admin.memoryVersionTabAfter")} content={bodyContent} />
+              )
             ),
           },
           {
@@ -332,6 +429,10 @@ export default function ResourceVersionDrawer({
   const [selectedRevisionId, setSelectedRevisionId] = useState("");
   const [content, setContent] = useState("");
   const [previousContent, setPreviousContent] = useState("");
+  const [revisionTree, setRevisionTree] = useState<SkillTreeNodeRecord | null>(null);
+  const [selectedFilePath, setSelectedFilePath] = useState("");
+  const [selectedFileContent, setSelectedFileContent] = useState("");
+  const [fileLoading, setFileLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -339,6 +440,7 @@ export default function ResourceVersionDrawer({
   const [reloadKey, setReloadKey] = useState(0);
   const [detailReloadKey, setDetailReloadKey] = useState(0);
   const [rollingBack, setRollingBack] = useState(false);
+  const fileRequestIdRef = useRef(0);
   const [skillRevisionCache, setSkillRevisionCache] = useState<SkillRevisionRecord[]>(
     [],
   );
@@ -357,6 +459,9 @@ export default function ResourceVersionDrawer({
     setSelectedRevisionId("");
     setContent("");
     setPreviousContent("");
+    setRevisionTree(null);
+    setSelectedFilePath("");
+    setSelectedFileContent("");
     setDetailError("");
     setRevisions([]);
     setSkillRevisionCache([]);
@@ -383,6 +488,7 @@ export default function ResourceVersionDrawer({
           }
           const nextRevisions = items.map((item) => ({
             revisionId: item.revisionId,
+            parentRevisionId: item.parentRevisionId,
             revisionNo: item.revisionNo,
             changeSource: item.changeSource,
             createdAt: item.createdAt,
@@ -408,6 +514,7 @@ export default function ResourceVersionDrawer({
         }
         const nextRevisions = items.map((item) => ({
           revisionId: item.revisionId,
+          parentRevisionId: "",
           revisionNo: item.revisionNo,
           changeSource: item.changeSource,
           createdAt: item.createdAt,
@@ -449,32 +556,47 @@ export default function ResourceVersionDrawer({
     if (!open || !selectedRevisionId) {
       setContent("");
       setPreviousContent("");
+      setRevisionTree(null);
+      setSelectedFilePath("");
+      setSelectedFileContent("");
       setDetailError("");
       return undefined;
     }
 
     let ignore = false;
+    fileRequestIdRef.current += 1;
     setDetailLoading(true);
+    setFileLoading(false);
     setDetailError("");
     void (async () => {
       try {
         if (isSkillResource) {
-          const currentIndex = skillRevisionCache.findIndex(
+          const selectedRecord = skillRevisionCache.find(
             (item) => item.revisionId === selectedRevisionId,
           );
-          const previousRevision =
-            currentIndex >= 0 ? skillRevisionCache[currentIndex + 1] : undefined;
-          const [currentContent, prevContent] = await Promise.all([
+          // Rollbacks create branches, and the 50-revision retention limit may prune
+          // an item's parent. Only request a diff base that still exists in the list.
+          const previousRevision = selectedRecord?.parentRevisionId
+            ? skillRevisionCache.find(
+                (item) => item.revisionId === selectedRecord.parentRevisionId,
+              )
+            : undefined;
+          const [currentContent, prevContent, tree] = await Promise.all([
             getSkillRevisionFile(resourceId, selectedRevisionId),
             previousRevision
               ? getSkillRevisionFile(resourceId, previousRevision.revisionId)
               : Promise.resolve(""),
+            getSkillRevisionTree(resourceId, selectedRevisionId),
           ]);
           if (ignore) {
             return;
           }
           setContent(currentContent);
           setPreviousContent(prevContent);
+          setRevisionTree(tree);
+          const defaultPath = pickDefaultFilePath(flattenSkillTree(tree));
+          setSelectedFilePath(defaultPath);
+          setSelectedFileContent(defaultPath === "SKILL.md" ? currentContent : "");
           return;
         }
 
@@ -524,6 +646,30 @@ export default function ResourceVersionDrawer({
     skillRevisionCache,
     t,
   ]);
+
+  const handleSelectRevisionFile = async (file: SkillTreeFileItem) => {
+    const requestId = fileRequestIdRef.current + 1;
+    fileRequestIdRef.current = requestId;
+    setSelectedFilePath(file.path);
+    if (file.binary) {
+      setSelectedFileContent("");
+      return;
+    }
+    setFileLoading(true);
+    try {
+      const nextContent = await getSkillRevisionFile(resourceId, selectedRevisionId, file.path);
+      if (fileRequestIdRef.current === requestId) {
+        setSelectedFileContent(nextContent);
+      }
+    } catch (error) {
+      console.error("Load revision file failed:", error);
+      message.error(getLocalizedErrorMessage(error));
+    } finally {
+      if (fileRequestIdRef.current === requestId) {
+        setFileLoading(false);
+      }
+    }
+  };
 
   const handleRollback = () => {
     if (!selectedRevision || selectedRevision.isHead) {
@@ -580,7 +726,7 @@ export default function ResourceVersionDrawer({
   return (
     <Drawer
       destroyOnHidden
-      width="min(980px, calc(100vw - 32px))"
+      width="min(1320px, calc(100vw - 24px))"
       open={open}
       title={title}
       className="memory-version-drawer"
@@ -659,6 +805,11 @@ export default function ResourceVersionDrawer({
             revision={selectedRevision}
             content={content}
             previousContent={previousContent}
+            isSkillResource={isSkillResource}
+            revisionTree={revisionTree}
+            selectedFilePath={selectedFilePath}
+            selectedFileContent={selectedFileContent}
+            fileLoading={fileLoading}
             loading={detailLoading}
             error={detailError}
             canRollback={canRollback}
@@ -666,6 +817,7 @@ export default function ResourceVersionDrawer({
             t={t}
             onRetry={() => setDetailReloadKey((value) => value + 1)}
             onRollback={handleRollback}
+            onSelectFile={handleSelectRevisionFile}
           />
         </section>
       </div>

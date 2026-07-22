@@ -381,7 +381,7 @@ export interface CreateSkillPayload {
 
 export interface PublishSkillToMarketPayload {
   name: string;
-  category: string;
+  tags: string[];
   source:
     | { type: "uploaded_zip"; uploadId: string }
     | { type: "url"; url: string };
@@ -409,6 +409,7 @@ interface BuiltinSkillListItem {
   description: string;
   category: string;
   content: string;
+  tags?: string[];
   installed?: boolean;
   installed_skill_id?: string;
 }
@@ -442,6 +443,7 @@ const normalizeMarketItem = (item: MarketItemOpenAPIResponse): MarketSkillRecord
 
   return {
     ...base,
+    tags: toStringArray(item.tags),
     id: item.market_item_id || item.id || base.id,
     marketItemId: item.market_item_id || item.id || "",
     sourceSkillId: item.source_skill_id || base.skillId,
@@ -1269,6 +1271,18 @@ export async function getSkillRevisionFile(
   return payload.content || "";
 }
 
+export async function getSkillRevisionTree(
+  skillId: string,
+  revisionId: string,
+): Promise<SkillTreeNodeRecord> {
+  const response = await skillRevisionsApi.apiCoreSkillsSkillIdRevisionsRevisionIdTreeGet({
+    skillId,
+    revisionId,
+  });
+  const payload = unwrapEnvelope<SkillTreeNodeOpenAPIResponse>(response.data);
+  return normalizeTreeNode(payload);
+}
+
 export class RollbackConflictError extends Error {
   readonly isConflict = true;
   constructor(message = 'rollback conflict: uncommitted draft exists') {
@@ -1618,16 +1632,13 @@ export async function listSkillMarketPage(options?: {
   page?: number;
   pageSize?: number;
   keyword?: string;
-  category?: string;
+  tags?: string[];
 }): Promise<MarketSkillListResult> {
   const response = await skillMarketApi.apiCoreSkillMarketGet({
     page: options?.page ?? 1,
     pageSize: options?.pageSize ?? 20,
     keyword: options?.keyword?.trim() || undefined,
-    category:
-      options?.category && options.category !== "all"
-        ? options.category.trim()
-        : undefined,
+    tags: options?.tags?.map((item) => item.trim()).filter(Boolean),
   });
   const payload = unwrapEnvelope<MarketListOpenAPIResponse>(response.data);
 
@@ -1637,6 +1648,14 @@ export async function listSkillMarketPage(options?: {
     page: payload.page ?? 1,
     pageSize: payload.page_size ?? 20,
   };
+}
+
+export async function listSkillMarketTags(): Promise<string[]> {
+  const response = await skillMarketApi.apiCoreSkillMarketTagsGet();
+  const payload = unwrapEnvelope<{ tags?: string[] }>(response.data);
+  return [...new Set(toStringArray(payload.tags))].sort((left, right) =>
+    left.localeCompare(right),
+  );
 }
 
 export async function listBuiltinSkills(): Promise<MarketSkillRecord[]> {
@@ -1649,7 +1668,7 @@ export async function listBuiltinSkills(): Promise<MarketSkillRecord[]> {
     skillName: item.name,
     description: item.description,
     category: item.category,
-    tags: [],
+    tags: toStringArray(item.tags),
     content: item.content,
     headRevisionId: "",
     draft: { hasUncommittedDraft: false, taskId: "", version: 0 },
@@ -1682,7 +1701,7 @@ export async function publishSkillToMarket(
   const response = await skillMarketApi.apiCoreSkillMarketAdminItemsPost({
     marketPublishOpenAPIRequest: {
       name: payload.name,
-      category: payload.category,
+      tags: payload.tags,
       source:
         payload.source.type === "uploaded_zip"
           ? { type: "uploaded_zip", upload_id: payload.source.uploadId }

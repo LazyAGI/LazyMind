@@ -3845,6 +3845,83 @@
   overflow: hidden;
 }
 
+.memory-version-skill-package {
+  min-height: 420px;
+  height: calc(100vh - 260px);
+  height: calc(100dvh - 260px);
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.memory-version-skill-tree {
+  min-width: 0;
+  overflow: auto;
+  border-right: 1px solid #edf1f5;
+  background: #fbfcff;
+
+  .ant-tree {
+    padding: 8px;
+    background: transparent;
+  }
+
+  .ant-tree-treenode {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .ant-tree-node-content-wrapper {
+    display: flex;
+    flex: 1 1 auto;
+  }
+
+  .ant-tree-node-content-wrapper,
+  .ant-tree-title {
+    min-width: 0;
+    overflow: hidden;
+  }
+}
+
+.memory-version-skill-tree-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-version-skill-content {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+
+  > .memory-version-content-panel {
+    min-height: 0;
+    max-height: none;
+    flex: 1;
+    border: 0;
+    border-radius: 0;
+  }
+
+  > .memory-version-content-panel > .memory-version-content-panel-head {
+    display: none;
+  }
+
+  > .ant-alert {
+    margin: 16px;
+  }
+}
+
+.memory-version-file-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .memory-version-content-panel-head {
   flex: 0 0 auto;
   padding: 10px 12px;
@@ -3904,6 +3981,18 @@
   .memory-version-content-panel {
     min-height: 320px;
     max-height: none;
+  }
+
+  .memory-version-skill-package {
+    min-height: 480px;
+    height: auto;
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(160px, 32vh) minmax(320px, 1fr);
+  }
+
+  .memory-version-skill-tree {
+    border-right: 0;
+    border-bottom: 1px solid #edf1f5;
   }
 }
 
