@@ -855,6 +855,17 @@ const enUS = {
 
   // Chat
   chat: {
+	markdownDiagram: "Diagram",
+	markdownSource: "Source",
+	markdownDiagramRendering: "Rendering diagram…",
+	markdownDiagramRenderFailed: "Diagram rendering failed",
+	markdownDiagramWaitingContent: "Waiting for complete diagram content",
+	markdownDiagramGenerating: "Generating diagram…",
+	markdownSourceCopied: "Source copied",
+	markdownSourceCopyFailed: "Failed to copy source",
+	collectedHistoryInputs: "Historical inputs ({{count}})",
+	collectedHistoryInputMode: "{{mode}} · {{time}}",
+	collectedHistoryInputEmpty: "No text summary is available for this historical run",
     contextUsage: "Context Usage",
     contextUsageShow: "Show context usage",
     contextUsageViewReport: "View Report",

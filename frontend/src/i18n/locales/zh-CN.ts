@@ -821,6 +821,17 @@ const zhCN = {
   },
 
   chat: {
+	markdownDiagram: "图表",
+	markdownSource: "源码",
+	markdownDiagramRendering: "正在渲染图表…",
+	markdownDiagramRenderFailed: "图表渲染失败",
+	markdownDiagramWaitingContent: "等待完整图表内容",
+	markdownDiagramGenerating: "正在生成图表…",
+	markdownSourceCopied: "源码已复制",
+	markdownSourceCopyFailed: "源码复制失败",
+	collectedHistoryInputs: "历史资料（{{count}}）",
+	collectedHistoryInputMode: "{{mode}} · {{time}}",
+	collectedHistoryInputEmpty: "该历史执行没有可展示的文本摘要",
     contextUsage: "上下文用量",
     contextUsageShow: "查看上下文用量",
     contextUsageViewReport: "查看报告",

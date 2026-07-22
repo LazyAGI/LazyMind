@@ -516,6 +516,9 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 }
 
 func chatHistoryInput(raw map[string]any, query string) any {
+	if displayQuery, ok := raw["display_query"].(string); ok && strings.TrimSpace(displayQuery) != "" {
+		return []any{map[string]any{"input_type": "text", "text": strings.TrimSpace(displayQuery)}}
+	}
 	if in, ok := raw["input"].([]any); ok && len(in) > 0 {
 		return in
 	}
