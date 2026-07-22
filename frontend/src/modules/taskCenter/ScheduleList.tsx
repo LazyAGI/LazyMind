@@ -122,6 +122,24 @@ function formatMonthDays(days: number[]): string {
   ].filter(Boolean).join('，');
 }
 
+function parseMonthDayField(field: string): number[] {
+  const days: number[] = [];
+  field.split(',').forEach((rawToken) => {
+    const token = rawToken.trim();
+    const range = token.match(/^(-?\d+)-(-?\d+)$/);
+    if (range) {
+      const start = Number(range[1]);
+      const end = Number(range[2]);
+      const step = start <= end ? 1 : -1;
+      for (let day = start; day !== end + step; day += step) days.push(day);
+      return;
+    }
+    const day = Number(token);
+    if (Number.isInteger(day)) days.push(day);
+  });
+  return sortMonthDays([...new Set(days.filter((day) => (day >= 1 && day <= 31) || (day >= -4 && day <= -1)))]);
+}
+
 function buildCronExpr(weekdays: number[], time: dayjs.Dayjs): string {
   const minute = time.minute();
   const hour = time.hour();
@@ -158,7 +176,7 @@ function describeCron(cron: string, t: TFunc): string {
   const cadence = parseCadence(cron);
   const fields = cadence.cron.trim().split(/\s+/);
   if (fields.length === 5 && fields[2] !== '*') {
-    const days = formatMonthDays(fields[2].split(',').map(Number));
+    const days = formatMonthDays(parseMonthDayField(fields[2]));
     return `每${cadence.interval > 1 ? cadence.interval : ''}月 · ${days} ${String(fields[1]).padStart(2, '0')}:${String(fields[0]).padStart(2, '0')}`;
   }
   const { weekdays, time } = parseCronExpr(cron);
@@ -191,18 +209,6 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
   );
   const [localTime, setLocalTime] = useState<dayjs.Dayjs>(parsed.time);
 
-  // Sync whenever the controlled value changes (e.g. form.setFieldsValue in edit mode).
-  const prevValue = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (value !== undefined && value !== prevValue.current) {
-      prevValue.current = value;
-      const p = parseCronExpr(value);
-      // Normalise: empty means every day, store as all 7 so localWeekdays stays consistent.
-      setLocalWeekdays(p.weekdays.length === 0 ? WEEKDAY_VALUES : p.weekdays);
-      setLocalTime(p.time);
-    }
-  }, [value]);
-
   const rawWeekdays = value ? parseCronExpr(value).weekdays : localWeekdays;
   // Empty array means "every day" (dow=*). Treat it as all 7 days selected so
   // the buttons light up correctly; buildCronExpr still emits '*' for all-7.
@@ -232,8 +238,26 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
   const initialMode = cadence.unit || (fields.length === 5 && fields[2] !== '*' ? 'month' : 'week');
   const [mode, setMode] = useState<'week' | 'month'>(initialMode);
   const [interval, setInterval] = useState(cadence.interval);
-  const [monthDays, setMonthDays] = useState<number[]>(initialMode === 'month' ? fields[2].split(',').map(Number).filter(Boolean) : [1]);
+  const [monthDays, setMonthDays] = useState<number[]>(initialMode === 'month' ? parseMonthDayField(fields[2]) : [1]);
   const [monthPanelOpen, setMonthPanelOpen] = useState(false);
+
+  // Sync every part of the visual picker when form.setFieldsValue loads another schedule.
+  const prevValue = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (value !== undefined && value !== prevValue.current) {
+      prevValue.current = value;
+      const nextCadence = parseCadence(value);
+      const nextFields = nextCadence.cron.trim().split(/\s+/);
+      const nextMode = nextCadence.unit || (nextFields.length === 5 && nextFields[2] !== '*' ? 'month' : 'week');
+      const nextParsed = parseCronExpr(value);
+      setLocalWeekdays(nextParsed.weekdays.length === 0 ? WEEKDAY_VALUES : nextParsed.weekdays);
+      setLocalTime(nextParsed.time);
+      setMode(nextMode);
+      setInterval(nextCadence.interval);
+      setMonthDays(nextMode === 'month' ? parseMonthDayField(nextFields[2]) : [1]);
+    }
+  }, [value]);
+
   const emitMode = (nextMode: 'week' | 'month') => {
     setMode(nextMode);
     onChange?.(withCadence(nextMode === 'week' ? buildCronExpr(weekdays, time) : buildMonthlyCronExpr(monthDays, time), interval, nextMode));
