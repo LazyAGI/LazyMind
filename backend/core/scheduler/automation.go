@@ -291,6 +291,12 @@ func BatchCreateHandler(w http.ResponseWriter, r *http.Request) {
 	created := map[string]string{}
 	var group orm.AutomationGroup
 	db := store.DB()
+	for _, item := range body.Tasks {
+		if err := validateScheduleDescription(r.Context(), item.PromptTemplate); err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 	err := db.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		tz := body.Group.Timezone

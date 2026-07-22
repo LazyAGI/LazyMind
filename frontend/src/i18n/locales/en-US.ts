@@ -1387,6 +1387,7 @@ const enUS = {
     nextRunAt: "Next Run",
     enabled: "Status",
     scheduleTaskCount: "Runs",
+    sequence: "No.",
     scheduleDescription: "Description",
     scheduleAttachments: "Attachments",
     scheduleTriggerPeriod: "Schedule",

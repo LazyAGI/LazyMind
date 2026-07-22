@@ -24,6 +24,7 @@ export interface Task {
   created_at: string;
   updated_at: string;
   finished_at?: string;
+  waiting_reason?: string;
 }
 
 export interface Schedule {
@@ -75,6 +76,7 @@ export interface TaskListResponse {
     all: number;
     pending: number;
     waiting: number;
+    waiting_inputs: number;
     running: number;
     succeeded: number;
     failed: number;
@@ -124,14 +126,6 @@ export async function cancelTask(id: string): Promise<void> {
 
 export async function removeTask(id: string): Promise<void> {
   await axiosInstance.post(`${CORE}/task-center/tasks/${id}:remove`);
-}
-
-export async function addTask(conversationId: string, title?: string): Promise<Task> {
-  const resp = await axiosInstance.post<Task>(`${CORE}/task-center/tasks`, {
-    conversation_id: conversationId,
-    title: title ?? '',
-  });
-  return resp.data;
 }
 
 export async function listSchedules(includeDisabled = false): Promise<ScheduleListResponse> {

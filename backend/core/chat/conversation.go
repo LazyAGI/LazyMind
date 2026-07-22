@@ -20,7 +20,6 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
-	"lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/plugin"
 	"lazymind/core/state"
@@ -398,7 +397,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			Title:          &taskTitle,
 			Status:         "running",
 		}
-		_ = taskcenter.CreateTask(reqCtx, db, bgTask)
+		if taskcenter.CreateTask(reqCtx, db, bgTask) == nil {
+			_ = db.WithContext(reqCtx).Model(&orm.Conversation{}).
+				Where("id = ? AND create_user_id = ?", convID, userID).
+				Update("is_task_conv", true).Error
+		}
 	}
 
 	// Mark the last assistant turn that had an ask_pending as answered.
@@ -1187,19 +1190,24 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		userID = "0"
 	}
 	db := store.DB()
-	res := db.Where("id = ? AND create_user_id = ?", convID, userID).Delete(&orm.Conversation{})
-	if res.RowsAffected == 0 {
+	now := time.Now().UTC()
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&orm.Conversation{}).
+			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, []string{convID}, now)
+	}); errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 		return
-	}
-	db.Where("conversation_id = ?", convID).Delete(&orm.ChatHistory{})
-	db.Where("conversation_id = ?", convID).Delete(&orm.MultiAnswersChatHistory{})
-	db.Where("conversation_id = ?", convID).Delete(&orm.ConversationArtifact{})
-	// Cascade-delete task center entries for this conversation.
-	db.Where("conversation_id = ?", convID).Delete(&orm.TaskCenterTask{})
-	if err := removeConversationArtifactFiles(userID, convID); err != nil {
-		log.Logger.Warn().Err(err).Str("conversation_id", convID).
-			Msg("remove main chat artifact files failed")
+	} else if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
@@ -1255,28 +1263,15 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("id IN ?", ownedIDs).Delete(&orm.Conversation{}).Error; err != nil {
+		now := time.Now().UTC()
+		if err := tx.Model(&orm.Conversation{}).Where("id IN ? AND deleted_at IS NULL", ownedIDs).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.ChatHistory{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.MultiAnswersChatHistory{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.ConversationArtifact{}).Error; err != nil {
-			return err
-		}
-		return tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.TaskCenterTask{}).Error
+		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, ownedIDs, now)
 	}); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "batch delete conversations failed", err), http.StatusInternalServerError)
 		return
-	}
-	for _, conversationID := range ownedIDs {
-		if err := removeConversationArtifactFiles(userID, conversationID); err != nil {
-			log.Logger.Warn().Err(err).Str("conversation_id", conversationID).
-				Msg("remove main chat artifact files failed")
-		}
 	}
 
 	writeConversationJSON(w, http.StatusOK, map[string]any{

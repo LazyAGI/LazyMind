@@ -713,6 +713,8 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 }
 
 .schedule-empty { margin: 50px 0; }
+.schedule-history-status { display: grid; justify-items: start; gap: 4px; }
+.schedule-history-status small { color: $muted; line-height: 1.35; }
 .schedule-detail-content section { margin-bottom: 12px; padding: 18px; border: 1px solid $border; border-radius: 10px; background: #fff; }
 .schedule-detail-content h3 { margin: 0 0 10px; font-size: 14px; }
 .schedule-detail-content p { margin: 0; color: $muted; line-height: 1.7; }

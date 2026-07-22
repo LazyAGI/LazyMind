@@ -1,0 +1,2 @@
+-- Soft-deleted task conversations cannot be restored safely because users may
+-- also have deleted them independently. Execution counts remain derivable data.

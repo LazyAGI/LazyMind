@@ -280,7 +280,8 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     from lazymind.chat.plugin.plugin_manager import is_plugin_driver_turn
     raw_query = str(request.message.query or '')
     if (
-        not is_plugin_driver_turn(request.plugin.plugin_context)
+        not request.runtime.skip_sensitive_filter
+        and not is_plugin_driver_turn(request.plugin.plugin_context)
         and check_sensitive_content(raw_query)
     ):
         return await _handle_chat_impl(request, task_profile_override=provisional)
@@ -363,7 +364,13 @@ async def _handle_chat_impl(
     language_query = user_input.strip()
     is_driver_turn = is_plugin_driver_turn(plugin.plugin_context)
     sensitive_word = (
-        None if is_driver_turn or runtime.context_usage_preview or runtime.context_prompt_export
+        None
+        if (
+            runtime.skip_sensitive_filter
+            or is_driver_turn
+            or runtime.context_usage_preview
+            or runtime.context_prompt_export
+        )
         else check_sensitive_content(query)
     )
     if sensitive_word:

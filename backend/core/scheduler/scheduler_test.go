@@ -123,3 +123,15 @@ func TestCadenceExpression(t *testing.T) {
 		t.Fatal("adjacent ISO weeks must not both match a two-week cadence")
 	}
 }
+
+func TestPreviousCronTimeUsesPriorScheduledCycle(t *testing.T) {
+	next := time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC)
+	previous, err := previousCronTime("0 12 * * 4", "UTC", next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, time.July, 23, 12, 0, 0, 0, time.UTC)
+	if !previous.Equal(want) {
+		t.Fatalf("previous cycle = %s, want %s", previous, want)
+	}
+}

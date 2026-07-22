@@ -2,12 +2,18 @@ from typing import Annotated, Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Body, Header, Response
 from lazymind.chat.service.chat_request import ChatRequest
-from lazymind.chat.service.chat_service import handle_chat
+from lazymind.chat.service.chat_service import check_sensitive_content, handle_chat
 from lazymind.chat.service.component import get_all_tool_groups, normalize_tool_locale
 from lazymind.model_config import inject_model_config
 from lazyllm.tools.tool_config_inject import inject_tool_config
 
 router = APIRouter()
+
+
+@router.post('/api/chat/sensitive-check', summary='Check text against the configured sensitive-word list')
+async def sensitive_check(payload: Annotated[Dict[str, Any], Body()]):
+    matched_word = check_sensitive_content(str(payload.get('text') or ''))
+    return {'passed': matched_word is None, 'matched_word': matched_word}
 
 
 @router.post('/api/chat/tools', summary='List the tool catalog and Toolkit methods')

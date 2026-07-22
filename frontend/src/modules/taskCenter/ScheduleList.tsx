@@ -328,38 +328,40 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
 
   const columns: ColumnsType<Task> = [
     {
-      title: t('taskCenter.scheduleDescription'),
-      dataIndex: 'conversation_title',
-      render: (v: string, r: Task) => {
-        const label = v || r.title || r.conversation_id;
-        return (
+      title: t('taskCenter.sequence'),
+      key: 'sequence',
+      width: 56,
+      align: 'center',
+      render: (_value, record, index) => {
+        const sequence = (page - 1) * 10 + index + 1;
+        return record.conversation_id ? (
           <Button
             type='link'
-            style={{ padding: 0, textAlign: 'left', height: 'auto', whiteSpace: 'normal' }}
-            onClick={() => handleOpenConversation(r.conversation_id)}
+            style={{ padding: 0, height: 'auto' }}
+            onClick={() => handleOpenConversation(record.conversation_id)}
           >
-            {label}
+            {sequence}
           </Button>
-        );
+        ) : sequence;
       },
     },
     {
       title: t('taskCenter.statusCol'),
       dataIndex: 'status',
-      width: 90,
+      width: 150,
       filters: statusOptions,
       filteredValue: statusFilter,
       onFilter: (value, record) => record.status === value,
-      render: (v: string) => (
-        <Tag color={v === 'succeeded' ? 'green' : v === 'failed' ? 'red' : 'blue'}>
-          {t(`taskCenter.status${capitalize(v)}`) || v}
-        </Tag>
+      render: (v: string, record: Task) => (
+        <div className='schedule-history-status'><Tag color={v === 'succeeded' ? 'green' : v === 'failed' ? 'red' : 'blue'}>
+          {v === 'waiting_inputs' ? t('taskCenter.statusWaitingInputs') : t(`taskCenter.status${capitalize(v)}`) || v}
+        </Tag>{record.waiting_reason ? <small>{record.waiting_reason}</small> : null}</div>
       ),
     },
     {
       title: t('taskCenter.steps'),
       dataIndex: 'steps',
-      width: 80,
+      width: 64,
       render: (steps: Task['steps']) => {
         if (!steps?.length) return '—';
         const done = steps.filter((s) => s.status === 'succeeded').length;
@@ -369,13 +371,13 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
     {
       title: t('taskCenter.createdAt'),
       dataIndex: 'created_at',
-      width: 160,
+      width: 140,
       render: (v: string) => new Date(v).toLocaleString(),
     },
     {
       title: t('taskCenter.finishedAt'),
       dataIndex: 'finished_at',
-      width: 160,
+      width: 140,
       render: (v: string) => (v ? new Date(v).toLocaleString() : '—'),
     },
   ];

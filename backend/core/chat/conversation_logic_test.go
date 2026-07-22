@@ -34,6 +34,17 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 	}
 }
 
+func TestBuildChatRequestBodyPropagatesSensitiveFilterBypass(t *testing.T) {
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{"skip_sensitive_filter": true}, nil, "", 1)
+	if skip, _ := body["skip_sensitive_filter"].(bool); !skip {
+		t.Fatalf("expected skip_sensitive_filter=true, got %#v", body["skip_sensitive_filter"])
+	}
+	req := buildLazyChatRequest(body)
+	if !req.Runtime.SkipSensitiveFilter {
+		t.Fatal("expected upstream runtime to skip repeated sensitive filtering")
+	}
+}
+
 func TestApplyIntentOperationsPreservesUnchangedFields(t *testing.T) {
 	doc := map[string]any{
 		"version":        2,

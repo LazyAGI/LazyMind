@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -93,6 +94,29 @@ func nextCronTime(expr, tz string) (time.Time, error) {
 		t = t.Add(time.Minute)
 	}
 	return time.Time{}, fmt.Errorf("cron expression produces no future times within 5 years")
+}
+
+func previousCronTime(expr, tz string, before time.Time) (time.Time, error) {
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		loc = time.UTC
+	}
+	interval, cadenceUnit, cronExpr, err := parseCadenceExpr(expr)
+	if err != nil {
+		return time.Time{}, err
+	}
+	fields := strings.Fields(cronExpr)
+	if len(fields) != 5 {
+		return time.Time{}, fmt.Errorf("cron expression must have 5 fields (minute hour dom month dow)")
+	}
+	t := before.In(loc).Truncate(time.Minute).Add(-time.Minute)
+	for i := 0; i < 5*525600; i++ {
+		if matchCron(t, fields) && matchCadence(t, interval, cadenceUnit) {
+			return t, nil
+		}
+		t = t.Add(-time.Minute)
+	}
+	return time.Time{}, fmt.Errorf("cron expression has no previous time within 5 years")
 }
 
 func parseCadenceExpr(expr string) (int, string, string, error) {
@@ -234,14 +258,19 @@ func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
 		return
 	}
 	sem := make(chan struct{}, maxConcurrentFires)
+	var wg sync.WaitGroup
 	for _, s := range due {
 		s := s
 		sem <- struct{}{}
+		wg.Add(1)
 		go func() {
-			defer func() { <-sem }()
+			defer func() { <-sem; wg.Done() }()
 			fireOne(ctx, db, s, now)
 		}()
 	}
+	// Do not resolve dependencies until every due schedule has materialized its
+	// actual TaskCenterTask. This is the same-tick barrier for dependency chains.
+	wg.Wait()
 }
 
 func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.Time) {
@@ -258,25 +287,18 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 	result := db.WithContext(ctx).Model(&orm.UserSchedule{}).
 		Where("id = ? AND next_run_at = ?", s.ID, s.NextRunAt).
 		Updates(map[string]any{
-			"last_run_at": firedAt,
+			"last_run_at": scheduledAt,
 			"next_run_at": next.UTC(),
 		})
 	if result.RowsAffected == 0 {
 		// Another instance already fired this schedule tick; skip entirely.
 		return
 	}
-	// Materialize the scheduled occurrence before dispatching. Downstream schedules
-	// use this durable row as the expected-input barrier, including same-time fires.
-	now := time.Now().UTC()
-	fire := orm.ScheduleFire{ID: common.GeneratePrefixedID("fire_", 36), ScheduleID: s.ID, ScheduledFireAt: scheduledAt, LogicalSlotKey: s.ID + ":" + scheduledAt.Format(time.RFC3339), Status: "planned", Attempt: 1, CreatedAt: now, UpdatedAt: now}
-	if err := db.WithContext(ctx).Create(&fire).Error; err != nil {
-		return
-	}
-
 	var depCount int64
 	db.WithContext(ctx).Model(&orm.ScheduleDependency{}).Where("target_schedule_id = ? AND enabled = true", s.ID).Count(&depCount)
 	if depCount > 0 {
-		createWaitingScheduledTask(ctx, db, s, fire)
+		start := dependencyWindowStart(db, s, scheduledAt)
+		createWaitingScheduledTask(ctx, db, s, start, scheduledAt, "scheduled")
 		return
 	}
 
@@ -301,7 +323,7 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 		ScheduleID:        &s.ID,
 		GroupID:           s.GroupID,
 		ScheduledFireAt:   &scheduledAt,
-		LogicalSlotKey:    fire.LogicalSlotKey,
+		LogicalSlotKey:    s.ID + ":" + scheduledAt.Format(time.RFC3339Nano),
 		TriggerType:       "scheduled",
 		DefinitionVersion: s.DefinitionVersion,
 	}
@@ -309,8 +331,6 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 		fmt.Printf("[Scheduler] CreateTask failed for schedule %s: %v\n", s.ID, err)
 		return
 	}
-	db.WithContext(ctx).Model(&orm.ScheduleFire{}).Where("id = ?", fire.ID).Updates(map[string]any{"task_id": task.ID, "status": "running", "updated_at": time.Now().UTC()})
-
 	// Task persisted — now it's safe to increment run_count.
 	db.WithContext(ctx).Model(&orm.UserSchedule{}).
 		Where("id = ?", s.ID).
@@ -319,11 +339,12 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 	// Build chat request with kb_ids and file_ids from the schedule definition.
 	query := renderPromptTemplate(s.PromptTemplate, firedAt)
 	reqBody := map[string]any{
-		"query":           query,
-		"conversation_id": convID,
-		"stream":          true,
-		"mode":            "auto",
-		"input":           []map[string]any{{"input_type": "text", "text": query}},
+		"query":                 query,
+		"conversation_id":       convID,
+		"stream":                true,
+		"mode":                  "auto",
+		"input":                 []map[string]any{{"input_type": "text", "text": query}},
+		"skip_sensitive_filter": true,
 	}
 	// Attach knowledge base IDs if configured.
 	var kbIDs []string
@@ -516,6 +537,10 @@ func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "cron_expr and prompt_template are required", http.StatusBadRequest)
 		return
 	}
+	if err := validateScheduleDescription(r.Context(), body.PromptTemplate); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	tz := body.Timezone
 	if tz == "" {
 		tz = "Asia/Shanghai"
@@ -634,6 +659,10 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	updates["remark"] = body.Remark
 	s.Remark = body.Remark
 	if body.PromptTemplate != "" {
+		if err := validateScheduleDescription(r.Context(), body.PromptTemplate); err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		updates["prompt_template"] = body.PromptTemplate
 		s.PromptTemplate = body.PromptTemplate
 	}
@@ -709,17 +738,16 @@ func RunNowHandler(w http.ResponseWriter, r *http.Request) {
 	var depCount int64
 	db.Model(&orm.ScheduleDependency{}).Where("target_schedule_id = ? AND enabled = true", s.ID).Count(&depCount)
 	if depCount > 0 {
-		fire := orm.ScheduleFire{ID: common.GeneratePrefixedID("fire_", 36), ScheduleID: s.ID, ScheduledFireAt: now, LogicalSlotKey: s.ID + ":manual:" + now.Format(time.RFC3339Nano), Status: "planned", Attempt: 1, CreatedAt: now, UpdatedAt: now}
-		if err := db.Create(&fire).Error; err != nil {
-			common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		taskID := createWaitingScheduledTask(r.Context(), db, s, fire)
+		// A manual run uses the click time as its right boundary. Its left boundary
+		// is the most recent successful, non-deleted run. On the first effective
+		// run, derive one full cycle from the next planned trigger.
+		start := dependencyWindowStart(db, s, s.NextRunAt)
+		taskID := createWaitingScheduledTask(r.Context(), db, s, start, now, "manual")
 		if taskID == "" {
 			common.ReplyErr(w, "failed to create waiting task", http.StatusInternalServerError)
 			return
 		}
-		db.Model(&orm.UserSchedule{}).Where("id = ?", s.ID).Update("last_run_at", now)
+		go resumeWaitingTasks(context.Background(), db)
 		common.ReplyJSON(w, map[string]any{"task_id": taskID, "conversation_id": "", "status": "waiting_inputs"})
 		return
 	}
@@ -734,12 +762,16 @@ func RunNowHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	taskTitle = truncateRunes(taskTitle, 40, "...")
 	task := &orm.TaskCenterTask{
-		UserID:         s.UserID,
-		ConversationID: convID,
-		TaskType:       "scheduled",
-		Title:          &taskTitle,
-		Status:         "running",
-		ScheduleID:     &s.ID,
+		UserID:          s.UserID,
+		ConversationID:  convID,
+		TaskType:        "scheduled",
+		Title:           &taskTitle,
+		Status:          "running",
+		ScheduleID:      &s.ID,
+		GroupID:         s.GroupID,
+		ScheduledFireAt: &now,
+		LogicalSlotKey:  s.ID + ":manual:" + now.Format(time.RFC3339Nano),
+		TriggerType:     "manual",
 	}
 	if err := taskcenter.CreateTask(r.Context(), db, task); err != nil {
 		common.ReplyErr(w, "failed to create task: "+err.Error(), http.StatusInternalServerError)
