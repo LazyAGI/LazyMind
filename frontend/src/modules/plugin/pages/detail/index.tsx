@@ -190,23 +190,28 @@ export default function PluginDetailPage() {
           pollRef.current = null;
           const wasRepairing = prevStatusRef.current === 'repairing';
           if (wasRepairing) {
-            const repairFailed = data.generate_warning?.startsWith('[修复失败]');
+            let repairFailed = data.generate_warning?.startsWith('[修复失败]') ?? false;
+            let repairDetails: string[] = [];
+            if (data.last_repair_run_id) {
+              try {
+                const run = await getPluginRepairRun(pluginId, data.last_repair_run_id);
+                repairDetails = Array.isArray(run.diagnostics_after)
+                  ? run.diagnostics_after
+                    .filter((item) => item.severity === 'error')
+                    .map((item) => `${item.path}: ${localizeErrorCode(item.code, localizeErrorCode('2000509'))}`)
+                  : [];
+                repairFailed = run.status !== 'succeeded' || repairDetails.length > 0;
+              } catch {
+                // Keep the warning-prefix fallback when repair-run lookup is unavailable.
+              }
+            }
             // Close the repair Modal now that the job finished.
             setRepairModalOpen(false);
             setRepairHint('');
             setRepairValidationErrors([]);
             setRepairSubmitting(false);
             if (repairFailed) {
-              if (data.last_repair_run_id) {
-                void getPluginRepairRun(pluginId, data.last_repair_run_id).then((run) => {
-                  const details = Array.isArray(run.diagnostics_after)
-                    ? run.diagnostics_after
-                      .filter((item) => item.severity === 'error')
-                      .map((item) => `${item.path}: ${localizeErrorCode(item.code, localizeErrorCode('2000509'))}`)
-                    : [];
-                  setRepairFailureDetails([...new Set(details)]);
-                }).catch(() => setRepairFailureDetails([]));
-              }
+              setRepairFailureDetails([...new Set(repairDetails)]);
               // Clear only the generate_warning banner so it reappears with the new failure message.
               if (pluginId) {
                 const warningKey = `generate_warning:${contentKey(data.generate_warning ?? '')}`;
@@ -274,10 +279,18 @@ export default function PluginDetailPage() {
     try {
       let fullHint = hintSnapshot;
       if (errorsSnapshot.length > 0) {
-        const errText = errorsSnapshot.map((e) => e.message).join('\n');
+        const errText = JSON.stringify(errorsSnapshot.map((e) => ({
+          code: e.code,
+          path: e.path,
+          node_id: e.nodeId,
+          edge_id: e.edgeKey,
+          material_id: e.materialId,
+          message: e.message,
+          details: e.details,
+        })), null, 2);
         fullHint = fullHint
-          ? `${fullHint}\n\n校验错误（需一并修复）：\n${errText}`
-          : `校验错误（需修复）：\n${errText}`;
+          ? `${fullHint}\n\nAuthoritative validation diagnostics to fix:\n${errText}`
+          : `Authoritative validation diagnostics to fix:\n${errText}`;
       }
       setRepairSubmitting(true);
       // Mark prevStatusRef as repairing BEFORE the API call so the polling
@@ -395,8 +408,9 @@ export default function PluginDetailPage() {
     const result = await validatePluginDraft(pluginId);
     const diagnostics = result.diagnostics.map((item) => ({
       code: item.code,
-      message: localizeErrorCode(item.code, localizeErrorCode('2000509')),
+      message: item.message,
       severity: item.severity,
+      path: item.path,
       nodeId: item.node_id,
       edgeKey: item.edge_id,
       materialId: item.material_id,
@@ -732,7 +746,13 @@ export default function PluginDetailPage() {
                 <p style={{ marginBottom: 6 }}>{t('selfEvolutionRun.pluginDetailRepairValidationBasis')}</p>
                 <ul style={{ margin: '0 0 12px 0', paddingLeft: 18, fontSize: 13, color: 'var(--color-text-secondary, #888)' }}>
                   {repairValidationErrors.map((e, i) => (
-                    <li key={i}>{localizeErrorCode(e.code, localizeErrorCode('2000509'))}</li>
+                    <li key={i}>{t(`selfEvolutionRun.validationErrors.${e.code}`, {
+                      defaultValue: e.message,
+                      node: e.nodeId ?? '',
+                      edge: e.edgeKey ?? '',
+                      material: e.materialId ?? '',
+                      producer: String(e.details?.producer_step_id ?? e.details?.previous_producer ?? ''),
+                    })}</li>
                   ))}
                 </ul>
               </>
