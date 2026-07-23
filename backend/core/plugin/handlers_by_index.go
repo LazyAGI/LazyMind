@@ -151,7 +151,7 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "patch item failed", http.StatusInternalServerError)
 		return
 	}
-	notifyPluginArtifactUpdated(ctx, db, sessionID, newRev.StepID, newRev.SlotID, newRev.Slot, newRev.Revision, newRev.ListIndex, "human")
+	NotifyPluginArtifactUpdated(ctx, db, sessionID, newRev.StepID, newRev.SlotID, newRev.Slot, newRev.Revision, newRev.ListIndex, "human")
 	common.ReplyOK(w, map[string]any{
 		"type":       "slot_item_patched",
 		"session_id": sessionID,
@@ -340,7 +340,7 @@ func RollbackSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "rollback failed", http.StatusInternalServerError)
 		return
 	}
-	notifyPluginArtifactUpdated(ctx, db, sessionID, newRev.StepID, newRev.SlotID, newRev.Slot, newRev.Revision, newRev.ListIndex, "rollback")
+	NotifyPluginArtifactUpdated(ctx, db, sessionID, newRev.StepID, newRev.SlotID, newRev.Slot, newRev.Revision, newRev.ListIndex, "rollback")
 	common.ReplyOK(w, map[string]any{
 		"type":       "slot_item_rolled_back",
 		"session_id": sessionID,

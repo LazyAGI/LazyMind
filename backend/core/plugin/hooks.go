@@ -114,10 +114,10 @@ func onArtifact(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID
 	})
 }
 
-// notifyPluginArtifactUpdated publishes a durable slot change made outside the
+// NotifyPluginArtifactUpdated publishes a durable slot change made outside the
 // SubAgent artifact hook (for example a human edit, version selection, or rollback).
 // Event delivery is best-effort; the committed revision remains authoritative.
-func notifyPluginArtifactUpdated(
+func NotifyPluginArtifactUpdated(
 	ctx context.Context,
 	db *gorm.DB,
 	sessionID, stepID, slotID, slot string,

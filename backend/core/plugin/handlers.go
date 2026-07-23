@@ -563,7 +563,7 @@ func PatchSessionSlot(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "select revision failed", http.StatusInternalServerError)
 		return
 	}
-	notifyPluginArtifactUpdated(ctx, db, sessionID, selected.StepID, selected.SlotID, selected.Slot, selected.Revision, selected.ListIndex, "selection")
+	NotifyPluginArtifactUpdated(ctx, db, sessionID, selected.StepID, selected.SlotID, selected.Slot, selected.Revision, selected.ListIndex, "selection")
 	common.ReplyOK(w, map[string]any{"selected_revision": body.SelectedRevision})
 }
 
