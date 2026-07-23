@@ -4953,27 +4953,27 @@ export function SelfEvolutionPageController({
                 >
                   <span role="rowheader">
                     <strong>{questionTypeLabel}</strong>
-                  <small>
-                    {t("selfEvolutionRun.scoredCaseCount", {
-                      scored: summary.scoredCaseCount,
-                      total: summary.caseCount,
-                    })}
-                  </small>
-                </span>
-                {evalReportMetricMeta.map((metric) => {
-                  const value = clampScore(summary.metrics[metric.key]);
-                  return (
-                    <span
-                      key={metric.key}
-                      role="cell"
-                      className="self-evolution-px-heatmap-cell"
-                      style={getEvalMetricTone(value)}
-                      title={`${questionTypeLabel} ${metric.label}: ${formatPercent(value)}`}
-                    >
-                      {formatPercent(value)}
-                    </span>
-                  );
-                })}
+                    <small>
+                      {t("selfEvolutionRun.scoredCaseCount", {
+                        scored: summary.scoredCaseCount,
+                        total: summary.caseCount,
+                      })}
+                    </small>
+                  </span>
+                  {evalReportMetricMeta.map((metric) => {
+                    const value = clampScore(summary.metrics[metric.key]);
+                    return (
+                      <span
+                        key={metric.key}
+                        role="cell"
+                        className="self-evolution-px-heatmap-cell"
+                        style={getEvalMetricTone(value)}
+                        title={`${questionTypeLabel} ${metric.label}: ${formatPercent(value)}`}
+                      >
+                        {formatPercent(value)}
+                      </span>
+                    );
+                  })}
                 </div>
               );
             })}
