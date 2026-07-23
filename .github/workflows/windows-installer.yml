@@ -38,6 +38,18 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Normalize Electron pnpm workspace
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $workspacePath = Join-Path $env:GITHUB_WORKSPACE "desktop\electron\pnpm-workspace.yaml"
+          $workspace = Get-Content -LiteralPath $workspacePath -Raw
+          if ($workspace -notmatch '(?m)^packages:\s*$') {
+            $workspace = "packages:`n  - `"."`n`n$workspace"
+            Set-Content -LiteralPath $workspacePath -Value $workspace -NoNewline
+          }
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
