@@ -1426,6 +1426,46 @@ func TestSourceTreeBindingRootRequestIncludesDeletingBindingsWithStatus(t *testi
 	}
 }
 
+func TestSourceTreeBindingRootRequestReturnsSingleDeletingBindingWithStatus(t *testing.T) {
+	t.Parallel()
+
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1", Status: "DELETING"}
+	repo.bindings["source-1"] = []store.Binding{{
+		BindingID:              "binding-1",
+		SourceID:               "source-1",
+		TreeKey:                "local-root",
+		CoreParentDocumentName: "test1",
+		ConnectorType:          "local_fs",
+		TargetType:             "local_path",
+		TargetRef:              "/tmp/test_watch/test1",
+		Status:                 "DELETING",
+	}}
+	engine := NewDBSourceTreeQueryEngine(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10})
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		TreeKey:   "local-root",
+		UseCache:  boolPtr(true),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list deleting binding root: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected the deleting binding root, got %+v", page.Items)
+	}
+	root := page.Items[0]
+	if root.BindingID != "binding-1" || root.DisplayName != "test1" {
+		t.Fatalf("unexpected deleting binding root: %+v", root)
+	}
+	if root.SourceState != "OUT_OF_SCOPE" || root.PendingAction != "DELETE" ||
+		!root.HasUpdate || root.UpdateType != "deleted" || root.UpdateDesc != "待删除" {
+		t.Fatalf("single deleting binding root should expose pending delete status: %+v", root)
+	}
+}
+
 func TestSourceTreeBindingRootsUseIndexedRootDisplayNames(t *testing.T) {
 	t.Parallel()
 

@@ -265,7 +265,10 @@ func (e *DBSourceTreeQueryEngine) maybeListBindingRoots(ctx context.Context, sou
 	if err != nil {
 		return TreeNodePage{}, false, mapStoreError(err)
 	}
-	if len(bindings) <= 1 {
+	if len(bindings) == 0 {
+		return TreeNodePage{}, false, nil
+	}
+	if len(bindings) == 1 && !strings.EqualFold(strings.TrimSpace(bindings[0].Status), "DELETING") {
 		return TreeNodePage{}, false, nil
 	}
 	page, err := e.bindingRootsPage(ctx, source, bindings)
