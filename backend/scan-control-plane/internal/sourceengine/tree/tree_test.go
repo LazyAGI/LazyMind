@@ -1369,7 +1369,7 @@ func TestSourceTreeBindingRootRequestReturnsAllBindingRootsForMultiBindingSource
 	}
 }
 
-func TestSourceTreeBindingRootRequestExcludesDeletingBindings(t *testing.T) {
+func TestSourceTreeBindingRootRequestIncludesDeletingBindingsWithStatus(t *testing.T) {
 	t.Parallel()
 
 	base := newTreeReadRepo()
@@ -1405,8 +1405,24 @@ func TestSourceTreeBindingRootRequestExcludesDeletingBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list binding roots: %v", err)
 	}
-	if len(page.Items) != 1 || page.Items[0].BindingID != "binding-new" {
-		t.Fatalf("expected only the active binding root, got %+v", page.Items)
+	if len(page.Items) != 2 {
+		t.Fatalf("expected active and deleting binding roots, got %+v", page.Items)
+	}
+	deleting := page.Items[0]
+	if deleting.BindingID != "binding-old" || deleting.DisplayName != "Old" {
+		t.Fatalf("unexpected deleting binding root: %+v", deleting)
+	}
+	if deleting.SourceState != "OUT_OF_SCOPE" || deleting.PendingAction != "DELETE" ||
+		!deleting.HasUpdate || deleting.UpdateType != "deleted" || deleting.UpdateDesc != "待删除" {
+		t.Fatalf("deleting binding root should expose pending delete status: %+v", deleting)
+	}
+	active := page.Items[1]
+	if active.BindingID != "binding-new" || active.DisplayName != "New" {
+		t.Fatalf("unexpected active binding root: %+v", active)
+	}
+	if active.SourceState == "OUT_OF_SCOPE" || active.PendingAction == "DELETE" ||
+		active.UpdateType == "deleted" || active.UpdateDesc == "待删除" {
+		t.Fatalf("active binding root should not expose the deleting binding status: %+v", active)
 	}
 }
 

@@ -228,7 +228,7 @@ func (e *DBSourceTreeQueryEngine) listBindingRoots(ctx context.Context, source s
 	if err != nil {
 		return TreeNodePage{}, mapStoreError(err)
 	}
-	return e.bindingRootsPage(ctx, source, visibleTreeBindings(bindings))
+	return e.bindingRootsPage(ctx, source, bindings)
 }
 
 func (e *DBSourceTreeQueryEngine) bindingRootsPage(ctx context.Context, source store.Source, bindings []store.Binding) (TreeNodePage, error) {
@@ -257,7 +257,7 @@ func (e *DBSourceTreeQueryEngine) bindingRootNode(ctx context.Context, source st
 	if ok {
 		node = bindingRootNodeWithObject(node, root)
 	}
-	return node, nil
+	return bindingRootNodeWithStatus(node, binding), nil
 }
 
 func (e *DBSourceTreeQueryEngine) maybeListBindingRoots(ctx context.Context, source store.Source) (TreeNodePage, bool, error) {
@@ -265,7 +265,6 @@ func (e *DBSourceTreeQueryEngine) maybeListBindingRoots(ctx context.Context, sou
 	if err != nil {
 		return TreeNodePage{}, false, mapStoreError(err)
 	}
-	bindings = visibleTreeBindings(bindings)
 	if len(bindings) <= 1 {
 		return TreeNodePage{}, false, nil
 	}
@@ -285,7 +284,6 @@ func (e *DBSourceTreeQueryEngine) resolveBindingForRequestedParent(ctx context.C
 	if err != nil {
 		return store.Binding{}, false, mapStoreError(err)
 	}
-	bindings = visibleTreeBindings(bindings)
 	if len(bindings) <= 1 {
 		return fallback, false, nil
 	}
@@ -317,16 +315,6 @@ func (e *DBSourceTreeQueryEngine) resolveBindingForRequestedParent(ctx context.C
 		}
 	}
 	return fallback, false, nil
-}
-
-func visibleTreeBindings(bindings []store.Binding) []store.Binding {
-	visible := make([]store.Binding, 0, len(bindings))
-	for _, binding := range bindings {
-		if binding.Status != "DELETING" {
-			visible = append(visible, binding)
-		}
-	}
-	return visible
 }
 
 func requestedParentRefs(req SourceTreeChildrenRequest) []string {

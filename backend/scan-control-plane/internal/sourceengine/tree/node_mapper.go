@@ -92,6 +92,18 @@ func bindingRootNodeWithObject(node TreeNode, item ObjectWithState) TreeNode {
 	return node
 }
 
+func bindingRootNodeWithStatus(node TreeNode, binding store.Binding) TreeNode {
+	if !strings.EqualFold(strings.TrimSpace(binding.Status), "DELETING") {
+		return node
+	}
+	node.SourceState = "OUT_OF_SCOPE"
+	node.PendingAction = "DELETE"
+	node.HasUpdate = true
+	node.UpdateType = "deleted"
+	node.UpdateDesc = "待删除"
+	return node
+}
+
 func sourceObjectNode(item ObjectWithState) TreeNode {
 	object := item.Object
 	selectableContainer := object.IsContainer || object.HasChildren
