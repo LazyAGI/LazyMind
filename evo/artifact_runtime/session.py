@@ -735,11 +735,12 @@ class RunSession:
         if targets:
             await self._terminate(targets)
 
-    async def _terminate(self, executions: tuple[_ActiveExecution, ...], *,
-                         final: Literal[
-                             'paused', 'cancelled', 'interrupted'
-                         ] | None = None
-                         ) -> None:
+    async def _terminate(
+        self,
+        executions: tuple[_ActiveExecution, ...],
+        *,
+        final: Literal['paused', 'cancelled', 'interrupted'] | None = None,
+    ) -> None:
         failures: list[Exception] = []
         for execution in executions:
             if execution.attempt.status in {'scheduled', 'running'}:

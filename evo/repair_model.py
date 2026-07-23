@@ -140,14 +140,23 @@ OPENCODE_PROVIDERS = {
 
 
 class EvoModelConfigError(ValueError):
-    def __init__(self, code: int, reason: str, *, provider: str = '', model: str = '',
-                 missing_fields: tuple[str, ...] = ()) -> None:
-        super().__init__(reason)
+    def __init__(
+        self,
+        code: int,
+        reason: str,
+        provider: str = '',
+        model: str = '',
+        missing_fields: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(code, reason, provider, model, missing_fields)
         self.code = code
         self.reason = reason
         self.provider = provider
         self.model = model
         self.missing_fields = missing_fields
+
+    def __str__(self) -> str:
+        return self.reason
 
     def detail(self) -> dict[str, Any]:
         data: dict[str, Any] = {

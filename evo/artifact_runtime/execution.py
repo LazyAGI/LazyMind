@@ -58,12 +58,18 @@ class ExecutionHandle(Protocol):
 
 
 class ExecutionCleanupError(OperationExecutionError):
-    def __init__(self, message: str, alive_processes: Sequence[psutil.Process] = (), *,
-                 unverified: bool = False
-                 ) -> None:
-        super().__init__(message)
+    def __init__(
+        self,
+        message: str,
+        alive_processes: Sequence[psutil.Process] = (),
+        unverified: bool = False,
+    ) -> None:
+        super().__init__(message, tuple(alive_processes), unverified)
         self.alive_processes = tuple(alive_processes)
         self.unverified = unverified
+
+    def __str__(self) -> str:
+        return str(self.args[0])
 
     @property
     def cleanup_pending(self) -> bool:
@@ -367,7 +373,7 @@ async def _start_isolated(invocation: OperationInvocation, ctx: OperationContext
                     try:
                         async with asyncio.timeout(terminate_timeout):
                             await asyncio.shield(process.wait())
-                    except BaseException as fallback_error:
+                    except (asyncio.CancelledError, Exception) as fallback_error:
                         cleanup_errors.append(fallback_error)
             tasks = tuple(
                 task
