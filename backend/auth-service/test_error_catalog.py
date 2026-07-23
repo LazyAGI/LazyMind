@@ -58,7 +58,11 @@ class ErrorCatalogTest(unittest.TestCase):
                 continue
             tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
             for node in ast.walk(tree):
-                if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name) or node.func.id != 'raise_error':
+                if (
+                    not isinstance(node, ast.Call)
+                    or not isinstance(node.func, ast.Name)
+                    or node.func.id != 'raise_error'
+                ):
                     continue
                 if not node.args or not isinstance(node.args[0], ast.Attribute):
                     continue
