@@ -447,6 +447,9 @@ func TestWikiFileNodeKeepsOriginalTypeMetadata(t *testing.T) {
 	if normalized.FileExtension != ".pdf" || normalized.MimeType != "application/pdf" || normalized.SizeBytes != 8 {
 		t.Fatalf("wiki file node should keep original metadata, got %+v", normalized)
 	}
+	if !normalized.IsDocument || !normalized.IsContainer || normalized.HasChildren {
+		t.Fatalf("wiki file node should be document and container without implying children, got %+v", normalized)
+	}
 	if normalized.ProviderMeta["file_type"] != "file" || normalized.ProviderMeta["stable_id"] != "file-1" {
 		t.Fatalf("wiki file node provider metadata was not preserved: %+v", normalized.ProviderMeta)
 	}

@@ -26,7 +26,7 @@ func TestCreateSkillFromUploadedZip_CreatesInitialRevisionAndRoutesBlobs(t *test
 
 	zipPath := filepath.Join(uploadDir, "skill.zip")
 	writeSkillZip(t, zipPath, map[string][]byte{
-		"SKILL.md":        []byte("# 论文精读\n\n用于阅读和总结论文。\n"),
+		"SKILL.md":        externalSkillMD("论文精读", "用于阅读和总结论文的技能"),
 		"references/a.md": []byte("# 参考资料\n\n这是参考资料。\n"),
 		"scripts/run.py":  []byte("print(\"hello skill\")\n"),
 		"assets/logo.png": minimalPNGBytes(),
@@ -53,9 +53,9 @@ func TestCreateSkillFromUploadedZip_CreatesInitialRevisionAndRoutesBlobs(t *test
 		OwnerUserName:  "张三",
 		CreateUserID:   "user_001",
 		CreateUserName: "张三",
-		Name:           "论文精读",
-		Category:       "research",
-		Description:    "用于阅读和总结论文的技能",
+		Name:           "请求中的旧名称",
+		Category:       "请求中的旧分类",
+		Description:    "请求中的旧描述",
 		Tags:           []string{"paper", "research"},
 		AutoEvo:        false,
 		IsEnabled:      boolPtr(true),
@@ -135,6 +135,7 @@ func newSkillV2TestDB(t *testing.T) *gorm.DB {
 		&testSkillV2RevisionEntryRow{},
 		&testSkillV2DraftRow{},
 		&testSkillV2DraftEntryRow{},
+		&testSkillV2MarketItemRow{},
 	); err != nil {
 		t.Fatalf("auto migrate skill v2 test tables: %v", err)
 	}
@@ -209,11 +210,11 @@ func assertSkillMetadata(t *testing.T, db *gorm.DB, skillID, headRevisionID stri
 	if row.SkillName != "论文精读" {
 		t.Fatalf("skill_name = %q, want 论文精读", row.SkillName)
 	}
-	if row.Category != "research" {
-		t.Fatalf("category = %q, want research", row.Category)
+	if row.Category != "External" {
+		t.Fatalf("category = %q, want External", row.Category)
 	}
-	if row.RelativeRoot != "research/论文精读" {
-		t.Fatalf("relative_root = %q, want research/论文精读", row.RelativeRoot)
+	if row.RelativeRoot != "External/论文精读" {
+		t.Fatalf("relative_root = %q, want External/论文精读", row.RelativeRoot)
 	}
 	if row.SkillMDPath != "SKILL.md" {
 		t.Fatalf("skill_md_path = %q, want SKILL.md", row.SkillMDPath)
@@ -232,6 +233,10 @@ func assertSkillMetadata(t *testing.T, db *gorm.DB, skillID, headRevisionID stri
 		t.Fatalf("head_revision_id = %v, want %q", row.HeadRevisionID, headRevisionID)
 	}
 	assertNoLegacySkillColumns(t, db)
+}
+
+func externalSkillMD(name, description string) []byte {
+	return []byte(fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n# %s\n", name, description, name))
 }
 
 func assertInitialRevision(t *testing.T, db *gorm.DB, skillID, revisionID string) {
@@ -574,6 +579,16 @@ type testSkillV2SkillRow struct {
 
 func (testSkillV2SkillRow) TableName() string {
 	return "skills"
+}
+
+type testSkillV2MarketItemRow struct {
+	ID            string `gorm:"column:id;type:varchar(36);primaryKey"`
+	SourceSkillID string `gorm:"column:source_skill_id;type:varchar(36);not null"`
+	Status        string `gorm:"column:status;type:text;not null;default:'draft'"`
+}
+
+func (testSkillV2MarketItemRow) TableName() string {
+	return "skill_market_items"
 }
 
 type testSkillV2BlobRow struct {

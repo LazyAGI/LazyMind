@@ -1,6 +1,6 @@
-import React, { useRef, useState } from "react";
+import { useState } from "react";
 import { Button, Checkbox, Input, Progress, Radio } from "antd";
-import { EditOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "./index.scss";
 
@@ -8,6 +8,7 @@ export interface AskQuestion {
   text: string;
   type: "boolean" | "single" | "multiple" | "text";
   choices?: string[];
+  allow_other?: boolean;
 }
 
 export interface AskPending {
@@ -56,6 +57,9 @@ export type AnswerState =
   | { type: "multiple"; value: string[]; otherText: string }
   | { type: "text"; value: string };
 
+// Must match algorithm/lazymind/chat/engine/tools/ask_user.py::_OTHER_OPTION.
+const OTHER_OPTION = "其他";
+
 function initAnswer(q: AskQuestion): AnswerState {
   switch (q.type) {
     case "boolean":
@@ -92,7 +96,11 @@ function formatAnswer(
   choices: string[],
   otherOption: string,
   answerSeparator: string,
+  unansweredLabel: string,
 ): string {
+  if (!isAnswered(ans, otherOption)) {
+    return `${q.text}: ${unansweredLabel}`;
+  }
   switch (ans.type) {
     case "boolean":
       return `${q.text}: ${ans.value ?? ""}`;
@@ -119,66 +127,29 @@ function formatAnswer(
   }
 }
 
-/** Editable inline choice label. */
-function EditableChoice({
+function ChoiceLabel({
   value,
+  editable,
   disabled,
   onChange,
 }: {
   value: string;
+  editable: boolean;
   disabled: boolean;
-  onChange: (next: string) => void;
+  onChange?: (value: string) => void;
 }) {
-  const { t } = useTranslation();
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const inputRef = useRef<any>(null);
-
-  const startEdit = (e: React.MouseEvent) => {
-    if (disabled) return;
-    e.stopPropagation();
-    setDraft(value);
-    setEditing(true);
-    // Focus after render
-    setTimeout(() => inputRef.current?.focus(), 0);
-  };
-
-  const commit = () => {
-    setEditing(false);
-    const trimmed = draft.trim();
-    if (trimmed && trimmed !== value) {
-      onChange(trimmed);
-    } else {
-      setDraft(value);
-    }
-  };
-
-  if (editing) {
-    return (
-      <Input
-        ref={inputRef}
-        size="small"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onPressEnter={commit}
-        onClick={(e) => e.stopPropagation()}
-        className="ask-wizard__choice-input"
-      />
-    );
+  if (!editable) {
+    return <span className="ask-wizard__choice-label">{value}</span>;
   }
-
   return (
-    <span className="ask-wizard__choice-label">
-      {value}
-      {!disabled && (
-        <EditOutlined
-          className="ask-wizard__choice-edit-icon"
-          onClick={startEdit}
-          title={t("chat.askCardEditOption")}
-        />
-      )}
-    </span>
+    <Input
+      size="small"
+      value={value}
+      disabled={disabled}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => onChange?.(event.target.value)}
+      className="ask-wizard__choice-input"
+    />
   );
 }
 
@@ -190,7 +161,8 @@ export default function AskCard({
   onAnswerChange,
 }: AskCardProps) {
   const { t } = useTranslation();
-  const otherOption = t("chat.askCardOtherOption");
+  const otherOption = OTHER_OPTION;
+  const otherOptionLabel = t("chat.askCardOtherOption");
   const answerSeparator = t("chat.askCardAnswerSeparator");
   const { questions, title, description } = askPending;
   const total = questions.length;
@@ -199,9 +171,10 @@ export default function AskCard({
     questions.map((q, i) => savedAnswers?.[i] ?? initAnswer(q)),
   );
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [submitted, setSubmitted] = useState(false);
+  const isReadOnly = disabled || submitted;
 
-  // Per-question, per-choice edited labels. Keyed as `${qIdx}-${choiceIdx}`.
-  // Stored as Record<qIdx, string[]> mirroring the original choices array.
+  // Preserve the structured payload shape expected by the backend.
   const [customChoices, setCustomChoices] = useState<Record<number, string[]>>(
     () =>
       Object.fromEntries(questions.map((q, i) => [i, [...(q.choices ?? [])]])),
@@ -209,9 +182,16 @@ export default function AskCard({
 
   const currentQ = questions[currentIndex]!;
   const currentAns = answers[currentIndex]!;
-  const currentAnswered = isAnswered(currentAns, otherOption);
-  const allAnswered = answers.every((answer) => isAnswered(answer, otherOption));
   const currentChoices = customChoices[currentIndex] ?? currentQ.choices ?? [];
+
+  const updateChoice = (questionIndex: number, choiceIndex: number, value: string) => {
+    setCustomChoices((previous) => ({
+      ...previous,
+      [questionIndex]: (previous[questionIndex] ?? []).map((choice, index) =>
+        index === choiceIndex ? value : choice,
+      ),
+    }));
+  };
 
   const progressPercent = Math.round(
     (answers.filter((answer) => isAnswered(answer, otherOption)).length / total) * 100,
@@ -232,18 +212,8 @@ export default function AskCard({
     }
   };
 
-  const updateChoice = (qIdx: number, choiceIdx: number, newLabel: string) => {
-    setCustomChoices((prev) => {
-      const updated = { ...prev };
-      const arr = [...(updated[qIdx] ?? questions[qIdx]!.choices ?? [])];
-      arr[choiceIdx] = newLabel;
-      updated[qIdx] = arr;
-      return updated;
-    });
-  };
-
   const handleSubmit = () => {
-    if (disabled || !allAnswered) return;
+    if (isReadOnly) return;
     const lines = questions.map((q, i) =>
       formatAnswer(
         q,
@@ -251,6 +221,7 @@ export default function AskCard({
         customChoices[i] ?? q.choices ?? [],
         otherOption,
         answerSeparator,
+        t("chat.askCardUnanswered"),
       ),
     );
     const structured: AskAnswersStructured = {
@@ -260,9 +231,10 @@ export default function AskCard({
         type: q.type,
         choices: q.choices ?? [],
         custom_choices: customChoices[i] ?? q.choices ?? [],
-        answer: answers[i] ?? null,
+        answer: isAnswered(answers[i]!, otherOption) ? answers[i]! : null,
       })),
     };
+    setSubmitted(true);
     onSubmit({ text: lines.join("\n"), structured });
   };
 
@@ -275,7 +247,7 @@ export default function AskCard({
 
   return (
     <div
-      className={`ask-wizard${disabled ? " ask-wizard--disabled" : ""}`}
+      className={`ask-wizard${isReadOnly ? " ask-wizard--disabled" : ""}`}
       aria-label={t("chat.askCardAria")}
     >
       {/* Header */}
@@ -329,7 +301,7 @@ export default function AskCard({
                         ? "primary"
                         : "default"
                     }
-                    disabled={disabled}
+                    disabled={isReadOnly}
                     onClick={() =>
                       updateAnswer(
                         currentIndex,
@@ -365,7 +337,7 @@ export default function AskCard({
                     chosen !== otherOption,
                   );
                 }}
-                disabled={disabled}
+                disabled={isReadOnly}
               >
                 {(currentQ.choices ?? []).map((origVal, ci) => (
                   <Radio
@@ -373,10 +345,15 @@ export default function AskCard({
                     value={origVal}
                     className="ask-wizard__choice"
                   >
-                    <EditableChoice
-                      value={currentChoices[ci] ?? origVal}
-                      disabled={disabled}
-                      onChange={(next) => updateChoice(currentIndex, ci, next)}
+                    <ChoiceLabel
+                      value={
+                        origVal === otherOption
+                          ? otherOptionLabel
+                          : (currentChoices[ci] ?? origVal)
+                      }
+                      editable={origVal !== otherOption}
+                      disabled={isReadOnly}
+                      onChange={(value) => updateChoice(currentIndex, ci, value)}
                     />
                   </Radio>
                 ))}
@@ -392,7 +369,7 @@ export default function AskCard({
                         otherText: e.target.value,
                       })
                     }
-                    disabled={disabled}
+                    disabled={isReadOnly}
                     placeholder={t("chat.askCardOtherPlaceholder")}
                     className="ask-wizard__other-input"
                   />
@@ -414,7 +391,7 @@ export default function AskCard({
                         : "",
                   })
                 }
-                disabled={disabled}
+                disabled={isReadOnly}
               >
                 {(currentQ.choices ?? []).map((origVal, ci) => (
                   <Checkbox
@@ -422,10 +399,15 @@ export default function AskCard({
                     value={origVal}
                     className="ask-wizard__choice"
                   >
-                    <EditableChoice
-                      value={currentChoices[ci] ?? origVal}
-                      disabled={disabled}
-                      onChange={(next) => updateChoice(currentIndex, ci, next)}
+                    <ChoiceLabel
+                      value={
+                        origVal === otherOption
+                          ? otherOptionLabel
+                          : (currentChoices[ci] ?? origVal)
+                      }
+                      editable={origVal !== otherOption}
+                      disabled={isReadOnly}
+                      onChange={(value) => updateChoice(currentIndex, ci, value)}
                     />
                   </Checkbox>
                 ))}
@@ -446,7 +428,7 @@ export default function AskCard({
                         otherText: e.target.value,
                       })
                     }
-                    disabled={disabled}
+                    disabled={isReadOnly}
                     placeholder={t("chat.askCardOtherPlaceholder")}
                     className="ask-wizard__other-input"
                   />
@@ -463,7 +445,7 @@ export default function AskCard({
                   value: e.target.value,
                 })
               }
-              disabled={disabled}
+              disabled={isReadOnly}
               placeholder={t("chat.askCardInputPlaceholder")}
               className="ask-wizard__text-input"
               autoSize={{ minRows: 2, maxRows: 5 }}
@@ -477,7 +459,7 @@ export default function AskCard({
         <div className="ask-wizard__nav-buttons">
           <Button
             icon={<LeftOutlined />}
-            disabled={!canGoPrev || disabled}
+            disabled={!canGoPrev}
             onClick={() => goTo(currentIndex - 1)}
             className="ask-wizard__nav-btn"
           >
@@ -487,17 +469,15 @@ export default function AskCard({
             <Button
               type="primary"
               onClick={() => goTo(currentIndex + 1)}
-              disabled={disabled}
               className="ask-wizard__nav-btn"
             >
               {t("chat.askCardNext")}
               <RightOutlined />
             </Button>
           ) : (
-            !disabled && (
+            !isReadOnly && (
               <Button
                 type="primary"
-                disabled={!allAnswered}
                 onClick={handleSubmit}
                 className="ask-wizard__submit-btn"
               >
@@ -515,7 +495,6 @@ export default function AskCard({
               type="button"
               className={`ask-wizard__jump-item${idx === currentIndex ? " is-current" : ""}${isAnswered(answers[idx]!, otherOption) ? " is-done" : ""}`}
               onClick={() => goTo(idx)}
-              disabled={disabled}
               aria-label={`Go to question ${idx + 1}`}
             >
               {idx + 1}
@@ -524,7 +503,7 @@ export default function AskCard({
         </div>
       </div>
 
-      {!disabled && (
+      {!isReadOnly && (
         <p className="ask-wizard__hint">{t("chat.askCardAutoSaveHint")}</p>
       )}
     </div>

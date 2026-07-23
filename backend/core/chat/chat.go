@@ -95,6 +95,7 @@ type ChatRetrievalOptions struct {
 type ChatRuntimeOptions struct {
 	Debug                         bool           `json:"debug,omitempty"`
 	Reasoning                     bool           `json:"reasoning"`
+	ThinkingDepth                 string         `json:"thinking_depth,omitempty"`
 	Priority                      *int           `json:"priority,omitempty"`
 	Trace                         bool           `json:"trace,omitempty"`
 	EnvironmentContext            map[string]any `json:"environment_context,omitempty"`
@@ -105,6 +106,7 @@ type ChatRuntimeOptions struct {
 	ContextUsagePreview           bool           `json:"context_usage_preview,omitempty"`
 	ContextPromptExport           bool           `json:"context_prompt_export,omitempty"`
 	ContextPreviewAllowLLMRouting bool           `json:"context_preview_allow_llm_routing,omitempty"`
+	SkipSensitiveFilter           bool           `json:"skip_sensitive_filter,omitempty"`
 }
 
 type ChatPersonalizationOptions struct {
@@ -159,21 +161,23 @@ type TaskCreatedEvent struct {
 }
 
 // ArtifactCreatedEvent is emitted by the main Agent's artifact tools.
-// Core binds it to the authoritative conversation and history IDs of this request.
+// Core binds new artifacts to the request and keeps an existing artifact's history on replacement.
 type ArtifactCreatedEvent struct {
-	ArtifactID  string          `json:"artifact_id"`
-	Filename    string          `json:"filename"`
-	ContentType string          `json:"content_type"`
-	Value       json.RawMessage `json:"value"`
-	Caption     *string         `json:"caption,omitempty"`
+	ArtifactID      string          `json:"artifact_id"`
+	Filename        string          `json:"filename"`
+	ContentType     string          `json:"content_type"`
+	Value           json.RawMessage `json:"value"`
+	Caption         *string         `json:"caption,omitempty"`
+	ReplaceExisting bool            `json:"replace_existing,omitempty"`
 }
 
 // AskQuestion is a single question within an AskPendingEvent.
 // type is one of "boolean", "single", "multiple", "text".
 type AskQuestion struct {
-	Text    string   `json:"text"`
-	Type    string   `json:"type"`
-	Choices []string `json:"choices,omitempty"`
+	Text       string   `json:"text"`
+	Type       string   `json:"type"`
+	Choices    []string `json:"choices,omitempty"`
+	AllowOther *bool    `json:"allow_other,omitempty"`
 }
 
 // AskPendingEvent is emitted by ask_user (via _write_agent_data) on the main SSE stream.
@@ -403,6 +407,12 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if reasoning, ok := body["reasoning"].(bool); ok {
 		req.Runtime.Reasoning = reasoning
 	}
+	if depth, ok := body["thinking_depth"].(string); ok {
+		depth = strings.ToLower(strings.TrimSpace(depth))
+		if depth == "low" || depth == "medium" || depth == "high" {
+			req.Runtime.ThinkingDepth = depth
+		}
+	}
 	if databases, ok := body["databases"].([]any); ok {
 		req.Retrieval.Databases = databases
 	}
@@ -456,6 +466,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if allow, ok := body["context_preview_allow_llm_routing"].(bool); ok {
 		req.Runtime.ContextPreviewAllowLLMRouting = allow
+	}
+	if skip, ok := body["skip_sensitive_filter"].(bool); ok {
+		req.Runtime.SkipSensitiveFilter = skip
 	}
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
 		req.Runtime.LLMConfig = llmConfig

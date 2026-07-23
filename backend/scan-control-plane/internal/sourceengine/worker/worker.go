@@ -199,7 +199,8 @@ func (w *DefaultParseWorker) loadExecutionContext(ctx context.Context, task stor
 }
 
 func (w *DefaultParseWorker) validateTaskFreshness(exec executionContext) error {
-	if exec.binding.Status != "ACTIVE" {
+	cleanupDelete := exec.binding.Status == "DELETING" && exec.task.TaskAction == taskpkg.TaskActionDelete
+	if exec.binding.Status != "ACTIVE" && !cleanupDelete {
 		return fmt.Errorf("binding is not active")
 	}
 	if exec.binding.BindingGeneration != exec.task.BindingGeneration {

@@ -16,7 +16,7 @@ func TestRemoteFSWriteAndCommit_TaskConflict(t *testing.T) {
 	committer := NewCommitter(CommitterDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
 	write1 := httptest.NewRecorder()
-	handler.Content(write1, httptest.NewRequest(http.MethodPut, remoteContentURL("skills/research/论文精读/SKILL.md", "user_001", "task1", ""), strings.NewReader("# task1\n")))
+	handler.Content(write1, httptest.NewRequest(http.MethodPut, remoteContentURL("skills/research/论文精读/SKILL.md", "user_001", "task1", ""), strings.NewReader(testutil.SkillMD("论文精读", "task1"))))
 	if write1.Code != http.StatusOK {
 		t.Fatalf("task1 write status=%d body=%s", write1.Code, write1.Body.String())
 	}

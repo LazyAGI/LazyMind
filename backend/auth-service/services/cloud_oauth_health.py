@@ -41,9 +41,22 @@ def batch_size() -> int:
     return _env_int('LAZYMIND_CLOUD_AUTH_HEALTH_CHECK_BATCH_SIZE', 100, 1)
 
 
+def retry_interval_seconds() -> int:
+    return _env_int('LAZYMIND_CLOUD_AUTH_HEALTH_RETRY_INTERVAL_SECONDS', 60, 10)
+
+
+def retry_max_interval_seconds() -> int:
+    return _env_int(
+        'LAZYMIND_CLOUD_AUTH_HEALTH_RETRY_MAX_INTERVAL_SECONDS',
+        300,
+        retry_interval_seconds(),
+    )
+
+
 async def _run_loop() -> None:
+    retry_delay = retry_interval_seconds()
     while True:
-        await asyncio.sleep(interval_seconds())
+        delay = interval_seconds()
         try:
             result = await asyncio.to_thread(
                 cloud_oauth_service.run_health_check_once,
@@ -51,10 +64,16 @@ async def _run_loop() -> None:
                 batch_size=batch_size(),
             )
             logger.info('cloud auth health check completed: %s', result)
+            if result.get('retryable_errors'):
+                delay = retry_delay
+                retry_delay = min(retry_delay * 2, retry_max_interval_seconds())
+            else:
+                retry_delay = retry_interval_seconds()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.exception('cloud auth health check failed: %s', exc)
+        await asyncio.sleep(delay)
 
 
 def start() -> None:

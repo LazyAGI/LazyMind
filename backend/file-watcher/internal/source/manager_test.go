@@ -14,9 +14,10 @@ import (
 )
 
 type startCall struct {
-	sourceID string
-	tenantID string
-	root     string
+	sourceID  string
+	bindingID string
+	tenantID  string
+	root      string
 }
 
 type watcherStub struct {
@@ -32,27 +33,58 @@ func newWatcherStub() *watcherStub {
 	}
 }
 
-func (w *watcherStub) Start(_ context.Context, sourceID, tenantID, root string) error {
-	call := startCall{sourceID: sourceID, tenantID: tenantID, root: root}
+func (w *watcherStub) Start(_ context.Context, sourceID, bindingID, tenantID, root string) error {
+	call := startCall{sourceID: sourceID, bindingID: bindingID, tenantID: tenantID, root: root}
 	w.mu.Lock()
-	w.started[sourceID] = call
+	w.started[runtimeKey(sourceID, bindingID)] = call
 	w.mu.Unlock()
 	w.startCh <- call
 	return nil
 }
 
-func (w *watcherStub) Stop(sourceID string) error {
+func (w *watcherStub) Stop(sourceID, bindingID string) error {
 	w.mu.Lock()
-	delete(w.started, sourceID)
+	delete(w.started, runtimeKey(sourceID, bindingID))
 	w.mu.Unlock()
 	return nil
 }
 
-func (w *watcherStub) Health(sourceID string) fs.WatcherHealth {
+func (w *watcherStub) Health(sourceID, bindingID string) fs.WatcherHealth {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_, ok := w.started[sourceID]
+	_, ok := w.started[runtimeKey(sourceID, bindingID)]
 	return fs.WatcherHealth{Enabled: ok, Healthy: ok}
+}
+
+func TestBindingScopedStopKeepsOtherPathRunning(t *testing.T) {
+	t.Parallel()
+
+	watcher := newWatcherStub()
+	mgr := NewManager(&config.Config{AgentID: "agent-1", TenantID: "tenant-1"}, watcher, validatorStub{}, fs.NewPathMapper("", nil), zap.NewNop())
+	for _, bindingID := range []string{"binding-1", "binding-2"} {
+		_, err := mgr.HandleCommand(context.Background(), internal.Command{Type: internal.CommandStartSource, SourceID: "source-1", BindingID: bindingID, RootPath: t.TempDir()})
+		if err != nil {
+			t.Fatalf("start %s: %v", bindingID, err)
+		}
+		select {
+		case <-watcher.startCh:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out starting %s", bindingID)
+		}
+	}
+	if got := len(mgr.ListRuntimes()); got != 2 {
+		t.Fatalf("same source should have two binding runtimes, got %d", got)
+	}
+	if sourceCount, watchCount, _ := mgr.Stats(); sourceCount != 1 || watchCount != 2 {
+		t.Fatalf("stats should count one source and two path watchers: sources=%d watches=%d", sourceCount, watchCount)
+	}
+	if _, err := mgr.HandleCommand(context.Background(), internal.Command{Type: internal.CommandStopSource, SourceID: "source-1", BindingID: "binding-1"}); err != nil {
+		t.Fatalf("stop binding: %v", err)
+	}
+	runtimes := mgr.ListRuntimes()
+	if len(runtimes) != 1 || runtimes[0].BindingID != "binding-2" {
+		t.Fatalf("binding-scoped stop affected the other path: %+v", runtimes)
+	}
 }
 
 type validatorStub struct{}

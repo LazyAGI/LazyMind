@@ -99,3 +99,39 @@ func TestFireOne_OptimisticLock(t *testing.T) {
 		t.Fatalf("second attempt should be skipped (optimistic lock), got %d rows affected", r2.RowsAffected)
 	}
 }
+
+func TestMatchDayOfMonthSupportsMonthEndOffsets(t *testing.T) {
+	loc := time.UTC
+	if !matchDayOfMonth("-1", time.Date(2026, time.February, 28, 9, 0, 0, 0, loc)) {
+		t.Fatal("expected -1 to match the last day of February")
+	}
+	if !matchDayOfMonth("-2", time.Date(2026, time.April, 29, 9, 0, 0, 0, loc)) {
+		t.Fatal("expected -2 to match the second-to-last day of April")
+	}
+	if matchDayOfMonth("-1", time.Date(2026, time.April, 29, 9, 0, 0, 0, loc)) {
+		t.Fatal("expected -1 not to match before the last day")
+	}
+}
+
+func TestCadenceExpression(t *testing.T) {
+	interval, unit, cronExpr, err := parseCadenceExpr("@every:2:week;0 9 * * 1")
+	if err != nil || interval != 2 || unit != "week" || cronExpr != "0 9 * * 1" {
+		t.Fatalf("unexpected cadence parse: %d %q %q %v", interval, unit, cronExpr, err)
+	}
+	matching := time.Date(2026, time.January, 5, 9, 0, 0, 0, time.UTC)
+	if matchCadence(matching, 2, "week") == matchCadence(matching.AddDate(0, 0, 7), 2, "week") {
+		t.Fatal("adjacent ISO weeks must not both match a two-week cadence")
+	}
+}
+
+func TestPreviousCronTimeUsesPriorScheduledCycle(t *testing.T) {
+	next := time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC)
+	previous, err := previousCronTime("0 12 * * 4", "UTC", next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, time.July, 23, 12, 0, 0, 0, time.UTC)
+	if !previous.Equal(want) {
+		t.Fatalf("previous cycle = %s, want %s", previous, want)
+	}
+}

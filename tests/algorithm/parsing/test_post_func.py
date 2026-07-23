@@ -327,7 +327,7 @@ def test_node_parser_full_pipeline_cleans_and_merges(monkeypatch, tmp_path):
 
 
 def test_image_node_loader_uses_ocr_cache_dir_config(monkeypatch, tmp_path):
-    import parsing.transform.post_func as post_func_module
+    import lazymind.parsing.engine.transform.post_func as post_func_module
 
     cache_root = tmp_path / 'ocr_cache'
     cache_root.mkdir()

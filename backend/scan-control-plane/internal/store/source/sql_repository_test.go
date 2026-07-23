@@ -236,6 +236,142 @@ func TestSQLiteCreateOperationUpsertUsesCallerRequestConstraint(t *testing.T) {
 	}
 }
 
+func TestDeleteBindingStagesOnlySyncedDocumentsForCleanup(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "scan.db"))+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	repo := NewSQLRepositoryWithDriver("sqlite", db)
+	if err := repo.AutoMigrate(); err != nil {
+		t.Fatalf("auto migrate sqlite: %v", err)
+	}
+
+	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
+	nextSyncAt := now.Add(time.Hour)
+	if err := repo.orm.Create(&ormSource{SourceID: "source-1", TenantID: "tenant-1", CreatedBy: "user-1", Name: "Docs", DatasetID: "dataset-1", Status: "ACTIVE", ConfigVersion: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("seed source: %v", err)
+	}
+	if err := repo.orm.Create(&ormBinding{BindingID: "binding-1", SourceID: "source-1", ConnectorType: "local_fs", TargetType: "local_path", TargetRef: "/docs", TargetFingerprint: "/docs", TreeKey: "root", BindingGeneration: 1, CoreParentDocumentID: "folder-1", SyncMode: "scheduled", NextSyncAt: &nextSyncAt, Status: "ACTIVE", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("seed binding: %v", err)
+	}
+	if err := repo.orm.Create(&ormSyncCheckpoint{SourceID: "source-1", BindingID: "binding-1", BindingGeneration: 1, NextSyncAt: &nextSyncAt, LockOwner: "worker-1", LockUntil: timePtr(now.Add(time.Minute)), CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("seed checkpoint: %v", err)
+	}
+	for _, key := range []string{"synced", "unsynced"} {
+		if err := repo.orm.Create(&ormSourceObject{SourceID: "source-1", BindingID: "binding-1", ObjectKey: key, DisplayName: key, SearchName: key, ObjectType: "file", IsDocument: true, SourceVersion: "v1", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+			t.Fatalf("seed object %s: %v", key, err)
+		}
+	}
+	states := []ormDocumentState{
+		{SourceID: "source-1", BindingID: "binding-1", BindingGeneration: 1, ObjectKey: "synced", SourceVersion: "v1", BaselineVersion: "v1", SourceState: "UNCHANGED", SyncState: "IDLE", DocumentListVisible: true, Selectable: true, ParseQueueState: "QUEUED", DocumentID: "document-synced", ActiveTaskID: "task-synced", CreatedAt: now, UpdatedAt: now},
+		{SourceID: "source-1", BindingID: "binding-1", BindingGeneration: 1, ObjectKey: "unsynced", SourceVersion: "v1", SourceState: "NEW", SyncState: "IDLE", PendingAction: "CREATE", DocumentListVisible: true, Selectable: true, ParseQueueState: "QUEUED", DocumentID: "document-unsynced", ActiveTaskID: "task-unsynced", CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.orm.Create(&states).Error; err != nil {
+		t.Fatalf("seed states: %v", err)
+	}
+	documents := []ormDocument{
+		{DocumentID: "document-synced", TenantID: "tenant-1", SourceID: "source-1", BindingID: "binding-1", ObjectKey: "synced", CoreDocumentID: "core-doc-1", CurrentVersionID: "v1", ParseStatus: "SUCCEEDED", CreatedAt: now, UpdatedAt: now},
+		{DocumentID: "document-unsynced", TenantID: "tenant-1", SourceID: "source-1", BindingID: "binding-1", ObjectKey: "unsynced", ParseStatus: "PENDING", CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.orm.Create(&documents).Error; err != nil {
+		t.Fatalf("seed documents: %v", err)
+	}
+	for _, taskID := range []string{"task-synced", "task-unsynced"} {
+		objectKey := strings.TrimPrefix(taskID, "task-")
+		if err := repo.orm.Create(&ormParseTask{TaskID: taskID, TenantID: "tenant-1", SourceID: "source-1", BindingID: "binding-1", BindingGeneration: 1, ObjectKey: objectKey, DocumentID: "document-" + objectKey, TaskAction: "CREATE", TargetVersionID: "v1", IdempotencyKey: taskID, Status: "PENDING", NextRunAt: now, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+			t.Fatalf("seed task %s: %v", taskID, err)
+		}
+	}
+
+	result, err := repo.DeleteBinding(context.Background(), "source-1", "binding-1", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("delete binding: %v", err)
+	}
+	if result.Binding.Status != "DELETING" || result.Cleanup.CancelledParseTaskCount != 2 || result.Cleanup.ClearedObjectCount != 0 || result.Cleanup.ClearedStateCount != 0 || result.Cleanup.TombstonedDocumentCount != 0 {
+		t.Fatalf("unexpected staged cleanup result: %+v", result)
+	}
+	synced, err := repo.GetDocumentState(context.Background(), "source-1", "binding-1", "synced")
+	if err != nil {
+		t.Fatalf("get synced state: %v", err)
+	}
+	if synced.SourceState != "OUT_OF_SCOPE" || synced.PendingAction != "DELETE" || !synced.DocumentListVisible || !synced.Selectable || synced.ActiveTaskID != "" || synced.ParseQueueState != "NONE" {
+		t.Fatalf("synced document was not staged for cleanup: %+v", synced)
+	}
+	unsynced, err := repo.GetDocumentState(context.Background(), "source-1", "binding-1", "unsynced")
+	if err != nil {
+		t.Fatalf("get unsynced state: %v", err)
+	}
+	if unsynced.PendingAction != "" || unsynced.DocumentListVisible || unsynced.Selectable || unsynced.DocumentID != "" || unsynced.ActiveTaskID != "" {
+		t.Fatalf("unsynced document should be hidden without a core delete: %+v", unsynced)
+	}
+	if _, err := repo.GetObject(context.Background(), "source-1", "binding-1", "synced"); err != nil {
+		t.Fatalf("cleanup planning snapshot was removed: %v", err)
+	}
+	document, err := repo.GetDocument(context.Background(), "source-1", "binding-1", "synced")
+	if err != nil || document.ParseStatus != "SUCCEEDED" {
+		t.Fatalf("document was tombstoned before cleanup sync: document=%+v err=%v", document, err)
+	}
+	checkpoint, err := repo.GetSyncCheckpoint(context.Background(), "binding-1")
+	if err != nil || checkpoint.NextSyncAt == nil || !checkpoint.NextSyncAt.Equal(nextSyncAt) || checkpoint.LockOwner != "" || checkpoint.LockUntil != nil {
+		t.Fatalf("scheduled cleanup checkpoint was not preserved/unlocked: checkpoint=%+v err=%v", checkpoint, err)
+	}
+	due, err := repo.ListDueSyncCheckpoints(context.Background(), nextSyncAt.Add(time.Second), 10)
+	if err != nil || len(due) != 1 || due[0].BindingID != "binding-1" {
+		t.Fatalf("deleting scheduled binding was not eligible for cleanup sync: due=%+v err=%v", due, err)
+	}
+	run := SyncRun{RunID: "cleanup-run-1", SourceID: "source-1", BindingID: "binding-1", BindingGeneration: 1, TriggerType: "scheduled", ScopeType: "cleanup", Status: SyncRunStatusPending, StartedAt: now.Add(time.Minute)}
+	if _, created, err := repo.EnqueueSyncRun(context.Background(), run); err != nil || !created {
+		t.Fatalf("enqueue cleanup run: created=%v err=%v", created, err)
+	}
+	claimed, ok, err := repo.ClaimDueSyncRun(context.Background(), "cleanup-worker", now.Add(2*time.Minute), time.Minute)
+	if err != nil || !ok || claimed.RunID != run.RunID {
+		t.Fatalf("claim deleting binding cleanup run: claimed=%+v ok=%v err=%v", claimed, ok, err)
+	}
+	if _, ok, err := repo.FinishSyncRun(context.Background(), run.RunID, "cleanup-worker", SyncRunFinish{Status: SyncRunStatusSucceeded, Coverage: JSON{"complete": true, "covered_target_root": true, "scope_type": "cleanup"}, FinishedAt: now.Add(3 * time.Minute)}); err != nil || !ok {
+		t.Fatalf("finish cleanup run: ok=%v err=%v", ok, err)
+	}
+	ready, err := repo.ListReadyBindingCleanups(context.Background(), 10)
+	if err != nil || len(ready) != 0 {
+		t.Fatalf("binding must not finalize while a delete is pending: ready=%+v err=%v", ready, err)
+	}
+	synced.PendingAction = ""
+	synced.DocumentListVisible = false
+	synced.Selectable = false
+	if err := repo.SaveDocumentState(context.Background(), synced); err != nil {
+		t.Fatalf("complete cleanup state: %v", err)
+	}
+	ready, err = repo.ListReadyBindingCleanups(context.Background(), 10)
+	if err != nil || len(ready) != 1 || ready[0].BindingID != "binding-1" {
+		t.Fatalf("completed cleanup binding was not ready: ready=%+v err=%v", ready, err)
+	}
+	if err := repo.FinalizeBindingCleanup(context.Background(), "source-1", "binding-1", now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("finalize binding cleanup: %v", err)
+	}
+	if _, err := repo.GetBinding(context.Background(), "source-1", "binding-1"); ErrorCodeOf(err) != ErrCodeBindingNotFound {
+		t.Fatalf("finalized binding was not removed: %v", err)
+	}
+	if _, err := repo.GetObject(context.Background(), "source-1", "binding-1", "synced"); ErrorCodeOf(err) != ErrCodeNotFound {
+		t.Fatalf("finalized object snapshot was not removed: %v", err)
+	}
+	document, err = repo.GetDocument(context.Background(), "source-1", "binding-1", "synced")
+	if err != nil || document.ParseStatus != "SUPERSEDED" {
+		t.Fatalf("finalized document was not tombstoned: document=%+v err=%v", document, err)
+	}
+	if err := repo.orm.Create(&ormBinding{BindingID: "binding-only-save", SourceID: "source-1", ConnectorType: "local_fs", TargetType: "local_path", TargetRef: "/only-save", TargetFingerprint: "/only-save", TreeKey: "only-save-root", BindingGeneration: 1, CoreParentDocumentID: "folder-only-save", SyncMode: "manual", Status: "ACTIVE", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("seed only-save binding: %v", err)
+	}
+	if _, err := repo.DeleteBinding(context.Background(), "source-1", "binding-only-save", now.Add(4*time.Minute)); err != nil {
+		t.Fatalf("delete only-save binding: %v", err)
+	}
+	ready, err = repo.ListReadyBindingCleanups(context.Background(), 10)
+	if err != nil || len(ready) != 0 {
+		t.Fatalf("only-save removal must wait for an explicit cleanup sync: ready=%+v err=%v", ready, err)
+	}
+}
+
 func TestSQLiteRepairDedupesLegacyRowsBeforeCreatingIndexes(t *testing.T) {
 	t.Parallel()
 

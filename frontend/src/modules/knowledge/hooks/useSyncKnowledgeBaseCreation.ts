@@ -258,8 +258,6 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     createSuccessMessageKey: "knowledge.createFromCloudDocumentsSuccess",
     refreshSources: refreshSourcesAfterCreate,
     handleToggleLocalScanChat: async () => undefined,
-    executeDeleteSource: async () => undefined,
-    openDetailPage: () => undefined,
     openEditWizard: () => undefined,
   });
   Object.assign(ctx, createOAuthEngine(ctx));

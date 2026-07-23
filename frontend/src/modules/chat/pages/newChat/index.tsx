@@ -22,6 +22,7 @@ import { localizeErrorCode } from "@/components/request";
 import PreferenceConfigNotice from "@/modules/chat/components/PreferenceConfigNotice";
 import type { ConversationPluginSettings } from "@/modules/chat/utils/request";
 import { RightOutlined, ScheduleOutlined } from "@ant-design/icons";
+import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 
 function readRunInBackgroundMode() {
   try {
@@ -69,6 +70,12 @@ const NewChatPage = () => {
     );
 
   const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    useChatThinkStore
+      .getState()
+      .setThinkingDepth(runInBackground ? "high" : "medium");
+  }, [runInBackground]);
   const dragCounterRef = useRef(0);
   const isChatDisabled = !modelProviderGuard.canChat;
   const chatDisabledReason = modelProviderGuard.isChecking

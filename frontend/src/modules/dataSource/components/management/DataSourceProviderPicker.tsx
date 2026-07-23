@@ -4,12 +4,11 @@ import {
   getSourceTypeDescription,
   getSourceTypeTitle,
 } from "../../utils/status";
-import type { DataSourceManagementVm } from "../../hooks/useDataSourceManagement";
 import type { SyncKnowledgeBaseCreationVm } from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";
 import type { SourceType } from "../../constants/types";
 
 type ProviderPickerVm = Pick<
-  DataSourceManagementVm | SyncKnowledgeBaseCreationVm,
+  SyncKnowledgeBaseCreationVm,
   | "t"
   | "creatableSourceTypeOptions"
   | "handleCreateProviderSelect"

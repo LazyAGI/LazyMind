@@ -230,3 +230,31 @@ def test_skill_reference_rendering_preserves_explicit_tool_failure():
     }, language='zh', preview_value='reference.md')
 
     assert '未能读取 **reference.md** 技能参考资料。' in result_text
+
+
+def test_create_skill_rendering_uses_single_segment_name_and_preserves_failure():
+    call_text, preview_value = _tool_call_frame_text({
+        'id': 'call-create-skill',
+        'function': {
+            'name': 'SkillManagementToolkit_create_skill',
+            'arguments': {
+                'name': 'skill',
+                'content': '---\nname: skill\ndescription: Test skill.\n---\nUse it.',
+            },
+        },
+    }, language='zh')
+
+    assert preview_value == 'skill'
+    assert '正在创建 **skill** 技能。' in call_text
+
+    result_text = _tool_result_frame_text({
+        'id': 'call-create-skill',
+        'name': 'SkillManagementToolkit_create_skill',
+        'result': {
+            'success': False,
+            'tool': 'create_skill',
+            'error': "Skill name 'internal2/skill' is invalid.",
+        },
+    }, language='zh', preview_value='internal2/skill')
+
+    assert '未能创建 **internal2/skill** 技能。' in result_text

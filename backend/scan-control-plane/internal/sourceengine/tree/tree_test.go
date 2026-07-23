@@ -510,7 +510,7 @@ func TestTargetTreeSearchCacheFailedRefreshPreservesPreviousCompleteSnapshot(t *
 	}
 }
 
-func TestLocalFSTargetSearchCacheUsesLongerStaleTTL(t *testing.T) {
+func TestLocalFSTargetSearchCacheUsesConfiguredStaleTTL(t *testing.T) {
 	t.Parallel()
 
 	store := newMemoryTargetSearchCacheStore()
@@ -545,6 +545,37 @@ func TestLocalFSTargetSearchCacheUsesLongerStaleTTL(t *testing.T) {
 	minStaleAt := before.Add(targetSearchCacheLocalFSTTL - time.Second)
 	if snapshot.staleAt.Before(minStaleAt) {
 		t.Fatalf("local_fs cache should use longer stale ttl, stale_at=%s min=%s", snapshot.staleAt, minStaleAt)
+	}
+}
+
+func TestFeishuTargetSearchCacheUsesDailyStaleTTL(t *testing.T) {
+	t.Parallel()
+
+	store := newMemoryTargetSearchCacheStore()
+	spy := &treeConnectorSpy{
+		connectorType:  connector.ConnectorType("feishu"),
+		supportsSearch: true,
+	}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	engine := NewDefaultTargetTreeEngine(registry, WithTargetSearchCacheStore(store))
+	before := time.Now()
+	req := TargetTreeSearchRequest{
+		ConnectorType: connector.ConnectorType("feishu"),
+		IncludeFiles:  true,
+	}
+	if err := engine.Prewarm(context.Background(), req); err != nil {
+		t.Fatalf("prewarm target search cache: %v", err)
+	}
+	snapshot, ok := store.snapshots[targetSearchCacheKey(req)]
+	if !ok {
+		t.Fatalf("target search cache snapshot was not persisted")
+	}
+	minStaleAt := before.Add(targetSearchCacheFeishuTTL - time.Second)
+	if snapshot.staleAt.Before(minStaleAt) {
+		t.Fatalf("feishu cache should use daily stale ttl, stale_at=%s min=%s", snapshot.staleAt, minStaleAt)
 	}
 }
 

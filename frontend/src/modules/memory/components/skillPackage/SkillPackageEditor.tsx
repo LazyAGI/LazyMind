@@ -614,7 +614,13 @@ export default function SkillPackageEditor({
       );
       closeCreateModal();
       await refreshPackage();
-      setSelectedPath(trimmedPath);
+      if (!isDirectory) {
+        contentCacheRef.current.set(trimmedPath, {
+          content: "",
+          binary: false,
+        });
+        setSelectedPath(trimmedPath);
+      }
       message.success(t("common.saveSuccess"));
     } catch (error) {
       console.error("Create skill path failed:", error);

@@ -10,7 +10,7 @@ os.environ.setdefault('LAZYMIND_AUTH_CLOUD_SECRET_KEY', 'test-secret-key')
 
 from core import database as database_module  # noqa: E402
 from models import Base, CloudAuthConnection  # noqa: E402
-from services.cloud_oauth_provider import CloudAccountProfile, CloudTokenPayload  # noqa: E402
+from services.cloud_oauth_provider import CloudAccountProfile, CloudProviderError, CloudTokenPayload  # noqa: E402
 from services.cloud_oauth_service import CloudOAuthService  # noqa: E402
 
 
@@ -24,6 +24,8 @@ class _Provider:
         self.display_name = 'Feishu User 1'
         self.provider_tenant_key = 'tenant-key-1'
         self.refresh_error: Exception | None = None
+        self.refresh_calls = 0
+        self.exchange_refresh_token = 'refresh-token'
 
     def provider_name(self) -> str:
         return 'feishu'
@@ -35,11 +37,12 @@ class _Provider:
     def exchange_code(self, *, client_id: str, client_secret: str, code: str, redirect_uri: str) -> CloudTokenPayload:
         return CloudTokenPayload(
             access_token='oauth-token',
-            refresh_token='refresh-token',
+            refresh_token=self.exchange_refresh_token,
             expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
         )
 
     def refresh_access_token(self, *, client_id: str, client_secret: str, refresh_token: str) -> CloudTokenPayload:
+        self.refresh_calls += 1
         if self.refresh_error is not None:
             raise self.refresh_error
         return CloudTokenPayload(access_token='refreshed-token', refresh_token=refresh_token)
@@ -96,6 +99,40 @@ class CloudOAuthOwnerTest(unittest.TestCase):
             os.unlink(self._tmp.name)
         except OSError:
             pass
+
+    def _authorize_oauth_connection(self) -> str:
+        created = self.service.create_authorize_url(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='oauth_user',
+            client_id='client',
+            client_secret='secret',
+            redirect_uri='https://example.test/callback',
+            state='state-1',
+        )
+        callback = self.service.oauth_callback(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            connection_id=created['connection_id'],
+            code='code-1',
+            state='state-1',
+        )
+        return callback['connection_id']
+
+    def _expire_access_token(self, connection_id: str) -> None:
+        self.service._cache_delete(connection_id)
+        with cloud_oauth_module.SessionLocal() as db:
+            row = db.query(CloudAuthConnection).filter_by(connection_id=connection_id).first()
+            state = self.service._decrypt_payload(row.auth_state_ciphertext, field_name='auth_state')
+            state.update({
+                'access_token': '',
+                'access_expires_at': '',
+                'refresh_token': 'refresh-token-health',
+            })
+            row.auth_state_ciphertext = self.service._encrypt_payload(state, field_name='auth_state')
+            db.commit()
 
     def test_token_and_verify_require_owner(self) -> None:
         created = self.service.create_connection(
@@ -328,6 +365,75 @@ class CloudOAuthOwnerTest(unittest.TestCase):
         detail = self.service.get_connection(connection_id, user_id='user-1')
         self.assertEqual(detail['status'], 'ACTIVE')
         self.assertEqual(detail['last_error'], '')
+
+    def test_health_check_keeps_active_connection_on_retryable_network_error(self) -> None:
+        connection_id = self._authorize_oauth_connection()
+        self._expire_access_token(connection_id)
+        self.provider.refresh_error = CloudProviderError('provider network error', retryable=True)
+
+        result = self.service.run_health_check_once(provider='feishu', batch_size=10)
+
+        self.assertEqual(result['active'], 1)
+        self.assertEqual(result['retryable_errors'], 1)
+        detail = self.service.get_connection(connection_id, user_id='user-1')
+        self.assertEqual(detail['status'], 'ACTIVE')
+        self.assertEqual(detail['last_error'], 'provider network error')
+
+        self.provider.refresh_error = None
+        recovered = self.service.run_health_check_once(provider='feishu', batch_size=10)
+
+        self.assertEqual(recovered['active'], 1)
+        detail = self.service.get_connection(connection_id, user_id='user-1')
+        self.assertEqual(detail['status'], 'ACTIVE')
+        self.assertEqual(detail['last_error'], '')
+
+    def test_health_check_marks_expired_refresh_token_and_lists_connection(self) -> None:
+        connection_id = self._authorize_oauth_connection()
+        self._expire_access_token(connection_id)
+        self.provider.refresh_error = CloudProviderError(
+            'feishu token refresh failed [20037]: refresh token has expired',
+            provider_code='20037',
+            requires_reauth=True,
+        )
+
+        result = self.service.run_health_check_once(provider='feishu', batch_size=10)
+
+        self.assertEqual(result['expired'], 1)
+        detail = self.service.get_connection(connection_id, user_id='user-1')
+        self.assertEqual(detail['status'], 'EXPIRED')
+        listed = self.service.list_connections(
+            owner_user_id='user-1',
+            provider='feishu',
+            status='ACTIVE,ERROR,EXPIRED',
+        )
+        self.assertEqual([item['connection_id'] for item in listed['items']], [connection_id])
+
+    def test_oauth_callback_rejects_missing_refresh_token(self) -> None:
+        self.provider.exchange_refresh_token = ''
+        created = self.service.create_authorize_url(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='oauth_user',
+            client_id='client',
+            client_secret='secret',
+            redirect_uri='https://example.test/callback',
+            state='state-1',
+        )
+
+        with self.assertRaisesRegex(Exception, 'cloud access token is unavailable'):
+            self.service.oauth_callback(
+                provider='feishu',
+                tenant_id='',
+                owner_user_id='user-1',
+                connection_id=created['connection_id'],
+                code='code-1',
+                state='state-1',
+            )
+
+        detail = self.service.get_connection(created['connection_id'], user_id='user-1')
+        self.assertEqual(detail['status'], 'ERROR')
+        self.assertEqual(detail['last_error'], 'provider returned empty refresh_token')
 
     def test_health_check_skips_revoked_connection(self) -> None:
         created = self.service.create_authorize_url(

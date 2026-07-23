@@ -30,6 +30,8 @@ import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
+  PLUGIN_PANEL_EXPANDED_EVENT,
+  PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX,
 } from "@/modules/chat/constants/chat";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
@@ -37,6 +39,7 @@ import TaskCenter from "@/modules/chat/components/TaskCenter";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
+import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 
 // Stable empty reference to avoid returning a fresh array from the zustand
 // selector on every render, which (with useSyncExternalStore) would trigger an
@@ -87,6 +90,31 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
   const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
+  const [pluginPanelExpanded, setPluginPanelExpanded] = useState(false);
+  const [expandedRailTab, setExpandedRailTab] = useState<"chat" | "tasks">("chat");
+
+  useEffect(() => {
+    let restoredExpanded = false;
+    try {
+      restoredExpanded = localStorage.getItem(
+        `${PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX}${sessionId}`,
+      ) === "true";
+    } catch {
+      // Keep the default compact layout when browser storage is unavailable.
+    }
+    setPluginPanelExpanded(restoredExpanded);
+    if (restoredExpanded) setExpandedRailTab("chat");
+
+    const handleExpandedChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ conversationId: string; expanded: boolean }>).detail;
+      if (detail.conversationId === sessionId) {
+        setPluginPanelExpanded(detail.expanded);
+        if (detail.expanded) setExpandedRailTab("chat");
+      }
+    };
+    window.addEventListener(PLUGIN_PANEL_EXPANDED_EVENT, handleExpandedChange);
+    return () => window.removeEventListener(PLUGIN_PANEL_EXPANDED_EVENT, handleExpandedChange);
+  }, [sessionId]);
 
   // Keep pendingPluginSettingsRef in sync with the welcome screen while no conversation is active.
   useEffect(() => {
@@ -433,6 +461,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           },
         },
         models: [t("chat.lazyMindModel")],
+        thinking_depth:
+          extras?.thinking_depth ?? useChatThinkStore.getState().thinkingDepth,
         // enable_thinking: think ? true : false,
         stream: true,
         input,
@@ -680,7 +710,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   return (
     <div
-      className="detail-container"
+      className={`detail-container${pluginPanelExpanded ? " detail-container--plugin-expanded" : ""}`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -696,6 +726,13 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           </div>
         </div>
       )}
+      {pluginPanelExpanded && (
+        <div className="expanded-rail-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={expandedRailTab === "chat"} className={expandedRailTab === "chat" ? "active" : ""} onClick={() => setExpandedRailTab("chat")}>{t("chat.pluginRailConversation")}</button>
+          <button type="button" role="tab" aria-selected={expandedRailTab === "tasks"} className={expandedRailTab === "tasks" ? "active" : ""} onClick={() => setExpandedRailTab("tasks")}>{t("taskCenter.panelTitle")} {tasks.length > 0 && <span>{tasks.length}</span>}</button>
+        </div>
+      )}
+      <div className={`chat-conversation-pane${pluginPanelExpanded && expandedRailTab !== "chat" ? " chat-conversation-pane--hidden" : ""}`}>
       <ChatContainerComponent
         ref={chatRef}
         canChat={chatEnabled}
@@ -737,7 +774,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           autoRunning || pluginDefinitionChanged ? undefined : chatDisabledAction
         }
       />
-      {tasks.length > 0 && isTaskPanelCollapsed && (
+      </div>
+      {!pluginPanelExpanded && tasks.length > 0 && isTaskPanelCollapsed && (
         <button
           type="button"
           className="task-panel-restore-btn"
@@ -748,15 +786,17 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           <span className="task-panel-restore-label">{t("taskCenter.panelTitle")} ({tasks.length})</span>
         </button>
       )}
-      {tasks.length > 0 && !isTaskPanelCollapsed && (
+      {((tasks.length > 0 && !pluginPanelExpanded && !isTaskPanelCollapsed) || pluginPanelExpanded) && (
         <div
-          className="right-box"
-          style={panelWidth ? { width: panelWidth, minWidth: panelWidth } : undefined}
+          className={`right-box${pluginPanelExpanded ? " right-box--expanded-tab" : ""}${pluginPanelExpanded && expandedRailTab !== "tasks" ? " right-box--tab-hidden" : ""}`}
+          style={!pluginPanelExpanded && panelWidth ? { width: panelWidth, minWidth: panelWidth } : undefined}
+          aria-hidden={pluginPanelExpanded && expandedRailTab !== "tasks"}
         >
           <div className="right-box-resize-handle" onMouseDown={onPanelResizeStart} />
           <TaskCenter
             sessionId={sessionId}
-            onClose={() => setIsTaskPanelCollapsed(true)}
+            onClose={pluginPanelExpanded ? undefined : () => setIsTaskPanelCollapsed(true)}
+            showHeader={!pluginPanelExpanded}
           />
         </div>
       )}

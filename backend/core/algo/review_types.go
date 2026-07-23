@@ -3,10 +3,7 @@ package algo
 type SkillReviewRequest struct {
 	RequestID    string         `json:"requestid"`
 	UserID       string         `json:"user_id,omitempty"`
-	StartTime    string         `json:"start_time"`
-	EndTime      string         `json:"end_time"`
-	MinUserTurns int            `json:"min_user_turns,omitempty"`
-	MinToolTurns int            `json:"min_tool_turns,omitempty"`
+	SessionIDs   []string       `json:"session_ids"`
 	ModelConfigs map[string]any `json:"model_configs"`
 }
 
@@ -43,13 +40,13 @@ type SkillOrganizeData struct {
 }
 
 type MemoryReviewRequest struct {
+	TaskID    string         `json:"task_id"`
 	UserID    string         `json:"user_id"`
 	History   any            `json:"history"`
-	Memory    string         `json:"memory"`
-	User      string         `json:"user"`
 	LLMConfig map[string]any `json:"llm_config"`
 }
 
 type MemoryReviewResponse struct {
 	Status string `json:"status"`
+	TaskID string `json:"task_id"`
 }

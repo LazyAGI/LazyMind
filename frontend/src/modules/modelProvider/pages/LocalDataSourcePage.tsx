@@ -26,7 +26,6 @@ export default function LocalDataSourcePage() {
     t,
     loading,
     canCreateLocalSource,
-    localSourceCount,
     localChatSources,
     chatSettingsLoading,
     chatSettingsLoadFailed,
@@ -178,15 +177,6 @@ export default function LocalDataSourcePage() {
                 <p>{t("modelProvider.cloudDocuments.localDetailSubtitle")}</p>
               </div>
             </div>
-            <div
-              className="model-provider-cloud-doc-local-summary"
-              aria-label={`${t("modelProvider.cloudDocuments.localConnectedCountLabel")}: ${localSourceCount}`}
-            >
-              <strong>{localSourceCount}</strong>
-              <Text type="secondary">
-                {t("modelProvider.cloudDocuments.localConnectedCountLabel")}
-              </Text>
-            </div>
           </div>
 
           <div className="model-provider-cloud-doc-setting-card is-directory-config">
@@ -309,11 +299,7 @@ export default function LocalDataSourcePage() {
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               description={t("modelProvider.cloudDocuments.localChatDirectoriesNoBindings")}
-            >
-              <Button onClick={() => navigate("/data-sources")}>
-                {t("modelProvider.cloudDocuments.localManageDataSources")}
-              </Button>
-            </Empty>
+            />
           )}
         </div>
       </Modal>

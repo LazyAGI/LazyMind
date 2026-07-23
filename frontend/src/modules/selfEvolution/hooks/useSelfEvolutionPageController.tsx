@@ -145,6 +145,7 @@ import {
   formatAbMetricLabel,
   buildAbSummaryReports,
   parseAbtestComparisonArtifact,
+  buildAbSummaryFromComparisonArtifact,
   formatMaybePValue,
   parseSSEFrame,
   isDoneSSEFrame,
@@ -302,6 +303,8 @@ export function SelfEvolutionPageController({
   const [isConfirmingNewSession, setIsConfirmingNewSession] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isPlanningNextStep, setIsPlanningNextStep] = useState(false);
+  const [hasAttemptedFinalResultLoad, setHasAttemptedFinalResultLoad] =
+    useState(false);
   const [isRestoringThread, setIsRestoringThread] = useState(false);
   const [isHistorySessionModalOpen, setIsHistorySessionModalOpen] =
     useState(false);
@@ -318,7 +321,11 @@ export function SelfEvolutionPageController({
   const [newSessionDraft, setNewSessionDraft] = useState<NewSessionDraft>({});
   const [activeWorkbenchTab, setActiveWorkbenchTab] = useState<
     SelfEvolutionWorkbenchTab | undefined
-  >("messages");
+  >(() =>
+    routeState && "activeWorkbenchTab" in routeState
+      ? routeState.activeWorkbenchTab ?? undefined
+      : "messages",
+  );
   const [activeArtifactKind, setActiveArtifactKind] =
     useState<WorkflowResultKind>();
   const [isArtifactPanelOpen, setIsArtifactPanelOpen] = useState(false);
@@ -363,6 +370,7 @@ export function SelfEvolutionPageController({
   const [selectedViewStage, setSelectedViewStage] = useState<string>();
   const [selectedThreadStepId, setSelectedThreadStepId] = useState<string>();
   const [loadingThreadStepId, setLoadingThreadStepId] = useState<string>();
+  const routeSelectionRestoredRef = useRef(false);
   const threadEventsRef = useRef<NormalizedThreadEvent[]>([]);
   const [remoteThreadHistory, setRemoteThreadHistory] = useState<
     ThreadHistoryEntry[]
@@ -662,6 +670,11 @@ export function SelfEvolutionPageController({
       threadStepStatusByStage,
       workflowRuntimeState,
     ],
+  );
+  const isWorkflowComplete = Boolean(
+    !pendingCheckpointWaitPrompt &&
+      processDashboard.overview.length > 0 &&
+      processDashboard.overview.every((item) => item.step.status === "done"),
   );
   const applyLocalStageStreamCompletion = useCallback(
     (completedStage: ThreadEventStage) => {
@@ -970,14 +983,17 @@ export function SelfEvolutionPageController({
   const analysisActionableCaseColumns = useMemo<
     ColumnsType<AnalysisActionableCaseRow>
   >(() => buildAnalysisActionableCaseColumns(t), [t]);
-  const abSummaryReports = useMemo<AbSummaryReport[]>(
-    () => buildAbSummaryReports(workflowResults.abtests.data),
-    [workflowResults.abtests.data],
-  );
   const abtestComparisonArtifact = useMemo(
     () => parseAbtestComparisonArtifact(workflowResults.abtests.data),
     [workflowResults.abtests.data],
   );
+  const abSummaryReports = useMemo<AbSummaryReport[]>(() => {
+    const reports = buildAbSummaryReports(workflowResults.abtests.data);
+    if (reports.length > 0 || !abtestComparisonArtifact) {
+      return reports;
+    }
+    return [buildAbSummaryFromComparisonArtifact(abtestComparisonArtifact)];
+  }, [abtestComparisonArtifact, workflowResults.abtests.data]);
   const abTraceObservation = useMemo(
     () => normalizeTraceObservation(workflowResults.abtests.data),
     [workflowResults.abtests.data],
@@ -1016,7 +1032,24 @@ export function SelfEvolutionPageController({
   >(() => {
     const report = abSummaryReports[0];
     if (!report) {
-      return undefined;
+      if (
+        !isWorkflowComplete ||
+        !hasAttemptedFinalResultLoad ||
+        workflowResults.abtests.loading
+      ) {
+        return undefined;
+      }
+      return {
+        verdict: "done",
+        title: t("selfEvolutionRun.workflowCompleted"),
+        desc:
+          workflowResults.abtests.error ||
+          t("selfEvolutionRun.resultEmptyHint", {
+            label: getWorkflowResultLabels().abtests,
+          }),
+        metrics: [],
+        reasons: [],
+      };
     }
     const verdictText = (report.verdict || "").toLowerCase();
     const verdict: SelfEvolutionFinalResultSummary["verdict"] =
@@ -1100,7 +1133,15 @@ export function SelfEvolutionPageController({
       metrics: metricRows,
       reasons: reasons.slice(0, 3),
     };
-  }, [abSummaryReports, processDashboard.cutoverCompleted, t]);
+  }, [
+    abSummaryReports,
+    hasAttemptedFinalResultLoad,
+    isWorkflowComplete,
+    processDashboard.cutoverCompleted,
+    t,
+    workflowResults.abtests.error,
+    workflowResults.abtests.loading,
+  ]);
   const abComparisonColumns = useMemo<ColumnsType<AbComparisonRow>>(
     () => buildAbComparisonColumns(t),
     [t],
@@ -1587,6 +1628,31 @@ export function SelfEvolutionPageController({
     },
     [activeThreadId, fetchEvalReportBadCases],
   );
+  useEffect(() => {
+    setHasAttemptedFinalResultLoad(false);
+  }, [activeThreadId]);
+
+  useEffect(() => {
+    if (
+      !activeThreadId ||
+      !isWorkflowComplete ||
+      hasAttemptedFinalResultLoad ||
+      workflowResults.abtests.loading ||
+      workflowResults.abtests.loaded
+    ) {
+      return;
+    }
+    setHasAttemptedFinalResultLoad(true);
+    void fetchWorkflowResult("abtests", { force: true });
+  }, [
+    activeThreadId,
+    fetchWorkflowResult,
+    hasAttemptedFinalResultLoad,
+    isWorkflowComplete,
+    workflowResults.abtests.loaded,
+    workflowResults.abtests.loading,
+  ]);
+
   const handleWorkflowDownload = useCallback(
     async (
       kind: WorkflowResultKind,
@@ -1711,9 +1777,15 @@ export function SelfEvolutionPageController({
       }
       navigate(
         `/self-evolution/detail/${encodeURIComponent(activeThreadId)}/observation/${kind}`,
+        {
+          state: {
+            activeWorkbenchTab: activeWorkbenchTab ?? null,
+            selectedViewStage: kind,
+          },
+        },
       );
     },
-    [activeThreadId, navigate],
+    [activeThreadId, activeWorkbenchTab, navigate],
   );
 
   const openCaseArtifact = useCallback(
@@ -3243,6 +3315,29 @@ export function SelfEvolutionPageController({
   }, [activeSessionId]);
 
   useEffect(() => {
+    routeSelectionRestoredRef.current = false;
+  }, [routeThreadId]);
+
+  useEffect(() => {
+    const returnedStage = routeState?.selectedViewStage;
+    if (
+      !returnedStage ||
+      isRestoringThread ||
+      routeSelectionRestoredRef.current
+    ) {
+      return;
+    }
+    const returnedStep = threadStepList.steps.find(
+      (step) => toThreadEventStage(step.stage || step.title) === returnedStage,
+    );
+    if (!returnedStep) {
+      return;
+    }
+    routeSelectionRestoredRef.current = true;
+    void onSelectThreadStep(returnedStep);
+  }, [isRestoringThread, routeState?.selectedViewStage, threadStepList]);
+
+  useEffect(() => {
     if (!stepListCheckpointPrompt?.completedStage || selectedThreadStepId) {
       return;
     }
@@ -3316,6 +3411,22 @@ export function SelfEvolutionPageController({
       time: nowLabel,
     });
     setPrompt("");
+
+    const isContinueCheckpointCommand = Boolean(
+      activeThreadId &&
+        pendingCheckpointWaitPrompt?.command &&
+        !requiresManualCheckpointAction(pendingCheckpointWaitPrompt) &&
+        trimmedPrompt === pendingCheckpointWaitPrompt.command.trim(),
+    );
+    if (isContinueCheckpointCommand) {
+      setIsPlanningNextStep(true);
+      try {
+        await continueThreadExecution();
+      } finally {
+        setIsPlanningNextStep(false);
+      }
+      return;
+    }
 
     if (activeThreadId) {
       setIsSendingMessage(true);
@@ -3414,7 +3525,6 @@ export function SelfEvolutionPageController({
       return;
     }
 
-    const checkpointNextStage = pendingCheckpointWaitPrompt?.nextStage;
     const nextStepRunId = resolveContinueThreadStepId(threadStepListRef.current);
     if (nextStepRunId) {
       pendingNextStepRunIdRef.current = nextStepRunId;
@@ -3428,26 +3538,12 @@ export function SelfEvolutionPageController({
         `${AGENT_API_BASE}/threads/${encodeURIComponent(activeThreadId)}/continue`,
         { command_id: requestedCommandId },
       );
-      const refreshedStepList = await refreshThreadStepList(activeThreadId);
-      const latestStepRunId =
-        pendingNextStepRunIdRef.current || nextStepRunId;
-      const latestStep = refreshedStepList.steps.find(
-        (step) => step.stepId === latestStepRunId,
-      );
-      const activeStep = refreshedStepList.steps.find(
-        (step) => step.active || isThreadStepRunning(step),
-      );
-      const latestViewStage =
-        (latestStep
-          ? resolveThreadStepViewStage(latestStep)
-          : undefined) ||
-        checkpointNextStage ||
-        (activeStep ? resolveThreadStepViewStage(activeStep) : undefined);
+      await refreshThreadStepList(activeThreadId);
 
       setSelectedThreadStepId(undefined);
       setLoadingThreadStepId(undefined);
       loadingThreadStepIdRef.current = undefined;
-      setSelectedViewStage(latestViewStage);
+      setSelectedViewStage(undefined);
       await subscribePendingNextStepRunOrRestoreLatest(
         activeThreadId,
         activeSessionId,

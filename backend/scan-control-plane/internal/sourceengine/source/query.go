@@ -179,7 +179,7 @@ func (e *DefaultEngine) GetSource(ctx context.Context, req GetSourceRequest) (Ge
 		if err != nil {
 			return GetSourceResponse{}, mapStoreError(err)
 		}
-		resp.Bindings = bindingsToResponse(bindings)
+		resp.Bindings = bindingsToResponse(activeBindings(bindings))
 	}
 	if req.IncludeSummary {
 		summary, err := e.GetSourceSummary(ctx, SourceSummaryRequest{CallerID: req.CallerID, SourceID: req.SourceID})
@@ -214,7 +214,6 @@ func (e *DefaultEngine) BatchGetSourcesByDatasetIDs(ctx context.Context, dataset
 	}
 	return sourceMap, nil
 }
-
 
 func (e *DefaultEngine) TriggerSourceSync(ctx context.Context, req TriggerSourceSyncRequest) (TriggerSourceSyncResponse, error) {
 	if req.SourceID == "" {
@@ -256,7 +255,7 @@ func (e *DefaultEngine) syncBindings(ctx context.Context, req TriggerSourceSyncR
 		if err != nil {
 			return nil, mapStoreError(err)
 		}
-		if binding.Status != BindingStatusActive {
+		if binding.Status != BindingStatusActive && binding.Status != BindingStatusDeleting {
 			return nil, NewError(ErrCodeInvalidRequest, "binding is not active")
 		}
 		return []store.Binding{binding}, nil
@@ -267,7 +266,7 @@ func (e *DefaultEngine) syncBindings(ctx context.Context, req TriggerSourceSyncR
 	}
 	active := make([]store.Binding, 0, len(bindings))
 	for _, binding := range bindings {
-		if binding.Status == BindingStatusActive {
+		if binding.Status == BindingStatusActive || binding.Status == BindingStatusDeleting {
 			active = append(active, binding)
 		}
 	}
@@ -277,8 +276,17 @@ func (e *DefaultEngine) syncBindings(ctx context.Context, req TriggerSourceSyncR
 func (e *DefaultEngine) enqueueManualSyncs(ctx context.Context, req TriggerSourceSyncRequest, bindings []store.Binding) (TriggerSourceSyncResponse, error) {
 	resp := TriggerSourceSyncResponse{RunIDs: []string{}, JobIDs: []string{}, Intents: []SyncRunIntentResponse{}}
 	for _, binding := range bindings {
-		for idx, scopeRef := range syncScopeRefs(req.ScopeRef, binding.BindingID) {
-			normalizedScopeRef, err := e.normalizeManualSyncScope(ctx, binding, connector.ScopeType(req.ScopeType), scopeRef)
+		scopeRefs := syncScopeRefs(req.ScopeRef, binding.BindingID)
+		if binding.Status == BindingStatusDeleting {
+			scopeRefs = []connector.ScopeRef{nil}
+		}
+		for idx, scopeRef := range scopeRefs {
+			scopeType := connector.ScopeType(req.ScopeType)
+			if binding.Status == BindingStatusDeleting {
+				scopeType = connector.ScopeTypeCleanup
+				scopeRef = nil
+			}
+			normalizedScopeRef, err := e.normalizeManualSyncScope(ctx, binding, scopeType, scopeRef)
 			if err != nil {
 				return resp, err
 			}
@@ -286,7 +294,7 @@ func (e *DefaultEngine) enqueueManualSyncs(ctx context.Context, req TriggerSourc
 				RequestID: scopedSyncRequestID(req.RequestID, idx),
 				SourceID:  binding.SourceID,
 				BindingID: binding.BindingID,
-				ScopeType: connector.ScopeType(req.ScopeType),
+				ScopeType: scopeType,
 				ScopeRef:  normalizedScopeRef,
 			})
 			if err != nil {
@@ -301,6 +309,16 @@ func (e *DefaultEngine) enqueueManualSyncs(ctx context.Context, req TriggerSourc
 		}
 	}
 	return resp, nil
+}
+
+func activeBindings(bindings []store.Binding) []store.Binding {
+	active := make([]store.Binding, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding.Status == BindingStatusActive {
+			active = append(active, binding)
+		}
+	}
+	return active
 }
 
 type syncObjectReader interface {

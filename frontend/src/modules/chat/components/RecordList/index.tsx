@@ -4,7 +4,6 @@ import {
   DeleteOutlined,
   DownOutlined,
   FilterOutlined,
-  PlusCircleOutlined,
 } from "@ant-design/icons";
 import classnames from "classnames";
 import {
@@ -40,7 +39,6 @@ import InfiniteScroll from "react-infinite-scroll-component";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
-import { addTask, listTasks } from "@/modules/taskCenter/api";
 
 import dayjs from "dayjs";
 
@@ -50,7 +48,10 @@ import {
 } from "@/modules/chat/utils/conversationActivity";
 import {
   CHAT_CONVERSATION_ACTIVITY_EVENT,
+  CHAT_CONVERSATION_FILTER_EVENT,
+  CHAT_CONVERSATION_FILTER_KEY,
   type ChatConversationActivityDetail,
+  type ChatConversationFilter,
 } from "@/modules/chat/constants/chat";
 import "./index.scss";
 import { downloadStream } from "@/modules/chat/utils/download";
@@ -139,11 +140,17 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const [checkedList, setCheckedList] = useState<string[]>([]);
     const [showBatchExport, setShowBatchExport] = useState(false);
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
-    // Set of conversation_ids already in task center (for dedup)
-    const [taskConvIds, setTaskConvIds] = useState<Set<string>>(new Set());
     // convTypeFilter: which conversation types to show. Default = normal only (no task convs).
     // Values: 'normal' = non-task, 'task' = task. Multiple values allowed.
-    const [convTypeFilter, setConvTypeFilter] = useState<string[]>(['normal']);
+    const [convTypeFilter, setConvTypeFilter] = useState<string[]>(() => {
+      try {
+        return sessionStorage.getItem(CHAT_CONVERSATION_FILTER_KEY) === "task"
+          ? ["task"]
+          : ["normal"];
+      } catch {
+        return ["normal"];
+      }
+    });
     const [filterPopoverOpen, setFilterPopoverOpen] = useState(false);
     const scrollableTargetId = compact
       ? "sidebarConversationScrollableDiv"
@@ -154,15 +161,28 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const { setThink } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
 
-    // Load task center index once on mount to support dedup check.
     useEffect(() => {
-      listTasks({ page_size: 200 })
-        .then((resp) => {
-          const ids = new Set((resp.items ?? []).map((t) => t.conversation_id));
-          setTaskConvIds(ids);
-        })
-        .catch(() => {});
-    }, []);
+      const handleFilterChange = (event: Event) => {
+        const filter = (
+          event as CustomEvent<{ filter?: ChatConversationFilter }>
+        ).detail?.filter;
+        if (filter !== "normal" && filter !== "task") return;
+        const next = [filter];
+        setConvTypeFilter(next);
+        setFilterPopoverOpen(false);
+        getHistory({ isFirst: true, filterOverride: next, searchText: keyword });
+      };
+      window.addEventListener(
+        CHAT_CONVERSATION_FILTER_EVENT,
+        handleFilterChange,
+      );
+      return () =>
+        window.removeEventListener(
+          CHAT_CONVERSATION_FILTER_EVENT,
+          handleFilterChange,
+        );
+    }, [keyword]);
+
     const groupedHistoryList = useMemo(() => {
       const groups: Record<ConversationGroup, Conversation[]> = {
         today: [],
@@ -481,29 +501,6 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                   deleteHistory(item);
                 }}
               />
-              <Tooltip title={taskConvIds.has(item.conversation_id ?? '') ? t("chat.taskCenterAdded") : t("chat.addToTaskCenter")}>
-                <PlusCircleOutlined
-                  className="add-to-task"
-                  style={{
-                    marginLeft: 4,
-                    fontSize: 12,
-                    color: taskConvIds.has(item.conversation_id ?? '') ? '#ccc' : '#888',
-                    cursor: taskConvIds.has(item.conversation_id ?? '') ? 'default' : 'pointer',
-                  }}
-                  onClick={async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const convId = item.conversation_id ?? '';
-                    if (taskConvIds.has(convId)) return;
-                    try {
-                      await addTask(convId, item.display_name ?? '');
-                      setTaskConvIds((prev) => new Set([...prev, convId]));
-                      message.success(t("chat.addToTaskCenterSuccess"));
-                    } catch {
-                    }
-                  }}
-                />
-              </Tooltip>
             </>
           )}
         </div>
@@ -610,6 +607,14 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                                     return;
                                   }
                                   setConvTypeFilter(next);
+                                  try {
+                                    sessionStorage.setItem(
+                                      CHAT_CONVERSATION_FILTER_KEY,
+                                      next.length === 1 ? next[0] : "all",
+                                    );
+                                  } catch {
+                                    // Ignore storage errors.
+                                  }
                                   getHistory({ isFirst: true, filterOverride: next, searchText: keyword });
                                 }}
                                 style={{ display: 'flex', flexDirection: 'column', gap: 8 }}

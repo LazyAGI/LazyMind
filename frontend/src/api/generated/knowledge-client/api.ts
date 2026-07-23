@@ -1098,7 +1098,7 @@ export interface Doc {
    * @type {string}
    * @memberof Doc
    */
-  type?: DocTypeEnum;
+  type?: string;
   /**
    * Presigned URI for accessing the converted document if the document is docx.
    * @type {string}

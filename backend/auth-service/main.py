@@ -242,16 +242,6 @@ def _handle_validation_error(_, exc: RequestValidationError):
     )
 
 
-@app.on_event('startup')
-async def _start_cloud_oauth_health_check():
-    cloud_oauth_health.start()
-
-
-@app.on_event('shutdown')
-async def _stop_cloud_oauth_health_check():
-    await cloud_oauth_health.stop()
-
-
 def _export_openapi_artifacts() -> None:
     export_enabled = (os.getenv(_OPENAPI_EXPORT_ENABLED_ENV, '1') or '').strip().lower()
     if export_enabled in {'0', 'false', 'no', 'off'}:
@@ -299,5 +289,16 @@ app.include_router(cloud_oauth_router, prefix=_API_PREFIX)
 app.include_router(user_router, prefix=_API_PREFIX)
 app.include_router(role_router, prefix=_API_PREFIX)
 app.include_router(group_router, prefix=_API_PREFIX)
+
+
+@app.on_event('startup')
+async def _start_cloud_oauth_health_check():
+    cloud_oauth_health.start()
+
+
+@app.on_event('shutdown')
+async def _stop_cloud_oauth_health_check():
+    await cloud_oauth_health.stop()
+
 
 _export_openapi_artifacts()

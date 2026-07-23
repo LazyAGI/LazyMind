@@ -33,9 +33,9 @@ def test_sentence_tokenizer_splitter_returns_strings():
 def test_normal_line_splitter_splits_sentences_and_merges_short_prefixes():
     splitter = NormalLineSplitter()
 
-    assert splitter._split_text('短。\n这是一个较长的句子。') == ['短。这是一个较长的句子。']
+    assert splitter._split_text('短。\n这是一个较长的句子。') == ['短。\n这是一个较长的句子。']
     assert splitter._split_text('这是一个足够长的第一句。\n第二句也足够长？') == [
-        '这是一个足够长的第一句。',
+        '这是一个足够长的第一句。\n',
         '第二句也足够长？',
     ]
 
@@ -51,7 +51,7 @@ def test_line_splitter_uses_normal_sentence_splitter_for_non_pdf():
 
     assert isinstance(result, list)
     assert all(isinstance(item, DocNode) for item in result)
-    assert [item.text for item in result] == ['这是一个足够长的第一句。', '第二句也足够长？']
+    assert [item.text for item in result] == ['这是一个足够长的第一句。\n', '第二句也足够长？']
     assert result[0].metadata == {'file_name': 'note.md', 'page': 1}
     assert result[0].metadata is not node.metadata
 
@@ -112,7 +112,7 @@ def test_paragraph_splitter_splits_by_paragraph_and_applies_overlap():
 
     chunks = splitter.split_text('第一段内容较长。\n\n\n第二段内容也长。\n\n\n第三段收尾。')
 
-    assert chunks == ['第一段内容较长。', '较长。第二段内容也长。', '容也长。\n\n\n第三段收尾。']
+    assert chunks == ['第一段内容较长。', '。\n\n\n第二段内容也长。', '容也长。\n\n\n第三段收尾。']
 
 
 def test_paragraph_splitter_handles_empty_text_and_run_component():

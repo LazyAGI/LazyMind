@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	skillmetadata "lazymind/core/skillv2/metadata"
 	skillreview "lazymind/core/skillv2/review"
 	skillsearch "lazymind/core/skillv2/search"
 	"lazymind/core/versionfs"
@@ -169,10 +170,16 @@ func (s versionStore) EnforceRevisionLimit(ctx context.Context, tx *gorm.DB, ski
 }
 
 func (s versionStore) AfterCommit(ctx context.Context, tx *gorm.DB, revision versionfs.RevisionRecord, entries map[string]versionfs.Entry) error {
+	if err := skillmetadata.SyncPublished(ctx, tx, revision.ResourceID, entries, revision.CreatedAt); err != nil {
+		return err
+	}
 	return skillsearch.RebuildSkillTx(ctx, tx, revision.ResourceID, revision.CreatedAt)
 }
 
 func (s versionStore) AfterRollback(ctx context.Context, tx *gorm.DB, skillID string, revisionID string, entries map[string]versionfs.Entry, now time.Time) error {
+	if err := skillmetadata.SyncPublished(ctx, tx, skillID, entries, now); err != nil {
+		return err
+	}
 	return skillsearch.RebuildSkillTx(ctx, tx, skillID, now)
 }
 

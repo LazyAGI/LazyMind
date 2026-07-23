@@ -17,7 +17,9 @@ func TestHTTPCoreClientResourceRoutesUseCoreDocumentAPIs(t *testing.T) {
 	var datasetReqs []CreateDatasetRequest
 	var rootDocBody map[string]any
 	var deleted []string
+	var datasetUserName string
 	var rootUserID string
+	var rootUserName string
 	var deleteDocumentUserID string
 	var deleteDatasetUserID string
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,6 +28,7 @@ func TestHTTPCoreClientResourceRoutesUseCoreDocumentAPIs(t *testing.T) {
 			if r.Method != http.MethodPost {
 				t.Fatalf("unexpected dataset method %s", r.Method)
 			}
+			datasetUserName = r.Header.Get("X-User-Name")
 			var req CreateDatasetRequest
 			decodeJSON(t, r, &req)
 			datasetReqs = append(datasetReqs, req)
@@ -35,6 +38,7 @@ func TestHTTPCoreClientResourceRoutesUseCoreDocumentAPIs(t *testing.T) {
 				t.Fatalf("unexpected root document method %s", r.Method)
 			}
 			rootUserID = r.Header.Get("X-User-Id")
+			rootUserName = r.Header.Get("X-User-Name")
 			if got := r.URL.Query().Get("document_id"); got != "" {
 				t.Fatalf("binding root must not guess document_id from idempotency key, got %q", got)
 			}
@@ -63,6 +67,7 @@ func TestHTTPCoreClientResourceRoutesUseCoreDocumentAPIs(t *testing.T) {
 		IdempotencyKey: "create-source:user-1:req-1:dataset",
 		Name:           "Docs",
 		CreatedBy:      "user-1",
+		UserName:       "User One",
 		TenantID:       "tenant-1",
 	})
 	if err != nil {
@@ -73,6 +78,7 @@ func TestHTTPCoreClientResourceRoutesUseCoreDocumentAPIs(t *testing.T) {
 		DatasetID:      dataset.DatasetID,
 		Name:           "Binding",
 		UserID:         "user-1",
+		UserName:       "User One",
 	})
 	if err != nil {
 		t.Fatalf("create binding root: %v", err)
@@ -83,11 +89,17 @@ func TestHTTPCoreClientResourceRoutesUseCoreDocumentAPIs(t *testing.T) {
 	if len(datasetReqs) != 1 || datasetReqs[0].DisplayName != "Docs" {
 		t.Fatalf("dataset create did not carry Core display_name: %+v", datasetReqs)
 	}
+	if datasetUserName != "User One" {
+		t.Fatalf("dataset create should carry caller user name, got %q", datasetUserName)
+	}
 	if rootDocBody["display_name"] != "Binding" || rootDocBody["p_id"] != "" || rootDocBody["idempotency_key"] != "binding-root-1" {
 		t.Fatalf("binding root request should create a top-level Core document: %+v", rootDocBody)
 	}
 	if rootUserID != "user-1" {
 		t.Fatalf("binding root request should carry caller user id, got %q", rootUserID)
+	}
+	if rootUserName != "User One" {
+		t.Fatalf("binding root request should carry caller user name, got %q", rootUserName)
 	}
 	if err := client.DeleteDocument(context.Background(), DeleteDocumentRequest{DatasetID: "dataset-1", DocumentID: "core-folder-1", UserID: "user-1"}); err != nil {
 		t.Fatalf("delete document: %v", err)
@@ -123,6 +135,7 @@ func TestHTTPCoreClientCreateDatasetCarriesAlgo(t *testing.T) {
 		IdempotencyKey: "create-source:user-1:req-1:dataset",
 		Name:           "Docs",
 		CreatedBy:      "user-1",
+		Tags:           []string{"scan"},
 		Algo: &DatasetAlgo{
 			AlgoID:      "general_algo",
 			DisplayName: "General",
@@ -136,6 +149,9 @@ func TestHTTPCoreClientCreateDatasetCarriesAlgo(t *testing.T) {
 	}
 	if datasetReq.Algo == nil || datasetReq.Algo.AlgoID != "general_algo" || datasetReq.Algo.DisplayName != "General" {
 		t.Fatalf("dataset create lost algo payload: %+v", datasetReq)
+	}
+	if len(datasetReq.Tags) != 1 || datasetReq.Tags[0] != "scan" {
+		t.Fatalf("dataset create lost tags payload: %+v", datasetReq.Tags)
 	}
 }
 

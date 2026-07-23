@@ -10,22 +10,24 @@ import {
   type ReactNode,
 } from "react";
 import { RcFile } from "antd/es/upload";
-import { Badge, Button, message, Spin, Tooltip } from "antd";
+import { Button, message, Select, Spin, Tooltip } from "antd";
 import {
+  BookOutlined,
   BulbOutlined,
   CloseOutlined,
   CommentOutlined,
   EditOutlined,
+  PaperClipOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
 import { debounce } from "lodash";
-import AttachmentIcon from "../../assets/icons/attachment_icon.svg?react";
 import SendIcon from "../../assets/icons/send_icon.svg?react";
 import AddIcon from "../../assets/icons/add.svg?react";
 
 import ImageUpload, {
   allowedImageTypes,
   allowedFileTypes,
+  allowedTextTypes,
   allowedUploadTypes,
   ImageUploadImperativeProps,
   OnBeforeAddFilesResult,
@@ -33,11 +35,12 @@ import ImageUpload, {
 import { fileToBase64 } from "@/modules/chat/utils/upload";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
+import { resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl";
 
 import "./index.scss";
 
 import { ChatConfig } from "../ChatConfigs";
-import ChatSelector from "../ChatSelector";
+import ChatSelector, { type ChatSelectorImperativeProps } from "../ChatSelector";
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import { appendPromptToDraft } from "../PromptModal/promptLibrary";
 import ChatConfigModal from "./ChatConfigModal";
@@ -57,7 +60,10 @@ import { buildCitedMessageText } from "../newChatContainer/utils/citeMessage";
 const EMPTY_DISMISSED: Array<{ session_id: string; plugin_id: string }> = [];
 import ShowChatFileList from "../ShowChatFileList";
 import { formatFileSize } from "@/modules/chat/utils";
-import { useChatThinkStore } from "@/modules/chat/store/chatThink";
+import {
+  useChatThinkStore,
+  type ThinkingDepth,
+} from "@/modules/chat/store/chatThink";
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
@@ -234,7 +240,49 @@ function isImage(f: { name?: string }) {
 }
 function isDoc(f: { name?: string }) {
   const suffix = getSuffix(f);
-  return suffix !== "" && allowedFileTypes.includes(suffix);
+  return suffix !== "" && (
+    allowedFileTypes.includes(suffix) || allowedTextTypes.includes(suffix)
+  );
+}
+
+const MARKDOWN_IMAGE_PATTERN =
+  /!\[[^\]]*\]\(([^\s)]+)(?:\s+["'][^"']*["'])?\)/g;
+
+function extractMarkdownImageSources(text: string): string[] {
+  return Array.from(
+    text.matchAll(MARKDOWN_IMAGE_PATTERN),
+    (match) => match[1] ?? "",
+  ).filter(Boolean);
+}
+
+function removeMarkdownImages(text: string): string {
+  return text.replace(MARKDOWN_IMAGE_PATTERN, "").trim();
+}
+
+async function markdownImageToFile(source: string): Promise<File> {
+  const resolvedSource = await resolveMarkdownImageUrlAsync(source);
+  const url = new URL(resolvedSource, window.location.origin);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Unsupported image URL protocol");
+  }
+
+  const response = await fetch(url, { credentials: "same-origin" });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch pasted image: ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  if (!blob.type.startsWith("image/")) {
+    throw new Error("Pasted URL did not return an image");
+  }
+  const rawName = decodeURIComponent(url.pathname.split("/").pop() || "");
+  const suffix = getSuffix({ name: rawName });
+  const mimeExtension = blob.type.split("/")[1]?.split("+")[0] || "png";
+  const fileName = allowedImageTypes.includes(suffix)
+    ? rawName
+    : `pasted-image-${Date.now()}.${mimeExtension}`;
+
+  return new File([blob], fileName, { type: blob.type || "image/png" });
 }
 
 function preprocessUpload(
@@ -295,6 +343,7 @@ export interface SendMessageParams {
   fileListRef?: React.RefObject<ImageUploadImperativeProps | null>;
   files?: (RcFile & { uri: string })[];
   create_time?: string;
+  thinking_depth?: ThinkingDepth;
   /** When true, the payload will include run_in_background=true and the task center badge will increment. */
   run_in_background?: boolean;
   /** Structured answers from an AskCard submission; forwarded to the backend as ask_answers_structured. */
@@ -415,7 +464,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onSend,
       placeholder,
       openHistory,
-      openNewChat,
       isChatContent,
       showHistoryList,
       showHistoryButton = true,
@@ -450,6 +498,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       runInBackground = false,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
+    const knowledgeSelectorRef = useRef<ChatSelectorImperativeProps | null>(null);
     const promptRef = useRef<PromptImperativeProps>(null);
     const batchChatRef = useRef<BatchChatImperativeProps | null>(null);
     const innerRef = useRef<HTMLDivElement>(null);
@@ -459,13 +508,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const [polishingSuggestionKey, setPolishingSuggestionKey] = useState<
       string | null
     >(null);
-    const { setThink } = useChatThinkStore();
+    const { thinkingDepth, setThinkingDepth } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
     const [text, setText] = useState("");
     const [mentions, setMentions] = useState<ChatMention[]>([]);
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialPluginSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
+    const [addMenuOpen, setAddMenuOpen] = useState(false);
     const disabledNoticeId = useId();
     const previousSessionIdRef = useRef<string | undefined>(undefined);
     const hasSentMessageRef = useRef(false);
@@ -669,12 +719,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       return normalizedCiteMessage ? [normalizedCiteMessage] : [];
     }, [citeMessage, citeMessages]);
     const isPromptPolishing = Boolean(polishingSuggestionKey);
-    const documentFileCount = fileList.filter(
-      (item) => !allowedImageTypes.includes(item.suffix),
-    ).length;
-    const uploadBadgeCount = isUploading
-      ? Math.max(documentFileCount, 1)
-      : documentFileCount;
     const isSendDisabled =
       disabled || isPromptPolishing || !value?.trim() || isUploading;
     const shouldShowPromptSuggestions =
@@ -753,6 +797,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setNewMessage(false);
       const sendParams: SendMessageParams = {
         text: normalizedText,
+        thinking_depth: thinkingDepth,
         mentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
         citeMessages: normalizedCiteMessages,
@@ -893,7 +938,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           if (invalidFiles.length > 0) {
             message.warning(
               t("chat.unsupportedFileType", {
-                types: allowedUploadTypes.join(","),
+                types: t("chat.supportedUploadTypeSummary"),
               }),
             );
           }
@@ -902,14 +947,30 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             fileListRef.current?.uploadFiles(files);
           }
         } else {
+          const plainText = clipboardData.getData("text/plain");
+          const imageSources = extractMarkdownImageSources(plainText);
+
           // Keep the structured editor plain-text only; pasted HTML must not be
           // able to manufacture trusted mention nodes.
           e.preventDefault();
-          document.execCommand(
-            "insertText",
-            false,
-            clipboardData.getData("text/plain"),
-          );
+          if (imageSources.length > 0) {
+            e.stopPropagation();
+            void Promise.all(imageSources.map(markdownImageToFile))
+              .then((imageFiles) => {
+                fileListRef.current?.uploadFiles(imageFiles);
+                const remainingText = removeMarkdownImages(plainText);
+                if (remainingText) {
+                  document.execCommand("insertText", false, remainingText);
+                }
+              })
+              .catch(() => {
+                message.error(t("chat.fileUploadFailedRetry"));
+                document.execCommand("insertText", false, plainText);
+              });
+            return;
+          }
+
+          document.execCommand("insertText", false, plainText);
         }
       },
       [disabled, disabledReason, fileList.length, t],
@@ -1024,33 +1085,106 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
               <div className="input-bottom-actions">
                 <div className="input-bottom-actions-left">
-                  {isChatContent && (
-                    <div
-                      className={`input-bottom-actions-left-item${isPromptPolishing ? " is-disabled" : ""}`}
-                      aria-disabled={isPromptPolishing}
-                      onClick={() => {
-                        if (isPromptPolishing) {
+                  <div className="chat-add-resource">
+                    <Popover
+                      trigger="click"
+                      open={addMenuOpen}
+                      onOpenChange={(open) => {
+                        if (open && (disabled || isPromptPolishing)) {
+                          if (disabledReason) {
+                            message.warning(disabledReason);
+                          }
                           return;
                         }
-                        setThink(false);
-                        clearMultiData();
-                        clearPendingMessage();
-                        openNewChat?.();
-                        setContextUsageReset((current) => current + 1);
-                        setNewMessage(true);
+                        setAddMenuOpen(open);
                       }}
+                      placement="topLeft"
+                      classNames={{ root: "chat-add-resource-popover" }}
+                      content={
+                        <div className="chat-add-resource-menu">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddMenuOpen(false);
+                              fileListRef.current?.openFileDialog();
+                            }}
+                          >
+                            <PaperClipOutlined />
+                            {t("chat.addAttachment")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddMenuOpen(false);
+                              knowledgeSelectorRef.current?.open(document.body);
+                            }}
+                          >
+                            <BookOutlined />
+                            {t("chat.knowledgeBase")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddMenuOpen(false);
+                              promptRef.current?.onOpen();
+                            }}
+                          >
+                            <CommentOutlined />
+                            {t("chat.promptTemplate")}
+                          </button>
+                        </div>
+                      }
                     >
-                      <AddIcon />
-                      {t("chat.newChat")}
+                      <Tooltip title={t("chat.addResourceTooltip")}>
+                        <div
+                          className={`input-bottom-actions-left-item${addMenuOpen ? " selected" : ""}${disabled || isPromptPolishing ? " is-disabled" : ""}`}
+                          role="button"
+                          tabIndex={disabled || isPromptPolishing ? -1 : 0}
+                          aria-disabled={disabled || isPromptPolishing}
+                        >
+                          <AddIcon />
+                          {t("chat.addResource")}
+                        </div>
+                      </Tooltip>
+                    </Popover>
+                    <div className="chat-add-resource-hidden-selector">
+                      <ChatSelector
+                        ref={knowledgeSelectorRef}
+                        chatConfig={chatConfig ?? {}}
+                        refreshKey={knowledgeRefreshKey}
+                        embeddingReady={embeddingReady}
+                        multimodalEmbeddingReady={multimodalEmbeddingReady}
+                        rerankReady={rerankReady}
+                        onChange={onKnowledgeBaseChange}
+                      />
                     </div>
-                  )}
-                  <ChatSelector
-                    chatConfig={chatConfig ?? {}}
-                    refreshKey={knowledgeRefreshKey}
-                    embeddingReady={embeddingReady}
-                    multimodalEmbeddingReady={multimodalEmbeddingReady}
-                    rerankReady={rerankReady}
-                    onChange={onKnowledgeBaseChange}
+                    <div className="chat-add-resource-hidden-upload">
+                      <ImageUpload
+                        updateFiles={updateImageList}
+                        listNum={fileList.length}
+                        ref={fileListRef}
+                        types={allowedUploadTypes}
+                        max={MAX_UPLOAD_FILES}
+                        onBeforeAddFiles={onBeforeAddFiles}
+                        disabled={disabled || isPromptPolishing}
+                        disabledReason={isPromptPolishing ? t("chat.promptPolishing") : disabledReason}
+                        icon={<span />}
+                      />
+                    </div>
+                  </div>
+                  <Select
+                    aria-label={t("chat.thinkingDepth")}
+                    className="chat-thinking-depth-select"
+                    size="small"
+                    variant="borderless"
+                    value={thinkingDepth}
+                    disabled={disabled || isStreaming}
+                    onChange={setThinkingDepth}
+                    options={[
+                      { value: "low", label: t("chat.thinkingDepthLow") },
+                      { value: "medium", label: t("chat.thinkingDepthMedium") },
+                      { value: "high", label: t("chat.thinkingDepthHigh") },
+                    ]}
                   />
                   {/* <ModelSelector sessionId={sessionId} disabled={isStreaming} /> */}
                   {showHistoryButton && openHistory && (
@@ -1061,24 +1195,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       {t("chat.chatHistory")}
                     </div>
                   )}
-                  <div
-                    className={`input-bottom-actions-left-item${disabled || isPromptPolishing ? " is-disabled" : ""}`}
-                    aria-disabled={disabled || isPromptPolishing}
-                    onClick={() => {
-                      if (isPromptPolishing) {
-                        return;
-                      }
-                      if (disabled) {
-                        if (disabledReason) {
-                          message.warning(disabledReason);
-                        }
-                        return;
-                      }
-                      promptRef.current?.onOpen();
-                    }}
-                  >
-                    {t("chat.promptTemplate")}
-                  </div>
                   {isChatContent && (
                     <Tooltip title={skillDepositTooltip}>
                       <div
@@ -1145,6 +1261,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           tags: chatConfig?.tags ?? [],
                         },
                         runtime: contextRuntimeSettings,
+                        thinkingDepth,
                       })}
                       buildRequest={() => {
                         const files = fileListRef.current?.getFiles() ?? [];
@@ -1173,40 +1290,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                             creator: chatConfig?.creators ?? [],
                             tags: chatConfig?.tags ?? [],
                           },
+                          thinking_depth: thinkingDepth,
                           ...contextRuntimeSettings,
                         };
                       }}
-                    />
-                  </div>
-                  <div className="input-bottom-actions-right-item">
-                    <ImageUpload
-                      updateFiles={updateImageList}
-                      listNum={fileList.length}
-                      ref={fileListRef}
-                      types={allowedUploadTypes}
-                      max={MAX_UPLOAD_FILES}
-                      onBeforeAddFiles={onBeforeAddFiles}
-                      disabled={disabled || isPromptPolishing}
-                      disabledReason={
-                        isPromptPolishing
-                          ? t("chat.promptPolishing")
-                          : disabledReason
-                      }
-                      icon={
-                        <Badge
-                          count={uploadBadgeCount}
-                          dot={isUploading && !documentFileCount}
-                          size="small"
-                          className="chat-upload-document-badge"
-                        >
-                          <Button
-                            aria-label={t("chat.upload")}
-                            icon={<AttachmentIcon />}
-                            type="text"
-                            disabled={disabled || isPromptPolishing}
-                          />
-                        </Badge>
-                      }
                     />
                   </div>
                   <div className="input-bottom-actions-right-item">

@@ -16,8 +16,7 @@ func (e *DefaultEngine) DeleteBinding(ctx context.Context, sourceID, bindingID s
 	if err != nil {
 		return DeleteBindingResponse{}, mapStoreError(err)
 	}
-	warnings := e.deleteFolderAsWarning(ctx, src.DatasetID, deleted.Binding.CoreParentDocumentID, src.CreatedBy)
-	warnings = append(warnings, e.queueLocalWatcherStops(ctx, src, []store.Binding{deleted.Binding})...)
+	warnings := e.queueLocalWatcherStops(ctx, src, []store.Binding{deleted.Binding})
 	return DeleteBindingResponse{
 		Deleted:                     true,
 		BindingID:                   deleted.Binding.BindingID,

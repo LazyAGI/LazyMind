@@ -505,6 +505,41 @@ func TestListDocumentsByDatasetsSkipsInaccessibleAndMissingDatasets(t *testing.T
 	}
 }
 
+func TestListDocumentsByDatasetsFiltersScanDeniedDataset(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedDocumentListDataset(t, db, "dataset-local", "user-1")
+	seedDocumentListDataset(t, db, "dataset-manual", "user-1")
+	now := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	seedDocumentListDoc(t, db, "dataset-local", "doc-local", "local.txt", now, "user-1", nil)
+	seedDocumentListDoc(t, db, "dataset-manual", "doc-manual", "manual.txt", now.Add(time.Minute), "user-1", nil)
+
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/scan/internal/source-access/by-dataset:batch" {
+			t.Errorf("unexpected scan request %s %q", r.Method, r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
+		return testJSONResponse(http.StatusOK, `{"items":[{"dataset_id":"dataset-local","source_id":"source-local","exists":true,"allowed":false},{"dataset_id":"dataset-manual","exists":false,"allowed":true}]}`), nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/documents:listByDatasets", strings.NewReader(`{"dataset_ids":["dataset-local","dataset-manual"]}`))
+	req.Header.Set("X-User-Id", "user-1")
+	req.Header.Set("Authorization", "Bearer user-token")
+	rec := httptest.NewRecorder()
+	ListDocumentsByDatasets(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body ListDocumentsResponse
+	decodeRecorderJSON(t, rec, &body)
+	if body.TotalSize != 1 || len(body.Documents) != 1 || body.Documents[0].DocumentID != "doc-manual" {
+		t.Fatalf("expected only manual dataset document, got total=%d docs=%+v", body.TotalSize, body.Documents)
+	}
+}
+
 func TestListDocumentsByDatasetsRequiresDatasetIDs(t *testing.T) {
 	_ = newDocumentTestDB(t)
 

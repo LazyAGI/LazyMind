@@ -3,7 +3,7 @@ import {
   formRulesSource,
   frontendDockerfileSource,
   indexHtml,
-  localComposeSource,
+  localRuntimeFrontendSource,
   loginSource,
   mainLayoutSource,
   mainEntry,
@@ -21,7 +21,8 @@ describe('Vite entrypoint', () => {
     expect(indexHtml).toContain('<script type="module" src="/src/main.tsx"></script>');
     expect(mainEntry).toContain('createRoot');
     expect(mainEntry).toContain('document.getElementById("app")');
-    expect(mainEntry).toMatch(/root\.render\s*\(\s*<App\s*\/>\s*\)/);
+    expect(mainEntry).toContain('<GlobalErrorBoundary>');
+    expect(mainEntry).toContain('<App />');
   });
 });
 
@@ -36,7 +37,8 @@ describe('router contract', () => {
     expect(routePaths).toContain('/');
     expect(routePaths).toContain('agent/chat');
     expect(routePaths).toContain('lib/knowledge');
-    expect(routePaths).toContain('data-sources');
+    expect(routePaths).toContain('databases');
+    expect(routePaths).toContain('cloud-documents');
     expect(routePaths).toContain('model-providers');
     expect(routePaths).toContain('memory-management');
     expect(routePaths).toContain('self-evolution');
@@ -77,12 +79,12 @@ describe('runtime facade contract', () => {
     expect(loginSource).not.toContain('VITE_HIDE_EVO');
   });
 
-  it('keeps frontend Docker build args available while local mode disables the frontend container', () => {
+  it('keeps frontend Docker build args available while the local runtime serves the frontend', () => {
     expect(frontendDockerfileSource).toContain('ARG VITE_API_BASE_URL');
     expect(frontendDockerfileSource).toContain('ARG VITE_LAZYMIND_MODE');
     expect(frontendDockerfileSource).toContain('ARG VITE_HIDE_EVO');
-    expect(localComposeSource).toMatch(/disabled_container_services:[\s\S]*-\s*frontend/);
-    expect(localComposeSource).not.toMatch(/frontend:[\s\S]*VITE_LAZYMIND_MODE:\s*local/);
+    expect(localRuntimeFrontendSource).toContain('VITE_LAZYMIND_MODE=');
+    expect(localRuntimeFrontendSource).toContain('filepath.Join(paths.RepoRoot, "frontend")');
   });
 });
 

@@ -31,8 +31,8 @@ const INTENT_FIELD_LABELS: Record<string, string> = {
 interface ChatMessageContentProps {
   item: any;
   uniqueKey?: string;
-  isThinkingCollapsed: (key: string) => boolean;
-  onToggleThinkingCollapse: (key: string) => void;
+  isThinkingCollapsed: (key: string, defaultCollapsed?: boolean) => boolean;
+  onToggleThinkingCollapse: (key: string, currentCollapsed?: boolean) => void;
 }
 
 export default function ChatMessageContent({
@@ -43,12 +43,12 @@ export default function ChatMessageContent({
 }: ChatMessageContentProps) {
   const { t } = useTranslation();
   const thinkingKey = uniqueKey || item.history_id || item.id || "default";
-  const isCollapsed = isThinkingCollapsed(thinkingKey);
   const citeMessageList =
     item.role === RoleTypes.USER ? getCiteMessages(item) : [];
   const isStreaming =
     item.finish_reason !==
     ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
+  const isCollapsed = isThinkingCollapsed(thinkingKey, !isStreaming);
   const conversationIntent =
     item.intent_updated?.scope === "conversation"
       ? item.intent_updated.intent_context
@@ -107,7 +107,7 @@ export default function ChatMessageContent({
         <>
           <div
             className="chat-think-status"
-            onClick={() => onToggleThinkingCollapse(thinkingKey)}
+            onClick={() => onToggleThinkingCollapse(thinkingKey, isCollapsed)}
           >
             <img src={ThinkIcon} className="chat-think-icon" alt="" />
             <span className="chat-think-title">

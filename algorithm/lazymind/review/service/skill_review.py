@@ -10,12 +10,14 @@ import lazyllm
 from lazyllm import AutoModel, LOG
 from lazyllm.tools.agent.skill_manager import SkillManager
 
-from lazymind.chat.engine.tools.infra.skill_remote_store import SkillRemoteStore
-from lazymind.chat.engine.tools.infra.skill_validation import (
-    parse_skill_frontmatter,
-    validate_skill_content,
+from lazymind.common.skill_document import require_valid_skill_document
+from lazymind.common.integrations.remote_fs import RemoteFS
+from lazymind.common.skill_remote_store import SkillRemoteStore
+from lazymind.common.skill_storage_key import (
+    EXTERNAL_SKILL_CATEGORY,
+    INTERNAL_SKILL_CATEGORY,
+    parse_skill_storage_key,
 )
-from lazymind.chat.integrations.remote_fs import RemoteFS
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
 from lazymind.review.skill_review.config import DEFAULT_REPORT_DIR_NAME
@@ -152,7 +154,7 @@ def _run_skill_review(
     work_dir = _resolve_artifact_dir(request.artifact_dir, requestid=request.requestid)
     read_user_ids = [request.user_id] if request.user_id else None
 
-    raw_sessions = read_session(request.start_time, request.end_time, read_user_ids)
+    raw_sessions = read_session(request.session_ids, read_user_ids)
     if request.user_id:
         user_sessions = _group_sessions_by_user(raw_sessions)
         user_sessions = {
@@ -489,8 +491,24 @@ def _apply_skill_review_records(
             'input_count': 0,
             'output_count': 0,
             'error_count': 0,
+            'skipped_count': 0,
             'applied': [],
             'errors': [],
+            'skipped': [],
+        }
+
+    skipped = [_external_patch_skip_result(record) for record in records if _is_external_patch(record)]
+    actionable_records = [record for record in records if not _is_external_patch(record)]
+    if not actionable_records:
+        return 0, {
+            'status': 'completed',
+            'input_count': len(records),
+            'output_count': 0,
+            'error_count': 0,
+            'skipped_count': len(skipped),
+            'applied': [],
+            'errors': [],
+            'skipped': skipped,
         }
 
     skill_fs_url = str(_cfg['skill_fs_url'] or '').strip()
@@ -500,89 +518,109 @@ def _apply_skill_review_records(
     applied: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
 
-    for record in records:
+    for record in actionable_records:
         try:
             applied.append(_apply_skill_review_record(record, store))
         except Exception as exc:
             LOG.exception(f'[SkillReview] failed to apply resolution {record.id}: {exc}')
             errors.append(stage_error('apply', record.id, exc))
 
-    status = 'failed' if records and not applied else ('partial' if errors else 'completed')
+    status = 'failed' if actionable_records and not applied else ('partial' if errors else 'completed')
     report = {
         'status': status,
         'input_count': len(records),
         'output_count': len(applied),
         'error_count': len(errors),
+        'skipped_count': len(skipped),
         'applied': applied,
         'errors': errors,
+        'skipped': skipped,
     }
     return len(applied), report
 
 
 def _apply_skill_review_record(record: SkillReviewResolution, store: SkillRemoteStore) -> dict[str, Any]:
-    content_error = validate_skill_content(record.skill_content)
-    if content_error:
-        raise ValueError(content_error)
+    if _is_external_patch(record):
+        return _external_patch_skip_result(record)
 
-    frontmatter, _ = parse_skill_frontmatter(record.skill_content)
-    content_name = str(frontmatter.get('name') or '').strip()
-    content_category = str(frontmatter.get('category') or '').strip()
+    document = require_valid_skill_document(
+        record.skill_content,
+        expected_name=record.skill_name,
+    )
+    content_name = str(document.metadata['name'])
 
     if record.type == 'new':
-        category = content_category
         name = content_name or record.skill_name
-        if not category:
-            raise ValueError(f'category is required to create skill {name!r}')
-        result = store.create(category, name, record.skill_content)
+        result = store.create(INTERNAL_SKILL_CATEGORY, name, record.skill_content)
         return {
             'id': record.id,
             'type': record.type,
             'name': name,
-            'category': category,
+            'category': INTERNAL_SKILL_CATEGORY,
             'store_result': result,
         }
 
     if record.type == 'patch':
-        existing_identity = store.resolve_existing_identity(record.skill_name)
-        if existing_identity.get('error') and content_category:
-            existing_identity = store.resolve_existing_identity(record.skill_name, content_category)
+        existing_identity = store.resolve_existing_identity(record.target_skill_key)
         if existing_identity.get('error'):
             raise ValueError(str(existing_identity['error']))
-        old_category = str(existing_identity.get('category') or '').strip()
-        old_name = str(existing_identity.get('name') or record.skill_name).strip()
-        new_category = content_category or old_category
+        storage_category = str(existing_identity['category']).strip()
+        old_name = str(
+            existing_identity.get('name')
+            or record.target_skill_key.rsplit('/', 1)[-1]
+        ).strip()
         new_name = content_name or old_name
-        if not new_category:
-            raise ValueError(f'category is required to patch skill {record.skill_name!r}')
         if (
-            (new_category, new_name) != (old_category, old_name)
-            and _skill_package_exists(store, new_category, new_name)
+            new_name != old_name
+            and _skill_package_exists(store, storage_category, new_name)
         ):
-            raise ValueError(f'cannot rename skill {old_name!r} to existing skill {new_category}/{new_name}')
-        if (new_category, new_name) == (old_category, old_name):
-            before = store.list_files(old_category, old_name)
+            raise ValueError(
+                f'cannot rename skill {old_name!r} to existing skill '
+                f'{storage_category}/{new_name}'
+            )
+        if new_name == old_name:
+            before = store.list_files(storage_category, old_name)
             after = dict(before)
             after['SKILL.md'] = record.skill_content
-            replace_result = store.replace_files(old_category, old_name, before, after)
+            replace_result = store.replace_files(storage_category, old_name, before, after)
             store_result = {'replace': replace_result}
         else:
-            create_result = store.create(new_category, new_name, record.skill_content)
-            remove_result = store.remove(old_category, old_name)
-            store_result = {
-                'create': create_result,
-                'remove': remove_result,
-            }
+            rename_result = store.rename(
+                storage_category,
+                old_name,
+                storage_category,
+                new_name,
+                skill_content=record.skill_content,
+            )
+            store_result = {'rename': rename_result}
         return {
             'id': record.id,
             'type': record.type,
             'old_name': old_name,
-            'old_category': old_category,
+            'old_category': storage_category,
             'name': new_name,
-            'category': new_category,
+            'category': storage_category,
             'store_result': store_result,
         }
 
     raise ValueError(f'unsupported skill review resolution type {record.type!r}')
+
+
+def _is_external_patch(record: SkillReviewResolution) -> bool:
+    if record.type != 'patch':
+        return False
+    category, _ = parse_skill_storage_key(record.target_skill_key)
+    return category == EXTERNAL_SKILL_CATEGORY
+
+
+def _external_patch_skip_result(record: SkillReviewResolution) -> dict[str, Any]:
+    return {
+        'id': record.id,
+        'type': record.type,
+        'target_skill_key': record.target_skill_key,
+        'status': 'skipped',
+        'reason': 'external_skill_patch_not_allowed',
+    }
 
 
 def _skill_package_exists(store: SkillRemoteStore, category: str, name: str) -> bool:
