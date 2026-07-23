@@ -61,7 +61,7 @@ SCENARIOS = [
     *[(query, 'create') for query in (
         '创建一份产品说明', '生成三张海报', '写一份项目总结', '制作一份演示文稿',
         '产出一个营销文案', 'Create a landing page', 'Generate a logo', 'Draft a contract outline',
-        '创建一个AI视频Skill', '写一份研究摘要',
+        '创建一个AI视频Skill', '编写对应的技术投标方案',
     )],
     # Direct answers (11) -- total 100
     *[(query, 'answer') for query in (

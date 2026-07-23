@@ -17,7 +17,7 @@ import lazyllm
 
 from lazymind.chat.engine.tools.infra import tool_error, tool_success
 from lazymind.chat.engine.tools.infra.core_api_client import post_core_api
-from lazyllm.tools.agent.base import _write_agent_data
+from lazymind.chat.service.agent_event_bus import emit_agent_event
 
 
 def _agentic_config() -> Dict[str, Any]:
@@ -104,7 +104,7 @@ def create_plugin_draft(
         })
     except Exception as exc:  # noqa: BLE001
         # Pre-fill failure is non-fatal; generation can still proceed
-        _write_agent_data({'plugin_draft_prefill_warning': str(exc)})
+        emit_agent_event('plugin_draft_prefill_warning', message=str(exc))
 
     # Step 3: Trigger async AI generation
     try:
@@ -115,14 +115,13 @@ def create_plugin_draft(
     editor_url = f'/plugin/{draft_id}'
 
     # Emit plugin_draft_created SSE event so future frontend cards can pick it up
-    _write_agent_data({
-        'plugin_draft_created': {
-            'draft_id': draft_id,
-            'name': name,
-            'editor_url': editor_url,
-            'status': 'generating',
-        },
-    })
+    emit_agent_event(
+        'plugin_draft_created',
+        draft_id=draft_id,
+        name=name,
+        editor_url=editor_url,
+        status='generating',
+    )
 
     return tool_success({
         'draft_id': draft_id,

@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import lazyllm
-from lazyllm.tools.agent.base import _write_agent_data
+from lazymind.chat.service.agent_event_bus import emit_agent_event
 
 from lazymind.chat.plugin import plugin_loader
 from lazymind.chat.engine.subagent import SUBAGENT_CORE_TOOL_NAMES
@@ -847,7 +847,7 @@ def _normalise_preflight_result(
 
 
 def _emit_preflight_snapshot(snapshot: Optional[Dict[str, Any]]) -> None:
-    _write_agent_data(
+    emit_agent_event(
         'plugin_preflight_updated',
         clear=snapshot is None,
         snapshot=snapshot or {},

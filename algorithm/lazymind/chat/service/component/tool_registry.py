@@ -92,7 +92,7 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         '`vision_extractor`, or `save_plugin_artifact`. Prefer this for images when the task is '
         'visual (edit, generate, workflow) or you only need the file location.\n'
         '- `read_user_attachment(filename, turn=N)`: extract TEXT — direct read for plain-text files, '
-        'OCR for pdf/doc/docx/pptx, or a '
+        'local structured extraction for docx (with OCR fallback), OCR for pdf/doc/pptx, or a '
         'text description via vision for images. Use only when you need document text or a textual '
         'answer about image content (e.g. "what does this document say", "describe this diagram").\n'
         'Supported uploads: images, pdf/doc/docx/pptx, and common plain-text/code/config files.\n'

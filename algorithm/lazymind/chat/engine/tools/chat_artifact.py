@@ -9,7 +9,7 @@ import uuid
 from typing import Any, Dict, Optional
 
 import lazyllm
-from lazyllm.tools.agent.base import _write_agent_data
+from lazymind.chat.service.agent_event_bus import emit_agent_event
 
 from lazymind.config import config as _cfg
 from lazymind.chat.engine.tools.infra import tool_success
@@ -132,7 +132,7 @@ def save_chat_artifact(
         raise ValueError('artifact content exceeds the 2 MiB limit')
 
     artifact_id = str(uuid.uuid4())
-    _write_agent_data(
+    emit_agent_event(
         'artifact_created',
         artifact_id=artifact_id,
         filename=safe_name,
@@ -174,7 +174,7 @@ def save_chat_file(
         os.replace(temporary, destination)
         size = os.path.getsize(destination)
         value = {'filename': filename, 'path': destination, 'size': size}
-        _write_agent_data(
+        emit_agent_event(
             'artifact_created',
             artifact_id=artifact_id,
             filename=filename,

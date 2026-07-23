@@ -95,6 +95,13 @@ export interface ChatMessage {
   cite_message?: string;
   cite_messages?: string[];
   tool_call_turns?: number;
+  tool_limit_pending?: {
+    decision_id: string;
+    used_rounds: number;
+    round_limit: number;
+    expanded_max_rounds: number;
+    timeout_seconds: number;
+  };
   mentions?: ChatMention[];
   intent_updated?: {
     scope: "conversation";

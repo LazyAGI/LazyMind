@@ -88,6 +88,10 @@ class AgentEventFrameTranslator:
             ask_data = {k: v for k, v in event.items() if k != 'tag'}
             frames.append(_stream_frame(extra={'ask_pending': ask_data}))
             return frames
+        if event_type == 'tool_limit_pending':
+            payload = {k: v for k, v in event.items() if k != 'tag'}
+            frames.append(_stream_frame(extra={'tool_limit_pending': payload}))
+            return frames
         if event_type == 'intent_updated':
             payload = {k: v for k, v in event.items() if k != 'tag'}
             frames.append(_stream_frame(extra={'intent_updated': payload}))

@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 from lazyllm import LOG, AutoModel
 
+from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
@@ -300,6 +301,9 @@ def _build_agentic_config(
         ).strip(),
         'is_subagent': True,
         'agent_type': effective_agent_type,
+        'thinking_depth': str(
+            params.get('_thinking_depth') or agentic_config.get('thinking_depth') or 'medium'
+        ),
     })
     if effective_agent_type == 'plugin_step':
         agentic_config.update({
@@ -467,6 +471,11 @@ def _build_subagent_plan(
         force_summarize_context=ctx.objective,
         execution_options=AgentExecutionOptions(
             extra_stop_condition=_make_cancel_stop_condition(),
+            max_retries=(
+                max(1, int(_cfg['agentic_expanded_max_rounds']) - 1)
+                if str((lazyllm.globals.get('agentic_config') or {}).get('thinking_depth') or '').lower() == 'max'
+                else None
+            ),
         ),
     )
 

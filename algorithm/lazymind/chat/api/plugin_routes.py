@@ -42,6 +42,12 @@ class TaskCancelResponse(BaseModel):
     ok: bool
 
 
+class ToolLimitDecisionRequest(BaseModel):
+    conversation_id: str
+    decision_id: str
+    action: str
+
+
 @router.post('/api/plugin/driver', response_model=DriverResponse, summary='Evaluate plugin step result')
 async def plugin_driver(req: DriverRequest) -> DriverResponse:
     """DriverAgent evaluation endpoint.
@@ -95,6 +101,27 @@ async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
 
         lazyllm.globals._init_sid(sid=sid)
         FileSystemQueue(klass='cancel').enqueue(_json.dumps({'tag': 'cancel'}))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return TaskCancelResponse(ok=True)
+
+
+@router.post('/api/plugin/tool-limit-decision', response_model=TaskCancelResponse,
+             summary='Continue or summarize a ChatAgent after its tool-round limit')
+async def tool_limit_decision(req: ToolLimitDecisionRequest) -> TaskCancelResponse:
+    from lazymind.chat.engine.agent_runtime.tool_limit_control import tool_limit_decision_coordinator
+    from lazymind.chat.service.chat_service import _active_sessions
+    try:
+        action = req.action.strip().lower()
+        if action not in {'continue', 'summarize'}:
+            raise HTTPException(status_code=400, detail='action must be continue or summarize')
+        sid = _active_sessions.get(req.conversation_id.strip())
+        if not sid:
+            return TaskCancelResponse(ok=False)
+        if not tool_limit_decision_coordinator.submit(sid, req.decision_id, action):
+            return TaskCancelResponse(ok=False)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return TaskCancelResponse(ok=True)

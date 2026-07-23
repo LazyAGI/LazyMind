@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Dict, List, Optional
 
-from lazyllm.tools.agent.base import _write_agent_data
+from lazymind.chat.service.agent_event_bus import emit_agent_event
 
 
 _OTHER_OPTION = '其他'
@@ -154,5 +154,5 @@ def ask_user(
         payload['title'] = str(title).strip()
     if description and str(description).strip():
         payload['description'] = str(description).strip()
-    _write_agent_data('ask_pending', **payload)
+    emit_agent_event('ask_pending', **payload)
     return f'Question sent to user (ask_id={ask_id}). Waiting for answer on next turn.'

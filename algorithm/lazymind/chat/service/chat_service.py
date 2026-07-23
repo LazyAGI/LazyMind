@@ -235,7 +235,7 @@ def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
         explicit_resources['plugin_refs'] = [active_plugin_ref]
     thinking_depth = (
         request.runtime.thinking_depth
-        if request.runtime.thinking_depth in ('low', 'medium', 'high') else 'medium'
+        if request.runtime.thinking_depth in ('low', 'medium', 'high', 'max') else 'medium'
     )
     return {
         'query': user_input.strip(),
@@ -463,8 +463,9 @@ async def _handle_chat_impl(
 
     thinking_depth = (
         runtime.thinking_depth
-        if runtime.thinking_depth in ('low', 'medium', 'high') else 'medium'
+        if runtime.thinking_depth in ('low', 'medium', 'high', 'max') else 'medium'
     )
+    agentic_config['thinking_depth'] = thinking_depth
     task_profile = None
     if _cfg['dynamic_prompt_modules']:
         profile_started = time.monotonic()
@@ -713,6 +714,7 @@ async def _handle_chat_impl(
                 'low': _cfg['agentic_max_rounds_low'],
                 'medium': _cfg['agentic_max_rounds_medium'],
                 'high': _cfg['agentic_max_rounds_high'],
+                'max': max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
             }.get(thinking_depth, _cfg['agentic_max_rounds_medium']),
             tool_failure_limits={
                 'url_fetch': 2,

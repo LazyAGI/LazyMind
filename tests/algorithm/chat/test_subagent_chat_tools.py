@@ -86,7 +86,7 @@ def test_create_subagent_manual_returns_immediately(monkeypatch):
     cfg = _patch_config(monkeypatch)
     cfg['mode'] = 'manual'
     write_calls = []
-    monkeypatch.setattr(sct, '_write_agent_data', lambda tag, **kw: write_calls.append((tag, kw)))
+    monkeypatch.setattr(sct, 'emit_agent_event', lambda tag, **kw: write_calls.append((tag, kw)))
 
     result = sct.create_subagent(
         agent_type='research',
@@ -102,6 +102,17 @@ def test_create_subagent_manual_returns_immediately(monkeypatch):
     assert write_calls[0][1]['mode'] == 'manual'
 
 
+def test_create_subagent_propagates_max_thinking_depth(monkeypatch):
+    cfg = _patch_config(monkeypatch)
+    cfg.update({'mode': 'manual', 'thinking_depth': 'max'})
+    write_calls = []
+    monkeypatch.setattr(sct, 'emit_agent_event', lambda tag, **kw: write_calls.append((tag, kw)))
+
+    sct.create_subagent(agent_type='research', title='deep research', objective='research')
+
+    assert write_calls[0][1]['params']['_thinking_depth'] == 'max'
+
+
 # ---------------------------------------------------------------------------
 # create_subagent — auto mode (polling until succeeded)
 # ---------------------------------------------------------------------------
@@ -109,7 +120,7 @@ def test_create_subagent_manual_returns_immediately(monkeypatch):
 def test_create_subagent_auto_polls_and_returns_summary(monkeypatch):
     _patch_config(monkeypatch)
     write_calls = []
-    monkeypatch.setattr(sct, '_write_agent_data', lambda tag, **kw: write_calls.append(tag))
+    monkeypatch.setattr(sct, 'emit_agent_event', lambda tag, **kw: write_calls.append(tag))
 
     poll_count = [0]
 
@@ -137,7 +148,7 @@ def test_create_subagent_auto_polls_and_returns_summary(monkeypatch):
 
 def test_create_subagent_auto_failed_task(monkeypatch):
     _patch_config(monkeypatch)
-    monkeypatch.setattr(sct, '_write_agent_data', lambda tag, **kw: None)
+    monkeypatch.setattr(sct, 'emit_agent_event', lambda tag, **kw: None)
 
     class FakeDB:
         def get_task_status(self, _task_id):
@@ -158,7 +169,7 @@ def test_create_subagent_auto_emits_heartbeat(monkeypatch):
     """Heartbeat must be written when poll interval >= HEARTBEAT_INTERVAL."""
     _patch_config(monkeypatch)
     write_calls = []
-    monkeypatch.setattr(sct, '_write_agent_data', lambda tag, **kw: write_calls.append(tag))
+    monkeypatch.setattr(sct, 'emit_agent_event', lambda tag, **kw: write_calls.append(tag))
 
     poll_count = [0]
 

@@ -53,7 +53,7 @@ def test_intentwrite_emits_atomic_patch_with_current_evidence():
     tool = build_intentwrite_tool(
         conversation_id='conv-1', current_query='后面只总结经验，不要执行', current_intent={},
     )
-    with patch('lazymind.chat.engine.tools.intent_writer._write_agent_data') as write:
+    with patch('lazymind.chat.engine.tools.intent_writer.emit_agent_event') as write:
         result = tool('conversation', [
             _operation(evidence='总结经验'),
             _operation(op='set', field='execution_mode', value='analysis_only', evidence='不要执行'),

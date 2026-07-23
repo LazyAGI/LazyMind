@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Literal, Optional
 
-from lazyllm.tools.agent.base import _write_agent_data
+from lazymind.chat.service.agent_event_bus import emit_agent_event
 
 
 INTENT_FIELDS = {
@@ -137,7 +137,7 @@ def build_intentwrite_tool(
             if step_id not in config['valid_step_ids']:
                 raise ValueError(f'unknown step_id {step_id!r} for the active plugin.')
 
-        _write_agent_data('intent_updated', **{
+        emit_agent_event('intent_updated', **{
             'conversation_id': config['conversation_id'],
             'session_id': config['plugin_session_id'] if scope != 'conversation' else '',
             'scope': scope,
