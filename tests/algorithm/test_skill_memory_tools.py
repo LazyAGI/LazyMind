@@ -1,25 +1,8 @@
 import importlib
-
 import pytest
 
 memory_mod = importlib.import_module('lazymind.chat.engine.tools.memory')
-memory_reader_mod = memory_mod
 skill_editor_mod = importlib.import_module('lazymind.chat.engine.tools.skill_editor')
-
-
-def _memory_tools():
-    return memory_mod.MemoryTools()
-
-
-class FakeMemoryStore:
-    def __init__(self, contents=None, read_error=None):
-        self.contents = dict(contents or {})
-        self.read_error = read_error
-
-    def read(self, target):
-        if self.read_error:
-            raise self.read_error
-        return self.contents[target]
 
 
 class FakeSkillStore:
@@ -75,7 +58,6 @@ class FakeSkillStore:
         self.packages.pop((category, name), None)
         return {'action': 'remove'}
 
-
 @pytest.mark.parametrize(
     ('raw_message', 'secret'),
     [
@@ -106,7 +88,7 @@ def test_memory_tool_exception_log_does_not_include_raw_exception(monkeypatch):
     monkeypatch.setattr(memory_mod.lazyllm, 'LOG', fake_log)
 
     memory_mod._log_tool_exception(
-        'read_memory',
+        'read_memory_reference',
         RuntimeError('Authorization: Bearer secret-value'),
     )
 
@@ -114,42 +96,6 @@ def test_memory_tool_exception_log_does_not_include_raw_exception(monkeypatch):
     assert len(calls['error']) == 1
     assert 'Authorization: <redacted>' in calls['error'][0]
     assert 'secret-value' not in calls['error'][0]
-
-
-def test_read_memory_reads_remote_fs(monkeypatch):
-    assert not hasattr(memory_mod.MemoryRemoteStore, 'write')
-    store = FakeMemoryStore({'memory': 'remote memory'})
-    monkeypatch.setattr(memory_reader_mod, 'MemoryRemoteStore', lambda: store)
-    lazyllm = importlib.import_module('lazyllm')
-    sentinel = object()
-    previous = lazyllm.globals.get('agentic_config', sentinel)
-    lazyllm.globals['agentic_config'] = {'memory_tool_results': []}
-    try:
-        result = _memory_tools().read_memory('memory')
-
-        assert result['success'] is True
-        assert result['tool'] == 'read_memory'
-        assert result['result'] == {
-            'target': 'memory',
-            'content': 'remote memory',
-            'content_length': len('remote memory'),
-        }
-        assert lazyllm.globals['agentic_config']['memory_tool_results'] == [{
-            'tool': 'read_memory',
-            'success': True,
-            'mutation': False,
-            'result': {
-                'status': 'read',
-                'target': 'memory',
-                'content_length': len('remote memory'),
-            },
-            'retryable': False,
-        }]
-    finally:
-        if previous is sentinel:
-            lazyllm.globals.pop('agentic_config', None)
-        else:
-            lazyllm.globals['agentic_config'] = previous
 
 
 def test_skill_editor_create_file_tools_remove_core_paths():

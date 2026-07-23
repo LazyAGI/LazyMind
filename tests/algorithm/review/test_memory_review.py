@@ -92,10 +92,7 @@ def _load_review_modules():
     fake_tools_pkg = ModuleType('lazymind.chat.engine.tools')
 
     class FakeMemoryTools:
-        __public_apis__ = ['read_memory', 'episode_create']
-
-        def read_memory(self, *args, **kwargs):
-            return None
+        __public_apis__ = ['episode_create']
 
         def episode_create(self, *args, **kwargs):
             return None
@@ -243,8 +240,6 @@ def _run_review_with_tool_results(monkeypatch, tool_results, *, response='Review
     )
 
     class FakeMemoryTools:
-        def read_memory(self, *args, **kwargs):
-            return None
 
         def episode_create(self, *args, **kwargs):
             return None
@@ -309,7 +304,7 @@ def _tool_failure(
 
 def _read_success() -> dict[str, Any]:
     return {
-        'tool': 'read_memory',
+        'tool': 'read_memory_reference',
         'success': True,
         'mutation': False,
         'result': {'target': 'memory', 'content_length': 42},
@@ -570,10 +565,7 @@ def test_review_memory_runs_agent_with_episode_tools(monkeypatch):
     )
 
     class FakeMemoryTools:
-        __public_apis__ = ['read_memory', 'episode_create']
-
-        def read_memory(self, *args, **kwargs):
-            return None
+        __public_apis__ = ['episode_create']
 
         def episode_create(self, *args, **kwargs):
             return None
@@ -790,7 +782,7 @@ def test_review_memory_fails_when_agent_makes_no_write_decision(monkeypatch):
 def test_review_memory_does_not_hide_read_failure_behind_no_changes(monkeypatch):
     result = _run_review_with_tool_results(
         monkeypatch,
-        [_tool_failure(tool='read_memory', message='Memory storage is unavailable.')],
+        [_tool_failure(tool='read_memory_reference', message='Memory storage is unavailable.')],
         response='Nothing to save because there are no durable facts.',
     )
 
@@ -808,7 +800,7 @@ def test_review_memory_does_not_hide_read_failure_behind_no_changes(monkeypatch)
 
 def test_review_memory_reports_partial_when_write_succeeds_after_read_failure(monkeypatch):
     result = _run_review_with_tool_results(monkeypatch, [
-        _tool_failure(tool='read_memory', message='Memory storage is unavailable.'),
+        _tool_failure(tool='read_memory_reference', message='Memory storage is unavailable.'),
         _episode_success('episode-a'),
     ])
 
@@ -827,7 +819,7 @@ def test_review_memory_reports_partial_when_write_succeeds_after_read_failure(mo
 def test_review_memory_merges_read_and_write_failures(monkeypatch):
     result = _run_review_with_tool_results(monkeypatch, [
         _tool_failure(
-            tool='read_memory',
+            tool='read_memory_reference',
             code='storage_read_failed',
             message='Memory storage read failed.',
         ),

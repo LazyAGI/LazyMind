@@ -22,6 +22,7 @@ from lazymind.chat.engine.prompts import (
     select_skill_candidates,
     selected_prompt_modules,
 )
+from lazymind.common.memory import load_memory_context
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
@@ -343,8 +344,6 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         'has_subagents': bool(agent.has_subagents),
         'conversation_id': conversation_id,
         'query': query or '',
-        'memory': personalization.memory or '',
-        'user_preference': personalization.user_preference or '',
     }
     # Inject per-conversation plugin flags from Go (resolved from conversations table).
     # enable_plugin=None means "not set"; default to True so behaviour is unchanged
@@ -378,6 +377,13 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     inject_tool_config(runtime.tool_config)
     inject_reader_config(ocr_config=runtime.ocr_config)
     lazyllm.globals['agentic_config'] = agentic_config
+
+    memory_context = None
+    if personalization.use_memory:
+        memory_context = load_memory_context()
+        agentic_config['soul'] = memory_context.soul
+        agentic_config['profile'] = memory_context.profile
+        agentic_config['preference'] = memory_context.preference
 
     thinking_depth = (
         runtime.thinking_depth
@@ -541,8 +547,9 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         bool(all_tools),
         environment_context=runtime.environment_context,
         use_memory=personalization.use_memory,
-        user_preference=personalization.user_preference,
-        memory=personalization.memory,
+        soul=memory_context.soul if memory_context else None,
+        profile=memory_context.profile if memory_context else None,
+        preference=memory_context.preference if memory_context else None,
         current_query=language_query,
         conversation_history=agent_history,
         tool_prompt_appendices=collect_system_prompt_appendices(

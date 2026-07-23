@@ -1,3 +1,21 @@
+from __future__ import annotations
+
+from .context import (
+    MAX_PREFERENCE_CONTEXT_CHARS,
+    MAX_PREFERENCE_CONTEXT_ITEMS,
+    MemoryContext,
+    load_memory_context,
+    profile_languages,
+    truncate_preference_index,
+)
+from .editors import (
+    add_preference_entry,
+    delete_preference_entry,
+    preference_name_to_reference_name,
+    set_profile_field,
+    set_soul_field,
+    validate_preference_name,
+)
 from .episode_store import (
     EPISODE_COLLECTION,
     EpisodeConflictError,
@@ -15,16 +33,52 @@ from .models import (
     build_episode_idempotency_key,
     normalize_episode_summary,
 )
+from .paths import (
+    AGENTS_ROOT,
+    MEMORY_ROOT,
+    PREFERENCE_PATH,
+    PROFILE_PATH,
+    REFERENCE_ROOT,
+    SOUL_PATH,
+    USERS_ROOT,
+    build_reference_path,
+    is_memory_path,
+    is_reference_path,
+    normalize_memory_path,
+    split_reference_ref,
+)
 from .ranking import (
     episode_query_coverage,
     informative_query_terms,
     tokenize_episode_text,
 )
-from .remote_store import MEMORY_TARGET_PATHS, MemoryRemoteStore
+from .result import is_memory_ok, memory_err, memory_ok
+from .validation import (
+    PreferenceItem,
+    append_preference_item,
+    parse_preference_items,
+    remove_preference_item,
+    validate_preference_index,
+    validate_profile_content,
+    validate_reference_content,
+    validate_soul_content,
+)
+from .store import MemoryStore
 
 __all__ = [
+    'AGENTS_ROOT',
     'EPISODE_COLLECTION',
-    'MEMORY_TARGET_PATHS',
+    'MAX_PREFERENCE_CONTEXT_CHARS',
+    'MAX_PREFERENCE_CONTEXT_ITEMS',
+    'MEMORY_ROOT',
+    'MemoryContext',
+    'MemoryStore',
+    'PREFERENCE_PATH',
+    'PROFILE_PATH',
+    'PreferenceItem',
+    'REFERENCE_ROOT',
+    'SOUL_PATH',
+    'USERS_ROOT',
     'EpisodeConflictError',
     'EpisodeReadError',
     'EpisodeCreateInput',
@@ -34,11 +88,34 @@ __all__ = [
     'EpisodeSource',
     'EpisodeStore',
     'EpisodeType',
-    'MemoryRemoteStore',
+    'add_preference_entry',
+    'append_preference_item',
     'build_episode_idempotency_key',
+    'build_reference_path',
+    'delete_preference_entry',
     'episode_query_coverage',
     'get_episode_store',
     'informative_query_terms',
+    'is_memory_ok',
+    'is_memory_path',
+    'is_reference_path',
+    'load_memory_context',
+    'memory_err',
+    'memory_ok',
     'normalize_episode_summary',
+    'normalize_memory_path',
+    'parse_preference_items',
+    'preference_name_to_reference_name',
+    'profile_languages',
+    'remove_preference_item',
+    'set_profile_field',
+    'set_soul_field',
+    'split_reference_ref',
     'tokenize_episode_text',
+    'truncate_preference_index',
+    'validate_preference_index',
+    'validate_preference_name',
+    'validate_profile_content',
+    'validate_reference_content',
+    'validate_soul_content',
 ]
