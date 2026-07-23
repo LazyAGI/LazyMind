@@ -1,78 +1,112 @@
 id: writer-plugin
 name: AI Writer
 description: >
-  Compose structured long-form writing, including articles, reports, technical
-  documents, creative stories, fiction, short stories, and novel-style drafts.
-  The workflow parses the writing intent and scope, generates
-  an outline, plans per-section writing instructions, drafts the full text once,
-  and renders the final document. Retry and rewind are runtime commands; revision
-  of an existing document belongs to the dedicated document-revision workflow.
+  Read source documents and knowledge, create or reuse an outline, draft a
+  structured document, revise either the outline or full text, and publish to
+  Feishu through one WriterDocument-based workflow.
 
 when_to_use: >
-  Use this plugin only when the user explicitly requests it, or when the user
-  requests a complete, complex writing deliverable that depends materially on
-  existing knowledge or source materials and requires a multi-stage workflow
-  such as context building, outlining, section planning, and drafting.
-  Do not invoke it for everyday conversation, simple document generation,
-  short-form writing, rewriting, summarization, translation, brainstorming,
-  outlining alone, or tasks that can be answered directly. This is a fallback
-  writing plugin: if a more specific skill or plugin matches the task, such as
-  proposal, academic, or product-document writing, use that instead.
+  Use this plugin for compound writing work that benefits from persisted
+  artifacts: creating long-form content, continuing from a supplied outline,
+  revising an existing Feishu document, combining knowledge-base evidence with
+  writing, or publishing a generated document to Feishu. Do not require the
+  user to choose between creation and revision workflows; select the applicable
+  reachable step from the user's request and the available artifacts. When
+  triggering after clarification or a cloud-file read, request_context must
+  preserve every user-supplied source and destination URL verbatim, including
+  URLs supplied through ask_user; a document-content summary never replaces
+  its locator.
 
 tool_scripts:
   - path: scripts/tools.py
     functions:
       - writer_build_writing_task
+      - writer_load_document
       - writer_profile_resources
       - writer_create_writing_context
+      - writer_prepare_outline
       - writer_generate_outline
       - writer_generate_section_instructions
       - writer_generate_draft_block
       - writer_generate_draft_document
       - writer_update_writing_context
       - writer_generate_final_document
+      - writer_build_revision_task
+      - writer_plan_revision
+      - writer_apply_revision
+      - writer_create_document
+      - writer_publish_revision
+      - writer_publish_document
 
 steps:
-  - id: build_context
-  - id: generate_outline
-  - id: plan_sections
-  - id: generate_document
+  - id: prepare
+  - id: outline
+  - id: write_document
+  - id: publish
 
 slots:
   - id: writing_task
     label: Writing Task
-    type: text
+    type: file
     cardinality: single
   - id: resource_profiles
     label: Resource Profiles
-    type: text
+    type: file
     cardinality: single
   - id: writing_context
     label: Writing Context
-    type: text
+    type: file
     cardinality: single
-    summary_max_chars: 600
   - id: context_ir
     label: Context Result
     type: file
     cardinality: single
+  - id: source_ir
+    label: Source Document
+    type: file
+    cardinality: single
+  - id: target_document
+    label: Cloud Document Target
+    type: file
+    cardinality: single
+
+  - id: outline_ir
+    label: Outline
+    type: file
+    cardinality: single
   - id: writing_context_after_outline
     label: Writing Context After Outline
-    type: text
+    type: file
     cardinality: single
-    summary_max_chars: 600
-  - id: writing_context_after_draft
-    label: Writing Context After Draft
-    type: text
+
+  - id: outline_revision_task
+    label: Outline Revision Task
+    type: file
     cardinality: single
-    summary_max_chars: 600
-  - id: outline
-    label: Outline
-    type: text
+  - id: outline_locate_result
+    label: Outline Located Blocks
+    type: file
     cardinality: single
+  - id: outline_modify_plan
+    label: Outline Modification Plan
+    type: file
+    cardinality: single
+  - id: outline_patch_set
+    label: Outline Patch Set
+    type: file
+    cardinality: single
+  - id: outline_patch_result
+    label: Outline Patch Result
+    type: file
+    cardinality: single
+  - id: outline_write_result
+    label: Outline Cloud Sync Result
+    type: file
+    cardinality: single
+
   - id: section_instructions
     label: Section Instructions
-    type: text
+    type: file
     cardinality: single
   - id: section_plan_ir
     label: Section Plan Result
@@ -80,74 +114,123 @@ slots:
     cardinality: single
   - id: draft_blocks
     label: Draft Blocks
-    type: text
+    type: file
     cardinality: list
     ordered: true
   - id: draft_document
     label: Full Draft
-    type: text
+    type: file
+    cardinality: single
+  - id: writing_context_after_draft
+    label: Writing Context After Draft
+    type: file
     cardinality: single
   - id: final_document
     label: Final Document
-    type: text
+    type: file
     cardinality: single
   - id: final_document_md
-    label: Final Document (Markdown)
+    label: Final Document Markdown
     type: file
+    cardinality: single
+
+  - id: document_revision_task
+    label: Document Revision Task
+    type: file
+    cardinality: single
+  - id: document_locate_result
+    label: Document Located Blocks
+    type: file
+    cardinality: single
+  - id: document_modify_plan
+    label: Document Modification Plan
+    type: file
+    cardinality: single
+  - id: document_patch_set
+    label: Document Patch Set
+    type: file
+    cardinality: single
+  - id: document_patch_result
+    label: Document Patch Result
+    type: file
+    cardinality: single
+  - id: publish_result
+    label: Publish Result
+    type: file
+    cardinality: single
+  - id: publish_target_document
+    label: Created Publish Target
+    type: file
+    cardinality: single
+  - id: published_document
+    label: Published Document
+    type: file
+    cardinality: single
+  - id: published_link
+    label: Published Document Link
+    type: text
     cardinality: single
 
 ui:
   tabs:
     - id: context
-      step_id: build_context
+      step_id: prepare
       label: Context
       layout: list
       slots:
         - id: context_ir
+        - id: source_ir
 
     - id: outline
-      step_id: generate_outline
+      step_id: outline
       label: Outline
       layout: list
       slots:
-        - id: outline
-
-    - id: plan_sections
-      step_id: plan_sections
-      label: Plan Sections
-      layout: list
-      slots:
-        - id: section_plan_ir
+        - id: outline_ir
 
     - id: result
-      step_id: generate_document
+      step_id: write_document
       label: Final Document
       layout: list
       slots:
         - id: final_document
 
+    - id: publish
+      step_id: publish
+      label: 写回文稿
+      layout: list
+      slots:
+        - id: published_link
+        - id: published_document
+
 i18n:
   zh-CN:
     name: AI 写作
     steps:
-      build_context: {label: 构造上下文}
-      generate_outline: {label: 生成大纲}
-      plan_sections: {label: 规划章节}
-      generate_document: {label: 撰写成稿}
+      prepare: {label: 写作准备}
+      outline: {label: 大纲}
+      write_document: {label: 成稿}
+      publish: {label: 写回文稿}
     tabs:
-      context: {label: 构造上下文}
-      outline: {label: 生成大纲}
-      plan_sections: {label: 规划章节}
-      result: {label: 撰写成稿}
+      context: {label: 写作准备}
+      outline: {label: 大纲}
+      result: {label: 成稿}
+      publish: {label: 写回文稿}
     slots:
       writing_task: {label: 写作任务}
       resource_profiles: {label: 资源画像}
       writing_context: {label: 写作上下文}
       context_ir: {label: 上下文构造结果}
-      outline: {label: 大纲}
+      source_ir: {label: 来源文档}
+      target_document: {label: 云文档目标}
+      outline_ir: {label: 大纲}
       section_instructions: {label: 章节规划}
       section_plan_ir: {label: 章节规划结果}
       draft_blocks: {label: 章节草稿}
       draft_document: {label: 完整初稿}
-      final_document: {label: 最终成稿}
-      final_document_md: {label: 最终成稿（Markdown）}
+      final_document: {label: 最终正文}
+      final_document_md: {label: 最终正文 Markdown}
+      publish_result: {label: 发布结果}
+      publish_target_document: {label: 新建发布目标}
+      published_document: {label: 已发布飞书文档}
+      published_link: {label: 飞书文档链接}

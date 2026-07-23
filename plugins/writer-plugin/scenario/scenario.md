@@ -1,100 +1,127 @@
-# AI Writer Plugin
+# Unified AI Writer Plugin
 
-## Scenario
+## Scope
 
-Help users compose structured long-form writing, including articles, reports, technical documents, creative stories, fiction, short stories, and novel-style drafts. This plugin owns only the 0-to-1 creation workflow:
+Use one artifact-backed WriterDocument workflow for compound creation and revision:
 
-1. **build_context** — parse the writing intent, target audience, core sub-topics, style, and factual consensus
-2. **generate_outline** — produce a structured outline based on the context
-3. **plan_sections** — generate per-chapter writing instructions from the outline
-4. **generate_document** — serially draft the full document, assemble the final
-   WriterDocument, and render its Markdown file in one step
+- read Feishu/Lark documents, uploaded files, and selected knowledge bases;
+- generate an outline or use a supplied outline;
+- generate, regenerate, or revise that same outline artifact;
+- plan sections and write a complete document;
+- generate, rewrite, or revise that same full-document artifact;
+- publish a local outline or document to Feishu.
 
-There is no separate audit or patch-revision pass. Every step supports a full rerun; revision of an existing document is handled by the dedicated document-revision plugin.
+Do not route users between separate creation and revision plugins or expose separate
+revision cards. The ChatAgent chooses the applicable mode inside the current product step.
 
-## Intent Recognition
+## Steps
 
-### Cold start (no active session)
+### prepare
 
-- Invoke `trigger_writer_plugin(user_input=<user's exact original request>)` when the user explicitly asks to use the AI Writer plugin.
-- Otherwise, invoke it only when all of the following are true:
-  1. The user requests a complete, independently deliverable piece of writing.
-  2. Producing it reliably depends materially on existing knowledge, source materials, supplied documents, factual background, professional constraints, or continuity with prior content.
-  3. The task genuinely benefits from multiple workflow stages, such as context building, outlining, section planning, and drafting.
-  4. No more specific writing skill or plugin matches the task.
+Always begin a new workflow with `prepare`. It preserves the complete request, retrieves
+requested sources, and constructs writing context.
 
-`user_input` must preserve the user's request verbatim. Do not rewrite, expand, translate, summarize, or add inferred details before calling the trigger tool. A request is not complex merely because it mentions an article, report, document, story, or word count. If it can be completed reliably in one direct response, do not invoke the plugin.
+Cloud document URLs are resource identity, not optional prose context. The trigger and
+normalized request must preserve every source/destination URL supplied in the original
+request or a clarification answer. Reading a document before triggering does not replace
+passing its URL into the workflow. If the request refers to "this/my/original Feishu
+document" but the consolidated request contains no locator, do not start an unbound
+writing flow; require the missing URL.
 
-### Trigger examples
+### outline
 
-Invoke the plugin for requests such as:
+`outline` owns the single user-visible `outline_ir` slot.
 
-- "Use the AI Writer plugin to complete this article."
-- "Based on the industry materials I provided, write a complete analysis report for senior management. Unify the data definitions and design the chapter structure."
-- "Synthesize the project background, interview notes, and previous proposals into a complete project retrospective report."
-- "Continue the novel with a complete chapter based on the story bible and previous chapters, preserving character, plot, and world-building continuity."
-- "Use these technical references to produce a complete in-depth article, including structural planning and section-by-section drafting."
+- First run with a supplied outline → prepare it as outline IR.
+- First run without a supplied outline → generate it.
+- User asks “change section X of the outline” → rerun `outline` and internally apply a
+  PatchSet to the latest selected `outline_ir`.
+- User edits in the frontend → the frontend saves a human revision of the same
+  `outline_ir` slot.
 
-### Do not trigger
+Every result has stage="outline" and ui_editable=true. If the IR is bound to a cloud
+document, AI or frontend revision synchronizes that document and stores the
+provider-confirmed IR as the next artifact revision.
 
-Handle requests like these directly without invoking the plugin:
+### write_document
 
-- "Write a short product introduction."
-- "Write a leave-request email."
-- "Polish this paragraph."
-- "Summarize the main points of this material."
-- "Translate this passage into English."
-- "Give me an article outline."
-- "Suggest five titles."
-- "Create a Word document for me."
-- "Explain reinforcement learning."
-- "Let's discuss how this article could be improved."
-- "Write an 800-word introduction to artificial intelligence."
+`write_document` owns the single user-visible `final_document` slot and has two modes.
 
-Do not trigger solely because the user says "write," requests a named document type, or specifies a long word count. Simple document-file creation is not a complex writing task.
+Generation/rewrite mode:
 
-### Prefer a more specific capability
+1. read the latest selected `outline_ir`;
+2. regenerate section instructions;
+3. draft all sections;
+4. assemble and save `final_document`.
 
-The AI Writer plugin is a general fallback. If another skill or plugin more precisely matches the writing domain, use it instead:
+Targeted revision mode:
 
-- "Write a bid proposal." → use a proposal-writing skill or plugin.
-- "Write an academic paper based on these experiment results." → use an academic-writing skill or plugin.
-- "Create a product requirements document." → use a product-document skill or plugin.
-- "Write my résumé." → use a résumé-writing skill or plugin, if available.
+1. use the latest selected `final_document`, or `source_ir` for direct revision;
+2. locate the requested content;
+3. generate and apply a PatchSet;
+4. save the result as the next revision of `final_document`.
 
-### Boundary examples
+Do not run section planning for a targeted body revision. Do run it again whenever the
+body is generated or rewritten from a changed outline.
 
-- "Write an artificial intelligence industry report." → Do not invoke by default; the request does not establish a material dependency on sources or a need for a multi-stage workflow.
-- "Using these ten market research documents, write an artificial intelligence industry report for senior management. Design the structure, reconcile the data, draft it section by section, and review it for consistency." → Invoke, unless a more specific industry-report skill or plugin is available.
-- "Create a meeting-minutes document." → Do not invoke; creating a document is not itself a complex writing task.
-- "Synthesize six meeting transcripts, project records, and decision history into a formal project retrospective report." → Invoke if no more specific project-retrospective writing capability is available.
+Frontend edits are human revisions of the same `final_document` slot. AI body revisions
+remain local until `publish`, so generation and revision share the same write-back
+boundary.
 
-### With an active session
+### publish
 
-| User intent | Recommended step | Tool call |
-|---|---|---|
-| Re-parse the writing intent | build_context | `advance_step(step_id='build_context', user_input=<note>)` |
-| Unhappy with the outline, regenerate it | generate_outline | `advance_step(step_id='generate_outline', user_input=<note>)` |
-| Re-plan the section instructions | plan_sections | `advance_step(step_id='plan_sections', user_input=<note>)` |
-| Rewrite the final document | generate_document | `advance_step(step_id='generate_document', user_input=<note>)` |
-| Satisfied with the final result | (no action — DriverAgent marks DONE automatically) | — |
+Use `publish` to write an unbound local `outline_ir` or `final_document` to Feishu, apply
+a prepared body PatchSet to its original bound source, or publish to a new/different
+target.
 
-When the user or DriverAgent indicates the problem originates from a prior step, use `advance_step` with that prior step's `step_id` to rewind and redo it. The available prior steps are listed dynamically by `advance_step`'s Rewind list and need not be enumerated here.
+- A supplied target URI or an existing source binding can be written directly.
+- “新建飞书文档” and “另存为” explicitly authorize creating a new target. Supplying
+  a folder or wiki parent as the write location also authorizes creation there.
+- A generic “写入/发布到飞书” does not authorize creation. If the local result has no
+  target, ask whether a new Feishu document may be created and tell the user the result
+  will be returned as a link. Enter or continue `publish` only after confirmation.
+- Creation and writing are separate operations: persist `target_document` immediately
+  after creation, then write to that exact target so a retry does not create duplicates.
+- A targeted body revision of an existing document must publish its saved PatchSet.
+  Full-document writing to that existing source is invalid because it appends retained
+  blocks and can undo deletions.
+- After a provider-confirmed write and read-back, return the browser URL as
+  `published_link` so the frontend can display the completed Feishu document link.
 
-## Notes
+## Supported paths
 
-- For cold start, go through `trigger_writer_plugin` and pass the user's exact original request as `user_input`.
-- Do not use `ask_user` before triggering this plugin merely to collect optional writing preferences such as length, style, audience, plot elements, or structure. Optional details belong inside the plugin workflow.
-- After a tool returns, briefly tell the user which step is currently running, for example:
-  - Cold start: "Parsing your writing request, please wait…"
-  - Regenerating the outline: "Regenerating the outline…"
-- Concrete writing content (section drafts, final report, etc.) is produced by the tools the subagent collaborates with; the main Agent does not need to re-state the body.
-- Never reproduce, rewrite, summarize, or independently generate the outline or final document in the chat answer. Those user-visible deliverables are rendered once in the plugin panel. After `generate_document` succeeds, reply with only a short completion status that directs the user to the final-result tab.
-- Requests to revise an existing document do not belong to this plugin; route them to the dedicated document-revision workflow.
+- From scratch: `prepare → outline → write_document`
+- Supplied Feishu outline: `prepare → outline → write_document`
+- Existing Feishu document revision: `prepare → write_document` in revision mode
+- Outline only: `prepare → outline`
+- Publish outline: `prepare → outline → publish`
+- Publish local body: `prepare → outline → write_document → publish`
 
-## Artifact Handoff
+Repeated AI changes rerun/rewind `outline` or `write_document`. Repeated frontend changes
+create human revisions in the same slot. Do not create a second document-version store or
+a hidden current-document pointer.
 
-- Each step's output is stored as a file path — the artifact carrier is a file path, not the file content itself.
-- Orchestration flow: `get_artifact(key=A)` returns a path → pass that path as an argument to the downstream tool function (the tool reads the file itself) → the tool returns a new path → call `save_artifact(content_type='file', value=<new path>, key=B)` to persist → the next step calls `get_artifact(key=B)` to get the path back → continue.
-- Slots omitted from `ui.tabs` remain internal artifacts. They are still persisted and versioned by the backend when a step calls `save_artifact`; plugin code must not implement a second version store.
-- The main Agent is responsible for **orchestrating tool calls and passing paths**, not for generating any content (to avoid bloating the context).
+## Artifact contract
+
+- All structured outline and body results use the same WriterDocument schema.
+- `outline_ir`, `final_document`, and `published_document` have ui_editable=true.
+- `published_link` is the provider-confirmed Feishu/Lark browser URL.
+- Internal locate results, modify plans, PatchSets, section plans, and draft blocks are
+  persisted but are not exposed as separate product cards.
+- Plugin tools pass artifact paths and do not copy complete documents into ChatAgent
+  responses.
+
+## Active-session intent mapping
+
+| User intent | Step and mode |
+|---|---|
+| Read new sources or restart from changed requirements | `prepare` |
+| Generate/use/regenerate an outline | `outline`, prepare/generate mode |
+| Modify the current outline with AI | rerun `outline`, revision mode |
+| Write/rewrite the body from the current outline | `write_document`, generation mode |
+| Modify an existing/generated body with AI | rerun `write_document`, revision mode |
+| Write an unbound local result to Feishu | `publish` |
+
+When an outline change invalidates an existing body, rewind to `outline`; the next
+`write_document` execution replans sections from the newly selected outline revision.
+Use only step IDs currently reported as reachable by the runtime.
