@@ -91,28 +91,21 @@ def ask_user(
     title: Optional[str] = None,
     description: Optional[str] = None,
 ) -> str:
-    """Ask reply-seeking questions in an interactive card and end the turn.
+    """Ask the user through an interactive UI card and end the current turn.
 
-    Use for blocking or optional questions whenever you choose to ask. Never
-    replace this call with a plain-text question merely because an answer is optional.
+    Use this for user-facing questions on the first assistant turn as well as
+    later clarification or follow-up turns. No earlier card or tool call is
+    required.
 
     Args:
-        questions: Questions with `text` and `type`. Use `boolean`, `single`,
-            `multiple`, or `text`. For `single`/`multiple`, `choices` MUST be a
-            list of recommended plain strings, never objects; "Other" is added
-            by default. Set `allow_other=false` only when the choices are exhaustive.
-            Users can edit every recommended choice instead of typing from scratch.
-            Use `text` when there are no useful suggestions. Omit `choices` for
-            `boolean` and `text`.
-        title: Optional short card heading.
-        description: Optional one-sentence subtitle.
-
-    Example:
-        questions=[
-            {"text": "Style?", "type": "single", "choices": ["Photo", "Drawing"]},
-            {"text": "Portrait?", "type": "boolean"},
-        ],
-        title="Image settings"
+        questions: Items with `text` and type `boolean`, `single`, `multiple`,
+            or `text`. Use one item when asked to question the user one at a time.
+            Use `text` without `choices` when useful suggestions are unavailable.
+            Otherwise use choice types with a few editable string recommendations;
+            "Other" is automatic unless `allow_other=false`. Follow-up questions,
+            including those after an earlier card, use another call.
+        title: Optional card heading.
+        description: Optional subtitle.
     """
     if not isinstance(questions, list) or len(questions) == 0:
         raise ValueError('"questions" must be a non-empty list of question dicts.')

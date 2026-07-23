@@ -4,7 +4,7 @@ from __future__ import annotations
 import inspect
 import re
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 import docstring_parser
 import lazyllm
@@ -52,6 +52,8 @@ from lazymind.chat.engine.subagent.tools import (
 
 SystemPromptAppendix = dict[str, str | tuple[str, ...]]
 SystemPromptAppendixProvider = Callable[[], SystemPromptAppendix | None]
+QueryAppendixProvider = Callable[[], str | None]
+QueryAppendixPosition = Literal['before', 'after']
 SYSTEM_PROMPT_APPENDIX_SECTIONS = ('tool_policy', 'safety', 'output_contract', 'response_policy')
 
 IMAGE_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
@@ -118,26 +120,20 @@ ATTACHMENT_EDIT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
 ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# User-response channel contract (mandatory)\n'
-        'Make two separate decisions. First, decide whether to ask at all. You may instead make a safe '
-        'assumption and continue. Second, if you choose to ask, `ask_user` is the ONLY valid channel. '
-        'This channel rule does not depend on necessity: blocking, optional, skippable, open-ended, '
-        'preference, optimization, and follow-up questions all require `ask_user` when asked. Never '
-        'write a reply-seeking question or request in assistant text. "The task could continue without '
-        'an answer" is a reason not to ask; it is never permission to ask in plain text. If you want '
-        'to offer a default when the user does not reply, `ask_user` is more reliable than a plain-text '
-        'question: use the card to make the optional choice explicit and preserve the default path.\n'
-        'Choose the question type from the answer space. For divergent or open-ended questions with '
-        'no useful suggested answers, use `text`. When a small set of meaningful recommended answers '
-        'exists, use `single` or `multiple` with only those choices. Recommended choices reduce typing '
-        'because the user can edit each one before submitting. Do not add an "Other" choice yourself. '
-        'It is appended by default; set `allow_other=false` only when the choices are intentionally '
-        'exhaustive.\n'
-        'If the user explicitly requests an interview, quiz, clarification sequence, or asks you to '
-        'question them before answering, asking is part of the requested task and MUST use `ask_user`; '
-        'do not bypass it with defaults. Use the minimum related questions, then end the turn with no '
-        'text after the tool call. Rhetorical questions that expect no reply are exempt.',
+        'When `ask_user` is available, every user-facing question or request for a reply MUST be an '
+        'actual `ask_user` function-tool call. Never put such a question or request in assistant prose. '
+        'If the user explicitly asks you to question or interview them, follow that instruction by '
+        'calling `ask_user`. This contract controls only the response channel; decide what and how much '
+        'to ask from the user’s request and the conversation.',
     ),
 }
+ASK_USER_QUERY_APPENDIX = (
+    'ATTENTION — `ask_user` is registered for this turn. If you ask the user any question, request '
+    'their opinion, or invite any reply, you MUST make an actual `ask_user` function-tool call; NEVER '
+    'write that request as assistant prose. This rule applies to every kind of user-facing question or '
+    'reply request, including clarification, confirmation, opinion, open-ended questions, and optional '
+    'follow-ups.'
+)
 KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         "# Selected Knowledge Base Rules (CRITICAL — follow strictly)\n"
@@ -236,11 +232,18 @@ class ToolConfig:
     output_schema: dict[str, Any] | None = None
     required_config: list[str] | None = None
     appendix_system_prompt: SystemPromptAppendix | SystemPromptAppendixProvider | None = None
+    appendix_query: str | QueryAppendixProvider | None = None
+    appendix_query_position: QueryAppendixPosition = 'after'
 
     def __post_init__(self) -> None:
-        if callable(self.appendix_system_prompt):
-            return
-        self._validate_appendix(self.appendix_system_prompt)
+        if not callable(self.appendix_system_prompt):
+            self._validate_appendix(self.appendix_system_prompt)
+        if self.appendix_query is not None and not (
+            isinstance(self.appendix_query, str) or callable(self.appendix_query)
+        ):
+            raise TypeError('appendix_query must be a string, callable, or None')
+        if self.appendix_query_position not in ('before', 'after'):
+            raise ValueError('appendix_query_position must be "before" or "after"')
 
     @staticmethod
     def _validate_appendix(appendix: SystemPromptAppendix | None) -> None:
@@ -343,6 +346,7 @@ ASK_USER_TOOL_CONFIG = ToolConfig(
     tool=ask_user,
     module='interaction',
     appendix_system_prompt=ASK_USER_TOOL_POLICY_APPENDIX,
+    appendix_query=ASK_USER_QUERY_APPENDIX,
 )
 
 USER_ATTACHMENT_TOOL_CONFIGS = (
@@ -822,4 +826,27 @@ def collect_system_prompt_appendices(
                     continue
                 section_seen.add(dedupe_key)
                 collected.setdefault(section, []).append(original)
+    return collected
+
+
+def collect_query_appendices(
+    configs: list[ToolConfig],
+    position: QueryAppendixPosition = 'after',
+) -> list[str]:
+    """Collect current-turn tool instructions without adding them to chat history."""
+    collected = []
+    seen = set()
+    for cfg in configs:
+        if cfg.appendix_query_position != position:
+            continue
+        provider = cfg.appendix_query
+        content = provider() if callable(provider) else provider
+        original = str(content or '').strip()
+        if not original:
+            continue
+        dedupe_key = ' '.join(original.split())
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        collected.append(original)
     return collected

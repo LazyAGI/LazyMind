@@ -13,6 +13,7 @@ class AgentRole(str, Enum):
 
 PromptChannel = Literal['system', 'runtime']
 ContentKind = Literal['instruction', 'state', 'reference']
+PromptPlacement = Literal['before_input', 'after_input']
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class PromptSection:
     priority: int = 100
     authoritative: bool = False
     content_kind: ContentKind = 'instruction'
+    placement: PromptPlacement = 'before_input'
 
 
 @dataclass(frozen=True)

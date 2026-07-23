@@ -21,6 +21,7 @@ import {
   buildChatMessageListFromHistory,
   getRegenerationInputs,
   mergeChatMessageLists,
+  stripAskUserReceipt,
 } from "@/modules/chat/utils/message";
 import { splitThinkingContent } from "@/modules/chat/utils/thinking";
 import {
@@ -425,7 +426,10 @@ export function useChatConversation({
         ...result,
         id: result.messageId,
         raw_delta: mergedRawDelta,
-        delta: splitResult.content,
+        delta: stripAskUserReceipt(
+          splitResult.content,
+          !!(result.ask_pending || assistantMessage.ask_pending),
+        ),
         reasoning_content: splitResult.reasoning_content,
         sources:
           result.sources && result.sources.length > 0
@@ -767,7 +771,11 @@ export function useChatConversation({
       sources: [],
       model_mode: "value_engineering",
     };
-    const newMessageList = [...messageList, userMessage, assistantMessage];
+    const newMessageList = [
+      ...messageListRef.current,
+      userMessage,
+      assistantMessage,
+    ];
     messageListRef.current = newMessageList;
     setMessageList(newMessageList);
 
@@ -775,6 +783,9 @@ export function useChatConversation({
     scroll.scrollToEnd();
     openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, {
       ...(params.run_in_background ? { run_in_background: true } : {}),
+      ...(params.thinking_depth
+        ? { thinking_depth: params.thinking_depth }
+        : {}),
       ...(params.mentions?.length ? { mentions: params.mentions } : {}),
     });
 

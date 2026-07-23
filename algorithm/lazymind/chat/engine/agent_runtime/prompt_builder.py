@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import List, Tuple
 
-from .models import AgentRole, ContentKind, PromptBundle, PromptSection
+from .models import AgentRole, ContentKind, PromptBundle, PromptPlacement, PromptSection
 
 
 _RUNTIME_GUIDANCE = (
@@ -83,9 +83,12 @@ class PromptBuilder:
         skip_if: bool | Callable[[], bool] = False,
         authoritative: bool = False,
         content_kind: ContentKind = 'instruction',
+        placement: PromptPlacement = 'before_input',
     ) -> 'PromptBuilder':
         if content_kind not in ('instruction', 'state', 'reference'):
             raise ValueError(f'unsupported prompt content_kind: {content_kind}')
+        if placement not in ('before_input', 'after_input'):
+            raise ValueError(f'unsupported prompt placement: {placement}')
         return self._add(PromptSection(
             section_id=section_id.strip(),
             channel='runtime',
@@ -95,6 +98,7 @@ class PromptBuilder:
             priority=priority,
             authoritative=authoritative,
             content_kind=content_kind,
+            placement=placement,
         ))
 
     def input(self, content: str, *, source: str, title: str = '') -> 'PromptBuilder':
@@ -117,7 +121,14 @@ class PromptBuilder:
         return '\n\n'.join(blocks)
 
     def _render_input(self, sections: tuple[PromptSection, ...]) -> str:
-        runtime = [section for section in sections if section.channel == 'runtime']
+        runtime = [
+            section for section in sections
+            if section.channel == 'runtime' and section.placement == 'before_input'
+        ]
+        post_input = [
+            section for section in sections
+            if section.channel == 'runtime' and section.placement == 'after_input'
+        ]
         parts = []
         if runtime:
             parts.extend([f'### {self._runtime_title}', _RUNTIME_GUIDANCE])
@@ -129,6 +140,9 @@ class PromptBuilder:
                 ])
             parts.append('---')
         parts.extend([f'### {self._input_title}', self._input_content])
+        if post_input:
+            for section in post_input:
+                parts.append(section.content.strip())
         return '\n\n'.join(part for part in parts if part)
 
     def build(self) -> PromptBundle:

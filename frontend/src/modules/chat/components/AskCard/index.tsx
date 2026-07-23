@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Button, Checkbox, Input, Progress, Radio } from "antd";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -171,6 +171,8 @@ export default function AskCard({
     questions.map((q, i) => savedAnswers?.[i] ?? initAnswer(q)),
   );
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [submitted, setSubmitted] = useState(false);
+  const isReadOnly = disabled || submitted;
 
   // Preserve the structured payload shape expected by the backend.
   const [customChoices, setCustomChoices] = useState<Record<number, string[]>>(
@@ -211,7 +213,7 @@ export default function AskCard({
   };
 
   const handleSubmit = () => {
-    if (disabled) return;
+    if (isReadOnly) return;
     const lines = questions.map((q, i) =>
       formatAnswer(
         q,
@@ -232,6 +234,7 @@ export default function AskCard({
         answer: isAnswered(answers[i]!, otherOption) ? answers[i]! : null,
       })),
     };
+    setSubmitted(true);
     onSubmit({ text: lines.join("\n"), structured });
   };
 
@@ -244,7 +247,7 @@ export default function AskCard({
 
   return (
     <div
-      className={`ask-wizard${disabled ? " ask-wizard--disabled" : ""}`}
+      className={`ask-wizard${isReadOnly ? " ask-wizard--disabled" : ""}`}
       aria-label={t("chat.askCardAria")}
     >
       {/* Header */}
@@ -298,7 +301,7 @@ export default function AskCard({
                         ? "primary"
                         : "default"
                     }
-                    disabled={disabled}
+                    disabled={isReadOnly}
                     onClick={() =>
                       updateAnswer(
                         currentIndex,
@@ -334,7 +337,7 @@ export default function AskCard({
                     chosen !== otherOption,
                   );
                 }}
-                disabled={disabled}
+                disabled={isReadOnly}
               >
                 {(currentQ.choices ?? []).map((origVal, ci) => (
                   <Radio
@@ -349,7 +352,7 @@ export default function AskCard({
                           : (currentChoices[ci] ?? origVal)
                       }
                       editable={origVal !== otherOption}
-                      disabled={disabled}
+                      disabled={isReadOnly}
                       onChange={(value) => updateChoice(currentIndex, ci, value)}
                     />
                   </Radio>
@@ -366,7 +369,7 @@ export default function AskCard({
                         otherText: e.target.value,
                       })
                     }
-                    disabled={disabled}
+                    disabled={isReadOnly}
                     placeholder={t("chat.askCardOtherPlaceholder")}
                     className="ask-wizard__other-input"
                   />
@@ -388,7 +391,7 @@ export default function AskCard({
                         : "",
                   })
                 }
-                disabled={disabled}
+                disabled={isReadOnly}
               >
                 {(currentQ.choices ?? []).map((origVal, ci) => (
                   <Checkbox
@@ -403,7 +406,7 @@ export default function AskCard({
                           : (currentChoices[ci] ?? origVal)
                       }
                       editable={origVal !== otherOption}
-                      disabled={disabled}
+                      disabled={isReadOnly}
                       onChange={(value) => updateChoice(currentIndex, ci, value)}
                     />
                   </Checkbox>
@@ -425,7 +428,7 @@ export default function AskCard({
                         otherText: e.target.value,
                       })
                     }
-                    disabled={disabled}
+                    disabled={isReadOnly}
                     placeholder={t("chat.askCardOtherPlaceholder")}
                     className="ask-wizard__other-input"
                   />
@@ -442,7 +445,7 @@ export default function AskCard({
                   value: e.target.value,
                 })
               }
-              disabled={disabled}
+              disabled={isReadOnly}
               placeholder={t("chat.askCardInputPlaceholder")}
               className="ask-wizard__text-input"
               autoSize={{ minRows: 2, maxRows: 5 }}
@@ -456,7 +459,7 @@ export default function AskCard({
         <div className="ask-wizard__nav-buttons">
           <Button
             icon={<LeftOutlined />}
-            disabled={!canGoPrev || disabled}
+            disabled={!canGoPrev}
             onClick={() => goTo(currentIndex - 1)}
             className="ask-wizard__nav-btn"
           >
@@ -466,14 +469,13 @@ export default function AskCard({
             <Button
               type="primary"
               onClick={() => goTo(currentIndex + 1)}
-              disabled={disabled}
               className="ask-wizard__nav-btn"
             >
               {t("chat.askCardNext")}
               <RightOutlined />
             </Button>
           ) : (
-            !disabled && (
+            !isReadOnly && (
               <Button
                 type="primary"
                 onClick={handleSubmit}
@@ -493,7 +495,6 @@ export default function AskCard({
               type="button"
               className={`ask-wizard__jump-item${idx === currentIndex ? " is-current" : ""}${isAnswered(answers[idx]!, otherOption) ? " is-done" : ""}`}
               onClick={() => goTo(idx)}
-              disabled={disabled}
               aria-label={`Go to question ${idx + 1}`}
             >
               {idx + 1}
@@ -502,7 +503,7 @@ export default function AskCard({
         </div>
       </div>
 
-      {!disabled && (
+      {!isReadOnly && (
         <p className="ask-wizard__hint">{t("chat.askCardAutoSaveHint")}</p>
       )}
     </div>
