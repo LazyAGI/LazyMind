@@ -180,7 +180,7 @@ func TestAuthServiceAdminVerifierUsesTrustedInternalRoleLookup(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"user_id":"user-1","role":"system-admin","tenant_id":"tenant-1","disabled":false}`))
+		_, _ = w.Write([]byte(`{"code":200,"message":"success","data":{"user_id":"user-1","role":"system-admin","tenant_id":"tenant-1","disabled":false}}`))
 	}))
 	defer server.Close()
 

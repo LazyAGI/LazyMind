@@ -95,20 +95,33 @@ func (v *authServiceAdminVerifier) isAdminWithInternalToken(ctx context.Context,
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return false, fmt.Errorf("auth service internal role lookup failed: %s", resp.Status)
+		return false, fmt.Errorf("auth service validate failed: internal role lookup returned %s", resp.Status)
 	}
 	var payload struct {
 		UserID   string `json:"user_id"`
 		Role     string `json:"role"`
 		Disabled bool   `json:"disabled"`
+		Data     struct {
+			UserID   string `json:"user_id"`
+			Role     string `json:"role"`
+			Disabled bool   `json:"disabled"`
+		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return false, err
 	}
-	if payload.Disabled || strings.TrimSpace(payload.UserID) != userID {
+	responseUserID := strings.TrimSpace(payload.UserID)
+	responseRole := payload.Role
+	responseDisabled := payload.Disabled
+	if responseUserID == "" {
+		responseUserID = strings.TrimSpace(payload.Data.UserID)
+		responseRole = payload.Data.Role
+		responseDisabled = payload.Data.Disabled
+	}
+	if responseDisabled || responseUserID != userID {
 		return false, nil
 	}
-	return authServiceRoleIsAdmin(payload.Role), nil
+	return authServiceRoleIsAdmin(responseRole), nil
 }
 
 func internalTokenMatches(expected, actual string) bool {
