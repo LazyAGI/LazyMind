@@ -26,7 +26,8 @@ from lazymind.chat.engine.tools.writer import (
 
 
 _FEISHU_URL_RE = re.compile(
-    r"https?://[^\s<>\"']*(?:feishu\.cn|larksuite\.com)/[^\s<>\"']+",
+    r"https?://[^\s<>\"']*(?:feishu\.cn|larksuite\.com)/"
+    r"[^\s<>\"'，。；！？、）】》」』]+",
     re.IGNORECASE,
 )
 
@@ -100,13 +101,20 @@ def _feishu_url(user_input: str) -> str:
 
 
 def revise_load_document(user_input: str) -> dict:
-    """Load the immutable source WriterDocument from Feishu."""
+    """Create the immutable revise task and load its source document."""
     root = _run_root('load')
     target = TargetDocument(uri=_feishu_url(user_input), adapter='feishu')
+    revise_task = WriterRevisionToolkit().build_revise_task(
+        query=user_input,
+        target_document_json=json.dumps(target.model_dump(), ensure_ascii=False),
+    )
     result = WriterResourceTools(llm=None, artifact_store=str(root)).document_to_docir(target)
     loaded_document_json = _read_json_string(_result_path(result))
 
     return {
+        'revise_task': _save_json_artifact(
+            'revise_task', revise_task, writer_schema('task.WritingTask'), directory=root,
+        ),
         'source_ir': _save_json_artifact(
             'source_ir', _writer_document_json(loaded_document_json, ui_editable=False),
             WriterToolkitBase.WRITER_IR_SCHEMA, directory=root,
@@ -114,15 +122,11 @@ def revise_load_document(user_input: str) -> dict:
     }
 
 
-def revise_build_context(user_input: str, source_ir_path: str) -> dict:
+def revise_build_context(revise_task_path: str, source_ir_path: str) -> dict:
     """Build the model context for revision as its own observable plugin step."""
     root = _run_root('context')
     writer = WriterRevisionToolkit()
-    target = TargetDocument(uri=_feishu_url(user_input), adapter='feishu')
-    revise_task_json = writer.build_revise_task(
-        query=user_input,
-        target_document_json=json.dumps(target.model_dump(), ensure_ascii=False),
-    )
+    revise_task_json = _read_json_string(revise_task_path)
     context_json = writer.create_writing_context(
         writing_task_json=revise_task_json,
         resource_profiles_json='[]',
@@ -145,14 +149,17 @@ def revise_build_context(user_input: str, source_ir_path: str) -> dict:
     }
 
 
-def revise_generate_revision(base_ir_path: str, revision_context_path: str, query: str) -> dict:
+def revise_generate_revision(
+    base_ir_path: str,
+    revision_context_path: str,
+    revise_task_path: str,
+) -> dict:
     """Revise the document, write the PatchSet to Feishu, and return all artifacts."""
     root = _run_root('revision')
     writer = WriterRevisionToolkit()
     base_ir = _read_json_string(base_ir_path)
     context = _read_json_string(revision_context_path)
-
-    task = writer.build_revise_task(query=query)
+    task = _read_json_string(revise_task_path)
     located = writer.locate_revision_target(
         writing_task_json=task,
         writer_document_json=base_ir,
@@ -189,9 +196,6 @@ def revise_generate_revision(base_ir_path: str, revision_context_path: str, quer
         raise ValueError(f'LazyLLM writer tool did not return persisted_document: {write_back!r}')
 
     return {
-        'revise_task': _save_json_artifact(
-            'revise_task', task, writer_schema('task.WritingTask'), directory=root,
-        ),
         'locate_result': _save_json_artifact(
             'locate_result', located, writer_schema('revision.LocateResult'), directory=root,
         ),

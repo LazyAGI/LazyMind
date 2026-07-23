@@ -5,11 +5,11 @@
 Revise part of an existing Feishu document while keeping WriterDocument as the
 single internal document representation and PatchSet as the modification contract.
 
-1. **load_document** — reuse the current user's chat-enabled Feishu OAuth
-   connection, read the document, and store it as the immutable `source_ir`
-   WriterDocument.
+1. **load_document** — preserve the complete request as the immutable
+   `revise_task`, reuse the current user's chat-enabled Feishu OAuth connection,
+   read the document, and store it as the immutable `source_ir` WriterDocument.
 2. **build_context** — build and display the revision context from the immutable
-   source IR and the user's request without changing the document.
+   revise task and source IR without changing the document.
 3. **revise_document** — locate the requested scope, generate a PatchSet, apply
    it to source_ir and keep the resulting WriterDocument as internal candidate_ir, translate
    the same PatchSet into provider-native block operations, write it to Feishu,
@@ -50,6 +50,8 @@ After the condition is fixed, retry `load_document`.
 
 ## Artifact contract
 
+- `revise_task` is created once from the initial complete request and is reused
+  by every later step; later user turns and retry instructions do not rebuild it.
 - `source_ir` is immutable and records the initially loaded document.
 - `candidate_ir` is the internal WriterDocument produced by applying patch_set locally.
 - `patch_set` is the only modification contract used for remote write-back.

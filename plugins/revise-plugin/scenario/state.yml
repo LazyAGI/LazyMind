@@ -23,11 +23,14 @@ steps:
       source WriterDocument. Do not build revision context in this
       step; build_context is a separate user-visible step.
 
-      Call revise_load_document(user_input="{{user_input}}"). The tool directly calls
-      LazyLLM WriterResourceTools.document_to_docir through the existing chat-enabled
-      Feishu credential and returns the source_ir file path.
+      Call revise_load_document(user_input="{{user_input}}"). The tool creates the
+      immutable revise_task from the complete request, then calls LazyLLM
+      WriterResourceTools.document_to_docir through the existing chat-enabled Feishu
+      credential and returns revise_task and source_ir file paths.
 
-      Persist source_ir with content_type='file'.
+      Persist revise_task and source_ir under their exact keys with content_type='file'.
+      All later steps must reuse this revise_task instead of rebuilding it from a later
+      user_input or runtime instruction.
 
       Never ask the model to copy or reconstruct document content. Preserve LazyLLM/FS
       authorization and access errors unchanged so the platform authorization layer can
@@ -35,25 +38,31 @@ steps:
     tools:
       - revise_load_document
     outputs:
+      - material: revise_task
       - material: source_ir
     acceptance_criteria: |
-      source_ir is present and contains a WriterDocument.
+      revise_task is present and contains the original revision instruction and Feishu
+      target; source_ir is present and contains a WriterDocument.
 
   build_context:
     label: Build Context
     prompt: |
       {{runtime_instruction}}
 
-      Retrieve source_ir, then call
-      revise_build_context(user_input="{{user_input}}", source_ir_path=<source_ir path>).
+      Retrieve revise_task and source_ir, then call
+      revise_build_context(revise_task_path=<revise_task path>,
+      source_ir_path=<source_ir path>).
       Persist revision_context and revision_context_ir under their exact keys with
       content_type='file'. revision_context_ir is the UI-visible WriterDocument for
       this step.
 
+      Do not rebuild the task from this step's user_input or runtime instruction.
       Do not revise the document and do not write to Feishu in this step.
     tools:
       - revise_build_context
     inputs:
+      - material: revise_task
+        required: true
       - material: source_ir
         required: true
     outputs:
@@ -68,17 +77,20 @@ steps:
     prompt: |
       {{runtime_instruction}}
 
-      Retrieve source_ir and revision_context. Call
+      Retrieve revise_task, source_ir, and revision_context. Call
       revise_generate_revision(base_ir_path=<source_ir path>,
-      revision_context_path=<revision_context path>, query="{{user_input}}").
+      revision_context_path=<revision_context path>,
+      revise_task_path=<revise_task path>).
 
       The tool locates and modifies the requested content, applies the PatchSet locally,
       writes the same PatchSet back to Feishu, and re-reads the persisted document before
       returning. This is the only step allowed to mutate the Feishu document.
+      Do not replace or extend the persisted revise_task with this step's user_input or
+      runtime instruction.
 
       Persist every returned value under its exact key in one save_artifacts call.
-      Use content_type='file' for revise_task, locate_result, modify_plan, patch_set,
-      patch_result, candidate_ir, write_result, and synced_snapshot.
+      Use content_type='file' for locate_result, modify_plan, patch_set, patch_result,
+      candidate_ir, write_result, and synced_snapshot.
       Do not save them through separate tool calls.
 
       candidate_ir is the local result kept for internal traceability and is not displayed.
@@ -91,12 +103,13 @@ steps:
     tools:
       - revise_generate_revision
     inputs:
+      - material: revise_task
+        required: true
       - material: source_ir
         required: true
       - material: revision_context
         required: true
     outputs:
-      - material: revise_task
       - material: locate_result
       - material: modify_plan
       - material: patch_set
