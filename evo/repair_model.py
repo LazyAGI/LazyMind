@@ -165,7 +165,7 @@ class EvoModelConfigError(ValueError):
             'message': (
                 '请先完成 evo_llm 模型配置'
                 if self.code == MODEL_NOT_CONFIGURED
-                else '当前 evo_llm 不支持 repair'
+                else '当前配置的自进化模型不支持自进化'
             ),
             'data': data,
         }

@@ -285,7 +285,7 @@ func TestThreadModelConfigRejectsMissingFields(t *testing.T) {
 func TestEvoCreateModelErrorIsPreserved(t *testing.T) {
 	err := &common.HTTPError{
 		StatusCode: http.StatusUnprocessableEntity,
-		Message:    `{"detail":{"code":2001301,"message":"当前 evo_llm 不支持 repair","data":{"reason":"evo_llm_not_allowed"}}}`,
+		Message:    `{"detail":{"code":2001301,"message":"当前配置的自进化模型不支持自进化","data":{"reason":"evo_llm_not_allowed"}}}`,
 	}
 	appErr, ok := evoCreateModelAppError(err)
 	if !ok || appErr.Code != evoModelNotAllowedCode || appErr.HTTPStatus != http.StatusUnprocessableEntity {

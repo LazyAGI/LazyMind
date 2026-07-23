@@ -35,9 +35,9 @@ async def execution_stream(projections: ProjectionService, thread_id: str,
                 done = {
                     key: snapshot.get(key)
                     for key in (
-                        'thread_id', 'step_id', 'current_step', 'checkpoint_state',
-                        'first_missing_step', 'last_released_step', 'retry_from_step',
-                        'last_error',
+                        'thread_id', 'step_id', 'status', 'reason', 'current_step',
+                        'checkpoint_state', 'first_missing_step',
+                        'last_released_step', 'retry_from_step', 'last_error',
                     )
                 }
                 done['last_event_id'] = cursor

@@ -134,6 +134,7 @@ class ProjectionService:
             )
             rows = _repair_trace_rows(rows, page, trace_scope)
             execution_id = '' if execution is None else execution.attempt_id
+            terminal = _step_terminal(page)
             return {
                 'thread_id': thread_id,
                 'step_id': step_id,
@@ -142,7 +143,12 @@ class ProjectionService:
                     _repair_trace_event(thread_id, step_id, execution_id, row)
                     for row in rows
                 ],
-                'terminal': _step_terminal(page),
+                'terminal': terminal,
+                'reason': (
+                    _stream_end_reason(snapshot, page)
+                    if terminal
+                    else ''
+                ),
                 **public_thread_state(snapshot),
             }
 
@@ -351,11 +357,13 @@ async def execution_events(flow: Any, definition: FlowDefinition,
         items = [item for item in items if item['step_id'] == step_id]
     if after_event_id:
         items = events_after(items, after_event_id)
+    terminal = _terminal(snapshot) if page is None else _step_terminal(page)
     return {
         'thread_id': run_id,
         'step_id': step_id or None,
         'items': items,
-        'terminal': _terminal(snapshot) if page is None else _step_terminal(page),
+        'terminal': terminal,
+        'reason': _stream_end_reason(snapshot, page) if terminal else '',
         **public_thread_state(snapshot),
     }
 
@@ -791,6 +799,39 @@ def _public_step(page: Mapping[str, Any]) -> dict[str, Any]:
 
 def _step_terminal(page: Mapping[str, Any]) -> bool:
     return bool(page['next_step_id']) or page['status'] in _TERMINAL_STEPS
+
+
+def _stream_end_reason(
+    snapshot: FlowSnapshot,
+    page: Mapping[str, Any] | None,
+) -> str:
+    if page is not None:
+        page_status = str(page['status'])
+        if page_status == 'completed' or page['next_step_id']:
+            pending = snapshot.pending_approval
+            if pending is not None and pending.stage == page['stage']:
+                return 'checkpoint_wait'
+            if (
+                snapshot.status == 'completed'
+                and snapshot.current_stage == page['stage']
+            ):
+                return 'flow_completed'
+            return 'step_completed'
+        if page_status in {'cancelled', 'canceled'}:
+            return 'cancelled'
+        if page_status == 'failed':
+            return 'failed'
+        if page_status == 'paused':
+            return 'user_paused'
+
+    if snapshot.pending_approval is not None:
+        return 'checkpoint_wait'
+    return {
+        'paused': 'user_paused',
+        'cancelled': 'cancelled',
+        'failed': 'failed',
+        'completed': 'flow_completed',
+    }.get(snapshot.status, 'step_completed')
 
 
 def events_after(items: list[dict[str, Any]], event_id: str
