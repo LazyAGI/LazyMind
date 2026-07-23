@@ -546,12 +546,6 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               usePluginStore.getState().setAutoRunning(conversationId, true);
               usePluginStore.getState().loadActiveSession(conversationId);
             });
-          } else if (type === 'plugin_artifact_updated') {
-            // Backend emits this only after the slot revision is durable. Refresh
-            // from the authoritative session projection; no timer polling needed.
-            import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
-              usePluginStore.getState().loadActiveSession(conversationId, { silentError: true });
-            });
           } else if (
             type === 'step_waiting' ||
             type === 'plugin_completed' ||

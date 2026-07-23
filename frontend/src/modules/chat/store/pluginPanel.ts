@@ -31,7 +31,6 @@ const DRAFT_FLUSH_DELAY_MS = 60_000;
 const DRAFT_LS_PREFIX = 'slotDraft:';
 
 const _drafts = new Map<string, DraftEntry>();
-const _pendingSessionReloads = new Set<string>();
 
 function _draftKey(sessionId: string, slotId: string, listIndex: number): string {
   return `${sessionId}:${slotId}:${listIndex}`;
@@ -448,13 +447,8 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
 
   loadActiveSession: async (conversationId, options) => {
     if (!conversationId) return;
-    // Coalesce concurrent event-driven refreshes instead of dropping the newest
-    // one. Artifact and lifecycle SSE events can arrive while a previous session
-    // request is still resolving.
-    if (get().loadingByConversation[conversationId]) {
-      _pendingSessionReloads.add(conversationId);
-      return;
-    }
+    // Deduplicate concurrent calls for the same conversation.
+    if (get().loadingByConversation[conversationId]) return;
     set((s) => ({
       loadingByConversation: { ...s.loadingByConversation, [conversationId]: true },
     }));
@@ -500,9 +494,6 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
       set((s) => ({
         loadingByConversation: { ...s.loadingByConversation, [conversationId]: false },
       }));
-      if (_pendingSessionReloads.delete(conversationId)) {
-        void get().loadActiveSession(conversationId, { silentError: true });
-      }
     }
   },
 
@@ -551,9 +542,9 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
   fetchPluginUI: async (pluginId) => {
     const lang = i18n.language || "";
     const cacheKey = `${pluginId}:${lang}`;
-    // Keep the cache as an offline fallback, but revalidate on panel mount so
-    // plugin.yaml tab/slot changes do not remain stale for the whole SPA session.
+    // Return cached value if already fetched for this language.
     const cached = get().pluginUIByPlugin[cacheKey];
+    if (cached) return cached;
     try {
       const res = await PluginInfoApi().getPlugin(pluginId, {
         headers: lang ? { "Accept-Language": lang } : undefined,
@@ -564,7 +555,7 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
       }));
       return ui;
     } catch {
-      return cached ?? {};
+      return {};
     }
   },
 

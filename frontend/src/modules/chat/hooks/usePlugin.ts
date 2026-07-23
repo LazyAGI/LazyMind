@@ -3,8 +3,7 @@ import { usePluginStore, type SlotRevision } from '@/modules/chat/store/pluginPa
 
 /**
  * usePluginSession returns the active plugin session and helpers for the given conversationId.
- * It loads the session on mount. Subsequent slot refreshes are driven by the
- * conversation SSE lifecycle and artifact events.
+ * It loads the session on mount and keeps slots refreshed.
  */
 export function usePluginSession(conversationId: string) {
   const session = usePluginStore((s) => s.sessionByConversation[conversationId] ?? null);
