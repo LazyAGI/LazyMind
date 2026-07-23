@@ -97,8 +97,8 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'FeishuWikiFS_copy': 'path1',
     'GoogleDriveFS_search': 'keywords',
     'GoogleDriveFS_find': 'pattern',
-    'advance_step': 'step_id',
-    'advance_step_and_hand_off': 'step_id',
+    'advance_step': 'steps',
+    'advance_step_and_hand_off': 'steps',
     'advance_steps': 'steps',
     'advance_steps_and_hand_off': 'steps',
 }
@@ -1308,6 +1308,9 @@ def _tool_result_frame_text(tool_result: dict[str, Any], language: str = 'en', p
         'name': tool_name,
         'result': result,
     }
+    if _tool_name_is(tool_name, 'ask_user'):
+        encoded = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+        return f'<{_TOOL_RESULT_TAG}>{encoded}</{_TOOL_RESULT_TAG}>'
     preview = _tool_result_preview(tool_name, result, preview_value, language)
     return (
         f'<{_TOOL_RESULT_PREVIEW_TAG} id="{escape(tool_call_id, quote=True)}">{preview}</{_TOOL_RESULT_PREVIEW_TAG}>'

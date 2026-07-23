@@ -106,6 +106,7 @@ type ChatRuntimeOptions struct {
 	ContextUsagePreview           bool           `json:"context_usage_preview,omitempty"`
 	ContextPromptExport           bool           `json:"context_prompt_export,omitempty"`
 	ContextPreviewAllowLLMRouting bool           `json:"context_preview_allow_llm_routing,omitempty"`
+	SkipSensitiveFilter           bool           `json:"skip_sensitive_filter,omitempty"`
 }
 
 type ChatPersonalizationOptions struct {
@@ -174,9 +175,10 @@ type ArtifactCreatedEvent struct {
 // AskQuestion is a single question within an AskPendingEvent.
 // type is one of "boolean", "single", "multiple", "text".
 type AskQuestion struct {
-	Text    string   `json:"text"`
-	Type    string   `json:"type"`
-	Choices []string `json:"choices,omitempty"`
+	Text       string   `json:"text"`
+	Type       string   `json:"type"`
+	Choices    []string `json:"choices,omitempty"`
+	AllowOther *bool    `json:"allow_other,omitempty"`
 }
 
 // AskPendingEvent is emitted by ask_user (via _write_agent_data) on the main SSE stream.
@@ -474,6 +476,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if allow, ok := body["context_preview_allow_llm_routing"].(bool); ok {
 		req.Runtime.ContextPreviewAllowLLMRouting = allow
+	}
+	if skip, ok := body["skip_sensitive_filter"].(bool); ok {
+		req.Runtime.SkipSensitiveFilter = skip
 	}
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
 		req.Runtime.LLMConfig = llmConfig

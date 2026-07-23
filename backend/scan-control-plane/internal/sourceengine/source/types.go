@@ -46,6 +46,12 @@ type Engine interface {
 	UpdateBinding(ctx context.Context, callerID, sourceID, bindingID string, input BindingInput) (BindingMutationResponse, error)
 	DeleteBinding(ctx context.Context, sourceID, bindingID string) (DeleteBindingResponse, error)
 	UpdateBindingChatEnabled(ctx context.Context, bindingID string, chatEnabled bool) error
+
+	// IsBindingPathAccessible checks whether the binding'''s root directory
+	// still exists on the agent via a stat call. Used as a safety-net fallback
+	// in GET chat-settings. Fail-open: returns true when the check cannot be
+	// performed, so transient agent errors do not hide bindings incorrectly.
+	IsBindingPathAccessible(ctx context.Context, agentID, targetRef string) bool
 }
 
 type CreateSourceRequest struct {

@@ -41,11 +41,25 @@ config.add('runtime_mode', str, 'cloud', 'RUNTIME_MODE',
 # ---------------------------------------------------------------------------
 config.add('mount_base_dir', str, '/data', 'MOUNT_BASE_DIR', description='Base directory for mounted files.')
 config.add(
-    'sensitive_words_path',
+    'sensitive_red_words_path',
     str,
-    os.path.join(_LAZYMIND_ROOT, 'chat', 'resources', 'sensitive_words.txt'),
-    'SENSITIVE_WORDS_PATH',
-    description='Path to sensitive words file.',
+    os.path.join(_LAZYMIND_ROOT, 'chat', 'resources', 'sensitive_red.txt'),
+    'SENSITIVE_RED_WORDS_PATH',
+    description='Path to sensitive red words file.',
+)
+config.add(
+    'sensitive_gray_words_path',
+    str,
+    os.path.join(_LAZYMIND_ROOT, 'chat', 'resources', 'sensitive_gray.txt'),
+    'SENSITIVE_GRAY_WORDS_PATH',
+    description='Path to sensitive gray words file.',
+)
+config.add(
+    'sensitive_whitelist_path',
+    str,
+    os.path.join(_LAZYMIND_ROOT, 'chat', 'resources', 'sensitive_whitelist.txt'),
+    'SENSITIVE_WHITELIST_PATH',
+    description='Path to sensitive whitelist file.',
 )
 config.add('llm_priority', int, 0, 'LLM_PRIORITY', description='LLM priority level.')
 config.add('max_concurrency', int, 10, 'MAX_CONCURRENCY', description='Max concurrent requests.')

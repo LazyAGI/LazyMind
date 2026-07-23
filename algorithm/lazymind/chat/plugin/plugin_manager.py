@@ -3,11 +3,8 @@
 Tool types registered dynamically per-conversation:
 
 - trigger_<plugin_id>       : Cold-start tool. Injected when no active plugin session exists.
-- advance_step_and_hand_off : Step-advancement tool (stop-tool). Default; queues step and hands off control to user.
-- advance_step              : Synchronous step-advancement tool. Only in 'dynamic' mode; blocks until
-                              the SubAgent finishes before ReAct continues.
-- advance_steps             : Atomic synchronous batch advancement for multiple Ready steps.
-- advance_steps_and_hand_off: Atomic asynchronous batch advancement (stop-tool).
+- advance_step_and_hand_off : Asynchronous stop-tool accepting one or more step commands.
+- advance_step              : Synchronous tool accepting one or more step commands; dynamic mode only.
 - ask_user                  : Ask the user a question (stop-tool). ChatAgent only; absent in auto mode.
 - intentwrite               : Extended with plugin-session and plugin-step scopes when active.
 - list_plugin_steps         : Read-only step status query (ChatAgent only, when session active).
@@ -322,30 +319,31 @@ def is_plugin_driver_turn(plugin_context: Any) -> bool:
 
 _COLD_START_PLUGIN_PROMPT = (
     '## Available Workflows\n'
-    'IMPORTANT: Only trigger a plugin when the capability matches the '
+    'The product term is workflow. "Plugin" is a legacy internal synonym only.\n'
+    'IMPORTANT: Only trigger a workflow when the capability matches the '
     "user's PRIMARY and DIRECT intent — the main goal they are asking for "
-    'right now. Never trigger a plugin for a sub-step that the model has '
+    'right now. Never trigger a workflow for a sub-step that the model has '
     "internally decided is part of a larger multi-step plan. If the user's "
     'request involves multiple steps and only one of those steps would use a '
-    'plugin, do NOT trigger the plugin. Never infer plugin intent from '
+    'workflow, do NOT trigger the workflow. Never infer workflow intent from '
     'indirect or implicit cues.\n'
-    'When a plugin matches, call its `trigger_<plugin>` preflight tool. Trigger does NOT '
-    'start a task. It loads the full plugin and returns ready, need_information, '
+    'When a workflow matches, call its `trigger_<workflow>` preflight tool. Trigger does NOT '
+    'start a task. It loads the full workflow and returns ready, need_information, '
     'not_applicable, or preflight_failed.\n'
     'If trigger returns ready, you MUST immediately follow its returned instruction and '
     'call the applicable advancement tool in the SAME turn. Do not explain, confirm, or '
     'end the turn first.\n'
     'If it returns need_information, use ask_user only when that tool is available.\n\n'
-    'CRITICAL — explicit plugin start requests:\n'
-    'If the user explicitly asks to start, launch, or enable a plugin (e.g. '
-    '"启动绘图工作流", "打开图片生成工作流", "启动图片工作流", "start the image workflow"), '
-    'you MUST call the matching `trigger_<plugin_id>_plugin` tool in this same '
+    'CRITICAL — explicit workflow requests:\n'
+    'If the user explicitly names a workflow and asks to use, run, start, launch, open, or '
+    'enable it (e.g. "使用 AI Writer workflow", "用 AI Writer 工作流", '
+    '"启动绘图工作流", "use the image workflow"), '
+    'you MUST call the matching `trigger_<workflow_id>` tool in this same '
     'response before any other action. Do NOT reply with text only, do NOT call '
-    '`image_generator` / `image_editor` / `video_generator` / `video_to_gif` directly, '
+    'a generic toolkit or same-domain tool directly (including writing, image, or video tools), '
     'and do NOT ask clarification '
-    'questions first. Pass the user\'s request as `user_input` (or repeat their '
-    'start phrase if they gave no further detail).\n'
-    'For the AI image plugin (`image-plugin`), call `trigger_image_plugin`.\n\n'
+    'questions first. Pass the complete request as `request_context` and set '
+    '`explicit_workflow_request=true`.\n\n'
 )
 
 
@@ -741,16 +739,16 @@ Persisted preflight from earlier clarification turns:
 Current consolidated request context:
 {request_context}
 
-Explicit plugin request: {json.dumps(bool(explicit_plugin_request))}
+Explicit workflow request: {json.dumps(bool(explicit_plugin_request))}
 
-If Explicit plugin request is true, the user has authoritatively selected this plugin.
+If Explicit workflow request is true, the user has authoritatively selected this workflow.
 You MUST NOT return not_applicable. Return ready when safe defaults are available, or
 need_information only when information is genuinely required before the first step can run.
 
 Classify the request as exactly one of:
 - ready: applicable and all truly required information is available or has an explicit safe default.
 - need_information: applicable but required information is missing.
-- not_applicable: this plugin should not be launched for the request.
+- not_applicable: this workflow should not be launched for the request.
 
 For ready, choose one valid first_step_id. Do not decide how execution continues after launch;
 the caller applies the current execution policy.
@@ -880,7 +878,7 @@ def build_cold_start_tools(
         if catalog_entry is not None:
             pid = str(catalog_entry.get('plugin_id') or 'plugin')
             name = str(catalog_entry.get('name') or pid)
-            desc = str(catalog_entry.get('description') or f'Trigger the {name} plugin.')
+            desc = str(catalog_entry.get('description') or f'Trigger the {name} workflow.')
             when_to_use = str(catalog_entry.get('when_to_use') or '').strip()
             first_steps: List[str] = []
             plugin_ref = str(catalog_entry.get('plugin_ref', pid)).encode()
@@ -890,7 +888,7 @@ def build_cold_start_tools(
             assert spec is not None
             pid = spec.plugin_id
             name = spec.yaml.get('name', pid)
-            desc = spec.yaml.get('description', f'Trigger the {name} plugin.')
+            desc = spec.yaml.get('description', f'Trigger the {name} workflow.')
             when_to_use = spec.yaml.get('when_to_use', '').strip()
             # Entry candidates are resolved by Go when the trigger runs. Keeping
             # them out of the static tool definition prevents stale local graph
@@ -908,9 +906,9 @@ def build_cold_start_tools(
             tool_name='',
         ):
 
-            def _trigger(request_context: str, explicit_plugin_request: bool) -> str:
+            def _trigger(request_context: str, explicit_workflow_request: bool) -> str:
                 request_context = str(request_context or '').strip()
-                explicit_plugin_request = bool(explicit_plugin_request)
+                explicit_plugin_request = bool(explicit_workflow_request)
                 if not request_context:
                     return json.dumps({
                         'status': 'preflight_failed',
@@ -964,9 +962,8 @@ def build_cold_start_tools(
                 previous = cfg.get('plugin_preflight_context')
                 if not isinstance(previous, dict) or previous.get('plugin_id') != resolved_plugin_id:
                     previous = None
-                # Once the user explicitly selects a plugin, retain that choice
-                # across any clarification turns whose text may no longer repeat
-                # the plugin name.
+                # Once the user explicitly selects a workflow, retain that choice
+                # across clarification turns whose text may no longer repeat its name.
                 explicit_plugin_request = bool(
                     explicit_plugin_request
                     or (previous or {}).get('explicit_plugin_request')
@@ -1011,7 +1008,7 @@ def build_cold_start_tools(
                         )
                         result.update({
                             'decision': 'ready',
-                            'reason': 'The user explicitly requested this plugin.',
+                            'reason': 'The user explicitly requested this workflow.',
                             'missing_information': [],
                             'first_step_id': resolved_first[0],
                         })
@@ -1102,7 +1099,7 @@ def build_cold_start_tools(
                     'must_advance': True,
                     'advance_committed': False,
                     'requires_hand_off_choice': not static_advancement,
-                    'fallback_hand_off': first_step_default_approval == 'required',
+                    'fallback_hand_off': True,
                     'step_name_index': step_name_index,
                     'launch_plan': launch_plan,
                     'scenario': resolved_spec.scenario_md,
@@ -1118,9 +1115,9 @@ def build_cold_start_tools(
                     )
                 else:
                     instruction = (
-                        'You MUST now choose `advance_step` or `advance_step_and_hand_off` '
-                        'for first_step_id using the current request policy, step-name index, '
-                        'and first-step default approval. Do not answer with prose first.'
+                        'Infer whether the user explicitly requested multiple workflow steps. '
+                        'If yes, choose `advance_step`; otherwise choose the default '
+                        '`advance_step_and_hand_off`. Do not answer with prose first.'
                     )
                 return json.dumps({
                     'status': 'ready',
@@ -1145,11 +1142,12 @@ def build_cold_start_tools(
                 'Args:\n'
                 '    request_context (str): The complete user goal. When clarification has\n'
                 '        occurred, consolidate the original request and all answers.\n\n'
-                '    explicit_plugin_request (bool): Always supply this flag. Set true when the user explicitly names,\n'
-                '        starts, enables, or asks to run this plugin. Explicit selection cannot\n'
+                '    explicit_workflow_request (bool): Always supply this flag. Set true when the user\n'
+                '        explicitly names and asks to use, run, start, launch, open, or enable this\n'
+                '        workflow. Explicit selection cannot\n'
                 '        be rejected as not_applicable.\n\n'
                 'Returns:\n'
-                '    A structured preflight result. This tool never starts the plugin.\n'
+                '    A structured preflight result. This tool never starts the workflow.\n'
                 '    When status is ready, immediately call an advance tool in the same turn.'
             )
             return _trigger
@@ -1249,8 +1247,10 @@ def build_cold_advance_tools(plugin_mode: str = 'dynamic') -> List[Any]:
             return build_advance_step_tool(
                 str(cfg['plugin_id']), str(cfg.get('plugin_step') or '')
             )(
-                step_id=step_id,
-                user_input=str(plan.get('normalized_request') or cfg.get('query') or ''),
+                steps=[{
+                    'step_id': step_id,
+                    'user_input': str(plan.get('normalized_request') or cfg.get('query') or ''),
+                }],
             )
         return _commit_prepared_plugin(step_id, hand_off=False)
 
@@ -1272,14 +1272,16 @@ def build_cold_advance_tools(plugin_mode: str = 'dynamic') -> List[Any]:
             return build_advance_step_and_hand_off_tool(
                 str(cfg['plugin_id']), str(cfg.get('plugin_step') or '')
             )(
-                step_id=step_id,
-                user_input=str(plan.get('normalized_request') or cfg.get('query') or ''),
+                steps=[{
+                    'step_id': step_id,
+                    'user_input': str(plan.get('normalized_request') or cfg.get('query') or ''),
+                }],
             )
         return _commit_prepared_plugin(step_id, hand_off=True)
 
     if plugin_mode == 'auto':
         return [advance_step_and_hand_off]
-    return [advance_step, advance_step_and_hand_off]
+    return [advance_step_and_hand_off, advance_step]
 
 
 def commit_prepared_plugin_fallback() -> str:
@@ -1360,13 +1362,11 @@ async def _enforce_prepared_plugin_advance(
     )
     if requires_hand_off_choice:
         correction = (
-            '## Mandatory plugin launch correction\n'
-            'The plugin trigger already returned ready. Do not answer, explain, confirm, '
-            'or ask another question. Immediately start first_step_id. Choose between '
-            '`advance_step` and `advance_step_and_hand_off` from the latest user request, '
-            'the compact step-name index, and the first-step default approval. A requested '
-            'confirmation at a later named boundary does not require handing off the first '
-            'step. Launch plan:\n'
+            '## Mandatory workflow launch correction\n'
+            'The workflow trigger already returned ready. Do not answer, explain, confirm, '
+            'or ask another question. Immediately start first_step_id. Infer whether the user '
+            'explicitly requested multiple workflow steps. Use `advance_step` only if they did; '
+            'otherwise use the default `advance_step_and_hand_off`. Launch plan:\n'
             + json.dumps(visible_launch_plan, ensure_ascii=False)
             + '\n'
             + str(prepared.get('step_name_index') or '')
@@ -1492,11 +1492,7 @@ def build_advance_step_and_hand_off_tool(
     step_labels: Optional[Dict[str, str]] = None,
     include_approval_guidance: bool = True,
 ) -> Any:
-    """Build the advance_step_and_hand_off tool (stop-tool).
-
-    Queues the step asynchronously and immediately ends the current ReAct turn.
-    Mode-specific continuation behavior is defined by the system guidance.
-    """
+    """Build the asynchronous advancement stop-tool for one or more steps."""
     snapshot = _live_reachability_snapshot(plugin_id, current_step, rewind_steps)
     forward = snapshot.forward_steps
     rewind = snapshot.rewind_steps
@@ -1511,38 +1507,29 @@ def build_advance_step_and_hand_off_tool(
         include_default_approval=include_approval_guidance,
     )
 
-    def advance_step_and_hand_off(
-        step_id: str,
-        user_input: str,
-        runtime_instruction: Optional[str] = None,
-        partial_indices: Optional[Dict[str, List[int]]] = None,
-    ) -> str:
-        """Start the next step asynchronously and hand off subsequent control.
-
-        After calling this tool, the current ReAct loop exits and the SSE stream closes.
-        The step runs in the background. Mode-specific system guidance determines
-        what happens after it completes.
-
-        Use this when the user explicitly requests review/a boundary, or when the
-        target step is annotated with default approval required. Use
-        `advance_step` when approval is explicitly skipped or defaults to not required.
-
-        Session completion is computed automatically by Go after all effective
-        branches reach the graph end.
-        """
+    def advance_step_and_hand_off(steps: List[Dict[str, Any]]) -> str:
+        """Start one or more Ready steps and end the current ReAct turn."""
+        if not isinstance(steps, list) or not steps:
+            raise ValueError('steps must contain at least one step command.')
+        if len(steps) > 1:
+            submission = _trigger_plugin_steps(plugin_id, steps, hand_off=True)
+            if not submission.accepted:
+                raise RuntimeError(submission.message)
+            return submission.message
+        command = steps[0]
+        if not isinstance(command, dict):
+            raise ValueError('each steps item must be an object.')
+        step_id = str(command.get('step_id') or '')
         if step_id == '__end__':
             raise ValueError('Manual __end__ transitions are disabled; Go computes session completion.')
         result = _trigger_plugin_step(
-            plugin_id, step_id, user_input,
+            plugin_id, step_id, str(command.get('user_input') or ''),
             is_cold_start=False,
             hand_off=True,
-            runtime_instruction=runtime_instruction or '',
-            partial_indices=partial_indices or {},
+            runtime_instruction=str(command.get('runtime_instruction') or ''),
+            partial_indices=command.get('partial_indices') or {},
             operation='advance',
         )
-        # advance_step_and_hand_off remains a static stop-tool for compatibility.
-        # Raising turns a Go rejection into an ok=false tool observation, so the
-        # ReAct loop continues and the model sees the exact structured reason.
         if not _agentic_config().get('_last_plugin_transition_accepted', False):
             raise RuntimeError(result)
         _set_local_plugin_step(step_id)
@@ -1554,45 +1541,15 @@ def build_advance_step_and_hand_off_tool(
         else 'Use this tool to start the selected next step.\n'
     )
     advance_step_and_hand_off.__doc__ = (
-        'Start the next workflow step asynchronously and end the current ReAct turn.\n\n'
+        'Start one or more Ready workflow steps asynchronously and end the current turn.\n\n'
         + selection_guidance
-        + 'Terminal steps are also boundaries; after a\n'
-        'terminal task succeeds, the plugin event loop completes the session.\n\n'
-        '## Running an earlier step again\n\n'
-        'If the user expresses dissatisfaction with or changes to the result of a step that\n'
-        'has ALREADY run, select the earliest affected step_id. The backend automatically\n'
-        'decides whether the target is a normal advance, retry, or rewind.\n\n'
-        'Examples:\n'
-        '  User: "我不喜欢日系风格，改成北欧简约风" → the style was set in an earlier step\n'
-        '    → advance_step_and_hand_off(step_id=<that_step>,\n'
-        '        user_input="北欧简约风格，...")\n'
-        '  User: "不要树，改成蓝天白云" → subject was defined in analyze_subject\n'
-        '    → advance_step_and_hand_off(step_id="analyze_subject",\n'
-        '        user_input="主体：蓝天白云...")\n\n'
-        '## Checkpoint-Resume (interrupted steps)\n\n'
-        'When the user says "继续" and the step was interrupted (not "重试"):\n'
-        '  advance_step_and_hand_off(step_id=<current_step>, runtime_instruction=(\n'
-        '    "Previous attempt was interrupted. Check existing artifacts for this step "\n'
-        '    "and only produce missing outputs (resume from checkpoint). "\n'
-        '    "Do not regenerate already-saved artifacts."))\n'
-        'When the user says "重试", select that same step_id and describe the requested\n'
-        'restart behavior in runtime_instruction.\n\n'
-        '## Completing the plugin\n\n'
-        'Hand off the terminal pipeline step itself. Go automatically marks the session\n'
-        'complete when all effective branches finish; never submit `__end__`.\n\n'
-        'If the DriverAgent or user indicates a prior step produced bad output, simply pass\n'
-        'that step_id again. Do not reason about backend lifecycle operation names.\n\n'
+        + 'Pass one command for one step. Pass multiple commands only for independent Ready\n'
+        'steps that should be submitted atomically. Never batch dependent or previously\n'
+        'attempted steps. Terminal steps are also hand-off boundaries.\n\n'
         + choices_doc + '\n\n'
         'Args:\n'
-        '    step_id (str): Step to advance to (see list above).\n'
-        '    user_input (str): Concise goal statement for the SubAgent based on the latest\n'
-        '        user query only. Do NOT pass vague phrases like "继续" or "continue", and\n'
-        '        do NOT include prior-turn context unless the user explicitly repeats it.\n'
-        '    runtime_instruction (str, optional): Ephemeral directive for this run only.\n'
-        '    partial_indices (dict, optional): Maps slot → list_index values to\n'
-        '        overwrite (list-cardinality slots only).\n\n'
-        'Returns:\n'
-        '    Confirmation that the step was queued. Exits ReAct immediately after.'
+        '    steps: One or more objects containing step_id and user_input; each may also\n'
+        '        contain runtime_instruction and partial_indices.'
     )
     return advance_step_and_hand_off
 
@@ -1603,12 +1560,7 @@ def build_advance_step_tool(
     rewind_steps: Optional[List[str]] = None,
     step_labels: Optional[Dict[str, str]] = None,
 ) -> Any:
-    """Build the synchronous advance_step tool for policies that allow it.
-
-    Blocks until the SubAgent completes, then returns the step result summary so
-    ChatAgent can continue reasoning. Use for explicit continuous execution and
-    for steps whose default approval is not required.
-    """
+    """Build the synchronous advancement tool for one or more steps."""
     snapshot = _live_reachability_snapshot(plugin_id, current_step, rewind_steps)
     forward = snapshot.forward_steps
     rewind = snapshot.rewind_steps
@@ -1619,25 +1571,39 @@ def build_advance_step_tool(
         current_step=current_step if current_step in snapshot.retry_steps else '',
     )
 
-    def advance_step(
-        step_id: str,
-        user_input: str,
-        runtime_instruction: Optional[str] = None,
-        partial_indices: Optional[Dict[str, List[int]]] = None,
-    ) -> str:
-        """Advance the active plugin to the next step and WAIT for completion.
-
-        Blocks until the SubAgent finishes, then returns the step result summary.
-        Use when the user explicitly requests continuous/no-approval execution, or
-        when the target step defaults to no approval and the user has not overridden it.
-        """
+    def advance_step(steps: List[Dict[str, Any]]) -> str:
+        """Start one or more Ready steps and wait for their results."""
+        if not isinstance(steps, list) or not steps:
+            raise ValueError('steps must contain at least one step command.')
+        if len(steps) > 1:
+            submission = _trigger_plugin_steps(plugin_id, steps, hand_off=False)
+            if not submission.accepted:
+                return submission.message
+            summaries = []
+            cfg = _agentic_config()
+            for task in submission.tasks or []:
+                step_id, task_id = str(task.get('step_id') or ''), str(task.get('task_id') or '')
+                if step_id and task_id:
+                    cfg['_last_plugin_task_id'] = task_id
+                    summaries.append(f'## {step_id}\n{_wait_for_go_task(step_id, submission.message)}')
+            cfg['_last_plugin_tasks'] = submission.tasks or []
+            return (
+                submission.message if not summaries else '\n\n'.join(summaries)
+            ) + _append_step_transition_hint(
+                '', plugin_id=plugin_id, current_step='', rewind_steps=rewind_steps or [],
+                step_labels=labels,
+            )
+        command = steps[0]
+        if not isinstance(command, dict):
+            raise ValueError('each steps item must be an object.')
+        step_id = str(command.get('step_id') or '')
         if step_id == '__end__':
             raise ValueError('Manual __end__ transitions are disabled; Go computes session completion.')
         result = _trigger_plugin_step(
-            plugin_id, step_id, user_input,
+            plugin_id, step_id, str(command.get('user_input') or ''),
             is_cold_start=False,
-            runtime_instruction=runtime_instruction or '',
-            partial_indices=partial_indices or {},
+            runtime_instruction=str(command.get('runtime_instruction') or ''),
+            partial_indices=command.get('partial_indices') or {},
             operation='advance',
         )
         if not _agentic_config().get('_last_plugin_transition_accepted', False):
@@ -1668,114 +1634,23 @@ def build_advance_step_tool(
         )
 
     advance_step.__doc__ = (
-        'Advance the active workflow step synchronously and return the result.\n\n'
-        'Use this tool in continuous/uninterrupted mode, or when the target step is\n'
-        'annotated `[default approval: not required]` and the user did not override it.\n'
-        'Continuous mode is active when the user intent contains phrases like\n'
-        '"一次性完成", "不要中断", "一次性写完", "run all steps", "no interruptions".\n'
+        'Start one or more Ready workflow steps synchronously and return their results.\n\n'
+        'Use only when the user explicitly requests multiple workflow steps, for example\n'
+        '"帮我执行 N 步", "连续执行到 X", "一次性执行完", "run N steps",\n'
+        '"continue through X", or "run all steps". A complete-deliverable request alone\n'
+        'does not authorize this synchronous tool.\n'
         'In continuous mode with an explicit target boundary, use `advance_step` only\n'
         'for prerequisite steps before that boundary, then execute the boundary step\n'
         'with `advance_step_and_hand_off` and stop. If the user did not set a boundary,\n'
         'run prerequisite remaining steps with this tool, then execute the terminal step\n'
         'with `advance_step_and_hand_off` and stop.\n\n'
-        'If the target step defaults to approval, or the user asks to review/confirm it,\n'
-        'use `advance_step_and_hand_off` instead.\n\n'
+        'For every other request, use `advance_step_and_hand_off` instead.\n\n'
         + choices_doc + '\n\n'
-        'Args:\n'
-        '    step_id (str): Step to advance to (see list above).\n'
-        '    user_input (str): Concise goal statement from the latest user query only.\n'
-        '    runtime_instruction (str, optional): Ephemeral directive for this run.\n'
-        '    partial_indices (dict, optional): List-slot overwrite indices.\n\n'
-        'Returns:\n'
-        '    Step result summary after SubAgent completes.'
+        'Pass one command for one step, or multiple independent Ready step commands for one\n'
+        'atomic batch. Each command contains step_id and user_input and may contain\n'
+        'runtime_instruction and partial_indices.'
     )
     return advance_step
-
-
-def build_advance_steps_and_hand_off_tool(
-    plugin_id: str,
-    current_step: str,
-    rewind_steps: Optional[List[str]] = None,
-    step_labels: Optional[Dict[str, str]] = None,
-) -> Any:
-    """Build the atomic asynchronous batch-advance stop tool."""
-    forward = _live_reachability_snapshot(plugin_id, current_step, rewind_steps).forward_steps
-    choices_doc = _build_step_choices_doc(
-        forward, [], step_labels or {}, plugin_id=plugin_id, current_step=current_step,
-    )
-
-    def advance_steps_and_hand_off(steps: List[Dict[str, Any]]) -> str:
-        """Atomically queue multiple currently-Ready steps and end this ReAct turn."""
-        submission = _trigger_plugin_steps(plugin_id, steps, hand_off=True)
-        if not submission.accepted:
-            raise RuntimeError(submission.message)
-        return submission.message
-
-    advance_steps_and_hand_off.__doc__ = (
-        'Atomically start two or more independent Ready workflow steps and end the current turn.\n\n'
-        'Use one call when Go reports multiple Ready steps that should start now. Go evaluates all\n'
-        'items against the same projection and either queues every item or rejects the entire batch.\n'
-        'Never include a downstream step that needs an output from another item in this batch.\n'
-        'Previously attempted targets are not supported in batches; use a single-step tool.\n\n'
-        + choices_doc + '\n\n'
-        'Args:\n'
-        '    steps: At least two objects. Each object must contain step_id and user_input, and may\n'
-        '        contain runtime_instruction and partial_indices. Give every step its own focused\n'
-        '        instruction; do not combine instructions for different steps.\n\n'
-        'Returns:\n'
-        '    One durable acceptance for all steps. Exits ReAct only after Go accepts the full batch.'
-    )
-    return advance_steps_and_hand_off
-
-
-def build_advance_steps_tool(
-    plugin_id: str,
-    current_step: str,
-    rewind_steps: Optional[List[str]] = None,
-    step_labels: Optional[Dict[str, str]] = None,
-) -> Any:
-    """Build the atomic synchronous batch-advance tool."""
-    forward = _live_reachability_snapshot(plugin_id, current_step, rewind_steps).forward_steps
-    choices_doc = _build_step_choices_doc(
-        forward, [], step_labels or {}, plugin_id=plugin_id, current_step=current_step,
-    )
-
-    def advance_steps(steps: List[Dict[str, Any]]) -> str:
-        """Atomically start multiple Ready steps and wait for every task result."""
-        submission = _trigger_plugin_steps(plugin_id, steps, hand_off=False)
-        if not submission.accepted:
-            return submission.message
-        summaries: List[str] = []
-        cfg = _agentic_config()
-        for task in submission.tasks or []:
-            step_id = str(task.get('step_id') or '')
-            task_id = str(task.get('task_id') or '')
-            if not step_id or not task_id:
-                continue
-            cfg['_last_plugin_task_id'] = task_id
-            result = _wait_for_go_task(step_id, submission.message)
-            summaries.append(f'## {step_id}\n{result}')
-        cfg['_last_plugin_tasks'] = submission.tasks or []
-        if not summaries:
-            return submission.message
-        return '\n\n'.join(summaries) + _append_step_transition_hint(
-            '', plugin_id=plugin_id, current_step='', rewind_steps=rewind_steps or [],
-            step_labels=step_labels or {},
-        )
-
-    advance_steps.__doc__ = (
-        'Atomically start two or more independent Ready workflow steps and wait for all results.\n\n'
-        'Prefer this over repeated advance_step calls whenever the authoritative Ready list contains\n'
-        'multiple steps that should run now. The batch is all-or-rejected and increments state_version\n'
-        'once. Never batch a downstream dependency or a previously attempted target.\n\n'
-        + choices_doc + '\n\n'
-        'Args:\n'
-        '    steps: At least two objects. Each object contains step_id, user_input, and optional\n'
-        '        runtime_instruction / partial_indices specific to that step.\n\n'
-        'Returns:\n'
-        '    Per-step results after every task in the accepted batch reaches a terminal state.'
-    )
-    return advance_steps
 
 
 def _append_step_transition_hint(
@@ -2045,7 +1920,7 @@ def _build_preflight_context_section(preflight: Any) -> str:
         '## Workflow Preflight Context [AUTHORITATIVE]\n'
         'This durable snapshot survives history compaction. Preserve original_intent, '
         'merge new answers into normalized_request, and pass the consolidated result to '
-        'trigger_<plugin>(request_context).\n'
+        'trigger_<workflow>(request_context).\n'
         + json.dumps(visible, ensure_ascii=False, indent=2)
     )
 
@@ -2061,15 +1936,17 @@ def _build_cold_execution_policy(plugin_mode: str) -> str:
     return (
         '## Current Workflow Launch Policy [AUTHORITATIVE]\n'
         'After a trigger returns ready, it provides a compact index of every workflow step, '
-        'the valid first step, and that first step\'s default approval. Match any user-named '
+        'the valid first step, and that first step\'s default approval. You must still infer '
+        'the execution scope from the user\'s words; approval metadata does not choose the tool. '
+        'Match any user-named '
         'target boundary against the full id/name index. The index contains names only and '
         'does not imply order or reachability.\n'
-        '- If the requested boundary is the first step, use `advance_step_and_hand_off`.\n'
-        '- If the user requests continuous execution to a different named boundary, use '
-        '`advance_step` for the first step. A request to confirm at that later boundary must '
-        'not hand off the first step.\n'
-        '- Otherwise explicit approval/continuation intent wins; when absent, use the first '
-        'step\'s default approval.\n'
+        '- DEFAULT: use `advance_step_and_hand_off` for the first step.\n'
+        '- Use `advance_step` only when the user explicitly requests more than one workflow '
+        'step, such as "帮我执行 N 步", "连续执行到 X", "一次性执行完", '
+        '"run N steps", "continue through X", or "run the whole workflow without stopping".\n'
+        '- Asking for a complete article, image, report, or other final deliverable does NOT '
+        'by itself request multi-step or uninterrupted execution.\n'
         'Always start only the first_step_id returned by the trigger. After each synchronous '
         '`advance_step` result, use only the newly returned reachable-step details and repeat '
         'the decision. Continue synchronously through prerequisites; when the named boundary '
@@ -2179,22 +2056,12 @@ def resolve_plugin_injection(
                     step_labels=step_labels,
                     include_approval_guidance=plugin_mode != 'auto',
                 ),
-                build_advance_steps_and_hand_off_tool(
-                    p_plugin_id, p_current_step,
-                    rewind_steps=rewind_steps,
-                    step_labels=step_labels,
-                ),
             ]
-            plugin_stop_tools = ['advance_step_and_hand_off', 'advance_steps_and_hand_off']
+            plugin_stop_tools = ['advance_step_and_hand_off']
 
             if plugin_mode == 'dynamic':
                 plugin_tools.extend([
                     build_advance_step_tool(
-                        p_plugin_id, p_current_step,
-                        rewind_steps=rewind_steps,
-                        step_labels=step_labels,
-                    ),
-                    build_advance_steps_tool(
                         p_plugin_id, p_current_step,
                         rewind_steps=rewind_steps,
                         step_labels=step_labels,
@@ -2304,7 +2171,9 @@ def resolve_plugin_injection(
 
 
 def _catalog_intro(entry: Dict[str, Any]) -> str:
-    lines = [f'## Workflow: {entry.get("plugin_id") or entry.get("name") or "workflow"}']
+    workflow_id = entry.get('plugin_id') or entry.get('plugin_ref') or 'workflow'
+    workflow_name = entry.get('name') or workflow_id
+    lines = [f'## Workflow: {workflow_name} (id: {workflow_id})']
     if entry.get('description'):
         lines.append(str(entry['description']))
     if entry.get('when_to_use'):
@@ -2420,9 +2289,9 @@ def _build_mode_guidance(
         return (
             '## Current Workflow Execution Policy [AUTHORITATIVE]\n\n'
             'Only asynchronous advancement tools are available. Use '
-            '`advance_steps_and_hand_off` exactly once when two or more independent Ready '
-            'steps should start now; use `advance_step_and_hand_off` for one Ready step. '
-            'Both tools end the current turn only after Go accepts the full command.\n'
+            '`advance_step_and_hand_off` with one command for one Ready step, or multiple '
+            'commands for independent Ready steps that should start atomically. The tool ends '
+            'the current turn only after Go accepts the full command.\n'
             'After the step completes, the backend controller evaluates the result and '
             'starts the next decision turn. Do not wait for synchronous step results or ask '
             'the user questions during execution.'
@@ -2462,26 +2331,18 @@ def _build_mode_guidance(
         'with a separate user_input/runtime_instruction for every step. Do not issue repeated\n'
         'single-step calls for the same frontier. Never include a Blocked node or a downstream\n'
         'node that needs another batch item\'s future output. Running an attempted step again remains single-step.\n\n'
-        '### Rule 3 — Approval precedence and workflow advancement\n'
-        'Select the advancement tool with this priority:\n'
-        '  1. Explicit intent in the latest query or persisted session intent wins. Match a\n'
-        '     user-named target against the compact "Workflow Step Name Index". If that boundary\n'
-        '     is a currently valid next step, use `advance_step_and_hand_off` for it. If it is\n'
-        '     another known step and the user requests continuous execution until that boundary,\n'
-        '     use `advance_step` or `advance_steps` for prerequisite Ready frontiers. Do NOT hand off an\n'
-        '     intermediate step merely because the user requested confirmation at the later\n'
-        '     boundary. If the user requests uninterrupted execution without a boundary, use\n'
-        '     the singular or plural waiting tool according to the Ready frontier size.\n'
-        '  2. If the user expresses no approval preference, read the target step\'s\n'
-        '     `[default approval: ...]` annotation. Use a hand-off variant when approval is\n'
-        '     required; use a waiting variant when it is not required. For multiple selected\n'
-        '     Ready steps, use one plural tool; if any selected target needs an asynchronous\n'
-        '     boundary, use `advance_steps_and_hand_off`.\n'
-        'After an `advance_step` result, repeat this decision for the next target. This lets\n'
-        'automatic steps continue until the workflow reaches a step that requires approval.\n\n'
+        '### Rule 3 — Dynamic mode defaults to hand-off\n'
+        'DEFAULT: call `advance_step_and_hand_off` and stop after starting the selected Ready step(s).\n'
+        'Use `advance_step` only when the latest query or persisted session intent explicitly asks\n'
+        'to execute multiple workflow steps, for example "帮我执行 N 步", "连续执行到 X",\n'
+        '"一次性执行完", "run N steps", "continue through X", or "run all steps".\n'
+        'A request for a complete deliverable or a named workflow is NOT a request for continuous\n'
+        'execution. Step approval annotations are context only and never override this dynamic-mode default.\n'
+        'When several independent Ready steps form the same frontier, pass them in one call to the\n'
+        'chosen tool; the number of parallel Ready nodes does not itself imply continuous execution.\n\n'
         'If the user clearly asks to proceed with the existing workflow and\n'
         'does not add new requirements, corrections, or dissatisfaction signals:\n'
-        '  - If continuous mode is NOT active: apply the target step\'s default approval.\n'
+        '  - If continuous mode is NOT active: use `advance_step_and_hand_off` and stop.\n'
         '  - If continuous mode IS active (Rule 4) and the user set a target boundary:\n'
         '    use `advance_step` for prerequisite steps before that boundary, then use\n'
         '    `advance_step_and_hand_off` for the boundary step and stop.\n'
@@ -2500,19 +2361,16 @@ def _build_mode_guidance(
         '\n\n## Workflow execution guidance\n\n'
         'Tools for step advancement:\n'
         '- `advance_step_and_hand_off`: Start a step asynchronously and end the current turn.\n'
-        '- `advance_steps_and_hand_off`: Atomically start multiple Ready steps and end the turn.\n'
     )
     common += (
         (
             'An asynchronous boundary returns the next decision to the user.\n'
             '- `advance_step`: Queue one step and WAIT for its result.\n'
-            '- `advance_steps`: Atomically queue multiple Ready steps and WAIT for all results. '
-            'Use this in continuous/uninterrupted mode (see Rule 4 below). '
+            'Pass multiple step commands to `advance_step` to atomically queue independent Ready '
+            'steps and WAIT for all results. Use this in continuous/uninterrupted mode (see Rule 4 below). '
             'Use `advance_step` for prerequisite steps before a requested boundary, then '
             '`advance_step_and_hand_off` for the boundary step.\n'
-            'When there is no explicit approval preference, use the target step annotation: '
-            '`advance_step_and_hand_off` for `[default approval: required]`, otherwise '
-            '`advance_step` and evaluate the next target after it completes.\n\n'
+            'Unless explicit multi-step intent is present, always use `advance_step_and_hand_off`.\n\n'
             '### Rule 4 — Continuous / uninterrupted execution mode (MUST check before every action)\n'
             'Activate continuous mode when ANY of the following is true:\n'
             '  a) The "User Intent & Constraints" section contains phrases such as:\n'
@@ -2543,8 +2401,7 @@ def _build_mode_guidance(
             '     it hands off control and breaks the continuous run.\n'
             '  6. If any advancement tool returns an error, stop the sequence immediately and '
             '     report the failure; do not skip or continue to a later step.\n\n'
-            'Outside explicit continuous mode, step defaults still apply whenever the user has '
-            'not stated an approval preference.\n\n'
+            'Outside explicit continuous mode, always hand off after starting the selected frontier.\n\n'
             'When a step is interrupted and user says "继续": call advance_step_and_hand_off with '
             'runtime_instruction="Previous attempt was interrupted. Check existing artifacts '
             'and only produce missing outputs (resume from checkpoint)."\n'

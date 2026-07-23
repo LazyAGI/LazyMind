@@ -174,7 +174,7 @@ func loadConversationsForExport(
 	endAt time.Time,
 ) ([]orm.Conversation, map[string][]orm.ChatHistory, error) {
 	db := store.DB().WithContext(r.Context())
-	q := db.Model(&orm.Conversation{}).Where("create_user_id = ?", userID)
+	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL", userID)
 	if len(req.ConversationIDs) > 0 {
 		ids := make([]string, 0, len(req.ConversationIDs))
 		for _, id := range req.ConversationIDs {

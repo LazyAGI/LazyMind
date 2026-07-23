@@ -130,6 +130,144 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 	}
 }
 
+func TestOnSubAgentDone_HandoffWaitsAndMergesParallelTerminalStatuses(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.DB.AutoMigrate(&orm.ChatHistory{}); err != nil {
+		t.Fatalf("migrate history: %v", err)
+	}
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "ps-history", ConversationID: "conv-history", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	if _, err := CreateSessionStep(ctx, db.DB, "ps-history", "analyze_subject", "task-history", 1); err != nil {
+		t.Fatalf("step: %v", err)
+	}
+	if _, err := CreateSessionStep(ctx, db.DB, "ps-history", "generate_image", "task-image", 1); err != nil {
+		t.Fatalf("parallel step: %v", err)
+	}
+	now := time.Now()
+	for _, taskID := range []string{"task-history", "task-image"} {
+		if err := db.DB.Exec(
+			"INSERT INTO sub_agent_tasks (id, conversation_id, trigger_history_id, seq_in_conversation, agent_type, title, objective, mode, status, progress_pct, last_heartbeat, workspace_path, input_slots, output_slots, create_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			taskID, "conv-history", "history-1", 1, "plugin_step", taskID, "", "manual", "pending", 0, now, "", "[]", "[]", "", now, now,
+		).Error; err != nil {
+			t.Fatalf("task %s: %v", taskID, err)
+		}
+	}
+	if err := db.DB.Create(&orm.ChatHistory{
+		ID: "history-1", ConversationID: "conv-history", Seq: 1,
+		Content: "画一张漫画", Result: "<think>准备执行工作流</think>",
+	}).Error; err != nil {
+		t.Fatalf("history: %v", err)
+	}
+
+	handOff := true
+	pctx := &PluginChatContext{
+		SessionID: "ps-history", PluginID: "image-plugin", StepID: "analyze_subject",
+		ConvID: "conv-history", PluginMode: "dynamic", HandOff: &handOff,
+		TriggerHistoryID: "history-1",
+	}
+	OnSubAgentDone(
+		ctx, db.DB, nil, "task-history", subagent.StatusSucceeded,
+		"Analyzed the requested manga style and saved the subject analysis.",
+		func(string, map[string]any) {}, pctx,
+	)
+	var before orm.ChatHistory
+	_ = db.DB.First(&before, "id = ?", "history-1").Error
+	if before.Result != "<think>准备执行工作流</think>" {
+		t.Fatalf("summary was written before parallel batch finished: %s", before.Result)
+	}
+
+	pctx.StepID = "generate_image"
+	OnSubAgentDone(
+		ctx, db.DB, nil, "task-image", subagent.StatusInterrupted, "user stopped",
+		func(string, map[string]any) {}, pctx,
+	)
+
+	var history orm.ChatHistory
+	if err := db.DB.First(&history, "id = ?", "history-1").Error; err != nil {
+		t.Fatalf("reload history: %v", err)
+	}
+	for _, want := range []string{
+		"<think>准备执行工作流</think>",
+		"已完成 analyze_subject",
+		"用户中断了 generate_image",
+	} {
+		if !strings.Contains(history.Result, want) {
+			t.Fatalf("history result missing %q: %s", want, history.Result)
+		}
+	}
+}
+
+func TestHandoffStepName_PrefersLabelThenID(t *testing.T) {
+	labels := map[string]string{"analyze_subject": "主体分析"}
+	if got := handoffStepName("analyze_subject", labels); got != "主体分析（analyze_subject）" {
+		t.Fatalf("labeled step: %q", got)
+	}
+	if got := handoffStepName("generate_image", labels); got != "generate_image" {
+		t.Fatalf("fallback step: %q", got)
+	}
+}
+
+func TestEnforceWorkflowConversationSettings_EnablesApprovalMode(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.DB.AutoMigrate(&orm.Conversation{}); err != nil {
+		t.Fatalf("migrate conversation: %v", err)
+	}
+	disabled := false
+	auto := "auto"
+	conversation := orm.Conversation{
+		ID: "conv-settings", DisplayName: "Workflow chat",
+		EnablePlugin: &disabled, PluginMode: &auto,
+	}
+	if err := db.DB.Create(&conversation).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if err := enforceWorkflowConversationSettings(ctx, db.DB, conversation.ID); err != nil {
+		t.Fatalf("enforce settings: %v", err)
+	}
+	var got orm.Conversation
+	if err := db.DB.First(&got, "id = ?", conversation.ID).Error; err != nil {
+		t.Fatalf("reload conversation: %v", err)
+	}
+	if got.EnablePlugin == nil || !*got.EnablePlugin {
+		t.Fatalf("workflow was not enabled: %#v", got.EnablePlugin)
+	}
+	if got.PluginMode == nil || *got.PluginMode != "dynamic" {
+		t.Fatalf("plugin mode: %#v", got.PluginMode)
+	}
+}
+
+func TestAppendHandoffHistorySummary_SkipsInlineExecution(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.DB.AutoMigrate(&orm.ChatHistory{}); err != nil {
+		t.Fatalf("migrate history: %v", err)
+	}
+	if err := db.DB.Create(&orm.ChatHistory{
+		ID: "history-inline", ConversationID: "conv-inline-history", Seq: 1,
+		Content: "continue", Result: "original result",
+	}).Error; err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	handOff := false
+	err := appendHandoffHistorySummary(ctx, db.DB, &PluginChatContext{
+		ConvID: "conv-inline-history", StepID: "step-a", HandOff: &handOff,
+		TriggerHistoryID: "history-inline",
+	}, false)
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	var history orm.ChatHistory
+	_ = db.DB.First(&history, "id = ?", "history-inline").Error
+	if history.Result != "original result" {
+		t.Fatalf("inline execution history changed: %q", history.Result)
+	}
+}
+
 func TestOnSubAgentDone_ExplicitNoHandOffWaitsForChatAgent(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()

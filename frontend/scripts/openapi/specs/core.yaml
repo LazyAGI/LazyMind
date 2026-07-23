@@ -411,9 +411,6 @@ components:
                     type: array
                 reasoning_content:
                     type: string
-                thinking_time_s:
-                    format: int64
-                    type: integer
                 seq:
                     type: integer
                 sources:
@@ -645,6 +642,9 @@ components:
                         properties: {}
                         type: object
                     type: array
+                thinking_time_s:
+                    format: int64
+                    type: integer
             type: object
         ConversationHistoryListResponse:
             properties:
@@ -855,6 +855,8 @@ components:
             type: object
         CreateTaskItem:
             properties:
+                content_hash:
+                    type: string
                 cross_dataset:
                     type: boolean
                 task:
@@ -2319,21 +2321,76 @@ components:
                 source:
                     type: string
             type: object
+        PromptCategory:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+            required:
+                - id
+                - name
+            type: object
+        PromptCategoryListResponse:
+            properties:
+                categories:
+                    items:
+                        $ref: '#/components/schemas/PromptCategory'
+                    type: array
+            type: object
+        PromptCategoryRequest:
+            properties:
+                name:
+                    type: string
+            required:
+                - name
+            type: object
+        PromptFacets:
+            properties:
+                categories:
+                    properties: {}
+                    type: object
+                category_total:
+                    format: int64
+                    type: integer
+                scopes:
+                    properties: {}
+                    type: object
+            type: object
         PromptItem:
             properties:
+                category:
+                    type: string
                 content:
+                    type: string
+                created_at:
                     type: string
                 display_name:
                     type: string
                 id:
                     type: string
-                is_default:
+                is_favorite:
                     type: boolean
+                last_used_at:
+                    type: string
                 name:
                     type: string
+                source:
+                    type: string
+                updated_at:
+                    type: string
+                usage_count:
+                    format: int64
+                    type: integer
             type: object
         PromptListResponse:
             properties:
+                custom_categories:
+                    items:
+                        $ref: '#/components/schemas/PromptCategory'
+                    type: array
+                facets:
+                    $ref: '#/components/schemas/PromptFacets'
                 next_page_token:
                     type: string
                 prompts:
@@ -2346,6 +2403,8 @@ components:
             type: object
         PromptPatchRequest:
             properties:
+                category:
+                    type: string
                 content:
                     type: string
                 display_name:
@@ -2368,6 +2427,8 @@ components:
             type: object
         PromptRequest:
             properties:
+                category:
+                    type: string
                 content:
                     type: string
                 display_name:
@@ -2375,6 +2436,18 @@ components:
             required:
                 - display_name
                 - content
+            type: object
+        PromptStateResponse:
+            properties:
+                id:
+                    type: string
+                is_favorite:
+                    type: boolean
+                last_used_at:
+                    type: string
+                usage_count:
+                    format: int64
+                    type: integer
             type: object
         QuestionTypeOption:
             properties:
@@ -2524,6 +2597,8 @@ components:
                     type: string
                 id:
                     type: string
+                is_head:
+                    type: boolean
                 message:
                     type: string
                 parent_revision_id:
@@ -2547,6 +2622,7 @@ components:
                 - content_hash
                 - created_at
                 - id
+                - is_head
                 - message
                 - path
                 - revision_id
@@ -3138,6 +3214,8 @@ components:
             type: object
         UploadFileResponse:
             properties:
+                content_hash:
+                    type: string
                 content_type:
                     type: string
                 content_url:
@@ -3270,6 +3348,323 @@ components:
                 - provider_name
                 - user_model_provider_group_id
                 - user_model_provider_id
+            type: object
+        agentRouterABAudit:
+            properties:
+                candidate_ref:
+                    type: string
+                reason:
+                    type: string
+                thread_id:
+                    type: string
+            type: object
+        agentRouterABStrategyRequest:
+            properties:
+                owner:
+                    $ref: '#/components/schemas/agentRouterOwnerInput'
+                    description: Optional Evo owner recorded in the AB audit.
+                reason:
+                    description: Audit reason for the strategy change.
+                    type: string
+                router_admin_url:
+                    description: Optional Router admin origin override.
+                    type: string
+                router_chat_url:
+                    description: Optional Router chat stream URL override.
+                    type: string
+                weights:
+                    additionalProperties:
+                        type: integer
+                    description: Algorithm weights. Omit or set null to clear the strategy and return to default routing.
+                    nullable: true
+                    type: object
+            type: object
+        agentRouterABStrategyResponse:
+            properties:
+                active:
+                    type: boolean
+                id:
+                    description: Router strategy id; null when inactive.
+                    format: int64
+                    nullable: true
+                    type: integer
+                router_response:
+                    $ref: '#/components/schemas/agentRouterMutationResponse'
+                    description: Present after PUT; contains the Router mutation result.
+                updated_by:
+                    $ref: '#/components/schemas/agentRouterABAudit'
+                weights:
+                    additionalProperties:
+                        type: integer
+                    type: object
+            required:
+                - active
+                - id
+                - updated_by
+                - weights
+            type: object
+        agentRouterActionRequest:
+            properties:
+                action:
+                    enum:
+                        - healthcheck
+                        - start
+                        - restart
+                        - stop
+                    type: string
+                wait_ready_seconds:
+                    description: Start or restart readiness timeout in seconds; default 180, maximum 900.
+                    format: double
+                    type: number
+            required:
+                - action
+            type: object
+        agentRouterActionResponse:
+            properties:
+                action:
+                    enum:
+                        - healthcheck
+                        - start
+                        - restart
+                        - stop
+                    type: string
+                algorithm_id:
+                    type: string
+                healthcheck:
+                    $ref: '#/components/schemas/agentRouterHealth'
+                status:
+                    enum:
+                        - passed
+                        - failed
+                        - stopped
+                    type: string
+            required:
+                - action
+                - algorithm_id
+                - healthcheck
+                - status
+            type: object
+        agentRouterAlgorithm:
+            properties:
+                algorithm_id:
+                    type: string
+                created_at:
+                    nullable: true
+                    type: string
+                healthy_instances:
+                    type: integer
+                instance_count:
+                    type: integer
+                name:
+                    type: string
+                status:
+                    enum:
+                        - starting
+                        - active
+                        - disabled
+                        - missing
+                    type: string
+                thread_id:
+                    nullable: true
+                    type: string
+            required:
+                - algorithm_id
+                - created_at
+                - healthy_instances
+                - instance_count
+                - name
+                - status
+                - thread_id
+            type: object
+        agentRouterAlgorithmListResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/agentRouterAlgorithm'
+                    type: array
+            required:
+                - items
+            type: object
+        agentRouterDeleteResponse:
+            properties:
+                algorithm_id:
+                    type: string
+                artifacts_deleted:
+                    type: integer
+                ledger_deleted:
+                    type: boolean
+                retained_history:
+                    items:
+                        type: string
+                    type: array
+                router_record_retained:
+                    type: boolean
+                router_status:
+                    enum:
+                        - missing
+                        - disabled
+                    type: string
+                status:
+                    enum:
+                        - deleted
+                    type: string
+                workspace:
+                    enum:
+                        - deleted
+                        - missing
+                        - retained_external
+                        - retained_shared
+                    type: string
+            required:
+                - algorithm_id
+                - artifacts_deleted
+                - ledger_deleted
+                - retained_history
+                - router_record_retained
+                - router_status
+                - status
+                - workspace
+            type: object
+        agentRouterErrorDetail:
+            properties:
+                message:
+                    type: string
+                type:
+                    type: string
+            required:
+                - message
+                - type
+            type: object
+        agentRouterErrorResponse:
+            properties:
+                detail:
+                    $ref: '#/components/schemas/agentRouterErrorDetail'
+            required:
+                - detail
+            type: object
+        agentRouterHealth:
+            properties:
+                algorithm_status:
+                    enum:
+                        - starting
+                        - active
+                        - disabled
+                        - missing
+                    type: string
+                healthy_instances:
+                    type: integer
+                instances:
+                    items:
+                        $ref: '#/components/schemas/agentRouterInstance'
+                    type: array
+                status:
+                    enum:
+                        - passed
+                        - failed
+                        - stopped
+                    type: string
+            required:
+                - healthy_instances
+                - instances
+                - status
+            type: object
+        agentRouterInstance:
+            properties:
+                failures:
+                    type: integer
+                host:
+                    type: string
+                instance_id:
+                    type: string
+                port:
+                    type: integer
+                status:
+                    type: string
+            required:
+                - failures
+                - host
+                - instance_id
+                - port
+                - status
+            type: object
+        agentRouterMutationResponse:
+            properties:
+                id:
+                    format: int64
+                    type: integer
+                is_active:
+                    type: boolean
+                normalized:
+                    type: boolean
+                status:
+                    enum:
+                        - cleared
+                    type: string
+                weights:
+                    additionalProperties:
+                        type: integer
+                    type: object
+            type: object
+        agentRouterOwnerInput:
+            properties:
+                candidate_ref:
+                    description: Candidate artifact reference used for audit.
+                    type: string
+                thread_id:
+                    description: Owning Evo thread id.
+                    type: string
+            required:
+                - thread_id
+            type: object
+        agentRouterStatusCounts:
+            properties:
+                active:
+                    type: integer
+                evo_owned:
+                    type: integer
+                healthy:
+                    type: integer
+            required:
+                - active
+                - evo_owned
+                - healthy
+            type: object
+        agentRouterStatusResponse:
+            properties:
+                ab_strategy:
+                    $ref: '#/components/schemas/agentRouterStrategyView'
+                algorithms:
+                    $ref: '#/components/schemas/agentRouterStatusCounts'
+                router_admin_url:
+                    type: string
+                status:
+                    enum:
+                        - ok
+                    type: string
+            required:
+                - ab_strategy
+                - algorithms
+                - router_admin_url
+                - status
+            type: object
+        agentRouterStrategyView:
+            properties:
+                active:
+                    type: boolean
+                id:
+                    description: Router strategy id; null when inactive.
+                    format: int64
+                    nullable: true
+                    type: integer
+                weights:
+                    additionalProperties:
+                        type: integer
+                    description: 'Effective routing weights; {default: 100} when AB routing is inactive.'
+                    type: object
+            required:
+                - active
+                - id
+                - weights
             type: object
         agentThreadListOpenAPIResponse:
             properties:
@@ -3557,6 +3952,10 @@ components:
                     type: string
                 is_default:
                     type: boolean
+                max_input_tokens:
+                    description: Maximum catalog LLM or VLM input context window, for example 128K or 1M; null for other, custom, or unknown models
+                    nullable: true
+                    type: string
                 model_type:
                     type: string
                 name:
@@ -3699,6 +4098,7 @@ components:
         marketEditOpenAPIRequest:
             properties:
                 category:
+                    description: Deprecated compatibility field; converted to one marketplace tag when tags is omitted.
                     type: string
                 description:
                     type: string
@@ -3706,6 +4106,11 @@ components:
                     type: string
                 source:
                     $ref: '#/components/schemas/skillSourceOpenAPIRequest'
+                tags:
+                    description: Marketplace discovery tags.
+                    items:
+                        type: string
+                    type: array
                 version_note:
                     type: string
             type: object
@@ -3745,6 +4150,10 @@ components:
                     type: string
                 status:
                     type: string
+                tags:
+                    items:
+                        type: string
+                    type: array
                 updated_at:
                     type: string
                 version_note:
@@ -3772,13 +4181,18 @@ components:
         marketPublishOpenAPIRequest:
             properties:
                 category:
+                    description: Deprecated compatibility field; converted to one marketplace tag when tags is empty.
                     type: string
                 name:
                     type: string
                 source:
                     $ref: '#/components/schemas/skillSourceOpenAPIRequest'
+                tags:
+                    description: Marketplace discovery tags.
+                    items:
+                        type: string
+                    type: array
             required:
-                - category
                 - name
                 - source
             type: object
@@ -3935,6 +4349,164 @@ components:
                 - draft_version
                 - source_skill_revision_id
             type: object
+        promptCategoryCreateOpenAPIRequest:
+            properties:
+                name:
+                    type: string
+            required:
+                - name
+            type: object
+        promptCategoryListOpenAPIResponse:
+            properties:
+                categories:
+                    items:
+                        $ref: '#/components/schemas/promptCategoryOpenAPIResponse'
+                    type: array
+            type: object
+        promptCategoryOpenAPIResponse:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+            required:
+                - id
+                - name
+            type: object
+        promptCreateOpenAPIRequest:
+            properties:
+                category:
+                    type: string
+                content:
+                    type: string
+                display_name:
+                    type: string
+            required:
+                - category
+                - content
+                - display_name
+            type: object
+        promptFacetOpenAPIResponse:
+            properties:
+                categories:
+                    additionalProperties:
+                        format: int64
+                        type: integer
+                    type: object
+                category_total:
+                    format: int64
+                    type: integer
+                scopes:
+                    additionalProperties:
+                        format: int64
+                        type: integer
+                    type: object
+            required:
+                - category_total
+            type: object
+        promptItemOpenAPIResponse:
+            properties:
+                category:
+                    type: string
+                content:
+                    type: string
+                created_at:
+                    type: string
+                display_name:
+                    type: string
+                id:
+                    type: string
+                is_favorite:
+                    type: boolean
+                last_used_at:
+                    type: string
+                name:
+                    type: string
+                source:
+                    type: string
+                updated_at:
+                    type: string
+                usage_count:
+                    format: int64
+                    type: integer
+            required:
+                - category
+                - content
+                - display_name
+                - id
+                - is_favorite
+                - name
+                - source
+                - usage_count
+            type: object
+        promptListOpenAPIResponse:
+            properties:
+                custom_categories:
+                    items:
+                        $ref: '#/components/schemas/promptCategoryOpenAPIResponse'
+                    type: array
+                facets:
+                    $ref: '#/components/schemas/promptFacetOpenAPIResponse'
+                next_page_token:
+                    type: string
+                prompts:
+                    items:
+                        $ref: '#/components/schemas/promptItemOpenAPIResponse'
+                    type: array
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - facets
+                - next_page_token
+                - total
+            type: object
+        promptPatchOpenAPIRequest:
+            properties:
+                category:
+                    type: string
+                content:
+                    type: string
+                display_name:
+                    type: string
+            required:
+                - category
+                - content
+                - display_name
+            type: object
+        promptPolishOpenAPIRequest:
+            properties:
+                content:
+                    type: string
+                user_instruct:
+                    type: string
+            required:
+                - content
+                - user_instruct
+            type: object
+        promptPolishOpenAPIResponse:
+            properties:
+                content:
+                    type: string
+            required:
+                - content
+            type: object
+        promptStateOpenAPIResponse:
+            properties:
+                id:
+                    type: string
+                is_favorite:
+                    type: boolean
+                last_used_at:
+                    type: string
+                usage_count:
+                    format: int64
+                    type: integer
+            required:
+                - id
+                - is_favorite
+                - usage_count
+            type: object
         remoteFSCopyOpenAPIRequest:
             properties:
                 from:
@@ -4030,11 +4602,67 @@ components:
             required:
                 - path
             type: object
+        resourceUpdateTaskOpenAPIResponse:
+            properties:
+                attempt_count:
+                    type: integer
+                created_at:
+                    type: string
+                error_code:
+                    type: string
+                error_message:
+                    type: string
+                finished_at:
+                    type: string
+                id:
+                    type: string
+                next_run_at:
+                    type: string
+                resource_id:
+                    type: string
+                resource_type:
+                    type: string
+                result_id:
+                    type: string
+                review_result_id:
+                    type: string
+                started_at:
+                    type: string
+                status:
+                    type: string
+                task_type:
+                    type: string
+                trigger_id:
+                    type: string
+                trigger_type:
+                    type: string
+                updated_at:
+                    type: string
+                user_id:
+                    type: string
+            required:
+                - attempt_count
+                - created_at
+                - id
+                - next_run_at
+                - resource_id
+                - resource_type
+                - status
+                - task_type
+                - trigger_id
+                - trigger_type
+                - updated_at
+                - user_id
+            type: object
         selectedModelOpenAPIItem:
             properties:
                 base_url:
                     type: string
                 group_name:
+                    type: string
+                max_input_tokens:
+                    description: Maximum selected catalog LLM or VLM input context window, for example 128K or 1M; null for other, custom, or unknown models
+                    nullable: true
                     type: string
                 model_id:
                     type: string
@@ -4178,12 +4806,15 @@ components:
                 auto_evo:
                     type: boolean
                 category:
+                    description: Legacy inline-create field. ZIP and URL imports use External.
                     type: string
                 description:
+                    description: Legacy inline-create field. ZIP and URL imports derive description from SKILL.md frontmatter.
                     type: string
                 is_enabled:
                     type: boolean
                 name:
+                    description: Legacy inline-create field. ZIP and URL imports derive name from SKILL.md frontmatter.
                     type: string
                 source:
                     $ref: '#/components/schemas/skillSourceOpenAPIRequest'
@@ -4192,8 +4823,6 @@ components:
                         type: string
                     type: array
             required:
-                - category
-                - name
                 - source
             type: object
         skillDeleteOpenAPIResponse:
@@ -4358,7 +4987,12 @@ components:
             properties:
                 has_uncommitted_draft:
                     type: boolean
+                status:
+                    type: string
                 task_id:
+                    type: string
+                type:
+                    description: Draft type. create identifies a Skill that has no formal revision yet.
                     type: string
                 version:
                     format: int64
@@ -4394,6 +5028,13 @@ components:
                 - content
                 - expected_draft_version
                 - path
+            type: object
+        skillEmptyTrashOpenAPIResponse:
+            properties:
+                purged:
+                    type: integer
+            required:
+                - purged
             type: object
         skillExistsOpenAPIResponse:
             properties:
@@ -4457,6 +5098,10 @@ components:
             properties:
                 category:
                     type: string
+                deleted_at:
+                    type: string
+                deleted_by:
+                    type: string
                 description:
                     type: string
                 draft:
@@ -4505,6 +5150,36 @@ components:
                 - page_size
                 - total
             type: object
+        skillMaintenanceStatusOpenAPIResponse:
+            properties:
+                has_active_task:
+                    type: boolean
+                message:
+                    type: string
+                task:
+                    $ref: '#/components/schemas/skillMaintenanceTaskOpenAPIResponse'
+            required:
+                - has_active_task
+            type: object
+        skillMaintenanceTaskOpenAPIResponse:
+            properties:
+                id:
+                    type: string
+                request_id:
+                    type: string
+                started_at:
+                    type: string
+                status:
+                    type: string
+                type:
+                    type: string
+            required:
+                - id
+                - request_id
+                - started_at
+                - status
+                - type
+            type: object
         skillOrganizeOpenAPIRequest:
             properties:
                 artifact_dir:
@@ -4531,6 +5206,63 @@ components:
                 - status
                 - taskid
             type: object
+        skillPurgeOpenAPIResponse:
+            properties:
+                purged:
+                    type: boolean
+                skill_id:
+                    type: string
+            required:
+                - purged
+                - skill_id
+            type: object
+        skillRestoreOpenAPIResponse:
+            properties:
+                restored:
+                    type: boolean
+                skill_id:
+                    type: string
+            required:
+                - restored
+                - skill_id
+            type: object
+        skillReviewTaskListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/skillReviewTaskStatusOpenAPIResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - page
+                - page_size
+                - total
+            type: object
+        skillReviewTaskStatusOpenAPIResponse:
+            properties:
+                requestid:
+                    type: string
+                result_count:
+                    format: int64
+                    type: integer
+                run_status:
+                    type: string
+                status:
+                    type: string
+                task:
+                    $ref: '#/components/schemas/resourceUpdateTaskOpenAPIResponse'
+            required:
+                - requestid
+                - result_count
+                - status
+                - task
+            type: object
         skillRevisionListOpenAPIResponse:
             properties:
                 items:
@@ -4550,6 +5282,8 @@ components:
                     type: string
                 id:
                     type: string
+                is_head:
+                    type: boolean
                 message:
                     type: string
                 parent_revision_id:
@@ -4567,6 +5301,7 @@ components:
                 - change_source
                 - created_at
                 - id
+                - is_head
                 - revision_id
                 - revision_no
                 - skill_id
@@ -5245,14 +5980,16 @@ paths:
                 - agent
     /api/core/agent/router/ab-strategy:
         get:
-            description: Proxies Evo GET /router/ab-strategy.
+            description: 'Returns the effective Router weights and the latest Evo AB audit metadata. When AB routing is inactive, weights is {default: 100}.'
             parameters:
-                - in: query
+                - description: Optional Router admin origin override.
+                  in: query
                   name: router_admin_url
                   required: false
                   schema:
                     type: string
-                - in: query
+                - description: Optional Router chat stream URL override.
+                  in: query
                   name: router_chat_url
                   required: false
                   schema:
@@ -5262,57 +5999,84 @@ paths:
                     content:
                         application/json:
                             schema:
-                                additionalProperties: true
-                                type: object
-                    description: Evo router AB strategy
+                                $ref: '#/components/schemas/agentRouterABStrategyResponse'
+                    description: Router AB strategy
             summary: Get Evo router AB strategy
             tags:
                 - agent
         put:
-            description: Proxies Evo PUT /router/ab-strategy.
+            description: Activates the supplied positive integer weights after ownership and health validation. Omit weights or set it to null to clear AB routing and return to the default algorithm.
             requestBody:
                 content:
                     application/json:
                         schema:
-                            additionalProperties: true
-                            type: object
+                            $ref: '#/components/schemas/agentRouterABStrategyRequest'
                 required: true
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
+                                $ref: '#/components/schemas/agentRouterABStrategyResponse'
+                    description: Updated Router AB strategy
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agentRouterErrorResponse'
+                    description: Router management error
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agentRouterErrorResponse'
+                    description: Router management error
+                "422":
+                    content:
+                        application/json:
+                            schema:
                                 additionalProperties: true
                                 type: object
-                    description: Evo router AB strategy
+                    description: Invalid Router AB strategy
             summary: Update Evo router AB strategy
             tags:
                 - agent
     /api/core/agent/router/algorithms:
         get:
-            description: Proxies Evo GET /router/algorithms.
+            description: Lists the Router default plus one ABTest-approved Evo algorithm per thread, enriched with live Router state.
             parameters:
-                - in: query
+                - description: Filter by owning Evo thread.
+                  in: query
                   name: thread_id
                   required: false
                   schema:
                     type: string
-                - in: query
+                - description: Filter by exact algorithm id.
+                  in: query
                   name: algorithm_id
                   required: false
                   schema:
                     type: string
-                - in: query
+                - description: Filter by live Router status; defaults to all.
+                  in: query
                   name: status
                   required: false
                   schema:
+                    enum:
+                        - all
+                        - starting
+                        - active
+                        - disabled
+                        - missing
                     type: string
-                - in: query
+                - description: Optional Router admin origin override.
+                  in: query
                   name: router_admin_url
                   required: false
                   schema:
                     type: string
-                - in: query
+                - description: Optional Router chat stream URL override.
+                  in: query
                   name: router_chat_url
                   required: false
                   schema:
@@ -5322,70 +6086,133 @@ paths:
                     content:
                         application/json:
                             schema:
-                                additionalProperties: true
-                                type: object
-                    description: Evo router algorithms
+                                $ref: '#/components/schemas/agentRouterAlgorithmListResponse'
+                    description: Evo-owned Router algorithms
             summary: List Evo router algorithms
             tags:
                 - agent
-        post:
-            description: Proxies Evo POST /router/algorithms.
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            additionalProperties: true
-                            type: object
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Evo router algorithm
-            summary: Register Evo router algorithm
-            tags:
-                - agent
-    /api/core/agent/router/algorithms/{algorithm_id}:action:
-        post:
-            description: Proxies Evo POST /router/algorithms/{algorithm_id}:action.
+    /api/core/agent/router/algorithms/{algorithm_id}:
+        delete:
+            description: Stops the algorithm and deletes its Evo ledger entry, candidate artifacts, and managed workspace. Returns 409 while the algorithm is referenced by the active AB strategy. Router metadata is retained as disabled when Router already knew the algorithm.
             parameters:
                 - in: path
                   name: algorithm_id
                   required: true
                   schema:
                     type: string
+                - description: Optional Router admin origin override.
+                  in: query
+                  name: router_admin_url
+                  required: false
+                  schema:
+                    type: string
+                - description: Optional Router chat stream URL override.
+                  in: query
+                  name: router_chat_url
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agentRouterDeleteResponse'
+                    description: Deleted Evo router algorithm
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agentRouterErrorResponse'
+                    description: Router management error
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agentRouterErrorResponse'
+                    description: Router management error
+            summary: Delete Evo router algorithm
+            tags:
+                - agent
+    /api/core/agent/router/algorithms/{algorithm_id}/action:
+        post:
+            description: Runs healthcheck, start, restart, or stop for an Evo-owned algorithm. Start reactivates a stopped algorithm; restart may restart or reactivate it; stop keeps its Evo ledger record.
+            parameters:
+                - in: path
+                  name: algorithm_id
+                  required: true
+                  schema:
+                    type: string
+                - description: Optional Router admin origin override.
+                  in: query
+                  name: router_admin_url
+                  required: false
+                  schema:
+                    type: string
+                - description: Optional Router chat stream URL override.
+                  in: query
+                  name: router_chat_url
+                  required: false
+                  schema:
+                    type: string
             requestBody:
                 content:
                     application/json:
                         schema:
-                            additionalProperties: true
-                            type: object
+                            $ref: '#/components/schemas/agentRouterActionRequest'
                 required: true
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
-                                additionalProperties: true
-                                type: object
-                    description: Evo router algorithm action
-            summary: Run Evo router algorithm action
-            tags:
-                - agent
-    /api/core/agent/router/status:
-        get:
-            description: Proxies Evo GET /router/status.
-            responses:
-                "200":
+                                $ref: '#/components/schemas/agentRouterActionResponse'
+                    description: Router algorithm action result
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agentRouterErrorResponse'
+                    description: Router management error
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agentRouterErrorResponse'
+                    description: Router management error
+                "422":
                     content:
                         application/json:
                             schema:
                                 additionalProperties: true
                                 type: object
-                    description: Evo router status
+                    description: Invalid Router algorithm action
+            summary: Run Evo router algorithm action
+            tags:
+                - agent
+    /api/core/agent/router/status:
+        get:
+            description: Returns Router availability, Evo-owned algorithm counts, and the current AB strategy. Evo error status and body are passed through unchanged.
+            parameters:
+                - description: Optional Router admin origin override.
+                  in: query
+                  name: router_admin_url
+                  required: false
+                  schema:
+                    type: string
+                - description: Optional Router chat stream URL override.
+                  in: query
+                  name: router_chat_url
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agentRouterStatusResponse'
+                    description: Router status
             summary: Get Evo router status
             tags:
                 - agent
@@ -6105,6 +6932,18 @@ paths:
                                 $ref: '#/components/schemas/ConversationListResponse'
                     description: Conversation list
             summary: Conversation list
+    /api/core/conversations/{conversation_id}/artifacts:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/artifacts
     /api/core/conversations/{conversation_id}/dismissed-plugin-sessions:
         get:
             parameters:
@@ -8220,6 +9059,54 @@ paths:
             summary: 'Internal: apply word-group actions in batch (algorithm → core)'
             tags:
                 - word_group
+    /api/core/internal/plugin-sessions/{session_id}/projection:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /internal/plugin-sessions/{session_id}/projection
+    /api/core/internal/plugin-sessions/{session_id}:transition:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /internal/plugin-sessions/{session_id}:transition
+    /api/core/internal/plugin-sessions:plan-start:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /internal/plugin-sessions:plan-start
+    /api/core/internal/plugin-sessions:start:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /internal/plugin-sessions:start
+    /api/core/internal/plugin-transition-commands/{command_id}:
+        get:
+            parameters:
+                - in: path
+                  name: command_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /internal/plugin-transition-commands/{command_id}
     /api/core/internal/subagent/tasks/{task_id}:
         get:
             parameters:
@@ -8748,6 +9635,12 @@ paths:
                   required: false
                   schema:
                     type: string
+                - description: Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
+                  in: header
+                  name: Accept-Language
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:
@@ -8889,7 +9782,7 @@ paths:
             summary: POST /model_providers/{model_provider_id}/groups/{group_id}/keys
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models:
         get:
-            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models).
+            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog LLM or VLM model's maximum input context window expressed as a string such as 128K or 1M. Other, custom, or unknown models return null.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -9014,7 +9907,7 @@ paths:
                 - model_providers
     /api/core/model_providers/models:
         get:
-            description: Requires query model_type (e.g. llm, embedding). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
+            description: Requires query model_type (e.g. llm or vlm). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog LLM or VLM model's maximum input context window expressed as a string such as 128K or 1M; other, custom, or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
             parameters:
                 - in: query
                   name: model_type
@@ -9058,7 +9951,7 @@ paths:
                 - model_providers
     /api/core/model_providers/selected_models:
         get:
-            description: Returns the current user's selected model for each model_type.
+            description: Returns the current user's selected model for each model_type. Each selection includes nullable max_input_tokens, the selected catalog LLM or VLM model's maximum input context window expressed as a string such as 128K or 1M; other, custom, or unknown models return null.
             responses:
                 "200":
                     content:
@@ -9165,6 +10058,13 @@ paths:
     /api/core/model_providers:with_groups:
         get:
             description: Returns user_model_providers for the current user that have at least one non-deleted row in user_model_provider_groups. The current user identity is injected by the auth gateway from the token. Same response shape as GET /model_providers.
+            parameters:
+                - description: Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
+                  in: header
+                  name: Accept-Language
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:
@@ -9697,6 +10597,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /plugin-drafts/{draft_id}:save
+    /api/core/plugin-drafts/{draft_id}:validate:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /plugin-drafts/{draft_id}:validate
     /api/core/plugin-drafts:polish-info:
         post:
             responses:
@@ -9727,6 +10639,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /plugin-sessions/{session_id}/artifacts
+    /api/core/plugin-sessions/{session_id}/projection:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /plugin-sessions/{session_id}/projection
     /api/core/plugin-sessions/{session_id}/slots:
         get:
             parameters:
@@ -9993,6 +10917,53 @@ paths:
                 "200":
                     description: OK
             summary: GET /plugins/{plugin_id}
+    /api/core/prompt_categories:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/promptCategoryListOpenAPIResponse'
+                    description: Prompt category list
+            summary: Prompt category list
+            tags:
+                - prompts
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/promptCategoryCreateOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/promptCategoryOpenAPIResponse'
+                    description: Created prompt category
+            summary: Create prompt category
+            tags:
+                - prompts
+    /api/core/prompt_categories/{name}:
+        delete:
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Deleted successfully
+            summary: Delete prompt category
+            tags:
+                - prompts
     /api/core/prompts:
         get:
             parameters:
@@ -10011,29 +10982,53 @@ paths:
                   required: false
                   schema:
                     type: string
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: scope
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: sort
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: locale
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/PromptListResponse'
+                                $ref: '#/components/schemas/promptListOpenAPIResponse'
                     description: Prompt list
             summary: Prompt list
+            tags:
+                - prompts
         post:
             requestBody:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/PromptRequest'
+                            $ref: '#/components/schemas/promptCreateOpenAPIRequest'
                 required: true
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/PromptItem'
+                                $ref: '#/components/schemas/promptItemOpenAPIResponse'
                     description: Created prompt
             summary: Create prompt
+            tags:
+                - prompts
     /api/core/prompts/{name}:
         delete:
             parameters:
@@ -10050,6 +11045,8 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Deleted successfully
             summary: Delete prompt
+            tags:
+                - prompts
         get:
             parameters:
                 - in: path
@@ -10057,14 +11054,21 @@ paths:
                   required: true
                   schema:
                     type: string
+                - in: query
+                  name: locale
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/PromptItem'
+                                $ref: '#/components/schemas/promptItemOpenAPIResponse'
                     description: Prompt details
             summary: Get prompt
+            tags:
+                - prompts
         patch:
             parameters:
                 - in: path
@@ -10076,17 +11080,19 @@ paths:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/PromptPatchRequest'
+                            $ref: '#/components/schemas/promptPatchOpenAPIRequest'
                 required: true
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/PromptItem'
+                                $ref: '#/components/schemas/promptItemOpenAPIResponse'
                     description: Updated prompt
             summary: Update prompt
-    /api/core/prompts/{name}:setDefault:
+            tags:
+                - prompts
+    /api/core/prompts/{name}:favorite:
         post:
             parameters:
                 - in: path
@@ -10099,10 +11105,12 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/EmptyObject'
-                    description: Set successfully
-            summary: Set as default prompt
-    /api/core/prompts/{name}:unsetDefault:
+                                $ref: '#/components/schemas/promptStateOpenAPIResponse'
+                    description: Favorited successfully
+            summary: Favorite prompt
+            tags:
+                - prompts
+    /api/core/prompts/{name}:unfavorite:
         post:
             parameters:
                 - in: path
@@ -10115,25 +11123,47 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/EmptyObject'
-                    description: Unset successfully
-            summary: Unset default prompt
+                                $ref: '#/components/schemas/promptStateOpenAPIResponse'
+                    description: Unfavorited successfully
+            summary: Unfavorite prompt
+            tags:
+                - prompts
+    /api/core/prompts/{name}:use:
+        post:
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/promptStateOpenAPIResponse'
+                    description: Usage recorded
+            summary: Record prompt usage
+            tags:
+                - prompts
     /api/core/prompts:polish:
         post:
             requestBody:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/PromptPolishRequest'
+                            $ref: '#/components/schemas/promptPolishOpenAPIRequest'
                 required: true
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/PromptPolishResponse'
+                                $ref: '#/components/schemas/promptPolishOpenAPIResponse'
                     description: Polished prompt
             summary: Polish prompt
+            tags:
+                - prompts
     /api/core/published-plugins/{plugin_ref:.+}/versions:
         get:
             parameters:
@@ -10235,6 +11265,15 @@ paths:
                         - raw
                         - base64
                     type: string
+                - description: Conversation mode.
+                  in: query
+                  name: mode
+                  required: false
+                  schema:
+                    enum:
+                        - auto
+                        - manual
+                    type: string
             responses:
                 "200":
                     content:
@@ -10276,6 +11315,15 @@ paths:
                         - raw
                         - base64
                     type: string
+                - description: Conversation mode.
+                  in: query
+                  name: mode
+                  required: false
+                  schema:
+                    enum:
+                        - auto
+                        - manual
+                    type: string
             requestBody:
                 content:
                     application/octet-stream:
@@ -10308,6 +11356,15 @@ paths:
                   required: true
                   schema:
                     type: string
+                - description: Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
+                  in: query
+                  name: mode
+                  required: false
+                  schema:
+                    enum:
+                        - auto
+                        - manual
+                    type: string
             requestBody:
                 content:
                     application/json:
@@ -10338,6 +11395,15 @@ paths:
                   name: task_id
                   required: true
                   schema:
+                    type: string
+                - description: Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
+                  in: query
+                  name: mode
+                  required: false
+                  schema:
+                    enum:
+                        - auto
+                        - manual
                     type: string
             requestBody:
                 content:
@@ -10386,6 +11452,15 @@ paths:
                         - raw
                         - base64
                     type: string
+                - description: Conversation mode.
+                  in: query
+                  name: mode
+                  required: false
+                  schema:
+                    enum:
+                        - auto
+                        - manual
+                    type: string
             responses:
                 "200":
                     content:
@@ -10427,6 +11502,15 @@ paths:
                         - raw
                         - base64
                     type: string
+                - description: Conversation mode.
+                  in: query
+                  name: mode
+                  required: false
+                  schema:
+                    enum:
+                        - auto
+                        - manual
+                    type: string
             responses:
                 "200":
                     content:
@@ -10459,6 +11543,15 @@ paths:
                   required: false
                   schema:
                     type: string
+                - description: Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
+                  in: query
+                  name: mode
+                  required: false
+                  schema:
+                    enum:
+                        - auto
+                        - manual
+                    type: string
             responses:
                 "200":
                     content:
@@ -10483,6 +11576,15 @@ paths:
                   name: task_id
                   required: true
                   schema:
+                    type: string
+                - description: Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
+                  in: query
+                  name: mode
+                  required: false
+                  schema:
+                    enum:
+                        - auto
+                        - manual
                     type: string
             requestBody:
                 content:
@@ -10799,6 +11901,18 @@ paths:
             summary: Unpublish market skill item
             tags:
                 - skill-market
+    /api/core/skill-market/tags:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillTagsOpenAPIResponse'
+                    description: Market skill tag list
+            summary: List published market skill tags
+            tags:
+                - skill-market
     /api/core/skill-market:install:
         post:
             requestBody:
@@ -10817,18 +11931,39 @@ paths:
             summary: Install skill from market
             tags:
                 - skill-market
-    /api/core/skill-review-results/{review_result_id}:
+    /api/core/skill-organize/tasks:
         get:
             parameters:
-                - in: path
-                  name: review_result_id
-                  required: true
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: status
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: requestid
+                  required: false
                   schema:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /skill-review-results/{review_result_id}
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillReviewTaskListOpenAPIResponse'
+                    description: Skill organize task list
+            summary: List current user's Skill organize tasks
+            tags:
+                - skills
     /api/core/skill-review/tasks:
         get:
             responses:
@@ -11054,6 +12189,7 @@ paths:
                 - skills
     /api/core/skills/{skill_id}:
         delete:
+            description: Logically deletes a skill by moving it to the recycle bin.
             parameters:
                 - in: path
                   name: skill_id
@@ -11066,8 +12202,8 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/skillDeleteOpenAPIResponse'
-                    description: Deleted skill
-            summary: Delete directory skill
+                    description: Moved skill to trash
+            summary: Move skill to trash
             tags:
                 - skills
         get:
@@ -11753,8 +12889,14 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: DELETE /skills/{skill_id}:purge
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillPurgeOpenAPIResponse'
+                    description: Purged skill
+            summary: Permanently delete trashed skill
+            tags:
+                - skills
     /api/core/skills/{skill_id}:restore:
         post:
             parameters:
@@ -11765,8 +12907,14 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /skills/{skill_id}:restore
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillRestoreOpenAPIResponse'
+                    description: Restored skill
+            summary: Restore skill from trash
+            tags:
+                - skills
     /api/core/skills/{skill_id}:share:
         post:
             parameters:
@@ -11834,8 +12982,14 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /skills/{skill_id}:trash
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillDeleteOpenAPIResponse'
+                    description: Moved skill to trash
+            summary: Move skill to trash
+            tags:
+                - skills
     /api/core/skills/categories:
         get:
             responses:
@@ -11846,6 +13000,18 @@ paths:
                                 $ref: '#/components/schemas/skillCategoriesOpenAPIResponse'
                     description: Skill category list
             summary: List skill categories
+            tags:
+                - skills
+    /api/core/skills/maintenance-task:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillMaintenanceStatusOpenAPIResponse'
+                    description: Skill maintenance task status
+            summary: Get current user's active Skill maintenance task
             tags:
                 - skills
     /api/core/skills/tags:
@@ -11862,15 +13028,57 @@ paths:
                 - skills
     /api/core/skills:trash:
         delete:
+            description: Permanently deletes every skill in the current user's recycle bin.
             responses:
                 "200":
-                    description: OK
-            summary: DELETE /skills:trash
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillEmptyTrashOpenAPIResponse'
+                    description: Emptied skill trash
+            summary: Empty skill trash
+            tags:
+                - skills
         get:
+            description: Lists skills in the current user's recycle bin.
+            parameters:
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: tags
+                  required: false
+                  schema:
+                    items:
+                        type: string
+                    type: array
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
             responses:
                 "200":
-                    description: OK
-            summary: GET /skills:trash
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillListOpenAPIResponse'
+                    description: Trashed skill list
+            summary: List trashed skills
+            tags:
+                - skills
     /api/core/static-files/{path:.*}:
         get:
             parameters:
@@ -12138,6 +13346,12 @@ paths:
                   required: false
                   schema:
                     type: integer
+                - description: Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
+                  in: header
+                  name: Accept-Language
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:
