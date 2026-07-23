@@ -79,7 +79,7 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
     assert agent_calls[0]['kwargs']['skills'] is False
     assert agent_calls[0]['kwargs']['stream'] is True
     assert '## Attached Files' not in agent_calls[0]['kwargs']['prompt']
-    assert agent_queries[0].endswith('### User Instruction\n\nhello')
+    assert '### User Instruction\n\nhello\n\nATTENTION — `ask_user`' in agent_queries[0]
     assert 'answer:### Runtime Context' in body
     assert 'hello' in body
     assert '"status": "FINISHED"' in body

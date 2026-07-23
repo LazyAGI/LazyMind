@@ -317,6 +317,31 @@ func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 	}
 }
 
+func TestBuildChatRequestBodyMergesRequestDisabledTools(t *testing.T) {
+	ctx := &evolution.ChatResourceContext{DisabledTools: []string{"bing"}}
+	body := buildChatRequestBody(
+		nil, nil, "conv-1", "session-1", "hello", nil,
+		map[string]any{"disabled_tools": []any{"ask_user"}}, ctx, "user-1", 1,
+	)
+
+	disabled, ok := body["disabled_tools"].([]string)
+	if !ok || len(disabled) != 2 || disabled[0] != "ask_user" || disabled[1] != "bing" {
+		t.Fatalf("expected request and persisted disabled tools to merge, got %#v", body["disabled_tools"])
+	}
+}
+
+func TestReplaceAskUserToolResultSupportsJSONCarrier(t *testing.T) {
+	content := `before<tool_result>{"id":"call-1","name":"ask_user","result":"Question sent"}</tool_result>after`
+	replaced := replaceAskUserToolResult(content, "Q1: Purpose\n  Answer: Personal use")
+
+	if strings.Contains(replaced, `"result":"Question sent"`) {
+		t.Fatalf("expected placeholder result to be replaced, got %s", replaced)
+	}
+	if !strings.Contains(replaced, `"result":"Q1: Purpose\n  Answer: Personal use"`) {
+		t.Fatalf("expected structured answer context, got %s", replaced)
+	}
+}
+
 func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled(t *testing.T) {
 	ctx := &evolution.ChatResourceContext{
 		DisabledTools:      []string{},

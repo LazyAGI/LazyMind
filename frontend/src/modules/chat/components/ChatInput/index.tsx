@@ -60,7 +60,10 @@ import { buildCitedMessageText } from "../newChatContainer/utils/citeMessage";
 const EMPTY_DISMISSED: Array<{ session_id: string; plugin_id: string }> = [];
 import ShowChatFileList from "../ShowChatFileList";
 import { formatFileSize } from "@/modules/chat/utils";
-import { useChatThinkStore } from "@/modules/chat/store/chatThink";
+import {
+  useChatThinkStore,
+  type ThinkingDepth,
+} from "@/modules/chat/store/chatThink";
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
@@ -340,6 +343,7 @@ export interface SendMessageParams {
   fileListRef?: React.RefObject<ImageUploadImperativeProps | null>;
   files?: (RcFile & { uri: string })[];
   create_time?: string;
+  thinking_depth?: ThinkingDepth;
   /** When true, the payload will include run_in_background=true and the task center badge will increment. */
   run_in_background?: boolean;
   /** Structured answers from an AskCard submission; forwarded to the backend as ask_answers_structured. */
@@ -504,7 +508,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const [polishingSuggestionKey, setPolishingSuggestionKey] = useState<
       string | null
     >(null);
-    const { setThink, thinkingDepth, setThinkingDepth } = useChatThinkStore();
+    const { thinkingDepth, setThinkingDepth } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
     const [text, setText] = useState("");
@@ -793,6 +797,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setNewMessage(false);
       const sendParams: SendMessageParams = {
         text: normalizedText,
+        thinking_depth: thinkingDepth,
         mentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
         citeMessages: normalizedCiteMessages,

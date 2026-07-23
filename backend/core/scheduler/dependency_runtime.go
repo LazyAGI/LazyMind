@@ -294,7 +294,12 @@ func launchDependentTask(db *gorm.DB, s orm.UserSchedule, taskID, contextText st
 	}
 	currentRequest := renderPromptTemplate(s.PromptTemplate, time.Now())
 	query := contextText + "\n\n<current-task-request>\n这是当前需要执行的任务要求，请使用上方已完成的历史执行结果作答：\n" + currentRequest + "\n</current-task-request>"
-	reqBody := map[string]any{"query": query, "display_query": currentRequest, "conversation_id": convID, "stream": true, "mode": "auto", "input": []map[string]any{{"input_type": "text", "text": query}}, "skip_sensitive_filter": true}
+	reqBody := map[string]any{
+		"query": query, "display_query": currentRequest, "conversation_id": convID,
+		"stream": true, "mode": "auto", "thinking_depth": "high",
+		"input":                 []map[string]any{{"input_type": "text", "text": query}},
+		"skip_sensitive_filter": true, "disabled_tools": []string{"ask_user"},
+	}
 	var kbIDs, fileIDs []string
 	if json.Unmarshal([]byte(s.KbIDs), &kbIDs) == nil && len(kbIDs) > 0 {
 		reqBody["kb_ids"] = kbIDs
