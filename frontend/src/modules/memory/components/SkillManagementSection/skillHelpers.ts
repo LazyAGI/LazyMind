@@ -55,14 +55,14 @@ export const filterMarketSkills = (
   items: StructuredAsset[],
   options: {
     keyword: string;
-    category: string;
+    tag: string;
     source: SkillMarketSourceFilter;
   },
 ) => {
   const keyword = options.keyword.trim().toLowerCase();
 
   return items.filter((item) => {
-    if (options.category !== "all" && item.category !== options.category) {
+    if (options.tag !== "all" && !item.tags.includes(options.tag)) {
       return false;
     }
 
@@ -102,8 +102,8 @@ export const isMarketSkillInstalled = (
   });
 };
 
-export const collectMarketCategories = (items: StructuredAsset[]) =>
-  [...new Set(items.map((item) => item.category).filter(Boolean))].sort((left, right) =>
+export const collectMarketTags = (items: StructuredAsset[]) =>
+  [...new Set(items.flatMap((item) => item.tags).filter(Boolean))].sort((left, right) =>
     left.localeCompare(right, "zh-CN"),
   );
 

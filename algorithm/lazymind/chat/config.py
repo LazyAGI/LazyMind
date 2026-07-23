@@ -1,7 +1,9 @@
 from lazymind.config import config
 
 MOUNT_BASE_DIR: str = config['mount_base_dir']
-SENSITIVE_WORDS_PATH: str = config['sensitive_words_path']
+SENSITIVE_RED_WORDS_PATH: str = config['sensitive_red_words_path']
+SENSITIVE_GRAY_WORDS_PATH: str = config['sensitive_gray_words_path']
+SENSITIVE_WHITELIST_PATH: str = config['sensitive_whitelist_path']
 
 LAZYMIND_LLM_PRIORITY: int = config['llm_priority']
 

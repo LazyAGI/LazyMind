@@ -67,7 +67,6 @@ const RenderOffice = (props: RenderOfficeProps) => {
       textsToMatch.forEach((text) => {
         elements.forEach((element) => {
           if (element.innerText === text) {
-            console.log("Highlighting element:", element, text);
             element.style.backgroundColor = "yellow";
             element.scrollIntoView({ behavior: "smooth", block: "center" });
           }

@@ -68,11 +68,18 @@ func SubmitSkillOrganize(w http.ResponseWriter, r *http.Request) {
 		}, http.StatusBadRequest)
 		return
 	}
-	skillIDs, err := resolveSkillOrganizeIDs(r.Context(), db, userID, normalized.Skills)
+	internalSkills, skillIDs, err := resolveInternalSkillOrganizeSelection(r.Context(), db, userID, normalized.Skills)
 	if err != nil {
 		replyServiceError(w, err)
 		return
 	}
+	if len(internalSkills) == 0 {
+		common.ReplyErrWithData(w, "no internal skills selected", map[string]any{
+			"code": "skill_organize_no_internal_skills",
+		}, http.StatusBadRequest)
+		return
+	}
+	normalized.Skills = internalSkills
 	decision, err := taskguard.EvaluateSkillOperation(r.Context(), db, nil, taskguard.SkillOperationRequest{
 		UserID:        userID,
 		SkillIDs:      skillIDs,
@@ -207,34 +214,41 @@ func filterInternalSkillOrganizePaths(skillPaths []string) []string {
 	return internal
 }
 
-func resolveSkillOrganizeIDs(ctx context.Context, db *gorm.DB, userID string, skillPaths []string) ([]string, error) {
+func resolveInternalSkillOrganizeSelection(ctx context.Context, db *gorm.DB, userID string, skillPaths []string) ([]string, []string, error) {
 	relativeRoots := make([]string, 0, len(skillPaths))
 	for _, skillPath := range skillPaths {
 		relativeRoots = append(relativeRoots, strings.TrimPrefix(skillPath, skillOrganizeBaseDir+"/"))
 	}
-	var rows []struct {
+	type skillOrganizeRow struct {
 		ID           string `gorm:"column:id"`
+		Category     string `gorm:"column:category"`
 		RelativeRoot string `gorm:"column:relative_root"`
 	}
+	var rows []skillOrganizeRow
 	if err := db.WithContext(ctx).Table("skills").
-		Select("id, relative_root").
+		Select("id, category, relative_root").
 		Where("owner_user_id = ? AND deleted_at IS NULL AND relative_root IN ?", strings.TrimSpace(userID), relativeRoots).
 		Find(&rows).Error; err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	byRoot := make(map[string]string, len(rows))
+	byRoot := make(map[string]skillOrganizeRow, len(rows))
 	for _, row := range rows {
-		byRoot[row.RelativeRoot] = row.ID
+		byRoot[row.RelativeRoot] = row
 	}
+	internalSkills := make([]string, 0, len(relativeRoots))
 	ids := make([]string, 0, len(relativeRoots))
 	for _, relativeRoot := range relativeRoots {
-		id := byRoot[relativeRoot]
-		if id == "" {
-			return nil, gorm.ErrRecordNotFound
+		row, ok := byRoot[relativeRoot]
+		if !ok {
+			return nil, nil, gorm.ErrRecordNotFound
 		}
-		ids = append(ids, id)
+		if row.Category != skillOrganizeInternalCategory {
+			continue
+		}
+		internalSkills = append(internalSkills, skillOrganizeBaseDir+"/"+relativeRoot)
+		ids = append(ids, row.ID)
 	}
-	return ids, nil
+	return internalSkills, ids, nil
 }
 
 func submitSkillOrganize(ctx context.Context, db *gorm.DB, userID string, req skillOrganizeSubmitRequest) (*algo.SkillOrganizeResponse, int, error) {

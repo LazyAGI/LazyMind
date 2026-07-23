@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -31,6 +32,17 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 	}
 	if _, err := strconv.ParseInt(suffix, 10, 64); err != nil {
 		t.Fatalf("expected millisecond timestamp suffix, got %q: %v", suffix, err)
+	}
+}
+
+func TestBuildChatRequestBodyPropagatesSensitiveFilterBypass(t *testing.T) {
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{"skip_sensitive_filter": true}, nil, "", 1)
+	if skip, _ := body["skip_sensitive_filter"].(bool); !skip {
+		t.Fatalf("expected skip_sensitive_filter=true, got %#v", body["skip_sensitive_filter"])
+	}
+	req := buildLazyChatRequest(body)
+	if !req.Runtime.SkipSensitiveFilter {
+		t.Fatal("expected upstream runtime to skip repeated sensitive filtering")
 	}
 }
 
@@ -388,6 +400,41 @@ func TestBuildChatHistoryExtPreservesMultimodalInput(t *testing.T) {
 	}
 }
 
+func TestBuildChatHistoryExtUsesDisplayQueryForAutomatedContext(t *testing.T) {
+	ext := buildChatHistoryExt(map[string]any{
+		"input":         []any{map[string]any{"input_type": "text", "text": "large internal model context"}},
+		"display_query": "用户任务描述",
+	}, "用户任务描述")
+	if !strings.Contains(string(ext), "用户任务描述") || strings.Contains(string(ext), "large internal model context") {
+		t.Fatalf("history ext must contain display query only: %s", ext)
+	}
+}
+
+func TestCollectedInputsForConversationReturnsSnapshotAndSummary(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/collected-inputs.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.TaskCenterTask{}, &orm.TaskRunInput{}, &orm.TaskRunOutput{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.TaskCenterTask{ID: "downstream", UserID: "u", ConversationID: "weekly-conv", TaskType: "scheduled", Status: "succeeded", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.TaskRunOutput{ID: "output", TaskID: "upstream", ConversationID: "daily-conv", SummaryText: "日报摘要", OutputStatus: "ready", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := json.Marshal(map[string]any{"source_name": "Github调研", "executed_at": now, "mode": "摘要"})
+	if err := db.Create(&orm.TaskRunInput{ID: "input", DownstreamTaskID: "downstream", UpstreamTaskID: "upstream", DependencyID: "dep", OutputID: "output", Position: 0, SnapshotJSON: snapshot, CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	items := collectedInputsForConversation(context.Background(), db.DB, "weekly-conv")
+	if len(items) != 1 || items[0]["summary"] != "日报摘要" || items[0]["source_name"] != "Github调研" || items[0]["conversation_id"] != "daily-conv" {
+		t.Fatalf("unexpected collected inputs: %#v", items)
+	}
+}
+
 func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
 	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-detail.db")
 	if err != nil {
@@ -485,6 +532,19 @@ func TestChatHistoryResponseIncludesThinkingDuration(t *testing.T) {
 	}
 	if got := item["reasoning_content"]; got != "分析并调用工具" {
 		t.Fatalf("reasoning_content: got %#v", got)
+	}
+}
+
+func TestChatHistoryResponseHidesLegacyCollectedContext(t *testing.T) {
+	item := chatHistoryToResponseItem(orm.ChatHistory{
+		RawContent: `<collected-task-context>large internal context</collected-task-context>
+<current-task-request>
+这是当前需要执行的任务要求，请使用上方已完成的历史执行结果作答：
+生成本周调研报告
+</current-task-request>`,
+	})
+	if got := item["query"]; got != "生成本周调研报告" {
+		t.Fatalf("query = %q", got)
 	}
 }
 

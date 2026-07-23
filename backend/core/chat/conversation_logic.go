@@ -516,6 +516,9 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 }
 
 func chatHistoryInput(raw map[string]any, query string) any {
+	if displayQuery, ok := raw["display_query"].(string); ok && strings.TrimSpace(displayQuery) != "" {
+		return []any{map[string]any{"input_type": "text", "text": strings.TrimSpace(displayQuery)}}
+	}
 	if in, ok := raw["input"].([]any); ok && len(in) > 0 {
 		return in
 	}
@@ -701,6 +704,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"user_id":          strings.TrimSpace(userID),
 		"mode":             mode,
 		"intent_context":   loadConversationIntentContext(ctx, db, convID),
+	}
+	if skip, ok := raw["skip_sensitive_filter"].(bool); ok && skip {
+		body["skip_sensitive_filter"] = true
 	}
 	if mentionContext := buildMentionResourceContext(ctx, db, userID, histories, raw); mentionContext != "" {
 		body["query"] = mentionContext + "\n\nUser query:\n" + query
@@ -1419,6 +1425,14 @@ func streamSingleAnswer(
 	}
 	if persisted {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
+		// Reaching this point means the upstream SSE channel has closed and the
+		// final history payload was persisted. Intermediate thinking persistence
+		// never reaches this update.
+		if err := db.Model(&orm.TaskCenterTask{}).
+			Where("conversation_id = ? AND task_type = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", convID, "background_chat").
+			Updates(map[string]any{"status": "succeeded", "finished_at": now, "updated_at": now}).Error; err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Msg("failed to finish background task after SSE close")
+		}
 	}
 	if persisted && !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))

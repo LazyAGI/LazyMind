@@ -836,13 +836,30 @@
   gap: 12px;
 }
 
+.memory-skill-admin-publish-form {
+  .ant-tabs-nav {
+    margin-bottom: 16px;
+  }
+}
+
+.memory-skill-admin-package-panel {
+  display: grid;
+  gap: 10px;
+}
+
 .memory-skill-field {
+  min-width: 0;
+
   label {
     display: block;
     margin-bottom: 6px;
     color: #344054;
     font-size: 13px;
     font-weight: 600;
+  }
+
+  .ant-select {
+    width: 100%;
   }
 }
 

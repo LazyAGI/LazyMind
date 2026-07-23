@@ -85,6 +85,40 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
     assert '"status": "FINISHED"' in body
 
 
+def test_sensitive_input_is_blocked_before_model_execution(monkeypatch):
+    model_calls = []
+
+    def fail_if_model_is_created(*args, **kwargs):
+        model_calls.append((args, kwargs))
+        raise AssertionError('sensitive input must not reach model construction')
+
+    monkeypatch.setattr(chat_service, 'AutoModel', fail_if_model_is_created)
+    request = ChatRequest(
+        message={'query': '你是傻逼', 'history': []},
+        conversation={'session_id': 'sid-sensitive'},
+        runtime={'llm_config': {}},
+    )
+
+    async def drive():
+        response = await chat_service.handle_chat(request)
+        assert response.status_code == 200
+        assert response.media_type == 'text/event-stream'
+        return await _collect_streaming_response(response)
+
+    body = asyncio.run(drive())
+    payloads = [json.loads(chunk) for chunk in body.strip().split('\n\n')]
+
+    assert model_calls == []
+    assert len(payloads) == 2
+    assert payloads[0]['code'] == 200
+    assert payloads[0]['data'] == {
+        'think': None,
+        'text': chat_service.SENSITIVE_FILTER_RESPONSE_TEXT,
+        'sources': [],
+    }
+    assert payloads[1]['data'] == {'status': 'FINISHED', 'tool_call_turns': 0}
+
+
 def test_task_profile_review_emits_ephemeral_pseudo_stream(monkeypatch):
     request = ChatRequest(
         message={'query': '推荐一款适合我的相机', 'history': []},
@@ -96,13 +130,19 @@ def test_task_profile_review_emits_ephemeral_pseudo_stream(monkeypatch):
         plugin={'enable_plugin': False},
     )
     original_history = list(request.message.history)
+    sensitive_checks = []
 
     def fake_resolve(inputs):
         return chat_service.resolve_task_profile(
             inputs['query'], enable_llm_fallback=False,
         )
 
-    async def fake_impl(_request, *, task_profile_override=None):
+    async def fake_impl(
+        _request,
+        *,
+        task_profile_override=None,
+        sensitive_match_override=None,
+    ):
         assert task_profile_override is not None
 
         async def body():
@@ -112,6 +152,11 @@ def test_task_profile_review_emits_ephemeral_pseudo_stream(monkeypatch):
 
     monkeypatch.setattr(chat_service, '_resolve_task_profile_with_model', fake_resolve)
     monkeypatch.setattr(chat_service, '_handle_chat_impl', fake_impl)
+    monkeypatch.setattr(
+        chat_service,
+        'check_sensitive_content',
+        lambda query: sensitive_checks.append(query),
+    )
 
     async def drive():
         response = await chat_service.handle_chat(request)
@@ -124,10 +169,12 @@ def test_task_profile_review_emits_ephemeral_pseudo_stream(monkeypatch):
     assert '，请稍后' in body
     assert body.endswith('final\n\n')
     assert request.message.history == original_history
+    assert sensitive_checks == ['推荐一款适合我的相机']
 
 
 def test_context_usage_preview_only_uses_model_when_explicitly_requested(monkeypatch):
     model_calls = []
+    sensitive_checks = []
 
     def fake_model_resolve(inputs):
         model_calls.append(inputs)
@@ -135,11 +182,21 @@ def test_context_usage_preview_only_uses_model_when_explicitly_requested(monkeyp
             inputs['query'], enable_llm_fallback=False,
         )
 
-    async def fake_impl(_request, *, task_profile_override=None):
+    async def fake_impl(
+        _request,
+        *,
+        task_profile_override=None,
+        sensitive_match_override=None,
+    ):
         return task_profile_override
 
     monkeypatch.setattr(chat_service, '_resolve_task_profile_with_model', fake_model_resolve)
     monkeypatch.setattr(chat_service, '_handle_chat_impl', fake_impl)
+    monkeypatch.setattr(
+        chat_service,
+        'check_sensitive_content',
+        lambda query: sensitive_checks.append(query),
+    )
 
     def request(allow_llm):
         return ChatRequest(
@@ -158,3 +215,40 @@ def test_context_usage_preview_only_uses_model_when_explicitly_requested(monkeyp
 
     asyncio.run(chat_service.handle_chat(request(True)))
     assert len(model_calls) == 1
+    assert sensitive_checks == []
+
+
+def test_context_prompt_export_and_driver_skip_sensitive_detection(monkeypatch):
+    sensitive_checks = []
+
+    async def fake_impl(
+        _request,
+        *,
+        task_profile_override=None,
+        sensitive_match_override=None,
+    ):
+        return task_profile_override
+
+    monkeypatch.setattr(chat_service, '_handle_chat_impl', fake_impl)
+    monkeypatch.setattr(
+        chat_service,
+        'check_sensitive_content',
+        lambda query: sensitive_checks.append(query),
+    )
+    requests = (
+        ChatRequest(
+            message={'query': '你是傻逼', 'history': []},
+            conversation={'session_id': 'sid-export'},
+            runtime={'context_prompt_export': True},
+        ),
+        ChatRequest(
+            message={'query': '你是傻逼', 'history': []},
+            conversation={'session_id': 'sid-driver'},
+            plugin={'plugin_context': {'synthetic_source': 'driver'}},
+        ),
+    )
+
+    for request in requests:
+        asyncio.run(chat_service.handle_chat(request))
+
+    assert sensitive_checks == []

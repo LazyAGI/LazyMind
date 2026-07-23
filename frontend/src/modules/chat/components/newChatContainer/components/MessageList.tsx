@@ -313,6 +313,41 @@ const MessageList: React.FC<MessageListProps> = ({
           </div>
         )}
         <div className={`user-wrap ${isEditing ? "editing" : ""}`}>
+		  {!isEditing && Array.isArray(item.collected_inputs) && item.collected_inputs.length > 0 ? (
+			<details className="chat-collected-inputs">
+			  <summary>{t("chat.collectedHistoryInputs", { count: item.collected_inputs.length })}</summary>
+			  <div className="chat-collected-input-list">
+				{item.collected_inputs.map((source: any, sourceIndex: number) => (
+				  <div className="chat-collected-input" key={`${source.task_id}-${sourceIndex}`}>
+					<div className="chat-collected-input-title">
+					  {source.conversation_id ? (
+						<a
+						  href={`/agent/chat/home?conversation_id=${encodeURIComponent(source.conversation_id)}`}
+						  onClick={(event) => {
+							event.preventDefault();
+							window.dispatchEvent(new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
+							  detail: { conversationId: source.conversation_id, source: "mention" },
+							}));
+						  }}
+						>
+						  @{source.source_name || source.task_id}
+						</a>
+					  ) : `@${source.source_name || source.task_id}`}
+					</div>
+					<div className="chat-collected-input-meta">
+					  {t("chat.collectedHistoryInputMode", {
+						mode: source.mode || "—",
+						time: source.executed_at ? dayjs(source.executed_at).format("YYYY/MM/DD HH:mm") : "—",
+					  })}
+					</div>
+					<div className="chat-collected-input-summary">
+					  {source.summary || t("chat.collectedHistoryInputEmpty")}
+					</div>
+				  </div>
+				))}
+			  </div>
+			</details>
+		  ) : null}
           {!isEditing && citeMessageList.length > 0 ? (
             <UserCitationPreview citeMessages={citeMessageList} />
           ) : null}

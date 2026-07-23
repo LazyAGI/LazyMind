@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  CheckOutlined,
+  CloseOutlined,
+  DownOutlined,
+  LoadingOutlined,
+} from "@ant-design/icons";
 import { Typography } from "antd";
 import { useTranslation } from "react-i18next";
 import {
@@ -52,6 +58,24 @@ export function RepairTraceStreamPanel({ rows }: { rows: RepairTraceRow[] }) {
   const activeAttempt =
     attemptGroups.find((group) => group.status === "running")?.attempt ||
     attemptGroups[attemptGroups.length - 1]?.attempt;
+  const activeGroupKey =
+    attemptGroups.find((group) => group.status === "running")?.key ||
+    attemptGroups[attemptGroups.length - 1]?.key;
+  const [expandedAttempts, setExpandedAttempts] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!activeGroupKey) {
+      return;
+    }
+    setExpandedAttempts((current) => {
+      if (current.has(activeGroupKey)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(activeGroupKey);
+      return next;
+    });
+  }, [activeGroupKey]);
 
   useEffect(() => {
     const container = listRef.current;
@@ -60,6 +84,22 @@ export function RepairTraceStreamPanel({ rows }: { rows: RepairTraceRow[] }) {
     }
     container.scrollTop = container.scrollHeight;
   }, [rows.length, rows[rows.length - 1]?.key]);
+
+  useEffect(() => {
+    const container = listRef.current;
+    if (!container || !activeGroupKey || !expandedAttempts.has(activeGroupKey)) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const currentAttempt = container.querySelector<HTMLElement>(
+        ".self-evolution-repair-trace-attempt.is-current",
+      );
+      if (currentAttempt) {
+        container.scrollTop = currentAttempt.offsetTop - container.offsetTop;
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeGroupKey, expandedAttempts]);
 
   return (
     <section
@@ -104,60 +144,104 @@ export function RepairTraceStreamPanel({ rows }: { rows: RepairTraceRow[] }) {
             {t("selfEvolutionRun.repairTraceEmpty")}
           </Text>
         ) : (
-          attemptGroups.map((group) => (
-            <section
-              key={group.key}
-              className={`self-evolution-repair-trace-attempt is-${group.status}`}
-              aria-label={group.label}
-            >
-              <div className="self-evolution-repair-trace-attempt-head">
-                <Text className="self-evolution-repair-trace-attempt-title">
-                  {group.label}
-                </Text>
-                <span
-                  className={`self-evolution-repair-trace-attempt-status is-${group.status}`}
-                >
-                  {group.statusLabel}
-                </span>
-              </div>
+          attemptGroups.map((group) => {
+            const isExpanded = expandedAttempts.has(group.key);
+            const toggleExpanded = () => {
+              setExpandedAttempts((current) => {
+                const next = new Set(current);
+                if (next.has(group.key)) {
+                  next.delete(group.key);
+                } else {
+                  next.add(group.key);
+                }
+                return next;
+              });
+            };
 
-              {group.phaseSummaries.length > 0 ? (
-                <div
-                  className="self-evolution-repair-trace-phases"
-                  aria-label={t("selfEvolutionRun.repairTracePhasesAria")}
+            return (
+              <section
+                key={group.key}
+                className={`self-evolution-repair-trace-attempt is-${group.status}${
+                  isExpanded ? " is-expanded" : ""
+                }${group.key === activeGroupKey ? " is-current" : ""}`}
+                aria-label={group.label}
+              >
+                <button
+                  type="button"
+                  className="self-evolution-repair-trace-attempt-head"
+                  aria-expanded={isExpanded}
+                  onClick={toggleExpanded}
                 >
-                  {group.phaseSummaries.map((phase) => (
-                    <div
-                      key={`${group.key}-${phase.category}`}
-                      className={`self-evolution-repair-trace-phase is-${phase.status}`}
-                    >
-                      <span className="self-evolution-repair-trace-phase-label">
-                        {phase.label}
-                      </span>
-                      <span className="self-evolution-repair-trace-phase-meta">
-                        {phase.count > 0
-                          ? t("selfEvolutionRun.repairTracePhaseCount", {
-                              count: phase.count,
-                            })
-                          : null}
-                      </span>
-                      <span
-                        className={`self-evolution-repair-trace-phase-status is-${phase.status}`}
+                  <span
+                    className={`self-evolution-repair-trace-attempt-icon is-${group.status}`}
+                    aria-hidden="true"
+                  >
+                    {group.status === "done" ? (
+                      <CheckOutlined />
+                    ) : group.status === "failed" ? (
+                      <CloseOutlined />
+                    ) : (
+                      <LoadingOutlined spin />
+                    )}
+                  </span>
+                  <span className="self-evolution-repair-trace-attempt-copy">
+                    <Text className="self-evolution-repair-trace-attempt-title">
+                      {group.label}
+                    </Text>
+                    <span className="self-evolution-repair-trace-attempt-meta">
+                      {t("selfEvolutionRun.repairTraceEventCount", {
+                        count: group.rows.length,
+                      })}
+                    </span>
+                  </span>
+                  <span className={`self-evolution-repair-trace-attempt-status is-${group.status}`}>
+                    {group.statusLabel}
+                  </span>
+                  <DownOutlined className="self-evolution-repair-trace-attempt-chevron" />
+                </button>
+
+                {isExpanded ? (
+                  <div className="self-evolution-repair-trace-attempt-body">
+                    {group.phaseSummaries.length > 0 ? (
+                      <div
+                        className="self-evolution-repair-trace-phases"
+                        aria-label={t("selfEvolutionRun.repairTracePhasesAria")}
                       >
-                        {phase.statusLabel}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+                        {group.phaseSummaries.map((phase) => (
+                          <div
+                            key={`${group.key}-${phase.category}`}
+                            className={`self-evolution-repair-trace-phase is-${phase.status}`}
+                          >
+                            <span className="self-evolution-repair-trace-phase-label">
+                              {phase.label}
+                            </span>
+                            <span className="self-evolution-repair-trace-phase-meta">
+                              {phase.count > 0
+                                ? t("selfEvolutionRun.repairTracePhaseCount", {
+                                    count: phase.count,
+                                  })
+                                : null}
+                            </span>
+                            <span
+                              className={`self-evolution-repair-trace-phase-status is-${phase.status}`}
+                            >
+                              {phase.statusLabel}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
 
-              <div className="self-evolution-repair-trace-attempt-rows">
-                {group.rows.map((row) => (
-                  <RepairTraceRowItem key={row.key} row={row} />
-                ))}
-              </div>
-            </section>
-          ))
+                    <div className="self-evolution-repair-trace-attempt-rows">
+                      {group.rows.map((row) => (
+                        <RepairTraceRowItem key={row.key} row={row} />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+            );
+          })
         )}
       </div>
     </section>

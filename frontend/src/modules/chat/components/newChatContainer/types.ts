@@ -96,6 +96,14 @@ export interface ChatMessage {
   cite_messages?: string[];
   tool_call_turns?: number;
   mentions?: ChatMention[];
+	collected_inputs?: Array<{
+		task_id: string;
+		conversation_id?: string;
+		source_name?: string;
+		executed_at?: string;
+		mode?: string;
+		summary?: string;
+	}>;
   intent_updated?: {
     scope: "conversation";
     intent_context: Record<string, unknown>;

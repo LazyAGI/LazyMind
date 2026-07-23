@@ -37,6 +37,12 @@ async def proxy_chat_tools(request: Request):
     return await _select_and_forward(request, caller_algo_id)
 
 
+@router.post('/api/chat/sensitive-check', summary='Proxy: sensitive-word check (router mode)')
+async def proxy_sensitive_check(request: Request):
+    caller_algo_id = await _parse_algo_id(request)
+    return await _select_and_forward(request, caller_algo_id)
+
+
 @router.post('/api/chat/context-usage', summary='Proxy: estimate chat context usage (router mode)')
 async def proxy_chat_context_usage(request: Request):
     caller_algo_id = await _parse_algo_id(request)

@@ -33,6 +33,7 @@ import "./index.scss";
 interface Props {
   sessionId: string;
   onClose?: () => void;
+  showHeader?: boolean;
 }
 
 const EMPTY_TASKS: SubAgentTask[] = [];
@@ -516,7 +517,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
 type FilterKey = "all" | "running" | "succeeded" | "failed";
 
 const TaskCenter = (props: Props) => {
-  const { sessionId, onClose } = props;
+  const { sessionId, onClose, showHeader = true } = props;
   const { t } = useTranslation();
   const [filter, setFilter] = useState<FilterKey>("all");
 
@@ -551,7 +552,7 @@ const TaskCenter = (props: Props) => {
 
   return (
     <div className="task-center">
-      <div className="task-center-header">
+      {showHeader && <div className="task-center-header">
         <span className="task-center-title">
           {t("taskCenter.panelTitle")}
         </span>
@@ -565,7 +566,7 @@ const TaskCenter = (props: Props) => {
             <RightOutlined />
           </button>
         )}
-      </div>
+      </div>}
       <div className="task-center-filters">
         {filterDefs.map(({ key, label }) => (
           <button

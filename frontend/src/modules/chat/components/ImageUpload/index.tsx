@@ -203,11 +203,6 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
 
       uploadFileInChunks(file as File, {
         timeout: 2 * 60 * 1000,
-        onProgress: (progress) => {
-          console.log(
-            t("chat.uploadProgressLog", { percentage: progress.percentage }),
-          );
-        },
       })
         .then((storedPath) => {
           setUploadingCount((prev) => prev - 1);

@@ -53,12 +53,7 @@ func TestMaintenanceTaskStatusIsScopedToCurrentUser(t *testing.T) {
 func TestSkillOrganizeDraftConflictDoesNotCallAlgorithm(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
-	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
-		"category":      "internal",
-		"relative_root": "internal/论文精读",
-	}).Error; err != nil {
-		t.Fatalf("mark internal skill: %v", err)
-	}
+	setSkillOrganizeCategory(t, db, "skill1", "internal", "internal/论文精读")
 	testutil.SeedTextBlob(t, db, "draft_hash", "draft")
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "draft_hash")
 	oldDB := store.DB()

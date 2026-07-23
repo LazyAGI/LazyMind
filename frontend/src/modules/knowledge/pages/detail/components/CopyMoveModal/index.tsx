@@ -25,12 +25,9 @@ function CopyMoveModal(props: CopyMoveModalProps) {
     dataset_id = "",
     data_source_type = "DATA_SOURCE_TYPE_UNSPECIFIED",
     document_id = "",
-    p_id,
   } = currentData ?? {};
   const [treeData, setTreeData] = useState<ITreeData[]>([]);
   const [selectTreeData, setSelectTreeData] = useState<ITreeData>({});
-
-  console.log(selectTreeData, currentData, t("knowledge.currentSelectionParams"));
 
   function updateTreeData(
     list: ITreeData[],

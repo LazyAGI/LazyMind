@@ -25,7 +25,7 @@ def shutdown_background_executor() -> None:
     background_executor.shutdown(wait=False, cancel_futures=True)
 
 
-@router.post('/api/chat/skill_review', summary='Run skill review for chat histories in a time range')
+@router.post('/api/chat/skill_review', summary='Run skill review for selected sessions')
 async def skill_review(payload: SkillReviewRequest):
     loop = asyncio.get_running_loop()
     taskid = build_skill_review_taskid(payload.requestid)

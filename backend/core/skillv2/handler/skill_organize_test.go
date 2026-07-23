@@ -30,12 +30,11 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
-	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
-		"category":      "internal",
-		"relative_root": "internal/论文精读",
-	}).Error; err != nil {
-		t.Fatalf("mark internal skill: %v", err)
-	}
+	testutil.SeedSkillWithRevision(t, db, "skill2", "rev2")
+	setSkillOrganizeCategory(t, db, "skill1", "internal", "internal/论文精读")
+	setSkillOrganizeCategory(t, db, "skill2", "external", "external/论文精读-skill2")
+	testutil.SeedTextBlob(t, db, "external_draft_hash", "external draft")
+	testutil.SeedDraftEntry(t, db, "skill2", "SKILL.md", "upsert", "file", "external_draft_hash")
 	store.Init(db.DB, nil, nil)
 
 	var captured algo.SkillOrganizeRequest
@@ -60,7 +59,7 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
 		"requestid": "org_smoke",
 		"user_id": "ignored",
-		"skills": [" /skills/internal/论文精读/ "],
+		"skills": [" /skills/internal/论文精读/ ", "skills/external/论文精读-skill2"],
 		"fs_base_url": "http://frontend-should-not-win",
 		"artifact_dir": "tmp/a-skill-org",
 		"model_configs": {"llm": {"api_key": "frontend-should-not-win"}}
@@ -155,7 +154,7 @@ func TestSubmitSkillOrganizeFiltersNonInternalSkills(t *testing.T) {
 	}
 }
 
-func TestSubmitSkillOrganizeRejectsEmptyInternalSelection(t *testing.T) {
+func TestSubmitSkillOrganizeRejectsRequestWithoutInternalSkills(t *testing.T) {
 	oldCaller := skillOrganizeCaller
 	oldDB := store.DB()
 	t.Cleanup(func() {
@@ -165,30 +164,38 @@ func TestSubmitSkillOrganizeRejectsEmptyInternalSelection(t *testing.T) {
 
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	setSkillOrganizeCategory(t, db, "skill1", "external", "external/论文精读")
 	store.Init(db.DB, nil, nil)
 
 	called := false
-	skillOrganizeCaller = func(context.Context, algo.SkillOrganizeRequest) (*algo.SkillOrganizeResponse, int, error) {
+	skillOrganizeCaller = func(_ context.Context, _ algo.SkillOrganizeRequest) (*algo.SkillOrganizeResponse, int, error) {
 		called = true
 		return nil, 0, nil
 	}
+
 	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
-		"requestid":"org_non_internal_only",
-		"skills":["skills/creative/art_style","skills/vcs/git-guide","skills/research/deep-research"]
+		"requestid": "org_external_only",
+		"skills": ["skills/external/论文精读"]
 	}`))
 	req.Header.Set("X-User-Id", "user_001")
 	rec := httptest.NewRecorder()
 
 	SubmitSkillOrganize(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	if called {
-		t.Fatal("algorithm caller must not run when no internal skills remain")
+	if rec.Code != http.StatusBadRequest || called {
+		t.Fatalf("status=%d called=%v body=%s", rec.Code, called, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "skill_organize_no_internal_skills") {
 		t.Fatalf("unexpected body: %s", rec.Body.String())
+	}
+	var count int64
+	if err := db.Model(&orm.ResourceUpdateTask{}).
+		Where("task_type = ?", orm.ResourceUpdateTaskTypeOrganizeSkill).
+		Count(&count).Error; err != nil {
+		t.Fatalf("count organize reservations: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("organize reservation count = %d, want 0", count)
 	}
 }
 
@@ -266,5 +273,14 @@ func TestNormalizeSkillOrganizeRequestRejectsTooManySkills(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "must not exceed") {
 		t.Fatalf("expected too many skills error, got %v", err)
+	}
+}
+
+func setSkillOrganizeCategory(t *testing.T, db *testutil.TestDB, skillID, category, relativeRoot string) {
+	t.Helper()
+	if err := db.Model(&testutil.SkillRow{}).
+		Where("id = ?", skillID).
+		Updates(map[string]any{"category": category, "relative_root": relativeRoot}).Error; err != nil {
+		t.Fatalf("update skill category: %v", err)
 	}
 }

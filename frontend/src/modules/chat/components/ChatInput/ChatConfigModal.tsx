@@ -36,6 +36,7 @@ export default function ChatConfigPopover({
   );
   // Track whether we've already fetched defaults to avoid repeated requests.
   const fetchedRef = useRef(false);
+  const enforcedWorkflowConversationRef = useRef<string | null>(null);
 
   // Sync external initialSettings into local state; reset fetch cache on conversation change.
   useEffect(() => {
@@ -49,6 +50,31 @@ export default function ChatConfigPopover({
       fetchedRef.current = false;
     }
   }, [conversationId, initialSettings]);
+
+  // Starting/attaching a workflow makes approval mode authoritative for this
+  // conversation. Enforce it once per attached session; users may still switch
+  // between auto and approval afterwards, but cannot disable until it is removed.
+  useEffect(() => {
+    if (!hasPluginSession) {
+      enforcedWorkflowConversationRef.current = null;
+      return;
+    }
+    const key = conversationId || 'pending-conversation';
+    if (enforcedWorkflowConversationRef.current === key) return;
+    enforcedWorkflowConversationRef.current = key;
+    const next: ConversationPluginSettings = {
+      ...settings,
+      enable_plugin: true,
+      plugin_mode: 'dynamic',
+    };
+    setSettings(next);
+    onSave?.(next);
+    if (conversationId && !conversationId.startsWith('temp_')) {
+      void ConversationSettingsApi().patchPluginSettings(conversationId, next).catch(() => {
+        enforcedWorkflowConversationRef.current = null;
+      });
+    }
+  }, [conversationId, hasPluginSession, onSave, settings]);
 
   // Fetch settings from server the first time the popover opens.
   async function ensureSettings() {

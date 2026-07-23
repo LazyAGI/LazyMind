@@ -119,6 +119,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       thinkingCollapseMap,
       toggleThinkingCollapse,
       isThinkingCollapsed,
+      collapseAllThinking,
     } = useThinkingCollapse();
 
     const {
@@ -157,6 +158,14 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       openSSE: conversation.openSSE,
       scrollToEnd: conversation.scroll.scrollToEnd,
     });
+
+    const sendMessage = useCallback(
+      (params: Parameters<typeof conversation.sendMessage>[0]) => {
+        collapseAllThinking();
+        conversation.sendMessage(params);
+      },
+      [collapseAllThinking, conversation.sendMessage],
+    );
 
     userEditRef.current = userEdit;
 
@@ -245,7 +254,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     useImperativeHandle(ref, () => ({
       replaceMessageList: conversation.replaceMessageList,
       createNewChat: conversation.createNewChat,
-      sendMessage: conversation.sendMessage,
+      sendMessage,
       disconnectConversationStream: conversation.disconnectConversationStream,
       uploadFiles: (files: File[]) => {
         chatInputRef.current?.uploadFiles(files);
@@ -273,12 +282,12 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
 
     const handleSkillDeposit = useCallback(() => {
       clearCiteMessages();
-      conversation.sendMessage({
+      sendMessage({
         text: t("chat.skillDepositPrompt"),
         clearInput: true,
         create_time: new Date().toISOString(),
       });
-    }, [clearCiteMessages, conversation, t]);
+    }, [clearCiteMessages, sendMessage, t]);
 
     return (
       <div className="chat-chat-container">
@@ -287,7 +296,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
             messageList={conversation.messageList}
             initialCard={initialCard}
             sendMessage={(text, clearInput, extras) => {
-              conversation.sendMessage({ text, clearInput, ...(extras ?? {}) });
+              sendMessage({ text, clearInput, ...(extras ?? {}) });
             }}
             regenerate={conversation.regenerate}
             stopGeneration={conversation.stopGeneration}
@@ -321,7 +330,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
           <ChatInput
             value={conversation.content}
             onChange={conversation.setContent}
-            onSend={conversation.sendMessage}
+            onSend={sendMessage}
             openHistory={
               setShowHistoryList ? () => setShowHistoryList(true) : undefined
             }

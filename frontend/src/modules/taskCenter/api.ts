@@ -24,6 +24,7 @@ export interface Task {
   created_at: string;
   updated_at: string;
   finished_at?: string;
+  waiting_reason?: string;
 }
 
 export interface Schedule {
@@ -36,10 +37,33 @@ export interface Schedule {
   prompt_template: string;
   kb_ids?: string[];
   file_ids?: string[];
+  group_id?: string;
+  group_position: number;
+  dependencies?: ScheduleDependency[];
   enabled: boolean;
   run_count: number;
   last_run_at?: string;
   next_run_at: string;
+  created_at: string;
+}
+
+export interface ScheduleDependency {
+  id?: string;
+  source_schedule_id: string;
+  source_name?: string;
+  window_type?: string;
+  content_types?: string[];
+  incomplete_policy?: string;
+  max_wait_seconds?: number;
+}
+
+export interface AutomationGroup {
+  id: string;
+  name: string;
+  remark: string;
+  timezone: string;
+  enabled: boolean;
+  task_count: number;
   created_at: string;
 }
 
@@ -52,6 +76,7 @@ export interface TaskListResponse {
     all: number;
     pending: number;
     waiting: number;
+    waiting_inputs: number;
     running: number;
     succeeded: number;
     failed: number;
@@ -72,6 +97,8 @@ export interface CreateScheduleRequest {
   remark?: string;
   kb_ids?: string[];
   file_ids?: string[];
+  group_id?: string;
+  dependencies?: ScheduleDependency[];
 }
 
 export async function listTasks(params: {
@@ -99,14 +126,6 @@ export async function cancelTask(id: string): Promise<void> {
 
 export async function removeTask(id: string): Promise<void> {
   await axiosInstance.post(`${CORE}/task-center/tasks/${id}:remove`);
-}
-
-export async function addTask(conversationId: string, title?: string): Promise<Task> {
-  const resp = await axiosInstance.post<Task>(`${CORE}/task-center/tasks`, {
-    conversation_id: conversationId,
-    title: title ?? '',
-  });
-  return resp.data;
 }
 
 export async function listSchedules(includeDisabled = false): Promise<ScheduleListResponse> {
@@ -148,5 +167,42 @@ export async function listScheduleTasks(
   const resp = await axiosInstance.get<TaskListResponse>(
     `${CORE}/task-center/schedules/${scheduleId}/tasks?${query.toString()}`,
   );
+  return resp.data;
+}
+
+export async function listAutomationGroups(): Promise<{ items: AutomationGroup[]; total: number }> {
+  const resp = await axiosInstance.get(`${CORE}/automation-groups`);
+  return resp.data;
+}
+
+export async function createAutomationGroup(req: { name: string; remark?: string; timezone?: string }): Promise<AutomationGroup> {
+  const resp = await axiosInstance.post(`${CORE}/automation-groups`, req);
+  return resp.data;
+}
+
+export async function deleteAutomationGroup(id: string): Promise<void> {
+  await axiosInstance.delete(`${CORE}/automation-groups/${id}`);
+}
+
+export async function moveSchedule(id: string, groupId?: string, position = 0): Promise<void> {
+  await axiosInstance.post(`${CORE}/schedules/${id}:move`, { group_id: groupId || null, position });
+}
+
+export interface BatchScheduleDraft {
+  client_key: string;
+  name: string;
+  remark?: string;
+  cron_expr: string;
+  prompt_template: string;
+  kb_ids?: string[];
+  file_ids?: string[];
+  dependencies?: Array<ScheduleDependency & { source_client_key?: string }>;
+}
+
+export async function batchCreateAutomationGroup(req: {
+  group: { name: string; remark?: string; timezone: string };
+  tasks: BatchScheduleDraft[];
+}): Promise<{ group_id: string; schedule_ids: Record<string, string> }> {
+  const resp = await axiosInstance.post(`${CORE}/automation-groups:batch-create`, req);
   return resp.data;
 }
