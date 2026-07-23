@@ -21,6 +21,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/preferencefile"
+	skillservice "lazymind/core/skillv2/service"
 	"lazymind/core/skillv2/taskguard"
 	"lazymind/core/state"
 	"lazymind/core/store"
@@ -150,6 +151,104 @@ func TestAutoEvoDraftWaitsForEditorThenCommits(t *testing.T) {
 	}
 	if draft.TaskID != "" || draft.ConversationID != nil || draft.DraftUpdatedAt != nil {
 		t.Fatalf("draft ownership not cleared: %#v", draft)
+	}
+}
+
+func TestEnablingAutoEvoPublishesPendingReviewDraft(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	createSkillReviewResultsTable(t, db)
+	createMemoryReviewTable(t, db)
+	now := time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC)
+	insertSkillResource(t, db, orm.SkillResource{
+		ID: "skill-pending-review", OwnerUserID: "user-1", Category: "system", SkillName: "pending-review",
+		Content: skillContent("pending-review", "old"), Version: 1, AutoEvo: false, IsEnabled: true,
+		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour), CreateUserID: "user-1",
+	})
+	newContent := skillContent("pending-review", "new")
+	newHash := evolution.HashContent(newContent)
+	if err := db.Create(&orm.SkillV2Blob{
+		Hash: newHash, Size: int64(len(newContent)), Mime: "text/markdown; charset=utf-8", FileType: "markdown",
+		StorageBackend: "postgres", Content: []byte(newContent), CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("insert draft blob: %v", err)
+	}
+	if err := db.Model(&orm.SkillV2Draft{}).Where("skill_id = ?", "skill-pending-review").Updates(map[string]any{
+		"version": 2, "draft_updated_at": now, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatalf("update pending review draft: %v", err)
+	}
+	if err := db.Create(&orm.SkillV2DraftEntry{
+		SkillID: "skill-pending-review", Path: "SKILL.md", Op: "upsert", EntryType: "file", BlobHash: &newHash,
+		Size: int64(len(newContent)), Mime: "text/markdown; charset=utf-8", FileType: "markdown", Mode: 0o644, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("insert draft entry: %v", err)
+	}
+	userID := "user-1"
+	if err := db.Create(&orm.SkillDraftReviewSession{
+		ID: "draft-review-session", SkillID: "skill-pending-review",
+		BaseRevisionID: "skill-pending-review-rev", DraftVersionAtStart: 2, DraftSnapshotHash: "snapshot",
+		Status: "active", Version: 1, UndoLimit: 20, CreatedBy: &userID, UpdatedBy: &userID,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("insert active draft review: %v", err)
+	}
+
+	svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+		DB:        db,
+		BlobStore: skillservice.NewBlobStore(db, skillservice.NewLocalObjectStore(t.TempDir())),
+	})
+	enabled := true
+	if _, err := svc.PatchSkill(context.Background(), skillservice.PatchSkillRequest{
+		SkillID: "skill-pending-review",
+		UserID:  userID,
+		AutoEvo: &enabled,
+	}); err != nil {
+		t.Fatalf("enable auto evo: %v", err)
+	}
+
+	var promoted orm.SkillV2Draft
+	if err := db.Take(&promoted, "skill_id = ?", "skill-pending-review").Error; err != nil {
+		t.Fatalf("load promoted draft: %v", err)
+	}
+	if promoted.DraftStatus != "auto_pending" || !strings.HasPrefix(promoted.TaskID, "review_auto_evo_") {
+		t.Fatalf("promoted draft = %#v, want auto_pending review task", promoted)
+	}
+	detail, err := svc.GetSkill(context.Background(), skillservice.GetSkillRequest{SkillID: "skill-pending-review", UserID: userID})
+	if err != nil {
+		t.Fatalf("load promoted skill: %v", err)
+	}
+	if detail.Draft.HasUncommittedDraft {
+		t.Fatalf("auto pending draft still exposed as pending confirmation: %#v", detail.Draft)
+	}
+
+	scanner := NewScanner(db, Config{}, "auto-evo-toggle-scanner")
+	scanner.clock = func() time.Time { return now }
+	scanResult, err := scanner.RunOnce(context.Background())
+	if err != nil || scanResult.SkillDraftTasksCreated != 1 {
+		t.Fatalf("scan promoted draft: result=%#v err=%v", scanResult, err)
+	}
+	worker := NewWorker(db, Config{WorkerBatchSize: 1, WorkerLockTTL: time.Minute, MaxAttempts: 1}, "auto-evo-toggle-worker")
+	worker.clock = func() time.Time { return now }
+	runResult, err := worker.RunOnce(context.Background())
+	if err != nil || runResult.Done != 1 {
+		t.Fatalf("publish promoted draft: result=%#v err=%v", runResult, err)
+	}
+	if got := readSkillV2HeadContent(t, db, "skill-pending-review"); got != newContent {
+		t.Fatalf("published content = %q, want %q", got, newContent)
+	}
+	var draftEntryCount int64
+	if err := db.Model(&orm.SkillV2DraftEntry{}).Where("skill_id = ?", "skill-pending-review").Count(&draftEntryCount).Error; err != nil {
+		t.Fatalf("count published draft entries: %v", err)
+	}
+	if draftEntryCount != 0 {
+		t.Fatalf("draft entry count = %d, want 0 after publish", draftEntryCount)
+	}
+	var committedReview orm.SkillDraftReviewSession
+	if err := db.Take(&committedReview, "id = ?", "draft-review-session").Error; err != nil {
+		t.Fatalf("load committed review: %v", err)
+	}
+	if committedReview.Status != "committed" {
+		t.Fatalf("review status = %q, want committed", committedReview.Status)
 	}
 }
 

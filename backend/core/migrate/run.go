@@ -23,6 +23,7 @@ import (
 const (
 	defaultSQLiteDSN     = "./acl.db"
 	defaultMigrationsDir = "./migrations"
+	fakeVersionsEnv      = "MIGRATION_FAKE_VERSIONS"
 	stateTableName       = "schema_migrations"
 	historyTableName     = "schema_migration_history"
 	lockTableName        = "schema_migration_lock"
@@ -30,6 +31,7 @@ const (
 )
 
 var migrationFilePattern = regexp.MustCompile(`^(\d+)_(.+)\.(up|down)\.sql$`)
+var supersedesDirectivePattern = regexp.MustCompile(`(?i)^--\s*\+migrate\s+supersedes\s*:?\s*(.*)$`)
 
 type Runner struct {
 	driver string
@@ -39,10 +41,11 @@ type Runner struct {
 }
 
 type migrationFile struct {
-	Version  uint64
-	Name     string
-	UpPath   string
-	DownPath string
+	Version    uint64
+	Name       string
+	UpPath     string
+	DownPath   string
+	Supersedes []uint64
 }
 
 type historyRecord struct {
@@ -154,6 +157,10 @@ func (r *Runner) Up(limit int) error {
 	if err != nil {
 		return err
 	}
+	fakeVersions, err := configuredFakeVersions(migrations)
+	if err != nil {
+		return err
+	}
 	if err := r.bootstrapHistoryIfNeeded(migrations, hasVersion, version); err != nil {
 		return err
 	}
@@ -169,11 +176,9 @@ func (r *Runner) Up(limit int) error {
 
 	currentMax := highestAppliedVersion(applied)
 	for _, mig := range missing {
-		if err := r.applyUpMigration(mig, currentMax); err != nil {
+		applied, currentMax, err = r.applyUpMigrationWithFake(mig, migrations, applied, fakeVersions, currentMax)
+		if err != nil {
 			return err
-		}
-		if mig.Version > currentMax {
-			currentMax = mig.Version
 		}
 	}
 	return nil
@@ -253,6 +258,10 @@ func (r *Runner) Goto(target uint64) error {
 	if err != nil {
 		return err
 	}
+	fakeVersions, err := configuredFakeVersions(migrations)
+	if err != nil {
+		return err
+	}
 	if err := r.bootstrapHistoryIfNeeded(migrations, hasVersion, version); err != nil {
 		return err
 	}
@@ -291,13 +300,11 @@ func (r *Runner) Goto(target uint64) error {
 		if _, ok := appliedMap[mig.Version]; ok {
 			continue
 		}
-		if err := r.applyUpMigration(mig, currentMax); err != nil {
+		applied, currentMax, err = r.applyUpMigrationWithFake(mig, migrations, applied, fakeVersions, currentMax)
+		if err != nil {
 			return err
 		}
 		appliedMap[mig.Version] = historyRecord{Version: mig.Version, Name: mig.Name}
-		if mig.Version > currentMax {
-			currentMax = mig.Version
-		}
 	}
 	return nil
 }
@@ -557,7 +564,113 @@ func (r *Runner) loadMigrations() ([]migrationFile, error) {
 		out = append(out, *item)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
+	for i := range out {
+		if out[i].UpPath == "" {
+			continue
+		}
+		body, err := os.ReadFile(out[i].UpPath)
+		if err != nil {
+			return nil, err
+		}
+		sources, err := parseSupersedesDirective(string(body))
+		if err != nil {
+			return nil, fmt.Errorf("migration %d: %w", out[i].Version, err)
+		}
+		for _, source := range sources {
+			if source >= out[i].Version {
+				return nil, fmt.Errorf("migration %d supersedes non-lower version %d", out[i].Version, source)
+			}
+		}
+		out[i].Supersedes = sources
+	}
 	return out, nil
+}
+
+func parseSupersedesDirective(body string) ([]uint64, error) {
+	var directive string
+	for _, line := range strings.Split(body, "\n") {
+		matches := supersedesDirectivePattern.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) != 2 {
+			continue
+		}
+		if directive != "" {
+			return nil, fmt.Errorf("multiple Supersedes directives")
+		}
+		directive = strings.TrimSpace(matches[1])
+		if directive == "" {
+			return nil, fmt.Errorf("empty Supersedes directive")
+		}
+	}
+	if directive == "" {
+		return nil, nil
+	}
+
+	seen := make(map[uint64]struct{})
+	versions := make([]uint64, 0)
+	for _, raw := range strings.Split(directive, ",") {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			return nil, fmt.Errorf("invalid empty version in Supersedes directive")
+		}
+		version, err := strconv.ParseUint(value, 10, 64)
+		if err != nil || version == 0 {
+			return nil, fmt.Errorf("invalid version %q in Supersedes directive", value)
+		}
+		if _, ok := seen[version]; ok {
+			return nil, fmt.Errorf("duplicate version %d in Supersedes directive", version)
+		}
+		seen[version] = struct{}{}
+		versions = append(versions, version)
+	}
+	return versions, nil
+}
+
+func configuredFakeVersions(migrations []migrationFile) (map[uint64]struct{}, error) {
+	versions, err := parseFakeVersions(os.Getenv(fakeVersionsEnv))
+	if err != nil {
+		return nil, err
+	}
+	for version := range versions {
+		mig, ok := findMigration(migrations, version)
+		if !ok || mig.UpPath == "" {
+			return nil, fmt.Errorf("%s contains version %d without an up migration file", fakeVersionsEnv, version)
+		}
+		if len(mig.Supersedes) == 0 {
+			return nil, fmt.Errorf("%s contains version %d without a Supersedes directive", fakeVersionsEnv, version)
+		}
+	}
+
+	for _, mig := range migrations {
+		for _, source := range mig.Supersedes {
+			if _, ok := findMigration(migrations, source); ok {
+				return nil, fmt.Errorf("squash migration %d still has superseded migration file %d", mig.Version, source)
+			}
+		}
+	}
+	return versions, nil
+}
+
+func parseFakeVersions(raw string) (map[uint64]struct{}, error) {
+	versions := make(map[uint64]struct{})
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return versions, nil
+	}
+	for _, item := range strings.Split(raw, ",") {
+		value := strings.TrimSpace(item)
+		if value == "" {
+			return nil, fmt.Errorf("%s contains an empty version", fakeVersionsEnv)
+		}
+		version, err := strconv.ParseUint(value, 10, 64)
+		if err != nil || version == 0 {
+			return nil, fmt.Errorf("%s contains invalid version %q", fakeVersionsEnv, value)
+		}
+		if _, ok := versions[version]; ok {
+			return nil, fmt.Errorf("%s contains duplicate version %d", fakeVersionsEnv, version)
+		}
+		versions[version] = struct{}{}
+	}
+	return versions, nil
 }
 
 func missingUpMigrations(migrations []migrationFile, applied []historyRecord) []migrationFile {
@@ -593,6 +706,169 @@ func findMigration(migrations []migrationFile, version uint64) (migrationFile, b
 		}
 	}
 	return migrationFile{}, false
+}
+
+func (r *Runner) applyUpMigrationWithFake(
+	mig migrationFile,
+	migrations []migrationFile,
+	applied []historyRecord,
+	fakeVersions map[uint64]struct{},
+	currentMax uint64,
+) ([]historyRecord, uint64, error) {
+	fake, err := shouldFakeMigration(mig, migrations, applied, fakeVersions)
+	if err != nil {
+		return applied, currentMax, err
+	}
+	if fake {
+		if err := r.applyFakeMigration(mig, currentMax); err != nil {
+			return applied, currentMax, err
+		}
+		applied = replaceSupersededHistory(applied, mig)
+	} else {
+		if err := r.applyUpMigration(mig, currentMax); err != nil {
+			return applied, currentMax, err
+		}
+		applied = append(applied, historyRecord{Version: mig.Version, Name: mig.Name})
+		sort.Slice(applied, func(i, j int) bool { return applied[i].Version < applied[j].Version })
+	}
+	if mig.Version > currentMax {
+		currentMax = mig.Version
+	}
+	return applied, currentMax, nil
+}
+
+func shouldFakeMigration(
+	mig migrationFile,
+	migrations []migrationFile,
+	applied []historyRecord,
+	fakeVersions map[uint64]struct{},
+) (bool, error) {
+	if len(mig.Supersedes) == 0 {
+		return false, nil
+	}
+
+	appliedSet := make(map[uint64]struct{}, len(applied))
+	for _, record := range applied {
+		appliedSet[record.Version] = struct{}{}
+	}
+	appliedSources := make([]uint64, 0, len(mig.Supersedes))
+	missingSources := make([]uint64, 0, len(mig.Supersedes))
+	for _, source := range mig.Supersedes {
+		if _, ok := appliedSet[source]; ok {
+			appliedSources = append(appliedSources, source)
+		} else {
+			missingSources = append(missingSources, source)
+		}
+	}
+	_, fakeEnabled := fakeVersions[mig.Version]
+
+	switch {
+	case len(appliedSources) == 0:
+		if fakeEnabled {
+			return false, fmt.Errorf("cannot fake squash migration %d: none of its superseded migrations are applied", mig.Version)
+		}
+		return false, nil
+	case len(missingSources) > 0:
+		return false, fmt.Errorf(
+			"cannot apply squash migration %d: superseded migrations are partially applied; applied=%v missing=%v",
+			mig.Version,
+			appliedSources,
+			missingSources,
+		)
+	case !fakeEnabled:
+		return false, fmt.Errorf(
+			"cannot execute squash migration %d: all superseded migrations are already applied; set %s=%d to record it without executing SQL",
+			mig.Version,
+			fakeVersionsEnv,
+			mig.Version,
+		)
+	}
+
+	if err := validateFakeOrphans(migrations, applied, fakeVersions); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func validateFakeOrphans(
+	migrations []migrationFile,
+	applied []historyRecord,
+	fakeVersions map[uint64]struct{},
+) error {
+	fileVersions := make(map[uint64]struct{}, len(migrations))
+	for _, mig := range migrations {
+		fileVersions[mig.Version] = struct{}{}
+	}
+	allowedOrphans := make(map[uint64]struct{})
+	for version := range fakeVersions {
+		mig, _ := findMigration(migrations, version)
+		for _, source := range mig.Supersedes {
+			allowedOrphans[source] = struct{}{}
+		}
+	}
+	for _, record := range applied {
+		if _, ok := fileVersions[record.Version]; ok {
+			continue
+		}
+		if _, ok := allowedOrphans[record.Version]; !ok {
+			return fmt.Errorf(
+				"cannot fake migration: applied version %d has no migration file and is not declared by a configured squash migration",
+				record.Version,
+			)
+		}
+	}
+	return nil
+}
+
+func replaceSupersededHistory(applied []historyRecord, mig migrationFile) []historyRecord {
+	superseded := make(map[uint64]struct{}, len(mig.Supersedes))
+	for _, version := range mig.Supersedes {
+		superseded[version] = struct{}{}
+	}
+	updated := make([]historyRecord, 0, len(applied)-len(mig.Supersedes)+1)
+	for _, record := range applied {
+		if _, ok := superseded[record.Version]; ok {
+			continue
+		}
+		updated = append(updated, record)
+	}
+	updated = append(updated, historyRecord{Version: mig.Version, Name: mig.Name})
+	sort.Slice(updated, func(i, j int) bool { return updated[i].Version < updated[j].Version })
+	return updated
+}
+
+func (r *Runner) applyFakeMigration(mig migrationFile, currentMax uint64) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	for _, source := range mig.Supersedes {
+		if err := r.deleteHistory(tx, source); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	if err := r.insertHistory(tx, mig.Version, mig.Name); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	nextVersion := currentMax
+	if mig.Version > nextVersion {
+		nextVersion = mig.Version
+	}
+	if err := r.writeState(tx, &nextVersion, false); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	log.Logger.Warn().
+		Uint64("version", mig.Version).
+		Str("name", mig.Name).
+		Interface("supersedes", mig.Supersedes).
+		Msg("migration recorded without executing SQL")
+	return nil
 }
 
 func (r *Runner) applyUpMigration(mig migrationFile, currentMax uint64) error {

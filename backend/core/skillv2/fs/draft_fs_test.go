@@ -19,12 +19,20 @@ func TestDraftFSWriteText_StoresOverlayOnly(t *testing.T) {
 		Content:              "# 新内容\n",
 		ExpectedDraftVersion: 1,
 		UserID:               "user_001",
+		DraftStatus:          "pending_confirm",
 	})
 	if err != nil {
 		t.Fatalf("WriteText returned error: %v", err)
 	}
 	if resp.DraftVersion != 2 {
 		t.Fatalf("DraftVersion = %d, want 2", resp.DraftVersion)
+	}
+	var draftStatus string
+	if err := db.Table("skill_drafts").Select("draft_status").Where("skill_id = ?", "skill1").Scan(&draftStatus).Error; err != nil {
+		t.Fatalf("read draft status: %v", err)
+	}
+	if draftStatus != "pending_confirm" {
+		t.Fatalf("draft_status = %q, want pending_confirm", draftStatus)
 	}
 	testutil.AssertHeadRevision(t, db, "skill1", "rev1")
 	if got := testutil.CountRows(t, db, "skill_draft_entries", "skill_id = ? AND path = ? AND op = ?", "skill1", "SKILL.md", "upsert"); got != 1 {

@@ -15,6 +15,8 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+
+	"lazymind/core/common/orm"
 )
 
 func TestCreateSkillFromUploadedZip_CreatesInitialRevisionAndRoutesBlobs(t *testing.T) {
@@ -136,6 +138,7 @@ func newSkillV2TestDB(t *testing.T) *gorm.DB {
 		&testSkillV2DraftRow{},
 		&testSkillV2DraftEntryRow{},
 		&testSkillV2MarketItemRow{},
+		&orm.SkillDraftReviewSession{},
 	); err != nil {
 		t.Fatalf("auto migrate skill v2 test tables: %v", err)
 	}
