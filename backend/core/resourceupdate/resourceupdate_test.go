@@ -372,6 +372,8 @@ func TestAutoEvoPersonalDraftScannerCommitsConversationDraft(t *testing.T) {
 	insertPersonalResource(t, db, "memory-auto-draft", "user-1", orm.ResourceUpdateResourceTypeMemory, "old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
 	insertPersonalResource(t, db, "memory-review-draft", "user-2", orm.ResourceUpdateResourceTypeMemory, "review old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
 	insertPersonalResource(t, db, "memory-manual-draft", "user-3", orm.ResourceUpdateResourceTypeMemory, "manual old", 1, false, 0, now.Add(-time.Hour), now.Add(-time.Hour))
+	insertPersonalResource(t, db, "memory-stuck-auto-draft", "user-4", orm.ResourceUpdateResourceTypeMemory, "stuck old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
+	insertPersonalResource(t, db, "memory-empty-manual-draft", "user-5", orm.ResourceUpdateResourceTypeMemory, "empty manual old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
 
 	setPersonalDraft := func(resourceID, content, taskID, status string) {
 		t.Helper()
@@ -392,23 +394,36 @@ func TestAutoEvoPersonalDraftScannerCommitsConversationDraft(t *testing.T) {
 	setPersonalDraft("memory-auto-draft", "new", "session-1", "pending_confirm")
 	setPersonalDraft("memory-review-draft", "review new", "memory_review_1", "pending_confirm")
 	setPersonalDraft("memory-manual-draft", "manual new", "session-3", "pending_confirm")
+	setPersonalDraft("memory-stuck-auto-draft", "stuck new", "", "auto_pending")
+	setPersonalDraft("memory-empty-manual-draft", "empty manual new", "", "pending_confirm")
 
 	scanner := NewScanner(db, Config{}, "personal-draft-scanner")
 	scanner.clock = func() time.Time { return now }
 	scanResult, err := scanner.RunOnce(context.Background())
-	if err != nil || scanResult.PersonalDraftTasksCreated != 1 {
+	if err != nil || scanResult.PersonalDraftTasksCreated != 2 {
 		t.Fatalf("scan personal drafts: result=%#v err=%v", scanResult, err)
+	}
+	var recoveredDraft orm.PersonalResourceDraft
+	if err := db.Take(&recoveredDraft, "resource_id = ?", "memory-stuck-auto-draft").Error; err != nil {
+		t.Fatalf("read recovered draft: %v", err)
+	}
+	if !strings.HasPrefix(recoveredDraft.TaskID, "personal_auto_evo_") || recoveredDraft.Version != 3 {
+		t.Fatalf("recovered draft = %#v, want generated task and version 3", recoveredDraft)
 	}
 	repeatScan, err := scanner.RunOnce(context.Background())
 	if err != nil || repeatScan.PersonalDraftTasksCreated != 0 {
 		t.Fatalf("repeat scan duplicated personal draft task: result=%#v err=%v", repeatScan, err)
 	}
 
-	worker := NewWorker(db, Config{WorkerBatchSize: 1, WorkerLockTTL: time.Minute}, "personal-draft-worker")
+	worker := NewWorker(db, Config{WorkerBatchSize: 2, WorkerLockTTL: time.Minute}, "personal-draft-worker")
 	worker.clock = func() time.Time { return now }
 	result, err := worker.RunOnce(context.Background())
-	if err != nil || result.Done != 1 {
-		t.Fatalf("commit personal draft: result=%#v err=%v", result, err)
+	if err != nil || result.Done != 2 {
+		var tasks []orm.ResourceUpdateTask
+		if queryErr := db.Where("task_type = ?", orm.ResourceUpdateTaskTypeAutoCommitPersonalDraft).Order("created_at ASC").Find(&tasks).Error; queryErr != nil {
+			t.Fatalf("commit personal draft: result=%#v err=%v; query tasks: %v", result, err, queryErr)
+		}
+		t.Fatalf("commit personal draft: result=%#v err=%v tasks=%#v", result, err, tasks)
 	}
 	if content, _ := readPersonalResourceHeadContent(t, db, "memory-auto-draft"); content != "new" {
 		t.Fatalf("committed content = %q, want new", content)
@@ -425,6 +440,12 @@ func TestAutoEvoPersonalDraftScannerCommitsConversationDraft(t *testing.T) {
 	}
 	if content, _ := readPersonalResourceHeadContent(t, db, "memory-manual-draft"); content != "manual old" {
 		t.Fatalf("manual draft was committed: %q", content)
+	}
+	if content, _ := readPersonalResourceHeadContent(t, db, "memory-stuck-auto-draft"); content != "stuck new" {
+		t.Fatalf("recovered auto draft was not committed: %q", content)
+	}
+	if content, _ := readPersonalResourceHeadContent(t, db, "memory-empty-manual-draft"); content != "empty manual old" {
+		t.Fatalf("empty manual draft was committed: %q", content)
 	}
 }
 

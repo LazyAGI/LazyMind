@@ -1366,13 +1366,23 @@ func markPendingDraftAuto(ctx context.Context, tx *gorm.DB, resourceID string, n
 	if !isPendingConfirmDraftStatus(draft.DraftStatus) {
 		return nil
 	}
-	if err := tx.WithContext(ctx).Model(&orm.PersonalResourceDraft{}).
+	updates := map[string]any{
+		"draft_status": draftStatusAutoPending,
+		"updated_at":   now,
+	}
+	if strings.TrimSpace(draft.TaskID) == "" {
+		updates["task_id"] = "personal_auto_evo_" + uuid.NewString()
+		updates["conversation_id"] = nil
+		updates["version"] = gorm.Expr("version + 1")
+	}
+	result := tx.WithContext(ctx).Model(&orm.PersonalResourceDraft{}).
 		Where("resource_id = ? AND version = ?", resourceID, draft.Version).
-		Updates(map[string]any{
-			"draft_status": draftStatusAutoPending,
-			"updated_at":   now,
-		}).Error; err != nil {
-		return err
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrConflict
 	}
 	return markActiveReviewSessions(ctx, tx, resourceID, reviewStatusInvalidated, "", now)
 }

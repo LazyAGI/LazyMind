@@ -98,13 +98,14 @@ func scanAutoEvoPersonalDrafts(ctx context.Context, tx *gorm.DB, now time.Time) 
 		ResourceType string `gorm:"column:resource_type"`
 		UserID       string `gorm:"column:user_id"`
 		TaskID       string `gorm:"column:task_id"`
+		DraftStatus  string `gorm:"column:draft_status"`
 		DraftVersion int64  `gorm:"column:draft_version"`
 	}
 	if err := tx.WithContext(ctx).
 		Table("personal_resources AS r").
-		Select("r.id AS resource_id, r.resource_type, r.user_id, d.task_id, d.version AS draft_version").
+		Select("r.id AS resource_id, r.resource_type, r.user_id, d.task_id, d.draft_status, d.version AS draft_version").
 		Joins("JOIN personal_resource_drafts AS d ON d.resource_id = r.id").
-		Where("r.auto_evo = ? AND d.task_id <> '' AND d.draft_status IN ?", true, []string{"pending_confirm", "auto_pending"}).
+		Where("r.auto_evo = ? AND d.draft_status IN ?", true, []string{"pending_confirm", "auto_pending"}).
 		Order("r.user_id ASC, r.id ASC").
 		Find(&rows).Error; err != nil {
 		return 0, err
@@ -112,6 +113,28 @@ func scanAutoEvoPersonalDrafts(ctx context.Context, tx *gorm.DB, now time.Time) 
 
 	created := 0
 	for _, row := range rows {
+		if strings.TrimSpace(row.TaskID) == "" {
+			if strings.TrimSpace(row.DraftStatus) != "auto_pending" {
+				continue
+			}
+			taskID := "personal_auto_evo_" + common.GenerateID()
+			result := tx.WithContext(ctx).Model(&orm.PersonalResourceDraft{}).
+				Where("resource_id = ? AND version = ? AND task_id = '' AND draft_status = ?", row.ResourceID, row.DraftVersion, "auto_pending").
+				Updates(map[string]any{
+					"task_id":         taskID,
+					"conversation_id": nil,
+					"version":         gorm.Expr("version + 1"),
+					"updated_at":      now,
+				})
+			if result.Error != nil {
+				return 0, result.Error
+			}
+			if result.RowsAffected != 1 {
+				continue
+			}
+			row.TaskID = taskID
+			row.DraftVersion++
+		}
 		if strings.HasPrefix(strings.TrimSpace(row.TaskID), "memory_review_") {
 			continue
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"lazymind/core/common/orm"
@@ -297,8 +298,15 @@ func TestUpdateMetadataEnableAutoEvoMarksPendingDraftAuto(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile draft returned error: %v", err)
 	}
-	if nextDraft.DraftVersion != draft.DraftVersion || nextDraft.DraftStatus != draftStatusAutoPending {
-		t.Fatalf("draft after auto_evo = version %d status %q, want version %d status %q", nextDraft.DraftVersion, nextDraft.DraftStatus, draft.DraftVersion, draftStatusAutoPending)
+	if nextDraft.DraftVersion != draft.DraftVersion+1 || nextDraft.DraftStatus != draftStatusAutoPending {
+		t.Fatalf("draft after auto_evo = version %d status %q, want version %d status %q", nextDraft.DraftVersion, nextDraft.DraftStatus, draft.DraftVersion+1, draftStatusAutoPending)
+	}
+	var storedDraft orm.PersonalResourceDraft
+	if err := db.Where("resource_id = ?", state.ID).Take(&storedDraft).Error; err != nil {
+		t.Fatalf("query draft: %v", err)
+	}
+	if !strings.HasPrefix(storedDraft.TaskID, "personal_auto_evo_") {
+		t.Fatalf("task_id = %q, want generated personal auto-evo task", storedDraft.TaskID)
 	}
 	var review orm.PersonalResourceReviewSession
 	if err := db.Where("id = ?", preview.ReviewID).Take(&review).Error; err != nil {
