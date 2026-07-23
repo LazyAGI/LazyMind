@@ -32,6 +32,7 @@ from lazymind.chat.service.component import (
     ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
     USER_ATTACHMENT_TOOL_CONFIGS,
+    collect_query_appendices,
     collect_system_prompt_appendices,
     filter_tools,
     normalize_history_for_agent,
@@ -214,8 +215,13 @@ def _build_ask_user_tool() -> list:
     return [ask_user]
 
 
-def _should_register_ask_user(agentic_config: Dict[str, Any]) -> bool:
-    """Auto plugin sessions are mechanically non-interactive."""
+def _should_register_ask_user(
+    agentic_config: Dict[str, Any],
+    disabled_tools: set[str] | None = None,
+) -> bool:
+    """Respect explicit non-interactive requests and legacy auto plugin sessions."""
+    if 'ask_user' in (disabled_tools or set()):
+        return False
     return not (
         agentic_config.get('enable_plugin', True)
         and agentic_config.get('plugin_mode') == 'auto'
@@ -621,7 +627,7 @@ async def _handle_chat_impl(
     # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.
     # Auto plugin mode is non-interactive by contract: ask_user must be absent,
     # not merely discouraged by prompt text.
-    allow_ask_user = _should_register_ask_user(agentic_config)
+    allow_ask_user = _should_register_ask_user(agentic_config, disabled)
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
     ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
     artifact_tools = _build_chat_artifact_tools()
@@ -647,6 +653,7 @@ async def _handle_chat_impl(
         'skills_exposed': list(selected_skills or []),
     })
     prompt_builder = PromptBuilder.for_role(AgentRole.CHAT)
+    active_tool_configs = active_configs + attachment_configs + ask_user_configs
     add_standard_system_sections(
         prompt_builder,
         bool(all_tools),
@@ -657,7 +664,7 @@ async def _handle_chat_impl(
         current_query=language_query,
         conversation_history=agent_history,
         tool_prompt_appendices=collect_system_prompt_appendices(
-            active_configs + attachment_configs + ask_user_configs,
+            active_tool_configs,
         ),
         task_profile=task_profile,
         dynamic_prompt_modules=_cfg['dynamic_prompt_modules'],
@@ -717,6 +724,17 @@ async def _handle_chat_impl(
             task_profile is not None
             and task_profile.routing_review_required
         ),
+    )
+    prompt_builder.runtime(
+        'chat_tool_query_appendices_before', 'Active Tool Instructions',
+        '\n\n'.join(collect_query_appendices(active_tool_configs, 'before')),
+        'tool.registry', priority=90, authoritative=True, content_kind='instruction',
+    )
+    prompt_builder.runtime(
+        'chat_tool_query_appendices_after', 'Active Tool Instructions',
+        '\n\n'.join(collect_query_appendices(active_tool_configs, 'after')),
+        'tool.registry', priority=90, authoritative=True, content_kind='instruction',
+        placement='after_input',
     )
     prompt_bundle = prompt_builder.input(
         content=language_query,

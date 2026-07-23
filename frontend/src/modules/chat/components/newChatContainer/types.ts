@@ -108,4 +108,18 @@ export interface ChatMessage {
     scope: "conversation";
     intent_context: Record<string, unknown>;
   };
+  ask_pending?: {
+    ask_id: string;
+    questions: Array<{
+      text: string;
+      type: "boolean" | "single" | "multiple" | "text";
+      choices?: string[];
+      allow_other?: boolean;
+    }>;
+    title?: string;
+    description?: string;
+  };
+  ask_answered?: boolean;
+  ask_saved_answers?: Record<number, unknown>;
+  is_history?: boolean;
 }

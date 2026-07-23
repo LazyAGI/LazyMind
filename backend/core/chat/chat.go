@@ -174,9 +174,10 @@ type ArtifactCreatedEvent struct {
 // AskQuestion is a single question within an AskPendingEvent.
 // type is one of "boolean", "single", "multiple", "text".
 type AskQuestion struct {
-	Text    string   `json:"text"`
-	Type    string   `json:"type"`
-	Choices []string `json:"choices,omitempty"`
+	Text       string   `json:"text"`
+	Type       string   `json:"type"`
+	Choices    []string `json:"choices,omitempty"`
+	AllowOther *bool    `json:"allow_other,omitempty"`
 }
 
 // AskPendingEvent is emitted by ask_user (via _write_agent_data) on the main SSE stream.

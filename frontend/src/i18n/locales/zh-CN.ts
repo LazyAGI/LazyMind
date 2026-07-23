@@ -1025,6 +1025,7 @@ const zhCN = {
     askCardOtherPlaceholder: "请输入其他内容…",
     askCardOtherOption: "其他",
     askCardAnswerSeparator: "；",
+    askCardUnanswered: "用户未回复",
     askCardAria: "问题确认",
     artifactDownloadButton: "下载附件",
     artifactCollectorTitle: "附件与产物",
