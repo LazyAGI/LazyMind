@@ -799,7 +799,8 @@ class CloudOAuthService:
                 ]
                 if same_app_rows:
                     # Reuse the first PENDING/ERROR connection — refresh its
-                    # oauth_state so the new authorize_url is bound to this record.
+                    # oauth_state and credential so the new authorize_url,
+                    # callback, and token exchange all use the latest secrets.
                     reused = same_app_rows[0]
                     reused_connection_id = reused.connection_id
                     auth_state = self._decrypt_payload(
@@ -812,6 +813,16 @@ class CloudOAuthService:
                     auth_state['reauthorize_provider_tenant_key'] = ''
                     reused.auth_state_ciphertext = self._encrypt_payload(
                         auth_state, field_name='auth_state'
+                    )
+                    # Sync credential with the latest client_id/client_secret
+                    # from the request so the callback does not use stale secrets.
+                    credential = self._decrypt_payload(
+                        reused.credential_ciphertext, field_name='credential'
+                    )
+                    credential['client_id'] = normalized_client_id
+                    credential['client_secret'] = normalized_client_secret
+                    reused.credential_ciphertext = self._encrypt_payload(
+                        credential, field_name='credential'
                     )
                     reused.status = 'PENDING'
                     reused.last_error = ''
