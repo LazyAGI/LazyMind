@@ -353,6 +353,12 @@ func TestListEvalSetItemsMarksKnowledgeBaseReferenceDocAndChunkSelection(t *test
 		ID:        "eval_item_empty_doc",
 		EvalSetID: "eval_set_items_reference",
 	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:                "eval_item_empty_doc_with_chunk",
+		EvalSetID:         "eval_set_items_reference",
+		ReferenceChunkIDs: "chunk_orphaned",
+		ReferenceContext:  sampleReferenceContextWithChunk("chunk_orphaned"),
+	})
 
 	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets/eval_set_items_reference/items", "", "user_1")
 	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_items_reference"})
@@ -396,6 +402,11 @@ func TestListEvalSetItemsMarksKnowledgeBaseReferenceDocAndChunkSelection(t *test
 	if emptyDoc.ReferenceDocFromKnowledgeBase || emptyDoc.ReferenceDocInvalid ||
 		emptyDoc.ReferenceChunkSelected || emptyDoc.ReferenceChunkInvalid {
 		t.Fatalf("expected empty reference doc flags false, got %#v", emptyDoc)
+	}
+	emptyDocWithChunk := itemsByID["eval_item_empty_doc_with_chunk"]
+	if emptyDocWithChunk.ReferenceDocFromKnowledgeBase || emptyDocWithChunk.ReferenceDocInvalid ||
+		!emptyDocWithChunk.ReferenceChunkSelected || !emptyDocWithChunk.ReferenceChunkInvalid {
+		t.Fatalf("expected orphaned context chunk to be invalid, got %#v", emptyDocWithChunk)
 	}
 }
 
