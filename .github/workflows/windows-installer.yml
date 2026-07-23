@@ -46,7 +46,12 @@ jobs:
           $workspacePath = Join-Path $env:GITHUB_WORKSPACE "desktop\electron\pnpm-workspace.yaml"
           $workspace = Get-Content -LiteralPath $workspacePath -Raw
           if ($workspace -notmatch '(?m)^packages:\s*$') {
-            $workspace = "packages:`n  - `"."`n`n$workspace"
+            $workspace = @(
+              'packages:'
+              '  - "."'
+              ''
+              $workspace
+            ) -join "`n"
             Set-Content -LiteralPath $workspacePath -Value $workspace -NoNewline
           }
 
