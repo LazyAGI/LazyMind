@@ -674,6 +674,77 @@ def _validate_slot_references(
     return errors
 
 
+def _validate_material_semantics(
+    plugin_dict: Dict[str, Any],
+    state_dict: Dict[str, Any],
+) -> List[str]:
+    """Mirror the compiler's producer and self-overwrite material invariants."""
+    external_slots = {
+        str(slot.get('id'))
+        for slot in (plugin_dict.get('slots') or [])
+        if isinstance(slot, dict)
+        and slot.get('id')
+        and (slot.get('external') is True or slot.get('producer') == 'external')
+    }
+    producers: Dict[str, str] = {
+        material: 'external slot declaration' for material in external_slots
+    }
+    errors: List[str] = []
+    steps = state_dict.get('steps') or {}
+    if not isinstance(steps, dict):
+        return errors
+
+    def material_ref(value: Any) -> Optional[str]:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            raw = value.get('material') or value.get('slot') or value.get('id')
+            return str(raw) if raw else None
+        return None
+
+    for step_id, step in steps.items():
+        if not isinstance(step, dict):
+            continue
+        consumed = set()
+        for value in step.get('inputs') or []:
+            material = material_ref(value)
+            if material:
+                consumed.add(material)
+            if isinstance(value, dict):
+                for alternative in value.get('alternatives') or []:
+                    alternative_id = material_ref(alternative)
+                    if alternative_id:
+                        consumed.add(alternative_id)
+
+        for value in step.get('outputs') or []:
+            material = material_ref(value)
+            if not material:
+                continue
+            if material in consumed:
+                errors.append(
+                    f"step '{step_id}' cannot both consume and produce material '{material}'"
+                )
+            previous = producers.get(material)
+            if previous:
+                errors.append(
+                    f"material '{material}' has multiple producers: "
+                    f"{previous} and step '{step_id}'"
+                )
+            else:
+                producers[material] = f"step '{step_id}'"
+    return errors
+
+
+def _validate_material_contract(
+    plugin_dict: Dict[str, Any],
+    state_dict: Dict[str, Any],
+) -> List[str]:
+    return [
+        *_validate_slot_references(plugin_dict, state_dict),
+        *_validate_material_semantics(plugin_dict, state_dict),
+    ]
+
+
 _SLOT_REPAIR_SYSTEM = (
     'You are a plugin schema doctor. You receive a plugin.yaml (slots definition) and a '
     'state.yml (inputs/outputs/route/skip expressions) that have mismatched slot IDs.\n\n'
@@ -1897,7 +1968,7 @@ async def repair_state_machine(req: RepairRequest) -> RepairResponse:
     )
 
     # Pre-validate slot references so we can inject them into the repair prompt.
-    pre_slot_errors = _validate_slot_references(plugin_dict, state_dict)
+    pre_slot_errors = _validate_material_contract(plugin_dict, state_dict)
 
     warnings_section = ''
     if req.warnings:
@@ -2084,22 +2155,26 @@ async def repair_state_machine(req: RepairRequest) -> RepairResponse:
     # they are confusing and can mask V8 validation errors if left in.
     fixed_dict.pop('slots', None)
     fixed_yaml_out = yaml.dump(fixed_dict, allow_unicode=True, sort_keys=False)
-    slot_errors = _validate_slot_references(plugin_dict, fixed_dict)
-    if slot_errors:
+    slot_errors = _validate_material_contract(plugin_dict, fixed_dict)
+    for repair_attempt in range(MAX_PATCH_RETRIES):
+        if not slot_errors:
+            break
         logger.info('[repair/statemachine] slot errors on final state: %s', slot_errors)
         plugin_dict, fixed_dict = _repair_slots_only(plugin_dict, fixed_dict, slot_errors, req.llm_config or {})
         fixed_dict.pop('slots', None)
         fixed_yaml_out = yaml.dump(fixed_dict, allow_unicode=True, sort_keys=False)
-        remaining_slot_errors = _validate_slot_references(plugin_dict, fixed_dict)
-        if remaining_slot_errors:
-            logger.warning('[repair/statemachine] slot repair incomplete: %s', remaining_slot_errors)
-            remaining.extend([f'slot repair incomplete: {e}' for e in remaining_slot_errors])
-        else:
-            logger.info('[repair/statemachine] slot repair succeeded')
+        slot_errors = _validate_material_contract(plugin_dict, fixed_dict)
+        logger.info(
+            '[repair/statemachine] material repair attempt=%d remaining=%d',
+            repair_attempt + 1,
+            len(slot_errors),
+        )
         repaired_plugin_yaml = yaml.dump(plugin_dict, allow_unicode=True, sort_keys=False)
+    if slot_errors:
+        logger.warning('[repair/statemachine] material repair incomplete: %s', slot_errors)
+        remaining.extend([f'material repair incomplete: {error}' for error in slot_errors])
     elif pre_slot_errors:
-        # Pre-existing slot errors were fixed by the LLM rewriting state.yml (good path).
-        logger.info('[repair/statemachine] pre-existing slot errors resolved by state repair')
+        logger.info('[repair/statemachine] material repair succeeded')
 
     logger.info(
         '[repair/statemachine] SUCCESS state_yaml_len=%d plugin_yaml_updated=%s remaining=%s',

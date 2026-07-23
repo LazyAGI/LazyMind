@@ -20,7 +20,6 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
-	"lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/plugin"
 	"lazymind/core/state"
@@ -165,6 +164,14 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if query == "" {
 		common.ReplyErr(w, "query required", http.StatusBadRequest)
 		return
+	}
+	// Automated aggregate tasks send a large, structured model query while the
+	// conversation should display only the user's task request. Keep those two
+	// representations separate: query remains the model input and display_query
+	// is used only for persisted/rendered chat history.
+	displayQuery := query
+	if v, ok := raw["display_query"].(string); ok && strings.TrimSpace(v) != "" {
+		displayQuery = strings.TrimSpace(v)
 	}
 
 	userID := store.UserID(r)
@@ -369,7 +376,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			fmt.Printf("[PLUGIN_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
 		}
 	}
-	historyExt := buildChatHistoryExt(raw, query)
+	historyExt := buildChatHistoryExt(raw, displayQuery)
 	if err := applyChatAttachmentConversion(r.Context(), reqBody); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "prepare chat attachments failed", err), http.StatusBadGateway)
 		return
@@ -379,7 +386,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	stateStore := store.State()
 
 	if !stream {
-		handleNonStreamChat(w, reqCtx, db, stateStore, baseURL, reqBody, convID, query, target, historyExt)
+		handleNonStreamChat(w, reqCtx, db, stateStore, baseURL, reqBody, convID, displayQuery, target, historyExt)
 		return
 	}
 
@@ -387,7 +394,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	// task center. Status is derived on read via resolveTaskStatus (chat_histories
 	// presence), so no status callback is needed after the SSE drains.
 	if runInBackground, _ := raw["run_in_background"].(bool); runInBackground {
-		taskTitle := query
+		taskTitle := displayQuery
 		if len([]rune(taskTitle)) > 40 {
 			taskTitle = string([]rune(taskTitle)[:40]) + "..."
 		}
@@ -398,7 +405,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			Title:          &taskTitle,
 			Status:         "running",
 		}
-		_ = taskcenter.CreateTask(reqCtx, db, bgTask)
+		if taskcenter.CreateTask(reqCtx, db, bgTask) == nil {
+			_ = db.WithContext(reqCtx).Model(&orm.Conversation{}).
+				Where("id = ? AND create_user_id = ?", convID, userID).
+				Update("is_task_conv", true).Error
+		}
 	}
 
 	// Mark the last assistant turn that had an ask_pending as answered.
@@ -411,7 +422,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, query, target, dualReply, historyExt)
+	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, displayQuery, target, dualReply, historyExt)
 }
 
 // ResumeChat text POST /api/v1/conversations:resumeChat
@@ -984,7 +995,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	}
 	item := map[string]any{
 		"seq":               h.Seq,
-		"query":             h.RawContent,
+		"query":             displayChatHistoryContent(h.RawContent),
 		"result":            stripThinkTags(stripToolTags(h.Result)),
 		"id":                h.ID,
 		"feed_back":         h.FeedBack,
@@ -1013,12 +1024,66 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	return item
 }
 
+func displayChatHistoryContent(raw string) string {
+	const openTag = "<current-task-request>"
+	const closeTag = "</current-task-request>"
+	start := strings.LastIndex(raw, openTag)
+	if start < 0 {
+		return raw
+	}
+	start += len(openTag)
+	endOffset := strings.Index(raw[start:], closeTag)
+	if endOffset < 0 {
+		return raw
+	}
+	content := strings.TrimSpace(raw[start : start+endOffset])
+	content = strings.TrimPrefix(content, "这是当前需要执行的任务要求，请使用上方已完成的历史执行结果作答：")
+	return strings.TrimSpace(content)
+}
+
 func conversationHistoryResponseItems(histories []orm.ChatHistory) []map[string]any {
 	list := make([]map[string]any, 0, len(histories))
 	for _, h := range histories {
 		list = append(list, chatHistoryToResponseItem(h))
 	}
 	return list
+}
+
+func collectedInputsForConversation(ctx context.Context, db *gorm.DB, convID string) []map[string]any {
+	var rows []struct {
+		UpstreamTaskID       string
+		SourceConversationID string
+		SummaryText          string
+		SnapshotJSON         string
+		Position             int
+	}
+	err := db.WithContext(ctx).Table("task_run_inputs tri").
+		Select("tri.upstream_task_id, tro.conversation_id AS source_conversation_id, tro.summary_text, tri.snapshot_json, tri.position").
+		Joins("JOIN task_center_tasks downstream ON downstream.id = tri.downstream_task_id AND downstream.archived_at IS NULL").
+		Joins("JOIN task_run_outputs tro ON tro.id = tri.output_id").
+		Where("downstream.conversation_id = ?", convID).
+		Order("tri.position ASC").Scan(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	result := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		var snapshot map[string]any
+		_ = json.Unmarshal([]byte(row.SnapshotJSON), &snapshot)
+		item := map[string]any{
+			"task_id":         row.UpstreamTaskID,
+			"conversation_id": row.SourceConversationID,
+			"summary":         row.SummaryText,
+			"position":        row.Position,
+		}
+		for _, key := range []string{"source_name", "executed_at", "mode"} {
+			if value, ok := snapshot[key]; ok {
+				item[key] = value
+			}
+		}
+		result = append(result, item)
+	}
+	return result
 }
 
 func filterConversationSearchConfigDatasetList(ctx context.Context, db *gorm.DB, searchCfg any) any {
@@ -1165,10 +1230,14 @@ func GetConversationHistory(w http.ResponseWriter, r *http.Request) {
 	if end < total {
 		nextToken = encodeListPageToken(end, pageSize, total)
 	}
+	historyItems := conversationHistoryResponseItems(page)
+	if collectedInputs := collectedInputsForConversation(r.Context(), store.DB(), convID); len(collectedInputs) > 0 && len(historyItems) > 0 {
+		historyItems[0]["collected_inputs"] = collectedInputs
+	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{
 		"conversation_id": convID,
 		"name":            "conversations/" + convID,
-		"history":         conversationHistoryResponseItems(page),
+		"history":         historyItems,
 		"total_size":      total,
 		"next_page_token": nextToken,
 	})
@@ -1187,19 +1256,24 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		userID = "0"
 	}
 	db := store.DB()
-	res := db.Where("id = ? AND create_user_id = ?", convID, userID).Delete(&orm.Conversation{})
-	if res.RowsAffected == 0 {
+	now := time.Now().UTC()
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&orm.Conversation{}).
+			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, []string{convID}, now)
+	}); errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 		return
-	}
-	db.Where("conversation_id = ?", convID).Delete(&orm.ChatHistory{})
-	db.Where("conversation_id = ?", convID).Delete(&orm.MultiAnswersChatHistory{})
-	db.Where("conversation_id = ?", convID).Delete(&orm.ConversationArtifact{})
-	// Cascade-delete task center entries for this conversation.
-	db.Where("conversation_id = ?", convID).Delete(&orm.TaskCenterTask{})
-	if err := removeConversationArtifactFiles(userID, convID); err != nil {
-		log.Logger.Warn().Err(err).Str("conversation_id", convID).
-			Msg("remove main chat artifact files failed")
+	} else if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
@@ -1255,28 +1329,15 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("id IN ?", ownedIDs).Delete(&orm.Conversation{}).Error; err != nil {
+		now := time.Now().UTC()
+		if err := tx.Model(&orm.Conversation{}).Where("id IN ? AND deleted_at IS NULL", ownedIDs).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.ChatHistory{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.MultiAnswersChatHistory{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.ConversationArtifact{}).Error; err != nil {
-			return err
-		}
-		return tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.TaskCenterTask{}).Error
+		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, ownedIDs, now)
 	}); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "batch delete conversations failed", err), http.StatusInternalServerError)
 		return
-	}
-	for _, conversationID := range ownedIDs {
-		if err := removeConversationArtifactFiles(userID, conversationID); err != nil {
-			log.Logger.Warn().Err(err).Str("conversation_id", conversationID).
-				Msg("remove main chat artifact files failed")
-		}
 	}
 
 	writeConversationJSON(w, http.StatusOK, map[string]any{
@@ -1306,7 +1367,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db := store.DB()
-	q := db.Model(&orm.Conversation{}).Where("create_user_id = ?", userID)
+	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL", userID)
 	if keyword != "" {
 		q = q.Where("display_name LIKE ?", "%"+keyword+"%")
 	}

@@ -461,7 +461,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           },
         },
         models: [t("chat.lazyMindModel")],
-        thinking_depth: useChatThinkStore.getState().thinkingDepth,
+        thinking_depth:
+          extras?.thinking_depth ?? useChatThinkStore.getState().thinkingDepth,
         // enable_thinking: think ? true : false,
         stream: true,
         input,

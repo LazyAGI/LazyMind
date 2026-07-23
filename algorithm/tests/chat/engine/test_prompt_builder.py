@@ -49,3 +49,21 @@ def test_prompt_builder_keeps_input_boundary_without_runtime_context() -> None:
         .build()
     )
     assert bundle.current_input == '### Task Objective\n\nDo the work.'
+
+
+def test_prompt_builder_renders_after_input_guard_after_user_instruction() -> None:
+    bundle = (
+        PromptBuilder.for_role(AgentRole.CHAT)
+        .runtime(
+            'guard', 'Tool Guard', 'Call the tool.', 'tool.registry',
+            authoritative=True, placement='after_input',
+        )
+        .input('Ask one at a time.', source='user')
+        .build()
+    )
+
+    assert bundle.current_input.index('Ask one at a time.') < bundle.current_input.index(
+        'Call the tool.'
+    )
+    assert 'Post-Instruction Runtime Guard' not in bundle.current_input
+    assert bundle.input_content == 'Ask one at a time.'

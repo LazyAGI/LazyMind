@@ -13,7 +13,11 @@ from lazyllm.tools.agent.skill_manager import SkillManager
 from lazymind.common.skill_document import require_valid_skill_document
 from lazymind.common.integrations.remote_fs import RemoteFS
 from lazymind.common.skill_remote_store import SkillRemoteStore
-from lazymind.common.skill_storage_key import INTERNAL_SKILL_CATEGORY
+from lazymind.common.skill_storage_key import (
+    EXTERNAL_SKILL_CATEGORY,
+    INTERNAL_SKILL_CATEGORY,
+    parse_skill_storage_key,
+)
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
 from lazymind.review.skill_review.config import DEFAULT_REPORT_DIR_NAME
@@ -150,7 +154,7 @@ def _run_skill_review(
     work_dir = _resolve_artifact_dir(request.artifact_dir, requestid=request.requestid)
     read_user_ids = [request.user_id] if request.user_id else None
 
-    raw_sessions = read_session(request.start_time, request.end_time, read_user_ids)
+    raw_sessions = read_session(request.session_ids, read_user_ids)
     if request.user_id:
         user_sessions = _group_sessions_by_user(raw_sessions)
         user_sessions = {
@@ -487,8 +491,24 @@ def _apply_skill_review_records(
             'input_count': 0,
             'output_count': 0,
             'error_count': 0,
+            'skipped_count': 0,
             'applied': [],
             'errors': [],
+            'skipped': [],
+        }
+
+    skipped = [_external_patch_skip_result(record) for record in records if _is_external_patch(record)]
+    actionable_records = [record for record in records if not _is_external_patch(record)]
+    if not actionable_records:
+        return 0, {
+            'status': 'completed',
+            'input_count': len(records),
+            'output_count': 0,
+            'error_count': 0,
+            'skipped_count': len(skipped),
+            'applied': [],
+            'errors': [],
+            'skipped': skipped,
         }
 
     skill_fs_url = str(_cfg['skill_fs_url'] or '').strip()
@@ -498,26 +518,31 @@ def _apply_skill_review_records(
     applied: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
 
-    for record in records:
+    for record in actionable_records:
         try:
             applied.append(_apply_skill_review_record(record, store))
         except Exception as exc:
             LOG.exception(f'[SkillReview] failed to apply resolution {record.id}: {exc}')
             errors.append(stage_error('apply', record.id, exc))
 
-    status = 'failed' if records and not applied else ('partial' if errors else 'completed')
+    status = 'failed' if actionable_records and not applied else ('partial' if errors else 'completed')
     report = {
         'status': status,
         'input_count': len(records),
         'output_count': len(applied),
         'error_count': len(errors),
+        'skipped_count': len(skipped),
         'applied': applied,
         'errors': errors,
+        'skipped': skipped,
     }
     return len(applied), report
 
 
 def _apply_skill_review_record(record: SkillReviewResolution, store: SkillRemoteStore) -> dict[str, Any]:
+    if _is_external_patch(record):
+        return _external_patch_skip_result(record)
+
     document = require_valid_skill_document(
         record.skill_content,
         expected_name=record.skill_name,
@@ -579,6 +604,23 @@ def _apply_skill_review_record(record: SkillReviewResolution, store: SkillRemote
         }
 
     raise ValueError(f'unsupported skill review resolution type {record.type!r}')
+
+
+def _is_external_patch(record: SkillReviewResolution) -> bool:
+    if record.type != 'patch':
+        return False
+    category, _ = parse_skill_storage_key(record.target_skill_key)
+    return category == EXTERNAL_SKILL_CATEGORY
+
+
+def _external_patch_skip_result(record: SkillReviewResolution) -> dict[str, Any]:
+    return {
+        'id': record.id,
+        'type': record.type,
+        'target_skill_key': record.target_skill_key,
+        'status': 'skipped',
+        'reason': 'external_skill_patch_not_allowed',
+    }
 
 
 def _skill_package_exists(store: SkillRemoteStore, category: str, name: str) -> bool:

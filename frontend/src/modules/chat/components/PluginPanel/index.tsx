@@ -1,11 +1,17 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Popconfirm, Tooltip } from 'antd';
+import { FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
 import { usePluginSession } from '@/modules/chat/hooks/usePlugin';
 import { usePluginStore } from '@/modules/chat/store/pluginPanel';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { PluginSessionApi } from '@/modules/chat/utils/request';
 import StateGraphModal from '@/components/StateGraphModal';
+import {
+  PLUGIN_PANEL_EXPANDED_EVENT,
+  PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX,
+} from '@/modules/chat/constants/chat';
 import type {
   PluginSession,
   SlotRevision,
@@ -16,7 +22,8 @@ import type {
   CompositeColumnNode,
   InnerTabsNode,
 } from '@/modules/chat/store/pluginPanel';
-import { SlotRenderer, SlotEditingContext } from './SlotComponents';
+import { SlotRenderer, SlotDownloadContext, SlotEditingContext } from './SlotComponents';
+import { WriterIRToolbarTargetContext } from './WriterIRControl';
 import './PluginPanel.scss';
 
 /** Parse a JSON intent context string and return the text field, or '' if empty/invalid. */
@@ -381,6 +388,37 @@ function getTabSlotRevisions(
     return slots.filter((s) => s.slot === artifactKey && s.step_id === tab.id);
   }
   return slots.filter((s) => s.slot === artifactKey && s.selected);
+}
+
+function isJsonArtifactRevision(slot: SlotRevision): boolean {
+  if (slot.content_type === 'json') return true;
+  const raw = slot.artifact_value;
+  if (!raw || typeof raw !== 'object') return false;
+  if (raw.type === 'json') return true;
+  const source = String(raw.filename ?? raw.name ?? raw.path ?? raw.url ?? '');
+  return source.split(/[?#]/, 1)[0].toLowerCase().endsWith('.json');
+}
+
+/** Prefer the structured WriterDocument over its Markdown export when both exist. */
+function resolveWriterFinalSlotDefs(tab: TabDef, session: PluginSession): SlotDef[] {
+  if (session.plugin_id !== 'writer-plugin') return tab.slots;
+  const declaredSlotIds = new Set(tab.slots.map((slot) => slot.id));
+
+  return tab.slots.flatMap((slotDef) => {
+    if (!slotDef.id.endsWith('_md')) return [slotDef];
+    const irSlotId = slotDef.id.slice(0, -3);
+    const hasIRArtifact = getTabSlotRevisions(session, tab, irSlotId)
+      .some(isJsonArtifactRevision);
+    if (!hasIRArtifact) return [slotDef];
+    if (declaredSlotIds.has(irSlotId)) return [];
+
+    return [{
+      ...slotDef,
+      id: irSlotId,
+      label: slotDef.label.replace(/\s*[（(]\s*markdown\s*[）)]/i, '').trim() || irSlotId,
+      type: 'text',
+    }];
+  });
 }
 
 /** Get all distinct sort_orders present across the participating slots. */
@@ -804,6 +842,85 @@ function SortableImageList({
   );
 }
 
+function NamedTabSlot({
+  slotDef,
+  revisions,
+  session,
+  onRefresh,
+  onReference,
+  onFocusSortOrder,
+  onAddItem,
+}: {
+  slotDef: SlotDef;
+  revisions: SlotRevision[];
+  session: PluginSession;
+  onRefresh?: () => void;
+  onReference?: (slot: SlotRevision) => void;
+  onFocusSortOrder?: (sortOrder: number | undefined) => void;
+  onAddItem: () => void;
+}) {
+  const { t } = useTranslation();
+  const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null);
+  const slotLabel = slotDef.label ?? slotDef.id;
+  const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
+  const isDraggable = Boolean(slotDef.ordered);
+
+  return (
+    <WriterIRToolbarTargetContext.Provider value={toolbarTarget}>
+      <div className='plugin-panel__named-slot'>
+        <div className='plugin-panel__slot-heading'>
+          {(slotDef.label || slotDef.id) && (
+            <span className='plugin-panel__slot-label'>{slotLabel}</span>
+          )}
+          <div
+            className='plugin-panel__slot-toolbar writer-ir'
+            ref={setToolbarTarget}
+          />
+        </div>
+        {revisions.length === 0 ? (
+          <div
+            className='plugin-panel__slot-placeholder'
+            aria-label={`${slotLabel} pending`}
+          >
+            <span>—</span>
+          </div>
+        ) : isImageList ? (
+          <SortableImageList
+            revisions={revisions}
+            session={session}
+            slotDef={slotDef}
+            isDraggable={isDraggable}
+            onRefresh={onRefresh}
+            onReference={onReference}
+            onFocusSortOrder={onFocusSortOrder}
+            onAddItem={onAddItem}
+          />
+        ) : (
+          revisions.map((rev) => (
+            <div
+              key={`${rev.slot_id}-${rev.list_index ?? -1}`}
+              onClick={() => onFocusSortOrder?.(rev.sort_order)}
+              role='button'
+              tabIndex={0}
+              aria-label={t('chat.pluginContentItemAria', { index: rev.sort_order ?? '' })}
+            >
+              <SlotRenderer
+                slot={rev}
+                expectedType={slotDef.type}
+                sessionId={session.session_id}
+                slotId={slotDef.id}
+                revisionCount={rev.revision_count}
+                onRefresh={onRefresh}
+                onReference={onReference}
+              />
+            </div>
+          ))
+        )}
+      </div>
+    </WriterIRToolbarTargetContext.Provider>
+  );
+}
+
 function TabSlotGrid({
   tab,
   session,
@@ -817,7 +934,6 @@ function TabSlotGrid({
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
 }) {
-  const { t } = useTranslation();
   const addFileInputRef = useRef<HTMLInputElement>(null);
   const addingSlotIdRef = useRef<string>('');
   const addingSlotTypeRef = useRef<string>('');
@@ -862,7 +978,7 @@ function TabSlotGrid({
     const filtered = slotDefs.filter((s) => visible.has(s.id));
     return filtered.length > 0 ? filtered : slotDefs;
   };
-  const visibleSlots = resolveVisibleSlots(tab.slots);
+  const visibleSlots = resolveVisibleSlots(resolveWriterFinalSlotDefs(tab, session));
   return (
     <div className={`plugin-panel__tab-content plugin-panel__tab-content--${tab.layout ?? 'vertical'}`}>
       {/* Hidden file input for adding new items */}
@@ -881,54 +997,17 @@ function TabSlotGrid({
         if (hideEmpty && revisions.length === 0) {
           return null;
         }
-        const slotLabel = slotDef.label ?? slotDef.id;
-        const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
-        const isDraggable = Boolean(slotDef.ordered);
         return (
-          <div key={slotDef.id} className='plugin-panel__named-slot'>
-            {(slotDef.label || slotDef.id) && (
-              <span className='plugin-panel__slot-label'>{slotLabel}</span>
-            )}
-            {revisions.length === 0 ? (
-              <div
-                className='plugin-panel__slot-placeholder'
-                aria-label={`${slotLabel} pending`}
-              >
-                <span>—</span>
-              </div>
-            ) : isImageList ? (
-              <SortableImageList
-                revisions={revisions}
-                session={session}
-                slotDef={slotDef}
-                isDraggable={isDraggable}
-                onRefresh={onRefresh}
-                onReference={onReference}
-                onFocusSortOrder={onFocusSortOrder}
-                onAddItem={() => handleAddItem(slotDef.id, slotDef.type)}
-              />
-            ) : (
-              revisions.map((rev) => (
-                <div
-                  key={`${rev.slot_id}-${rev.list_index ?? -1}`}
-                  onClick={() => onFocusSortOrder?.(rev.sort_order)}
-                  role='button'
-                  tabIndex={0}
-                  aria-label={t('chat.pluginContentItemAria', { index: rev.sort_order ?? '' })}
-                >
-                  <SlotRenderer
-                    slot={rev}
-                    expectedType={slotDef.type}
-                    sessionId={session.session_id}
-                    slotId={slotDef.id}
-                    revisionCount={rev.revision_count}
-                    onRefresh={onRefresh}
-                    onReference={onReference}
-                  />
-                </div>
-              ))
-            )}
-          </div>
+          <NamedTabSlot
+            key={slotDef.id}
+            slotDef={slotDef}
+            revisions={revisions}
+            session={session}
+            onRefresh={onRefresh}
+            onReference={onReference}
+            onFocusSortOrder={onFocusSortOrder}
+            onAddItem={() => handleAddItem(slotDef.id, slotDef.type)}
+          />
         );
       })}
     </div>
@@ -940,6 +1019,25 @@ const STATUS_KEY: Record<string, string> = {
   completed: 'chat.pluginStatusDone',
   waiting: 'chat.pluginStatusWaiting',
 };
+
+function readPersistedExpanded(conversationId: string): boolean {
+  try {
+    return localStorage.getItem(`${PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX}${conversationId}`) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function persistExpanded(conversationId: string, expanded: boolean) {
+  try {
+    localStorage.setItem(
+      `${PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX}${conversationId}`,
+      String(expanded),
+    );
+  } catch {
+    // The live layout state still works when browser storage is unavailable.
+  }
+}
 
 export function PluginPanel({
   conversationId,
@@ -967,10 +1065,32 @@ export function PluginPanel({
   const [ui, setUI] = useState<PluginUI>({});
   const [dismissing, setDismissing] = useState(false);
   const [stateGraphOpen, setStateGraphOpen] = useState(false);
+  const [expanded, setExpanded] = useState(() => readPersistedExpanded(conversationId));
+  const initialExpandedRef = useRef(expanded);
   // Track which slots are currently being edited; destructive/navigation actions
   // stay disabled until each editor saves or cancels.
   const editingSlots = useRef<Set<string>>(new Set());
   const [anySlotEditing, setAnySlotEditing] = useState(false);
+
+  const setExpandedMode = useCallback((nextExpanded: boolean) => {
+    if (nextExpanded) setCollapsed(false);
+    setExpanded(nextExpanded);
+    persistExpanded(conversationId, nextExpanded);
+    window.dispatchEvent(new CustomEvent(PLUGIN_PANEL_EXPANDED_EVENT, {
+      detail: { conversationId, expanded: nextExpanded },
+    }));
+  }, [conversationId]);
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent(PLUGIN_PANEL_EXPANDED_EVENT, {
+      detail: { conversationId, expanded: initialExpandedRef.current },
+    }));
+    return () => {
+      window.dispatchEvent(new CustomEvent(PLUGIN_PANEL_EXPANDED_EVENT, {
+        detail: { conversationId, expanded: false },
+      }));
+    };
+  }, [conversationId]);
 
   const handleDismiss = useCallback(async () => {
     if (!session || dismissing || anySlotEditing) return;
@@ -1093,10 +1213,10 @@ export function PluginPanel({
     onSendMessage?.(`${t('chat.pluginRollbackPrefix')}${stepId}`);
   }
 
-  return (
+  const panel = (
     <SlotEditingContext.Provider value={{ setEditing: handleSlotEditingChange }}>
     <div
-      className={`plugin-panel plugin-panel--${displayStatus}${collapsed ? ' plugin-panel--collapsed' : ''}`}
+      className={`plugin-panel plugin-panel--${displayStatus}${collapsed ? ' plugin-panel--collapsed' : ''}${expanded ? ' plugin-panel--expanded' : ''}`}
       data-session-id={session.session_id}
       aria-label={t('chat.pluginPanelTitle')}
     >
@@ -1143,74 +1263,88 @@ export function PluginPanel({
               )}
             </div>
           )}
-          <Tooltip
-            title={anySlotEditing ? t('chat.pluginFinishEditingFirst') : undefined}
-            placement='bottomRight'
+          <button
+            type='button'
+            className='plugin-panel__expand-btn'
+            onClick={() => setExpandedMode(!expanded)}
+            aria-label={t(expanded ? 'chat.pluginPanelShrink' : 'chat.pluginPanelExpand')}
+            title={t(expanded ? 'chat.pluginPanelShrink' : 'chat.pluginPanelExpand')}
           >
-            <span
-              className='plugin-panel__header-action-wrap'
-              tabIndex={anySlotEditing ? 0 : undefined}
-              aria-label={anySlotEditing ? t('chat.pluginFinishEditingFirst') : undefined}
+            {expanded ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+            <span>{t(expanded ? 'chat.pluginPanelShrinkShort' : 'chat.pluginPanelExpandShort')}</span>
+          </button>
+          {!expanded && (
+            <Tooltip
+              title={anySlotEditing ? t('chat.pluginFinishEditingFirst') : undefined}
+              placement='bottomRight'
             >
-              <Popconfirm
-                title={t('chat.pluginDismissConfirmTitle')}
-                description={t('chat.pluginDismissConfirmDesc')}
-                onConfirm={handleDismiss}
-                okText={t('chat.pluginDismissConfirmOk')}
-                cancelText={t('chat.pluginDismissConfirmCancel')}
-                okButtonProps={{ danger: true, size: 'small' }}
-                cancelButtonProps={{ size: 'small' }}
-                disabled={dismissDisabled}
-                placement='bottomRight'
+              <span
+                className='plugin-panel__header-action-wrap'
+                tabIndex={anySlotEditing ? 0 : undefined}
+                aria-label={anySlotEditing ? t('chat.pluginFinishEditingFirst') : undefined}
+              >
+                <Popconfirm
+                  title={t('chat.pluginDismissConfirmTitle')}
+                  description={t('chat.pluginDismissConfirmDesc')}
+                  onConfirm={handleDismiss}
+                  okText={t('chat.pluginDismissConfirmOk')}
+                  cancelText={t('chat.pluginDismissConfirmCancel')}
+                  okButtonProps={{ danger: true, size: 'small' }}
+                  cancelButtonProps={{ size: 'small' }}
+                  disabled={dismissDisabled}
+                  placement='bottomRight'
+                >
+                  <button
+                    type='button'
+                    className='plugin-panel__dismiss-btn'
+                    disabled={dismissDisabled}
+                    aria-label={t('chat.pluginDismissBtn')}
+                    title={anySlotEditing ? undefined : t('chat.pluginDismissBtn')}
+                  >
+                    <svg width='12' height='12' viewBox='0 0 12 12' fill='none' xmlns='http://www.w3.org/2000/svg' aria-hidden='true'>
+                      <path d='M2 2L10 10M10 2L2 10' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' />
+                    </svg>
+                  </button>
+                </Popconfirm>
+              </span>
+            </Tooltip>
+          )}
+          {!expanded && (
+            <Tooltip
+              title={collapseDisabled ? t('chat.pluginFinishEditingFirst') : undefined}
+              placement='bottomRight'
+            >
+              <span
+                className='plugin-panel__header-action-wrap'
+                tabIndex={collapseDisabled ? 0 : undefined}
+                aria-label={collapseDisabled ? t('chat.pluginFinishEditingFirst') : undefined}
               >
                 <button
                   type='button'
-                  className='plugin-panel__dismiss-btn'
-                  disabled={dismissDisabled}
-                  aria-label={t('chat.pluginDismissBtn')}
-                  title={anySlotEditing ? undefined : t('chat.pluginDismissBtn')}
+                  className='plugin-panel__collapse-btn'
+                  onClick={() => setCollapsed((c) => !c)}
+                  disabled={collapseDisabled}
+                  aria-label={collapsed ? t('chat.pluginPanelExpand') : t('chat.pluginPanelCollapse')}
+                  title={collapseDisabled
+                    ? undefined
+                    : collapsed
+                      ? t('chat.pluginPanelExpand')
+                      : t('chat.pluginPanelCollapse')}
                 >
-                  <svg width='12' height='12' viewBox='0 0 12 12' fill='none' xmlns='http://www.w3.org/2000/svg' aria-hidden='true'>
-                    <path d='M2 2L10 10M10 2L2 10' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' />
+                  <svg
+                    width='12'
+                    height='12'
+                    viewBox='0 0 12 12'
+                    fill='none'
+                    xmlns='http://www.w3.org/2000/svg'
+                    className={`plugin-panel__collapse-icon${collapsed ? ' plugin-panel__collapse-icon--up' : ''}`}
+                  >
+                    <path d='M2 4L6 8L10 4' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
                   </svg>
                 </button>
-              </Popconfirm>
-            </span>
-          </Tooltip>
-          <Tooltip
-            title={collapseDisabled ? t('chat.pluginFinishEditingFirst') : undefined}
-            placement='bottomRight'
-          >
-            <span
-              className='plugin-panel__header-action-wrap'
-              tabIndex={collapseDisabled ? 0 : undefined}
-              aria-label={collapseDisabled ? t('chat.pluginFinishEditingFirst') : undefined}
-            >
-              <button
-                type='button'
-                className='plugin-panel__collapse-btn'
-                onClick={() => setCollapsed((c) => !c)}
-                disabled={collapseDisabled}
-                aria-label={collapsed ? t('chat.pluginPanelExpand') : t('chat.pluginPanelCollapse')}
-                title={collapseDisabled
-                  ? undefined
-                  : collapsed
-                    ? t('chat.pluginPanelExpand')
-                    : t('chat.pluginPanelCollapse')}
-              >
-                <svg
-                  width='12'
-                  height='12'
-                  viewBox='0 0 12 12'
-                  fill='none'
-                  xmlns='http://www.w3.org/2000/svg'
-                  className={`plugin-panel__collapse-icon${collapsed ? ' plugin-panel__collapse-icon--up' : ''}`}
-                >
-                  <path d='M2 4L6 8L10 4' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
-                </svg>
-              </button>
-            </span>
-          </Tooltip>
+              </span>
+            </Tooltip>
+          )}
         </div>
       </div>
 
@@ -1261,13 +1395,15 @@ export function PluginPanel({
                 role='tabpanel'
                 hidden={idx !== activeTabIdx}
               >
-                <TabSlotGrid
-                  tab={tab}
-                  session={session}
-                  onRefresh={refresh}
-                  onReference={onReference}
-                  onFocusSortOrder={handleFocusSortOrder}
-                />
+                <SlotDownloadContext.Provider value={idx === tabs.length - 1}>
+                  <TabSlotGrid
+                    tab={tab}
+                    session={session}
+                    onRefresh={refresh}
+                    onReference={onReference}
+                    onFocusSortOrder={handleFocusSortOrder}
+                  />
+                </SlotDownloadContext.Provider>
               </div>
             ))
           ) : (
@@ -1361,4 +1497,10 @@ export function PluginPanel({
     )}
     </SlotEditingContext.Provider>
   );
+
+  if (expanded) {
+    const host = document.querySelector('.detail-container');
+    if (host) return createPortal(panel, host);
+  }
+  return panel;
 }

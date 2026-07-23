@@ -3,10 +3,7 @@ package algo
 type SkillReviewRequest struct {
 	RequestID    string         `json:"requestid"`
 	UserID       string         `json:"user_id,omitempty"`
-	StartTime    string         `json:"start_time"`
-	EndTime      string         `json:"end_time"`
-	MinUserTurns int            `json:"min_user_turns,omitempty"`
-	MinToolTurns int            `json:"min_tool_turns,omitempty"`
+	SessionIDs   []string       `json:"session_ids"`
 	ModelConfigs map[string]any `json:"model_configs"`
 }
 

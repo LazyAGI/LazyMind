@@ -32,6 +32,7 @@ export interface WriterDocument {
   stage: WriterStage;
   title: string;
   blocks: WriterBlock[];
+  ui_editable?: boolean;
   revision?: string | null;
   metadata?: Record<string, unknown>;
   provider_binding?: Record<string, unknown>;
@@ -149,6 +150,9 @@ export function parseWriterDocument(value: unknown): WriterIRParseResult {
     value.blocks.forEach((block, index) => {
       validateBlock(block, `blocks[${index}]`, ids, issues);
     });
+  }
+  if (value.ui_editable !== undefined && typeof value.ui_editable !== 'boolean') {
+    issues.push('ui_editable must be a boolean');
   }
   if (value.revision !== undefined && value.revision !== null && typeof value.revision !== 'string') {
     issues.push('revision must be a string or null');

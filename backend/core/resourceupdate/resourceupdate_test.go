@@ -349,6 +349,9 @@ func TestCountSkillReviewHistoryStatsCountsTrajectoryToolCalls(t *testing.T) {
 	if stats.UserTurnCount != 3 || stats.ToolCallCount != 8 || stats.QualifiedSessionCount != 1 {
 		t.Fatalf("expected trajectory-style 3/8/1, got %#v", stats)
 	}
+	if len(stats.QualifiedSessionIDs) != 1 || stats.QualifiedSessionIDs[0] != "conv-u1" {
+		t.Fatalf("expected qualified conversation ID, got %#v", stats.QualifiedSessionIDs)
+	}
 }
 
 func TestCountSkillReviewHistoryStatsExcludesPluginConversations(t *testing.T) {
@@ -377,6 +380,40 @@ func TestCountSkillReviewHistoryStatsExcludesPluginConversations(t *testing.T) {
 	}
 	if stats.UserTurnCount != 2 || stats.ToolCallCount != 2 || stats.QualifiedSessionCount != 1 {
 		t.Fatalf("expected only regular conversation to count, got %#v", stats)
+	}
+	if len(stats.QualifiedSessionIDs) != 1 || stats.QualifiedSessionIDs[0] != "conv-regular" {
+		t.Fatalf("plugin conversation must not be selected, got %#v", stats.QualifiedSessionIDs)
+	}
+}
+
+func TestValidateSkillReviewSessionsRejectsOtherUsersAndPluginConversations(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	insertConversation(t, db, "conv-owned", "user-1", now)
+	insertConversation(t, db, "conv-other", "user-2", now)
+	insertConversation(t, db, "conv-plugin", "user-1", now)
+	if err := db.Create(&orm.PluginSession{
+		ID:             "plugin-session-validation",
+		ConversationID: "conv-plugin",
+		PluginID:       "image-plugin",
+		Status:         "completed",
+		CreateUserID:   "user-1",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}).Error; err != nil {
+		t.Fatalf("insert plugin session: %v", err)
+	}
+
+	ids, err := validateSkillReviewSessions(ctx, db, "user-1", []string{"conv-owned"})
+	if err != nil || len(ids) != 1 || ids[0] != "conv-owned" {
+		t.Fatalf("validate owned conversation: ids=%#v err=%v", ids, err)
+	}
+	if _, err := validateSkillReviewSessions(ctx, db, "user-1", []string{"conv-owned", "conv-other"}); err == nil {
+		t.Fatal("expected another user's conversation to be rejected")
+	}
+	if _, err := validateSkillReviewSessions(ctx, db, "user-1", []string{"conv-owned", "conv-plugin"}); err == nil {
+		t.Fatal("expected plugin conversation to be rejected")
 	}
 }
 
@@ -507,6 +544,7 @@ func TestCreateManualSkillReviewTaskFreezesWindowAndBlocksDuplicate(t *testing.T
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	start := now.Add(-2 * time.Hour)
 	insertSkillReviewConversation(t, db, "conv-qualified", "user-1", start.Add(10*time.Minute), 3, 8)
+	insertSkillReviewConversation(t, db, "conv-other-user", "user-2", start.Add(20*time.Minute), 3, 8)
 	insertSchedulerState(t, db, orm.SkillReviewSchedulerState{
 		UserID:        "user-1",
 		LastWindowEnd: start,
@@ -537,6 +575,8 @@ func TestCreateManualSkillReviewTaskFreezesWindowAndBlocksDuplicate(t *testing.T
 		frozen.TriggerReason != "manual" ||
 		frozen.QuantityThreshold != 1 ||
 		frozen.QualifiedSessionCount != 1 ||
+		len(frozen.SessionIDs) != 1 ||
+		frozen.SessionIDs[0] != "conv-qualified" ||
 		frozen.RequestID != summary.RunningRequestID ||
 		frozen.StartTime != formatTaskTime(start) ||
 		frozen.EndTime != formatTaskTime(now) {
@@ -1001,7 +1041,7 @@ func TestSkillPreflightFreezesRequestAndSkipsWhenBelowThreshold(t *testing.T) {
 	assertRequestJSONHasNoSensitiveFields(t, got.RequestJSON)
 }
 
-func TestSkillWorkerCallsReviewWithoutPendingSkillResults(t *testing.T) {
+func TestSkillWorkerDoesNotSendPendingSkillIDs(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	createSkillReviewResultsTable(t, db)
 	ctx := context.Background()
@@ -1069,7 +1109,7 @@ func TestSkillWorkerCallsReviewWithoutPendingSkillResults(t *testing.T) {
 	if result.Done != 1 {
 		t.Fatalf("expected one done task, got %#v", result)
 	}
-	if captured.UserID != "user-1" {
+	if captured.UserID != "user-1" || len(captured.SessionIDs) != 1 || captured.SessionIDs[0] != "conv-u1" {
 		t.Fatalf("unexpected skill review request: %#v", captured)
 	}
 	capturedBody, err := json.Marshal(captured)
@@ -1079,8 +1119,14 @@ func TestSkillWorkerCallsReviewWithoutPendingSkillResults(t *testing.T) {
 	if strings.Contains(string(capturedBody), "user_turn_count") || strings.Contains(string(capturedBody), "tool_call_count") {
 		t.Fatalf("skill review request must not expose internal threshold counts: %s", string(capturedBody))
 	}
-	if captured.MinUserTurns != 2 || captured.MinToolTurns != 2 {
-		t.Fatalf("skill review request should use backend thresholds, got %#v", captured)
+	if strings.Contains(string(capturedBody), "start_time") || strings.Contains(string(capturedBody), "end_time") {
+		t.Fatalf("skill review request must not expose internal time window: %s", string(capturedBody))
+	}
+	if strings.Contains(string(capturedBody), "pending_skill_ids") {
+		t.Fatalf("skill review request must not include removed pending_skill_ids: %s", string(capturedBody))
+	}
+	if strings.Contains(string(capturedBody), "min_user_turns") || strings.Contains(string(capturedBody), "min_tool_turns") {
+		t.Fatalf("skill review request must not include optional thresholds: %s", string(capturedBody))
 	}
 	if !strings.HasPrefix(captured.RequestID, skillReviewRequestIDPrefix) {
 		t.Fatalf("skill review requestid should use review task mode, got %#v", captured.RequestID)
@@ -1114,12 +1160,13 @@ func TestSkillWorkerCallsReviewWithoutPendingSkillResults(t *testing.T) {
 	}
 }
 
-func TestSkillWorkerPassesManualThresholds(t *testing.T) {
+func TestSkillWorkerUsesFrozenManualSessions(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	createSkillReviewResultsTable(t, db)
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	start := now.Add(-time.Hour)
+	insertSkillReviewConversation(t, db, "conv-manual", "user-1", start.Add(10*time.Minute), 3, 8)
 	insertTask(t, db, orm.ResourceUpdateTask{
 		ID:           "manual-skill-task",
 		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
@@ -1169,7 +1216,7 @@ func TestSkillWorkerPassesManualThresholds(t *testing.T) {
 	if result.Done != 1 {
 		t.Fatalf("expected one done task, got %#v", result)
 	}
-	if captured.RequestID != "review_manual-request" || captured.MinUserTurns != 3 || captured.MinToolTurns != 8 {
+	if captured.RequestID != "review_manual-request" || len(captured.SessionIDs) != 1 || captured.SessionIDs[0] != "conv-manual" {
 		t.Fatalf("unexpected manual skill review request: %#v", captured)
 	}
 }
