@@ -2797,6 +2797,7 @@ export function SelfEvolutionPageController({
   };
 
   const syncThreadStepListState = (stepList: ThreadStepListState) => {
+    threadStepListRef.current = stepList;
     setThreadStepList(stepList);
     setWorkflowRuntimeState((prev) =>
       applyThreadStepListToWorkflowRuntimeState(prev, stepList),
@@ -2831,6 +2832,61 @@ export function SelfEvolutionPageController({
     }
     return stepList;
   };
+
+  async function advanceAutoExecutionAfterStepStream(
+    threadId: string,
+    completedStepId: string,
+    sessionId: string,
+  ) {
+    if (!isAutoMode || isAdvancingToNextStepRef.current) {
+      return false;
+    }
+
+    isAdvancingToNextStepRef.current = true;
+    try {
+      const stepList = await refreshThreadStepList(threadId);
+      const completedStep = stepList.steps.find(
+        (step) => step.stepId === completedStepId,
+      );
+      if (
+        !completedStep ||
+        normalizeThreadStepStatus(completedStep.status) !== "done"
+      ) {
+        return false;
+      }
+
+      const nextStepRunId = completedStep.nextStepRunId?.trim();
+      if (!nextStepRunId) {
+        return false;
+      }
+
+      const nextStep = stepList.steps.find(
+        (step) => step.stepId === nextStepRunId,
+      );
+      const completedStage = resolveThreadStepViewStage(completedStep);
+      const nextStage =
+        (nextStep && resolveThreadStepViewStage(nextStep)) ||
+        (completedStage
+          ? buildCheckpointPromptForCompletedStage(completedStage)?.nextStage
+          : undefined);
+
+      pendingNextStepRunIdRef.current = undefined;
+      setSelectedThreadStepId(nextStepRunId);
+      setLoadingThreadStepId(undefined);
+      loadingThreadStepIdRef.current = undefined;
+      setTerminalFlowStepStatus(undefined);
+      prepareThreadStepStreamView(nextStage);
+      await waitForStepEventsStreamConnected(
+        threadId,
+        nextStepRunId,
+        sessionId,
+      );
+      await refreshThreadStepList(threadId).catch(() => undefined);
+      return true;
+    } finally {
+      isAdvancingToNextStepRef.current = false;
+    }
+  }
 
   const prepareThreadStepStreamView = (viewStage?: string) => {
     if (viewStage) {
@@ -3052,6 +3108,11 @@ export function SelfEvolutionPageController({
               appendChat: shouldAppendEventChat,
             });
             await disconnectStream();
+            await advanceAutoExecutionAfterStepStream(
+              threadId,
+              stepId,
+              sessionId,
+            );
             return;
           }
 
@@ -3069,6 +3130,11 @@ export function SelfEvolutionPageController({
           });
           if (shouldDisconnectThreadEventStream(event)) {
             await disconnectStream();
+            await advanceAutoExecutionAfterStepStream(
+              threadId,
+              stepId,
+              sessionId,
+            );
             return;
           }
         }
@@ -3085,6 +3151,11 @@ export function SelfEvolutionPageController({
               appendChat: shouldAppendEventChat,
             });
             await disconnectStream();
+            await advanceAutoExecutionAfterStepStream(
+              threadId,
+              stepId,
+              sessionId,
+            );
             return;
           }
 
@@ -3095,6 +3166,11 @@ export function SelfEvolutionPageController({
           });
           if (shouldDisconnectThreadEventStream(event)) {
             await disconnectStream();
+            await advanceAutoExecutionAfterStepStream(
+              threadId,
+              stepId,
+              sessionId,
+            );
           }
         }
       }
@@ -3693,6 +3769,22 @@ export function SelfEvolutionPageController({
       return;
     }
 
+    const checkpointWaitingStep = getCheckpointWaitingStep(threadStepList);
+    if (
+      checkpointWaitingStep &&
+      normalizeThreadStepStatus(checkpointWaitingStep.status) === "done"
+    ) {
+      const activeThreadId = activeSession?.threadId || routeThreadId;
+      if (activeThreadId) {
+        void advanceAutoExecutionAfterStepStream(
+          activeThreadId,
+          checkpointWaitingStep.stepId,
+          activeSessionId,
+        );
+      }
+      return;
+    }
+
     const checkpointKey = [
       pendingCheckpointWaitPrompt.completedStage || "",
       pendingCheckpointWaitPrompt.nextStage || "",
@@ -3709,6 +3801,9 @@ export function SelfEvolutionPageController({
     isRestoringThread,
     isSendingMessage,
     pendingCheckpointWaitPrompt,
+    activeSession?.threadId,
+    activeSessionId,
+    routeThreadId,
     threadStepList,
     threadStepStatusByStage,
   ]);
