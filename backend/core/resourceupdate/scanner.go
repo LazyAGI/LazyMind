@@ -361,13 +361,42 @@ func scanAutoEvoSkillDrafts(ctx context.Context, tx *gorm.DB, now time.Time) (in
 		Table("skills AS s").
 		Select("s.id AS skill_id, s.owner_user_id AS user_id, d.task_id, d.version AS draft_version").
 		Joins("JOIN skill_drafts AS d ON d.skill_id = s.id").
-		Where("s.auto_evo = ? AND s.deleted_at IS NULL AND d.task_id <> '' AND EXISTS (SELECT 1 FROM skill_draft_entries e WHERE e.skill_id = s.id)", true).
+		Where(`s.auto_evo = ? AND s.deleted_at IS NULL
+			AND EXISTS (SELECT 1 FROM skill_draft_entries e WHERE e.skill_id = s.id)
+			AND (d.task_id <> '' OR EXISTS (
+				SELECT 1 FROM skill_draft_review_sessions rs
+				WHERE rs.skill_id = s.id AND rs.status = 'active' AND rs.draft_version_at_start = d.version
+			))`, true).
 		Order("s.owner_user_id ASC, s.id ASC").
 		Find(&rows).Error; err != nil {
 		return 0, err
 	}
 	created := 0
 	for _, row := range rows {
+		if strings.TrimSpace(row.TaskID) == "" {
+			taskID := "review_auto_evo_" + common.GenerateID()
+			result := tx.WithContext(ctx).Model(&orm.SkillV2Draft{}).
+				Where(`skill_id = ? AND version = ? AND task_id = '' AND EXISTS (
+					SELECT 1 FROM skill_draft_review_sessions rs
+					WHERE rs.skill_id = skill_drafts.skill_id AND rs.status = 'active'
+						AND rs.draft_version_at_start = skill_drafts.version
+				)`, row.SkillID, row.DraftVersion).
+				Updates(map[string]any{
+					"draft_status":    "auto_pending",
+					"task_id":         taskID,
+					"conversation_id": nil,
+					"version":         gorm.Expr("version + 1"),
+					"updated_at":      now,
+				})
+			if result.Error != nil {
+				return 0, result.Error
+			}
+			if result.RowsAffected != 1 {
+				continue
+			}
+			row.TaskID = taskID
+			row.DraftVersion++
+		}
 		var count int64
 		if err := tx.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
 			Where("task_type = ? AND resource_type = ? AND resource_id = ? AND status IN ?",

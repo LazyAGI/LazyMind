@@ -221,6 +221,12 @@ func TestEnablingAutoEvoPublishesPendingReviewDraft(t *testing.T) {
 		t.Fatalf("auto pending draft still exposed as pending confirmation: %#v", detail.Draft)
 	}
 
+	// Simulate a legacy row that was already auto-enabled before this fix was deployed.
+	if err := db.Model(&orm.SkillV2Draft{}).Where("skill_id = ?", "skill-pending-review").Updates(map[string]any{
+		"draft_status": "", "task_id": "", "version": 2,
+	}).Error; err != nil {
+		t.Fatalf("restore legacy pending review state: %v", err)
+	}
 	scanner := NewScanner(db, Config{}, "auto-evo-toggle-scanner")
 	scanner.clock = func() time.Time { return now }
 	scanResult, err := scanner.RunOnce(context.Background())
