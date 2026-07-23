@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
@@ -25,6 +26,11 @@ T = TypeVar('T')
 _STAGES = tuple(A.STEPS)
 _FIRST_FRAME_TIMEOUT = 60.0
 _THREAD_ID_ATTEMPTS = 32
+_AUTO_WAIT_TIMEOUT = 30.0
+_AUTO_STOPPED = frozenset({'idle', 'cancelled', 'failed', 'completed'})
+
+
+logger = logging.getLogger(__name__)
 
 
 class EvoService:
@@ -43,6 +49,8 @@ class EvoService:
         self.router = RouterService(self.root, flow)
         self._control_locks: dict[str, asyncio.Lock] = {}
         self._message_locks: dict[str, asyncio.Lock] = {}
+        self._auto_tasks: dict[str, asyncio.Task[None]] = {}
+        self._closing = False
 
     @classmethod
     async def open(cls, root: str | Path, definition: FlowDefinition | None = None, *,
@@ -56,7 +64,9 @@ class EvoService:
             max_concurrency=max_concurrency,
             terminate_timeout=terminate_timeout,
         )
-        return cls(root, definition, flow)
+        service = cls(root, definition, flow)
+        await service._restore_auto_threads()
+        return service
 
     async def create_thread(self, request: ThreadCreate | Mapping[str, Any]
                             ) -> dict[str, Any]:
@@ -130,7 +140,10 @@ class EvoService:
         request = _command(request)
 
         async def action() -> dict[str, str]:
-            snapshot = await self.flow.snapshot(thread_id)
+            snapshot, mode = await asyncio.gather(
+                self.flow.snapshot(thread_id),
+                self._thread_mode(thread_id),
+            )
             if snapshot.status == 'paused':
                 raise ServiceError(409, 'paused thread requires resume')
             if snapshot.status != 'idle':
@@ -139,6 +152,8 @@ class EvoService:
             if target != _STAGES[0]:
                 raise ServiceError(422, f'start runs through {_STAGES[0]}')
             await self.flow.start(thread_id)
+            if mode == 'auto':
+                self._ensure_auto_task(thread_id)
             return _accepted(thread_id, request.command_id, 'start')
 
         return await self._control(thread_id, action)
@@ -149,6 +164,15 @@ class EvoService:
         request = _command(request)
 
         async def action() -> dict[str, str]:
+            if await self._thread_mode(thread_id) == 'auto':
+                snapshot = await self.flow.snapshot(thread_id)
+                if snapshot.status == 'idle':
+                    raise ServiceError(409, 'thread has not been started')
+                if snapshot.status in {'cancelled', 'failed'}:
+                    raise ServiceError(409, f'cannot continue thread from {snapshot.status}')
+                self._ensure_auto_task(thread_id)
+                return _accepted(thread_id, request.command_id, 'continue')
+
             snapshot = await self.flow.snapshot(thread_id)
             pending = snapshot.pending_approval
             if pending is None:
@@ -173,6 +197,8 @@ class EvoService:
 
         async def action() -> dict[str, str]:
             await self.flow.retry(thread_id)
+            if await self._thread_mode(thread_id) == 'auto':
+                self._ensure_auto_task(thread_id)
             return _accepted(thread_id, request.command_id, 'retry')
 
         return await self._control(thread_id, action)
@@ -197,6 +223,8 @@ class EvoService:
 
         async def action() -> dict[str, str]:
             await self.flow.resume(thread_id)
+            if await self._thread_mode(thread_id) == 'auto':
+                self._ensure_auto_task(thread_id)
             return _accepted(thread_id, request.command_id, 'resume')
 
         return await self._control(thread_id, action)
@@ -235,9 +263,16 @@ class EvoService:
 
     async def delete_thread(self, thread_id: str) -> dict[str, Any]:
         async def action() -> dict[str, Any]:
+            auto = await self._thread_mode(thread_id) == 'auto'
+            await self._stop_auto_task(thread_id)
+            try:
+                await self.flow.release(thread_id)
+            except BaseException:
+                if auto:
+                    self._ensure_auto_task(thread_id)
+                raise
             lock = self._message_locks.setdefault(thread_id, asyncio.Lock())
             async with lock:
-                await self.flow.release(thread_id)
                 await self.router.delete_thread(thread_id)
                 await self.messages.delete_thread(thread_id)
                 await self.flow.delete_run(thread_id)
@@ -251,6 +286,13 @@ class EvoService:
         return await self._control(thread_id, action)
 
     async def close(self) -> None:
+        self._closing = True
+        tasks = tuple(self._auto_tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._auto_tasks.clear()
         await self.flow.close()
 
     async def _control(self, thread_id: str,
@@ -266,6 +308,83 @@ class EvoService:
             return {}
         value = await self.flow.read(thread_id, record.ref)
         return value if isinstance(value, Mapping) else {}
+
+    async def _thread_mode(self, thread_id: str) -> str:
+        return str((await self._run_config(thread_id)).get('mode') or '')
+
+    async def _restore_auto_threads(self) -> None:
+        for thread_id in await self.flow.run_ids():
+            snapshot, mode = await asyncio.gather(
+                self.flow.snapshot(thread_id),
+                self._thread_mode(thread_id),
+            )
+            if mode == 'auto' and snapshot.status not in _AUTO_STOPPED:
+                self._ensure_auto_task(thread_id)
+
+    def _ensure_auto_task(self, thread_id: str) -> None:
+        if self._closing:
+            return
+        current = self._auto_tasks.get(thread_id)
+        if current is not None and not current.done():
+            return
+        task = asyncio.create_task(
+            self._drive_auto(thread_id),
+            name=f'evo-auto:{thread_id}',
+        )
+        self._auto_tasks[thread_id] = task
+        task.add_done_callback(
+            lambda completed, run_id=thread_id: self._auto_task_done(
+                run_id,
+                completed,
+            )
+        )
+
+    async def _drive_auto(self, thread_id: str) -> None:
+        while not self._closing:
+            lock = self._control_locks.setdefault(thread_id, asyncio.Lock())
+            async with lock:
+                snapshot = await self.flow.snapshot(thread_id)
+                if snapshot.status in _AUTO_STOPPED:
+                    return
+                if snapshot.status == 'paused':
+                    await self.flow.resume(thread_id)
+                    continue
+                if snapshot.status == 'awaiting_approval':
+                    pending = snapshot.pending_approval
+                    if pending is None:
+                        raise RuntimeError('awaiting approval without pending stage')
+                    await self.flow.approve(thread_id, pending.stage)
+                    continue
+
+            try:
+                await self.flow.wait_until_boundary(
+                    thread_id,
+                    timeout=_AUTO_WAIT_TIMEOUT,
+                )
+            except TimeoutError:
+                continue
+
+    def _auto_task_done(self, thread_id: str,
+                        task: asyncio.Task[None]
+                        ) -> None:
+        if self._auto_tasks.get(thread_id) is task:
+            del self._auto_tasks[thread_id]
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.error(
+                'auto runner failed for %s',
+                thread_id,
+                exc_info=(type(error), error, error.__traceback__),
+            )
+
+    async def _stop_auto_task(self, thread_id: str) -> None:
+        task = self._auto_tasks.pop(thread_id, None)
+        if task is None:
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 def _seed_values(thread_id: str, request: ThreadCreate) -> dict[str, object]:
