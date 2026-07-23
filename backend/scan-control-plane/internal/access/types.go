@@ -13,6 +13,7 @@ type Actor struct {
 	TenantID      string
 	Role          string
 	Authorization string
+	InternalToken string
 }
 
 type BindingTargetRequest struct {
