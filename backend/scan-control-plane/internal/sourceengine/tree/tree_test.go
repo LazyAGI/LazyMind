@@ -1204,6 +1204,121 @@ func TestSourceTreeListChildrenUsesIndexedRepoWhenUseCache(t *testing.T) {
 	}
 }
 
+func TestSourceTreeEmptyLocalCacheFallsBackToLiveChildren(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{connectorType: connector.ConnectorType("local_fs")}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{
+		{
+			BindingID:     "binding-active",
+			SourceID:      "source-1",
+			TreeKey:       "local-root",
+			ConnectorType: "local_fs",
+			TargetType:    string(treeTestTargetType),
+			TargetRef:     "/workspace/test2",
+			AgentID:       "agent-1",
+			Status:        "ACTIVE",
+		},
+		{
+			BindingID:     "binding-deleting",
+			SourceID:      "source-1",
+			TreeKey:       "old-root",
+			ConnectorType: "local_fs",
+			TargetType:    string(treeTestTargetType),
+			TargetRef:     "/workspace/test1",
+			AgentID:       "agent-1",
+			Status:        "DELETING",
+		},
+	}
+	engine := NewDBSourceTreeQueryEngine(
+		repo,
+		TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10},
+		WithSourceTreeConnectorRegistry(registry),
+	)
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-active",
+		TreeKey:   "local-root",
+		ParentKey: "local-root",
+		UseCache:  boolPtr(true),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list local children with empty cache: %v", err)
+	}
+	if repo.listObjectsCalls != 1 || len(spy.listRequests) != 1 {
+		t.Fatalf("empty local cache should fall back to live connector, listObjects=%d liveLists=%d", repo.listObjectsCalls, len(spy.listRequests))
+	}
+	if len(page.Items) != 2 || !page.HasMore || page.SearchMode != SearchModeConnector {
+		t.Fatalf("unexpected live fallback page: %+v", page)
+	}
+	for _, node := range page.Items {
+		if !node.IsContainer && (node.SourceState != "NEW" || node.PendingAction != "CREATE" ||
+			node.UpdateType != "new" || node.UpdateDesc != "新文件待入库") {
+			t.Fatalf("new live document should expose pending-create status: %+v", node)
+		}
+	}
+}
+
+func TestSourceTreeLiveChildrenPreserveStoredDocumentState(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	baseRepo := newTreeReadRepo()
+	baseRepo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	baseRepo.bindings["source-1"] = []store.Binding{{
+		BindingID:     "binding-1",
+		SourceID:      "source-1",
+		TreeKey:       "tree-root",
+		ConnectorType: string(treeTestConnectorType),
+		TargetType:    string(treeTestTargetType),
+		TargetRef:     "tree-test://root",
+		Status:        "ACTIVE",
+	}}
+	stored := indexedObject("source-1", "binding-1", "tree-root", "doc-1", "other-parent", "Welcome.md", true, false)
+	stored.State.SourceState = "MODIFIED"
+	stored.State.PendingAction = "REPARSE"
+	stored.State.Selectable = true
+	baseRepo.objects = []ObjectWithState{stored}
+	repo := &treeReadRepoWithObject{treeReadRepo: baseRepo}
+	engine := NewDBSourceTreeQueryEngine(
+		repo,
+		TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10},
+		WithSourceTreeConnectorRegistry(registry),
+	)
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		UseCache:  boolPtr(false),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list live children: %v", err)
+	}
+	for _, node := range page.Items {
+		if node.ObjectKey == "doc-1" {
+			if node.SourceState != "MODIFIED" || node.PendingAction != "REPARSE" ||
+				node.UpdateType != "changed" || node.UpdateDesc != "内容变化待重解析" {
+				t.Fatalf("live document lost stored state: %+v", node)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected live doc-1 in page: %+v", page.Items)
+}
+
 func TestSourceTreeListChildrenFiltersUnsupportedDocuments(t *testing.T) {
 	t.Parallel()
 

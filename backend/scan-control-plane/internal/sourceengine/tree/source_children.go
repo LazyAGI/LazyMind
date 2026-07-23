@@ -79,6 +79,9 @@ func (e *DBSourceTreeQueryEngine) ListChildren(ctx context.Context, req SourceTr
 		return TreeNodePage{}, NewError(ErrCodeResultTooLarge, "current level has more items than max_items")
 	}
 	items = filterObjectItems(filefilter.FromSourceBinding(source, binding), items)
+	if len(items) == 0 && !hasMore && shouldFallbackToLiveLocalTree(req, binding) {
+		return e.listLiveChildren(ctx, req, source, binding, listMode)
+	}
 	return objectPage(items, nextCursor, hasMore, listMode == ListModeAllCurrentLevel), nil
 }
 
@@ -150,7 +153,23 @@ func (e *DBSourceTreeQueryEngine) mapLiveSourcePage(ctx context.Context, conn co
 		if normalized.IsContainer && !req.IncludeContainers {
 			continue
 		}
-		nodes = append(nodes, liveSourceNode(req.SourceID, binding, raw, normalized))
+		node := liveSourceNode(req.SourceID, binding, raw, normalized)
+		if normalized.IsDocument {
+			state, ok, err := e.liveDocumentState(ctx, req.SourceID, binding.BindingID, normalized.ObjectKey)
+			if err != nil {
+				return TreeNodePage{}, err
+			}
+			if !ok {
+				state = store.DocumentState{
+					SourceState:   "NEW",
+					SyncState:     "IDLE",
+					PendingAction: "CREATE",
+					Selectable:    true,
+				}
+			}
+			node = treeNodeWithDocumentState(node, state, normalized.IsContainer || normalized.HasChildren)
+		}
+		nodes = append(nodes, node)
 	}
 	return TreeNodePage{
 		Items:        nodes,
@@ -167,6 +186,21 @@ type sourceObjectReader interface {
 
 type sourceDocumentStateReader interface {
 	GetDocumentState(ctx context.Context, sourceID, bindingID, objectKey string) (store.DocumentState, error)
+}
+
+func (e *DBSourceTreeQueryEngine) liveDocumentState(ctx context.Context, sourceID, bindingID, objectKey string) (store.DocumentState, bool, error) {
+	reader, ok := e.repo.(sourceDocumentStateReader)
+	if !ok {
+		return store.DocumentState{}, false, nil
+	}
+	state, err := reader.GetDocumentState(ctx, sourceID, bindingID, objectKey)
+	if err != nil {
+		if store.ErrorCodeOf(err) == store.ErrCodeNotFound {
+			return store.DocumentState{}, false, nil
+		}
+		return store.DocumentState{}, false, mapStoreError(err)
+	}
+	return state, true, nil
 }
 
 func (e *DBSourceTreeQueryEngine) indexedBindingRoot(ctx context.Context, req SourceTreeChildrenRequest, binding store.Binding) (ObjectWithState, bool, error) {
@@ -343,6 +377,12 @@ func sourceTreeUseCache(req SourceTreeChildrenRequest) bool {
 		return true
 	}
 	return *req.UseCache
+}
+
+func shouldFallbackToLiveLocalTree(req SourceTreeChildrenRequest, binding store.Binding) bool {
+	return strings.TrimSpace(req.Cursor) == "" &&
+		strings.EqualFold(strings.TrimSpace(binding.Status), "ACTIVE") &&
+		strings.EqualFold(strings.TrimSpace(binding.ConnectorType), "local_fs")
 }
 
 func sourceTreeRootRequest(req SourceTreeChildrenRequest) bool {
