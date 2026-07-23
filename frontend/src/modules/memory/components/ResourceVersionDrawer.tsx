@@ -567,6 +567,7 @@ export default function ResourceVersionDrawer({
   const [selectedFileContent, setSelectedFileContent] = useState("");
   const [fileLoading, setFileLoading] = useState(false);
   const [diffFiles, setDiffFiles] = useState<SkillDiffFileRecord[]>([]);
+  const [diffRevisionId, setDiffRevisionId] = useState("");
   const [diffBaseRevisionId, setDiffBaseRevisionId] = useState("");
   const [selectedDiffPath, setSelectedDiffPath] = useState("");
   const [selectedDiffLines, setSelectedDiffLines] = useState<ReturnType<typeof buildDiffLinesWithInline>>([]);
@@ -605,9 +606,11 @@ export default function ResourceVersionDrawer({
     setSelectedFilePath("");
     setSelectedFileContent("");
     setDiffFiles([]);
+    setDiffRevisionId("");
     setDiffBaseRevisionId("");
     setSelectedDiffPath("");
     setSelectedDiffLines([]);
+    setDiffLoading(false);
     setDiffError("");
     setDetailError("");
     setRevisions([]);
@@ -703,9 +706,11 @@ export default function ResourceVersionDrawer({
       setSelectedFilePath("");
       setSelectedFileContent("");
       setDiffFiles([]);
+      setDiffRevisionId("");
       setDiffBaseRevisionId("");
       setSelectedDiffPath("");
       setSelectedDiffLines([]);
+      setDiffLoading(false);
       setDiffError("");
       setDetailError("");
       return undefined;
@@ -713,9 +718,17 @@ export default function ResourceVersionDrawer({
 
     let ignore = false;
     fileRequestIdRef.current += 1;
+    diffRequestIdRef.current += 1;
     setDetailLoading(true);
     setFileLoading(false);
     setDetailError("");
+    setDiffFiles([]);
+    setDiffRevisionId("");
+    setDiffBaseRevisionId("");
+    setSelectedDiffPath("");
+    setSelectedDiffLines([]);
+    setDiffLoading(false);
+    setDiffError("");
     void (async () => {
       try {
         if (isSkillResource) {
@@ -768,6 +781,7 @@ export default function ResourceVersionDrawer({
             nextDiffFiles[0]?.path ||
             "";
           setDiffFiles(nextDiffFiles);
+          setDiffRevisionId(selectedRevisionId);
           setDiffBaseRevisionId(previousRevision?.revisionId || "");
           setSelectedDiffPath(defaultDiffPath);
           setSelectedDiffLines([]);
@@ -825,7 +839,14 @@ export default function ResourceVersionDrawer({
   ]);
 
   useEffect(() => {
-    if (!open || !isSkillResource || !selectedRevisionId || !selectedDiffPath) {
+    if (
+      !open ||
+      !isSkillResource ||
+      !selectedRevisionId ||
+      diffRevisionId !== selectedRevisionId ||
+      !selectedDiffPath ||
+      !diffFiles.some((file) => file.path === selectedDiffPath)
+    ) {
       setSelectedDiffLines([]);
       return undefined;
     }
@@ -837,6 +858,49 @@ export default function ResourceVersionDrawer({
     setDiffError("");
     void (async () => {
       try {
+        const selectedDiffFile = diffFiles.find(
+          (file) => file.path === selectedDiffPath,
+        );
+        const selectedStatus = selectedDiffFile?.status?.toLowerCase();
+
+        if (selectedDiffFile?.binary || selectedDiffFile?.tooLarge) {
+          if (!ignore && diffRequestIdRef.current === requestId) {
+            setSelectedDiffLines([]);
+          }
+          return;
+        }
+
+        if (selectedStatus === "added") {
+          const fileContent = await getSkillRevisionFile(
+            resourceId,
+            selectedRevisionId,
+            selectedDiffPath,
+          );
+          if (!ignore && diffRequestIdRef.current === requestId) {
+            setSelectedDiffLines(buildDiffLinesWithInline("", fileContent));
+          }
+          return;
+        }
+
+        if (selectedStatus === "deleted" && diffBaseRevisionId) {
+          const fileContent = await getSkillRevisionFile(
+            resourceId,
+            diffBaseRevisionId,
+            selectedDiffPath,
+          );
+          if (!ignore && diffRequestIdRef.current === requestId) {
+            setSelectedDiffLines(buildDiffLinesWithInline(fileContent, ""));
+          }
+          return;
+        }
+
+        if (selectedStatus === "unchanged") {
+          if (!ignore && diffRequestIdRef.current === requestId) {
+            setSelectedDiffLines([]);
+          }
+          return;
+        }
+
         if (diffBaseRevisionId) {
           const file = await compareSkillRevisionFileDiff(
             resourceId,
@@ -876,6 +940,8 @@ export default function ResourceVersionDrawer({
     };
   }, [
     diffBaseRevisionId,
+    diffFiles,
+    diffRevisionId,
     isSkillResource,
     open,
     resourceId,
