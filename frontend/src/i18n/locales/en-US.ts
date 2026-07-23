@@ -855,6 +855,17 @@ const enUS = {
 
   // Chat
   chat: {
+	markdownDiagram: "Diagram",
+	markdownSource: "Source",
+	markdownDiagramRendering: "Rendering diagram…",
+	markdownDiagramRenderFailed: "Diagram rendering failed",
+	markdownDiagramWaitingContent: "Waiting for complete diagram content",
+	markdownDiagramGenerating: "Generating diagram…",
+	markdownSourceCopied: "Source copied",
+	markdownSourceCopyFailed: "Failed to copy source",
+	collectedHistoryInputs: "Historical inputs ({{count}})",
+	collectedHistoryInputMode: "{{mode}} · {{time}}",
+	collectedHistoryInputEmpty: "No text summary is available for this historical run",
     contextUsage: "Context Usage",
     contextUsageShow: "Show context usage",
     contextUsageViewReport: "View Report",
@@ -1074,10 +1085,12 @@ const enUS = {
     pluginPanelShrinkShort: "Shrink",
     pluginRailConversation: "Chat",
     slots: {
-      rawData: "Raw data",
       download: "Download",
-      viewContent: "View content",
+      downloadOriginalFile: "Download original file",
       contentLoadFailed: "Failed to load content",
+    },
+    writer: {
+      downloadMarkdown: "Download Markdown",
     },
     pluginStatusRunning: "Running",
     pluginStatusDone: "Done",
@@ -1424,6 +1437,7 @@ const enUS = {
     nextRunAt: "Next Run",
     enabled: "Status",
     scheduleTaskCount: "Runs",
+    sequence: "No.",
     scheduleDescription: "Description",
     scheduleAttachments: "Attachments",
     scheduleTriggerPeriod: "Schedule",

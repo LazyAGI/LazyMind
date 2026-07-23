@@ -510,6 +510,23 @@
     letter-spacing: 0.06em;
   }
 
+  &__slot-heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  &__slot-toolbar {
+    display: none;
+    flex: 1;
+    min-width: 0;
+
+    &:not(:empty) {
+      display: block;
+    }
+  }
+
   &__slot-items {
     display: flex;
     flex-wrap: wrap;

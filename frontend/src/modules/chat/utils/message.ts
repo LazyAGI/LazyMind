@@ -151,6 +151,9 @@ export function buildChatMessageListFromHistory(
       inputs: normalizedInputs,
       create_time: record.create_time || fallbackCreateTime,
       mentions: Array.isArray(record.mentions) ? record.mentions : [],
+		collected_inputs: Array.isArray((record as any).collected_inputs)
+			? (record as any).collected_inputs
+			: [],
     });
 
     const isLastRecord = record === lastRecord;
