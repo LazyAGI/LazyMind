@@ -1,22 +1,17 @@
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
-from datetime import date
-from typing import Optional
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from typing import Any, Optional
 
 import yaml
 
 from ..paths import REFERENCE_ROOT, normalize_memory_path, split_reference_ref
-from .common import parse_yaml_frontmatter, reject_unknown_keys
+from .common import parse_yaml_mapping, reject_unknown_keys, validate_iso_datetime
 
 _SUMMARY_MAX_CHARS = 100
-_ITEM_BLOCK_RE = re.compile(
-    r'(?m)^- name:\s*(?P<name>\S+)\s*\n'
-    r'[ \t]+summary:\s*(?P<summary>.+?)\s*\n'
-    r'[ \t]+ref:\s*(?P<ref>\S+)\s*$'
-)
-_ROOT_KEYS = {'schema_version', 'updated_at'}
+_ROOT_KEYS = {'preferences'}
+_ITEM_KEYS = {'name', 'summary', 'ref', 'created_at', 'updated_at'}
 
 
 @dataclass(frozen=True)
@@ -24,16 +19,31 @@ class PreferenceItem:
     name: str
     summary: str
     ref: str
+    created_at: str
+    updated_at: str
 
 
 def parse_preference_items(content: str) -> list[PreferenceItem]:
+    document = parse_yaml_mapping(content)
+    raw_items = document.get('preferences')
+    if not isinstance(raw_items, list):
+        return []
     items: list[PreferenceItem] = []
-    for match in _ITEM_BLOCK_RE.finditer(content or ''):
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        if not _ITEM_KEYS.issubset(raw_item):
+            continue
+        values = {key: raw_item.get(key) for key in _ITEM_KEYS}
+        if not all(isinstance(value, str) for value in values.values()):
+            continue
         items.append(
             PreferenceItem(
-                name=match.group('name').strip(),
-                summary=match.group('summary').strip(),
-                ref=match.group('ref').strip(),
+                name=values['name'].strip(),
+                summary=values['summary'].strip(),
+                ref=values['ref'].strip(),
+                created_at=values['created_at'].strip(),
+                updated_at=values['updated_at'].strip(),
             )
         )
     return items
@@ -41,40 +51,52 @@ def parse_preference_items(content: str) -> list[PreferenceItem]:
 
 def validate_preference_index(content: str) -> Optional[str]:
     if not content or not str(content).strip():
-        return 'preference requires non-empty content.'
+        return 'preference requires a non-empty YAML mapping.'
 
-    frontmatter, body = parse_yaml_frontmatter(content)
-    if not frontmatter:
-        return 'preference must contain YAML frontmatter.'
-
-    root_error = reject_unknown_keys(frontmatter, _ROOT_KEYS, field='preference')
+    document = parse_yaml_mapping(content)
+    if not document:
+        return 'preference must be a valid non-empty YAML mapping.'
+    root_error = reject_unknown_keys(document, _ROOT_KEYS, field='preference')
     if root_error:
         return root_error
-    if frontmatter.get('schema_version') != 1:
-        return "preference 'schema_version' must be 1."
-    updated_at = frontmatter.get('updated_at')
-    if updated_at is not None and not isinstance(updated_at, (str, date)):
-        return "preference 'updated_at' must be a date string."
+    if 'preferences' not in document:
+        return "preference requires a 'preferences' list."
 
-    items = parse_preference_items(content)
-    # Detect malformed list markers that look like preference items but failed parse.
-    list_markers = re.findall(r'(?m)^- name:\s*.+$', body or '')
-    if len(list_markers) != len(items):
-        return (
-            'preference index items must use the form:\n'
-            '- name: pref.xxx\n'
-            '  summary: ...\n'
-            '  ref: references/xxx.md#anchor'
-        )
+    raw_items = document.get('preferences')
+    if not isinstance(raw_items, list):
+        return "preference 'preferences' must be a list."
 
     seen_names: set[str] = set()
-    for item in items:
+    seen_refs: set[str] = set()
+    for idx, raw_item in enumerate(raw_items):
+        field = f'preferences[{idx}]'
+        if not isinstance(raw_item, dict):
+            return f"Field '{field}' must be a mapping."
+        item_error = reject_unknown_keys(raw_item, _ITEM_KEYS, field=field)
+        if item_error:
+            return item_error
+        missing = sorted(_ITEM_KEYS - set(raw_item))
+        if missing:
+            return f"Field '{field}' requires: {', '.join(missing)}."
+        if not all(isinstance(raw_item.get(key), str) for key in _ITEM_KEYS):
+            return f"Field '{field}' values must all be strings."
+
+        item = PreferenceItem(
+            name=str(raw_item['name']).strip(),
+            summary=str(raw_item['summary']).strip(),
+            ref=str(raw_item['ref']).strip(),
+            created_at=str(raw_item['created_at']).strip(),
+            updated_at=str(raw_item['updated_at']).strip(),
+        )
         error = validate_preference_item(item)
         if error:
             return error
         if item.name in seen_names:
             return f'duplicate preference item name: {item.name!r}.'
+        if item.ref in seen_refs:
+            return f'duplicate preference reference: {item.ref!r}.'
         seen_names.add(item.name)
+        seen_refs.add(item.ref)
     return None
 
 
@@ -92,30 +114,43 @@ def validate_preference_item(item: PreferenceItem) -> Optional[str]:
         path, _anchor = split_reference_ref(item.ref)
     except ValueError as exc:
         return f'preference item {item.name!r} has invalid ref: {exc}'
-    # Prefer relative refs in the index for readability.
-    relative = path
-    if relative.startswith(f'{REFERENCE_ROOT}/'):
-        relative = f'references/{relative[len(REFERENCE_ROOT) + 1:]}'
-    _ = relative
+    if not path.startswith(f'{REFERENCE_ROOT}/'):
+        return f'preference item {item.name!r} ref must be under {REFERENCE_ROOT}.'
+
+    for key, value in (
+        ('created_at', item.created_at),
+        ('updated_at', item.updated_at),
+    ):
+        error = validate_iso_datetime(value, field=f'{item.name}.{key}')
+        if error:
+            return error
+    created_at = _parse_datetime(item.created_at)
+    updated_at = _parse_datetime(item.updated_at)
+    if updated_at < created_at:
+        return f'preference item {item.name!r} updated_at cannot precede created_at.'
     return None
 
 
-def render_preference_item(item: PreferenceItem) -> str:
-    return (
-        f'- name: {item.name}\n'
-        f'  summary: {item.summary}\n'
-        f'  ref: {item.ref}\n'
+def render_preference_index(content: str, items: list[PreferenceItem]) -> str:
+    del content  # The fixed schema has no extensible root metadata to preserve.
+    return yaml.safe_dump(
+        {'preferences': [asdict(item) for item in items]},
+        allow_unicode=True,
+        sort_keys=False,
+        default_flow_style=False,
     )
 
 
-def render_preference_index(content: str, items: list[PreferenceItem]) -> str:
-    frontmatter, _body = parse_yaml_frontmatter(content)
-    merged = dict(frontmatter or {})
-    merged['schema_version'] = 1
-    merged['updated_at'] = date.today().isoformat()
-    fm = yaml.safe_dump(merged, allow_unicode=True, sort_keys=False, default_flow_style=False).strip()
-    blocks = [render_preference_item(item).rstrip('\n') for item in items]
-    return '\n'.join(['---', fm, '---', '# Preference Index', *blocks]) + '\n'
+def append_preference_item(content: str, item: PreferenceItem) -> str:
+    error = validate_preference_item(item)
+    if error:
+        raise ValueError(error)
+    existing = parse_preference_items(content)
+    if any(entry.name == item.name for entry in existing):
+        raise ValueError(f'preference item {item.name!r} already exists.')
+    if any(entry.ref == item.ref for entry in existing):
+        raise ValueError(f'preference reference {item.ref!r} already exists.')
+    return render_preference_index(content, [*existing, item])
 
 
 def remove_preference_item(content: str, name: str) -> str:
@@ -127,16 +162,36 @@ def remove_preference_item(content: str, name: str) -> str:
     return render_preference_index(content, kept)
 
 
-def append_preference_item(content: str, item: PreferenceItem) -> str:
-    error = validate_preference_item(item)
-    if error:
-        raise ValueError(error)
-    existing = parse_preference_items(content)
-    if any(entry.name == item.name for entry in existing):
-        raise ValueError(f'preference item {item.name!r} already exists.')
-    return render_preference_index(content, [*existing, item])
+def reorder_preference_items(content: str, ordered_names: list[str]) -> str:
+    items = parse_preference_items(content)
+    names = [str(name or '').strip() for name in ordered_names]
+    if any(not name for name in names):
+        raise ValueError('ordered_names must contain every preference name.')
+    if len(names) != len(set(names)):
+        raise ValueError('ordered_names must not contain duplicates.')
+    current_names = {item.name for item in items}
+    requested_names = set(names)
+    if requested_names != current_names or len(names) != len(items):
+        missing = sorted(current_names - requested_names)
+        unknown = sorted(requested_names - current_names)
+        details: list[str] = []
+        if missing:
+            details.append(f"missing: {', '.join(missing)}")
+        if unknown:
+            details.append(f"unknown: {', '.join(unknown)}")
+        raise ValueError(
+            'ordered_names must be an exact permutation of existing preferences'
+            + (f" ({'; '.join(details)})" if details else '')
+            + '.'
+        )
+    by_name = {item.name: item for item in items}
+    return render_preference_index(content, [by_name[name] for name in names])
 
 
 def preference_ref_path(ref: str) -> str:
     path, _ = split_reference_ref(ref)
     return normalize_memory_path(path)
+
+
+def _parse_datetime(value: str) -> datetime:
+    return datetime.fromisoformat(value.strip().replace('Z', '+00:00'))

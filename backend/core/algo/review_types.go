@@ -40,13 +40,23 @@ type SkillOrganizeData struct {
 }
 
 type MemoryReviewRequest struct {
-	TaskID    string         `json:"task_id"`
-	UserID    string         `json:"user_id"`
-	History   any            `json:"history"`
-	LLMConfig map[string]any `json:"llm_config"`
+	TaskID                     string         `json:"task_id"`
+	UserID                     string         `json:"user_id"`
+	ConversationID             string         `json:"conversation_id"`
+	ConversationLastActiveAtMS int64          `json:"conversation_last_active_at_ms"`
+	History                    any            `json:"history"`
+	LLMConfig                  map[string]any `json:"llm_config"`
 }
 
 type MemoryReviewResponse struct {
-	Status string `json:"status"`
-	TaskID string `json:"task_id"`
+	Status    string             `json:"status"`
+	TaskID    string             `json:"task_id"`
+	Outcome   string             `json:"outcome"`
+	Retryable bool               `json:"retryable"`
+	Error     *MemoryReviewError `json:"error,omitempty"`
+}
+
+type MemoryReviewError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }

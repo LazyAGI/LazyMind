@@ -115,7 +115,7 @@ func TestCompareContentSeparatesLocalAndWholeLineReplacementGroups(t *testing.T)
 		"- 3333333333333333333333",
 		"- 修改完成后运行测试",
 	}
-	diff := compareText(t, "memory/user.md", oldLines, newLines)
+	diff := compareText(t, "memory/users/preference.yaml", oldLines, newLines)
 
 	hunks := hunkLines(diff.DiffEntryLines)
 	if len(hunks) != 3 {

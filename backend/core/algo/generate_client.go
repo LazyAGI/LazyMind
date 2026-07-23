@@ -22,14 +22,6 @@ func GenerateSkill(ctx context.Context, req SkillGenerateRequest) (string, error
 	return generate(ctx, rewritePayload("skill", req.Content, req.UserInstruct, req.LLMConfig))
 }
 
-func GenerateMemory(ctx context.Context, req ManagedGenerateRequest) (string, error) {
-	return generate(ctx, rewritePayload("memory", req.Content, req.UserInstruct, req.LLMConfig))
-}
-
-func GenerateUserPreference(ctx context.Context, req ManagedGenerateRequest) (string, error) {
-	return generate(ctx, rewritePayload("user_preference", req.Content, req.UserInstruct, req.LLMConfig))
-}
-
 func GeneratePolish(ctx context.Context, req PolishGenerateRequest) (string, error) {
 	return generate(ctx, rewritePayload("polish", req.Content, req.UserInstruct, req.LLMConfig))
 }

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any, Optional
+
+import yaml
 
 _FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*(\n(.*))?$', re.DOTALL)
 
@@ -13,14 +16,34 @@ def parse_yaml_frontmatter(content: str) -> tuple[dict[str, Any], str]:
 
     yaml_text, body = match.group(1), match.group(3) or ''
     try:
-        import yaml  # type: ignore
-
         parsed = yaml.safe_load(yaml_text)
         if isinstance(parsed, dict):
             return parsed, body
     except Exception:
         pass
     return {}, body
+
+
+def parse_yaml_mapping(content: str) -> dict[str, Any]:
+    """Parse one plain YAML mapping, returning an empty mapping on invalid input."""
+    try:
+        parsed = yaml.safe_load(content or '')
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def validate_iso_datetime(value: Any, *, field: str) -> Optional[str]:
+    if not isinstance(value, str) or not value.strip():
+        return f"Field '{field}' must be a non-empty ISO 8601 datetime string."
+    normalized = value.strip()
+    try:
+        parsed = datetime.fromisoformat(normalized.replace('Z', '+00:00'))
+    except ValueError:
+        return f"Field '{field}' must be an ISO 8601 datetime string."
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return f"Field '{field}' must include a timezone offset."
+    return None
 
 
 def require_no_body(body: str, *, entity: str) -> Optional[str]:

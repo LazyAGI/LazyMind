@@ -16,13 +16,6 @@ from .editors import (
     set_soul_field,
     validate_preference_name,
 )
-from .episode_store import (
-    EPISODE_COLLECTION,
-    EpisodeConflictError,
-    EpisodeReadError,
-    EpisodeStore,
-    get_episode_store,
-)
 from .models import (
     EpisodeCreateInput,
     EpisodeCreateResult,
@@ -47,11 +40,6 @@ from .paths import (
     normalize_memory_path,
     split_reference_ref,
 )
-from .ranking import (
-    episode_query_coverage,
-    informative_query_terms,
-    tokenize_episode_text,
-)
 from .result import is_memory_ok, memory_err, memory_ok
 from .validation import (
     PreferenceItem,
@@ -64,6 +52,41 @@ from .validation import (
     validate_soul_content,
 )
 from .store import MemoryStore
+
+_EPISODE_STORE_EXPORTS = {
+    'EPISODE_COLLECTION',
+    'EpisodeConflictError',
+    'EpisodeReadError',
+    'EpisodeStore',
+    'get_episode_store',
+}
+_EPISODE_RANKING_EXPORTS = {
+    'episode_query_coverage',
+    'informative_query_terms',
+    'tokenize_episode_text',
+}
+
+
+def __getattr__(name: str):
+    """Load the SegmentStore-backed Episode runtime only when it is requested.
+
+    Soul/Profile/Preference validation and file operations should not require
+    the substantially heavier RAG dependency set.
+    """
+    if name in _EPISODE_STORE_EXPORTS:
+        from . import episode_store
+
+        value = getattr(episode_store, name)
+        globals()[name] = value
+        return value
+    if name in _EPISODE_RANKING_EXPORTS:
+        from . import ranking
+
+        value = getattr(ranking, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+
 
 __all__ = [
     'AGENTS_ROOT',

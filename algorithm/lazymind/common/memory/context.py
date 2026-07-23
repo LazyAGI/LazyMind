@@ -3,18 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from lazyllm import LOG
+import yaml
 
-from .validation.common import parse_yaml_frontmatter
-from .validation.preference import (
-    parse_preference_items,
-    render_preference_item,
-)
+from .validation.common import parse_yaml_mapping
+from .validation.preference import parse_preference_items, validate_preference_index
 from .store import MemoryStore
 
 # Cap preference index items when preparing prompt/runtime context.
 MAX_PREFERENCE_CONTEXT_ITEMS = 100
-MAX_PREFERENCE_CONTEXT_CHARS = 10_000
+MAX_PREFERENCE_CONTEXT_CHARS = 50_000
 
 
 @dataclass(frozen=True)
@@ -24,21 +21,30 @@ class MemoryContext:
     preference: str
 
 
-def load_memory_context(store: Optional[MemoryStore] = None) -> MemoryContext:
+def load_memory_context(
+    store: Optional[MemoryStore] = None,
+    *,
+    project_preference: bool = True,
+) -> MemoryContext:
     """Load soul / profile / preference for prompt injection and tools.
 
     References are intentionally excluded; callers read them on demand.
-    Missing or unreadable RemoteFS documents become empty strings so Chat
-    startup does not depend on algorithm-side templates.
+    The three fixed files are required. Missing, unreadable, or invalid files
+    raise instead of silently disabling persistent memory.
     """
     memory_store = store or MemoryStore()
-    soul = _safe_read(memory_store.read_soul, label='soul')
-    profile = _safe_read(memory_store.read_profile, label='profile')
-    preference = _safe_read(memory_store.read_preference, label='preference')
+    soul = memory_store.read_soul()
+    profile = memory_store.read_profile()
+    preference = memory_store.read_preference()
+    preference_context = (
+        truncate_preference_index(preference)
+        if project_preference
+        else preference
+    )
     return MemoryContext(
         soul=soul,
         profile=profile,
-        preference=truncate_preference_index(preference),
+        preference=preference_context,
     )
 
 
@@ -48,7 +54,11 @@ def truncate_preference_index(
     max_items: int = MAX_PREFERENCE_CONTEXT_ITEMS,
     max_chars: int = MAX_PREFERENCE_CONTEXT_CHARS,
 ) -> str:
-    """Keep preference frontmatter with bounded item count and total characters."""
+    """Render the first preferences in stored order for prompt injection.
+
+    ``created_at`` is intentionally omitted from the resident prompt projection;
+    only ``updated_at`` is exposed.
+    """
     text = content if isinstance(content, str) else ''
     if max_items < 0:
         raise ValueError('max_items must be >= 0')
@@ -56,39 +66,29 @@ def truncate_preference_index(
         raise ValueError('max_chars must be >= 1')
     if not text.strip():
         return text
-    items = parse_preference_items(text)
-    if len(items) <= max_items and len(text) <= max_chars:
-        return text
+    error = validate_preference_index(text)
+    if error:
+        raise ValueError(error)
 
-    frontmatter, _body = parse_yaml_frontmatter(text)
-    kept = items[:max_items]
-    header_lines = ['---']
-    schema_version = frontmatter.get('schema_version', 1)
-    header_lines.append(f'schema_version: {schema_version}')
-    updated_at = frontmatter.get('updated_at')
-    if updated_at is not None:
-        header_lines.append(f'updated_at: {updated_at}')
-    header_lines.extend(['---', '# Preference Index'])
-    body_lines = list(header_lines)
-    base_text = '\n'.join(body_lines) + '\n'
-    if len(base_text) > max_chars:
-        return base_text[:max_chars]
-
-    blocks = [render_preference_item(item).rstrip('\n') for item in kept]
-    result_lines = list(body_lines)
-    current_text = base_text
-    for block in blocks:
-        candidate = '\n'.join(result_lines + [block]) + '\n'
-        if len(candidate) > max_chars:
+    items = parse_preference_items(text)[:max_items]
+    projected: list[dict[str, str]] = []
+    for item in items:
+        candidate = {
+            'name': item.name,
+            'summary': item.summary,
+            'ref': item.ref,
+            'updated_at': item.updated_at,
+        }
+        rendered = _render_preference_context([*projected, candidate])
+        if len(rendered) > max_chars:
             break
-        result_lines.append(block)
-        current_text = candidate
-    return current_text
+        projected.append(candidate)
+    return _render_preference_context(projected)
 
 
 def profile_languages(profile: str) -> list[str]:
-    frontmatter, _ = parse_yaml_frontmatter(profile or '')
-    locale = frontmatter.get('locale') if isinstance(frontmatter, dict) else None
+    document = parse_yaml_mapping(profile or '')
+    locale = document.get('locale') if isinstance(document, dict) else None
     if not isinstance(locale, dict):
         return []
     languages = locale.get('languages')
@@ -97,10 +97,10 @@ def profile_languages(profile: str) -> list[str]:
     return [str(item).strip() for item in languages if str(item).strip()]
 
 
-def _safe_read(loader, *, label: str) -> str:
-    try:
-        value = loader()
-        return value if isinstance(value, str) else ''
-    except Exception as exc:
-        LOG.warning(f'[MemoryContext] failed to load {label}: {exc}')
-        return ''
+def _render_preference_context(items: list[dict[str, str]]) -> str:
+    return yaml.safe_dump(
+        {'preferences': items},
+        allow_unicode=True,
+        sort_keys=False,
+        default_flow_style=False,
+    )

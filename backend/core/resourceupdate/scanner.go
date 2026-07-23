@@ -23,11 +23,9 @@ type Scanner struct {
 }
 
 type ScannerRunResult struct {
-	SkillResultsExpired        int
-	SkillTasksCreated          int
-	SkillDraftTasksCreated     int
-	MemoryTasksCreated         int
-	UserPreferenceTasksCreated int
+	SkillResultsExpired    int
+	SkillTasksCreated      int
+	SkillDraftTasksCreated int
 }
 
 type autoApplyTrigger struct {
@@ -60,25 +58,13 @@ func (s *Scanner) RunOnce(ctx context.Context) (ScannerRunResult, error) {
 			return err
 		}
 		result.SkillDraftTasksCreated = created
-		created, err = scanMemoryReviewResults(ctx, tx, orm.ResourceUpdateResourceTypeMemory, now)
-		if err != nil {
-			return err
-		}
-		result.MemoryTasksCreated = created
-		created, err = scanMemoryReviewResults(ctx, tx, orm.ResourceUpdateResourceTypeUserPreference, now)
-		if err != nil {
-			return err
-		}
-		result.UserPreferenceTasksCreated = created
 		return nil
 	})
-	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.SkillDraftTasksCreated > 0 || result.MemoryTasksCreated > 0 || result.UserPreferenceTasksCreated > 0) {
+	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.SkillDraftTasksCreated > 0) {
 		resourceUpdateInfo(logEventResultScanDone).
 			Int("skill_results_expired", result.SkillResultsExpired).
 			Int("skill_tasks_created", result.SkillTasksCreated).
 			Int("skill_draft_tasks_created", result.SkillDraftTasksCreated).
-			Int("memory_tasks_created", result.MemoryTasksCreated).
-			Int("user_preference_tasks_created", result.UserPreferenceTasksCreated).
 			Msg(logEventResultScanDone)
 	}
 	return result, err
@@ -88,7 +74,6 @@ func ScanPendingResultsForResource(ctx context.Context, db *gorm.DB, resourceTyp
 	if db == nil {
 		return errors.New("resource update scanner db is nil")
 	}
-	now := time.Now().UTC()
 	resourceType = strings.TrimSpace(resourceType)
 	userID = strings.TrimSpace(userID)
 	resourceID = strings.TrimSpace(resourceID)
@@ -104,10 +89,6 @@ func ScanPendingResultsForResource(ctx context.Context, db *gorm.DB, resourceTyp
 		switch resourceType {
 		case orm.ResourceUpdateResourceTypeSkill:
 			return nil
-		case orm.ResourceUpdateResourceTypeMemory:
-			return scanMemoryReviewResultsForResource(ctx, tx, orm.ResourceUpdateResourceTypeMemory, userID, resourceID, now)
-		case orm.ResourceUpdateResourceTypeUserPreference:
-			return scanMemoryReviewResultsForResource(ctx, tx, orm.ResourceUpdateResourceTypeUserPreference, userID, resourceID, now)
 		default:
 			return nil
 		}
@@ -365,123 +346,6 @@ func applyNewSkillReviewResult(ctx context.Context, tx *gorm.DB, row SkillReview
 	return updateSkillReviewStatus(ctx, tx, row.ID, reviewStatusAccepted)
 }
 
-func scanMemoryReviewResults(ctx context.Context, tx *gorm.DB, target string, now time.Time) (int, error) {
-	var rows []MemoryReviewResult
-	if err := memoryResultSelect(withUpdateLock(tx).WithContext(ctx)).
-		Where("target = ? AND user_id <> '' AND state = ? AND review_status = ?", target, memoryReviewStateSuccess, reviewStatusPending).
-		Order("time ASC, id ASC").
-		Find(&rows).Error; err != nil {
-		return 0, err
-	}
-	created := 0
-	for _, row := range rows {
-		resourceID, autoEvo, err := mapMemoryReviewResultResource(ctx, tx, target, row)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				resourceUpdateInfo(logEventResultScanSkipped).
-					Str("resource_type", target).
-					Str("review_result_id", row.ID).
-					Str("user_id", strings.TrimSpace(row.UserID)).
-					Str("session_id", strings.TrimSpace(row.SessionID)).
-					Str("reason", "resource_not_found").
-					Msg(logEventResultScanSkipped)
-				continue
-			}
-			return 0, err
-		}
-		if !autoEvo {
-			resourceUpdateInfo(logEventResultScanSkipped).
-				Str("resource_type", target).
-				Str("resource_id", resourceID).
-				Str("review_result_id", row.ID).
-				Str("user_id", strings.TrimSpace(row.UserID)).
-				Str("session_id", strings.TrimSpace(row.SessionID)).
-				Str("reason", "auto_evo_disabled").
-				Msg(logEventResultScanSkipped)
-			continue
-		}
-		made, err := ensureAutoApplyTask(ctx, tx, target, strings.TrimSpace(row.UserID), resourceID, row.ID, now, reviewResultTrigger())
-		if err != nil {
-			return 0, err
-		}
-		if made {
-			created++
-		}
-	}
-	return created, nil
-}
-
-func scanMemoryReviewResultsForResource(ctx context.Context, tx *gorm.DB, target, userID, resourceID string, now time.Time) error {
-	var rows []MemoryReviewResult
-	if err := memoryResultSelect(withUpdateLock(tx).WithContext(ctx)).
-		Where("target = ? AND user_id = ? AND state = ? AND review_status = ?", target, userID, memoryReviewStateSuccess, reviewStatusPending).
-		Order("time ASC, id ASC").
-		Find(&rows).Error; err != nil {
-		return err
-	}
-	for _, row := range rows {
-		mappedID, autoEvo, err := mapMemoryReviewResultResource(ctx, tx, target, row)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				resourceUpdateInfo(logEventResultScanSkipped).
-					Str("resource_type", target).
-					Str("resource_id", resourceID).
-					Str("review_result_id", row.ID).
-					Str("user_id", strings.TrimSpace(row.UserID)).
-					Str("session_id", strings.TrimSpace(row.SessionID)).
-					Str("reason", "resource_not_found").
-					Msg(logEventResultScanSkipped)
-				continue
-			}
-			return err
-		}
-		if mappedID != resourceID {
-			resourceUpdateInfo(logEventResultScanSkipped).
-				Str("resource_type", target).
-				Str("resource_id", resourceID).
-				Str("mapped_resource_id", mappedID).
-				Str("review_result_id", row.ID).
-				Str("user_id", strings.TrimSpace(row.UserID)).
-				Str("session_id", strings.TrimSpace(row.SessionID)).
-				Str("reason", "resource_mismatch").
-				Msg(logEventResultScanSkipped)
-			continue
-		}
-		if !autoEvo {
-			resourceUpdateInfo(logEventResultScanSkipped).
-				Str("resource_type", target).
-				Str("resource_id", resourceID).
-				Str("review_result_id", row.ID).
-				Str("user_id", strings.TrimSpace(row.UserID)).
-				Str("session_id", strings.TrimSpace(row.SessionID)).
-				Str("reason", "auto_evo_disabled").
-				Msg(logEventResultScanSkipped)
-			continue
-		}
-		generation, err := currentAutoEvoGeneration(tx, target, resourceID)
-		if err != nil {
-			return err
-		}
-		if _, err := ensureAutoApplyTask(ctx, tx, target, userID, resourceID, row.ID, now, autoEvoTrigger(generation)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func mapMemoryReviewResultResource(ctx context.Context, tx *gorm.DB, target string, row MemoryReviewResult) (string, bool, error) {
-	switch target {
-	case orm.ResourceUpdateResourceTypeMemory:
-		resource, err := mapMemoryReviewResultToPersonalResource(tx.WithContext(ctx), target, row)
-		return resource.ID, resource.AutoEvo, err
-	case orm.ResourceUpdateResourceTypeUserPreference:
-		resource, err := mapMemoryReviewResultToPersonalResource(tx.WithContext(ctx), target, row)
-		return resource.ID, resource.AutoEvo, err
-	default:
-		return "", false, fmt.Errorf("unsupported review target %q", target)
-	}
-}
-
 func ensureAutoApplyTask(ctx context.Context, tx *gorm.DB, resourceType, userID, resourceID, reviewResultID string, now time.Time, trigger autoApplyTrigger) (bool, error) {
 	resourceType = strings.TrimSpace(resourceType)
 	userID = strings.TrimSpace(userID)
@@ -636,27 +500,9 @@ func autoApplyTriggerID(resourceType, resourceID, reviewResultID string, trigger
 			strconv.FormatInt(trigger.Generation, 10),
 		}, ":")
 	}
-	tableName := "memory_review"
-	if resourceType == orm.ResourceUpdateResourceTypeSkill {
-		tableName = "skill_review_results"
-	}
-	return orm.ResourceUpdateTriggerTypeReviewResult, tableName + ":" + reviewResultID
+	return orm.ResourceUpdateTriggerTypeReviewResult, "skill_review_results:" + reviewResultID
 }
 
-func currentAutoEvoGeneration(tx *gorm.DB, resourceType, resourceID string) (int64, error) {
-	var row struct {
-		AutoEvoGeneration int64 `gorm:"column:auto_evo_generation"`
-	}
-	var err error
-	switch resourceType {
-	case orm.ResourceUpdateResourceTypeMemory:
-		err = tx.Model(&orm.PersonalResource{}).Select("auto_evo_generation").Where("id = ? AND resource_type = ?", resourceID, resourceType).Take(&row).Error
-	case orm.ResourceUpdateResourceTypeUserPreference:
-		err = tx.Model(&orm.PersonalResource{}).Select("auto_evo_generation").Where("id = ? AND resource_type = ?", resourceID, resourceType).Take(&row).Error
-	case orm.ResourceUpdateResourceTypeSkill:
-		err = tx.Model(&orm.SkillV2Skill{}).Select("auto_evo_generation").Where("id = ?", resourceID).Take(&row).Error
-	default:
-		return 0, fmt.Errorf("unsupported resource type %q", resourceType)
-	}
-	return row.AutoEvoGeneration, err
+func activeAutoApplyStatuses() []string {
+	return []string{orm.ResourceUpdateTaskStatusPending, orm.ResourceUpdateTaskStatusRunning}
 }

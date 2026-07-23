@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from lazyllm import LOG
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from lazymind.review.service.memory_review import MemoryReviewResult, review_memory
 
@@ -22,6 +22,10 @@ class MemoryReviewPayload(BaseModel):
         default_factory=list,
         description='Chat history passed by backend for review',
     )
+    conversation_last_active_at_ms: Optional[int] = Field(
+        None,
+        description='Optional conversation last-active Unix timestamp in milliseconds',
+    )
     llm_config: Optional[Dict[str, Any]] = Field(
         None,
         description=(
@@ -29,6 +33,13 @@ class MemoryReviewPayload(BaseModel):
             'When omitted, the active runtime_models configuration is used.'
         ),
     )
+
+    @field_validator('conversation_last_active_at_ms', mode='before')
+    @classmethod
+    def normalize_conversation_last_active_at_ms(cls, value):
+        if isinstance(value, bool) or (value is not None and not isinstance(value, int)):
+            return None
+        return value
 
     @model_validator(mode='before')
     @classmethod
@@ -62,7 +73,7 @@ class MemoryReviewPayload(BaseModel):
 
 @router.post(
     '/api/chat/memory_review',
-    summary='Review backend-provided history for Episode creation',
+    summary='Review backend-provided history for persistent memory updates',
     response_model=MemoryReviewResult,
     response_model_exclude_none=True,
 )
@@ -85,6 +96,7 @@ async def memory_review(payload: MemoryReviewPayload):
             conversation_id=payload.conversation_id,
             history=payload.history,
             llm_config=payload.llm_config,
+            conversation_last_active_at_ms=payload.conversation_last_active_at_ms,
         )
     except Exception as exc:
         LOG.exception(f'[MemoryReview] memory review failed: {exc}')

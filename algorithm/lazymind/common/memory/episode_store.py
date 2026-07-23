@@ -105,13 +105,13 @@ class EpisodeStore:
 
     @staticmethod
     def _segment(record: EpisodeRecord) -> dict:
-        metadata = record.model_dump(mode='json')
+        metadata = record.model_dump(mode='json', by_alias=True)
         metadata.pop('id', None)
         metadata.pop('user_id', None)
         hit_count = int(metadata.pop('hit_count', 0))
         return {
             'uid': record.id,
-            'doc_id': record.id,
+            'doc_id': record.source.conversation_id,
             'group': 'episode',
             'content': tokenize_episode_text(record.summary),
             'meta': metadata,
@@ -123,18 +123,10 @@ class EpisodeStore:
     @staticmethod
     def _record(segment: dict) -> EpisodeRecord:
         metadata = dict(segment.get('meta') or {})
-        legacy_metadata = segment.get('metadata') or {}
-        if not metadata and legacy_metadata:
-            metadata = dict(legacy_metadata)
         metadata['id'] = segment.get('uid') or segment.get('id')
         metadata['user_id'] = segment.get('kb_id') or metadata.get('user_id')
         counters = segment.get('counters') or {}
-        if 'hit_count' in counters:
-            metadata['hit_count'] = counters['hit_count']
-        elif segment.get('number') is not None:
-            metadata['hit_count'] = segment.get('number')
-        else:
-            metadata['hit_count'] = metadata.get('hit_count', 0)
+        metadata['hit_count'] = counters.get('hit_count', 0)
         return EpisodeRecord.model_validate(metadata)
 
     @staticmethod
@@ -218,17 +210,11 @@ class EpisodeStore:
         if not normalized_conversation_id:
             raise ValueError('conversation_id is required')
         try:
-            segments = self._strict_get({'kb_id': normalized_user_id})
-            records = [
-                self._record(segment)
-                for segment in segments
-                if str(
-                    ((segment.get('meta') or segment.get('metadata') or {}).get('source') or {}).get(
-                        'conversation_id',
-                        '',
-                    )
-                ).strip() == normalized_conversation_id
-            ]
+            segments = self._strict_get({
+                'kb_id': normalized_user_id,
+                'doc_id': normalized_conversation_id,
+            })
+            records = [self._record(segment) for segment in segments]
         except EpisodeReadError:
             raise
         except Exception as exc:

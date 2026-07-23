@@ -17,19 +17,16 @@ func TestSkillDraftConversationIDMigrationContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(up)
-	for _, table := range []string{"skill_drafts", "personal_resource_drafts"} {
-		if !strings.Contains(content, "ALTER TABLE public."+table) {
-			t.Fatalf("up migration does not alter %s", table)
-		}
+	if !strings.Contains(content, "ALTER TABLE public.skill_drafts") {
+		t.Fatal("up migration does not alter skill_drafts")
 	}
-	if strings.Count(content, "ALTER COLUMN conversation_id TYPE VARCHAR(128)") != 2 {
-		t.Fatal("up migration must expand both draft conversation_id columns to VARCHAR(128)")
+	if !strings.Contains(content, "ALTER COLUMN conversation_id TYPE VARCHAR(128)") {
+		t.Fatal("up migration must expand skill draft conversation_id to VARCHAR(128)")
 	}
 
-	for _, model := range []any{SkillV2Draft{}, PersonalResourceDraft{}} {
-		field, ok := reflect.TypeOf(model).FieldByName("ConversationID")
-		if !ok || !strings.Contains(field.Tag.Get("gorm"), "type:varchar(128)") {
-			t.Fatalf("%T ConversationID must use varchar(128)", model)
-		}
+	model := SkillV2Draft{}
+	field, ok := reflect.TypeOf(model).FieldByName("ConversationID")
+	if !ok || !strings.Contains(field.Tag.Get("gorm"), "type:varchar(128)") {
+		t.Fatalf("%T ConversationID must use varchar(128)", model)
 	}
 }

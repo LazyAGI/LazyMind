@@ -7,7 +7,7 @@ import unicodedata
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 class EpisodeType(str, Enum):
@@ -22,9 +22,7 @@ class EpisodeSource(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     kind: Literal['chat_explicit', 'memory_review']
-    task_id: str | None = None
     conversation_id: str
-    message_ids: list[str] = Field(default_factory=list)
 
     @field_validator('conversation_id')
     @classmethod
@@ -34,35 +32,27 @@ class EpisodeSource(BaseModel):
             raise ValueError('must not be blank')
         return normalized
 
-    @field_validator('task_id')
-    @classmethod
-    def _optional_task_id(cls, value: str | None) -> str | None:
-        normalized = str(value or '').strip()
-        return normalized or None
-
-    @field_validator('message_ids')
-    @classmethod
-    def _stable_message_ids(cls, values: list[str]) -> list[str]:
-        return sorted({str(value).strip() for value in values if str(value).strip()})
-
-
 class EpisodeCreateInput(BaseModel):
     """Internal create contract; agent-visible fields are supplied by MemoryTools."""
 
-    model_config = ConfigDict(extra='forbid')
+    model_config = ConfigDict(extra='forbid', populate_by_name=True)
 
     occurred_at_ms: int
-    thread_key: str
-    episode_type: EpisodeType
+    episode_type: EpisodeType = Field(
+        validation_alias=AliasChoices('episode_type', 'type'),
+        serialization_alias='type',
+    )
     summary: str
     source: EpisodeSource
 
-    @field_validator('thread_key', 'summary')
+    @field_validator('summary')
     @classmethod
-    def _not_blank(cls, value: str) -> str:
+    def _valid_summary(cls, value: str) -> str:
         normalized = str(value).strip()
         if not normalized:
             raise ValueError('must not be blank')
+        if len(normalized) > 200:
+            raise ValueError('must be at most 200 characters')
         return normalized
 
     @field_validator('occurred_at_ms')
@@ -72,16 +62,8 @@ class EpisodeCreateInput(BaseModel):
             raise ValueError('must be a positive Unix timestamp in milliseconds')
         return value
 
-    @model_validator(mode='after')
-    def _thread_tracks_source_conversation(self) -> 'EpisodeCreateInput':
-        if self.thread_key != self.source.conversation_id:
-            raise ValueError('thread_key must equal source.conversation_id')
-        return self
-
-
 class EpisodeRecord(EpisodeCreateInput):
     id: str
-    schema_version: int = 1
     recorded_at_ms: int
     user_id: str
     hit_count: int = 0

@@ -5,6 +5,7 @@ from .preference import (
     append_preference_item,
     parse_preference_items,
     remove_preference_item,
+    reorder_preference_items,
     validate_preference_index,
 )
 from .profile import validate_profile_content
@@ -16,6 +17,7 @@ __all__ = [
     'append_preference_item',
     'parse_preference_items',
     'remove_preference_item',
+    'reorder_preference_items',
     'validate_preference_index',
     'validate_profile_content',
     'validate_reference_content',

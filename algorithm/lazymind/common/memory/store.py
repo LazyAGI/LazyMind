@@ -40,11 +40,13 @@ class MemoryStore:
         normalized = self._require_file_path(path)
         try:
             with self.fs.open(normalized, 'r', encoding='utf-8', errors='replace') as fh:
-                return fh.read()
+                content = fh.read()
         except Exception as exc:
             if self._is_not_found(exc):
                 raise FileNotFoundError(f'memory path not found: {normalized}') from exc
             raise RuntimeError(f'failed to read {normalized}: {exc}') from exc
+        self._validate(normalized, content)
+        return content
 
     def write(self, path: str, content: str, *, validate: bool = True) -> None:
         normalized = self._require_file_path(path)
@@ -180,7 +182,10 @@ class MemoryStore:
         name: str,
         summary: str,
         scenario: str,
+        details: str,
         reason: str,
+        source_kind: str,
+        conversation_id: str,
     ) -> dict[str, Any]:
         from .editors.preference import add_preference_entry
         from .result import memory_ok
@@ -193,7 +198,10 @@ class MemoryStore:
             name=name,
             summary=summary,
             scenario=scenario,
+            details=details,
             reason=reason,
+            source_kind=source_kind,
+            conversation_id=conversation_id,
         )
         if not edited.get('ok'):
             return edited
@@ -208,8 +216,21 @@ class MemoryStore:
         if not written_pref.get('ok'):
             try:
                 self.delete_reference(reference_name)
-            except Exception:
-                pass
+            except Exception as cleanup_exc:
+                from .result import memory_err
+
+                return memory_err(
+                    (
+                        f"preference add partially applied: reference "
+                        f"{reference_name!r} was created but the index write failed; "
+                        f'cleanup also failed: {cleanup_exc}'
+                    ),
+                    type='partial',
+                    operation='add',
+                    applied=['reference'],
+                    failed=['preference_index'],
+                    item=edited['item'],
+                )
             return written_pref
         return memory_ok(item=edited['item'])
 
@@ -229,9 +250,46 @@ class MemoryStore:
         reference_name = reference_name_from_item(edited['item'])
         try:
             self.delete_reference(reference_name)
-        except Exception:
-            pass
+        except Exception as exc:
+            from .result import memory_err
+
+            return memory_err(
+                (
+                    f"preference delete partially applied: index entry "
+                    f"{edited['item'].name!r} was removed but reference "
+                    f'{reference_name!r} could not be deleted: {exc}'
+                ),
+                type='partial',
+                operation='delete',
+                applied=['preference_index'],
+                failed=['reference'],
+                item=edited['item'],
+            )
         return memory_ok(item=edited['item'])
+
+    def reorder_preferences(self, ordered_names: list[str]) -> dict[str, Any]:
+        """Reorder every preference by exact name permutation.
+
+        This is a storage API for an explicit user-controlled ordering surface.
+        It is intentionally not exposed through ``MemoryTools``.
+        """
+        from .result import memory_err, memory_ok
+        from .validation.preference import parse_preference_items, reorder_preference_items
+
+        loaded = self._read_document(PREFERENCE_PATH, label='preference')
+        if not loaded.get('ok'):
+            return loaded
+        try:
+            content = reorder_preference_items(loaded['content'], ordered_names)
+        except ValueError as exc:
+            return memory_err(str(exc), type='validation')
+        written = self._write_document(PREFERENCE_PATH, content)
+        if not written.get('ok'):
+            return written
+        return memory_ok(
+            content=content,
+            items=parse_preference_items(content),
+        )
 
     def list_references(self) -> list[dict[str, Any]]:
         return [item for item in self.list_dir(REFERENCE_ROOT) if item.get('type') == 'file']
@@ -243,6 +301,8 @@ class MemoryStore:
             return memory_ok(content=self.read(path))
         except FileNotFoundError:
             return memory_err(f'{label} document not found.', type='not_found')
+        except ValueError as exc:
+            return memory_err(str(exc), type='validation')
         except RuntimeError as exc:
             return memory_err(str(exc), type='store')
 
@@ -255,20 +315,8 @@ class MemoryStore:
         except ValueError as exc:
             return memory_err(str(exc), type='validation')
         except RuntimeError as exc:
-            message = str(exc).strip()
-            if message.lower() == 'conflict':
-                return memory_err(
-                    'There are pending changes. Please resolve them before modifying.',
-                    type='conflict',
-                )
-            return memory_err(message, type='store')
+            return memory_err(str(exc).strip(), type='store')
         except Exception as exc:
-            message = str(exc).strip()
-            if message.lower() == 'conflict':
-                return memory_err(
-                    'There are pending changes. Please resolve them before modifying.',
-                    type='conflict',
-                )
             return memory_err(f'failed to write {path}: {exc}', type='store')
 
     def _require_file_path(self, path: str) -> str:
@@ -303,6 +351,8 @@ class MemoryStore:
 
     @staticmethod
     def _is_not_found(exc: Exception) -> bool:
+        if isinstance(exc, FileNotFoundError):
+            return True
         message = str(exc).lower()
         return 'not found' in message or '404' in message or 'does not exist' in message
 

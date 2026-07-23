@@ -1,8 +1,7 @@
 package remotefs
 
 import (
-	"context"
-	"encoding/base64"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -13,18 +12,21 @@ import (
 
 	"gorm.io/gorm"
 
-	"lazymind/core/evolution"
-	"lazymind/core/preferencefile"
-	"lazymind/core/resourcefs"
 	skillhttperr "lazymind/core/skillv2/httperr"
 	skillremotefs "lazymind/core/skillv2/remotefs"
 	"lazymind/core/store"
 )
 
+var (
+	errRemoteFSInvalidPath = errors.New("invalid remote fs path")
+	errRemoteFSConflict    = errors.New("remote fs conflict")
+	errRemoteFSUnsupported = errors.New("remote fs operation unsupported")
+)
+
 type Handler struct {
-	db    *gorm.DB
-	skill *skillremotefs.Handler
-	fs    *resourcefs.Service
+	db     *gorm.DB
+	skill  *skillremotefs.Handler
+	memory *memoryCurrentHandler
 }
 
 func NewHandler(db *gorm.DB) *Handler {
@@ -35,48 +37,77 @@ func NewHandler(db *gorm.DB) *Handler {
 			BlobStore:  skillremotefs.NewBlobStore(db, skillremotefs.NewLocalObjectStore(skillObjectRoot())),
 			StateStore: store.State(),
 		}),
-		fs: resourcefs.NewService(resourcefs.ServiceDeps{DB: db}),
+		memory: newMemoryCurrentHandler(newMemoryCurrentService(db)),
 	}
 }
 
 func List(w http.ResponseWriter, r *http.Request) {
-	NewHandler(store.DB()).List(w, r)
+	dispatch(w, r, (*Handler).List)
 }
 
 func Info(w http.ResponseWriter, r *http.Request) {
-	NewHandler(store.DB()).Info(w, r)
+	dispatch(w, r, (*Handler).Info)
 }
 
 func Exists(w http.ResponseWriter, r *http.Request) {
-	NewHandler(store.DB()).Exists(w, r)
+	dispatch(w, r, (*Handler).Exists)
 }
 
 func Content(w http.ResponseWriter, r *http.Request) {
-	NewHandler(store.DB()).Content(w, r)
+	dispatch(w, r, (*Handler).Content)
 }
 
 func Dir(w http.ResponseWriter, r *http.Request) {
-	NewHandler(store.DB()).Dir(w, r)
+	dispatch(w, r, (*Handler).Dir)
 }
 
 func Delete(w http.ResponseWriter, r *http.Request) {
-	NewHandler(store.DB()).Delete(w, r)
+	dispatch(w, r, (*Handler).Delete)
 }
 
 func Copy(w http.ResponseWriter, r *http.Request) {
-	NewHandler(store.DB()).Copy(w, r)
+	dispatch(w, r, (*Handler).Copy)
 }
 
 func Move(w http.ResponseWriter, r *http.Request) {
-	NewHandler(store.DB()).Move(w, r)
+	dispatch(w, r, (*Handler).Move)
 }
 
 func Trash(w http.ResponseWriter, r *http.Request) {
-	NewHandler(store.DB()).Trash(w, r)
+	dispatch(w, r, (*Handler).Trash)
+}
+
+func dispatch(
+	w http.ResponseWriter,
+	r *http.Request,
+	operation func(*Handler, http.ResponseWriter, *http.Request),
+) {
+	if !requireInternalServiceToken(w, r) {
+		return
+	}
+	operation(NewHandler(store.DB()), w, r)
+}
+
+func requireInternalServiceToken(w http.ResponseWriter, r *http.Request) bool {
+	expected := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"))
+	if expected == "" {
+		return true
+	}
+	provided := strings.TrimSpace(r.Header.Get("X-LazyMind-Internal-Token"))
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
+		skillhttperr.ReplyWithCode(
+			w,
+			"internal token required",
+			http.StatusUnauthorized,
+			skillhttperr.CodeUnauthenticated,
+		)
+		return false
+	}
+	return true
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	pathValue := normalizeRemoteFSPath(r.URL.Query().Get("path"))
 	if isPluginPath(pathValue) {
 		h.pluginList(w, r, pathValue)
 		return
@@ -85,35 +116,15 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		h.skill.List(w, requestWithUserAndPath(r, pathValue))
 		return
 	}
-	userID, ok := requireUser(w, r)
-	if !ok {
+	if isMemoryMountPath(pathValue) {
+		h.memory.List(w, r, pathValue)
 		return
 	}
-	switch pathValue {
-	case "memory":
-		writeJSON(w, http.StatusOK, map[string]any{"items": []map[string]any{
-			{"name": "memory.md", "path": resourcefs.MemoryPath, "type": "file"},
-			{"name": "user.md", "path": resourcefs.UserPreferencePath, "type": "file"},
-		}})
-	case resourcefs.MemoryPath, resourcefs.UserPreferencePath:
-		ref, err := h.ensurePersonal(r.Context(), userID, pathValue)
-		if err != nil {
-			replyError(w, err)
-			return
-		}
-		file, err := h.fs.ReadFile(r.Context(), resourcefs.ReadFileRequest{Ref: ref, RefType: resourcefs.FileRefHead})
-		if err != nil {
-			replyError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": []map[string]any{fileListItem(file)}})
-	default:
-		replyError(w, resourcefs.ErrInvalidPath)
-	}
+	replyError(w, errRemoteFSInvalidPath)
 }
 
 func (h *Handler) Info(w http.ResponseWriter, r *http.Request) {
-	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	pathValue := normalizeRemoteFSPath(r.URL.Query().Get("path"))
 	if isPluginPath(pathValue) {
 		h.pluginInfo(w, r, pathValue)
 		return
@@ -122,29 +133,15 @@ func (h *Handler) Info(w http.ResponseWriter, r *http.Request) {
 		h.skill.Info(w, requestWithUserAndPath(r, pathValue))
 		return
 	}
-	if pathValue == "memory" {
-		writeJSON(w, http.StatusOK, map[string]any{"path": "memory", "type": "dir"})
+	if isMemoryMountPath(pathValue) {
+		h.memory.Info(w, r, pathValue)
 		return
 	}
-	userID, ok := requireUser(w, r)
-	if !ok {
-		return
-	}
-	ref, err := h.ensurePersonal(r.Context(), userID, pathValue)
-	if err != nil {
-		replyError(w, err)
-		return
-	}
-	file, err := h.fs.ReadFile(r.Context(), resourcefs.ReadFileRequest{Ref: ref, RefType: resourcefs.FileRefHead})
-	if err != nil {
-		replyError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, fileListItem(file))
+	replyError(w, errRemoteFSInvalidPath)
 }
 
 func (h *Handler) Exists(w http.ResponseWriter, r *http.Request) {
-	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	pathValue := normalizeRemoteFSPath(r.URL.Query().Get("path"))
 	if isPluginPath(pathValue) {
 		_, _, _, err := h.pluginFiles(r, pathValue)
 		writeJSON(w, http.StatusOK, map[string]any{"exists": err == nil})
@@ -154,20 +151,15 @@ func (h *Handler) Exists(w http.ResponseWriter, r *http.Request) {
 		h.skill.Exists(w, requestWithUserAndPath(r, pathValue))
 		return
 	}
-	if pathValue == "memory" {
-		writeJSON(w, http.StatusOK, map[string]any{"exists": true})
+	if isMemoryMountPath(pathValue) {
+		h.memory.Exists(w, r, pathValue)
 		return
 	}
-	userID, ok := requireUser(w, r)
-	if !ok {
-		return
-	}
-	_, err := h.ensurePersonal(r.Context(), userID, pathValue)
-	writeJSON(w, http.StatusOK, map[string]any{"exists": err == nil})
+	writeJSON(w, http.StatusOK, map[string]any{"exists": false})
 }
 
 func (h *Handler) Content(w http.ResponseWriter, r *http.Request) {
-	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	pathValue := normalizeRemoteFSPath(r.URL.Query().Get("path"))
 	if isPluginPath(pathValue) {
 		h.pluginContent(w, r, pathValue)
 		return
@@ -176,202 +168,126 @@ func (h *Handler) Content(w http.ResponseWriter, r *http.Request) {
 		h.skill.Content(w, requestWithUserAndPath(r, pathValue))
 		return
 	}
-	switch r.Method {
-	case http.MethodGet:
-		h.readPersonalContent(w, r, pathValue)
-	case http.MethodPut:
-		h.writePersonalContent(w, r, pathValue)
-	default:
-		skillhttperr.Reply(w, "method not allowed", http.StatusMethodNotAllowed)
+	if isMemoryMountPath(pathValue) {
+		h.memory.Content(w, r, pathValue)
+		return
 	}
+	replyError(w, errRemoteFSInvalidPath)
 }
 
 func (h *Handler) Dir(w http.ResponseWriter, r *http.Request) {
-	if h.delegateBodyPath(w, r, func() { h.skill.Dir(w, requestWithUser(r)) }) {
+	data, pathValue, ok := readBodyPath(w, r)
+	if !ok {
 		return
 	}
-	replyError(w, resourcefs.ErrUnsupported)
+	r.Body = io.NopCloser(strings.NewReader(string(data)))
+	if isPluginPath(pathValue) {
+		skillhttperr.Reply(w, "revision/plugin views are read-only", http.StatusBadRequest)
+		return
+	}
+	if isSkillPath(pathValue) {
+		h.skill.Dir(w, requestWithUser(r))
+		return
+	}
+	if isMemoryMountPath(pathValue) {
+		h.memory.Dir(w, r)
+		return
+	}
+	replyError(w, errRemoteFSUnsupported)
 }
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
-	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	pathValue := normalizeRemoteFSPath(r.URL.Query().Get("path"))
+	if isPluginPath(pathValue) {
+		skillhttperr.Reply(w, "revision/plugin views are read-only", http.StatusBadRequest)
+		return
+	}
 	if isSkillPath(pathValue) {
 		h.skill.DeletePath(w, requestWithUserAndPath(r, pathValue))
 		return
 	}
-	userID, ok := requireUser(w, r)
-	if !ok {
+	if isMemoryMountPath(pathValue) {
+		h.memory.Delete(w, r, pathValue)
 		return
 	}
-	ref, err := h.ensurePersonal(r.Context(), userID, pathValue)
-	if err != nil {
-		replyError(w, err)
-		return
-	}
-	clearContent := ""
-	if ref.ResourceType == resourcefs.ResourceTypeUserPreference {
-		clearContent = preferencefile.EmptyPreferenceFileContent()
-	}
-	draft, err := h.fs.ReadFile(r.Context(), resourcefs.ReadFileRequest{Ref: ref, RefType: resourcefs.FileRefDraft})
-	if err != nil {
-		replyError(w, err)
-		return
-	}
-	draftResp, err := h.fs.WriteDraft(r.Context(), resourcefs.WriteDraftRequest{
-		Ref:                  ref,
-		Content:              clearContent,
-		ExpectedDraftVersion: draft.DraftVersion,
-		TaskID:               strings.TrimSpace(r.URL.Query().Get("task_id")),
-		UpdatedBy:            userID,
-	})
-	if err != nil {
-		replyError(w, err)
-		return
-	}
-	commit, err := h.fs.CommitDraft(r.Context(), resourcefs.CommitDraftRequest{
-		Ref:                  ref,
-		Message:              "clear personal resource",
-		SourceRefType:        "remote_fs_delete",
-		ExpectedDraftVersion: draftResp.DraftVersion,
-		CreatedBy:            userID,
-	})
-	if err != nil {
-		replyError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "revision_id": commit.RevisionID, "revision_no": commit.RevisionNo})
+	replyError(w, errRemoteFSInvalidPath)
 }
 
 func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
-	if h.delegateBodyPathPair(w, r, func() { h.skill.Copy(w, requestWithUser(r)) }) {
+	data, from, to, ok := readBodyPathPair(w, r)
+	if !ok {
 		return
 	}
-	replyError(w, resourcefs.ErrUnsupported)
+	r.Body = io.NopCloser(strings.NewReader(string(data)))
+	if isPluginPath(from) || isPluginPath(to) {
+		skillhttperr.Reply(w, "revision/plugin views are read-only", http.StatusBadRequest)
+		return
+	}
+	fromSkill, toSkill := isSkillPath(from), isSkillPath(to)
+	fromMemory, toMemory := isMemoryMountPath(from), isMemoryMountPath(to)
+	if fromSkill && toSkill {
+		h.skill.Copy(w, requestWithUser(r))
+		return
+	}
+	if fromMemory && toMemory {
+		h.memory.Copy(w, r)
+		return
+	}
+	if (fromSkill || toSkill) && (fromMemory || toMemory) {
+		skillhttperr.Reply(w, "copy across skill and memory mounts is not allowed", http.StatusBadRequest)
+		return
+	}
+	replyError(w, errRemoteFSUnsupported)
 }
 
 func (h *Handler) Move(w http.ResponseWriter, r *http.Request) {
-	if h.delegateBodyPathPair(w, r, func() { h.skill.Move(w, requestWithUser(r)) }) {
+	data, from, to, ok := readBodyPathPair(w, r)
+	if !ok {
 		return
 	}
-	replyError(w, resourcefs.ErrUnsupported)
+	r.Body = io.NopCloser(strings.NewReader(string(data)))
+	if isPluginPath(from) || isPluginPath(to) {
+		skillhttperr.Reply(w, "revision/plugin views are read-only", http.StatusBadRequest)
+		return
+	}
+	fromSkill, toSkill := isSkillPath(from), isSkillPath(to)
+	fromMemory, toMemory := isMemoryMountPath(from), isMemoryMountPath(to)
+	if fromSkill && toSkill {
+		h.skill.Move(w, requestWithUser(r))
+		return
+	}
+	if fromMemory && toMemory {
+		h.memory.Move(w, r)
+		return
+	}
+	if (fromSkill || toSkill) && (fromMemory || toMemory) {
+		skillhttperr.Reply(w, "move across skill and memory mounts is not allowed", http.StatusBadRequest)
+		return
+	}
+	replyError(w, errRemoteFSUnsupported)
 }
 
 func (h *Handler) Trash(w http.ResponseWriter, r *http.Request) {
-	pathValue := resourcefs.NormalizePath(r.URL.Query().Get("path"))
+	pathValue := normalizeRemoteFSPath(r.URL.Query().Get("path"))
 	if pathValue == "" {
 		var body struct {
 			Path string `json:"path"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		pathValue = resourcefs.NormalizePath(body.Path)
+		pathValue = normalizeRemoteFSPath(body.Path)
 	}
 	if isSkillPath(pathValue) {
 		h.skill.Trash(w, requestWithUserAndPath(r, pathValue))
 		return
 	}
-	replyError(w, resourcefs.ErrUnsupported)
+	replyError(w, errRemoteFSUnsupported)
 }
 
-func (h *Handler) readPersonalContent(w http.ResponseWriter, r *http.Request, pathValue string) {
-	userID, ok := requireUser(w, r)
-	if !ok {
-		return
-	}
-	ref, err := h.ensurePersonal(r.Context(), userID, pathValue)
-	if err != nil {
-		replyError(w, err)
-		return
-	}
-	refType := resourcefs.FileRefHead
-	if isMemoryReviewTaskID(r.URL.Query().Get("task_id")) {
-		if draft, err := h.fs.ReadFile(r.Context(), resourcefs.ReadFileRequest{Ref: ref, RefType: resourcefs.FileRefDraft}); err == nil && strings.TrimSpace(draft.DraftStatus) == "pending_confirm" {
-			refType = resourcefs.FileRefDraft
-		}
-	}
-	file, err := h.fs.ReadFile(r.Context(), resourcefs.ReadFileRequest{Ref: ref, RefType: refType})
-	if err != nil {
-		replyError(w, err)
-		return
-	}
-	switch r.URL.Query().Get("encoding") {
-	case "base64":
-		writeJSON(w, http.StatusOK, map[string]any{"encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(file.Content))})
-	default:
-		if file.Mime != "" {
-			w.Header().Set("Content-Type", file.Mime)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(file.Content))
-	}
-}
-
-func (h *Handler) writePersonalContent(w http.ResponseWriter, r *http.Request, pathValue string) {
-	userID, ok := requireUser(w, r)
-	if !ok {
-		return
-	}
-	taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
-	if taskID == "" {
-		skillhttperr.Reply(w, "task_id is required", http.StatusBadRequest)
-		return
-	}
-	ref, err := h.ensurePersonal(r.Context(), userID, pathValue)
-	if err != nil {
-		replyError(w, err)
-		return
-	}
-	draft, err := h.fs.ReadFile(r.Context(), resourcefs.ReadFileRequest{Ref: ref, RefType: resourcefs.FileRefDraft})
-	if err != nil {
-		replyError(w, err)
-		return
-	}
-	if !isMemoryReviewTaskID(taskID) && strings.TrimSpace(draft.DraftStatus) == "pending_confirm" {
-		replyError(w, resourcefs.ErrConflict)
-		return
-	}
+func readBodyPath(w http.ResponseWriter, r *http.Request) ([]byte, string, bool) {
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		replyError(w, err)
-		return
-	}
-	resp, err := h.fs.WriteDraft(r.Context(), resourcefs.WriteDraftRequest{
-		Ref:                  ref,
-		Content:              string(data),
-		ExpectedDraftVersion: draft.DraftVersion,
-		TaskID:               taskID,
-		UpdatedBy:            userID,
-	})
-	if err != nil {
-		replyError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "draft_version": resp.DraftVersion})
-}
-
-func isMemoryReviewTaskID(taskID string) bool {
-	return strings.HasPrefix(strings.TrimSpace(taskID), "memory_review_")
-}
-
-func (h *Handler) ensurePersonal(ctx context.Context, userID, pathValue string) (resourcefs.ResourceRef, error) {
-	resourceType, err := resourcefs.ResourceTypeForPath(pathValue)
-	if err != nil {
-		return resourcefs.ResourceRef{}, err
-	}
-	ref := resourcefs.ResourceRef{UserID: userID, ResourceType: resourceType}
-	if resourceType != resourcefs.ResourceTypeMemory && resourceType != resourcefs.ResourceTypeUserPreference {
-		return resourcefs.ResourceRef{}, resourcefs.ErrInvalidResourceType
-	}
-	if _, err := evolution.EnsurePersonalResourceContent(ctx, h.db, userID, string(resourceType)); err != nil {
-		return resourcefs.ResourceRef{}, err
-	}
-	return ref, nil
-}
-
-func (h *Handler) delegateBodyPath(w http.ResponseWriter, r *http.Request, delegate func()) bool {
-	data, err := io.ReadAll(r.Body)
-	if err != nil {
-		replyError(w, err)
-		return true
+		return nil, "", false
 	}
 	r.Body = io.NopCloser(strings.NewReader(string(data)))
 	var body struct {
@@ -379,21 +295,16 @@ func (h *Handler) delegateBodyPath(w http.ResponseWriter, r *http.Request, deleg
 	}
 	if err := json.Unmarshal(data, &body); err != nil {
 		skillhttperr.Reply(w, "invalid json", http.StatusBadRequest)
-		return true
+		return nil, "", false
 	}
-	if isSkillPath(resourcefs.NormalizePath(body.Path)) {
-		r.Body = io.NopCloser(strings.NewReader(string(data)))
-		delegate()
-		return true
-	}
-	return false
+	return data, normalizeRemoteFSPath(body.Path), true
 }
 
-func (h *Handler) delegateBodyPathPair(w http.ResponseWriter, r *http.Request, delegate func()) bool {
+func readBodyPathPair(w http.ResponseWriter, r *http.Request) ([]byte, string, string, bool) {
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		replyError(w, err)
-		return true
+		return nil, "", "", false
 	}
 	r.Body = io.NopCloser(strings.NewReader(string(data)))
 	var body struct {
@@ -402,26 +313,9 @@ func (h *Handler) delegateBodyPathPair(w http.ResponseWriter, r *http.Request, d
 	}
 	if err := json.Unmarshal(data, &body); err != nil {
 		skillhttperr.Reply(w, "invalid json", http.StatusBadRequest)
-		return true
+		return nil, "", "", false
 	}
-	if isSkillPath(resourcefs.NormalizePath(body.From)) && isSkillPath(resourcefs.NormalizePath(body.To)) {
-		r.Body = io.NopCloser(strings.NewReader(string(data)))
-		delegate()
-		return true
-	}
-	return false
-}
-
-func fileListItem(file resourcefs.FileResponse) map[string]any {
-	return map[string]any{
-		"name":      filepath.Base(file.Path),
-		"path":      file.Path,
-		"type":      "file",
-		"size":      file.Size,
-		"mime":      file.Mime,
-		"file_type": file.FileType,
-		"binary":    file.Binary,
-	}
+	return data, normalizeRemoteFSPath(body.From), normalizeRemoteFSPath(body.To), true
 }
 
 func requireUser(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -437,7 +331,7 @@ func requireUser(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 func requestWithUser(r *http.Request) *http.Request {
-	return requestWithUserAndPath(r, resourcefs.NormalizePath(r.URL.Query().Get("path")))
+	return requestWithUserAndPath(r, normalizeRemoteFSPath(r.URL.Query().Get("path")))
 }
 
 func requestWithUserAndPath(r *http.Request, pathValue string) *http.Request {
@@ -459,6 +353,10 @@ func isSkillPath(pathValue string) bool {
 	return pathValue == "skills" || strings.HasPrefix(pathValue, "skills/")
 }
 
+func normalizeRemoteFSPath(value string) string {
+	return strings.TrimLeft(strings.TrimSpace(value), "/")
+}
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -467,14 +365,14 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func replyError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, resourcefs.ErrInvalidPath), errors.Is(err, resourcefs.ErrInvalidResourceType):
+	case errors.Is(err, errRemoteFSInvalidPath):
 		skillhttperr.Reply(w, err.Error(), http.StatusBadRequest)
-	case errors.Is(err, resourcefs.ErrResourceNotFound), errors.Is(err, resourcefs.ErrRevisionNotFound), errors.Is(err, gorm.ErrRecordNotFound):
+	case errors.Is(err, gorm.ErrRecordNotFound):
 		skillhttperr.ReplyWithCode(w, "not found", http.StatusNotFound, skillhttperr.CodeNotFound)
-	case errors.Is(err, resourcefs.ErrConflict):
+	case errors.Is(err, errRemoteFSConflict):
 		skillhttperr.Reply(w, "conflict", http.StatusConflict)
-	case errors.Is(err, resourcefs.ErrUnsupported):
-		skillhttperr.Reply(w, "unsupported for personal resource", http.StatusUnprocessableEntity)
+	case errors.Is(err, errRemoteFSUnsupported):
+		skillhttperr.Reply(w, "unsupported remote fs operation", http.StatusUnprocessableEntity)
 	default:
 		skillhttperr.Reply(w, err.Error(), http.StatusInternalServerError)
 	}

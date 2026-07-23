@@ -13,12 +13,6 @@ type SkillGenerateRequest struct {
 	LLMConfig    map[string]any
 }
 
-type ManagedGenerateRequest struct {
-	Content      string
-	UserInstruct string
-	LLMConfig    map[string]any
-}
-
 type PolishGenerateRequest struct {
 	Content      string
 	UserInstruct string

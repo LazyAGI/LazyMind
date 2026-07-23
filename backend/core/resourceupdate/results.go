@@ -1,8 +1,6 @@
 package resourceupdate
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,7 +12,6 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
-	"lazymind/core/common/orm"
 )
 
 const (
@@ -25,8 +22,6 @@ const (
 
 	skillReviewTypePatch = "patch"
 	skillReviewTypeNew   = "new"
-
-	memoryReviewStateSuccess = "success"
 )
 
 type SkillReviewResult struct {
@@ -42,21 +37,6 @@ type SkillReviewResult struct {
 }
 
 func (SkillReviewResult) TableName() string { return "skill_review_results" }
-
-type MemoryReviewResult struct {
-	ID            string          `gorm:"column:id" json:"id"`
-	UserID        string          `gorm:"column:user_id" json:"user_id"`
-	Target        string          `gorm:"column:target" json:"target"`
-	SessionID     string          `gorm:"column:session_id" json:"session_id"`
-	SourceContent string          `gorm:"column:source_content" json:"source_content"`
-	Content       string          `gorm:"column:content" json:"content"`
-	Operations    json.RawMessage `gorm:"column:operations" json:"operations,omitempty"`
-	State         string          `gorm:"column:state" json:"state"`
-	ReviewStatus  string          `gorm:"column:review_status" json:"review_status"`
-	Time          time.Time       `gorm:"column:time" json:"time"`
-}
-
-func (MemoryReviewResult) TableName() string { return "memory_review" }
 
 type skillFrontmatter struct {
 	Name        string `yaml:"name"`
@@ -96,28 +76,6 @@ func parsePositiveQueryInt(value string, def, max int) int {
 		return max
 	}
 	return n
-}
-
-func normalizeReviewTarget(target string) string {
-	switch strings.TrimSpace(target) {
-	case orm.ResourceUpdateResourceTypeMemory:
-		return orm.ResourceUpdateResourceTypeMemory
-	case orm.ResourceUpdateResourceTypeUserPreference:
-		return orm.ResourceUpdateResourceTypeUserPreference
-	default:
-		return strings.TrimSpace(target)
-	}
-}
-
-func isAutoApplyActiveStatus(status string) bool {
-	return status == orm.ResourceUpdateTaskStatusPending || status == orm.ResourceUpdateTaskStatusRunning
-}
-
-func taskReviewResultID(task orm.ResourceUpdateTask) string {
-	if id := strings.TrimSpace(task.ReviewResultID); id != "" {
-		return id
-	}
-	return strings.TrimSpace(task.TriggerID)
 }
 
 func parseSkillFrontmatter(content string) (skillFrontmatter, error) {
@@ -184,43 +142,4 @@ func validatePathSegment(segment string) error {
 func skillResultSelect(db *gorm.DB) *gorm.DB {
 	return db.Table("skill_review_results").
 		Select("id, skill_name, type, review_status, userid, requestid, skill_content, COALESCE(summary, '') AS summary, time")
-}
-
-func memoryResultSelect(db *gorm.DB) *gorm.DB {
-	return db.Table("memory_review").
-		Select("id, user_id, target, session_id, source_content, content, operations, state, review_status, time")
-}
-
-func mapMemoryReviewResultToPersonalResource(db *gorm.DB, target string, result MemoryReviewResult) (orm.PersonalResource, error) {
-	var row orm.PersonalResource
-	err := db.
-		Where("user_id = ? AND resource_type = ?",
-			strings.TrimSpace(result.UserID),
-			strings.TrimSpace(target)).
-		Take(&row).Error
-	return row, err
-}
-
-func personalResourceHeadContent(ctx context.Context, db *gorm.DB, resource orm.PersonalResource) (string, orm.PersonalResourceRevision, error) {
-	if resource.HeadRevisionID == nil || strings.TrimSpace(*resource.HeadRevisionID) == "" {
-		return "", orm.PersonalResourceRevision{}, gorm.ErrRecordNotFound
-	}
-	var revision orm.PersonalResourceRevision
-	if err := db.WithContext(ctx).
-		Where("id = ? AND resource_id = ?", *resource.HeadRevisionID, resource.ID).
-		Take(&revision).Error; err != nil {
-		return "", orm.PersonalResourceRevision{}, err
-	}
-	var blob orm.PersonalResourceBlob
-	if err := db.WithContext(ctx).Where("hash = ?", revision.BlobHash).Take(&blob).Error; err != nil {
-		return "", orm.PersonalResourceRevision{}, err
-	}
-	if blob.Binary {
-		return "", orm.PersonalResourceRevision{}, fmt.Errorf("%w: personal resource head is binary", errReviewInvalid)
-	}
-	return string(blob.Content), revision, nil
-}
-
-func activeAutoApplyStatuses() []string {
-	return []string{orm.ResourceUpdateTaskStatusPending, orm.ResourceUpdateTaskStatusRunning}
 }

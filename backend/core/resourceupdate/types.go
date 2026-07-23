@@ -52,13 +52,10 @@ type skillGenerateRequestJSON struct {
 	WindowFrozen                   bool     `json:"window_frozen"`
 }
 
-type memoryGenerateRequestJSON struct {
-	SessionID      string          `json:"session_id"`
-	History        json.RawMessage `json:"history,omitempty"`
-	Memory         string          `json:"memory,omitempty"`
-	User           string          `json:"user,omitempty"`
-	Target         string          `json:"target,omitempty"`
-	CurrentContent string          `json:"current_content,omitempty"`
+type memoryReviewRequestJSON struct {
+	ConversationID             string          `json:"conversation_id"`
+	ConversationLastActiveAtMS int64           `json:"conversation_last_active_at_ms"`
+	History                    json.RawMessage `json:"history,omitempty"`
 }
 
 type skillDraftAutoCommitRequestJSON struct {

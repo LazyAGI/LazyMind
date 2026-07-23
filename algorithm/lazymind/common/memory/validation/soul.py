@@ -4,13 +4,12 @@ from typing import Any, Optional
 
 from .common import (
     optional_str,
-    parse_yaml_frontmatter,
+    parse_yaml_mapping,
     reject_unknown_keys,
     require_mapping,
-    require_no_body,
 )
 
-_ROOT_KEYS = {'schema_version', 'identity', 'mission', 'interaction', 'epistemic'}
+_ROOT_KEYS = {'identity', 'mission', 'interaction', 'epistemic'}
 _IDENTITY_KEYS = {'name', 'role', 'description'}
 _MISSION_KEYS = {'primary_goal', 'success_definition'}
 _INTERACTION_KEYS = {
@@ -25,24 +24,15 @@ _EPISTEMIC_KEYS = {'uncertainty_style', 'verification_mode'}
 
 def validate_soul_content(content: str) -> Optional[str]:
     if not content or not str(content).strip():
-        return 'soul requires non-empty YAML frontmatter content.'
+        return 'soul requires a non-empty YAML mapping.'
 
-    frontmatter, body = parse_yaml_frontmatter(content)
-    if not frontmatter:
-        return 'soul must contain YAML frontmatter.'
+    document = parse_yaml_mapping(content)
+    if not document:
+        return 'soul must be a valid non-empty YAML mapping.'
 
-    body_error = require_no_body(body, entity='soul')
-    if body_error:
-        return body_error
-
-    root_error = reject_unknown_keys(frontmatter, _ROOT_KEYS, field='soul')
+    root_error = reject_unknown_keys(document, _ROOT_KEYS, field='soul')
     if root_error:
         return root_error
-
-    if 'schema_version' not in frontmatter:
-        return "soul requires 'schema_version'."
-    if frontmatter.get('schema_version') != 1:
-        return "soul 'schema_version' must be 1."
 
     for section, allowed, required_strings in (
         ('identity', _IDENTITY_KEYS, ('name', 'role', 'description')),
@@ -61,7 +51,7 @@ def validate_soul_content(content: str) -> Optional[str]:
         ('epistemic', _EPISTEMIC_KEYS, ('uncertainty_style', 'verification_mode')),
     ):
         error = _validate_required_string_section(
-            frontmatter.get(section),
+            document.get(section),
             section=section,
             allowed=allowed,
             required_strings=required_strings,

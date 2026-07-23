@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
+import lazyllm
+
 from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.common.memory.paths import (
     PREFERENCE_PATH,
@@ -14,8 +16,6 @@ from lazymind.common.memory.paths import (
 from lazymind.common.memory.store import MemoryStore
 
 SAMPLE_SOUL = (
-    '---\n'
-    'schema_version: 1\n'
     'identity:\n'
     '  name: "LazyMind"\n'
     '  role: "personal_ai_assistant"\n'
@@ -32,12 +32,9 @@ SAMPLE_SOUL = (
     'epistemic:\n'
     '  uncertainty_style: "explicit"\n'
     '  verification_mode: "when_material"\n'
-    '---\n'
 )
 
 SAMPLE_PROFILE = (
-    '---\n'
-    'schema_version: 1\n'
     'identity:\n'
     '  preferred_name: null\n'
     '  aliases: []\n'
@@ -53,22 +50,17 @@ SAMPLE_PROFILE = (
     '  expertise_domains: []\n'
     'accessibility:\n'
     '  communication_needs: []\n'
-    '---\n'
 )
 
-SAMPLE_PREFERENCE = (
-    '---\n'
-    'schema_version: 1\n'
-    'updated_at: 2026-07-20\n'
-    '---\n'
-    '# Preference Index\n'
-)
+SAMPLE_PREFERENCE = 'preferences: []\n'
 
 
 class FakeRemoteFS:
     def __init__(self, files: Optional[Dict[str, str]] = None):
         self.files: Dict[str, str] = dict(files or {})
         self.dirs: set[str] = set()
+        self.fail_write_paths: set[str] = set()
+        self.fail_rm_paths: set[str] = set()
 
     def exists(self, path: str) -> bool:
         normalized = normalize_memory_path(path)
@@ -104,12 +96,16 @@ class FakeRemoteFS:
 
     def write(self, path: str, content: str, content_type: str = 'text/plain; charset=utf-8') -> None:
         normalized = normalize_memory_path(path)
+        if normalized in self.fail_write_paths:
+            raise RuntimeError(f'write failed: {normalized}')
         self.files[normalized] = content
         parent = normalized.rsplit('/', 1)[0]
         self.dirs.add(parent)
 
     def rm(self, path: str) -> None:
         normalized = normalize_memory_path(path)
+        if normalized in self.fail_rm_paths:
+            raise RuntimeError(f'delete failed: {normalized}')
         self.files.pop(normalized, None)
 
     def open(self, path: str, mode: str = 'rb', **kwargs):
@@ -143,7 +139,18 @@ def _tools_with_store(fs: FakeRemoteFS):
     return MemoryTools(), store
 
 
+def _reset_ledger() -> list[dict[str, Any]]:
+    ledger: list[dict[str, Any]] = []
+    lazyllm.globals['agentic_config'] = {
+        'memory_tool_results': ledger,
+        'memory_source_kind': 'chat_explicit',
+        'conversation_id': 'conversation-1',
+    }
+    return ledger
+
+
 def test_soul_editor_updates_supported_field():
+    ledger = _reset_ledger()
     fs = FakeRemoteFS({
         SOUL_PATH: SAMPLE_SOUL,
         PROFILE_PATH: SAMPLE_PROFILE,
@@ -156,9 +163,13 @@ def test_soul_editor_updates_supported_field():
     assert payload['success'] is True
     assert payload['result']['status'] == 'applied'
     assert '更直接的助手' in fs.files[SOUL_PATH]
+    assert ledger[-1]['tool'] == 'soul_editor'
+    assert ledger[-1]['mutation'] is True
+    assert ledger[-1]['result']['status'] == 'applied'
 
 
 def test_soul_editor_rejects_missing_field():
+    ledger = _reset_ledger()
     fs = FakeRemoteFS({
         SOUL_PATH: SAMPLE_SOUL,
         PROFILE_PATH: SAMPLE_PROFILE,
@@ -170,9 +181,12 @@ def test_soul_editor_rejects_missing_field():
     assert payload['success'] is False
     assert payload['error']['type'] == 'validation'
     assert 'does not exist in soul' in payload['error']['reason']
+    assert ledger[-1]['success'] is False
+    assert ledger[-1]['mutation'] is False
 
 
 def test_profile_editor_rejects_new_key():
+    ledger = _reset_ledger()
     fs = FakeRemoteFS({
         SOUL_PATH: SAMPLE_SOUL,
         PROFILE_PATH: SAMPLE_PROFILE,
@@ -184,9 +198,12 @@ def test_profile_editor_rejects_new_key():
     assert payload['success'] is False
     assert payload['error']['type'] == 'validation'
     assert 'does not exist in profile' in payload['error']['reason']
+    assert ledger[-1]['tool'] == 'profile_editor'
+    assert ledger[-1]['mutation'] is False
 
 
 def test_profile_editor_updates_list_field():
+    ledger = _reset_ledger()
     fs = FakeRemoteFS({
         SOUL_PATH: SAMPLE_SOUL,
         PROFILE_PATH: SAMPLE_PROFILE,
@@ -199,9 +216,11 @@ def test_profile_editor_updates_list_field():
     assert payload['success'] is True
     assert payload['result']['status'] == 'applied'
     assert 'en-US' in fs.files[PROFILE_PATH]
+    assert ledger[-1]['mutation'] is True
 
 
 def test_preference_editor_add_and_delete():
+    ledger = _reset_ledger()
     fs = FakeRemoteFS({
         SOUL_PATH: SAMPLE_SOUL,
         PROFILE_PATH: SAMPLE_PROFILE,
@@ -214,14 +233,93 @@ def test_preference_editor_add_and_delete():
             name='pref.response.concise',
             summary='回答要简洁',
             scenario='日常问答',
+            details='先给结论，再按需补充背景。',
             reason='用户明确要求简洁回答',
         )
         assert added['success'] is True
         assert added['result']['status'] == 'applied'
         assert 'pref.response.concise' in fs.files[PREFERENCE_PATH]
-        assert build_reference_path('response-concise') in fs.files
+        reference_path = build_reference_path('response-concise')
+        assert reference_path in fs.files
+        reference = fs.files[reference_path]
+        assert 'name: pref.response.concise' in reference
+        assert 'summary: 回答要简洁' in reference
+        assert 'kind: chat_explicit' in reference
+        assert 'conversation_id: conversation-1' in reference
+        assert '## Application Scenarios' in reference
+        assert '## Preference Details' in reference
+        assert '## Reason' in reference
 
         deleted = tools.preference_editor('delete', name='pref.response.concise')
         assert deleted['success'] is True
         assert 'pref.response.concise' not in fs.files[PREFERENCE_PATH]
         assert build_reference_path('response-concise') not in fs.files
+    assert [entry['tool'] for entry in ledger] == [
+        'preference_editor',
+        'preference_editor',
+    ]
+    assert all(entry['mutation'] is True for entry in ledger)
+
+
+def test_preference_editor_rejects_update_without_suggesting_delete_and_readd():
+    ledger = _reset_ledger()
+    payload = MemoryTools().preference_editor(
+        'update',
+        name='pref.response.concise',
+    )
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'validation'
+    assert ledger[-1]['mutation'] is False
+    assert 'Updating an existing entry is not supported yet; delete and re-add.' not in (
+        MemoryTools.preference_editor.__doc__ or ''
+    )
+    assert 'cannot update or reorder preferences' in (
+        MemoryTools.preference_editor.__doc__ or ''
+    )
+
+
+def test_preference_editor_requires_hidden_source_context_for_add():
+    ledger: list[dict[str, Any]] = []
+    lazyllm.globals['agentic_config'] = {'memory_tool_results': ledger}
+    payload = MemoryTools().preference_editor(
+        'add',
+        name='pref.response.concise',
+        summary='回答要简洁',
+        scenario='日常问答',
+        details='先给结论，再按需补充背景。',
+        reason='用户明确要求简洁回答',
+    )
+
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'missing_context'
+    assert ledger[-1]['mutation'] is False
+
+
+def test_preference_editor_records_partial_mutation():
+    ledger = _reset_ledger()
+    fs = FakeRemoteFS({
+        SOUL_PATH: SAMPLE_SOUL,
+        PROFILE_PATH: SAMPLE_PROFILE,
+        PREFERENCE_PATH: SAMPLE_PREFERENCE,
+    })
+    reference_path = build_reference_path('response-concise')
+    fs.fail_write_paths.add(PREFERENCE_PATH)
+    fs.fail_rm_paths.add(reference_path)
+    tools, store = _tools_with_store(fs)
+
+    with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
+        payload = tools.preference_editor(
+            'add',
+            name='pref.response.concise',
+            summary='回答要简洁',
+            scenario='日常问答',
+            details='先给结论，再按需补充背景。',
+            reason='用户明确要求简洁回答',
+        )
+
+    assert payload['success'] is False
+    assert payload['error']['type'] == 'partial'
+    assert ledger[-1]['success'] is False
+    assert ledger[-1]['mutation'] is True
+    assert ledger[-1]['error']['code'] == 'partial'
+    assert ledger[-1]['result']['operation'] == 'add'

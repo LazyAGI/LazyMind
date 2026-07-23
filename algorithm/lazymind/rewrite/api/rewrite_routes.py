@@ -45,7 +45,7 @@ def _init_session(task_type: RewriteTaskType, model_config: Dict[str, Any]) -> N
     inject_model_config(model_config)
 
 
-@router.post('/api/chat/rewrite', summary='Rewrite text content with LLM by task type')
+@router.post('/api/chat/rewrite', summary='Rewrite a skill draft or polish a prompt with an LLM')
 async def rewrite(payload: RewritePayload):
     try:
         _init_session(payload.task_type, payload.llm_config)

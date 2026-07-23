@@ -103,7 +103,7 @@ func TestOpenAPISpecRevisionSchemasIncludeHeadMarker(t *testing.T) {
 		t.Fatalf("decode openapi spec: %v", err)
 	}
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
-	for _, schemaName := range []string{"RevisionSummary", "skillRevisionOpenAPIResponse"} {
+	for _, schemaName := range []string{"skillRevisionOpenAPIResponse"} {
 		schema, ok := schemas[schemaName].(map[string]any)
 		if !ok {
 			t.Fatalf("schema %s missing", schemaName)
@@ -489,7 +489,6 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"post", "/api/core/skill-shares/{share_item_id}:accept", false, true, true},
 		{"post", "/api/core/skill-shares/{share_item_id}:reject", false, true, true},
 		{"post", "/api/core/skill/create", true, false, true},
-		{"get", "/api/core/personalization-items", false, false, true},
 		{"get", "/api/core/model_providers", false, true, true},
 		{"get", "/api/core/model_providers/features", false, false, true},
 		{"get", "/api/core/model_providers:with_groups", false, false, true},
@@ -508,19 +507,6 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"put", "/api/core/personalization-setting", true, false, true},
 		{"get", "/api/core/user/ui-preferences", false, false, true},
 		{"patch", "/api/core/user/ui-preferences", true, false, true},
-		{"patch", "/api/core/personal-resource/{resource_type}", true, true, true},
-		{"get", "/api/core/personal-resource/{resource_type}:file", false, true, true},
-		{"put", "/api/core/personal-resource/{resource_type}:file", true, true, true},
-		{"put", "/api/core/personal-resource/{resource_type}:draft", true, true, true},
-		{"get", "/api/core/personal-resource/{resource_type}:draft-preview", false, true, true},
-		{"post", "/api/core/personal-resource/{resource_type}:generate", true, true, true},
-		{"post", "/api/core/personal-resource/{resource_type}/draft-review/{review_id}/actions", true, true, true},
-		{"post", "/api/core/personal-resource/{resource_type}/draft-review/{review_id}:undo", true, true, true},
-		{"post", "/api/core/personal-resource/{resource_type}:commit", true, true, true},
-		{"post", "/api/core/personal-resource/{resource_type}:discard", false, true, true},
-		{"get", "/api/core/personal-resource/{resource_type}/revisions", false, true, true},
-		{"get", "/api/core/personal-resource/{resource_type}/revisions/{revision_id}", false, true, true},
-		{"post", "/api/core/personal-resource/{resource_type}:rollback", true, true, true},
 		{"get", "/api/core/skill-review:summary", false, false, false},
 		{"post", "/api/core/skill-review:run", false, false, false},
 		{"get", "/api/core/skill-review/tasks", false, false, false},
@@ -628,106 +614,6 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 			t.Fatalf("expected history parameter %q in %q, got %q (%v)", want.name, want.inVal, got, historyParamNames)
 		}
 	}
-}
-
-func TestOpenAPISpecAssignsMetadataFieldsToPersonalResourcePatch(t *testing.T) {
-	r := mux.NewRouter()
-	registerAllRoutes(r)
-
-	specJSON, err := buildOpenAPISpecFromRouter(r)
-	if err != nil {
-		t.Fatalf("build openapi spec: %v", err)
-	}
-
-	var spec map[string]any
-	if err := json.Unmarshal(specJSON, &spec); err != nil {
-		t.Fatalf("decode openapi spec: %v", err)
-	}
-
-	components, ok := spec["components"].(map[string]any)
-	if !ok {
-		t.Fatalf("components missing in openapi spec")
-	}
-	schemas, ok := components["schemas"].(map[string]any)
-	if !ok {
-		t.Fatalf("schemas missing in openapi spec")
-	}
-
-	schemaProperties := func(schemaName string) map[string]any {
-		t.Helper()
-		schema, ok := schemas[schemaName].(map[string]any)
-		if !ok {
-			t.Fatalf("schema %s missing", schemaName)
-		}
-		properties, ok := schema["properties"].(map[string]any)
-		if !ok {
-			t.Fatalf("schema %s properties missing", schemaName)
-		}
-		return properties
-	}
-
-	draftRequestProps := schemaProperties("personalResourceWriteDraftOpenAPIRequest")
-	for _, name := range []string{"content", "expected_draft_version"} {
-		if _, ok := draftRequestProps[name]; !ok {
-			t.Fatalf("personalResourceWriteDraftOpenAPIRequest expected property %q", name)
-		}
-	}
-	for _, name := range []string{"agent_persona", "preferred_name", "response_style"} {
-		if _, ok := draftRequestProps[name]; ok {
-			t.Fatalf("personalResourceWriteDraftOpenAPIRequest must not include property %q", name)
-		}
-	}
-	patchRequestProps := schemaProperties("personalResourcePatchOpenAPIRequest")
-	for _, name := range []string{"auto_evo", "agent_persona", "preferred_name", "response_style"} {
-		if _, ok := patchRequestProps[name]; !ok {
-			t.Fatalf("personalResourcePatchOpenAPIRequest expected property %q", name)
-		}
-	}
-
-	memoryResponseProps := schemaProperties("managedStateOpenAPIResponse")
-	for _, name := range []string{"agent_persona", "preferred_name", "response_style"} {
-		if _, ok := memoryResponseProps[name]; !ok {
-			t.Fatalf("managedStateOpenAPIResponse expected property %q", name)
-		}
-	}
-
-	paths, ok := spec["paths"].(map[string]any)
-	if !ok {
-		t.Fatalf("paths missing in openapi spec")
-	}
-	assertRequestSchemaRef := func(path, method, wantRef string) {
-		t.Helper()
-		pathItem, ok := paths[path].(map[string]any)
-		if !ok {
-			t.Fatalf("path missing from openapi spec: %s", path)
-		}
-		op, ok := pathItem[method].(map[string]any)
-		if !ok {
-			t.Fatalf("operation missing from openapi spec: %s %s", method, path)
-		}
-		requestBody, ok := op["requestBody"].(map[string]any)
-		if !ok {
-			t.Fatalf("requestBody missing for %s %s", method, path)
-		}
-		content, ok := requestBody["content"].(map[string]any)
-		if !ok {
-			t.Fatalf("requestBody content missing for %s %s", method, path)
-		}
-		jsonContent, ok := content["application/json"].(map[string]any)
-		if !ok {
-			t.Fatalf("application/json requestBody missing for %s %s", method, path)
-		}
-		schema, ok := jsonContent["schema"].(map[string]any)
-		if !ok {
-			t.Fatalf("requestBody schema missing for %s %s", method, path)
-		}
-		if got, _ := schema["$ref"].(string); got != wantRef {
-			t.Fatalf("requestBody schema ref for %s %s = %q, want %q", method, path, got, wantRef)
-		}
-	}
-
-	assertRequestSchemaRef("/api/core/personal-resource/{resource_type}:file", "put", "#/components/schemas/personalResourceWriteDraftOpenAPIRequest")
-	assertRequestSchemaRef("/api/core/personal-resource/{resource_type}:draft", "put", "#/components/schemas/personalResourceWriteDraftOpenAPIRequest")
 }
 
 func TestOpenAPISpecMarksUIPreferencesPatchFieldsOptional(t *testing.T) {

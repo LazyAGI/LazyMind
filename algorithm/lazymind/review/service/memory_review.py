@@ -10,13 +10,18 @@ from pydantic import BaseModel, ConfigDict
 
 from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.chat.service.component.history import normalize_history_for_agent
-from lazymind.common.memory import EpisodeReadError, get_episode_store
+from lazymind.common.memory import EpisodeReadError, get_episode_store, load_memory_context
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
 from lazymind.review.memory_review.prompts import build_memory_review_prompt
 
 
-_WRITE_TOOLS = frozenset({'episode_create'})
+_WRITE_TOOLS = frozenset({
+    'soul_editor',
+    'profile_editor',
+    'preference_editor',
+    'episode_create',
+})
 _SAFE_REVIEW_ERROR_MESSAGES = {
     'storage_unavailable': 'Persistent memory storage is temporarily unavailable.',
     'storage_read_failed': 'Persistent memory storage could not be read.',
@@ -41,7 +46,7 @@ class MemoryReviewResult(BaseModel):
 
     status: Literal['success', 'failed']
     task_id: str
-    outcome: Literal['saved', 'no_changes', 'no_write_decision', 'partial', 'failed']
+    outcome: Literal['saved', 'no_changes', 'partial', 'failed']
     retryable: bool = False
     error: Optional[MemoryReviewError] = None
 
@@ -113,8 +118,18 @@ def review_memory(
     conversation_id: str,
     history: List[Dict[str, Any]],
     llm_config: Optional[Dict[str, Any]] = None,
+    conversation_last_active_at_ms: Optional[int] = None,
 ) -> MemoryReviewResult:
     review_started_at_ms = time_ns() // 1_000_000
+    episode_occurred_at_ms = (
+        conversation_last_active_at_ms
+        if (
+            isinstance(conversation_last_active_at_ms, int)
+            and not isinstance(conversation_last_active_at_ms, bool)
+            and conversation_last_active_at_ms > 0
+        )
+        else review_started_at_ms
+    )
     lazyllm.globals._init_sid(sid=task_id)
     lazyllm.locals._init_sid(sid=task_id)
     inject_model_config(llm_config)
@@ -128,7 +143,9 @@ def review_memory(
         'user_id': user_id,
         'task_id': task_id,
         'conversation_id': conversation_id,
-        'review_started_at_ms': review_started_at_ms,
+        'episode_occurred_at_ms': episode_occurred_at_ms,
+        'episode_source_kind': 'memory_review',
+        'memory_source_kind': 'memory_review',
         'memory_tool_results': [],
     }
     lazyllm.globals['agentic_config'] = config
@@ -158,7 +175,30 @@ def review_memory(
                 message=_SAFE_REVIEW_ERROR_MESSAGES[exc.code],
             ),
         )
-    prompt = build_memory_review_prompt(existing_episodes)
+    try:
+        memory_context = load_memory_context(project_preference=False)
+    except Exception as raw_exc:
+        exc = EpisodeReadError.from_exception(raw_exc)
+        LOG.exception(
+            f'[MemoryReview] failed to load fixed Memory files: '
+            f'user_id={user_id} task_id={task_id}: {raw_exc}'
+        )
+        return MemoryReviewResult(
+            status='failed',
+            task_id=task_id,
+            outcome='failed',
+            retryable=exc.retryable,
+            error=MemoryReviewError(
+                code=exc.code,
+                message=_SAFE_REVIEW_ERROR_MESSAGES[exc.code],
+            ),
+        )
+    prompt = build_memory_review_prompt(
+        existing_episodes,
+        soul=memory_context.soul,
+        profile=memory_context.profile,
+        preference=memory_context.preference,
+    )
 
     llm = AutoModel(model='llm')
     review_agent = lazyllm.tools.agent.ReactAgent(
@@ -186,10 +226,13 @@ def review_memory(
     ledger = [entry for entry in config['memory_tool_results'] if isinstance(entry, dict)]
     write_results = [entry for entry in ledger if entry.get('tool') in _WRITE_TOOLS]
     successful_writes = [entry for entry in write_results if entry.get('success') is True]
-    created_writes = [
+    applied_writes = [
         entry for entry in successful_writes
-        if isinstance(entry.get('result'), dict)
-        and entry['result'].get('status') == 'created'
+        if entry.get('mutation') is True
+    ]
+    mutated_writes = [
+        entry for entry in write_results
+        if entry.get('mutation') is True
     ]
     failed_writes = _unresolved_write_failures(write_results)
     read_failures = [
@@ -198,13 +241,13 @@ def review_memory(
     ]
     unresolved_ids = {id(entry) for entry in [*failed_writes, *read_failures]}
     unresolved_failures = [entry for entry in ledger if id(entry) in unresolved_ids]
-    if created_writes and not unresolved_failures:
+    if applied_writes and not unresolved_failures:
         return MemoryReviewResult(
             status='success',
             task_id=task_id,
             outcome='saved',
         )
-    if created_writes and unresolved_failures:
+    if mutated_writes and unresolved_failures:
         return MemoryReviewResult(
             status='failed',
             task_id=task_id,
@@ -224,10 +267,8 @@ def review_memory(
     if unresolved_failures:
         retryable = (
             all(entry.get('retryable') is True for entry in unresolved_failures)
-            and all(
-                isinstance(entry, dict) and entry.get('mutation') is False
-                for entry in config['memory_tool_results']
-            )
+            and not applied_writes
+            and all(entry.get('mutation') is False for entry in unresolved_failures)
         )
         return MemoryReviewResult(
             status='failed',
@@ -248,7 +289,7 @@ def review_memory(
     return MemoryReviewResult(
         status='failed',
         task_id=task_id,
-        outcome='no_write_decision',
+        outcome='failed',
         error=MemoryReviewError(
             code='no_write_decision',
             message=(

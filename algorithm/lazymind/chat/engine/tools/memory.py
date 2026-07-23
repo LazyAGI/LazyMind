@@ -104,10 +104,38 @@ def _record_tool_result(
         entry['result'] = ledger_result
     error = payload.get('error')
     if isinstance(error, dict):
-        entry['error'] = error
+        ledger_error = dict(error)
+        if not ledger_error.get('code'):
+            ledger_error['code'] = str(ledger_error.get('type') or 'write_failed')
+        if not ledger_error.get('message'):
+            ledger_error['message'] = str(
+                ledger_error.get('reason') or 'A memory tool operation failed.'
+            )
+        entry['error'] = ledger_error
     entry['retryable'] = payload.get('retryable') is True
     ledger.append(entry)
     return payload
+
+
+def _record_state_memory_result(
+    payload: dict[str, Any],
+    *,
+    mutation: bool,
+    store_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    ledger_result = payload.get('result')
+    if not isinstance(ledger_result, dict) and isinstance(store_result, dict):
+        details = {
+            key: value
+            for key, value in store_result.items()
+            if key not in {'ok', 'error', 'type', 'content'}
+        }
+        ledger_result = details or None
+    return _record_tool_result(
+        payload,
+        mutation=mutation,
+        ledger_result=ledger_result if isinstance(ledger_result, dict) else None,
+    )
 
 
 def _log_tool_exception(tool: str, exc: Exception) -> None:
@@ -119,12 +147,6 @@ def _log_tool_exception(tool: str, exc: Exception) -> None:
 
 def _memory_write_error(tool_name: str, message: str) -> Dict[str, Any]:
     text = str(message or '').strip()
-    if text.lower() == 'conflict':
-        return tool_error(
-            tool_name,
-            'There are pending changes. Please resolve them before modifying.',
-            error_type='conflict',
-        )
     return tool_error(tool_name, f'Failed to write via RemoteFS: {text}', error_type='store')
 
 
@@ -135,66 +157,12 @@ def _memory_applied(tool_name: str, **result: Any) -> Dict[str, Any]:
 def _memory_result_error(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     error_type = str(result.get('type') or 'validation')
     reason = str(result.get('error') or f'{tool_name} failed.')
-    if error_type in {'store', 'conflict'}:
+    if error_type == 'store':
         return _memory_write_error(tool_name, reason)
     return tool_error(tool_name, reason, error_type=error_type)
 
 
-# Per-reference read limits: truncate when either bound is reached first.
-MAX_REFERENCE_READ_LINES = 200
-MAX_REFERENCE_READ_CHARS = 8000
 MAX_REFERENCE_READ_COUNT = 10
-
-_REFERENCE_TRUNCATION_WARNING = (
-    '\n\n<!-- WARNING: This reference content was truncated because it exceeded '
-    'the limits. Use a narrower #anchor, read fewer refs in one call, '
-    'or ask the user if the omitted detail matters. -->\n'
-)
-
-
-def truncate_reference_content(
-    content: str,
-    *,
-    max_lines: int = MAX_REFERENCE_READ_LINES,
-    max_chars: int = MAX_REFERENCE_READ_CHARS,
-) -> tuple[str, bool]:
-    """Truncate reference text when line count or character count exceeds limits."""
-    if max_lines < 1:
-        raise ValueError('max_lines must be >= 1')
-    if max_chars < 1:
-        raise ValueError('max_chars must be >= 1')
-
-    text = content if isinstance(content, str) else ''
-    if not text:
-        return '', False
-
-    lines = text.splitlines(keepends=True)
-    if not lines:
-        lines = [text]
-
-    parts: list[str] = []
-    char_count = 0
-    truncated = False
-
-    for line_idx, line in enumerate(lines):
-        if line_idx >= max_lines:
-            truncated = True
-            break
-        if char_count + len(line) <= max_chars:
-            parts.append(line)
-            char_count += len(line)
-            continue
-        remaining = max_chars - char_count
-        if remaining > 0:
-            parts.append(line[:remaining])
-        truncated = True
-        break
-
-    result = ''.join(parts)
-    if not truncated and result != text:
-        truncated = True
-    return result, truncated
-
 
 def _normalize_refs(refs: Union[str, List[str]]) -> list[str]:
     if isinstance(refs, str):
@@ -218,17 +186,12 @@ def _normalize_refs(refs: Union[str, List[str]]) -> list[str]:
 def _read_single_reference(store: MemoryStore, raw_ref: str) -> dict[str, Any]:
     path, anchor = split_reference_ref(raw_ref)
     content = store.read_reference(raw_ref)
-    truncated_content, truncated = truncate_reference_content(content)
-    if truncated:
-        truncated_content = f'{truncated_content.rstrip()}{_REFERENCE_TRUNCATION_WARNING}'
     return {
         'ref': raw_ref,
         'path': path,
         'anchor': anchor or None,
-        'content': truncated_content,
-        'content_length': len(truncated_content),
-        'original_content_length': len(content),
-        'truncated': truncated,
+        'content': content,
+        'content_length': len(content),
     }
 
 
@@ -260,13 +223,19 @@ class MemoryTools:
         """
         normalized_refs = _normalize_refs(refs)
         if not normalized_refs:
-            return tool_error('read_memory_reference', 'refs is required.')
+            return _record_state_memory_result(
+                tool_error('read_memory_reference', 'refs is required.'),
+                mutation=False,
+            )
 
         if len(normalized_refs) > MAX_REFERENCE_READ_COUNT:
-            return tool_error(
-                'read_memory_reference',
-                f'At most {MAX_REFERENCE_READ_COUNT} refs may be read per call; '
-                f'got {len(normalized_refs)}.',
+            return _record_state_memory_result(
+                tool_error(
+                    'read_memory_reference',
+                    f'At most {MAX_REFERENCE_READ_COUNT} refs may be read per call; '
+                    f'got {len(normalized_refs)}.',
+                ),
+                mutation=False,
             )
 
         store = MemoryStore()
@@ -275,37 +244,54 @@ class MemoryTools:
             try:
                 split_reference_ref(raw_ref)
             except ValueError as exc:
-                return tool_error(
-                    'read_memory_reference',
-                    f'Invalid ref {raw_ref!r}: {exc}',
+                return _record_state_memory_result(
+                    tool_error(
+                        'read_memory_reference',
+                        f'Invalid ref {raw_ref!r}: {exc}',
+                    ),
+                    mutation=False,
                 )
             try:
                 items.append(_read_single_reference(store, raw_ref))
             except FileNotFoundError:
-                return tool_error(
-                    'read_memory_reference',
-                    f'Reference not found for ref={raw_ref!r}.',
-                    error_type='not_found',
+                return _record_state_memory_result(
+                    tool_error(
+                        'read_memory_reference',
+                        f'Reference not found for ref={raw_ref!r}.',
+                        error_type='not_found',
+                    ),
+                    mutation=False,
                 )
             except RuntimeError as exc:
-                return tool_error(
-                    'read_memory_reference',
-                    f'Failed to read {raw_ref!r}: {exc}',
-                    error_type='store',
+                return _record_state_memory_result(
+                    tool_error(
+                        'read_memory_reference',
+                        f'Failed to read {raw_ref!r}: {exc}',
+                        error_type='store',
+                    ),
+                    mutation=False,
                 )
             except Exception as exc:
-                return tool_error(
-                    'read_memory_reference',
-                    f'Failed to read {raw_ref!r}: {exc}',
-                    error_type='store',
+                return _record_state_memory_result(
+                    tool_error(
+                        'read_memory_reference',
+                        f'Failed to read {raw_ref!r}: {exc}',
+                        error_type='store',
+                    ),
+                    mutation=False,
                 )
 
-        truncated_count = sum(1 for item in items if item.get('truncated'))
-        return tool_success('read_memory_reference', {
+        payload = tool_success('read_memory_reference', {
             'items': items,
             'ref_count': len(items),
-            'truncated_count': truncated_count,
         })
+        return _record_tool_result(
+            payload,
+            mutation=False,
+            ledger_result={
+                'ref_count': len(items),
+            },
+        )
 
     def soul_editor(self, field: str, value: str) -> Dict[str, Any]:
         """Update one existing leaf value in the agent soul document.
@@ -323,26 +309,38 @@ class MemoryTools:
         raw_field = str(field or '').strip()
         raw_value = str(value if value is not None else '')
         if not raw_field:
-            return tool_error('soul_editor', 'field is required.', error_type='validation')
+            return _record_state_memory_result(
+                tool_error('soul_editor', 'field is required.', error_type='validation'),
+                mutation=False,
+            )
 
         result = MemoryStore().apply_soul_field(raw_field, raw_value)
         if not result.get('ok'):
-            return _memory_result_error('soul_editor', result)
+            return _record_state_memory_result(
+                _memory_result_error('soul_editor', result),
+                mutation=result.get('type') == 'partial',
+                store_result=result,
+            )
 
-        return _memory_applied(
-            'soul_editor',
-            field=raw_field,
-            path=SOUL_PATH,
-            value=raw_value.strip(),
-            content_length=len(result['content']),
+        return _record_state_memory_result(
+            _memory_applied(
+                'soul_editor',
+                field=raw_field,
+                path=SOUL_PATH,
+                value=raw_value.strip(),
+                content_length=len(result['content']),
+            ),
+            mutation=True,
         )
 
     def profile_editor(self, field: str, value: str) -> Dict[str, Any]:
         """Update one existing leaf value in the user profile document.
 
-        Use this for stable user facts such as preferred name, locale, role,
-        organization, or accessibility needs. Do not use it for long-form
-        behavioral preferences; those belong in ``preference_editor``.
+        Use this only for a current, stable user fact that the user explicitly
+        states or corrects, such as preferred name, locale, role, organization,
+        or accessibility needs. Do not infer a fact, and do not use this for
+        long-form behavioral preferences; those belong in
+        ``preference_editor``.
         Only fields already present in the loaded profile document can be
         updated; keys cannot be added or renamed. Value type follows the
         currently stored leaf (string/null or string list).
@@ -357,18 +355,28 @@ class MemoryTools:
         raw_field = str(field or '').strip()
         raw_value = '' if value is None else str(value)
         if not raw_field:
-            return tool_error('profile_editor', 'field is required.', error_type='validation')
+            return _record_state_memory_result(
+                tool_error('profile_editor', 'field is required.', error_type='validation'),
+                mutation=False,
+            )
 
         result = MemoryStore().apply_profile_field(raw_field, raw_value)
         if not result.get('ok'):
-            return _memory_result_error('profile_editor', result)
+            return _record_state_memory_result(
+                _memory_result_error('profile_editor', result),
+                mutation=result.get('type') == 'partial',
+                store_result=result,
+            )
 
-        return _memory_applied(
-            'profile_editor',
-            field=raw_field,
-            path=PROFILE_PATH,
-            value=raw_value,
-            content_length=len(result['content']),
+        return _record_state_memory_result(
+            _memory_applied(
+                'profile_editor',
+                field=raw_field,
+                path=PROFILE_PATH,
+                value=raw_value,
+                content_length=len(result['content']),
+            ),
+            mutation=True,
         )
 
     def preference_editor(
@@ -377,65 +385,120 @@ class MemoryTools:
         name: str,
         summary: str = '',
         scenario: str = '',
+        details: str = '',
         reason: str = '',
     ) -> Dict[str, Any]:
         """Add or delete a user preference index entry.
 
-        Use this for stable long-term preferences that should appear in the
-        injected preference index. Each added entry writes ``preference.md``
-        and a matching reference file under ``memory/users/references/``.
-        Updating an existing entry is not supported yet; delete and re-add.
+        Use this only for a service preference the user explicitly states that
+        is stable, long-term, and reusable across conversations. Each added
+        entry writes ``preference.yaml`` and a matching reference file under
+        ``memory/users/references/``. This tool cannot update or reorder preferences.
+        Never delete and re-add an entry as an update because ordering is
+        controlled only by the user.
 
         Args:
             op: ``add`` to create a new preference entry, or ``delete`` to remove.
             name: Preference identifier such as ``pref.response.concise``.
             summary: Short executable summary for the index. Required for ``add``.
             scenario: When the preference should apply. Required for ``add``.
+            details: Detailed preference behavior. Required for ``add``.
             reason: Why the preference should be saved. Required for ``add``.
         """
         raw_op = str(op or '').strip().lower()
         raw_name = str(name or '').strip()
         if raw_op not in {'add', 'delete'}:
-            return tool_error(
-                'preference_editor',
-                "op must be 'add' or 'delete'.",
-                error_type='validation',
+            return _record_state_memory_result(
+                tool_error(
+                    'preference_editor',
+                    "op must be 'add' or 'delete'.",
+                    error_type='validation',
+                ),
+                mutation=False,
             )
         if not raw_name:
-            return tool_error('preference_editor', 'name is required.', error_type='validation')
+            return _record_state_memory_result(
+                tool_error('preference_editor', 'name is required.', error_type='validation'),
+                mutation=False,
+            )
 
         store = MemoryStore()
         if raw_op == 'add':
+            config = _agentic_config()
+            source_kind = str(
+                config.get('memory_source_kind')
+                or config.get('episode_source_kind')
+                or ''
+            ).strip()
+            conversation_id = str(config.get('conversation_id') or '').strip()
+            if source_kind not in {'chat_explicit', 'memory_review'}:
+                return _record_state_memory_result(
+                    tool_error(
+                        'preference_editor',
+                        (
+                            'memory_source_kind must be set by runtime to either '
+                            "'chat_explicit' or 'memory_review'."
+                        ),
+                        error_type='missing_context',
+                    ),
+                    mutation=False,
+                )
+            if not conversation_id:
+                return _record_state_memory_result(
+                    tool_error(
+                        'preference_editor',
+                        'conversation_id must be set by runtime.',
+                        error_type='missing_context',
+                    ),
+                    mutation=False,
+                )
             result = store.add_preference_with_reference(
                 name=raw_name,
                 summary=summary,
                 scenario=scenario,
+                details=details,
                 reason=reason,
+                source_kind=source_kind,
+                conversation_id=conversation_id,
             )
             if not result.get('ok'):
-                return _memory_result_error('preference_editor', result)
+                return _record_state_memory_result(
+                    _memory_result_error('preference_editor', result),
+                    mutation=result.get('type') == 'partial',
+                    store_result=result,
+                )
             item = result['item']
-            return _memory_applied(
-                'preference_editor',
-                op='add',
-                name=item.name,
-                summary=item.summary,
-                ref=item.ref,
-                path=PREFERENCE_PATH,
-                reference_name=preference_name_to_reference_name(item.name),
+            return _record_state_memory_result(
+                _memory_applied(
+                    'preference_editor',
+                    op='add',
+                    name=item.name,
+                    summary=item.summary,
+                    ref=item.ref,
+                    path=PREFERENCE_PATH,
+                    reference_name=preference_name_to_reference_name(item.name),
+                ),
+                mutation=True,
             )
 
         result = store.remove_preference_with_reference(raw_name)
         if not result.get('ok'):
-            return _memory_result_error('preference_editor', result)
+            return _record_state_memory_result(
+                _memory_result_error('preference_editor', result),
+                mutation=result.get('type') == 'partial',
+                store_result=result,
+            )
         item = result['item']
-        return _memory_applied(
-            'preference_editor',
-            op='delete',
-            name=item.name,
-            ref=item.ref,
-            path=PREFERENCE_PATH,
-            reference_name=preference_name_to_reference_name(item.name),
+        return _record_state_memory_result(
+            _memory_applied(
+                'preference_editor',
+                op='delete',
+                name=item.name,
+                ref=item.ref,
+                path=PREFERENCE_PATH,
+                reference_name=preference_name_to_reference_name(item.name),
+            ),
+            mutation=True,
         )
 
     def episode_create(
@@ -477,9 +540,40 @@ class MemoryTools:
                 )
             values[field] = value
 
-        task_id = str(config.get('task_id') or '').strip()
-        is_review = task_id.startswith('memory_review_')
-        timestamp_field = 'review_started_at_ms' if is_review else 'episode_occurred_at_ms'
+        source_kind = str(config.get('episode_source_kind') or '').strip()
+        if not source_kind:
+            return _record_tool_result(
+                {
+                    'success': False,
+                    'tool': 'episode_create',
+                    'error': {
+                        'code': 'missing_context',
+                        'message': 'episode_source_kind is required in agentic_config.',
+                        'detail': {'field': 'episode_source_kind'},
+                    },
+                    'retryable': False,
+                },
+                mutation=False,
+            )
+        if source_kind not in {'chat_explicit', 'memory_review'}:
+            return _record_tool_result(
+                {
+                    'success': False,
+                    'tool': 'episode_create',
+                    'error': {
+                        'code': 'invalid_arguments',
+                        'message': (
+                            'episode_source_kind must be either '
+                            "'chat_explicit' or 'memory_review'."
+                        ),
+                        'detail': {'field': 'episode_source_kind'},
+                    },
+                    'retryable': False,
+                },
+                mutation=False,
+            )
+
+        timestamp_field = 'episode_occurred_at_ms'
         occurred_at_ms = config.get(timestamp_field)
         if isinstance(occurred_at_ms, bool):
             occurred_at_ms = None
@@ -505,14 +599,11 @@ class MemoryTools:
         try:
             item = EpisodeCreateInput(
                 occurred_at_ms=occurred_at_ms,
-                thread_key=values['conversation_id'],
                 episode_type=EpisodeType(episode_type),
                 summary=summary,
                 source=EpisodeSource(
-                    kind='memory_review' if is_review else 'chat_explicit',
-                    task_id=task_id if is_review else None,
+                    kind=source_kind,
                     conversation_id=values['conversation_id'],
-                    message_ids=[],
                 ),
             )
         except (TypeError, ValueError, ValidationError) as exc:

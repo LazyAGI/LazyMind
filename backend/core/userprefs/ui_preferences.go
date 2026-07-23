@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/preferencefile"
 	"lazymind/core/store"
 )
 
@@ -145,15 +145,9 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 }
 
 func LoadUserPreferenceConfigured(ctx context.Context, db *gorm.DB, userID string) (bool, error) {
-	var row struct {
-		Content []byte
-	}
+	var row orm.MemoryCurrentEntry
 	err := db.WithContext(ctx).
-		Table("personal_resources AS r").
-		Select("b.content").
-		Joins("JOIN personal_resource_revisions AS rev ON rev.id = r.head_revision_id AND rev.resource_id = r.id").
-		Joins("JOIN personal_resource_blobs AS b ON b.hash = rev.blob_hash").
-		Where("r.user_id = ? AND r.resource_type = ?", strings.TrimSpace(userID), "user_preference").
+		Where("user_id = ? AND path = ? AND entry_type = ?", strings.TrimSpace(userID), "memory/users/preference.yaml", "file").
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
@@ -161,14 +155,13 @@ func LoadUserPreferenceConfigured(ctx context.Context, db *gorm.DB, userID strin
 	if err != nil {
 		return false, err
 	}
-	file, err := preferencefile.ParseFileContent(string(row.Content))
-	if err != nil {
+	var document struct {
+		Preferences []map[string]any `yaml:"preferences"`
+	}
+	if err := yaml.Unmarshal(row.Content, &document); err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(file.AgentPersona) != "" ||
-		strings.TrimSpace(file.PreferredName) != "" ||
-		strings.TrimSpace(file.ResponseStyle) != "" ||
-		strings.TrimSpace(file.Content) != "", nil
+	return len(document.Preferences) > 0, nil
 }
 
 func buildUIPreferencesResponse(row orm.UserUIPreferences, userPreferenceConfigured bool) uiPreferencesResponse {

@@ -73,20 +73,6 @@ func shouldAuditBackendMutationRequest(method, path string) bool {
 	switch {
 	case strings.HasPrefix(path, "/skill/"):
 		return true
-	case path == "/memory":
-		return true
-	case strings.HasPrefix(path, "/memory/"):
-		return true
-	case strings.HasPrefix(path, "/memory:"):
-		return true
-	case path == "/user-preference":
-		return true
-	case strings.HasPrefix(path, "/user-preference/"):
-		return true
-	case strings.HasPrefix(path, "/user-preference:"):
-		return true
-	case strings.HasPrefix(path, "/user_preference/"):
-		return true
 	case path == "/skills":
 		return true
 	case strings.HasPrefix(path, "/skills/"):

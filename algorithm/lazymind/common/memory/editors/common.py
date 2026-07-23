@@ -6,17 +6,16 @@ from typing import Any
 import yaml
 
 from ..result import memory_err, memory_ok
-from ..validation.common import parse_yaml_frontmatter
+from ..validation.common import parse_yaml_mapping
 
 
-def render_yaml_frontmatter(frontmatter: dict[str, Any]) -> str:
-    body = yaml.safe_dump(
-        frontmatter,
+def render_yaml_document(document: dict[str, Any]) -> str:
+    return yaml.safe_dump(
+        document,
         allow_unicode=True,
         sort_keys=False,
         default_flow_style=False,
-    ).strip()
-    return f'---\n{body}\n---\n'
+    )
 
 
 def field_path_parts(field: str) -> list[str]:
@@ -29,13 +28,10 @@ def field_path_parts(field: str) -> list[str]:
 def iter_leaf_fields(data: dict[str, Any], *, prefix: str = '') -> list[str]:
     """Return dot-paths for leaf values already present in ``data``.
 
-    Nested mappings are traversed; ``schema_version`` at the document root is
-    excluded because editors must not change schema identity.
+    Nested mappings are traversed and only existing leaves are returned.
     """
     fields: list[str] = []
     for key, value in data.items():
-        if not prefix and key == 'schema_version':
-            continue
         path = f'{prefix}.{key}' if prefix else str(key)
         if isinstance(value, dict):
             fields.extend(iter_leaf_fields(value, prefix=path))
@@ -44,8 +40,8 @@ def iter_leaf_fields(data: dict[str, Any], *, prefix: str = '') -> list[str]:
     return fields
 
 
-def editable_fields_from_frontmatter(frontmatter: dict[str, Any]) -> frozenset[str]:
-    return frozenset(iter_leaf_fields(frontmatter))
+def editable_fields_from_document(document: dict[str, Any]) -> frozenset[str]:
+    return frozenset(iter_leaf_fields(document))
 
 
 def get_nested_field(data: dict[str, Any], field: str) -> Any:
@@ -102,18 +98,15 @@ def coerce_value_to_existing_type(existing: Any, raw_value: str) -> Any:
     )
 
 
-def update_frontmatter_document(content: str, field: str, value: Any) -> str:
-    frontmatter, body = parse_yaml_frontmatter(content)
-    if not frontmatter:
-        raise ValueError('document must contain YAML frontmatter.')
-    set_existing_nested_field(frontmatter, field, value)
-    rendered = render_yaml_frontmatter(frontmatter)
-    if body and body.strip():
-        return f'{rendered}{body}'
-    return rendered
+def update_yaml_document(content: str, field: str, value: Any) -> str:
+    document = parse_yaml_mapping(content)
+    if not document:
+        raise ValueError('document must contain a non-empty YAML mapping.')
+    set_existing_nested_field(document, field, value)
+    return render_yaml_document(document)
 
 
-def set_existing_frontmatter_field(
+def set_existing_yaml_field(
     content: str,
     field: str,
     value: str,
@@ -122,7 +115,7 @@ def set_existing_frontmatter_field(
     validate,
     require_non_empty_string: bool = False,
 ) -> dict[str, Any]:
-    """Update one existing frontmatter leaf; keys cannot be added or renamed.
+    """Update one existing YAML leaf; keys cannot be added or renamed.
 
     Editable fields are discovered from the loaded RemoteFS document. Returns a
     structured result: ``{'ok': True, 'content': ...}`` or
@@ -132,11 +125,14 @@ def set_existing_frontmatter_field(
     if not normalized_field:
         return memory_err('field is required.', type='validation')
 
-    frontmatter, _body = parse_yaml_frontmatter(content)
-    if not frontmatter:
-        return memory_err(f'{entity} must contain YAML frontmatter.', type='validation')
+    document = parse_yaml_mapping(content)
+    if not document:
+        return memory_err(
+            f'{entity} must contain a non-empty YAML mapping.',
+            type='validation',
+        )
 
-    editable = editable_fields_from_frontmatter(frontmatter)
+    editable = editable_fields_from_document(document)
     if normalized_field not in editable:
         supported = ', '.join(sorted(editable)) or '(none)'
         return memory_err(
@@ -146,7 +142,7 @@ def set_existing_frontmatter_field(
         )
 
     try:
-        existing = get_nested_field(frontmatter, normalized_field)
+        existing = get_nested_field(document, normalized_field)
         parsed = coerce_value_to_existing_type(existing, value)
     except ValueError as exc:
         return memory_err(str(exc), type='validation')
@@ -158,7 +154,7 @@ def set_existing_frontmatter_field(
         )
 
     try:
-        updated = update_frontmatter_document(content, normalized_field, parsed)
+        updated = update_yaml_document(content, normalized_field, parsed)
     except ValueError as exc:
         return memory_err(str(exc), type='validation')
 

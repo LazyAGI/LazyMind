@@ -1,21 +1,18 @@
 from __future__ import annotations
 
+import pytest
+
 from lazymind.common.memory import (
-    MAX_PREFERENCE_CONTEXT_CHARS,
     load_memory_context,
     profile_languages,
     truncate_preference_index,
 )
+from lazymind.common.memory.paths import PREFERENCE_PATH, PROFILE_PATH, SOUL_PATH
 from lazymind.common.memory.validation import PreferenceItem, append_preference_item
 from lazymind.common.memory.store import MemoryStore
 
-SAMPLE_PREFERENCE = (
-    '---\n'
-    'schema_version: 1\n'
-    'updated_at: 2026-07-20\n'
-    '---\n'
-    '# Preference Index\n'
-)
+SAMPLE_PREFERENCE = 'preferences: []\n'
+TIMESTAMP = '2026-07-20T09:30:00+08:00'
 
 
 class FakeRemoteFS:
@@ -67,14 +64,17 @@ def test_truncate_preference_index_keeps_frontmatter_and_cap():
                 name=f'pref.item.{idx}',
                 summary=f'summary {idx}',
                 ref=f'references/topic.md#item-{idx}',
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
             ),
         )
     truncated = truncate_preference_index(content, max_items=100)
     assert truncated.count('- name:') == 100
-    assert 'schema_version: 1' in truncated
     assert 'pref.item.0' in truncated
     assert 'pref.item.99' in truncated
     assert 'pref.item.100' not in truncated
+    assert 'created_at:' not in truncated
+    assert truncated.count('updated_at:') == 100
 
 
 def test_truncate_preference_index_caps_total_chars():
@@ -86,30 +86,27 @@ def test_truncate_preference_index_caps_total_chars():
                 name=f'pref.long.{idx}',
                 summary='x' * 100,
                 ref=f'references/topic.md#item-{idx}',
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
             ),
         )
     truncated = truncate_preference_index(content, max_items=100, max_chars=10_000)
-    assert len(truncated) <= MAX_PREFERENCE_CONTEXT_CHARS
-    assert truncated.startswith('---\n')
-    assert '# Preference Index' in truncated
+    assert len(truncated) <= 10_000
+    assert truncated.startswith('preferences:')
+    assert 'created_at:' not in truncated
 
 
 def test_profile_languages():
     profile = (
-        '---\n'
-        'schema_version: 1\n'
         'locale:\n'
         '  languages: ["zh-CN", "en-US"]\n'
-        '---\n'
     )
     assert profile_languages(profile) == ['zh-CN', 'en-US']
 
 
 def test_load_memory_context_reads_store_without_references():
     fs = FakeRemoteFS({
-        'memory/agents/soul.md': (
-            '---\n'
-            'schema_version: 1\n'
+        SOUL_PATH: (
             'identity:\n'
             '  name: "LazyMind"\n'
             '  role: "personal_ai_assistant"\n'
@@ -126,24 +123,31 @@ def test_load_memory_context_reads_store_without_references():
             'epistemic:\n'
             '  uncertainty_style: "explicit"\n'
             '  verification_mode: "when_material"\n'
-            '---\n'
         ),
-        'memory/users/profile.md': (
-            '---\n'
-            'schema_version: 1\n'
+        PROFILE_PATH: (
             'identity:\n'
             '  preferred_name: "Alice"\n'
-            '---\n'
+            '  aliases: []\n'
+            '  pronouns: null\n'
+            'locale:\n'
+            '  languages: ["zh-CN"]\n'
+            '  timezone: "Asia/Shanghai"\n'
+            '  region: "CN"\n'
+            'professional:\n'
+            '  roles: []\n'
+            '  organization: null\n'
+            '  industry: null\n'
+            '  expertise_domains: []\n'
+            'accessibility:\n'
+            '  communication_needs: []\n'
         ),
-        'memory/users/preference.md': (
-            '---\n'
-            'schema_version: 1\n'
-            'updated_at: 2026-07-20\n'
-            '---\n'
-            '# Preference Index\n'
+        PREFERENCE_PATH: (
+            'preferences:\n'
             '- name: pref.response.detail\n'
             '  summary: Prefer concise answers.\n'
             '  ref: references/response.md\n'
+            f'  created_at: "{TIMESTAMP}"\n'
+            f'  updated_at: "{TIMESTAMP}"\n'
         ),
         'memory/users/references/response.md': (
             '---\n'
@@ -158,9 +162,18 @@ def test_load_memory_context_reads_store_without_references():
     assert 'Alice' in ctx.profile
     assert 'pref.response.detail' in ctx.preference
     assert 'long detail body' not in ctx.preference
+    assert 'created_at:' not in ctx.preference
+    assert 'updated_at:' in ctx.preference
+
+    full_ctx = load_memory_context(
+        MemoryStore(fs),
+        project_preference=False,
+    )
+    assert 'created_at:' in full_ctx.preference
+    assert full_ctx.preference == fs.files[PREFERENCE_PATH]
 
 
-def test_load_memory_context_uses_empty_on_store_errors():
+def test_load_memory_context_propagates_store_errors():
     class BrokenStore(MemoryStore):
         def read_soul(self):
             raise RuntimeError('backend down')
@@ -171,7 +184,5 @@ def test_load_memory_context_uses_empty_on_store_errors():
         def read_preference(self):
             raise RuntimeError('backend down')
 
-    ctx = load_memory_context(BrokenStore(FakeRemoteFS()))
-    assert ctx.soul == ''
-    assert ctx.profile == ''
-    assert ctx.preference == ''
+    with pytest.raises(RuntimeError, match='backend down'):
+        load_memory_context(BrokenStore(FakeRemoteFS()))

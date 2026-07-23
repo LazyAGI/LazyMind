@@ -489,6 +489,8 @@ async def _handle_chat_impl(
         'session_id': conversation.session_id,
         'task_id': conversation.session_id,
         'episode_occurred_at_ms': int(start_time * 1000),
+        'episode_source_kind': 'chat_explicit',
+        'memory_source_kind': 'chat_explicit',
         'filters': filters if RAG_MODE and filters else {},
         'files': resolved_files,
         'history_files_per_turn': files_map,
@@ -660,6 +662,8 @@ async def _handle_chat_impl(
         [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled],
         user_query=language_query,
     )
+    if not personalization.use_memory:
+        active_configs = [cfg for cfg in active_configs if cfg.name != 'memory']
     agent_tools = [cfg.tool for cfg in active_configs]
     # Respect enable_subagent flag: when false, suppress create_subagent and related tools.
     enable_subagent = agentic_config.get('enable_subagent', True)
@@ -880,22 +884,6 @@ async def _handle_chat_impl(
 
         try:
             async with rag_sem:
-                if episode_results:
-                    try:
-                        hit_results = get_episode_store().increment_hits(
-                            user_id, [item.episode.id for item in episode_results],
-                        )
-                        failed_ids = [episode_id for episode_id, ok in hit_results.items() if not ok]
-                        if failed_ids:
-                            LOG.warning(
-                                f'[EpisodeMemory] hit increment matched no record: '
-                                f'user_id={user_id!r} ids={failed_ids!r}'
-                            )
-                    except Exception as exc:
-                        LOG.warning(
-                            f'[EpisodeMemory] hit increment failed: user_id={user_id!r} '
-                            f'error_type={type(exc).__name__} error={exc}'
-                        )
                 initial_agent_stream = executor.stream_agent(react_agent, plan)
                 guarded_agent_stream = guard_plugin_agent_stream(
                     initial_agent_stream,
@@ -921,6 +909,25 @@ async def _handle_chat_impl(
             for frame in translator.finish(final_result):
                 cost = round(time.time() - start_time, 3)
                 yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='FINISH')
+
+            if episode_results:
+                try:
+                    hit_results = await asyncio.to_thread(
+                        get_episode_store().increment_hits,
+                        user_id,
+                        [item.episode.id for item in episode_results],
+                    )
+                    failed_ids = [episode_id for episode_id, ok in hit_results.items() if not ok]
+                    if failed_ids:
+                        LOG.warning(
+                            f'[EpisodeMemory] hit increment matched no record: '
+                            f'user_id={user_id!r} ids={failed_ids!r}'
+                        )
+                except Exception as exc:
+                    LOG.warning(
+                        f'[EpisodeMemory] hit increment failed: user_id={user_id!r} '
+                        f'error_type={type(exc).__name__} error={exc}'
+                    )
 
         except Exception as exc:
             LOG.exception('[ChatServer] agent failed')

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Any
+
+import yaml
 
 from ..paths import reference_filename, split_reference_ref
 from ..result import memory_err, memory_ok
@@ -44,38 +47,55 @@ def preference_name_to_reference_name(name: str) -> str:
 
 def build_preference_reference_content(
     *,
-    reference_name: str,
+    preference_name: str,
     summary: str,
     scenario: str,
+    details: str,
     reason: str,
+    created_at: str,
+    updated_at: str,
+    source_kind: str,
+    conversation_id: str,
 ) -> dict[str, Any]:
     scenario_text = str(scenario or '').strip()
+    details_text = str(details or '').strip()
     reason_text = str(reason or '').strip()
     summary_text = str(summary or '').strip()
     if not scenario_text:
         return memory_err('scenario is required.', type='validation')
+    if not details_text:
+        return memory_err('details is required.', type='validation')
     if not reason_text:
         return memory_err('reason is required.', type='validation')
     if not summary_text:
         return memory_err('summary is required.', type='validation')
+    if len(summary_text) > 100:
+        return memory_err('summary must be 100 characters or less.', type='validation')
 
-    description = summary_text.replace('"', '\\"')
     body = (
         '## Application Scenarios\n'
         f'{scenario_text}\n\n'
-        '## Reasons\n'
+        '## Preference Details\n'
+        f'{details_text}\n\n'
+        '## Reason\n'
         f'{reason_text}\n'
     )
-    content = (
-        '---\n'
-        f'name: {reference_name}\n'
-        f'description: "{description}"\n'
-        'metadata:\n'
-        '  node_type: memory\n'
-        '  type: user_preference\n'
-        '---\n'
-        f'{body}'
+    frontmatter = yaml.safe_dump(
+        {
+            'name': preference_name,
+            'summary': summary_text,
+            'created_at': created_at,
+            'updated_at': updated_at,
+            'source': {
+                'kind': source_kind,
+                'conversation_id': conversation_id,
+            },
+        },
+        allow_unicode=True,
+        sort_keys=False,
+        default_flow_style=False,
     )
+    content = f'---\n{frontmatter}---\n{body}'
     error = validate_reference_content(content)
     if error:
         return memory_err(error, type='validation')
@@ -87,18 +107,28 @@ def build_add_preference_item(
     name: str,
     summary: str,
     scenario: str,
+    details: str,
     reason: str,
+    source_kind: str,
+    conversation_id: str,
+    timestamp: str | None = None,
 ) -> dict[str, Any]:
     name_result = validate_preference_name(name)
     if not name_result.get('ok'):
         return name_result
     normalized_name = str(name_result['name'])
     reference_name = normalized_name[len('pref.'):].replace('.', '-').replace('_', '-')
+    created_at = str(timestamp or _utc_now()).strip()
     reference_result = build_preference_reference_content(
-        reference_name=reference_name,
+        preference_name=normalized_name,
         summary=summary,
         scenario=scenario,
+        details=details,
         reason=reason,
+        created_at=created_at,
+        updated_at=created_at,
+        source_kind=source_kind,
+        conversation_id=conversation_id,
     )
     if not reference_result.get('ok'):
         return reference_result
@@ -106,6 +136,8 @@ def build_add_preference_item(
         name=normalized_name,
         summary=str(summary).strip(),
         ref=f'references/{reference_name}.md',
+        created_at=created_at,
+        updated_at=created_at,
     )
     return memory_ok(
         item=item,
@@ -120,13 +152,21 @@ def add_preference_entry(
     name: str,
     summary: str,
     scenario: str,
+    details: str,
     reason: str,
+    source_kind: str,
+    conversation_id: str,
+    timestamp: str | None = None,
 ) -> dict[str, Any]:
     built = build_add_preference_item(
         name=name,
         summary=summary,
         scenario=scenario,
+        details=details,
         reason=reason,
+        source_kind=source_kind,
+        conversation_id=conversation_id,
+        timestamp=timestamp,
     )
     if not built.get('ok'):
         return built
@@ -169,3 +209,7 @@ def reference_name_from_item(item: PreferenceItem) -> str:
     path, _anchor = split_reference_ref(item.ref)
     filename = reference_filename(path)
     return filename[:-3] if filename.endswith('.md') else filename
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec='seconds')

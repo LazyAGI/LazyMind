@@ -26,6 +26,7 @@ class FakeSegmentStore:
     def __init__(self):
         self.rows = {}
         self.strict_gets = []
+        self.get_calls = []
         self.counter_calls = []
         self.search_calls = []
         self.scores = {}
@@ -40,6 +41,7 @@ class FakeSegmentStore:
 
     def get(self, _collection, criteria=None, **kwargs):
         self.strict_gets.append(kwargs.get('raise_on_error', False))
+        self.get_calls.append(copy.deepcopy(criteria or {}))
         result = []
         for item in self.rows.values():
             for field, expected in (criteria or {}).items():
@@ -108,18 +110,15 @@ def _episode(
     summary='采用 SegmentStore',
     *,
     occurred_at_ms=1_700_000_000_000,
-    task_id='task-1',
     conversation_id='conv-1',
     episode_type=EpisodeType.DECISION,
 ):
     return EpisodeCreateInput(
         occurred_at_ms=occurred_at_ms,
-        thread_key=conversation_id,
         episode_type=episode_type,
         summary=summary,
         source=EpisodeSource(
             kind='chat_explicit',
-            task_id=task_id,
             conversation_id=conversation_id,
         ),
     )
@@ -263,7 +262,41 @@ def test_single_create_is_idempotent_when_only_time_and_summary_format_change():
     assert stored['occurred_at_ms'] == 1000
     assert stored['recorded_at_ms'] == 1_800_000_000_000
     assert stored['summary'] == 'Use  SegmentStore V1'
+    assert stored['type'] == 'decision'
+    assert 'episode_type' not in stored
     assert {'id', 'user_id', 'hit_count'}.isdisjoint(stored)
+
+
+def test_episode_store_writes_and_reads_only_the_v1_minimal_contract():
+    backend = FakeSegmentStore()
+    store = EpisodeStore(backend)
+
+    created = store.create('user-1', _episode('V1 Episode 元数据'))
+    row = backend.rows[created.id]
+    stored_source = row['meta']['source']
+
+    assert store.collection == 'lazymind_memory_episode_v1'
+    assert row['doc_id'] == 'conv-1'
+    assert stored_source == {
+        'kind': 'chat_explicit',
+        'conversation_id': 'conv-1',
+    }
+    record = store.list_by_conversation('user-1', 'conv-1')[0]
+
+    assert record.source.model_dump() == {
+        'kind': 'chat_explicit',
+        'conversation_id': 'conv-1',
+    }
+    assert set(record.model_dump()) == {
+        'occurred_at_ms',
+        'episode_type',
+        'summary',
+        'source',
+        'id',
+        'recorded_at_ms',
+        'user_id',
+        'hit_count',
+    }
 
 
 def test_store_false_create_result_is_not_reported_as_created():
@@ -293,6 +326,7 @@ def test_list_by_conversation_is_tenant_scoped_and_oldest_first():
     assert all(record.user_id == 'user-1' for record in records)
     assert all(record.source.conversation_id == 'conv-1' for record in records)
     assert backend.strict_gets and all(backend.strict_gets)
+    assert backend.get_calls[-1] == {'kb_id': 'user-1', 'doc_id': 'conv-1'}
 
 
 def test_list_by_conversation_ignores_malformed_rows_from_other_conversations():
@@ -303,17 +337,17 @@ def test_list_by_conversation_ignores_malformed_rows_from_other_conversations():
         'user-1',
         _episode('其他会话记录', conversation_id='conv-2'),
     )
-    backend.rows[unrelated.id]['meta']['thread_key'] = 'corrupted-thread-key'
+    backend.rows[unrelated.id]['meta'] = {'malformed': True}
 
     records = store.list_by_conversation('user-1', 'conv-1')
 
     assert [record.id for record in records] == [expected.id]
 
 
-def test_episode_hit_count_reads_new_counter_before_legacy_fields():
+def test_episode_hit_count_reads_only_the_named_counter():
     backend = FakeSegmentStore()
     store = EpisodeStore(backend)
-    created = store.create('user-1', _episode('兼容旧命中计数'))
+    created = store.create('user-1', _episode('V1 命中计数'))
     row = backend.rows[created.id]
     row['meta']['hit_count'] = 3
     row['number'] = 5
@@ -322,10 +356,7 @@ def test_episode_hit_count_reads_new_counter_before_legacy_fields():
     assert store.list_by_conversation('user-1', 'conv-1')[0].hit_count == 7
 
     row['counters'] = {}
-    assert store.list_by_conversation('user-1', 'conv-1')[0].hit_count == 5
-
-    row['number'] = None
-    assert store.list_by_conversation('user-1', 'conv-1')[0].hit_count == 3
+    assert store.list_by_conversation('user-1', 'conv-1')[0].hit_count == 0
 
 
 def test_idempotency_key_is_tenant_conversation_and_summary_scoped():
@@ -335,37 +366,34 @@ def test_idempotency_key_is_tenant_conversation_and_summary_scoped():
     baseline = store.create('user-1', _episode())
     assert store.create('user-2', _episode()).id != baseline.id
     assert store.create('user-1', _episode(conversation_id='conv-2')).id != baseline.id
-    assert store.create('user-1', _episode(task_id='task-2')).id == baseline.id
     assert store.create('user-1', _episode(episode_type=EpisodeType.RESULT)).id == baseline.id
     assert len(backend.rows) == 3
 
 
-def test_create_reuses_oldest_legacy_id_for_same_conversation_summary():
+def test_create_reuses_oldest_existing_id_for_same_conversation_summary():
     backend = FakeSegmentStore()
     store = EpisodeStore(backend, clock_ms=lambda: 2000)
     created = store.create('user-1', _episode('采用 SegmentStore'))
     template = backend.rows.pop(created.id)
 
     later = copy.deepcopy(template)
-    later['uid'] = later['doc_id'] = 'ep_legacy_later'
+    later['uid'] = 'ep_duplicate_later'
     later['meta']['recorded_at_ms'] = 2000
-    later['meta']['source']['task_id'] = 'legacy-task-later'
     earlier = copy.deepcopy(template)
-    earlier['uid'] = earlier['doc_id'] = 'ep_legacy_earlier'
+    earlier['uid'] = 'ep_duplicate_earlier'
     earlier['meta']['recorded_at_ms'] = 1000
-    earlier['meta']['source']['task_id'] = 'legacy-task-earlier'
     backend.rows[later['uid']] = later
     backend.rows[earlier['uid']] = earlier
 
     result = store.create(
         'user-1',
-        _episode('  采用  SegmentStore  ', task_id='new-task', episode_type=EpisodeType.RESULT),
+        _episode('  采用  SegmentStore  ', episode_type=EpisodeType.RESULT),
     )
 
     assert result.status == 'idempotent'
-    assert result.id == 'ep_legacy_earlier'
+    assert result.id == 'ep_duplicate_earlier'
     assert result.idempotency_key == created.id
-    assert set(backend.rows) == {'ep_legacy_later', 'ep_legacy_earlier'}
+    assert set(backend.rows) == {'ep_duplicate_later', 'ep_duplicate_earlier'}
 
 
 def test_create_conflict_strictly_verifies_same_tenant_and_identity():
@@ -440,16 +468,15 @@ def test_create_conflict_rejects_wrong_tenant_or_identity(mutate_row, message):
     assert backend.strict_gets == [True, True]
 
 
-def test_episode_input_requires_thread_key_to_match_source_conversation():
-    with pytest.raises(ValueError, match='thread_key must equal source.conversation_id'):
+@pytest.mark.parametrize('summary', ['', 'x' * 201])
+def test_episode_input_requires_summary_between_one_and_two_hundred_characters(summary):
+    with pytest.raises(ValueError):
         EpisodeCreateInput(
             occurred_at_ms=1_700_000_000_000,
-            thread_key='different-conversation',
             episode_type='decision',
-            summary='采用 SegmentStore',
+            summary=summary,
             source=EpisodeSource(
                 kind='chat_explicit',
-                task_id='task-1',
                 conversation_id='conv-1',
             ),
         )
@@ -618,7 +645,7 @@ def test_sqlite_conversation_list_and_exact_dedup_keep_tenant_scope(tmp_path):
     first = store.create('user-1', _episode('采用蓝色发布'))
     duplicate = store.create(
         'user-1',
-        _episode('  采用蓝色发布  ', task_id='task-2', episode_type=EpisodeType.RESULT),
+        _episode('  采用蓝色发布  ', episode_type=EpisodeType.RESULT),
     )
     second = store.create('user-1', _episode('发布验证已经完成'))
     store.create('user-1', _episode('其他会话记录', conversation_id='conv-2'))
@@ -633,28 +660,13 @@ def test_sqlite_conversation_list_and_exact_dedup_keep_tenant_scope(tmp_path):
     assert all(record.source.conversation_id == 'conv-1' for record in records)
 
 
-def test_sqlite_episode_counter_legacy_reads_and_reset_complete_lifecycle(tmp_path):
+def test_sqlite_episode_counter_and_reset_complete_lifecycle(tmp_path):
     backend = _sqlite_store(tmp_path / 'episode-lifecycle.db')
     store = EpisodeStore(backend)
     created = store.create('user-1', _episode('完整生命周期'))
 
     assert store.increment_hits('user-1', [created.id]) == {created.id: True}
     assert store.list_by_conversation('user-1', 'conv-1')[0].hit_count == 1
-
-    row = backend.get(
-        episode_store_module.EPISODE_COLLECTION,
-        {'uid': created.id, 'kb_id': 'user-1'},
-        raise_on_error=True,
-    )[0]
-    row['counters'] = {}
-    row['number'] = 6
-    row['meta']['hit_count'] = 4
-    assert backend.upsert(episode_store_module.EPISODE_COLLECTION, [row]) is True
-    assert store.list_by_conversation('user-1', 'conv-1')[0].hit_count == 6
-
-    row['number'] = None
-    assert backend.upsert(episode_store_module.EPISODE_COLLECTION, [row]) is True
-    assert store.list_by_conversation('user-1', 'conv-1')[0].hit_count == 4
 
     assert store.reset_episode('user-1') is True
     assert store.list_by_conversation('user-1', 'conv-1') == []
@@ -716,9 +728,10 @@ def test_episode_create_uses_runtime_context_even_when_retrieval_is_disabled(mon
     store = EpisodeStore(backend, clock_ms=lambda: 1_800_000_000_000)
     lazyllm.globals['agentic_config'] = {
         'user_id': 'user-1',
-        'task_id': 'chat-session-task-1',
+        'task_id': 'memory_review_misleading-chat-task',
         'conversation_id': 'conv-1',
         'episode_occurred_at_ms': 1_700_000_000_000,
+        'episode_source_kind': 'chat_explicit',
         'use_memory': False,
         'memory_tool_results': [],
     }
@@ -733,13 +746,11 @@ def test_episode_create_uses_runtime_context_even_when_retrieval_is_disabled(mon
     row = next(iter(backend.rows.values()))
     stored = row['meta']
     assert row['kb_id'] == 'user-1'
-    assert stored['thread_key'] == 'conv-1'
+    assert row['doc_id'] == 'conv-1'
     assert stored['occurred_at_ms'] == 1_700_000_000_000
     assert stored['source'] == {
         'kind': 'chat_explicit',
-        'task_id': None,
         'conversation_id': 'conv-1',
-        'message_ids': [],
     }
     ledger = lazyllm.globals['agentic_config']['memory_tool_results']
     assert ledger == [{
@@ -781,12 +792,37 @@ def test_episode_create_reports_missing_context_to_agent_and_ledger():
     }
 
 
+@pytest.mark.parametrize(
+    ('source_kind', 'expected_code'),
+    [(None, 'missing_context'), ('unsupported_source', 'invalid_arguments')],
+)
+def test_episode_create_requires_valid_explicit_source_kind(source_kind, expected_code):
+    config = {
+        'user_id': 'user-1',
+        'conversation_id': 'conv-1',
+        'episode_occurred_at_ms': 1_700_000_000_000,
+        'memory_tool_results': [],
+    }
+    if source_kind is not None:
+        config['episode_source_kind'] = source_kind
+    lazyllm.globals['agentic_config'] = config
+
+    result = MemoryTools().episode_create('需要保存', 'decision')
+
+    assert result['success'] is False
+    assert result['error']['code'] == expected_code
+    assert result['error']['detail'] == {'field': 'episode_source_kind'}
+    assert result['retryable'] is False
+    assert config['memory_tool_results'][-1]['mutation'] is False
+
+
 def test_episode_create_rejects_invalid_type_as_tool_failure():
     lazyllm.globals['agentic_config'] = {
         'user_id': 'user-1',
         'task_id': 'task-1',
         'conversation_id': 'conv-1',
         'episode_occurred_at_ms': 1_700_000_000_000,
+        'episode_source_kind': 'chat_explicit',
         'memory_tool_results': [],
     }
 
@@ -803,7 +839,8 @@ def test_episode_create_exposes_safe_retryable_storage_failure(monkeypatch):
         'user_id': 'user-1',
         'task_id': 'memory_review_conv-1',
         'conversation_id': 'conv-1',
-        'review_started_at_ms': 1_700_000_000_000,
+        'episode_occurred_at_ms': 1_700_000_000_000,
+        'episode_source_kind': 'memory_review',
         'memory_tool_results': [],
     }
     memory_module = __import__('lazymind.chat.engine.tools.memory', fromlist=['get_episode_store'])
@@ -848,7 +885,8 @@ def test_episode_create_marks_dedup_lookup_failure_as_retryable_without_mutation
         'user_id': 'user-1',
         'task_id': 'memory_review_conv-1',
         'conversation_id': 'conv-1',
-        'review_started_at_ms': 1_700_000_000_000,
+        'episode_occurred_at_ms': 1_700_000_000_000,
+        'episode_source_kind': 'memory_review',
         'memory_tool_results': [],
     }
     memory_module = __import__('lazymind.chat.engine.tools.memory', fromlist=['get_episode_store'])
@@ -877,7 +915,8 @@ def test_episode_create_does_not_retry_ambiguous_write_timeout(monkeypatch):
         'user_id': 'user-1',
         'task_id': 'memory_review_conv-1',
         'conversation_id': 'conv-1',
-        'review_started_at_ms': 1_700_000_000_000,
+        'episode_occurred_at_ms': 1_700_000_000_000,
+        'episode_source_kind': 'memory_review',
         'memory_tool_results': [],
     }
     memory_module = __import__('lazymind.chat.engine.tools.memory', fromlist=['get_episode_store'])
@@ -909,7 +948,8 @@ def test_episode_retry_ledger_uses_same_key_so_later_success_can_resolve_failure
         'user_id': 'user-1',
         'task_id': 'memory_review_conv-1',
         'conversation_id': 'conv-1',
-        'review_started_at_ms': 1_700_000_000_000,
+        'episode_occurred_at_ms': 1_700_000_000_000,
+        'episode_source_kind': 'memory_review',
         'memory_tool_results': [],
     }
     memory_module = __import__('lazymind.chat.engine.tools.memory', fromlist=['get_episode_store'])
@@ -926,11 +966,40 @@ def test_episode_retry_ledger_uses_same_key_so_later_success_can_resolve_failure
     assert ledger[0]['result']['idempotency_key'] == saved['result']['idempotency_key']
     assert ledger[1]['result']['idempotency_key'] == saved['result']['idempotency_key']
     stored = backend.rows[saved['result']['id']]['meta']
-    assert stored['thread_key'] == 'conv-1'
     assert stored['occurred_at_ms'] == 1_700_000_000_000
     assert stored['source']['kind'] == 'memory_review'
-    assert stored['source']['task_id'] == 'memory_review_conv-1'
+    assert 'task_id' not in stored['source']
     assert stored['source']['conversation_id'] == 'conv-1'
+
+
+def test_review_episode_uses_explicit_source_and_shared_conversation_time(monkeypatch):
+    backend = FakeSegmentStore()
+    store = EpisodeStore(backend, clock_ms=lambda: 1_800_000_000_000)
+    lazyllm.globals['agentic_config'] = {
+        'user_id': 'user-1',
+        'task_id': 'ordinary-review-task-without-prefix',
+        'conversation_id': 'conv-1',
+        'episode_occurred_at_ms': 1_700_000_000_000,
+        'episode_source_kind': 'memory_review',
+        'memory_tool_results': [],
+    }
+    memory_module = __import__('lazymind.chat.engine.tools.memory', fromlist=['get_episode_store'])
+    monkeypatch.setattr(memory_module, 'get_episode_store', lambda: store)
+    tools = MemoryTools()
+
+    first = tools.episode_create('发布方案确定为蓝色发布', 'decision')
+    second = tools.episode_create('发布验证已经完成', 'result')
+
+    assert first['success'] is True
+    assert second['success'] is True
+    assert len(backend.rows) == 2
+    for row in backend.rows.values():
+        stored = row['meta']
+        assert stored['occurred_at_ms'] == 1_700_000_000_000
+        assert stored['source'] == {
+            'kind': 'memory_review',
+            'conversation_id': 'conv-1',
+        }
 
 
 def test_chat_episode_is_reused_by_review_with_different_task_and_type(monkeypatch):
@@ -942,17 +1011,20 @@ def test_chat_episode_is_reused_by_review_with_different_task_and_type(monkeypat
 
     lazyllm.globals['agentic_config'] = {
         'user_id': 'user-1',
+        'task_id': 'memory_review_misleading-chat-task',
         'conversation_id': 'conv-1',
         'episode_occurred_at_ms': 1_700_000_000_000,
+        'episode_source_kind': 'chat_explicit',
         'memory_tool_results': [],
     }
     chat_result = tools.episode_create('采用蓝色发布', 'decision')
 
     lazyllm.globals['agentic_config'] = {
         'user_id': 'user-1',
-        'task_id': 'memory_review_core-task-1',
+        'task_id': 'ordinary-review-task-1',
         'conversation_id': 'conv-1',
-        'review_started_at_ms': 1_700_000_100_000,
+        'episode_occurred_at_ms': 1_700_000_100_000,
+        'episode_source_kind': 'memory_review',
         'memory_tool_results': [],
     }
     review_result = tools.episode_create('  采用蓝色发布  ', 'result')
@@ -962,10 +1034,8 @@ def test_chat_episode_is_reused_by_review_with_different_task_and_type(monkeypat
     assert review_result['result']['id'] == chat_result['result']['id']
     assert len(backend.rows) == 1
     stored = backend.rows[chat_result['result']['id']]['meta']
-    assert stored['episode_type'] == 'decision'
+    assert stored['type'] == 'decision'
     assert stored['source'] == {
         'kind': 'chat_explicit',
-        'task_id': None,
         'conversation_id': 'conv-1',
-        'message_ids': [],
     }
