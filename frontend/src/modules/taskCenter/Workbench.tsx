@@ -3,10 +3,10 @@ import { Button, Empty, Input, Progress, Select, Spin, Tooltip } from 'antd';
 import { CheckCircleFilled, ClockCircleOutlined, ReloadOutlined, RightOutlined, SearchOutlined, SyncOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { listTasks } from './api';
+import { listTasks, removeTask } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
-import { CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
+import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 
 const SECTION_LIMIT = 5;
@@ -51,6 +51,7 @@ export default function Workbench({ active }: WorkbenchProps) {
   const completedToday = completed.filter(isTaskFinishedToday);
   const recent = completed.filter((task) => isTaskFinishedWithinDays(task, 7));
   const openConversation = (id: string) => {
+    selectChatConversationFilter('task');
     sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, id);
     navigate('/agent/chat/home');
   };
@@ -79,7 +80,7 @@ export default function Workbench({ active }: WorkbenchProps) {
         <RunningSection tasks={running} expanded={runningExpanded} onToggle={() => setRunningExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
         <RecentSection tasks={recent} expanded={recentExpanded} onToggle={() => setRecentExpanded((value) => !value)} onSelect={setSelected} />
       </Spin>
-      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} />
+      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} onDelete={async (task) => { await removeTask(task.id); setSelected(null); await load(); }} />
       {graphTask?.plugin_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.plugin_session_id} pluginId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
     </div>
   );

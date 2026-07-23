@@ -1,6 +1,6 @@
 import pytest
 
-from lazymind.chat.engine.tools.internal.adaptive_topk import (
+from lazymind.chat.engine.tools.algo.kb_adaptive_topk import (
     AdaptiveKComponent,
     _fit_by_budget,
     _moving_average,

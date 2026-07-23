@@ -80,10 +80,20 @@ func (h *Handler) listBindingChatSettings(w http.ResponseWriter, r *http.Request
 
 		var chatBindings []bindingChatSettingEntry
 		for _, b := range getResp.Bindings {
-			if !isLocalFSBinding(b) || b.Status != sourceengine.BindingStatusActive {
-				continue
-			}
-			chatBindings = append(chatBindings, bindingChatSettingEntry{
+		if !isLocalFSBinding(b) || b.Status != sourceengine.BindingStatusActive {
+			continue
+		}
+		// Lightweight safety-net: skip bindings whose monitored root directory
+		// no longer exists on the agent. Covers cases missed by the real-time
+		// watcher (e.g. directory deleted while agent was offline).
+		// Also disables chat for such bindings so other consumers see the
+		// correct state.
+		if b.AgentID != "" && !h.sources.IsBindingPathAccessible(r.Context(), b.AgentID, b.TargetRef) {
+			_ = h.sources.UpdateBindingChatEnabled(r.Context(), b.BindingID, false)
+			continue
+		}
+
+		chatBindings = append(chatBindings, bindingChatSettingEntry{
 				BindingID:        b.BindingID,
 				TargetRef:        b.TargetRef,
 				ConnectorType:    b.ConnectorType,

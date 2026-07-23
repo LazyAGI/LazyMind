@@ -1,4 +1,4 @@
-"""DriverAgent — evaluates a completed plugin step and emits a natural-language assessment.
+"""DriverAgent — evaluates a completed workflow step and emits a natural-language assessment.
 
 The DriverAgent is powered by the configured LLM and uses the plugin's driver.md prompt
 as its system instruction.  Its output is a concise natural-language message that describes
@@ -44,7 +44,7 @@ class DriverEvaluationError(Exception):
 
 
 _DEFAULT_DRIVER_PROMPT = (
-    'You are a quality evaluator for a plugin workflow step.\n\n'
+    'You are a quality evaluator for a workflow step.\n\n'
     'Your task: assess whether the step result is complete and acceptable.\n\n'
     '## Output rules (STRICT)\n\n'
     '- Write 1-2 sentences of plain natural language.\n'
@@ -101,7 +101,7 @@ def _build_driver_plan(
         'plugin.state', priority=20,
     )
     builder.runtime(
-        'driver_step', 'Plugin Step', f'Plugin: {plugin_id}\nStep: {step_id}',
+        'driver_step', 'Workflow Step', f'Workflow: {plugin_id}\nStep: {step_id}',
         'plugin.runtime',
         priority=10,
         authoritative=True,
@@ -210,7 +210,7 @@ def evaluate_step(
     llm_config: Optional[Dict[str, Any]] = None,
     plugin_artifacts_summary: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Evaluate a completed plugin step and return a natural-language assessment message.
+    """Evaluate a completed workflow step and return a natural-language assessment message.
 
     Args:
         plugin_id: The plugin identifier.
@@ -221,7 +221,7 @@ def evaluate_step(
         llm_config: Optional LLM configuration dict (API key, model name, etc.) aligned
             with ChatAgent/SubAgent configs.
         plugin_artifacts_summary: Optional text summary of all artifacts produced so far
-            in this plugin session, for richer quality assessment.
+            in this workflow session, for richer quality assessment.
 
     Returns:
         dict with key: message (str) — a concise natural-language assessment.
@@ -231,7 +231,7 @@ def evaluate_step(
     """
     spec = plugin_loader.get_plugin(plugin_id)
     if spec is None:
-        raise DriverEvaluationError(f'Plugin {plugin_id!r} not found; cannot evaluate step.')
+        raise DriverEvaluationError(f'Workflow {plugin_id!r} not found; cannot evaluate step.')
 
     step_config = spec.get_step_config(step_id)
     acceptance = step_config.get('acceptance_criteria', '')

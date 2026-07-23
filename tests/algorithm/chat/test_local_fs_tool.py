@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 
 import lazymind.chat.engine.tools.local_fs as local_fs_mod
@@ -65,6 +66,69 @@ def test_local_fs_read_checks_source_extension(monkeypatch, tmp_path):
     assert ok['result']['source_id'] == 'source-a'
     assert denied['success'] is False
     assert denied['error']['type'] == 'PermissionError'
+
+
+def test_local_fs_string_replace_updates_one_exact_match_atomically(monkeypatch, tmp_path):
+    allowed = tmp_path / 'allowed'
+    allowed.mkdir()
+    target = allowed / 'notes.md'
+    target.write_bytes(b'heading\r\nold value\r\ntail\r\n')
+    target.chmod(0o640)
+    _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['md'])])
+
+    result = LocalFileToolkit().string_replace(
+        str(target),
+        'heading\r\nold value',
+        'heading\r\nnew value',
+    )
+
+    assert result['success'] is True
+    assert result['result']['replacements'] == 1
+    assert result['result']['source_id'] == 'source-a'
+    assert target.read_bytes() == b'heading\r\nnew value\r\ntail\r\n'
+    assert os.stat(target).st_mode & 0o777 == 0o640
+
+
+def test_local_fs_string_replace_requires_expected_match_count(monkeypatch, tmp_path):
+    allowed = tmp_path / 'allowed'
+    allowed.mkdir()
+    target = allowed / 'notes.txt'
+    original = 'same\nsame\n'
+    target.write_text(original, encoding='utf-8')
+    _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['txt'])])
+
+    ambiguous = LocalFileToolkit().string_replace(str(target), 'same', 'changed')
+
+    assert ambiguous['success'] is False
+    assert ambiguous['error']['type'] == 'ValueError'
+    assert 'found at least 2' in ambiguous['error']['reason']
+    assert target.read_text(encoding='utf-8') == original
+
+    replaced = LocalFileToolkit().string_replace(
+        str(target), 'same', 'changed', expected_replacements=2,
+    )
+    assert replaced['success'] is True
+    assert target.read_text(encoding='utf-8') == 'changed\nchanged\n'
+
+
+def test_local_fs_string_replace_rejects_non_text_content_and_disallowed_files(monkeypatch, tmp_path):
+    allowed = tmp_path / 'allowed'
+    allowed.mkdir()
+    binary = allowed / 'binary.txt'
+    hidden = allowed / 'hidden.log'
+    binary.write_bytes(b'before\x00after')
+    hidden.write_text('before', encoding='utf-8')
+    _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['txt'])])
+
+    binary_result = LocalFileToolkit().string_replace(str(binary), 'before', 'changed')
+    hidden_result = LocalFileToolkit().string_replace(str(hidden), 'before', 'changed')
+
+    assert binary_result['success'] is False
+    assert binary_result['error']['type'] == 'ValueError'
+    assert binary.read_bytes() == b'before\x00after'
+    assert hidden_result['success'] is False
+    assert hidden_result['error']['type'] == 'PermissionError'
+    assert hidden.read_text(encoding='utf-8') == 'before'
 
 
 def test_local_fs_rejects_symlink_escape(monkeypatch, tmp_path):

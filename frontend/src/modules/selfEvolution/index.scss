@@ -2980,10 +2980,10 @@
 
 .self-evolution-repair-trace-attempt {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border-radius: 12px;
+  overflow: hidden;
+  border-radius: 10px;
   border: 1px solid #e4eefb;
   background: #fff;
 
@@ -3004,16 +3004,79 @@
 }
 
 .self-evolution-repair-trace-attempt-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto 14px;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 10px;
+  border: 0;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    background: #f8fbff;
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(47, 127, 229, 0.45);
+    outline-offset: -2px;
+  }
+}
+
+.self-evolution-repair-trace-attempt.is-running
+  .self-evolution-repair-trace-attempt-head {
+  background: #f8fbff;
+}
+
+.self-evolution-repair-trace-attempt-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #d5e0ec;
+  border-radius: 50%;
+  color: #60758b;
+
+  &.is-running {
+    border-color: #b9d4f7;
+    background: #edf5ff;
+    color: #2f7fe5;
+  }
+
+  &.is-done {
+    border-color: #9fd8b7;
+    background: #f0faf4;
+    color: #22a06b;
+  }
+
+  &.is-failed {
+    border-color: #efb0b8;
+    background: #fff4f5;
+    color: #d14352;
+  }
+}
+
+.self-evolution-repair-trace-attempt-copy {
+  min-width: 0;
 }
 
 .self-evolution-repair-trace-attempt-title {
+  display: block;
   color: #1f4f82;
   font-size: 13px;
   font-weight: 700;
+}
+
+.self-evolution-repair-trace-attempt-meta {
+  display: block;
+  margin-top: 3px;
+  color: #6b84a2;
+  font-size: 11px;
 }
 
 .self-evolution-repair-trace-attempt-status {
@@ -3031,6 +3094,26 @@
   &.is-failed {
     color: #d14352;
   }
+}
+
+.self-evolution-repair-trace-attempt-chevron {
+  color: #6b84a2;
+  font-size: 11px;
+  transition: transform 160ms ease;
+}
+
+.self-evolution-repair-trace-attempt.is-expanded
+  .self-evolution-repair-trace-attempt-chevron {
+  transform: rotate(180deg);
+}
+
+.self-evolution-repair-trace-attempt-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid #e8eef5;
+  background: #fbfcfe;
 }
 
 .self-evolution-repair-trace-attempt-rows {

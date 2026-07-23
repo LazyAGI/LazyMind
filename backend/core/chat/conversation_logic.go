@@ -291,7 +291,7 @@ func buildAskUserToolResultContent(
 	questionsRaw, _ := askPendingData["questions"].([]any)
 
 	if askStructured != nil {
-		lines := []string{"Questions were shown to the user via an interactive card. The user submitted all answers.", ""}
+		lines := []string{"Questions were shown via an interactive card. The user submitted the form; some answers may be omitted.", ""}
 		for i, sq := range askStructured.Questions {
 			prefix := fmt.Sprintf("Q%d: %s", i+1, sq.Text)
 			if len(sq.Choices) > 0 {
@@ -413,14 +413,34 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 }
 
 var askUserToolResultPattern = regexp.MustCompile(`(?s)(<tool_result\b[^>]*>)Question sent to user \(ask_id=[^)]+\)\.(</tool_result>)`)
+var toolResultBlockPattern = regexp.MustCompile(`(?s)<tool_result\b[^>]*>.*?</tool_result>`)
 
 // replaceAskUserToolResult replaces the placeholder ask_user tool_result content
 // in an assistant message with enriched context so the LLM understands the state.
 func replaceAskUserToolResult(assistantContent, newContent string) string {
-	if !strings.Contains(assistantContent, "Question sent to user") {
-		return assistantContent
-	}
-	return askUserToolResultPattern.ReplaceAllString(assistantContent, "${1}"+newContent+"${2}")
+	replaced := askUserToolResultPattern.ReplaceAllString(
+		assistantContent, "${1}"+newContent+"${2}",
+	)
+	return toolResultBlockPattern.ReplaceAllStringFunc(replaced, func(block string) string {
+		openEnd := strings.Index(block, ">")
+		closeStart := strings.LastIndex(block, "</tool_result>")
+		if openEnd < 0 || closeStart <= openEnd {
+			return block
+		}
+		var payload map[string]any
+		if json.Unmarshal([]byte(block[openEnd+1:closeStart]), &payload) != nil {
+			return block
+		}
+		if name, _ := payload["name"].(string); name != "ask_user" {
+			return block
+		}
+		payload["result"] = newContent
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return block
+		}
+		return block[:openEnd+1] + string(encoded) + block[closeStart:]
+	})
 }
 
 const chatActionRegeneration = "CHAT_ACTION_REGENERATION"
@@ -516,6 +536,9 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 }
 
 func chatHistoryInput(raw map[string]any, query string) any {
+	if displayQuery, ok := raw["display_query"].(string); ok && strings.TrimSpace(displayQuery) != "" {
+		return []any{map[string]any{"input_type": "text", "text": strings.TrimSpace(displayQuery)}}
+	}
 	if in, ok := raw["input"].([]any); ok && len(in) > 0 {
 		return in
 	}
@@ -702,6 +725,13 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"mode":             mode,
 		"intent_context":   loadConversationIntentContext(ctx, db, convID),
 	}
+	requestDisabledTools := stringSliceFromAny(raw["disabled_tools"])
+	if len(requestDisabledTools) > 0 {
+		body["disabled_tools"] = requestDisabledTools
+	}
+	if skip, ok := raw["skip_sensitive_filter"].(bool); ok && skip {
+		body["skip_sensitive_filter"] = true
+	}
 	if mentionContext := buildMentionResourceContext(ctx, db, userID, histories, raw); mentionContext != "" {
 		body["query"] = mentionContext + "\n\nUser query:\n" + query
 	}
@@ -727,7 +757,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		body["plugin_context"] = mergedPC
 	}
 	if resourceContext != nil {
-		body["disabled_tools"] = resourceContext.DisabledTools
+		body["disabled_tools"] = mergeDisabledToolNames(
+			requestDisabledTools, resourceContext.DisabledTools,
+		)
 		body["available_skills"] = resourceContext.AvailableSkills
 		if useMemory {
 			body["memory"] = resourceContext.Memory
@@ -1419,6 +1451,14 @@ func streamSingleAnswer(
 	}
 	if persisted {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
+		// Reaching this point means the upstream SSE channel has closed and the
+		// final history payload was persisted. Intermediate thinking persistence
+		// never reaches this update.
+		if err := db.Model(&orm.TaskCenterTask{}).
+			Where("conversation_id = ? AND task_type = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", convID, "background_chat").
+			Updates(map[string]any{"status": "succeeded", "finished_at": now, "updated_at": now}).Error; err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Msg("failed to finish background task after SSE close")
+		}
 	}
 	if persisted && !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))

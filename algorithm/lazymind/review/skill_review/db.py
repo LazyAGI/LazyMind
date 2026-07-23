@@ -26,16 +26,15 @@ _engine_cache_lock = threading.Lock()
 
 
 def read_session(
-    start_time: datetime,
-    end_time: datetime,
+    session_ids: list[str],
     user_ids: Optional[list[str]] = None,
 ) -> list[dict[str, Any]]:
+    normalized_session_ids = [str(item).strip() for item in session_ids if str(item).strip()]
+    if not normalized_session_ids:
+        return []
     normalized_user_ids = [str(item).strip() for item in (user_ids or []) if str(item).strip()]
 
-    params: dict[str, Any] = {
-        'start_time': start_time,
-        'end_time': end_time,
-    }
+    params: dict[str, Any] = {'session_ids': normalized_session_ids}
 
     user_filter = ''
     if normalized_user_ids:
@@ -44,16 +43,15 @@ def read_session(
 
     query = text(
         f"""
-        WITH updated_sessions AS (
+        WITH selected_sessions AS (
             SELECT c.id AS conversation_id, c.create_user_id
             FROM conversations c
-            WHERE c.updated_at >= :start_time
-              AND c.updated_at < :end_time
+            WHERE c.id = ANY(:session_ids)
               {user_filter}
         )
-        SELECT ch.*, us.create_user_id
+        SELECT ch.*, ss.create_user_id
         FROM chat_histories ch
-        JOIN updated_sessions us ON ch.conversation_id = us.conversation_id
+        JOIN selected_sessions ss ON ch.conversation_id = ss.conversation_id
         ORDER BY ch.conversation_id ASC, ch.create_time ASC
         """
     )

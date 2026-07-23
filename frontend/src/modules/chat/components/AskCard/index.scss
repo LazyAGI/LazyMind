@@ -134,6 +134,8 @@
 
     .ant-radio-wrapper,
     .ant-checkbox-wrapper {
+      display: flex;
+      width: 100%;
       font-size: 13px;
       color: #2d3a56;
       padding: 8px 12px;
@@ -141,6 +143,11 @@
       border: 1px solid #e4e9f5;
       transition: background 0.15s, border-color 0.15s;
       margin: 0 !important;
+
+      > span:last-child {
+        flex: 1;
+        min-width: 0;
+      }
 
       &:hover {
         background: #f4f6ff;
@@ -163,6 +170,20 @@
     display: inline-flex;
     align-items: center;
     cursor: default;
+  }
+
+  &__choice-input {
+    width: 100%;
+    min-width: 0;
+    border-color: transparent !important;
+    background: transparent !important;
+    padding-inline: 4px !important;
+
+    &:hover,
+    &:focus {
+      border-color: #b5c0ef !important;
+      background: #fff !important;
+    }
   }
 
   &__other-input {

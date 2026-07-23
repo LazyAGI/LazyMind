@@ -173,6 +173,10 @@ class AgentExecutor:
         agent._tools_manager = ToolCallGuard(
             agent._tools_manager, options.tool_failure_limits,
         )
+        # Restore lazy Toolkit activation before the streaming helper takes over.
+        # Relying only on ReactAgent._pre_process makes restoration dependent on
+        # llm_chat_history surviving the helper/framework call path.
+        agent._prepare_tool_context(plan.prompt.current_input, plan.history)
         agent.set_stop_tools(plan.stop_tools)
         return agent
 

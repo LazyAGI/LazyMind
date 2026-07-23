@@ -135,6 +135,7 @@ def test_url_fetch_batch_preview_shows_count_and_sample_urls():
     assert 'https://example.test/1' in call_text
     assert '另有 1 个' in call_text
 
+
 def test_google_drive_search_uses_provider_specific_preview():
     tool_call = {
         'id': 'call_drive',
@@ -174,7 +175,7 @@ def test_plugin_preflight_result_renders_outcome_and_reason_in_chinese():
         'zh',
     )
 
-    assert '插件启动检查已完成，结果是 **not_applicable**' in result_text
+    assert '工作流启动检查已完成，结果是 **not_applicable**' in result_text
     assert f'原因是 **{reason}**' in result_text
 
 

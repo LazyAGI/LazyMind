@@ -64,7 +64,7 @@ _DEFAULT_TASK = {
     'conversation_id': 'conv-1',
     'agent_type': 'test',
     'objective': 'do something',
-    'params': {},
+    'params': {'required_output_artifact_keys': ['result']},
     'workspace_path': '/tmp/ws',
     'input_artifact_keys': [],
     'output_artifact_keys': ['result'],

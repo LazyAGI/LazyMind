@@ -72,7 +72,9 @@ export default function SkillMarketView({
                     key={item.id}
                     className={`memory-skill-tile ${installed ? "is-installed" : ""}`}
                   >
-                    <span className="memory-skill-tile-icon">{renderSkillCategoryIcon(item.category)}</span>
+                    <span className="memory-skill-tile-icon">
+                      {renderSkillCategoryIcon(item.tags[0] || "default")}
+                    </span>
                     <div className="memory-skill-tile-copy">
                       <div className="memory-skill-tile-title-line">
                         <strong className="memory-skill-tile-name">{item.name}</strong>
@@ -90,9 +92,13 @@ export default function SkillMarketView({
                       <Tooltip title={item.description}>
                         <p className="memory-skill-tile-desc">{item.description}</p>
                       </Tooltip>
-                      {item.category ? (
+                      {item.tags.length ? (
                         <div className="memory-skill-tile-meta">
-                          <span className="memory-skill-tile-category">{item.category}</span>
+                          {item.tags.map((tag) => (
+                            <span key={tag} className="memory-skill-tile-category">
+                              {tag}
+                            </span>
+                          ))}
                         </div>
                       ) : null}
                     </div>

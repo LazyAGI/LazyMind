@@ -1,7 +1,9 @@
 from __future__ import annotations
 import asyncio
+import hashlib
 import json
 import re
+import threading
 import time
 from html import escape as escape_xml
 from typing import Any, Dict, List, Optional, Union
@@ -14,7 +16,9 @@ from lazymind.chat.config import (
     MAX_CONCURRENCY,
     RAG_MODE,
     SENSITIVE_FILTER_RESPONSE_TEXT,
-    SENSITIVE_WORDS_PATH,
+    SENSITIVE_GRAY_WORDS_PATH,
+    SENSITIVE_RED_WORDS_PATH,
+    SENSITIVE_WHITELIST_PATH,
 )
 from lazymind.chat.engine.prompts import (
     add_standard_system_sections,
@@ -27,8 +31,10 @@ from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     ASK_USER_TOOL_CONFIG,
+    ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
     USER_ATTACHMENT_TOOL_CONFIGS,
+    collect_query_appendices,
     collect_system_prompt_appendices,
     filter_tools,
     normalize_history_for_agent,
@@ -52,6 +58,7 @@ from lazymind.chat.engine.tools.intent_writer import (
 )
 from lazymind.chat.service.utils import (
     SensitiveFilter,
+    SensitiveMatch,
     log_and_emit_frame,
     register_image_url,
     response_payload,
@@ -69,7 +76,11 @@ from lazymind.config import config as _cfg
 from lazymind.common.memory import get_episode_store
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
-sensitive_filter = SensitiveFilter(SENSITIVE_WORDS_PATH)
+sensitive_filter = SensitiveFilter(
+    SENSITIVE_RED_WORDS_PATH,
+    SENSITIVE_GRAY_WORDS_PATH,
+    SENSITIVE_WHITELIST_PATH,
+)
 
 # Maps conversation_id → session_id for active chat sessions.
 # Used by task-cancel endpoint to cancel ChatAgent by conversation_id.
@@ -78,6 +89,11 @@ _CITE_MESSAGE_PATTERN = re.compile(
     r'<cite_message>([\s\S]*?)</cite_message>\s*',
     re.IGNORECASE,
 )
+_MCP_TOOL_CACHE_TTL_SECONDS = 300
+_TASK_PROFILE_ROUTER_TIMEOUT_SECONDS = 20
+_SENSITIVE_MATCH_UNSET = object()
+_mcp_tool_cache: dict[str, tuple[float, list[Any]]] = {}
+_mcp_tool_cache_lock = threading.Lock()
 
 
 def _select_episode_memory_reference(
@@ -151,43 +167,51 @@ def _normalize_kb_id_filter(raw_kb_id: Any) -> str | list[str] | None:
     return None
 
 
-def check_sensitive_content(
-    query: str,
-) -> Optional[str]:
-    if not sensitive_filter.loaded:
-        return None
-    has_sensitive, sensitive_word = sensitive_filter.check(query)
-    return sensitive_word if has_sensitive else None
+def check_sensitive_content(query: str) -> Optional[SensitiveMatch]:
+    return sensitive_filter.evaluate(query)
 
 
-def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
-    """Build MCP tool list from mcp_config. Skip individual servers on failure with a warning."""
-    tools = []
-    for server in mcp_config:
-        url = server.get('url')
-        if not url:
-            LOG.warning(
-                f"[MCP] skipped server {server.get('name')}: missing 'url' field"
-            )
-            continue
-        try:
-            client = MCPClient(
-                command_or_url=url,
-                headers=server.get('headers'),
-                timeout=server.get('timeout', 5),
-                transport=server.get('transport', 'auto'),
-            )
-            allowed = server.get('allowed_tools') or None
-            mcp_tools = client.get_tools(allowed_tools=allowed)
-            tools.extend(mcp_tools)
-            LOG.info(
-                f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}"
-            )
-        except Exception as e:
-            LOG.warning(
-                f"[MCP] failed to connect {server.get('name')}: {e}"
-            )
-    return tools
+def _mcp_server_cache_key(server: Dict[str, Any]) -> str:
+    encoded = json.dumps(server, ensure_ascii=False, sort_keys=True, default=str).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _load_mcp_server_tools(server: Dict[str, Any]) -> list:
+    url = server.get('url')
+    if not url:
+        LOG.warning(f"[MCP] skipped server {server.get('name')}: missing 'url' field")
+        return []
+    cache_key = _mcp_server_cache_key(server)
+    now = time.monotonic()
+    with _mcp_tool_cache_lock:
+        cached = _mcp_tool_cache.get(cache_key)
+        if cached and now - cached[0] < _MCP_TOOL_CACHE_TTL_SECONDS:
+            LOG.info(f"[MCP] reused cached tools from {server.get('name')}")
+            return list(cached[1])
+    try:
+        client = MCPClient(
+            command_or_url=url,
+            headers=server.get('headers'),
+            timeout=server.get('timeout', 5),
+            transport=server.get('transport', 'auto'),
+        )
+        allowed = server.get('allowed_tools') or None
+        mcp_tools = client.get_tools(allowed_tools=allowed)
+        with _mcp_tool_cache_lock:
+            _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
+        LOG.info(f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}")
+        return mcp_tools
+    except Exception as e:
+        LOG.warning(f"[MCP] failed to connect {server.get('name')}: {e}")
+        return []
+
+
+async def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
+    """Load MCP schemas concurrently and reuse unchanged schemas briefly."""
+    groups = await asyncio.gather(*(
+        asyncio.to_thread(_load_mcp_server_tools, server) for server in mcp_config
+    ))
+    return [tool for group in groups for tool in group]
 
 
 def _build_subagent_chat_tools() -> list:
@@ -212,11 +236,13 @@ def _build_chat_artifact_tools() -> list:
 
 
 def _build_user_attachment_tools(has_files: bool) -> list:
-    """Register find_user_attachment / read_user_attachment when the conversation has uploads."""
+    """Register attachment lookup, reading, and text editing when uploads exist."""
     if not has_files:
         return []
-    from lazymind.chat.engine.subagent.tools import find_user_attachment, read_user_attachment
-    return [find_user_attachment, read_user_attachment]
+    return [
+        *(config.tool for config in USER_ATTACHMENT_TOOL_CONFIGS),
+        ATTACHMENT_EDIT_TOOL_CONFIG.tool,
+    ]
 
 
 def _build_ask_user_tool() -> list:
@@ -230,15 +256,144 @@ def _build_ask_user_tool() -> list:
     return [ask_user]
 
 
-def _should_register_ask_user(agentic_config: Dict[str, Any]) -> bool:
-    """Auto plugin sessions are mechanically non-interactive."""
+def _should_register_ask_user(
+    agentic_config: Dict[str, Any],
+    disabled_tools: set[str] | None = None,
+) -> bool:
+    """Respect explicit non-interactive requests and legacy auto plugin sessions."""
+    if 'ask_user' in (disabled_tools or set()):
+        return False
     return not (
         agentic_config.get('enable_plugin', True)
         and agentic_config.get('plugin_mode') == 'auto'
     )
 
 
+def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
+    query, _ = _normalize_cite_message_query_for_agent(request.message.query)
+    user_input, _ = _normalize_cite_message_query_for_agent(request.message.user_query or query)
+    explicit_resources = request.explicit_resource_bindings.model_dump()
+    selected_kb_ids = _normalize_kb_id_filter((request.retrieval.filters or {}).get('kb_id'))
+    if selected_kb_ids and not explicit_resources['knowledge_base_ids']:
+        explicit_resources['knowledge_base_ids'] = (
+            selected_kb_ids if isinstance(selected_kb_ids, list) else [selected_kb_ids]
+        )
+    active_plugin_ref = str(
+        (request.plugin.plugin_context or {}).get('plugin_ref') or ''
+    ).strip()
+    if active_plugin_ref and not explicit_resources['plugin_refs']:
+        explicit_resources['plugin_refs'] = [active_plugin_ref]
+    thinking_depth = (
+        request.runtime.thinking_depth
+        if request.runtime.thinking_depth in ('low', 'medium', 'high') else 'medium'
+    )
+    return {
+        'query': user_input.strip(),
+        'history': normalize_history_for_agent(list(request.message.history or [])),
+        'intent': request.conversation.intent_context,
+        'has_attachments': bool(request.message.files),
+        'explicit_resources': explicit_resources,
+        'thinking_depth': thinking_depth,
+    }
+
+
+def _resolve_task_profile_with_model(inputs: dict[str, Any]) -> Any:
+    def classify(prompt: str) -> Any:
+        router_llm = AutoModel(model='llm')
+        return router_llm(
+            prompt,
+            response_format={'type': 'json_object'},
+            stream_output=False,
+            timeout=_TASK_PROFILE_ROUTER_TIMEOUT_SECONDS,
+        )
+
+    return resolve_task_profile(
+        **inputs,
+        classifier=classify,
+        enable_llm_fallback=True,
+    )
+
+
 async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingResponse]:
+    if not _cfg['dynamic_prompt_modules']:
+        return await _handle_chat_impl(request)
+
+    inputs = _task_profile_inputs(request)
+    provisional = resolve_task_profile(
+        **inputs,
+        classifier=None,
+        enable_llm_fallback=False,
+    )
+    if not provisional.routing_review_required:
+        return await _handle_chat_impl(request, task_profile_override=provisional)
+
+    from lazymind.chat.plugin.plugin_manager import is_plugin_driver_turn
+    raw_query = str(request.message.query or '')
+    filter_query, _ = _normalize_cite_message_query_for_agent(raw_query)
+    skip_sensitive_filter = (
+        request.runtime.skip_sensitive_filter
+        or is_plugin_driver_turn(request.plugin.plugin_context)
+        or request.runtime.context_usage_preview
+        or request.runtime.context_prompt_export
+    )
+    sensitive_match = (
+        None
+        if skip_sensitive_filter
+        else check_sensitive_content(filter_query)
+    )
+    if sensitive_match is not None:
+        return await _handle_chat_impl(
+            request,
+            task_profile_override=provisional,
+            sensitive_match_override=sensitive_match,
+        )
+
+    inject_model_config(request.runtime.llm_config)
+
+    async def resolve_and_continue():
+        started = time.time()
+        routing_task = asyncio.create_task(asyncio.to_thread(
+            _resolve_task_profile_with_model, inputs,
+        ))
+        for status_delta in ('正在', '分析', '用户意图', '，请稍后'):
+            yield log_and_emit_frame(
+                {'think': status_delta, 'text': None, 'sources': []},
+                round(time.time() - started, 3),
+                raw_query,
+                request.conversation.session_id,
+                tag='TASK_PROFILE',
+            )
+            await asyncio.sleep(0.08)
+        profile = await routing_task
+        response = await _handle_chat_impl(
+            request,
+            task_profile_override=profile,
+            sensitive_match_override=sensitive_match,
+        )
+        if isinstance(response, StreamingResponse):
+            async for chunk in response.body_iterator:
+                yield chunk
+            return
+        yield sse_line(response_payload(200, 'success', response, time.time() - started))
+
+    if request.runtime.context_usage_preview or request.runtime.context_prompt_export:
+        profile = provisional
+        if request.runtime.context_preview_allow_llm_routing:
+            profile = await asyncio.to_thread(_resolve_task_profile_with_model, inputs)
+        return await _handle_chat_impl(
+            request,
+            task_profile_override=profile,
+            sensitive_match_override=sensitive_match,
+        )
+    return StreamingResponse(resolve_and_continue(), media_type='text/event-stream')
+
+
+async def _handle_chat_impl(
+    request: ChatRequest,
+    *,
+    task_profile_override: Any = None,
+    sensitive_match_override: SensitiveMatch | None | object = _SENSITIVE_MATCH_UNSET,
+) -> Union[Dict[str, Any], StreamingResponse]:
     message = request.message
     conversation = request.conversation
     retrieval = request.retrieval
@@ -279,15 +434,24 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         cited_message_context = user_cited_context
     language_query = user_input.strip()
     is_driver_turn = is_plugin_driver_turn(plugin.plugin_context)
-    sensitive_word = (
-        None if is_driver_turn or runtime.context_usage_preview or runtime.context_prompt_export
-        else check_sensitive_content(query)
+    skip_sensitive_filter = (
+        runtime.skip_sensitive_filter
+        or is_driver_turn
+        or runtime.context_usage_preview
+        or runtime.context_prompt_export
     )
-    if sensitive_word:
+    if skip_sensitive_filter:
+        sensitive_match = None
+    elif sensitive_match_override is _SENSITIVE_MATCH_UNSET:
+        sensitive_match = check_sensitive_content(query)
+    else:
+        sensitive_match = sensitive_match_override
+    if sensitive_match is not None:
         cost = round(time.time() - start_time, 3)
         LOG.warning(
             f'[ChatServer] [SENSITIVE_FILTER_BLOCKED] [query={query[:50]}...] '
-            f'[sensitive_word={sensitive_word}] [session_id={conversation.session_id}]'
+            f'[sensitive_word={sensitive_match.word}] [tier={sensitive_match.tier}] '
+            f'[session_id={conversation.session_id}]'
         )
         return single_event_stream_response(response_payload(
             200,
@@ -392,15 +556,18 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     task_profile = None
     if _cfg['dynamic_prompt_modules']:
         profile_started = time.monotonic()
-        task_profile = resolve_task_profile(
-            language_query,
-            history=agent_history,
-            intent=conversation.intent_context,
-            classifier=None,
-            enable_llm_fallback=False,
-            has_attachments=bool(files_map),
-            explicit_resources=explicit_resource_payload,
-        )
+        task_profile = task_profile_override
+        if task_profile is None:
+            task_profile = resolve_task_profile(
+                language_query,
+                history=agent_history,
+                intent=conversation.intent_context,
+                classifier=None,
+                enable_llm_fallback=False,
+                thinking_depth=thinking_depth,
+                has_attachments=bool(files_map),
+                explicit_resources=explicit_resource_payload,
+            )
         profile_latency_ms = int((time.monotonic() - profile_started) * 1000)
         LOG.info(
             '[ChatServer] [TASK_PROFILE] [sid=%s] source=%s outcome=%s deliverable=%s '
@@ -497,15 +664,18 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     # Respect enable_subagent flag: when false, suppress create_subagent and related tools.
     enable_subagent = agentic_config.get('enable_subagent', True)
     subagent_tools = _build_subagent_chat_tools() if enable_subagent else []
-    mcp_tools = _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
+    mcp_tools = await _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
     # User attachment tools are only meaningful when the user has uploaded files.
     attachment_tools = _build_user_attachment_tools(bool(files_map))
-    attachment_configs = list(USER_ATTACHMENT_TOOL_CONFIGS) if attachment_tools else []
+    attachment_configs = (
+        [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
+        if attachment_tools else []
+    )
     # ask_user is a ChatAgent-only stop-tool. It is NOT in DEFAULT_TOOLS so SubAgents
     # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.
     # Auto plugin mode is non-interactive by contract: ask_user must be absent,
     # not merely discouraged by prompt text.
-    allow_ask_user = _should_register_ask_user(agentic_config)
+    allow_ask_user = _should_register_ask_user(agentic_config, disabled)
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
     ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
     artifact_tools = _build_chat_artifact_tools()
@@ -542,6 +712,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     episode_reference, episode_results = _select_episode_memory_reference(episode_candidates)
 
     prompt_builder = PromptBuilder.for_role(AgentRole.CHAT)
+    active_tool_configs = active_configs + attachment_configs + ask_user_configs
     add_standard_system_sections(
         prompt_builder,
         bool(all_tools),
@@ -553,7 +724,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         current_query=language_query,
         conversation_history=agent_history,
         tool_prompt_appendices=collect_system_prompt_appendices(
-            active_configs + attachment_configs + ask_user_configs,
+            active_tool_configs,
         ),
         task_profile=task_profile,
         dynamic_prompt_modules=_cfg['dynamic_prompt_modules'],
@@ -619,6 +790,17 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             and task_profile.routing_review_required
         ),
     )
+    prompt_builder.runtime(
+        'chat_tool_query_appendices_before', 'Active Tool Instructions',
+        '\n\n'.join(collect_query_appendices(active_tool_configs, 'before')),
+        'tool.registry', priority=90, authoritative=True, content_kind='instruction',
+    )
+    prompt_builder.runtime(
+        'chat_tool_query_appendices_after', 'Active Tool Instructions',
+        '\n\n'.join(collect_query_appendices(active_tool_configs, 'after')),
+        'tool.registry', priority=90, authoritative=True, content_kind='instruction',
+        placement='after_input',
+    )
     prompt_bundle = prompt_builder.input(
         content=language_query,
         source='user',
@@ -678,9 +860,16 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             return {'prompt_markdown': prompt_markdown}
         report = await estimate_context_usage(plan, agent_context)
         report_data = report_to_dict(report)
-        requires_llm = bool(task_profile and task_profile.routing_review_required)
+        llm_enhanced = runtime.context_preview_allow_llm_routing
+        requires_llm = bool(
+            not llm_enhanced and task_profile and task_profile.routing_review_required
+        )
         report_data.update({
-            'preview_accuracy': 'rule_only' if requires_llm else 'deterministic',
+            'preview_accuracy': (
+                'llm_enhanced' if llm_enhanced
+                else 'rule_only' if requires_llm
+                else 'deterministic'
+            ),
             'requires_llm': requires_llm,
             'llm_reason': task_profile.routing_review_reason if requires_llm else '',
         })

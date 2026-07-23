@@ -261,6 +261,16 @@ def add_standard_system_sections(
     )
 
     if dynamic_prompt_modules and task_profile is not None:
+        builder.system(
+            'task_profile_interpretation', '# Task profile interpretation',
+            'The enabled task modules and deliverable hints were selected by fast heuristic '
+            'rules. They are provisional guidance, may be incomplete or inaccurate, and must '
+            'not override the user\'s actual request. Independently infer the user\'s goal and '
+            'correct the response strategy when the wording, conversation context, or available '
+            'evidence indicates a better interpretation. Do not mention this internal routing '
+            'review to the user. Runtime sections explicitly marked AUTHORITATIVE remain binding.',
+            'platform.task.interpretation', priority=31,
+        )
         outcomes = {task_profile.primary_outcome, *task_profile.secondary_outcomes}
         builder.system(
             'task_learning', '', LEARNING_GUIDANCE, 'platform.task.learning', priority=32,
@@ -311,7 +321,7 @@ def add_standard_system_sections(
         excluded_lines = [
             *(f'- Skill: {value}' for value in excluded.skill_names),
             *(f'- Knowledge base: {value}' for value in excluded.knowledge_base_ids),
-            *(f'- Plugin: {value}' for value in excluded.plugin_refs),
+            *(f'- Workflow: {value}' for value in excluded.plugin_refs),
         ]
         if excluded_lines:
             builder.runtime(
