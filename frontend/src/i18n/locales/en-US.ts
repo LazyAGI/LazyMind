@@ -1063,6 +1063,7 @@ const enUS = {
     askCardOtherPlaceholder: "Please specify…",
     askCardOtherOption: "Other",
     askCardAnswerSeparator: "; ",
+    askCardUnanswered: "No response",
     askCardAria: "Questions requiring confirmation",
     artifactDownloadButton: "Download attachments",
     artifactCollectorTitle: "Attachments and artifacts",

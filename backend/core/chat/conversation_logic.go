@@ -291,7 +291,7 @@ func buildAskUserToolResultContent(
 	questionsRaw, _ := askPendingData["questions"].([]any)
 
 	if askStructured != nil {
-		lines := []string{"Questions were shown to the user via an interactive card. The user submitted all answers.", ""}
+		lines := []string{"Questions were shown via an interactive card. The user submitted the form; some answers may be omitted.", ""}
 		for i, sq := range askStructured.Questions {
 			prefix := fmt.Sprintf("Q%d: %s", i+1, sq.Text)
 			if len(sq.Choices) > 0 {

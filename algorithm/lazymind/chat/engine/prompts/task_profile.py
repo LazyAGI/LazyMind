@@ -33,6 +33,11 @@ DELIVERABLES = {
     'artifact', 'execution_result',
 }
 SKILL_MODES = {'suppress', 'candidates', 'explicit'}
+_TRIVIAL_CHAT_INPUT = re.compile(
+    r'^(?:[你您]好|嗨|哈喽|哈罗|在吗|测试|'
+    r'hi|hello|hey|test)[\s!！,.，。?？~～]*$',
+    re.I,
+)
 
 
 @dataclass(frozen=True)
@@ -900,6 +905,24 @@ def resolve_task_profile(
         needs_llm = True
     resources = _normalize_explicit_resources(explicit_resources)
     rule = _apply_explicit_resources(rule, resources, query)
+    stripped_query = str(query or '').strip()
+    has_explicit_resources = bool(
+        resources.skill_names or resources.knowledge_base_ids
+        or resources.plugin_refs or resources.mentions
+    )
+    trivial_input = (
+        not has_attachments
+        and not has_explicit_resources
+        and (not stripped_query or bool(_TRIVIAL_CHAT_INPUT.fullmatch(stripped_query)))
+    )
+    if trivial_input:
+        return replace(
+            rule,
+            freshness='stable',
+            confidence=1.0,
+            routing_review_required=False,
+            routing_review_reason='',
+        )
     depth = thinking_depth if thinking_depth in {'low', 'medium', 'high'} else 'low'
     simple_stable_answer = (
         rule.primary_outcome == 'answer'
