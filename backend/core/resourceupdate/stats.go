@@ -3,7 +3,9 @@ package resourceupdate
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -40,6 +42,11 @@ func CountSkillReviewHistoryStats(ctx context.Context, db *gorm.DB, userID strin
 		Joins("JOIN conversations AS c ON c.id = ch.conversation_id").
 		Where("c.create_user_id = ?", userID).
 		Where("c.deleted_at IS NULL").
+		Where(`NOT EXISTS (
+			SELECT 1
+			FROM plugin_sessions AS ps
+			WHERE ps.conversation_id = c.id
+		)`).
 		Where("c.updated_at >= ? AND c.updated_at < ?", start, end).
 		Order("ch.conversation_id ASC, ch.create_time ASC, ch.seq ASC").
 		Scan(&rows).Error
@@ -67,13 +74,61 @@ func CountSkillReviewHistoryStats(ctx context.Context, db *gorm.DB, userID strin
 		perConversation[conversationID] = item
 	}
 
-	for _, item := range perConversation {
+	for conversationID, item := range perConversation {
 		if item.UserTurnCount >= minUserTurns && item.ToolCallCount >= minToolTurns {
 			stats.QualifiedSessionCount++
+			stats.QualifiedSessionIDs = append(stats.QualifiedSessionIDs, conversationID)
 		}
 	}
+	sort.Strings(stats.QualifiedSessionIDs)
 	stats.QuantityThreshold = 0
 	return stats, nil
+}
+
+func validateSkillReviewSessions(ctx context.Context, db *gorm.DB, userID string, sessionIDs []string) ([]string, error) {
+	normalized := normalizeStringIDs(sessionIDs)
+	if len(normalized) == 0 {
+		return nil, fmt.Errorf("session_ids required")
+	}
+
+	var count int64
+	err := db.WithContext(ctx).
+		Table("conversations AS c").
+		Where("c.id IN ?", normalized).
+		Where("c.create_user_id = ?", strings.TrimSpace(userID)).
+		Where("c.deleted_at IS NULL").
+		Where(`NOT EXISTS (
+			SELECT 1
+			FROM plugin_sessions AS ps
+			WHERE ps.conversation_id = c.id
+		)`).
+		Distinct("c.id").
+		Count(&count).Error
+	if err != nil {
+		return nil, err
+	}
+	if count != int64(len(normalized)) {
+		return nil, fmt.Errorf("session_ids must belong to user %q and must not contain plugin conversations", strings.TrimSpace(userID))
+	}
+	return normalized, nil
+}
+
+func normalizeStringIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	normalized := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		normalized = append(normalized, id)
+	}
+	sort.Strings(normalized)
+	return normalized
 }
 
 func countHistoryResultToolTurns(result string, knownToolCallIDs map[string]struct{}) int {

@@ -5,7 +5,6 @@ import {
   DashboardOutlined,
   DownloadOutlined,
   ExclamationCircleFilled,
-  LoadingOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -46,8 +45,7 @@ export default function ContextUsageButton({
   const [open, setOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [llmEnhanced, setLlmEnhanced] = useState(false);
-  const [enhancing, setEnhancing] = useState(false);
+  const [llmLoading, setLlmLoading] = useState(false);
   const versionRef = useRef(0);
   const calculatedKeyRef = useRef("");
   const requestRef = useRef<Promise<void> | null>(null);
@@ -67,8 +65,7 @@ export default function ContextUsageButton({
     setStatus("empty");
     setOpen(false);
     setDetailOpen(false);
-    setLlmEnhanced(false);
-    setEnhancing(false);
+    setLlmLoading(false);
   }, [resetKey]);
 
   useEffect(() => () => {
@@ -76,23 +73,20 @@ export default function ContextUsageButton({
     requestRef.current = null;
   }, []);
 
-  const calculate = (allowLlmRouting = false) => {
+  const calculate = (useLlm = false) => {
     if (requestRef.current) return requestRef.current;
     const requestedVersion = versionRef.current;
     const requestedKey = staleKey;
     const requestId = ++requestIdRef.current;
-    setEnhancing(allowLlmRouting);
-    if (allowLlmRouting) setOpen(true);
     setStatus("loading");
-    const payload = {
+    setLlmLoading(useLlm);
+    const request = estimateContextUsage({
       ...buildRequest(),
-      context_preview_allow_llm_routing: allowLlmRouting,
-    };
-    const request = estimateContextUsage(payload)
+      context_preview_allow_llm_routing: useLlm,
+    })
       .then((nextReport) => {
         if (requestId !== requestIdRef.current) return;
         setReport(nextReport);
-        setLlmEnhanced(allowLlmRouting && !nextReport.requires_llm);
         calculatedKeyRef.current = requestedKey;
         setStatus(
           requestedVersion === versionRef.current && requestedKey === staleKey
@@ -106,7 +100,7 @@ export default function ContextUsageButton({
       .finally(() => {
         if (requestId === requestIdRef.current) {
           requestRef.current = null;
-          setEnhancing(false);
+          setLlmLoading(false);
         }
       });
     requestRef.current = request;
@@ -123,7 +117,6 @@ export default function ContextUsageButton({
     try {
       const blob = await exportContextPrompt({
         ...buildRequest(),
-        context_preview_allow_llm_routing: llmEnhanced,
       });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -172,7 +165,16 @@ export default function ContextUsageButton({
           </Button>
         ) : null}
       </div>
-      {status === "loading" && !report ? (
+      {status === "loading" && llmLoading ? (
+        <div className="context-usage-routing-state is-loading">
+          <Spin size="small" className="context-usage-routing-icon" />
+          <div className="context-usage-routing-copy">
+            <strong>{t("chat.contextUsageLlmLoading")}</strong>
+            <span>{t("chat.contextUsageLlmLoadingHint")}</span>
+          </div>
+          <div className="context-usage-routing-progress"><i /></div>
+        </div>
+      ) : status === "loading" ? (
         <div className="context-usage-loading"><Spin size="small" /></div>
       ) : report ? (
         <>
@@ -203,16 +205,7 @@ export default function ContextUsageButton({
               </Button>
             </div>
           ) : null}
-          {enhancing ? (
-            <div className="context-usage-routing-state is-loading" aria-live="polite">
-              <LoadingOutlined className="context-usage-routing-icon" spin />
-              <div className="context-usage-routing-copy">
-                <strong>{t("chat.contextUsageLlmLoading")}</strong>
-                <span>{t("chat.contextUsageLlmLoadingHint")}</span>
-              </div>
-              <div className="context-usage-routing-progress" aria-hidden="true"><i /></div>
-            </div>
-          ) : report.requires_llm ? (
+          {report.requires_llm ? (
             <div className="context-usage-routing-state is-warning">
               <ExclamationCircleFilled className="context-usage-routing-icon" />
               <div className="context-usage-routing-copy">
@@ -220,12 +213,13 @@ export default function ContextUsageButton({
                 <span>{report.llm_reason || t("chat.contextUsageRuleOnlyReason")}</span>
                 <small>{t("chat.contextUsageLlmTokenHint")}</small>
               </div>
-              <Button type="primary" size="small" onClick={() => void calculate(true)}>
+              <Button size="small" onClick={() => void calculate(true)}>
                 {t("chat.contextUsageUseLlm")}
               </Button>
             </div>
-          ) : llmEnhanced ? (
-            <div className="context-usage-routing-state is-success" aria-live="polite">
+          ) : null}
+          {report.preview_accuracy === "llm_enhanced" ? (
+            <div className="context-usage-routing-state is-success">
               <CheckCircleFilled className="context-usage-routing-icon" />
               <div className="context-usage-routing-copy">
                 <strong>{t("chat.contextUsageLlmEnhanced")}</strong>

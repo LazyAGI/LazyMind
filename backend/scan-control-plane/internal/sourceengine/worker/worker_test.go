@@ -319,6 +319,36 @@ func TestWorkerDispatchesReparseAndDeleteCoreActions(t *testing.T) {
 			t.Fatalf("cleanup should not export source content, got %d exports", conn.exportCalls)
 		}
 	})
+
+	t.Run("deleting binding still executes its cleanup delete", func(t *testing.T) {
+		ctx := context.Background()
+		now := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+		repo := newWorkerIdempotencyStore(now)
+		bindingKey := workerIdempotencyBindingKey("source-1", "binding-1")
+		binding := repo.bindings[bindingKey]
+		binding.Status = "DELETING"
+		repo.bindings[bindingKey] = binding
+		conn := &workerSpyConnector{exportVersion: "v1"}
+		core := newWorkerIdempotencyCoreClient()
+		reducer := statepkg.NewDBStateReducer(repo, statepkg.WithClock(func() time.Time { return now }))
+		task := repo.seedPendingTask("doc-cleanup-deleting", "v1", statepkg.SourceStateOutOfScope, statepkg.PendingActionDelete)
+		task.TaskAction = taskpkg.TaskActionDelete
+		task.TargetVersionID = "v1"
+		task.IdempotencyKey = taskpkg.IdempotencyKey(task)
+		repo.tasks[task.TaskID] = task
+		doc := repo.documents[workerIdempotencyKey("source-1", "binding-1", "doc-cleanup-deleting")]
+		doc.CoreDocumentID = "core-doc-cleanup-deleting"
+		doc.CurrentVersionID = "v1"
+		repo.documents[workerIdempotencyKey("source-1", "binding-1", "doc-cleanup-deleting")] = doc
+		parseWorker := worker.NewDefaultParseWorker(repo, mustRegistry(t, conn), core, reducer, &workerIdempotencyTempObjectStore{}, worker.WithClock(func() time.Time { return now }))
+
+		if err := parseWorker.RunOnce(ctx, "worker-1"); err != nil {
+			t.Fatalf("run deleting binding cleanup: %v", err)
+		}
+		if len(core.Submissions) != 1 || core.Submissions[0].Action != coreclient.ActionDelete {
+			t.Fatalf("deleting binding cleanup was not submitted: %+v", core.Submissions)
+		}
+	})
 }
 
 func TestRunnerRequeuesDeferredSameSourceTasks(t *testing.T) {

@@ -106,6 +106,19 @@ func PatchConversationPluginSettings(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "no valid fields to update", http.StatusBadRequest)
 		return
 	}
+	if enabled, exists := updates["enable_plugin"]; exists && enabled == false {
+		var workflowCount int64
+		if err := db.WithContext(r.Context()).Model(&orm.PluginSession{}).
+			Where("conversation_id = ? AND dismissed = false", convID).
+			Count(&workflowCount).Error; err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if workflowCount > 0 {
+			common.ReplyErr(w, "cannot disable workflows while a workflow is attached to the conversation", http.StatusConflict)
+			return
+		}
+	}
 
 	if err := db.WithContext(r.Context()).Model(&orm.Conversation{}).
 		Where("id = ? AND create_user_id = ?", convID, userID).

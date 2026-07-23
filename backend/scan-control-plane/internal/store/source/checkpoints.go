@@ -35,7 +35,7 @@ func (r *SQLRepository) ListDueSyncCheckpoints(ctx context.Context, now time.Tim
 		Where("source_sync_checkpoints.next_sync_at <= ?", now).
 		Where(`source_sync_checkpoints.lock_owner IS NULL OR source_sync_checkpoints.lock_owner = ''
 				OR source_sync_checkpoints.lock_until IS NULL OR source_sync_checkpoints.lock_until <= ?`, now).
-		Where("b.status = ?", "ACTIVE").
+		Where("b.status IN ?", []string{"ACTIVE", "DELETING"}).
 		Where("b.sync_mode IN ?", []string{"scheduled", "watch"}).
 		Where("b.binding_generation = source_sync_checkpoints.binding_generation").
 		Order("source_sync_checkpoints.next_sync_at, source_sync_checkpoints.binding_id").

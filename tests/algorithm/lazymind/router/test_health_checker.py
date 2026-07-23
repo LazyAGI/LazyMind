@@ -197,6 +197,7 @@ async def test_update_heartbeat_writes_to_db(session_factory):
                                  pid=1, port_range_start=18000, port_range_end=18099))
 
     pm = _mock_pm(instance_id='inst-1')
+    pm.ensure_instance_registered = AsyncMock()
     hc = HealthChecker(pm, _mock_registry())
 
     before = datetime.now(timezone.utc)

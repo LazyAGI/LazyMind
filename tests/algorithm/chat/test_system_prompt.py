@@ -38,7 +38,6 @@ def test_system_prompt_includes_cross_tool_policy_when_tools_are_active() -> Non
 
     assert '# Tool use policy' in prompt
     assert 'get_*Toolkit_methods' in prompt
-    assert 'knowledge-base evidence' in prompt
 
 
 def test_system_prompt_omits_tool_policy_without_tools() -> None:

@@ -295,54 +295,58 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               }
             />
           </div>
-          <div className="memory-form-field">
-            <label>{t("admin.memoryCategory")}</label>
-            <Input
-              value={draft.category}
-              readOnly={isReadOnly}
-              placeholder={t("admin.memoryCategoryPlaceholder")}
-              onChange={(event) =>
-                setDraft((previous: any) => ({
-                  ...previous,
-                  category: event.target.value,
-                }))
-              }
-            />
-          </div>
-          <div className="memory-form-field memory-form-field-full">
-            <label>{t("admin.memoryTagSet")}</label>
-            <Select
-              mode="tags"
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              tokenSeparators={[",", "，"]}
-              style={{ width: "100%" }}
-              value={draft.tags}
-              disabled={isReadOnly}
-              placeholder={t("admin.memoryTagsPlaceholder")}
-              onChange={(value) => {
-                const normalizedTags = normalizeTagValues(value);
-                if (normalizedTags.length > SKILL_TAG_MAX_COUNT) {
-                  message.warning(
-                    t("admin.memorySkillTagMaxCount", {
-                      count: SKILL_TAG_MAX_COUNT,
-                    }),
-                  );
-                }
-                setDraft((previous: any) => ({
-                  ...previous,
-                  tags: normalizedTags.slice(0, SKILL_TAG_MAX_COUNT),
-                }));
-              }}
-              options={tagOptions}
-            />
-            {!isSkillCreateModal ? (
-              <span className="memory-form-hint">
-                {t("admin.memoryTagsHint")}
-              </span>
-            ) : null}
-          </div>
+          {!isSkillEditModal ? (
+            <>
+              <div className="memory-form-field">
+                <label>{t("admin.memoryCategory")}</label>
+                <Input
+                  value={draft.category}
+                  readOnly={isReadOnly}
+                  placeholder={t("admin.memoryCategoryPlaceholder")}
+                  onChange={(event) =>
+                    setDraft((previous: any) => ({
+                      ...previous,
+                      category: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="memory-form-field memory-form-field-full">
+                <label>{t("admin.memoryTagSet")}</label>
+                <Select
+                  mode="tags"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  tokenSeparators={[",", "，"]}
+                  style={{ width: "100%" }}
+                  value={draft.tags}
+                  disabled={isReadOnly}
+                  placeholder={t("admin.memoryTagsPlaceholder")}
+                  onChange={(value) => {
+                    const normalizedTags = normalizeTagValues(value);
+                    if (normalizedTags.length > SKILL_TAG_MAX_COUNT) {
+                      message.warning(
+                        t("admin.memorySkillTagMaxCount", {
+                          count: SKILL_TAG_MAX_COUNT,
+                        }),
+                      );
+                    }
+                    setDraft((previous: any) => ({
+                      ...previous,
+                      tags: normalizedTags.slice(0, SKILL_TAG_MAX_COUNT),
+                    }));
+                  }}
+                  options={tagOptions}
+                />
+                {!isSkillCreateModal ? (
+                  <span className="memory-form-hint">
+                    {t("admin.memoryTagsHint")}
+                  </span>
+                ) : null}
+              </div>
+            </>
+          ) : null}
           {isSkillCreateModal ? (
             isExternalSkillImport ? (
               <div className="memory-form-field memory-form-field-full">

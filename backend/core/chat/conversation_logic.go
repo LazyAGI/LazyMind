@@ -291,7 +291,7 @@ func buildAskUserToolResultContent(
 	questionsRaw, _ := askPendingData["questions"].([]any)
 
 	if askStructured != nil {
-		lines := []string{"Questions were shown to the user via an interactive card. The user submitted all answers.", ""}
+		lines := []string{"Questions were shown via an interactive card. The user submitted the form; some answers may be omitted.", ""}
 		for i, sq := range askStructured.Questions {
 			prefix := fmt.Sprintf("Q%d: %s", i+1, sq.Text)
 			if len(sq.Choices) > 0 {
@@ -413,14 +413,34 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 }
 
 var askUserToolResultPattern = regexp.MustCompile(`(?s)(<tool_result\b[^>]*>)Question sent to user \(ask_id=[^)]+\)\.(</tool_result>)`)
+var toolResultBlockPattern = regexp.MustCompile(`(?s)<tool_result\b[^>]*>.*?</tool_result>`)
 
 // replaceAskUserToolResult replaces the placeholder ask_user tool_result content
 // in an assistant message with enriched context so the LLM understands the state.
 func replaceAskUserToolResult(assistantContent, newContent string) string {
-	if !strings.Contains(assistantContent, "Question sent to user") {
-		return assistantContent
-	}
-	return askUserToolResultPattern.ReplaceAllString(assistantContent, "${1}"+newContent+"${2}")
+	replaced := askUserToolResultPattern.ReplaceAllString(
+		assistantContent, "${1}"+newContent+"${2}",
+	)
+	return toolResultBlockPattern.ReplaceAllStringFunc(replaced, func(block string) string {
+		openEnd := strings.Index(block, ">")
+		closeStart := strings.LastIndex(block, "</tool_result>")
+		if openEnd < 0 || closeStart <= openEnd {
+			return block
+		}
+		var payload map[string]any
+		if json.Unmarshal([]byte(block[openEnd+1:closeStart]), &payload) != nil {
+			return block
+		}
+		if name, _ := payload["name"].(string); name != "ask_user" {
+			return block
+		}
+		payload["result"] = newContent
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return block
+		}
+		return block[:openEnd+1] + string(encoded) + block[closeStart:]
+	})
 }
 
 const chatActionRegeneration = "CHAT_ACTION_REGENERATION"
@@ -516,6 +536,9 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 }
 
 func chatHistoryInput(raw map[string]any, query string) any {
+	if displayQuery, ok := raw["display_query"].(string); ok && strings.TrimSpace(displayQuery) != "" {
+		return []any{map[string]any{"input_type": "text", "text": strings.TrimSpace(displayQuery)}}
+	}
 	if in, ok := raw["input"].([]any); ok && len(in) > 0 {
 		return in
 	}
@@ -695,11 +718,19 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"databases":        raw["databases"],
 		"debug":            raw["debug"],
 		"reasoning":        resolveReasoning(raw),
+		"thinking_depth":   resolveThinkingDepth(raw),
 		"priority":         raw["priority"],
 		"use_memory":       useMemory,
 		"user_id":          strings.TrimSpace(userID),
 		"mode":             mode,
 		"intent_context":   loadConversationIntentContext(ctx, db, convID),
+	}
+	requestDisabledTools := stringSliceFromAny(raw["disabled_tools"])
+	if len(requestDisabledTools) > 0 {
+		body["disabled_tools"] = requestDisabledTools
+	}
+	if skip, ok := raw["skip_sensitive_filter"].(bool); ok && skip {
+		body["skip_sensitive_filter"] = true
 	}
 	if mentionContext := buildMentionResourceContext(ctx, db, userID, histories, raw); mentionContext != "" {
 		body["query"] = mentionContext + "\n\nUser query:\n" + query
@@ -726,7 +757,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		body["plugin_context"] = mergedPC
 	}
 	if resourceContext != nil {
-		body["disabled_tools"] = resourceContext.DisabledTools
+		body["disabled_tools"] = mergeDisabledToolNames(
+			requestDisabledTools, resourceContext.DisabledTools,
+		)
 		body["available_skills"] = resourceContext.AvailableSkills
 		if useMemory {
 			body["memory"] = resourceContext.Memory
@@ -845,6 +878,16 @@ func resolveReasoning(raw map[string]any) bool {
 		return value
 	}
 	return true
+}
+
+func resolveThinkingDepth(raw map[string]any) string {
+	if value, ok := raw["thinking_depth"].(string); ok {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "low", "medium", "high":
+			return strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	return "medium"
 }
 
 func datasetIDsFromSearchConfig(sc map[string]any) []string {
@@ -1069,6 +1112,13 @@ func handleStreamChat(
 	streamDualAnswer(chatCtx, reqCtx, w, flusher, db, stateStore, baseURL, reqBody, convID, query, historyID, secondaryHistoryID, target, historyExt)
 }
 
+func elapsedThinkingSeconds(elapsed time.Duration) int64 {
+	if elapsed <= 0 {
+		return 1
+	}
+	return int64((elapsed + time.Second - 1) / time.Second)
+}
+
 func streamSingleAnswer(
 	chatCtx, reqCtx context.Context,
 	w http.ResponseWriter,
@@ -1110,6 +1160,8 @@ func streamSingleAnswer(
 	var pendingConversationIntent *IntentUpdatedEvent
 	thinkStart := time.Now()
 	var thinkingDurationS int64
+	var thinkingActive bool
+	var sawToolResultPreview bool
 	progressRowCreated := target.IsRegeneration && target.Existing != nil
 	persistThinkingProgress := func() {
 		partialResult := fullResult
@@ -1250,14 +1302,32 @@ func streamSingleAnswer(
 			continue
 		}
 		if d.Heartbeat {
+			if thinkingActive {
+				nextDuration := elapsedThinkingSeconds(time.Since(thinkStart))
+				if nextDuration != thinkingDurationS {
+					thinkingDurationS = nextDuration
+					persistThinkingProgress()
+					thinkingChunk := &ChatChunkResponse{
+						ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
+						FinishReason: "FINISH_REASON_UNSPECIFIED", ThinkingDurationS: thinkingDurationS,
+					}
+					if reqCtx.Err() == nil {
+						writeSSEChunk(w, flusher, thinkingChunk)
+					}
+					if stateStore != nil {
+						_ = appendChatChunk(chatCtx, stateStore, convID, historyID, thinkingChunk)
+					}
+				}
+			}
 			continue
 		}
 		if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > toolCallTurns {
 			toolCallTurns = next
 		}
 		if d.ReasoningText != "" {
+			thinkingActive = true
 			pendingThink += d.ReasoningText
-			thinkingDurationS = int64(time.Since(thinkStart).Seconds())
+			thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
 			persistThinkingProgress()
 			thinkingChunk := &ChatChunkResponse{
 				ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
@@ -1271,7 +1341,18 @@ func streamSingleAnswer(
 			}
 			continue
 		}
+		hasToolPreview := strings.Contains(d.Text, "<tp") || strings.Contains(d.Text, "<trp")
+		if hasToolPreview {
+			thinkingActive = true
+			thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
+			if strings.Contains(d.Text, "<trp") {
+				sawToolResultPreview = true
+			}
+		} else if sawToolResultPreview && d.Text != "" {
+			thinkingActive = false
+		}
 		if pendingThink != "" {
+			thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
 			fullResult += "<think>" + pendingThink + "</think>"
 			pendingThink = ""
 		}
@@ -1306,6 +1387,7 @@ func streamSingleAnswer(
 	now := time.Now()
 	retrievalResult := marshalRetrievalResult(sources)
 	if pendingThink != "" {
+		thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
 		fullResult += "<think>" + pendingThink + "</think>"
 	}
 	// Persist ask_pending into ext so the ask card survives page reload.
@@ -1369,6 +1451,14 @@ func streamSingleAnswer(
 	}
 	if persisted {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
+		// Reaching this point means the upstream SSE channel has closed and the
+		// final history payload was persisted. Intermediate thinking persistence
+		// never reaches this update.
+		if err := db.Model(&orm.TaskCenterTask{}).
+			Where("conversation_id = ? AND task_type = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", convID, "background_chat").
+			Updates(map[string]any{"status": "succeeded", "finished_at": now, "updated_at": now}).Error; err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Msg("failed to finish background task after SSE close")
+		}
 	}
 	if persisted && !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))

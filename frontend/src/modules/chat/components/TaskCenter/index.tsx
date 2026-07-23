@@ -33,6 +33,7 @@ import "./index.scss";
 interface Props {
   sessionId: string;
   onClose?: () => void;
+  showHeader?: boolean;
 }
 
 const EMPTY_TASKS: SubAgentTask[] = [];
@@ -275,36 +276,21 @@ function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
   });
   const fileListImages = fileListItems.filter((item) => item.isImage);
   const fileListFiles = fileListItems.filter((item) => !item.isImage);
+  const previewImages = [...imageUrls, ...fileListImages].filter(
+    (image, index, items) =>
+      items.findIndex((candidate) => candidate.src === image.src) === index,
+  );
 
   const total =
-    imageUrls.length + fileListItems.length + files.length + texts.length;
+    previewImages.length + fileListFiles.length + files.length + texts.length;
 
   return (
     <CollapsibleSection title={`${t("taskCenter.artifacts")} (${total})`}>
       <div className="task-artifacts-inner">
-        {(imageUrls.length > 0 || fileListImages.length > 0) && (
+        {previewImages.length > 0 && (
           <div className="task-artifacts-grid">
             <Image.PreviewGroup>
-              {imageUrls.map((img) => (
-                <div className="task-artifact-preview" key={img.key}>
-                  <Image
-                    src={img.src}
-                    width={64}
-                    height={64}
-                    className="task-artifact-thumb"
-                  />
-                  <a
-                    href={img.src}
-                    download={img.filename}
-                    className="task-artifact-preview-download"
-                    title={`${t("taskCenter.download")} ${img.filename}`}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <DownloadOutlined />
-                  </a>
-                </div>
-              ))}
-              {fileListImages.map((img) => (
+              {previewImages.map((img) => (
                 <div className="task-artifact-preview" key={img.key}>
                   <Image
                     src={img.src}
@@ -481,7 +467,11 @@ function TaskCard({ task }: { task: SubAgentTask }) {
         >
           {collapsed ? <RightOutlined /> : <DownOutlined />}
         </button>
-        <span className="task-card-title">{task.title}</span>
+        <Tooltip title={task.title} placement="topLeft">
+          <span className="task-card-title" title={task.title}>
+            {task.title}
+          </span>
+        </Tooltip>
         <span className="task-card-tag">{t("taskCenter.panelTitle")}</span>
         <StatusBadge status={task.status} />
       </div>
@@ -527,7 +517,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
 type FilterKey = "all" | "running" | "succeeded" | "failed";
 
 const TaskCenter = (props: Props) => {
-  const { sessionId, onClose } = props;
+  const { sessionId, onClose, showHeader = true } = props;
   const { t } = useTranslation();
   const [filter, setFilter] = useState<FilterKey>("all");
 
@@ -562,7 +552,7 @@ const TaskCenter = (props: Props) => {
 
   return (
     <div className="task-center">
-      <div className="task-center-header">
+      {showHeader && <div className="task-center-header">
         <span className="task-center-title">
           {t("taskCenter.panelTitle")}
         </span>
@@ -576,7 +566,7 @@ const TaskCenter = (props: Props) => {
             <RightOutlined />
           </button>
         )}
-      </div>
+      </div>}
       <div className="task-center-filters">
         {filterDefs.map(({ key, label }) => (
           <button

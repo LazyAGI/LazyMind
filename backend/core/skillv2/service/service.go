@@ -19,6 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
+	skillmetadata "lazymind/core/skillv2/metadata"
 	skillsearch "lazymind/core/skillv2/search"
 )
 
@@ -46,9 +47,6 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	req.Name = strings.TrimSpace(req.Name)
 	req.Category = strings.TrimSpace(req.Category)
 	req.Description = strings.TrimSpace(req.Description)
-	if err := validateSkillIdentity(req.Name, req.Category); err != nil {
-		return CreateSkillResponse{}, err
-	}
 	files, sourceRefType, sourceRefID, err := s.filesFromSource(ctx, req.OwnerUserID, req.Source)
 	if err != nil {
 		return CreateSkillResponse{}, err
@@ -56,7 +54,20 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	if err := validateSkillFiles(files); err != nil {
 		return CreateSkillResponse{}, err
 	}
-	if err := validateSkillPackageMetadata(req.Name, req.Category, req.Description, files); err != nil {
+	if isExternalImportSource(req.Source.Type) {
+		meta, err := skillmetadata.FromFiles(files)
+		if err != nil {
+			return CreateSkillResponse{}, err
+		}
+		req.Name = meta.Name
+		req.Description = meta.Description
+		req.Category = skillmetadata.ExternalCategory
+	} else {
+		if err := validateSkillPackageMetadata(req.Name, req.Category, req.Description, files); err != nil {
+			return CreateSkillResponse{}, err
+		}
+	}
+	if err := validateSkillIdentity(req.Name, req.Category); err != nil {
 		return CreateSkillResponse{}, err
 	}
 
@@ -120,6 +131,15 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		return CreateSkillResponse{}, err
 	}
 	return CreateSkillResponse{SkillID: skillID, HeadRevisionID: revisionID}, nil
+}
+
+func isExternalImportSource(sourceType string) bool {
+	switch strings.ToLower(strings.TrimSpace(sourceType)) {
+	case "uploaded", "upload", "uploaded_zip", "url":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (PatchSkillResponse, error) {
@@ -280,17 +300,28 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		nextName := skill.SkillName
 		nextCategory := skill.Category
 		nextDescription := skill.Description
-		if req.Name != nil {
-			nextName = *req.Name
-		}
-		if req.Category != nil {
-			nextCategory = *req.Category
-		}
-		if req.Description != nil {
-			nextDescription = *req.Description
-		}
-		if err := validateSkillPackageMetadata(nextName, nextCategory, nextDescription, files); err != nil {
-			return err
+		externalImport := isExternalImportSource(req.Source.Type)
+		if externalImport {
+			meta, err := skillmetadata.FromFiles(files)
+			if err != nil {
+				return err
+			}
+			nextName = meta.Name
+			nextDescription = meta.Description
+			nextCategory = skillmetadata.ExternalCategory
+		} else {
+			if req.Name != nil {
+				nextName = *req.Name
+			}
+			if req.Category != nil {
+				nextCategory = *req.Category
+			}
+			if req.Description != nil {
+				nextDescription = *req.Description
+			}
+			if err := validateSkillPackageMetadata(nextName, nextCategory, nextDescription, files); err != nil {
+				return err
+			}
 		}
 		parentID := ""
 		if skill.HeadRevisionID != nil {
@@ -319,17 +350,17 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 			"version":          gorm.Expr("version + 1"),
 			"updated_at":       s.clock.Now(),
 		}
-		if req.Name != nil {
+		if externalImport || req.Name != nil {
 			updates["skill_name"] = nextName
 		}
-		if req.Category != nil {
+		if externalImport || req.Category != nil {
 			updates["category"] = nextCategory
 		}
-		if req.Name != nil || req.Category != nil {
+		if externalImport || req.Name != nil || req.Category != nil {
 			updates["relative_root"] = path.Join(nextCategory, nextName)
 		}
-		if req.Description != nil {
-			updates["description"] = *req.Description
+		if externalImport || req.Description != nil {
+			updates["description"] = nextDescription
 		}
 		if req.Tags != nil {
 			tags, _ := json.Marshal(*req.Tags)
@@ -351,6 +382,9 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 			updates["is_enabled"] = *req.IsEnabled
 		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NULL", req.SkillID).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := skillmetadata.SyncRevision(ctx, tx, req.SkillID, revisionID, s.clock.Now()); err != nil {
 			return err
 		}
 		if err := s.resetDraft(tx, req.SkillID, revisionID); err != nil {
@@ -577,7 +611,11 @@ func skillBlobReferenced(tx *gorm.DB, hash string) (bool, error) {
 
 func (s *SkillService) ListSkills(ctx context.Context, req ListSkillsRequest) (ListSkillsResponse, error) {
 	var rows []skillRow
-	if err := s.db.WithContext(ctx).Where("owner_user_id = ? AND deleted_at IS NULL", req.UserID).Order("created_at DESC, id DESC").Find(&rows).Error; err != nil {
+	if err := s.db.WithContext(ctx).
+		Where("owner_user_id = ? AND deleted_at IS NULL", req.UserID).
+		Where("NOT EXISTS (SELECT 1 FROM skill_market_items AS market_items WHERE market_items.source_skill_id = skills.id)").
+		Order("created_at DESC, id DESC").
+		Find(&rows).Error; err != nil {
 		return ListSkillsResponse{}, err
 	}
 	items := make([]SkillSummary, 0, len(rows))
@@ -755,29 +793,14 @@ func (s *SkillService) AcceptReview(ctx context.Context, req AcceptReviewRequest
 			"auto_evo_error":        "",
 			"updated_at":            s.clock.Now(),
 		}
-		nextName := strings.TrimSpace(req.Name)
 		nextCategory := strings.TrimSpace(req.Category)
-		if nextName != "" {
-			updates["skill_name"] = nextName
-		}
 		if nextCategory != "" {
 			updates["category"] = nextCategory
-		}
-		if nextName != "" || nextCategory != "" {
 			var skill skillRow
 			if err := tx.Where("id = ? AND deleted_at IS NULL", req.SkillID).Take(&skill).Error; err != nil {
 				return err
 			}
-			if nextName == "" {
-				nextName = skill.SkillName
-			}
-			if nextCategory == "" {
-				nextCategory = skill.Category
-			}
-			updates["relative_root"] = path.Join(nextCategory, nextName)
-		}
-		if strings.TrimSpace(req.Description) != "" {
-			updates["description"] = strings.TrimSpace(req.Description)
+			updates["relative_root"] = path.Join(nextCategory, skill.SkillName)
 		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NULL", req.SkillID).Updates(updates).Error; err != nil {
 			return err
@@ -1174,6 +1197,9 @@ func (s *SkillService) prepareEnableSkill(ctx context.Context, tx *gorm.DB, skil
 			return "", false, err
 		}
 	}
+	if err := skillmetadata.SyncRevision(ctx, tx, skill.ID, revisionID, s.clock.Now()); err != nil {
+		return "", false, err
+	}
 	return revisionID, true, nil
 }
 
@@ -1368,6 +1394,9 @@ func (s *SkillService) commitFilesAsNewHead(ctx context.Context, tx *gorm.DB, sk
 		"version":          gorm.Expr("version + 1"),
 		"updated_at":       s.clock.Now(),
 	}).Error; err != nil {
+		return "", err
+	}
+	if err := skillmetadata.SyncRevision(ctx, tx, skillID, revisionID, s.clock.Now()); err != nil {
 		return "", err
 	}
 	return revisionID, nil

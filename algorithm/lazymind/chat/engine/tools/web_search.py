@@ -14,7 +14,8 @@ def url_fetch(url: str = '', urls: Optional[List[str]] = None) -> Dict[str, Any]
 
     Use this for public web pages. Do not use it for authenticated cloud-file
     URLs such as Feishu/Lark Wiki or Docs and Notion; use CloudFileToolkit for
-    those links instead. When several public URLs need inspection, pass all of
+    those links instead. Never invent or guess a URL: use a URL supplied by the
+    user or returned by a search tool. When several public URLs need inspection, pass all of
     them in `urls` in one call instead of relying on multiple parallel tool
     calls. The pages are fetched concurrently with bounded concurrency.
 

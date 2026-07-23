@@ -33,6 +33,7 @@ class ChatRetrievalOptions(BaseModel):
 class ChatRuntimeOptions(BaseModel):
     debug: Optional[bool] = False
     reasoning: Optional[bool] = False
+    thinking_depth: str = 'medium'
     priority: Optional[int] = None
     trace: Optional[bool] = False
     environment_context: Optional[Dict[str, Any]] = None
@@ -43,6 +44,7 @@ class ChatRuntimeOptions(BaseModel):
     context_usage_preview: bool = False
     context_prompt_export: bool = False
     context_preview_allow_llm_routing: bool = False
+    skip_sensitive_filter: bool = False
 
 
 class ChatPersonalizationOptions(BaseModel):

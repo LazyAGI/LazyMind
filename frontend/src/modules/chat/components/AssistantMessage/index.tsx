@@ -853,12 +853,12 @@ const AssistantMessage = (props: any) => {
     // Render ask_pending card if present
     if (item.ask_pending) {
       const askPending = item.ask_pending;
-      const isAnswered = !!item.ask_answered;
+      const isReadOnly = !!item.is_history || !!item.ask_answered;
       return (
         <AskCard
           key={askPending.ask_id}
           askPending={askPending}
-          disabled={isAnswered}
+          disabled={isReadOnly}
           savedAnswers={item.ask_saved_answers}
           onAnswerChange={(idx, ans) => {
             const currentAnswers = { ...(item.ask_saved_answers || {}), [idx]: ans };
@@ -1003,7 +1003,7 @@ const AssistantMessage = (props: any) => {
               }
             />
           </div>
-          {index === length - 1 && renderBottom()}
+          {(item.ask_pending || index === length - 1) && renderBottom()}
           {index === length - 1 && pluginSession && sessionId && (
             <PluginPanel
               key={sessionId}
@@ -1056,7 +1056,7 @@ const AssistantMessage = (props: any) => {
             !item.onboardingInfo &&
             renderFooter()}
         </div>
-        {index === length - 1 && renderBottom()}
+        {(item.ask_pending || index === length - 1) && renderBottom()}
         {index === length - 1 && pluginSession && sessionId && (
           <PluginPanel
             key={sessionId}

@@ -1,0 +1,17 @@
+# Test-only dependencies for tests/algorithm. This file is intentionally not
+# referenced by algorithm runtime images or `make up`.
+pytest
+pytest-asyncio
+httpx<0.28
+pypdf
+docx2txt
+EbookLib
+html2text
+olefile
+spacy
+bm25s
+PyStemmer
+nltk
+jieba
+sentencepiece
+psycopg2-binary

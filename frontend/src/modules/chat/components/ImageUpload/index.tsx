@@ -24,6 +24,7 @@ export interface ImageUploadImperativeProps {
   clear: () => void;
   uploadFiles: (files: File[]) => void;
   getUploadingCount: () => number;
+  openFileDialog: () => void;
 }
 
 interface Props {
@@ -46,7 +47,24 @@ interface FileItem extends RcFile {
 
 export const allowedImageTypes = [".png", ".jpg", ".jpeg"];
 export const allowedFileTypes = [".pdf", ".docx", ".doc", ".pptx"];
-export const allowedUploadTypes = [...allowedImageTypes, ...allowedFileTypes];
+// Keep this list aligned with algorithm CHAT_TEXT_EXTENSIONS and core common textFileExtensions.
+export const allowedTextTypes = [
+  ".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".jsonl", ".ndjson",
+  ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".log", ".sql",
+  ".html", ".htm", ".css", ".scss", ".sass", ".less",
+  ".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx",
+  ".java", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".cs",
+  ".go", ".rs", ".rb", ".php", ".swift", ".kt", ".kts", ".scala",
+  ".sh", ".bash", ".zsh", ".fish", ".ps1", ".bat", ".cmd",
+  ".vue", ".svelte", ".tex", ".rst", ".properties", ".env",
+  ".gradle", ".groovy", ".lua", ".r", ".dart", ".ex", ".exs", ".erl", ".hrl",
+  ".clj", ".cljs", ".edn", ".fs", ".fsx", ".vb", ".asm", ".s",
+];
+export const allowedUploadTypes = [
+  ...allowedImageTypes,
+  ...allowedFileTypes,
+  ...allowedTextTypes,
+];
 
 export type OnBeforeAddFilesResult = {
   filesToAdd: File[];
@@ -83,6 +101,7 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
     const [files, setFiles] = useState<FileItem[]>([]);
     const [uploadingCount, setUploadingCount] = useState(0);
     const filesRef = useRef<FileItem[]>(files);
+    const uploadRootRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
       filesRef.current = files;
@@ -110,7 +129,11 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
       const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
       if (!allowedTypes.includes(ext)) {
         message.warning(
-          t("chat.unsupportedFileType", { types: allowedTypes.join(",") }),
+          t("chat.unsupportedFileType", {
+            types: allowedTypes.length > 12
+              ? t("chat.supportedUploadTypeSummary")
+              : allowedTypes.join(","),
+          }),
         );
         return false;
       }
@@ -180,11 +203,6 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
 
       uploadFileInChunks(file as File, {
         timeout: 2 * 60 * 1000,
-        onProgress: (progress) => {
-          console.log(
-            t("chat.uploadProgressLog", { percentage: progress.percentage }),
-          );
-        },
       })
         .then((storedPath) => {
           setUploadingCount((prev) => prev - 1);
@@ -247,6 +265,9 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
       getFiles: () => files,
       clear: () => commitFiles([]),
       getUploadingCount: () => uploadingCount,
+      openFileDialog: () => {
+        uploadRootRef.current?.querySelector<HTMLInputElement>('input[type="file"]')?.click();
+      },
       uploadFiles: (droppedFiles: File[]) => {
         if (disabled) {
           if (disabledReason) {
@@ -337,11 +358,13 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
     }
 
     return (
-      <Upload {...uploadProps}>
-        <Tooltip placement="top" title={t("chat.uploadTooltipLimit")}>
-          {icon}
-        </Tooltip>
-      </Upload>
+      <div ref={uploadRootRef} style={{ display: "contents" }}>
+        <Upload {...uploadProps}>
+          <Tooltip placement="top" title={t("chat.uploadTooltipLimit")}>
+            {icon}
+          </Tooltip>
+        </Upload>
+      </div>
     );
   },
 );
