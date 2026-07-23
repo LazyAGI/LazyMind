@@ -465,8 +465,6 @@ func (p *DBTaskPlanner) restoreFailedTask(ctx context.Context, desired store.Par
 	task.SourceVersion = desired.SourceVersion
 	task.TargetVersionID = desired.TargetVersionID
 	task.CoreParentDocumentID = desired.CoreParentDocumentID
-	task.CoreTaskID = ""
-	task.CoreDocumentID = ""
 	task.LeaseOwner = ""
 	task.LeaseUntil = nil
 	task.RetryCount = 0

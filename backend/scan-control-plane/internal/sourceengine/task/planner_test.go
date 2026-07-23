@@ -262,8 +262,8 @@ func TestGenerateTasksRestoresFailedTaskForSameVersion(t *testing.T) {
 	if restored.Status != TaskStatusPending || !restored.NextRunAt.Equal(restoreAt) || restored.LeaseOwner != "" || restored.LeaseUntil != nil {
 		t.Fatalf("failed task was not made immediately claimable: %+v", restored)
 	}
-	if restored.CoreTaskID != "" || restored.CoreDocumentID != "" || restored.RetryCount != 0 {
-		t.Fatalf("restore should clear retry/core ids for a fresh submission: %+v", restored)
+	if restored.CoreTaskID != "core-task-old" || restored.CoreDocumentID != "core-document-old" || restored.RetryCount != 0 {
+		t.Fatalf("restore should preserve core ids for idempotent recovery: %+v", restored)
 	}
 	if len(restored.LastError) != 0 || repo.deadLetters[failed.TaskID] {
 		t.Fatalf("restore should clear task error and dead letter: task=%+v deadLetter=%v", restored, repo.deadLetters[failed.TaskID])

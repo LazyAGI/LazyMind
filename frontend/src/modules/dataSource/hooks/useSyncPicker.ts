@@ -187,17 +187,18 @@ export function useSyncPicker({
       }
 
       const treeNode = node as SyncTreeDataNode;
-      const parentKey = `${treeNode.objectKey || treeNode.key || ""}`.trim();
-      if (!parentKey) {
+      const parentTreeKey = `${treeNode.key || ""}`.trim();
+      const parentObjectKey = `${treeNode.objectKey || treeNode.nodeRef || ""}`.trim();
+      if (!parentTreeKey || !parentObjectKey) {
         return;
       }
-      const cachedChildren = syncTreeChildrenCacheRef.current.get(parentKey);
+      const cachedChildren = syncTreeChildrenCacheRef.current.get(parentTreeKey);
       if (cachedChildren) {
         const selectableKeys = collectScanTreeFileKeys(cachedChildren);
         setSyncTreeNodes((current) =>
-          mergeScanTreeChildren(current, parentKey, cachedChildren),
+          mergeScanTreeChildren(current, parentTreeKey, cachedChildren),
         );
-        if (syncSelectedDocIds.includes(parentKey)) {
+        if (syncSelectedDocIds.includes(parentTreeKey)) {
           setSyncSelectedDocIds((current) =>
             Array.from(new Set([...current, ...selectableKeys])),
           );
@@ -211,8 +212,8 @@ export function useSyncPicker({
           const response = await client.listSourceTreeChildren({
             sourceId: detailSource.id,
             sourceTreeChildrenRequest: {
-              binding_id: detailSource.bindingId,
-              tree_key: detailSource.bindingTreeKey,
+              binding_id: treeNode.bindingId || detailSource.bindingId,
+              tree_key: treeNode.treeKey || detailSource.bindingTreeKey,
               parent_key: candidate,
               include_documents: true,
               include_containers: true,
@@ -222,23 +223,23 @@ export function useSyncPicker({
           });
           return getScanTreeNodePage(response.data);
         };
-        const treePage = await requestPage(parentKey);
+        const treePage = await requestPage(parentObjectKey);
 
         const children = filterScanTreeChildren(
-          parentKey,
+          parentObjectKey,
           normalizeLazyScanTreeNodes(treePage.items),
         );
         const selectableKeys = collectScanTreeFileKeys(children);
-        syncTreeChildrenCacheRef.current.set(parentKey, children);
+        syncTreeChildrenCacheRef.current.set(parentTreeKey, children);
         setSyncKnownSelectableFileKeys((prev) => {
           const next = new Set(prev);
           selectableKeys.forEach((key) => next.add(key));
           return next;
         });
         setSyncTreeNodes((current) =>
-          mergeScanTreeChildren(current, parentKey, children),
+          mergeScanTreeChildren(current, parentTreeKey, children),
         );
-        if (syncSelectedDocIds.includes(parentKey)) {
+        if (syncSelectedDocIds.includes(parentTreeKey)) {
           setSyncSelectedDocIds((current) =>
             Array.from(new Set([...current, ...selectableKeys])),
           );
@@ -314,6 +315,13 @@ export function useSyncPicker({
       message.warning(t("admin.dataSourceDetailSelectFileFirst"));
       return false;
     }
+    const scopesByBinding = new Map<string, SyncGenerateScope[]>();
+    targetScopes.forEach(({ bindingId, ...scope }) => {
+      const bindingKey = `${bindingId || detailSource.bindingId || ""}`.trim();
+      const scopes = scopesByBinding.get(bindingKey) || [];
+      scopes.push(scope);
+      scopesByBinding.set(bindingKey, scopes);
+    });
     const currentTime = formatNow();
 
     stopSyncPolling();
@@ -324,18 +332,6 @@ export function useSyncPicker({
         message.info(t("admin.dataSourceDetailCloudSyncPreparing"));
       }
 
-      const generateTasksRequest: {
-        mode: string;
-        binding_id?: string;
-        scopes: SyncGenerateScope[];
-        priority?: number;
-      } = {
-        mode: "partial",
-        binding_id: detailSource.bindingId,
-        scopes: targetScopes,
-        priority: 5,
-      };
-
       // If at least one selected target is a deleted-state synthetic node,
       // attempting with a stale selection_token may be rejected by backend.
       // Retry once without the token in that case.
@@ -345,34 +341,53 @@ export function useSyncPicker({
           (item.sourceState === "DELETED" || item.updateState === "deleted"),
       );
 
-      let generateResponse;
-      try {
-        generateResponse = await client.generateParseTasks({
-          sourceId: detailSource.id,
-          generateTasksRequest,
-        });
-      } catch (err) {
-        if (hasDeletedTarget) {
-          generateResponse = await client.generateParseTasks({
+      const generateResults: Array<Record<string, any>> = [];
+      for (const [bindingId, scopes] of scopesByBinding) {
+        const generateTasksRequest = {
+          mode: "partial",
+          binding_id: bindingId || undefined,
+          scopes,
+          priority: 5,
+        };
+        try {
+          const response = await client.generateParseTasks({
             sourceId: detailSource.id,
-            generateTasksRequest: {
-              ...generateTasksRequest,
-              mode: "full",
-            },
+            generateTasksRequest,
           });
-        } else {
-          throw err;
+          generateResults.push(response.data as Record<string, any>);
+        } catch (err) {
+          if (!hasDeletedTarget) {
+            throw err;
+          }
+          const response = await client.generateParseTasks({
+            sourceId: detailSource.id,
+            generateTasksRequest: { ...generateTasksRequest, mode: "full" },
+          });
+          generateResults.push(response.data as Record<string, any>);
         }
       }
-      const result = generateResponse.data as typeof generateResponse.data & {
-        ignored_unchanged_count?: number;
-      };
-      const checkedCount = result.requested_count ?? targetPaths.length;
-      const syncedCount = result.accepted_count ?? 0;
-      const ignoredCount =
-        result.ignored_unchanged_count ??
-        result.skipped_count ??
-        Math.max(checkedCount - syncedCount, 0);
+      const checkedCount = generateResults.reduce(
+        (total, result) => total + Number(result.requested_count || 0),
+        0,
+      ) || targetPaths.length;
+      const syncedCount = generateResults.reduce(
+        (total, result) => total + Number(result.accepted_count || 0),
+        0,
+      );
+      const ignoredCount = generateResults.reduce(
+        (total, result) =>
+          total +
+          Number(
+            result.ignored_unchanged_count ??
+              result.skipped_count ??
+              Math.max(
+                Number(result.requested_count || 0) -
+                  Number(result.accepted_count || 0),
+                0,
+              ),
+          ),
+        0,
+      );
 
       const checkedRows = documents.filter(
         (item) => targetSet.has(item.id) || targetSet.has(item.path),

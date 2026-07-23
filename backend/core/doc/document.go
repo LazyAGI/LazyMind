@@ -638,6 +638,7 @@ func CreateDocument(w http.ResponseWriter, r *http.Request) {
 	if display == "" {
 		display = docID
 	}
+	documentType := resolveDocumentType(body.Type, display)
 	pid := strings.TrimSpace(body.PID)
 	fileID := strings.TrimSpace(body.FileID)
 	tagsBytes, _ := json.Marshal(body.Tags)
@@ -648,6 +649,7 @@ func CreateDocument(w http.ResponseWriter, r *http.Request) {
 		LazyllmDocID: "",
 		DatasetID:    datasetID,
 		DisplayName:  display,
+		DocumentType: documentType,
 		PID:          pid,
 		Tags:         tagsBytes,
 		FileID:       fileID,
@@ -668,6 +670,7 @@ func CreateDocument(w http.ResponseWriter, r *http.Request) {
 		DocID:         docID,
 		DatasetID:     datasetID,
 		DisplayName:   display,
+		Type:          documentType,
 		PID:           pid,
 		Tags:          tagsBytes,
 		FileID:        fileID,
@@ -793,6 +796,9 @@ func UpdateDocument(w http.ResponseWriter, r *http.Request) {
 	if s := strings.TrimSpace(body.FileID); s != "" {
 		updates["file_id"] = s
 	}
+	if s := strings.TrimSpace(body.Type); s != "" {
+		updates["document_type"] = s
+	}
 	now := time.Now().UTC()
 	updates["updated_at"] = now
 
@@ -805,6 +811,7 @@ func UpdateDocument(w http.ResponseWriter, r *http.Request) {
 			LazyllmDocID: "",
 			DatasetID:    datasetID,
 			DisplayName:  strings.TrimSpace(body.DisplayName),
+			DocumentType: resolveDocumentType(body.Type, body.DisplayName),
 			PID:          strings.TrimSpace(body.PID),
 			FileID:       strings.TrimSpace(body.FileID),
 			Tags:         func() []byte { b, _ := json.Marshal(body.Tags); return b }(),
@@ -824,6 +831,7 @@ func UpdateDocument(w http.ResponseWriter, r *http.Request) {
 			DocID:         docID,
 			DatasetID:     datasetID,
 			DisplayName:   row.DisplayName,
+			Type:          row.DocumentType,
 			PID:           row.PID,
 			Tags:          row.Tags,
 			FileID:        row.FileID,
@@ -1701,7 +1709,7 @@ func mergedDocRowFromCoreOnlyWithDatasetDisplay(row orm.Document, datasetDisplay
 	_ = json.Unmarshal(row.Ext, &dExt)
 	documentSize := dExt.FileSize
 	relPath := firstNonEmpty(strings.TrimSpace(dExt.RelativePath), relativePathFromFullPath(dExt.StoredPath))
-	docType := documentTypeFromName(firstNonEmpty(strings.TrimSpace(row.DisplayName), dExt.OriginalFilename))
+	docType := resolveDocumentType(row.DocumentType, firstNonEmpty(strings.TrimSpace(row.DisplayName), dExt.OriginalFilename))
 	return mergedDocRow{
 		DocID:            row.ID,
 		Filename:         row.DisplayName,
@@ -1951,7 +1959,6 @@ func loadMergedDocumentsBySearch(ctx context.Context, datasetIDs []string, keywo
 		if base.SizeBytes != nil {
 			documentSize = int64(*base.SizeBytes)
 		}
-		docType := documentTypeFromName(base.Filename)
 		relPath := relativePathFromFullPath(base.Path)
 		documentStage := strings.TrimSpace(base.UploadStatus)
 		if taskStatus := strings.TrimSpace(latestTaskStatusByExternalID[extID]); taskStatus != "" {
@@ -1972,9 +1979,7 @@ func loadMergedDocumentsBySearch(ctx context.Context, datasetIDs []string, keywo
 		if strings.TrimSpace(dExt.RelativePath) != "" {
 			relPath = strings.TrimSpace(dExt.RelativePath)
 		}
-		if strings.TrimSpace(dExt.OriginalFilename) != "" {
-			docType = documentTypeFromName(dExt.OriginalFilename)
-		}
+		docType := resolveDocumentType(doc.DocumentType, firstNonEmpty(dExt.OriginalFilename, base.Filename))
 		rows = append(rows, mergedDocRow{
 			DocID:            doc.ID,
 			Filename:         base.Filename,
@@ -2590,7 +2595,6 @@ func loadMergedDocumentsByDocIDs(ctx context.Context, docIDs []string, datasetID
 		if base.SizeBytes != nil {
 			documentSize = int64(*base.SizeBytes)
 		}
-		docType := documentTypeFromName(base.Filename)
 		relPath := relativePathFromFullPath(base.Path)
 		documentStage := strings.TrimSpace(base.UploadStatus)
 		if taskStatus, ok := latestTaskStatusByExternalID[extID]; ok && strings.TrimSpace(taskStatus) != "" {
@@ -2611,9 +2615,7 @@ func loadMergedDocumentsByDocIDs(ctx context.Context, docIDs []string, datasetID
 		if strings.TrimSpace(dExt.RelativePath) != "" {
 			relPath = strings.TrimSpace(dExt.RelativePath)
 		}
-		if strings.TrimSpace(dExt.OriginalFilename) != "" {
-			docType = documentTypeFromName(dExt.OriginalFilename)
-		}
+		docType := resolveDocumentType(doc.DocumentType, firstNonEmpty(dExt.OriginalFilename, base.Filename))
 		if strings.TrimSpace(dExt.StoredPath) != "" {
 			base.Path = strings.TrimSpace(dExt.StoredPath)
 		}
@@ -2955,6 +2957,21 @@ func documentTypeFromName(name string) string {
 	default:
 		return "DOCUMENT_TYPE_UNSPECIFIED"
 	}
+}
+
+func resolveDocumentType(storedType, name string) string {
+	if documentType := strings.TrimSpace(storedType); documentType != "" {
+		return documentType
+	}
+	return documentTypeFromName(name)
+}
+
+func fileDocumentTypeFromName(name string) string {
+	documentType := documentTypeFromName(name)
+	if documentType == "FOLDER" {
+		return "DOCUMENT_TYPE_UNSPECIFIED"
+	}
+	return documentType
 }
 
 func dataSourceTypeFromSourceType(sourceType string) string {

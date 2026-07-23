@@ -1,4 +1,5 @@
 from lazyllm.tools.rag import DocNode
+from lazyllm.tools.rag.doc_node import MetadataMode
 
 from lazymind.parsing.engine.transform.para_parser import (
     LineSplitter,
@@ -100,6 +101,40 @@ def test_line_splitter_uses_mineru_lines_for_pdf():
 
     assert [item.text for item in result] == ['line one']
     assert result[0].metadata['page'] == 2
+
+
+def test_normal_line_splitter_inherits_parent_metadata_exclusions():
+    node = DocNode(
+        text='这是一个足够长的第一句。\n第二句也足够长？',
+        metadata={'file_name': 'note.md', 'page': 1, 'bbox': [0, 0, 1, 1]},
+        global_metadata={'file_name': 'note.md'},
+    )
+    node.excluded_embed_metadata_keys = ['page', 'bbox']
+    node.excluded_llm_metadata_keys = ['page', 'bbox']
+
+    result = NormalLineSplitter().forward(node)
+
+    for child in result:
+        assert set(child.excluded_embed_metadata_keys) == {'page', 'bbox'}
+        assert child.get_text(MetadataMode.EMBED).startswith('file_name: note.md\n\n')
+
+
+def test_mineru_line_splitter_inherits_parent_metadata_exclusions():
+    node = DocNode(
+        text='merged text',
+        metadata={
+            'file_name': 'paper.pdf',
+            'lines': [{'content': 'line one', 'type': 'text', 'page': 2, 'bbox': [1, 2, 3, 4]}],
+        },
+        global_metadata={'file_name': 'paper.pdf'},
+    )
+    node.excluded_embed_metadata_keys = ['lines', 'type', 'page', 'bbox']
+    node.excluded_llm_metadata_keys = ['lines', 'type', 'page', 'bbox']
+
+    result = MineruLineSplitter().forward(node)
+
+    assert set(result[0].excluded_embed_metadata_keys) == {'lines', 'type', 'page', 'bbox'}
+    assert result[0].get_text(MetadataMode.EMBED) == 'file_name: paper.pdf\n\nline one'
 
 
 def test_paragraph_splitter_splits_by_paragraph_and_applies_overlap():

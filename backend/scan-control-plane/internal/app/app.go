@@ -243,7 +243,7 @@ func buildAdapters(cfg config.Config) (Components, error) {
 	if err != nil {
 		return Components{}, err
 	}
-	adminVerifier, err := newAuthServiceAdminVerifier(cfg.AuthServiceBaseURL, nil)
+	adminVerifier, err := newAuthServiceAdminVerifier(cfg.AuthServiceBaseURL, cfg.AuthServiceInternalToken, nil)
 	if err != nil {
 		return Components{}, fmt.Errorf("configure auth service admin verifier: %w", err)
 	}

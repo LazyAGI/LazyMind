@@ -17,6 +17,13 @@ class CreateUserResponse(BaseModel):
     role_name: str
 
 
+class InternalUserRoleResponse(BaseModel):
+    user_id: str
+    role: str
+    tenant_id: str | None = None
+    disabled: bool
+
+
 class UserRoleBody(BaseModel):
     role_id: str  # UUID string
 
