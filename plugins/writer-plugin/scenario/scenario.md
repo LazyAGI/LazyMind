@@ -74,7 +74,9 @@ Use `publish` to write an unbound local `outline_ir` or `final_document` to Feis
 a prepared body PatchSet to its original bound source, or publish to a new/different
 target.
 
-- A supplied target URI or an existing source binding can be written directly.
+- A targeted revision of the original body applies its saved PatchSet.
+- A generated or rewritten body written back to its source replaces the source content.
+- Append is used only when the user explicitly requests append or continue-at-end.
 - “新建飞书文档” and “另存为” explicitly authorize creating a new target. Supplying
   a folder or wiki parent as the write location also authorizes creation there.
 - A generic “写入/发布到飞书” does not authorize creation. If the local result has no
@@ -83,8 +85,10 @@ target.
 - Creation and writing are separate operations: persist `target_document` immediately
   after creation, then write to that exact target so a retry does not create duplicates.
 - A targeted body revision of an existing document must publish its saved PatchSet.
-  Full-document writing to that existing source is invalid because it appends retained
-  blocks and can undo deletions.
+  Appending a full document to that existing source is invalid because it duplicates
+  retained blocks and can undo deletions.
+- When append versus replace is ambiguous for a non-empty target, ask the user rather
+  than defaulting to append.
 - After a provider-confirmed write and read-back, return the browser URL as
   `published_link` so the frontend can display the completed Feishu document link.
 

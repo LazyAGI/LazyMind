@@ -203,9 +203,11 @@ steps:
 
          1. Call writer_generate_section_instructions using the latest outline_ir and
             writing_context_after_outline. Save section_instructions and section_plan_ir.
-         2. Repeatedly call writer_generate_draft_block with writing_task,
-            section_instructions, and writing_context_after_outline. Save every non-empty
-            path in order as draft_blocks; stop when the function returns an empty string.
+         2. Call writer_generate_draft_blocks once with writing_task,
+            section_instructions, and writing_context_after_outline. It returns every
+            generated block path in order. Save all returned paths as the ordered
+            draft_blocks list, preferably in one save_artifacts call. Do not repeatedly
+            call writer_generate_draft_block from the Agent loop.
          3. Call writer_generate_draft_document using the last block path, current
             context, and outline. Save draft_document.
          4. Call writer_update_writing_context using draft_document and save
@@ -242,7 +244,7 @@ steps:
       and never pass source_ir or outline_ir to writer_generate_final_document.
     tools:
       - writer_generate_section_instructions
-      - writer_generate_draft_block
+      - writer_generate_draft_blocks
       - writer_generate_draft_document
       - writer_update_writing_context
       - writer_generate_final_document
@@ -305,7 +307,7 @@ steps:
 
       Use outline_ir only when final_document does not exist and the user explicitly
       requested publishing the outline itself. In that case call
-      writer_publish_document with publish_outline=true.
+      writer_append_document with publish_outline=true only for a new or empty target.
 
       Decide from the current user query and saved targets:
 
@@ -314,41 +316,48 @@ steps:
       2. If document_patch_set exists and the destination is the original bound source,
          retrieve source_ir and document_patch_set, then call writer_publish_revision.
          This is mandatory for a targeted body revision. Do not call
-         writer_publish_document afterward: full-document writing appends content to an
-         existing Feishu document and would undo deletions or duplicate retained blocks.
-      3. If there is no document_patch_set and the user supplied a Feishu/Lark document
-         URI, or explicitly requested writing back to the already bound source, call
-         writer_publish_document directly.
-      4. If the user explicitly requested "new document", "create in Feishu", or "save as",
+         writer_append_document afterward: appending content to an existing Feishu
+         document would undo deletions or duplicate retained blocks.
+      3. If final_document was generated or rewritten from source_ir/outline_ir and the
+         user requests writing it back to that same bound source, retrieve both
+         final_document and source_ir, then call writer_replace_document. This replaces
+         the source outline/body; never append the generated document after its source.
+      4. Call writer_append_document only when the user explicitly requests append,
+         continue-at-end, or preservation of all existing target content.
+      5. If the user explicitly requested "new document", "create in Feishu", or "save as",
          or supplied a folder/wiki parent as the write location, call
          writer_create_document first. Pass parent_uri when a folder/wiki parent was
          supplied; otherwise create in the user's Feishu root. Save the returned artifact
          as publish_target_document, then pass its path as target_document_path to
-         writer_publish_document.
-      5. If the result is unbound and the user only said "write/publish to Feishu" without
+         writer_append_document. A newly created target is empty.
+      6. If the result is unbound and the user only said "write/publish to Feishu" without
          a target or explicit permission to create, do not call either mutation tool.
          Ask whether we may create a new Feishu document, and state that the completed
          document will be returned as a link. Continue only after the user confirms.
+      7. If an existing non-empty target is specified but append versus replace is not
+         clear from the user request and artifact lineage, ask the user. Never default
+         to append for an existing document.
 
       Before passing an existing artifact to a writer tool, call get_artifact and use
       the absolute path in value.path. Never pass only an artifact filename.
 
       writer_create_document only needs the intended title and optional parent_uri. Save
       its exact returned file path as publish_target_document. Then call
-      writer_publish_document with absolute content_path and target_document_path values.
+      writer_append_document with absolute content_path and target_document_path values.
 
       Never infer permission to create from a generic publish request. Only after
-      writer_publish_document succeeds, save its exact publish_result and
+      the selected publishing tool succeeds, save its exact publish_result and
       published_document file paths and save its exact published_link string. If any
       create, write, or read-back call fails, do not synthesize or save any of these
       outputs; report the tool failure so the step can retry or fail.
 
-      Both publishing tools return published_document re-read from the provider with
+      All publishing tools return published_document re-read from the provider with
       ui_editable=true.
     tools:
       - writer_create_document
       - writer_publish_revision
-      - writer_publish_document
+      - writer_replace_document
+      - writer_append_document
     inputs:
       - material: final_document
         required: true
@@ -369,5 +378,5 @@ steps:
     acceptance_criteria: |
       publish_result reports success and published_document is the provider-confirmed,
       editable WriterDocument. Both must be file artifacts returned by
-      writer_publish_document, not text summaries created by the agent. published_link
-      is the provider URL returned by the same successful tool call.
+      the selected publishing tool, not text summaries created by the agent.
+      published_link is the provider URL returned by the same successful tool call.

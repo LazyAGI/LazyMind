@@ -402,6 +402,24 @@ def writer_generate_draft_block(
     )
 
 
+def writer_generate_draft_blocks(
+    writing_task_path: str,
+    section_instructions_path: str,
+    writing_context_path: str,
+) -> list[str]:
+    """Generate every remaining draft block in one plugin tool invocation."""
+    generated: list[str] = []
+    while True:
+        path = writer_generate_draft_block(
+            writing_task_path=writing_task_path,
+            section_instructions_path=section_instructions_path,
+            writing_context_path=writing_context_path,
+        )
+        if not path:
+            return generated
+        generated.append(path)
+
+
 def writer_generate_draft_document(
     draft_blocks_anchor_path: str,
     writing_context_path: str,
@@ -662,14 +680,69 @@ def writer_publish_revision(
     }
 
 
-def writer_publish_document(
+def writer_replace_document(
+    content_path: str,
+    source_ir_path: str,
+    target_document_path: str = '',
+    target_uri: str = '',
+) -> dict:
+    """Replace a bound cloud source with the selected final WriterDocument."""
+    root = _run_root('replace-document')
+    content_data = _read_json_file(content_path)
+    source_data = _read_json_file(source_ir_path)
+    document = WriterDocument.model_validate(content_data)
+    target = _target_from_document(source_data)
+    if target_document_path.strip():
+        target = TargetDocument.model_validate(_read_json_file(target_document_path))
+    if target_uri.strip():
+        target = TargetDocument(uri=target_uri.strip(), adapter='feishu')
+    if target is None:
+        raise ValueError('source_ir_path must contain a cloud-bound source document.')
+
+    replace_document = WriterDocument.model_validate(
+        _json_loads(_set_document_editable(document, stage='final'), {}),
+    )
+    write_result = WriterResourceTools(
+        llm=None,
+        artifact_store=str(root),
+    ).replace_document(replace_document, target)
+    refreshed = WriterResourceTools(
+        llm=None,
+        artifact_store=str(root),
+    ).document_to_docir(TargetDocument(
+        **target.model_dump(exclude={'meta'}),
+        meta={**target.meta, 'stage': 'final'},
+    ))
+    published_json = _set_document_editable(
+        _read_json_file(_result_path(refreshed)),
+        stage='final',
+    )
+    published_link = str(
+        target.meta.get('browser_url')
+        or (target.uri if target.uri.startswith(('http://', 'https://')) else '')
+    ).strip()
+    if not published_link:
+        raise ValueError('Feishu replacement succeeded but no browser URL was returned.')
+    return {
+        'publish_result': _result_path(write_result),
+        'published_document': _save_json_artifact(
+            'published_document',
+            published_json,
+            WriterToolkitBase.WRITER_IR_SCHEMA,
+            directory=root,
+        ),
+        'published_link': published_link,
+    }
+
+
+def writer_append_document(
     content_path: str,
     target_document_path: str = '',
     target_uri: str = '',
     publish_outline: bool = False,
 ) -> dict:
-    """Write a local WriterDocument to a Feishu target and return its confirmed IR."""
-    root = _run_root('publish')
+    """Append a local WriterDocument to a Feishu target and return its confirmed IR."""
+    root = _run_root('append-document')
     content_data = _read_json_file(content_path)
     document = WriterDocument.model_validate(content_data)
     if document.stage == 'outline' and not publish_outline:
@@ -693,7 +766,7 @@ def writer_publish_document(
     write_result = WriterResourceTools(
         llm=None,
         artifact_store=str(root),
-    ).write_to_document(publish_document, target)
+    ).append_to_document(publish_document, target)
     refreshed = WriterResourceTools(
         llm=None,
         artifact_store=str(root),

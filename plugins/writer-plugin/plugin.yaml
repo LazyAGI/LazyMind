@@ -28,6 +28,7 @@ tool_scripts:
       - writer_generate_outline
       - writer_generate_section_instructions
       - writer_generate_draft_block
+      - writer_generate_draft_blocks
       - writer_generate_draft_document
       - writer_update_writing_context
       - writer_generate_final_document
@@ -36,7 +37,8 @@ tool_scripts:
       - writer_apply_revision
       - writer_create_document
       - writer_publish_revision
-      - writer_publish_document
+      - writer_replace_document
+      - writer_append_document
 
 steps:
   - id: prepare
