@@ -274,6 +274,9 @@ func (fs *DraftFS) Delete(ctx context.Context, req DeleteRequest) (DraftMutation
 	if err != nil {
 		return DraftMutationResponse{}, err
 	}
+	if cleaned == "SKILL.md" {
+		return DraftMutationResponse{}, fmt.Errorf("cannot delete SKILL.md")
+	}
 	var out DraftMutationResponse
 	err = fs.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		entries, err := draftEntriesForSkill(ctx, tx, req.SkillID)

@@ -160,6 +160,35 @@ func TestDraftFSDeleteBaseEmptyDir_WritesDeleteOverlay(t *testing.T) {
 	}
 }
 
+func TestDraftFSDeleteSkillMD_IsRejected(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	testutil.SeedTextBlob(t, db, "h_skill_draft", "# Draft\n")
+	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_skill_draft")
+	draftFS := NewDraftFS(DraftFSDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	_, err := draftFS.Delete(context.Background(), DeleteRequest{
+		SkillID:              "skill1",
+		Path:                 "SKILL.md",
+		ExpectedDraftVersion: 1,
+		UserID:               "user_001",
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot delete SKILL.md") {
+		t.Fatalf("Delete SKILL.md error = %v, want protected file error", err)
+	}
+
+	var draft testutil.SkillDraftRow
+	if err := db.Where("skill_id = ?", "skill1").Take(&draft).Error; err != nil {
+		t.Fatalf("query draft: %v", err)
+	}
+	if draft.Version != 1 {
+		t.Fatalf("draft version = %d, want 1", draft.Version)
+	}
+	if got := testutil.CountRows(t, db, "skill_draft_entries", "skill_id = ? AND path = ? AND op = ?", "skill1", "SKILL.md", "upsert"); got != 1 {
+		t.Fatalf("SKILL.md draft upsert count = %d, want 1", got)
+	}
+}
+
 func TestDraftFSDeleteNonEmptyDirectory_RequiresRecursive(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")

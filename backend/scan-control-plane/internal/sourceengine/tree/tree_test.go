@@ -1369,6 +1369,47 @@ func TestSourceTreeBindingRootRequestReturnsAllBindingRootsForMultiBindingSource
 	}
 }
 
+func TestSourceTreeBindingRootRequestExcludesDeletingBindings(t *testing.T) {
+	t.Parallel()
+
+	base := newTreeReadRepo()
+	repo := &treeReadRepoWithObject{treeReadRepo: base}
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{
+		{
+			BindingID: "binding-old",
+			SourceID:  "source-1",
+			TreeKey:   "old-root",
+			Status:    "DELETING",
+		},
+		{
+			BindingID: "binding-new",
+			SourceID:  "source-1",
+			TreeKey:   "new-root",
+			Status:    "ACTIVE",
+		},
+	}
+	repo.objects = []ObjectWithState{
+		indexedObject("source-1", "binding-old", "old-root", "old-root", "", "Old", true, true),
+		indexedObject("source-1", "binding-new", "new-root", "new-root", "", "New", true, true),
+	}
+	engine := NewDBSourceTreeQueryEngine(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10})
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-new",
+		TreeKey:   "new-root",
+		UseCache:  boolPtr(true),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list binding roots: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].BindingID != "binding-new" {
+		t.Fatalf("expected only the active binding root, got %+v", page.Items)
+	}
+}
+
 func TestSourceTreeBindingRootsUseIndexedRootDisplayNames(t *testing.T) {
 	t.Parallel()
 

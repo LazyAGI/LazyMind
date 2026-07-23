@@ -394,4 +394,5 @@ func init() {
 	registerAdditionalError("请先选择样本", http.StatusBadRequest, 2001987)
 	registerAdditionalError("libreoffice is unavailable", http.StatusInternalServerError, 2001988)
 	registerAdditionalErrorAlias("dataset name supports Chinese/English, numbers, -, _, ., up to 100 characters", "Invalid dataset name format", http.StatusBadRequest, 2001989)
+	registerAdditionalError("cannot delete SKILL.md", http.StatusBadRequest, 2001990)
 }

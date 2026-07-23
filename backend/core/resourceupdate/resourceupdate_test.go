@@ -958,10 +958,18 @@ func TestSkillReviewTaskListDropsCompletedRunFromRunningFilter(t *testing.T) {
 		t.Fatalf("build all task list: %v", err)
 	}
 	if all.Total != 1 || len(all.Items) != 1 ||
-		all.Items[0].Status != orm.ResourceUpdateTaskStatusDone ||
+		all.Items[0].Status != orm.SkillReviewStatsStatusCompleted ||
 		all.Items[0].RunStatus != "completed" ||
 		all.Items[0].ResultCount != 1 {
 		t.Fatalf("unexpected completed task status: %#v", all)
+	}
+
+	done, err := buildSkillReviewTaskList(ctx, db, "user-1", orm.ResourceUpdateTaskStatusDone, "req-1", 1, 1000)
+	if err != nil {
+		t.Fatalf("build done task list: %v", err)
+	}
+	if done.Total != 1 || done.Items[0].Status != orm.SkillReviewStatsStatusCompleted {
+		t.Fatalf("expected done filter to return raw completed status, got %#v", done)
 	}
 }
 
@@ -1009,7 +1017,7 @@ func TestSkillReviewTaskListUsesCompletedAlgorithmRunForLegacyFailedCoreTask(t *
 	if err != nil {
 		t.Fatalf("build task list: %v", err)
 	}
-	if len(resp.Items) != 1 || resp.Items[0].Status != orm.ResourceUpdateTaskStatusDone ||
+	if len(resp.Items) != 1 || resp.Items[0].Status != orm.SkillReviewStatsStatusCompleted ||
 		resp.Items[0].RunStatus != "completed" || resp.Items[0].ResultCount != 1 ||
 		resp.Items[0].Task.Status != orm.ResourceUpdateTaskStatusFailed {
 		t.Fatalf("unexpected reconciled task status: %#v", resp)
@@ -1048,7 +1056,7 @@ func TestSkillReviewTaskListUsesBoundAlgorithmTaskID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build task list: %v", err)
 	}
-	if len(resp.Items) != 1 || resp.Items[0].Status != orm.ResourceUpdateTaskStatusRunning || resp.Items[0].RunStatus != "review_miner" {
+	if len(resp.Items) != 1 || resp.Items[0].Status != orm.SkillReviewStatsStatusReviewMiner || resp.Items[0].RunStatus != "review_miner" {
 		t.Fatalf("unexpected bound task status: %#v", resp)
 	}
 }
@@ -1121,9 +1129,9 @@ func TestSkillOrganizeTaskListUsesAlgorithmRunStatus(t *testing.T) {
 	for _, item := range all.Items {
 		statuses[item.RequestID] = item
 	}
-	if statuses["request-running"].Status != orm.ResourceUpdateTaskStatusRunning ||
+	if statuses["request-running"].Status != orm.SkillReviewStatsStatusOrganizeDraft ||
 		statuses["request-running"].RunStatus != "organize_draft" ||
-		statuses["request-completed"].Status != orm.ResourceUpdateTaskStatusDone ||
+		statuses["request-completed"].Status != orm.SkillReviewStatsStatusCompleted ||
 		statuses["request-completed"].RunStatus != "completed" ||
 		statuses["request-failed"].Status != orm.ResourceUpdateTaskStatusFailed ||
 		statuses["request-failed"].RunStatus != "failed" {
@@ -1136,6 +1144,14 @@ func TestSkillOrganizeTaskListUsesAlgorithmRunStatus(t *testing.T) {
 	}
 	if running.Total != 1 || running.Items[0].RequestID != "request-running" {
 		t.Fatalf("unexpected running organize tasks: %#v", running)
+	}
+
+	drafting, err := buildSkillOrganizeTaskList(ctx, db, "user-1", orm.SkillReviewStatsStatusOrganizeDraft, "", 1, 1000)
+	if err != nil {
+		t.Fatalf("filter organize draft tasks: %v", err)
+	}
+	if drafting.Total != 1 || drafting.Items[0].RequestID != "request-running" {
+		t.Fatalf("unexpected organize draft tasks: %#v", drafting)
 	}
 
 	failed, err := buildSkillOrganizeTaskList(ctx, db, "user-1", "", "request-failed", 1, 1000)
