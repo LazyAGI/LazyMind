@@ -13,7 +13,12 @@ import {
   Tree,
   message,
 } from "antd";
-import { FileSearchOutlined, RollbackOutlined } from "@ant-design/icons";
+import {
+  FileOutlined,
+  FileSearchOutlined,
+  FolderOutlined,
+  RollbackOutlined,
+} from "@ant-design/icons";
 import { getLocalizedErrorMessage } from "@/components/request";
 import type { ResourceVersionType } from "../resourceVersionApi";
 import {
@@ -88,6 +93,8 @@ const buildRevisionDiffTreeData = (
       const node: MutableNode = {
         key: path,
         children: [],
+        icon: isFile ? <FileOutlined /> : <FolderOutlined />,
+        isLeaf: isFile,
         selectable: isFile,
         title: (
           <span className="memory-skill-tree-node-title">
@@ -284,6 +291,7 @@ function SkillRevisionDiffPanel({
         </div>
         <Tree
           blockNode
+          showIcon
           defaultExpandAll
           treeData={treeData}
           selectedKeys={selectedPath ? [selectedPath] : []}

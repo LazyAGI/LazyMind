@@ -97,6 +97,8 @@ import {
   AbTopDiffRow,
   AbSummaryReport,
   getPxMetricMeta,
+  getEvalQuestionTypeLabel,
+  getAffectedBlockLabel,
   getKnowledgeBaseName,
   getCatalogApiErrorMessage,
   isCanceledRequest,
@@ -1001,15 +1003,22 @@ export function SelfEvolutionPageController({
     [workflowResults["analysis-reports"].data],
   );
   const analysisActionableCaseRows = useMemo<AnalysisActionableCaseRow[]>(
-    () => buildAnalysisActionableCaseRows(analysisSummaryContent),
-    [analysisSummaryContent],
+    () =>
+      buildAnalysisActionableCaseRows(analysisSummaryContent).map((item) => ({
+        ...item,
+        affectedBlock: getAffectedBlockLabel(item.affectedBlock),
+      })),
+    [analysisSummaryContent, t],
   );
   const affectedBlockCountRows = useMemo(
     () =>
       buildAffectedBlockCountRows(
         analysisSummaryContent,
         t("selfEvolutionRun.uncategorized"),
-      ),
+      ).map((item) => ({
+        ...item,
+        category: getAffectedBlockLabel(item.category),
+      })),
     [analysisSummaryContent, t],
   );
   const analysisReportData = useMemo(() => {
@@ -4839,14 +4848,16 @@ export function SelfEvolutionPageController({
                 </span>
               ))}
             </div>
-            {evalReportQuestionTypeSummaries.map((summary) => (
-              <div
-                key={summary.questionType}
-                className="self-evolution-px-heatmap-row"
-                role="row"
-              >
-                <span role="rowheader">
-                  <strong>{summary.questionType.replace(/_/g, " ")}</strong>
+            {evalReportQuestionTypeSummaries.map((summary) => {
+              const questionTypeLabel = getEvalQuestionTypeLabel(summary.questionType);
+              return (
+                <div
+                  key={summary.questionType}
+                  className="self-evolution-px-heatmap-row"
+                  role="row"
+                >
+                  <span role="rowheader">
+                    <strong>{questionTypeLabel}</strong>
                   <small>
                     {t("selfEvolutionRun.scoredCaseCount", {
                       scored: summary.scoredCaseCount,
@@ -4862,14 +4873,15 @@ export function SelfEvolutionPageController({
                       role="cell"
                       className="self-evolution-px-heatmap-cell"
                       style={getEvalMetricTone(value)}
-                      title={`${summary.questionType} ${metric.label}: ${formatPercent(value)}`}
+                      title={`${questionTypeLabel} ${metric.label}: ${formatPercent(value)}`}
                     >
                       {formatPercent(value)}
                     </span>
                   );
                 })}
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>

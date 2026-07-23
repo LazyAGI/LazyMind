@@ -137,6 +137,7 @@
   width: 100%;
   min-height: 0;
   height: 100%;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: clamp(10px, 1.15vh, 14px);
@@ -252,7 +253,7 @@
 .self-evolution-chatlike-launchpad-content {
   display: flex;
   flex-direction: column;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   gap: clamp(8px, 1.1vh, 12px);
   margin-top: 0;
   padding: clamp(10px, 1.25vh, 14px);
@@ -401,6 +402,7 @@
 
 .self-evolution-launch-compact-meta {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 8px;
 }
@@ -5628,8 +5630,8 @@
   }
 
   .self-evolution-workbench-chat-feed.is-ended {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .self-evolution-workbench-chat-feed.is-collapsible,
@@ -5641,6 +5643,9 @@
   .self-evolution-workbench-chat-feed.is-collapsible .self-evolution-workbench-tab-body,
   .self-evolution-workbench-chat-feed.is-collapsible.is-open .self-evolution-workbench-tab-body,
   .self-evolution-workbench-chat-feed.is-ended .self-evolution-workbench-tab-body {
+    flex: 0 0 100%;
+    height: 100%;
+    max-height: 100%;
     min-height: 0;
   }
 
@@ -6953,6 +6958,9 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  touch-action: pan-y;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -6987,6 +6995,7 @@
 }
 
 .self-evolution-bubble {
+  flex: 0 0 auto;
   max-width: 90%;
   border-radius: 14px;
   padding: 10px 12px;
