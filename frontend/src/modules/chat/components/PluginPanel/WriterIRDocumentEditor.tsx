@@ -9,6 +9,7 @@ import {
   countWriterBlocks,
   createWriterParagraph,
   findWriterBlock,
+  getWriterOutlineInstruction,
   getWriterSpanStyles,
   updateWriterBlockContent,
   updateWriterDocumentTitle,
@@ -64,7 +65,17 @@ function headingLevel(block: WriterBlock): number {
   return Number.isFinite(level) ? Math.min(6, Math.max(2, Math.trunc(level))) : 2;
 }
 
-function renderBlockSequence(blocks: WriterBlock[]): string {
+function renderOutlineInstruction(block: WriterBlock, show: boolean): string {
+  if (!show) return '';
+  const instruction = getWriterOutlineInstruction(block);
+  if (!instruction) return '';
+  return `<p class="writer-ir__outline-instruction" data-writer-outline-instruction="true" contenteditable="false">${escapeHtml(instruction)}</p>`;
+}
+
+function renderBlockSequence(
+  blocks: WriterBlock[],
+  showOutlineInstruction: boolean,
+): string {
   const rendered: string[] = [];
 
   for (let index = 0; index < blocks.length;) {
@@ -78,26 +89,26 @@ function renderBlockSequence(blocks: WriterBlock[]): string {
         && blocks[index].type === 'list_item'
         && Boolean(blocks[index].numbering?.ordered) === ordered
       ) {
-        items.push(renderBlock(blocks[index]));
+        items.push(renderBlock(blocks[index], showOutlineInstruction));
         index += 1;
       }
       rendered.push(`<${tag} class="writer-ir__list">${items.join('')}</${tag}>`);
       continue;
     }
 
-    rendered.push(renderBlock(block));
+    rendered.push(renderBlock(block, showOutlineInstruction));
     index += 1;
   }
 
   return rendered.join('');
 }
 
-function renderBlock(block: WriterBlock): string {
+function renderBlock(block: WriterBlock, showOutlineInstruction: boolean): string {
   if (block.type === 'document') {
     return [
       `<section data-writer-document-root="${escapeHtmlAttribute(block.node_id)}"`,
       ` class="writer-ir__document-root">`,
-      renderBlockSequence(block.children ?? []),
+      renderBlockSequence(block.children ?? [], showOutlineInstruction),
       '</section>',
     ].join('');
   }
@@ -110,10 +121,11 @@ function renderBlock(block: WriterBlock): string {
     block.editable === false ? 'contenteditable="false"' : '',
   ].filter(Boolean).join(' ');
   const text = renderBlockText(block);
+  const outlineInstruction = renderOutlineInstruction(block, showOutlineInstruction);
   const children = block.children?.length
     ? block.type === 'list_item'
-      ? renderBlockSequence(block.children)
-      : `<div data-writer-children="true" class="writer-ir__children">${renderBlockSequence(block.children)}</div>`
+      ? renderBlockSequence(block.children, showOutlineInstruction)
+      : `<div data-writer-children="true" class="writer-ir__children">${renderBlockSequence(block.children, showOutlineInstruction)}</div>`
     : '';
 
   if (block.type === 'heading') {
@@ -121,26 +133,27 @@ function renderBlock(block: WriterBlock): string {
     return [
       `<div ${attributes}>`,
       `<h${level} data-writer-block-content="true" class="writer-ir__heading writer-ir__heading--${level}">${text}</h${level}>`,
+      outlineInstruction,
       children,
       '</div>',
     ].join('');
   }
   if (block.type === 'code') {
-    return `<div ${attributes}><pre data-writer-block-content="true" class="writer-ir__code"><code>${text}</code></pre>${children}</div>`;
+    return `<div ${attributes}><pre data-writer-block-content="true" class="writer-ir__code"><code>${text}</code></pre>${outlineInstruction}${children}</div>`;
   }
   if (block.type === 'paragraph') {
-    return `<div ${attributes}><p data-writer-block-content="true" class="writer-ir__paragraph">${text}</p>${children}</div>`;
+    return `<div ${attributes}><p data-writer-block-content="true" class="writer-ir__paragraph">${text}</p>${outlineInstruction}${children}</div>`;
   }
   if (block.type === 'quote') {
-    return `<div ${attributes}><blockquote data-writer-block-content="true" class="writer-ir__quote">${text}</blockquote>${children}</div>`;
+    return `<div ${attributes}><blockquote data-writer-block-content="true" class="writer-ir__quote">${text}</blockquote>${outlineInstruction}${children}</div>`;
   }
   if (block.type === 'divider') {
     return `<div ${attributes}><hr data-writer-block-content="true" class="writer-ir__divider"></div>`;
   }
   if (block.type === 'list_item') {
-    return `<li ${attributes}><span data-writer-block-content="true">${text}</span>${children}</li>`;
+    return `<li ${attributes}><span data-writer-block-content="true">${text}</span>${outlineInstruction}${children}</li>`;
   }
-  return `<div ${attributes}><div data-writer-block-content="true" class="writer-ir__fallback">${text}</div>${children}</div>`;
+  return `<div ${attributes}><div data-writer-block-content="true" class="writer-ir__fallback">${text}</div>${outlineInstruction}${children}</div>`;
 }
 
 function renderDocument(document: WriterDocument): string {
@@ -148,7 +161,7 @@ function renderDocument(document: WriterDocument): string {
     `<h1 class="writer-ir__title" data-writer-document-title="true">`,
     escapeHtml(document.title),
     '</h1>',
-    renderBlockSequence(document.blocks),
+    renderBlockSequence(document.blocks, document.stage === 'outline'),
   ].join('');
 }
 
@@ -167,6 +180,7 @@ function textFromElement(element: HTMLElement): string {
   for (const child of Array.from(clone.children)) {
     if (
       child.matches('[data-writer-children]')
+      || child.matches('[data-writer-outline-instruction]')
       || child.matches('ul, ol')
     ) child.remove();
   }

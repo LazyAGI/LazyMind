@@ -229,6 +229,15 @@
   font-weight: 650;
 }
 
+.writer-ir__outline-instruction {
+  margin: 2px 0 14px;
+  color: var(--writer-ir-muted);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .writer-ir__paragraph,
 .writer-ir__quote,
 .writer-ir__fallback {

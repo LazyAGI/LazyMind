@@ -14,6 +14,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   countWriterBlocks,
+  getWriterOutlineInstruction,
   getWriterSpanStyles,
   type WriterBlock,
   type WriterDocument,
@@ -100,7 +101,11 @@ function PreviewBlockContent({ block }: { block: WriterBlock }) {
 function BlockShell({
   block,
   children,
-}: { block: WriterBlock; children?: ReactNode }) {
+  showOutlineInstruction,
+}: { block: WriterBlock; children?: ReactNode; showOutlineInstruction: boolean }) {
+  const instruction = showOutlineInstruction
+    ? getWriterOutlineInstruction(block)
+    : null;
   return (
     <div
       className='writer-ir__block'
@@ -108,24 +113,36 @@ function BlockShell({
       data-node-type={block.type}
     >
       <PreviewBlockContent block={block} />
+      {instruction && (
+        <p className='writer-ir__outline-instruction'>{instruction}</p>
+      )}
       {children}
     </div>
   );
 }
 
-function ListItemBlock({ block }: { block: WriterBlock }) {
+function ListItemBlock({
+  block,
+  showOutlineInstruction,
+}: { block: WriterBlock; showOutlineInstruction: boolean }) {
   return (
     <li className='writer-ir__list-item'>
-      <BlockShell block={block}>
+      <BlockShell block={block} showOutlineInstruction={showOutlineInstruction}>
         {(block.children?.length ?? 0) > 0 && (
-          <BlockSequence blocks={block.children ?? []} />
+          <BlockSequence
+            blocks={block.children ?? []}
+            showOutlineInstruction={showOutlineInstruction}
+          />
         )}
       </BlockShell>
     </li>
   );
 }
 
-function BlockSequence({ blocks }: { blocks: WriterBlock[] }) {
+function BlockSequence({
+  blocks,
+  showOutlineInstruction,
+}: { blocks: WriterBlock[]; showOutlineInstruction: boolean }) {
   const rendered: ReactNode[] = [];
 
   for (let index = 0; index < blocks.length;) {
@@ -145,7 +162,11 @@ function BlockSequence({ blocks }: { blocks: WriterBlock[] }) {
       rendered.push(
         <ListTag className='writer-ir__list' key={`list-${group[0].node_id}`}>
           {group.map((item) => (
-            <ListItemBlock key={item.node_id} block={item} />
+            <ListItemBlock
+              key={item.node_id}
+              block={item}
+              showOutlineInstruction={showOutlineInstruction}
+            />
           ))}
         </ListTag>,
       );
@@ -156,16 +177,26 @@ function BlockSequence({ blocks }: { blocks: WriterBlock[] }) {
     if (block.type === 'document') {
       rendered.push(
         <section className='writer-ir__document-root' key={block.node_id}>
-          <BlockSequence blocks={block.children ?? []} />
+          <BlockSequence
+            blocks={block.children ?? []}
+            showOutlineInstruction={showOutlineInstruction}
+          />
         </section>,
       );
       continue;
     }
     rendered.push(
-      <BlockShell block={block} key={block.node_id}>
+      <BlockShell
+        block={block}
+        key={block.node_id}
+        showOutlineInstruction={showOutlineInstruction}
+      >
         {(block.children?.length ?? 0) > 0 && (
           <div className='writer-ir__children'>
-            <BlockSequence blocks={block.children ?? []} />
+            <BlockSequence
+              blocks={block.children ?? []}
+              showOutlineInstruction={showOutlineInstruction}
+            />
           </div>
         )}
       </BlockShell>,
@@ -551,11 +582,13 @@ export function WriterIRControl({
       aria-label={t('chat.writerIR.documentRegion')}
       ref={rootRef}
     >
-      {toolbarTarget === undefined
-        ? toolbar
-        : toolbarTarget
-          ? createPortal(toolbar, toolbarTarget)
-          : null}
+      {!documentReadOnly && (
+        toolbarTarget === undefined
+          ? toolbar
+          : toolbarTarget
+            ? createPortal(toolbar, toolbarTarget)
+            : null
+      )}
 
       {externalUpdate && (
         <div className='writer-ir__notice writer-ir__notice--warning' role='alert'>
@@ -580,7 +613,10 @@ export function WriterIRControl({
         <article className='writer-ir__document'>
           <h1 className='writer-ir__title'>{draft.title}</h1>
           {draft.blocks.length > 0 ? (
-            <BlockSequence blocks={draft.blocks} />
+            <BlockSequence
+              blocks={draft.blocks}
+              showOutlineInstruction={draft.stage === 'outline'}
+            />
           ) : (
             <div className='writer-ir__empty' role='status'>
               {t('chat.writerIR.emptyDocument')}

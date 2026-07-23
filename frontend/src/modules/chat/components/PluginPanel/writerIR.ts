@@ -179,6 +179,13 @@ export function countWriterBlocks(blocks: WriterBlock[]): number {
   );
 }
 
+export function getWriterOutlineInstruction(block: WriterBlock): string | null {
+  const instruction = block.authoring?.instruction;
+  if (typeof instruction !== 'string') return null;
+  const trimmed = instruction.trim();
+  return trimmed || null;
+}
+
 export function findWriterBlock(
   blocks: WriterBlock[],
   nodeId: string,
