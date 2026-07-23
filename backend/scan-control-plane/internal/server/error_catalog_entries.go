@@ -76,6 +76,7 @@ func init() {
 	registerError("core create task returned empty task_id", "CORE_CREATE_TASK_RETURNED_EMPTY_TASK_ID", "Core service returned an empty task_id when creating a task", http.StatusBadGateway)
 	registerError("core result poll interval must be positive", "CORE_RESULT_POLL_INTERVAL_MUST_BE_POSITIVE", "Core result poll interval must be positive", http.StatusBadRequest)
 	registerError("core result reconciler is required", "CORE_RESULT_RECONCILER_REQUIRED", "Core result reconciler is required", http.StatusBadRequest)
+	registerError("core resume task returned empty tasks", "CORE_SUBMIT_FAILED", "Failed to submit task to core service", http.StatusBadGateway)
 	registerError("core upload returned empty upload_file_id", "CORE_UPLOAD_RETURNED_EMPTY_UPLOAD_FILE_ID", "Core service returned an empty upload_file_id after upload", http.StatusBadGateway)
 	registerError("core_task_not_found", "CORE_TASK_NOT_FOUND", "Core task not found", http.StatusNotFound)
 	registerError("could not allocate temp object token", "COULD_NOT_ALLOCATE_TEMP_OBJECT_TOKEN", "Could not allocate temp object token", http.StatusInternalServerError)
