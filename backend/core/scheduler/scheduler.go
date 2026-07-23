@@ -343,8 +343,10 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 		"conversation_id":       convID,
 		"stream":                true,
 		"mode":                  "auto",
+		"thinking_depth":        "high",
 		"input":                 []map[string]any{{"input_type": "text", "text": query}},
 		"skip_sensitive_filter": true,
+		"disabled_tools":        []string{"ask_user"},
 	}
 	// Attach knowledge base IDs if configured.
 	var kbIDs []string
@@ -790,7 +792,9 @@ func RunNowHandler(w http.ResponseWriter, r *http.Request) {
 		"conversation_id": convID,
 		"stream":          true,
 		"mode":            "auto",
+		"thinking_depth":  "high",
 		"input":           []map[string]any{{"input_type": "text", "text": query}},
+		"disabled_tools":  []string{"ask_user"},
 	}
 	var kbIDs []string
 	if json.Unmarshal([]byte(s.KbIDs), &kbIDs) == nil && len(kbIDs) > 0 {

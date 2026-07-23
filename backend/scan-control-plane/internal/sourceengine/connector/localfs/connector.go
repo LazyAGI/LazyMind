@@ -192,3 +192,13 @@ func (c *LocalFSConnector) resolveAgentID(agentID string) string {
 	}
 	return c.defaultAgentID
 }
+// CheckPathExists returns true if the given path still exists on the agent'''s
+// filesystem. It delegates to the agent'''s StatPath HTTP endpoint. Used as a
+// lightweight safety-net in GET chat-settings to filter out bindings whose
+// root directories have been removed without the real-time watcher detecting it
+// (e.g. directory deleted while the agent was offline).
+func (c *LocalFSConnector) CheckPathExists(ctx context.Context, agentID, path string) bool {
+	_, err := c.agent.StatPath(ctx, StatPathRequest{AgentID: agentID, Path: path})
+	return err == nil
+}
+

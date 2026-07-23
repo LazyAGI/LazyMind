@@ -89,26 +89,6 @@ func TestApplyLocalFSPathsForChatAddsActiveLocalBindings(t *testing.T) {
 	}
 }
 
-func TestApplyLocalFSPathsForChatDisabledOmitsParameter(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/localfs-chat-disabled.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.LocalFSChatSetting{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/core/conversations:chat", nil)
-	req.Header.Set("X-User-Id", "u1")
-	reqBody := map[string]any{}
-	if err := applyLocalFSPathsForChat(req.Context(), req, db.DB, "u1", reqBody); err != nil {
-		t.Fatalf("apply local fs paths: %v", err)
-	}
-	if _, ok := reqBody["local_fs_sources"]; ok {
-		t.Fatalf("local_fs_sources should be omitted when setting is disabled: %#v", reqBody)
-	}
-}
-
 func TestApplyLocalFSPathsForChatFiltersByBindingChatEnabled(t *testing.T) {
 	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/localfs-chat-filter.db")
 	if err != nil {

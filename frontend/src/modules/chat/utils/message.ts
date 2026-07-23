@@ -13,6 +13,15 @@ const CITE_MESSAGE_PATTERN =
   /<cite_message>([\s\S]*?)<\/cite_message>\s*/i;
 const CITE_MESSAGE_GLOBAL_PATTERN =
   /<cite_message>([\s\S]*?)<\/cite_message>\s*/gi;
+const ASK_USER_RECEIPT_PATTERN =
+  /^Question sent to user \(ask_id=[^)]+\)\.\s*Waiting for answer on next turn\.?$/i;
+
+export function stripAskUserReceipt(text: string | undefined, hasAskPending: boolean) {
+  const content = text || "";
+  return hasAskPending && ASK_USER_RECEIPT_PATTERN.test(content.trim())
+    ? ""
+    : content;
+}
 
 interface ChatUserMessageLike {
   delta?: string;
@@ -162,10 +171,15 @@ export function buildChatMessageListFromHistory(
       record.result,
       record.reasoning_content,
     );
+    const hasAskPending = !!(record as any).ask_pending;
+    const displayAssistantContent = stripAskUserReceipt(
+      splitResult.content,
+      hasAskPending,
+    );
     const assistantMessage: any = {
       role: RoleTypes.ASSISTANT,
       reasoning_content: splitResult.reasoning_content,
-      delta: splitResult.content,
+      delta: displayAssistantContent,
       raw_delta: record.result || "",
       finish_reason: isActuallyGenerating
         ? ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
@@ -176,10 +190,11 @@ export function buildChatMessageListFromHistory(
       thinking_time_s: record.thinking_time_s,
       tool_call_turns: record.tool_call_turns,
       intent_updated: (record as any).intent_updated,
+      is_history: true,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.
-    if ((record as any).ask_pending) {
+    if (hasAskPending) {
       assistantMessage.ask_pending = (record as any).ask_pending;
       // Restore partially-filled answers so the wizard resumes where the user left off.
       if ((record as any).ask_saved_answers) {
