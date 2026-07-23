@@ -231,54 +231,6 @@ export function dedupeAndSortChatMessages(messages: ChatMessage[]) {
     });
 }
 
-export function normalizeThreadHistoryMessages(payload: ThreadRestorePayload): ChatMessage[] {
-  const records = getNestedArrayField(payload, ["rounds"]);
-  const roundMessages = records
-    .filter((item): item is Record<string, unknown> => isRecord(item))
-    .flatMap<ChatMessage>((item, index) => {
-      const requestPayload = getNestedRecordField(item, ["request_payload"]);
-      const userContent =
-        getStringField(item, ["user_message", "userMessage"]) ||
-        getHistoryMessageContent(requestPayload);
-      const assistantContent =
-        getStringField(item, ["assistant_message", "assistantMessage"]) ||
-        getHistoryAssistantDeltaContent(item.records) ||
-        getHistoryAssistantDeltaContent(item.assistant_message);
-      const roundId = getStringField(item, ["round_id", "id"]) || `round-${index + 1}`;
-      const createdAt = item.created_at || item.create_time || item.timestamp;
-      const updatedAt = item.updated_at || item.update_time || createdAt;
-      const baseSortTime =
-        getThreadTimeSortValue(createdAt) ||
-        getNumberField(item, ["sequence", "seq", "index"]) ||
-        index * 2;
-      const messages: ChatMessage[] = [];
-
-      if (userContent) {
-        messages.push({
-          id: `thread-history-${roundId}-user-${index}`,
-          role: "user",
-          content: userContent,
-          time: formatThreadTime(createdAt),
-          sortTime: baseSortTime,
-        });
-      }
-
-      if (assistantContent) {
-        messages.push({
-          id: `thread-history-${roundId}-assistant-${index}`,
-          role: "assistant",
-          content: assistantContent,
-          time: formatThreadTime(updatedAt),
-          sortTime: baseSortTime + 1,
-        });
-      }
-
-      return messages;
-    });
-
-  return dedupeAndSortChatMessages([...normalizeHistoryEventMessages(payload), ...roundMessages]);
-}
-
 function normalizeThreadMessageItems(payload: ThreadRestorePayload): ChatMessage[] {
   const records = getNestedArrayField(payload, ["items", "messages", "rounds"]);
 
