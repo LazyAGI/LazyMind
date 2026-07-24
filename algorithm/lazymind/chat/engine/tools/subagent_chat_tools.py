@@ -5,11 +5,11 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import lazyllm
-from lazyllm.tools.agent.base import _write_agent_data
 
 from lazymind.chat.engine.subagent import SUBAGENT_ATTACHMENT_CONTEXT_KEY
 from lazymind.chat.engine.subagent.db import TaskQueryDB
 from lazymind.chat.engine.tools.infra import tool_success
+from lazyllm.tools.agent.base import _write_agent_data
 
 # How often to emit a heartbeat while polling in auto mode (seconds).
 _HEARTBEAT_INTERVAL = 15

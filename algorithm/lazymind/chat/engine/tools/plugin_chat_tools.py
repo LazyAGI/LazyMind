@@ -14,10 +14,10 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 import lazyllm
-from lazyllm.tools.agent.base import _write_agent_data
 
 from lazymind.chat.engine.tools.infra import tool_error, tool_success
 from lazymind.chat.engine.tools.infra.core_api_client import post_core_api
+from lazyllm.tools.agent.base import _write_agent_data
 
 
 def _agentic_config() -> Dict[str, Any]:
@@ -69,9 +69,9 @@ def create_plugin_draft(
     name = (name or '').strip()
     description = (description or '').strip()
     if not name:
-        return tool_error('create_plugin_draft', 'name is required')
+        return tool_error('name is required')
     if not description:
-        return tool_error('create_plugin_draft', 'description is required')
+        return tool_error('description is required')
 
     # Build enriched description for AI generation
     full_description = description
@@ -84,7 +84,7 @@ def create_plugin_draft(
     try:
         create_resp = post_core_api('/plugin-drafts', {'name': name})
     except RuntimeError as exc:
-        return tool_error('create_plugin_draft', f'Failed to create plugin draft: {exc}')
+        return tool_error(f'Failed to create plugin draft: {exc}')
 
     draft_data = create_resp.get('response', {})
     # Unwrap data envelope
@@ -92,7 +92,7 @@ def create_plugin_draft(
         draft_data = draft_data['data']
     draft_id = (draft_data.get('id') or '').strip() if isinstance(draft_data, dict) else ''
     if not draft_id:
-        return tool_error('create_plugin_draft', 'Failed to create plugin draft: no draft_id returned')
+        return tool_error('Failed to create plugin draft: no draft_id returned')
 
     # Step 2: Pre-fill confirmed name and description
     try:
@@ -104,26 +104,27 @@ def create_plugin_draft(
         })
     except Exception as exc:  # noqa: BLE001
         # Pre-fill failure is non-fatal; generation can still proceed
-        _write_agent_data('plugin_draft_prefill_warning', message=str(exc))
+        _write_agent_data({'plugin_draft_prefill_warning': str(exc)})
 
     # Step 3: Trigger async AI generation
     try:
         post_core_api(f'/plugin-drafts/{draft_id}:ai-generate', {'description': full_description})
     except RuntimeError as exc:
-        return tool_error('create_plugin_draft', f'Failed to trigger AI generation: {exc}')
+        return tool_error(f'Failed to trigger AI generation: {exc}')
 
     editor_url = f'/plugin/{draft_id}'
 
     # Emit plugin_draft_created SSE event so future frontend cards can pick it up
-    _write_agent_data(
-        'plugin_draft_created',
-        draft_id=draft_id,
-        name=name,
-        editor_url=editor_url,
-        status='generating',
-    )
+    _write_agent_data({
+        'plugin_draft_created': {
+            'draft_id': draft_id,
+            'name': name,
+            'editor_url': editor_url,
+            'status': 'generating',
+        },
+    })
 
-    return tool_success('create_plugin_draft', {
+    return tool_success({
         'draft_id': draft_id,
         'editor_url': editor_url,
         'status': 'generating',
