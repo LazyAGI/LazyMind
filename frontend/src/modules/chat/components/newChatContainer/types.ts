@@ -102,6 +102,7 @@ export interface ChatMessage {
     expanded_max_rounds: number;
     timeout_seconds: number;
   };
+  resolved_tool_limit_decision_id?: string;
   mentions?: ChatMention[];
 	collected_inputs?: Array<{
 		task_id: string;

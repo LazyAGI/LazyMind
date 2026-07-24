@@ -66,6 +66,8 @@ export default function ToolLimitCard({ pending, onDecision }: ToolLimitCardProp
     }
   };
 
+  if (resolved === "continue" || resolved === "summarize") return null;
+
   return (
     <div className="tool-limit-card">
       <div className="tool-limit-card__title">{t("chat.toolLimitTitle")}</div>

@@ -853,6 +853,7 @@ const AssistantMessage = (props: any) => {
   function renderBottom() {
     if (
       item.tool_limit_pending &&
+      item.tool_limit_pending.decision_id !== item.resolved_tool_limit_decision_id &&
       sessionId &&
       item.finish_reason ===
         ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
@@ -862,11 +863,18 @@ const AssistantMessage = (props: any) => {
           key={item.tool_limit_pending.decision_id}
           pending={item.tool_limit_pending}
           onDecision={async (action) => {
+            const decisionId = item.tool_limit_pending.decision_id;
             await decideToolLimit(
               sessionId,
-              item.tool_limit_pending.decision_id,
+              decisionId,
               action,
             );
+            updateMessage({
+              id: item.id,
+              history_id: item.history_id,
+              tool_limit_pending: undefined,
+              resolved_tool_limit_decision_id: decisionId,
+            });
           }}
         />
       );
