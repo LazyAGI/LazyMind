@@ -60,11 +60,11 @@ For long-running work, each step remains visible. Users can approve checkpoints,
 <table>
   <tr>
     <td width="50%" align="center">
-      <a href="docs/assets/artifact-workspace-en.jpg"><img src="docs/assets/artifact-workspace-en.jpg" alt="A real Artifact remains editable at an approval checkpoint" width="100%" /></a>
+      <a href="docs/assets/artifact-workspace-en.png"><img src="docs/assets/artifact-workspace-en.png" alt="A real Artifact remains editable at an approval checkpoint" width="100%" /></a>
       <br /><sub>Inspect and edit the Artifact before continuing</sub>
     </td>
     <td width="50%" align="center">
-      <a href="docs/assets/artifact-version-diff-en.jpg"><img src="docs/assets/artifact-version-diff-en.jpg" alt="Inspect the execution trail and approve the next step without restarting" width="100%" /></a>
+      <a href="docs/assets/artifact-version-diff-en.png"><img src="docs/assets/artifact-version-diff-en.png" alt="Inspect the execution trail and approve the next step without restarting" width="100%" /></a>
       <br /><sub>Review a version diff and restore the result you need</sub>
     </td>
   </tr>
@@ -94,11 +94,11 @@ Research methods, writing processes, and domain standards can be managed as Skil
 <table>
   <tr>
     <td width="50%" align="center">
-      <a href="docs/assets/skill-to-workflow-entry-en.jpg"><img src="docs/assets/skill-to-workflow-entry-en.jpg" alt="Create an executable workflow from an existing Skill" width="100%" /></a>
+      <a href="docs/assets/skill-to-workflow-entry-en.png"><img src="docs/assets/skill-to-workflow-entry-en.png" alt="Create an executable workflow from an existing Skill" width="100%" /></a>
       <br /><sub>Select a Skill as the source of a new workflow</sub>
     </td>
     <td width="50%" align="center">
-      <a href="docs/assets/skill-to-workflow-editor-en.jpg"><img src="docs/assets/skill-to-workflow-editor-en.jpg" alt="Manage converted and custom workflows after generation" width="100%" /></a>
+      <a href="docs/assets/skill-to-workflow-editor-en.png"><img src="docs/assets/skill-to-workflow-editor-en.png" alt="Manage converted and custom workflows after generation" width="100%" /></a>
       <br /><sub>Inspect, refine, publish, and version the generated workflow</sub>
     </td>
   </tr>
