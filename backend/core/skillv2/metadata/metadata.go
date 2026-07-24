@@ -14,7 +14,7 @@ import (
 	"lazymind/core/versionfs"
 )
 
-const ExternalCategory = "External"
+const ExternalCategory = "external"
 
 type Metadata struct {
 	Name        string

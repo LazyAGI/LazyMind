@@ -56,8 +56,8 @@ func TestCreateSourceHandlerRequiresBindingsArray(t *testing.T) {
 	if err := json.NewDecoder(badResp.Body).Decode(&errResp); err != nil {
 		t.Fatalf("decode error response: %v", err)
 	}
-	if errResp.Code != string(sourceengine.ErrCodeInvalidRequest) {
-		t.Fatalf("expected invalid request error, got %+v", errResp)
+	if errResp.Code != "INVALID_JSON_REQUEST_BODY" {
+		t.Fatalf("expected invalid JSON request body error, got %+v", errResp)
 	}
 }
 
@@ -153,7 +153,7 @@ func TestCreateSourceHandlerAcceptsStructuredProviderOptions(t *testing.T) {
 	}
 }
 
-func TestNewHandlerWithoutAccessCheckerDeniesProtectedRoutes(t *testing.T) {
+func TestNewHandlerWithoutAccessCheckerReturnsConfigurationError(t *testing.T) {
 	t.Parallel()
 
 	engine := &serverSourceEngineStub{}
@@ -165,8 +165,8 @@ func TestNewHandlerWithoutAccessCheckerDeniesProtectedRoutes(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected default access checker to deny protected route, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected missing access checker to return a configuration error, got %d body=%s", w.Code, w.Body.String())
 	}
 	if engine.createCalls != 0 {
 		t.Fatalf("expected denied request not to call source engine, got %d calls", engine.createCalls)
@@ -1031,10 +1031,6 @@ func (s *serverSourceEngineStub) UpdateBindingChatEnabled(_ context.Context, bin
 	return nil
 }
 
-
-
-
-
 func (s *serverSourceEngineStub) BatchGetSourcesByDatasetIDs(_ context.Context, datasetIDs []string) (map[string]bool, error) {
 	result := make(map[string]bool, len(datasetIDs))
 	for _, id := range datasetIDs {
@@ -1203,7 +1199,6 @@ func (a *apiContractLocalAgentStub) StatPath(context.Context, localfs.StatPathRe
 func (a *apiContractLocalAgentStub) ExportFile(context.Context, localfs.ExportFileRequest) (localfs.ExportedFile, error) {
 	return localfs.ExportedFile{}, nil
 }
-
 
 func TestUpdateSourceHandlerModifiesName(t *testing.T) {
 	t.Parallel()

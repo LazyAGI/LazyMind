@@ -1576,26 +1576,54 @@ func markPendingSkillDraftAuto(ctx context.Context, tx *gorm.DB, skillID string,
 		}
 		return err
 	}
-	if !isPendingSkillDraftStatus(draft.DraftStatus) {
-		return nil
-	}
 	var count int64
 	if err := tx.WithContext(ctx).Model(&skillDraftEntryRow{}).Where("skill_id = ?", skillID).Count(&count).Error; err != nil {
 		return err
 	}
-	nextStatus := ""
-	if count > 0 {
-		nextStatus = skillDraftStatusAutoPending
+	if count == 0 {
+		if !isPendingSkillDraftStatus(draft.DraftStatus) {
+			return nil
+		}
+		return tx.WithContext(ctx).Model(&skillDraftRow{}).
+			Where("skill_id = ? AND version = ?", skillID, draft.Version).
+			Updates(map[string]any{
+				"draft_status": "",
+				"updated_at":   now,
+			}).Error
 	}
-	if strings.TrimSpace(draft.DraftStatus) == nextStatus {
-		return nil
+
+	if !isPendingSkillDraftStatus(draft.DraftStatus) {
+		var matchingActiveReviewCount int64
+		if err := tx.WithContext(ctx).
+			Table("skill_draft_review_sessions").
+			Where("skill_id = ? AND status = ? AND draft_version_at_start = ?", skillID, "active", draft.Version).
+			Count(&matchingActiveReviewCount).Error; err != nil {
+			return err
+		}
+		if matchingActiveReviewCount == 0 {
+			return nil
+		}
 	}
-	return tx.WithContext(ctx).Model(&skillDraftRow{}).
+
+	updates := map[string]any{
+		"draft_status": skillDraftStatusAutoPending,
+		"updated_at":   now,
+	}
+	if strings.TrimSpace(draft.TaskID) == "" {
+		updates["task_id"] = "review_auto_evo_" + uuid.NewString()
+		updates["conversation_id"] = nil
+		updates["version"] = gorm.Expr("version + 1")
+	}
+	result := tx.WithContext(ctx).Model(&skillDraftRow{}).
 		Where("skill_id = ? AND version = ?", skillID, draft.Version).
-		Updates(map[string]any{
-			"draft_status": nextStatus,
-			"updated_at":   now,
-		}).Error
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("stale draft version")
+	}
+	return nil
 }
 
 func isPendingSkillDraftStatus(status string) bool {

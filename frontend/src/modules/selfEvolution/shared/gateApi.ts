@@ -50,6 +50,10 @@ export function buildThreadGateVersionUrl(threadId: string, step: string, versio
   return `${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/gates/${encodeURIComponent(step)}/versions/${version}`;
 }
 
+export function buildThreadGateDownloadUrl(threadId: string, step: string, version: number) {
+  return `${buildThreadGateVersionUrl(threadId, step, version)}:download`;
+}
+
 export function normalizeGateContentResponse(value: unknown): unknown {
   if (!isRecord(value)) {
     return value;
@@ -97,4 +101,37 @@ export async function fetchThreadGateContent(
     } as Parameters<typeof axiosInstance.get>[1],
   );
   return normalizeGateContentResponse(response.data);
+}
+
+export async function fetchThreadGateDownload(
+  threadId: string,
+  kind: WorkflowResultKind,
+  options?: { signal?: AbortSignal },
+): Promise<Blob> {
+  const step = resultKindGateStepMap[kind];
+  if (!step) {
+    throw new Error(`unsupported result kind: ${kind}`);
+  }
+
+  const listResponse = await axiosInstance.get(buildThreadGatesListUrl(threadId), {
+    signal: options?.signal,
+    silentError: true,
+  } as Parameters<typeof axiosInstance.get>[1]);
+  const gate = getNestedArrayField(listResponse.data, ["gates"])
+    .map(normalizeThreadGateRecord)
+    .find((item) => item?.step === step);
+  const version = gate ? resolveThreadGateVersion(gate) : undefined;
+  if (!version) {
+    throw { response: { status: 404 } };
+  }
+
+  const response = await axiosInstance.get(
+    buildThreadGateDownloadUrl(threadId, step, version),
+    {
+      responseType: "blob",
+      signal: options?.signal,
+      silentError: true,
+    } as Parameters<typeof axiosInstance.get>[1],
+  );
+  return response.data as Blob;
 }

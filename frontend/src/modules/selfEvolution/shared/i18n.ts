@@ -133,3 +133,23 @@ export function getQuestionTypeLabelMap(): Record<number, string> {
     5: t("selfEvolutionRun.qtCode"),
   };
 }
+
+export function getEvalQuestionTypeLabel(questionType: string): string {
+  const normalized = questionType.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const labels: Record<string, string> = {
+    single_hop: t("selfEvolutionRun.qtSingleHop"),
+    single_doc_multi_hop: t("selfEvolutionRun.qtSingleDocMultiHop"),
+    multi_doc_multi_hop: t("selfEvolutionRun.qtMultiDocMultiHop"),
+    table_list: t("selfEvolutionRun.qtTableList"),
+  };
+  return labels[normalized] || questionType.replace(/_/g, " ");
+}
+
+export function getAffectedBlockLabel(affectedBlock: string): string {
+  const labels: Record<string, string> = {
+    retrieval: t("selfEvolutionRun.affectedBlockRetrieval"),
+    tracing_observability: t("selfEvolutionRun.affectedBlockTracingObservability"),
+    tool_orchestration: t("selfEvolutionRun.affectedBlockToolOrchestration"),
+  };
+  return labels[affectedBlock.trim().toLowerCase()] || affectedBlock.replace(/_/g, " ");
+}

@@ -6,6 +6,12 @@ ErrorTuple = Tuple[int, int, str]
 
 
 class ErrorCodes:
+    INTERNAL_ERROR: ErrorTuple = (500, 1000000, 'Internal server error')
+    INVALID_REQUEST: ErrorTuple = (400, 1000001, 'Invalid request parameters')
+    RESOURCE_NOT_FOUND: ErrorTuple = (404, 1000002, 'Resource not found')
+    METHOD_NOT_ALLOWED: ErrorTuple = (405, 1000003, 'Method not allowed')
+    HTTP_ERROR: ErrorTuple = (500, 1000004, 'HTTP request failed')
+
     INVALID_USERNAME: ErrorTuple = (400, 1000101, 'Invalid username format')
     USER_ALREADY_EXISTS: ErrorTuple = (400, 1000102, 'User already exists')
     INVALID_PASSWORD: ErrorTuple = (400, 1000103, 'Invalid password format')
@@ -56,6 +62,67 @@ class ErrorCodes:
     CLOUD_TOKEN_UNAVAILABLE: ErrorTuple = (502, 1000707, 'cloud access token is unavailable')
     CLOUD_CRYPTO_UNAVAILABLE: ErrorTuple = (500, 1000708, 'cloud oauth encryption key is not configured')
 
+    CLOUD_CLIENT_CREDENTIALS_REQUIRED: ErrorTuple = (400, 1000801, 'client_id and client_secret are required')
+    CLOUD_APP_CREDENTIAL_NOT_CONFIGURED: ErrorTuple = (400, 1000802, 'cloud app credential is not configured')
+    CLOUD_APP_CREDENTIAL_INCOMPLETE: ErrorTuple = (400, 1000803, 'cloud app credential is incomplete')
+    CLOUD_REAUTHORIZE_CREDENTIAL_INCOMPLETE: ErrorTuple = (
+        400,
+        1000804,
+        'reauthorize connection credential is incomplete',
+    )
+    CLOUD_REAUTHORIZE_ACCOUNT_ID_REQUIRED: ErrorTuple = (
+        400,
+        1000805,
+        'reauthorize target provider_account_id is required',
+    )
+    CLOUD_CLIENT_ID_REQUIRED: ErrorTuple = (400, 1000806, 'client_id is required')
+    CLOUD_CLIENT_SECRET_REQUIRED: ErrorTuple = (400, 1000807, 'client_secret is required')
+    CLOUD_CLIENT_SECRET_REQUIRED_ON_CLIENT_ID_CHANGE: ErrorTuple = (
+        400,
+        1000808,
+        'client_secret is required when client_id changes',
+    )
+    CLOUD_REDIRECT_URI_REQUIRED: ErrorTuple = (400, 1000809, 'redirect_uri is required')
+    CLOUD_REDIRECT_URI_REQUIRED_FOR_OAUTH_USER: ErrorTuple = (400, 1000810, 'redirect_uri is required for oauth_user')
+    CLOUD_REAUTHORIZED_ACCOUNT_MISMATCH: ErrorTuple = (
+        409,
+        1000811,
+        'reauthorized account does not match target connection',
+    )
+    CLOUD_REAUTHORIZED_TENANT_MISMATCH: ErrorTuple = (
+        409,
+        1000812,
+        'reauthorized tenant does not match target connection',
+    )
+    CLOUD_REAUTHORIZE_ACCOUNT_CHANGED: ErrorTuple = (409, 1000813, 'reauthorize target account changed')
+    CLOUD_CLIENT_ID_ALREADY_EXISTS: ErrorTuple = (409, 1000814, 'a connection with this client_id already exists')
+    CLOUD_OAUTH_AUTHORIZE_MODE_REQUIRED: ErrorTuple = (
+        400,
+        1000815,
+        'oauth_user connections must use oauth/authorize-url',
+    )
+    CLOUD_AUTHORIZE_URL_OAUTH_USER_ONLY: ErrorTuple = (400, 1000816, 'authorize-url only supports oauth_user')
+    CLOUD_CALLBACK_OAUTH_USER_ONLY: ErrorTuple = (400, 1000817, 'callback only supports oauth_user')
+    CLOUD_REAUTHORIZE_TARGET_OAUTH_USER_ONLY: ErrorTuple = (400, 1000818, 'reauthorize target must be oauth_user')
+    CLOUD_REFRESH_TOKEN_REQUIRED: ErrorTuple = (400, 1000819, 'refresh_token is required for cloud token refresh')
+    CLOUD_PROVIDER_ACCESS_TOKEN_EMPTY: ErrorTuple = (502, 1000820, 'cloud provider returned an empty access token')
+    CLOUD_CREDENTIAL_ENCRYPT_FAILED: ErrorTuple = (500, 1000821, 'cloud credential encryption failed')
+    CLOUD_CREDENTIAL_DECRYPT_FAILED: ErrorTuple = (500, 1000822, 'cloud credential decryption failed')
+    CLOUD_PROVIDER_REFRESH_TOKEN_EMPTY: ErrorTuple = (502, 1000823, 'cloud provider returned an empty refresh token')
+    GOOGLE_DRIVE_OAUTH_USER_ONLY: ErrorTuple = (400, 1000824, 'Google Drive only supports oauth_user connections')
+
+    JWT_SECRET_REQUIRED: ErrorTuple = (500, 1000901, 'JWT signing secret is not configured')
+    CLOUD_PROVIDER_HTTP_ERROR: ErrorTuple = (502, 1000902, 'cloud provider returned an HTTP error')
+    CLOUD_PROVIDER_NETWORK_ERROR: ErrorTuple = (502, 1000903, 'cloud provider network request failed')
+    CLOUD_PROVIDER_INVALID_JSON: ErrorTuple = (502, 1000904, 'cloud provider returned invalid JSON')
+    GOOGLE_DRIVE_CODE_EXCHANGE_FAILED: ErrorTuple = (502, 1000905, 'Google Drive authorization code exchange failed')
+    GOOGLE_DRIVE_TOKEN_REFRESH_FAILED: ErrorTuple = (502, 1000906, 'Google Drive token refresh failed')
+    NOTION_CODE_EXCHANGE_FAILED: ErrorTuple = (502, 1000907, 'Notion authorization code exchange failed')
+    NOTION_TOKEN_REFRESH_FAILED: ErrorTuple = (502, 1000908, 'Notion token refresh failed')
+    FEISHU_TENANT_TOKEN_FAILED: ErrorTuple = (502, 1000909, 'Feishu tenant token request failed')
+    FEISHU_USER_INFO_FAILED: ErrorTuple = (502, 1000910, 'Feishu user information request failed')
+    CLOUD_CIPHERTEXT_INVALID: ErrorTuple = (500, 1000911, 'cloud credential ciphertext is invalid')
+
 
 @dataclass
 class AppException(Exception):
@@ -88,3 +155,40 @@ def error_payload_from_exception(exc: AppException) -> dict[str, Any]:
         'message': exc.message,
         'ex_mesage': exc.extra or '',
     }
+
+
+_EXCEPTION_PREFIXES: tuple[tuple[str, ErrorTuple], ...] = (
+    ('LAZYMIND_JWT_SECRET is required', ErrorCodes.JWT_SECRET_REQUIRED),
+    ('provider returned invalid json', ErrorCodes.CLOUD_PROVIDER_INVALID_JSON),
+    ('provider network error', ErrorCodes.CLOUD_PROVIDER_NETWORK_ERROR),
+    ('provider http error', ErrorCodes.CLOUD_PROVIDER_HTTP_ERROR),
+    ('google drive code exchange failed', ErrorCodes.GOOGLE_DRIVE_CODE_EXCHANGE_FAILED),
+    ('google drive token refresh failed', ErrorCodes.GOOGLE_DRIVE_TOKEN_REFRESH_FAILED),
+    ('notion code exchange failed', ErrorCodes.NOTION_CODE_EXCHANGE_FAILED),
+    ('notion token refresh failed', ErrorCodes.NOTION_TOKEN_REFRESH_FAILED),
+    ('feishu tenant token failed', ErrorCodes.FEISHU_TENANT_TOKEN_FAILED),
+    ('feishu user info failed', ErrorCodes.FEISHU_USER_INFO_FAILED),
+    ('invalid ciphertext', ErrorCodes.CLOUD_CIPHERTEXT_INVALID),
+    ('Google Drive only supports oauth_user connections in LazyMind', ErrorCodes.GOOGLE_DRIVE_OAUTH_USER_ONLY),
+    (
+        'LAZYMIND_AUTH_CLOUD_SECRET_KEY is required for cloud oauth credential encryption',
+        ErrorCodes.CLOUD_CRYPTO_UNAVAILABLE,
+    ),
+)
+
+
+def app_exception_from_exception(exc: Exception) -> AppException:
+    raw_message = str(exc).strip()
+    lowered = raw_message.lower()
+    for prefix, err in _EXCEPTION_PREFIXES:
+        normalized_prefix = prefix.lower()
+        if (
+            lowered == normalized_prefix
+            or lowered.startswith(normalized_prefix + ':')
+            or lowered.startswith(normalized_prefix + ' ')
+        ):
+            http_code, code, message = err
+            detail = raw_message[len(prefix):].lstrip(': ').strip()
+            return AppException(http_code=http_code, code=code, message=message, extra=detail or None)
+    http_code, code, message = ErrorCodes.INTERNAL_ERROR
+    return AppException(http_code=http_code, code=code, message=message)

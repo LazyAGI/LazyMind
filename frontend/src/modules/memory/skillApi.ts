@@ -146,6 +146,10 @@ export interface SkillOrganizeRunRecord {
 export type SkillOrganizeTaskStatus =
   | "pending"
   | "running"
+  | "organize_plan"
+  | "organize_draft"
+  | "organize_apply"
+  | "completed"
   | "done"
   | "failed"
   | "skipped";
@@ -240,10 +244,23 @@ export interface SkillReviewRunRecord {
   requestId: string;
 }
 
+export type SkillReviewTaskStatus =
+  | "pending"
+  | "running"
+  | "review_draft"
+  | "review_cluster"
+  | "review_miner"
+  | "review_solution"
+  | "review_apply"
+  | "completed"
+  | "done"
+  | "failed"
+  | "skipped";
+
 export interface SkillReviewTaskStatusRecord {
   task: ResourceUpdateTaskRecord | null;
   requestId: string;
-  status: string;
+  status: SkillReviewTaskStatus;
   runStatus: string;
   resultCount: number;
 }
@@ -786,7 +803,7 @@ const normalizeSkillReviewTaskStatus = (
   return {
     task,
     requestId,
-    status,
+    status: status as SkillReviewTaskStatus,
     runStatus: toStringValue(raw?.run_status, ""),
     resultCount: toNumberValue(raw?.result_count, 0),
   };
@@ -937,6 +954,7 @@ export async function getSkillOrganizeTask(
 }
 
 const skillOrganizeTerminalStatuses = new Set<SkillOrganizeTaskStatus>([
+  "completed",
   "done",
   "failed",
   "skipped",

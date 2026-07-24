@@ -13,6 +13,8 @@ export interface ValidationError {
   materialId?: string;
   /** structured diagnostic context returned by the authoritative validator */
   details?: Record<string, unknown>;
+  /** authoritative YAML path returned by the compiler */
+  path?: string;
   /** line number hint for YAML view (optional) */
   line?: number;
 }

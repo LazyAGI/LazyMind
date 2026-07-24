@@ -167,7 +167,6 @@ export default function DataSourceWizardModal({
             <WizardConnectionStep
               t={t}
               form={form}
-              isEditMode={isEditMode}
               selectedType={selectedType}
               syncMode={syncMode}
               localPathOptions={localPathOptions}

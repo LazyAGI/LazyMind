@@ -2,6 +2,7 @@ package doc
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -122,6 +123,9 @@ func scanSourceAccessHeaders(r *http.Request) map[string]string {
 		if userID := strings.TrimSpace(store.UserID(r)); userID != "" {
 			headers["X-User-ID"] = userID
 		}
+	}
+	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
+		headers["X-LazyMind-Internal-Token"] = token
 	}
 	return headers
 }

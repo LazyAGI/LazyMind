@@ -34,7 +34,7 @@ func (versionStore) LoadDraft(ctx context.Context, tx *gorm.DB, resourceID strin
 }
 
 func (versionStore) HasDraftChanges(ctx context.Context, tx *gorm.DB, resourceID string, draft versionfs.DraftState) (bool, error) {
-	return draft.Status == "pending_confirm", nil
+	return draft.Status == draftStatusPendingConfirm || draft.Status == draftStatusAutoPending, nil
 }
 
 func (versionStore) ClaimDraft(ctx context.Context, tx *gorm.DB, resourceID string, draft versionfs.DraftState, userID string, now time.Time) (versionfs.DraftState, error) {

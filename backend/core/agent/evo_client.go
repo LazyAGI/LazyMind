@@ -211,3 +211,32 @@ func evoProxyStatusCode(err error) int {
 	}
 	return http.StatusBadGateway
 }
+
+func evoCreateModelAppError(err error) (*common.AppError, bool) {
+	var httpErr *common.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusUnprocessableEntity {
+		return nil, false
+	}
+	var envelope struct {
+		Detail struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Data    any    `json:"data"`
+		} `json:"detail"`
+	}
+	if json.Unmarshal([]byte(httpErr.Message), &envelope) != nil {
+		return nil, false
+	}
+	if envelope.Detail.Code != threadModelNotConfiguredCode && envelope.Detail.Code != evoModelNotAllowedCode {
+		return nil, false
+	}
+	message := strings.TrimSpace(envelope.Detail.Message)
+	if message == "" {
+		message = "evo_llm 模型配置无效"
+	}
+	return common.NewAppError(
+		http.StatusUnprocessableEntity,
+		envelope.Detail.Code,
+		message,
+	).WithDetail(envelope.Detail.Data), true
+}

@@ -6,11 +6,11 @@ from pathlib import Path
 from statistics import fmean
 from typing import Any
 
-from evo.operations.abtest.candidate import candidate_rag_answer, candidate_service, discard_candidate
+from evo.operations.abtest.candidate import async_candidate_rag_answer, candidate_service, stop_candidate
 from evo.operations.abtest.comparison import GOODCASE_MAX_OVERALL_DROP, compare_eval_detail_for_repair
 from evo.operations.analysis.summary import build_analysis_from_answers
 from evo.operations.eval.judge import judge_case
-from evo.operations.eval.materializers import build_eval_detail_summary
+from evo.operations.eval.summary import build_eval_detail_summary
 
 from .errors import EXTERNAL_CHAT_FAILURE_TYPES
 from .trace import safe_emit
@@ -27,7 +27,7 @@ EPSILON = 0.0001
 BADCASE_MIN_OVERALL_GAIN = 0.10
 
 
-def validate_candidate_patch(
+async def validate_candidate_patch(
     root: Path,
     diff: str,
     plan: Mapping[str, Any],
@@ -61,8 +61,9 @@ def validate_candidate_patch(
         payload={'case_count': len(selected)},
     )
     service: Mapping[str, Any] | None = None
+    cleanup_service = True
     try:
-        service = candidate_service(candidate_config, patch, ctx, temporary=True)
+        service = candidate_service(candidate_config, patch, ctx)
     except Exception as exc:
         safe_emit(
             trace, 'candidate.service_failed', status='failed', attempt=attempt,
@@ -91,7 +92,7 @@ def validate_candidate_patch(
         for case_id, case in selected.items():
             safe_emit(trace, 'candidate.case_started', status='started', attempt=attempt, payload={'case_id': case_id})
             try:
-                answer = candidate_rag_answer(case, service)
+                answer = await async_candidate_rag_answer(case, service)
                 answers[case_id] = answer
                 judges[case_id] = judge_case(case, answer, eval_policy)
             except Exception as exc:
@@ -191,6 +192,7 @@ def validate_candidate_patch(
                         'goodcase_guard_status', 'recommended_action')
         })
         accepted, reason = _candidate_gate(comparison, candidate_summary, delta)
+        cleanup_service = not accepted
         return {
             'status': 'accepted' if accepted else 'rejected',
             'accepted': accepted,
@@ -200,7 +202,8 @@ def validate_candidate_patch(
             'analysis_delta': delta,
         }
     finally:
-        _cleanup_candidate_service(service, trace=trace, attempt=attempt)
+        if cleanup_service:
+            _cleanup_candidate_service(service, trace=trace, attempt=attempt)
 
 
 def _cleanup_candidate_service(
@@ -209,11 +212,9 @@ def _cleanup_candidate_service(
     trace: Any | None = None,
     attempt: int | None = None,
 ) -> dict[str, Any]:
-    result = discard_candidate(service)
+    result = stop_candidate(service)
     if result['status'] in {'completed', 'failed'}:
         safe_emit(trace, 'candidate.service_stopped', status=result['status'], attempt=attempt, payload=result)
-    if result['status'] == 'failed':
-        raise RuntimeError(str(result.get('message') or 'failed to discard repair candidate'))
     return result
 
 

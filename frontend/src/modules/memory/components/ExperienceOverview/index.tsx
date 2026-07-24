@@ -26,6 +26,9 @@ const isProfileAsset = (record: ExperienceAsset) => {
 };
 
 const isPendingAsset = (record: ExperienceAsset) => {
+  if (record.autoEvo) {
+    return false;
+  }
   const draftStatus = String(record.draftStatus || "").toLowerCase();
   const reviewStatus = String(record.reviewStatus || "").toLowerCase();
   return (
