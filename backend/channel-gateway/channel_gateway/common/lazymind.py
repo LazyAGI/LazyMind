@@ -17,8 +17,12 @@ class LazyMindError(RuntimeError):
 
 class LazyMindHTTPError(LazyMindError):
     def __init__(self, status_code: int, message: str):
-        super().__init__(message)
+        super().__init__(status_code, message)
         self.status_code = status_code
+        self.message = message
+
+    def __str__(self) -> str:
+        return self.message
 
 
 @dataclass

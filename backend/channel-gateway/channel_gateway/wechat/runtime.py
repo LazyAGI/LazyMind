@@ -441,7 +441,7 @@ class WeChatRuntime:
                 )
             )
             self._retry_send(
-                lambda: self._wechat.send_text(
+                lambda chunk=chunk, client_id=client_id: self._wechat.send_text(
                     base_url=credentials['base_url'],
                     token=credentials['token'],
                     to_user_id=to_user_id,

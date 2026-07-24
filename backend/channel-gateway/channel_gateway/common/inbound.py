@@ -18,7 +18,8 @@ class ReplySender(Protocol):
         context_token: str,
         text: str,
         message_key: str,
-    ) -> None: ...
+    ) -> None:
+        ...
 
 
 @dataclass(frozen=True, slots=True)

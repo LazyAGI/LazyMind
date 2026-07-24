@@ -37,10 +37,10 @@ class JsonCipher:
         text = (ciphertext or '').strip()
         if text.startswith(self._PREFIX):
             key = self._user_key(self._owner_context(owner_user_id))
-            encoded = text[len(self._PREFIX) :]
+            encoded = text[len(self._PREFIX):]
         elif text.startswith(self._LEGACY_PREFIX):
             key = hashlib.sha256(self._owner_context(owner_user_id)).digest()
-            encoded = text[len(self._LEGACY_PREFIX) :]
+            encoded = text[len(self._LEGACY_PREFIX):]
         else:
             raise ValueError('unsupported ciphertext version')
         context = self._owner_context(owner_user_id)
