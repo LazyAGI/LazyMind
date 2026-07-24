@@ -4785,11 +4785,15 @@
 .memory-diff-inline-add {
   font-weight: 900;
   border-radius: 2px;
+  background: #abefc6;
+  color: #027a48;
 }
 
 .memory-diff-inline-remove {
   font-weight: 900;
   border-radius: 2px;
+  background: #fecdca;
+  color: #b42318;
 }
 
 .memory-diff-prefix {

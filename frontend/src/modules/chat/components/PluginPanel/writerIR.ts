@@ -47,7 +47,7 @@ export interface WriterIRParseResult {
 
 export type WriterBlockMoveDirection = 'up' | 'down';
 export type WriterInlineStyle = 'strong' | 'italic';
-export type WriterBlockFormat = 'paragraph' | 'heading' | 'code';
+export type WriterBlockFormat = 'paragraph' | 'heading' | 'code' | 'list_item';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -189,6 +189,43 @@ export function getWriterSpanStyles(span: WriterSpan): string[] {
   return [];
 }
 
+function writerStyleMap(span: WriterSpan): Record<string, unknown> {
+  const source = span.style ?? span.stype;
+  if (isRecord(source)) return { ...source };
+  if (!Array.isArray(source)) return {};
+  return Object.fromEntries(source.map((style) => [
+    style === 'strong' ? 'bold' : style === 'code' ? 'inline_code' : style,
+    true,
+  ]));
+}
+
+function normalizeWriterBlockForSync(block: WriterBlock): WriterBlock {
+  const spans = block.spans?.map((span) => {
+    const normalized = { ...span, style: writerStyleMap(span) };
+    delete normalized.stype;
+    return normalized;
+  });
+  const children = block.children?.map(normalizeWriterBlockForSync);
+  return {
+    ...block,
+    ...(spans ? { spans } : {}),
+    ...(children ? { children } : {}),
+  };
+}
+
+/**
+ * Convert legacy array/stype rich-text values to the Writer IR wire contract
+ * accepted by the backend.
+ */
+export function normalizeWriterDocumentForSync(
+  document: WriterDocument,
+): WriterDocument {
+  return {
+    ...document,
+    blocks: document.blocks.map(normalizeWriterBlockForSync),
+  };
+}
+
 function hasWriterInlineStyle(span: WriterSpan, style: WriterInlineStyle): boolean {
   const styles = getWriterSpanStyles(span);
   return style === 'strong'
@@ -217,6 +254,20 @@ export function findWriterBlock(
   for (const block of blocks) {
     if (block.node_id === nodeId) return block;
     const nested = findWriterBlock(block.children ?? [], nodeId);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+export function findWriterBlockParent(
+  blocks: WriterBlock[],
+  nodeId: string,
+): WriterBlock | undefined {
+  for (const block of blocks) {
+    if ((block.children ?? []).some((child) => child.node_id === nodeId)) {
+      return block;
+    }
+    const nested = findWriterBlockParent(block.children ?? [], nodeId);
     if (nested) return nested;
   }
   return undefined;
@@ -501,18 +552,23 @@ export function updateWriterBlockFormat(
   document: WriterDocument,
   nodeId: string,
   format: WriterBlockFormat,
-  headingLevel?: number,
+  options?: number | { headingLevel?: number; ordered?: boolean },
 ): WriterDocument {
+  const resolved = typeof options === 'number'
+    ? { headingLevel: options }
+    : (options ?? {});
   const result = replaceBlockInTree(document.blocks, nodeId, (block) => {
     if (
       block.type === 'document'
       || block.editable === false
       || (block.children?.length ?? 0) > 0
     ) return block;
-    const nextLevel = Math.min(6, Math.max(1, Math.trunc(headingLevel ?? 1)));
+    const nextLevel = Math.min(6, Math.max(1, Math.trunc(resolved.headingLevel ?? 1)));
+    const nextOrdered = Boolean(resolved.ordered);
     if (
       block.type === format
       && (format !== 'heading' || Number(block.numbering?.level) === nextLevel)
+      && (format !== 'list_item' || Boolean(block.numbering?.ordered) === nextOrdered)
     ) {
       return block;
     }
@@ -521,6 +577,7 @@ export function updateWriterBlockFormat(
     delete numbering.level;
     delete numbering.ordered;
     if (format === 'heading') numbering.level = nextLevel;
+    if (format === 'list_item') numbering.ordered = nextOrdered;
     return { ...block, type: format, numbering };
   });
   return result.changed ? { ...document, blocks: result.blocks } : document;
@@ -594,7 +651,7 @@ export function createWriterParagraph(stage: WriterStage): WriterBlock {
     node_id: nodeId,
     type: 'paragraph',
     content: '',
-    spans: [{ text: '', style: [] }],
+    spans: [{ text: '', style: {} }],
     children: [],
     stage,
     status: '',
@@ -682,6 +739,87 @@ export function splitWriterBlock(
       document: withUpdatedBlocks(document, result.blocks),
       insertedNodeId: insertedBlock.node_id,
     }
+    : { document };
+}
+
+/**
+ * Nest the current block as the last child of its previous sibling.
+ * Used for Tab-based outline hierarchy.
+ */
+export function indentWriterBlock(
+  document: WriterDocument,
+  nodeId: string,
+): { document: WriterDocument; insertedNodeId?: string } {
+  const target = findWriterBlock(document.blocks, nodeId);
+  if (!target || target.type === 'document' || target.editable === false) {
+    return { document };
+  }
+
+  const result = updateChildrenArray(document.blocks, (siblings) => {
+    const index = siblings.findIndex((block) => block.node_id === nodeId);
+    if (index <= 0) return { siblings, changed: false };
+
+    const previous = siblings[index - 1];
+    if (previous.type === 'document' || previous.editable === false) {
+      return { siblings, changed: false };
+    }
+
+    const next = siblings.slice();
+    next.splice(index, 1);
+    next[index - 1] = {
+      ...previous,
+      children: [...(previous.children ?? []), target],
+    };
+    return { siblings: next, changed: true };
+  });
+
+  return result.changed
+    ? { document: withUpdatedBlocks(document, result.blocks), insertedNodeId: nodeId }
+    : { document };
+}
+
+/**
+ * Move an empty nested block out of its parent children list and place it as
+ * the next sibling of that parent. Used when Enter is pressed on an empty
+ * indented block so editing does not keep deepening the tree.
+ */
+export function liftWriterBlockAfterParent(
+  document: WriterDocument,
+  nodeId: string,
+): { document: WriterDocument; insertedNodeId?: string } {
+  const target = findWriterBlock(document.blocks, nodeId);
+  const parent = findWriterBlockParent(document.blocks, nodeId);
+  if (
+    !target
+    || !parent
+    || target.type === 'document'
+    || parent.type === 'document'
+    || target.editable === false
+  ) {
+    return { document };
+  }
+
+  const result = updateChildrenArray(document.blocks, (siblings) => {
+    const parentIndex = siblings.findIndex((block) => block.node_id === parent.node_id);
+    if (parentIndex < 0) return { siblings, changed: false };
+
+    const parentBlock = siblings[parentIndex];
+    const childIndex = (parentBlock.children ?? []).findIndex(
+      (child) => child.node_id === nodeId,
+    );
+    if (childIndex < 0) return { siblings, changed: false };
+
+    const nextChildren = (parentBlock.children ?? []).filter(
+      (_, index) => index !== childIndex,
+    );
+    const next = siblings.slice();
+    next[parentIndex] = { ...parentBlock, children: nextChildren };
+    next.splice(parentIndex + 1, 0, target);
+    return { siblings: next, changed: true };
+  });
+
+  return result.changed
+    ? { document: withUpdatedBlocks(document, result.blocks), insertedNodeId: nodeId }
     : { document };
 }
 

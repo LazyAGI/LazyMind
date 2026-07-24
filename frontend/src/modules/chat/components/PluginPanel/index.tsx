@@ -163,6 +163,8 @@ function AutoSlotGrid({
     bySlot[s.slot_id].push(s);
   }
 
+  const stepOrder = getPluginStepOrder(session);
+
   return (
     <div className='plugin-panel__auto-grid'>
       {Object.entries(bySlot).map(([slotId, revisions]) => (
@@ -178,6 +180,7 @@ function AutoSlotGrid({
                 revisionCount={rev.revision_count}
                 onRefresh={onRefresh}
                 onReference={onReference}
+                readOnly={isPluginStepReadOnly(session, rev.step_id, stepOrder)}
               />
             ))}
           </div>
@@ -288,6 +291,50 @@ function buildColumns(
 
 function getTabStepId(tab: TabDef): string | undefined {
   return tab.step_id ?? tab.id;
+}
+
+/**
+ * Derive a stable workflow step order for completed-step locking.
+ * Prefer UI tab order; fall back to first-seen step ids from session history.
+ */
+function getPluginStepOrder(session: PluginSession, tabs: TabDef[] = []): string[] {
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  const push = (stepId?: string) => {
+    if (!stepId || seen.has(stepId)) return;
+    seen.add(stepId);
+    ordered.push(stepId);
+  };
+  for (const tab of tabs) push(getTabStepId(tab));
+  for (const step of session.steps ?? []) push(step.step_id);
+  return ordered;
+}
+
+/**
+ * Completed steps stay editable only while they remain the workflow frontier
+ * (latest progressed step, waiting for review). Once a later step starts or
+ * completes — or the whole session finishes — lock editing even if the
+ * artifact still declares ui_editable / edit permission.
+ */
+function isPluginStepReadOnly(
+  session: PluginSession,
+  stepId: string | undefined,
+  stepOrder: string[],
+): boolean {
+  if (session.status === 'completed') return true;
+  if (!stepId) return false;
+
+  const past = session.projection?.past ?? [];
+  const current = session.projection?.current ?? [];
+  if (current.includes(stepId)) return false;
+  if (!past.includes(stepId)) return false;
+
+  const stepIndex = stepOrder.indexOf(stepId);
+  if (stepIndex === -1) {
+    return current.length > 0;
+  }
+  const laterSteps = new Set(stepOrder.slice(stepIndex + 1));
+  return past.some((id) => laterSteps.has(id)) || current.some((id) => laterSteps.has(id));
 }
 
 function revisionMatchesTabScope(
@@ -466,6 +513,7 @@ function InnerTabsCell({
   onRefresh,
   onReference,
   hideImageMutationActions,
+  readOnly,
 }: {
   tabsNode: InnerTabsNode;
   tab: TabDef;
@@ -475,6 +523,7 @@ function InnerTabsCell({
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
   hideImageMutationActions?: boolean;
+  readOnly?: boolean;
 }) {
   const [activeIdx, setActiveIdx] = useState(0);
 
@@ -517,6 +566,7 @@ function InnerTabsCell({
                 onRefresh={onRefresh}
                 onReference={onReference}
                 hideImageMutationActions={hideImageMutationActions}
+                readOnly={readOnly}
               />
             ) : (
               <div className='composite-cell__empty'>—</div>
@@ -538,12 +588,14 @@ function CompositeSlotGrid({
   onRefresh,
   onReference,
   onFocusSortOrder,
+  readOnly,
 }: {
   tab: TabDef;
   session: PluginSession;
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
+  readOnly?: boolean;
 }) {
   const { t } = useTranslation();
   const rows = getCompositeRows(tab, session);
@@ -593,6 +645,7 @@ function CompositeSlotGrid({
                     onRefresh={onRefresh}
                     onReference={onReference}
                     hideImageMutationActions={hideImageMutationActions}
+                    readOnly={readOnly}
                   />
                 </div>
               );
@@ -620,6 +673,7 @@ function CompositeSlotGrid({
                     onRefresh={onRefresh}
                     onReference={onReference}
                     hideImageMutationActions={hideImageMutationActions}
+                    readOnly={readOnly}
                   />
                 ) : (
                   <div className='composite-grid__cell-empty'>—</div>
@@ -652,6 +706,7 @@ function SortableImageList({
   onReference,
   onFocusSortOrder,
   onAddItem,
+  readOnly,
 }: {
   revisions: SlotRevision[];
   session: PluginSession;
@@ -661,6 +716,7 @@ function SortableImageList({
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
   onAddItem?: () => void;
+  readOnly?: boolean;
 }) {
   const { t } = useTranslation();
   const reorderSlotItems = usePluginStore((s) => s.reorderSlotItems);
@@ -782,16 +838,18 @@ function SortableImageList({
     if (r.list_index !== undefined) byListIndex[r.list_index] = r;
   }
 
+  const canDrag = isDraggable && !readOnly;
+
   return (
     <div
-      className={`plugin-panel__image-list${isDraggable ? ' plugin-panel__image-list--sortable' : ''}`}
-      onDragLeave={isDraggable ? handleContainerDragLeave : undefined}
-      onDragEnter={isDraggable ? handleDragEnter : undefined}
-      onDragOver={isDraggable ? handleContainerDragOver : undefined}
-      onDrop={isDraggable ? handleContainerDrop : undefined}
+      className={`plugin-panel__image-list${canDrag ? ' plugin-panel__image-list--sortable' : ''}`}
+      onDragLeave={canDrag ? handleContainerDragLeave : undefined}
+      onDragEnter={canDrag ? handleDragEnter : undefined}
+      onDragOver={canDrag ? handleContainerDragOver : undefined}
+      onDrop={canDrag ? handleContainerDrop : undefined}
     >
       {/* Insert indicator before first item */}
-      {isDraggable && (
+      {canDrag && (
         <div className={`plugin-panel__image-insert-gap${insertIdx === 0 ? ' plugin-panel__image-insert-gap--active' : ''}`} aria-hidden='true' />
       )}
       {localOrder.map((listIndex, idx) => {
@@ -800,12 +858,12 @@ function SortableImageList({
         return (
           <React.Fragment key={`${rev.slot_id}-${rev.sort_order ?? rev.list_index ?? 0}`}>
             <div
-              draggable={isDraggable}
-              onDragStart={isDraggable ? (e) => handleDragStart(idx, e) : undefined}
-              onDragEnter={isDraggable ? handleDragEnter : undefined}
-              onDragOver={isDraggable ? (e) => handleDragOver(e, idx) : undefined}
-              onDrop={isDraggable ? (e) => handleDrop(e, idx) : undefined}
-              onDragEnd={isDraggable ? handleDragEnd : undefined}
+              draggable={canDrag}
+              onDragStart={canDrag ? (e) => handleDragStart(idx, e) : undefined}
+              onDragEnter={canDrag ? handleDragEnter : undefined}
+              onDragOver={canDrag ? (e) => handleDragOver(e, idx) : undefined}
+              onDrop={canDrag ? (e) => handleDrop(e, idx) : undefined}
+              onDragEnd={canDrag ? handleDragEnd : undefined}
               onClick={() => onFocusSortOrder?.(rev.sort_order)}
               role='button'
               tabIndex={0}
@@ -819,20 +877,21 @@ function SortableImageList({
                 sessionId={session.session_id}
                 slotId={slotDef.id}
                 revisionCount={rev.revision_count}
-                isDraggable={isDraggable}
+                isDraggable={canDrag}
                 onRefresh={onRefresh}
                 onReference={onReference}
+                readOnly={readOnly}
               />
             </div>
             {/* Insert indicator after each item */}
-            {isDraggable && (
+            {canDrag && (
               <div className={`plugin-panel__image-insert-gap${insertIdx === idx + 1 ? ' plugin-panel__image-insert-gap--active' : ''}`} aria-hidden='true' />
             )}
           </React.Fragment>
         );
       })}
       {/* Add new item card */}
-      {onAddItem && (
+      {onAddItem && !readOnly && (
         <button
           className='plugin-panel__image-add-card'
           onClick={onAddItem}
@@ -856,6 +915,7 @@ function NamedTabSlot({
   onReference,
   onFocusSortOrder,
   onAddItem,
+  readOnly,
 }: {
   slotDef: SlotDef;
   revisions: SlotRevision[];
@@ -864,12 +924,13 @@ function NamedTabSlot({
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
   onAddItem: () => void;
+  readOnly?: boolean;
 }) {
   const { t } = useTranslation();
   const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null);
   const slotLabel = slotDef.label ?? slotDef.id;
   const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
-  const isDraggable = Boolean(slotDef.ordered);
+  const isDraggable = Boolean(slotDef.ordered) && !readOnly;
 
   return (
     <WriterIRToolbarTargetContext.Provider value={toolbarTarget}>
@@ -899,7 +960,8 @@ function NamedTabSlot({
             onRefresh={onRefresh}
             onReference={onReference}
             onFocusSortOrder={onFocusSortOrder}
-            onAddItem={onAddItem}
+            onAddItem={readOnly ? undefined : onAddItem}
+            readOnly={readOnly}
           />
         ) : (
           revisions.map((rev) => (
@@ -918,6 +980,7 @@ function NamedTabSlot({
                 revisionCount={rev.revision_count}
                 onRefresh={onRefresh}
                 onReference={onReference}
+                readOnly={readOnly}
               />
             </div>
           ))
@@ -933,12 +996,14 @@ function TabSlotGrid({
   onRefresh,
   onReference,
   onFocusSortOrder,
+  readOnly,
 }: {
   tab: TabDef;
   session: PluginSession;
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
+  readOnly?: boolean;
 }) {
   const addFileInputRef = useRef<HTMLInputElement>(null);
   const addingSlotIdRef = useRef<string>('');
@@ -946,15 +1011,16 @@ function TabSlotGrid({
   const { createSlotItem } = usePluginStore();
 
   const handleAddItem = useCallback((slotId: string, slotType: string) => {
+    if (readOnly) return;
     addingSlotIdRef.current = slotId;
     addingSlotTypeRef.current = slotType;
     addFileInputRef.current?.click();
-  }, []);
+  }, [readOnly]);
 
   const handleAddFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
+    if (!file || readOnly) return;
     const slotId = addingSlotIdRef.current;
     if (!slotId) return;
     const slotType = addingSlotTypeRef.current;
@@ -966,7 +1032,7 @@ function TabSlotGrid({
     } catch {
       // upload failure — no-op
     }
-  }, [session.session_id, createSlotItem, onRefresh]);
+  }, [session.session_id, createSlotItem, onRefresh, readOnly]);
   if (tab.layout === 'composite') {
     return (
       <CompositeSlotGrid
@@ -975,6 +1041,7 @@ function TabSlotGrid({
         onRefresh={onRefresh}
         onReference={onReference}
         onFocusSortOrder={onFocusSortOrder}
+        readOnly={readOnly}
       />
     );
   }
@@ -1013,6 +1080,7 @@ function TabSlotGrid({
             onReference={onReference}
             onFocusSortOrder={onFocusSortOrder}
             onAddItem={() => handleAddItem(slotDef.id, slotDef.type)}
+            readOnly={readOnly}
           />
         );
       })}
@@ -1177,6 +1245,7 @@ export function PluginPanel({
   const tabs: TabDef[] = ui.tabs ?? [];
   const hasTabs = tabs.length > 0;
   const hasIntent = true;
+  const stepOrder = getPluginStepOrder(session, tabs);
 
   const showActions =
     session.status === 'waiting' ||
@@ -1408,6 +1477,7 @@ export function PluginPanel({
                     onRefresh={refresh}
                     onReference={onReference}
                     onFocusSortOrder={handleFocusSortOrder}
+                    readOnly={isPluginStepReadOnly(session, getTabStepId(tab), stepOrder)}
                   />
                 </SlotDownloadContext.Provider>
               </div>
