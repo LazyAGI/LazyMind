@@ -257,7 +257,6 @@ func TestOpenAPISpecIncludesAgentEvoContracts(t *testing.T) {
 
 	paths := spec["paths"].(map[string]any)
 	for _, gateDetailPath := range []string{
-		"/api/core/agent/threads/{thread_id}/gates/eval/versions/{version}/bad-cases",
 		"/api/core/agent/threads/{thread_id}/gates/abtest/versions/{version}/case-details",
 	} {
 		if _, ok := paths[gateDetailPath]; !ok {

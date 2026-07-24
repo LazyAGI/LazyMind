@@ -1,0 +1,222 @@
+name: Windows Desktop Installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: "Branch, tag, or commit SHA to build; leave empty to build the selected workflow branch"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-installer-${{ inputs.git_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  MIRROR_PROFILE: intl
+  NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+  GOPROXY: https://proxy.golang.org,direct
+  PIP_INDEX_URL: https://pypi.org/simple
+  UV_DEFAULT_INDEX: https://pypi.org/simple
+
+jobs:
+  build-windows-installer:
+    name: Build Windows x64 installer
+    runs-on: windows-2025
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git_ref || github.ref }}
+          submodules: true
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Normalize Electron pnpm workspace
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $workspacePath = Join-Path $env:GITHUB_WORKSPACE "desktop\electron\pnpm-workspace.yaml"
+          $workspace = Get-Content -LiteralPath $workspacePath -Raw
+          if ($workspace -notmatch '(?m)^packages:\s*$') {
+            $workspace = @(
+              'packages:'
+              '  - "."'
+              ''
+              $workspace
+            ) -join "`n"
+            Set-Content -LiteralPath $workspacePath -Value $workspace -NoNewline
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          package-manager-cache: false
+
+      - name: Enable pnpm
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          corepack enable
+          corepack prepare pnpm@10.0.0 --activate
+          pnpm --version
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.5"
+          cache: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.31"
+          enable-cache: false
+
+      - name: Show build environment
+        shell: pwsh
+        env:
+          REQUESTED_REF: ${{ inputs.git_ref || github.ref_name }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          git --version
+          pwsh --version
+          node --version
+          pnpm --version
+          go version
+          uv --version
+
+          Write-Host "Runner architecture: $env:RUNNER_ARCH"
+          Write-Host "Workspace: $env:GITHUB_WORKSPACE"
+          Write-Host "Requested ref: $env:REQUESTED_REF"
+          Write-Host "Checked out commit: $(git rev-parse HEAD)"
+          Get-PSDrive -Name C |
+            Select-Object Name,
+              @{Name="UsedGB"; Expression={[math]::Round($_.Used / 1GB, 2)}},
+              @{Name="FreeGB"; Expression={[math]::Round($_.Free / 1GB, 2)}} |
+            Format-Table
+
+      - name: Run Desktop tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          node --test `
+            desktop/scripts/desktop-build.test.mjs `
+            desktop/scripts/desktop-paths.test.mjs `
+            desktop/scripts/installer-warmup.test.mjs `
+            desktop/scripts/runtime-status.test.mjs
+
+      - name: Check Windows build prerequisites
+        shell: pwsh
+        run: |
+          pwsh `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -File desktop/scripts/build-windows-x64.ps1 `
+            doctor
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          pwsh `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -File desktop/scripts/build-windows-x64.ps1 `
+            installer
+
+      - name: Validate and stage installer
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $distDir = Join-Path $env:GITHUB_WORKSPACE "desktop\dist"
+          $publishDir = Join-Path $distDir "publish"
+          $installers = @(
+            Get-ChildItem `
+              -LiteralPath $distDir `
+              -File `
+              -Filter "LazyMind-windows-x64-installer-*.exe"
+          )
+
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one installer, found $($installers.Count)"
+          }
+
+          $sourceInstaller = $installers[0]
+          $packagePath = Join-Path $env:GITHUB_WORKSPACE "desktop\electron\package.json"
+          $package = Get-Content $packagePath -Raw | ConvertFrom-Json
+          $shortSha = (& git rev-parse --short=8 HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $shortSha -notmatch '^[0-9a-fA-F]{7,}$') {
+            throw "Could not resolve the checked out commit"
+          }
+          $outputName = "LazyMind-windows-x64-installer-$($package.version)-$shortSha.exe"
+
+          New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
+
+          $outputPath = Join-Path $publishDir $outputName
+          Copy-Item -LiteralPath $sourceInstaller.FullName -Destination $outputPath
+
+          $outputFile = Get-Item -LiteralPath $outputPath
+          if ($outputFile.Length -le 0) {
+            throw "Generated installer is empty"
+          }
+
+          $hash = Get-FileHash -LiteralPath $outputPath -Algorithm SHA256
+          $signature = Get-AuthenticodeSignature -LiteralPath $outputPath
+          "installer_path=$outputPath" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+
+          @"
+          ## Windows installer
+
+          - File: `$outputName`
+          - Size: $([math]::Round($outputFile.Length / 1MB, 2)) MiB
+          - SHA-256: `$($hash.Hash.ToLowerInvariant())`
+          - Signature: `$($signature.Status)`
+          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+          Get-ChildItem -LiteralPath $publishDir | Format-Table Name, Length
+
+      - name: Upload installer artifact
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.package.outputs.installer_path }}
+          if-no-files-found: error
+          retention-days: 14
+          archive: false
+
+      - name: Add download link to summary
+        shell: pwsh
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          @"
+          ## Download
+
+          [Download the Windows installer]($env:ARTIFACT_URL)
+          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: Show final disk usage
+        if: always()
+        shell: pwsh
+        run: |
+          Get-PSDrive -Name C |
+            Select-Object Name,
+              @{Name="UsedGB"; Expression={[math]::Round($_.Used / 1GB, 2)}},
+              @{Name="FreeGB"; Expression={[math]::Round($_.Free / 1GB, 2)}} |
+            Format-Table

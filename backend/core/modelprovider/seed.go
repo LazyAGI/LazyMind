@@ -42,7 +42,7 @@ type modelCatalog map[string]catalogSection
 
 var endpointPathMarkers = []string{"/embeddings", "/rerank", "/embed"}
 
-var maxInputTokensPattern = regexp.MustCompile(`^[1-9][0-9]*(K|M)$`)
+var maxInputTokensPattern = regexp.MustCompile(`^[1-9][0-9]*([KM])?$`)
 
 // normalizeBaseURL appends a trailing slash to generic API roots; endpoint-specific URLs are kept as-is.
 func normalizeBaseURL(raw string) string {
@@ -135,12 +135,12 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 		return errors.New("model name and type are required")
 	}
 	if item.MaxInputTokens != nil {
-		if modelType != "llm" && modelType != "vlm" {
-			return errors.New("model max_input_tokens is only supported for llm or vlm models")
+		if modelType != "llm" && modelType != "vlm" && modelType != "embed" {
+			return errors.New("model max_input_tokens is only supported for llm, vlm, or embed models")
 		}
 		maxInputTokens := strings.ToUpper(strings.TrimSpace(*item.MaxInputTokens))
 		if !maxInputTokensPattern.MatchString(maxInputTokens) {
-			return errors.New("model max_input_tokens must use a positive K or M value, for example 128K or 1M")
+			return errors.New("model max_input_tokens must be a positive integer or use a K or M suffix, for example 512, 128K, or 1M")
 		}
 		item.MaxInputTokens = &maxInputTokens
 	}

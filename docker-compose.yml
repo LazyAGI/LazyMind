@@ -756,7 +756,9 @@ services:
         condition: service_healthy
 
   evo-api:
+    init: true
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-evo-api:${LAZYMIND_IMAGE_TAG:-latest}
+    entrypoint: ["python", "-m", "evo.app"]
     build:
       network: host
       context: .

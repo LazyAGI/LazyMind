@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"lazymind/core/common"
-	"lazymind/core/datasource"
 	"net/http"
 	"net/url"
 	"sort"
@@ -55,15 +54,6 @@ type scanSourceBinding struct {
 }
 
 func applyLocalFSPathsForChat(ctx context.Context, r *http.Request, db *gorm.DB, userID string, reqBody map[string]any) error {
-	enabled, err := datasource.LoadLocalFSChatEnabled(ctx, db, userID)
-	if err != nil {
-		return err
-	}
-	if !enabled {
-		fmt.Printf("[CORE_LOCALFS_DEBUG] chat_enabled=false user=%s\n", userID)
-		return nil
-	}
-	fmt.Printf("[CORE_LOCALFS_DEBUG] chat_enabled=true user=%s\n", userID)
 	sources, err := loadLocalFSSourcesForChat(ctx, r, userID)
 	if err != nil {
 		return err
