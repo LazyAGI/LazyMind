@@ -14,6 +14,41 @@
 - 如使用公有云 API 模型，请提前准备好对应的 API Key
 - 如使用内网模型，请确保当前机器能访问到内网服务
 
+### macOS：使用 Colima 替代 Docker Desktop
+
+如果本机无法使用 Docker Desktop，可以通过 Homebrew 安装 [Colima](https://github.com/abiosoft/colima) 和 Docker 命令行工具：
+
+```bash
+brew install colima docker docker-compose docker-buildx
+```
+
+启动兼容 Docker 的虚拟机：
+
+```bash
+colima start \
+  --runtime docker \
+  --vm-type vz \
+  --mount-type virtiofs \
+  --cpu 4 \
+  --memory 6 \
+  --disk 80
+```
+
+确认 Colima 和 Docker Compose 已就绪：
+
+```bash
+colima status
+docker version
+docker compose version
+```
+
+之后即可使用下文的 `make up` 或 `make up-build`。使用完毕后，应先停止 LazyMind 服务栈，再停止 Colima：
+
+```bash
+make down
+colima stop
+```
+
 ## 环境变量
 
 ### 1. 模型配置
