@@ -1017,8 +1017,7 @@ const enUS = {
     pluginGeneratedImage: "Generated Image",
     pluginAddAttachment: "Add attachment",
     pluginStop: "Stop",
-    pluginPanelExpand: "Expand plugin panel",
-    pluginPanelCollapse: "Collapse plugin panel",
+    pluginPanelCollapse: "Collapse workflow panel",
     pluginFinishEditingFirst: "Save or cancel the current edit first",
     writerIR: {
       documentRegion: "Structured document",

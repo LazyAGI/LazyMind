@@ -979,8 +979,7 @@ const zhCN = {
     pluginGeneratedImage: "生成图片",
     pluginAddAttachment: "新增附件",
     pluginStop: "停止",
-    pluginPanelExpand: "展开插件面板",
-    pluginPanelCollapse: "收起插件面板",
+    pluginPanelCollapse: "收起工作流面板",
     pluginFinishEditingFirst: "请先保存或取消当前编辑",
     writerIR: {
       documentRegion: "结构化文档",
