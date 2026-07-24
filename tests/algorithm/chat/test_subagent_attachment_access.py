@@ -23,7 +23,7 @@ def test_create_subagent_snapshots_parent_attachment_context(monkeypatch):
     })
     monkeypatch.setattr(
         subagent_chat_tools,
-        'emit_agent_event',
+        '_write_agent_data',
         lambda tag, **payload: emitted.append((tag, payload)),
     )
 

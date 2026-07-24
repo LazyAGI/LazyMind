@@ -847,7 +847,7 @@ func DecideToolLimit(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("conversation not found: %v", err), http.StatusNotFound)
 		return
 	}
-	if err := plugin.NotifyChatToolLimitDecision(convID, decisionID, action); err != nil {
+	if err := notifyToolLimitDecision(convID, decisionID, action); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("failed to deliver tool-limit decision: %v", err), http.StatusConflict)
 		return
 	}

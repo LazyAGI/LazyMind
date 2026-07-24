@@ -5,11 +5,11 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import lazyllm
+from lazyllm.tools.agent.base import _write_agent_data
 
 from lazymind.chat.engine.subagent import SUBAGENT_ATTACHMENT_CONTEXT_KEY
 from lazymind.chat.engine.subagent.db import TaskQueryDB
 from lazymind.chat.engine.tools.infra import tool_success
-from lazymind.chat.service.agent_event_bus import emit_agent_event
 
 # How often to emit a heartbeat while polling in auto mode (seconds).
 _HEARTBEAT_INTERVAL = 15
@@ -157,7 +157,7 @@ def create_subagent(
         if existing and existing.get('task_id'):
             task_id = str(existing['task_id'])
 
-    emit_agent_event(
+    _write_agent_data(
         'task_created',
         task_id=task_id,
         title=title,
@@ -185,7 +185,7 @@ def create_subagent(
                 break
             now = time.time()
             if now - last_heartbeat >= _HEARTBEAT_INTERVAL:
-                emit_agent_event('heartbeat')
+                _write_agent_data('heartbeat')
                 last_heartbeat = now
             time.sleep(_POLL_INTERVAL)
 

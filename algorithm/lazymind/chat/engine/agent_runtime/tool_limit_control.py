@@ -9,8 +9,8 @@ from typing import Any, Optional
 
 import lazyllm
 from lazyllm import FileSystemQueue
+from lazyllm.tools.agent.base import _write_agent_data
 
-from lazymind.chat.service.agent_event_bus import emit_agent_event
 from lazymind.config import config
 
 
@@ -78,7 +78,7 @@ class ToolLimitDecisionCoordinator:
                 f'ChatAgent reached tool round limit={current_limit}; waiting up to '
                 f'{timeout:g}s for a decision.'
             )
-            emit_agent_event(
+            _write_agent_data(
                 'tool_limit_pending',
                 decision_id=decision_id,
                 used_rounds=used_rounds,
