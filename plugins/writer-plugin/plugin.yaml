@@ -27,7 +27,6 @@ tool_scripts:
       - writer_prepare_outline
       - writer_generate_outline
       - writer_generate_section_instructions
-      - writer_generate_draft_block
       - writer_generate_draft_blocks
       - writer_generate_draft_document
       - writer_update_writing_context

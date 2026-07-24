@@ -203,8 +203,7 @@ steps:
          2. Call writer_generate_draft_blocks once with writing_task,
             section_instructions, and writing_context_after_outline. It returns every
             generated block path in order. Save all returned paths as the ordered
-            draft_blocks list, preferably in one save_artifacts call. Do not repeatedly
-            call writer_generate_draft_block from the Agent loop.
+            draft_blocks list, preferably in one save_artifacts call.
          3. Call writer_generate_draft_document using the last block path, current
             context, and outline. Save draft_document.
          4. Call writer_update_writing_context using draft_document and save

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import tempfile
 import uuid
@@ -13,6 +14,7 @@ from lazyllm.tools.writer.data_models import (
     InputResource,
     SectionInstruction,
     TargetDocument,
+    WriterAuthoring,
     WriterBlock,
     WriterDocument,
     WritingTask,
@@ -25,10 +27,15 @@ from lazyllm.tools.writer.tools import (
     WriterResourceTools,
     WriterRevisionTools,
 )
-from lazyllm.tools.writer.utils import save_artifact_json
+from lazyllm.tools.writer.utils import render_document_markdown, save_artifact_json
 
 
 WRITER_DATA_MODEL_SCHEMA_PREFIX = 'lazyllm.tools.writer.data_models'
+_FEISHU_URL_RE = re.compile(
+    r"https?://[^\s<>\"']*(?:feishu\.(?:cn|com)|larksuite\.com)/"
+    r"[^\s<>\"'，。；！？、）】》」』]+",
+    re.IGNORECASE,
+)
 
 
 def writer_schema(name: str) -> str:
@@ -97,12 +104,25 @@ def _primary_data(result: dict) -> Any:
     return _read_artifact_data(artifact_path)
 
 
+def _result_data(result: dict, key: str) -> Any:
+    path = ((result.get('metadata') or {}).get('artifact_paths') or {}).get(key)
+    if not path:
+        raise ValueError(f'Writer tool did not return artifact {key!r}: {result!r}')
+    return _read_artifact_data(path)
+
+
+def _feishu_url(user_input: str) -> str:
+    match = _FEISHU_URL_RE.search(user_input or '')
+    if not match:
+        raise ValueError('A Feishu/Lark document URL is required.')
+    return match.group(0).rstrip(').,;!?]}，。；！？】》」』')
+
+
 def _extract_feishu_resources(user_input: str) -> list[dict]:
-    pattern = re.compile(r'https?://[A-Za-z0-9.\-]+\.feishu\.cn/\S+')
     resources: list[dict] = []
     seen: set[str] = set()
-    for idx, match in enumerate(pattern.finditer(user_input or '')):
-        url = match.group(0)
+    for idx, match in enumerate(_FEISHU_URL_RE.finditer(user_input or '')):
+        url = match.group(0).rstrip(').,;!?]}，。；！？】》」』')
         if url in seen:
             continue
         seen.add(url)
@@ -118,6 +138,75 @@ def _extract_feishu_resources(user_input: str) -> list[dict]:
     return resources
 
 
+def _set_document_editable(value: Any, *, stage: str | None = None) -> WriterDocument:
+    document = WriterDocument.model_validate(value)
+    if stage is not None:
+        document.stage = stage
+    document.ui_editable = True
+
+    def update_blocks(blocks: list[WriterBlock], level: int = 1) -> None:
+        for block in blocks:
+            block.editable = True
+            if stage is not None:
+                block.stage = stage
+            heading_level = block.numbering.get('level')
+            if block.type == 'heading' and (
+                not isinstance(heading_level, int)
+                or isinstance(heading_level, bool)
+                or not 1 <= heading_level <= 9
+            ):
+                block.numbering['level'] = min(level, 9)
+            update_blocks(block.children, level + 1)
+
+    update_blocks(document.blocks)
+    return document
+
+
+def _target_from_document(value: Any) -> TargetDocument | None:
+    document = WriterDocument.model_validate(value)
+    source = document.metadata.get('source')
+    if not isinstance(source, dict):
+        return None
+    try:
+        target = TargetDocument.model_validate(source)
+    except Exception:
+        return None
+    return target if target.uri or target.doc_id else None
+
+
+def _document_text(document: WriterDocument) -> str:
+    return '\n'.join(
+        block.content
+        for block in document.iter_blocks()
+        if block.content
+    )
+
+
+def _published_link(target: TargetDocument) -> str:
+    link = str(
+        target.meta.get('browser_url')
+        or (target.uri if target.uri.startswith(('http://', 'https://')) else '')
+    ).strip()
+    if not link:
+        raise ValueError('Provider write succeeded but no browser URL was returned.')
+    return link
+
+
+def _resolve_target(
+    source_document: WriterDocument | None = None,
+    target_document_json: str = '',
+    target_uri: str = '',
+) -> TargetDocument | None:
+    target = _target_from_document(source_document) if source_document else None
+    if target_document_json.strip():
+        target = TargetDocument.model_validate(
+            _json_loads(target_document_json, {}),
+        )
+    if target_uri.strip():
+        target = TargetDocument(uri=target_uri.strip(), adapter='feishu')
+    return target
+
+
 class WriterToolkitBase:
     """Adapters for LazyLLM's unified WriterDocument/WriterBlock tool APIs."""
 
@@ -130,6 +219,55 @@ class WriterToolkitBase:
         task = WritingTask(query=query, task_type='write')
         return _json_dumps(task.model_dump())
 
+    def build_resources(
+        self,
+        file_paths_json: str = '[]',
+        source_document_json: str = '',
+        knowledge_text: str = '',
+    ) -> str:
+        """Build normalized InputResource data from plugin runtime inputs."""
+        file_paths = _json_loads(file_paths_json, [])
+        if not isinstance(file_paths, list):
+            raise TypeError('file_paths_json must be a JSON array.')
+        resources = [{
+            'resource_id': os.path.basename(path),
+            'resource_type': 'file',
+            'uri': path,
+            'title': os.path.basename(path),
+            'mime_type': None,
+            'summary': None,
+            'meta': {},
+        } for path in file_paths]
+
+        if source_document_json:
+            document = WriterDocument.model_validate(
+                _json_loads(source_document_json, {}),
+            )
+            target = _target_from_document(document)
+            resources.append({
+                'resource_id': 'source_document',
+                'resource_type': 'text',
+                'inline_text': _document_text(document),
+                'title': document.title or None,
+                'summary': None,
+                'meta': {
+                    'provider': target.adapter if target else None,
+                    'uri': target.uri if target else None,
+                    'role': 'background',
+                },
+            })
+
+        if knowledge_text.strip():
+            resources.append({
+                'resource_id': 'knowledge_base_evidence',
+                'resource_type': 'text',
+                'inline_text': knowledge_text,
+                'title': 'Knowledge base evidence',
+                'summary': None,
+                'meta': {'provider': 'knowledge_base', 'role': 'background'},
+            })
+        return _json_dumps(resources)
+
     def profile_resources(self, writing_task_json: str, user_input: str, resources_json: str = '[]') -> str:
         """Profile writing resources."""
         root = _temp_root()
@@ -139,7 +277,14 @@ class WriterToolkitBase:
             resources = []
         if not isinstance(resources, list):
             raise TypeError('resources_json must be a JSON array.')
-        resources = resources + _extract_feishu_resources(user_input)
+        has_feishu_resource = any(
+            isinstance(item, dict)
+            and isinstance(item.get('meta'), dict)
+            and item['meta'].get('provider') == 'feishu'
+            for item in resources
+        )
+        if not has_feishu_resource:
+            resources += _extract_feishu_resources(user_input)
 
         task_path = _write_input_artifact(
             root, 'writing_task.json', task_data, writer_schema('task.WritingTask'),
@@ -165,6 +310,28 @@ class WriterToolkitBase:
             target_document=target_document,
         )
         return _json_dumps(task.model_dump())
+
+    def build_revision_task(
+        self,
+        query: str,
+        writer_document_json: str,
+        allow_outline: bool = True,
+    ) -> str:
+        """Build a revision task directly from its current WriterDocument."""
+        document = WriterDocument.model_validate(
+            _json_loads(writer_document_json, {}),
+        )
+        if document.stage == 'outline' and not allow_outline:
+            raise ValueError(
+                'A full-document revision cannot use an outline-stage document.',
+            )
+        target = _target_from_document(document)
+        return self.build_revise_task(
+            query=query,
+            target_document_json=(
+                _json_dumps(target.model_dump()) if target else ''
+            ),
+        )
 
     def validate_patch_set(
         self,
@@ -234,7 +401,27 @@ class WriterToolkitBase:
         result = WriterPlanningTools(
             llm=AutoModel(model='llm'), artifact_store=str(root),
         ).generate_outline(task=task_path, context=context_path)
-        return _json_dumps(_primary_data(result))
+        return _set_document_editable(_primary_data(result), stage='outline').model_dump_json()
+
+    def prepare_outline(self, source_document_json: str) -> str:
+        """Normalize a supplied document into an editable outline."""
+        document = WriterDocument.model_validate(
+            _json_loads(source_document_json, {}),
+        )
+        for block in document.blocks:
+            if block.type != 'paragraph':
+                continue
+            lines = [line.strip() for line in block.content.splitlines() if line.strip()]
+            if not lines:
+                continue
+            block.type = 'heading'
+            block.content = lines[0]
+            block.spans = []
+            block.numbering['level'] = 1
+            block.authoring = block.authoring or WriterAuthoring()
+            if len(lines) > 1 and not block.authoring.constraints.section_goal:
+                block.authoring.constraints.section_goal = '\n'.join(lines[1:])
+        return _set_document_editable(document, stage='outline').model_dump_json()
 
     def generate_section_instructions(
         self,
@@ -285,6 +472,32 @@ class WriterToolkitBase:
             previous_blocks=previous_blocks,
         )
         return _json_dumps(_primary_data(result))
+
+    def generate_draft_blocks(
+        self,
+        writing_task_json: str,
+        section_instructions_json: str,
+        writing_context_json: str,
+    ) -> str:
+        """Generate every planned draft section in order."""
+        instructions_data = _json_loads(section_instructions_json, {})
+        instructions = (
+            instructions_data.get('instructions')
+            if isinstance(instructions_data, dict) else None
+        )
+        if not isinstance(instructions, list):
+            raise TypeError('section_instructions_json must contain instructions.')
+
+        blocks: list[Any] = []
+        for instruction in instructions:
+            block = _json_loads(self.generate_draft_section(
+                writing_task_json=writing_task_json,
+                section_instruction_json=_json_dumps(instruction),
+                writing_context_json=writing_context_json,
+                previous_blocks_json=_json_dumps(blocks),
+            ), {})
+            blocks.append(block)
+        return _json_dumps(blocks)
 
     def generate_draft_document(
         self,
@@ -374,9 +587,23 @@ class WriterToolkitBase:
         if output_path:
             with open(output_path, 'r', encoding='utf-8') as fh:
                 markdown = fh.read()
+        final_document = _set_document_editable(
+            _primary_data(result),
+            stage='final',
+        )
         return _json_dumps({
-            'final_document': _primary_data(result),
+            'final_document': final_document.model_dump(),
             'final_document_md': markdown,
+        })
+
+    def render_markdown(self, writer_document_json: str) -> str:
+        """Return the current WriterDocument title and rendered Markdown."""
+        document = WriterDocument.model_validate(
+            _json_loads(writer_document_json, {}),
+        )
+        return _json_dumps({
+            'title': document.title,
+            'markdown': render_document_markdown(document),
         })
 
     def locate_revision_target(
@@ -459,6 +686,35 @@ class WriterToolkitBase:
         ).generate_patch_set(document=document_path, modify_plan=plan_path, context=context_path)
         return _json_dumps(_primary_data(result))
 
+    def plan_revision(
+        self,
+        writing_task_json: str,
+        writer_document_json: str,
+        writing_context_json: str,
+    ) -> str:
+        """Locate targets, build a modification plan, and generate a PatchSet."""
+        located = self.locate_revision_target(
+            writing_task_json=writing_task_json,
+            writer_document_json=writer_document_json,
+            writing_context_json=writing_context_json,
+        )
+        plan = self.generate_modify_plan(
+            writing_task_json=writing_task_json,
+            writer_document_json=writer_document_json,
+            locate_result_json=located,
+            writing_context_json=writing_context_json,
+        )
+        patch_set = self.generate_patch_set(
+            writer_document_json=writer_document_json,
+            modify_plan_json=plan,
+            writing_context_json=writing_context_json,
+        )
+        return _json_dumps({
+            'locate_result': _json_loads(located, {}),
+            'modify_plan': _json_loads(plan, {}),
+            'patch_set': _json_loads(patch_set, {}),
+        })
+
     def apply_patch(
         self,
         writer_document_json: str,
@@ -484,9 +740,186 @@ class WriterToolkitBase:
         )
         artifact_paths = (result.get('metadata') or {}).get('artifact_paths') or {}
         revised_path = artifact_paths.get('revised_document', '')
+        source = WriterDocument.model_validate(
+            _json_loads(writer_document_json, {}),
+        )
+        revised = _set_document_editable(
+            _read_artifact_data(revised_path) if revised_path else {},
+            stage=source.stage,
+        )
         return _json_dumps({
             'patch_result': _primary_data(result),
-            'revised_document': _read_artifact_data(revised_path) if revised_path else {},
+            'revised_document': revised.model_dump(),
+        })
+
+    def apply_revision(
+        self,
+        writer_document_json: str,
+        patch_set_json: str,
+        writing_context_json: str,
+        sync_provider: bool = False,
+        allow_outline: bool = True,
+    ) -> str:
+        """Apply a local revision and optionally synchronize its bound provider."""
+        source = WriterDocument.model_validate(
+            _json_loads(writer_document_json, {}),
+        )
+        if source.stage == 'outline' and not allow_outline:
+            raise ValueError(
+                'A full-document revision cannot use an outline-stage document.',
+            )
+        applied = _json_loads(self.apply_patch(
+            writer_document_json=writer_document_json,
+            patch_set_json=patch_set_json,
+            writing_context_json=writing_context_json,
+        ), {})
+        output = {
+            'patch_result': applied.get('patch_result') or {},
+            'revised_document': applied.get('revised_document') or {},
+            'write_result': None,
+        }
+        if not sync_provider or _target_from_document(source) is None:
+            return _json_dumps(output)
+
+        published = _json_loads(WriterResourceToolkit().publish_revision(
+            source_document_json=writer_document_json,
+            patch_set_json=patch_set_json,
+        ), {})
+        output['revised_document'] = published.get('published_document') or {}
+        output['write_result'] = published.get('publish_result') or {}
+        return _json_dumps(output)
+
+    def load_document(self, user_input: str, stage: str = 'final') -> str:
+        """Load a Feishu/Lark document and return its IR and target binding."""
+        if stage not in {'outline', 'draft', 'final'}:
+            raise ValueError('stage must be outline, draft, or final.')
+        root = _temp_root()
+        target = TargetDocument(
+            uri=_feishu_url(user_input),
+            adapter='feishu',
+            meta={'stage': stage},
+        )
+        result = WriterResourceTools(
+            llm=None, artifact_store=str(root),
+        ).document_to_docir(target)
+        return _json_dumps({
+            'source_document': _primary_data(result),
+            'target_document': target.model_dump(),
+        })
+
+    def create_document(self, title: str, parent_uri: str = '') -> str:
+        """Create an empty Feishu document and return its target binding."""
+        root = _temp_root()
+        result = WriterResourceTools(
+            llm=None, artifact_store=str(root),
+        ).create_document(
+            title=title.strip() or '未命名文档',
+            parent_uri=parent_uri.strip(),
+            adapter='feishu',
+        )
+        return _json_dumps(_primary_data(result))
+
+    def publish_revision(
+        self,
+        source_document_json: str,
+        patch_set_json: str,
+    ) -> str:
+        """Apply a prepared PatchSet to its bound provider document."""
+        root = _temp_root()
+        source = WriterDocument.model_validate(
+            _json_loads(source_document_json, {}),
+        )
+        target = _target_from_document(source)
+        if target is None:
+            raise ValueError('source document must contain a cloud target binding.')
+        result = WriterResourceTools(
+            llm=None, artifact_store=str(root),
+        ).apply_patch_to_document(
+            patch_set=_json_loads(patch_set_json, {}),
+            source_document=source,
+        )
+        persisted = _set_document_editable(
+            _result_data(result, 'persisted_document'),
+            stage=source.stage,
+        )
+        return _json_dumps({
+            'publish_result': _primary_data(result),
+            'published_document': persisted.model_dump(),
+            'published_link': _published_link(target),
+        })
+
+    def replace_document(
+        self,
+        content_json: str,
+        source_document_json: str,
+        target_document_json: str = '',
+        target_uri: str = '',
+    ) -> str:
+        """Replace a provider document with the selected WriterDocument."""
+        return self._write_document(
+            mode='replace',
+            content_json=content_json,
+            source_document_json=source_document_json,
+            target_document_json=target_document_json,
+            target_uri=target_uri,
+        )
+
+    def append_document(
+        self,
+        content_json: str,
+        target_document_json: str = '',
+        target_uri: str = '',
+        publish_outline: bool = False,
+    ) -> str:
+        """Append a WriterDocument to a provider target."""
+        document = WriterDocument.model_validate(_json_loads(content_json, {}))
+        if document.stage == 'outline' and not publish_outline:
+            raise ValueError(
+                'Refusing to publish outline IR as the final document. '
+                'Set publish_outline=true only for an explicit outline publish.',
+            )
+        return self._write_document(
+            mode='append',
+            content_json=content_json,
+            source_document_json=content_json,
+            target_document_json=target_document_json,
+            target_uri=target_uri,
+        )
+
+    def _write_document(
+        self,
+        *,
+        mode: str,
+        content_json: str,
+        source_document_json: str = '',
+        target_document_json: str = '',
+        target_uri: str = '',
+    ) -> str:
+        root = _temp_root()
+        document = WriterDocument.model_validate(_json_loads(content_json, {}))
+        source = (
+            WriterDocument.model_validate(_json_loads(source_document_json, {}))
+            if source_document_json else None
+        )
+        target = _resolve_target(source, target_document_json, target_uri)
+        if target is None:
+            raise ValueError('A target provider document is required.')
+        publish_document = _set_document_editable(document, stage='final')
+        resource = WriterResourceTools(llm=None, artifact_store=str(root))
+        write_result = (
+            resource.replace_document(publish_document, target)
+            if mode == 'replace'
+            else resource.append_to_document(publish_document, target)
+        )
+        refreshed = resource.document_to_docir(TargetDocument(
+            **target.model_dump(exclude={'meta'}),
+            meta={**target.meta, 'stage': 'final'},
+        ))
+        published = _set_document_editable(_primary_data(refreshed), stage='final')
+        return _json_dumps({
+            'publish_result': _primary_data(write_result),
+            'published_document': published.model_dump(),
+            'published_link': _published_link(target),
         })
 
 
@@ -499,11 +932,12 @@ class WriterCreateToolkit(WriterToolkitBase):
     """
 
     __public_apis__ = [
-        'build_writing_task', 'profile_resources', 'create_writing_context',
-        'generate_outline', 'generate_section_instructions',
-        'generate_draft_section', 'generate_draft_document',
+        'build_writing_task', 'build_resources', 'profile_resources',
+        'create_writing_context', 'prepare_outline', 'generate_outline',
+        'generate_section_instructions', 'generate_draft_section',
+        'generate_draft_blocks', 'generate_draft_document',
         'update_writing_context', 'check_consistency',
-        'generate_final_document',
+        'generate_final_document', 'render_markdown',
     ]
 
 
@@ -515,7 +949,16 @@ class WriterRevisionToolkit(WriterToolkitBase):
     """
 
     __public_apis__ = [
-        'build_revise_task', 'locate_revision_target',
-        'generate_modify_plan', 'generate_patch_set', 'validate_patch_set',
-        'apply_patch',
+        'build_revise_task', 'build_revision_task', 'locate_revision_target',
+        'generate_modify_plan', 'generate_patch_set', 'plan_revision',
+        'validate_patch_set', 'apply_patch', 'apply_revision',
+    ]
+
+
+class WriterResourceToolkit(WriterToolkitBase):
+    """Load and persist WriterDocuments through provider-neutral resource tools."""
+
+    __public_apis__ = [
+        'load_document', 'create_document', 'publish_revision',
+        'replace_document', 'append_document',
     ]
