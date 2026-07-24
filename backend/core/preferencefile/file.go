@@ -73,7 +73,17 @@ func PatchFileContent(content string, patch PreferencePatch) (string, Preference
 	}
 	file.hasFrontmatter = true
 	if patch.Content != nil {
-		file.Content = stripLeadingPreferenceFrontmatters(*patch.Content)
+		submittedMeta, submittedBody, hasFrontmatter, parseErr :=
+			splitPreferenceFrontmatter(*patch.Content)
+		if parseErr == nil && hasFrontmatter && isPreferenceFrontmatter(submittedMeta) {
+			file.AgentPersona = yamlString(submittedMeta, "agent_persona")
+			file.PreferredName = yamlString(submittedMeta, "preferred_name")
+			file.ResponseStyle = yamlString(submittedMeta, "response_style")
+			file.meta = submittedMeta
+			file.Content = stripLeadingPreferenceFrontmatters(submittedBody)
+		} else {
+			file.Content = stripLeadingPreferenceFrontmatters(*patch.Content)
+		}
 	}
 	if patch.AgentPersona != nil {
 		file.AgentPersona = *patch.AgentPersona
