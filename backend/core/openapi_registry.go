@@ -445,6 +445,44 @@ type exportConversationFilePathParams struct {
 	FileID string `path:"file_id"`
 }
 
+type conversationPathParams struct {
+	Name string `path:"name"`
+}
+
+type channelCommandOpenAPI struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type channelCommandRegistryOpenAPI struct {
+	SchemaVersion  string                  `json:"schema_version"`
+	Commands       []channelCommandOpenAPI `json:"commands"`
+	SelectionRules []string                `json:"selection_rules"`
+	OutputSchema   map[string]any          `json:"output_schema"`
+}
+
+type channelIntentOpenAPIRequest struct {
+	Provider        string                        `json:"provider"`
+	Message         string                        `json:"message"`
+	State           map[string]any                `json:"state"`
+	CommandRegistry channelCommandRegistryOpenAPI `json:"command_registry"`
+}
+
+type channelIntentOpenAPIResponse struct {
+	SchemaVersion string         `json:"schema_version"`
+	Command       string         `json:"command"`
+	Parameters    map[string]any `json:"parameters"`
+}
+
+type conversationSearchConfigOpenAPIRequest struct {
+	DatasetIDs []string `json:"dataset_ids"`
+}
+
+type conversationSearchConfigOpenAPIResponse struct {
+	ConversationID string         `json:"conversation_id"`
+	SearchConfig   map[string]any `json:"search_config"`
+}
+
 type toolPathParams struct {
 	ToolName string `path:"tool_name"`
 }
@@ -2035,6 +2073,18 @@ type pluginRepairPreviewOpenAPIRequest struct {
 	Mode   string `json:"mode"`
 }
 
+type writerDocumentSyncPathParams struct {
+	SessionID string `path:"session_id"`
+	SlotID    string `path:"slot_id"`
+	ListIndex int    `path:"list_index"`
+}
+
+type writerDocumentSyncOpenAPIRequest struct {
+	BaseRevision    int            `json:"base_revision"`
+	SourceDocument  map[string]any `json:"source_document"`
+	RevisedDocument map[string]any `json:"revised_document"`
+}
+
 func registeredCoreOperations() []openAPIOperation {
 	jsonBodyOf := func(v any, required bool) *openAPIBody {
 		return &openAPIBody{Required: required, ContentType: "application/json", Schema: schemaSource{Type: v}}
@@ -2090,6 +2140,15 @@ func registeredCoreOperations() []openAPIOperation {
 		{Method: "POST", Path: "/plugin-drafts/{draft_id}:confirm-workflow", Summary: "Confirm Skill workflow candidate", Tags: []string{"plugin"}, PathParams: pluginDraftPathParams{}, RequestBody: jsonBodyOf(pluginWorkflowConfirmOpenAPIRequest{}, true), Responses: map[int]openAPIResponse{200: evoJSONResp("Confirmation result")}},
 		{Method: "POST", Path: "/plugin-drafts/{draft_id}:repair-preview", Summary: "Preview Plugin repair", Tags: []string{"plugin"}, PathParams: pluginDraftPathParams{}, RequestBody: jsonBodyOf(pluginRepairPreviewOpenAPIRequest{}, true), Responses: map[int]openAPIResponse{200: evoJSONResp("Repair preview")}},
 		{Method: "GET", Path: "/plugin-drafts/{draft_id}/repair-runs/{repair_id}", Summary: "Get Plugin repair run", Tags: []string{"plugin"}, PathParams: pluginRepairRunPathParams{}, Responses: map[int]openAPIResponse{200: evoJSONResp("Repair run")}},
+		{
+			Method:      "POST",
+			Path:        "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document",
+			Summary:     "Sync an edited WriterDocument to Feishu",
+			Tags:        []string{"plugin", "writer"},
+			PathParams:  writerDocumentSyncPathParams{},
+			RequestBody: jsonBodyOf(writerDocumentSyncOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("WriterDocument sync result")},
+		},
 		{
 			Method:      "GET",
 			Path:        "/datasets",
@@ -3728,6 +3787,25 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  mcpServerPathParams{},
 			RequestBody: jsonBodyOf(mcp.UpdateToolsRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Updated MCP server tools", mcp.ServerResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/channel-intents:classify",
+			Summary:     "Classify a channel message",
+			Description: "Classifies an external-channel message against the caller-provided command registry and parameter schemas.",
+			Tags:        []string{"channels"},
+			RequestBody: jsonBodyOf(channelIntentOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Classified channel command", channelIntentOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/conversations/{name}:search-config",
+			Summary:     "Update conversation knowledge bases",
+			Description: "Replaces the knowledge bases on an existing conversation while preserving its other search settings.",
+			Tags:        []string{"conversations"},
+			PathParams:  conversationPathParams{},
+			RequestBody: jsonBodyOf(conversationSearchConfigOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated conversation search config", conversationSearchConfigOpenAPIResponse{})},
 		},
 		{
 			Method:      "POST",

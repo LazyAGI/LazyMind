@@ -519,6 +519,10 @@ type targetTreeCachePrewarmer struct {
 }
 
 func buildTargetSearchCachePrewarmer(built Components, cfg config.Config) (*targetTreeCachePrewarmer, error) {
+	if !cfg.TargetSearchCachePrewarmEnabled {
+		fmt.Fprintln(os.Stdout, "target search cache prewarmer disabled")
+		return nil, nil
+	}
 	if built.TargetSearchCacheStore == nil {
 		return nil, nil
 	}

@@ -883,7 +883,7 @@ func resolveReasoning(raw map[string]any) bool {
 func resolveThinkingDepth(raw map[string]any) string {
 	if value, ok := raw["thinking_depth"].(string); ok {
 		switch strings.ToLower(strings.TrimSpace(value)) {
-		case "low", "medium", "high":
+		case "low", "medium", "high", "max":
 			return strings.ToLower(strings.TrimSpace(value))
 		}
 	}
@@ -1280,6 +1280,22 @@ func streamSingleAnswer(
 					Type:    "ask_pending",
 					Payload: d.AskPending,
 				})
+			}
+			continue
+		}
+		if d.ToolLimitPending != nil {
+			limitChunk := &ChatChunkResponse{
+				ConversationID:   convID,
+				Seq:              int32(seq),
+				HistoryID:        historyID,
+				FinishReason:     "FINISH_REASON_UNSPECIFIED",
+				ToolLimitPending: d.ToolLimitPending,
+			}
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, limitChunk)
+			}
+			if stateStore != nil {
+				_ = appendChatChunk(chatCtx, stateStore, convID, historyID, limitChunk)
 			}
 			continue
 		}

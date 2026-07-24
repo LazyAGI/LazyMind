@@ -4,96 +4,126 @@
 
 > **让 AI 按照你的资料、标准和偏好，稳定完成真实任务。**
 
-LazyMind 是面向知识密集型任务的 **AI Skill Runtime**。它把少数深度用户手动组织模型、资料、Skill、工具和流程的经验，封装成普通用户可以直接使用的产品。
+[![GitHub stars](https://img.shields.io/github/stars/LazyAGI/LazyMind?style=flat-square)](https://github.com/LazyAGI/LazyMind/stargazers)
+[![License](https://img.shields.io/github/license/LazyAGI/LazyMind?style=flat-square)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-arm64-111827?style=flat-square&logo=apple)](desktop/README.md)
+[![Windows](https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square&logo=windows)](desktop/README.md)
+[![本地优先](https://img.shields.io/badge/部署-本地优先-16a34a?style=flat-square)](docs/quick_start.CN.md)
 
-你不必反复上传资料、调 Prompt、配置 CLI 或全程盯着 Agent：LazyMind 会基于你的知识推进任务，展示每一步和中间产物，并从反馈中持续贴近你的交付标准。既可以通过 **Desktop Mode** 在本机使用，也可以部署为团队共享的企业服务。
+LazyMind 是面向知识密集型工作的 **AI Skill Runtime**。它在同一个工作台里连接可复用知识、可执行 Skill、可观测工作流、可编辑产物与评测驱动的持续改进。
 
----
+你不必反复上传资料、调 Prompt 或全程盯着 Agent：选择一次知识与工作流，LazyMind 会继续规划、执行、展示中间结果，并把经过确认的反馈带到下一次任务中。既可以通过 **Desktop Mode** 在本机使用，也可以部署为团队共享的企业服务。
 
-## 为什么需要 LazyMind？
-
-真实任务一旦超出简单问答，用户通常会遇到四个障碍：
-
-- **资料散落**：项目材料、历史报告和业务知识分布在本地文件与多个协作平台，每次都要重新寻找、上传和解释。
-- **标准难以沉淀**：AI 能生成内容，却不了解业务口径、表达偏好、格式要求和交付边界，结果总要反复修改。
-- **长任务容易失控**：资料和工具一多，Agent 就可能跳步、漏掉约束或中途跑偏，用户只能全程监督。
-- **高阶能力门槛太高**：模型、Skill、插件和工作流都在快速发展，但组合、配置与长期维护仍然依赖少数深度用户。
-
-LazyMind 用三个相互配合的系统吸收这些复杂度：
-
-| 系统 | 解决的问题 | 用户得到什么 |
-|------|------------|--------------|
-| **知识底座** | AI 看得到什么 | 资料无需反复搬运，任务可以持续调用自己的知识并追溯原文 |
-| **状态大脑** | 长任务怎么稳定跑 | 过程可见、结果可改、异常可恢复，关键决策仍由用户掌控 |
-| **AI 成长引擎** | 下一次能不能更好 | 偏好、术语、反馈和评测结果持续沉淀，系统越用越贴合标准 |
-
-三者共同组成产品化的 Skill Runtime：不是再提供一个 AI 入口，而是把模型能力稳定转化为交付结果。
+**[快速开始](#快速开始)** · **[产品架构](docs/architecture.md)** · **[构建工作流](docs/plugin-format.md)** · **[桌面模式](desktop/README.md)**
 
 ---
+
+## 它能交付什么？
+
+| 场景 | LazyMind 执行 | 你获得 |
+|------|---------------|--------|
+| **调研与评审** | 搜索资料 → 检索证据 → 对比 → 综合 → 审阅 | 基于内部资料与外部来源、过程可追溯的报告 |
+| **AI Writer** | 整理素材 → 生成大纲 → 分章节写作 → 修改 → 终审 | 可编辑、有版本记录的文档，而不是一次性回答 |
+| **AI Image** | 理解需求 → 收集参考 → 优化 Prompt → 生成/编辑 | 保留生成过程的图片与动态表情 |
+| **知识助手** | 接入资料 → 解析/OCR → 混合检索 → 重排 → 回答 | 可回溯到组织知识的答案 |
+| **质量改进** | 收集 badcase → 评测 → 诊断 → A/B Test → 部署 | 经过验证的策略优化，而不是未经检查的 Prompt 改动 |
+
+## LazyMind 如何工作
+
+```mermaid
+flowchart LR
+    K["知识<br/>本地文件 · 云文档 · 对象存储"] --> R["检索与推理<br/>解析 · OCR · 混合检索 · 重排"]
+    S["Skill 与工作流<br/>指令 · 工具 · 状态机"] --> X["可观测执行<br/>步骤 · 审批 · 重试 · 回退"]
+    R --> X
+    X --> A["可编辑产物<br/>引用 · 版本 · 交付"]
+    A --> F["反馈与评测<br/>偏好 · badcase · A/B Test"]
+    F --> K
+    F --> S
+```
+
+这个闭环由三个相互连接的系统组成：
+
+| 系统 | 负责什么 | 产品行为 |
+|------|----------|----------|
+| **知识底座** | 给 AI 正确的上下文 | 多源接入、OCR、混合检索、重排与原文追溯 |
+| **状态大脑** | 让长任务不跑偏 | 步骤可见、关键点审批、产物可编辑、重试/回退与版本记录 |
+| **AI 成长引擎** | 安全地改进下一次执行 | 可审核的偏好与术语，以及评测、诊断、A/B Test 与回滚 |
 
 ## 核心亮点
 
-### 1. 从“问一个问题”到“交付一个结果”
+### 1. 交付结果，而不只是回复消息
 
-选择自己的知识和一个 Skill，LazyMind 会继续完成资料整理、结构规划、内容生成、检查与交付，而不是在给出一段回答后停下来。
+选择知识与 Skill 后，LazyMind 会从资料整理继续推进到规划、生成、审阅与交付。Plugin 用状态机定义步骤、工具、输入输出和流转条件，Artifact 则保留可编辑结果与版本历史。
 
-仓库内置的场景包括：
+长任务的每一步都保持可见；用户可以在关键节点审批、直接修改 Artifact，或者从失败步骤重新执行，而不必推倒重来。
 
-- **AI Writer**：整理素材 → 生成大纲 → 分章节写作 → 局部修改 → 全文审阅 → 最终稿
-- **AI Image**：理解需求 → 收集参考 → 优化 Prompt → 生成或编辑图片，也可以制作动态表情包
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/artifact-workspace.jpg"><img src="docs/assets/artifact-workspace.jpg" alt="在审批节点查看并编辑有实际内容的 Artifact" width="100%" /></a>
+      <br /><sub>继续执行前，查看并直接编辑 Artifact</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/artifact-version-diff.jpg"><img src="docs/assets/artifact-version-diff.jpg" alt="通过可编辑 Diff 对比 Artifact 的历史版本" width="100%" /></a>
+      <br /><sub>对比版本 Diff，并恢复需要的结果</sub>
+    </td>
+  </tr>
+</table>
 
-**How：** 本地目录、对象存储、飞书和 Notion 等数据源进入统一知识库；PDFReader、MinerU 或 PaddleOCR-VL 完成解析，再通过多路 Embedding、混合检索和重排为 Agent 提供依据。
+### 2. 让每次执行都基于可复用知识
 
-**Why：** 模型能力不应停留在聊天窗口。只有连接真实资料与交付流程，AI 才能从“看起来会做”走向“真正把事情做完”。
+本地目录、对象存储、飞书和 Notion 等数据源进入统一知识库；PDFReader、MinerU 或 PaddleOCR-VL 负责解析文档，再通过多路 Embedding、混合检索和重排，让结果建立在相关证据之上。
 
-![数据源管理 — 新建数据源](docs/assets/datasource-create.png)
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/knowledge-library.png"><img src="docs/assets/knowledge-library.png" alt="在统一知识库中管理文档并查看解析状态" width="100%" /></a>
+      <br /><sub>统一管理知识文档，并清晰掌握解析状态</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/knowledge-cited-answer-latest.png"><img src="docs/assets/knowledge-cited-answer-latest.png" alt="题干与答案分别包含行内引用，并共同指向原始文档" width="100%" /></a>
+      <br /><sub>两个 (1) 分别引用题干和答案，并共同指向下方同一份原始文档</sub>
+    </td>
+  </tr>
+</table>
 
-### 2. 不用全程盯着 Agent，但始终保有掌控感
+### 3. 把专家经验封装成可复用工作流
 
-长任务会持续显示当前状态、工具调用、耗时和中间结果。用户可以在关键节点审批，直接修改 Artifact，或者从出问题的步骤重新执行，而不必推倒重来。
+调研方法、写作流程与行业标准可以作为 Skill 管理，并转换为可执行 Plugin。团队可以诊断、修复、发布、版本化和回滚，而不必反复从 Prompt 与脚本重新搭建。开发方式见[插件格式规范](docs/plugin-format.md)。
 
-**How：** Plugin 使用状态机定义步骤、工具、输入输出和流转条件；Artifact 保留版本，Driver 负责自动验收，并根据结果继续、重试或回退。
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-to-workflow-entry.jpg"><img src="docs/assets/skill-to-workflow-entry.jpg" alt="选择已有 Skill 并将其转换为可执行工作流" width="100%" /></a>
+      <br /><sub>选择已有 Skill，作为新工作流的起点</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-to-workflow-editor.png"><img src="docs/assets/skill-to-workflow-editor.png" alt="在可视化编辑器中检查和调整转换后的工作流" width="100%" /></a>
+      <br /><sub>检查、调整、发布并版本化生成的工作流</sub>
+    </td>
+  </tr>
+</table>
 
-**Why：** 复杂 Agent 最难接受的不是偶尔失败，而是过程不可见、错误不可控。LazyMind 把黑盒执行变成用户与 Agent 可以共同完成的工作台。
+### 4. 只在证据支持时改进系统
 
-### 3. 把少数人的 AI 使用经验，变成人人可用的能力
+“智积阅累”负责沉淀用户想要什么——偏好、术语、经验与 Skill；`evo` 负责验证系统怎样做得更好——把 badcase 变成评测样例，依次执行基线评测、问题诊断、修复与 A/B Test。
 
-一个好用的调研方法、写作流程或行业经验，不必永远停留在个人 Prompt、脚本和配置里。它可以作为 Skill 管理，也可以进一步变成团队反复使用的可执行 Plugin。
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-review.png"><img src="docs/assets/skill-review.png" alt="智积阅累通过 Skill 复盘持续沉淀和改进能力" width="100%" /></a>
+      <br /><sub>智积阅累：复盘 Skill，沉淀偏好、术语与经验</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/evo-pipeline.png"><img src="docs/assets/evo-pipeline.png" alt="算法跃迁把失败转化为经过评测的改进流水线" width="100%" /></a>
+      <br /><sub>算法跃迁：经过评测验证，再安全发布改进</sub>
+    </td>
+  </tr>
+</table>
 
-**How：** LazyMind 可以分析 Skill 的文件、脚本和工具依赖，判断它是否适合生成工作流，映射平台工具并生成 Plugin；生成后支持诊断、修复、发布、版本追踪和回滚。
+### 5. 从本地开始，在需要协作时扩展
 
-**Why：** Prompt 解决一次问题，稳定工作流解决一类问题。LazyMind 让 AI 生产力不再依赖某个会搭环境、会调工具的人，而是成为可复用、可追溯的团队资产。
-
-插件格式与开发方式见 [插件格式规范](docs/plugin-format.md)。
-
-### 4. 下载到本机就能用，敏感知识无需离开设备
-
-个人用户和小团队可以通过 Desktop Mode 在本机管理知识、运行 Agent，不必先搭建完整的云端基础设施；需要多人共享时，再切换到企业服务栈。
-
-**How：** 本地模式使用原生进程、SQLite 和 Milvus Lite，并统一管理 Go、Python、Node 服务及应用数据目录；当前提供 macOS arm64 桌面构建和 Windows x64 ZIP/安装包构建。
-
-**Why：** 知识管理产品的第一道门槛往往是部署与数据安全。Desktop Mode 降低体验成本，也让本地资料和运行数据保持在用户掌控之中。
-
-团队部署支持 Kong、JWT/RBAC、Core ACL、外部 Milvus/OpenSearch 和私有化 OCR。详情见 [Desktop 文档](desktop/README.md)。
-
-### 5. 每一个人工干预和差评，都能帮助下一次做得更好
-
-用户改过的内容、否定过的答案、补充过的规则和给出的差评，不应该随着一次对话结束而消失。LazyMind 会把这些信号转化为可以审核、复用和验证的成长素材，让系统逐渐理解用户偏好，也让同一类问题持续得到修复。
-
-这个成长过程包含两个相互配合的闭环：
-
-- **智积阅累——沉淀“用户想要什么”**：将人工修改、评价和历史使用中形成的偏好、术语、经验与 Skill 作为可运营资产统一管理，支持审核、版本追踪和回滚。用户不必在每次任务中重新说明口径、习惯与交付标准。
-- **evo——验证“系统怎样做得更好”**：将差评和 badcase 变成评测样例，定位知识、召回、Prompt、工具或算法策略中的问题，再运行“基线评测 → 生成修复方案 → A/B Test → 合并与部署”，用数据确认改动是否真的有效。
-
-**How：** 一次人工干预既可以成为智积阅累中的长期记忆与规则，也可以进入 evo 的评测和优化链路；两个闭环都保留来源、版本和验证过程，并允许用户在关键节点审阅。
-
-**Why：** 真正的自进化不是模型擅自改变，而是系统能够记住人的标准、找到失败原因，并在验证后采用更好的方案。每一次使用因此不再是孤立任务，而是在为下一次交付积累知识和证据。
-
-![智积阅累 — Skill、词表与工具](docs/assets/knowledge-ops.png)
-
-![evo 自进化执行路径](docs/assets/evo-pipeline.png)
-
-![evo 实时执行编排](docs/assets/evo-run.png)
+Desktop Mode 使用原生进程、SQLite 和 Milvus Lite，并遵循平台规范管理数据目录；团队部署可以进一步接入 Kong、JWT/RBAC、Core ACL、外部 Milvus/OpenSearch 与私有化 OCR。两种模式保持一致的工作方式。
 
 ---
 
@@ -119,11 +149,23 @@ make local-win-up
 - API 文档：http://localhost:8090/docs.html
 - 默认账号：`admin` / `admin`
 
-登录后在模型设置中配置 LLM、Embedding、Reranker，以及按需配置 VLM、图片或视频模型。高质量 PDF 解析可额外配置 MinerU API Key：
+登录后进入前端的**设置**页面：
 
-```bash
-export LAZYLLM_MINERU_API_KEY=你的_mineru_key
-```
+- 在**模型供应商**中添加供应商凭证与 API Key，再到**系统默认设置**中选择默认的大模型、向量模型和重排序模型；多模态向量、图文、语音、图片、视频和自进化模型均可按需配置。
+- 在**工具**中按需配置服务凭证，包括用于文档解析的 MinerU 或 PaddleOCR、网页与学术搜索引擎，以及其他集成。使用 MinerU 在线服务时，无需再通过环境变量配置 API Key。
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/settings-models.png"><img src="docs/assets/settings-models.png" alt="在前端设置中选择各项系统默认模型" width="100%" /></a>
+      <br /><sub>为不同系统能力选择默认模型</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/settings-tools.png"><img src="docs/assets/settings-tools.png" alt="在前端设置中配置文档解析与搜索服务" width="100%" /></a>
+      <br /><sub>配置文档解析、搜索与其他工具凭证</sub>
+    </td>
+  </tr>
+</table>
 
 停止本地运行：
 
@@ -147,60 +189,7 @@ Windows 使用 `make local-win-down`。完整配置见 [快速开始](docs/quick
 make up
 ```
 
-常用部署选项：
-
-### macOS 使用 Colima 启动容器栈
-
-如果本机无法使用 Docker Desktop，可以使用 [Colima](https://github.com/abiosoft/colima) 提供 Docker 运行环境。未安装 Homebrew 时，先按官方方式安装：
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-安装完成后按终端提示配置 `PATH`。Apple Silicon 通常使用：
-
-```bash
-echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
-eval "$(/opt/homebrew/bin/brew shellenv)"
-brew --version
-```
-
-安装 Colima 和 Docker 命令行工具：
-
-```bash
-brew install colima docker docker-compose docker-buildx
-```
-
-启动 Colima：
-
-```bash
-colima start --runtime docker --vm-type vz --mount-type virtiofs --cpu 4 --memory 6 --disk 80
-```
-
-验证环境：
-
-```bash
-colima status
-docker version
-docker compose version
-```
-
-环境就绪后，在项目根目录启动容器栈：
-
-```bash
-make up
-```
-
-使用完毕后，先停掉容器栈，再关闭 Colima：
-
-```bash
-make down
-colima stop
-```
-
 ### 启动命令速查
-
-除 Colima 容器栈外，项目还支持宿主机本地运行等多种方式，常用命令如下：
 
 | 场景 | 命令 |
 |------|------|
@@ -209,7 +198,7 @@ colima stop
 | 私有化 PaddleOCR | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
 | 外接 Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 
-服务架构、环境变量和鉴权链路见 [架构文档](docs/architecture.md)。
+Docker/Colima 配置见 [Colima 配置说明](docs/quick_start.CN.md#macos使用-colima-替代-docker-desktop)或完整的[快速开始](docs/quick_start.CN.md)，服务依赖、环境变量和鉴权链路见[架构文档](docs/architecture.md)。
 
 ---
 

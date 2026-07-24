@@ -155,7 +155,7 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 		// Write slot revision if this is a plugin_step task with a slot binding.
 		// list_index for partial retry is embedded inside the artifact JSON value and
 		// extracted by the plugin hook via extractListIndex — no need to pass it here.
-		routePluginArtifact(ctx, db, ev.TaskID, ev.ArtifactKey)
+		routePluginArtifact(ctx, db, stateStore, ev.TaskID, ev.ArtifactKey)
 	case "done":
 		status := ev.Status
 		if status == "" {
@@ -204,7 +204,7 @@ func routeError(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID
 var EventHooks = &eventHooks{}
 
 type eventHooks struct {
-	onArtifact       func(ctx context.Context, db *gorm.DB, taskID, artifactKey string)
+	onArtifact       func(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, artifactKey string)
 	onTerminalStatus func(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, status, message string)
 	// onConversationEvent is called when a plugin lifecycle event should be pushed to the
 	// main conversation SSE stream. convID and historyID identify the target stream;
@@ -213,7 +213,7 @@ type eventHooks struct {
 }
 
 // RegisterArtifactHook registers a hook called on every artifact event for any SubAgent task.
-func (h *eventHooks) RegisterArtifactHook(fn func(ctx context.Context, db *gorm.DB, taskID, artifactKey string)) {
+func (h *eventHooks) RegisterArtifactHook(fn func(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, artifactKey string)) {
 	h.onArtifact = fn
 }
 
@@ -241,8 +241,8 @@ func routePluginStepStatus(ctx context.Context, db *gorm.DB, stateStore state.St
 	}
 }
 
-func routePluginArtifact(ctx context.Context, db *gorm.DB, taskID, slot string) {
+func routePluginArtifact(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, slot string) {
 	if EventHooks.onArtifact != nil {
-		EventHooks.onArtifact(ctx, db, taskID, slot)
+		EventHooks.onArtifact(ctx, db, stateStore, taskID, slot)
 	}
 }

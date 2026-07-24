@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type ThinkingDepth = "low" | "medium" | "high";
+export type ThinkingDepth = "low" | "medium" | "high" | "max";
 
 interface ChatThinkStore {
   think: boolean;

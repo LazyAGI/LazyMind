@@ -1184,6 +1184,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       { value: "low", label: t("chat.thinkingDepthLow") },
                       { value: "medium", label: t("chat.thinkingDepthMedium") },
                       { value: "high", label: t("chat.thinkingDepthHigh") },
+                      { value: "max", label: t("chat.thinkingDepthMax") },
                     ]}
                   />
                   {/* <ModelSelector sessionId={sessionId} disabled={isStreaming} /> */}

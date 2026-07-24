@@ -134,6 +134,17 @@ export const taskStreamUrl = (taskId: string) =>
 export const convEventsUrl = (conversationId: string) =>
   `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events`;
 
+export function decideToolLimit(
+  conversationId: string,
+  decisionId: string,
+  action: "continue" | "summarize",
+) {
+  return axiosInstance.post(
+    `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}:toolLimitDecision`,
+    { decision_id: decisionId, action },
+  );
+}
+
 export function TaskServiceApi() {
   return {
     listConversationTasks(conversationId: string, options?: RawAxiosRequestConfig) {

@@ -38,6 +38,18 @@ services:
             config:
               auth_service_url: http://auth-service:8000
 
+  - name: channel-gateway
+    url: http://channel-gateway:8085
+    routes:
+      - name: channel-gateway-route
+        paths:
+          - /api/channel-gateway
+        strip_path: false
+        plugins:
+          - name: rbac-auth
+            config:
+              auth_service_url: http://auth-service:8000
+
   # core 统一通过 /api/core 访问，Kong  strip 前缀后转发（如 /api/core/conversations → /conversations）
   - name: core-service
     url: http://core:8000

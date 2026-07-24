@@ -212,7 +212,7 @@ _SCENARIO_SCRIPTS_SYSTEM = (
     '  - Local data processing (image manipulation, PDF parsing, format conversion, etc.)\n'
     '  - Complex deterministic computation (math, parsing, encoding/decoding)\n\n'
     'DO NOT write scripts when:\n'
-    '  - Steps only need save_artifact (always auto-injected, never requires a script)\n'
+    '  - Steps only need save_artifacts (always auto-injected, never requires a script)\n'
     '  - The workflow is pure LLM reasoning, writing, analysis, or summarization\n'
     '  - A web search could work without calling a specific private API\n'
     '  - The plugin is a text/content generation pipeline\n\n'
