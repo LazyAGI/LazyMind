@@ -172,20 +172,6 @@
     cursor: default;
   }
 
-  &__choice-input {
-    width: 100%;
-    min-width: 0;
-    border-color: transparent !important;
-    background: transparent !important;
-    padding-inline: 4px !important;
-
-    &:hover,
-    &:focus {
-      border-color: #b5c0ef !important;
-      background: #fff !important;
-    }
-  }
-
   &__other-input {
     margin-top: 8px;
     border-radius: 8px !important;

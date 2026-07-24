@@ -14,7 +14,12 @@ import {
   unwrapArtifactPayload,
 } from './writerArtifactViews';
 import { WriterIRControl, type WriterIRSaveResult } from './WriterIRControl';
-import { isWriterDocument, type WriterBlock, type WriterDocument } from './writerIR';
+import {
+  isWriterDocument,
+  normalizeWriterDocumentForSync,
+  type WriterBlock,
+  type WriterDocument,
+} from './writerIR';
 import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
 import i18n from '@/i18n';
 import { useTranslation } from 'react-i18next';
@@ -1621,6 +1626,25 @@ function replaceStructuredArtifactPayload(
   return document;
 }
 
+/** True when the document has a cloud provider target (Feishu uri or document_id). */
+function hasProviderTarget(document?: WriterDocument | null): boolean {
+  const binding = document?.provider_binding;
+  if (!binding) return false;
+
+  return (
+    (typeof binding.uri === 'string' && binding.uri.trim() !== '')
+    || (
+      typeof binding.document_id === 'string'
+      && binding.document_id.trim() !== ''
+    )
+  );
+}
+
+function ensureJsonFilename(name: string): string {
+  const trimmed = name.trim() || 'writer-document.json';
+  return trimmed.toLowerCase().endsWith('.json') ? trimmed : `${trimmed}.json`;
+}
+
 async function syncWriterDocumentSlot(
   sessionId: string,
   slotId: string,
@@ -1638,8 +1662,8 @@ async function syncWriterDocumentSlot(
     listIndex,
     {
       base_revision: sourceRevision,
-      source_document: sourceDocument,
-      revised_document: revisedDocument,
+      source_document: normalizeWriterDocumentForSync(sourceDocument),
+      revised_document: normalizeWriterDocumentForSync(revisedDocument),
     },
     { silentError: true } as never,
   );
@@ -1662,11 +1686,6 @@ async function syncWriterDocumentSlot(
     document: result.document,
     sourceRevision: result.revision,
   };
-}
-
-function ensureJsonFilename(name: string): string {
-  const trimmed = name.trim() || 'writer-document.json';
-  return trimmed.toLowerCase().endsWith('.json') ? trimmed : `${trimmed}.json`;
 }
 
 function writerBlockToMarkdown(block: WriterBlock, depth = 0): string {
@@ -1717,10 +1736,7 @@ function shouldRenderInlineStructuredContent(
   const payload = getInlineStructuredArtifactPayload(slot);
   if (payload === null) return false;
   if (isWriterDocument(payload)) {
-    const resolvedSlotId = slotId ?? slot.slot;
-    const usesWriterSync = resolvedSlotId === 'synced_snapshot'
-      && (slot.list_index ?? -1) === -1;
-    return expectedType !== 'image' && (expectedType !== 'file' || usesWriterSync);
+    return expectedType !== 'image';
   }
   if (expectedType !== 'text') return false;
   if (slot.content_type === 'json') return true;
@@ -1836,9 +1852,9 @@ function SlotJsonFile({
 
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
-  const usesWriterSync = resolvedSlotId === 'synced_snapshot' && apiListIndex === -1;
   const showArtifactActions = !WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
   const writerDocument = isWriterDocument(payload) ? payload : null;
+  const usesWriterSync = apiListIndex === -1 && hasProviderTarget(writerDocument);
   const canEditWriterIR = Boolean(sessionId && slotId)
     && !readOnly
     && writerDocument?.ui_editable === true
@@ -1860,7 +1876,7 @@ function SlotJsonFile({
       try {
         const result = await syncWriterDocumentSlot(
           sessionId,
-          slotId,
+          slot.slot_id,
           apiListIndex,
           sourceRevision,
           sourceDocument,
@@ -1909,6 +1925,7 @@ function SlotJsonFile({
     raw,
     readOnly,
     sessionId,
+    slot.slot_id,
     slotId,
     sourceJson,
     usesWriterSync,
@@ -2069,8 +2086,8 @@ function SlotInlineStructured({
   const [writerEditing, setWriterEditing] = useState(false);
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
-  const usesWriterSync = resolvedSlotId === 'synced_snapshot' && apiListIndex === -1;
   const writerDocument = isWriterDocument(payload) ? payload : null;
+  const usesWriterSync = apiListIndex === -1 && hasProviderTarget(writerDocument);
   const canEditWriterIR = Boolean(sessionId && slotId)
     && !readOnly
     && writerDocument?.ui_editable === true;
@@ -2083,7 +2100,7 @@ function SlotInlineStructured({
   } | null>(null);
 
   useEffect(() => {
-    if (!writerDocument || !usesWriterSync) {
+    if (!writerDocument) {
       setWriterMarkdownDownload(null);
       return;
     }
@@ -2096,7 +2113,7 @@ function SlotInlineStructured({
       filename: writerMarkdownFilename(slot.caption || resolvedSlotId),
     });
     return () => URL.revokeObjectURL(url);
-  }, [resolvedSlotId, slot.caption, usesWriterSync, writerDocument]);
+  }, [resolvedSlotId, slot.caption, writerDocument]);
 
   const handleSaveWriterDocument = useCallback(async (
     sourceDocument: WriterDocument,
@@ -2110,7 +2127,7 @@ function SlotInlineStructured({
       try {
         const result = await syncWriterDocumentSlot(
           sessionId,
-          slotId,
+          slot.slot_id,
           apiListIndex,
           sourceRevision,
           sourceDocument,
