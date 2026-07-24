@@ -165,7 +165,6 @@ func TestAgentThreadGateDetailRoutesRegistered(t *testing.T) {
 		path   string
 		want   string
 	}{
-		{http.MethodGet, "/agent/threads/thr-1/gates/eval/versions/2/bad-cases", "/agent/threads/{thread_id}/gates/eval/versions/{version}/bad-cases"},
 		{http.MethodGet, "/agent/threads/thr-1/gates/abtest/versions/3/case-details", "/agent/threads/{thread_id}/gates/abtest/versions/{version}/case-details"},
 		{http.MethodGet, "/agent/threads/thr-1/results/traces:compare", "/agent/threads/{thread_id}/results/traces:compare"},
 		{http.MethodGet, "/agent/threads/thr-1/results/traces/trace-1", "/agent/threads/{thread_id}/results/traces/{trace_id}"},

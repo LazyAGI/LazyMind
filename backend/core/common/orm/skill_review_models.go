@@ -34,6 +34,15 @@ var skillReviewStatsActiveStatuses = []string{
 	SkillReviewStatsStatusOrganizeApply,
 }
 
+func IsSkillReviewStatsActiveStatus(status string) bool {
+	for _, activeStatus := range skillReviewStatsActiveStatuses {
+		if status == activeStatus {
+			return true
+		}
+	}
+	return false
+}
+
 // SkillReviewStatsActiveScope selects known algorithm execution stages. A
 // successful terminal row closes the logical request even if an older Core
 // version retried the same requestid and left a later stage row behind.

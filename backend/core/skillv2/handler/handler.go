@@ -1260,6 +1260,24 @@ func MarketUnpublish(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"market_item_id": resp.MarketItemID})
 }
 
+func MarketDelete(w http.ResponseWriter, r *http.Request) {
+	db, ok := requireDB(w)
+	if !ok {
+		return
+	}
+	marketItemID := firstNonEmpty(common.PathVar(r, "market_item_id"), common.PathVar(r, "item_id"))
+	resp, err := newMarketService(db).Delete(r.Context(), skillmarket.DeleteRequest{MarketItemID: marketItemID})
+	if err != nil {
+		replyServiceError(w, err)
+		return
+	}
+	common.ReplyOK(w, map[string]any{
+		"deleted":         true,
+		"market_item_id":  resp.MarketItemID,
+		"source_skill_id": resp.SourceSkillID,
+	})
+}
+
 func Share(w http.ResponseWriter, r *http.Request) {
 	db, skillID, userID, ok := requireOwnedSkill(w, r)
 	if !ok {

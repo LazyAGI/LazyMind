@@ -1011,7 +1011,7 @@ func SaveArtifactByKey(w http.ResponseWriter, r *http.Request) {
 	// Resolve slot binding for the slot via Python plugin API.
 	slotID, cardinality := resolveSlotBinding(sess.PluginID, body.Slot)
 	if slotID == "" {
-		common.ReplyErr(w, fmt.Sprintf("no slot binding for slot %q in plugin %q", body.Slot, sess.PluginID), http.StatusBadRequest)
+		common.ReplyErr(w, fmt.Sprintf("no slot binding: slot %q in plugin %q", body.Slot, sess.PluginID), http.StatusBadRequest)
 		return
 	}
 

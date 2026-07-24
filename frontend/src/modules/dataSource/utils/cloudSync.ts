@@ -48,13 +48,23 @@ export async function waitForCloudSyncRun(
     const summaryBindings = Array.isArray(summary?.bindings)
       ? (summary.bindings as Record<string, any>[])
       : [];
+    const deletingBindings = bindings.filter(
+      (item) => `${item.status || ""}`.toUpperCase() === "DELETING",
+    );
+    const activeBindingCount = bindings.length - deletingBindings.length;
+    const expectedSummaryRuns = Math.max(
+      Math.min(expectedRuns, activeBindingCount || 1),
+      1,
+    );
     const finishedBindings = summaryBindings.filter((item) =>
       Boolean(item.last_success_at || item.lastSuccessAt),
     );
 
     if (
-      finishedBindings.length >= expectedRuns ||
-      (expectedRuns === 1 && Boolean(summary?.last_success_at || summary?.lastSuccessAt))
+      deletingBindings.length === 0 &&
+      (finishedBindings.length >= expectedSummaryRuns ||
+        (expectedSummaryRuns === 1 &&
+          Boolean(summary?.last_success_at || summary?.lastSuccessAt)))
     ) {
       return { run_ids: runIds, status: "SUCCEEDED" };
     }
