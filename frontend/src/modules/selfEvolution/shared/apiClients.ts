@@ -1,4 +1,4 @@
-import { AgentApi as CoreAgentApi, Configuration as CoreConfiguration, DefaultApi as CoreDefaultApi, type Dataset } from "@/api/generated/core-client";
+import { AgentApi as CoreAgentApi, Configuration as CoreConfiguration, DefaultApi as CoreDefaultApi, EvalSetsApi as CoreEvalSetsApi, type Dataset } from "@/api/generated/core-client";
 import {
   BASE_URL,
   axiosInstance,
@@ -34,6 +34,15 @@ export function createCoreAgentGeneratedApiClient() {
         headers: { "Content-Type": "application/json" },
       },
     }),
+    baseUrl,
+    axiosInstance,
+  );
+}
+
+export function createCoreEvalSetsApiClient() {
+  const baseUrl = BASE_URL || window.location.origin;
+  return new CoreEvalSetsApi(
+    new CoreConfiguration({ basePath: baseUrl }),
     baseUrl,
     axiosInstance,
   );

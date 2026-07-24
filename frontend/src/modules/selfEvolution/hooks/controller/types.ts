@@ -88,7 +88,6 @@ export type ArtifactPanelItem = {
   sectionDesc: string;
   title: string;
   desc: string;
-  fallbackUrl: string;
   fileName: string;
   preview: ReactNode;
 };

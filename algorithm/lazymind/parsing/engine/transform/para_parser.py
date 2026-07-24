@@ -4,9 +4,9 @@ from typing import Callable, List, Optional, Sequence, Tuple
 from pathlib import Path
 from pydantic import Field, PrivateAttr
 
-from lazyllm.tools.rag import NodeTransform
+from lazyllm.tools.rag import NodeTransform, DocNode
 from lazyllm.module import ModuleBase
-from lazyllm.tools.rag import DocNode
+from lazymind.parsing.engine.utils import spawn_child_doc_node
 
 
 def split_by_regex(regex: str) -> Callable[[str], List[str]]:
@@ -104,7 +104,8 @@ class NormalLineSplitter(NodeTransform):
             global_metadata = node.global_metadata
             split_text = self._split_text(node.text)
             result.extend([
-                DocNode(
+                spawn_child_doc_node(
+                    node,
                     text=text,
                     metadata=copy.deepcopy(metadata),
                     global_metadata=copy.deepcopy(global_metadata),
@@ -423,9 +424,12 @@ class MineruLineSplitter(NodeTransform):
             lines = _metadata.pop('lines', [])
             for line in lines:
                 metadata = {'type': line.get('type', 'text'), 'page': line.get('page', 0), 'bbox': line.get('bbox', [])}
-                result.append(DocNode(text=line.get('content', ''),
-                                      metadata=_metadata | metadata,
-                                      global_metadata=copy.deepcopy(global_metadata)))
+                result.append(spawn_child_doc_node(
+                    node,
+                    text=line.get('content', ''),
+                    metadata=_metadata | metadata,
+                    global_metadata=copy.deepcopy(global_metadata),
+                ))
         return result
 
 

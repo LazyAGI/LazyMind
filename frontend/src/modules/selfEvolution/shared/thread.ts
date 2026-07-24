@@ -1,14 +1,6 @@
 import { type EvolutionMode, type ThreadRestorePayload } from "./types";
 import { getNestedRecordField, getNestedStringField, isRecord } from "./fields";
 
-export function getThreadTitleFromHistoryPayload(payload: ThreadRestorePayload) {
-  if (!isRecord(payload)) {
-    return undefined;
-  }
-
-  return getNestedStringField(payload, ["title"]);
-}
-
 export function getThreadTitleFromPayload(payload: ThreadRestorePayload) {
   if (!isRecord(payload)) {
     return undefined;

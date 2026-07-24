@@ -240,6 +240,10 @@ func (s *Service) WriteDraft(ctx context.Context, req WriteDraftRequest) (DraftR
 			return err
 		}
 		nextVersion := draft.Version + 1
+		draftStatus := draftStatusPendingConfirm
+		if resource.AutoEvo && shouldAutoCommitPersonalDraft(req.TaskID) {
+			draftStatus = draftStatusAutoPending
+		}
 		updatedBy := nullableString(req.UpdatedBy)
 		conversationID := nullableString(req.ConversationID)
 		update := map[string]any{
@@ -251,7 +255,7 @@ func (s *Service) WriteDraft(ctx context.Context, req WriteDraftRequest) (DraftR
 			"mime":             blob.Mime,
 			"file_type":        blob.FileType,
 			"binary":           blob.Binary,
-			"draft_status":     "pending_confirm",
+			"draft_status":     draftStatus,
 			"draft_updated_at": now,
 			"task_id":          strings.TrimSpace(req.TaskID),
 			"conversation_id":  conversationID,
@@ -270,7 +274,7 @@ func (s *Service) WriteDraft(ctx context.Context, req WriteDraftRequest) (DraftR
 			Ref:            req.Ref,
 			Path:           mustPath(req.Ref.ResourceType),
 			DraftVersion:   nextVersion,
-			DraftStatus:    "pending_confirm",
+			DraftStatus:    draftStatus,
 			BaseRevisionID: valueOrEmpty(resource.HeadRevisionID),
 			BlobHash:       blob.Hash,
 			ContentHash:    blob.Hash,
@@ -279,6 +283,11 @@ func (s *Service) WriteDraft(ctx context.Context, req WriteDraftRequest) (DraftR
 		return nil
 	})
 	return out, normalizeGormErr(err)
+}
+
+func shouldAutoCommitPersonalDraft(taskID string) bool {
+	taskID = strings.TrimSpace(taskID)
+	return taskID != "" && !strings.HasPrefix(taskID, "memory_review_")
 }
 
 func (s *Service) UpdateMetadata(ctx context.Context, req UpdateMetadataRequest) (MetadataResponse, error) {
@@ -1357,13 +1366,23 @@ func markPendingDraftAuto(ctx context.Context, tx *gorm.DB, resourceID string, n
 	if !isPendingConfirmDraftStatus(draft.DraftStatus) {
 		return nil
 	}
-	if err := tx.WithContext(ctx).Model(&orm.PersonalResourceDraft{}).
+	updates := map[string]any{
+		"draft_status": draftStatusAutoPending,
+		"updated_at":   now,
+	}
+	if strings.TrimSpace(draft.TaskID) == "" {
+		updates["task_id"] = "personal_auto_evo_" + uuid.NewString()
+		updates["conversation_id"] = nil
+		updates["version"] = gorm.Expr("version + 1")
+	}
+	result := tx.WithContext(ctx).Model(&orm.PersonalResourceDraft{}).
 		Where("resource_id = ? AND version = ?", resourceID, draft.Version).
-		Updates(map[string]any{
-			"draft_status": draftStatusAutoPending,
-			"updated_at":   now,
-		}).Error; err != nil {
-		return err
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrConflict
 	}
 	return markActiveReviewSessions(ctx, tx, resourceID, reviewStatusInvalidated, "", now)
 }

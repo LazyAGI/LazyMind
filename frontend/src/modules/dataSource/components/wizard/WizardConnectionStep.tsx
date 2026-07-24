@@ -45,7 +45,6 @@ const { Text } = Typography;
 export interface WizardConnectionStepProps {
   t: TFunction;
   form: FormInstance<SourceFormValues>;
-  isEditMode: boolean;
   selectedType: SourceType;
   syncMode: SyncMode;
   localPathOptions: LocalPathSelectOption[];
@@ -326,7 +325,6 @@ export default function WizardConnectionStep({
           >
             <TreeSelect
               key={`local-path-browse-${localPathBrowseKey}`}
-              disabled={isEditMode}
               multiple
               allowClear
               filterTreeNode={false}

@@ -38,6 +38,56 @@ def test_skeleton_response_repairs_invalid_legacy_yaml(monkeypatch):
     assert result == repaired_plugin
 
 
+def test_material_contract_detects_self_overwrite_and_multiple_producers():
+    plugin = {
+        'slots': [
+            {'id': 'web_search_results', 'external': True},
+        ],
+    }
+    state = {
+        'steps': {
+            'phase_2_search': {
+                'outputs': [{'material': 'web_search_results'}],
+            },
+            'phase_3_deep_dive': {
+                'inputs': [{'material': 'web_search_results'}],
+                'outputs': [{'material': 'web_search_results'}],
+            },
+        },
+    }
+
+    errors = staged._validate_material_contract(plugin, state)
+
+    assert errors == [
+        "material 'web_search_results' has multiple producers: "
+        "external slot declaration and step 'phase_2_search'",
+        "step 'phase_3_deep_dive' cannot both consume and produce material "
+        "'web_search_results'",
+        "material 'web_search_results' has multiple producers: "
+        "external slot declaration and step 'phase_3_deep_dive'",
+    ]
+
+
+def test_material_contract_accepts_distinct_transformation_output():
+    plugin = {
+        'slots': [
+            {'id': 'web_search_results'},
+            {'id': 'deep_dive_results'},
+        ],
+    }
+    state = {
+        'steps': {
+            'search': {'outputs': [{'material': 'web_search_results'}]},
+            'deep_dive': {
+                'inputs': [{'material': 'web_search_results'}],
+                'outputs': [{'material': 'deep_dive_results'}],
+            },
+        },
+    }
+
+    assert staged._validate_material_contract(plugin, state) == []
+
+
 @pytest.mark.asyncio
 async def test_unresolved_ancillary_coverage_does_not_require_confirmation(monkeypatch):
     analysis = {

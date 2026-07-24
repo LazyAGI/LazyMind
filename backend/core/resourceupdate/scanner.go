@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -26,6 +27,7 @@ type ScannerRunResult struct {
 	SkillResultsExpired        int
 	SkillTasksCreated          int
 	SkillDraftTasksCreated     int
+	PersonalDraftTasksCreated  int
 	MemoryTasksCreated         int
 	UserPreferenceTasksCreated int
 }
@@ -60,6 +62,11 @@ func (s *Scanner) RunOnce(ctx context.Context) (ScannerRunResult, error) {
 			return err
 		}
 		result.SkillDraftTasksCreated = created
+		created, err = scanAutoEvoPersonalDrafts(ctx, tx, now)
+		if err != nil {
+			return err
+		}
+		result.PersonalDraftTasksCreated = created
 		created, err = scanMemoryReviewResults(ctx, tx, orm.ResourceUpdateResourceTypeMemory, now)
 		if err != nil {
 			return err
@@ -72,16 +79,93 @@ func (s *Scanner) RunOnce(ctx context.Context) (ScannerRunResult, error) {
 		result.UserPreferenceTasksCreated = created
 		return nil
 	})
-	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.SkillDraftTasksCreated > 0 || result.MemoryTasksCreated > 0 || result.UserPreferenceTasksCreated > 0) {
+	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.SkillDraftTasksCreated > 0 || result.PersonalDraftTasksCreated > 0 || result.MemoryTasksCreated > 0 || result.UserPreferenceTasksCreated > 0) {
 		resourceUpdateInfo(logEventResultScanDone).
 			Int("skill_results_expired", result.SkillResultsExpired).
 			Int("skill_tasks_created", result.SkillTasksCreated).
 			Int("skill_draft_tasks_created", result.SkillDraftTasksCreated).
+			Int("personal_draft_tasks_created", result.PersonalDraftTasksCreated).
 			Int("memory_tasks_created", result.MemoryTasksCreated).
 			Int("user_preference_tasks_created", result.UserPreferenceTasksCreated).
 			Msg(logEventResultScanDone)
 	}
 	return result, err
+}
+
+func scanAutoEvoPersonalDrafts(ctx context.Context, tx *gorm.DB, now time.Time) (int, error) {
+	var rows []struct {
+		ResourceID   string `gorm:"column:resource_id"`
+		ResourceType string `gorm:"column:resource_type"`
+		UserID       string `gorm:"column:user_id"`
+		TaskID       string `gorm:"column:task_id"`
+		DraftStatus  string `gorm:"column:draft_status"`
+		DraftVersion int64  `gorm:"column:draft_version"`
+	}
+	if err := tx.WithContext(ctx).
+		Table("personal_resources AS r").
+		Select("r.id AS resource_id, r.resource_type, r.user_id, d.task_id, d.draft_status, d.version AS draft_version").
+		Joins("JOIN personal_resource_drafts AS d ON d.resource_id = r.id").
+		Where("r.auto_evo = ? AND d.draft_status IN ?", true, []string{"pending_confirm", "auto_pending"}).
+		Order("r.user_id ASC, r.id ASC").
+		Find(&rows).Error; err != nil {
+		return 0, err
+	}
+
+	created := 0
+	for _, row := range rows {
+		if strings.TrimSpace(row.TaskID) == "" {
+			if strings.TrimSpace(row.DraftStatus) != "auto_pending" {
+				continue
+			}
+			taskID := "personal_auto_evo_" + common.GenerateID()
+			result := tx.WithContext(ctx).Model(&orm.PersonalResourceDraft{}).
+				Where("resource_id = ? AND version = ? AND task_id = '' AND draft_status = ?", row.ResourceID, row.DraftVersion, "auto_pending").
+				Updates(map[string]any{
+					"task_id":         taskID,
+					"conversation_id": nil,
+					"version":         gorm.Expr("version + 1"),
+					"updated_at":      now,
+				})
+			if result.Error != nil {
+				return 0, result.Error
+			}
+			if result.RowsAffected != 1 {
+				continue
+			}
+			row.TaskID = taskID
+			row.DraftVersion++
+		}
+		if strings.HasPrefix(strings.TrimSpace(row.TaskID), "memory_review_") {
+			continue
+		}
+		requestBody, err := json.Marshal(personalDraftAutoCommitRequestJSON{TaskID: row.TaskID, DraftVersion: row.DraftVersion})
+		if err != nil {
+			return 0, err
+		}
+		task := orm.ResourceUpdateTask{
+			ID:           common.GenerateID(),
+			TaskType:     orm.ResourceUpdateTaskTypeAutoCommitPersonalDraft,
+			ResourceType: strings.TrimSpace(row.ResourceType),
+			UserID:       strings.TrimSpace(row.UserID),
+			ResourceID:   strings.TrimSpace(row.ResourceID),
+			TriggerType:  orm.ResourceUpdateTriggerTypeAutoEvoEnabled,
+			TriggerID:    fmt.Sprintf("personal_draft:%s:%s:%d", row.ResourceID, row.TaskID, row.DraftVersion),
+			Status:       orm.ResourceUpdateTaskStatusPending,
+			RequestJSON:  requestBody,
+			NextRunAt:    now,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+		result := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&task)
+		if result.Error != nil {
+			return 0, result.Error
+		}
+		if result.RowsAffected == 0 {
+			continue
+		}
+		created++
+	}
+	return created, nil
 }
 
 func ScanPendingResultsForResource(ctx context.Context, db *gorm.DB, resourceType, userID, resourceID string) error {
@@ -300,13 +384,42 @@ func scanAutoEvoSkillDrafts(ctx context.Context, tx *gorm.DB, now time.Time) (in
 		Table("skills AS s").
 		Select("s.id AS skill_id, s.owner_user_id AS user_id, d.task_id, d.version AS draft_version").
 		Joins("JOIN skill_drafts AS d ON d.skill_id = s.id").
-		Where("s.auto_evo = ? AND s.deleted_at IS NULL AND d.task_id <> '' AND EXISTS (SELECT 1 FROM skill_draft_entries e WHERE e.skill_id = s.id)", true).
+		Where(`s.auto_evo = ? AND s.deleted_at IS NULL
+			AND EXISTS (SELECT 1 FROM skill_draft_entries e WHERE e.skill_id = s.id)
+			AND (d.task_id <> '' OR EXISTS (
+				SELECT 1 FROM skill_draft_review_sessions rs
+				WHERE rs.skill_id = s.id AND rs.status = 'active' AND rs.draft_version_at_start = d.version
+			))`, true).
 		Order("s.owner_user_id ASC, s.id ASC").
 		Find(&rows).Error; err != nil {
 		return 0, err
 	}
 	created := 0
 	for _, row := range rows {
+		if strings.TrimSpace(row.TaskID) == "" {
+			taskID := "review_auto_evo_" + common.GenerateID()
+			result := tx.WithContext(ctx).Model(&orm.SkillV2Draft{}).
+				Where(`skill_id = ? AND version = ? AND task_id = '' AND EXISTS (
+					SELECT 1 FROM skill_draft_review_sessions rs
+					WHERE rs.skill_id = skill_drafts.skill_id AND rs.status = 'active'
+						AND rs.draft_version_at_start = skill_drafts.version
+				)`, row.SkillID, row.DraftVersion).
+				Updates(map[string]any{
+					"draft_status":    "auto_pending",
+					"task_id":         taskID,
+					"conversation_id": nil,
+					"version":         gorm.Expr("version + 1"),
+					"updated_at":      now,
+				})
+			if result.Error != nil {
+				return 0, result.Error
+			}
+			if result.RowsAffected != 1 {
+				continue
+			}
+			row.TaskID = taskID
+			row.DraftVersion++
+		}
 		var count int64
 		if err := tx.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).
 			Where("task_type = ? AND resource_type = ? AND resource_id = ? AND status IN ?",

@@ -15,6 +15,8 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+
+	"lazymind/core/common/orm"
 )
 
 func TestCreateSkillFromUploadedZip_CreatesInitialRevisionAndRoutesBlobs(t *testing.T) {
@@ -136,6 +138,7 @@ func newSkillV2TestDB(t *testing.T) *gorm.DB {
 		&testSkillV2DraftRow{},
 		&testSkillV2DraftEntryRow{},
 		&testSkillV2MarketItemRow{},
+		&orm.SkillDraftReviewSession{},
 	); err != nil {
 		t.Fatalf("auto migrate skill v2 test tables: %v", err)
 	}
@@ -210,11 +213,11 @@ func assertSkillMetadata(t *testing.T, db *gorm.DB, skillID, headRevisionID stri
 	if row.SkillName != "论文精读" {
 		t.Fatalf("skill_name = %q, want 论文精读", row.SkillName)
 	}
-	if row.Category != "External" {
-		t.Fatalf("category = %q, want External", row.Category)
+	if row.Category != "external" {
+		t.Fatalf("category = %q, want external", row.Category)
 	}
-	if row.RelativeRoot != "External/论文精读" {
-		t.Fatalf("relative_root = %q, want External/论文精读", row.RelativeRoot)
+	if row.RelativeRoot != "external/论文精读" {
+		t.Fatalf("relative_root = %q, want external/论文精读", row.RelativeRoot)
 	}
 	if row.SkillMDPath != "SKILL.md" {
 		t.Fatalf("skill_md_path = %q, want SKILL.md", row.SkillMDPath)

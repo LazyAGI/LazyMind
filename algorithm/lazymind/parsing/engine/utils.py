@@ -1,6 +1,27 @@
+import copy
 from pathlib import Path
 
 from lazyllm.thirdparty import PIL
+from lazyllm.tools.rag.doc_node import DocNode
+
+
+def spawn_child_doc_node(
+    parent: DocNode,
+    *,
+    text: str,
+    metadata: dict | None = None,
+    global_metadata: dict | None = None,
+) -> DocNode:
+    child = DocNode(
+        text=text,
+        metadata=metadata if metadata is not None else copy.deepcopy(parent.metadata),
+        global_metadata=(
+            global_metadata if global_metadata is not None else copy.deepcopy(parent.global_metadata)
+        ),
+    )
+    child.excluded_embed_metadata_keys = parent.excluded_embed_metadata_keys[:]
+    child.excluded_llm_metadata_keys = parent.excluded_llm_metadata_keys[:]
+    return child
 
 
 def _safe_name(value: str) -> str:

@@ -312,6 +312,7 @@ func actorFromRequest(r *http.Request) (access.Actor, error) {
 		TenantID:      strings.TrimSpace(r.Header.Get("X-Tenant-ID")),
 		Role:          strings.TrimSpace(r.Header.Get("X-User-Role")),
 		Authorization: strings.TrimSpace(r.Header.Get("Authorization")),
+		InternalToken: strings.TrimSpace(r.Header.Get("X-LazyMind-Internal-Token")),
 	}
 	if actor.TenantID == "" {
 		actor.TenantID = strings.TrimSpace(r.URL.Query().Get("tenant_id"))

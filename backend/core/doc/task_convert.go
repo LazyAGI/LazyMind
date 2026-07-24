@@ -368,7 +368,7 @@ func convertOfficeToPDF(ctx context.Context, profile documentParseProfile, sourc
 	if profile == documentParseProfileLocal {
 		detected := detectLibreOffice()
 		if !detected.Found {
-			return "", convertProviderLibreOffice, errors.New(detected.Message)
+			return "", convertProviderLibreOffice, errors.New("libreoffice is unavailable: " + detected.Message)
 		}
 		if err := runLibreOfficeConvert(ctx, detected.Path, sourcePath, targetPath); err != nil {
 			return "", convertProviderLibreOffice, err
