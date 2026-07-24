@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"lazymind/core/compat/contract"
+	"lazymind/core/compat/knowledge"
 	"lazymind/core/compat/skill"
 )
 
@@ -23,6 +24,16 @@ func (stubSkillPort) ReadContent(context.Context, contract.CallContext, string) 
 	return skill.Content{}, nil
 }
 
+type stubKnowledgeCatalogPort struct{}
+
+func (stubKnowledgeCatalogPort) List(context.Context, contract.CallContext, knowledge.ListInput) (knowledge.ListResult, error) {
+	return knowledge.ListResult{}, nil
+}
+
+func (stubKnowledgeCatalogPort) Get(context.Context, contract.CallContext, knowledge.GetInput) (knowledge.GetResult, error) {
+	return knowledge.GetResult{}, nil
+}
+
 func TestNewCreatesSkillFacadeWhenPortProvided(t *testing.T) {
 	rt, err := New(Dependencies{SkillPort: stubSkillPort{}})
 	if err != nil {
@@ -30,6 +41,19 @@ func TestNewCreatesSkillFacadeWhenPortProvided(t *testing.T) {
 	}
 	if rt.Skill == nil {
 		t.Fatalf("Skill facade is nil")
+	}
+}
+
+func TestNewCreatesKnowledgeFacadeWhenCatalogProvided(t *testing.T) {
+	rt, err := New(Dependencies{KnowledgeCatalog: stubKnowledgeCatalogPort{}})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	if rt.Knowledge == nil {
+		t.Fatalf("Knowledge facade is nil")
+	}
+	if rt.Skill != nil {
+		t.Fatalf("Skill facade = %#v, want nil", rt.Skill)
 	}
 }
 
@@ -44,6 +68,9 @@ func TestNewAllowsNilSkillPort(t *testing.T) {
 	if rt.Skill != nil {
 		t.Fatalf("Skill facade = %#v, want nil", rt.Skill)
 	}
+	if rt.Knowledge != nil {
+		t.Fatalf("Knowledge facade = %#v, want nil", rt.Knowledge)
+	}
 }
 
 func TestRuntimeDoesNotContainRequestState(t *testing.T) {
@@ -53,7 +80,7 @@ func TestRuntimeDoesNotContainRequestState(t *testing.T) {
 			t.Fatalf("Runtime contains request field %s", name)
 		}
 	}
-	if typ.NumField() != 1 {
-		t.Fatalf("Runtime field count = %d, want 1", typ.NumField())
+	if typ.NumField() != 2 {
+		t.Fatalf("Runtime field count = %d, want 2", typ.NumField())
 	}
 }
