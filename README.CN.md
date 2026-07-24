@@ -49,23 +49,57 @@ flowchart LR
 | **状态大脑** | 让长任务不跑偏 | 步骤可见、关键点审批、产物可编辑、重试/回退与版本记录 |
 | **AI 成长引擎** | 安全地改进下一次执行 | 可审核的偏好与术语，以及评测、诊断、A/B Test 与回滚 |
 
-## 产品导览
+## 核心亮点
 
-### 交付结果，而不只是回复消息
+### 1. 交付结果，而不只是回复消息
 
 选择知识与 Skill 后，LazyMind 会从资料整理继续推进到规划、生成、审阅与交付。Plugin 用状态机定义步骤、工具、输入输出和流转条件，Artifact 则保留可编辑结果与版本历史。
 
-### 把专家经验封装成可复用工作流
+长任务的每一步都保持可见；用户可以在关键节点审批、直接修改 Artifact，或者从失败步骤重新执行，而不必推倒重来。
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/artifact-workspace.jpg"><img src="docs/assets/artifact-workspace.jpg" alt="在审批节点查看并编辑有实际内容的 Artifact" width="100%" /></a>
+      <br /><sub>继续执行前，查看并直接编辑 Artifact</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/artifact-version-diff.jpg"><img src="docs/assets/artifact-version-diff.jpg" alt="通过可编辑 Diff 对比 Artifact 的历史版本" width="100%" /></a>
+      <br /><sub>对比版本 Diff，并恢复需要的结果</sub>
+    </td>
+  </tr>
+</table>
+
+### 2. 让每次执行都基于可复用知识
+
+本地目录、对象存储、飞书和 Notion 等数据源进入统一知识库；PDFReader、MinerU 或 PaddleOCR-VL 负责解析文档，再通过多路 Embedding、混合检索和重排，让结果建立在相关证据之上。
+
+![接入本地与云端知识源](docs/assets/datasource-create.png)
+
+### 3. 把专家经验封装成可复用工作流
 
 调研方法、写作流程与行业标准可以作为 Skill 管理，并转换为可执行 Plugin。团队可以诊断、修复、发布、版本化和回滚，而不必反复从 Prompt 与脚本重新搭建。开发方式见[插件格式规范](docs/plugin-format.md)。
 
-### 只在证据支持时改进系统
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-to-workflow-entry.jpg"><img src="docs/assets/skill-to-workflow-entry.jpg" alt="选择已有 Skill 并将其转换为可执行工作流" width="100%" /></a>
+      <br /><sub>选择已有 Skill，作为新工作流的起点</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-to-workflow-editor.png"><img src="docs/assets/skill-to-workflow-editor.png" alt="在可视化编辑器中检查和调整转换后的工作流" width="100%" /></a>
+      <br /><sub>检查、调整、发布并版本化生成的工作流</sub>
+    </td>
+  </tr>
+</table>
+
+### 4. 只在证据支持时改进系统
 
 “智积阅累”负责沉淀用户想要什么——偏好、术语、经验与 Skill；`evo` 负责验证系统怎样做得更好——把 badcase 变成评测样例，依次执行基线评测、问题诊断、修复与 A/B Test。
 
 ![evo 工作台把失败转化为经过评测的改进流水线](docs/assets/evo-pipeline.png)
 
-### 从本地开始，在需要协作时扩展
+### 5. 从本地开始，在需要协作时扩展
 
 Desktop Mode 使用原生进程、SQLite 和 Milvus Lite，并遵循平台规范管理数据目录；团队部署可以进一步接入 Kong、JWT/RBAC、Core ACL、外部 Milvus/OpenSearch 与私有化 OCR。两种模式保持一致的工作方式。
 

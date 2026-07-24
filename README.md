@@ -49,23 +49,57 @@ This loop is built from three connected systems:
 | **State Brain** | Keep long tasks on course | Visible steps, approvals, editable artifacts, retries, rewinds, and version history |
 | **AI Growth Engine** | Improve future runs safely | Reviewable preferences and terminology plus evaluation, diagnosis, A/B tests, and rollback |
 
-## Product tour
+## Core highlights
 
-### Deliver outcomes, not chat messages
+### 1. Deliver outcomes, not chat messages
 
 Choose knowledge and a Skill; LazyMind continues from source organization through planning, generation, review, and delivery. Plugins define steps, tools, inputs, outputs, and transitions as state machines, while artifacts preserve editable results and revision history.
 
-### Package expert practice into reusable workflows
+For long-running work, each step remains visible. Users can approve checkpoints, edit an artifact, or rerun from the failed step instead of restarting the whole task.
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/artifact-workspace.jpg"><img src="docs/assets/artifact-workspace.jpg" alt="A real Artifact remains editable at an approval checkpoint" width="100%" /></a>
+      <br /><sub>Inspect and edit the Artifact before continuing</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/artifact-version-diff.jpg"><img src="docs/assets/artifact-version-diff.jpg" alt="Compare an Artifact with an earlier version using an editable diff" width="100%" /></a>
+      <br /><sub>Review a version diff and restore the result you need</sub>
+    </td>
+  </tr>
+</table>
+
+### 2. Ground every run in reusable knowledge
+
+Local directories, object storage, Feishu, Notion, and other sources feed a unified knowledge base. PDFReader, MinerU, or PaddleOCR-VL parses documents; multi-embedding retrieval, hybrid search, and reranking keep results grounded in relevant evidence.
+
+![Connect local and cloud knowledge sources](docs/assets/datasource-create.png)
+
+### 3. Package expert practice into reusable workflows
 
 Research methods, writing processes, and domain standards can be managed as Skills and converted into executable Plugins. Teams can diagnose, repair, publish, version, and roll them back instead of rebuilding the same setup from prompts and scripts. See the [Plugin format specification](docs/plugin-format.md).
 
-### Improve only after evidence
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-to-workflow-entry.jpg"><img src="docs/assets/skill-to-workflow-entry.jpg" alt="Create an executable workflow from an existing Skill" width="100%" /></a>
+      <br /><sub>Select a Skill as the source of a new workflow</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-to-workflow-editor.png"><img src="docs/assets/skill-to-workflow-editor.png" alt="Inspect and refine the generated workflow in a visual editor" width="100%" /></a>
+      <br /><sub>Inspect, refine, publish, and version the generated workflow</sub>
+    </td>
+  </tr>
+</table>
+
+### 4. Improve only after evidence
 
 Knowledge Ops captures what the user wants—preferences, terminology, experience, and Skills. `evo` tests how the system should improve by turning bad cases into evaluation samples and running baseline evaluation, diagnosis, repair, and A/B testing.
 
 ![The evo workspace turns failures into an evaluated improvement pipeline](docs/assets/evo-pipeline.png)
 
-### Start local, scale when collaboration requires it
+### 5. Start local, scale when collaboration requires it
 
 Desktop Mode uses native processes, SQLite, and Milvus Lite with platform-standard data paths. Shared deployments add Kong, JWT/RBAC, Core ACL, external Milvus/OpenSearch, and on-premises OCR. Your workflow stays recognizable across both modes.
 
