@@ -5,8 +5,10 @@ import json
 import os
 import re
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from evo import artifacts as A
 from evo.operations.eval.answer import (
@@ -15,7 +17,12 @@ from evo.operations.eval.answer import (
     case_kb_id,
     failed_rag_answer,
 )
-from evo.operations.route.router_algorithm import ensure_owned_algorithm, manage_owned_algorithm
+from evo.operations.route.router_algorithm import (
+    discard_owned_algorithm,
+    delete_owned_algorithm,
+    ensure_owned_algorithm,
+    publish_owned_algorithm,
+)
 from evo.operations.route.router_ledger import RouterAlgorithmLedger
 from evo.operations.route.router_manager import (
     RouterAlgorithmSpec,
@@ -47,6 +54,7 @@ ENV_PASSTHROUGH = (
 DEFAULT_MAX_RETRIES = '8'
 PATCH_STATUSES = {'verified', 'unvalidated'}
 SAFE_ID = re.compile(r'[^A-Za-z0-9_.-]+')
+ALGORITHM_ID = re.compile(r'evo_[A-Za-z0-9][A-Za-z0-9_.-]{0,59}')
 
 
 def candidate_service(
@@ -54,11 +62,11 @@ def candidate_service(
     patch: Mapping[str, Any],
     ctx: Any | None = None,
     workspace: Mapping[str, Any] | None = None,
+    *,
+    temporary: bool = False,
 ) -> dict[str, Any]:
     patch = _candidate_patch(patch, workspace or {})
     base = {'candidate_config': dict(config), 'patch_status': _text(patch.get('status'))}
-    if not _text(patch.get('diff')):
-        return base | _failed('', '', '', '', 'invalid_repair_patch', 'repair patch has empty diff')
     if _text(patch.get('status')) not in PATCH_STATUSES:
         return base | _failed(
             '', '', '', '', 'invalid_repair_patch',
@@ -67,8 +75,14 @@ def candidate_service(
 
     algorithm_id = router_chat_url = admin_url = code_path = ''
     manager: RouterManager | None = None
+    ledger: RouterAlgorithmLedger | None = None
     try:
-        algorithm_id = _algorithm_id(config, patch, _text(getattr(ctx, 'run_id', 'run')))
+        algorithm_id = _algorithm_id(
+            config,
+            patch,
+            _text(getattr(ctx, 'run_id', 'run')),
+            temporary,
+        )
         router_chat_url = normalize_chat_url(_required(config, 'router_chat_url'))
         admin_url = _required(config, 'router_admin_url')
         manager = RouterManager(admin_url, router_chat_url)
@@ -81,6 +95,7 @@ def candidate_service(
             config=_environment(config, algorithm_id),
         )
         root = _required(os.environ, 'LAZYMIND_EVO_BASE_DIR')
+        ledger = RouterAlgorithmLedger(Path(root) / 'router-store')
         run_id = _text(getattr(ctx, 'run_id', ''))
         if not run_id:
             raise ValueError('candidate operation requires ctx.run_id')
@@ -98,7 +113,7 @@ def candidate_service(
         }
         registration, detail = ensure_owned_algorithm(
             manager,
-            RouterAlgorithmLedger(Path(root) / 'router-store'),
+            ledger,
             spec,
             owner,
             timeout_s=timeout_s,
@@ -109,7 +124,7 @@ def candidate_service(
             'algorithm_id': algorithm_id,
             'router_chat_url': manager.router_chat_url,
             'router_admin_url': manager.router_admin_url,
-            'cleanup_allowed': any(registration.get(key) is True for key in ('created', 'reactivated')),
+            'cleanup_allowed': True,
             'workspace_ref': _text(patch.get('workspace_ref')),
             'code_path': code_path,
             'register_request': spec.payload(),
@@ -124,9 +139,82 @@ def candidate_service(
             code_path,
             exc.kind,
             str(exc),
-        )
+        ) | {'cleanup_allowed': _owns_unpublished(ledger, algorithm_id, run_id)}
     except Exception as exc:
         return base | _failed(algorithm_id, router_chat_url, admin_url, code_path, type(exc).__name__, str(exc))
+
+
+def discard_candidate(
+    service: Mapping[str, Any] | None,
+    *,
+    delete_workspace: bool = True,
+) -> dict[str, Any]:
+    if not service or service.get('cleanup_allowed') is not True:
+        return {'status': 'not_applicable', 'reason': 'candidate_not_owned'}
+    algorithm_id = _text(service.get('algorithm_id'))
+    if not algorithm_id.startswith('evo_'):
+        return {'status': 'not_applicable', 'reason': 'candidate_not_owned'}
+    try:
+        root = _required(os.environ, 'LAZYMIND_EVO_BASE_DIR')
+        ledger = RouterAlgorithmLedger(Path(root) / 'router-store')
+        row = ledger.get_algorithm(algorithm_id)
+        if row is None:
+            return {'status': 'completed', 'algorithm_id': algorithm_id}
+        if row.get('published_at') is not None:
+            return {'status': 'not_applicable', 'reason': 'candidate_published'}
+        manager = RouterManager(
+            _required(service, 'router_admin_url'),
+            _required(service, 'router_chat_url'),
+        )
+        if delete_workspace:
+            result = delete_owned_algorithm(
+                manager,
+                ledger,
+                algorithm_id,
+                Path(root) / 'work' / 'repair',
+            )
+        else:
+            discard_owned_algorithm(manager, ledger, algorithm_id)
+            result = {'workspace': 'retained_for_abtest'}
+        return {
+            'status': 'completed',
+            'algorithm_id': algorithm_id,
+            'workspace': result.get('workspace'),
+        }
+    except RouterManagerError as exc:
+        return {'status': 'failed', 'algorithm_id': algorithm_id, 'error_type': exc.kind, 'message': str(exc)}
+    except Exception as exc:
+        return {'status': 'failed', 'algorithm_id': algorithm_id, 'error_type': 'ledger_error', 'message': str(exc)}
+
+
+def finalize_candidate(service: Mapping[str, Any], comparison: Mapping[str, Any]) -> None:
+    accepted = (
+        service.get('status') == 'ready'
+        and comparison.get('status') == 'completed'
+        and comparison.get('verdict') == 'accept'
+    )
+    if comparison.get('status') != 'completed':
+        return
+    if not accepted:
+        result = discard_candidate(service)
+        if result['status'] == 'failed':
+            raise RuntimeError(str(result.get('message') or 'failed to discard candidate'))
+        return
+    try:
+        root = _required(os.environ, 'LAZYMIND_EVO_BASE_DIR')
+        publish_owned_algorithm(
+            RouterManager(
+                _required(service, 'router_admin_url'),
+                _required(service, 'router_chat_url'),
+            ),
+            RouterAlgorithmLedger(Path(root) / 'router-store'),
+            _required(service, 'algorithm_id'),
+        )
+    except Exception:
+        result = discard_candidate(service)
+        if result['status'] == 'failed':
+            raise RuntimeError(str(result.get('message') or 'failed to discard candidate'))
+        raise
 
 
 def candidate_rag_answer(case: Mapping[str, Any], service: Mapping[str, Any]) -> dict[str, Any]:
@@ -172,31 +260,7 @@ def _candidate_answer_target(case: Mapping[str, Any],
 
 
 def stop_candidate(service: Mapping[str, Any] | None) -> dict[str, Any]:
-    if not service or service.get('status') != 'ready':
-        return {'status': 'not_applicable', 'reason': 'candidate_not_ready'}
-    if service.get('cleanup_allowed') is not True:
-        return {'status': 'not_applicable', 'reason': 'candidate_not_owned'}
-    algorithm_id = _text(service.get('algorithm_id'))
-    if not algorithm_id.startswith('evo_'):
-        return {'status': 'not_applicable', 'reason': 'candidate_not_owned'}
-    manager = RouterManager(
-        _required(service, 'router_admin_url'),
-        _required(service, 'router_chat_url'),
-    )
-    try:
-        root = _required(os.environ, 'LAZYMIND_EVO_BASE_DIR')
-        manage_owned_algorithm(
-            manager,
-            RouterAlgorithmLedger(Path(root) / 'router-store'),
-            algorithm_id,
-            'stop',
-            timeout_s=0,
-        )
-        return {'status': 'completed', 'algorithm_id': algorithm_id}
-    except RouterManagerError as exc:
-        return {'status': 'failed', 'algorithm_id': algorithm_id, 'error_type': exc.kind, 'message': str(exc)}
-    except Exception as exc:
-        return {'status': 'failed', 'algorithm_id': algorithm_id, 'error_type': 'ledger_error', 'message': str(exc)}
+    return discard_candidate(service)
 
 
 def _candidate_patch(patch: Mapping[str, Any], workspace: Mapping[str, Any]) -> dict[str, Any]:
@@ -208,19 +272,27 @@ def _candidate_patch(patch: Mapping[str, Any], workspace: Mapping[str, Any]) -> 
     }
 
 
-def _algorithm_id(config: Mapping[str, Any], patch: Mapping[str, Any], run_id: str) -> str:
+def _algorithm_id(
+    config: Mapping[str, Any],
+    patch: Mapping[str, Any],
+    run_id: str,
+    temporary: bool,
+) -> str:
     explicit = _text(config.get('algorithm_id'))
-    if explicit:
-        value = _safe_id(explicit, 'evo_candidate')[:64]
-        if not value.startswith('evo_'):
-            raise ValueError('candidate_config.algorithm_id must start with evo_')
-        return value
+    if explicit and not temporary:
+        if ALGORITHM_ID.fullmatch(explicit) is None:
+            raise ValueError('candidate_config.algorithm_id must be an ASCII evo_ id of at most 64 characters')
+        return explicit
     digest = hashlib.sha1(json.dumps(
         {'workspace': patch.get('workspace_ref'), 'diff': patch.get('diff')},
         sort_keys=True,
         default=str,
     ).encode()).hexdigest()[:10]
-    return f'evo_{_safe_id(_text(config.get("thread_id") or run_id), "run")}_{digest}'[:64]
+    thread = _safe_id(_text(config.get('thread_id') or run_id), 'run').removeprefix('thr-')
+    if temporary:
+        return f'evo_tmp_{thread[-12:]}_{digest[:6]}_{uuid4().hex[:6]}'[:64]
+    date = datetime.now(timezone.utc).strftime('%Y%m%d')
+    return f'evo_{date}_{thread[-12:]}_{digest[:6]}_{uuid4().hex[:4]}'
 
 
 def _environment(config: Mapping[str, Any], algorithm_id: str) -> dict[str, str]:
@@ -232,6 +304,7 @@ def _environment(config: Mapping[str, Any], algorithm_id: str) -> dict[str, str]
         'LAZYMIND_MAX_RETRIES': _max_retries(config),
         'LAZYMIND_ENABLE_ROUTER': 'false',
         'LAZYMIND_ROUTER_CHILD_PROXIED_ONLY': 'true',
+        'PYTHONSAFEPATH': '1',
     }
     env.update({key: _text(os.getenv(key)) for key in ENV_PASSTHROUGH if _text(os.getenv(key))})
     extra = config.get('env') if isinstance(config.get('env'), Mapping) else {}
@@ -270,6 +343,19 @@ def _failed(
         'code_path': code_path,
         'healthcheck': {'status': 'failed', 'type': error_type, 'message': message},
     }
+
+
+def _owns_unpublished(
+    ledger: RouterAlgorithmLedger | None,
+    algorithm_id: str,
+    thread_id: str,
+) -> bool:
+    row = ledger.get_algorithm(algorithm_id) if ledger is not None and algorithm_id else None
+    return bool(
+        row
+        and row.get('thread_id') == thread_id
+        and row.get('published_at') is None
+    )
 
 
 def _required(value: Mapping[str, Any], key: str) -> str:
