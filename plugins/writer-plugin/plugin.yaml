@@ -33,7 +33,9 @@ tool_scripts:
       - writer_generate_final_document
       - writer_export_markdown
       - writer_build_revision_task
-      - writer_plan_revision
+      - writer_locate_revision_target
+      - writer_generate_modify_plan
+      - writer_generate_patch_set
       - writer_apply_revision
       - writer_create_document
       - writer_publish_revision

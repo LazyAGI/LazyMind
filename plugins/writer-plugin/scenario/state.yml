@@ -7,9 +7,13 @@ transitions:
 
   prepare:
     - to: outline
-      when: Generate, reuse, display, or revise an outline.
+      when: >
+        Generate, reuse, display, or revise an outline. This route is mandatory
+        for a targeted revision when the prepared source_ir.stage is outline.
     - to: write_document
-      when: Revise an existing full document directly.
+      when: >
+        Revise an existing full document directly. Use this route for a targeted
+        revision only when the prepared source_ir.stage is draft or final.
     - to: __end__
       when: The requested read-only preparation is complete.
 
@@ -52,8 +56,11 @@ steps:
       1. Call writer_build_writing_task(query="{{user_input}}") and save its path as
          writing_task.
       2. If the request contains a Feishu/Lark document that must be read, call
-         writer_load_document(user_input="{{user_input}}", stage=<outline when the user
-         identifies it as an outline, otherwise final>). Save source_ir and
+         writer_load_document(user_input="{{user_input}}", stage=<final for a direct
+         in-place revision of an existing document; outline only when the user explicitly
+         wants to create, use, or revise the document as an authoring outline>). Merely
+         mentioning an outline title, outline section, or text located before/after an
+         outline does not make the whole document an outline. Save source_ir and
          target_document. Do not call writer_load_document for unrelated ordinary URLs.
       3. If the request selects or references a knowledge base, use the kb framework
          tools to retrieve the relevant evidence first. Preserve the returned evidence
@@ -68,6 +75,11 @@ steps:
       source_ir and target_document are optional because a from-scratch request has no
       cloud source. Do not invent either artifact. If a required tool fails, stop without
       synthesizing a fallback artifact.
+
+      In the final summary, when source_ir exists, explicitly report its stage and the
+      required next step. Use "next step: outline revision" for stage="outline", and
+      "next step: full-document revision" for stage="draft" or stage="final". This
+      routing information must be stated even when the user did not ask to see it.
     tools:
       - kb
       - cloud_files
@@ -120,7 +132,9 @@ steps:
       C. Revise current outline:
          When outline_ir exists and the user requests a targeted change, use the latest
          selected outline_ir as base_ir. Call writer_build_revision_task with the current
-         user instruction, then writer_plan_revision, then writer_apply_revision.
+         user instruction, then call writer_locate_revision_target,
+         writer_generate_modify_plan, writer_generate_patch_set, and
+         writer_apply_revision in that order.
          Persist the returned task, locate result, modify plan, patch set, and patch
          result under the outline_* internal keys. If write_result is non-empty, persist
          it as outline_write_result. Save the returned revised_ir path as outline_ir,
@@ -138,7 +152,9 @@ steps:
       - writer_prepare_outline
       - writer_generate_outline
       - writer_build_revision_task
-      - writer_plan_revision
+      - writer_locate_revision_target
+      - writer_generate_modify_plan
+      - writer_generate_patch_set
       - writer_apply_revision
       - writer_update_writing_context
     inputs:
@@ -221,7 +237,8 @@ steps:
          writer_apply_revision on an outline-stage IR from this step.
 
          1. Call writer_build_revision_task with the current user instruction and base_ir.
-         2. Call writer_plan_revision, then writer_apply_revision using the latest
+         2. Call writer_locate_revision_target, writer_generate_modify_plan,
+            writer_generate_patch_set, then writer_apply_revision using the latest
             available writing context.
          3. Persist the task, locate result, modify plan, patch set, and patch result
             under the document_* internal keys.
@@ -245,7 +262,9 @@ steps:
       - writer_update_writing_context
       - writer_generate_final_document
       - writer_build_revision_task
-      - writer_plan_revision
+      - writer_locate_revision_target
+      - writer_generate_modify_plan
+      - writer_generate_patch_set
       - writer_apply_revision
     inputs:
       - material: outline_ir

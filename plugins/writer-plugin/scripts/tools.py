@@ -339,38 +339,57 @@ def writer_build_revision_task(query: str, base_ir_path: str) -> str:
     )
 
 
-def writer_plan_revision(
+def writer_locate_revision_target(
     base_ir_path: str,
     writing_context_path: str,
     revision_task_path: str,
-) -> dict:
-    """Locate revision targets and produce a structured PatchSet."""
-    root = _run_root('revision-plan')
-    payload = _json_loads(WriterRevisionToolkit().plan_revision(
+) -> str:
+    """Locate the WriterDocument blocks affected by a revision task."""
+    content = WriterRevisionToolkit().locate_revision_target(
         writing_task_json=_read_json_string(revision_task_path),
         writer_document_json=_read_json_string(base_ir_path),
         writing_context_json=_read_json_string(writing_context_path),
-    ), {})
-    return {
-        'locate_result': _save_json_artifact(
-            'locate_result',
-            json.dumps(payload.get('locate_result') or {}, ensure_ascii=False),
-            writer_schema('revision.LocateResult'),
-            directory=root,
-        ),
-        'modify_plan': _save_json_artifact(
-            'modify_plan',
-            json.dumps(payload.get('modify_plan') or {}, ensure_ascii=False),
-            writer_schema('revision.ModifyPlan'),
-            directory=root,
-        ),
-        'patch_set': _save_json_artifact(
-            'patch_set',
-            json.dumps(payload.get('patch_set') or {}, ensure_ascii=False),
-            writer_schema('revision.PatchSet'),
-            directory=root,
-        ),
-    }
+    )
+    return _save_json_artifact(
+        'locate_result', content, writer_schema('revision.LocateResult'),
+        directory=_run_root('revision-locate'),
+    )
+
+
+def writer_generate_modify_plan(
+    base_ir_path: str,
+    writing_context_path: str,
+    revision_task_path: str,
+    locate_result_path: str,
+) -> str:
+    """Build a ModifyPlan for the located revision targets."""
+    content = WriterRevisionToolkit().generate_modify_plan(
+        writing_task_json=_read_json_string(revision_task_path),
+        writer_document_json=_read_json_string(base_ir_path),
+        locate_result_json=_read_json_string(locate_result_path),
+        writing_context_json=_read_json_string(writing_context_path),
+    )
+    return _save_json_artifact(
+        'modify_plan', content, writer_schema('revision.ModifyPlan'),
+        directory=_run_root('revision-plan'),
+    )
+
+
+def writer_generate_patch_set(
+    base_ir_path: str,
+    writing_context_path: str,
+    modify_plan_path: str,
+) -> str:
+    """Generate a PatchSet directly from a ModifyPlan."""
+    content = WriterRevisionToolkit().generate_patch_set(
+        writer_document_json=_read_json_string(base_ir_path),
+        modify_plan_json=_read_json_string(modify_plan_path),
+        writing_context_json=_read_json_string(writing_context_path),
+    )
+    return _save_json_artifact(
+        'patch_set', content, writer_schema('revision.PatchSet'),
+        directory=_run_root('revision-patch'),
+    )
 
 
 def writer_apply_revision(
