@@ -81,8 +81,8 @@ flowchart LR
       <br /><sub>统一管理知识文档，并清晰掌握解析状态</sub>
     </td>
     <td width="50%" align="center">
-      <a href="docs/assets/knowledge-cited-answer.jpg"><img src="docs/assets/knowledge-cited-answer.jpg" alt="回答包含行内引用与自动生成的参考文献" width="100%" /></a>
-      <br /><sub>回答带行内引用，结论可以追溯到原始文档</sub>
+      <a href="docs/assets/knowledge-cited-answer-latest.png"><img src="docs/assets/knowledge-cited-answer-latest.png" alt="题干与答案分别包含行内引用，并共同指向原始文档" width="100%" /></a>
+      <br /><sub>两个 (1) 分别引用题干和答案，并共同指向下方同一份原始文档</sub>
     </td>
   </tr>
 </table>

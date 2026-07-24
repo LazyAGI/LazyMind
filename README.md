@@ -60,11 +60,11 @@ For long-running work, each step remains visible. Users can approve checkpoints,
 <table>
   <tr>
     <td width="50%" align="center">
-      <a href="docs/assets/artifact-workspace.jpg"><img src="docs/assets/artifact-workspace.jpg" alt="A real Artifact remains editable at an approval checkpoint" width="100%" /></a>
+      <a href="docs/assets/artifact-workspace-en.jpg"><img src="docs/assets/artifact-workspace-en.jpg" alt="A real Artifact remains editable at an approval checkpoint" width="100%" /></a>
       <br /><sub>Inspect and edit the Artifact before continuing</sub>
     </td>
     <td width="50%" align="center">
-      <a href="docs/assets/artifact-version-diff.jpg"><img src="docs/assets/artifact-version-diff.jpg" alt="Compare an Artifact with an earlier version using an editable diff" width="100%" /></a>
+      <a href="docs/assets/artifact-version-diff-en.jpg"><img src="docs/assets/artifact-version-diff-en.jpg" alt="Inspect the execution trail and approve the next step without restarting" width="100%" /></a>
       <br /><sub>Review a version diff and restore the result you need</sub>
     </td>
   </tr>
@@ -77,11 +77,11 @@ Local directories, object storage, Feishu, Notion, and other sources feed a unif
 <table>
   <tr>
     <td width="50%" align="center">
-      <a href="docs/assets/knowledge-library.png"><img src="docs/assets/knowledge-library.png" alt="Manage parsed documents in a reusable knowledge base" width="100%" /></a>
+      <a href="docs/assets/knowledge-library-en.jpg"><img src="docs/assets/knowledge-library-en.jpg" alt="Manage parsed documents in a reusable knowledge base" width="100%" /></a>
       <br /><sub>Organize documents and track parsing status in one knowledge base</sub>
     </td>
     <td width="50%" align="center">
-      <a href="docs/assets/knowledge-cited-answer.jpg"><img src="docs/assets/knowledge-cited-answer.jpg" alt="Answer with inline citations and an automatically generated reference list" width="100%" /></a>
+      <a href="docs/assets/knowledge-cited-answer-en.jpg"><img src="docs/assets/knowledge-cited-answer-en.jpg" alt="Answer with inline citations and an automatically generated reference list" width="100%" /></a>
       <br /><sub>Ground answers with inline citations and traceable references</sub>
     </td>
   </tr>
@@ -94,11 +94,11 @@ Research methods, writing processes, and domain standards can be managed as Skil
 <table>
   <tr>
     <td width="50%" align="center">
-      <a href="docs/assets/skill-to-workflow-entry.jpg"><img src="docs/assets/skill-to-workflow-entry.jpg" alt="Create an executable workflow from an existing Skill" width="100%" /></a>
+      <a href="docs/assets/skill-to-workflow-entry-en.jpg"><img src="docs/assets/skill-to-workflow-entry-en.jpg" alt="Create an executable workflow from an existing Skill" width="100%" /></a>
       <br /><sub>Select a Skill as the source of a new workflow</sub>
     </td>
     <td width="50%" align="center">
-      <a href="docs/assets/skill-to-workflow-editor.png"><img src="docs/assets/skill-to-workflow-editor.png" alt="Inspect and refine the generated workflow in a visual editor" width="100%" /></a>
+      <a href="docs/assets/skill-to-workflow-editor-en.jpg"><img src="docs/assets/skill-to-workflow-editor-en.jpg" alt="Manage converted and custom workflows after generation" width="100%" /></a>
       <br /><sub>Inspect, refine, publish, and version the generated workflow</sub>
     </td>
   </tr>
@@ -111,11 +111,11 @@ Knowledge Ops captures what the user wants—preferences, terminology, experienc
 <table>
   <tr>
     <td width="50%" align="center">
-      <a href="docs/assets/skill-review.png"><img src="docs/assets/skill-review.png" alt="Knowledge Ops reviews and improves reusable Skills" width="100%" /></a>
+      <a href="docs/assets/skill-review-en.jpg"><img src="docs/assets/skill-review-en.jpg" alt="Knowledge Ops reviews and improves reusable Skills" width="100%" /></a>
       <br /><sub>Knowledge Ops reviews Skills, preferences, terminology, and experience</sub>
     </td>
     <td width="50%" align="center">
-      <a href="docs/assets/evo-pipeline.png"><img src="docs/assets/evo-pipeline.png" alt="The evo workspace turns failures into an evaluated improvement pipeline" width="100%" /></a>
+      <a href="docs/assets/evo-pipeline-en.jpg"><img src="docs/assets/evo-pipeline-en.jpg" alt="The evo workspace turns failures into an evaluated improvement pipeline" width="100%" /></a>
       <br /><sub>Algorithm evolution validates improvements before rollout</sub>
     </td>
   </tr>
@@ -157,11 +157,11 @@ After login, open **Settings** in the frontend:
 <table>
   <tr>
     <td width="50%" align="center">
-      <a href="docs/assets/settings-models.png"><img src="docs/assets/settings-models.png" alt="Select default models in frontend settings" width="100%" /></a>
+      <a href="docs/assets/settings-models-en.jpg"><img src="docs/assets/settings-models-en.jpg" alt="Select default models in frontend settings" width="100%" /></a>
       <br /><sub>Select the default models for each system capability</sub>
     </td>
     <td width="50%" align="center">
-      <a href="docs/assets/settings-tools.png"><img src="docs/assets/settings-tools.png" alt="Configure document parsing and search providers in frontend settings" width="100%" /></a>
+      <a href="docs/assets/settings-tools-en.jpg"><img src="docs/assets/settings-tools-en.jpg" alt="Configure document parsing and search providers in frontend settings" width="100%" /></a>
       <br /><sub>Configure document parsing, search, and integration credentials</sub>
     </td>
   </tr>
