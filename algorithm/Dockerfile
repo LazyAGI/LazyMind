@@ -177,10 +177,8 @@ RUN pip install --no-cache-dir -r /tmp/evo-requirements.txt python-dotenv
 
 COPY evo/ /app/evo/
 
-RUN chmod +x /app/evo/service/entrypoint.sh
-
 EXPOSE 8047
-ENTRYPOINT ["/app/evo/service/entrypoint.sh"]
+ENTRYPOINT ["python", "-m", "evo.app"]
 
 
 # Stage: mineru - base_env (full env, no code) + torch/mineru extras + code.

@@ -933,6 +933,7 @@ interface SlotImageProps {
   /** Called when the user clicks the reference (cite) button. */
   onReference?: (slot: SlotRevision) => void;
   readOnly?: boolean;
+  hideMutationActions?: boolean;
 }
 
 export function SlotImage({
@@ -945,6 +946,7 @@ export function SlotImage({
   onRefresh,
   onReference,
   readOnly,
+  hideMutationActions,
 }: SlotImageProps) {
   const raw = slot.artifact_value;
   const { displayUrl: url, pending, hasSource } = useSlotImageUrl(raw);
@@ -1035,12 +1037,13 @@ export function SlotImage({
   }
 
   const hasActions = Boolean(sessionId && slotId && slot.list_index !== undefined) && !readOnly;
+  const showMutationActions = hasActions && !hideMutationActions;
 
   // Overlays rendered directly on top of the image (no separate action bar)
   const overlays = hasActions ? (
     <>
       {/* Delete + Upload buttons — top-right, shown on hover via CSS */}
-      {confirmDelete ? (
+      {showMutationActions && (confirmDelete ? (
         <span className='plugin-slot__delete-confirm plugin-slot__delete-confirm--overlay'>
           <span className='plugin-slot__delete-confirm-text'>{tr('chat.slots.confirmDeleteQuestion')}</span>
           <button
@@ -1072,7 +1075,7 @@ export function SlotImage({
             aria-label={tr('chat.slots.deleteImage')}
           >×</button>
         </span>
-      )}
+      ))}
 
       {/* Version badge — bottom-left, always visible, overlaid on image */}
       {revisionCount !== undefined && revisionCount > 0 && (
@@ -1117,7 +1120,7 @@ export function SlotImage({
           {overlays}
         </div>
         {/* Hidden file input */}
-        {hasActions && (
+        {showMutationActions && (
           <input
             ref={fileInputRef}
             type='file'
@@ -2375,6 +2378,7 @@ export function SlotRenderer({
   onRefresh,
   onReference,
   readOnly,
+  hideImageMutationActions,
 }: {
   slot: SlotRevision;
   cardMode?: boolean;
@@ -2386,6 +2390,7 @@ export function SlotRenderer({
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
   readOnly?: boolean;
+  hideImageMutationActions?: boolean;
 }) {
   useTranslation();
   if (slot.artifact_value === undefined || slot.artifact_value === null) {
@@ -2405,6 +2410,7 @@ export function SlotRenderer({
         onRefresh={onRefresh}
         onReference={onReference}
         readOnly={readOnly}
+        hideMutationActions={hideImageMutationActions}
       />
     );
   }

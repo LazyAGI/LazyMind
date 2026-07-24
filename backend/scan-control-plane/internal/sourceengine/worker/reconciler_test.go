@@ -457,6 +457,13 @@ func (c *recordingCoreClient) SubmitParseTask(ctx context.Context, req coreclien
 	return response, nil
 }
 
+func (c *recordingCoreClient) ResumeParseTask(ctx context.Context, req coreclient.ResumeParseTaskRequest) (coreclient.SubmitParseTaskResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return coreclient.SubmitParseTaskResponse{}, err
+	}
+	return coreclient.SubmitParseTaskResponse{CoreTaskID: req.CoreTaskID, Status: coreclient.StatusSubmitted}, nil
+}
+
 func (c *recordingCoreClient) GetCoreTaskResult(ctx context.Context, req coreclient.GetCoreTaskResultRequest) (coreclient.CoreTaskResult, error) {
 	if err := ctx.Err(); err != nil {
 		return coreclient.CoreTaskResult{}, err

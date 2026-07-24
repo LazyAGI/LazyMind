@@ -66,6 +66,11 @@ type skillDraftAutoCommitRequestJSON struct {
 	DraftVersion int64  `json:"draft_version"`
 }
 
+type personalDraftAutoCommitRequestJSON struct {
+	TaskID       string `json:"task_id"`
+	DraftVersion int64  `json:"draft_version"`
+}
+
 type taskOutcome struct {
 	Status       string
 	ResultID     string

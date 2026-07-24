@@ -7,6 +7,7 @@ export type SyncTreeDataNode = DataNode & {
   treeKey?: string;
   objectKey?: string;
   nodeRef?: string;
+  bindingId?: string;
   childrenLoaded?: boolean;
 };
 
@@ -17,6 +18,7 @@ export type SyncGenerateScope = {
   path?: string;
   is_document?: boolean;
   is_container?: boolean;
+  bindingId?: string;
 };
 
 export function isSelectableScanTreeDocument(node: ScanV2TreeNode) {
@@ -24,11 +26,19 @@ export function isSelectableScanTreeDocument(node: ScanV2TreeNode) {
 }
 
 export function getScanTreeNodeKey(node: ScanV2TreeNode) {
-  return `${node.object_key || node.key}`;
+  return `${node.key || node.object_key}`;
 }
 
 export function getScanTreeNodeParentKey(node: ScanV2TreeNode) {
-  return `${node.parent_key || ""}`.trim();
+  const parentKey = `${node.parent_key || ""}`.trim();
+  const bindingId = `${node.binding_id || ""}`.trim();
+  return parentKey && bindingId ? `${bindingId}:${parentKey}` : parentKey;
+}
+
+function getScanTreeNodeScopedObjectKey(node: ScanV2TreeNode) {
+  const objectKey = `${node.object_key || node.node_ref || ""}`.trim();
+  const bindingId = `${node.binding_id || ""}`.trim();
+  return objectKey && bindingId ? `${bindingId}:${objectKey}` : objectKey;
 }
 
 export function collectScanTreeFileKeys(nodes: ScanV2TreeNode[]): string[] {
@@ -41,7 +51,7 @@ export function collectScanTreeFileKeys(nodes: ScanV2TreeNode[]): string[] {
       if (!isSelectableScanTreeDocument(node)) {
         return;
       }
-      keys.push(`${node.object_key || node.key}`);
+      keys.push(getScanTreeNodeKey(node));
     });
   };
   walk(nodes);
@@ -53,6 +63,10 @@ export function collectScanTreeNodesByKey(nodes: ScanV2TreeNode[]) {
   const walk = (items: ScanV2TreeNode[]) => {
     items.forEach((node) => {
       byKey.set(getScanTreeNodeKey(node), node);
+      const scopedObjectKey = getScanTreeNodeScopedObjectKey(node);
+      if (scopedObjectKey) {
+        byKey.set(scopedObjectKey, node);
+      }
       if (node.children?.length) {
         walk(node.children);
       }
@@ -126,11 +140,14 @@ export function buildSyncGenerateScopes(
 
     let parentKey = getScanTreeNodeParentKey(node);
     while (parentKey) {
-      if (selectedSet.has(parentKey)) {
+      const parent = nodeByKey.get(parentKey);
+      if (!parent) {
+        break;
+      }
+      if (selectedSet.has(getScanTreeNodeKey(parent))) {
         return;
       }
-      const parent = nodeByKey.get(parentKey);
-      parentKey = parent ? getScanTreeNodeParentKey(parent) : "";
+      parentKey = getScanTreeNodeParentKey(parent);
     }
 
     scopes.push({
@@ -139,6 +156,7 @@ export function buildSyncGenerateScopes(
       node_ref: node.node_ref || node.object_key || key,
       is_document: node.is_document === true,
       is_container: node.is_container === true || node.has_children === true,
+      bindingId: node.binding_id,
     });
   });
 
@@ -151,7 +169,7 @@ export function mergeScanTreeChildren(
   children: ScanV2TreeNode[],
 ): ScanV2TreeNode[] {
   return nodes.map((node) => {
-    if (getScanTreeNodeMergeKeys(node).includes(parentKey)) {
+    if (getScanTreeNodeKey(node) === parentKey) {
       return { ...node, children };
     }
     if (node.children?.length) {

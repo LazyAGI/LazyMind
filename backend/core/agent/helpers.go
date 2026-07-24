@@ -21,9 +21,17 @@ import (
 )
 
 const (
-	defaultThreadPageSize = 20
-	maxThreadPageSize     = 100
+	defaultThreadPageSize        = 20
+	maxThreadPageSize            = 100
+	threadModelNotConfiguredCode = 2001300
+	evoModelNotAllowedCode       = 2001301
 )
+
+type threadModelConfigIssue struct {
+	ModelRole     string   `json:"model_role"`
+	Status        string   `json:"status"`
+	MissingFields []string `json:"missing_fields,omitempty"`
+}
 
 var recordIDCounter atomic.Uint64
 
@@ -62,34 +70,57 @@ func attachThreadModelConfig(ctx context.Context, db *gorm.DB, userID string, pa
 	return nil
 }
 
-func hasThreadRequiredLLMConfig(payload map[string]any) bool {
+func threadModelConfigIssues(payload map[string]any) []threadModelConfigIssue {
 	llmConfig, ok := payload["llm_config"].(map[string]any)
 	if !ok {
-		return false
+		return []threadModelConfigIssue{
+			{ModelRole: "llm", Status: "not_configured"},
+			{ModelRole: "evo_llm", Status: "not_configured"},
+			{ModelRole: "embed_main", Status: "not_configured"},
+		}
 	}
 	for _, key := range []string{"eval_policy", "repair_policy", "candidate_config", "abtest_candidate_config"} {
 		if _, ok := llmConfig[key]; ok {
-			return false
+			return []threadModelConfigIssue{{ModelRole: "llm_config", Status: "invalid"}}
 		}
 	}
-	for _, role := range []string{"llm", "evo_llm"} {
-		found := false
+	issues := make([]threadModelConfigIssue, 0, 3)
+	for _, role := range []string{"llm", "evo_llm", "embed_main"} {
+		var roleConfig map[string]any
 		for key, value := range llmConfig {
 			if !strings.EqualFold(strings.TrimSpace(key), role) {
 				continue
 			}
-			roleConfig, ok := value.(map[string]any)
-			found = ok
-			for _, field := range []string{"source", "model", "base_url", "api_key"} {
-				found = found && strings.TrimSpace(fmt.Sprint(roleConfig[field])) != ""
-			}
+			roleConfig, _ = value.(map[string]any)
 			break
 		}
-		if !found {
-			return false
+		if roleConfig == nil {
+			issues = append(issues, threadModelConfigIssue{ModelRole: role, Status: "not_configured"})
+			continue
+		}
+		missing := make([]string, 0, 4)
+		provider := strings.TrimSpace(agentScalarString(roleConfig["source"]))
+		if provider == "" {
+			provider = strings.TrimSpace(agentScalarString(roleConfig["provider"]))
+		}
+		if provider == "" {
+			missing = append(missing, "source")
+		}
+		for _, field := range []string{"model", "base_url"} {
+			if strings.TrimSpace(agentScalarString(roleConfig[field])) == "" {
+				missing = append(missing, field)
+			}
+		}
+		if strings.TrimSpace(agentScalarString(roleConfig["api_key"])) == "" && roleConfig["skip_auth"] != true {
+			missing = append(missing, "api_key")
+		}
+		if len(missing) > 0 {
+			issues = append(issues, threadModelConfigIssue{
+				ModelRole: role, Status: "incomplete", MissingFields: missing,
+			})
 		}
 	}
-	return true
+	return issues
 }
 
 func buildEvoThreadCreatePayload(payload map[string]any) map[string]any {

@@ -1204,6 +1204,121 @@ func TestSourceTreeListChildrenUsesIndexedRepoWhenUseCache(t *testing.T) {
 	}
 }
 
+func TestSourceTreeEmptyLocalCacheFallsBackToLiveChildren(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{connectorType: connector.ConnectorType("local_fs")}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{
+		{
+			BindingID:     "binding-active",
+			SourceID:      "source-1",
+			TreeKey:       "local-root",
+			ConnectorType: "local_fs",
+			TargetType:    string(treeTestTargetType),
+			TargetRef:     "/workspace/test2",
+			AgentID:       "agent-1",
+			Status:        "ACTIVE",
+		},
+		{
+			BindingID:     "binding-deleting",
+			SourceID:      "source-1",
+			TreeKey:       "old-root",
+			ConnectorType: "local_fs",
+			TargetType:    string(treeTestTargetType),
+			TargetRef:     "/workspace/test1",
+			AgentID:       "agent-1",
+			Status:        "DELETING",
+		},
+	}
+	engine := NewDBSourceTreeQueryEngine(
+		repo,
+		TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10},
+		WithSourceTreeConnectorRegistry(registry),
+	)
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-active",
+		TreeKey:   "local-root",
+		ParentKey: "local-root",
+		UseCache:  boolPtr(true),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list local children with empty cache: %v", err)
+	}
+	if repo.listObjectsCalls != 1 || len(spy.listRequests) != 1 {
+		t.Fatalf("empty local cache should fall back to live connector, listObjects=%d liveLists=%d", repo.listObjectsCalls, len(spy.listRequests))
+	}
+	if len(page.Items) != 2 || !page.HasMore || page.SearchMode != SearchModeConnector {
+		t.Fatalf("unexpected live fallback page: %+v", page)
+	}
+	for _, node := range page.Items {
+		if !node.IsContainer && (node.SourceState != "NEW" || node.PendingAction != "CREATE" ||
+			node.UpdateType != "new" || node.UpdateDesc != "新文件待入库") {
+			t.Fatalf("new live document should expose pending-create status: %+v", node)
+		}
+	}
+}
+
+func TestSourceTreeLiveChildrenPreserveStoredDocumentState(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	baseRepo := newTreeReadRepo()
+	baseRepo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	baseRepo.bindings["source-1"] = []store.Binding{{
+		BindingID:     "binding-1",
+		SourceID:      "source-1",
+		TreeKey:       "tree-root",
+		ConnectorType: string(treeTestConnectorType),
+		TargetType:    string(treeTestTargetType),
+		TargetRef:     "tree-test://root",
+		Status:        "ACTIVE",
+	}}
+	stored := indexedObject("source-1", "binding-1", "tree-root", "doc-1", "other-parent", "Welcome.md", true, false)
+	stored.State.SourceState = "MODIFIED"
+	stored.State.PendingAction = "REPARSE"
+	stored.State.Selectable = true
+	baseRepo.objects = []ObjectWithState{stored}
+	repo := &treeReadRepoWithObject{treeReadRepo: baseRepo}
+	engine := NewDBSourceTreeQueryEngine(
+		repo,
+		TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10},
+		WithSourceTreeConnectorRegistry(registry),
+	)
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		UseCache:  boolPtr(false),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list live children: %v", err)
+	}
+	for _, node := range page.Items {
+		if node.ObjectKey == "doc-1" {
+			if node.SourceState != "MODIFIED" || node.PendingAction != "REPARSE" ||
+				node.UpdateType != "changed" || node.UpdateDesc != "内容变化待重解析" {
+				t.Fatalf("live document lost stored state: %+v", node)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected live doc-1 in page: %+v", page.Items)
+}
+
 func TestSourceTreeListChildrenFiltersUnsupportedDocuments(t *testing.T) {
 	t.Parallel()
 
@@ -1369,6 +1484,103 @@ func TestSourceTreeBindingRootRequestReturnsAllBindingRootsForMultiBindingSource
 	}
 }
 
+func TestSourceTreeBindingRootRequestIncludesDeletingBindingsWithStatus(t *testing.T) {
+	t.Parallel()
+
+	base := newTreeReadRepo()
+	repo := &treeReadRepoWithObject{treeReadRepo: base}
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{
+		{
+			BindingID: "binding-old",
+			SourceID:  "source-1",
+			TreeKey:   "old-root",
+			Status:    "DELETING",
+		},
+		{
+			BindingID: "binding-new",
+			SourceID:  "source-1",
+			TreeKey:   "new-root",
+			Status:    "ACTIVE",
+		},
+	}
+	repo.objects = []ObjectWithState{
+		indexedObject("source-1", "binding-old", "old-root", "old-root", "", "Old", true, true),
+		indexedObject("source-1", "binding-new", "new-root", "new-root", "", "New", true, true),
+	}
+	engine := NewDBSourceTreeQueryEngine(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10})
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-new",
+		TreeKey:   "new-root",
+		UseCache:  boolPtr(true),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list binding roots: %v", err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("expected active and deleting binding roots, got %+v", page.Items)
+	}
+	deleting := page.Items[0]
+	if deleting.BindingID != "binding-old" || deleting.DisplayName != "Old" {
+		t.Fatalf("unexpected deleting binding root: %+v", deleting)
+	}
+	if deleting.SourceState != "OUT_OF_SCOPE" || deleting.PendingAction != "DELETE" ||
+		!deleting.HasUpdate || deleting.UpdateType != "deleted" || deleting.UpdateDesc != "待删除" {
+		t.Fatalf("deleting binding root should expose pending delete status: %+v", deleting)
+	}
+	active := page.Items[1]
+	if active.BindingID != "binding-new" || active.DisplayName != "New" {
+		t.Fatalf("unexpected active binding root: %+v", active)
+	}
+	if active.SourceState == "OUT_OF_SCOPE" || active.PendingAction == "DELETE" ||
+		active.UpdateType == "deleted" || active.UpdateDesc == "待删除" {
+		t.Fatalf("active binding root should not expose the deleting binding status: %+v", active)
+	}
+}
+
+func TestSourceTreeBindingRootRequestReturnsSingleDeletingBindingWithStatus(t *testing.T) {
+	t.Parallel()
+
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1", Status: "DELETING"}
+	repo.bindings["source-1"] = []store.Binding{{
+		BindingID:              "binding-1",
+		SourceID:               "source-1",
+		TreeKey:                "local-root",
+		CoreParentDocumentName: "test1",
+		ConnectorType:          "local_fs",
+		TargetType:             "local_path",
+		TargetRef:              "/tmp/test_watch/test1",
+		Status:                 "DELETING",
+	}}
+	engine := NewDBSourceTreeQueryEngine(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10})
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		TreeKey:   "local-root",
+		UseCache:  boolPtr(true),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list deleting binding root: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected the deleting binding root, got %+v", page.Items)
+	}
+	root := page.Items[0]
+	if root.BindingID != "binding-1" || root.DisplayName != "test1" {
+		t.Fatalf("unexpected deleting binding root: %+v", root)
+	}
+	if root.SourceState != "OUT_OF_SCOPE" || root.PendingAction != "DELETE" ||
+		!root.HasUpdate || root.UpdateType != "deleted" || root.UpdateDesc != "待删除" {
+		t.Fatalf("single deleting binding root should expose pending delete status: %+v", root)
+	}
+}
+
 func TestSourceTreeBindingRootsUseIndexedRootDisplayNames(t *testing.T) {
 	t.Parallel()
 
@@ -1471,6 +1683,48 @@ func TestSourceTreeParentKeyCanSelectSiblingBindingRoot(t *testing.T) {
 	}
 	if len(page.Items) != 1 || page.Items[0].BindingID != "binding-2" || page.Items[0].ObjectKey != "doc-2" {
 		t.Fatalf("expected children from sibling binding root, got %+v", page.Items)
+	}
+}
+
+func TestSourceTreeParentKeyPrefersRequestedBindingWhenRootsMatch(t *testing.T) {
+	t.Parallel()
+
+	base := newTreeReadRepo()
+	repo := &treeReadRepoWithObject{treeReadRepo: base}
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{
+		{
+			BindingID: "binding-1",
+			SourceID:  "source-1",
+			TreeKey:   "shared-root",
+			Status:    "DELETING",
+		},
+		{
+			BindingID: "binding-2",
+			SourceID:  "source-1",
+			TreeKey:   "shared-root",
+			Status:    "ACTIVE",
+		},
+	}
+	repo.objects = []ObjectWithState{
+		indexedObject("source-1", "binding-1", "shared-root", "old-doc", "shared-root", "Old.md", true, false),
+		indexedObject("source-1", "binding-2", "shared-root", "new-doc", "shared-root", "New.md", true, false),
+	}
+	engine := NewDBSourceTreeQueryEngine(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10})
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-2",
+		TreeKey:   "shared-root",
+		UseCache:  boolPtr(true),
+		ParentKey: "shared-root",
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list requested binding root children: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].BindingID != "binding-2" || page.Items[0].ObjectKey != "new-doc" {
+		t.Fatalf("expected children from requested binding, got %+v", page.Items)
 	}
 }
 

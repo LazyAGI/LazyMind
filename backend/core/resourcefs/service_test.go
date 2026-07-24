@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"lazymind/core/common/orm"
@@ -170,6 +171,47 @@ func TestServiceDraftCommitRevisionRollback(t *testing.T) {
 	}
 }
 
+func TestWriteDraftMarksConversationDraftForAutoCommit(t *testing.T) {
+	tests := []struct {
+		name       string
+		autoEvo    bool
+		taskID     string
+		wantStatus string
+	}{
+		{name: "auto update conversation", autoEvo: true, taskID: "session-1", wantStatus: draftStatusAutoPending},
+		{name: "manual update conversation", autoEvo: false, taskID: "session-1", wantStatus: draftStatusPendingConfirm},
+		{name: "memory review", autoEvo: true, taskID: "memory_review_1", wantStatus: draftStatusPendingConfirm},
+		{name: "manual editor", autoEvo: true, taskID: "", wantStatus: draftStatusPendingConfirm},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newResourceFSTestDB(t)
+			service := NewService(ServiceDeps{DB: db.DB})
+			ref := ResourceRef{UserID: "u1", ResourceType: ResourceTypeMemory}
+			state, err := service.EnsureResource(context.Background(), ref, "v1")
+			if err != nil {
+				t.Fatalf("EnsureResource returned error: %v", err)
+			}
+			if err := db.Model(&orm.PersonalResource{}).Where("id = ?", state.ID).Update("auto_evo", tt.autoEvo).Error; err != nil {
+				t.Fatalf("set auto_evo: %v", err)
+			}
+			draft, err := service.WriteDraft(context.Background(), WriteDraftRequest{
+				Ref:                  ref,
+				Content:              "v2",
+				ExpectedDraftVersion: state.DraftVersion,
+				TaskID:               tt.taskID,
+				UpdatedBy:            "u1",
+			})
+			if err != nil {
+				t.Fatalf("WriteDraft returned error: %v", err)
+			}
+			if draft.DraftStatus != tt.wantStatus {
+				t.Fatalf("draft status = %q, want %q", draft.DraftStatus, tt.wantStatus)
+			}
+		})
+	}
+}
+
 func TestRollbackRejectsPendingDraft(t *testing.T) {
 	for _, resourceType := range []ResourceType{ResourceTypeMemory, ResourceTypeUserPreference} {
 		t.Run(string(resourceType), func(t *testing.T) {
@@ -256,8 +298,15 @@ func TestUpdateMetadataEnableAutoEvoMarksPendingDraftAuto(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile draft returned error: %v", err)
 	}
-	if nextDraft.DraftVersion != draft.DraftVersion || nextDraft.DraftStatus != draftStatusAutoPending {
-		t.Fatalf("draft after auto_evo = version %d status %q, want version %d status %q", nextDraft.DraftVersion, nextDraft.DraftStatus, draft.DraftVersion, draftStatusAutoPending)
+	if nextDraft.DraftVersion != draft.DraftVersion+1 || nextDraft.DraftStatus != draftStatusAutoPending {
+		t.Fatalf("draft after auto_evo = version %d status %q, want version %d status %q", nextDraft.DraftVersion, nextDraft.DraftStatus, draft.DraftVersion+1, draftStatusAutoPending)
+	}
+	var storedDraft orm.PersonalResourceDraft
+	if err := db.Where("resource_id = ?", state.ID).Take(&storedDraft).Error; err != nil {
+		t.Fatalf("query draft: %v", err)
+	}
+	if !strings.HasPrefix(storedDraft.TaskID, "personal_auto_evo_") {
+		t.Fatalf("task_id = %q, want generated personal auto-evo task", storedDraft.TaskID)
 	}
 	var review orm.PersonalResourceReviewSession
 	if err := db.Where("id = ?", preview.ReviewID).Take(&review).Error; err != nil {

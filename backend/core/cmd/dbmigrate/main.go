@@ -57,7 +57,7 @@ func usage() {
     flask db migrate [-m "msg"]  →  dbmigrate migrate [-m "msg"]
     flask db upgrade             →  dbmigrate upgrade  text  core Starttext RunUp()
 
-Env: ACL_DB_DRIVER, ACL_DB_DSN, MIGRATIONS_DIR (default: ./migrations)
+Env: ACL_DB_DRIVER, ACL_DB_DSN, MIGRATIONS_DIR (default: ./migrations), MIGRATION_FAKE_VERSIONS
 
 Commands:
   migrate [-m "message"]         text（text orm/models text DDL，text Postgres + ACL_DB_DSN）

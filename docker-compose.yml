@@ -334,6 +334,7 @@ services:
     environment:
       <<: *core-env
       MIGRATIONS_DIR: /migrations
+      MIGRATION_FAKE_VERSIONS: ${MIGRATION_FAKE_VERSIONS:-}
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
       LAZYMIND_SUBAGENT_DB_DSN: ${ACL_DB_DSN}
@@ -755,7 +756,9 @@ services:
         condition: service_healthy
 
   evo-api:
+    init: true
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-evo-api:${LAZYMIND_IMAGE_TAG:-latest}
+    entrypoint: ["python", "-m", "evo.app"]
     build:
       network: host
       context: .

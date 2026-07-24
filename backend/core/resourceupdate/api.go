@@ -293,8 +293,11 @@ func buildSkillTaskList(ctx context.Context, db *gorm.DB, userID, taskType, stat
 		}
 		if status == "" ||
 			item.Status == status ||
+			(status == orm.ResourceUpdateTaskStatusDone &&
+				item.Status == orm.SkillReviewStatsStatusCompleted) ||
 			(status == orm.ResourceUpdateTaskStatusRunning &&
-				(item.Status == orm.ResourceUpdateTaskStatusPending || item.Status == orm.ResourceUpdateTaskStatusRunning)) {
+				(item.Status == orm.ResourceUpdateTaskStatusRunning ||
+					orm.IsSkillReviewStatsActiveStatus(item.Status))) {
 			items = append(items, item)
 		}
 	}
@@ -340,7 +343,7 @@ func buildSkillReviewTaskStatus(ctx context.Context, db *gorm.DB, userID string,
 	}
 
 	resp.RunStatus = stats.Status
-	resp.Status = skillReviewTaskStatusFromRunStats(stats.Status)
+	resp.Status = stats.Status
 	resp.ResultCount = skillReviewStatsToResponse(stats).SkillCount
 	return resp, nil
 }
@@ -383,19 +386,6 @@ func findSkillReviewTaskStats(ctx context.Context, db *gorm.DB, userID string, t
 		}
 	}
 	return rows[len(rows)-1], true, nil
-}
-
-func skillReviewTaskStatusFromRunStats(runStatus string) string {
-	switch strings.TrimSpace(runStatus) {
-	case orm.SkillReviewStatsStatusCompleted:
-		return orm.ResourceUpdateTaskStatusDone
-	case orm.SkillReviewStatsStatusFailed:
-		return orm.ResourceUpdateTaskStatusFailed
-	case orm.SkillReviewStatsStatusSkipped:
-		return orm.ResourceUpdateTaskStatusSkipped
-	default:
-		return orm.ResourceUpdateTaskStatusRunning
-	}
 }
 
 type skillReviewStatsCounts struct {

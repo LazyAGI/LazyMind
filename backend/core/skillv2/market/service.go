@@ -101,6 +101,15 @@ type UnpublishResponse struct {
 	MarketItemID string
 }
 
+type DeleteRequest struct {
+	MarketItemID string
+}
+
+type DeleteResponse struct {
+	MarketItemID  string
+	SourceSkillID string
+}
+
 type TreeNode struct {
 	Name     string
 	Path     string
@@ -371,6 +380,148 @@ func (s *Service) Unpublish(ctx context.Context, req UnpublishRequest) (Unpublis
 	updates := map[string]any{"status": "unpublished", "updated_by": req.AdminUserID, "updated_at": now}
 	err := s.db.WithContext(ctx).Model(&skillMarketItemRow{}).Where("id = ?", req.MarketItemID).Updates(updates).Error
 	return UnpublishResponse{MarketItemID: req.MarketItemID}, err
+}
+
+func (s *Service) Delete(ctx context.Context, req DeleteRequest) (DeleteResponse, error) {
+	marketItemID := strings.TrimSpace(req.MarketItemID)
+	if marketItemID == "" {
+		return DeleteResponse{}, fmt.Errorf("market item id is required")
+	}
+
+	var out DeleteResponse
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var item skillMarketItemRow
+		if err := tx.Where("id = ?", marketItemID).Take(&item).Error; err != nil {
+			return err
+		}
+
+		var source skillRow
+		result := tx.Where("id = ?", item.SourceSkillID).Limit(1).Find(&source)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected > 0 && source.OwnerUserID != marketSourceOwnerID(item.ID) {
+			return fmt.Errorf("market source skill ownership mismatch")
+		}
+
+		if err := tx.Where("market_item_id = ?", item.ID).Delete(&skillMarketInstallRow{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("id = ?", item.ID).Delete(&skillMarketItemRow{}).Error; err != nil {
+			return err
+		}
+		if result.RowsAffected > 0 {
+			if err := deleteMarketSourceSkillGraphTx(ctx, tx, source.ID); err != nil {
+				return err
+			}
+		}
+
+		out = DeleteResponse{MarketItemID: item.ID, SourceSkillID: item.SourceSkillID}
+		return nil
+	})
+	return out, err
+}
+
+func deleteMarketSourceSkillGraphTx(ctx context.Context, tx *gorm.DB, skillID string) error {
+	tx = tx.WithContext(ctx)
+	var revisionIDs []string
+	if err := tx.Model(&skillRevisionRow{}).Where("skill_id = ?", skillID).Pluck("id", &revisionIDs).Error; err != nil {
+		return err
+	}
+	blobHashes := make(map[string]struct{})
+	if len(revisionIDs) > 0 {
+		var revisionBlobHashes []string
+		if err := tx.Model(&skillRevisionEntryRow{}).
+			Where("revision_id IN ? AND blob_hash IS NOT NULL", revisionIDs).
+			Pluck("blob_hash", &revisionBlobHashes).Error; err != nil {
+			return err
+		}
+		for _, hash := range revisionBlobHashes {
+			blobHashes[hash] = struct{}{}
+		}
+	}
+	var draftBlobHashes []string
+	if err := tx.Model(&skillDraftEntryRow{}).
+		Where("skill_id = ? AND blob_hash IS NOT NULL", skillID).
+		Pluck("blob_hash", &draftBlobHashes).Error; err != nil {
+		return err
+	}
+	for _, hash := range draftBlobHashes {
+		blobHashes[hash] = struct{}{}
+	}
+
+	if len(revisionIDs) > 0 {
+		if err := tx.Where("revision_id IN ?", revisionIDs).Delete(&skillRevisionEntryRow{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("id IN ?", revisionIDs).Delete(&skillRevisionRow{}).Error; err != nil {
+			return err
+		}
+	}
+	if err := tx.Where("skill_id = ?", skillID).Delete(&skillDraftEntryRow{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Where("skill_id = ?", skillID).Delete(&skillDraftRow{}).Error; err != nil {
+		return err
+	}
+	if err := deleteMarketSourceReviewGraphTx(tx, skillID); err != nil {
+		return err
+	}
+	if tx.Migrator().HasTable(&skillSearchIndexRow{}) {
+		if err := tx.Where("skill_id = ?", skillID).Delete(&skillSearchIndexRow{}).Error; err != nil {
+			return err
+		}
+	}
+	if err := tx.Where("id = ?", skillID).Delete(&skillRow{}).Error; err != nil {
+		return err
+	}
+	return deleteUnreferencedMarketSourceBlobsTx(tx, blobHashes)
+}
+
+func deleteMarketSourceReviewGraphTx(tx *gorm.DB, skillID string) error {
+	if !tx.Migrator().HasTable("skill_draft_review_sessions") {
+		return nil
+	}
+	var reviewIDs []string
+	if err := tx.Table("skill_draft_review_sessions").Where("skill_id = ?", skillID).Pluck("id", &reviewIDs).Error; err != nil {
+		return err
+	}
+	if len(reviewIDs) == 0 {
+		return nil
+	}
+	if tx.Migrator().HasTable("skill_draft_review_action_items") {
+		if err := tx.Exec("DELETE FROM skill_draft_review_action_items WHERE review_session_id IN ?", reviewIDs).Error; err != nil {
+			return err
+		}
+	}
+	if tx.Migrator().HasTable("skill_draft_review_action_batches") {
+		if err := tx.Exec("DELETE FROM skill_draft_review_action_batches WHERE review_session_id IN ?", reviewIDs).Error; err != nil {
+			return err
+		}
+	}
+	return tx.Exec("DELETE FROM skill_draft_review_sessions WHERE id IN ?", reviewIDs).Error
+}
+
+func deleteUnreferencedMarketSourceBlobsTx(tx *gorm.DB, blobHashes map[string]struct{}) error {
+	for hash := range blobHashes {
+		var revisionRefs int64
+		if err := tx.Model(&skillRevisionEntryRow{}).Where("blob_hash = ?", hash).Count(&revisionRefs).Error; err != nil {
+			return err
+		}
+		if revisionRefs > 0 {
+			continue
+		}
+		var draftRefs int64
+		if err := tx.Model(&skillDraftEntryRow{}).Where("blob_hash = ?", hash).Count(&draftRefs).Error; err != nil {
+			return err
+		}
+		if draftRefs == 0 {
+			if err := tx.Where("hash = ?", hash).Delete(&skillBlobRow{}).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 type LocalObjectStore struct {
@@ -866,6 +1017,20 @@ type skillDraftRow struct {
 }
 
 func (skillDraftRow) TableName() string { return "skill_drafts" }
+
+type skillDraftEntryRow struct {
+	SkillID  string  `gorm:"column:skill_id;type:varchar(36);primaryKey"`
+	Path     string  `gorm:"column:path;type:text;primaryKey"`
+	BlobHash *string `gorm:"column:blob_hash;type:text"`
+}
+
+func (skillDraftEntryRow) TableName() string { return "skill_draft_entries" }
+
+type skillSearchIndexRow struct {
+	SkillID string `gorm:"column:skill_id;type:varchar(36);primaryKey"`
+}
+
+func (skillSearchIndexRow) TableName() string { return "skill_search_indexes" }
 
 type skillMarketItemRow struct {
 	ID            string     `gorm:"column:id;type:varchar(36);primaryKey"`
