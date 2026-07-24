@@ -1168,7 +1168,7 @@ const enUS = {
     thinkingDepthLow: "Thinking: Low",
     thinkingDepthMedium: "Thinking: Medium",
     thinkingDepthHigh: "Thinking: High",
-    thinkingDepthMax: "Thinking: Max (up to 200 rounds)",
+    thinkingDepthMax: "Thinking: Max",
     intentUpdated: "Intent updated",
     intentGoal: "Goal",
     intentDeliverable: "Deliverable",

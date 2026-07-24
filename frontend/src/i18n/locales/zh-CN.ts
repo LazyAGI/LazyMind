@@ -1144,7 +1144,7 @@ const zhCN = {
     thinkingDepthLow: "思考深度：低",
     thinkingDepthMedium: "思考深度：中",
     thinkingDepthHigh: "思考深度：高",
-    thinkingDepthMax: "思考深度：Max（最多 200 轮）",
+    thinkingDepthMax: "思考深度：Max",
     intentUpdated: "意图已更新",
     intentGoal: "目标",
     intentDeliverable: "交付物",
