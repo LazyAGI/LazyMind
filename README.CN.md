@@ -74,7 +74,18 @@ flowchart LR
 
 本地目录、对象存储、飞书和 Notion 等数据源进入统一知识库；PDFReader、MinerU 或 PaddleOCR-VL 负责解析文档，再通过多路 Embedding、混合检索和重排，让结果建立在相关证据之上。
 
-![接入本地与云端知识源](docs/assets/datasource-create.png)
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/knowledge-library.png"><img src="docs/assets/knowledge-library.png" alt="在统一知识库中管理文档并查看解析状态" width="100%" /></a>
+      <br /><sub>统一管理知识文档，并清晰掌握解析状态</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/knowledge-cited-answer.jpg"><img src="docs/assets/knowledge-cited-answer.jpg" alt="回答包含行内引用与自动生成的参考文献" width="100%" /></a>
+      <br /><sub>回答带行内引用，结论可以追溯到原始文档</sub>
+    </td>
+  </tr>
+</table>
 
 ### 3. 把专家经验封装成可复用工作流
 
@@ -97,7 +108,18 @@ flowchart LR
 
 “智积阅累”负责沉淀用户想要什么——偏好、术语、经验与 Skill；`evo` 负责验证系统怎样做得更好——把 badcase 变成评测样例，依次执行基线评测、问题诊断、修复与 A/B Test。
 
-![evo 工作台把失败转化为经过评测的改进流水线](docs/assets/evo-pipeline.png)
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-review.png"><img src="docs/assets/skill-review.png" alt="智积阅累通过 Skill 复盘持续沉淀和改进能力" width="100%" /></a>
+      <br /><sub>智积阅累：复盘 Skill，沉淀偏好、术语与经验</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/evo-pipeline.png"><img src="docs/assets/evo-pipeline.png" alt="算法跃迁把失败转化为经过评测的改进流水线" width="100%" /></a>
+      <br /><sub>算法跃迁：经过评测验证，再安全发布改进</sub>
+    </td>
+  </tr>
+</table>
 
 ### 5. 从本地开始，在需要协作时扩展
 
@@ -127,11 +149,23 @@ make local-win-up
 - API 文档：http://localhost:8090/docs.html
 - 默认账号：`admin` / `admin`
 
-登录后在模型设置中配置 LLM、Embedding、Reranker，以及按需配置 VLM、图片或视频模型。高质量 PDF 解析可额外配置 MinerU API Key：
+登录后进入前端的**设置**页面：
 
-```bash
-export LAZYLLM_MINERU_API_KEY=你的_mineru_key
-```
+- 在**模型供应商**中添加供应商凭证与 API Key，再到**系统默认设置**中选择默认的大模型、向量模型和重排序模型；多模态向量、图文、语音、图片、视频和自进化模型均可按需配置。
+- 在**工具**中按需配置服务凭证，包括用于文档解析的 MinerU 或 PaddleOCR、网页与学术搜索引擎，以及其他集成。使用 MinerU 在线服务时，无需再通过环境变量配置 API Key。
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/settings-models.png"><img src="docs/assets/settings-models.png" alt="在前端设置中选择各项系统默认模型" width="100%" /></a>
+      <br /><sub>为不同系统能力选择默认模型</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/settings-tools.png"><img src="docs/assets/settings-tools.png" alt="在前端设置中配置文档解析与搜索服务" width="100%" /></a>
+      <br /><sub>配置文档解析、搜索与其他工具凭证</sub>
+    </td>
+  </tr>
+</table>
 
 停止本地运行：
 

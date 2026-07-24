@@ -80,10 +80,15 @@ VIDEO_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
 }
 KNOWLEDGE_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
     'output_contract': (
-        '# Knowledge evidence citation rules\n'
-        'When answering with evidence retrieved from a knowledge base or uploaded '
-        'document index, cite using the original `[[document.chunk]]` markers present '
-        'in the retrieved evidence. Do not invent, rewrite, or fabricate citation markers.',
+        '# Knowledge evidence citation rules (mandatory)\n'
+        'When you use evidence retrieved from a knowledge base or uploaded document index, '
+        'you MUST cite that evidence in the user-visible final answer. Place the original '
+        '`[[document.chunk]]` marker immediately after each claim or paragraph it supports. '
+        'Every answer that relies on retrieved knowledge MUST contain at least one such marker. '
+        'Copy markers exactly from the corresponding retrieved evidence; do not invent, '
+        'renumber, rewrite, or fabricate citation markers. Do not replace these markers with '
+        'a manually written references list: the application converts valid markers into '
+        'inline citations and builds the references panel automatically.',
     ),
 }
 ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {

@@ -74,7 +74,18 @@ For long-running work, each step remains visible. Users can approve checkpoints,
 
 Local directories, object storage, Feishu, Notion, and other sources feed a unified knowledge base. PDFReader, MinerU, or PaddleOCR-VL parses documents; multi-embedding retrieval, hybrid search, and reranking keep results grounded in relevant evidence.
 
-![Connect local and cloud knowledge sources](docs/assets/datasource-create.png)
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/knowledge-library.png"><img src="docs/assets/knowledge-library.png" alt="Manage parsed documents in a reusable knowledge base" width="100%" /></a>
+      <br /><sub>Organize documents and track parsing status in one knowledge base</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/knowledge-cited-answer.jpg"><img src="docs/assets/knowledge-cited-answer.jpg" alt="Answer with inline citations and an automatically generated reference list" width="100%" /></a>
+      <br /><sub>Ground answers with inline citations and traceable references</sub>
+    </td>
+  </tr>
+</table>
 
 ### 3. Package expert practice into reusable workflows
 
@@ -97,7 +108,18 @@ Research methods, writing processes, and domain standards can be managed as Skil
 
 Knowledge Ops captures what the user wants—preferences, terminology, experience, and Skills. `evo` tests how the system should improve by turning bad cases into evaluation samples and running baseline evaluation, diagnosis, repair, and A/B testing.
 
-![The evo workspace turns failures into an evaluated improvement pipeline](docs/assets/evo-pipeline.png)
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-review.png"><img src="docs/assets/skill-review.png" alt="Knowledge Ops reviews and improves reusable Skills" width="100%" /></a>
+      <br /><sub>Knowledge Ops reviews Skills, preferences, terminology, and experience</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/evo-pipeline.png"><img src="docs/assets/evo-pipeline.png" alt="The evo workspace turns failures into an evaluated improvement pipeline" width="100%" /></a>
+      <br /><sub>Algorithm evolution validates improvements before rollout</sub>
+    </td>
+  </tr>
+</table>
 
 ### 5. Start local, scale when collaboration requires it
 
@@ -127,11 +149,23 @@ After startup:
 - API docs: http://localhost:8090/docs.html
 - Default credentials: `admin` / `admin`
 
-Configure the LLM, embedding, and reranker in Model Settings after login. VLM, image, and video models are optional. For high-quality PDF parsing, you can also configure a MinerU API key before startup:
+After login, open **Settings** in the frontend:
 
-```bash
-export LAZYLLM_MINERU_API_KEY=your_mineru_key
-```
+- Add provider credentials and API keys under **Model Providers**, then select the default LLM, embedding, and reranker under **System Defaults**. Multimodal embedding, VLM, speech, image, video, and evolution models are optional.
+- Configure service credentials under **Tools** when needed, including MinerU or PaddleOCR for document parsing, web and academic search engines, and other integrations. No environment variable is required for a hosted MinerU API key.
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/settings-models.png"><img src="docs/assets/settings-models.png" alt="Select default models in frontend settings" width="100%" /></a>
+      <br /><sub>Select the default models for each system capability</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/settings-tools.png"><img src="docs/assets/settings-tools.png" alt="Configure document parsing and search providers in frontend settings" width="100%" /></a>
+      <br /><sub>Configure document parsing, search, and integration credentials</sub>
+    </td>
+  </tr>
+</table>
 
 Stop the local runtime with:
 
