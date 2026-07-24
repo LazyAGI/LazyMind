@@ -679,7 +679,6 @@ class TestChatRouteModelConfig:
 
         fake_service = ModuleType('lazymind.chat.service.chat_service')
         fake_service.handle_chat = fake_handle_chat
-        fake_service.check_sensitive_content = lambda _text: None
 
         fake_config = ModuleType('lazymind.chat.config')
         fake_config.DEFAULT_CHAT_DATASET = 'default'
@@ -723,7 +722,6 @@ class TestChatRouteModelConfig:
 
         fake_service = ModuleType('lazymind.chat.service.chat_service')
         fake_service.handle_chat = fake_handle_chat
-        fake_service.check_sensitive_content = lambda _text: None
 
         fake_config = ModuleType('lazymind.chat.config')
         fake_config.DEFAULT_CHAT_DATASET = 'default'

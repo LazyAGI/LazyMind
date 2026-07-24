@@ -30,7 +30,6 @@ func setupListProviderTestDB(t *testing.T) *gorm.DB {
 		&orm.DefaultModel{},
 		&orm.UserModelProvider{},
 		&orm.UserModelProviderGroup{},
-		&orm.UserModelProviderGroupModel{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

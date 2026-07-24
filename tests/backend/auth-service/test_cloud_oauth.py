@@ -11,11 +11,7 @@ def _stub_redis_dependencies(monkeypatch):
 
     monkeypatch.setattr(login_rate_limiter, 'is_limited', lambda user_id: False)
     monkeypatch.setattr(login_rate_limiter, 'record_failure', lambda user_id: None)
-    monkeypatch.setattr(
-        auth_api,
-        'set_refresh_token',
-        lambda token_hash, user_id: store.__setitem__(token_hash, user_id),
-    )
+    monkeypatch.setattr(auth_api, 'set_refresh_token', lambda token_hash, user_id: store.__setitem__(token_hash, user_id))
     monkeypatch.setattr(auth_api, 'get_user_id_by_token', lambda token_hash: store.get(token_hash))
     monkeypatch.setattr(auth_api, 'delete_refresh_token', lambda token_hash: store.pop(token_hash, None))
 
@@ -63,11 +59,7 @@ def test_oauth_authorize_url_success_when_secret_key_present(client: TestClient,
     monkeypatch.setenv('LAZYMIND_AUTH_CLOUD_SECRET_KEY', 'test-ragscan-secret')
 
     headers = _auth_headers(client, 'cloudok')
-    resp = client.post(
-        '/api/authservice/v1/cloud/feishu/oauth/authorize-url',
-        json=_authorize_payload(),
-        headers=headers,
-    )
+    resp = client.post('/api/authservice/v1/cloud/feishu/oauth/authorize-url', json=_authorize_payload(), headers=headers)
     assert resp.status_code == 200
     payload = resp.json()
     assert payload['code'] == 200
@@ -82,8 +74,7 @@ def test_oauth_authorize_url_success_when_secret_key_present(client: TestClient,
     listed = client.get('/api/authservice/v1/cloud/connections?provider=feishu', headers=headers)
     assert listed.status_code == 200
     items = _data(listed)['items']
-    assert len(items) == 1
-    assert items[0]['connection_id'] == data['connection_id']
+    assert items == []
 
     pending = client.get('/api/authservice/v1/cloud/connections?provider=feishu&status=PENDING', headers=headers)
     assert pending.status_code == 200
@@ -101,20 +92,3 @@ def test_oauth_authorize_url_success_when_secret_key_present(client: TestClient,
     assert len(status_items) == 1
     assert status_items[0]['connection_id'] == data['connection_id']
     assert status_items[0]['status'] == 'PENDING'
-
-
-def test_google_drive_oauth_provider_is_registered(client: TestClient, monkeypatch):
-    monkeypatch.setenv('LAZYMIND_AUTH_CLOUD_SECRET_KEY', 'test-ragscan-secret')
-
-    response = client.post(
-        '/api/authservice/v1/cloud/googledrive/oauth/authorize-url',
-        json=_authorize_payload(),
-        headers=_auth_headers(client, 'googledriveuser'),
-    )
-
-    assert response.status_code == 200
-    data = _data(response)
-    assert data['provider'] == 'googledrive'
-    assert data['scope'] == 'https://www.googleapis.com/auth/drive.readonly'
-    assert 'accounts.google.com/o/oauth2/v2/auth' in data['authorize_url']
-    assert 'access_type=offline' in data['authorize_url']

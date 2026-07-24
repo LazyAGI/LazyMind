@@ -157,13 +157,14 @@ func TestSearchToolConfigEntryUsesSelectedGoogleCustomSearch(t *testing.T) {
 	}
 }
 
-func TestSearchToolConfigEntryMapsBocha(t *testing.T) {
+func TestSearchToolConfigEntryMapsBochaAndSciverse(t *testing.T) {
 	tests := []struct {
 		name         string
 		providerName string
 		wantKey      string
 	}{
 		{name: "bocha", providerName: "Bocha", wantKey: "bocha"},
+		{name: "sciverse", providerName: "Sciverse", wantKey: "sciverse"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -183,22 +184,22 @@ func TestSearchToolConfigEntryMapsBocha(t *testing.T) {
 
 func TestSearchToolConfigEntryFallsBackToSharedSelection(t *testing.T) {
 	db := setupToolConfigTestDB(t)
-	seedSelectedSearchTool(t, db, "admin", "Tavily", "group-shared", "shared-key", true)
+	seedSelectedSearchTool(t, db, "admin", "Sciverse", "group-shared", "shared-key", true)
 
 	entry, err := searchToolConfigEntry(t.Context(), db, "user-1")
 	if err != nil {
 		t.Fatalf("searchToolConfigEntry error: %v", err)
 	}
-	if entry["tavily"] != "shared-key" {
+	if entry["sciverse"] != "shared-key" {
 		t.Fatalf("unexpected shared tool config: %#v", entry)
 	}
 }
 
-func TestAcademicSearchToolConfigEntryUsesSelectedSciverseDatasource(t *testing.T) {
+func TestSearchToolConfigEntryUsesSelectedSciverseDatasource(t *testing.T) {
 	db := setupToolConfigTestDB(t)
 	seedSelectedToolProvider(t, db, "user-1", "Sciverse", "group-sciverse-datasource", "datasource-key", datasourceProviderCategory, datasourceProviderCategory, false)
 
-	entry, err := academicSearchToolConfigEntry(t.Context(), db, "user-1")
+	entry, err := searchToolConfigEntry(t.Context(), db, "user-1")
 	if err != nil {
 		t.Fatalf("searchToolConfigEntry error: %v", err)
 	}
@@ -207,38 +208,11 @@ func TestAcademicSearchToolConfigEntryUsesSelectedSciverseDatasource(t *testing.
 	}
 }
 
-func TestSearchAndAcademicToolConfigsCoexist(t *testing.T) {
-	db := setupToolConfigTestDB(t)
-	seedSelectedSearchTool(t, db, "user-1", "Tavily", "group-tavily", "tavily-key", false)
-	seedSelectedToolProvider(
-		t, db, "user-1", "Sciverse", "group-sciverse-datasource", "sciverse-key",
-		datasourceProviderCategory, datasourceProviderCategory, false,
-	)
-	if err := db.Model(&orm.UserSelectedProvider{}).
-		Where("user_id = ? AND category = ?", "user-1", datasourceProviderCategory).
-		Update("updated_at", time.Now().Add(time.Minute)).Error; err != nil {
-		t.Fatalf("make Sciverse selection newer: %v", err)
-	}
-
-	searchEntry, err := searchToolConfigEntry(t.Context(), db, "user-1")
-	if err != nil {
-		t.Fatalf("searchToolConfigEntry error: %v", err)
-	}
-	academicEntry, err := academicSearchToolConfigEntry(t.Context(), db, "user-1")
-	if err != nil {
-		t.Fatalf("academicSearchToolConfigEntry error: %v", err)
-	}
-	entry := mergeToolConfig(nil, searchEntry, academicEntry)
-	if entry["tavily"] != "tavily-key" || entry["sciverse"] != "sciverse-key" {
-		t.Fatalf("expected Tavily and Sciverse configs, got %#v", entry)
-	}
-}
-
-func TestAcademicSearchToolConfigEntryFallsBackToConfiguredSciverseDatasource(t *testing.T) {
+func TestSearchToolConfigEntryFallsBackToConfiguredSciverseDatasource(t *testing.T) {
 	db := setupToolConfigTestDB(t)
 	seedConfiguredToolProvider(t, db, "user-1", "Sciverse", "group-sciverse-configured", "configured-key", datasourceProviderCategory)
 
-	entry, err := academicSearchToolConfigEntry(t.Context(), db, "user-1")
+	entry, err := searchToolConfigEntry(t.Context(), db, "user-1")
 	if err != nil {
 		t.Fatalf("searchToolConfigEntry error: %v", err)
 	}
@@ -258,28 +232,11 @@ func TestMergeToolConfigKeepsFeishuAndSearchTool(t *testing.T) {
 	}
 }
 
-func TestCloudToolProvidersIncludeGoogleDrive(t *testing.T) {
-	want := map[string]bool{
-		"feishu":      true,
-		"googledrive": true,
-		"notion":      true,
-	}
-	for _, provider := range _cloudToolProviders {
-		delete(want, provider)
-	}
-	if len(want) != 0 {
-		t.Fatalf("missing cloud tool providers: %#v", want)
-	}
-}
-
-func TestAcademicSearchToolConfigEntrySplitsMultiKeyCredential(t *testing.T) {
+func TestSearchToolConfigEntrySplitsMultiKeyCredential(t *testing.T) {
 	db := setupToolConfigTestDB(t)
-	seedSelectedToolProvider(
-		t, db, "user-1", "Sciverse", "group-sciverse", "key-1\n key-2 \n",
-		datasourceProviderCategory, datasourceProviderCategory, false,
-	)
+	seedSelectedSearchTool(t, db, "user-1", "Sciverse", "group-sciverse", "key-1\n key-2 \n", false)
 
-	entry, err := academicSearchToolConfigEntry(t.Context(), db, "user-1")
+	entry, err := searchToolConfigEntry(t.Context(), db, "user-1")
 	if err != nil {
 		t.Fatalf("searchToolConfigEntry error: %v", err)
 	}

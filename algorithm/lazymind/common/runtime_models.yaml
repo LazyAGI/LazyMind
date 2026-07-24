@@ -47,8 +47,3 @@ image_editor:
   source: dynamic
   dynamic_auth: true
   type: image_editing
-
-video_generator:
-  source: dynamic
-  dynamic_auth: true
-  type: text2video

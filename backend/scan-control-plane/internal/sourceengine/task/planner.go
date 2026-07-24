@@ -98,7 +98,7 @@ func (p *DBTaskPlanner) GenerateTasks(ctx context.Context, req GenerateRequest) 
 	if p.shouldQueueManualSync(req) {
 		return p.queueManualSyncs(ctx, req)
 	}
-	return p.generateTasks(ctx, req, p.maxManualObjects, false, nil, false)
+	return p.generateTasks(ctx, req, p.maxManualObjects, false, nil)
 }
 
 func (p *DBTaskPlanner) GeneratePendingTasks(ctx context.Context, req GeneratePendingRequest) (GenerateResult, error) {
@@ -116,8 +116,7 @@ func (p *DBTaskPlanner) GeneratePendingTasks(ctx context.Context, req GeneratePe
 	if err != nil {
 		return GenerateResult{}, mapStoreError(err)
 	}
-	cleanupRun := run.ScopeType == string(connector.ScopeTypeCleanup)
-	if binding.Status != "ACTIVE" && !(cleanupRun && binding.Status == "DELETING") {
+	if binding.Status != "ACTIVE" {
 		return GenerateResult{}, NewError(ErrCodeInvalidRequest, "binding is not active")
 	}
 	if binding.BindingGeneration != run.BindingGeneration {
@@ -134,7 +133,7 @@ func (p *DBTaskPlanner) GeneratePendingTasks(ctx context.Context, req GeneratePe
 		BindingID:  req.BindingID,
 		ObjectKeys: coverage.queryObjectKeys(),
 		Priority:   req.Priority,
-	}, 0, true, coverage, cleanupRun)
+	}, 0, true, coverage)
 }
 
 func (p *DBTaskPlanner) GeneratePendingTasksForRun(ctx context.Context, sourceID, bindingID, runID string) error {
@@ -328,7 +327,7 @@ func syncRequestID(req GenerateRequest, scope manualSyncScope, idx int) string {
 	return "manual-pull-" + hex.EncodeToString(sum[:12])
 }
 
-func (p *DBTaskPlanner) generateTasks(ctx context.Context, req GenerateRequest, maxObjects int, requirePendingAction bool, coverage *coverageSelector, cleanupOnly bool) (GenerateResult, error) {
+func (p *DBTaskPlanner) generateTasks(ctx context.Context, req GenerateRequest, maxObjects int, requirePendingAction bool, coverage *coverageSelector) (GenerateResult, error) {
 	requestedObjects := len(req.ObjectKeys)
 	if requestedObjects == 0 {
 		requestedObjects = len(req.DocumentIDs)
@@ -355,7 +354,7 @@ func (p *DBTaskPlanner) generateTasks(ctx context.Context, req GenerateRequest, 
 	if err != nil {
 		return GenerateResult{}, mapStoreError(err)
 	}
-	if binding.Status != "ACTIVE" && !(cleanupOnly && binding.Status == "DELETING") {
+	if binding.Status != "ACTIVE" {
 		return GenerateResult{}, NewError(ErrCodeInvalidRequest, "binding is not active")
 	}
 	objectKeys := req.ObjectKeys
@@ -381,10 +380,6 @@ func (p *DBTaskPlanner) generateTasks(ctx context.Context, req GenerateRequest, 
 		}
 		action := actionForState(docState)
 		if action == "" {
-			result.SkippedCount++
-			continue
-		}
-		if cleanupOnly && action != TaskActionDelete {
 			result.SkippedCount++
 			continue
 		}
@@ -465,6 +460,8 @@ func (p *DBTaskPlanner) restoreFailedTask(ctx context.Context, desired store.Par
 	task.SourceVersion = desired.SourceVersion
 	task.TargetVersionID = desired.TargetVersionID
 	task.CoreParentDocumentID = desired.CoreParentDocumentID
+	task.CoreTaskID = ""
+	task.CoreDocumentID = ""
 	task.LeaseOwner = ""
 	task.LeaseUntil = nil
 	task.RetryCount = 0

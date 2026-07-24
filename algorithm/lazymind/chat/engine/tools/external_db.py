@@ -82,7 +82,7 @@ class ReadOnlySqlManager(SqlManager):
             return raw
 
 
-class ExternalDatabaseToolkit:
+class ExternalDBToolGroup:
     """Read-only tools for querying user-configured external relational databases."""
 
     __public_apis__ = ['list_external_dbs', 'describe_external_db', 'external_db_query']

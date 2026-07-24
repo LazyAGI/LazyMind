@@ -22,22 +22,6 @@ def _new_id(prefix: str) -> str:
     return f'{prefix}{uuid.uuid4().hex}'
 
 
-def _intent_text(raw: Any) -> Optional[str]:
-    if raw is None:
-        return None
-    try:
-        data = json.loads(raw) if isinstance(raw, str) else raw
-    except (TypeError, ValueError):
-        return str(raw).strip() or None
-    if not isinstance(data, dict):
-        return str(data).strip() or None
-    legacy = str(data.get('text') or data.get('content') or '').strip()
-    if legacy:
-        return legacy
-    visible = {k: v for k, v in data.items() if k not in {'version', 'revision'} and v}
-    return json.dumps(visible, ensure_ascii=False, separators=(',', ':')) if visible else None
-
-
 class SubAgentDB:
     """Thin DB accessor over the down-passed core DSN.
 
@@ -130,6 +114,24 @@ class SubAgentDB:
                 {'task_id': task_id, 'key': key},
             ).mappings().first()
         return (int(row['m']) if row else 0) + 1
+
+    def save_artifact(self, task_id: str, key: str, content_type: str, value: Dict[str, Any], seq: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                text(
+                    'INSERT INTO sub_agent_artifacts (id, task_id, slot, content_type, value, seq, created_at) '
+                    'VALUES (:id, :task_id, :key, :ct, :value, :seq, :created_at)'
+                ),
+                {
+                    'id': _new_id('saa_'),
+                    'task_id': task_id,
+                    'key': key,
+                    'ct': content_type,
+                    'value': json.dumps(value, ensure_ascii=False, default=str),
+                    'seq': seq,
+                    'created_at': _utcnow(),
+                },
+            )
 
     def load_artifacts(self, task_id: str, keys: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         sql = (
@@ -328,50 +330,6 @@ class SubAgentDB:
             return dict(row) if row else None
         except Exception:
             return None
-
-    def load_bound_slot_artifacts(
-        self, task_id: str, slot: str
-    ) -> List[Dict[str, Any]]:
-        """Return the exact revisions frozen as inputs for a plugin step attempt.
-
-        A plugin attempt records ``material_revision_id`` before its SubAgent task
-        starts. Reading through that binding prevents a later human edit or version
-        selection from changing the inputs of an already-running attempt.
-        """
-        try:
-            with self._conn() as conn:
-                rows = conn.execute(
-                    text(
-                        'SELECT '
-                        '  psr.slot, '
-                        '  psr.slot_id, '
-                        '  psr.revision, '
-                        '  psr.list_index, '
-                        '  psr.artifact_seq, '
-                        '  psr.human_artifact_id, '
-                        '  psr.content_snapshot, '
-                        '  psr.change_source, '
-                        '  COALESCE(producer_exact.task_id, producer_legacy.task_id) AS task_id '
-                        'FROM plugin_attempt_input_bindings paib '
-                        'INNER JOIN plugin_session_steps consumer '
-                        '  ON consumer.id = paib.attempt_id '
-                        'INNER JOIN plugin_slot_revisions psr '
-                        '  ON psr.id = paib.material_revision_id '
-                        'LEFT JOIN plugin_session_steps producer_exact '
-                        '  ON producer_exact.id = psr.producer_attempt_id '
-                        'LEFT JOIN plugin_session_steps producer_legacy '
-                        '  ON producer_legacy.session_id = psr.session_id '
-                        '  AND producer_legacy.step_id = psr.step_id '
-                        '  AND producer_legacy.attempt = psr.attempt '
-                        'WHERE consumer.task_id = :task_id '
-                        '  AND (paib.bind_as = :slot OR paib.material_id = :slot OR psr.slot = :slot) '
-                        'ORDER BY psr.list_index ASC NULLS FIRST, paib.created_at ASC'
-                    ),
-                    {'task_id': task_id, 'slot': slot},
-                ).mappings().all()
-            return [dict(row) for row in rows]
-        except Exception:
-            return []
 
     def load_slot_order_list(self, session_id: str, slot: str) -> List[int]:
         """Return list_index values in UI display order for a plugin slot."""
@@ -596,45 +554,6 @@ class SubAgentDB:
     def format_task_artifacts(self, task_ids: List[str]) -> List[str]:
         rows = self.load_artifacts_for_tasks(task_ids)
         return _rows_to_artifact_summary(rows, order_field='seq', is_human_field=None) if rows else []
-
-    def get_conversation_intent(self, conversation_id: str) -> Optional[str]:
-        try:
-            with self._conn() as conn:
-                row = conn.execute(
-                    text('SELECT ext FROM conversations WHERE id = :cid'),
-                    {'cid': conversation_id},
-                ).mappings().first()
-            ext = row['ext'] if row else None
-            if isinstance(ext, str):
-                ext = json.loads(ext)
-            return _intent_text(ext.get('intent_context')) if isinstance(ext, dict) else None
-        except Exception:
-            return None
-
-    def get_session_intent(self, session_id: str) -> Optional[str]:
-        try:
-            with self._conn() as conn:
-                row = conn.execute(
-                    text('SELECT intent_context FROM plugin_sessions WHERE id = :sid'),
-                    {'sid': session_id},
-                ).mappings().first()
-            return _intent_text(row['intent_context']) if row else None
-        except Exception:
-            return None
-
-    def get_step_intent(self, session_id: str, step_id: str) -> Optional[str]:
-        try:
-            with self._conn() as conn:
-                row = conn.execute(
-                    text(
-                        'SELECT intent_context FROM plugin_step_intents '
-                        'WHERE session_id = :sid AND step_id = :step'
-                    ),
-                    {'sid': session_id, 'step': step_id},
-                ).mappings().first()
-            return _intent_text(row['intent_context']) if row else None
-        except Exception:
-            return None
 
 
 # ---------------------------------------------------------------------------
@@ -995,21 +914,6 @@ class TaskQueryDB:
 
     # ----- intent / constraint helpers -----
 
-    def get_conversation_intent(self, conversation_id: str) -> Optional[str]:
-        """Return conversation-level intent stored outside chat history."""
-        try:
-            with self._conn() as conn:
-                row = conn.execute(
-                    text('SELECT ext FROM conversations WHERE id = :cid'),
-                    {'cid': conversation_id},
-                ).mappings().first()
-            ext = row['ext'] if row else None
-            if isinstance(ext, str):
-                ext = json.loads(ext)
-            return _intent_text(ext.get('intent_context')) if isinstance(ext, dict) else None
-        except Exception:
-            return None
-
     def get_session_intent(self, session_id: str) -> Optional[str]:
         """Return the global intent_context text for a session, or None if not set."""
         try:
@@ -1023,7 +927,8 @@ class TaskQueryDB:
             raw = row['intent_context']
             if raw is None:
                 return None
-            return _intent_text(raw)
+            data = json.loads(raw) if isinstance(raw, str) else raw
+            return data.get('text') or data.get('content') if isinstance(data, dict) else str(data) or None
         except Exception:
             return None
 
@@ -1043,7 +948,8 @@ class TaskQueryDB:
             raw = row['intent_context']
             if raw is None:
                 return None
-            return _intent_text(raw)
+            data = json.loads(raw) if isinstance(raw, str) else raw
+            return data.get('text') or data.get('content') if isinstance(data, dict) else str(data) or None
         except Exception:
             return None
 
@@ -1063,7 +969,8 @@ class TaskQueryDB:
                 raw = row['intent_context']
                 if raw is None:
                     continue
-                text_val = _intent_text(raw)
+                data = json.loads(raw) if isinstance(raw, str) else raw
+                text_val = data.get('text') or data.get('content') if isinstance(data, dict) else str(data)
                 if text_val:
                     result[row['step_id']] = text_val
             return result

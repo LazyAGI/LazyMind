@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 
 import lazyllm
 
-from lazymind.chat.engine.subagent import SUBAGENT_ATTACHMENT_CONTEXT_KEY
 from lazymind.chat.engine.subagent.db import TaskQueryDB
 from lazymind.chat.engine.tools.infra import tool_success
 from lazyllm.tools.agent.base import _write_agent_data
@@ -76,24 +75,6 @@ def _mode() -> str:
     return mode if mode in ('auto', 'manual') else 'auto'
 
 
-def _current_attachment_context() -> Dict[str, Any]:
-    """Snapshot the parent conversation fields required by attachment tools."""
-    cfg = _agentic_config()
-    files = list(cfg.get('files') or [])
-    history_files_per_turn = {
-        str(turn): list(paths or [])
-        for turn, paths in (cfg.get('history_files_per_turn') or {}).items()
-    }
-    if not files and not history_files_per_turn:
-        return {}
-    return {
-        'files': files,
-        'history_files_per_turn': history_files_per_turn,
-        'user_id': str(cfg.get('user_id') or '').strip(),
-        'conversation_id': str(cfg.get('conversation_id') or '').strip(),
-    }
-
-
 def create_subagent(
     agent_type: str,
     title: str,
@@ -141,13 +122,7 @@ def create_subagent(
         acknowledgement that the task is running in the background.
     """
     mode = _mode()
-    params = dict(params or {})
-    params['_thinking_depth'] = str(_agentic_config().get('thinking_depth') or 'medium')
-    attachment_context = _current_attachment_context()
-    if attachment_context:
-        params[SUBAGENT_ATTACHMENT_CONTEXT_KEY] = attachment_context
-    else:
-        params.pop(SUBAGENT_ATTACHMENT_CONTEXT_KEY, None)
+    params = params or {}
     input_slots = input_slots or []
     output_slots = output_slots or []
 
@@ -326,7 +301,7 @@ def save_plugin_artifact(
     sort_order: Optional[int] = None,
     caption: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Save a workflow artifact directly from ChatAgent without launching a SubAgent.
+    """Save a plugin artifact directly from ChatAgent without launching a SubAgent.
 
     Use this when ChatAgent can produce the artifact value itself (e.g. copying a user
     file into a slot, or writing a short text value) without running a full SubAgent.
@@ -335,7 +310,7 @@ def save_plugin_artifact(
     Calls Go core POST /plugin-sessions/{session_id}/artifacts to write a slot revision.
 
     Args:
-        slot (str): The slot id to write (must have a slot binding in the workflow).
+        slot (str): The slot id to write (must have a slot binding in the plugin).
         value (Any): The artifact value.
             - text: a plain string.
             - json: a dict or list.
@@ -356,7 +331,7 @@ def save_plugin_artifact(
     if not session_id:
         return tool_success('save_plugin_artifact', {
             'status': 'error',
-            'message': 'No active workflow session found.',
+            'message': 'No active plugin session found in agentic_config.',
         })
 
     from lazymind.config import config as _cfg
@@ -407,7 +382,7 @@ def save_plugin_artifact(
                 'message': f'Go core returned {resp.status_code}: {resp.text[:200]}',
             })
         data = resp.json()
-        msg = f"Artifact '{slot}' saved to workflow session {session_id}."
+        msg = f"Artifact '{slot}' saved to plugin session {session_id}."
         return tool_success('save_plugin_artifact', {
             'status': 'ok',
             'message': msg,

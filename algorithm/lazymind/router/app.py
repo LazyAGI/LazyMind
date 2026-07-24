@@ -31,12 +31,9 @@ def _create_router_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        child_runtime_started = await _startup(
-            get_engine, Base, get_process_manager, get_global_registry, HealthChecker
-        )
+        await _startup(get_engine, Base, get_process_manager, get_global_registry, HealthChecker)
         yield
-        if child_runtime_started:
-            await _shutdown(get_process_manager)
+        await _shutdown(get_process_manager)
 
     app = FastAPI(
         title='LazyMind API',
@@ -72,10 +69,6 @@ async def _startup(get_engine, Base, get_process_manager, get_global_registry, H
         await conn.run_sync(Base.metadata.create_all)
     logger.info('router_* tables ensured')
 
-    if not config['router_child_processes_enabled']:
-        logger.info('router child processes and background monitoring are disabled')
-        return False
-
     pm = get_process_manager()
     await pm.claim_port_range()
     await pm.ensure_default_algorithm()
@@ -105,7 +98,6 @@ async def _startup(get_engine, Base, get_process_manager, get_global_registry, H
 
     hc_task.add_done_callback(_on_hc_done)
     logger.info('Router startup complete — instance_id=%s', pm.instance_id)
-    return True
 
 
 async def _shutdown(get_process_manager):

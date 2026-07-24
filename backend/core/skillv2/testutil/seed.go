@@ -2,7 +2,6 @@ package testutil
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 )
 
@@ -45,15 +44,14 @@ func SeedSkillWithRevision(t *testing.T, db *TestDB, skillID, revisionID string)
 		ChangeSource: "create",
 		CreatedAt:    now,
 	})
-	content := SkillMD(skillName, "用于阅读和总结论文的技能")
-	SeedTextBlob(t, db, "h_skill_"+revisionID, content)
+	SeedTextBlob(t, db, "h_skill_"+revisionID, "# 论文精读\n")
 	hash := "h_skill_" + revisionID
 	MustCreate(t, db, &SkillRevisionEntryRow{
 		RevisionID: revisionID,
 		Path:       "SKILL.md",
 		EntryType:  "file",
 		BlobHash:   &hash,
-		Size:       int64(len([]byte(content))),
+		Size:       13,
 		Mime:       "text/markdown",
 		FileType:   "markdown",
 		Mode:       420,
@@ -66,10 +64,6 @@ func SeedSkillWithRevision(t *testing.T, db *TestDB, skillID, revisionID string)
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	})
-}
-
-func SkillMD(name, description string) string {
-	return fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n# %s\n", name, description, name)
 }
 
 func SeedTextBlob(t *testing.T, db *TestDB, hash, content string) {

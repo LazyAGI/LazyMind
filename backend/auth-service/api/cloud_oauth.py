@@ -130,7 +130,7 @@ def oauth_callback(
 def list_connections(
     provider: str | None = None,
     auth_mode: str | None = None,
-    status: str | None = None,
+    status: str | None = 'ACTIVE',
     user: User = Depends(current_user),  # noqa: B008
 ):
     return cloud_oauth_service.list_connections(

@@ -133,11 +133,7 @@ func ListTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var rows []orm.SkillV2Skill
-	if err := db.WithContext(r.Context()).
-		Select("tags").
-		Where("owner_user_id = ? AND deleted_at IS NULL", userID).
-		Where("NOT EXISTS (SELECT 1 FROM skill_market_items AS market_items WHERE market_items.source_skill_id = skills.id)").
-		Find(&rows).Error; err != nil {
+	if err := db.WithContext(r.Context()).Select("tags").Where("owner_user_id = ? AND deleted_at IS NULL", userID).Find(&rows).Error; err != nil {
 		replyServiceError(w, err)
 		return
 	}
@@ -165,11 +161,7 @@ func ListCategories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var rows []orm.SkillV2Skill
-	if err := db.WithContext(r.Context()).
-		Select("category").
-		Where("owner_user_id = ? AND deleted_at IS NULL", userID).
-		Where("NOT EXISTS (SELECT 1 FROM skill_market_items AS market_items WHERE market_items.source_skill_id = skills.id)").
-		Find(&rows).Error; err != nil {
+	if err := db.WithContext(r.Context()).Select("category").Where("owner_user_id = ? AND deleted_at IS NULL", userID).Find(&rows).Error; err != nil {
 		replyServiceError(w, err)
 		return
 	}
@@ -202,8 +194,7 @@ func Create(w http.ResponseWriter, r *http.Request) {
 	}
 	name := firstNonEmpty(strings.TrimSpace(req.Name), strings.TrimSpace(req.SkillName))
 	category := strings.TrimSpace(req.Category)
-	externalImport := strings.TrimSpace(req.Content) == "" && len(req.Children) == 0 && req.Source.isExternalImport()
-	if !externalImport && (name == "" || category == "") {
+	if name == "" || category == "" {
 		replyError(w, "name/category required", http.StatusBadRequest)
 		return
 	}
@@ -236,24 +227,6 @@ func Create(w http.ResponseWriter, r *http.Request) {
 		"skill_id":         resp.SkillID,
 		"head_revision_id": resp.HeadRevisionID,
 	})
-}
-
-func (s skillSourceRequest) isExternalImport() bool {
-	sourceType := strings.ToLower(strings.TrimSpace(s.Type))
-	if sourceType == "" {
-		switch {
-		case strings.TrimSpace(s.UploadID) != "":
-			sourceType = "uploaded_zip"
-		case strings.TrimSpace(s.URL) != "":
-			sourceType = "url"
-		}
-	}
-	switch sourceType {
-	case "uploaded", "upload", "uploaded_zip", "url":
-		return true
-	default:
-		return false
-	}
 }
 
 func Get(w http.ResponseWriter, r *http.Request) {
@@ -909,7 +882,7 @@ func DiffFile(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
-	if isDraftReviewDiff(diffReq) && strings.TrimSpace(opts.Mode) == "" && skillHasHeadRevision(r.Context(), db, diffReq.New.SkillID) {
+	if isDraftReviewDiff(diffReq) && strings.TrimSpace(opts.Mode) == "" {
 		resp, err = newReviewService(db).PrepareFile(r.Context(), skillreview.PrepareFileRequest{
 			SkillID: strings.TrimSpace(diffReq.New.SkillID),
 			UserID:  userID,
@@ -921,16 +894,6 @@ func DiffFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	common.ReplyOK(w, diffFileDTO(resp))
-}
-
-func skillHasHeadRevision(ctx context.Context, db *gorm.DB, skillID string) bool {
-	var row struct {
-		HeadRevisionID *string `gorm:"column:head_revision_id"`
-	}
-	if err := db.WithContext(ctx).Table("skills").Select("head_revision_id").Where("id = ? AND deleted_at IS NULL", strings.TrimSpace(skillID)).Take(&row).Error; err != nil {
-		return false
-	}
-	return row.HeadRevisionID != nil && strings.TrimSpace(*row.HeadRevisionID) != ""
 }
 
 func DraftReviewAction(w http.ResponseWriter, r *http.Request) {
@@ -1108,7 +1071,6 @@ func MarketPublish(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Name     string             `json:"name"`
-		Tags     []string           `json:"tags"`
 		Category string             `json:"category"`
 		Source   skillSourceRequest `json:"source"`
 	}
@@ -1136,7 +1098,7 @@ func MarketPublish(w http.ResponseWriter, r *http.Request) {
 	resp, err := newMarketService(db).Publish(r.Context(), skillmarket.PublishRequest{
 		AdminUserID: userID,
 		Name:        strings.TrimSpace(req.Name),
-		Tags:        marketRequestTags(req.Tags, req.Category),
+		Category:    strings.TrimSpace(req.Category),
 		Source:      source,
 	})
 	if err != nil {
@@ -1157,7 +1119,6 @@ func MarketEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Name        *string             `json:"name"`
-		Tags        *[]string           `json:"tags"`
 		Category    *string             `json:"category"`
 		Description *string             `json:"description"`
 		Source      *skillSourceRequest `json:"source"`
@@ -1167,28 +1128,22 @@ func MarketEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	marketItemID := firstNonEmpty(common.PathVar(r, "market_item_id"), common.PathVar(r, "item_id"))
-	if req.Name != nil || req.Description != nil || req.Source != nil {
+	if req.Name != nil || req.Category != nil || req.Description != nil || req.Source != nil {
 		var item orm.SkillMarketItem
 		if err := db.WithContext(r.Context()).Where("id = ?", marketItemID).Take(&item).Error; err != nil {
 			replyServiceError(w, err)
 			return
 		}
-		var sourceSkill orm.SkillV2Skill
-		if err := db.WithContext(r.Context()).Select("owner_user_id").Where("id = ? AND deleted_at IS NULL", item.SourceSkillID).Take(&sourceSkill).Error; err != nil {
-			replyServiceError(w, err)
-			return
-		}
 		name := trimStringPtr(req.Name)
+		category := trimStringPtr(req.Category)
 		description := trimStringPtr(req.Description)
 		if name != nil && *name == "" {
 			replyError(w, "name cannot be empty", http.StatusBadRequest)
 			return
 		}
-		if name != nil {
-			if err := newMarketService(db).ValidateNameAvailable(r.Context(), *name, marketItemID); err != nil {
-				replyServiceError(w, err)
-				return
-			}
+		if category != nil && *category == "" {
+			replyError(w, "category cannot be empty", http.StatusBadRequest)
+			return
 		}
 		var source *skillservice.SourceInput
 		if req.Source != nil {
@@ -1201,8 +1156,9 @@ func MarketEdit(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := newSkillService(db).PatchSkill(r.Context(), skillservice.PatchSkillRequest{
 			SkillID:     item.SourceSkillID,
-			UserID:      sourceSkill.OwnerUserID,
+			UserID:      userID,
 			Name:        name,
+			Category:    category,
 			Description: description,
 			Source:      source,
 		}); err != nil {
@@ -1210,18 +1166,8 @@ func MarketEdit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	tags := req.Tags
-	if tags == nil && req.Category != nil {
-		legacyCategory := strings.TrimSpace(*req.Category)
-		if legacyCategory == "" {
-			replyError(w, "category cannot be empty", http.StatusBadRequest)
-			return
-		}
-		legacyTags := []string{legacyCategory}
-		tags = &legacyTags
-	}
-	if req.VersionNote != nil || tags != nil {
-		resp, err := newMarketService(db).Edit(r.Context(), skillmarket.EditRequest{AdminUserID: userID, MarketItemID: marketItemID, VersionNote: req.VersionNote, Tags: tags})
+	if req.VersionNote != nil {
+		resp, err := newMarketService(db).Edit(r.Context(), skillmarket.EditRequest{AdminUserID: userID, MarketItemID: marketItemID, VersionNote: strings.TrimSpace(*req.VersionNote)})
 		if err != nil {
 			replyServiceError(w, err)
 			return
@@ -1230,16 +1176,6 @@ func MarketEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyOK(w, map[string]any{"market_item_id": marketItemID})
-}
-
-func marketRequestTags(tags []string, legacyCategory string) []string {
-	if normalized := compactStrings(tags); len(normalized) > 0 {
-		return normalized
-	}
-	if category := strings.TrimSpace(legacyCategory); category != "" {
-		return []string{category}
-	}
-	return []string{}
 }
 
 func MarketUnpublish(w http.ResponseWriter, r *http.Request) {
@@ -1258,24 +1194,6 @@ func MarketUnpublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyOK(w, map[string]any{"market_item_id": resp.MarketItemID})
-}
-
-func MarketDelete(w http.ResponseWriter, r *http.Request) {
-	db, ok := requireDB(w)
-	if !ok {
-		return
-	}
-	marketItemID := firstNonEmpty(common.PathVar(r, "market_item_id"), common.PathVar(r, "item_id"))
-	resp, err := newMarketService(db).Delete(r.Context(), skillmarket.DeleteRequest{MarketItemID: marketItemID})
-	if err != nil {
-		replyServiceError(w, err)
-		return
-	}
-	common.ReplyOK(w, map[string]any{
-		"deleted":         true,
-		"market_item_id":  resp.MarketItemID,
-		"source_skill_id": resp.SourceSkillID,
-	})
 }
 
 func Share(w http.ResponseWriter, r *http.Request) {
@@ -2167,13 +2085,7 @@ func skillDetailDTO(item skillservice.SkillDetail) map[string]any {
 }
 
 func draftSummaryDTO(item skillservice.DraftSummary) map[string]any {
-	return map[string]any{
-		"has_uncommitted_draft": item.HasUncommittedDraft,
-		"task_id":               item.TaskID,
-		"version":               item.Version,
-		"type":                  item.Type,
-		"status":                item.Status,
-	}
+	return map[string]any{"has_uncommitted_draft": item.HasUncommittedDraft, "task_id": item.TaskID, "version": item.Version}
 }
 
 func draftStateDTO(item skillfs.DraftState) map[string]any {

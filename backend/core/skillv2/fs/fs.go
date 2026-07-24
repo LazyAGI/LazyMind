@@ -87,7 +87,6 @@ type WriteTextRequest struct {
 	Content              string
 	ExpectedDraftVersion int64
 	UserID               string
-	DraftStatus          string
 }
 
 type WriteFileRequest struct {
@@ -96,7 +95,6 @@ type WriteFileRequest struct {
 	Data                 []byte
 	ExpectedDraftVersion int64
 	UserID               string
-	DraftStatus          string
 }
 
 type MkdirRequest struct {
@@ -162,7 +160,6 @@ func (fs *DraftFS) WriteText(ctx context.Context, req WriteTextRequest) (WriteFi
 		Data:                 []byte(req.Content),
 		ExpectedDraftVersion: req.ExpectedDraftVersion,
 		UserID:               req.UserID,
-		DraftStatus:          req.DraftStatus,
 	})
 }
 
@@ -188,17 +185,6 @@ func (fs *DraftFS) WriteFile(ctx context.Context, req WriteFileRequest) (WriteFi
 		nextVersion, err := advanceDraftVersion(ctx, tx, req.SkillID, req.ExpectedDraftVersion, req.UserID, fs.clock.Now())
 		if err != nil {
 			return err
-		}
-		if strings.TrimSpace(req.DraftStatus) != "" {
-			result := tx.WithContext(ctx).Model(&skillDraftRow{}).
-				Where("skill_id = ? AND version = ?", req.SkillID, nextVersion).
-				Update("draft_status", strings.TrimSpace(req.DraftStatus))
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected != 1 {
-				return fmt.Errorf("stale draft version")
-			}
 		}
 		blob, err := fs.blobStore.Put(ctx, tx, cleaned, req.Data, fs.clock)
 		if err != nil {
@@ -237,11 +223,8 @@ func (fs *DraftFS) Mkdir(ctx context.Context, req MkdirRequest) (DraftMutationRe
 		if err != nil {
 			return err
 		}
-		if existing, ok := entries[cleaned]; ok {
-			if existing.EntryType == "file" {
-				return fmt.Errorf("cannot create directory over file: %s", cleaned)
-			}
-			return fmt.Errorf("path already exists: %s", cleaned)
+		if existing, ok := entries[cleaned]; ok && existing.EntryType == "file" {
+			return fmt.Errorf("cannot create directory over file: %s", cleaned)
 		}
 		for p, entry := range entries {
 			if entry.EntryType == "file" && isAncestorPath(p, cleaned) {
@@ -273,9 +256,6 @@ func (fs *DraftFS) Delete(ctx context.Context, req DeleteRequest) (DraftMutation
 	cleaned, err := cleanSkillPath(req.Path)
 	if err != nil {
 		return DraftMutationResponse{}, err
-	}
-	if cleaned == "SKILL.md" {
-		return DraftMutationResponse{}, fmt.Errorf("cannot delete SKILL.md")
 	}
 	var out DraftMutationResponse
 	err = fs.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

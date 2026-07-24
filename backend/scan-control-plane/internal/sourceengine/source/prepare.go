@@ -3,7 +3,6 @@ package source
 import (
 	"context"
 	"fmt"
-	"path"
 	"strings"
 	"time"
 
@@ -17,9 +16,7 @@ type preparedBinding struct {
 	checkpoint store.SyncCheckpoint
 }
 
-const scanDatasetTag = "scan"
-
-func (e *DefaultEngine) prepareCreateBinding(ctx context.Context, sourceID, datasetID, sourceName, callerID, callerName, tenantID, requestID string, bindingIndex int, input BindingInput, now time.Time) (preparedBinding, error) {
+func (e *DefaultEngine) prepareCreateBinding(ctx context.Context, sourceID, datasetID, sourceName, callerID, tenantID, requestID string, bindingIndex int, input BindingInput, now time.Time) (preparedBinding, error) {
 	input.ProviderOptions = providerOptionsWithActor(input.ProviderOptions, callerID, tenantID)
 	if err := validateBindingInput(input, true); err != nil {
 		return preparedBinding{}, err
@@ -37,7 +34,6 @@ func (e *DefaultEngine) prepareCreateBinding(ctx context.Context, sourceID, data
 		DatasetID:      datasetID,
 		Name:           displayName,
 		UserID:         callerID,
-		UserName:       callerName,
 	})
 	if err != nil {
 		return preparedBinding{}, err
@@ -58,9 +54,7 @@ func (e *DefaultEngine) createCoreDataset(ctx context.Context, req CreateSourceR
 		Name:           req.Name,
 		DisplayName:    req.Name,
 		CreatedBy:      req.CallerID,
-		UserName:       req.CallerName,
 		TenantID:       req.TenantID,
-		Tags:           []string{scanDatasetTag},
 		Algo:           e.defaultDatasetAlgoRef(),
 	})
 	return resp.DatasetID, err
@@ -84,28 +78,11 @@ func bindingRootDisplayName(explicit, sourceName string, target connector.Normal
 		return name
 	}
 	if isSingleFileTarget(target) {
-		if name := singleFileBindingRootDisplayName(target.DisplayName); name != "" {
-			return name
-		}
 		if name := strings.TrimSpace(sourceName); name != "" {
 			return name
 		}
 	}
 	return strings.TrimSpace(target.DisplayName)
-}
-
-func singleFileBindingRootDisplayName(displayName string) string {
-	name := strings.TrimSpace(displayName)
-	if name == "" {
-		return ""
-	}
-	if ext := path.Ext(name); ext != "" {
-		withoutExt := strings.TrimSpace(strings.TrimSuffix(name, ext))
-		if withoutExt != "" {
-			return withoutExt
-		}
-	}
-	return name
 }
 
 func isSingleFileTarget(target connector.NormalizedTarget) bool {
@@ -181,7 +158,6 @@ func (e *DefaultEngine) newBinding(sourceID, folderID, displayName string, input
 		ExcludeExtensions:      jsonFromStrings(input.ExcludeExtensions),
 		Status:                 status,
 		LastError:              store.JSON{},
-		ChatEnabled:            true,
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	}

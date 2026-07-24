@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('build', 'installer', 'resume', 'doctor', 'clean', 'clean-all')]
+    [ValidateSet('build', 'resume', 'doctor', 'clean', 'clean-all')]
     [string]$Action = 'build'
 )
 
@@ -13,7 +13,6 @@ $targetRoot = Join-Path $repoRoot 'desktop\build\windows-x64'
 $runtimeRoot = Join-Path $targetRoot 'runtime'
 $distRoot = Join-Path $repoRoot 'desktop\dist'
 $electronRoot = Join-Path $repoRoot 'desktop\electron'
-$installerResourcesRoot = Join-Path $targetRoot 'installer-resources'
 $pythonVersion = '3.11.15'
 $goBuildArgs = @('-trimpath', '-buildvcs=false', '-ldflags=-s -w')
 
@@ -44,19 +43,6 @@ function New-WindowsZipFileName {
     }
     $timestamp = (Get-Date).ToString('yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture)
     return "LazyMind-windows-x64-$timestamp-$commit.zip"
-}
-
-function New-WindowsInstallerFileName {
-    $commit = (& git.exe -C $repoRoot rev-parse --short=8 HEAD).Trim()
-    if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-fA-F]{7,}$') {
-        throw 'Could not resolve the Git commit for the Windows Desktop installer name.'
-    }
-    $package = Get-Content -LiteralPath (Join-Path $electronRoot 'package.json') -Raw | ConvertFrom-Json
-    if ([string]$package.version -notmatch '^\d+\.\d+\.\d+$') {
-        throw 'Windows installer package version must use MAJOR.MINOR.PATCH.'
-    }
-    $timestamp = (Get-Date).ToString('yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture)
-    return "LazyMind-windows-x64-installer-$($package.version)-$timestamp-$commit.exe"
 }
 
 function Import-EnvFile([string]$Path) {
@@ -93,7 +79,6 @@ function Initialize-Environment {
     $env:LAZYMIND_DESKTOP_RUNTIME_STAGE = $runtimeRoot
     $env:LAZYMIND_DESKTOP_OUTPUT_DIR = $distRoot
     $env:LAZYMIND_DESKTOP_WINDOWS_ICON = Join-Path $targetRoot 'LazyMind.ico'
-    $env:LAZYMIND_DESKTOP_INSTALLER_RESOURCES = $installerResourcesRoot
 }
 
 function Assert-Command([string]$Name, [string]$Hint) {
@@ -202,7 +187,7 @@ function Copy-RuntimeApp {
         (Join-Path $repoRoot '.codex-gomodcache'),
         (Join-Path $repoRoot '.pnpm-store')
     )
-    & robocopy.exe $repoRoot $appRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD @excludedDirs /XF '*.pyc' '*.pyo' '.DS_Store' '.env' 'config.env' 'config.win.env'
+    & robocopy.exe $repoRoot $appRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD @excludedDirs /XF '*.pyc' '*.pyo' '.DS_Store'
     if ($LASTEXITCODE -gt 7) { throw "robocopy runtime app staging failed with code $LASTEXITCODE" }
     $coreDevBinary = Join-Path $appRoot 'backend\core\core.exe'
     if (Test-Path -LiteralPath $coreDevBinary) { Remove-Item -LiteralPath $coreDevBinary -Force }
@@ -214,7 +199,7 @@ function Copy-RuntimeApp {
     }
 }
 
-function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = 'zip') {
+function Finalize-Desktop {
     $finalZipName = New-WindowsZipFileName
     Materialize-PythonAliases
     Prune-PythonTree (Join-Path $runtimeRoot 'runtimes\python')
@@ -238,21 +223,6 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
     Remove-GeneratedPath (Join-Path $distRoot 'win-unpacked')
     Remove-GeneratedPath (Join-Path $distRoot 'LazyMind-win-x64.zip')
     Remove-GeneratedPath (Join-Path $distRoot 'LazyMind-windows-x64.zip')
-    Remove-GeneratedPath (Join-Path $distRoot 'LazyMind-windows-x64-installer.exe')
-    if ($PackageKind -eq 'installer') {
-        Remove-GeneratedPath $installerResourcesRoot
-        New-Item -ItemType Directory -Force -Path $installerResourcesRoot | Out-Null
-        Build-GoBinary (Join-Path $repoRoot 'local\local-runtime-manager') (Join-Path $installerResourcesRoot 'lazymind-installer-maintenance.exe') @('.\cmd\installer-maintenance')
-        Invoke-Native 'pnpm.cmd' @('run', 'pack:win:x64:installer') $electronRoot
-        $builderInstaller = Join-Path $distRoot 'LazyMind-windows-x64-installer.exe'
-        $finalInstaller = Join-Path $distRoot (New-WindowsInstallerFileName)
-        if (-not (Test-Path -LiteralPath $builderInstaller -PathType Leaf)) {
-            throw "Electron Builder did not produce $builderInstaller"
-        }
-        Move-Item -LiteralPath $builderInstaller -Destination $finalInstaller -Force
-        Write-Host "Windows installer: $finalInstaller"
-        return
-    }
     Invoke-Native 'pnpm.cmd' @('run', 'pack:win:x64') $electronRoot
     $builderZip = Join-Path $distRoot 'LazyMind-win-x64.zip'
     $finalZip = Join-Path $distRoot $finalZipName
@@ -267,7 +237,7 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
     Write-Host "Portable ZIP: $finalZip"
 }
 
-function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = 'zip') {
+function Build-Desktop {
     Invoke-Doctor
     Remove-GeneratedPath $targetRoot
     New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'bin') | Out-Null
@@ -311,23 +281,20 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     Invoke-Native (Join-Path $algorithmVenv 'Scripts\lazyllm.exe') @('install', 'rag')
     Invoke-Native 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'algorithm\requirements.txt'))
     Invoke-Native 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'algorithm\requirements-local.txt'))
-    Finalize-Desktop $PackageKind
+    Finalize-Desktop
 }
 
 Initialize-Environment
 switch ($Action) {
     'doctor' { Invoke-Doctor }
     'build' { Build-Desktop }
-    'installer' { Build-Desktop 'installer' }
     'resume' { Invoke-Doctor; Finalize-Desktop }
     'clean' {
         Remove-GeneratedPath $targetRoot
         Remove-GeneratedPath (Join-Path $distRoot 'win-unpacked')
         Remove-GeneratedPath (Join-Path $distRoot 'LazyMind-win-x64.zip')
         Remove-GeneratedPath (Join-Path $distRoot 'LazyMind-windows-x64.zip')
-        Remove-GeneratedPath $installerResourcesRoot
         Remove-DistArtifacts 'LazyMind-windows-x64-????????-??????-*.zip'
-        Remove-DistArtifacts 'LazyMind-windows-x64-installer-*.exe'
     }
     'clean-all' {
         Remove-GeneratedPath (Join-Path $repoRoot 'desktop\build')

@@ -67,7 +67,6 @@ const (
 // SourceRuntime describes a local Source running on the Agent side.
 type SourceRuntime struct {
 	SourceID         string
-	BindingID        string
 	TenantID         string
 	RootPath         string
 	Status           SourceRuntimeStatus
@@ -81,7 +80,6 @@ type SourceRuntime struct {
 // FileEvent stores a file change event.
 type FileEvent struct {
 	SourceID   string        `json:"source_id"`
-	BindingID  string        `json:"binding_id,omitempty"`
 	TenantID   string        `json:"tenant_id"`
 	EventType  FileEventType `json:"event_type"`
 	Path       string        `json:"path"`
@@ -118,7 +116,6 @@ type StageResult struct {
 
 type StartSourceRequest struct {
 	SourceID        string `json:"source_id"`
-	BindingID       string `json:"binding_id,omitempty"`
 	TenantID        string `json:"tenant_id"`
 	RootPath        string `json:"root_path"`
 	SkipInitialScan bool   `json:"skip_initial_scan,omitempty"`
@@ -129,8 +126,7 @@ type StartSourceResponse struct {
 }
 
 type StopSourceRequest struct {
-	SourceID  string `json:"source_id"`
-	BindingID string `json:"binding_id,omitempty"`
+	SourceID string `json:"source_id"`
 }
 
 type AcceptedResponse struct {
@@ -167,7 +163,6 @@ type Command struct {
 	Type            CommandType `json:"type"`
 	TenantID        string      `json:"tenant_id,omitempty"`
 	SourceID        string      `json:"source_id,omitempty"`
-	BindingID       string      `json:"binding_id,omitempty"`
 	RootPath        string      `json:"root_path,omitempty"`
 	Mode            string      `json:"mode,omitempty"`
 	Reason          string      `json:"reason,omitempty"`

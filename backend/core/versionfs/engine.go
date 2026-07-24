@@ -41,10 +41,6 @@ type Store interface {
 	DeleteBlob(ctx context.Context, tx *gorm.DB, hash string) error
 }
 
-type initialCommitStore interface {
-	AllowsInitialCommit() bool
-}
-
 type HeadState struct {
 	RevisionID string
 }
@@ -165,13 +161,7 @@ func (e *Engine) CommitDraft(ctx context.Context, req CommitDraftRequest) (Commi
 			baseRevisionID = head.RevisionID
 		}
 		if baseRevisionID == "" {
-			store, ok := e.store.(initialCommitStore)
-			if !ok || !store.AllowsInitialCommit() {
-				return fmt.Errorf("resource has no base revision")
-			}
-		}
-		if baseRevisionID != head.RevisionID {
-			return ErrDraftBaseConflict
+			return fmt.Errorf("resource has no base revision")
 		}
 		if baseRevisionID != head.RevisionID {
 			return ErrDraftBaseConflict
@@ -217,7 +207,7 @@ func (e *Engine) CommitDraft(ctx context.Context, req CommitDraftRequest) (Commi
 		if err := e.store.MarkActiveReviews(ctx, tx, req.ResourceID, "committed", req.UserID, now); err != nil {
 			return err
 		}
-		if err := e.store.EnforceRevisionLimit(ctx, tx, req.ResourceID, protectedIDs(revisionID)); err != nil {
+		if err := e.store.EnforceRevisionLimit(ctx, tx, req.ResourceID, protectedIDs(revisionID, baseRevisionID)); err != nil {
 			return err
 		}
 		if err := e.store.AfterCommit(ctx, tx, revision, entries); err != nil {
@@ -315,7 +305,7 @@ func (e *Engine) CommitEntriesTx(ctx context.Context, tx *gorm.DB, req CommitEnt
 	if err := e.store.MarkActiveReviews(ctx, tx, req.ResourceID, "committed", req.UserID, now); err != nil {
 		return CommitEntriesResponse{}, err
 	}
-	if err := e.store.EnforceRevisionLimit(ctx, tx, req.ResourceID, protectedIDs(revisionID)); err != nil {
+	if err := e.store.EnforceRevisionLimit(ctx, tx, req.ResourceID, protectedIDs(revisionID, parentRevisionID)); err != nil {
 		return CommitEntriesResponse{}, err
 	}
 	if err := e.store.AfterCommit(ctx, tx, revision, req.Entries); err != nil {

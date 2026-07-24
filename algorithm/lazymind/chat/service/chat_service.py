@@ -1,9 +1,7 @@
 from __future__ import annotations
 import asyncio
-import hashlib
 import json
 import re
-import threading
 import time
 from typing import Any, Dict, List, Optional, Union
 import lazyllm
@@ -15,48 +13,21 @@ from lazymind.chat.config import (
     MAX_CONCURRENCY,
     RAG_MODE,
     SENSITIVE_FILTER_RESPONSE_TEXT,
-    SENSITIVE_GRAY_WORDS_PATH,
-    SENSITIVE_RED_WORDS_PATH,
-    SENSITIVE_WHITELIST_PATH,
+    SENSITIVE_WORDS_PATH,
 )
-from lazymind.chat.engine.prompts import (
-    add_standard_system_sections,
-    resolve_task_profile,
-    select_skill_candidates,
-    selected_prompt_modules,
-)
+from lazymind.chat.engine.prompts import build_system_prompt
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
-    ASK_USER_TOOL_CONFIG,
-    ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
-    USER_ATTACHMENT_TOOL_CONFIGS,
-    collect_query_appendices,
-    collect_system_prompt_appendices,
+    build_agent_tools,
     filter_tools,
     normalize_history_for_agent,
 )
-from lazymind.chat.engine.agent_runtime import (
-    AgentExecutionOptions,
-    AgentExecutor,
-    AgentRole,
-    AgentRunPlan,
-    PromptBuilder,
-    normalize_attachments,
-    estimate_context_usage,
-    render_context_markdown,
-    report_to_dict,
-    render_attachment_content,
-)
-from lazymind.chat.engine.tools.chat_artifact import chat_agent_workspace
-from lazymind.chat.engine.tools.intent_writer import (
-    build_intentwrite_tool,
-    render_intent_section,
-)
+from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
 from lazymind.chat.service.utils import (
     SensitiveFilter,
-    SensitiveMatch,
+    basename_from_path,
     log_and_emit_frame,
     register_image_url,
     response_payload,
@@ -73,11 +44,7 @@ from lazyllm.tools.mcp.client import MCPClient
 from lazymind.config import config as _cfg
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
-sensitive_filter = SensitiveFilter(
-    SENSITIVE_RED_WORDS_PATH,
-    SENSITIVE_GRAY_WORDS_PATH,
-    SENSITIVE_WHITELIST_PATH,
-)
+sensitive_filter = SensitiveFilter(SENSITIVE_WORDS_PATH)
 
 # Maps conversation_id → session_id for active chat sessions.
 # Used by task-cancel endpoint to cancel ChatAgent by conversation_id.
@@ -86,11 +53,6 @@ _CITE_MESSAGE_PATTERN = re.compile(
     r'<cite_message>([\s\S]*?)</cite_message>\s*',
     re.IGNORECASE,
 )
-_MCP_TOOL_CACHE_TTL_SECONDS = 300
-_TASK_PROFILE_ROUTER_TIMEOUT_SECONDS = 20
-_SENSITIVE_MATCH_UNSET = object()
-_mcp_tool_cache: dict[str, tuple[float, list[Any]]] = {}
-_mcp_tool_cache_lock = threading.Lock()
 
 
 def _normalize_cite_message_query_for_agent(query: str) -> tuple[str, str]:
@@ -104,7 +66,7 @@ def _normalize_cite_message_query_for_agent(query: str) -> tuple[str, str]:
 
     user_query = _CITE_MESSAGE_PATTERN.sub(collect_cite_message, query).strip()
     if not cite_messages:
-        return query, ''
+        return query, query
 
     if len(cite_messages) == 1:
         cite_text = cite_messages[0]
@@ -114,7 +76,11 @@ def _normalize_cite_message_query_for_agent(query: str) -> tuple[str, str]:
             for index, cite_message in enumerate(cite_messages, start=1)
         )
 
-    return user_query, cite_text
+    agent_query = (
+        f'用户本次引用的消息：\n{cite_text}\n\n'
+        f'用户本次的问题：\n{user_query}'
+    ).strip()
+    return user_query, agent_query
 
 
 def _normalize_kb_id_filter(raw_kb_id: Any) -> str | list[str] | None:
@@ -126,55 +92,48 @@ def _normalize_kb_id_filter(raw_kb_id: Any) -> str | list[str] | None:
     return None
 
 
-def check_sensitive_content(query: str) -> Optional[SensitiveMatch]:
-    return sensitive_filter.evaluate(query)
+def check_sensitive_content(
+    query: str,
+) -> Optional[str]:
+    if not sensitive_filter.loaded:
+        return None
+    has_sensitive, sensitive_word = sensitive_filter.check(query)
+    return sensitive_word if has_sensitive else None
 
 
-def _mcp_server_cache_key(server: Dict[str, Any]) -> str:
-    encoded = json.dumps(server, ensure_ascii=False, sort_keys=True, default=str).encode()
-    return hashlib.sha256(encoded).hexdigest()
+def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
+    """Build MCP tool list from mcp_config. Skip individual servers on failure with a warning."""
+    tools = []
+    for server in mcp_config:
+        url = server.get('url')
+        if not url:
+            LOG.warning(
+                f"[MCP] skipped server {server.get('name')}: missing 'url' field"
+            )
+            continue
+        try:
+            client = MCPClient(
+                command_or_url=url,
+                headers=server.get('headers'),
+                timeout=server.get('timeout', 5),
+                transport=server.get('transport', 'auto'),
+            )
+            allowed = server.get('allowed_tools') or None
+            mcp_tools = client.get_tools(allowed_tools=allowed)
+            tools.extend(mcp_tools)
+            LOG.info(
+                f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}"
+            )
+        except Exception as e:
+            LOG.warning(
+                f"[MCP] failed to connect {server.get('name')}: {e}"
+            )
+    return tools
 
 
-def _load_mcp_server_tools(server: Dict[str, Any]) -> list:
-    url = server.get('url')
-    if not url:
-        LOG.warning(f"[MCP] skipped server {server.get('name')}: missing 'url' field")
-        return []
-    cache_key = _mcp_server_cache_key(server)
-    now = time.monotonic()
-    with _mcp_tool_cache_lock:
-        cached = _mcp_tool_cache.get(cache_key)
-        if cached and now - cached[0] < _MCP_TOOL_CACHE_TTL_SECONDS:
-            LOG.info(f"[MCP] reused cached tools from {server.get('name')}")
-            return list(cached[1])
-    try:
-        client = MCPClient(
-            command_or_url=url,
-            headers=server.get('headers'),
-            timeout=server.get('timeout', 5),
-            transport=server.get('transport', 'auto'),
-        )
-        allowed = server.get('allowed_tools') or None
-        mcp_tools = client.get_tools(allowed_tools=allowed)
-        with _mcp_tool_cache_lock:
-            _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
-        LOG.info(f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}")
-        return mcp_tools
-    except Exception as e:
-        LOG.warning(f"[MCP] failed to connect {server.get('name')}: {e}")
-        return []
-
-
-async def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
-    """Load MCP schemas concurrently and reuse unchanged schemas briefly."""
-    groups = await asyncio.gather(*(
-        asyncio.to_thread(_load_mcp_server_tools, server) for server in mcp_config
-    ))
-    return [tool for group in groups for tool in group]
-
-
-def _build_subagent_chat_tools() -> list:
-    """Return all ChatAgent SubAgent tools as directly registered callables."""
+def _build_subagent_chat_tools(has_subagents: bool) -> list:
+    """Assemble ChatAgent SubAgent tools. create_subagent is always available; query tools
+    are registered only when the conversation already has SubAgent tasks."""
     from lazymind.chat.engine.tools.subagent_chat_tools import (
         create_subagent,
         get_subagent_artifacts,
@@ -182,26 +141,23 @@ def _build_subagent_chat_tools() -> list:
         list_subagent_artifacts,
         list_subagents,
     )
-    return [
-        create_subagent, list_subagents, get_subagent_status,
-        list_subagent_artifacts, get_subagent_artifacts,
-    ]
-
-
-def _build_chat_artifact_tools() -> list:
-    """Tools for artifacts produced directly by the main ChatAgent."""
-    from lazymind.chat.engine.tools.chat_artifact import save_chat_artifact
-    return [save_chat_artifact]
+    tools = [create_subagent]
+    if has_subagents:
+        tools.extend([
+            list_subagents,
+            get_subagent_status,
+            list_subagent_artifacts,
+            get_subagent_artifacts,
+        ])
+    return tools
 
 
 def _build_user_attachment_tools(has_files: bool) -> list:
-    """Register attachment lookup, reading, and text editing when uploads exist."""
+    """Register find_user_attachment / read_user_attachment when the conversation has uploads."""
     if not has_files:
         return []
-    return [
-        *(config.tool for config in USER_ATTACHMENT_TOOL_CONFIGS),
-        ATTACHMENT_EDIT_TOOL_CONFIG.tool,
-    ]
+    from lazymind.chat.engine.subagent.tools import find_user_attachment, read_user_attachment
+    return [find_user_attachment, read_user_attachment]
 
 
 def _build_ask_user_tool() -> list:
@@ -215,144 +171,180 @@ def _build_ask_user_tool() -> list:
     return [ask_user]
 
 
-def _should_register_ask_user(
-    agentic_config: Dict[str, Any],
-    disabled_tools: set[str] | None = None,
-) -> bool:
-    """Respect explicit non-interactive requests and legacy auto plugin sessions."""
-    if 'ask_user' in (disabled_tools or set()):
-        return False
+def _should_register_ask_user(agentic_config: Dict[str, Any]) -> bool:
+    """Auto plugin sessions are mechanically non-interactive."""
     return not (
         agentic_config.get('enable_plugin', True)
         and agentic_config.get('plugin_mode') == 'auto'
     )
 
 
-def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
-    query, _ = _normalize_cite_message_query_for_agent(request.message.query)
-    user_input, _ = _normalize_cite_message_query_for_agent(request.message.user_query or query)
-    explicit_resources = request.explicit_resource_bindings.model_dump()
-    selected_kb_ids = _normalize_kb_id_filter((request.retrieval.filters or {}).get('kb_id'))
-    if selected_kb_ids and not explicit_resources['knowledge_base_ids']:
-        explicit_resources['knowledge_base_ids'] = (
-            selected_kb_ids if isinstance(selected_kb_ids, list) else [selected_kb_ids]
-        )
-    active_plugin_ref = str(
-        (request.plugin.plugin_context or {}).get('plugin_ref') or ''
-    ).strip()
-    if active_plugin_ref and not explicit_resources['plugin_refs']:
-        explicit_resources['plugin_refs'] = [active_plugin_ref]
-    thinking_depth = (
-        request.runtime.thinking_depth
-        if request.runtime.thinking_depth in ('low', 'medium', 'high', 'max') else 'medium'
+def _build_schedule_tools() -> list:
+    """Return a lazy ToolGroup dict for all schedule management tools.
+
+    Injected as a single lazy group so the LLM only sees the gateway tool until
+    the user mentions scheduling topics.
+    """
+    from lazymind.chat.engine.tools.schedule import build_schedule_tool_group
+    return [build_schedule_tool_group()]
+
+
+def _collect_active_tool_names(configs: list) -> set[str]:
+    # Build a per-request callable allowlist from filtered tool configs.
+    # This is consumed by tool_runtime guard to prevent accidental execution
+    # when the model tries to call a tool that is not active in this session.
+    names: set[str] = set()
+    for cfg in configs:
+        inst = getattr(cfg, 'instance', None)
+        if inst is None:
+            continue
+        if callable(inst):
+            tool_name = str(getattr(inst, '__name__', '')).strip()
+            if tool_name:
+                names.add(tool_name)
+        public_apis = getattr(inst, '__public_apis__', None)
+        if isinstance(public_apis, (list, tuple)):
+            group_name = inst.__class__.__name__
+            if group_name:
+                names.add(f'get_{group_name}_methods')
+            for method_name in public_apis:
+                method = str(method_name).strip()
+                if method:
+                    names.add(method)
+                    if group_name:
+                        names.add(f'{group_name}_{method}')
+    return names
+
+
+def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]],
+                                   current_turn_seq: Optional[int] = None) -> str:
+    """Build the '## User Uploaded Files' context section from history_files_per_turn.
+
+    history_files_per_turn is a map of "<seq>" -> [file_paths...] where seq is a
+    1-based integer string matching the conversation turn sequence number.
+    Only turns with actual attachments appear as keys (empty turns are omitted by Go).
+
+    current_turn_seq: the authoritative seq for the current request turn, provided by
+    Go core. When not None it is used as the marker for 当前轮次. If the current turn
+    has no files it will not appear in the map, and no 当前轮次 marker is shown.
+    Falls back to max(keys) only when current_turn_seq is not provided (legacy callers).
+
+    Returns an empty string when there are no files.
+    The current turn (if it has files) is listed first with a [当前轮次] marker.
+    Historical turns follow in descending seq order.
+    """
+    if not history_files_per_turn:
+        return ''
+
+    # Parse all keys as integers (seq); skip unparseable entries.
+    turns: Dict[int, List[str]] = {}
+    for key, paths in history_files_per_turn.items():
+        if not paths:
+            continue
+        try:
+            turns[int(key)] = paths
+        except ValueError:
+            continue
+
+    if not turns:
+        return ''
+
+    def _describe_file(path: str) -> str:
+        import os as _os
+        name = _os.path.basename(path)
+        try:
+            size_bytes = _os.path.getsize(path)
+            if size_bytes < 1024:
+                size_str = f'{size_bytes} B'
+            elif size_bytes < 1024 * 1024:
+                size_str = f'{size_bytes / 1024:.1f} KB'
+            else:
+                size_str = f'{size_bytes / (1024 * 1024):.1f} MB'
+            return f'{name} ({size_str})'
+        except OSError:
+            return name
+
+    def _dedupe_names(paths: List[str]) -> List[tuple[str, str]]:
+        """Return (display_name, abs_path) pairs with intra-turn dedup."""
+        seen: Dict[str, int] = {}
+        result: List[tuple[str, str]] = []
+        import os as _os
+        for path in paths:
+            base = _os.path.basename(path)
+            name_no_ext, ext = _os.path.splitext(base)
+            if base not in seen:
+                seen[base] = 0
+                display = _describe_file(path)
+            else:
+                seen[base] += 1
+                n = seen[base]
+                new_base = f'{name_no_ext}-{n}{ext}'
+                try:
+                    import os as _os2
+                    size_bytes = _os2.path.getsize(path)
+                    if size_bytes < 1024:
+                        size_str = f'{size_bytes} B'
+                    elif size_bytes < 1024 * 1024:
+                        size_str = f'{size_bytes / 1024:.1f} KB'
+                    else:
+                        size_str = f'{size_bytes / (1024 * 1024):.1f} MB'
+                    display = f'{new_base} ({size_str})'
+                except OSError:
+                    display = new_base
+            result.append((display, path))
+        return result
+
+    # Determine which seq is the current turn.
+    # Prefer the authoritative value from Go (current_turn_seq); fall back to max(keys)
+    # only when the caller did not provide it (legacy path).
+    # If current_turn_seq is provided but has no attachments this turn, no 当前轮次 marker
+    # is shown — the map simply won't contain that key.
+    if current_turn_seq is not None and current_turn_seq in turns:
+        _cur = current_turn_seq
+    elif current_turn_seq is None:
+        _cur = max(turns.keys())  # legacy fallback
+    else:
+        _cur = None  # current turn exists but has no attachments — no marker
+
+    lines: List[str] = ['## User Uploaded Files [queried at request time]']
+
+    # Descending order: current turn first (if it has files), then historical turns newest-first.
+    for seq in sorted(turns.keys(), reverse=True):
+        pairs = _dedupe_names(turns[seq])
+        file_list = ', '.join(name for name, _ in pairs)
+        if seq == _cur:
+            lines.append(f'- [Turn {seq} 当前轮次]: {file_list}')
+        else:
+            lines.append(f'- [Turn {seq}]: {file_list}')
+
+    if _cur is None:
+        lines.append('')
+        lines.append('Note: the current turn has no attachments. All entries above are historical.')
+
+    lines.append('')
+    lines.append(
+        'Rules: Turn numbers are 1-based integers. '
+        'When the user says "this image / 这张图 / 这个文件" without specifying a turn, '
+        'default to the CURRENT TURN attachment (marked 当前轮次 above). '
+        'Only fall back to historical turns when the user explicitly references a past turn '
+        'or when the current turn has no attachments.'
     )
-    return {
-        'query': user_input.strip(),
-        'history': normalize_history_for_agent(list(request.message.history or [])),
-        'intent': request.conversation.intent_context,
-        'has_attachments': bool(request.message.files),
-        'explicit_resources': explicit_resources,
-        'thinking_depth': thinking_depth,
-    }
-
-
-def _resolve_task_profile_with_model(inputs: dict[str, Any]) -> Any:
-    def classify(prompt: str) -> Any:
-        router_llm = AutoModel(model='llm')
-        return router_llm(
-            prompt,
-            response_format={'type': 'json_object'},
-            stream_output=False,
-            timeout=_TASK_PROFILE_ROUTER_TIMEOUT_SECONDS,
-        )
-
-    return resolve_task_profile(
-        **inputs,
-        classifier=classify,
-        enable_llm_fallback=True,
+    lines.append(
+        'Do not parse attachments by default. '
+        'Use find_user_attachment(filename, turn=N) to get path/url for image tools, plugins, '
+        'or vision_extractor (visual/edit tasks). '
+        'Use read_user_attachment only when you need extracted text (documents, or textual '
+        'Q&A about image content). Supported: png, jpg, jpeg, pdf, doc, docx, pptx.'
     )
+    lines.append(
+        'find_user_attachment returns `path` (local) and `url` (signed); '
+        'prefer `path` for save_plugin_artifact.'
+    )
+
+    return '\n'.join(lines)
 
 
 async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingResponse]:
-    if not _cfg['dynamic_prompt_modules']:
-        return await _handle_chat_impl(request)
-
-    inputs = _task_profile_inputs(request)
-    provisional = resolve_task_profile(
-        **inputs,
-        classifier=None,
-        enable_llm_fallback=False,
-    )
-    if not provisional.routing_review_required:
-        return await _handle_chat_impl(request, task_profile_override=provisional)
-
-    from lazymind.chat.plugin.plugin_manager import is_plugin_driver_turn
-    raw_query = str(request.message.query or '')
-    filter_query, _ = _normalize_cite_message_query_for_agent(raw_query)
-    skip_sensitive_filter = (
-        request.runtime.skip_sensitive_filter
-        or is_plugin_driver_turn(request.plugin.plugin_context)
-        or request.runtime.context_usage_preview
-        or request.runtime.context_prompt_export
-    )
-    sensitive_match = (
-        None
-        if skip_sensitive_filter
-        else check_sensitive_content(filter_query)
-    )
-    if sensitive_match is not None:
-        return await _handle_chat_impl(
-            request,
-            task_profile_override=provisional,
-            sensitive_match_override=sensitive_match,
-        )
-
-    inject_model_config(request.runtime.llm_config)
-
-    async def resolve_and_continue():
-        started = time.time()
-        routing_task = asyncio.create_task(asyncio.to_thread(
-            _resolve_task_profile_with_model, inputs,
-        ))
-        for status_delta in ('正在', '分析', '用户意图', '，请稍后'):
-            yield log_and_emit_frame(
-                {'think': status_delta, 'text': None, 'sources': []},
-                round(time.time() - started, 3),
-                raw_query,
-                request.conversation.session_id,
-                tag='TASK_PROFILE',
-            )
-            await asyncio.sleep(0.08)
-        profile = await routing_task
-        response = await _handle_chat_impl(
-            request,
-            task_profile_override=profile,
-            sensitive_match_override=sensitive_match,
-        )
-        if isinstance(response, StreamingResponse):
-            async for chunk in response.body_iterator:
-                yield chunk
-            return
-        yield sse_line(response_payload(200, 'success', response, time.time() - started))
-
-    if request.runtime.context_usage_preview or request.runtime.context_prompt_export:
-        profile = provisional
-        if request.runtime.context_preview_allow_llm_routing:
-            profile = await asyncio.to_thread(_resolve_task_profile_with_model, inputs)
-        return await _handle_chat_impl(
-            request,
-            task_profile_override=profile,
-            sensitive_match_override=sensitive_match,
-        )
-    return StreamingResponse(resolve_and_continue(), media_type='text/event-stream')
-
-
-async def _handle_chat_impl(
-    request: ChatRequest,
-    *,
-    task_profile_override: Any = None,
-    sensitive_match_override: SensitiveMatch | None | object = _SENSITIVE_MATCH_UNSET,
-) -> Union[Dict[str, Any], StreamingResponse]:
     message = request.message
     conversation = request.conversation
     retrieval = request.retrieval
@@ -360,13 +352,11 @@ async def _handle_chat_impl(
     personalization = request.personalization
     agent = request.agent
     plugin = request.plugin
-    explicit_resources = request.explicit_resource_bindings
     from lazymind.chat.plugin.plugin_manager import (
         _build_chat_agent_task_context,
         guard_plugin_agent_stream,
         is_plugin_driver_turn,
         resolve_plugin_injection,
-        update_intentwriter,
     )
 
     conversation_id = (conversation.conversation_id or '').strip()
@@ -385,32 +375,14 @@ async def _handle_chat_impl(
     )
     start_time = time.time()
     priority = runtime.priority or LAZYMIND_LLM_PRIORITY
-    query, cited_message_context = _normalize_cite_message_query_for_agent(message.query)
-    user_input, user_cited_context = _normalize_cite_message_query_for_agent(
-        message.user_query or query,
-    )
-    if user_cited_context:
-        cited_message_context = user_cited_context
-    language_query = user_input.strip()
+    query, agent_query = _normalize_cite_message_query_for_agent(message.query)
     is_driver_turn = is_plugin_driver_turn(plugin.plugin_context)
-    skip_sensitive_filter = (
-        runtime.skip_sensitive_filter
-        or is_driver_turn
-        or runtime.context_usage_preview
-        or runtime.context_prompt_export
-    )
-    if skip_sensitive_filter:
-        sensitive_match = None
-    elif sensitive_match_override is _SENSITIVE_MATCH_UNSET:
-        sensitive_match = check_sensitive_content(query)
-    else:
-        sensitive_match = sensitive_match_override
-    if sensitive_match is not None:
+    sensitive_word = None if is_driver_turn else check_sensitive_content(query)
+    if sensitive_word:
         cost = round(time.time() - start_time, 3)
         LOG.warning(
             f'[ChatServer] [SENSITIVE_FILTER_BLOCKED] [query={query[:50]}...] '
-            f'[sensitive_word={sensitive_match.word}] [tier={sensitive_match.tier}] '
-            f'[session_id={conversation.session_id}]'
+            f'[sensitive_word={sensitive_word}] [session_id={conversation.session_id}]'
         )
         return single_event_stream_response(response_payload(
             200,
@@ -430,15 +402,7 @@ async def _handle_chat_impl(
             flat_files.extend(files_map[seq_key])
     resolved_files = validate_and_resolve_files(flat_files)
     filters['kb_id'] = _normalize_kb_id_filter(filters.get('kb_id'))
-    explicit_resource_payload = explicit_resources.model_dump()
-    selected_kb_ids = filters.get('kb_id')
-    if selected_kb_ids and not explicit_resource_payload['knowledge_base_ids']:
-        explicit_resource_payload['knowledge_base_ids'] = (
-            selected_kb_ids if isinstance(selected_kb_ids, list) else [selected_kb_ids]
-        )
-    active_plugin_ref = str((plugin.plugin_context or {}).get('plugin_ref') or '').strip()
-    if active_plugin_ref and not explicit_resource_payload['plugin_refs']:
-        explicit_resource_payload['plugin_refs'] = [active_plugin_ref]
+    LOG.info(f'[KBToolGroup_DEBUG] filters={filters!r} kb_id={filters.get("kb_id")!r}')
 
     raw_history = list(message.history) if isinstance(message.history, list) else []
     agent_history = normalize_history_for_agent(raw_history)
@@ -479,6 +443,7 @@ async def _handle_chat_impl(
     # (where it is only meaningful when enable_plugin=true); no need to store it in
     # agentic_config separately.
 
+    display_files: list[str] = []
     # Use the authoritative current_turn_seq from Go; fall back to max(keys) only as a
     # last resort (handles callers that do not yet pass the field).
     _eff_current_seq: int | None = message.current_turn_seq
@@ -486,13 +451,23 @@ async def _handle_chat_impl(
         int_keys = [int(k) for k in files_map if k.isdigit() and files_map[k]]
         if int_keys:
             _eff_current_seq = max(int_keys)
+    current_turn_paths: set[str] = (set(files_map.get(str(_eff_current_seq), []))
+                                    if _eff_current_seq is not None else set())
+
     for path in resolved_files:
         if path.lower().endswith(IMAGE_EXTENSIONS):
             register_image_url(translator.citation_state, path)
+            name = basename_from_path(path) or path
+        else:
+            name = path
+        if path in current_turn_paths:
+            display_files.append(f'{name} [当前轮次]')
+        else:
+            display_files.append(name)
 
     # Register the active session so the cancel endpoint can find it by conversation_id.
     _conv_id_key = conversation_id  # already stripped above
-    if _conv_id_key and not runtime.context_usage_preview and not runtime.context_prompt_export:
+    if _conv_id_key:
         _active_sessions[_conv_id_key] = conversation.session_id
     lazyllm.globals._init_sid(sid=conversation.session_id)
     lazyllm.locals._init_sid(sid=conversation.session_id)
@@ -501,90 +476,10 @@ async def _handle_chat_impl(
     inject_reader_config(ocr_config=runtime.ocr_config)
     lazyllm.globals['agentic_config'] = agentic_config
 
-    thinking_depth = (
-        runtime.thinking_depth
-        if runtime.thinking_depth in ('low', 'medium', 'high', 'max') else 'medium'
-    )
-    agentic_config['thinking_depth'] = thinking_depth
-    task_profile = None
-    if _cfg['dynamic_prompt_modules']:
-        profile_started = time.monotonic()
-        task_profile = task_profile_override
-        if task_profile is None:
-            task_profile = resolve_task_profile(
-                language_query,
-                history=agent_history,
-                intent=conversation.intent_context,
-                classifier=None,
-                enable_llm_fallback=False,
-                thinking_depth=thinking_depth,
-                has_attachments=bool(files_map),
-                explicit_resources=explicit_resource_payload,
-            )
-        profile_latency_ms = int((time.monotonic() - profile_started) * 1000)
-        LOG.info(
-            '[ChatServer] [TASK_PROFILE] [sid=%s] source=%s outcome=%s deliverable=%s '
-            'modules_dynamic=true skill_mode=%s latency_ms=%s error=%s',
-            conversation.session_id,
-            task_profile.source,
-            task_profile.primary_outcome,
-            task_profile.deliverable_kind,
-            task_profile.skill_mode,
-            profile_latency_ms,
-            task_profile.router_error,
-        )
-
-        excluded_kb_ids = set(task_profile.excluded_resources.knowledge_base_ids)
-        if excluded_kb_ids and agentic_config.get('filters'):
-            effective_filters = dict(agentic_config['filters'])
-            configured_kb_ids = effective_filters.get('kb_id')
-            configured_kb_ids = (
-                configured_kb_ids if isinstance(configured_kb_ids, list) else [configured_kb_ids]
-            )
-            remaining_kb_ids = [
-                value for value in configured_kb_ids
-                if value and value not in excluded_kb_ids
-            ]
-            effective_filters['kb_id'] = (
-                remaining_kb_ids[0] if len(remaining_kb_ids) == 1 else (remaining_kb_ids or None)
-            )
-            agentic_config['filters'] = effective_filters
-
-    excluded_plugin_refs = set(
-        task_profile.excluded_resources.plugin_refs if task_profile else ()
-    )
-    effective_plugin_context = plugin.plugin_context
-    if str((effective_plugin_context or {}).get('plugin_ref') or '') in excluded_plugin_refs:
-        effective_plugin_context = None
-    effective_plugin_catalog = [
-        item for item in plugin.catalog
-        if str(item.get('plugin_ref') or '') not in excluded_plugin_refs
-    ]
-    effective_allowed_plugin_refs = [
-        ref for ref in plugin.allowed_plugin_refs if ref not in excluded_plugin_refs
-    ]
-    effective_disabled_builtin_plugins = list(plugin.disabled_builtin_plugins)
-    effective_disabled_builtin_plugins.extend(
-        ref.removeprefix('builtin:') for ref in excluded_plugin_refs
-        if ref.startswith('builtin:')
-    )
-
-    plugin_contribution = resolve_plugin_injection(
-        effective_plugin_context,
-        conversation_id=conversation_id,
-        plugin_catalog=effective_plugin_catalog,
-        disabled_builtin_plugins=list(dict.fromkeys(effective_disabled_builtin_plugins)),
-        allowed_plugin_refs=effective_allowed_plugin_refs,
-    )
-    plugin_tools = plugin_contribution.tools
-    agentic_config.update(plugin_contribution.agentic_config_patch)
-
-    intentwriter = build_intentwrite_tool(
-        conversation_id=conversation_id,
-        current_query=query,
-        current_intent=conversation.intent_context,
-    )
-    intentwriter = update_intentwriter(intentwriter, plugin.plugin_context)
+    plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context = \
+        resolve_plugin_injection(plugin.plugin_context, conversation_id=conversation_id, plugin_catalog=plugin.catalog,
+                                 disabled_builtin_plugins=plugin.disabled_builtin_plugins)
+    agentic_config.update(agentic_config_patch)
 
     # Inject SubAgent task context into the system prompt independently of plugin state.
     # Injected when either plugin or subagent is enabled so the model knows about ongoing tasks.
@@ -596,232 +491,112 @@ async def _handle_chat_impl(
         f'[enable_plugin={_enable_plugin!r}] [enable_subagent={_enable_subagent!r}] '
         f'[plugin_tools={[getattr(t, "__name__", str(t)) for t in plugin_tools]!r}]'
     )
-    task_ctx = ''
+    # Build user attachment context from files_map and inject before plugin context.
+    user_attachment_context = _build_user_attachment_context(files_map, _eff_current_seq)
+
+    # Prepend artifact context and user attachment context before the user query.
+    parts = []
+    if plugin_artifact_context:
+        parts.append(plugin_artifact_context)
     if _enable_plugin or _enable_subagent:
         task_ctx = _build_chat_agent_task_context((conversation_id or '').strip())
-    conversation_intent_section = render_intent_section(
-        'Conversation Intent', conversation.intent_context,
-    )
-    attachment_content = render_attachment_content(
-        normalize_attachments(files_map, _eff_current_seq),
-        role=AgentRole.CHAT,
-        current_turn_seq=_eff_current_seq,
-    )
+        if task_ctx:
+            # Inject as a per-turn authoritative block (same as plugin_artifact_context)
+            # rather than into the system prompt, so stale task state from history is
+            # overridden by the live snapshot queried at request time.
+            parts.append(task_ctx)
+    if user_attachment_context:
+        parts.append(user_attachment_context)
+    # Inject the authoritative current-turn declaration so the model is never misled
+    # by conversation history into thinking an earlier turn is the current one.
+    if _eff_current_seq is not None:
+        parts.append(
+            f'## Current Request Context [AUTHORITATIVE]\n'
+            f'This is conversation turn **{_eff_current_seq}** (the current turn).\n'
+            f'Any turn number mentioned in the chat history that appears to be "current" '
+            f'is outdated. Turn {_eff_current_seq} is the only present moment.\n'
+            f'When the user says "this image / 这张图 / 这个文件 / 现在 / 本次", '
+            f'they are referring to turn {_eff_current_seq} unless they explicitly name another turn.'
+        )
+    if parts:
+        agent_query = '\n\n---\n\n'.join(parts) + '\n\n---\n\n## User Request\n' + agent_query
 
     disabled = set(agent.disabled_tools or [])
     active_configs = filter_tools(
         [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled],
-        user_query=language_query,
     )
-    agent_tools = [cfg.tool for cfg in active_configs]
+    agent_tools = build_agent_tools(active_configs)
     # Respect enable_subagent flag: when false, suppress create_subagent and related tools.
     enable_subagent = agentic_config.get('enable_subagent', True)
-    subagent_tools = _build_subagent_chat_tools() if enable_subagent else []
-    mcp_tools = await _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
+    subagent_tools = _build_subagent_chat_tools(bool(agent.has_subagents)) if enable_subagent else []
+    mcp_tools = _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
     # User attachment tools are only meaningful when the user has uploaded files.
     attachment_tools = _build_user_attachment_tools(bool(files_map))
-    attachment_configs = (
-        [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
-        if attachment_tools else []
-    )
+    # Schedule tools are independent of plugin and subagent flags — always inject them
+    # as a lazy group so the LLM only sees the gateway until the user mentions scheduling.
+    schedule_tools = _build_schedule_tools()
     # ask_user is a ChatAgent-only stop-tool. It is NOT in DEFAULT_TOOLS so SubAgents
     # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.
     # Auto plugin mode is non-interactive by contract: ask_user must be absent,
     # not merely discouraged by prompt text.
-    allow_ask_user = _should_register_ask_user(agentic_config, disabled)
+    allow_ask_user = _should_register_ask_user(agentic_config)
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
-    ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
-    artifact_tools = _build_chat_artifact_tools()
-    all_tools = ([intentwriter] + agent_tools + artifact_tools + subagent_tools + attachment_tools
-                 + ask_user_tools + plugin_tools + mcp_tools)
-    skill_config = agent.available_skills
-    selected_skills = agent.available_skills
-    if task_profile is not None:
-        selected_skills = select_skill_candidates(agent.available_skills, language_query, task_profile)
-        skill_config = selected_skills or False
+    all_tools = (agent_tools + subagent_tools + attachment_tools
+                 + schedule_tools + ask_user_tools + plugin_tools + mcp_tools)
     set_trace_context({
-        'trace_id': conversation.session_id,
+        'enabled': bool(runtime.trace),
+        'trace_id': conversation.session_id if runtime.trace else None,
         'session_id': conversation.session_id,
         'sampled': True,
         'module_trace': {'default': True},
         'request_tags': ['handle_chat'],
-        'task_profile_source': task_profile.source if task_profile else 'disabled',
-        'task_profile': task_profile.to_trace_dict() if task_profile else {},
-        'router_latency_ms': task_profile.router_latency_ms if task_profile else 0,
-        'router_error': task_profile.router_error if task_profile else '',
-        'prompt_modules': selected_prompt_modules(task_profile) if task_profile else [],
-        'skills_exposed': list(selected_skills or []),
     })
-    prompt_builder = PromptBuilder.for_role(AgentRole.CHAT)
-    active_tool_configs = active_configs + attachment_configs + ask_user_configs
-    add_standard_system_sections(
-        prompt_builder,
-        bool(all_tools),
+    runtime_prompt = build_system_prompt(
+        {cfg.name for cfg in active_configs},
         environment_context=runtime.environment_context,
         use_memory=personalization.use_memory,
         user_preference=personalization.user_preference,
         memory=personalization.memory,
-        current_query=language_query,
+        files=display_files,
+        current_query=query,
         conversation_history=agent_history,
-        tool_prompt_appendices=collect_system_prompt_appendices(
-            active_tool_configs,
-        ),
-        task_profile=task_profile,
-        dynamic_prompt_modules=_cfg['dynamic_prompt_modules'],
     )
-    # Plugin policy historically followed the common system prompt.
-    prompt_builder.system(
-        'chat_plugin_policy', 'Plugin Policy', plugin_contribution.system_prompt,
-        'plugin.scenario', priority=80,
-    )
-    prompt_builder.runtime(
-        'chat_plugin_runtime', 'Plugin State', plugin_contribution.runtime_context,
-        'plugin.runtime', priority=10, authoritative=True, content_kind='state',
-    )
-    prompt_builder.runtime(
-        'chat_tasks', 'SubAgent Tasks', task_ctx, 'database.tasks',
-        priority=20, authoritative=True, content_kind='state',
-    )
-    prompt_builder.runtime(
-        'chat_intent', 'Conversation Intent', conversation_intent_section,
-        'database.intent', priority=30, content_kind='instruction',
-    )
-    prompt_builder.runtime(
-        'chat_quoted_message', 'Quoted Message', cited_message_context,
-        'user.quote', priority=40, content_kind='reference',
-    )
-    prompt_builder.runtime(
-        'chat_resource_context', 'Mentioned Resource Context', query,
-        'backend.resources', priority=45, content_kind='reference',
-        skip_if=lambda: query.strip() == language_query,
-    )
-    prompt_builder.runtime(
-        'chat_attachments', 'Attachments', attachment_content,
-        'request.attachments', priority=50, authoritative=True,
-        content_kind='reference',
-    )
-    prompt_builder.runtime(
-        'chat_current_turn', 'Current Turn', (
-            f'This is conversation turn {_eff_current_seq}. Any turn described as current '
-            f'in chat history is outdated; Turn {_eff_current_seq} is the present request. '
-            f'Unless another turn is explicitly named, "现在 / 本次" refers to '
-            f'Turn {_eff_current_seq}.'
-        ),
-        'backend.turn', priority=60, authoritative=True, content_kind='state',
-        skip_if=lambda: _eff_current_seq is None,
-    )
-    prompt_builder.runtime(
-        'chat_task_routing_review', 'Task Routing Review', (
-            'The fast rule-only task profile was not conclusive. Independently determine the '
-            'user\'s actual goal, needed capabilities, and best response strategy before acting. '
-            'The provisional task profile is guidance, not an authoritative decision. Do not '
-            'announce or explain this routing analysis to the user; begin the useful response or '
-            'tool work directly. Uncertainty reported by rules: '
-            f'{task_profile.routing_review_reason if task_profile else "unknown"}'
-        ),
-        'backend.task_profile', priority=65, content_kind='instruction',
-        skip_if=lambda: not (
-            task_profile is not None
-            and task_profile.routing_review_required
-        ),
-    )
-    prompt_builder.runtime(
-        'chat_tool_query_appendices_before', 'Active Tool Instructions',
-        '\n\n'.join(collect_query_appendices(active_tool_configs, 'before')),
-        'tool.registry', priority=90, authoritative=True, content_kind='instruction',
-    )
-    prompt_builder.runtime(
-        'chat_tool_query_appendices_after', 'Active Tool Instructions',
-        '\n\n'.join(collect_query_appendices(active_tool_configs, 'after')),
-        'tool.registry', priority=90, authoritative=True, content_kind='instruction',
-        placement='after_input',
-    )
-    prompt_bundle = prompt_builder.input(
-        content=language_query,
-        source='user',
-    ).build()
+    if plugin_system_prompt:
+        runtime_prompt = runtime_prompt + '\n\n' + plugin_system_prompt
 
     llm = AutoModel(model='llm')
 
+    react_agent = build_react_agent(
+        llm=llm,
+        tools=all_tools,
+        force_summarize_context=query,
+        prompt=runtime_prompt,
+        skills=agent.available_skills,
+        workspace=_cfg['agentic_workspace'],
+        keep_full_turns=_cfg['agentic_keep_full_turns'],
+        fs=FS,
+        skills_dir=_cfg['skill_fs_url'],
+    )
     # ask_user is always a stop-tool for ChatAgent regardless of plugin state.
-    stop_tools = list(plugin_contribution.stop_tools)
+    # Merge it with any plugin-level stop tools (e.g. advance_step_and_hand_off).
+    stop_tools = list(plugin_stop_tools) if plugin_stop_tools else []
     if allow_ask_user and 'ask_user' not in stop_tools:
         stop_tools.append('ask_user')
-
-    plan = AgentRunPlan(
-        role=AgentRole.CHAT,
-        prompt=prompt_bundle,
-        history=agent_history,
-        tools=all_tools,
-        stop_tools=stop_tools,
-        force_summarize_context=query,
-        execution_options=AgentExecutionOptions(
-            skills=skill_config,
-            workspace=chat_agent_workspace(user_id or '0', conversation_id),
-            keep_full_turns=_cfg['agentic_keep_full_turns'],
-            fs=FS,
-            skills_dir=_cfg['skill_fs_url'],
-            max_retries={
-                'low': _cfg['agentic_max_rounds_low'],
-                'medium': _cfg['agentic_max_rounds_medium'],
-                'high': _cfg['agentic_max_rounds_high'],
-                'max': max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
-            }.get(thinking_depth, _cfg['agentic_max_rounds_medium']),
-            tool_failure_limits={
-                'url_fetch': 2,
-                'kb_search': 2,
-                'kb_tmp_search': 2,
-                'list_knowledge_bases': 2,
-                'list_knowledge_base_documents': 2,
-                'aggregate_knowledge_base_documents': 2,
-            },
-        ),
-    )
-    executor = AgentExecutor()
-    react_agent = executor.create_agent(llm, plan)
-    if runtime.context_usage_preview or runtime.context_prompt_export:
-        agent_context = await asyncio.to_thread(
-            react_agent.describe_context, agent_history, language_query,
-        )
-        if runtime.context_prompt_export:
-            prompt_markdown = render_context_markdown(plan, agent_context)
-            if task_profile and task_profile.routing_review_required:
-                prompt_markdown = '\n'.join([
-                    '> ⚠️ This is a rule-only prompt preview and may be inaccurate.',
-                    f'> Reason: {task_profile.routing_review_reason}',
-                    '> ChatAgent will resolve this uncertainty when the request executes.',
-                    '',
-                    prompt_markdown,
-                ])
-            return {'prompt_markdown': prompt_markdown}
-        report = await estimate_context_usage(plan, agent_context)
-        report_data = report_to_dict(report)
-        llm_enhanced = runtime.context_preview_allow_llm_routing
-        requires_llm = bool(
-            not llm_enhanced and task_profile and task_profile.routing_review_required
-        )
-        report_data.update({
-            'preview_accuracy': (
-                'llm_enhanced' if llm_enhanced
-                else 'rule_only' if requires_llm
-                else 'deterministic'
-            ),
-            'requires_llm': requires_llm,
-            'llm_reason': task_profile.routing_review_reason if requires_llm else '',
-        })
-        return report_data
+    react_agent.set_stop_tools(stop_tools)
 
     async def event_stream() -> Any:
         final_result: Any = None
 
         try:
             async with rag_sem:
-                initial_agent_stream = executor.stream_agent(react_agent, plan)
+                initial_agent_stream = drive_agent(
+                    react_agent, agent_query, history=agent_history,
+                )
                 guarded_agent_stream = guard_plugin_agent_stream(
                     initial_agent_stream,
                     all_tools=all_tools,
                     query=query,
-                    runtime_prompt=prompt_bundle.system_prompt,
+                    runtime_prompt=runtime_prompt,
                     agent=agent,
                     runtime_config=_cfg,
                     fs=FS,
@@ -835,7 +610,7 @@ async def _handle_chat_impl(
                             yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='FEED')
                     else:
                         # 'final' -- payload is already the resolved result value;
-                        # AgentExecutor propagates future exceptions before yielding final.
+                        # if future.result() raised, drive_agent propagated it before yielding.
                         final_result = payload
 
             for frame in translator.finish(final_result):

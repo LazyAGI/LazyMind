@@ -43,7 +43,6 @@ func (r *SQLRepository) EnqueueSyncRun(ctx context.Context, run SyncRun) (SyncRu
 				return err
 			}
 		}
-
 		if run.Status == "" {
 			run.Status = SyncRunStatusPending
 		}
@@ -92,9 +91,9 @@ func (r *SQLRepository) ClaimDueSyncRun(ctx context.Context, workerID string, no
 				JOIN source_bindings b ON b.binding_id = c.binding_id
 				WHERE c.binding_id = source_sync_runs.binding_id
 				  AND c.binding_generation = source_sync_runs.binding_generation
-				  AND (b.status = ? OR (b.status = ? AND source_sync_runs.scope_type = ?))
+				  AND b.status = ?
 				  AND (c.lock_owner IS NULL OR c.lock_owner = '' OR c.lock_until IS NULL OR c.lock_until <= ?)
-			)`, "ACTIVE", "DELETING", "cleanup", now).
+			)`, "ACTIVE", now).
 			Order("started_at, run_id").
 			Limit(1).
 			First(&taskModel).Error

@@ -29,18 +29,6 @@ func stripThinkTags(text string) string {
 	return strings.TrimSpace(thinkBlockPattern.ReplaceAllString(text, ""))
 }
 
-func extractThinkContent(text string) string {
-	matches := thinkBlockPattern.FindAllString(text, -1)
-	parts := make([]string, 0, len(matches))
-	for _, match := range matches {
-		part := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(match, "<think>"), "</think>"))
-		if part != "" {
-			parts = append(parts, part)
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
 func buildAssistantHistoryContent(history orm.ChatHistory) string {
 	return history.Result
 }

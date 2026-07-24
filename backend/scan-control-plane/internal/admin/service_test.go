@@ -107,7 +107,3 @@ func (s *serviceCoreStub) DeleteDataset(_ context.Context, req coreclient.Delete
 	s.deletedDataset = req.DatasetID
 	return nil
 }
-
-func (s *serviceCoreStub) UpdateDataset(context.Context, coreclient.UpdateDatasetRequest) error {
-	return nil
-}

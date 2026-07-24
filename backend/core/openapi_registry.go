@@ -445,44 +445,6 @@ type exportConversationFilePathParams struct {
 	FileID string `path:"file_id"`
 }
 
-type conversationPathParams struct {
-	Name string `path:"name"`
-}
-
-type channelCommandOpenAPI struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-
-type channelCommandRegistryOpenAPI struct {
-	SchemaVersion  string                  `json:"schema_version"`
-	Commands       []channelCommandOpenAPI `json:"commands"`
-	SelectionRules []string                `json:"selection_rules"`
-	OutputSchema   map[string]any          `json:"output_schema"`
-}
-
-type channelIntentOpenAPIRequest struct {
-	Provider        string                        `json:"provider"`
-	Message         string                        `json:"message"`
-	State           map[string]any                `json:"state"`
-	CommandRegistry channelCommandRegistryOpenAPI `json:"command_registry"`
-}
-
-type channelIntentOpenAPIResponse struct {
-	SchemaVersion string         `json:"schema_version"`
-	Command       string         `json:"command"`
-	Parameters    map[string]any `json:"parameters"`
-}
-
-type conversationSearchConfigOpenAPIRequest struct {
-	DatasetIDs []string `json:"dataset_ids"`
-}
-
-type conversationSearchConfigOpenAPIResponse struct {
-	ConversationID string         `json:"conversation_id"`
-	SearchConfig   map[string]any `json:"search_config"`
-}
-
 type toolPathParams struct {
 	ToolName string `path:"tool_name"`
 }
@@ -605,9 +567,8 @@ type promptItemOpenAPIResponse struct {
 }
 
 type promptFacetOpenAPIResponse struct {
-	Scopes        map[string]int64 `json:"scopes"`
-	Categories    map[string]int64 `json:"categories"`
-	CategoryTotal int64            `json:"category_total"`
+	Scopes     map[string]int64 `json:"scopes"`
+	Categories map[string]int64 `json:"categories"`
 }
 
 type promptListOpenAPIResponse struct {
@@ -648,6 +609,13 @@ type agentThreadTracePathParams struct {
 type agentThreadTraceCompareQueryParams struct {
 	A string `query:"a" required:"true"`
 	B string `query:"b" required:"true"`
+}
+
+type agentThreadEvalBadCasesQueryParams struct {
+	PageSize    int32  `query:"page_size"`
+	PageToken   string `query:"page_token"`
+	Keyword     string `query:"keyword"`
+	FailureType string `query:"failure_type"`
 }
 
 type agentThreadABTestCaseDetailsQueryParams struct {
@@ -693,19 +661,39 @@ type agentRouterQueryParams struct {
 type agentRouterAlgorithmQueryParams struct {
 	ThreadID       string `query:"thread_id" desc:"Filter by owning Evo thread."`
 	AlgorithmID    string `query:"algorithm_id" desc:"Filter by exact algorithm id."`
-	Status         string `query:"status" enum:"all,starting,active,disabled,missing" desc:"Filter by live Router status; defaults to all."`
+	Status         string `query:"status" enum:"starting,active,disabled,missing" desc:"Filter by live Router status."`
 	RouterAdminURL string `query:"router_admin_url" desc:"Optional Router admin origin override."`
 	RouterChatURL  string `query:"router_chat_url" desc:"Optional Router chat stream URL override."`
 }
 
 type agentRouterOwnerInput struct {
 	ThreadID     string `json:"thread_id" required:"true" desc:"Owning Evo thread id."`
+	RunID        string `json:"run_id,omitempty" desc:"Optional artifact run id; when set it must equal thread_id."`
 	CandidateRef string `json:"candidate_ref,omitempty" desc:"Candidate artifact reference used for audit."`
 }
 
+type agentRouterOwner struct {
+	ThreadID     string `json:"thread_id"`
+	RunID        string `json:"run_id"`
+	CandidateRef string `json:"candidate_ref"`
+}
+
+type agentRouterRegisterRequest struct {
+	AlgorithmID      string                `json:"algorithm_id" required:"true" desc:"Evo-owned algorithm id; must start with evo_."`
+	Name             string                `json:"name,omitempty" desc:"Display name; defaults to algorithm_id."`
+	CodePath         string                `json:"code_path" required:"true" desc:"Candidate lazymind/chat source path visible to Router."`
+	InstanceCount    int32                 `json:"instance_count,omitempty" desc:"Instance count from 1 to 4; default 1."`
+	Config           map[string]any        `json:"config,omitempty" freeform:"true" desc:"Configuration passed to Router child processes."`
+	Owner            agentRouterOwnerInput `json:"owner" required:"true"`
+	WaitReadySeconds float64               `json:"wait_ready_seconds,omitempty" desc:"Readiness timeout in seconds; default 180, maximum 900."`
+	CleanupPolicy    string                `json:"cleanup_policy,omitempty" enum:"thread_delete,manual" desc:"Workspace cleanup policy; default thread_delete."`
+	RouterAdminURL   string                `json:"router_admin_url,omitempty" desc:"Optional Router admin origin override."`
+	RouterChatURL    string                `json:"router_chat_url,omitempty" desc:"Optional Router chat stream URL override."`
+}
+
 type agentRouterActionRequest struct {
-	Action           string  `json:"action" required:"true" enum:"healthcheck,start,restart,stop"`
-	WaitReadySeconds float64 `json:"wait_ready_seconds,omitempty" desc:"Start or restart readiness timeout in seconds; default 180, maximum 900."`
+	Action           string  `json:"action" required:"true" enum:"healthcheck,restart,stop"`
+	WaitReadySeconds float64 `json:"wait_ready_seconds,omitempty" desc:"Restart readiness timeout in seconds; default 180, maximum 900."`
 }
 
 type agentRouterABStrategyRequest struct {
@@ -734,7 +722,7 @@ type agentRouterHealth struct {
 type agentRouterStrategyView struct {
 	Active  bool           `json:"active"`
 	ID      *int64         `json:"id" required:"true" nullable:"true" desc:"Router strategy id; null when inactive."`
-	Weights map[string]int `json:"weights" required:"true" desc:"Effective routing weights; {default: 100} when AB routing is inactive."`
+	Weights map[string]int `json:"weights" required:"true"`
 }
 
 type agentRouterStatusCounts struct {
@@ -751,23 +739,41 @@ type agentRouterStatusResponse struct {
 }
 
 type agentRouterAlgorithm struct {
-	AlgorithmID      string  `json:"algorithm_id"`
-	Name             string  `json:"name"`
-	Status           string  `json:"status" enum:"starting,active,disabled,missing"`
-	HealthyInstances int32   `json:"healthy_instances"`
-	InstanceCount    int32   `json:"instance_count"`
-	ThreadID         *string `json:"thread_id" required:"true" nullable:"true"`
-	CreatedAt        *string `json:"created_at" required:"true" nullable:"true"`
+	AlgorithmID      string           `json:"algorithm_id"`
+	Status           string           `json:"status" enum:"starting,active,disabled,missing"`
+	ExpectedState    string           `json:"expected_state" enum:"active,stopped,orphaned,claiming,deleting,managing"`
+	HealthyInstances int32            `json:"healthy_instances"`
+	InstanceCount    int32            `json:"instance_count"`
+	Owner            agentRouterOwner `json:"owner"`
+	RouterChatURL    string           `json:"router_chat_url"`
+	RouterAdminURL   string           `json:"router_admin_url"`
 }
 
 type agentRouterAlgorithmListResponse struct {
 	Items []agentRouterAlgorithm `json:"items" required:"true"`
 }
 
+type agentRouterRegisterResult struct {
+	AlgorithmID string `json:"algorithm_id,omitempty"`
+	Created     bool   `json:"created,omitempty"`
+	Reused      bool   `json:"reused,omitempty"`
+	Restarted   bool   `json:"restarted,omitempty"`
+	Reactivated bool   `json:"reactivated,omitempty"`
+}
+
+type agentRouterRegisterResponse struct {
+	Status           string                    `json:"status" enum:"ready"`
+	AlgorithmID      string                    `json:"algorithm_id"`
+	RouterChatURL    string                    `json:"router_chat_url"`
+	RouterAdminURL   string                    `json:"router_admin_url"`
+	RegisterResponse agentRouterRegisterResult `json:"register_response"`
+	Healthcheck      agentRouterHealth         `json:"healthcheck"`
+}
+
 type agentRouterActionResponse struct {
 	Status      string            `json:"status" enum:"passed,failed,stopped"`
 	AlgorithmID string            `json:"algorithm_id"`
-	Action      string            `json:"action" enum:"healthcheck,start,restart,stop"`
+	Action      string            `json:"action" enum:"healthcheck,restart,stop"`
 	Healthcheck agentRouterHealth `json:"healthcheck"`
 }
 
@@ -838,7 +844,6 @@ type datasetQueryParams struct {
 	OrderBy   string   `query:"order_by"`
 	Keyword   string   `query:"keyword"`
 	Tags      []string `query:"tags"`
-	Source    string   `query:"source" enum:"manual,cloud" desc:"Filter datasets by creation source."`
 }
 
 type createDatasetQueryParams struct {
@@ -921,16 +926,15 @@ type addModelProviderGroupModelOpenAPIResponse struct {
 }
 
 type listModelProviderGroupModelsOpenAPIItem struct {
-	ID                       string  `json:"id"`
-	UserModelProviderID      string  `json:"user_model_provider_id"`
-	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
-	Name                     string  `json:"name"`
-	ModelType                string  `json:"model_type"`
-	ProviderName             string  `json:"provider_name"`
-	GroupName                string  `json:"group_name"`
-	BaseURL                  string  `json:"base_url"`
-	IsDefault                bool    `json:"is_default"`
-	MaxInputTokens           *string `json:"max_input_tokens" desc:"Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
+	ID                       string `json:"id"`
+	UserModelProviderID      string `json:"user_model_provider_id"`
+	UserModelProviderGroupID string `json:"user_model_provider_group_id"`
+	Name                     string `json:"name"`
+	ModelType                string `json:"model_type"`
+	ProviderName             string `json:"provider_name"`
+	GroupName                string `json:"group_name"`
+	BaseURL                  string `json:"base_url"`
+	IsDefault                bool   `json:"is_default"`
 }
 
 type listModelProviderGroupModelsOpenAPIResponse struct {
@@ -942,15 +946,14 @@ type listUserModelsByModelTypeQueryParams struct {
 }
 
 type selectedModelOpenAPIItem struct {
-	ModelKey                 string  `json:"model_key"`
-	ModelID                  string  `json:"model_id"`
-	UserModelProviderID      string  `json:"user_model_provider_id"`
-	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
-	Name                     string  `json:"name"`
-	ProviderName             string  `json:"provider_name"`
-	GroupName                string  `json:"group_name"`
-	BaseURL                  string  `json:"base_url"`
-	MaxInputTokens           *string `json:"max_input_tokens" desc:"Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
+	ModelKey                 string `json:"model_key"`
+	ModelID                  string `json:"model_id"`
+	UserModelProviderID      string `json:"user_model_provider_id"`
+	UserModelProviderGroupID string `json:"user_model_provider_group_id"`
+	Name                     string `json:"name"`
+	ProviderName             string `json:"provider_name"`
+	GroupName                string `json:"group_name"`
+	BaseURL                  string `json:"base_url"`
 }
 
 type listSelectedModelsOpenAPIResponse struct {
@@ -1391,10 +1394,10 @@ type skillSourceOpenAPIRequest struct {
 }
 
 type skillCreateManagedOpenAPIRequest struct {
-	Name        string                    `json:"name,omitempty" desc:"Legacy inline-create field. ZIP and URL imports derive name from SKILL.md frontmatter."`
-	Category    string                    `json:"category,omitempty" desc:"Legacy inline-create field. ZIP and URL imports use External."`
+	Name        string                    `json:"name"`
+	Category    string                    `json:"category"`
 	Source      skillSourceOpenAPIRequest `json:"source"`
-	Description string                    `json:"description,omitempty" desc:"Legacy inline-create field. ZIP and URL imports derive description from SKILL.md frontmatter."`
+	Description string                    `json:"description,omitempty"`
 	Tags        []string                  `json:"tags,omitempty"`
 	AutoEvo     *bool                     `json:"auto_evo,omitempty"`
 	IsEnabled   *bool                     `json:"is_enabled,omitempty"`
@@ -1414,8 +1417,6 @@ type skillDraftSummaryOpenAPIResponse struct {
 	HasUncommittedDraft bool   `json:"has_uncommitted_draft"`
 	TaskID              string `json:"task_id,omitempty"`
 	Version             int64  `json:"version"`
-	Type                string `json:"type,omitempty" desc:"Draft type. create identifies a Skill that has no formal revision yet."`
-	Status              string `json:"status,omitempty"`
 }
 
 type skillListItemOpenAPIResponse struct {
@@ -1685,7 +1686,6 @@ type remoteFSListQueryParams struct {
 	UserID string `query:"user_id" required:"true" desc:"Required. Target user id used to resolve skills owned by the user."`
 	Path   string `query:"path" required:"true" desc:"RemoteFS path. Use skills for categories, skills/<category> for package list, or skills/<category>/<skill_name>[/rel_path] for package content."`
 	TaskID string `query:"task_id,omitempty" desc:"Optional for skills root/category list; required when path enters a package. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids."`
-	Mode   string `query:"mode" enum:"auto,manual" desc:"Conversation mode. auto marks a newly created Skill draft for idle-time auto commit."`
 }
 
 type remoteFSQueryParams struct {
@@ -1693,13 +1693,11 @@ type remoteFSQueryParams struct {
 	Path     string `query:"path" required:"true" desc:"RemoteFS package path: skills/<category>/<skill_name>[/rel_path]."`
 	TaskID   string `query:"task_id" required:"true" desc:"Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids."`
 	Encoding string `query:"encoding,omitempty" enum:"raw,base64" desc:"Optional content encoding for GET /remote-fs/content."`
-	Mode     string `query:"mode" enum:"auto,manual" desc:"Conversation mode."`
 }
 
 type remoteFSTaskQueryParams struct {
 	UserID string `query:"user_id" required:"true" desc:"Required. Target user id used to resolve skills owned by the user."`
 	TaskID string `query:"task_id" required:"true" desc:"Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids."`
-	Mode   string `query:"mode" enum:"auto,manual" desc:"Conversation mode. auto marks a newly created Skill draft for idle-time auto commit."`
 }
 
 type remoteFSUserQueryParams struct {
@@ -1784,8 +1782,7 @@ type marketInstallOpenAPIResponse struct {
 
 type marketPublishOpenAPIRequest struct {
 	Name     string                    `json:"name"`
-	Tags     []string                  `json:"tags" desc:"Marketplace discovery tags."`
-	Category string                    `json:"category,omitempty" desc:"Deprecated compatibility field; converted to one marketplace tag when tags is empty."`
+	Category string                    `json:"category"`
 	Source   skillSourceOpenAPIRequest `json:"source"`
 }
 
@@ -1796,8 +1793,7 @@ type marketPublishOpenAPIResponse struct {
 
 type marketEditOpenAPIRequest struct {
 	Name        *string                    `json:"name,omitempty"`
-	Tags        []string                   `json:"tags,omitempty" desc:"Marketplace discovery tags."`
-	Category    *string                    `json:"category,omitempty" desc:"Deprecated compatibility field; converted to one marketplace tag when tags is omitted."`
+	Category    *string                    `json:"category,omitempty"`
 	Description *string                    `json:"description,omitempty"`
 	Source      *skillSourceOpenAPIRequest `json:"source,omitempty"`
 	VersionNote *string                    `json:"version_note,omitempty"`
@@ -1808,7 +1804,6 @@ type marketItemOpenAPIResponse struct {
 	MarketItemID     string                      `json:"market_item_id"`
 	SourceSkillID    string                      `json:"source_skill_id,omitempty"`
 	Status           string                      `json:"status,omitempty"`
-	Tags             []string                    `json:"tags"`
 	Installed        bool                        `json:"installed,omitempty"`
 	InstalledSkillID string                      `json:"installed_skill_id,omitempty"`
 	Icon             string                      `json:"icon,omitempty"`
@@ -1825,12 +1820,6 @@ type marketListOpenAPIResponse struct {
 	Page     int32                       `json:"page"`
 	PageSize int32                       `json:"page_size"`
 	Total    int32                       `json:"total"`
-}
-
-type marketDeleteOpenAPIResponse struct {
-	Deleted       bool   `json:"deleted"`
-	MarketItemID  string `json:"market_item_id"`
-	SourceSkillID string `json:"source_skill_id"`
 }
 
 type skillDeleteOpenAPIResponse struct {
@@ -2073,18 +2062,6 @@ type pluginRepairPreviewOpenAPIRequest struct {
 	Mode   string `json:"mode"`
 }
 
-type writerDocumentSyncPathParams struct {
-	SessionID string `path:"session_id"`
-	SlotID    string `path:"slot_id"`
-	ListIndex int    `path:"list_index"`
-}
-
-type writerDocumentSyncOpenAPIRequest struct {
-	BaseRevision    int            `json:"base_revision"`
-	SourceDocument  map[string]any `json:"source_document"`
-	RevisedDocument map[string]any `json:"revised_document"`
-}
-
 func registeredCoreOperations() []openAPIOperation {
 	jsonBodyOf := func(v any, required bool) *openAPIBody {
 		return &openAPIBody{Required: required, ContentType: "application/json", Schema: schemaSource{Type: v}}
@@ -2140,15 +2117,6 @@ func registeredCoreOperations() []openAPIOperation {
 		{Method: "POST", Path: "/plugin-drafts/{draft_id}:confirm-workflow", Summary: "Confirm Skill workflow candidate", Tags: []string{"plugin"}, PathParams: pluginDraftPathParams{}, RequestBody: jsonBodyOf(pluginWorkflowConfirmOpenAPIRequest{}, true), Responses: map[int]openAPIResponse{200: evoJSONResp("Confirmation result")}},
 		{Method: "POST", Path: "/plugin-drafts/{draft_id}:repair-preview", Summary: "Preview Plugin repair", Tags: []string{"plugin"}, PathParams: pluginDraftPathParams{}, RequestBody: jsonBodyOf(pluginRepairPreviewOpenAPIRequest{}, true), Responses: map[int]openAPIResponse{200: evoJSONResp("Repair preview")}},
 		{Method: "GET", Path: "/plugin-drafts/{draft_id}/repair-runs/{repair_id}", Summary: "Get Plugin repair run", Tags: []string{"plugin"}, PathParams: pluginRepairRunPathParams{}, Responses: map[int]openAPIResponse{200: evoJSONResp("Repair run")}},
-		{
-			Method:      "POST",
-			Path:        "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document",
-			Summary:     "Sync an edited WriterDocument to Feishu",
-			Tags:        []string{"plugin", "writer"},
-			PathParams:  writerDocumentSyncPathParams{},
-			RequestBody: jsonBodyOf(writerDocumentSyncOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: evoJSONResp("WriterDocument sync result")},
-		},
 		{
 			Method:      "GET",
 			Path:        "/datasets",
@@ -2727,14 +2695,6 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Skill organize task accepted", skillOrganizeOpenAPIResponse{})},
 		},
 		{
-			Method:      "GET",
-			Path:        "/skill-organize/tasks",
-			Summary:     "List current user's Skill organize tasks",
-			Tags:        []string{"skills"},
-			QueryParams: skillReviewTaskListQueryParams{},
-			Responses:   map[int]openAPIResponse{200: resp("Skill organize task list", skillReviewTaskListOpenAPIResponse{})},
-		},
-		{
 			Method:      "POST",
 			Path:        "/skills",
 			Summary:     "Create directory skill",
@@ -3127,13 +3087,6 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Market skill list", marketListOpenAPIResponse{})},
 		},
 		{
-			Method:    "GET",
-			Path:      "/skill-market/tags",
-			Summary:   "List published market skill tags",
-			Tags:      []string{"skill-market"},
-			Responses: map[int]openAPIResponse{200: resp("Market skill tag list", skillTagsOpenAPIResponse{})},
-		},
-		{
 			Method:     "GET",
 			Path:       "/skill-market/{market_item_id}",
 			Summary:    "Get market skill details",
@@ -3175,14 +3128,6 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Edited market skill", marketItemOpenAPIResponse{})},
 		},
 		{
-			Method:     "DELETE",
-			Path:       "/admin/skill-market/{market_item_id}",
-			Summary:    "Permanently delete market skill item",
-			Tags:       []string{"skill-market"},
-			PathParams: marketItemPathParams{},
-			Responses:  map[int]openAPIResponse{200: resp("Deleted market skill", marketDeleteOpenAPIResponse{})},
-		},
-		{
 			Method:     "POST",
 			Path:       "/admin/skill-market/{market_item_id}:offline",
 			Summary:    "Unpublish market skill item",
@@ -3206,14 +3151,6 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  marketItemPathParams{},
 			RequestBody: jsonBodyOf(marketEditOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Edited market skill", marketItemOpenAPIResponse{})},
-		},
-		{
-			Method:     "DELETE",
-			Path:       "/skill-market/admin/items/{market_item_id}",
-			Summary:    "Permanently delete market skill item",
-			Tags:       []string{"skill-market"},
-			PathParams: marketItemPathParams{},
-			Responses:  map[int]openAPIResponse{200: resp("Deleted market skill", marketDeleteOpenAPIResponse{})},
 		},
 		{
 			Method:     "POST",
@@ -3361,7 +3298,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/model_providers/models",
 			Summary:     "List current user's models by model_type",
-			Description: "Requires query model_type (e.g. llm, vlm, or embed). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.",
+			Description: "Requires query model_type (e.g. llm, embedding). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.",
 			Tags:        []string{"model_providers"},
 			QueryParams: listUserModelsByModelTypeQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Models list", listModelProviderGroupModelsOpenAPIResponse{})},
@@ -3370,7 +3307,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/model_providers/selected_models",
 			Summary:     "Get selected models by model_type",
-			Description: "Returns the current user's selected model for each model_type. Each selection includes nullable max_input_tokens, the selected catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null.",
+			Description: "Returns the current user's selected model for each model_type.",
 			Tags:        []string{"model_providers"},
 			Responses:   map[int]openAPIResponse{200: resp("Selected models", listSelectedModelsOpenAPIResponse{})},
 		},
@@ -3425,7 +3362,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models",
 			Summary:     "List models under a connection group",
-			Description: "Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.",
+			Description: "Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models).",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupByIDPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Group models list", listModelProviderGroupModelsOpenAPIResponse{})},
@@ -3790,25 +3727,6 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "POST",
-			Path:        "/channel-intents:classify",
-			Summary:     "Classify a channel message",
-			Description: "Classifies an external-channel message against the caller-provided command registry and parameter schemas.",
-			Tags:        []string{"channels"},
-			RequestBody: jsonBodyOf(channelIntentOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Classified channel command", channelIntentOpenAPIResponse{})},
-		},
-		{
-			Method:      "PATCH",
-			Path:        "/conversations/{name}:search-config",
-			Summary:     "Update conversation knowledge bases",
-			Description: "Replaces the knowledge bases on an existing conversation while preserving its other search settings.",
-			Tags:        []string{"conversations"},
-			PathParams:  conversationPathParams{},
-			RequestBody: jsonBodyOf(conversationSearchConfigOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Updated conversation search config", conversationSearchConfigOpenAPIResponse{})},
-		},
-		{
-			Method:      "POST",
 			Path:        "/conversation:export",
 			Summary:     "Export conversations",
 			Tags:        []string{"conversations"},
@@ -3899,6 +3817,16 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"agent"},
 			PathParams:  agentThreadGatePathParams{},
 			Responses:   map[int]openAPIResponse{200: evoGateContentResp},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/threads/{thread_id}/gates/eval/versions/{version}/bad-cases",
+			Summary:     "List eval bad cases for a gate version",
+			Description: "Proxies Evo GET /threads/{thread_id}/gates/eval/versions/{version}/bad-cases.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadGateVersionPathParams{},
+			QueryParams: agentThreadEvalBadCasesQueryParams{},
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo eval bad case page")},
 		},
 		{
 			Method:      "GET",
@@ -4051,16 +3979,29 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/agent/router/algorithms",
 			Summary:     "List Evo router algorithms",
-			Description: "Lists the Router default plus one ABTest-approved Evo algorithm per thread, enriched with live Router state.",
+			Description: "Lists only algorithms owned by Evo, enriched with live Router state and owner metadata.",
 			Tags:        []string{"agent"},
 			QueryParams: agentRouterAlgorithmQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Evo-owned Router algorithms", agentRouterAlgorithmListResponse{})},
 		},
 		{
 			Method:      "POST",
+			Path:        "/agent/router/algorithms",
+			Summary:     "Register Evo router algorithm",
+			Description: "Registers or reactivates an Evo-owned candidate in Router and waits for the requested instances to become healthy.",
+			Tags:        []string{"agent"},
+			RequestBody: jsonBodyOf(agentRouterRegisterRequest{}, true),
+			Responses: map[int]openAPIResponse{
+				200: resp("Registered Router algorithm", agentRouterRegisterResponse{}),
+				409: routerErrorResp,
+				422: evoJSONResp("Invalid Router algorithm registration"),
+			},
+		},
+		{
+			Method:      "POST",
 			Path:        "/agent/router/algorithms/{algorithm_id}/action",
 			Summary:     "Run Evo router algorithm action",
-			Description: "Runs healthcheck, start, restart, or stop for an Evo-owned algorithm. Start reactivates a stopped algorithm; restart may restart or reactivate it; stop keeps its Evo ledger record.",
+			Description: "Runs healthcheck, restart, or stop for an Evo-owned algorithm. Restart requires the algorithm to be expected active; stop keeps its Evo ledger record.",
 			Tags:        []string{"agent"},
 			PathParams:  agentRouterAlgorithmPathParams{},
 			QueryParams: agentRouterQueryParams{},
@@ -4090,7 +4031,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/agent/router/ab-strategy",
 			Summary:     "Get Evo router AB strategy",
-			Description: "Returns the effective Router weights and the latest Evo AB audit metadata. When AB routing is inactive, weights is {default: 100}.",
+			Description: "Returns the active Router weights and the latest Evo AB audit metadata.",
 			Tags:        []string{"agent"},
 			QueryParams: agentRouterQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Router AB strategy", agentRouterABStrategyResponse{})},

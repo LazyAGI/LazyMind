@@ -10,34 +10,16 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 from lazyllm import LOG, AutoModel
 
-from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
-from lazymind.chat.engine.agent_runtime import (
-    AgentExecutionOptions,
-    AgentExecutor,
-    AgentRole,
-    AgentRunPlan,
-    PromptBuilder,
-    normalize_attachments,
-    render_attachment_content,
-)
-from lazymind.chat.engine.prompts import add_standard_system_sections
+from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
-from lazymind.chat.service.component.tool_registry import (
-    ATTACHMENT_EDIT_TOOL_CONFIG,
-    DEFAULT_TOOLS,
-    USER_ATTACHMENT_TOOL_CONFIGS,
-    collect_system_prompt_appendices,
-    filter_tools,
-    tool_is_active,
-)
+from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, build_agent_tools
 from lazyllm.tools.tool_config_inject import inject_tool_config
 
 from .context import SubAgentContext, set_context, LARGE_TOOL_RESULT_THRESHOLD
 from .db import SubAgentDB
 from . import tools as subagent_tools
-from . import SUBAGENT_ATTACHMENT_CONTEXT_KEY, SUBAGENT_CORE_TOOL_NAMES
 
 
 def _build_artifact_context_section(
@@ -110,18 +92,17 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
 
     When explicit is None/empty, fall back to all DEFAULT_TOOLS.
 
-    Note: save_artifacts, get_artifact, and list_artifacts are always available regardless
+    Note: save_artifact, get_artifact, and list_artifacts are always available regardless
     of this list — they are injected as mandatory base tools in _build_subagent_tools.
     Names of base tools in the explicit list are silently ignored (already present).
     """
+    _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts',
+                        'list_knowledge_bases', 'read_user_attachment', 'find_user_attachment',
+                        'find_artifact', 'patch_artifact', 'discard_draft'}
     if explicit:
-        core_tool_names = set(SUBAGENT_CORE_TOOL_NAMES)
-        name_list = [
-            name for item in explicit
-            if (name := str(item).strip()) and name not in core_tool_names
-        ]
+        name_list = [str(n).strip() for n in explicit if str(n).strip() and str(n).strip() not in _BASE_TOOL_NAMES]
         # Build lookup from DEFAULT_TOOLS
-        default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
+        default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS}
         # Build lookup from plugin script tools
         script_by_name: Dict[str, Any] = {}
         if plugin_id:
@@ -139,43 +120,39 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
             if name in script_by_name:
                 result.append(script_by_name[name])
             elif name in default_by_name:
-                result.append(default_by_name[name].tool)
+                resolved = build_agent_tools([default_by_name[name]])
+                result.extend(resolved)
             else:
                 LOG.warning('[SubAgent] tool %r not found in plugin scripts or DEFAULT_TOOLS — skipped', name)
         return result
-    return [cfg.tool for cfg in filter_tools(DEFAULT_TOOLS)]
+    return build_agent_tools(list(DEFAULT_TOOLS))
 
 
-def _build_subagent_tools(
-    extra_tools: Optional[List[Any]],
-    attachment_configs: Optional[List[Any]] = None,
-) -> List[Any]:
+def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
     """Combine mandatory SubAgent infra tools with optional domain tools.
 
-    Artifact and knowledge tools are always included regardless of the explicit
-    tools list. Attachment tools are included as one group when the parent task
-    carries attachment context, so the runtime tool list and its system prompt stay
-    consistent.
+    save_artifact, get_artifact, list_artifacts, list_knowledge_bases,
+    read_user_attachment, and find_user_attachment are always included regardless of
+    the explicit tools list — they are the SubAgent's core interface and must never
+    be stripped by plugin tool configurations.
     """
     base = [
-        subagent_tools.save_artifacts,
+        subagent_tools.save_artifact,
         subagent_tools.get_artifact,
         subagent_tools.list_artifacts,
         subagent_tools.list_knowledge_bases,
+        subagent_tools.read_user_attachment,
+        subagent_tools.find_user_attachment,
         subagent_tools.find_artifact,
         subagent_tools.patch_artifact,
         subagent_tools.discard_draft,
     ]
-    if attachment_configs:
-        base.extend(config.tool for config in attachment_configs)
     if extra_tools:
         base.extend(extra_tools)
     return base
 
 
-def _tool_configs_for_runtime_tools(runtime_tools: List[Any]) -> list:
-    runtime_ids = {id(tool) for tool in runtime_tools}
-    return [cfg for cfg in DEFAULT_TOOLS if id(cfg.tool) in runtime_ids]
+_ZH_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
 
 
 def _build_partial_sort_order_hints(
@@ -202,7 +179,7 @@ def _build_partial_sort_order_hints(
                 so_str = ', '.join(str(s) for s in sort_orders)
                 hints.append(
                     f'For slot "{slot}": overwrite the item(s) at '
-                    f'sort_order={so_str} in the corresponding save_artifacts entry '
+                    f'sort_order={so_str} — pass sort_order=N when calling save_artifact '
                     f'so that only those position(s) are replaced.'
                 )
         if not hints:
@@ -217,26 +194,79 @@ def _build_partial_sort_order_hints(
         return ''
 
 
-def _build_intent_context_section(db: 'SubAgentDB', conversation_id: str,
-                                  session_id: str, step_id: str = '') -> List[str]:
-    """Read conversation + plugin-session + current-step intent from DB.
+def _build_attachment_context_for_subagent(history_files_per_turn: 'Dict[str, List[str]]') -> str:
+    """Build the '## User Uploaded Files' context block for SubAgent prompts.
+
+    Mirrors _build_user_attachment_context in chat_service without cross-layer import.
+    Returns an empty string when history_files_per_turn is empty.
+    """
+    if not history_files_per_turn:
+        return ''
+    turns: Dict[int, List[str]] = {}
+    for key, paths in history_files_per_turn.items():
+        if not paths:
+            continue
+        try:
+            turns[int(key)] = paths
+        except ValueError:
+            continue
+    if not turns:
+        return ''
+
+    def _describe_file(path: str) -> str:
+        name = os.path.basename(path)
+        try:
+            size_bytes = os.path.getsize(path)
+            if size_bytes < 1024:
+                return f'{name} ({size_bytes} B)'
+            if size_bytes < 1024 * 1024:
+                return f'{name} ({size_bytes / 1024:.1f} KB)'
+            return f'{name} ({size_bytes / (1024 * 1024):.1f} MB)'
+        except OSError:
+            return name
+
+    lines: List[str] = ['## User Uploaded Files [queried at request time]']
+    for seq in sorted(turns.keys()):
+        seen: Dict[str, int] = {}
+        names: List[str] = []
+        for path in turns[seq]:
+            base = os.path.basename(path)
+            if base not in seen:
+                seen[base] = 0
+                names.append(_describe_file(path))
+            else:
+                seen[base] += 1
+                name_no_ext, ext = os.path.splitext(base)
+                names.append(f'{name_no_ext}-{seen[base]}{ext}')
+        lines.append(f'- Turn {seq}: {", ".join(names)}')
+    lines.append('')
+    lines.append('Turn numbers are 1-based integers matching the "Turn N" labels above.')
+    lines.append('Omit the turn parameter to search the current turn first, then historical turns.')
+    lines.append(
+        'Do not parse attachments by default. '
+        'find_user_attachment for path/url (image tools, plugins); '
+        'read_user_attachment only when extracted text is required.'
+    )
+    lines.append('find_user_attachment(filename, turn=N) returns path/url without parsing.')
+    return '\n'.join(lines)
+
+
+def _build_intent_context_section(db: 'SubAgentDB', session_id: str, step_id: str = '') -> List[str]:
+    """Read global + step-level intent from DB and return prompt lines.
 
     Returns an empty list if there are no intent constraints to inject.
     """
     try:
         lines: List[str] = []
-        conversation_intent: Optional[str] = db.get_conversation_intent(conversation_id)
-        session_intent: Optional[str] = db.get_session_intent(session_id) if session_id else None
-        step_intent: Optional[str] = db.get_step_intent(session_id, step_id) if session_id and step_id else None
+        session_intent: Optional[str] = db.get_session_intent(session_id)
+        step_intent: Optional[str] = db.get_step_intent(session_id, step_id) if step_id else None
 
-        if not conversation_intent and not session_intent and not step_intent:
+        if not session_intent and not step_intent:
             return []
 
         lines.append('')
-        lines.append('## Effective Execution Intent')
+        lines.append('## User Intent & Constraints')
         lines.append('The following constraints were specified by the user and MUST be respected:')
-        if conversation_intent:
-            lines.append(f'Conversation intent: {conversation_intent}')
         if session_intent:
             lines.append(f'Global constraints: {session_intent}')
         if step_intent:
@@ -246,115 +276,26 @@ def _build_intent_context_section(db: 'SubAgentDB', conversation_id: str,
         return []
 
 
-_STRUCTURED_PARAM_KEYS = {
-    # These values are rendered by dedicated sections below. Excluding only these
-    # avoids duplicating large/internal representations while preserving arbitrary
-    # task parameters supplied by plugin and ordinary SubAgent callers.
-    'history_files_per_turn',
-    SUBAGENT_ATTACHMENT_CONTEXT_KEY,
-    'partial_indices',
-    'required_output_artifact_keys',
-}
-
-
-def _attachment_context(params: Dict[str, Any]) -> Dict[str, Any]:
-    value = params.get(SUBAGENT_ATTACHMENT_CONTEXT_KEY)
-    return value if isinstance(value, dict) else {}
-
-
-def _history_files_per_turn(params: Dict[str, Any]) -> Dict[str, List[str]]:
-    context = _attachment_context(params)
-    return context.get('history_files_per_turn') or params.get('history_files_per_turn') or {}
-
-
-def _build_agentic_config(
-    task: Dict[str, Any],
-    params: Dict[str, Any],
-    effective_agent_type: str,
-) -> Dict[str, Any]:
-    """Restore the request context needed by tools inside every SubAgent."""
-    parent = params.get('parent_agentic_config')
-    agentic_config = dict(parent) if isinstance(parent, dict) else {}
-    attachment_context = _attachment_context(params)
-    history_files_per_turn = (
-        attachment_context.get('history_files_per_turn')
-        or params.get('history_files_per_turn')
-        or agentic_config.get('history_files_per_turn')
-        or {}
-    )
-    all_files = attachment_context.get('files') or agentic_config.get('files')
-    if not isinstance(all_files, list):
-        all_files = [path for paths in history_files_per_turn.values() for path in paths]
-    filters = dict(params.get('filters') or agentic_config.get('filters') or {})
-    agentic_config.update({
-        'query': str(params.get('user_input') or task.get('objective') or ''),
-        'files': all_files,
-        'history_files_per_turn': history_files_per_turn,
-        'filters': filters,
-        'user_id': str(
-            attachment_context.get('user_id')
-            or params.get('user_id')
-            or agentic_config.get('user_id')
-            or ''
-        ).strip(),
-        'conversation_id': str(
-            task.get('conversation_id') or agentic_config.get('conversation_id') or ''
-        ).strip(),
-        'is_subagent': True,
-        'agent_type': effective_agent_type,
-        'thinking_depth': str(
-            params.get('_thinking_depth') or agentic_config.get('thinking_depth') or 'medium'
-        ),
-    })
-    if effective_agent_type == 'plugin_step':
-        agentic_config.update({
-            'plugin_id': params.get('plugin_id', ''),
-            'plugin_session_id': params.get('session_id', ''),
-            'plugin_step': params.get('step_id', ''),
-        })
-    return agentic_config
-
-
-def _build_subagent_plan(
-    ctx: SubAgentContext,
-    db: Optional['SubAgentDB'],
-    *,
-    tools: List[Any],
-    tool_prompt_appendices: Dict[str, List[str]],
-    resume: bool = False,
-) -> AgentRunPlan:
-    builder = PromptBuilder.for_role(AgentRole.SUBAGENT)
-    add_standard_system_sections(
-        builder,
-        bool(tools),
-        use_memory=False,
-        current_query=ctx.objective,
-        show_tool_status=False,
-        tool_prompt_appendices=tool_prompt_appendices,
-    )
-    builder.system(
-        'subagent_role', 'SubAgent Role', (
-            'You are an autonomous SubAgent. Complete the task objective using only the '
-            'available tools. You may not spawn, create, or delegate to other agents.\n'
-            'Use the selected user-visible language for progress and the final summary. '
-            'Artifact content must follow the language required by the task objective or '
-            'the output slot contract; do not translate an artifact when its required '
-            'format specifies another language.'
-        ),
-        'platform.subagent',
-        priority=20,
-    )
-
-    display_params = {
-        key: value for key, value in ctx.params.items()
-        if key not in _STRUCTURED_PARAM_KEYS and value not in (None, '', [], {})
-    }
-    builder.runtime(
-        'subagent_parameters', 'Task Parameters',
-        '\n'.join(f'- {key}: {value}' for key, value in display_params.items()),
-        'task.params', priority=10, content_kind='reference',
-    )
-
+def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -> str:
+    # Detect language from the user_input param (primary) or the full objective text.
+    user_input = str(ctx.params.get('user_input') or '')
+    is_zh = bool(_ZH_RE.search(user_input) or _ZH_RE.search(ctx.objective))
+    lines = [
+        'You are an autonomous SubAgent. Complete the objective below using the available tools.',
+        'You are NOT allowed to spawn or create sub-agents or delegate tasks to other agents. '
+        'Only use the tools explicitly listed in your tool set.',
+    ]
+    if is_zh:
+        lines.append('You MUST respond and write all artifact content in Simplified Chinese(简体中文).')
+    lines += [
+        '',
+        f'Objective: {ctx.objective}',
+    ]
+    if ctx.params:
+        # Filter out partial_indices from params: it contains internal 0-based list_index
+        # values which would confuse the AI (it should use 1-based sort_order instead).
+        display_params = {k: v for k, v in ctx.params.items() if k != 'partial_indices'}
+        lines.append(f'Parameters: {json.dumps(display_params, ensure_ascii=False)}')
     # Inject artifact context: plugin session reads from slot revisions with sort_order;
     # ordinary SubAgent reads from sub_agent_artifacts of prior succeeded steps.
     session_id: str = ctx.params.get('session_id', '')
@@ -362,40 +303,19 @@ def _build_subagent_plan(
     if session_id or ctx.input_slots:
         artifact_section = _build_artifact_context_section(ctx, db) if db else []
         if artifact_section:
-            builder.runtime(
-                'subagent_artifacts', 'Existing Artifacts', '\n'.join(artifact_section),
-                'database.artifacts',
-                priority=20,
-                content_kind='reference',
-            )
+            lines.extend(artifact_section)
         elif ctx.input_slots:
-            builder.runtime(
-                'subagent_input_slots', 'Input Slots', ', '.join(ctx.input_slots),
-                'task.slots',
-                priority=20,
-                content_kind='reference',
-            )
+            lines.append(f'Input slots you may read: {", ".join(ctx.input_slots)}')
     # Inject intent/constraints from the plugin session so SubAgent respects user preferences.
-    if db:
-        intent_lines = _build_intent_context_section(db, ctx.conversation_id, session_id, step_id)
+    if session_id and db:
+        intent_lines = _build_intent_context_section(db, session_id, step_id)
         if intent_lines:
-            builder.runtime(
-                'subagent_intent', 'Effective Execution Intent',
-                '\n'.join(intent_lines).strip(), 'database.intent',
-                priority=30,
-                authoritative=True,
-                content_kind='instruction',
-            )
+            lines.extend(intent_lines)
     # Inject user attachment context so the SubAgent knows which files were uploaded.
-    history_files_per_turn = _history_files_per_turn(ctx.params)
-    attachment_section = render_attachment_content(
-        normalize_attachments(history_files_per_turn),
-        role=AgentRole.SUBAGENT,
-    )
-    builder.runtime(
-        'subagent_attachments', 'User Attachments', attachment_section,
-        'request.attachments', priority=40, content_kind='reference',
-    )
+    history_files_per_turn: Dict[str, List[str]] = ctx.params.get('history_files_per_turn') or {}
+    attachment_section = _build_attachment_context_for_subagent(history_files_per_turn)
+    if attachment_section:
+        lines.append(attachment_section)
     # Translate partial_indices (internal 0-based list_index) into sort_order guidance.
     # This tells the AI exactly which display position(s) to overwrite instead of append.
     partial_indices: Dict[str, List[int]] = ctx.params.get('partial_indices') or {}
@@ -404,82 +324,46 @@ def _build_subagent_plan(
             db, session_id, partial_indices,
         )
         if sort_order_hints:
-            builder.runtime(
-                'subagent_partial_retry', 'Partial Retry', sort_order_hints, 'task.retry',
-                priority=50,
-                authoritative=True,
-                content_kind='instruction',
-            )
+            lines.append(sort_order_hints)
     if ctx.params.get('required_output_artifact_keys') is not None:
         required_keys = _coerce_str_list(ctx.params.get('required_output_artifact_keys'))
     elif str(ctx.agent_type or '') == 'plugin_step':
         required_keys = []
     else:
         required_keys = list(ctx.output_slots)
-    output_lines = []
     if required_keys:
-        output_lines.append(
+        lines.append(
             'Required output artifacts: '
             + ', '.join(required_keys)
-            + '. Save every required key before finishing. When there are multiple outputs, '
-            'use one save_artifacts call containing every output entry.'
+            + '. Call save_artifact for each required key before finishing.'
         )
     else:
-        output_lines.append(
+        lines.append(
             'No output artifact is unconditionally required. Save only artifacts requested by '
             'the objective or step prompt, and never save placeholder content.'
         )
     optional_keys = [k for k in ctx.output_slots if k not in required_keys]
     if optional_keys:
-        output_lines.append(
+        lines.append(
             'Optional output artifact keys: ' + ', '.join(optional_keys)
         )
-    output_lines.append(
+    lines.append(
         '## Overwrite vs. Append for list slots\n'
-        'Each save_artifacts entry has an optional sort_order parameter (1-based):\n'
+        'save_artifact has an optional sort_order parameter (1-based):\n'
         '- Omit sort_order → append a new item at the end of the list.\n'
         '- Pass sort_order=N → overwrite the item currently at display position N.\n'
         'If the objective says the user wants to replace a specific item '
         '(e.g. "重新收集第二张图", "replace item 3", "redo position N"), '
         'you MUST pass sort_order=N. Omitting it will append a new item instead of replacing.'
     )
-    output_lines.append(
+    lines.append(
         'After all required artifacts are saved, write a final summary that contains the '
         'actual results and key findings — not only a reference to the artifacts. '
         'For example, if you searched for information, include the information itself. '
         'The summary must be self-contained and directly usable by the caller without '
         'opening any artifact.'
     )
-    builder.runtime(
-        'subagent_output_contract', 'Output Contract', '\n'.join(output_lines), 'task.slots',
-        priority=60,
-        authoritative=True,
-        content_kind='instruction',
-    )
-    input_content = (
-        'Continue the task from the execution history using the refreshed context above.'
-        if resume else ctx.objective
-    )
-    builder.input(
-        content=input_content,
-        source='task.objective',
-    )
-    history = []
-    return AgentRunPlan(
-        role=AgentRole.SUBAGENT,
-        prompt=builder.build(),
-        history=history,
-        tools=tools,
-        force_summarize_context=ctx.objective,
-        execution_options=AgentExecutionOptions(
-            extra_stop_condition=_make_cancel_stop_condition(),
-            max_retries=(
-                max(1, int(_cfg['agentic_expanded_max_rounds']) - 1)
-                if str((lazyllm.globals.get('agentic_config') or {}).get('thinking_depth') or '').lower() == 'max'
-                else None
-            ),
-        ),
-    )
+    return '\n'.join(lines)
 
 
 def _truncate_tool_result(ctx: SubAgentContext, result: Any, tool_name: str) -> str:
@@ -625,52 +509,56 @@ async def run_subagent_stream(
         sid = task_id
         lazyllm.globals._init_sid(sid=sid)
         lazyllm.locals._init_sid(sid=sid)
-        lazyllm.set_trace_context({
-            'session_id': params.get('session_id') or params.get('chat_session_id') or None,
-            'sampled': True,
-            'module_trace': {'default': True},
-            'request_tags': ['subagent'],
-        })
         inject_model_config(model_config)
         inject_tool_config(tool_config)
         set_context(ctx)
 
-        agentic_config = _build_agentic_config(task, params, effective_agent_type)
-        lazyllm.globals['agentic_config'] = agentic_config
-        # Materialize session bucket before Parallel-based tools (e.g. kb_search).
-        _ = lazyllm.globals._data
+        # For plugin_step tasks: inject plugin context into agentic_config so that
+        # save_artifact can resolve sort_order → list_index via the Go core API.
+        if effective_agent_type == 'plugin_step':
+            parent_agentic_config = params.get('parent_agentic_config')
+            agentic_config = dict(parent_agentic_config) if isinstance(parent_agentic_config, dict) else {}
+            history_files_per_turn = (
+                params.get('history_files_per_turn')
+                or agentic_config.get('history_files_per_turn')
+                or {}
+            )
+            all_files = agentic_config.get('files')
+            if not isinstance(all_files, list):
+                all_files = [p for paths in history_files_per_turn.values() for p in paths]
+            filters = dict(params.get('filters') or agentic_config.get('filters') or {})
+            agentic_config.update({
+                'plugin_id': params.get('plugin_id', ''),
+                'plugin_session_id': params.get('session_id', ''),
+                'plugin_step': params.get('step_id', ''),
+                'query': str(params.get('user_input') or ctx.objective),
+                'files': all_files,
+                'history_files_per_turn': history_files_per_turn,
+                'filters': filters,
+                'user_id': str(params.get('user_id') or agentic_config.get('user_id') or '').strip(),
+                'conversation_id': str(
+                    task.get('conversation_id') or agentic_config.get('conversation_id') or ''
+                ).strip(),
+                'is_subagent': True,
+                'agent_type': effective_agent_type,
+            })
+            lazyllm.globals['agentic_config'] = agentic_config
+            # Materialize session bucket before Parallel-based tools (e.g. kb_search).
+            _ = lazyllm.globals._data
 
         yield _sse({'type': 'task_start', 'task_id': task_id})
 
         llm = AutoModel(model='llm')
         runtime_tools = _resolve_runtime_tools(tools, plugin_id=params.get('plugin_id') or None)
-        attachment_configs = (
-            [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
-            if agentic_config.get('files') or agentic_config.get('history_files_per_turn')
-            else []
-        )
-        subagent_tools_all = _build_subagent_tools(runtime_tools, attachment_configs)
-        runtime_configs = _tool_configs_for_runtime_tools(runtime_tools)
-        plan = _build_subagent_plan(
-            ctx,
-            db,
-            tools=subagent_tools_all,
-            tool_prompt_appendices=collect_system_prompt_appendices(
-                runtime_configs + attachment_configs,
-            ),
-            resume=resume,
+        agent = build_react_agent(
+            llm=llm,
+            tools=_build_subagent_tools(runtime_tools),
+            force_summarize_context=ctx.objective,
+            extra_stop_condition=_make_cancel_stop_condition(),
         )
 
         step_seq = db.max_step_seq(task_id) + 1 if resume else 0
         resume_history = _rebuild_history_from_steps(db, task_id) if resume else None
-        if resume:
-            objective_message = (
-                PromptBuilder.for_role(AgentRole.SUBAGENT)
-                .input(content=ctx.objective, source='task.objective')
-                .build()
-                .current_input
-            )
-            plan.history = [{'role': 'user', 'content': objective_message}, *(resume_history or [])]
         progress = 5
         yield _sse({'type': 'progress', 'task_id': task_id, 'progress': progress,
                     'current_phase': '恢复执行...' if resume else '开始执行...'})
@@ -682,8 +570,7 @@ async def run_subagent_stream(
         _pending_text: str = ''
         _pending_think: str = ''
 
-        executor = AgentExecutor()
-        async for kind, payload in executor.stream(llm, plan):
+        async for kind, payload in drive_agent(agent, _objective_prompt(ctx, db), history=resume_history):
             if kind == 'event':
                 item = payload
                 tag = item.get('tag')
@@ -743,7 +630,7 @@ async def run_subagent_stream(
                         _pending_think += frame.get('think') or ''
                     else:
                         _pending_text += frame.get('text') or ''
-            else:  # 'final' -- AgentExecutor propagates future exceptions before yielding this.
+            else:  # 'final' -- drive_agent propagates future exceptions before yielding this.
                 final_result = payload
                 # Flush any remaining accumulated text/think as the final step.
                 if _pending_think:
@@ -795,10 +682,6 @@ async def run_subagent_stream(
             cost = round(time.time() - start_time, 3)
             if is_ok:
                 _auto_flush_drafts(ctx, db)
-                while emitted:
-                    ev = emitted.pop(0)
-                    ev['task_id'] = task_id
-                    yield _sse(ev)
                 yield _sse({'type': 'done', 'task_id': task_id, 'status': 'succeeded',
                             'summary': eval_summary, 'cost': cost})
             else:
@@ -812,10 +695,6 @@ async def run_subagent_stream(
         cost = round(time.time() - start_time, 3)
         # Auto-flush any pending drafts before emitting done.
         _auto_flush_drafts(ctx, db)
-        while emitted:
-            ev = emitted.pop(0)
-            ev['task_id'] = task_id
-            yield _sse(ev)
         yield _sse({'type': 'done', 'task_id': task_id, 'status': 'succeeded',
                     'summary': summary, 'cost': cost})
         yield 'data: [DONE]\n\n'
@@ -840,6 +719,15 @@ async def run_subagent_stream(
             pass
         if db is not None:
             db.dispose()
+
+
+def _parse_draft_stem(stem: str) -> tuple:
+    """Split a draft filename stem into (artifact_key, list_index_or_none)."""
+    if '_' in stem:
+        prefix, suffix = stem.rsplit('_', 1)
+        if suffix.isdigit():
+            return prefix, int(suffix)
+    return stem, None
 
 
 def _make_cancel_stop_condition():
@@ -871,23 +759,24 @@ def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:
     """Commit any pending draft files as new artifact revisions before the step ends.
 
     This is a safety net: if the model called patch_artifact but forgot to call
-    save_artifacts, the edits are not lost — they are committed here at step boundary.
+    save_artifact, the edits are not lost — they are committed here at step boundary.
     Only drafts for required keys or keys already saved in this run are flushed.
     """
     from . import tools as subagent_tools
     required = set(_coerce_str_list((ctx.params or {}).get('required_output_artifact_keys')))
     saved = set(ctx.saved_keys())
-    for base_key, list_index, original_type, content in ctx.list_pending_drafts():
+    for draft_key, original_type, content in ctx.list_pending_drafts():
+        base_key, list_index = _parse_draft_stem(draft_key)
         if required:
             if base_key not in required and base_key not in saved:
-                ctx.delete_draft(base_key, list_index)
+                ctx.delete_draft(draft_key)
                 LOG.info(
                     '[SubAgent] discarded optional draft key=%r for task=%s',
                     base_key, ctx.task_id,
                 )
                 continue
         elif base_key not in saved:
-            ctx.delete_draft(base_key, list_index)
+            ctx.delete_draft(draft_key)
             LOG.info(
                 '[SubAgent] discarded draft for unsaved key=%r for task=%s',
                 base_key, ctx.task_id,
@@ -895,10 +784,10 @@ def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:
             continue
         try:
             sort_order = (list_index + 1) if list_index is not None else None
-            subagent_tools._save_artifact(
+            subagent_tools.save_artifact(
                 base_key, content, content_type=original_type, sort_order=sort_order,
             )
-            ctx.delete_draft(base_key, list_index)
+            ctx.delete_draft(draft_key)
             LOG.info('[SubAgent] auto-flushed draft key=%r for task=%s', base_key, ctx.task_id)
         except Exception as exc:
             LOG.warning('[SubAgent] auto-flush draft key=%r failed: %s', base_key, exc)
@@ -973,7 +862,7 @@ def _evaluate_completion(
 
     If the LLM judges YES and ctx is provided, the final output is auto-saved as a
     text artifact for each missing key so the task is not penalised for a missing
-    save_artifacts call when the content is clearly present in the final output.
+    save_artifact call when the content is clearly present in the final output.
     """
     trace = _steps_to_trace(steps)
     force_text = str(force_result or '').strip()
@@ -982,7 +871,7 @@ def _evaluate_completion(
 
     prompt_lines = [
         'You are reviewing the execution of an autonomous SubAgent that stopped without '
-        'calling save_artifacts for all required output keys.',
+        'calling save_artifact for all required output keys.',
         '',
         f'Original objective: {objective}',
         f'Required artifact keys: {missing_str or saved_str}',
@@ -998,7 +887,7 @@ def _evaluate_completion(
         '',
         'Evaluation rules:',
         '- Answer YES if the agent gathered and delivered the information needed to satisfy '
-        'the objective, even if it forgot to call save_artifacts. The final output text counts '
+        'the objective, even if it forgot to call save_artifact. The final output text counts '
         'as evidence of completion.',
         '- Answer NO only if the agent clearly failed to obtain the required information '
         '(e.g. all tool calls errored out, or the output is empty / irrelevant).',
@@ -1025,7 +914,7 @@ def _evaluate_completion(
 
         # Auto-save final output as text artifacts for each missing key when the
         # LLM judges the task as succeeded. This recovers from models that forget
-        # to call save_artifacts but include the results in their final reply.
+        # to call save_artifact but include the results in their final reply.
         if is_succeeded and ctx is not None and force_text and missing_keys:
             content = summary if summary else force_text
             _image_keys = frozenset({
@@ -1037,6 +926,7 @@ def _evaluate_completion(
                 try:
                     seq = ctx.next_artifact_seq(key)
                     ctx.record_local_artifact(key, 'text', {'text': content}, seq)
+                    ctx.db.save_artifact(ctx.task_id, key, 'text', {'text': content}, seq)
                     ctx.emit({'type': 'artifact', 'slot': key,
                               'content_type': 'text', 'seq': seq, 'value': {'text': content}})
                     LOG.info(f'[SubAgent] auto-saved missing artifact key={key!r} for task={ctx.task_id}')

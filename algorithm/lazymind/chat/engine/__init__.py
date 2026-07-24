@@ -1,18 +1,20 @@
 from .tools import (
-    KBToolkit,
+    KBToolGroup,
     calculator,
     kb_tmp_search,
-    SkillManagementToolkit,
+    memory_editor,
+    SkillEditorToolGroup,
     url_fetch,
     vision_extractor,
     vocab_learn,
 )
 
 __all__ = [
-    'KBToolkit',
+    'KBToolGroup',
     'calculator',
     'kb_tmp_search',
-    'SkillManagementToolkit',
+    'memory_editor',
+    'SkillEditorToolGroup',
     'url_fetch',
     'vision_extractor',
     'vocab_learn',

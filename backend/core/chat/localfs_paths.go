@@ -5,121 +5,96 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"lazymind/core/common"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
+
+	"lazymind/core/common"
+	"lazymind/core/datasource"
 )
 
 const (
-	defaultScanTenantID       = ""
+	defaultScanTenantID       = "tenant-demo"
 	localFSScanPageSize       = 200
 	localFSScanMaxPages       = 100
 	localFSScanRequestTimeout = 10 * time.Second
 )
 
 var localFSScanHTTPClient = &http.Client{Timeout: localFSScanRequestTimeout}
-var allowedFileExtensions = map[string]bool{
-	"pdf": true, "doc": true, "docx": true,
-	"xls": true, "xlsx": true, "ipynb": true, "mbox": true,
-}
 
 type scanSourceListResponse struct {
 	Items []scanSourceListItem `json:"items"`
 	Total int                  `json:"total"`
 }
+
 type scanSourceListItem struct {
-	SourceID  string `json:"source_id"`
-	Status    string `json:"status"`
-	DatasetID string `json:"dataset_id"`
-	TenantID  string `json:"tenant_id,omitempty"`
+	SourceID string `json:"source_id"`
+	Status   string `json:"status"`
 }
+
 type scanGetSourceResponse struct {
 	Bindings []scanSourceBinding `json:"bindings"`
 }
+
 type scanSourceBinding struct {
-	BindingID         string   `json:"binding_id"`
-	ConnectorType     string   `json:"connector_type"`
-	TargetType        string   `json:"target_type"`
-	TargetRef         string   `json:"target_ref"`
-	Status            string   `json:"status"`
-	ChatEnabled       bool     `json:"chat_enabled"`
-	DeletedAt         any      `json:"deleted_at"`
-	IncludeExtensions []string `json:"include_extensions,omitempty"`
+	ConnectorType string `json:"connector_type"`
+	TargetType    string `json:"target_type"`
+	TargetRef     string `json:"target_ref"`
+	Status        string `json:"status"`
+	DeletedAt     any    `json:"deleted_at"`
 }
 
 func applyLocalFSPathsForChat(ctx context.Context, r *http.Request, db *gorm.DB, userID string, reqBody map[string]any) error {
-	sources, err := loadLocalFSSourcesForChat(ctx, r, userID)
+	enabled, err := datasource.LoadLocalFSChatEnabled(ctx, db, userID)
 	if err != nil {
 		return err
 	}
-	reqBody["local_fs_sources"] = sources
+	if !enabled {
+		return nil
+	}
+
+	paths, err := loadLocalFSPathsForChat(ctx, r, userID)
+	if err != nil {
+		return err
+	}
+	reqBody["localfs_paths"] = paths
 	return nil
 }
 
-func loadLocalFSSourcesForChat(ctx context.Context, r *http.Request, userID string) ([]map[string]any, error) {
-	sourceIDs, err := listActiveSourceIDs(ctx, r, userID)
+func loadLocalFSPathsForChat(ctx context.Context, r *http.Request, userID string) ([]string, error) {
+	sourceIDs, err := listReadableScanSourceIDs(ctx, r, userID)
 	if err != nil {
-		fmt.Printf("[CORE_LOCALFS_DEBUG] listActiveSourceIDs error: %v\n", err)
 		return nil, err
 	}
-	fmt.Printf("[CORE_LOCALFS_DEBUG] sourceIDs=%v\n", sourceIDs)
-
-	var sources []map[string]any
+	paths := make([]string, 0)
+	seen := map[string]struct{}{}
 	for _, sourceID := range sourceIDs {
 		bindings, err := getScanSourceBindings(ctx, r, userID, sourceID)
 		if err != nil {
 			return nil, err
 		}
-
-		var paths []string
-		extSeen := map[string]bool{}
-		for _, b := range bindings {
-			if !isLocalFSActiveAndChatEnabled(b) {
+		for _, binding := range bindings {
+			path := strings.TrimSpace(binding.TargetRef)
+			if path == "" || !isActiveLocalFSBinding(binding) {
 				continue
 			}
-			targetRef := strings.TrimSpace(b.TargetRef)
-			if targetRef == "" {
+			if _, ok := seen[path]; ok {
 				continue
 			}
-			paths = append(paths, targetRef)
-			for _, ext := range b.IncludeExtensions {
-				e := normalizeFileExtension(ext)
-				if e != "" && !extSeen[e] {
-					extSeen[e] = true
-				}
-			}
+			seen[path] = struct{}{}
+			paths = append(paths, path)
 		}
-
-		if len(paths) == 0 || len(extSeen) == 0 {
-			continue
-		}
-
-		var fileExtensions []string
-		for ext := range extSeen {
-			fileExtensions = append(fileExtensions, ext)
-		}
-		sort.Strings(fileExtensions)
-
-		sources = append(sources, map[string]any{
-			"source_id":       sourceID,
-			"paths":           paths,
-			"file_extensions": fileExtensions,
-		})
 	}
-
-	fmt.Printf("[CORE_LOCALFS_DEBUG] local_fs_sources=%v\n", sources)
-	return sources, nil
+	return paths, nil
 }
 
-func listActiveSourceIDs(ctx context.Context, r *http.Request, userID string) ([]string, error) {
-	var sourceIDs []string
-	for page := 1; page <= localFSScanMaxPages; page++ {
+func listReadableScanSourceIDs(ctx context.Context, r *http.Request, userID string) ([]string, error) {
+	sourceIDs := make([]string, 0)
+	for page := 1; page <= localFSScanMaxPages; page += 1 {
 		endpoint, err := scanControlPlaneURL("/api/scan/sources")
 		if err != nil {
 			return nil, err
@@ -129,15 +104,17 @@ func listActiveSourceIDs(ctx context.Context, r *http.Request, userID string) ([
 		query.Set("page_size", strconv.Itoa(localFSScanPageSize))
 		query.Set("status", "ACTIVE")
 		endpoint.RawQuery = query.Encode()
+
 		var payload scanSourceListResponse
 		if err := doScanControlPlaneJSON(ctx, r, userID, endpoint.String(), &payload); err != nil {
 			return nil, err
 		}
 		for _, item := range payload.Items {
 			sourceID := strings.TrimSpace(item.SourceID)
-			if sourceID != "" && isActiveStatus(item.Status) {
-				sourceIDs = append(sourceIDs, sourceID)
+			if sourceID == "" || !isActiveStatus(item.Status) {
+				continue
 			}
+			sourceIDs = append(sourceIDs, sourceID)
 		}
 		if len(payload.Items) == 0 || page*localFSScanPageSize >= payload.Total {
 			break
@@ -155,12 +132,11 @@ func getScanSourceBindings(ctx context.Context, r *http.Request, userID, sourceI
 	query.Set("include_bindings", "true")
 	query.Set("include_summary", "false")
 	endpoint.RawQuery = query.Encode()
+
 	var payload scanGetSourceResponse
 	if err := doScanControlPlaneJSON(ctx, r, userID, endpoint.String(), &payload); err != nil {
-		fmt.Printf("[CORE_LOCALFS_DEBUG] getScanSourceBindings error for source=%s: %v\n", sourceID, err)
 		return nil, err
 	}
-	fmt.Printf("[CORE_LOCALFS_DEBUG] source=%s bindings=%+v\n", sourceID, payload.Bindings)
 	return payload.Bindings, nil
 }
 
@@ -187,11 +163,13 @@ func doScanControlPlaneJSON(ctx context.Context, original *http.Request, userID,
 	if auth := strings.TrimSpace(original.Header.Get("Authorization")); auth != "" {
 		req.Header.Set("Authorization", auth)
 	}
+
 	resp, err := localFSScanHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("scan-control-plane request failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
@@ -206,25 +184,12 @@ func scanTenantIDFromRequest(r *http.Request) string {
 	return defaultScanTenantID
 }
 
-func isLocalFSActiveAndChatEnabled(binding scanSourceBinding) bool {
+func isActiveLocalFSBinding(binding scanSourceBinding) bool {
 	if binding.DeletedAt != nil || !isActiveStatus(binding.Status) {
-		return false
-	}
-	if !binding.ChatEnabled {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(binding.ConnectorType), "local_fs") ||
 		strings.EqualFold(strings.TrimSpace(binding.TargetType), "local_path")
-}
-
-func normalizeFileExtension(ext string) string {
-	e := strings.TrimSpace(ext)
-	e = strings.TrimPrefix(e, ".")
-	e = strings.ToLower(e)
-	if !allowedFileExtensions[e] && !common.IsTextFileExtension(e) {
-		return ""
-	}
-	return e
 }
 
 func isActiveStatus(status string) bool {

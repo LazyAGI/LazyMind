@@ -5,7 +5,6 @@ package taskcenter
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -90,7 +89,7 @@ func CancelTask(ctx context.Context, db *gorm.DB, userID, id string) error {
 
 func isTerminal(status string) bool {
 	switch status {
-	case "succeeded", "failed", "skipped", "canceled":
+	case "succeeded", "failed", "canceled":
 		return true
 	}
 	return false
@@ -123,7 +122,6 @@ type taskResponse struct {
 	CreatedAt         time.Time       `json:"created_at"`
 	UpdatedAt         time.Time       `json:"updated_at"`
 	FinishedAt        *time.Time      `json:"finished_at,omitempty"`
-	WaitingReason     string          `json:"waiting_reason,omitempty"`
 }
 
 func toResponse(t orm.TaskCenterTask, conversationTitle string, scheduleName *string, steps []stepInfo) taskResponse {
@@ -142,7 +140,7 @@ func toResponse(t orm.TaskCenterTask, conversationTitle string, scheduleName *st
 		ScheduleID:        t.ScheduleID,
 		ScheduleName:      scheduleName,
 		Steps:             steps,
-		ProgressJSON:      json.RawMessage(t.ProgressJSON),
+		ProgressJSON:      t.ProgressJSON,
 		CreatedAt:         t.CreatedAt,
 		UpdatedAt:         t.UpdatedAt,
 		FinishedAt:        t.FinishedAt,
@@ -229,22 +227,18 @@ func loadStepsForConversation(ctx context.Context, db *gorm.DB, convID string) [
 	return steps
 }
 
-// resolveTaskStatus returns the effective display status for a task.
+// resolveTaskStatus returns the effective display status for a task by querying
+// live data rather than relying on any write-time status callback.
 //
 // Decision tree (evaluated only when t.Status is non-terminal):
 //
 //  1. Plugin task (plugin_session_id set): derive from plugin_sessions.status.
-//  2. No plugin: rely on the persisted task status. Chat histories are written
-//     during streaming to preserve thinking progress, so their presence is not a
-//     completion signal.
+//  2. No plugin: check whether chat_histories has a row for this conversation.
+//     - Row exists  → SSE finished and was persisted → "succeeded".
+//     - No row, task is older than 2 h → timed out with no output → "failed".
+//     - No row, task is recent → still running → keep "running".
 func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) string {
 	if isTerminal(t.Status) {
-		return t.Status
-	}
-	if t.Status == "waiting_inputs" {
-		return "waiting_inputs"
-	}
-	if t.Status == "waiting" || t.Status == "pending" {
 		return t.Status
 	}
 	if t.PluginSessionID != nil && *t.PluginSessionID != "" {
@@ -270,53 +264,22 @@ func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) s
 		return t.Status
 	}
 
+	// No plugin session: use chat_histories presence as the completion signal.
+	// Go writes a chat_histories row atomically at the very end of streamSingleAnswer,
+	// after all SSE tokens have been consumed from Python. Its existence is therefore
+	// a reliable indicator that the Python→Go SSE stream has fully completed.
+	var histCount int64
+	db.WithContext(ctx).
+		Table("chat_histories").
+		Where("conversation_id = ?", t.ConversationID).
+		Count(&histCount)
+	if histCount > 0 {
+		return "succeeded"
+	}
 	if time.Since(t.CreatedAt) > 2*time.Hour {
 		return "failed"
 	}
 	return "running"
-}
-
-func waitingDependencyReason(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) string {
-	if t.Status == "failed" && t.DependencyStatus == "no_inputs" {
-		return "未收集到依赖任务输出"
-	}
-	if t.Status != "waiting_inputs" || t.ScheduleID == nil || t.WindowStart == nil || t.WindowEnd == nil {
-		return ""
-	}
-	type depRow struct {
-		SourceScheduleID string `gorm:"column:source_schedule_id"`
-		SourceName       string `gorm:"column:source_name"`
-	}
-	var deps []depRow
-	_ = db.WithContext(ctx).Table("schedule_dependencies sd").
-		Select("sd.source_schedule_id, us.name AS source_name").
-		Joins("JOIN user_schedules us ON us.id = sd.source_schedule_id").
-		Where("sd.target_schedule_id = ? AND sd.enabled = true", *t.ScheduleID).Find(&deps).Error
-	if len(deps) == 0 {
-		return ""
-	}
-	ready := 0
-	waitingNames := make([]string, 0)
-	for _, dep := range deps {
-		var count int64
-		db.WithContext(ctx).Table("task_center_tasks source_task").
-			Joins("JOIN task_run_outputs tro ON tro.task_id = source_task.id AND tro.output_status = 'ready'").
-			Where("source_task.schedule_id = ? AND source_task.archived_at IS NULL AND COALESCE(source_task.scheduled_fire_at, source_task.created_at) > ? AND COALESCE(source_task.scheduled_fire_at, source_task.created_at) <= ?", dep.SourceScheduleID, *t.WindowStart, *t.WindowEnd).
-			Count(&count)
-		if count > 0 {
-			ready++
-		} else {
-			waitingNames = append(waitingNames, dep.SourceName)
-		}
-	}
-	if len(waitingNames) == 0 {
-		return "依赖已就绪，准备执行"
-	}
-	name := waitingNames[0]
-	if len(waitingNames) > 1 {
-		name += "等"
-	}
-	return "等待 " + name + "：" + strconv.Itoa(ready) + "/" + strconv.Itoa(len(deps))
 }
 
 // ── API handlers ─────────────────────────────────────────────────────────────
@@ -385,14 +348,11 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	resolved := make([]resolvedRow, 0, len(rows))
 	statusCounts := map[string]int{
-		"all":            0,
-		"pending":        0,
-		"waiting":        0,
-		"waiting_inputs": 0,
-		"running":        0,
-		"succeeded":      0,
-		"failed":         0,
-		"canceled":       0,
+		"all":       0,
+		"waiting":   0,
+		"running":   0,
+		"succeeded": 0,
+		"failed":    0,
 	}
 	for _, row := range rows {
 		t := row.TaskCenterTask
@@ -424,9 +384,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		} else {
 			steps = loadStepsForConversation(r.Context(), db, t.ConversationID)
 		}
-		item := toResponse(t, resolvedItem.row.ConvDisplayName, resolvedItem.row.ScheduleName, steps)
-		item.WaitingReason = waitingDependencyReason(r.Context(), db, resolvedItem.row.TaskCenterTask)
-		items = append(items, item)
+		items = append(items, toResponse(t, resolvedItem.row.ConvDisplayName, resolvedItem.row.ScheduleName, steps))
 	}
 	common.ReplyJSON(w, map[string]any{
 		"items":         items,
@@ -450,7 +408,7 @@ func GetTaskByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var t orm.TaskCenterTask
-	if err := db.WithContext(r.Context()).Where("id = ? AND user_id = ? AND archived_at IS NULL", id, userID).First(&t).Error; err != nil {
+	if err := db.WithContext(r.Context()).Where("id = ? AND user_id = ?", id, userID).First(&t).Error; err != nil {
 		common.ReplyErr(w, "task not found", http.StatusNotFound)
 		return
 	}
@@ -520,8 +478,8 @@ func CancelTaskByID(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, nil)
 }
 
-// RemoveTaskHandler handles POST /task-center/tasks/{task_id}:remove.
-// It archives the run and soft-deletes its task conversation as one operation.
+// RemoveTaskHandler handles POST /task-center/tasks/{task_id}:remove
+// Soft-archives the task so it no longer appears in the list. The conversation is unaffected.
 func RemoveTaskHandler(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	path := strings.TrimPrefix(r.URL.Path, "/task-center/tasks/")
@@ -533,114 +491,91 @@ func RemoveTaskHandler(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "db unavailable", http.StatusInternalServerError)
 		return
 	}
-	existing, err := archiveTaskRun(r.Context(), db, userID, id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		common.ReplyErr(w, "task not found", http.StatusNotFound)
+	now := time.Now().UTC()
+	result := db.WithContext(r.Context()).Model(&orm.TaskCenterTask{}).
+		Where("id = ? AND user_id = ?", id, userID).
+		Updates(map[string]any{"archived_at": now, "updated_at": now})
+	if result.Error != nil {
+		common.ReplyErr(w, result.Error.Error(), http.StatusInternalServerError)
 		return
-	}
-	if err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if !isTerminal(existing.Status) {
-		if existing.ConversationID != "" && OnCancelHook != nil {
-			go OnCancelHook(r.Context(), existing.ConversationID)
-		}
 	}
 	common.ReplyOK(w, nil)
 }
 
-func archiveTaskRun(ctx context.Context, db *gorm.DB, userID, id string) (orm.TaskCenterTask, error) {
-	var existing orm.TaskCenterTask
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("id = ? AND user_id = ? AND archived_at IS NULL", id, userID).First(&existing).Error; err != nil {
-			return err
-		}
-		now := time.Now().UTC()
-		updates := map[string]any{"archived_at": now, "updated_at": now}
-		if !isTerminal(existing.Status) {
-			updates["status"] = "canceled"
-			updates["dependency_status"] = "canceled"
-			updates["finished_at"] = now
-		}
-		if err := tx.Model(&orm.TaskCenterTask{}).Where("id = ? AND user_id = ?", id, userID).Updates(updates).Error; err != nil {
-			return err
-		}
-		if existing.ConversationID != "" {
-			if err := tx.Model(&orm.Conversation{}).
-				Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", existing.ConversationID, userID).
-				Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
-				return err
-			}
-		}
-		// Input rows are snapshots owned by this downstream run, so archive cleanup
-		// removes them together with the run's visible history.
-		if err := tx.Where("downstream_task_id = ?", id).Delete(&orm.TaskRunInput{}).Error; err != nil {
-			return err
-		}
-		if existing.ScheduleID != nil && *existing.ScheduleID != "" {
-			var visibleRuns int64
-			if err := tx.Model(&orm.TaskCenterTask{}).
-				Where("schedule_id = ? AND user_id = ? AND archived_at IS NULL", *existing.ScheduleID, userID).
-				Count(&visibleRuns).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&orm.UserSchedule{}).
-				Where("id = ? AND user_id = ?", *existing.ScheduleID, userID).
-				Update("run_count", visibleRuns).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	return existing, err
-}
+// AddTaskHandler handles POST /task-center/tasks
+// Body: { "conversation_id": "...", "title": "..." }
+// Idempotent: if a record already exists for this conversation_id it returns the existing one.
+func AddTaskHandler(w http.ResponseWriter, r *http.Request) {
+	userID := store.UserID(r)
+	if userID == "" {
+		common.ReplyErr(w, "user not found", http.StatusUnauthorized)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "db unavailable", http.StatusInternalServerError)
+		return
+	}
 
-// ArchiveTasksForConversations keeps task-center membership intrinsic to how a
-// conversation was created: deleting a task conversation archives its tasks too.
-func ArchiveTasksForConversations(ctx context.Context, tx *gorm.DB, userID string, conversationIDs []string, now time.Time) error {
-	if len(conversationIDs) == 0 {
-		return nil
+	var body struct {
+		ConversationID string `json:"conversation_id"`
+		Title          string `json:"title"`
 	}
-	var tasks []orm.TaskCenterTask
-	if err := tx.WithContext(ctx).
-		Where("user_id = ? AND conversation_id IN ? AND archived_at IS NULL", userID, conversationIDs).
-		Find(&tasks).Error; err != nil {
-		return err
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, "invalid body: "+err.Error(), http.StatusBadRequest)
+		return
 	}
-	if len(tasks) == 0 {
-		return nil
+	if body.ConversationID == "" {
+		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
+		return
 	}
-	taskIDs := make([]string, 0, len(tasks))
-	scheduleIDs := make(map[string]struct{})
-	for _, task := range tasks {
-		taskIDs = append(taskIDs, task.ID)
-		if task.ScheduleID != nil && *task.ScheduleID != "" {
-			scheduleIDs[*task.ScheduleID] = struct{}{}
+
+	// Verify ownership.
+	var convCheck struct {
+		ID string `gorm:"column:id"`
+	}
+	if err := db.WithContext(r.Context()).
+		Table("conversations").
+		Select("id").
+		Where("id = ? AND create_user_id = ?", body.ConversationID, userID).
+		First(&convCheck).Error; err != nil {
+		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
+		return
+	}
+
+	// Idempotency check.
+	var existing orm.TaskCenterTask
+	err := db.WithContext(r.Context()).
+		Where("conversation_id = ? AND user_id = ?", body.ConversationID, userID).
+		First(&existing).Error
+	if err == nil {
+		convTitle := ""
+		type cRow struct {
+			DisplayName string `gorm:"column:display_name"`
 		}
+		var cr cRow
+		_ = db.WithContext(r.Context()).Table("conversations").Select("display_name").Where("id = ?", body.ConversationID).First(&cr).Error
+		convTitle = cr.DisplayName
+		common.ReplyJSON(w, toResponse(existing, convTitle, nil, loadStepsForConversation(r.Context(), db, body.ConversationID)))
+		return
 	}
-	if err := tx.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("id IN ?", taskIDs).
-		Updates(map[string]any{"archived_at": now, "updated_at": now}).Error; err != nil {
-		return err
+
+	title := body.Title
+	if title == "" {
+		title = body.ConversationID
 	}
-	if err := tx.WithContext(ctx).Where("downstream_task_id IN ?", taskIDs).Delete(&orm.TaskRunInput{}).Error; err != nil {
-		return err
+	task := &orm.TaskCenterTask{
+		UserID:         userID,
+		ConversationID: body.ConversationID,
+		TaskType:       "background_chat",
+		Title:          &title,
+		Status:         "running",
 	}
-	for scheduleID := range scheduleIDs {
-		var visibleRuns int64
-		if err := tx.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-			Where("schedule_id = ? AND user_id = ? AND archived_at IS NULL", scheduleID, userID).
-			Count(&visibleRuns).Error; err != nil {
-			return err
-		}
-		if err := tx.WithContext(ctx).Model(&orm.UserSchedule{}).
-			Where("id = ? AND user_id = ?", scheduleID, userID).
-			Update("run_count", visibleRuns).Error; err != nil {
-			return err
-		}
+	if err := CreateTask(r.Context(), db, task); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	return nil
+	common.ReplyJSON(w, toResponse(*task, title, nil, []stepInfo{}))
 }
 
 // ListScheduleTasks handles GET /task-center/schedules/{schedule_id}/tasks
@@ -690,12 +625,12 @@ func ListScheduleTasks(w http.ResponseWriter, r *http.Request) {
 
 	var total int64
 	_ = db.WithContext(r.Context()).Model(&orm.TaskCenterTask{}).
-		Where("schedule_id = ? AND user_id = ? AND archived_at IS NULL", scheduleID, userID).
+		Where("schedule_id = ? AND user_id = ?", scheduleID, userID).
 		Count(&total)
 
 	var rows []orm.TaskCenterTask
 	if err := db.WithContext(r.Context()).
-		Where("schedule_id = ? AND user_id = ? AND archived_at IS NULL", scheduleID, userID).
+		Where("schedule_id = ? AND user_id = ?", scheduleID, userID).
 		Order("created_at DESC").
 		Offset(offset).Limit(pageSize).
 		Find(&rows).Error; err != nil {
@@ -736,9 +671,7 @@ func ListScheduleTasks(w http.ResponseWriter, r *http.Request) {
 			steps = loadStepsForConversation(r.Context(), db, t.ConversationID)
 		}
 		sn := schedName
-		item := toResponse(t, convTitles[t.ConversationID], &sn, steps)
-		item.WaitingReason = waitingDependencyReason(r.Context(), db, t)
-		items = append(items, item)
+		items = append(items, toResponse(t, convTitles[t.ConversationID], &sn, steps))
 	}
 	common.ReplyJSON(w, map[string]any{
 		"items":     items,

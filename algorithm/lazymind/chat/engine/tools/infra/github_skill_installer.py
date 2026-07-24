@@ -10,8 +10,13 @@ from typing import Dict, Optional
 from urllib.parse import quote, unquote, urlparse
 
 import requests
+import yaml  # type: ignore
 
-from lazymind.common.skill_document import require_valid_skill_document
+from .skill_validation import (
+    normalize_skill_category,
+    validate_skill_content,
+    validate_skill_name,
+)
 
 
 _GITHUB_API = 'https://api.github.com'
@@ -53,6 +58,7 @@ class GitHubSkillSource:
 class PreparedSkillPackage:
     source: GitHubSkillSource
     name: str
+    category: str
     description: str
     files: Dict[str, bytes]
 
@@ -71,12 +77,17 @@ class GitHubSkillInstaller:
         self._session = session or requests.Session()
         self._source_cache: Dict[str, GitHubSkillSource] = {}
 
-    def prepare(self, github_url: str) -> PreparedSkillPackage:
+    def prepare(self, github_url: str, category: Optional[str] = None) -> PreparedSkillPackage:
+        final_category = normalize_skill_category(category if category is not None else 'external')
+        if not final_category:
+            raise ValueError(
+                f'category {category!r} is invalid; it must be a single ASCII-safe path segment.'
+            )
         source = self.resolve_source(github_url)
         with tempfile.TemporaryDirectory(prefix='lazymind-skill-') as temp_dir:
             archive_path = self._download_archive(source, temp_dir)
             files = self._read_package(archive_path, source.skill_path)
-        return self._normalize_package(source, files)
+        return self._normalize_package(source, final_category, files)
 
     def resolve_source(self, github_url: str) -> GitHubSkillSource:
         cache_key = str(github_url or '').strip()
@@ -277,6 +288,7 @@ class GitHubSkillInstaller:
     @staticmethod
     def _normalize_package(
         source: GitHubSkillSource,
+        category: str,
         files: Dict[str, bytes],
     ) -> PreparedSkillPackage:
         raw_skill_md = files['SKILL.md']
@@ -284,20 +296,42 @@ class GitHubSkillInstaller:
             content = raw_skill_md.decode('utf-8')
         except UnicodeDecodeError as exc:
             raise ValueError('SKILL.md must be valid UTF-8.') from exc
-        document = require_valid_skill_document(content)
-        name = str(document.metadata['name'])
-        description = str(document.metadata['description']).strip()
-        normalized_content = document.with_metadata(
-            github_url=source.canonical_url,
-        ).render()
+        lines = content.splitlines(keepends=True)
+        if not lines or lines[0].strip() != '---':
+            raise ValueError('SKILL.md must contain YAML frontmatter.')
+        end_index = next((idx for idx, line in enumerate(lines[1:], 1) if line.strip() == '---'), None)
+        if end_index is None:
+            raise ValueError('SKILL.md must contain YAML frontmatter.')
+        try:
+            frontmatter = yaml.safe_load(''.join(lines[1:end_index]))
+        except yaml.YAMLError as exc:
+            raise ValueError('SKILL.md contains invalid YAML frontmatter.') from exc
+        if not isinstance(frontmatter, dict):
+            raise ValueError('SKILL.md YAML frontmatter must be a mapping.')
+        name = str(frontmatter.get('name') or '').strip()
+        description = str(frontmatter.get('description') or '').strip()
+        name_error = validate_skill_name(name)
+        if name_error:
+            raise ValueError(name_error)
+        if not description:
+            raise ValueError("Frontmatter must include non-empty 'description'.")
+        normalized_frontmatter = dict(frontmatter)
+        normalized_frontmatter['category'] = category
+        normalized_frontmatter['github_url'] = source.canonical_url
+        body = ''.join(lines[end_index + 1:])
+        yaml_text = yaml.safe_dump(normalized_frontmatter, allow_unicode=True, sort_keys=False).strip()
+        normalized_content = f'---\n{yaml_text}\n---\n{body}'
         if len(normalized_content.encode('utf-8')) > _MAX_SKILL_MD_BYTES:
             raise ValueError('Normalized SKILL.md exceeds the 5 MiB loading limit.')
-        require_valid_skill_document(normalized_content, expected_name=name)
+        content_error = validate_skill_content(normalized_content)
+        if content_error:
+            raise ValueError(content_error)
         normalized_files = dict(files)
         normalized_files['SKILL.md'] = normalized_content.encode('utf-8')
         return PreparedSkillPackage(
             source=source,
             name=name,
+            category=category,
             description=description,
             files=normalized_files,
         )

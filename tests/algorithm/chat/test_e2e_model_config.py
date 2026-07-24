@@ -36,15 +36,17 @@ from lazymind.model_config import inject_model_config, get_dynamic_role_slot_map
 
 @contextmanager
 def _runtime_models_yaml(tmp_path: Path, content: str):
-    """Write a temporary runtime_models.yaml and select it through public config."""
+    """Write a temporary runtime_models.yaml and patch the module-level path."""
     config_path = tmp_path / 'runtime_models.yaml'
     config_path.write_text(textwrap.dedent(content), encoding='utf-8')
     get_dynamic_role_slot_map.cache_clear()
-    from lazymind.config import config
+    import lazymind.model_config as lc
+    old = lc._DYNAMIC_CONFIG_PATH
+    lc._DYNAMIC_CONFIG_PATH = config_path
     try:
-        with config.temp('model_config_path', str(config_path)):
-            yield config_path
+        yield config_path
     finally:
+        lc._DYNAMIC_CONFIG_PATH = old
         get_dynamic_role_slot_map.cache_clear()
 
 

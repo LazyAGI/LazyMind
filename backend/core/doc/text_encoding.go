@@ -9,8 +9,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"lazymind/core/common"
-
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/encoding/korean"
@@ -21,6 +19,15 @@ import (
 )
 
 const uploadTextUTF8ConvertEnv = "LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED"
+
+var uploadTextUTF8Extensions = map[string]struct{}{
+	".csv":  {},
+	".html": {},
+	".json": {},
+	".log":  {},
+	".md":   {},
+	".txt":  {},
+}
 
 func uploadTextUTF8ConvertEnabled() bool {
 	raw := strings.ToLower(strings.TrimSpace(os.Getenv(uploadTextUTF8ConvertEnv)))
@@ -39,7 +46,8 @@ func shouldNormalizeUploadedTextFile(path, originalFilename string) bool {
 	if name == "" {
 		name = filepath.Base(path)
 	}
-	return common.IsTextFileExtension(filepath.Ext(name))
+	_, ok := uploadTextUTF8Extensions[strings.ToLower(filepath.Ext(name))]
+	return ok
 }
 
 func normalizeUploadedTextFileInPlace(path, originalFilename string, currentSize int64) (int64, error) {

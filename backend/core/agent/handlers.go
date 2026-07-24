@@ -127,15 +127,8 @@ func CreateThread(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load llm config failed", err), http.StatusInternalServerError)
 		return
 	}
-	if issues := threadModelConfigIssues(requestPayload); len(issues) > 0 {
-		common.ReplyAppErr(w, common.NewAppError(
-			http.StatusUnprocessableEntity,
-			threadModelNotConfiguredCode,
-			"请先完成任务所需模型配置",
-		).WithDetail(map[string]any{
-			"reason": "model_not_configured",
-			"issues": issues,
-		}))
+	if !hasThreadRequiredLLMConfig(requestPayload) {
+		common.ReplyErr(w, "请先配置 llm 和 evo_llm 模型后再创建任务", http.StatusUnprocessableEntity)
 		return
 	}
 
@@ -152,10 +145,6 @@ func CreateThread(w http.ResponseWriter, r *http.Request) {
 	headers := forwardedUpstreamHeaders(r)
 	upstreamPayload := buildEvoThreadCreatePayload(requestPayload)
 	if err := newEvoClient(headers).CreateThread(r.Context(), upstreamPayload, &upstreamRaw); err != nil {
-		if appErr, ok := evoCreateModelAppError(err); ok {
-			common.ReplyAppErr(w, appErr)
-			return
-		}
 		common.ReplyErrWithData(w, "create upstream thread failed", map[string]any{"detail": err.Error()}, evoProxyStatusCode(err))
 		return
 	}
@@ -252,6 +241,16 @@ func GetThreadMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	proxyEvoResponse(w, r, http.MethodGet, threadProxyPath(threadID, "/messages"), cloneURLValues(r.URL.Query()), nil, "application/json")
+}
+
+func GetThreadEvalGateBadCases(w http.ResponseWriter, r *http.Request) {
+	threadID, ok := ownerCheckedThreadID(w, r)
+	if !ok {
+		return
+	}
+	version := strings.TrimSpace(mux.Vars(r)["version"])
+	path := threadProxyPath(threadID, "/gates/eval/versions/"+url.PathEscape(version)+"/bad-cases")
+	proxyEvoResponse(w, r, http.MethodGet, path, cloneURLValues(r.URL.Query()), nil, "application/json")
 }
 
 func GetThreadABTestGateCaseDetails(w http.ResponseWriter, r *http.Request) {
@@ -384,6 +383,10 @@ func GetRouterStatus(w http.ResponseWriter, r *http.Request) {
 
 func ListRouterAlgorithms(w http.ResponseWriter, r *http.Request) {
 	proxyEvoResponse(w, r, http.MethodGet, "/router/algorithms", cloneURLValues(r.URL.Query()), nil, "application/json")
+}
+
+func RegisterRouterAlgorithm(w http.ResponseWriter, r *http.Request) {
+	proxyEvoResponse(w, r, http.MethodPost, "/router/algorithms", cloneURLValues(r.URL.Query()), r.Body, "application/json")
 }
 
 func PostRouterAlgorithmAction(w http.ResponseWriter, r *http.Request) {

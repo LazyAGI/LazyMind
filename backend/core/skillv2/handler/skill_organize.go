@@ -19,10 +19,9 @@ import (
 )
 
 const (
-	maxSkillOrganizeSkills        = 20
-	skillOrganizeBaseDir          = "skills"
-	skillOrganizeInternalCategory = "internal"
-	skillOrganizeIDPrefix         = "org_"
+	maxSkillOrganizeSkills = 20
+	skillOrganizeBaseDir   = "skills"
+	skillOrganizeIDPrefix  = "org_"
 )
 
 var (
@@ -61,25 +60,11 @@ func SubmitSkillOrganize(w http.ResponseWriter, r *http.Request) {
 		replyError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	normalized.Skills = filterInternalSkillOrganizePaths(normalized.Skills)
-	if len(normalized.Skills) == 0 {
-		common.ReplyErrWithData(w, "no internal skills selected", map[string]any{
-			"code": "skill_organize_no_internal_skills",
-		}, http.StatusBadRequest)
-		return
-	}
-	internalSkills, skillIDs, err := resolveInternalSkillOrganizeSelection(r.Context(), db, userID, normalized.Skills)
+	skillIDs, err := resolveSkillOrganizeIDs(r.Context(), db, userID, normalized.Skills)
 	if err != nil {
 		replyServiceError(w, err)
 		return
 	}
-	if len(internalSkills) == 0 {
-		common.ReplyErrWithData(w, "no internal skills selected", map[string]any{
-			"code": "skill_organize_no_internal_skills",
-		}, http.StatusBadRequest)
-		return
-	}
-	normalized.Skills = internalSkills
 	decision, err := taskguard.EvaluateSkillOperation(r.Context(), db, nil, taskguard.SkillOperationRequest{
 		UserID:        userID,
 		SkillIDs:      skillIDs,
@@ -114,19 +99,13 @@ func SubmitSkillOrganize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, status, err := submitSkillOrganize(r.Context(), db, userID, normalized)
-	accepted := err == nil && status == http.StatusOK && resp != nil && resp.Code == 0 && skillOrganizeResponseStatusAccepted(resp.Data.Status) &&
+	accepted := err == nil && status == http.StatusOK && resp != nil && resp.Code == 0 && resp.Data.Status == "running" &&
 		resp.Data.RequestID == normalized.RequestID && strings.TrimSpace(resp.Data.TaskID) != ""
 	reservationStatus := orm.ResourceUpdateTaskStatusFailed
-	algorithmTaskID := ""
 	if accepted {
 		reservationStatus = orm.ResourceUpdateTaskStatusDone
-		algorithmTaskID = strings.TrimSpace(resp.Data.TaskID)
 	}
-	reservationErr := err
-	if !accepted && reservationErr == nil {
-		reservationErr = fmt.Errorf("skill organize returned unexpected response")
-	}
-	if finishErr := finishSkillOrganizeReservation(r.Context(), db, reservation.ID, reservationStatus, algorithmTaskID, reservationErr); finishErr != nil {
+	if finishErr := finishSkillOrganizeReservation(r.Context(), db, reservation.ID, reservationStatus, err); finishErr != nil {
 		replyError(w, "update skill organize reservation failed", http.StatusInternalServerError)
 		return
 	}
@@ -172,7 +151,7 @@ func createSkillOrganizeReservation(ctx context.Context, db *gorm.DB, userID, re
 	return task, db.WithContext(ctx).Create(&task).Error
 }
 
-func finishSkillOrganizeReservation(ctx context.Context, db *gorm.DB, taskID, status, resultID string, taskErr error) error {
+func finishSkillOrganizeReservation(ctx context.Context, db *gorm.DB, taskID, status string, taskErr error) error {
 	now := time.Now().UTC()
 	errorMessage := ""
 	errorCode := ""
@@ -184,7 +163,6 @@ func finishSkillOrganizeReservation(ctx context.Context, db *gorm.DB, taskID, st
 	}
 	return db.WithContext(ctx).Model(&orm.ResourceUpdateTask{}).Where("id = ?", taskID).Updates(map[string]any{
 		"status":        status,
-		"result_id":     strings.TrimSpace(resultID),
 		"error_code":    errorCode,
 		"error_message": errorMessage,
 		"locked_by":     "",
@@ -194,61 +172,34 @@ func finishSkillOrganizeReservation(ctx context.Context, db *gorm.DB, taskID, st
 	}).Error
 }
 
-func skillOrganizeResponseStatusAccepted(status string) bool {
-	switch strings.TrimSpace(status) {
-	case "pending", "running", "completed":
-		return true
-	default:
-		return false
-	}
-}
-
-func filterInternalSkillOrganizePaths(skillPaths []string) []string {
-	internal := make([]string, 0, len(skillPaths))
-	for _, skillPath := range skillPaths {
-		parts := strings.Split(skillPath, "/")
-		if len(parts) == 3 && parts[1] == skillOrganizeInternalCategory {
-			internal = append(internal, skillPath)
-		}
-	}
-	return internal
-}
-
-func resolveInternalSkillOrganizeSelection(ctx context.Context, db *gorm.DB, userID string, skillPaths []string) ([]string, []string, error) {
+func resolveSkillOrganizeIDs(ctx context.Context, db *gorm.DB, userID string, skillPaths []string) ([]string, error) {
 	relativeRoots := make([]string, 0, len(skillPaths))
 	for _, skillPath := range skillPaths {
 		relativeRoots = append(relativeRoots, strings.TrimPrefix(skillPath, skillOrganizeBaseDir+"/"))
 	}
-	type skillOrganizeRow struct {
+	var rows []struct {
 		ID           string `gorm:"column:id"`
-		Category     string `gorm:"column:category"`
 		RelativeRoot string `gorm:"column:relative_root"`
 	}
-	var rows []skillOrganizeRow
 	if err := db.WithContext(ctx).Table("skills").
-		Select("id, category, relative_root").
+		Select("id, relative_root").
 		Where("owner_user_id = ? AND deleted_at IS NULL AND relative_root IN ?", strings.TrimSpace(userID), relativeRoots).
 		Find(&rows).Error; err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	byRoot := make(map[string]skillOrganizeRow, len(rows))
+	byRoot := make(map[string]string, len(rows))
 	for _, row := range rows {
-		byRoot[row.RelativeRoot] = row
+		byRoot[row.RelativeRoot] = row.ID
 	}
-	internalSkills := make([]string, 0, len(relativeRoots))
 	ids := make([]string, 0, len(relativeRoots))
 	for _, relativeRoot := range relativeRoots {
-		row, ok := byRoot[relativeRoot]
-		if !ok {
-			return nil, nil, gorm.ErrRecordNotFound
+		id := byRoot[relativeRoot]
+		if id == "" {
+			return nil, gorm.ErrRecordNotFound
 		}
-		if row.Category != skillOrganizeInternalCategory {
-			continue
-		}
-		internalSkills = append(internalSkills, skillOrganizeBaseDir+"/"+relativeRoot)
-		ids = append(ids, row.ID)
+		ids = append(ids, id)
 	}
-	return internalSkills, ids, nil
+	return ids, nil
 }
 
 func submitSkillOrganize(ctx context.Context, db *gorm.DB, userID string, req skillOrganizeSubmitRequest) (*algo.SkillOrganizeResponse, int, error) {
@@ -256,14 +207,11 @@ func submitSkillOrganize(ctx context.Context, db *gorm.DB, userID string, req sk
 	if err != nil {
 		return nil, 0, fmt.Errorf("load model configs: %w", err)
 	}
-	algorithmSkills := make([]string, len(req.Skills))
-	for i, skillPath := range req.Skills {
-		algorithmSkills[i] = strings.TrimPrefix(skillPath, skillOrganizeBaseDir+"/")
-	}
 	return skillOrganizeCaller(ctx, algo.SkillOrganizeRequest{
 		RequestID:    req.RequestID,
 		UserID:       userID,
-		Skills:       algorithmSkills,
+		Skills:       req.Skills,
+		FSBaseURL:    common.CoreSelfEndpoint(),
 		ArtifactDir:  req.ArtifactDir,
 		ModelConfigs: modelConfigs,
 	})

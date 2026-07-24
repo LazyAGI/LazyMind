@@ -58,7 +58,7 @@ def resolve_remote_plugin(entry: Dict[str, Any]) -> tuple[str, 'PluginSpec']:
     if not final_dir.exists():
         tmp_dir = Path(tempfile.mkdtemp(prefix='plugin-', dir=str(cache_root)))
         try:
-            from lazymind.common.integrations.remote_fs import RemoteFS
+            from lazymind.chat.integrations.remote_fs import RemoteFS
             RemoteFS().materialize_dir(remote_root, str(tmp_dir), revision_id=revision_id)
             rows = []
             for file_path in sorted(p for p in tmp_dir.rglob('*') if p.is_file()):
@@ -244,11 +244,11 @@ class PluginSpec:
 
         required_framework_tools = self.yaml.get('required_framework_tools') or []
         if required_framework_tools:
-            from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, tool_is_active
+            from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, group_is_active
             by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS}
             unavailable = [
                 name for name in required_framework_tools
-                if name not in by_name or not tool_is_active(by_name[name])
+                if name not in by_name or not group_is_active(by_name[name])
             ]
             if unavailable:
                 raise ValueError(f'plugin requires unavailable framework tools: {unavailable}')
@@ -451,10 +451,9 @@ def get_plugin_intro(plugin_id: str) -> str:
     if not spec:
         return ''
     plugin_id_val = spec.plugin_id
-    workflow_name = str(spec.yaml.get('name') or plugin_id_val).strip()
     description = (spec.yaml.get('description') or '').strip()
     when_to_use = (spec.yaml.get('when_to_use') or '').strip()
-    lines = [f'## Workflow: {workflow_name} (id: {plugin_id_val})']
+    lines = [f'## Plugin: {plugin_id_val}']
     if description:
         lines.append(description)
     if when_to_use:

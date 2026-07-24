@@ -13,12 +13,9 @@ import (
 	"lazymind/core/algo"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/log"
 	"lazymind/core/modelconfig"
 	corestore "lazymind/core/store"
 
-	"golang.org/x/text/collate"
-	"golang.org/x/text/language"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -89,9 +86,8 @@ type promptItemResponse struct {
 }
 
 type promptFacetResponse struct {
-	Scopes        map[string]int64 `json:"scopes"`
-	Categories    map[string]int64 `json:"categories"`
-	CategoryTotal int64            `json:"category_total"`
+	Scopes     map[string]int64 `json:"scopes"`
+	Categories map[string]int64 `json:"categories"`
 }
 
 type promptListResponse struct {
@@ -489,16 +485,7 @@ func promptMatchesScope(item promptItemResponse, scope string) bool {
 	}
 }
 
-func sortPromptItems(items []promptItemResponse, sortBy, locale string) {
-	var nameCollator *collate.Collator
-	if sortBy == "name_asc" {
-		localeTag := language.SimplifiedChinese
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "en") {
-			localeTag = language.English
-		}
-		nameCollator = collate.New(localeTag, collate.IgnoreCase)
-	}
-
+func sortPromptItems(items []promptItemResponse, sortBy string) {
 	sort.SliceStable(items, func(i, j int) bool {
 		left, right := items[i], items[j]
 		switch sortBy {
@@ -507,10 +494,7 @@ func sortPromptItems(items []promptItemResponse, sortBy, locale string) {
 				return left.UsageCount > right.UsageCount
 			}
 		case "name_asc":
-			if comparison := nameCollator.CompareString(left.DisplayName, right.DisplayName); comparison != 0 {
-				return comparison < 0
-			}
-			return left.ID < right.ID
+			return strings.ToLower(left.DisplayName) < strings.ToLower(right.DisplayName)
 		default:
 			if left.UpdatedAt != nil || right.UpdatedAt != nil {
 				if left.UpdatedAt == nil {
@@ -567,7 +551,6 @@ func ListPrompts(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid sort", http.StatusBadRequest)
 		return
 	}
-	locale := r.URL.Query().Get("locale")
 	keyword := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("keyword")))
 	states, err := loadPromptStates(userID)
 	if err != nil {
@@ -586,7 +569,7 @@ func ListPrompts(w http.ResponseWriter, r *http.Request) {
 	}
 	allItems := make([]promptItemResponse, 0, len(presetPrompts)+len(customPrompts))
 	for _, preset := range presetPrompts {
-		allItems = append(allItems, localizedPresetItem(preset, locale, states[preset.ID]))
+		allItems = append(allItems, localizedPresetItem(preset, r.URL.Query().Get("locale"), states[preset.ID]))
 	}
 	for _, prompt := range customPrompts {
 		allItems = append(allItems, customPromptItem(prompt, states[prompt.ID]))
@@ -607,21 +590,16 @@ func ListPrompts(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		keywordItems = append(keywordItems, item)
-		if category == "" || item.Category == category {
-			facets.Scopes["all"]++
-			if item.UsageCount > 0 {
-				facets.Scopes["recent"]++
-			}
-			if item.IsFavorite {
-				facets.Scopes["favorite"]++
-			}
-			if item.Source == "custom" {
-				facets.Scopes["custom"]++
-			}
+		facets.Scopes["all"]++
+		facets.Categories[item.Category]++
+		if item.UsageCount > 0 {
+			facets.Scopes["recent"]++
 		}
-		if promptMatchesScope(item, scope) {
-			facets.Categories[item.Category]++
-			facets.CategoryTotal++
+		if item.IsFavorite {
+			facets.Scopes["favorite"]++
+		}
+		if item.Source == "custom" {
+			facets.Scopes["custom"]++
 		}
 	}
 	filtered := make([]promptItemResponse, 0, len(keywordItems))
@@ -633,7 +611,7 @@ func ListPrompts(w http.ResponseWriter, r *http.Request) {
 			filtered = append(filtered, item)
 		}
 	}
-	sortPromptItems(filtered, sortBy, locale)
+	sortPromptItems(filtered, sortBy)
 	total := len(filtered)
 	if start > total {
 		start = total
@@ -689,22 +667,6 @@ func UnfavoritePrompt(w http.ResponseWriter, r *http.Request) {
 	setPromptFavorite(w, r, false)
 }
 
-func promptUsageConflictClause(now time.Time) clause.OnConflict {
-	return clause.OnConflict{
-		Columns: []clause.Column{{Name: "create_user_id"}, {Name: "prompt_id"}},
-		DoUpdates: clause.Assignments(map[string]any{
-			"usage_count": gorm.Expr(
-				"? + ?",
-				clause.Column{Table: orm.PromptUserState{}.TableName(), Name: "usage_count"},
-				1,
-			),
-			"last_used_at": now,
-			"updated_at":   now,
-			"deleted_at":   nil,
-		}),
-	}
-}
-
 func UsePrompt(w http.ResponseWriter, r *http.Request) {
 	promptID := promptNameFromPath(r)
 	userID := corestore.UserID(r)
@@ -728,20 +690,23 @@ func UsePrompt(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	if err := corestore.DB().Clauses(promptUsageConflictClause(now)).Create(&state).Error; err != nil {
-		log.Logger.Error().Err(err).Str("prompt_id", promptID).Msg("record prompt usage failed")
+	if err := corestore.DB().Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "create_user_id"}, {Name: "prompt_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"usage_count":  gorm.Expr("usage_count + ?", 1),
+			"last_used_at": now,
+			"updated_at":   now,
+			"deleted_at":   nil,
+		}),
+	}).Create(&state).Error; err != nil {
 		common.ReplyErr(w, "record prompt usage failed", http.StatusInternalServerError)
 		return
 	}
-	var savedState orm.PromptUserState
-	if err := corestore.DB().Where("create_user_id = ? AND prompt_id = ?", userID, promptID).First(&savedState).Error; err != nil {
-		common.ReplyErr(w, "query prompt usage failed", http.StatusInternalServerError)
-		return
-	}
+	_ = corestore.DB().Where("create_user_id = ? AND prompt_id = ?", userID, promptID).First(&state).Error
 	writePromptJSON(w, http.StatusOK, promptStateResponse{
 		ID:         promptID,
-		IsFavorite: savedState.IsFavorite,
-		UsageCount: savedState.UsageCount,
-		LastUsedAt: savedState.LastUsedAt,
+		IsFavorite: state.IsFavorite,
+		UsageCount: state.UsageCount,
+		LastUsedAt: state.LastUsedAt,
 	})
 }

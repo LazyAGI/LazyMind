@@ -19,7 +19,6 @@ import (
 
 const (
 	targetSearchCacheTTL          = 10 * time.Minute
-	targetSearchCacheFeishuTTL    = 24 * time.Hour
 	targetSearchCacheLocalFSTTL   = 30 * time.Minute
 	targetSearchCacheExpireTTL    = 24 * time.Hour
 	targetSearchCacheBuildTimeout = 2 * time.Hour
@@ -217,9 +216,6 @@ func (c *targetSearchCache) buildIfUnlocked(ctx context.Context, conn connector.
 func (c *targetSearchCache) staleTTL(req TargetTreeSearchRequest) time.Duration {
 	if isLocalFSTargetSearch(req) {
 		return targetSearchCacheLocalFSTTL
-	}
-	if strings.EqualFold(strings.TrimSpace(string(req.ConnectorType)), "feishu") {
-		return targetSearchCacheFeishuTTL
 	}
 	return c.ttl
 }

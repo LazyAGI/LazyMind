@@ -56,7 +56,6 @@ type processComposeShutdown struct {
 
 func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, paths RuntimePaths, cfg RuntimeConfig, tokenPath string, apiPort int) error {
 	commandEnv := runtimeCommandEnv(paths, cfg)
-	plan := buildRuntimeProcessPlan(cfg)
 	windowsDesktopShell := runtime.GOOS == "windows" && cfg.Profile == "desktop"
 	commandPrefix := quoteShellArg(m.execPath) + " "
 	if windowsDesktopShell {
@@ -147,12 +146,6 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 			},
 		},
 	}
-	if !plan.includes(scanControlPlaneProcessName) {
-		delete(pcCfg.Processes, scanControlPlaneProcessName)
-	}
-	if !plan.includes(fileWatcherProcessName) {
-		delete(pcCfg.Processes, fileWatcherProcessName)
-	}
 	if windowsDesktopShell {
 		// process-compose normally starts every command through cmd.exe. A GUI
 		// application has no inherited console, so those shells each allocate a
@@ -173,7 +166,7 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 			Namespace:   "host",
 		}
 	}
-	for _, svc := range plan.AlgorithmServices {
+	for _, svc := range algorithmProcessSpecs(cfg.Algorithm) {
 		run := commandWithEnv(commandEnv, commandPrefix+"internal algorithm-run --service "+svc.Name)
 		down := commandWithEnv(commandEnv, commandPrefix+"internal algorithm-down --service "+svc.Name)
 		pcCfg.Processes[svc.Name] = processComposeProcess{
@@ -188,7 +181,7 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 		}
 	}
 	for name, process := range pcCfg.Processes {
-		process.Environment = runtimeProcessEnvironment(commandEnv, cfg, plan, name)
+		process.Environment = append([]string(nil), commandEnv...)
 		pcCfg.Processes[name] = process
 	}
 	_ = tokenPath
@@ -239,56 +232,6 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 		routerPortPoolEndEnvVar+"="+strconv.Itoa(routerPoolEnd),
 		routerPortsPerInstanceEnvVar+"="+strconv.Itoa(defaultRouterPortsPerInstance),
 	)
-	return env
-}
-
-func runtimeProcessEnvironment(base []string, cfg RuntimeConfig, plan runtimeProcessPlan, processName string) []string {
-	env := append([]string(nil), base...)
-	if cfg.MaintenanceMode != installerWarmupMaintenanceMode {
-		return env
-	}
-	overrides := []string{}
-	if processName == authServiceProcessName || plan.isAlgorithmProcess(processName) {
-		overrides = append(overrides,
-			"HF_HUB_OFFLINE=1",
-			"TRANSFORMERS_OFFLINE=1",
-			"PIP_NO_INDEX=1",
-			"PYTHONDONTWRITEBYTECODE=0",
-		)
-	}
-	switch processName {
-	case authServiceProcessName:
-		overrides = append(overrides, "LAZYMIND_CLOUD_AUTH_HEALTH_CHECK_ENABLED=false")
-	case coreProcessName:
-		overrides = append(overrides, "LAZYMIND_BACKGROUND_JOBS_ENABLED=false")
-	case chatProcessName:
-		overrides = append(overrides,
-			"LAZYMIND_BACKGROUND_JOBS_ENABLED=false",
-			"LAZYMIND_ROUTER_CHILD_PROCESSES_ENABLED=false",
-		)
-	}
-	return withEnvOverrides(env, overrides...)
-}
-
-func withEnvOverrides(env []string, overrides ...string) []string {
-	for _, override := range overrides {
-		key, _, ok := strings.Cut(override, "=")
-		if !ok {
-			continue
-		}
-		prefix := key + "="
-		replaced := false
-		for i := range env {
-			if strings.HasPrefix(env[i], prefix) {
-				env[i] = override
-				replaced = true
-				break
-			}
-		}
-		if !replaced {
-			env = append(env, override)
-		}
-	}
 	return env
 }
 

@@ -16,9 +16,9 @@ import (
 
 // RecursiveWatcher defines the recursive file watching interface.
 type RecursiveWatcher interface {
-	Start(ctx context.Context, sourceID, bindingID, tenantID, root string) error
-	Stop(sourceID, bindingID string) error
-	Health(sourceID, bindingID string) WatcherHealth
+	Start(ctx context.Context, sourceID, tenantID, root string) error
+	Stop(sourceID string) error
+	Health(sourceID string) WatcherHealth
 }
 
 // EventReporter reports file events.
@@ -67,12 +67,11 @@ func NewRecursiveWatcher(agentID string, cfg config.WatchConfig, reporter EventR
 	}
 }
 
-func (rw *recursiveWatcher) Start(ctx context.Context, sourceID, bindingID, tenantID, root string) error {
+func (rw *recursiveWatcher) Start(ctx context.Context, sourceID, tenantID, root string) error {
 	rw.mu.Lock()
 	defer rw.mu.Unlock()
-	key := watcherKey(sourceID, bindingID)
 
-	if _, exists := rw.entries[key]; exists {
+	if _, exists := rw.entries[sourceID]; exists {
 		return nil // Already watching.
 	}
 
@@ -89,15 +88,15 @@ func (rw *recursiveWatcher) Start(ctx context.Context, sourceID, bindingID, tena
 
 	watchCtx, cancel := context.WithCancel(ctx)
 	entry := &watcherEntry{cancel: cancel, watcher: nil, tenantID: tenantID}
-	rw.entries[key] = entry
+	rw.entries[sourceID] = entry
 
-	go rw.runWithRestart(watchCtx, key, sourceID, bindingID, tenantID, root)
-	rw.log.Info("watcher started", zap.String("source_id", sourceID), zap.String("binding_id", bindingID), zap.String("root", root))
+	go rw.runWithRestart(watchCtx, sourceID, tenantID, root)
+	rw.log.Info("watcher started", zap.String("source_id", sourceID), zap.String("root", root))
 	return nil
 }
 
 // runWithRestart rebuilds the watcher after unexpected loop exits using exponential backoff.
-func (rw *recursiveWatcher) runWithRestart(ctx context.Context, key, sourceID, bindingID, tenantID, root string) {
+func (rw *recursiveWatcher) runWithRestart(ctx context.Context, sourceID, tenantID, root string) {
 	const maxBackoff = 60 * time.Second
 	backoff := time.Second
 
@@ -108,17 +107,17 @@ func (rw *recursiveWatcher) runWithRestart(ctx context.Context, key, sourceID, b
 
 		fw, err := fsnotify.NewWatcher()
 		if err != nil {
-			rw.markUnhealthy(key, err.Error())
+			rw.markUnhealthy(sourceID, err.Error())
 			rw.log.Error("watcher rebuild failed", zap.String("source_id", sourceID), zap.Error(err))
 		} else {
 			if err := addRecursive(fw, root); err != nil {
-				rw.markUnhealthy(key, err.Error())
+				rw.markUnhealthy(sourceID, err.Error())
 				rw.log.Error("watcher addRecursive failed", zap.String("source_id", sourceID), zap.Error(err))
 				_ = fw.Close()
 			} else {
 				// Update the watcher reference in the entry.
 				rw.mu.Lock()
-				if e, ok := rw.entries[key]; ok {
+				if e, ok := rw.entries[sourceID]; ok {
 					if e.watcher != nil && e.watcher != fw {
 						_ = e.watcher.Close()
 					}
@@ -129,7 +128,7 @@ func (rw *recursiveWatcher) runWithRestart(ctx context.Context, key, sourceID, b
 				rw.mu.Unlock()
 
 				rw.log.Info("watcher loop running", zap.String("source_id", sourceID))
-				rw.loop(ctx, key, sourceID, bindingID, tenantID, fw)
+				rw.loop(ctx, sourceID, tenantID, fw)
 
 				// Do not rebuild when the loop exits normally due to ctx cancellation.
 				if ctx.Err() != nil {
@@ -141,7 +140,7 @@ func (rw *recursiveWatcher) runWithRestart(ctx context.Context, key, sourceID, b
 					zap.String("source_id", sourceID),
 					zap.Duration("backoff", backoff),
 				)
-				rw.markUnhealthy(key, "watcher loop exited unexpectedly")
+				rw.markUnhealthy(sourceID, "watcher loop exited unexpectedly")
 				_ = fw.Close()
 				backoff = min(backoff*2, maxBackoff)
 			}
@@ -162,12 +161,11 @@ func min(a, b time.Duration) time.Duration {
 	return b
 }
 
-func (rw *recursiveWatcher) Stop(sourceID, bindingID string) error {
+func (rw *recursiveWatcher) Stop(sourceID string) error {
 	rw.mu.Lock()
 	defer rw.mu.Unlock()
-	key := watcherKey(sourceID, bindingID)
 
-	entry, ok := rw.entries[key]
+	entry, ok := rw.entries[sourceID]
 	if !ok {
 		return nil
 	}
@@ -177,16 +175,16 @@ func (rw *recursiveWatcher) Stop(sourceID, bindingID string) error {
 	if entry.watcher != nil {
 		_ = entry.watcher.Close()
 	}
-	delete(rw.entries, key)
-	rw.log.Info("watcher stopped", zap.String("source_id", sourceID), zap.String("binding_id", bindingID))
+	delete(rw.entries, sourceID)
+	rw.log.Info("watcher stopped", zap.String("source_id", sourceID))
 	return nil
 }
 
-func (rw *recursiveWatcher) Health(sourceID, bindingID string) WatcherHealth {
+func (rw *recursiveWatcher) Health(sourceID string) WatcherHealth {
 	rw.mu.Lock()
 	defer rw.mu.Unlock()
 
-	entry, ok := rw.entries[watcherKey(sourceID, bindingID)]
+	entry, ok := rw.entries[sourceID]
 	if !ok {
 		return WatcherHealth{}
 	}
@@ -199,11 +197,11 @@ func (rw *recursiveWatcher) Health(sourceID, bindingID string) WatcherHealth {
 }
 
 // loop is the per-Source watcher main loop with built-in debounce.
-func (rw *recursiveWatcher) loop(ctx context.Context, key, sourceID, bindingID, tenantID string, fw *fsnotify.Watcher) {
+func (rw *recursiveWatcher) loop(ctx context.Context, sourceID, tenantID string, fw *fsnotify.Watcher) {
 	defer func() {
 		rw.mu.Lock()
 		defer rw.mu.Unlock()
-		if e, ok := rw.entries[key]; ok {
+		if e, ok := rw.entries[sourceID]; ok {
 			e.running = false
 			if ctx.Err() != nil {
 				e.lastError = ""
@@ -225,7 +223,6 @@ func (rw *recursiveWatcher) loop(ctx context.Context, key, sourceID, bindingID, 
 		occurredAt := fileEventOccurredAt(path)
 		ev := internal.FileEvent{
 			SourceID:   sourceID,
-			BindingID:  bindingID,
 			TenantID:   tenantID,
 			EventType:  et,
 			Path:       publicPath,
@@ -277,27 +274,20 @@ func (rw *recursiveWatcher) loop(ctx context.Context, key, sourceID, bindingID, 
 			return
 		case ev, ok := <-fw.Events:
 			if !ok {
-				rw.markUnhealthy(key, "watcher events channel closed")
+				rw.markUnhealthy(sourceID, "watcher events channel closed")
 				return
 			}
-			rw.markEvent(key)
+			rw.markEvent(sourceID)
 			rw.handleFsEvent(ev, fw, schedule)
 		case err, ok := <-fw.Errors:
 			if !ok {
-				rw.markUnhealthy(key, "watcher error channel closed")
+				rw.markUnhealthy(sourceID, "watcher error channel closed")
 				return
 			}
-			rw.markUnhealthy(key, err.Error())
+			rw.markUnhealthy(sourceID, err.Error())
 			rw.log.Error("watcher error", zap.String("source_id", sourceID), zap.Error(err))
 		}
 	}
-}
-
-func watcherKey(sourceID, bindingID string) string {
-	if bindingID == "" {
-		return sourceID
-	}
-	return sourceID + "\x00" + bindingID
 }
 
 func (rw *recursiveWatcher) markEvent(sourceID string) {

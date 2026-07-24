@@ -212,27 +212,6 @@ def test_build_driver_prompt_unknown_plugin_returns_default():
     assert _DEFAULT_DRIVER_PROMPT in prompt
 
 
-def test_driver_force_summarize_context_keeps_complete_evaluation_context():
-    from lazymind.chat.plugin.driver_agent import _build_driver_plan
-
-    plan = _build_driver_plan(
-        plugin_id='test-plugin',
-        step_id='step_a',
-        step_result='result body',
-        acceptance='must save the artifact',
-        plugin_artifacts_summary='artifact summary',
-        user_files=['/tmp/source.png'],
-        tools=[],
-    )
-
-    assert plan.force_summarize_context == plan.prompt.current_input
-    assert 'test-plugin' in plan.force_summarize_context
-    assert 'step_a' in plan.force_summarize_context
-    assert 'result body' in plan.force_summarize_context
-    assert 'artifact summary' in plan.force_summarize_context
-    assert 'source.png' in plan.force_summarize_context
-
-
 # ---------------------------------------------------------------------------
 # acceptance_criteria injected into prompt
 # ---------------------------------------------------------------------------

@@ -29,7 +29,6 @@ const (
 	ScopeTypePartial    ScopeType = "partial"
 	ScopeTypeDelta      ScopeType = "delta"
 	ScopeTypeWatchEvent ScopeType = "watch_event"
-	ScopeTypeCleanup    ScopeType = "cleanup"
 
 	ExportFormatOriginal ExportFormat = "original"
 	ExportFormatMarkdown ExportFormat = "markdown"
@@ -122,7 +121,7 @@ func (s ConfigSpec) Validate(req ValidateTargetRequest) error {
 	}
 	for _, key := range s.RequiredProviderOptions {
 		if strings.TrimSpace(req.ProviderOptions.String(key)) == "" {
-			return NewError(ErrorCodeInvalidArgument, fmt.Sprintf("provider option %s is required", key))
+			return NewError(ErrorCodeInvalidArgument, "provider option "+key+" is required")
 		}
 	}
 	return nil

@@ -123,17 +123,6 @@ func (w *DefaultParseWorker) runClaimed(ctx context.Context, task store.ParseTas
 		if response.Status == coreclient.ResultStatusNotFound {
 			return w.handleFailureWithPhase(ctx, task, fmt.Errorf("CORE_TASK_NOT_FOUND"), "parse")
 		}
-		if response.Status == coreclient.ResultStatusFailed || response.Status == coreclient.ResultStatusCanceled {
-			response, err = w.core.ResumeParseTask(ctx, coreclient.ResumeParseTaskRequest{
-				DatasetID:  exec.source.DatasetID,
-				CoreTaskID: task.CoreTaskID,
-				UserID:     exec.source.CreatedBy,
-			})
-			if err != nil {
-				return w.handleFailureWithPhase(ctx, task, err, "parse")
-			}
-			response.CoreDocumentID = firstNonEmpty(response.CoreDocumentID, task.CoreDocumentID)
-		}
 		return w.finalize(ctx, task, response)
 	}
 	if task.TaskAction == taskpkg.TaskActionDelete {
@@ -210,8 +199,7 @@ func (w *DefaultParseWorker) loadExecutionContext(ctx context.Context, task stor
 }
 
 func (w *DefaultParseWorker) validateTaskFreshness(exec executionContext) error {
-	cleanupDelete := exec.binding.Status == "DELETING" && exec.task.TaskAction == taskpkg.TaskActionDelete
-	if exec.binding.Status != "ACTIVE" && !cleanupDelete {
+	if exec.binding.Status != "ACTIVE" {
 		return fmt.Errorf("binding is not active")
 	}
 	if exec.binding.BindingGeneration != exec.task.BindingGeneration {

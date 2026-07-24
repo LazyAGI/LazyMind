@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from concurrent.futures import as_completed
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from lazymind.review.skill_review.reports import finish_stage_report, stage_erro
 from lazymind.review.skill_review.prompt import (
     cluster_signature_prompt,
     guidelines_prompt,
+    pending_skill_draft_prompt,
     refined_trajectory_prompt,
     skill_extraction_gate_prompt,
 )
@@ -40,17 +42,30 @@ _SKILL_EXTRACTION_GATE_SCHEMA = {
     'required': ['should_extract', 'reason'],
 }
 
+_PENDING_SKILL_DRAFT_SCHEMA = {
+    'title': 'pending_skill_draft_response',
+    'type': 'object',
+    'properties': {
+        'cluster_signature': ClusterSignature.model_json_schema(),
+        'refined_trajectory': RefinedTrajectory.model_json_schema(),
+        'guidelines': GuidelineSet.model_json_schema(),
+    },
+    'required': ['cluster_signature', 'refined_trajectory', 'guidelines'],
+}
+
 
 def build_skill_drafts(
     trajectories: list[Trajectory],
     llm: AutoModel,
     *,
+    pending_records: list[dict] | None = None,
     max_workers: int = DEFAULT_STAGE_WORKERS,
     artifact_dir: Path | None = None,
 ) -> tuple[list[SkillDraft], dict]:
-    """Build drafts from qualified trajectories."""
+    """Build drafts from trajectories and pending skill-review records."""
     started_at = start_stage()
-    jobs = _draft_jobs(trajectories, llm)
+    pending_records = pending_records or []
+    jobs = _draft_jobs(trajectories, pending_records, llm)
     results: list[SkillDraft | None] = [None] * len(jobs)
     errors: list[dict] = []
 
@@ -75,10 +90,9 @@ def build_skill_drafts(
         write_json_file(artifact_dir / STAGE_FILES[STAGE_DRAFT], drafts)
 
     metadata = _draft_report_metadata(jobs, results, errors)
-    input_count = metadata['trajectory']['input_count']
     LOG.info(
-        f'[SkillReview] built {len(drafts)} skill drafts from {input_count} trajectories; '
-        f'errors={len(errors)}'
+        f"[SkillReview] built {len(drafts)} skill drafts from {metadata['trajectory']['input_count']} trajectories "
+        f"and {metadata['pending_skill']['input_count']} pending skill reviews; errors={len(errors)}"
     )
     report = finish_stage_report(
         STAGE_DRAFT,
@@ -94,9 +108,10 @@ def build_skill_drafts(
 
 def _draft_jobs(
     trajectories: list[Trajectory],
+    pending_records: list[dict],
     llm: AutoModel,
 ) -> list[dict]:
-    return [
+    jobs = [
         {
             'kind': 'trajectory',
             'item_id': trajectory.session_id,
@@ -104,6 +119,15 @@ def _draft_jobs(
         }
         for trajectory in trajectories
     ]
+    jobs.extend(
+        {
+            'kind': 'pending_skill',
+            'item_id': str(record.get('id') or index),
+            'build': lambda record=record: _build_pending_skill_draft(record, llm),
+        }
+        for index, record in enumerate(pending_records)
+    )
+    return jobs
 
 
 def _draft_report_metadata(
@@ -113,6 +137,7 @@ def _draft_report_metadata(
 ) -> dict:
     metadata = {
         'trajectory': {'input_count': 0, 'output_count': 0, 'error_count': 0},
+        'pending_skill': {'input_count': 0, 'output_count': 0, 'error_count': 0},
     }
     for job, result in zip(jobs, results):
         kind = job['kind']
@@ -147,6 +172,35 @@ def _build_trajectory_draft(trajectory: Trajectory, llm: AutoModel) -> SkillDraf
         )
     except Exception as exc:
         raise exc
+
+
+def _build_pending_skill_draft(record: dict, llm: AutoModel) -> SkillDraft:
+    record_id = str(record.get('id') or '').strip()
+    skill_name = str(record.get('skill_name') or '').strip()
+    skill_content = _record_text(record.get('skill_content')).strip()
+    if not record_id:
+        raise ValueError('pending skill review record must contain id')
+    if not skill_name:
+        raise ValueError(f'pending skill review record {record_id} must contain skill_name')
+    if not skill_content:
+        raise ValueError(f'pending skill review record {record_id} must contain skill_content')
+
+    payload = call_json(
+        llm,
+        pending_skill_draft_prompt(skill_name, skill_content),
+        _PENDING_SKILL_DRAFT_SCHEMA,
+    )
+    cluster_signature = ClusterSignature.model_validate(payload.get('cluster_signature'))
+    refined_trajectory = _normalize_refined_trajectory(payload.get('refined_trajectory'))
+    guidelines = GuidelineSet.model_validate(payload.get('guidelines') or {})
+    return SkillDraft(
+        session_id=record_id,
+        cluster_signature=cluster_signature,
+        refined_trajectory=refined_trajectory,
+        guidelines=guidelines,
+        source_trajectory=record_id,
+        source_skills={skill_name: skill_content},
+    )
 
 
 def _build_skill_extraction_gate(
@@ -222,3 +276,11 @@ def _build_guidelines(
         GuidelineSet,
     )
     return GuidelineSet.model_validate(parsed)
+
+
+def _record_text(value) -> str:
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ''
+    return json.dumps(value, ensure_ascii=False, indent=2)

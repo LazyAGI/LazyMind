@@ -2,19 +2,14 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from lazymind.chat.engine.attachment_reader import (
     is_chat_attachment_file,
     is_chat_image_file,
-    is_chat_text_file,
     parse_attachment_content,
 )
-from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_error, tool_success
-from lazymind.chat.engine.tools.attachment_edit import (
-    AttachmentEditDraft,
-    effective_attachment_path,
-)
+from lazymind.chat.engine.tools.infra import tool_error, tool_success
 
 from .context import get_context, require_context, LARGE_ARTIFACT_THRESHOLD
 
@@ -54,7 +49,8 @@ def _build_artifact_value(value: Any, content_type: str):
         text = str(value)
         if len(text.encode('utf-8', errors='replace')) > LARGE_ARTIFACT_THRESHOLD:
             abs_path = ctx.write_large_content(text, hint='artifact_text')
-            return {'type': 'text', 'path': abs_path, 'size': os.path.getsize(abs_path)}, 'file'
+            rel = os.path.relpath(abs_path, ctx.workspace_path)
+            return {'type': 'text', 'path': rel, 'size': os.path.getsize(abs_path)}, 'file'
         return {'text': text}, 'text'
     if content_type == 'json':
         if isinstance(value, str):
@@ -65,7 +61,8 @@ def _build_artifact_value(value: Any, content_type: str):
         serialized = json.dumps(value, ensure_ascii=False, default=str)
         if len(serialized.encode('utf-8', errors='replace')) > LARGE_ARTIFACT_THRESHOLD:
             abs_path = ctx.write_large_content(serialized, hint='artifact_json')
-            return {'type': 'json', 'path': abs_path, 'size': os.path.getsize(abs_path)}, 'file'
+            rel = os.path.relpath(abs_path, ctx.workspace_path)
+            return {'type': 'json', 'path': rel, 'size': os.path.getsize(abs_path)}, 'file'
         return {'data': value}, 'json'
     if content_type == 'image':
         src = str(value).strip()
@@ -85,59 +82,31 @@ def _build_artifact_value(value: Any, content_type: str):
             return {'path': dst_abs}, 'image'
         return {'path': src}, 'image'
     if content_type == 'file':
-        source = str(value).strip()
-        if not source:
-            raise ValueError('File artifact path must not be empty.')
-        if os.path.isabs(source):
-            source = os.path.realpath(source)
-            if not os.path.isfile(source):
-                raise FileNotFoundError(f'File artifact does not exist: {source}')
-            rel = ctx.copy_into_workspace(source)
-            full = os.path.realpath(os.path.join(ctx.workspace_path, rel))
-        else:
-            full = os.path.realpath(os.path.join(ctx.workspace_path, source))
-            workspace = os.path.realpath(ctx.workspace_path)
-            if os.path.commonpath([workspace, full]) != workspace:
-                raise ValueError('Relative file artifact path must stay inside the task workspace.')
-            if not os.path.isfile(full):
-                raise FileNotFoundError(f'File artifact does not exist in task workspace: {source}')
-        size = os.path.getsize(full)
-        return {'filename': os.path.basename(full), 'path': full, 'size': size}, 'file'
+        abs_path = str(value)
+        rel = ctx.copy_into_workspace(abs_path) if os.path.isabs(abs_path) else abs_path
+        size = 0
+        full = os.path.join(ctx.workspace_path, rel)
+        if os.path.exists(full):
+            size = os.path.getsize(full)
+        return {'filename': os.path.basename(rel), 'path': full, 'size': size}, 'file'
     if content_type == 'file_list':
         items = value if isinstance(value, list) else [value]
         paths: List[str] = []
         for item in items:
-            p = str(item).strip()
-            if not p:
-                continue
-            if os.path.isabs(p):
-                source = os.path.realpath(p)
-                if not os.path.isfile(source):
-                    raise FileNotFoundError(f'File-list artifact does not exist: {source}')
-                rel = ctx.copy_into_workspace(source)
-                paths.append(os.path.realpath(os.path.join(ctx.workspace_path, rel)))
-                continue
-            resolved = os.path.realpath(os.path.join(ctx.workspace_path, p))
-            workspace = os.path.realpath(ctx.workspace_path)
-            if os.path.commonpath([workspace, resolved]) != workspace:
-                raise ValueError('Relative file-list artifact path must stay inside the task workspace.')
-            if not os.path.isfile(resolved):
-                raise FileNotFoundError(f'File-list artifact does not exist in task workspace: {p}')
-            paths.append(resolved)
-        if not paths:
-            raise ValueError('File-list artifact must contain at least one existing file.')
+            p = str(item)
+            paths.append(ctx.copy_into_workspace(p) if os.path.isabs(p) else p)
         return {'paths': paths}, 'file_list'
     return {'text': str(value)}, 'text'
 
 
-def _save_artifact(key: str, value: Any, content_type: str = 'text',
-                   source_tool: Optional[str] = None,
-                   sort_order: Optional[int] = None,
-                   caption: Optional[str] = None) -> Dict[str, Any]:
-    """Save one output artifact produced by this SubAgent.
+def save_artifact(key: str, value: Any, content_type: str = 'text',
+                  source_tool: Optional[str] = None,
+                  sort_order: Optional[int] = None,
+                  caption: Optional[str] = None) -> Dict[str, Any]:
+    """Save an output artifact produced by this SubAgent.
 
     File-type values must be local absolute paths; the framework copies them into the
-    workspace and stores a normalized absolute path. The same key may be saved multiple times
+    workspace and converts to relative paths. The same key may be saved multiple times
     (each call appends a row with an incremented seq), which is how variable-count outputs
     such as per-image generation are streamed to the frontend.
 
@@ -153,7 +122,7 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
       Use this whenever the user's instruction targets a specific item, for example:
         - "重新收集第二张图" → sort_order=2
         - "替换第三张参考图" → sort_order=3
-        - "第一张和第三张都重新生成" → save two entries with sort_order=1 and sort_order=3
+        - "第一张和第三张都重新生成" → call save_artifact twice: sort_order=1, sort_order=3
       Do NOT pass list_index directly — always use sort_order (1-based visual position).
 
     For single-cardinality slots the sort_order parameter is ignored (single slots
@@ -185,7 +154,7 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     ctx = require_context()
     if ctx.output_slots and key not in ctx.output_slots:
         return tool_error(
-            'save_artifacts',
+            'save_artifact',
             f'Artifact key {key!r} is not declared for this step. '
             f'Allowed keys: {", ".join(ctx.output_slots)}',
         )
@@ -218,43 +187,7 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     msg = f"Artifact '{key}' saved."
     if out_of_range_warning:
         msg += f' WARNING: {out_of_range_warning}'
-    return tool_success('save_artifacts', {'status': 'ok', 'message': msg})
-
-
-def save_artifacts(artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Save one or more output artifacts in one tool call.
-
-    Always pass a list, including when saving a single artifact. Each item accepts
-    key, value, content_type, source_tool, sort_order, and caption. Keeping all
-    writes in one model turn prevents a step with many outputs from exhausting the
-    ReAct tool-turn budget.
-    """
-    if not isinstance(artifacts, list) or not artifacts:
-        return tool_error('save_artifacts', 'artifacts must be a non-empty list.')
-    if len(artifacts) > 50:
-        return tool_error('save_artifacts', 'At most 50 artifacts may be saved at once.')
-
-    results: List[Dict[str, Any]] = []
-    for index, item in enumerate(artifacts):
-        if not isinstance(item, dict):
-            return tool_error('save_artifacts', f'artifacts[{index}] must be an object.')
-        if 'key' not in item or 'value' not in item:
-            return tool_error(
-                'save_artifacts', f'artifacts[{index}] requires key and value.',
-            )
-        results.append(_save_artifact(
-            key=str(item['key']),
-            value=item['value'],
-            content_type=str(item.get('content_type') or 'text'),
-            source_tool=item.get('source_tool'),
-            sort_order=item.get('sort_order'),
-            caption=item.get('caption'),
-        ))
-    return tool_success('save_artifacts', {
-        'status': 'ok',
-        'saved_count': len(results),
-        'results': results,
-    })
+    return tool_success('save_artifact', {'status': 'ok', 'message': msg})
 
 
 def _write_artifact_draft(
@@ -284,7 +217,7 @@ def _write_artifact_draft(
             content = built.get('text', '')
         else:  # json, DB-inline
             content = json.dumps(built.get('data', ''), ensure_ascii=False)
-        ctx.write_draft(key, original_type, content, list_index, pending_commit=False)
+        ctx.write_draft(key, original_type, content, list_index)
     except Exception:
         pass  # draft write failure is non-fatal
 
@@ -367,10 +300,7 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
     except Exception:
         plugin_session_id = ''
 
-    bound_rows = ctx.db.load_bound_slot_artifacts(ctx.task_id, key) if plugin_session_id else []
-    if bound_rows:
-        result = _get_bound_plugin_artifacts(ctx, key, bound_rows, sort_order)
-    elif plugin_session_id and sort_order is not None:
+    if plugin_session_id and sort_order is not None:
         result = _get_plugin_artifact_by_sort_order(ctx, key, plugin_session_id, sort_order)
     elif plugin_session_id and sort_order is None:
         result = _get_plugin_artifact_all(ctx, key, plugin_session_id)
@@ -404,12 +334,11 @@ def _resolve_artifact_text(
 
     Resolution priority:
     1. Draft file (reflects latest patch_artifact edits in this step).
-    2. Exact revision frozen in the current plugin attempt's input binding.
-    3. Plugin session selected revision via load_slot_artifact_by_sort_order —
+    2. Plugin session selected revision via load_slot_artifact_by_sort_order —
        this is the ONLY path that surfaces human-edited artifacts stored in
        plugin_human_artifacts; must be checked before sub_agent_artifacts.
-    4. Local in-memory cache (same step, sub_agent_artifacts).
-    5. DB sub_agent_artifacts (previous steps).
+    3. Local in-memory cache (same step, sub_agent_artifacts).
+    4. DB sub_agent_artifacts (previous steps).
 
     Returns (None, 'text') when no content is found.
     """
@@ -432,19 +361,6 @@ def _resolve_artifact_text(
 
     if plugin_session_id:
         so = sort_order if sort_order is not None else 1
-        bound_rows = ctx.db.load_bound_slot_artifacts(ctx.task_id, key)
-        if bound_rows:
-            row = bound_rows[so - 1] if 1 <= so <= len(bound_rows) else None
-            if row is None:
-                return None, 'text'
-            value, content_type = ctx.db.resolve_slot_revision_value(row)
-            if value is None:
-                return None, 'text'
-            original_type = 'json' if content_type == 'json' else 'text'
-            if content_type == 'file':
-                original_type = value.get('type', 'text')
-            return _extract_text_from_value(ctx, value, original_type), original_type
-
         row = ctx.db.load_slot_artifact_by_sort_order(plugin_session_id, key, so)
         if row is not None:
             value, content_type = ctx.db.resolve_slot_revision_value(row)
@@ -581,44 +497,6 @@ def _get_plugin_artifact_by_sort_order(
     })
 
 
-def _get_bound_plugin_artifacts(
-    ctx: Any,
-    key: str,
-    rows: list[Dict[str, Any]],
-    sort_order: Optional[int],
-) -> Dict[str, Any]:
-    """Resolve artifacts from the immutable input bindings of this attempt."""
-    selected_rows = rows
-    if sort_order is not None:
-        if sort_order < 1 or sort_order > len(rows):
-            return tool_success('get_artifact', {
-                'status': 'empty',
-                'message': f"No bound artifact found for key '{key}' at sort_order={sort_order}.",
-            })
-        selected_rows = [rows[sort_order - 1]]
-
-    artifacts = []
-    for position, row in enumerate(selected_rows, start=1):
-        value, content_type = ctx.db.resolve_slot_revision_value(row)
-        if value is None:
-            continue
-        artifact_sort_order = sort_order if sort_order is not None else position
-        artifacts.append({
-            'slot': key,
-            'content_type': content_type,
-            'value': value,
-            'sort_order': artifact_sort_order,
-            'revision': row.get('revision'),
-            '_from_attempt_binding': True,
-        })
-    if not artifacts:
-        return tool_success('get_artifact', {
-            'status': 'empty',
-            'message': f"Bound artifact key '{key}' could not be resolved.",
-        })
-    return tool_success('get_artifact', {'status': 'ok', 'key': key, 'artifacts': artifacts})
-
-
 def _get_plugin_artifact_all(ctx: Any, key: str, session_id: str) -> Dict[str, Any]:
     """Return all selected revisions for a plugin slot key (sort_order=None)."""
     resolved_rows = ctx.db.load_selected_slot_artifacts_resolved_with_order(session_id)
@@ -648,12 +526,12 @@ def patch_artifact(
 ) -> Dict[str, Any]:
     """Apply a local patch to a previously saved artifact without committing a new revision.
 
-    Edits are written to a draft file in the workspace. Call save_artifacts when you are
+    Edits are written to a draft file in the workspace. Call save_artifact when you are
     done patching to commit the changes and produce a new revision. If you do not call
-    save_artifacts, the framework will auto-flush all pending drafts when the step ends.
+    save_artifact, the framework will auto-flush all pending drafts when the step ends.
 
     Use patch_artifact for targeted edits (fix a paragraph, update a field). Use
-    save_artifacts directly when rewriting the whole artifact from scratch.
+    save_artifact directly when rewriting the whole artifact from scratch.
 
     To discard all uncommitted edits and revert to the last saved version, call
     discard_draft(key).
@@ -691,10 +569,10 @@ def patch_artifact(
                 'status': 'error',
                 'message': (
                     f"No committed content found for artifact '{key}'. "
-                    'Call save_artifacts first to create the artifact before patching.'
+                    'Call save_artifact first to create the artifact before patching.'
                 ),
             })
-        ctx.write_draft(key, original_type, text, list_index, pending_commit=False)
+        ctx.write_draft(key, original_type, text, list_index)
         draft_result = (text, original_type)
 
     content, original_type = draft_result
@@ -720,7 +598,7 @@ def patch_artifact(
         'status': 'ok',
         'message': (
             f"Draft for '{key}' updated ({lines_changed} line(s) changed). "
-            'Call save_artifacts to commit, or keep patching. '
+            'Call save_artifact to commit, or keep patching. '
             'The framework will auto-commit on step end if you forget.'
         ),
     })
@@ -1092,8 +970,7 @@ def _resolve_attachment(
 def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
     """Extract text from a user-uploaded attachment (on demand only).
 
-    Documents (pdf/doc/docx/pptx): OCR reader. Plain-text files: direct UTF-8 read.
-    Images: vision-model text description.
+    Documents (pdf/doc/docx/pptx): OCR reader. Images: vision-model text description.
     Do NOT call this just because a file is attached. For images used in visual tasks
     (edit, plugin, image_generator), use find_user_attachment for path/url instead.
     Call this when the user needs document text or a textual summary of image content.
@@ -1122,7 +999,7 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
             'status': 'error',
             'message': (
                 f"Unsupported file type '{os.path.splitext(matched)[1].lower() or '(no extension)'}'. "
-                'Supported: images, Office/PDF documents, and common plain-text files.'
+                'Supported: png, jpg, jpeg, pdf, doc, docx, pptx.'
             ),
         })
 
@@ -1130,17 +1007,14 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
         import lazyllm
         cfg: Dict[str, Any] = lazyllm.globals.get('agentic_config') or {}
         priority = int(cfg.get('priority') or 0)
-        read_path = effective_attachment_path(matched) if is_chat_text_file(matched) else matched
-        content = parse_attachment_content(read_path, priority=priority)
+        content = parse_attachment_content(matched, priority=priority)
     except Exception as e:
         return tool_success('read_user_attachment', {
             'status': 'error',
             'message': f"Could not parse '{os.path.basename(matched)}': {e}",
         })
 
-    kind = 'image' if is_chat_image_file(matched) else (
-        'text' if is_chat_text_file(matched) else 'document'
-    )
+    kind = 'image' if is_chat_image_file(matched) else 'document'
 
     return tool_success('read_user_attachment', {
         'status': 'ok',
@@ -1149,132 +1023,6 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
         'kind': kind,
         'content': content,
     })
-
-
-def _publish_attachment_edit(draft: AttachmentEditDraft) -> Dict[str, Any]:
-    """Publish through the owning Agent's artifact channel."""
-    ctx = get_context()
-    if ctx is None:
-        return draft.publish()['result']
-    artifact_key = ctx.output_slots[0] if ctx.output_slots else 'edited_attachment'
-    published = _save_artifact(
-        artifact_key,
-        draft.draft_path,
-        content_type='file',
-        source_tool='string_replace',
-        caption=f'Edited copy of {draft.filename}',
-    )
-    if not published.get('success'):
-        raise RuntimeError(str(published.get('error') or 'Could not publish edited attachment'))
-    return {
-        'artifact_key': artifact_key,
-        'filename': draft.filename,
-        'message': f"Saved edited attachment '{draft.filename}' as SubAgent artifact '{artifact_key}'.",
-    }
-
-
-@handle_tool_errors
-def string_replace(
-    filename: str,
-    old_string: Optional[str] = None,
-    new_string: Optional[str] = None,
-    expected_replacements: int = 1,
-    turn: Optional[int] = None,
-    mode: Literal['literal', 'regex'] = 'literal',
-    regex_flags: str = 'MULTILINE',
-    action: Literal['preview', 'apply', 'undo'] = 'preview',
-    preview_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Preview, apply, or undo a safe text replacement in an uploaded attachment.
-
-    Always call action='preview' first, inspect matches and diff, then call action='apply'
-    with the returned preview_id. Literal mode supports multiline text and treats LF/CRLF
-    as equivalent. Regex mode supports controlled flags and still requires an exact expected
-    match count. Applied edits update one downloadable artifact; action='undo' reverts one step.
-
-    Args:
-        filename: Attachment filename or display name shown in the conversation.
-        old_string: Literal text or regex pattern. Required only for preview.
-        new_string: Replacement text. Regex mode supports Python-style backreferences.
-        expected_replacements: Required match count, 1-100. A mismatch never changes the draft.
-        turn: Optional attachment turn number; omit to search newest attachments first.
-        mode: 'literal' (default) or 'regex'.
-        regex_flags: Comma-separated IGNORECASE, MULTILINE, and/or DOTALL for regex mode.
-        action: 'preview' (default), 'apply', or 'undo'.
-        preview_id: Required for apply; copy it exactly from a successful preview result.
-
-    Returns:
-        Preview diff and match locations, applied artifact metadata, or undo result.
-    """
-    matched, err = _resolve_attachment(filename, turn)
-    if err:
-        raise ValueError(err)
-    if not os.path.isfile(matched):
-        raise FileNotFoundError(
-            f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk."
-        )
-    if not is_chat_text_file(matched):
-        raise ValueError('string_replace supports uploaded plain-text/code/config files only')
-    normalized_action = str(action or 'preview').strip().lower()
-    draft = AttachmentEditDraft.for_current_conversation(matched)
-    if normalized_action == 'preview':
-        if old_string is None or new_string is None:
-            raise ValueError('old_string and new_string are required for preview')
-        preview = draft.create_preview(
-            old_string,
-            new_string,
-            expected_replacements,
-            mode,
-            regex_flags,
-        )
-        return tool_success('string_replace', {
-            'status': 'preview',
-            'action': 'preview',
-            'source_filename': os.path.basename(matched),
-            **preview,
-            'requires_apply': True,
-            'message': (
-                'Preview only; no file was changed. Verify every match and the diff, then call '
-                "string_replace with action='apply' and this preview_id."
-            ),
-        })
-    if normalized_action == 'apply':
-        if not preview_id:
-            raise ValueError('preview_id is required for apply; run preview first')
-        had_previous_edit = os.path.isfile(draft.draft_path)
-        preview, content, revision = draft.apply_preview(preview_id)
-        artifact = _publish_attachment_edit(draft)
-        return tool_success('string_replace', {
-            'status': 'ok',
-            'action': 'apply',
-            'source_filename': os.path.basename(matched),
-            **artifact,
-            'replacements': preview['replacements'],
-            'matches': preview['matches'],
-            'diff': preview['diff'],
-            'mode': preview['mode'],
-            'bytes': len(content),
-            'revision': revision,
-            'undo_available': True,
-            'original_unchanged': True,
-            'continues_previous_edit': had_previous_edit,
-        })
-    if normalized_action == 'undo':
-        content, diff, revision = draft.undo()
-        artifact = _publish_attachment_edit(draft)
-        return tool_success('string_replace', {
-            'status': 'ok',
-            'action': 'undo',
-            'source_filename': os.path.basename(matched),
-            **artifact,
-            'diff': diff,
-            'bytes': len(content),
-            'revision': revision,
-            'undo_available': revision > 0,
-            'original_unchanged': True,
-            'message': 'Reverted the most recent applied edit and updated the download artifact.',
-        })
-    raise ValueError("action must be 'preview', 'apply', or 'undo'")
 
 
 def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
@@ -1337,7 +1085,7 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
     """Return the accessible URL or local path of a plugin artifact.
 
     Analogous to find_user_attachment but for plugin step outputs.
-    Reads session_id and plugin_id from agentic_config (same as save_artifacts / get_artifact).
+    Reads session_id and plugin_id from agentic_config (same as save_artifact / get_artifact).
 
     Args:
         slot (str): The slot id to look up (e.g. 'image_output').

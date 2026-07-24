@@ -368,23 +368,6 @@ class ImageNodeLoader(ModuleBase):
             return True
         return bool(_extract_image_path(node))
 
-    def _extract_layout_metadata(self, node: DocNode) -> dict:
-        metadata = node.metadata or {}
-        bbox = copy.deepcopy(metadata.get('bbox', [0, 0, 0, 0]))
-        page = metadata.get('page', 0)
-        node_type = metadata.get('type', 'image')
-        return {
-            'page': page,
-            'bbox': bbox,
-            'type': node_type,
-            'lines': [{
-                'content': node.text,
-                'bbox': bbox,
-                'type': node_type,
-                'page': page,
-            }],
-        }
-
     def _normalize_image_file(self, image_path: str) -> str:
         return normalize_image_file(image_path=image_path, normalized_root=self._normalized_root)
 
@@ -430,7 +413,6 @@ class ImageNodeLoader(ModuleBase):
                         'file_type': 'image',
                         'is_pure_image': True,
                     }
-                    metadata.update(self._extract_layout_metadata(node))
                     image_nodes.append(ImageDocNode(
                         image_path=normalized_path,
                         metadata=metadata,

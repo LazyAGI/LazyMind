@@ -6,10 +6,10 @@ from lazyllm.tools.tools.search import BingSearch, GoogleSearch
 def test_bing_search_raises_on_error_when_enabled(monkeypatch):
     provider = BingSearch(subscription_key='key')
 
-    def fake_request(*_args, **_kwargs):
+    def fake_get(*_args, **_kwargs):
         raise RuntimeError('bing failed')
 
-    monkeypatch.setattr(provider, '_request', fake_request)
+    monkeypatch.setattr('lazyllm.tools.tools.search.bing_search.httpx.get', fake_get)
 
     with pytest.raises(RuntimeError, match='bing failed'):
         provider('query', raise_on_error=True)
@@ -18,10 +18,10 @@ def test_bing_search_raises_on_error_when_enabled(monkeypatch):
 def test_bing_search_keeps_empty_result_without_raise(monkeypatch):
     provider = BingSearch(subscription_key='key')
 
-    def fake_request(*_args, **_kwargs):
+    def fake_get(*_args, **_kwargs):
         raise RuntimeError('bing failed')
 
-    monkeypatch.setattr(provider, '_request', fake_request)
+    monkeypatch.setattr('lazyllm.tools.tools.search.bing_search.httpx.get', fake_get)
 
     assert provider('query') == []
 

@@ -7,7 +7,7 @@ from .citations import (
     reset_citation_state,
     rewrite_citations,
 )
-from .sensitive_filter import SensitiveFilter, SensitiveMatch
+from .sensitive_filter import SensitiveFilter
 from .static_file_url import (
     basename_from_path,
     local_path_from_static_file_url,
@@ -25,7 +25,6 @@ from .streaming import (
 
 __all__ = [
     'SensitiveFilter',
-    'SensitiveMatch',
     'annotate_citations',
     'basename_from_path',
     'build_stream_citation_scanner',

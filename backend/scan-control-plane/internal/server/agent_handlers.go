@@ -40,7 +40,6 @@ type agentHeartbeatRequest struct {
 
 type agentFileEvent struct {
 	SourceID   string    `json:"source_id"`
-	BindingID  string    `json:"binding_id,omitempty"`
 	TenantID   string    `json:"tenant_id"`
 	EventType  string    `json:"event_type"`
 	Path       string    `json:"path"`
@@ -66,7 +65,6 @@ type agentCommandResponse struct {
 	Type            string `json:"type"`
 	TenantID        string `json:"tenant_id,omitempty"`
 	SourceID        string `json:"source_id,omitempty"`
-	BindingID       string `json:"binding_id,omitempty"`
 	RootPath        string `json:"-"`
 	Mode            string `json:"mode,omitempty"`
 	Reason          string `json:"reason,omitempty"`
@@ -174,7 +172,6 @@ func (h *Handler) queueLocalWatcherStartsForAgent(r *http.Request, agentID, tena
 				"type":                "start_source",
 				"tenant_id":           tenantID,
 				"source_id":           binding.SourceID,
-				"binding_id":          binding.BindingID,
 				agentCommandRootKey(): binding.TargetRef,
 				"skip_initial_scan":   true,
 			},
@@ -322,18 +319,6 @@ func (h *Handler) enqueueAgentEvent(r *http.Request, agentID string, event agent
 	if len(bindings) == 0 {
 		return nil, []JobError{{Code: string(sourceengine.ErrCodeBindingNotFound), Message: "no active local binding for agent event", Details: map[string]any{"source_id": event.SourceID, "agent_id": agentID}}}
 	}
-	if strings.TrimSpace(event.BindingID) != "" {
-		filtered := bindings[:0]
-		for _, binding := range bindings {
-			if binding.BindingID == event.BindingID {
-				filtered = append(filtered, binding)
-			}
-		}
-		bindings = filtered
-		if len(bindings) == 0 {
-			return nil, []JobError{{Code: string(sourceengine.ErrCodeBindingNotFound), Message: "binding is not active for agent event", Details: map[string]any{"source_id": event.SourceID, "binding_id": event.BindingID, "agent_id": agentID}}}
-		}
-	}
 	var jobIDs []string
 	var errors []JobError
 	for _, binding := range bindings {
@@ -401,7 +386,6 @@ func agentCommandToResponse(command store.AgentCommand) agentCommandResponse {
 		Type:            stringValue(payload, "type", command.CommandType),
 		TenantID:        stringValue(payload, "tenant_id", ""),
 		SourceID:        stringValue(payload, "source_id", ""),
-		BindingID:       stringValue(payload, "binding_id", ""),
 		RootPath:        stringValue(payload, agentCommandRootKey(), ""),
 		Mode:            stringValue(payload, "mode", ""),
 		Reason:          stringValue(payload, "reason", ""),

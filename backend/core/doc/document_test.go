@@ -179,112 +179,6 @@ func newDocumentTestDB(t *testing.T) *orm.DB {
 	return db
 }
 
-func TestCreateDocumentStoresExplicitFolderTypeForDottedName(t *testing.T) {
-	db := newDocumentTestDB(t)
-	seedDocumentListDataset(t, db, "dataset-1", "user-1")
-
-	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets/dataset-1/documents?document_id=doc-folder", strings.NewReader(`{"display_name":"init.sql","type":"FOLDER"}`))
-	req.Header.Set("X-User-Id", "user-1")
-	req.Header.Set("X-User-Name", "Alice")
-	req = mux.SetURLVars(req, map[string]string{"dataset": "dataset-1"})
-	rec := httptest.NewRecorder()
-
-	CreateDocument(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var created Doc
-	decodeRecorderJSON(t, rec, &created)
-	if created.Type != "FOLDER" {
-		t.Fatalf("expected response type FOLDER, got %q", created.Type)
-	}
-
-	var stored orm.Document
-	if err := db.Where("id = ?", "doc-folder").Take(&stored).Error; err != nil {
-		t.Fatalf("query created document: %v", err)
-	}
-	if stored.DocumentType != "FOLDER" {
-		t.Fatalf("expected stored type FOLDER, got %q", stored.DocumentType)
-	}
-	loaded, err := loadDocumentByID(context.Background(), "dataset-1", "doc-folder")
-	if err != nil {
-		t.Fatalf("load created document: %v", err)
-	}
-	if loaded.Type != "FOLDER" {
-		t.Fatalf("expected stored type to override dotted-name inference, got %q", loaded.Type)
-	}
-}
-
-func TestUpdateDocumentAcceptsArbitraryStoredType(t *testing.T) {
-	db := newDocumentTestDB(t)
-	seedDocumentListDataset(t, db, "dataset-1", "user-1")
-	seedDocumentListDoc(t, db, "dataset-1", "doc-1", "special.bin", time.Now().UTC(), "user-1", nil)
-
-	req := httptest.NewRequest(http.MethodPatch, "/api/core/datasets/dataset-1/documents/doc-1", strings.NewReader(`{"type":"SPECIAL_INTERNAL_FILE"}`))
-	req.Header.Set("X-User-Id", "user-1")
-	req = mux.SetURLVars(req, map[string]string{"dataset": "dataset-1", "document": "doc-1"})
-	rec := httptest.NewRecorder()
-
-	UpdateDocument(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var stored orm.Document
-	if err := db.Where("id = ?", "doc-1").Take(&stored).Error; err != nil {
-		t.Fatalf("query updated document: %v", err)
-	}
-	if stored.DocumentType != "SPECIAL_INTERNAL_FILE" {
-		t.Fatalf("expected arbitrary stored type, got %q", stored.DocumentType)
-	}
-	var updated Doc
-	decodeRecorderJSON(t, rec, &updated)
-	if updated.Type != "SPECIAL_INTERNAL_FILE" {
-		t.Fatalf("expected arbitrary response type, got %q", updated.Type)
-	}
-}
-
-func TestDocumentTypeResolutionKeepsLegacyFallback(t *testing.T) {
-	tests := []struct {
-		name       string
-		storedType string
-		filename   string
-		want       string
-	}{
-		{name: "stored type wins", storedType: "SPECIAL_INTERNAL_FILE", filename: "item.bin", want: "SPECIAL_INTERNAL_FILE"},
-		{name: "legacy folder", filename: "legacy-folder", want: "FOLDER"},
-		{name: "legacy known file", filename: "notes.md", want: "MARKDOWN"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveDocumentType(tt.storedType, tt.filename); got != tt.want {
-				t.Fatalf("resolveDocumentType(%q, %q) = %q, want %q", tt.storedType, tt.filename, got, tt.want)
-			}
-		})
-	}
-	if got := fileDocumentTypeFromName("README"); got != "DOCUMENT_TYPE_UNSPECIFIED" {
-		t.Fatalf("extensionless uploaded file must not be stored as a folder, got %q", got)
-	}
-}
-
-func TestLoadDocumentFallsBackWhenStoredTypeIsNull(t *testing.T) {
-	db := newDocumentTestDB(t)
-	seedDocumentListDataset(t, db, "dataset-1", "user-1")
-	seedDocumentListDoc(t, db, "dataset-1", "legacy-folder", "legacy-folder", time.Now().UTC(), "user-1", nil)
-	if err := db.Exec("UPDATE documents SET document_type = NULL WHERE id = ?", "legacy-folder").Error; err != nil {
-		t.Fatalf("set legacy document type to NULL: %v", err)
-	}
-
-	loaded, err := loadDocumentByID(context.Background(), "dataset-1", "legacy-folder")
-	if err != nil {
-		t.Fatalf("load legacy document: %v", err)
-	}
-	if loaded.Type != "FOLDER" {
-		t.Fatalf("expected legacy NULL type to use filename fallback, got %q", loaded.Type)
-	}
-}
-
 func TestLoadMergedDocumentsUsesCoreUpdatedAtWhenNewerThanReadonlyBase(t *testing.T) {
 	db := newDocumentTestDB(t)
 	ctx := context.Background()
@@ -611,41 +505,6 @@ func TestListDocumentsByDatasetsSkipsInaccessibleAndMissingDatasets(t *testing.T
 	}
 }
 
-func TestListDocumentsByDatasetsFiltersScanDeniedDataset(t *testing.T) {
-	db := newDocumentTestDB(t)
-	seedDocumentListDataset(t, db, "dataset-local", "user-1")
-	seedDocumentListDataset(t, db, "dataset-manual", "user-1")
-	now := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
-	seedDocumentListDoc(t, db, "dataset-local", "doc-local", "local.txt", now, "user-1", nil)
-	seedDocumentListDoc(t, db, "dataset-manual", "doc-manual", "manual.txt", now.Add(time.Minute), "user-1", nil)
-
-	prevTransport := http.DefaultTransport
-	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/scan/internal/source-access/by-dataset:batch" {
-			t.Errorf("unexpected scan request %s %q", r.Method, r.URL.Path)
-			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
-		}
-		return testJSONResponse(http.StatusOK, `{"items":[{"dataset_id":"dataset-local","source_id":"source-local","exists":true,"allowed":false},{"dataset_id":"dataset-manual","exists":false,"allowed":true}]}`), nil
-	})
-	t.Cleanup(func() { http.DefaultTransport = prevTransport })
-	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
-
-	req := httptest.NewRequest(http.MethodPost, "/api/core/documents:listByDatasets", strings.NewReader(`{"dataset_ids":["dataset-local","dataset-manual"]}`))
-	req.Header.Set("X-User-Id", "user-1")
-	req.Header.Set("Authorization", "Bearer user-token")
-	rec := httptest.NewRecorder()
-	ListDocumentsByDatasets(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var body ListDocumentsResponse
-	decodeRecorderJSON(t, rec, &body)
-	if body.TotalSize != 1 || len(body.Documents) != 1 || body.Documents[0].DocumentID != "doc-manual" {
-		t.Fatalf("expected only manual dataset document, got total=%d docs=%+v", body.TotalSize, body.Documents)
-	}
-}
-
 func TestListDocumentsByDatasetsRequiresDatasetIDs(t *testing.T) {
 	_ = newDocumentTestDB(t)
 
@@ -707,30 +566,6 @@ func TestDeleteFolderDeletesChildrenAndUpdatesDatasetStats(t *testing.T) {
 	assertDocumentSoftDeleted(t, db, "dataset-1", "folder-1")
 	assertDocumentSoftDeleted(t, db, "dataset-1", "doc-1")
 	assertDatasetStats(t, "dataset-1", 0, 0)
-}
-
-func TestDeleteDottedFolderUsesStoredDocumentType(t *testing.T) {
-	db := newDocumentTestDB(t)
-	seedFolderWithSizedDoc(t, db, "dataset-1", "folder-1", "doc-1", 31744)
-	if err := db.Model(&orm.Document{}).Where("id = ?", "folder-1").Updates(map[string]any{
-		"display_name":  "init.sql",
-		"document_type": "FOLDER",
-	}).Error; err != nil {
-		t.Fatalf("mark dotted document as folder: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/core/datasets/dataset-1/documents/folder-1", nil)
-	req.Header.Set("X-User-Id", "user-1")
-	req = mux.SetURLVars(req, map[string]string{"dataset": "dataset-1", "document": "folder-1"})
-	rec := httptest.NewRecorder()
-
-	DeleteDocument(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	assertDocumentSoftDeleted(t, db, "dataset-1", "folder-1")
-	assertDocumentSoftDeleted(t, db, "dataset-1", "doc-1")
 }
 
 func TestBatchDeleteFolderDeletesChildrenAndUpdatesDatasetStats(t *testing.T) {

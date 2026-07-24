@@ -43,7 +43,6 @@ type DiffEntryLine struct {
 	OldLines                int    `json:"old_lines,omitempty"`
 	NewStart                int    `json:"new_start,omitempty"`
 	NewLines                int    `json:"new_lines,omitempty"`
-	wholeLineReplacement    bool
 }
 
 type Differ interface {

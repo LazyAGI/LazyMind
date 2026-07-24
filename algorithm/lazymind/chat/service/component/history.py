@@ -171,7 +171,6 @@ def normalize_history_for_agent(
             pending_text_parts: list[str] = []
             pending_tool_calls: list[dict[str, Any]] = []
             saw_structured_segments = False
-            ephemeral_tool_ids: set[str] = set()
 
             for seg in segments:
                 seg_type = seg['type']
@@ -182,9 +181,6 @@ def normalize_history_for_agent(
                     pending_text_parts.append(_strip_history_citations(seg['content']))
                 elif seg_type == 'tool_call':
                     saw_structured_segments = True
-                    if seg['name'] == 'intentwrite':
-                        ephemeral_tool_ids.add(seg['id'])
-                        continue
                     pending_tool_calls.append({
                         'id': seg['id'],
                         'type': 'function',
@@ -195,8 +191,6 @@ def normalize_history_for_agent(
                     })
                 elif seg_type == 'tool_result':
                     saw_structured_segments = True
-                    if seg['id'] in ephemeral_tool_ids or seg['name'] == 'intentwrite':
-                        continue
                     _append_pending_assistant(
                         normalized,
                         pending_reasoning_parts,

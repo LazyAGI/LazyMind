@@ -20,7 +20,6 @@ _TYPE_TO_SLOT: Dict[str, str] = {
     'tts': 'multimodal',
     'text2image': 'multimodal',
     'image_editing': 'multimodal',
-    'text2video': 'multimodal',
 }
 
 
@@ -168,7 +167,6 @@ _MODEL_CONFIG_ROLE_ALIASES: Dict[str, str] = {
     'stt': 'speech_to_text',
     'text2image': 'image_generator',
     'image_editing': 'image_editor',
-    'text2video': 'video_generator',
 }
 
 

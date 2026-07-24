@@ -4,8 +4,6 @@ from fastapi import FastAPI
 
 from lazymind.config import config
 from lazymind.chat.api import (
-    channel_intent_routes,
-    agent_control_routes,
     chat_routes,
     generate_plugin_routes,
     generate_plugin_staged_routes,
@@ -17,14 +15,12 @@ from lazymind.chat.api import (
 )
 from lazymind.chat.service.utils.trace_archive import start_local_trace_maintenance
 from lazymind.rewrite.api import rewrite_routes
-from lazymind.review.api import memory_review_routes, skill_organize_routes, skill_review_routes
+from lazymind.review.api import memory_review_routes, skill_review_routes
 
 
 def register_chat_routers(app: FastAPI) -> FastAPI:
     # health is always available for liveness probes.
     app.include_router(health_routes.router)
-    # Agent control callbacks must remain available in both direct and router modes.
-    app.include_router(agent_control_routes.router)
     # plugin routes must always be registered: Go backend calls /api/plugin/slot-binding
     # and /api/plugin/driver regardless of whether router mode is enabled.
     app.include_router(plugin_routes.router)
@@ -34,12 +30,10 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
         app.include_router(subagent_routes.router)
 
     if not config['router_child_proxied_only']:
-        app.include_router(channel_intent_routes.router)
         app.include_router(rewrite_routes.router)
         app.include_router(generate_plugin_routes.router)
         app.include_router(generate_plugin_staged_routes.router)
         app.include_router(memory_review_routes.router)
-        app.include_router(skill_organize_routes.router)
         app.include_router(skill_review_routes.router)
         app.include_router(model_features_routes.router)
         app.include_router(model_check_routes.router)
@@ -56,8 +50,7 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-if config['background_jobs_enabled']:
-    start_local_trace_maintenance()
+start_local_trace_maintenance()
 
 if __name__ == '__main__':
     import argparse

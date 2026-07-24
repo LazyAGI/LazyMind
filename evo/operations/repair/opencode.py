@@ -18,7 +18,7 @@ OPENCODE_FIELDS = {
     'model',
     'provider',
     'provider_model',
-    'npm',
+    'provider_label',
     'base_url',
     'api_key',
     'skip_auth',
@@ -50,7 +50,6 @@ class OpenCodeRunResult(NamedTuple):
     returncode: int
     session_id: str
     last_error: dict[str, Any] | None
-    finish_reason: str
 
 
 def run_opencode_streaming(
@@ -72,9 +71,8 @@ def run_opencode_streaming(
     events_path = artifact_dir / 'events.jsonl'
     config_path: Path | None = None
 
-    def result(returncode: int, session: str, error: dict[str, Any] | None,
-               finish_reason: str = '') -> OpenCodeRunResult:
-        return OpenCodeRunResult(returncode, session, error, finish_reason)
+    def result(returncode: int, session: str, error: dict[str, Any] | None) -> OpenCodeRunResult:
+        return OpenCodeRunResult(returncode, session, error)
 
     try:
         stdout_log = stdout_path.open('w', encoding='utf-8')
@@ -135,7 +133,7 @@ def run_opencode_streaming(
                     config_path.unlink()
             return fail('process_start_failed', exc)
 
-        session, error, finish_reason = session_id, None, ''
+        session, error = session_id, None
         try:
             while proc.poll() is None:
                 now = time.time()
@@ -146,16 +144,10 @@ def run_opencode_streaming(
                 ready, _, _ = select.select([proc.stdout], [], [], 0.05) if proc.stdout else ([], [], [])
                 if not ready:
                     continue
-                session, error, finish_reason = _read_line(
-                    ready[0].readline(), write_stdout, record,
-                    session, error, finish_reason, secrets,
-                )
+                session, error = _read_line(ready[0].readline(), write_stdout, record, session, error, secrets)
             if proc.stdout:
                 for line in proc.stdout:
-                    session, error, finish_reason = _read_line(
-                        line, write_stdout, record,
-                        session, error, finish_reason, secrets,
-                    )
+                    session, error = _read_line(line, write_stdout, record, session, error, secrets)
             returncode = proc.wait()
             record({'type': 'process_exit', 'status': 'completed' if returncode == 0 else 'failed',
                     'message': f'opencode exited with code {returncode}', 'returncode': returncode})
@@ -165,14 +157,13 @@ def run_opencode_streaming(
             if config_path is not None:
                 with suppress(OSError):
                     config_path.unlink()
-        return result(returncode, session, error, finish_reason)
+        return result(returncode, session, error)
 
 
 def _read_line(line: str, write_stdout: Callable[[str], None], record: Callable[[dict[str, Any]], dict[str, Any]],
-               session: str, error: dict[str, Any] | None, finish_reason: str,
-               secrets: list[str]) -> tuple[str, dict[str, Any] | None, str]:
+               session: str, error: dict[str, Any] | None, secrets: list[str]) -> tuple[str, dict[str, Any] | None]:
     if not line:
-        return session, error, finish_reason
+        return session, error
     write_stdout(line)
     try:
         event = _clean(json.loads(line), secrets)
@@ -180,18 +171,11 @@ def _read_line(line: str, write_stdout: Callable[[str], None], record: Callable[
         text = _clean(line.strip(), secrets)
         if text:
             record({'type': 'stdout', 'status': 'running', 'message': str(text)[:300]})
-        return session, error, finish_reason
+        return session, error
     if isinstance(event, dict):
         recorded = record(event)
-        part = event.get('part') if isinstance(event.get('part'), dict) else {}
-        if event.get('type') == 'step_finish':
-            finish_reason = str(part.get('reason') or event.get('reason') or '').strip()
-        return (
-            session or str(event.get('sessionID') or ''),
-            recorded if event.get('type') == 'error' else error,
-            finish_reason,
-        )
-    return session, error, finish_reason
+        return session or str(event.get('sessionID') or ''), recorded if event.get('type') == 'error' else error
+    return session, error
 
 
 def _cmd(prompt: str, session: str, settings: dict[str, str]) -> list[str]:
@@ -206,17 +190,22 @@ def _cmd(prompt: str, session: str, settings: dict[str, str]) -> list[str]:
 
 def _opencode_json(settings: dict[str, str]) -> dict[str, Any]:
     provider, model = settings.get('provider', ''), settings.get('provider_model', '')
-    npm = settings.get('npm', '')
     base_url, api_key = settings.get('base_url', ''), settings.get('api_key', '')
     config: dict[str, Any] = {'$schema': 'https://opencode.ai/config.json', 'permission': PERMISSIONS}
-    if provider and model and npm and base_url:
+    if provider and model and base_url:
+        official = base_url.rstrip('/').endswith('api.openai.com/v1')
+        npm = '@ai-sdk/openai' if provider == 'openai' and official else '@ai-sdk/openai-compatible'
+        model_cfg: dict[str, Any] = {'name': model, 'tool_call': True}
+        if not official:
+            model_cfg['limit'] = {'context': 32768, 'output': 1024}
         options = {'baseURL': base_url}
         if api_key:
             options['apiKey'] = api_key
         config['provider'] = {provider: {
             'npm': npm,
+            'name': settings.get('provider_label') or provider,
             'options': options,
-            'models': {model: {'name': model}},
+            'models': {model: model_cfg},
         }}
     return config
 
@@ -302,7 +291,7 @@ def _opencode_settings(raw: dict[str, str]) -> dict[str, str]:
 
 
 def _missing_config(settings: dict[str, str]) -> list[str]:
-    required = ['model', 'provider', 'provider_model', 'npm', 'base_url']
+    required = ['model', 'provider', 'provider_model', 'base_url']
     missing = [key for key in required if not settings.get(key)]
     if not settings.get('api_key') and settings.get('skip_auth') != 'true':
         missing.append('api_key')

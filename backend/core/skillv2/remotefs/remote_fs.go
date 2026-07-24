@@ -247,7 +247,7 @@ func (h *Handler) Dir(w http.ResponseWriter, r *http.Request) {
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
-			return h.createEmptyPackage(r.Context(), tx, userID, parsed, task)
+			return h.createEmptyPackage(r.Context(), tx, userID, parsed)
 		}
 		if err != nil {
 			return err
@@ -718,7 +718,7 @@ func (h *Handler) listSkills(w http.ResponseWriter, r *http.Request, userID, cat
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *Handler) createEmptyPackage(ctx context.Context, tx *gorm.DB, userID string, parsed remotePath, task remoteTask) error {
+func (h *Handler) createEmptyPackage(ctx context.Context, tx *gorm.DB, userID string, parsed remotePath) error {
 	var conflicts int64
 	if err := tx.WithContext(ctx).Model(&skillRow{}).
 		Where("owner_user_id = ? AND relative_root = ? AND deleted_at IS NULL", userID, parsed.packageRoot()).
@@ -730,10 +730,7 @@ func (h *Handler) createEmptyPackage(ctx context.Context, tx *gorm.DB, userID st
 	}
 	now := h.clock.Now()
 	skillID := uuid.NewString()
-	draftStatus := "pending_confirm"
-	if task.AutoCommit {
-		draftStatus = "auto_pending"
-	}
+	revisionID := uuid.NewString()
 	if err := tx.WithContext(ctx).Create(&skillRow{
 		ID:                 skillID,
 		OwnerUserID:        userID,
@@ -743,8 +740,8 @@ func (h *Handler) createEmptyPackage(ctx context.Context, tx *gorm.DB, userID st
 		Tags:               []byte("[]"),
 		RelativeRoot:       parsed.packageRoot(),
 		SkillMDPath:        "SKILL.md",
+		HeadRevisionID:     &revisionID,
 		Version:            1,
-		AutoEvo:            task.AutoCommit,
 		AutoEvoApplyStatus: "idle",
 		IsEnabled:          false,
 		UpdateStatus:       "up_to_date",
@@ -756,13 +753,23 @@ func (h *Handler) createEmptyPackage(ctx context.Context, tx *gorm.DB, userID st
 	if err := tx.WithContext(ctx).Model(&skillRow{}).Where("id = ?", skillID).Update("is_enabled", false).Error; err != nil {
 		return err
 	}
+	if err := tx.WithContext(ctx).Create(&skillRevisionRow{
+		ID:           revisionID,
+		SkillID:      skillID,
+		RevisionNo:   1,
+		TreeHash:     hashRemoteTree(nil),
+		ChangeSource: "create",
+		CreatedBy:    nullableString(userID),
+		CreatedAt:    now,
+	}).Error; err != nil {
+		return err
+	}
 	return tx.WithContext(ctx).Create(&skillDraftRow{
-		SkillID:     skillID,
-		DraftStatus: draftStatus,
-		TaskID:      task.ID,
-		Version:     1,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		SkillID:        skillID,
+		BaseRevisionID: &revisionID,
+		Version:        1,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}).Error
 }
 
@@ -904,7 +911,7 @@ func (h *Handler) publishedEntriesForSkill(ctx context.Context, db *gorm.DB, ski
 		return nil, err
 	}
 	if skill.HeadRevisionID == nil {
-		return map[string]mergedEntry{}, nil
+		return nil, fmt.Errorf("skill has no head revision")
 	}
 	var rows []skillRevisionEntryRow
 	if err := db.WithContext(ctx).Where("revision_id = ?", *skill.HeadRevisionID).Order("path ASC").Find(&rows).Error; err != nil {
@@ -1096,9 +1103,8 @@ const (
 )
 
 type remoteTask struct {
-	ID         string
-	Mode       remoteTaskMode
-	AutoCommit bool
+	ID   string
+	Mode remoteTaskMode
 }
 
 func parseRemoteTask(taskID string) remoteTask {
@@ -1288,9 +1294,7 @@ func requireTask(w http.ResponseWriter, r *http.Request) (remoteTask, bool) {
 		skillhttperr.Reply(w, "task_id is required", http.StatusBadRequest)
 		return remoteTask{}, false
 	}
-	task := parseRemoteTask(taskID)
-	task.AutoCommit = strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("mode")), "auto")
-	return task, true
+	return parseRemoteTask(taskID), true
 }
 
 func requireWriteParams(w http.ResponseWriter, r *http.Request) (string, remoteTask, bool) {
@@ -1426,7 +1430,6 @@ func (skillRevisionEntryRow) TableName() string { return "skill_revision_entries
 type skillDraftRow struct {
 	SkillID        string     `gorm:"column:skill_id;type:varchar(36);primaryKey"`
 	BaseRevisionID *string    `gorm:"column:base_revision_id;type:varchar(36)"`
-	DraftStatus    string     `gorm:"column:draft_status;type:text;not null;default:''"`
 	TaskID         string     `gorm:"column:task_id;type:text;not null;default:''"`
 	UpdatedBy      *string    `gorm:"column:updated_by;type:varchar(36)"`
 	Version        int64      `gorm:"column:version;not null;default:1"`

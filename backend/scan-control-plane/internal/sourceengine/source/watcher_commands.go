@@ -83,10 +83,9 @@ func (e *DefaultEngine) queueLocalWatcherCommand(ctx context.Context, src store.
 		AgentID:     binding.AgentID,
 		CommandType: commandType,
 		Payload: store.JSON{
-			"type":       commandType,
-			"tenant_id":  src.TenantID,
-			"source_id":  binding.SourceID,
-			"binding_id": binding.BindingID,
+			"type":      commandType,
+			"tenant_id": src.TenantID,
+			"source_id": binding.SourceID,
 		},
 		Status:    "PENDING",
 		LastError: store.JSON{},
