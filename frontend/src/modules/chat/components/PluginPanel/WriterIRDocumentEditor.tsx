@@ -17,6 +17,7 @@ import {
   findWriterBlock,
   getWriterOutlineInstruction,
   getWriterSpanStyles,
+  splitWriterBlock,
   toggleWriterBlockInlineStyle,
   updateWriterBlockContent,
   updateWriterBlockFormat,
@@ -70,6 +71,12 @@ function renderBlockText(block: WriterBlock): string {
     return spans.map(renderSpan).join('');
   }
   return escapeHtml(block.content ?? '');
+}
+
+function renderEditableBlockText(block: WriterBlock): string {
+  const text = renderBlockText(block);
+  if (text || block.editable === false) return text;
+  return '<br data-writer-empty-placeholder="true">';
 }
 
 function headingLevel(block: WriterBlock): number {
@@ -133,7 +140,7 @@ function renderBlock(block: WriterBlock, showOutlineInstruction: boolean): strin
     `class="writer-ir__block writer-ir__block--${escapeHtmlAttribute(block.type)}"`,
     block.editable === false ? 'contenteditable="false"' : '',
   ].filter(Boolean).join(' ');
-  const text = renderBlockText(block);
+  const text = renderEditableBlockText(block);
   const outlineInstruction = renderOutlineInstruction(block, showOutlineInstruction);
   const children = block.children?.length
     ? block.type === 'list_item'
@@ -192,6 +199,9 @@ function inferredBlockType(element: HTMLElement): string {
 
 function textFromElement(element: HTMLElement): string {
   const clone = element.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll('[data-writer-empty-placeholder]').forEach(
+    (placeholder) => placeholder.remove(),
+  );
   for (const child of Array.from(clone.children)) {
     if (
       child.matches('[data-writer-children]')
@@ -211,6 +221,39 @@ function textFromElement(element: HTMLElement): string {
   const value = Array.from(clone.childNodes).map(collect).join('')
     .replace(/\u00a0/g, ' ');
   return element.tagName === 'PRE' ? value : value.replace(/\n+$/, '');
+}
+
+function textFromBlockElement(
+  blockElement: HTMLElement,
+  contentElement: HTMLElement,
+): string {
+  let content = textFromElement(contentElement);
+  let foundContent = false;
+
+  for (const child of Array.from(blockElement.childNodes)) {
+    if (child === contentElement) {
+      foundContent = true;
+      continue;
+    }
+    if (!foundContent) continue;
+    if (
+      child instanceof HTMLElement
+      && child.matches(
+        '[data-writer-block], [data-writer-children], '
+        + '[data-writer-outline-instruction], ul, ol',
+      )
+    ) {
+      break;
+    }
+
+    const trailingContent = child instanceof HTMLElement
+      ? child.tagName === 'BR' ? '' : textFromElement(child)
+      : child.textContent?.replace(/\u00a0/g, ' ') ?? '';
+    if (!trailingContent) continue;
+    content = content ? `${content}\n${trailingContent}` : trailingContent;
+  }
+
+  return content;
 }
 
 function childElements(element: HTMLElement, selector: string): HTMLElement[] {
@@ -246,7 +289,9 @@ function parseEditorDocument(editor: HTMLElement, source: WriterDocument): Write
 
     const existing = findWriterBlock(titledDocument.blocks, nodeId);
     const contentElement = blockContentElement(element);
-    const content = type === 'divider' ? '' : textFromElement(contentElement);
+    const content = type === 'divider'
+      ? ''
+      : textFromBlockElement(element, contentElement);
     const contentDocument = existing
       ? updateWriterBlockContent(titledDocument, nodeId, content)
       : undefined;
@@ -405,6 +450,16 @@ function textBoundaryAt(
     remaining -= characters.length;
     textNode = walker.nextNode();
   }
+  const placeholder = contentElement.querySelector<HTMLElement>(
+    '[data-writer-empty-placeholder]',
+  );
+  if (placeholder && !(contentElement.textContent ?? '')) {
+    const parent = placeholder.parentNode ?? contentElement;
+    return {
+      node: parent,
+      offset: Array.from(parent.childNodes).indexOf(placeholder),
+    };
+  }
   return { node: contentElement, offset: contentElement.childNodes.length };
 }
 
@@ -440,6 +495,8 @@ export function WriterIRDocumentEditor({
   const lastEmittedDocumentRef = useRef<WriterDocument>();
   const savedSelectionRef = useRef<WriterEditorSelection | null>(null);
   const pendingSelectionRef = useRef<WriterEditorSelection | null>(null);
+  const isComposingRef = useRef(false);
+  const handledEnterKeyDownRef = useRef(false);
   const [activeSelection, setActiveSelection] = useState<WriterEditorSelection | null>(null);
 
   useLayoutEffect(() => {
@@ -480,6 +537,14 @@ export function WriterIRDocumentEditor({
   const handleInput = (event: FormEvent<HTMLElement>) => {
     if (disabled) return;
     const nextDocument = parseEditorDocument(event.currentTarget, document);
+    for (const contentElement of Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>('[data-writer-block-content]'),
+    )) {
+      if (!textFromElement(contentElement)) continue;
+      contentElement.querySelectorAll('[data-writer-empty-placeholder]').forEach(
+        (placeholder) => placeholder.remove(),
+      );
+    }
     lastEmittedDocumentRef.current = nextDocument;
     onChange(nextDocument);
     recordSelection();
@@ -577,7 +642,82 @@ export function WriterIRDocumentEditor({
     onChange(nextDocument);
   }, [disabled, document, onChange]);
 
+  const insertLineBreak = useCallback((editor: HTMLElement) => {
+    if (disabled) return;
+    const selection = readEditorSelection(editor);
+    const block = selection
+      ? findWriterBlock(document.blocks, selection.nodeId)
+      : undefined;
+    if (!selection || !block || block.editable === false) return;
+
+    if (block.type === 'code') {
+      const characters = Array.from(block.content ?? '');
+      const nextContent = [
+        ...characters.slice(0, selection.start),
+        '\n',
+        ...characters.slice(selection.end),
+      ].join('');
+      const nextDocument = updateWriterBlockContent(
+        document,
+        block.node_id,
+        nextContent,
+      );
+      if (nextDocument === document) return;
+
+      const nextSelection = {
+        nodeId: block.node_id,
+        start: selection.start + 1,
+        end: selection.start + 1,
+      };
+      savedSelectionRef.current = nextSelection;
+      pendingSelectionRef.current = nextSelection;
+      setActiveSelection(nextSelection);
+      onChange(nextDocument);
+      return;
+    }
+
+    const result = splitWriterBlock(
+      document,
+      block.node_id,
+      selection.start,
+      selection.end,
+    );
+    if (!result.insertedNodeId) return;
+    const nextSelection = {
+      nodeId: result.insertedNodeId,
+      start: 0,
+      end: 0,
+    };
+    savedSelectionRef.current = nextSelection;
+    pendingSelectionRef.current = nextSelection;
+    setActiveSelection(nextSelection);
+    onChange(result.document);
+  }, [disabled, document, onChange]);
+
+  const handleBeforeInput = (event: FormEvent<HTMLElement>) => {
+    const inputType = (event.nativeEvent as InputEvent).inputType;
+    if (inputType !== 'insertParagraph' && inputType !== 'insertLineBreak') return;
+    event.preventDefault();
+    if (handledEnterKeyDownRef.current) {
+      handledEnterKeyDownRef.current = false;
+      return;
+    }
+    insertLineBreak(event.currentTarget);
+  };
+
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (
+      event.key === 'Enter'
+      && !isComposingRef.current
+      && !event.nativeEvent.isComposing
+      && event.keyCode !== 229
+    ) {
+      event.preventDefault();
+      handledEnterKeyDownRef.current = true;
+      insertLineBreak(event.currentTarget);
+      return;
+    }
+
     if (!(event.metaKey || event.ctrlKey)) return;
     const key = event.key.toLowerCase();
     if (key !== 'b' && key !== 'i') return;
@@ -589,6 +729,11 @@ export function WriterIRDocumentEditor({
   const handleEditorFocus = () => {
     onFocus();
     window.requestAnimationFrame(recordSelection);
+  };
+
+  const handleKeyUp = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Enter') handledEnterKeyDownRef.current = false;
+    recordSelection();
   };
 
   return (
@@ -658,12 +803,19 @@ export function WriterIRDocumentEditor({
         aria-label={ariaLabel}
         aria-multiline='true'
         spellCheck
+        onBeforeInput={handleBeforeInput}
         onInput={handleInput}
         onFocus={handleEditorFocus}
         onPaste={handlePaste}
         onKeyDown={handleKeyDown}
+        onCompositionStart={() => {
+          isComposingRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          isComposingRef.current = false;
+        }}
         onMouseUp={recordSelection}
-        onKeyUp={recordSelection}
+        onKeyUp={handleKeyUp}
       />
     </div>
   );

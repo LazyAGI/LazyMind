@@ -526,6 +526,7 @@ export function WriterIRControl({
   }, [externalUpdate, finishTextEdit, requestImmediateSave]);
 
   const handleDocumentChange = useCallback((nextDocument: WriterDocument) => {
+    draftRef.current = nextDocument;
     setDraft((current) => {
       if (!textEditStartRef.current) textEditStartRef.current = current;
       return nextDocument;

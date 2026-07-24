@@ -1664,11 +1664,6 @@ async function syncWriterDocumentSlot(
   };
 }
 
-function ensureJsonFilename(name: string): string {
-  const trimmed = name.trim() || 'writer-document.json';
-  return trimmed.toLowerCase().endsWith('.json') ? trimmed : `${trimmed}.json`;
-}
-
 function writerBlockToMarkdown(block: WriterBlock, depth = 0): string {
   if (block.type === 'document') {
     return (block.children ?? []).map((child) => writerBlockToMarkdown(child, depth)).filter(Boolean).join('\n\n');
@@ -1717,10 +1712,7 @@ function shouldRenderInlineStructuredContent(
   const payload = getInlineStructuredArtifactPayload(slot);
   if (payload === null) return false;
   if (isWriterDocument(payload)) {
-    const resolvedSlotId = slotId ?? slot.slot;
-    const usesWriterSync = resolvedSlotId === 'synced_snapshot'
-      && (slot.list_index ?? -1) === -1;
-    return expectedType !== 'image' && (expectedType !== 'file' || usesWriterSync);
+    return expectedType !== 'image';
   }
   if (expectedType !== 'text') return false;
   if (slot.content_type === 'json') return true;
@@ -1774,7 +1766,6 @@ function SlotJsonFile({
     raw,
     `${slot.revision}:${reloadToken}`,
   );
-  const { patchSlotItemValue } = usePluginStore();
   const { setEditing: notifyEditing } = useContext(SlotEditingContext);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1836,7 +1827,6 @@ function SlotJsonFile({
 
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
-  const usesWriterSync = resolvedSlotId === 'synced_snapshot' && apiListIndex === -1;
   const showArtifactActions = !WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
   const writerDocument = isWriterDocument(payload) ? payload : null;
   const canEditWriterIR = Boolean(sessionId && slotId)
@@ -1856,62 +1846,35 @@ function SlotJsonFile({
       throw new Error(tr('chat.writerIR.saveFailed'));
     }
 
-    if (usesWriterSync) {
-      try {
-        const result = await syncWriterDocumentSlot(
-          sessionId,
-          slotId,
-          apiListIndex,
-          sourceRevision,
-          sourceDocument,
-          document,
-        );
-        const serialized = replaceStructuredArtifactPayload(sourceJson, result.document);
-        setSourceJson(serialized);
-        setPayload(result.document);
-        if (typeof result.sourceRevision === 'number') {
-          setLoadedRevision(result.sourceRevision);
-        }
-        onRefresh?.();
-        return result;
-      } catch (syncError) {
-        onRefresh?.();
-        throw syncError;
+    try {
+      const result = await syncWriterDocumentSlot(
+        sessionId,
+        slot.slot_id,
+        apiListIndex,
+        sourceRevision,
+        sourceDocument,
+        document,
+      );
+      const serialized = replaceStructuredArtifactPayload(sourceJson, result.document);
+      setSourceJson(serialized);
+      setPayload(result.document);
+      if (typeof result.sourceRevision === 'number') {
+        setLoadedRevision(result.sourceRevision);
       }
+      onRefresh?.();
+      return result;
+    } catch (syncError) {
+      onRefresh?.();
+      throw syncError;
     }
-
-    const serialized = replaceStructuredArtifactPayload(sourceJson, document);
-    const filename = ensureJsonFilename(name);
-    const file = new File(
-      [JSON.stringify(serialized, null, 2)],
-      filename,
-      { type: 'application/json' },
-    );
-    const storedPath = await uploadFileInChunks(file);
-    const nextValue: Record<string, unknown> = {
-      ...(raw && typeof raw === 'object' ? raw : {}),
-      type: 'json',
-      path: storedPath,
-      filename,
-      size: file.size,
-    };
-    delete nextValue.url;
-
-    await patchSlotItemValue(sessionId, slotId, apiListIndex, nextValue, 'file');
-    setSourceJson(serialized);
-    setPayload(document);
-    onRefresh?.();
   }, [
     apiListIndex,
-    name,
     onRefresh,
-    patchSlotItemValue,
-    raw,
     readOnly,
     sessionId,
+    slot.slot_id,
     slotId,
     sourceJson,
-    usesWriterSync,
   ]);
 
   const handleWriterEditingChange = useCallback((editing: boolean) => {
@@ -2064,12 +2027,10 @@ function SlotInlineStructured({
 }: SlotInlineStructuredProps) {
   const allowDownload = useContext(SlotDownloadContext);
   const payload = getInlineStructuredArtifactPayload(slot);
-  const { patchSlotItemValue } = usePluginStore();
   const { setEditing: notifyEditing } = useContext(SlotEditingContext);
   const [writerEditing, setWriterEditing] = useState(false);
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
-  const usesWriterSync = resolvedSlotId === 'synced_snapshot' && apiListIndex === -1;
   const writerDocument = isWriterDocument(payload) ? payload : null;
   const canEditWriterIR = Boolean(sessionId && slotId)
     && !readOnly
@@ -2083,7 +2044,7 @@ function SlotInlineStructured({
   } | null>(null);
 
   useEffect(() => {
-    if (!writerDocument || !usesWriterSync) {
+    if (!writerDocument) {
       setWriterMarkdownDownload(null);
       return;
     }
@@ -2096,7 +2057,7 @@ function SlotInlineStructured({
       filename: writerMarkdownFilename(slot.caption || resolvedSlotId),
     });
     return () => URL.revokeObjectURL(url);
-  }, [resolvedSlotId, slot.caption, usesWriterSync, writerDocument]);
+  }, [resolvedSlotId, slot.caption, writerDocument]);
 
   const handleSaveWriterDocument = useCallback(async (
     sourceDocument: WriterDocument,
@@ -2106,35 +2067,28 @@ function SlotInlineStructured({
     if (!sessionId || !slotId || readOnly) {
       throw new Error(tr('chat.writerIR.saveFailed'));
     }
-    if (usesWriterSync) {
-      try {
-        const result = await syncWriterDocumentSlot(
-          sessionId,
-          slotId,
-          apiListIndex,
-          sourceRevision,
-          sourceDocument,
-          document,
-        );
-        onRefresh?.();
-        return result;
-      } catch (syncError) {
-        onRefresh?.();
-        throw syncError;
-      }
+    try {
+      const result = await syncWriterDocumentSlot(
+        sessionId,
+        slot.slot_id,
+        apiListIndex,
+        sourceRevision,
+        sourceDocument,
+        document,
+      );
+      onRefresh?.();
+      return result;
+    } catch (syncError) {
+      onRefresh?.();
+      throw syncError;
     }
-    const serialized = replaceStructuredArtifactPayload(slot.artifact_value, document);
-    await patchSlotItemValue(sessionId, slotId, apiListIndex, serialized, 'json');
-    onRefresh?.();
   }, [
     apiListIndex,
     onRefresh,
-    patchSlotItemValue,
     readOnly,
     sessionId,
-    slot,
+    slot.slot_id,
     slotId,
-    usesWriterSync,
   ]);
 
   const handleWriterEditingChange = useCallback((editing: boolean) => {

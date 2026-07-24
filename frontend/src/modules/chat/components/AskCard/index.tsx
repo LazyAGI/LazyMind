@@ -127,30 +127,8 @@ function formatAnswer(
   }
 }
 
-function ChoiceLabel({
-  value,
-  editable,
-  disabled,
-  onChange,
-}: {
-  value: string;
-  editable: boolean;
-  disabled: boolean;
-  onChange?: (value: string) => void;
-}) {
-  if (!editable) {
-    return <span className="ask-wizard__choice-label">{value}</span>;
-  }
-  return (
-    <Input
-      size="small"
-      value={value}
-      disabled={disabled}
-      onClick={(event) => event.stopPropagation()}
-      onChange={(event) => onChange?.(event.target.value)}
-      className="ask-wizard__choice-input"
-    />
-  );
+function ChoiceLabel({ value }: { value: string }) {
+  return <span className="ask-wizard__choice-label">{value}</span>;
 }
 
 export default function AskCard({
@@ -175,7 +153,7 @@ export default function AskCard({
   const isReadOnly = disabled || submitted;
 
   // Preserve the structured payload shape expected by the backend.
-  const [customChoices, setCustomChoices] = useState<Record<number, string[]>>(
+  const [customChoices] = useState<Record<number, string[]>>(
     () =>
       Object.fromEntries(questions.map((q, i) => [i, [...(q.choices ?? [])]])),
   );
@@ -183,15 +161,6 @@ export default function AskCard({
   const currentQ = questions[currentIndex]!;
   const currentAns = answers[currentIndex]!;
   const currentChoices = customChoices[currentIndex] ?? currentQ.choices ?? [];
-
-  const updateChoice = (questionIndex: number, choiceIndex: number, value: string) => {
-    setCustomChoices((previous) => ({
-      ...previous,
-      [questionIndex]: (previous[questionIndex] ?? []).map((choice, index) =>
-        index === choiceIndex ? value : choice,
-      ),
-    }));
-  };
 
   const progressPercent = Math.round(
     (answers.filter((answer) => isAnswered(answer, otherOption)).length / total) * 100,
@@ -351,9 +320,6 @@ export default function AskCard({
                           ? otherOptionLabel
                           : (currentChoices[ci] ?? origVal)
                       }
-                      editable={origVal !== otherOption}
-                      disabled={isReadOnly}
-                      onChange={(value) => updateChoice(currentIndex, ci, value)}
                     />
                   </Radio>
                 ))}
@@ -405,9 +371,6 @@ export default function AskCard({
                           ? otherOptionLabel
                           : (currentChoices[ci] ?? origVal)
                       }
-                      editable={origVal !== otherOption}
-                      disabled={isReadOnly}
-                      onChange={(value) => updateChoice(currentIndex, ci, value)}
                     />
                   </Checkbox>
                 ))}
