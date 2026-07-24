@@ -44,6 +44,51 @@ func TestSkillReviewStatsActiveScope(t *testing.T) {
 	}
 }
 
+func TestSkillReviewStatsRegisteredForLocalDDL(t *testing.T) {
+	models := AllModelsForDDL()
+	if !modelListContains(models, &SkillReviewStats{}) {
+		t.Fatal("expected SkillReviewStats in AllModelsForDDL")
+	}
+
+	names := map[string]bool{}
+	for _, name := range TableNamesForDDL() {
+		names[name] = true
+	}
+	if !names["skill_review_stats"] {
+		t.Fatal("expected skill_review_stats in TableNamesForDDL")
+	}
+
+	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "skill-review-schema.db"))
+	if err != nil {
+		t.Fatalf("connect sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(AllModelsForDDL()...); err != nil {
+		t.Fatalf("auto migrate production model list: %v", err)
+	}
+	if !db.Migrator().HasTable(&SkillReviewStats{}) {
+		t.Fatal("expected skill_review_stats table")
+	}
+
+	wantColumns := map[string]bool{
+		"id": false, "requestid": false, "userid": false, "status": false,
+		"started_at": false, "duration_ms": false, "summary": false,
+	}
+	columns, err := db.Migrator().ColumnTypes(&SkillReviewStats{})
+	if err != nil {
+		t.Fatalf("inspect skill_review_stats columns: %v", err)
+	}
+	for _, column := range columns {
+		if _, ok := wantColumns[column.Name()]; ok {
+			wantColumns[column.Name()] = true
+		}
+	}
+	for name, found := range wantColumns {
+		if !found {
+			t.Fatalf("expected skill_review_stats.%s column", name)
+		}
+	}
+}
+
 func TestDetailedSkillReviewStatsStatusMigrationHasNoEnumConstraint(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
 	migrationPath := filepath.Join(filepath.Dir(file), "..", "..", "migrations", "20260714190000_allow_detailed_skill_review_stats_status.up.sql")
