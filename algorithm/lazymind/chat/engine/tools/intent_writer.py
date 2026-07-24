@@ -13,6 +13,7 @@ INTENT_FIELDS = {
 SCALAR_FIELDS = {'goal', 'deliverable', 'execution_mode'}
 LIST_FIELDS = INTENT_FIELDS - SCALAR_FIELDS
 VALID_OPERATIONS = {'set', 'add', 'remove', 'supersede'}
+FIELD_ALIASES = {'constraint': 'constraints'}
 
 
 def normalize_intent_document(value: Any) -> Dict[str, Any]:
@@ -114,6 +115,7 @@ def build_intentwrite_tool(
                 raise ValueError('each operation must be an object.')
             op = str(raw.get('op') or '').strip()
             field = str(raw.get('field') or '').strip()
+            field = FIELD_ALIASES.get(field, field)
             value = str(raw.get('value') or '').strip()
             evidence = str(raw.get('evidence') or '').strip()
             if op not in VALID_OPERATIONS or field not in INTENT_FIELDS or not value:
