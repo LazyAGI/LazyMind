@@ -96,6 +96,65 @@ func TestWriteUserPreferenceDraftReplacesBodyOnly(t *testing.T) {
 	}
 }
 
+func TestWriteUserPreferenceDraftStripsRepeatedFrontmatterFromContent(t *testing.T) {
+	db := newResourceFSTestDB(t)
+	store.Init(db.DB, nil, nil)
+	service := NewService(ServiceDeps{DB: db.DB})
+	ref := ResourceRef{UserID: "u1", ResourceType: ResourceTypeUserPreference}
+	fullContent := "---\nagent_persona: 旧助手\npreferred_name: 旧称呼\nresponse_style: \"旧风格\"\n---\n\n第一行\n旧值\n"
+	state, err := service.EnsureResource(context.Background(), ref, fullContent)
+	if err != nil {
+		t.Fatalf("EnsureResource returned error: %v", err)
+	}
+	submittedFrontmatter := "---\nagent_persona: 新助手\npreferred_name: 新称呼\nresponse_style: \"新风格\"\n---\n\n"
+	submittedContent := strings.Repeat(submittedFrontmatter, 3) + "第一行\n新值\n"
+	body, err := json.Marshal(map[string]any{
+		"content":                submittedContent,
+		"expected_draft_version": state.DraftVersion,
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPut, "/personal-resource/user_preference:file", bytes.NewReader(body))
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"resource_type": "user_preference"})
+	rec := httptest.NewRecorder()
+
+	WriteDraft(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	draft, err := service.ReadFile(context.Background(), ReadFileRequest{Ref: ref, RefType: FileRefDraft})
+	if err != nil {
+		t.Fatalf("ReadFile draft returned error: %v", err)
+	}
+	if strings.Count(draft.Content, "agent_persona:") != 1 {
+		t.Fatalf("draft content contains nested frontmatter: %q", draft.Content)
+	}
+	if !strings.Contains(draft.Content, `agent_persona: 旧助手`) ||
+		!strings.Contains(draft.Content, `preferred_name: 旧称呼`) ||
+		!strings.Contains(draft.Content, `response_style: "旧风格"`) {
+		t.Fatalf("draft content did not preserve stored frontmatter: %q", draft.Content)
+	}
+	if !strings.HasSuffix(draft.Content, "\n\n第一行\n新值\n") {
+		t.Fatalf("draft content body = %q", draft.Content)
+	}
+	preview, err := service.DraftPreview(context.Background(), DraftPreviewRequest{Ref: ref})
+	if err != nil {
+		t.Fatalf("DraftPreview returned error: %v", err)
+	}
+	var changedLines []string
+	for _, line := range preview.Diff.DiffEntryLines {
+		if line.Type == "ADDITION" || line.Type == "DELETION" {
+			changedLines = append(changedLines, line.Text)
+		}
+	}
+	if got, want := strings.Join(changedLines, "\n"), "旧值\n新值"; got != want {
+		t.Fatalf("changed diff lines = %q, want %q", got, want)
+	}
+}
+
 func TestPatchUserPreferenceMetadataUpdatesHeadAndDraftWithoutRevision(t *testing.T) {
 	db := newResourceFSTestDB(t)
 	store.Init(db.DB, nil, nil)
