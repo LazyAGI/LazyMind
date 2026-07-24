@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from .cleanup import delete_algorithm_artifacts, delete_managed_workspace
+from .cleanup import delete_managed_workspace
 from .router_ledger import RouterAlgorithmLedger, RouterLedgerError, json_hash
 from .router_manager import RouterAlgorithmSpec, RouterManager, RouterManagerError
 
@@ -76,7 +76,6 @@ def delete_owned_algorithm(
     ledger: RouterAlgorithmLedger,
     algorithm_id: str,
     managed_repair_root: str | Path,
-    artifact_store_root: str | Path,
 ) -> dict[str, Any]:
     with ledger.router_mutation():
         claim, previous_state = ledger.begin_delete(algorithm_id)
@@ -90,11 +89,6 @@ def delete_owned_algorithm(
             raise
 
         try:
-            artifacts_deleted = delete_algorithm_artifacts(
-                Path(artifact_store_root),
-                str(claim['run_id']),
-                algorithm_id,
-            )
             workspace = delete_managed_workspace(claim, ledger, Path(managed_repair_root))
         except Exception:
             ledger.resolve_delete(algorithm_id, claimed_at, 'stopped')
@@ -106,12 +100,12 @@ def delete_owned_algorithm(
             'router_status': 'missing' if detail is None else 'disabled',
             'router_record_retained': detail is not None,
             'ledger_deleted': True,
-            'artifacts_deleted': artifacts_deleted,
             'workspace': workspace,
             'retained_history': [
                 'router_metadata',
                 'router_ab_strategy_history',
                 'evo_ab_audit',
+                'abtest_artifacts',
                 'repair_artifacts',
                 'repair_trace',
             ],

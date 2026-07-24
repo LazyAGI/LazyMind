@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 
@@ -163,6 +164,138 @@ class CloudOAuthOwnerTest(unittest.TestCase):
             self.service.verify_connection(created['connection_id'], user_id='user-2', tenant_id='tenant-ignored')
         with self.assertRaisesRegex(Exception, 'Forbidden'):
             self.service.get_access_token(created['connection_id'], user_id='user-2', tenant_id='tenant-ignored')
+
+    def test_create_connection_reuses_identity_and_updates_credentials(self) -> None:
+        first = self.service.create_connection(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='tenant',
+            client_id='client',
+            client_secret='secret-1',
+            provider_options={'chat_enabled': False},
+        )
+        second = self.service.create_connection(
+            provider=' FEISHU ',
+            tenant_id='ignored',
+            owner_user_id=' user-1 ',
+            auth_mode=' TENANT ',
+            client_id=' client ',
+            client_secret='secret-2',
+            provider_options={'chat_enabled': True},
+        )
+
+        self.assertEqual(second['connection_id'], first['connection_id'])
+        with cloud_oauth_module.SessionLocal() as db:
+            rows = db.query(CloudAuthConnection).all()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].client_id, 'client')
+            credential = self.service._decrypt_payload(rows[0].credential_ciphertext, field_name='credential')
+            self.assertEqual(credential['client_secret'], 'secret-2')
+            self.assertEqual(credential['provider_options'], {'chat_enabled': True})
+
+    def test_create_connection_identity_is_scoped_by_owner_and_auth_mode(self) -> None:
+        first = self.service.create_connection(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='tenant',
+            client_id='client',
+            client_secret='secret',
+        )
+        other_owner = self.service.create_connection(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-2',
+            auth_mode='tenant',
+            client_id='client',
+            client_secret='secret',
+        )
+        other_mode = self.service.create_connection(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='service_account',
+            client_id='client',
+            client_secret='secret',
+        )
+
+        self.assertEqual(len({first['connection_id'], other_owner['connection_id'], other_mode['connection_id']}), 3)
+
+    def test_create_connection_reuses_legacy_row_without_client_identity(self) -> None:
+        first = self.service.create_connection(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='tenant',
+            client_id='client',
+            client_secret='secret-1',
+        )
+        with cloud_oauth_module.SessionLocal() as db:
+            row = db.query(CloudAuthConnection).filter_by(connection_id=first['connection_id']).one()
+            row.client_id = None
+            db.commit()
+
+        second = self.service.create_connection(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='tenant',
+            client_id='client',
+            client_secret='secret-2',
+        )
+
+        self.assertEqual(second['connection_id'], first['connection_id'])
+        with cloud_oauth_module.SessionLocal() as db:
+            rows = db.query(CloudAuthConnection).all()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].client_id, 'client')
+
+    def test_create_connection_reactivates_same_revoked_identity(self) -> None:
+        first = self.service.create_connection(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='tenant',
+            client_id='client',
+            client_secret='secret-1',
+        )
+        self.service.delete_connection(first['connection_id'], user_id='user-1')
+
+        second = self.service.create_connection(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='tenant',
+            client_id='client',
+            client_secret='secret-2',
+        )
+
+        self.assertEqual(second['connection_id'], first['connection_id'])
+        with cloud_oauth_module.SessionLocal() as db:
+            row = db.query(CloudAuthConnection).one()
+            self.assertEqual(row.status, 'ACTIVE')
+            credential = self.service._decrypt_payload(row.credential_ciphertext, field_name='credential')
+            self.assertEqual(credential['client_secret'], 'secret-2')
+
+    def test_concurrent_create_connection_keeps_single_identity(self) -> None:
+        def create(index: int) -> str:
+            result = self.service.create_connection(
+                provider='feishu',
+                tenant_id='',
+                owner_user_id='user-1',
+                auth_mode='tenant',
+                client_id='client',
+                client_secret=f'secret-{index}',
+            )
+            return result['connection_id']
+
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            connection_ids = list(executor.map(create, range(6)))
+
+        self.assertEqual(len(set(connection_ids)), 1)
+        with cloud_oauth_module.SessionLocal() as db:
+            self.assertEqual(db.query(CloudAuthConnection).count(), 1)
 
     def test_oauth_callback_records_profile_and_lists_owner_connections(self) -> None:
         created = self.service.create_authorize_url(

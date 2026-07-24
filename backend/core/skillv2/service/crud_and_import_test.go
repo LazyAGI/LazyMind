@@ -45,7 +45,7 @@ func TestCreateSkillFromURL_CreatesInitialRevision(t *testing.T) {
 	if err := db.Where("id = ?", resp.SkillID).Take(&imported).Error; err != nil {
 		t.Fatalf("query URL imported skill: %v", err)
 	}
-	if imported.SkillName != "URL 导入" || imported.Description != "URL 导入技能" || imported.Category != "External" {
+	if imported.SkillName != "URL 导入" || imported.Description != "URL 导入技能" || imported.Category != "external" {
 		t.Fatalf("URL imported metadata = %#v", imported)
 	}
 	assertInitialRevision(t, db, resp.SkillID, resp.HeadRevisionID)
@@ -126,7 +126,7 @@ func TestReplaceSkillContentFromUploadedZip_CreatesNewRevision(t *testing.T) {
 	if err := db.Where("id = ?", "skill1").Take(&replaced).Error; err != nil {
 		t.Fatalf("query replaced skill: %v", err)
 	}
-	if replaced.SkillName != "论文精读-v2" || replaced.Description != "论文精读第二版" || replaced.Category != "External" {
+	if replaced.SkillName != "论文精读-v2" || replaced.Description != "论文精读第二版" || replaced.Category != "external" {
 		t.Fatalf("replacement metadata = %#v", replaced)
 	}
 	assertInitialReplacementRevision(t, db, "skill1", resp.HeadRevisionID)

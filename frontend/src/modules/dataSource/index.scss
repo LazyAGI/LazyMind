@@ -85,6 +85,71 @@
   gap: 4px;
 }
 
+.data-source-sync-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.data-source-sync-picker-filters {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.data-source-sync-picker-keyword.ant-input-affix-wrapper {
+  width: 100%;
+  max-width: 520px;
+}
+
+.data-source-sync-picker-actions {
+  justify-content: flex-end;
+}
+
+.data-source-sync-tree.ant-tree {
+  max-height: 420px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+}
+
+.data-source-sync-tree-file-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.data-source-sync-tree-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.data-source-sync-tree-chip-new {
+  border-color: #b7eb8f;
+  background: #f6ffed;
+  color: #389e0d;
+}
+
+.data-source-sync-tree-chip-changed {
+  border-color: #91caff;
+  background: #e6f4ff;
+  color: #1677ff;
+}
+
+.data-source-sync-tree-chip-deleted {
+  border-color: #ffccc7;
+  background: #fff2f0;
+  color: #f5222d;
+}
+
 .data-source-workbench {
   flex: 1;
   min-height: 0;

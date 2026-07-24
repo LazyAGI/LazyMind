@@ -3,16 +3,70 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from .assemble import assemble_dataset
 from .csv_loader import DIFFICULTIES, GENERATED_CASE_FIELDS, QUESTION_TYPES, as_list, as_text
 from .csv_loader import json_object, norm_text, normalize_eval_case
-from .kb_loader import build_corpus_snapshot, load_corpus
 
 QUESTION_RETRY_COUNT = 3
 
 
-def prepare_case(config: Mapping[str, Any], snapshot: Mapping[str, Any], case_id: str) -> dict[str, Any]:
-    index = int(case_id.rsplit('_', 1)[-1]) - 1
+def build_case_requests(config: Mapping[str, Any],
+                        snapshot: Mapping[str, Any]
+                        ) -> dict[str, dict[str, str]]:
+    cases = [row for row in snapshot.get('cases') or () if isinstance(row, Mapping)]
+    case_ids = [as_text(row.get('id')) for row in cases]
+    if any(not case_id for case_id in case_ids):
+        raise ValueError('corpus snapshot cases require ids')
+    if len(set(case_ids)) != len(case_ids):
+        raise ValueError('corpus snapshot case ids must be unique')
+
+    stats = snapshot.get('stats') if isinstance(snapshot.get('stats'), Mapping) else {}
+    inputs = config.get('inputs') if isinstance(config.get('inputs'), Mapping) else {}
+    raw_target = (
+        config.get('num_case')
+        or inputs.get('num_case')
+        or stats.get('min_case_count')
+        or snapshot.get('case_count')
+        or len(case_ids)
+        or 1
+    )
+    target = int(raw_target)
+    if target < 1:
+        raise ValueError('corpus snapshot target case count must be positive')
+
+    index = 1
+    while len(case_ids) < target:
+        case_id = f'case_{index:04d}'
+        index += 1
+        if case_id not in case_ids:
+            case_ids.append(case_id)
+    return {case_id: {'case_id': case_id} for case_id in case_ids}
+
+
+def prepare_case(config: Mapping[str, Any], snapshot: Mapping[str, Any], case_id: str,
+                 request: Mapping[str, Any] | None = None
+                 ) -> dict[str, Any]:
+    request = request or {}
+    requested_id = as_text(request.get('case_id'))
+    if requested_id and requested_id != case_id:
+        raise ValueError('case request id does not match partition key')
+    guidance = {
+        key: value
+        for key, value in request.items()
+        if key not in {'case_id', 'case'}
+    }
+    manual_case = request.get('case')
+    if isinstance(manual_case, Mapping):
+        preparation = {
+            'case_id': case_id,
+            'mode': 'manual_case',
+            'case': dict(manual_case),
+        }
+        if guidance:
+            preparation['user_request'] = guidance
+        return preparation
+
+    suffix = case_id.rsplit('_', 1)[-1]
+    index = max(int(suffix) - 1, 0) if suffix.isdigit() else 0
     case = _case_by_id(snapshot, case_id)
     if case is not None:
         prep = dict(case.get('source_preparation') or {})
@@ -21,6 +75,8 @@ def prepare_case(config: Mapping[str, Any], snapshot: Mapping[str, Any], case_id
                      'difficulty': as_text(case.get('difficulty')),
                      'source_snapshot_dataset_id': as_text(snapshot.get('dataset_id')),
                      'source_message_id': as_text(case.get('source_message_id'))})
+        if guidance:
+            prep['user_request'] = guidance
         return _with_warnings(prep, snapshot, index)
     if snapshot.get('cases') and not snapshot.get('source_units'):
         raise ValueError(f'imported eval dataset has no case for partition {case_id}')
@@ -33,12 +89,16 @@ def prepare_case(config: Mapping[str, Any], snapshot: Mapping[str, Any], case_id
         source = sources[index % len(sources)]
         units = [unit for unit in units if as_text(unit.get('source_id')) == source]
     qtype = _choice(config, 'question_type', QUESTION_TYPES, index)
-    try:
-        contexts = _contexts(units, qtype, index)
-    except ValueError:
-        if as_list(config.get('question_types') or config.get('question_type')):
-            raise
-        qtype, contexts = 'single_hop', _contexts(units, 'single_hop', index)
+    required_chunks = _unique_texts(as_list(guidance.get('required_chunks')))
+    if required_chunks:
+        contexts = _required_contexts(units, required_chunks)
+    else:
+        try:
+            contexts = _contexts(units, qtype, index)
+        except ValueError:
+            if as_list(config.get('question_types') or config.get('question_type')):
+                raise
+            qtype, contexts = 'single_hop', _contexts(units, 'single_hop', index)
     prep = {
         'case_id': case_id,
         'mode': 'generated_kb_dataset',
@@ -51,6 +111,8 @@ def prepare_case(config: Mapping[str, Any], snapshot: Mapping[str, Any], case_id
                         'kb_id': ';'.join(dict.fromkeys(as_text(item['source_id'])
                                                         for item in contexts if as_text(item['source_id'])))},
     }
+    if guidance:
+        prep['user_request'] = guidance
     return _with_warnings(prep, snapshot, index)
 
 
@@ -59,6 +121,13 @@ def generate_case(config: Mapping[str, Any], snapshot: Mapping[str, Any], prep: 
                   duplicate_questions: Callable[[Mapping[str, Any]], list[str]] | None = None) -> dict[str, Any]:
     if not (case_id := as_text(prep.get('case_id'))):
         raise ValueError('case preparation missing case_id')
+    if prep.get('mode') == 'manual_case':
+        case = normalize_eval_case(_mapping(prep.get('case'), 'manual case'), default_id=case_id)
+        if case['id'] != case_id:
+            raise ValueError('manual case id does not match case preparation')
+        source = dict(case.get('source_preparation') or {})
+        source.update({'case_id': case_id, 'mode': 'manual_case'})
+        return {**case, 'source_preparation': source}
     if prep.get('mode') == 'imported_eval_dataset':
         case = _case_by_id(snapshot, case_id)
         if case is None:
@@ -98,53 +167,16 @@ def _case_by_id(snapshot: Mapping[str, Any], case_id: str) -> Mapping[str, Any] 
                  if isinstance(row, Mapping) and as_text(row.get('id')) == case_id), None)
 
 
+def _mapping(value: object, name: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f'{name} must be a mapping')
+    return value
+
+
 def _with_warnings(prep: dict[str, Any], snapshot: Mapping[str, Any], index: int) -> dict[str, Any]:
     if index == 0 and (warnings := [item for item in snapshot.get('warnings', []) if isinstance(item, Mapping)]):
         prep['warnings'] = [*list(prep.get('warnings') or []), *warnings]
     return prep
-
-
-def dataset_materializers(case_ids, *, llm_complete=None, duplicate_questions=None) -> dict[str, Any]:
-    partitions = tuple(sorted(dict.fromkeys(case_ids)))
-    if not partitions:
-        raise ValueError('case_ids must not be empty')
-
-    def load(ctx, inputs) -> Mapping[str, object]:
-        return {'report': load_corpus(inputs['source_config'], partitions)}
-
-    def snapshot(ctx, inputs) -> Mapping[str, object]:
-        return {'snapshot': build_corpus_snapshot(inputs['report'], inputs['source_config'])}
-
-    def prepare(ctx, inputs) -> Mapping[str, object]:
-        partition = ctx.output_key_by_name['preparation'].partition
-        return {'preparation': prepare_case(inputs['config'], inputs['snapshot'], partition)}
-
-    def case(ctx, inputs) -> Mapping[str, object]:
-        partition = ctx.output_key_by_name['case'].partition
-        preparation = inputs['preparation']
-        if as_text(preparation.get('case_id')) != partition:
-            raise ValueError('dataset.generate_case preparation case_id does not match partition')
-        check = None
-        if duplicate_questions is not None:
-            def duplicate_check(row):
-                return duplicate_questions(ctx.run_id, partition, row)
-            check = duplicate_check
-        return {'case': generate_case(inputs['config'], inputs['snapshot'], preparation, llm_complete, check)}
-
-    def assemble(ctx, inputs) -> Mapping[str, object]:
-        values = inputs['cases']
-        runtime_partitions = tuple(sorted(ref.key.partition for ref in ctx.input_ref_by_key.values()
-                                          if ref.key.partition))
-        if not isinstance(values, tuple):
-            raise ValueError('cases input must be a partitioned tuple')
-        if runtime_partitions != partitions:
-            raise ValueError('dataset materializer case_ids do not match runtime partitions')
-        return {'dataset': assemble_dataset(dict(zip(partitions, values, strict=True)),
-                                            run_id=ctx.run_id,
-                                            min_case_count=len(partitions))}
-
-    return {'dataset.load_corpus': load, 'dataset.build_corpus_snapshot': snapshot,
-            'dataset.prepare_case': prepare, 'dataset.generate_case': case, 'dataset.assemble': assemble}
 
 
 def _complete_case(config: Mapping[str, Any], prep: Mapping[str, Any], complete: Callable[[str], str] | None, *,
@@ -214,10 +246,34 @@ def _contexts(units: list[Mapping[str, Any]], qtype: str, index: int) -> list[di
             raise ValueError('multi_doc_multi_hop needs chunks from two documents')
         rotated = picked
     limit = 1 if qtype == 'single_hop' else min(2 if qtype == 'formula' else 3, len(rotated))
-    return [{**{key: as_text(unit.get(key)) for key in (
-        'source_id', 'source_unit_ref', 'doc_ref', 'chunk_id', 'doc_id', 'filename')},
+    return [_context(unit) for unit in rotated[:limit]]
+
+
+def _required_contexts(units: list[Mapping[str, Any]], required: list[str]
+                       ) -> list[dict[str, str]]:
+    by_id = {
+        identity: unit
+        for unit in units
+        for identity in (
+            as_text(unit.get('chunk_id')),
+            as_text(unit.get('source_unit_ref')),
+        )
+        if identity
+    }
+    missing = [chunk_id for chunk_id in required if chunk_id not in by_id]
+    if missing:
+        raise ValueError(f'required chunks are not present in corpus snapshot: {", ".join(missing)}')
+    return [_context(by_id[chunk_id]) for chunk_id in required]
+
+
+def _context(unit: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        **{key: as_text(unit.get(key)) for key in (
+            'source_id', 'source_unit_ref', 'doc_ref', 'chunk_id', 'doc_id', 'filename',
+        )},
         'unit_type': as_text(unit.get('unit_type') or 'paragraph'),
-        'content_preview': as_text(unit.get('content'))[:1200]} for unit in rotated[:limit]]
+        'content_preview': as_text(unit.get('content'))[:1200],
+    }
 
 
 def _choice(config: Mapping[str, Any], key: str, allowed: tuple[str, ...], index: int) -> str:

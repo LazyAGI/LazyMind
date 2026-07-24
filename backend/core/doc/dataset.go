@@ -124,8 +124,9 @@ const (
 	maxDatasetTags             = 10
 	maxDatasetTagRunes         = 20
 	maxDatasetDisplayNameRunes = 100
-	datasetDisplayNameRule     = "dataset name supports Chinese/English, numbers, -, _, ., up to 100 characters"
 )
+
+var errInvalidDatasetDisplayName = errors.New("dataset name supports Chinese/English, numbers, -, _, ., up to 100 characters")
 
 func validateDatasetDisplayName(name string) error {
 	trimmed := strings.TrimSpace(name)
@@ -133,7 +134,7 @@ func validateDatasetDisplayName(name string) error {
 		return fmt.Errorf("dataset name is required")
 	}
 	if trimmed != name || utf8.RuneCountInString(trimmed) > maxDatasetDisplayNameRunes {
-		return fmt.Errorf(datasetDisplayNameRule)
+		return errInvalidDatasetDisplayName
 	}
 	for _, r := range trimmed {
 		if r >= '\u4e00' && r <= '\u9fa5' {
@@ -151,7 +152,7 @@ func validateDatasetDisplayName(name string) error {
 		if r == '_' || r == '.' || r == '-' {
 			continue
 		}
-		return fmt.Errorf(datasetDisplayNameRule)
+		return errInvalidDatasetDisplayName
 	}
 	return nil
 }
