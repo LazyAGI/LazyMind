@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -11,6 +10,7 @@ from typing import Any
 from unidiff import PatchSet
 
 from evo.operations.public_contracts import RepairPatch, algo_id, dump_contract
+from evo.repair_model import EvoModelConfigError, opencode_settings
 
 from .candidate import validate_candidate_patch
 from .code_index import build_code_index
@@ -32,7 +32,6 @@ from .workspace import (
 )
 
 DEFAULT_SOURCE = '/app/algorithm'
-PROVIDER_NAME = re.compile(r'^[a-z0-9][a-z0-9_-]*$')
 FINAL_PATCH_STATUSES = {'validated', 'exhausted_with_patch'}
 
 
@@ -66,11 +65,11 @@ def prepare_candidate_workspace(
     }
 
 
-def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str, Any], ...],
-                    baseline_judges: tuple[Mapping[str, Any], ...], eval_policy: Mapping[str, Any],
-                    candidate_config: Mapping[str, Any], repair_policy: Mapping[str, Any], ctx: Any,
-                    plan: Mapping[str, Any] | None = None,
-                    trace: Any | None = None) -> dict[str, Any]:
+async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str, Any], ...],
+                          baseline_judges: tuple[Mapping[str, Any], ...], eval_policy: Mapping[str, Any],
+                          candidate_config: Mapping[str, Any], repair_policy: Mapping[str, Any], ctx: Any,
+                          plan: Mapping[str, Any] | None = None,
+                          trace: Any | None = None) -> dict[str, Any]:
     plan = plan if isinstance(plan, Mapping) else {}
     baseline_algo_id = next((text for judge in baseline_judges for text in (algo_id(judge),) if text), '')
     ready = _ready_workspace(workspace, plan, repair_policy)
@@ -92,9 +91,11 @@ def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str, Any]
         return _result('failed', plan, workspace, [], {}, missing_validation, baseline_algo_id, trace_cursor(trace))
     index = build_code_index(root)
     localization = localize_repair(index, plan)
-    opencode_config = _opencode_config_from_policy(policy)
-    if not opencode_config:
-        reason = 'missing opencode model configuration'
+    llm_config = policy.get('llm_config') if isinstance(policy.get('llm_config'), Mapping) else {}
+    try:
+        opencode_config = opencode_settings(llm_config.get('evo_llm'))
+    except EvoModelConfigError as exc:
+        reason = exc.reason
         safe_emit(trace, 'repair.loop_completed', status='failed', terminal=True, payload={'reason': reason})
         return _result('failed', plan, workspace, [], {}, reason, baseline_algo_id, trace_cursor(trace))
     attempts, session_id = [], ''
@@ -120,15 +121,22 @@ def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str, Any]
         session_id = run.session_id or session_id
         report = read_worker_report(artifact_dir / 'worker_report.json')
         diff_info = workspace_diff(root)
-        worker_failure = _worker_failure(run)
-        pre = pre_validate(root, diff_info, plan, policy, trace, attempt_no)
+        worker_failure = _repair_worker_failure(run, report, diff_info)
         if worker_failure:
+            pre = {'status': 'skipped', 'reason': 'worker_failed'}
             candidate = _rejected_candidate('worker_failed', worker_failure)
-        elif pre.get('status') != 'passed':
-            candidate = _rejected_candidate('pre_validation_failed', _text(pre.get('reason')) or 'pre_validation_failed')
         else:
-            candidate = validate_candidate_patch(root, diff_info['diff'], plan, case_map, baseline_map, eval_policy,
-                                                 candidate_config, ctx, trace, attempt_no)
+            pre = pre_validate(root, diff_info, plan, policy, trace, attempt_no)
+            if pre.get('status') != 'passed':
+                candidate = _rejected_candidate(
+                    'pre_validation_failed',
+                    _text(pre.get('reason')) or 'pre_validation_failed',
+                )
+            else:
+                candidate = await validate_candidate_patch(
+                    root, diff_info['diff'], plan, case_map, baseline_map,
+                    eval_policy, candidate_config, ctx, trace, attempt_no,
+                )
         status = 'validated' if candidate.get('accepted') is True else 'failed'
         attempt = {
             'attempt': attempt_no,
@@ -136,6 +144,7 @@ def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str, Any]
             'opencode': {
                 'returncode': getattr(run, 'returncode', None),
                 'last_error': getattr(run, 'last_error', None),
+                'finish_reason': getattr(run, 'finish_reason', ''),
                 'configured': bool(opencode_config),
             },
             'worker_report': report,
@@ -157,6 +166,13 @@ def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str, Any]
             safe_emit(trace, 'repair.loop_completed', status='completed', terminal=True,
                       payload={'status': 'validated', 'attempt_count': len(attempts)})
             return _result('validated', plan, workspace, attempts, attempt, 'validated repair patch',
+                           baseline_algo_id, trace_cursor(trace))
+        if candidate.get('early_stop_reason') == 'chat_runtime_error':
+            reason = 'candidate validation failed: chat_runtime_error'
+            safe_emit(trace, 'repair.loop_completed', status='failed', terminal=True,
+                      payload={'status': 'failed', 'attempt_count': len(attempts), 'reason': reason})
+            reset_workspace(root)
+            return _result('failed', plan, workspace, attempts, {}, reason,
                            baseline_algo_id, trace_cursor(trace))
     fallback = _latest_prevalidated_patch(attempts)
     if fallback:
@@ -401,6 +417,9 @@ def _latest_prevalidated_patch(attempts: list[Mapping[str, Any]]) -> Mapping[str
     for attempt in reversed(attempts):
         if not str(attempt.get('diff') or '').strip():
             continue
+        candidate = attempt.get('candidate_validation')
+        if isinstance(candidate, Mapping) and candidate.get('reason') == 'worker_failed':
+            continue
         pre = attempt.get('pre_validation') if isinstance(attempt.get('pre_validation'), Mapping) else {}
         if pre.get('status') == 'passed':
             return attempt
@@ -415,6 +434,21 @@ def _worker_failure(run: Any) -> str:
     if returncode:
         return f'opencode exited with {returncode}'
     return ''
+
+
+def _repair_worker_failure(run: Any, report: Mapping[str, Any],
+                           diff_info: Mapping[str, Any]) -> str:
+    failure = _worker_failure(run)
+    if (
+        not failure
+        and getattr(run, 'finish_reason', '') == 'length'
+        and (
+            not _text(diff_info.get('diff'))
+            or report.get('status') != 'edited'
+        )
+    ):
+        return 'opencode_output_truncated'
+    return failure
 
 
 def _rejected_candidate(reason: str, detail: str = '') -> dict[str, Any]:
@@ -464,33 +498,6 @@ def _plan_ref(plan: Mapping[str, Any]) -> dict[str, Any]:
         'status': _text(plan.get('status')),
         'objective_hash': objective_hash,
         'selected_group': _group_summary(plan.get('selected_group')),
-    }
-
-
-def _opencode_config_from_policy(policy: Mapping[str, Any]) -> dict[str, str]:
-    llm_config = policy.get('llm_config') if isinstance(policy.get('llm_config'), Mapping) else {}
-    role = llm_config.get('evo_llm') if isinstance(llm_config.get('evo_llm'), Mapping) else {}
-    if not role:
-        return {}
-    model = _text(role.get('model'))
-    base_url = _text(role.get('base_url')).rstrip('/')
-    provider = _text(role.get('provider') or role.get('source')).lower()
-    if not PROVIDER_NAME.fullmatch(provider):
-        return {}
-    if provider == 'qwen' and base_url == 'https://dashscope.aliyuncs.com':
-        base_url = f'{base_url}/compatible-mode/v1'
-    api_key = _text(role.get('api_key'))
-    skip_auth = role.get('skip_auth') is True
-    if not (provider and model and base_url and (api_key or skip_auth)):
-        return {}
-    return {
-        'model': f'{provider}/{model}',
-        'provider': provider,
-        'provider_model': model,
-        'provider_label': provider,
-        'base_url': base_url,
-        'api_key': api_key,
-        'skip_auth': 'true' if skip_auth else '',
     }
 
 

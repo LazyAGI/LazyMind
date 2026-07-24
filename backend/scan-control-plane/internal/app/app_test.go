@@ -154,7 +154,7 @@ func TestAuthServiceAdminVerifierUsesValidateEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	verifier, err := newAuthServiceAdminVerifier(server.URL, server.Client())
+	verifier, err := newAuthServiceAdminVerifier(server.URL, "internal-token", server.Client())
 	if err != nil {
 		t.Fatalf("new admin verifier: %v", err)
 	}
@@ -164,6 +164,64 @@ func TestAuthServiceAdminVerifierUsesValidateEndpoint(t *testing.T) {
 	}
 	if !ok {
 		t.Fatalf("expected realtime role to be admin")
+	}
+}
+
+func TestAuthServiceAdminVerifierUsesTrustedInternalRoleLookup(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/authservice/user/user-1/role/internal" {
+			http.Error(w, "unexpected internal role request", http.StatusNotFound)
+			return
+		}
+		if got := r.Header.Get("X-LazyMind-Internal-Token"); got != "internal-token" {
+			http.Error(w, "missing internal token", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":200,"message":"success","data":{"user_id":"user-1","role":"system-admin","tenant_id":"tenant-1","disabled":false}}`))
+	}))
+	defer server.Close()
+
+	verifier, err := newAuthServiceAdminVerifier(server.URL, "internal-token", server.Client())
+	if err != nil {
+		t.Fatalf("new admin verifier: %v", err)
+	}
+	ok, err := verifier.IsAdmin(context.Background(), access.Actor{
+		UserID:        "user-1",
+		InternalToken: "internal-token",
+	})
+	if err != nil {
+		t.Fatalf("verify internal admin: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected internal role lookup to verify admin")
+	}
+}
+
+func TestAuthServiceAdminVerifierRejectsUntrustedInternalCaller(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"user_id":"user-1","role":"system-admin","disabled":false}`))
+	}))
+	defer server.Close()
+
+	verifier, err := newAuthServiceAdminVerifier(server.URL, "internal-token", server.Client())
+	if err != nil {
+		t.Fatalf("new admin verifier: %v", err)
+	}
+	ok, err := verifier.IsAdmin(context.Background(), access.Actor{
+		UserID:        "user-1",
+		InternalToken: "wrong-token",
+	})
+	if err != nil {
+		t.Fatalf("reject untrusted caller: %v", err)
+	}
+	if ok {
+		t.Fatalf("untrusted internal caller must not be treated as admin")
 	}
 }
 

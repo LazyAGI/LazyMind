@@ -127,7 +127,10 @@ export function normalizeDataSourceFileUpdateState(
   ) {
     return "unchanged";
   }
-  if (hasStatusToken(updateType, ["delete", "deleted", "remove", "removed"])) {
+  if (
+    hasStatusToken(updateType, ["cleanup", "delete", "deleted", "remove", "removed"]) ||
+    hasStatusText(updateType, ["out_of_scope", "out of scope"])
+  ) {
     return "deleted";
   }
   if (

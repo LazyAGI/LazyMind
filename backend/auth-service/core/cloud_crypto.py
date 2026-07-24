@@ -12,7 +12,7 @@ _ENV_KEY = 'LAZYMIND_AUTH_CLOUD_SECRET_KEY'
 def _resolve_secret_key() -> bytes:
     raw = (os.environ.get(_ENV_KEY) or '').strip()
     if not raw:
-        raise RuntimeError(f'{_ENV_KEY} is required for cloud oauth credential encryption')
+        raise RuntimeError('LAZYMIND_AUTH_CLOUD_SECRET_KEY is required for cloud oauth credential encryption')
 
     # Preferred format: 32-byte key encoded with base64/urlsafe-base64.
     try:

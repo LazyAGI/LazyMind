@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import DateTime, String, Text, func
+from sqlalchemy import DateTime, Index, String, Text, func, text
 from sqlalchemy.orm import mapped_column
 
 from .base import Base
@@ -8,6 +8,18 @@ from .base import Base
 
 class CloudAuthConnection(Base):
     __tablename__ = 'cloud_auth_connections'
+    __table_args__ = (
+        Index(
+            'uq_cloud_auth_connections_owner_provider_mode_client',
+            'owner_user_id',
+            'provider',
+            'auth_mode',
+            'client_id',
+            unique=True,
+            postgresql_where=text("client_id IS NOT NULL AND auth_mode IN ('tenant', 'service_account')"),
+            sqlite_where=text("client_id IS NOT NULL AND auth_mode IN ('tenant', 'service_account')"),
+        ),
+    )
 
     connection_id = mapped_column(String(64), primary_key=True, default=lambda: f'conn_{uuid.uuid4().hex}')
     tenant_id = mapped_column(String(64), nullable=False, index=True, default='', comment='Tenant id')
@@ -19,6 +31,7 @@ class CloudAuthConnection(Base):
         default='oauth_user',
         comment='tenant/oauth_user/service_account',
     )
+    client_id = mapped_column(String(255), nullable=True, comment='Normalized cloud app/integration id')
     credential_ciphertext = mapped_column(Text, nullable=False, comment='Encrypted app credential payload')
     auth_state_ciphertext = mapped_column(Text, nullable=False, default='', comment='Encrypted token/auth state')
     provider_account_id = mapped_column(

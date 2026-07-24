@@ -82,7 +82,8 @@ def test_oauth_authorize_url_success_when_secret_key_present(client: TestClient,
     listed = client.get('/api/authservice/v1/cloud/connections?provider=feishu', headers=headers)
     assert listed.status_code == 200
     items = _data(listed)['items']
-    assert items == []
+    assert len(items) == 1
+    assert items[0]['connection_id'] == data['connection_id']
 
     pending = client.get('/api/authservice/v1/cloud/connections?provider=feishu&status=PENDING', headers=headers)
     assert pending.status_code == 200

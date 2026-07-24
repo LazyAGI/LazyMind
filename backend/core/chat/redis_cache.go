@@ -63,6 +63,7 @@ type ChatChunkResponse struct {
 	TaskCreated       *TaskCreatedNotice       `json:"task_created,omitempty"`
 	ArtifactCreated   *ConversationArtifactDTO `json:"artifact_created,omitempty"`
 	AskPending        *AskPendingEvent         `json:"ask_pending,omitempty"`
+	ToolLimitPending  *ToolLimitPendingEvent   `json:"tool_limit_pending,omitempty"`
 	IntentUpdated     *IntentUpdatedEvent      `json:"intent_updated,omitempty"`
 }
 
@@ -263,7 +264,7 @@ func getMultiAnswerInfo(ctx context.Context, stateStore state.Store, conversatio
 // ConvEvent is a conversation-level notification pushed to the frontend via the
 // /conversations/{id}/events SSE endpoint. It is independent of any chat turn.
 type ConvEvent struct {
-	Type    string `json:"type"`    // task_created | step_waiting | plugin_completed | plugin_error | driver_input | auto_chat_started | ask_pending
+	Type    string `json:"type"`    // task_created | plugin_artifact_updated | step_waiting | plugin_completed | plugin_error | driver_input | auto_chat_started | ask_pending
 	Payload any    `json:"payload"` // *TaskCreatedNotice or plugin lifecycle payload map
 }
 

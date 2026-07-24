@@ -29,9 +29,10 @@ function toSyncTreeDataNodes(
 
     return {
       key: getScanTreeNodeKey(node),
-      treeKey: `${node.key}`,
+      treeKey: `${node.tree_key || ""}`,
       objectKey: node.object_key,
       nodeRef: node.node_ref,
+      bindingId: node.binding_id,
       isLeaf: !node.has_children,
       disableCheckbox: !isSelectableScanTreeDocument(node),
       title: (

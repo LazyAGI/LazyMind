@@ -2,7 +2,9 @@ package common
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
+	"sync"
 )
 
 type AppError struct {
@@ -11,6 +13,18 @@ type AppError struct {
 	Message    string
 	Detail     any
 }
+
+type errorPattern struct {
+	template string
+	matcher  *regexp.Regexp
+	appErr   *AppError
+}
+
+var (
+	errorPatterns         []errorPattern
+	normalizedCatalogOnce sync.Once
+	normalizedCatalog     map[string]*AppError
+)
 
 func NewAppError(httpStatus, code int, message string) *AppError {
 	return &AppError{HTTPStatus: httpStatus, Code: code, Message: message}
@@ -146,12 +160,12 @@ var errorCatalog = map[string]*AppError{
 	"group_ids is required":                                       NewAppError(http.StatusBadRequest, 2000824, "group_ids is required"),
 	"group_ids is required for add_to_group":                      NewAppError(http.StatusBadRequest, 2000825, "group_ids is required for add_to_group"),
 	"group_ids is required for conflict":                          NewAppError(http.StatusBadRequest, 2000826, "group_ids is required for conflict"),
-	"group_ids required":                                          NewAppError(http.StatusBadRequest, 2000827, "group_ids required"),
+	"group_ids required":                                          NewAppError(http.StatusBadRequest, 2000824, "group_ids is required"),
 	"history ids are not in same conversation":                    NewAppError(http.StatusBadRequest, 2000828, "history ids are not in same conversation"),
 	"history_id required":                                         NewAppError(http.StatusBadRequest, 2000829, "history_id required"),
 	"id is required":                                              NewAppError(http.StatusBadRequest, 2000830, "id is required"),
 	"id is required when conflict is true":                        NewAppError(http.StatusBadRequest, 2000831, "id is required when conflict is true"),
-	"id required":                                                 NewAppError(http.StatusBadRequest, 2000832, "id required"),
+	"id required":                                                 NewAppError(http.StatusBadRequest, 2000830, "id is required"),
 	"ids required":                                                NewAppError(http.StatusBadRequest, 2000833, "ids required"),
 	"invalid action":                                              NewAppError(http.StatusBadRequest, 2000834, "invalid action"),
 	"invalid conversation name":                                   NewAppError(http.StatusBadRequest, 2000835, "invalid conversation name"),
@@ -167,8 +181,8 @@ var errorCatalog = map[string]*AppError{
 	"invalid suggestion filter":                                   NewAppError(http.StatusBadRequest, 2000845, "invalid suggestion filter"),
 	"messages request body required":                              NewAppError(http.StatusBadRequest, 2000846, "messages request body required"),
 	"missing file_id":                                             NewAppError(http.StatusBadRequest, 2000847, "missing file_id"),
-	"missing group_id":                                            NewAppError(http.StatusBadRequest, 2000848, "missing group_id"),
-	"missing id":                                                  NewAppError(http.StatusBadRequest, 2000849, "missing id"),
+	"missing group_id":                                            NewAppError(http.StatusBadRequest, 2000823, "group_id is required"),
+	"missing id":                                                  NewAppError(http.StatusBadRequest, 2000830, "id is required"),
 	"missing model_provider_id":                                   NewAppError(http.StatusBadRequest, 2000850, "missing model_provider_id"),
 	"missing model_provider_id or group_id":                       NewAppError(http.StatusBadRequest, 2000851, "missing model_provider_id or group_id"),
 	"missing model_provider_id, group_id, or model_id":            NewAppError(http.StatusBadRequest, 2000852, "missing model_provider_id, group_id, or model_id"),
@@ -177,8 +191,8 @@ var errorCatalog = map[string]*AppError{
 	"missing suggestion id":                                       NewAppError(http.StatusBadRequest, 2000855, "missing suggestion id"),
 	"model not found":                                             NewAppError(http.StatusBadRequest, 2000856, "model not found"),
 	"model_type is required":                                      NewAppError(http.StatusBadRequest, 2000857, "model_type is required"),
-	"model_key is required":                                       NewAppError(http.StatusBadRequest, 2000857, "model_key is required"),
-	"invalid model_key":                                           NewAppError(http.StatusBadRequest, 2000857, "invalid model_key"),
+	"model_key is required":                                       NewAppError(http.StatusBadRequest, 2001301, "model_key is required"),
+	"invalid model_key":                                           NewAppError(http.StatusBadRequest, 2001302, "invalid model_key"),
 	"name and base_url are required":                              NewAppError(http.StatusBadRequest, 2000858, "name and base_url are required"),
 	"name and model_type are required":                            NewAppError(http.StatusBadRequest, 2000859, "name and model_type are required"),
 	"name required":                                               NewAppError(http.StatusBadRequest, 2000860, "name required"),
@@ -199,7 +213,7 @@ var errorCatalog = map[string]*AppError{
 	"parent skill has pending_confirm draft":                          NewAppError(http.StatusBadRequest, 2000875, "parent skill has pending_confirm draft"),
 	"path namespace must be skills":                                   NewAppError(http.StatusBadRequest, 2000876, "path namespace must be skills"),
 	"path points to directory":                                        NewAppError(http.StatusBadRequest, 2000877, "path points to directory"),
-	"path required":                                                   NewAppError(http.StatusBadRequest, 2000878, "path required"),
+	"path required":                                                   NewAppError(http.StatusBadRequest, 2000209, "Path is required"),
 	"path segment cannot contain slash":                               NewAppError(http.StatusBadRequest, 2000879, "path segment cannot contain slash"),
 	"path segment required":                                           NewAppError(http.StatusBadRequest, 2000880, "path segment required"),
 	"provider_name, base_url, and api_key are required":               NewAppError(http.StatusBadRequest, 2000881, "provider_name, base_url, and api_key are required"),
@@ -216,8 +230,8 @@ var errorCatalog = map[string]*AppError{
 	"status must be 0 or 1":                                           NewAppError(http.StatusBadRequest, 2000891, "status must be 0 or 1"),
 	"suggestion title/content required":                               NewAppError(http.StatusBadRequest, 2000892, "suggestion title/content required"),
 	"suggestion_ids or user_instruct required":                        NewAppError(http.StatusBadRequest, 2000893, "suggestion_ids or user_instruct required"),
-	"user_instruct required":                                          NewAppError(http.StatusBadRequest, 2000893, "user_instruct required"),
-	"content and user_instruct required":                              NewAppError(http.StatusBadRequest, 2000893, "content and user_instruct required"),
+	"user_instruct required":                                          NewAppError(http.StatusBadRequest, 2001303, "user_instruct required"),
+	"content and user_instruct required":                              NewAppError(http.StatusBadRequest, 2001304, "content and user_instruct required"),
 	"suggestions length must be between 1 and 5":                      NewAppError(http.StatusBadRequest, 2000894, "suggestions length must be between 1 and 5"),
 	"term and aliases are empty":                                      NewAppError(http.StatusBadRequest, 2000895, "term and aliases are empty"),
 	"term is required":                                                NewAppError(http.StatusBadRequest, 2000896, "term is required"),
@@ -405,17 +419,51 @@ var errorCatalog = map[string]*AppError{
 
 func ResolveAppError(message string, statusCode int) *AppError {
 	base, detail := splitErrorMessage(message)
-	if appErr, ok := errorCatalog[normalizeErrorKey(base)]; ok {
-		if detail != "" {
-			return appErr.WithDetail(detail)
+	if appErr, matchedPattern, ok := lookupErrorCatalogMatch(base); ok {
+		resolved := *appErr
+		resolved.HTTPStatus = statusCode
+		if matchedPattern && detail == "" {
+			detail = strings.TrimSpace(message)
 		}
-		return appErr
+		if detail != "" {
+			resolved.Detail = detail
+		}
+		return &resolved
 	}
 	appErr := &AppError{HTTPStatus: statusCode, Code: ErrorCodeFromHTTPStatus(statusCode), Message: strings.TrimSpace(base)}
 	if detail != "" {
 		appErr.Detail = detail
 	}
 	return appErr
+}
+
+func lookupErrorCatalog(message string) (*AppError, bool) {
+	appErr, _, ok := lookupErrorCatalogMatch(message)
+	return appErr, ok
+}
+
+func lookupErrorCatalogMatch(message string) (*AppError, bool, bool) {
+	normalizedCatalogOnce.Do(func() {
+		normalizedCatalog = make(map[string]*AppError, len(errorCatalog))
+		for key, appErr := range errorCatalog {
+			normalized := normalizeErrorKey(key)
+			if previous, exists := normalizedCatalog[normalized]; exists && previous.Code != appErr.Code {
+				panic("duplicate normalized Core error catalog message: " + normalized)
+			}
+			normalizedCatalog[normalized] = appErr
+		}
+	})
+
+	normalized := normalizeErrorKey(message)
+	if appErr, ok := normalizedCatalog[normalized]; ok {
+		return appErr, false, true
+	}
+	for _, pattern := range errorPatterns {
+		if pattern.matcher.MatchString(normalized) {
+			return pattern.appErr, true, true
+		}
+	}
+	return nil, false, false
 }
 
 func splitErrorMessage(message string) (string, string) {

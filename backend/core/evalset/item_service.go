@@ -802,8 +802,11 @@ func itemResponses(items []orm.EvalSetItem, knowledgeBaseReferenceDocIDs map[str
 
 func itemResponse(item *orm.EvalSetItem, knowledgeBaseReferenceDocIDs map[string]struct{}) *EvalSetItemResponse {
 	referenceDocInvalid := hasInvalidReferenceDoc(item.ReferenceDocIDs, knowledgeBaseReferenceDocIDs)
+	referenceDocFromKnowledgeBase := hasReferenceDocInSet(item.ReferenceDocIDs, knowledgeBaseReferenceDocIDs)
 	referenceContextHasChunkParts := referenceContextHasChunks(item.ReferenceContext)
 	referenceChunkSelected := referenceContextHasChunkParts || len(splitListIDs(item.ReferenceChunkIDs)) > 0
+	referenceChunkInvalid := referenceContextHasChunkParts &&
+		(referenceDocInvalid || !referenceDocFromKnowledgeBase)
 	return &EvalSetItemResponse{
 		ID:                            item.ID,
 		EvalSetID:                     item.EvalSetID,
@@ -818,10 +821,10 @@ func itemResponse(item *orm.EvalSetItem, knowledgeBaseReferenceDocIDs map[string
 		ReferenceContext:              item.ReferenceContext,
 		ReferenceDoc:                  item.ReferenceDoc,
 		ReferenceDocIDs:               item.ReferenceDocIDs,
-		ReferenceDocFromKnowledgeBase: hasReferenceDocInSet(item.ReferenceDocIDs, knowledgeBaseReferenceDocIDs),
+		ReferenceDocFromKnowledgeBase: referenceDocFromKnowledgeBase,
 		ReferenceDocInvalid:           referenceDocInvalid,
 		ReferenceChunkSelected:        referenceChunkSelected,
-		ReferenceChunkInvalid:         referenceDocInvalid && referenceContextHasChunkParts,
+		ReferenceChunkInvalid:         referenceChunkInvalid,
 		IsDeleted:                     item.IsDeleted,
 		Source:                        item.Source,
 		SourceSessionID:               item.SourceSessionID,

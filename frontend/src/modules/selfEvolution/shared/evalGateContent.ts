@@ -1,4 +1,8 @@
-import { type PxCategoryMetricAverage } from "./types";
+import {
+  type EvalReportMetricKey,
+  type EvalReportQuestionTypeSummary,
+  type PxCategoryMetricAverage,
+} from "./types";
 import { t } from "./i18n";
 import {
   getNestedRecordField,
@@ -13,6 +17,28 @@ function clampGateMetric(value: number) {
     return 0;
   }
   return Math.min(1, Math.max(0, value));
+}
+
+const evalReportMetricKeys: EvalReportMetricKey[] = [
+  "correctness",
+  "relevance",
+  "completeness",
+  "groundedness",
+  "format_compliance",
+  "answer_quality",
+  "retrieval_quality",
+  "overall",
+];
+
+function getEvalReportMetrics(
+  record: Record<string, unknown> | undefined,
+): Record<EvalReportMetricKey, number> {
+  return Object.fromEntries(
+    evalReportMetricKeys.map((key) => [
+      key,
+      clampGateMetric(getNumberField(record, [key]) ?? 0),
+    ]),
+  ) as Record<EvalReportMetricKey, number>;
 }
 
 export function isGateEvalContent(record: Record<string, unknown>): boolean {
@@ -57,6 +83,30 @@ export function getGateEvalCaseCount(payload: unknown): number {
     getNumberField(record, ["case_num", "case_count", "total_cases"]) ||
     getGateEvalCaseRecords(payload).length
   );
+}
+
+export function getGateEvalMetrics(
+  payload: unknown,
+): Record<EvalReportMetricKey, number> | undefined {
+  const record = unwrapGateEvalContent(payload);
+  const metrics = getNestedRecordField(record, ["metrics"]);
+  return metrics ? getEvalReportMetrics(metrics) : undefined;
+}
+
+export function getGateEvalQuestionTypeSummaries(
+  payload: unknown,
+): EvalReportQuestionTypeSummary[] {
+  const record = unwrapGateEvalContent(payload);
+  return (getStructuredArrayField(record, ["question_type_summaries"]) || [])
+    .filter(isRecord)
+    .map((item) => ({
+      questionType:
+        (typeof item.question_type === "string" && item.question_type.trim()) ||
+        t("selfEvolutionRun.uncategorized"),
+      caseCount: getNumberField(item, ["case_num"]) || 0,
+      scoredCaseCount: getNumberField(item, ["scored_case_num"]) || 0,
+      metrics: getEvalReportMetrics(getNestedRecordField(item, ["metrics"])),
+    }));
 }
 
 export function buildPxCategoryMetricAveragesFromGateEval(

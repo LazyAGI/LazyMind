@@ -178,7 +178,6 @@ func registerAllRoutes(r *mux.Router) {
 	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates", []string{"qa.read"}, agent.ListThreadGates)
 	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates/{step}/versions/{version}:download", []string{"qa.read"}, agent.DownloadThreadGate)
 	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates/{step}/versions/{version}", []string{"qa.read"}, agent.GetThreadGateContent)
-	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates/eval/versions/{version}/bad-cases", []string{"qa.read"}, agent.GetThreadEvalGateBadCases)
 	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/gates/abtest/versions/{version}/case-details", []string{"qa.read"}, agent.GetThreadABTestGateCaseDetails)
 	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/results/traces:compare", []string{"qa.read"}, agent.CompareThreadTraces)
 	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/results/traces/{trace_id}", []string{"qa.read"}, agent.GetThreadTraceDetail)
@@ -207,6 +206,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations:resumeChat", []string{"qa.write"}, chat.ResumeChat)
 	handleAPI(r, "POST", "/conversations:stopChatGeneration", []string{"qa.write"}, chat.StopChatGeneration)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:stop", []string{"qa.write"}, chat.StopChatGeneration)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:toolLimitDecision", []string{"qa.write"}, chat.DecideToolLimit)
 	handleAPI(r, "GET", "/conversations/{conversation_id}:status", []string{"qa.read"}, chat.GetChatStatus)
 
 	// ----- SubAgent (Task Center) -----
@@ -296,6 +296,7 @@ func registerAllRoutes(r *mux.Router) {
 	// Stable list_index-based routes (preferred).
 	handleAPI(r, "DELETE", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, plugin.DeleteSlotItemByIndex)
 	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, plugin.PatchSlotItemByIndex)
+	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document", []string{"qa.write"}, chat.SyncWriterDocument)
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions", []string{"qa.read"}, plugin.GetSlotItemVersionsByIndex)
 	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback", []string{"qa.write"}, plugin.RollbackSlotItemByIndex)
 	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption", []string{"qa.write"}, plugin.PatchSlotCaptionByIndex)
@@ -374,9 +375,11 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/skill-market/{market_item_id}:install", []string{"qa.write"}, skillv2handler.MarketInstall)
 	handleAPI(r, "POST", "/admin/skill-market", []string{"user.admin"}, skillv2handler.MarketPublish)
 	handleAPI(r, "PATCH", "/admin/skill-market/{market_item_id}", []string{"user.admin"}, skillv2handler.MarketEdit)
+	handleAPI(r, "DELETE", "/admin/skill-market/{market_item_id}", []string{"user.admin"}, skillv2handler.MarketDelete)
 	handleAPI(r, "POST", "/admin/skill-market/{market_item_id}:offline", []string{"user.admin"}, skillv2handler.MarketUnpublish)
 	handleAPI(r, "POST", "/skill-market/admin/items", []string{"user.admin"}, skillv2handler.MarketPublish)
 	handleAPI(r, "PATCH", "/skill-market/admin/items/{market_item_id}", []string{"user.admin"}, skillv2handler.MarketEdit)
+	handleAPI(r, "DELETE", "/skill-market/admin/items/{market_item_id}", []string{"user.admin"}, skillv2handler.MarketDelete)
 	handleAPI(r, "POST", "/skill-market/admin/items/{market_item_id}:unpublish", []string{"user.admin"}, skillv2handler.MarketUnpublish)
 	handleAPI(r, "GET", "/skill-review:summary", []string{"qa.read"}, resourceupdate.GetSkillReviewSummary)
 	handleAPI(r, "POST", "/skill-review:run", []string{"qa.write"}, resourceupdate.RunSkillReview)

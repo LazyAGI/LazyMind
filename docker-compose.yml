@@ -362,6 +362,7 @@ services:
     environment:
       <<: *core-env
       MIGRATIONS_DIR: /migrations
+      MIGRATION_FAKE_VERSIONS: ${MIGRATION_FAKE_VERSIONS:-}
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
       LAZYMIND_SUBAGENT_DB_DSN: ${ACL_DB_DSN}
@@ -759,6 +760,8 @@ services:
       LAZYMIND_FILE_URL_SIGN_SECRET: changeme-in-production
       LAZYMIND_FILE_URL_EXPIRE_SECONDS: "3600"
       LAZYMIND_MAX_RETRIES: "20"
+      LAZYMIND_AGENTIC_TOOL_LIMIT_WAIT_TIMEOUT: ${LAZYMIND_AGENTIC_TOOL_LIMIT_WAIT_TIMEOUT:-120}
+      LAZYMIND_AGENTIC_EXPANDED_MAX_ROUNDS: ${LAZYMIND_AGENTIC_EXPANDED_MAX_ROUNDS:-200}
       LAZYMIND_REVIEW_MAX_RETRIES: "5"
       LAZYMIND_SKILL_REVIEW_DEBUG: "false"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
@@ -783,7 +786,9 @@ services:
         condition: service_healthy
 
   evo-api:
+    init: true
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-evo-api:${LAZYMIND_IMAGE_TAG:-latest}
+    entrypoint: ["python", "-m", "evo.app"]
     build:
       network: host
       context: .

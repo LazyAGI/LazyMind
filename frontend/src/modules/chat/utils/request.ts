@@ -134,6 +134,17 @@ export const taskStreamUrl = (taskId: string) =>
 export const convEventsUrl = (conversationId: string) =>
   `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events`;
 
+export function decideToolLimit(
+  conversationId: string,
+  decisionId: string,
+  action: "continue" | "summarize",
+) {
+  return axiosInstance.post(
+    `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}:toolLimitDecision`,
+    { decision_id: decisionId, action },
+  );
+}
+
 export function TaskServiceApi() {
   return {
     listConversationTasks(conversationId: string, options?: RawAxiosRequestConfig) {
@@ -176,6 +187,30 @@ export function PluginInfoApi() {
       return axiosInstance.get(`${coreApiBaseUrl}/plugins`, options);
     },
   };
+}
+
+export interface SyncWriterDocumentRequest {
+  base_revision: number;
+  source_document: Record<string, unknown>;
+  revised_document: Record<string, unknown>;
+}
+
+export interface SyncWriterDocumentPatchResult {
+  patch_id?: string;
+  success: boolean;
+  applied_hunks: string[];
+  failed_hunks: string[];
+  message: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface SyncWriterDocumentResult {
+  status: "synced" | "no_change";
+  revision: number;
+  feishu_synced: boolean;
+  artifact_saved: boolean;
+  patch_result: SyncWriterDocumentPatchResult;
+  document: Record<string, unknown>;
 }
 
 // Plugin Session API.
@@ -246,6 +281,23 @@ export function PluginSessionApi() {
       return axiosInstance.patch(
         `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}`,
         { value, ...(contentType ? { content_type: contentType } : {}) },
+        options,
+      );
+    },
+    syncWriterDocument(
+      sessionId: string,
+      slotId: string,
+      listIndex: number,
+      payload: SyncWriterDocumentRequest,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post<{
+        code: number;
+        message: string;
+        data: SyncWriterDocumentResult;
+      }>(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}:sync-writer-document`,
+        payload,
         options,
       );
     },

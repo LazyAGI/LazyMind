@@ -44,7 +44,7 @@ type SubAgentStep struct {
 
 func (SubAgentStep) TableName() string { return "sub_agent_steps" }
 
-// SubAgentArtifact is an output produced by a SubAgent via save_artifact.
+// SubAgentArtifact is an output produced by a SubAgent via save_artifacts.
 type SubAgentArtifact struct {
 	ID          string          `gorm:"column:id;type:varchar(36);primaryKey"`
 	TaskID      string          `gorm:"column:task_id;type:varchar(36);not null"`

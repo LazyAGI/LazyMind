@@ -95,7 +95,11 @@ DELIVERABLE_GUIDANCE = {
         'Deliver a diagnosis with ranked hypotheses, evidence needed, tests in efficient order, likely '
         'causes, and corrective actions.'
     ),
-    'artifact': 'Deliver the requested finished artifact in the requested format, not merely advice about it.',
+    'artifact': (
+        'Deliver the requested finished artifact in the requested format, not merely advice about it. '
+        'For a downloadable file, call save_chat_artifact as soon as the complete file exists, before '
+        'optional refinements, extra validation, or the final response.'
+    ),
     'execution_result': 'Perform the authorized action and report the concrete result, including any failure.',
 }
 RESPONSE_LANGUAGE_GUIDANCE = (
