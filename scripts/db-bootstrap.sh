@@ -41,6 +41,10 @@ SELECT 'CREATE DATABASE scan_control_plane'
 WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'scan_control_plane')
 \gexec
 
+SELECT 'CREATE DATABASE channel_gateway'
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'channel_gateway')
+\gexec
+
 ALTER DATABASE app OWNER TO app;
 GRANT ALL PRIVILEGES ON DATABASE app TO app;
 SQL

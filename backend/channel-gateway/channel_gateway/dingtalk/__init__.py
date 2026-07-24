@@ -1,0 +1,1 @@
+"""DingTalk channel adapter placeholder."""

@@ -1,0 +1,1 @@
+"""Slack channel adapter placeholder."""

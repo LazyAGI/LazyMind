@@ -38,6 +38,25 @@ func writeConversationJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func applyBasicChatOnlyPolicy(reqBody map[string]any) {
+	agenticConfig, _ := reqBody["agentic_config"].(map[string]any)
+	if agenticConfig == nil {
+		agenticConfig = map[string]any{}
+		reqBody["agentic_config"] = agenticConfig
+	}
+	agenticConfig["enable_plugin"] = false
+	agenticConfig["enable_subagent"] = false
+	reqBody["enable_plugin"] = false
+	reqBody["enable_subagent"] = false
+	reqBody["plugin_context"] = map[string]any{}
+	reqBody["plugin_catalog"] = []map[string]any{}
+	reqBody["disabled_tools"] = mergeDisabledToolNames(
+		stringSliceFromAny(reqBody["disabled_tools"]),
+		[]string{"ask_user", "schedule", "task", "task_center"},
+	)
+	delete(reqBody, "has_subagents")
+}
+
 // writeSSEChunk text SSE text： data: {"result":{...}}\n\n
 func writeSSEChunk(w http.ResponseWriter, flusher http.Flusher, v any) {
 	wrapped := map[string]any{"result": v}
@@ -89,6 +108,28 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if json.Unmarshal(bodyBytes, &raw) != nil {
 		common.ReplyErr(w, "invalid json", http.StatusBadRequest)
 		return
+	}
+	basicChatOnly, _ := raw["basic_chat_only"].(bool)
+	if basicChatOnly {
+		if runInBackground, _ := raw["run_in_background"].(bool); runInBackground {
+			common.ReplyErr(w, "basic chat does not support background execution", http.StatusConflict)
+			return
+		}
+		if _, hasAskAnswers := raw["ask_answers_structured"]; hasAskAnswers {
+			common.ReplyErr(w, "basic chat does not support ask answers", http.StatusConflict)
+			return
+		}
+		mentions, mentionErr := parseChatMentions(raw)
+		if mentionErr != nil {
+			common.ReplyErr(w, mentionErr.Error(), http.StatusBadRequest)
+			return
+		}
+		for _, mention := range mentions {
+			if mention.Type == "plugin" {
+				common.ReplyErr(w, "basic chat does not support plugin mentions", http.StatusConflict)
+				return
+			}
+		}
 	}
 	setConversationDefaultValue(raw)
 	if !checkInput(raw) {
@@ -281,99 +322,97 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
-	// resolvePluginModeWithFallback determines the effective plugin_mode for this request.
-	// It is injected into plugin_context (below) so Python can use it; it is not sent
-	// as a top-level reqBody field because Python reads it exclusively from plugin_context.
-	pluginMode := resolvePluginModeWithFallback(raw, reqBody)
-	existingPluginContext, _ := reqBody["plugin_context"].(map[string]any)
-	if existingPluginContext == nil {
-		existingPluginContext = map[string]any{}
-	}
-	existingPluginContext["plugin_mode"] = pluginMode
-	reqBody["plugin_context"] = existingPluginContext
-	if preflight := loadPluginPreflightContext(r.Context(), db, convID); len(preflight) > 0 {
-		existing, _ := reqBody["plugin_context"].(map[string]any)
-		if existing == nil {
-			existing = map[string]any{}
+	if basicChatOnly {
+		applyBasicChatOnlyPolicy(reqBody)
+	} else {
+		// resolvePluginModeWithFallback determines the effective plugin_mode for this request.
+		// It is injected into plugin_context (below) so Python can use it; it is not sent
+		// as a top-level reqBody field because Python reads it exclusively from plugin_context.
+		pluginMode := resolvePluginModeWithFallback(raw, reqBody)
+		existingPluginContext, _ := reqBody["plugin_context"].(map[string]any)
+		if existingPluginContext == nil {
+			existingPluginContext = map[string]any{}
 		}
-		existing["plugin_mode"] = pluginMode
-		existing["plugin_preflight"] = preflight
-		reqBody["plugin_context"] = existing
-	}
-
-	// Promote enable_plugin and enable_subagent from agentic_config to top-level
-	// so Python chat_routes can receive them as explicit parameters.
-	if ac, ok := reqBody["agentic_config"].(map[string]any); ok {
-		if v, ok := ac["enable_plugin"]; ok {
-			reqBody["enable_plugin"] = v
-		}
-		if v, ok := ac["enable_subagent"]; ok {
-			reqBody["enable_subagent"] = v
-		}
-	}
-	if err := applyPluginSelection(
-		r.Context(), db, userID, reqBody, mentionedResources.PluginRefs,
-		mentionedResources.ExcludedPluginRefs,
-	); err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusForbidden)
-		return
-	}
-
-	if activeSess, err := plugin.GetLatestSession(r.Context(), db, convID); err == nil && activeSess != nil {
-		existing, hasPC := reqBody["plugin_context"].(map[string]any)
-		if !hasPC || existing == nil {
-			// Case 1: inject from DB.
-			reqBody["plugin_context"] = map[string]any{
-				"session_id":   activeSess.ID,
-				"plugin_id":    activeSess.PluginID,
-				"current_step": activeSess.CurrentStepID,
-				"plugin_mode":  pluginMode,
-				"plugin_ref":   activeSess.PluginRef, "revision_id": activeSess.PluginRevisionID, "revision_no": activeSess.PluginRevisionNo, "tree_hash": activeSess.PluginTreeHash, "remote_root": activeSess.PluginRemoteRoot,
-			}
-			fmt.Printf("[PLUGIN_CONTEXT_INJECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s plugin_mode=%s\n",
-				convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID, pluginMode)
-		} else {
-			// Case 2: validate/correct stale fields from frontend.
-			stale := false
-			if sid, _ := existing["session_id"].(string); sid != activeSess.ID {
-				existing["session_id"] = activeSess.ID
-				stale = true
-			}
-			if pid, _ := existing["plugin_id"].(string); pid != activeSess.PluginID {
-				existing["plugin_id"] = activeSess.PluginID
-				stale = true
-			}
-			if cs, _ := existing["current_step"].(string); cs != activeSess.CurrentStepID {
-				existing["current_step"] = activeSess.CurrentStepID
-				stale = true
+		existingPluginContext["plugin_mode"] = pluginMode
+		reqBody["plugin_context"] = existingPluginContext
+		if preflight := loadPluginPreflightContext(r.Context(), db, convID); len(preflight) > 0 {
+			existing, _ := reqBody["plugin_context"].(map[string]any)
+			if existing == nil {
+				existing = map[string]any{}
 			}
 			existing["plugin_mode"] = pluginMode
-			existing["plugin_ref"] = activeSess.PluginRef
-			existing["revision_id"] = activeSess.PluginRevisionID
-			existing["revision_no"] = activeSess.PluginRevisionNo
-			existing["tree_hash"] = activeSess.PluginTreeHash
-			existing["remote_root"] = activeSess.PluginRemoteRoot
-			if stale {
-				fmt.Printf("[PLUGIN_CONTEXT_CORRECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s\n",
-					convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)
+			existing["plugin_preflight"] = preflight
+			reqBody["plugin_context"] = existing
+		}
+
+		// Promote enable_plugin and enable_subagent from agentic_config to top-level
+		// so Python chat_routes can receive them as explicit parameters.
+		if ac, ok := reqBody["agentic_config"].(map[string]any); ok {
+			if v, ok := ac["enable_plugin"]; ok {
+				reqBody["enable_plugin"] = v
+			}
+			if v, ok := ac["enable_subagent"]; ok {
+				reqBody["enable_subagent"] = v
 			}
 		}
-	} else if existing, hasPC := reqBody["plugin_context"].(map[string]any); hasPC {
-		// No active session in DB but frontend sent a plugin_context — clear it to avoid
-		// Python entering advance-step mode with a stale/non-existent session.
-		if preflight, ok := existing["plugin_preflight"].(map[string]any); ok && len(preflight) > 0 {
+		if err := applyPluginSelection(
+			r.Context(), db, userID, reqBody, mentionedResources.PluginRefs,
+			mentionedResources.ExcludedPluginRefs,
+		); err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusForbidden)
+			return
+		}
+
+		if activeSess, err := plugin.GetLatestSession(r.Context(), db, convID); err == nil && activeSess != nil {
+			existing, hasPC := reqBody["plugin_context"].(map[string]any)
+			if !hasPC || existing == nil {
+				// Case 1: inject from DB.
+				reqBody["plugin_context"] = map[string]any{
+					"session_id":   activeSess.ID,
+					"plugin_id":    activeSess.PluginID,
+					"current_step": activeSess.CurrentStepID,
+					"plugin_mode":  pluginMode,
+					"plugin_ref":   activeSess.PluginRef, "revision_id": activeSess.PluginRevisionID, "revision_no": activeSess.PluginRevisionNo, "tree_hash": activeSess.PluginTreeHash, "remote_root": activeSess.PluginRemoteRoot,
+				}
+				fmt.Printf("[PLUGIN_CONTEXT_INJECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s plugin_mode=%s\n",
+					convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID, pluginMode)
+			} else {
+				// Case 2: validate/correct stale fields from frontend.
+				stale := false
+				if sid, _ := existing["session_id"].(string); sid != activeSess.ID {
+					existing["session_id"] = activeSess.ID
+					stale = true
+				}
+				if pid, _ := existing["plugin_id"].(string); pid != activeSess.PluginID {
+					existing["plugin_id"] = activeSess.PluginID
+					stale = true
+				}
+				if cs, _ := existing["current_step"].(string); cs != activeSess.CurrentStepID {
+					existing["current_step"] = activeSess.CurrentStepID
+					stale = true
+				}
+				existing["plugin_mode"] = pluginMode
+				existing["plugin_ref"] = activeSess.PluginRef
+				existing["revision_id"] = activeSess.PluginRevisionID
+				existing["revision_no"] = activeSess.PluginRevisionNo
+				existing["tree_hash"] = activeSess.PluginTreeHash
+				existing["remote_root"] = activeSess.PluginRemoteRoot
+				if stale {
+					fmt.Printf("[PLUGIN_CONTEXT_CORRECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s\n",
+						convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)
+				}
+			}
+		} else if existing, hasPC := reqBody["plugin_context"].(map[string]any); hasPC {
+			// No active session in DB but frontend sent a plugin_context — clear it to avoid
+			// Python entering advance-step mode with a stale/non-existent session.
 			for _, key := range []string{"session_id", "plugin_id", "current_step", "plugin_ref", "revision_id", "revision_no", "tree_hash", "remote_root"} {
 				delete(existing, key)
 			}
 			existing["plugin_mode"] = pluginMode
 			reqBody["plugin_context"] = existing
-		} else {
-			for _, key := range []string{"session_id", "plugin_id", "current_step", "plugin_ref", "revision_id", "revision_no", "tree_hash", "remote_root"} {
-				delete(existing, key)
+			if _, hasPreflight := existing["plugin_preflight"]; !hasPreflight {
+				fmt.Printf("[PLUGIN_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
 			}
-			existing["plugin_mode"] = pluginMode
-			reqBody["plugin_context"] = existing
-			fmt.Printf("[PLUGIN_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
 		}
 	}
 	historyExt := buildChatHistoryExt(raw, displayQuery)
