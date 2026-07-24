@@ -38,19 +38,22 @@ value is merely a local path string does not satisfy an output and must be RETRY
 
 ## publish
 
-- DONE only when publish_result and published_document are tool-produced file artifacts,
-  publish_result reports success, published_document has ui_editable=true, and
-  published_link is a valid Feishu/Lark document URL.
+- Determine the selected delivery mode from the complete user request.
+- For Markdown delivery, DONE only when delivered_markdown is a real `.md` file
+  generated from the latest selected final_document. Feishu publish artifacts are not
+  required.
+- A Feishu/Lark URL used only as source or reference does not select Feishu delivery.
+- For explicitly requested Feishu delivery, DONE only when publish_result and
+  published_document are tool-produced file artifacts, publish_result reports success,
+  published_document has ui_editable=true, and published_link is a valid Feishu/Lark
+  document URL.
 - When final_document exists, publishing outline_ir instead is invalid and must be FAIL.
 - Text summaries such as "manual publishing required" do not satisfy any publish output.
   If document creation, writing, or provider read-back failed, the publish step must not
   be marked complete.
-- Asking permission to create an unbound Feishu target is not a failed publish attempt;
-  no publish artifacts should exist before confirmation.
+- An explicit request to write an unbound result to "my Feishu" authorizes creation in
+  the user's Feishu root; missing publish artifacts after that request must be RETRY.
 - Otherwise RETRY; two consecutive non-recoverable failures → FAIL.
-
-For non-publish terminal paths, return DONE when the user's requested local result is
-complete. Otherwise return PASS so the ChatAgent can choose a reachable next step.
 
 Use exactly:
 

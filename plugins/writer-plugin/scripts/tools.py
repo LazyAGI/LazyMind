@@ -15,7 +15,7 @@ from typing import Any
 
 from lazyllm.tools.writer.data_models import TargetDocument, WriterAuthoring, WriterDocument
 from lazyllm.tools.writer.tools import WriterResourceTools
-from lazyllm.tools.writer.utils import save_artifact_json
+from lazyllm.tools.writer.utils import render_document_markdown, save_artifact_json
 
 from lazymind.chat.engine.subagent.context import require_context
 from lazymind.chat.engine.tools.writer import (
@@ -141,6 +141,11 @@ def _document_text(value: Any) -> str:
 
     collect(document.blocks)
     return '\n'.join(lines)
+
+
+def _markdown_filename(title: str) -> str:
+    filename = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', '_', title).strip(' ._')
+    return f'{filename[:80] or "文稿"}.md'
 
 
 def _prepare_supplied_outline(value: Any) -> WriterDocument:
@@ -490,6 +495,14 @@ def writer_generate_final_document(
         'final_document': final_document_path,
         'final_document_md': str(markdown_path),
     }
+
+
+def writer_export_markdown(content_path: str) -> str:
+    """Export the latest WriterDocument as a downloadable Markdown file."""
+    document = WriterDocument.model_validate(_read_json_file(content_path))
+    output_path = _run_root('export-markdown') / _markdown_filename(document.title)
+    output_path.write_text(render_document_markdown(document), encoding='utf-8')
+    return str(output_path)
 
 
 def writer_build_revision_task(query: str, base_ir_path: str) -> str:

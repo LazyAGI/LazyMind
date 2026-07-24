@@ -23,9 +23,7 @@ transitions:
 
   write_document:
     - to: publish
-      when: Publish the local full document to Feishu.
-    - to: __end__
-      when: The requested document generation or revision is complete.
+      when: Deliver the completed local document as Markdown or publish it to Feishu.
 
   publish:
     - to: __end__
@@ -175,7 +173,6 @@ steps:
 
   write_document:
     label: 成稿
-    route: choice
     prompt: |
       {{runtime_instruction}}
 
@@ -292,24 +289,31 @@ steps:
       revision mode. This step must not mutate a cloud document.
 
   publish:
-    label: 写回文稿
+    label: 交付文稿
     prompt: |
       {{runtime_instruction}}
 
-      Artifact persistence rule: publish_target_document, publish_result, and
-      published_document are absolute local file paths and must be saved with
-      content_type="file". published_link is the only text output and must be saved with
-      content_type="text". Never save a file path as JSON or text.
-
-      Publish the latest selected local WriterDocument. When final_document exists, it
-      is mandatory. Never substitute outline_ir when final_document conversion or
-      writing fails. Stop and report the failure instead.
-
+      This is the unified delivery step. Retrieve the latest selected final_document.
       Use outline_ir only when final_document does not exist and the user explicitly
-      requested publishing the outline itself. In that case call
-      writer_append_document with publish_outline=true only for a new or empty target.
+      requested delivering the outline itself. Never substitute outline_ir after
+      final-document generation or revision fails.
 
-      Decide from the current user query and saved targets:
+      Select exactly one delivery mode from the user's complete request:
+
+      A. Markdown delivery (default):
+         Use this mode unless the user explicitly requested a Feishu/Lark destination
+         or write-back action. A Feishu/Lark URL used only as a source or reference does
+         not authorize publishing to it.
+         1. Call writer_export_markdown with the latest selected WriterDocument path.
+         2. Save the exact returned .md path as delivered_markdown with
+            content_type="file".
+         3. Do not call any Feishu publishing tool and do not ask for a destination.
+
+      B. Feishu delivery:
+         Use this mode only when the user explicitly asks to write back/update the
+         original Feishu document, publish/write to Feishu, create a new Feishu
+         document, save as another Feishu document, append to a Feishu document, or
+         supplies an explicit destination.
 
       1. If publish_target_document already exists from an earlier attempt of this step,
          reuse it as target_document_path. Do not create another document.
@@ -322,19 +326,19 @@ steps:
          user requests writing it back to that same bound source, retrieve both
          final_document and source_ir, then call writer_replace_document. This replaces
          the source outline/body; never append the generated document after its source.
+         Never call writer_replace_document unless source_ir is bound to that provider
+         document.
       4. Call writer_append_document only when the user explicitly requests append,
          continue-at-end, or preservation of all existing target content.
-      5. If the user explicitly requested "new document", "create in Feishu", or "save as",
-         or supplied a folder/wiki parent as the write location, call
-         writer_create_document first. Pass parent_uri when a folder/wiki parent was
-         supplied; otherwise create in the user's Feishu root. Save the returned artifact
-         as publish_target_document, then pass its path as target_document_path to
-         writer_append_document. A newly created target is empty.
-      6. If the result is unbound and the user only said "write/publish to Feishu" without
-         a target or explicit permission to create, do not call either mutation tool.
-         Ask whether we may create a new Feishu document, and state that the completed
-         document will be returned as a link. Continue only after the user confirms.
-      7. If an existing non-empty target is specified but append versus replace is not
+      5. If the selected WriterDocument is unbound and the user explicitly asks to
+         write/publish it to "my Feishu", or requests "new document", "create in
+         Feishu", or "save as", call writer_create_document first. Pass parent_uri when
+         a folder/wiki parent was supplied; otherwise create in the user's Feishu root.
+         The explicit Feishu delivery request authorizes this creation; do not ask for
+         another confirmation. Save the returned artifact as publish_target_document,
+         then pass its path as target_document_path to writer_append_document. A newly
+         created target is empty.
+      6. If an existing non-empty target is specified but append versus replace is not
          clear from the user request and artifact lineage, ask the user. Never default
          to append for an existing document.
 
@@ -345,15 +349,20 @@ steps:
       its exact returned file path as publish_target_document. Then call
       writer_append_document with absolute content_path and target_document_path values.
 
-      Never infer permission to create from a generic publish request. Only after
-      the selected publishing tool succeeds, save its exact publish_result and
-      published_document file paths and save its exact published_link string. If any
-      create, write, or read-back call fails, do not synthesize or save any of these
-      outputs; report the tool failure so the step can retry or fail.
+      Only after the selected publishing tool succeeds, save its exact publish_result
+      and published_document file paths and save its exact published_link string. If
+      any create, write, or read-back call fails, do not synthesize or save any of
+      these outputs; report the tool failure so the step can retry or fail.
 
       All publishing tools return published_document re-read from the provider with
       ui_editable=true.
+
+      Artifact persistence rule: delivered_markdown, publish_target_document,
+      publish_result, and published_document are absolute local file paths and must be
+      saved with content_type="file". published_link is text. Never save a file path as
+      JSON or text.
     tools:
+      - writer_export_markdown
       - writer_create_document
       - writer_publish_revision
       - writer_replace_document
@@ -370,13 +379,19 @@ steps:
       - material: document_patch_set
         required: false
     outputs:
+      - material: delivered_markdown
+        required: false
       - material: publish_target_document
         required: false
       - material: publish_result
+        required: false
       - material: published_document
+        required: false
       - material: published_link
+        required: false
     acceptance_criteria: |
-      publish_result reports success and published_document is the provider-confirmed,
-      editable WriterDocument. Both must be file artifacts returned by
-      the selected publishing tool, not text summaries created by the agent.
-      published_link is the provider URL returned by the same successful tool call.
+      Exactly one delivery mode succeeds. Markdown mode requires delivered_markdown to
+      be a real .md file generated from the latest selected WriterDocument and requires
+      no Feishu artifacts. Feishu mode requires publish_result to report success,
+      published_document to be the provider-confirmed editable WriterDocument, and
+      published_link to be the provider URL returned by the same successful tool call.

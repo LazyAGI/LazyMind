@@ -2,8 +2,8 @@ id: writer-plugin
 name: AI Writer
 description: >
   Read source documents and knowledge, create or reuse an outline, draft a
-  structured document, revise either the outline or full text, and publish to
-  Feishu through one WriterDocument-based workflow.
+  structured document, revise either the outline or full text, and deliver it
+  as Markdown or publish it to Feishu through one WriterDocument-based workflow.
 
 when_to_use: >
   Use this plugin for compound writing work that benefits from persisted
@@ -32,6 +32,7 @@ tool_scripts:
       - writer_generate_draft_document
       - writer_update_writing_context
       - writer_generate_final_document
+      - writer_export_markdown
       - writer_build_revision_task
       - writer_plan_revision
       - writer_apply_revision
@@ -156,6 +157,10 @@ slots:
     label: Document Patch Result
     type: file
     cardinality: single
+  - id: delivered_markdown
+    label: Delivered Markdown
+    type: file
+    cardinality: single
   - id: publish_result
     label: Publish Result
     type: file
@@ -199,9 +204,10 @@ ui:
 
     - id: publish
       step_id: publish
-      label: 写回文稿
+      label: 交付文稿
       layout: list
       slots:
+        - id: delivered_markdown
         - id: published_link
         - id: published_document
 
@@ -212,12 +218,12 @@ i18n:
       prepare: {label: 写作准备}
       outline: {label: 大纲}
       write_document: {label: 成稿}
-      publish: {label: 写回文稿}
+      publish: {label: 交付文稿}
     tabs:
       context: {label: 写作准备}
       outline: {label: 大纲}
       result: {label: 成稿}
-      publish: {label: 写回文稿}
+      publish: {label: 交付文稿}
     slots:
       writing_task: {label: 写作任务}
       resource_profiles: {label: 资源画像}
@@ -232,6 +238,7 @@ i18n:
       draft_document: {label: 完整初稿}
       final_document: {label: 最终正文}
       final_document_md: {label: 最终正文 Markdown}
+      delivered_markdown: {label: Markdown 文稿}
       publish_result: {label: 发布结果}
       publish_target_document: {label: 新建发布目标}
       published_document: {label: 已发布飞书文档}

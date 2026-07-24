@@ -9,7 +9,7 @@ Use one artifact-backed WriterDocument workflow for compound creation and revisi
 - generate, regenerate, or revise that same outline artifact;
 - plan sections and write a complete document;
 - generate, rewrite, or revise that same full-document artifact;
-- publish a local outline or document to Feishu.
+- deliver a local outline or document as Markdown, or publish it to Feishu.
 
 Do not route users between separate creation and revision plugins or expose separate
 revision cards. The ChatAgent chooses the applicable mode inside the current product step.
@@ -68,20 +68,26 @@ Frontend edits are human revisions of the same `final_document` slot. AI body re
 remain local until `publish`, so generation and revision share the same write-back
 boundary.
 
-### publish
+### publish (delivery)
 
-Use `publish` to write an unbound local `outline_ir` or `final_document` to Feishu, apply
-a prepared body PatchSet to its original bound source, or publish to a new/different
-target.
+`publish` is the unified delivery step and always follows a completed document. Unless
+the user explicitly requested a Feishu destination or write-back operation, export the
+latest selected `final_document` as a downloadable Markdown file.
 
+A Feishu URL used only as a source or reference is not a publishing destination. Use
+Feishu delivery only when the request explicitly asks to update/write back the source,
+publish to Feishu, create/save as a Feishu document, append to a target, or supplies an
+explicit destination.
+
+- Markdown delivery regenerates the `.md` file from the latest WriterDocument, so it
+  includes revisions made after initial drafting.
 - A targeted revision of the original body applies its saved PatchSet.
 - A generated or rewritten body written back to its source replaces the source content.
 - Append is used only when the user explicitly requests append or continue-at-end.
 - “新建飞书文档” and “另存为” explicitly authorize creating a new target. Supplying
   a folder or wiki parent as the write location also authorizes creation there.
-- A generic “写入/发布到飞书” does not authorize creation. If the local result has no
-  target, ask whether a new Feishu document may be created and tell the user the result
-  will be returned as a link. Enter or continue `publish` only after confirmation.
+- An explicit request to write an unbound result to “我的飞书” authorizes creating a
+  new document in the user's Feishu root without another confirmation.
 - Creation and writing are separate operations: persist `target_document` immediately
   after creation, then write to that exact target so a retry does not create duplicates.
 - A targeted body revision of an existing document must publish its saved PatchSet.
@@ -94,9 +100,9 @@ target.
 
 ## Supported paths
 
-- From scratch: `prepare → outline → write_document`
-- Supplied Feishu outline: `prepare → outline → write_document`
-- Existing Feishu document revision: `prepare → write_document` in revision mode
+- From scratch: `prepare → outline → write_document → publish` (Markdown delivery)
+- Supplied Feishu outline: `prepare → outline → write_document → publish`
+- Existing Feishu document revision: `prepare → write_document → publish`
 - Outline only: `prepare → outline`
 - Publish outline: `prepare → outline → publish`
 - Publish local body: `prepare → outline → write_document → publish`
@@ -109,6 +115,8 @@ a hidden current-document pointer.
 
 - All structured outline and body results use the same WriterDocument schema.
 - `outline_ir`, `final_document`, and `published_document` have ui_editable=true.
+- `delivered_markdown` is the Markdown file regenerated from the latest selected
+  WriterDocument for local delivery.
 - `published_link` is the provider-confirmed Feishu/Lark browser URL.
 - Internal locate results, modify plans, PatchSets, section plans, and draft blocks are
   persisted but are not exposed as separate product cards.
@@ -124,6 +132,7 @@ a hidden current-document pointer.
 | Modify the current outline with AI | rerun `outline`, revision mode |
 | Write/rewrite the body from the current outline | `write_document`, generation mode |
 | Modify an existing/generated body with AI | rerun `write_document`, revision mode |
+| Deliver without an explicit cloud destination | `publish`, Markdown mode |
 | Write an unbound local result to Feishu | `publish` |
 
 When an outline change invalidates an existing body, rewind to `outline`; the next
