@@ -46,6 +46,8 @@ export interface WriterIRParseResult {
 }
 
 export type WriterBlockMoveDirection = 'up' | 'down';
+export type WriterInlineStyle = 'strong' | 'italic';
+export type WriterBlockFormat = 'paragraph' | 'heading' | 'code';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -172,11 +174,25 @@ export function getWriterSpanStyles(span: WriterSpan): string[] {
   return [];
 }
 
+function hasWriterInlineStyle(span: WriterSpan, style: WriterInlineStyle): boolean {
+  const styles = getWriterSpanStyles(span);
+  return style === 'strong'
+    ? styles.includes('strong') || styles.includes('bold')
+    : styles.includes(style);
+}
+
 export function countWriterBlocks(blocks: WriterBlock[]): number {
   return blocks.reduce(
     (total, block) => total + 1 + countWriterBlocks(block.children ?? []),
     0,
   );
+}
+
+export function getWriterOutlineInstruction(block: WriterBlock): string | null {
+  const instruction = block.authoring?.instruction;
+  if (typeof instruction !== 'string') return null;
+  const trimmed = instruction.trim();
+  return trimmed || null;
 }
 
 export function findWriterBlock(
@@ -387,21 +403,116 @@ export function updateWriterBlockContent(
   return result.changed ? { ...document, blocks: result.blocks } : document;
 }
 
+function withWriterInlineStyle(
+  span: WriterSpan,
+  style: WriterInlineStyle,
+  enabled: boolean,
+): WriterSpan {
+  const key = Array.isArray(span.stype) && !Array.isArray(span.style) ? 'stype' : 'style';
+  const aliases = style === 'strong' ? new Set(['strong', 'bold']) : new Set([style]);
+  const styles = getWriterSpanStyles(span).filter((item) => !aliases.has(item));
+  if (enabled) styles.push(style);
+  return { ...span, [key]: styles };
+}
+
+export function toggleWriterBlockInlineStyle(
+  document: WriterDocument,
+  nodeId: string,
+  start: number,
+  end: number,
+  style: WriterInlineStyle,
+): WriterDocument {
+  if (start < 0 || end <= start) return document;
+  const result = replaceBlockInTree(document.blocks, nodeId, (block) => {
+    if (block.type === 'document' || block.editable === false) return block;
+    const contentLength = Array.from(block.content ?? '').length;
+    const safeStart = Math.min(start, contentLength);
+    const safeEnd = Math.min(end, contentLength);
+    if (safeEnd <= safeStart) return block;
+
+    const sourceSpans = block.spans?.length
+      && block.spans.map((span) => span.text).join('') === (block.content ?? '')
+      ? block.spans
+      : spanForEditedContent(block, block.content ?? '');
+    const selected = sliceWriterSpans(sourceSpans, safeStart, safeEnd);
+    const enable = !selected.every((span) => hasWriterInlineStyle(span, style));
+    const spans = mergeAdjacentWriterSpans([
+      ...sliceWriterSpans(sourceSpans, 0, safeStart),
+      ...selected.map((span) => withWriterInlineStyle(span, style, enable)),
+      ...sliceWriterSpans(sourceSpans, safeEnd, contentLength),
+    ]);
+    return { ...block, spans };
+  });
+  return result.changed ? { ...document, blocks: result.blocks } : document;
+}
+
+export function writerBlockRangeHasInlineStyle(
+  block: WriterBlock,
+  start: number,
+  end: number,
+  style: WriterInlineStyle,
+): boolean {
+  if (start < 0 || end <= start) return false;
+  const contentLength = Array.from(block.content ?? '').length;
+  const safeStart = Math.min(start, contentLength);
+  const safeEnd = Math.min(end, contentLength);
+  if (safeEnd <= safeStart) return false;
+  const sourceSpans = block.spans?.length
+    && block.spans.map((span) => span.text).join('') === (block.content ?? '')
+    ? block.spans
+    : spanForEditedContent(block, block.content ?? '');
+  const selected = sliceWriterSpans(sourceSpans, safeStart, safeEnd);
+  return selected.length > 0
+    && selected.every((span) => hasWriterInlineStyle(span, style));
+}
+
+export function updateWriterBlockFormat(
+  document: WriterDocument,
+  nodeId: string,
+  format: WriterBlockFormat,
+  headingLevel?: number,
+): WriterDocument {
+  const result = replaceBlockInTree(document.blocks, nodeId, (block) => {
+    if (
+      block.type === 'document'
+      || block.editable === false
+      || (block.children?.length ?? 0) > 0
+    ) return block;
+    const nextLevel = Math.min(6, Math.max(1, Math.trunc(headingLevel ?? 1)));
+    if (
+      block.type === format
+      && (format !== 'heading' || Number(block.numbering?.level) === nextLevel)
+    ) {
+      return block;
+    }
+
+    const numbering = { ...(block.numbering ?? {}) };
+    delete numbering.level;
+    delete numbering.ordered;
+    if (format === 'heading') numbering.level = nextLevel;
+    return { ...block, type: format, numbering };
+  });
+  return result.changed ? { ...document, blocks: result.blocks } : document;
+}
+
 export function updateWriterDocumentTitle(
   document: WriterDocument,
   title: string,
 ): WriterDocument {
+  if (document.title === title) return document;
   const metadata = document.metadata
     ? { ...document.metadata, title }
     : document.metadata;
-  const rootResult = replaceBlockInTree(document.blocks, document.document_id, (block) => {
-    if (block.type !== 'document') return block;
-    return {
+  const documentRoot = document.blocks.find(
+    (block) => block.type === 'document' && block.editable !== false,
+  );
+  const rootResult = documentRoot
+    ? replaceBlockInTree(document.blocks, documentRoot.node_id, (block) => ({
       ...block,
       content: title,
       spans: spanForEditedContent(block, title),
-    };
-  });
+    }))
+    : { blocks: document.blocks };
   return {
     ...document,
     title,

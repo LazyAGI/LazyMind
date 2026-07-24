@@ -124,8 +124,8 @@ func DeletePromptCategory(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if err := tx.Model(&orm.Prompt{}).
-			Where("category = ? AND create_user_id = ?", categoryID, userID).
-			Update("category", "custom").Error; err != nil {
+			Where("category = ? AND create_user_id = ? AND deleted_at IS NULL", categoryID, userID).
+			Update("deleted_at", time.Now().UTC()).Error; err != nil {
 			return err
 		}
 		return tx.Unscoped().Delete(&category).Error

@@ -875,6 +875,8 @@ const KnowledgePage: FC = () => {
           pageSize: pageSize,
           keyword: values.keyword,
           tags: values?.tags && values.tags !== ALL_TAGS ? [values.tags] : [],
+        }, {
+          params: { source: "manual" },
         })
         .then((res) => {
           handleSuccess(

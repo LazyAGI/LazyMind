@@ -439,10 +439,13 @@ func TestPromptCategoryLifecycleAndUserIsolation(t *testing.T) {
 		t.Fatalf("delete category failed: status=%d body=%s", deleteRec.Code, deleteRec.Body.String())
 	}
 	var prompt orm.Prompt
-	if err := db.Where("create_user_id = ? AND name = ?", "u1", "Review").First(&prompt).Error; err != nil {
-		t.Fatalf("load reassigned prompt: %v", err)
+	if err := db.Where("create_user_id = ? AND name = ? AND deleted_at IS NULL", "u1", "Review").First(&prompt).Error; err == nil {
+		t.Fatal("deleted category prompt is still active")
 	}
-	if prompt.Category != "custom" {
-		t.Fatalf("deleted category prompt was not reassigned: category=%q", prompt.Category)
+	if err := db.Unscoped().Where("create_user_id = ? AND name = ?", "u1", "Review").First(&prompt).Error; err != nil {
+		t.Fatalf("load deleted prompt: %v", err)
+	}
+	if prompt.DeletedAt == nil {
+		t.Fatal("deleted category prompt was not soft-deleted")
 	}
 }
