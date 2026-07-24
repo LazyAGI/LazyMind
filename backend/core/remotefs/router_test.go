@@ -107,8 +107,19 @@ func TestMemoryCurrentStateDoesNotUseTaskDraftModes(t *testing.T) {
 	db := newRemoteFSTestDB(t)
 	handler := NewHandler(db.DB)
 	memoryPath := "memory/users/references/direct.md"
+	reviewContent := validMemoryReferenceYAML
+	editorContent := strings.Replace(
+		validMemoryReferenceYAML,
+		"Explain motivations and tradeoffs.",
+		"Use concise answers.",
+		1,
+	)
 
-	writeReview := httptest.NewRequest(http.MethodPut, "/remote-fs/content?path="+memoryPath+"&user_id=u1&task_id=memory_review_1", strings.NewReader("review draft"))
+	writeReview := httptest.NewRequest(
+		http.MethodPut,
+		"/remote-fs/content?path="+memoryPath+"&user_id=u1&task_id=memory_review_1",
+		strings.NewReader(reviewContent),
+	)
 	writeReviewRec := httptest.NewRecorder()
 	handler.Content(writeReviewRec, writeReview)
 	if writeReviewRec.Code != http.StatusOK {
@@ -118,18 +129,22 @@ func TestMemoryCurrentStateDoesNotUseTaskDraftModes(t *testing.T) {
 	readReview := httptest.NewRequest(http.MethodGet, "/remote-fs/content?path="+memoryPath+"&user_id=u1&task_id=memory_review_1", nil)
 	readReviewRec := httptest.NewRecorder()
 	handler.Content(readReviewRec, readReview)
-	if readReviewRec.Code != http.StatusOK || readReviewRec.Body.String() != "review draft" {
+	if readReviewRec.Code != http.StatusOK || readReviewRec.Body.String() != reviewContent {
 		t.Fatalf("expected review read draft, got status=%d body=%q", readReviewRec.Code, readReviewRec.Body.String())
 	}
 
 	readEditor := httptest.NewRequest(http.MethodGet, "/remote-fs/content?path="+memoryPath+"&user_id=u1&task_id=session_1", nil)
 	readEditorRec := httptest.NewRecorder()
 	handler.Content(readEditorRec, readEditor)
-	if readEditorRec.Code != http.StatusOK || readEditorRec.Body.String() != "review draft" {
+	if readEditorRec.Code != http.StatusOK || readEditorRec.Body.String() != reviewContent {
 		t.Fatalf("expected current-state content, got status=%d body=%q", readEditorRec.Code, readEditorRec.Body.String())
 	}
 
-	writeEditor := httptest.NewRequest(http.MethodPut, "/remote-fs/content?path="+memoryPath+"&user_id=u1&task_id=session_1", strings.NewReader("editor draft"))
+	writeEditor := httptest.NewRequest(
+		http.MethodPut,
+		"/remote-fs/content?path="+memoryPath+"&user_id=u1&task_id=session_1",
+		strings.NewReader(editorContent),
+	)
 	writeEditorRec := httptest.NewRecorder()
 	handler.Content(writeEditorRec, writeEditor)
 	if writeEditorRec.Code != http.StatusOK {
@@ -139,7 +154,7 @@ func TestMemoryCurrentStateDoesNotUseTaskDraftModes(t *testing.T) {
 	readLatest := httptest.NewRequest(http.MethodGet, "/remote-fs/content?path="+memoryPath+"&user_id=u1", nil)
 	readLatestRec := httptest.NewRecorder()
 	handler.Content(readLatestRec, readLatest)
-	if readLatestRec.Code != http.StatusOK || readLatestRec.Body.String() != "editor draft" {
+	if readLatestRec.Code != http.StatusOK || readLatestRec.Body.String() != editorContent {
 		t.Fatalf("expected latest current-state content, got status=%d body=%q", readLatestRec.Code, readLatestRec.Body.String())
 	}
 }

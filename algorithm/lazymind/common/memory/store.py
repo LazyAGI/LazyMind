@@ -7,7 +7,6 @@ from lazymind.common.integrations.remote_fs import RemoteFS
 
 from .paths import (
     AGENTS_ROOT,
-    MEMORY_ROOT,
     PREFERENCE_PATH,
     PROFILE_PATH,
     REFERENCE_ROOT,
@@ -15,7 +14,6 @@ from .paths import (
     USERS_ROOT,
     build_reference_path,
     is_fixed_memory_file,
-    is_memory_path,
     is_reference_path,
     normalize_memory_path,
     split_reference_ref,
@@ -63,43 +61,6 @@ class MemoryStore:
         except Exception as exc:
             raise RuntimeError(f'failed to write {normalized}: {exc}') from exc
 
-    def exists(self, path: str) -> bool:
-        normalized = normalize_memory_path(path)
-        if not is_memory_path(normalized):
-            raise ValueError(f'unsupported memory path: {path!r}')
-        try:
-            return bool(self.fs.exists(normalized))
-        except Exception as exc:
-            raise RuntimeError(f'failed to check exists for {normalized}: {exc}') from exc
-
-    def list_dir(self, path: str) -> list[dict[str, Any]]:
-        normalized = normalize_memory_path(path)
-        if normalized not in {MEMORY_ROOT, AGENTS_ROOT, USERS_ROOT, REFERENCE_ROOT}:
-            raise ValueError(f'unsupported memory directory: {path!r}')
-        try:
-            if not self.fs.exists(normalized):
-                return []
-            entries = self.fs.ls(normalized, detail=True)
-        except Exception as exc:
-            if self._is_not_found(exc):
-                return []
-            raise RuntimeError(f'failed to list {normalized}: {exc}') from exc
-
-        items: list[dict[str, Any]] = []
-        for entry in entries or []:
-            raw_path = str((entry or {}).get('path') or (entry or {}).get('name') or '').strip()
-            entry_path = normalize_memory_path(raw_path)
-            if not entry_path:
-                continue
-            entry_type = str((entry or {}).get('type') or 'file').strip()
-            items.append({
-                'name': entry_path.rsplit('/', 1)[-1],
-                'path': entry_path,
-                'type': 'dir' if entry_type in ('directory', 'dir') else 'file',
-                'size': (entry or {}).get('size'),
-            })
-        return sorted(items, key=lambda item: (item['type'] != 'dir', item['name']))
-
     def read_soul(self) -> str:
         return self.read(SOUL_PATH)
 
@@ -115,18 +76,6 @@ class MemoryStore:
         if not anchor:
             return content
         return self._extract_anchor_section(content, anchor)
-
-    def write_soul(self, content: str) -> None:
-        self.write(SOUL_PATH, content)
-
-    def write_profile(self, content: str) -> None:
-        self.write(PROFILE_PATH, content)
-
-    def write_preference(self, content: str) -> None:
-        self.write(PREFERENCE_PATH, content)
-
-    def write_reference(self, name: str, content: str) -> None:
-        self.write(build_reference_path(name), content)
 
     def delete_reference(self, name: str) -> None:
         path = build_reference_path(name)
@@ -266,33 +215,6 @@ class MemoryStore:
                 item=edited['item'],
             )
         return memory_ok(item=edited['item'])
-
-    def reorder_preferences(self, ordered_names: list[str]) -> dict[str, Any]:
-        """Reorder every preference by exact name permutation.
-
-        This is a storage API for an explicit user-controlled ordering surface.
-        It is intentionally not exposed through ``MemoryTools``.
-        """
-        from .result import memory_err, memory_ok
-        from .validation.preference import parse_preference_items, reorder_preference_items
-
-        loaded = self._read_document(PREFERENCE_PATH, label='preference')
-        if not loaded.get('ok'):
-            return loaded
-        try:
-            content = reorder_preference_items(loaded['content'], ordered_names)
-        except ValueError as exc:
-            return memory_err(str(exc), type='validation')
-        written = self._write_document(PREFERENCE_PATH, content)
-        if not written.get('ok'):
-            return written
-        return memory_ok(
-            content=content,
-            items=parse_preference_items(content),
-        )
-
-    def list_references(self) -> list[dict[str, Any]]:
-        return [item for item in self.list_dir(REFERENCE_ROOT) if item.get('type') == 'file']
 
     def _read_document(self, path: str, *, label: str) -> dict[str, Any]:
         from .result import memory_err, memory_ok

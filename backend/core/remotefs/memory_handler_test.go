@@ -10,7 +10,27 @@ import (
 	"testing"
 
 	"lazymind/core/common/orm"
+	currentmemoryapi "lazymind/core/currentmemory"
 )
+
+const validMemoryReferenceYAML = `---
+name: pref.response.technical_detail
+summary: Explain tradeoffs for technical questions.
+created_at: "2026-07-20T09:30:00+08:00"
+updated_at: "2026-07-20T09:30:00+08:00"
+source:
+  kind: chat_explicit
+  conversation_id: conversation-1
+---
+## Application Scenarios
+Technical questions.
+
+## Preference Details
+Explain motivations and tradeoffs.
+
+## Reason
+The user requested it.
+`
 
 func TestMemoryMountLazyInitializesDefaultsPerUser(t *testing.T) {
 	db := newRemoteFSTestDB(t)
@@ -70,7 +90,17 @@ func TestMemoryMountLazyInitializesDefaultsPerUser(t *testing.T) {
 		)
 	}
 
-	writeReq := httptest.NewRequest(http.MethodPut, "/remote-fs/content?path="+memoryProfilePath+"&user_id=u1", strings.NewReader("custom: true\n"))
+	updatedProfile := strings.Replace(
+		defaultProfileYAML,
+		"timezone: null",
+		"timezone: Asia/Shanghai",
+		1,
+	)
+	writeReq := httptest.NewRequest(
+		http.MethodPut,
+		"/remote-fs/content?path="+memoryProfilePath+"&user_id=u1",
+		strings.NewReader(updatedProfile),
+	)
 	writeRec := httptest.NewRecorder()
 	handler.Content(writeRec, writeReq)
 	if writeRec.Code != http.StatusOK {
@@ -91,7 +121,7 @@ func TestMemoryMountLazyInitializesDefaultsPerUser(t *testing.T) {
 	)
 	readUpdatedRec := httptest.NewRecorder()
 	handler.Content(readUpdatedRec, readUpdatedReq)
-	if readUpdatedRec.Code != http.StatusOK || readUpdatedRec.Body.String() != "custom: true\n" {
+	if readUpdatedRec.Code != http.StatusOK || readUpdatedRec.Body.String() != updatedProfile {
 		t.Fatalf(
 			"repeated initialization replaced u1 profile: status=%d body=%q",
 			readUpdatedRec.Code,
@@ -200,7 +230,7 @@ func TestMemoryMountCurrentStateFileOperations(t *testing.T) {
 		t.Fatalf("mkdir status=%d body=%s", dirRec.Code, dirRec.Body.String())
 	}
 
-	content := []byte("# Coding\nPrefer tests.\n")
+	content := []byte(validMemoryReferenceYAML)
 	writeReq := httptest.NewRequest(
 		http.MethodPut,
 		"/remote-fs/content?path=memory/users/references/coding.md&user_id=u1",
@@ -446,7 +476,7 @@ func TestMemoryMountScopesCustomFilesAndMutationsByUser(t *testing.T) {
 	writeReq := httptest.NewRequest(
 		http.MethodPut,
 		"/remote-fs/content?path=memory/users/references/private.md&user_id=u1",
-		strings.NewReader("u1-only"),
+		strings.NewReader(validMemoryReferenceYAML),
 	)
 	writeRec := httptest.NewRecorder()
 	handler.Content(writeRec, writeReq)
@@ -505,8 +535,154 @@ func TestMemoryMountScopesCustomFilesAndMutationsByUser(t *testing.T) {
 	)
 	readRec := httptest.NewRecorder()
 	handler.Content(readRec, readReq)
-	if readRec.Code != http.StatusOK || readRec.Body.String() != "u1-only" {
+	if readRec.Code != http.StatusOK || readRec.Body.String() != validMemoryReferenceYAML {
 		t.Fatalf("u2 mutation affected u1 status=%d body=%q", readRec.Code, readRec.Body.String())
+	}
+}
+
+func TestMemoryMountValidatesDomainDocumentsWithoutRestrictingGenericFiles(t *testing.T) {
+	db := newRemoteFSTestDB(t)
+	handler := NewHandler(db.DB)
+
+	for _, testCase := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "soul", path: memorySoulPath, body: "identity: invalid\n"},
+		{name: "profile", path: memoryProfilePath, body: "custom: true\n"},
+		{name: "preference", path: memoryPreferencePath, body: "preferences: wrong\n"},
+		{
+			name: "reference",
+			path: memoryReferencesPath + "/invalid.md",
+			body: "# missing frontmatter\n",
+		},
+		{
+			name: "reference slug",
+			path: memoryReferencesPath + "/bad%20name.md",
+			body: validMemoryReferenceYAML,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			request := httptest.NewRequest(
+				http.MethodPut,
+				"/remote-fs/content?path="+testCase.path+"&user_id=u1",
+				strings.NewReader(testCase.body),
+			)
+			recorder := httptest.NewRecorder()
+			handler.Content(recorder, request)
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+
+	genericRequest := httptest.NewRequest(
+		http.MethodPut,
+		"/remote-fs/content?path=memory/work/notes.txt&user_id=u1",
+		strings.NewReader("free form"),
+	)
+	genericRecorder := httptest.NewRecorder()
+	handler.Content(genericRecorder, genericRequest)
+	if genericRecorder.Code != http.StatusOK {
+		t.Fatalf(
+			"generic memory file status=%d body=%s",
+			genericRecorder.Code,
+			genericRecorder.Body.String(),
+		)
+	}
+
+	soulRequest := httptest.NewRequest(
+		http.MethodGet,
+		"/remote-fs/content?path="+memorySoulPath+"&user_id=u1",
+		nil,
+	)
+	soulRecorder := httptest.NewRecorder()
+	handler.Content(soulRecorder, soulRequest)
+	if soulRecorder.Code != http.StatusOK || soulRecorder.Body.String() != defaultSoulYAML {
+		t.Fatalf(
+			"invalid write changed soul: status=%d body=%q",
+			soulRecorder.Code,
+			soulRecorder.Body.String(),
+		)
+	}
+}
+
+func TestMemoryMountAndPublicCurrentMemoryShareAuthoritativeState(t *testing.T) {
+	db := newRemoteFSTestDB(t)
+	remoteFSHandler := NewHandler(db.DB)
+	publicHandler := currentmemoryapi.NewHandler(db.DB)
+
+	updatedProfile := strings.Replace(
+		defaultProfileYAML,
+		"timezone: null",
+		"timezone: Asia/Shanghai",
+		1,
+	)
+	remoteWrite := httptest.NewRequest(
+		http.MethodPut,
+		"/remote-fs/content?path="+memoryProfilePath+"&user_id=user-1",
+		strings.NewReader(updatedProfile),
+	)
+	remoteWriteRecorder := httptest.NewRecorder()
+	remoteFSHandler.Content(remoteWriteRecorder, remoteWrite)
+	if remoteWriteRecorder.Code != http.StatusOK {
+		t.Fatalf(
+			"RemoteFS profile write status=%d body=%s",
+			remoteWriteRecorder.Code,
+			remoteWriteRecorder.Body.String(),
+		)
+	}
+
+	publicRead := httptest.NewRequest(http.MethodGet, "/memory/profile", nil)
+	publicRead.Header.Set("X-User-Id", "user-1")
+	publicReadRecorder := httptest.NewRecorder()
+	publicHandler.GetProfile(publicReadRecorder, publicRead)
+	if publicReadRecorder.Code != http.StatusOK ||
+		!strings.Contains(publicReadRecorder.Body.String(), `"timezone":"Asia/Shanghai"`) {
+		t.Fatalf(
+			"public profile read status=%d body=%s",
+			publicReadRecorder.Code,
+			publicReadRecorder.Body.String(),
+		)
+	}
+
+	publicPatch := httptest.NewRequest(
+		http.MethodPatch,
+		"/memory/soul",
+		strings.NewReader(`{"identity":{"name":"Shared state"}}`),
+	)
+	publicPatch.Header.Set("X-User-Id", "user-1")
+	publicPatchRecorder := httptest.NewRecorder()
+	publicHandler.PatchSoul(publicPatchRecorder, publicPatch)
+	if publicPatchRecorder.Code != http.StatusOK {
+		t.Fatalf(
+			"public Soul patch status=%d body=%s",
+			publicPatchRecorder.Code,
+			publicPatchRecorder.Body.String(),
+		)
+	}
+
+	remoteRead := httptest.NewRequest(
+		http.MethodGet,
+		"/remote-fs/content?path="+memorySoulPath+"&user_id=user-1",
+		nil,
+	)
+	remoteReadRecorder := httptest.NewRecorder()
+	remoteFSHandler.Content(remoteReadRecorder, remoteRead)
+	if remoteReadRecorder.Code != http.StatusOK {
+		t.Fatalf(
+			"RemoteFS Soul read status=%d body=%s",
+			remoteReadRecorder.Code,
+			remoteReadRecorder.Body.String(),
+		)
+	}
+	soul, err := currentmemoryapi.ParseSoul(remoteReadRecorder.Body.Bytes())
+	if err != nil {
+		t.Fatalf("parse RemoteFS Soul response: %v", err)
+	}
+	if soul.Identity.Name != "Shared state" {
+		t.Fatalf("RemoteFS did not observe public patch: %#v", soul.Identity)
 	}
 }
 

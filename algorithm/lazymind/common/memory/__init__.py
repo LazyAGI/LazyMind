@@ -23,7 +23,6 @@ from .models import (
     EpisodeSearchResult,
     EpisodeSource,
     EpisodeType,
-    build_episode_idempotency_key,
     normalize_episode_summary,
 )
 from .paths import (
@@ -54,8 +53,6 @@ from .validation import (
 from .store import MemoryStore
 
 _EPISODE_STORE_EXPORTS = {
-    'EPISODE_COLLECTION',
-    'EpisodeConflictError',
     'EpisodeReadError',
     'EpisodeStore',
     'get_episode_store',
@@ -68,10 +65,10 @@ _EPISODE_RANKING_EXPORTS = {
 
 
 def __getattr__(name: str):
-    """Load the SegmentStore-backed Episode runtime only when it is requested.
+    """Load the Core HTTP-backed Episode runtime only when it is requested.
 
     Soul/Profile/Preference validation and file operations should not require
-    the substantially heavier RAG dependency set.
+    the Episode tokenizer or HTTP client dependencies.
     """
     if name in _EPISODE_STORE_EXPORTS:
         from . import episode_store
@@ -90,7 +87,6 @@ def __getattr__(name: str):
 
 __all__ = [
     'AGENTS_ROOT',
-    'EPISODE_COLLECTION',
     'MAX_PREFERENCE_CONTEXT_CHARS',
     'MAX_PREFERENCE_CONTEXT_ITEMS',
     'MEMORY_ROOT',
@@ -102,7 +98,6 @@ __all__ = [
     'REFERENCE_ROOT',
     'SOUL_PATH',
     'USERS_ROOT',
-    'EpisodeConflictError',
     'EpisodeReadError',
     'EpisodeCreateInput',
     'EpisodeCreateResult',
@@ -113,7 +108,6 @@ __all__ = [
     'EpisodeType',
     'add_preference_entry',
     'append_preference_item',
-    'build_episode_idempotency_key',
     'build_reference_path',
     'delete_preference_entry',
     'episode_query_coverage',

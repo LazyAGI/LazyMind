@@ -156,6 +156,13 @@ def test_validate_sample_documents():
     assert validate_preference_index(SAMPLE_PREFERENCE) is None
 
 
+def test_validate_profile_requires_arrays_for_list_fields():
+    invalid = SAMPLE_PROFILE.replace('  aliases: []\n', '  aliases: null\n')
+    assert "identity.aliases' must be a list of strings" in (
+        validate_profile_content(invalid) or ''
+    )
+
+
 def test_validate_soul_rejects_non_mapping_and_extra_keys():
     bad = SAMPLE_SOUL + '\nfree text\n'
     assert 'valid non-empty YAML mapping' in (validate_soul_content(bad) or '')
@@ -200,8 +207,8 @@ def test_memory_store_roundtrip():
     assert store.read_profile() == SAMPLE_PROFILE
     assert store.read_preference() == SAMPLE_PREFERENCE
 
-    store.write_reference(
-        'response',
+    store.write(
+        build_reference_path('response'),
         (
             '---\n'
             'name: pref.response\n'
@@ -220,8 +227,6 @@ def test_memory_store_roundtrip():
             'The user requested it.\n'
         ),
     )
-    refs = store.list_references()
-    assert [item['name'] for item in refs] == ['response.md']
     section = store.read_reference('references/response.md#pref-response-technical-detail')
     assert 'Explain motivations and tradeoffs.' in section
 
@@ -231,7 +236,7 @@ def test_memory_store_rejects_invalid_path_and_content():
     with pytest.raises(ValueError):
         store.write('memory/agents/../secret.md', 'x')
     with pytest.raises(ValueError):
-        store.write_soul('identity: invalid\n')
+        store.write(SOUL_PATH, 'identity: invalid\n')
 
 
 def test_validate_reference_content():
@@ -293,12 +298,6 @@ def test_reorder_preferences_requires_exact_permutation_and_preserves_timestamps
     assert parse_preference_items(reordered) == [second, first]
     with pytest.raises(ValueError, match='exact permutation'):
         reorder_preference_items(content, ['pref.first'])
-
-    fs = FakeRemoteFS({PREFERENCE_PATH: content})
-    result = MemoryStore(fs).reorder_preferences(['pref.second', 'pref.first'])
-    assert result['ok'] is True
-    assert parse_preference_items(fs.files[PREFERENCE_PATH]) == [second, first]
-
 
 def test_preference_add_reports_partial_if_index_and_cleanup_fail():
     fs = FakeRemoteFS({PREFERENCE_PATH: SAMPLE_PREFERENCE})

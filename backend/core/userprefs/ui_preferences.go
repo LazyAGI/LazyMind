@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/currentmemory"
 	"lazymind/core/store"
 )
 
@@ -145,20 +145,19 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 }
 
 func LoadUserPreferenceConfigured(ctx context.Context, db *gorm.DB, userID string) (bool, error) {
-	var row orm.MemoryCurrentEntry
-	err := db.WithContext(ctx).
-		Where("user_id = ? AND path = ? AND entry_type = ?", strings.TrimSpace(userID), "memory/users/preference.yaml", "file").
-		Take(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	row, err := currentmemory.NewRepository(db).GetEntry(
+		ctx,
+		userID,
+		currentmemory.PreferencePath,
+	)
+	if errors.Is(err, currentmemory.ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	var document struct {
-		Preferences []map[string]any `yaml:"preferences"`
-	}
-	if err := yaml.Unmarshal(row.Content, &document); err != nil {
+	document, err := currentmemory.ParsePreferences(row.Content)
+	if err != nil {
 		return false, err
 	}
 	return len(document.Preferences) > 0, nil

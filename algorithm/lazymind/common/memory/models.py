@@ -72,12 +72,11 @@ class EpisodeRecord(EpisodeCreateInput):
 class EpisodeCreateResult(BaseModel):
     status: Literal['created', 'idempotent']
     id: str
-    idempotency_key: str
 
 
 class EpisodeSearchResult(BaseModel):
     episode: EpisodeRecord
-    bm25_score: float
+    lexical_score: float
     score: float
     rendered: str
 
@@ -89,7 +88,7 @@ def normalize_episode_summary(summary: str) -> str:
     return ' '.join(normalized.split()).casefold()
 
 
-def build_episode_idempotency_key(
+def build_episode_retry_fingerprint(
     *,
     user_id: str,
     conversation_id: str,
@@ -101,4 +100,4 @@ def build_episode_idempotency_key(
         'summary': normalize_episode_summary(summary),
     }
     raw = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
-    return 'ep_' + hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]
+    return 'episode_retry_' + hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]

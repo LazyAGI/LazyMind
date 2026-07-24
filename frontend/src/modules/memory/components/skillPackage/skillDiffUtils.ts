@@ -1,11 +1,7 @@
-import type {
-  DiffEntryLine,
-  DiffEntryLineOpenAPIResponse,
-} from "@/api/generated/core-client";
+import type { DiffEntryLineOpenAPIResponse } from "@/api/generated/core-client";
 import type { DiffLine } from "../../shared";
 
 export type DraftDiffEntryLineInput =
-  | DiffEntryLine
   | DiffEntryLineOpenAPIResponse
   | Record<string, unknown>;
 

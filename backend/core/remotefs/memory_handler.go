@@ -9,6 +9,7 @@ import (
 	"path"
 	"strings"
 
+	"lazymind/core/currentmemory"
 	skillhttperr "lazymind/core/skillv2/httperr"
 )
 
@@ -244,6 +245,8 @@ func memoryTruthy(value string) bool {
 
 func replyMemoryError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, currentmemory.ErrInvalidDocument):
+		skillhttperr.ReplyWithCode(w, err.Error(), http.StatusBadRequest, skillhttperr.CodeInvalidRequest)
 	case errors.Is(err, errMemoryInvalidPath):
 		skillhttperr.ReplyWithCode(w, err.Error(), http.StatusBadRequest, skillhttperr.CodeInvalidPath)
 	case errors.Is(err, errMemoryNotFound):

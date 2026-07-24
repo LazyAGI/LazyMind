@@ -337,7 +337,6 @@ export default function MemorySkillDetailPage() {
         open={versionDrawerOpen}
         resourceId={itemId}
         resourceName={skill?.name || itemId}
-        resourceType="skill"
         t={t}
         onClose={() => setVersionDrawerOpen(false)}
         onRolledBack={handleSkillRolledBack}

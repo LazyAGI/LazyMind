@@ -132,7 +132,7 @@ config.add('segment_store_user', str, 'admin', 'SEGMENT_STORE_USER',
 config.add('segment_store_password', str, 'LazyRAG_OpenSearch123!', 'SEGMENT_STORE_PASSWORD',
            description='Segment store password (OpenSearch/Elasticsearch only).')
 config.add('episode_candidate_topk', int, 20, 'EPISODE_CANDIDATE_TOPK',
-           description='Episode BM25 candidate count.')
+           description='Episode FTS candidate count.')
 config.add('episode_inject_topk', int, 5, 'EPISODE_INJECT_TOPK',
            description='Maximum Episode snapshots injected per chat request.')
 config.add('episode_context_max_chars', int, 4000, 'EPISODE_CONTEXT_MAX_CHARS',

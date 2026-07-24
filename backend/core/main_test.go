@@ -37,3 +37,15 @@ func TestBackgroundJobsEnabledAcceptsFalseValues(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateStartupConfigRequiresInternalToken(t *testing.T) {
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "")
+	if err := validateStartupConfig(); err == nil {
+		t.Fatal("validateStartupConfig() should reject an empty internal token")
+	}
+
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal-secret")
+	if err := validateStartupConfig(); err != nil {
+		t.Fatalf("validateStartupConfig() error = %v", err)
+	}
+}

@@ -1,12 +1,13 @@
 import { Alert, Input, Modal, Select, Skeleton, Tag } from "antd";
 import type { SkillShareRecord, SkillShareStatus } from "../skillApi";
+import type { ShareTarget } from "../shared";
 
 interface ShareModalProps {
   t: any;
   shareModalOpen: boolean;
   closeShareModal: () => void;
   handleConfirmShare: () => Promise<void>;
-  shareTarget: any;
+  shareTarget: ShareTarget | null;
   shareDraft: {
     groupIds: string[];
     userIds: string[];
@@ -58,12 +59,10 @@ export default function ShareModal(props: ShareModalProps) {
         <div className="memory-share-modal">
           <div className="memory-share-summary">
             <div className="memory-share-summary-title">
-              {"title" in shareTarget.item ? shareTarget.item.title : shareTarget.item.name}
+              {shareTarget.item.name}
             </div>
             <div className="memory-share-summary-desc">
-              {shareTarget.tab === "skills"
-                ? t("admin.memoryShareSkillHint")
-                : t("admin.memoryShareExperienceHint")}
+              {t("admin.memoryShareSkillHint")}
             </div>
           </div>
 
@@ -157,8 +156,7 @@ export default function ShareModal(props: ShareModalProps) {
             </div>
           </div>
 
-          {shareTarget.tab === "skills" ? (
-            <div className="memory-share-selected memory-share-status-panel">
+          <div className="memory-share-selected memory-share-status-panel">
               <div className="memory-share-selected-header">
                 <div>
                   <div className="memory-share-selected-title">
@@ -221,8 +219,7 @@ export default function ShareModal(props: ShareModalProps) {
                   {t("admin.memoryShareSyncedRecipientsEmpty")}
                 </span>
               )}
-            </div>
-          ) : null}
+          </div>
         </div>
       ) : null}
     </Modal>

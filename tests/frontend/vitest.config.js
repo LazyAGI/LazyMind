@@ -1,4 +1,11 @@
+import { fileURLToPath } from "node:url";
+
 export default {
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("../../frontend/src", import.meta.url)),
+    },
+  },
   testEnvironment: 'jsdom',
   rootDir: '.',
   testMatch: ['**/*.test.js'],

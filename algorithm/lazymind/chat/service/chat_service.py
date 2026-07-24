@@ -26,7 +26,11 @@ from lazymind.chat.engine.prompts import (
     select_skill_candidates,
     selected_prompt_modules,
 )
-from lazymind.common.memory import load_memory_context
+from lazymind.common.memory import (
+    EpisodeReadError,
+    get_episode_store,
+    load_memory_context,
+)
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
@@ -73,7 +77,6 @@ from lazyllm.tools.tool_config_inject import inject_tool_config
 from lazyllm import AutoModel
 from lazyllm.tools.mcp.client import MCPClient
 from lazymind.config import config as _cfg
-from lazymind.common.memory import get_episode_store
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
 sensitive_filter = SensitiveFilter(
@@ -708,7 +711,9 @@ async def _handle_chat_impl(
     if personalization.use_memory and user_id:
         try:
             episode_candidates = get_episode_store().search(user_id, language_query)
-        except Exception as exc:
+        except EpisodeReadError as exc:
+            if not exc.retryable:
+                raise
             LOG.warning(
                 f'[EpisodeMemory] retrieval failed: user_id={user_id!r} '
                 f'error_type={type(exc).__name__} error={exc}'

@@ -3,8 +3,11 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from lazymind.chat.service import chat_service
 from lazymind.chat.service.chat_request import ChatRequest
+from lazymind.common.memory import EpisodeReadError
 
 
 class _ContextAgent:
@@ -86,6 +89,47 @@ def test_episode_retrieval_uses_only_the_current_user_query(monkeypatch) -> None
     )
 
     assert store.queries == [('episode-prompt-user', '还记得火星苹果42吗')]
+
+
+def test_episode_retrieval_fails_open_only_for_transient_core_errors(
+    monkeypatch,
+) -> None:
+    error = EpisodeReadError('Core is temporarily unavailable')
+    error.code = 'storage_unavailable'
+    error.retryable = True
+
+    def fail_search(_user_id, _query):
+        raise error
+
+    monkeypatch.setattr(
+        chat_service,
+        'get_episode_store',
+        lambda: SimpleNamespace(search=fail_search),
+    )
+
+    result = _export_prompt(monkeypatch, query='继续之前的决定', history=[])
+
+    assert '<episode_memory' not in result['prompt_markdown']
+
+
+def test_episode_retrieval_propagates_non_retryable_contract_errors(
+    monkeypatch,
+) -> None:
+    error = EpisodeReadError('Core rejected the Episode request')
+    error.code = 'storage_read_failed'
+    error.retryable = False
+
+    def fail_search(_user_id, _query):
+        raise error
+
+    monkeypatch.setattr(
+        chat_service,
+        'get_episode_store',
+        lambda: SimpleNamespace(search=fail_search),
+    )
+
+    with pytest.raises(EpisodeReadError, match='Core rejected'):
+        _export_prompt(monkeypatch, query='继续之前的决定', history=[])
 
 
 def test_episode_memory_is_an_escaped_untrusted_runtime_reference(monkeypatch) -> None:

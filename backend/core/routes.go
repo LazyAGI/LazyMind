@@ -7,8 +7,10 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/agent"
 	"lazymind/core/chat"
+	"lazymind/core/currentmemory"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
+	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
 	"lazymind/core/file"
@@ -308,6 +310,21 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{conversation_id}/dismissed-plugin-sessions", []string{"qa.read"}, plugin.ListDismissedSessionsHandler)
 	handleAPI(r, "GET", "/personalization-setting", []string{"qa.read"}, evolution.GetPersonalizationSetting)
 	handleAPI(r, "PUT", "/personalization-setting", []string{"qa.write"}, evolution.SetPersonalizationSetting)
+	handleAPI(r, "GET", "/memory/soul", []string{"qa.read"}, currentmemory.GetSoul)
+	handleAPI(r, "PATCH", "/memory/soul", []string{"qa.write"}, currentmemory.PatchSoul)
+	handleAPI(r, "GET", "/memory/profile", []string{"qa.read"}, currentmemory.GetProfile)
+	handleAPI(r, "PATCH", "/memory/profile", []string{"qa.write"}, currentmemory.PatchProfile)
+	handleAPI(r, "GET", "/memory/preferences", []string{"qa.read"}, currentmemory.ListPreferences)
+	handleAPI(r, "PUT", "/memory/preferences:order", []string{"qa.write"}, currentmemory.ReorderPreferences)
+	handleAPI(r, "GET", "/memory/preferences/{name}", []string{"qa.read"}, currentmemory.GetPreference)
+	handleAPI(r, "DELETE", "/memory/preferences/{name}", []string{"qa.write"}, currentmemory.DeletePreference)
+	handleAPI(r, "GET", "/memory/episodes", []string{"qa.read"}, episode.ListEpisodes)
+	handleAPI(r, "GET", "/memory/episodes/{episode_id}", []string{"qa.read"}, episode.GetEpisode)
+	handleAPI(r, "DELETE", "/memory/episodes/{episode_id}", []string{"qa.write"}, episode.DeleteEpisode)
+	handleAPI(r, "POST", "/internal/memory/episodes", nil, episode.InternalCreate)
+	handleAPI(r, "POST", "/internal/memory/episodes:searchCandidates", nil, episode.InternalSearchCandidates)
+	handleAPI(r, "GET", "/internal/memory/episodes", nil, episode.InternalListByConversation)
+	handleAPI(r, "POST", "/internal/memory/episodes:recordHits", nil, episode.InternalRecordHits)
 	handleAPI(r, "GET", "/skills", []string{"qa.read"}, skillv2handler.List)
 	handleAPI(r, "GET", "/skills:trash", []string{"qa.read"}, skillv2handler.ListTrash)
 	handleAPI(r, "DELETE", "/skills:trash", []string{"qa.write"}, skillv2handler.EmptyTrash)

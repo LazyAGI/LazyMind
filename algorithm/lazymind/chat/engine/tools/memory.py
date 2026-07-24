@@ -3,6 +3,7 @@ import re
 from typing import Any, Dict, List, Literal, Union
 
 import lazyllm
+import requests
 from pydantic import ValidationError
 
 from lazymind.chat.engine.tools.infra import tool_error, tool_success
@@ -10,17 +11,16 @@ from lazymind.common.memory import (
     PREFERENCE_PATH,
     PROFILE_PATH,
     SOUL_PATH,
-    EpisodeConflictError,
     EpisodeCreateInput,
     EpisodeReadError,
     EpisodeSource,
     EpisodeType,
     MemoryStore,
-    build_episode_idempotency_key,
     get_episode_store,
     preference_name_to_reference_name,
     split_reference_ref,
 )
+from lazymind.common.memory.models import build_episode_retry_fingerprint
 
 _TRANSIENT_MARKERS = (
     'backend down',
@@ -73,7 +73,15 @@ def _safe_exception_message(exc: Exception) -> str:
 
 
 def _is_transient(exc: Exception) -> bool:
-    if isinstance(exc, (ConnectionError, TimeoutError)):
+    if isinstance(
+        exc,
+        (
+            ConnectionError,
+            TimeoutError,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+        ),
+    ):
         return True
     message = str(exc).casefold()
     return any(marker in message for marker in _TRANSIENT_MARKERS)
@@ -81,7 +89,11 @@ def _is_transient(exc: Exception) -> bool:
 
 def _is_timeout(exc: Exception) -> bool:
     message = str(exc).casefold()
-    return isinstance(exc, TimeoutError) or 'timed out' in message or 'timeout' in message
+    return (
+        isinstance(exc, (TimeoutError, requests.exceptions.Timeout))
+        or 'timed out' in message
+        or 'timeout' in message
+    )
 
 
 def _record_tool_result(
@@ -621,7 +633,7 @@ class MemoryTools:
                 mutation=False,
             )
 
-        idempotency_key = build_episode_idempotency_key(
+        retry_fingerprint = build_episode_retry_fingerprint(
             user_id=values['user_id'],
             conversation_id=values['conversation_id'],
             summary=item.summary,
@@ -650,7 +662,7 @@ class MemoryTools:
                 mutation=False,
                 ledger_result={
                     'status': 'failed',
-                    'idempotency_key': idempotency_key,
+                    'retry_fingerprint': retry_fingerprint,
                 },
             )
 
@@ -677,26 +689,7 @@ class MemoryTools:
                 mutation=False,
                 ledger_result={
                     'status': 'failed',
-                    'idempotency_key': idempotency_key,
-                },
-            )
-        except EpisodeConflictError as exc:
-            _log_tool_exception('episode_create', exc)
-            return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': 'episode_conflict',
-                        'message': _safe_exception_message(exc),
-                        'detail': {'exception_type': type(exc).__name__},
-                    },
-                    'retryable': False,
-                },
-                mutation=False,
-                ledger_result={
-                    'status': 'failed',
-                    'idempotency_key': idempotency_key,
+                    'retry_fingerprint': retry_fingerprint,
                 },
             )
         except Exception as exc:
@@ -722,7 +715,7 @@ class MemoryTools:
                 mutation=None,
                 ledger_result={
                     'status': 'failed',
-                    'idempotency_key': idempotency_key,
+                    'retry_fingerprint': retry_fingerprint,
                 },
             )
 
@@ -737,6 +730,6 @@ class MemoryTools:
             mutation=create_result.status == 'created',
             ledger_result={
                 'status': create_result.status,
-                'idempotency_key': create_result.idempotency_key,
+                'retry_fingerprint': retry_fingerprint,
             },
         )

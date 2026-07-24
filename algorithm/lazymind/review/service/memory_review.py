@@ -29,7 +29,6 @@ _SAFE_REVIEW_ERROR_MESSAGES = {
     'storage_failed': 'Persistent memory storage could not complete the operation.',
     'invalid_arguments': 'A memory tool rejected invalid arguments.',
     'missing_context': 'Required context for the memory operation is missing.',
-    'episode_conflict': 'Episode storage reported a conflicting record.',
     'write_failed': 'A memory write failed.',
 }
 
@@ -58,11 +57,11 @@ def _truncate_log_text(value: Any, limit: int = 4000) -> str:
     return f'{text[:limit]}...<truncated {len(text) - limit} chars>'
 
 
-def _write_idempotency_key(entry: Dict[str, Any]) -> tuple[str, str] | None:
+def _write_retry_fingerprint(entry: Dict[str, Any]) -> tuple[str, str] | None:
     result = entry.get('result')
     if not isinstance(result, dict):
         return None
-    key = str(result.get('idempotency_key') or '').strip()
+    key = str(result.get('retry_fingerprint') or '').strip()
     if not key:
         return None
     return str(entry.get('tool') or ''), key
@@ -72,7 +71,7 @@ def _unresolved_write_failures(write_results: List[Dict[str, Any]]) -> List[Dict
     later_success_keys: set[tuple[str, str]] = set()
     unresolved_reversed: List[Dict[str, Any]] = []
     for entry in reversed(write_results):
-        key = _write_idempotency_key(entry)
+        key = _write_retry_fingerprint(entry)
         if entry.get('success') is True:
             if key is not None:
                 later_success_keys.add(key)

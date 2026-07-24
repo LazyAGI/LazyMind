@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useRef } from "react";
 import {
   Alert,
   Button,
@@ -11,13 +10,11 @@ import {
   Steps,
   Tooltip,
 } from "antd";
-import { UndoOutlined } from "@ant-design/icons";
 import SendIcon from "@/modules/chat/assets/icons/send_icon.svg?react";
 import RouteLoading from "../../components/RouteLoading";
 import { useMemoryManagementOutletContext } from "../../context";
 import { getSkillBodyContentForDisplay } from "../../shared";
 import { DiffLineContent } from "../../components/DiffLineContent";
-import SkillDiffHunkPanel from "../../components/skillPackage/SkillDiffHunkPanel";
 
 export default function MemoryReviewPage() {
   const {
@@ -45,10 +42,6 @@ export default function MemoryReviewPage() {
     backendSuggestionBatchSubmitting,
     handleBackendBatchAccept,
     handleBackendBatchRejectWithConfirm,
-    backendSuggestionHasMore,
-    backendSuggestionLoadingMore,
-    backendSuggestionLoadMoreError,
-    loadMoreBackendSuggestions,
     clearSelectedBackendSuggestions,
     backendSuggestionSubmitting,
     selectedBackendSuggestionIds,
@@ -56,11 +49,6 @@ export default function MemoryReviewPage() {
     setBackendSuggestionSelected,
     submitBackendSuggestionDecision,
     backendDraftDiffLines,
-    backendDraftPreview,
-    backendDraftHunkSubmitting,
-    backendDraftReviewUndoing,
-    submitBackendDraftHunkDecision,
-    undoBackendDraftReview,
     backendDraftReady,
     qaQuestionDraft,
     setQaQuestionDraft,
@@ -93,38 +81,7 @@ export default function MemoryReviewPage() {
     manualPreviewContentDraft,
     setManualPreviewContentDraft,
   } = useMemoryManagementOutletContext();
-  const backendSuggestionListRef = useRef<HTMLDivElement | null>(null);
-  const maybeLoadMoreBackendSuggestions = useCallback(() => {
-    const container = backendSuggestionListRef.current;
-    if (
-      !container ||
-      !backendSuggestionHasMore ||
-      backendSuggestionLoadingMore ||
-      backendSuggestionBatchSubmitting === "accept" ||
-      backendSuggestionBatchSubmitting === "reject"
-    ) {
-      return;
-    }
-
-    const distanceToBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
-    if (distanceToBottom <= 96) {
-      void loadMoreBackendSuggestions();
-    }
-  }, [
-    backendSuggestionBatchSubmitting,
-    backendSuggestionHasMore,
-    backendSuggestionLoadingMore,
-    loadMoreBackendSuggestions,
-  ]);
-
-  useEffect(() => {
-    maybeLoadMoreBackendSuggestions();
-  }, [activeBackendSuggestions.length, maybeLoadMoreBackendSuggestions]);
-
-  const originalSkill = activeProposal?.tab === "skills" ? activeProposal.before : null;
-  const originalExperience =
-    activeProposal?.tab === "experience" ? activeProposal.before : null;
+  const originalSkill = activeProposal?.before || null;
   const originalSkillTags = Array.isArray(originalSkill?.tags)
     ? originalSkill.tags.filter(Boolean)
     : [];
@@ -132,16 +89,11 @@ export default function MemoryReviewPage() {
     originalSkill && typeof originalSkill.content === "string"
       ? getSkillBodyContentForDisplay(originalSkill.content)
       : "";
-  const originalSourceBodyText = originalSkill
-    ? originalSkillBodyText
-    : originalExperience
-      ? originalExperience.content
-      : activeProposalDiff?.beforeText || activeBackendSuggestionSourceText;
-  const sourceBodyTitle = originalSkill
-    ? t("admin.memoryMarkdown")
-    : originalExperience
-      ? t("admin.memoryContent")
-      : "";
+  const originalSourceBodyText =
+    originalSkillBodyText ||
+    activeProposalDiff?.beforeText ||
+    activeBackendSuggestionSourceText;
+  const sourceBodyTitle = originalSkill ? t("admin.memoryMarkdown") : "";
   const renderOriginalSkillSummary = () => {
     if (!originalSkill) {
       return null;
@@ -191,42 +143,13 @@ export default function MemoryReviewPage() {
       </div>
     );
   };
-  const renderOriginalExperienceSummary = () => {
-    if (!originalExperience) {
-      return null;
-    }
-
-    return (
-      <div className="memory-diff-skill-summary">
-        <div className="memory-diff-skill-title-row">
-          <span className="memory-diff-skill-label">{t("admin.memoryTitle")}</span>
-          <strong className="memory-diff-skill-name">{originalExperience.title || "-"}</strong>
-        </div>
-        <div className="memory-diff-skill-meta">
-          <div className="memory-diff-skill-meta-item">
-            <span className="memory-diff-skill-meta-label">
-              {t("admin.memoryAutoUpdate")}
-            </span>
-            <span className="memory-diff-skill-meta-value">
-              {originalExperience.autoEvo
-                ? t("admin.memoryDiffBoolYes")
-                : t("admin.memoryDiffBoolNo")}
-            </span>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   if (isReviewRouteRequested && !activeProposal) {
     return <RouteLoading title={t("admin.memoryDiffDialogTitle")} />;
   }
 
   if (activeProposal && isBackendSuggestionReviewMode) {
     const canPreviewBackendDraft = Boolean(activeProposal.backendSuggestions);
-    const isDraftPreviewOnly =
-      (activeProposal.tab === "skills" || activeProposal.tab === "experience") &&
-      canPreviewBackendDraft;
+    const isDraftPreviewOnly = canPreviewBackendDraft;
     const effectiveReviewStep = isDraftPreviewOnly ? 1 : activeReviewStep;
 
     return (
@@ -283,28 +206,11 @@ export default function MemoryReviewPage() {
                   loading={backendDraftSubmitting === "discard"}
                   disabled={
                     backendDraftSubmitting === "confirm" ||
-                    backendDraftLoading ||
-                    backendDraftReviewUndoing ||
-                    Object.keys(backendDraftHunkSubmitting).length > 0
+                    backendDraftLoading
                   }
                   onClick={discardBackendDraftAndReturn}
                 >
-                  {t("admin.memoryPreferenceDraftDiscard")}
-                </Button>
-              ) : null}
-              {canPreviewBackendDraft && effectiveReviewStep === 1 ? (
-                <Button
-                  icon={<UndoOutlined />}
-                  loading={backendDraftReviewUndoing}
-                  disabled={
-                    activeProposal.tab === "skills" ||
-                    !backendDraftPreview?.canUndo ||
-                    backendDraftSubmitting !== "" ||
-                    Object.keys(backendDraftHunkSubmitting).length > 0
-                  }
-                  onClick={() => void undoBackendDraftReview()}
-                >
-                  {t("admin.memoryDraftReviewUndo")}
+                  {t("admin.memorySkillDraftDiscard")}
                 </Button>
               ) : null}
               {canPreviewBackendDraft && effectiveReviewStep === 1 ? (
@@ -314,13 +220,11 @@ export default function MemoryReviewPage() {
                   disabled={
                     backendDraftSubmitting === "discard" ||
                     backendDraftLoading ||
-                    backendDraftReviewUndoing ||
-                    Object.keys(backendDraftHunkSubmitting).length > 0 ||
                     !backendDraftReady
                   }
                   onClick={() => void confirmBackendDraft()}
                 >
-                  {t("admin.memoryPreferenceDraftConfirm")}
+                  {t("admin.memorySkillDraftConfirm")}
                 </Button>
               ) : null}
             </Space>
@@ -332,13 +236,9 @@ export default function MemoryReviewPage() {
               canPreviewBackendDraft
                 ? effectiveReviewStep === 0
                   ? isDraftPreviewOnly
-                    ? activeProposal.tab === "skills"
-                      ? t("admin.memoryDiffSkillDraftPreviewHint")
-                      : t("admin.memoryDiffMemoryDraftPreviewHint")
-                    : t("admin.memoryDiffBackendChooseHint")
-                  : activeProposal.tab === "skills"
                     ? t("admin.memoryDiffSkillDraftPreviewHint")
-                    : t("admin.memoryDiffMemoryDraftPreviewHint")
+                    : t("admin.memoryDiffBackendChooseHint")
+                  : t("admin.memoryDiffSkillDraftPreviewHint")
                 : t("admin.memoryDiffBackendFallbackHint")
             }
           />
@@ -350,7 +250,6 @@ export default function MemoryReviewPage() {
                     <h4>{t("admin.memoryDiffBefore")}</h4>
                   </div>
                   {renderOriginalSkillSummary()}
-                  {renderOriginalExperienceSummary()}
                   {sourceBodyTitle ? (
                     <div className="memory-diff-source-title">{sourceBodyTitle}</div>
                   ) : null}
@@ -410,11 +309,7 @@ export default function MemoryReviewPage() {
                     </Button>
                   </Space>
                 </div>
-                <div
-                  ref={backendSuggestionListRef}
-                  className="memory-diff-change-list"
-                  onScroll={maybeLoadMoreBackendSuggestions}
-                >
+                <div className="memory-diff-change-list">
                   {activeBackendSuggestions.length ? (
                     <>
                       {activeBackendSuggestions.map((suggestion: any, index: number) => {
@@ -492,33 +387,6 @@ export default function MemoryReviewPage() {
                           </div>
                         );
                       })}
-                      <div className="memory-backend-suggestion-loadmore" aria-live="polite">
-                        {backendSuggestionLoadingMore ? (
-                          <div className="memory-backend-suggestion-loadmore-state">
-                            <Spin size="small" />
-                            <span>{t("common.loading")}</span>
-                          </div>
-                        ) : null}
-                        {!backendSuggestionLoadingMore && backendSuggestionLoadMoreError ? (
-                          <div className="memory-backend-suggestion-loadmore-state is-error">
-                            <span>{backendSuggestionLoadMoreError}</span>
-                            <Button
-                              type="link"
-                              size="small"
-                              onClick={() => void loadMoreBackendSuggestions()}
-                            >
-                              {t("common.retry")}
-                            </Button>
-                          </div>
-                        ) : null}
-                        {!backendSuggestionLoadingMore &&
-                        !backendSuggestionLoadMoreError &&
-                        !backendSuggestionHasMore ? (
-                          <span className="memory-backend-suggestion-loadmore-end">
-                            {t("admin.memoryBackendSuggestionEnd")}
-                          </span>
-                        ) : null}
-                      </div>
                     </>
                   ) : (
                     <div className="memory-backend-suggestion-empty">
@@ -538,17 +406,6 @@ export default function MemoryReviewPage() {
                         <Spin />
                         <span>{t("admin.memoryDiffPreviewGenerating")}</span>
                       </div>
-                    ) : activeProposal.tab !== "skills" &&
-                      backendDraftPreview?.fileDiff?.diffEntryLines.length ? (
-                      <SkillDiffHunkPanel
-                        diffEntryLines={backendDraftPreview.fileDiff.diffEntryLines}
-                        hunkReviewActive={Boolean(backendDraftPreview.reviewId)}
-                        hunkSubmitting={backendDraftHunkSubmitting}
-                        onHunkDecision={(hunk, decision) =>
-                          void submitBackendDraftHunkDecision(hunk.hunkId, decision)
-                        }
-                        t={t}
-                      />
                     ) : backendDraftDiffLines.length ? (
                       backendDraftDiffLines.map((line: any, index: number) => (
                         <div
@@ -664,7 +521,6 @@ export default function MemoryReviewPage() {
                   <h4>{t("admin.memoryDiffBefore")}</h4>
                 </div>
                 {renderOriginalSkillSummary()}
-                {renderOriginalExperienceSummary()}
                 {sourceBodyTitle ? (
                   <div className="memory-diff-source-title">{sourceBodyTitle}</div>
                 ) : null}
@@ -824,62 +680,19 @@ export default function MemoryReviewPage() {
                     />
                   </div>
                 ) : (
-                  <>
-                    {activeProposalDiff.isPreference ? (
-                      <div className="memory-diff-unified">
-                        <div className="memory-diff-preference-section">
-                          <div className="memory-diff-preference-section-title">
-                            {t("admin.memoryDiffPreferenceYamlSection")}
-                          </div>
-                          <div className="memory-diff-unified">
-                            {activeProposalDiff.prefYamlDiffLines.map((line: any, index: number) => (
-                              <div
-                                key={`yaml-${line.type}-${index}`}
-                                className={`memory-diff-line is-${line.type}`}
-                              >
-                                <span className="memory-diff-prefix">
-                                  {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
-                                </span>
-                                <DiffLineContent line={line} />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="memory-diff-preference-section">
-                          <div className="memory-diff-preference-section-title">
-                            {t("admin.memoryDiffPreferenceBodySection")}
-                          </div>
-                          <div className="memory-diff-unified">
-                            {activeProposalDiff.prefBodyDiffLines.map((line: any, index: number) => (
-                              <div
-                                key={`body-${line.type}-${index}`}
-                                className={`memory-diff-line is-${line.type}`}
-                              >
-                                <span className="memory-diff-prefix">
-                                  {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
-                                </span>
-                                <DiffLineContent line={line} />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
+                  <div className="memory-diff-unified">
+                    {activeProposalDiff.lines.map((line: any, index: number) => (
+                      <div
+                        key={`${line.type}-${index}`}
+                        className={`memory-diff-line is-${line.type}`}
+                      >
+                        <span className="memory-diff-prefix">
+                          {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
+                        </span>
+                        <DiffLineContent line={line} />
                       </div>
-                    ) : (
-                      <div className="memory-diff-unified">
-                        {activeProposalDiff.lines.map((line: any, index: number) => (
-                          <div
-                            key={`${line.type}-${index}`}
-                            className={`memory-diff-line is-${line.type}`}
-                          >
-                            <span className="memory-diff-prefix">
-                              {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
-                            </span>
-                            <DiffLineContent line={line} />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
+                    ))}
+                  </div>
                 )}
                 <div className="memory-diff-question-box">
                   <div className="memory-diff-question-inner">

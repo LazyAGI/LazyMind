@@ -4,10 +4,10 @@ from typing import Optional
 
 from .common import (
     optional_str,
-    optional_str_list,
     parse_yaml_mapping,
     reject_unknown_keys,
     require_mapping,
+    str_list,
 )
 
 _ROOT_KEYS = {'identity', 'locale', 'professional', 'accessibility'}
@@ -41,7 +41,7 @@ def validate_profile_content(content: str) -> Optional[str]:
         err = optional_str(identity.get(key), field=f'identity.{key}')
         if err:
             return err
-    err = optional_str_list(identity.get('aliases'), field='identity.aliases')
+    err = str_list(identity.get('aliases'), field='identity.aliases')
     if err:
         return err
 
@@ -50,7 +50,7 @@ def validate_profile_content(content: str) -> Optional[str]:
     if err:
         return err
     assert isinstance(locale, dict)
-    err = optional_str_list(locale.get('languages'), field='locale.languages')
+    err = str_list(locale.get('languages'), field='locale.languages')
     if err:
         return err
     for key in ('timezone', 'region'):
@@ -68,7 +68,7 @@ def validate_profile_content(content: str) -> Optional[str]:
         return err
     assert isinstance(professional, dict)
     for key in ('roles', 'expertise_domains'):
-        err = optional_str_list(professional.get(key), field=f'professional.{key}')
+        err = str_list(professional.get(key), field=f'professional.{key}')
         if err:
             return err
     for key in ('organization', 'industry'):
@@ -85,7 +85,7 @@ def validate_profile_content(content: str) -> Optional[str]:
     if err:
         return err
     assert isinstance(accessibility, dict)
-    err = optional_str_list(
+    err = str_list(
         accessibility.get('communication_needs'),
         field='accessibility.communication_needs',
     )

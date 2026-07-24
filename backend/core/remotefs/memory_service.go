@@ -11,60 +11,29 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/currentmemory"
 )
 
 const (
-	memoryRootPath       = "memory"
-	memoryAgentsPath     = "memory/agents"
-	memoryUsersPath      = "memory/users"
-	memorySoulPath       = "memory/agents/soul.yaml"
-	memoryProfilePath    = "memory/users/profile.yaml"
-	memoryPreferencePath = "memory/users/preference.yaml"
-	memoryReferencesPath = "memory/users/references"
+	memoryRootPath       = currentmemory.RootPath
+	memoryAgentsPath     = currentmemory.AgentsPath
+	memoryUsersPath      = currentmemory.UsersPath
+	memorySoulPath       = currentmemory.SoulPath
+	memoryProfilePath    = currentmemory.ProfilePath
+	memoryPreferencePath = currentmemory.PreferencePath
+	memoryReferencesPath = currentmemory.ReferencesPath
 
-	memoryEntryFile = "file"
-	memoryEntryDir  = "dir"
+	memoryEntryFile = currentmemory.EntryFile
+	memoryEntryDir  = currentmemory.EntryDir
 )
 
-const defaultSoulYAML = `identity:
-  name: LazyMind
-  role: personal_ai_assistant
-  description: 面向研究、分析和复杂任务的个人智能助手
-mission:
-  primary_goal: 帮助用户准确、高效地思考并完成工作
-  success_definition: 输出可靠、可执行且符合用户真实目标的结果
-interaction:
-  relationship_mode: collaborator
-  default_tone: warm_direct
-  initiative_level: proactive
-  challenge_level: constructive
-  decision_mode: recommend_then_confirm
-epistemic:
-  uncertainty_style: explicit
-  verification_mode: when_material
-`
-
-const defaultProfileYAML = `identity:
-  preferred_name: null
-  aliases: []
-  pronouns: null
-locale:
-  languages: []
-  timezone: null
-  region: null
-professional:
-  roles: []
-  organization: null
-  industry: null
-  expertise_domains: []
-accessibility:
-  communication_needs: []
-`
-
-const defaultPreferenceYAML = "preferences: []\n"
+const (
+	defaultSoulYAML       = currentmemory.DefaultSoulYAML
+	defaultProfileYAML    = currentmemory.DefaultProfileYAML
+	defaultPreferenceYAML = currentmemory.DefaultPreferenceYAML
+)
 
 var (
 	errMemoryInvalidPath = errors.New("invalid memory path")
@@ -74,71 +43,28 @@ var (
 )
 
 type memoryCurrentService struct {
-	db    *gorm.DB
-	clock func() time.Time
+	db         *gorm.DB
+	repository *currentmemory.Repository
+	clock      func() time.Time
 }
 
 func newMemoryCurrentService(db *gorm.DB) *memoryCurrentService {
-	return &memoryCurrentService{db: db, clock: time.Now}
+	return &memoryCurrentService{
+		db:         db,
+		repository: currentmemory.NewRepository(db),
+		clock:      time.Now,
+	}
 }
 
 func (s *memoryCurrentService) ensureInitialized(ctx context.Context, userID string) error {
-	if s == nil || s.db == nil {
+	if s == nil || s.repository == nil {
 		return errors.New("memory store db is not configured")
 	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return errors.New("memory user_id is required")
-	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var count int64
-		if err := tx.Model(&orm.MemoryCurrentEntry{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
-			return err
-		}
-		if count > 0 {
-			return nil
-		}
-		now := s.clock().UTC()
-		entries := defaultMemoryCurrentEntries(userID, now)
-		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error
-	})
+	return s.repository.EnsureInitializedAt(ctx, userID, s.clock().UTC())
 }
 
 func defaultMemoryCurrentEntries(userID string, now time.Time) []orm.MemoryCurrentEntry {
-	yamlEntry := func(entryPath, content string) orm.MemoryCurrentEntry {
-		data := []byte(content)
-		return orm.MemoryCurrentEntry{
-			UserID:    userID,
-			Path:      entryPath,
-			EntryType: memoryEntryFile,
-			Content:   data,
-			Size:      int64(len(data)),
-			Mime:      "application/yaml; charset=utf-8",
-			FileType:  "yaml",
-			Binary:    false,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-	}
-	dirEntry := func(entryPath string) orm.MemoryCurrentEntry {
-		return orm.MemoryCurrentEntry{
-			UserID:    userID,
-			Path:      entryPath,
-			EntryType: memoryEntryDir,
-			FileType:  "directory",
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-	}
-	return []orm.MemoryCurrentEntry{
-		dirEntry(memoryRootPath),
-		dirEntry(memoryAgentsPath),
-		dirEntry(memoryUsersPath),
-		dirEntry(memoryReferencesPath),
-		yamlEntry(memorySoulPath, defaultSoulYAML),
-		yamlEntry(memoryProfilePath, defaultProfileYAML),
-		yamlEntry(memoryPreferencePath, defaultPreferenceYAML),
-	}
+	return currentmemory.DefaultEntries(userID, now)
 }
 
 func normalizeMemoryCurrentPath(raw string) (string, error) {
@@ -216,11 +142,8 @@ func (s *memoryCurrentService) info(ctx context.Context, userID, rawPath string)
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return orm.MemoryCurrentEntry{}, err
 	}
-	var entry orm.MemoryCurrentEntry
-	err = s.db.WithContext(ctx).
-		Where("user_id = ? AND path = ?", strings.TrimSpace(userID), entryPath).
-		Take(&entry).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	entry, err := s.repository.GetEntry(ctx, userID, entryPath)
+	if errors.Is(err, currentmemory.ErrNotFound) {
 		return orm.MemoryCurrentEntry{}, errMemoryNotFound
 	}
 	return entry, err
@@ -234,13 +157,7 @@ func (s *memoryCurrentService) exists(ctx context.Context, userID, rawPath strin
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return false, err
 	}
-	var count int64
-	if err := s.db.WithContext(ctx).Model(&orm.MemoryCurrentEntry{}).
-		Where("user_id = ? AND path = ?", strings.TrimSpace(userID), entryPath).
-		Count(&count).Error; err != nil {
-		return false, err
-	}
-	return count == 1, nil
+	return s.repository.EntryExists(ctx, userID, entryPath)
 }
 
 func (s *memoryCurrentService) read(ctx context.Context, userID, rawPath string) (orm.MemoryCurrentEntry, error) {
@@ -267,6 +184,9 @@ func (s *memoryCurrentService) write(
 	}
 	if entryPath == memoryRootPath {
 		return orm.MemoryCurrentEntry{}, errMemoryProtected
+	}
+	if err := currentmemory.ValidateDocumentForPath(entryPath, content); err != nil {
+		return orm.MemoryCurrentEntry{}, err
 	}
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return orm.MemoryCurrentEntry{}, err
@@ -297,18 +217,7 @@ func (s *memoryCurrentService) write(
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
-		return tx.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "user_id"}, {Name: "path"}},
-			DoUpdates: clause.Assignments(map[string]any{
-				"entry_type": memoryEntryFile,
-				"content":    out.Content,
-				"size":       out.Size,
-				"mime":       out.Mime,
-				"file_type":  out.FileType,
-				"binary":     out.Binary,
-				"updated_at": now,
-			}),
-		}).Create(&out).Error
+		return currentmemory.NewRepository(tx).UpsertEntry(ctx, out)
 	})
 	return out, err
 }
@@ -378,8 +287,7 @@ func (s *memoryCurrentService) delete(ctx context.Context, userID, rawPath strin
 				return fmt.Errorf("%w: directory is not empty", errMemoryConflict)
 			}
 		}
-		return tx.Where("user_id = ? AND path IN ?", strings.TrimSpace(userID), paths).
-			Delete(&orm.MemoryCurrentEntry{}).Error
+		return currentmemory.NewRepository(tx).DeletePaths(ctx, userID, paths)
 	})
 }
 
@@ -445,8 +353,7 @@ func (s *memoryCurrentService) move(ctx context.Context, userID, rawFrom, rawTo 
 				paths = append(paths, entry.Path)
 			}
 		}
-		return tx.Where("user_id = ? AND path IN ?", strings.TrimSpace(userID), paths).
-			Delete(&orm.MemoryCurrentEntry{}).Error
+		return currentmemory.NewRepository(tx).DeletePaths(ctx, userID, paths)
 	})
 }
 
@@ -486,9 +393,14 @@ func (s *memoryCurrentService) copyEntries(
 		entry.Content = append([]byte(nil), entry.Content...)
 		entry.CreatedAt = now
 		entry.UpdatedAt = now
+		if entry.EntryType == memoryEntryFile {
+			if err := currentmemory.ValidateDocumentForPath(entry.Path, entry.Content); err != nil {
+				return err
+			}
+		}
 		clones = append(clones, entry)
 	}
-	return tx.Create(&clones).Error
+	return currentmemory.NewRepository(tx).CreateEntries(ctx, clones)
 }
 
 func normalizeMemoryPathPair(rawFrom, rawTo string) (string, string, error) {
@@ -508,9 +420,8 @@ func (s *memoryCurrentService) loadEntries(
 	db *gorm.DB,
 	userID string,
 ) ([]orm.MemoryCurrentEntry, map[string]orm.MemoryCurrentEntry, error) {
-	var entries []orm.MemoryCurrentEntry
-	if err := db.WithContext(ctx).Where("user_id = ?", strings.TrimSpace(userID)).
-		Order("path ASC").Find(&entries).Error; err != nil {
+	entries, err := currentmemory.NewRepository(db).ListEntries(ctx, userID)
+	if err != nil {
 		return nil, nil, err
 	}
 	byPath := make(map[string]orm.MemoryCurrentEntry, len(entries))

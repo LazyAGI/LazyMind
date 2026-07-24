@@ -75,9 +75,7 @@ def optional_str(value: Any, *, field: str) -> Optional[str]:
     return None
 
 
-def optional_str_list(value: Any, *, field: str) -> Optional[str]:
-    if value is None:
-        return None
+def str_list(value: Any, *, field: str) -> Optional[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         return f"Field '{field}' must be a list of strings."
     return None

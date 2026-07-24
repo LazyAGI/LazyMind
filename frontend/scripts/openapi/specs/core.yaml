@@ -495,26 +495,6 @@ components:
                         type: string
                     type: array
             type: object
-        CommitResponse:
-            properties:
-                content:
-                    type: string
-                path:
-                    type: string
-                ref:
-                    $ref: '#/components/schemas/ResourceRef'
-                revision_id:
-                    type: string
-                revision_no:
-                    format: int64
-                    type: integer
-            required:
-                - content
-                - path
-                - ref
-                - revision_id
-                - revision_no
-            type: object
         CompleteUploadRequest:
             properties:
                 auto_start:
@@ -998,6 +978,465 @@ components:
                 - id
                 - word
             type: object
+        CurrentMemoryConflictData:
+            properties:
+                current_etag:
+                    type: string
+            type: object
+        CurrentMemoryErrorResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CurrentMemoryConflictData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
+        CurrentMemoryPreferenceDetailData:
+            properties:
+                item:
+                    $ref: '#/components/schemas/CurrentMemoryPreferenceItem'
+                reference:
+                    allOf:
+                        - $ref: '#/components/schemas/CurrentMemoryReference'
+                    nullable: true
+                reference_status:
+                    enum:
+                        - available
+                        - missing
+                    type: string
+            required:
+                - item
+                - reference_status
+                - reference
+            type: object
+        CurrentMemoryPreferenceDetailResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CurrentMemoryPreferenceDetailData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CurrentMemoryPreferenceItem:
+            properties:
+                created_at:
+                    format: date-time
+                    type: string
+                name:
+                    type: string
+                summary:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - name
+                - summary
+                - created_at
+                - updated_at
+            type: object
+        CurrentMemoryPreferenceListData:
+            properties:
+                etag:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/CurrentMemoryPreferenceItem'
+                    type: array
+                total_size:
+                    format: int64
+                    type: integer
+                updated_at:
+                    format: int64
+                    type: integer
+            required:
+                - items
+                - total_size
+                - etag
+                - updated_at
+            type: object
+        CurrentMemoryPreferenceListResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CurrentMemoryPreferenceListData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CurrentMemoryPreferenceOrderRequest:
+            properties:
+                expected_etag:
+                    type: string
+                ordered_names:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - ordered_names
+                - expected_etag
+            type: object
+        CurrentMemoryProfileAccessibility:
+            properties:
+                communication_needs:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - communication_needs
+            type: object
+        CurrentMemoryProfileAccessibilityPatch:
+            properties:
+                communication_needs:
+                    items:
+                        type: string
+                    type: array
+            type: object
+        CurrentMemoryProfileData:
+            properties:
+                document:
+                    $ref: '#/components/schemas/CurrentMemoryProfileDocument'
+                updated_at:
+                    format: int64
+                    type: integer
+            required:
+                - document
+                - updated_at
+            type: object
+        CurrentMemoryProfileDocument:
+            properties:
+                accessibility:
+                    $ref: '#/components/schemas/CurrentMemoryProfileAccessibility'
+                identity:
+                    $ref: '#/components/schemas/CurrentMemoryProfileIdentity'
+                locale:
+                    $ref: '#/components/schemas/CurrentMemoryProfileLocale'
+                professional:
+                    $ref: '#/components/schemas/CurrentMemoryProfileProfessional'
+            required:
+                - identity
+                - locale
+                - professional
+                - accessibility
+            type: object
+        CurrentMemoryProfileIdentity:
+            properties:
+                aliases:
+                    items:
+                        type: string
+                    type: array
+                preferred_name:
+                    nullable: true
+                    type: string
+                pronouns:
+                    nullable: true
+                    type: string
+            required:
+                - preferred_name
+                - aliases
+                - pronouns
+            type: object
+        CurrentMemoryProfileIdentityPatch:
+            properties:
+                aliases:
+                    items:
+                        type: string
+                    type: array
+                preferred_name:
+                    nullable: true
+                    type: string
+                pronouns:
+                    nullable: true
+                    type: string
+            type: object
+        CurrentMemoryProfileLocale:
+            properties:
+                languages:
+                    items:
+                        type: string
+                    type: array
+                region:
+                    nullable: true
+                    type: string
+                timezone:
+                    nullable: true
+                    type: string
+            required:
+                - languages
+                - timezone
+                - region
+            type: object
+        CurrentMemoryProfileLocalePatch:
+            properties:
+                languages:
+                    items:
+                        type: string
+                    type: array
+                region:
+                    nullable: true
+                    type: string
+                timezone:
+                    nullable: true
+                    type: string
+            type: object
+        CurrentMemoryProfilePatchRequest:
+            properties:
+                accessibility:
+                    $ref: '#/components/schemas/CurrentMemoryProfileAccessibilityPatch'
+                identity:
+                    $ref: '#/components/schemas/CurrentMemoryProfileIdentityPatch'
+                locale:
+                    $ref: '#/components/schemas/CurrentMemoryProfileLocalePatch'
+                professional:
+                    $ref: '#/components/schemas/CurrentMemoryProfileProfessionalPatch'
+            type: object
+        CurrentMemoryProfileProfessional:
+            properties:
+                expertise_domains:
+                    items:
+                        type: string
+                    type: array
+                industry:
+                    nullable: true
+                    type: string
+                organization:
+                    nullable: true
+                    type: string
+                roles:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - roles
+                - organization
+                - industry
+                - expertise_domains
+            type: object
+        CurrentMemoryProfileProfessionalPatch:
+            properties:
+                expertise_domains:
+                    items:
+                        type: string
+                    type: array
+                industry:
+                    nullable: true
+                    type: string
+                organization:
+                    nullable: true
+                    type: string
+                roles:
+                    items:
+                        type: string
+                    type: array
+            type: object
+        CurrentMemoryProfileResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CurrentMemoryProfileData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CurrentMemoryReference:
+            properties:
+                application_scenarios:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                name:
+                    type: string
+                preference_details:
+                    type: string
+                reason:
+                    type: string
+                source:
+                    $ref: '#/components/schemas/CurrentMemoryReferenceSource'
+                summary:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - name
+                - summary
+                - created_at
+                - updated_at
+                - source
+                - application_scenarios
+                - preference_details
+                - reason
+            type: object
+        CurrentMemoryReferenceSource:
+            properties:
+                conversation_id:
+                    type: string
+                kind:
+                    enum:
+                        - memory_review
+                        - chat_explicit
+                    type: string
+            required:
+                - kind
+                - conversation_id
+            type: object
+        CurrentMemorySoulData:
+            properties:
+                document:
+                    $ref: '#/components/schemas/CurrentMemorySoulDocument'
+                updated_at:
+                    format: int64
+                    type: integer
+            required:
+                - document
+                - updated_at
+            type: object
+        CurrentMemorySoulDocument:
+            properties:
+                epistemic:
+                    $ref: '#/components/schemas/CurrentMemorySoulEpistemic'
+                identity:
+                    $ref: '#/components/schemas/CurrentMemorySoulIdentity'
+                interaction:
+                    $ref: '#/components/schemas/CurrentMemorySoulInteraction'
+                mission:
+                    $ref: '#/components/schemas/CurrentMemorySoulMission'
+            required:
+                - identity
+                - mission
+                - interaction
+                - epistemic
+            type: object
+        CurrentMemorySoulEpistemic:
+            properties:
+                uncertainty_style:
+                    type: string
+                verification_mode:
+                    type: string
+            required:
+                - uncertainty_style
+                - verification_mode
+            type: object
+        CurrentMemorySoulEpistemicPatch:
+            properties:
+                uncertainty_style:
+                    type: string
+                verification_mode:
+                    type: string
+            type: object
+        CurrentMemorySoulIdentity:
+            properties:
+                description:
+                    type: string
+                name:
+                    type: string
+                role:
+                    type: string
+            required:
+                - name
+                - role
+                - description
+            type: object
+        CurrentMemorySoulIdentityPatch:
+            properties:
+                description:
+                    type: string
+                name:
+                    type: string
+                role:
+                    type: string
+            type: object
+        CurrentMemorySoulInteraction:
+            properties:
+                challenge_level:
+                    type: string
+                decision_mode:
+                    type: string
+                default_tone:
+                    type: string
+                initiative_level:
+                    type: string
+                relationship_mode:
+                    type: string
+            required:
+                - relationship_mode
+                - default_tone
+                - initiative_level
+                - challenge_level
+                - decision_mode
+            type: object
+        CurrentMemorySoulInteractionPatch:
+            properties:
+                challenge_level:
+                    type: string
+                decision_mode:
+                    type: string
+                default_tone:
+                    type: string
+                initiative_level:
+                    type: string
+                relationship_mode:
+                    type: string
+            type: object
+        CurrentMemorySoulMission:
+            properties:
+                primary_goal:
+                    type: string
+                success_definition:
+                    type: string
+            required:
+                - primary_goal
+                - success_definition
+            type: object
+        CurrentMemorySoulMissionPatch:
+            properties:
+                primary_goal:
+                    type: string
+                success_definition:
+                    type: string
+            type: object
+        CurrentMemorySoulPatchRequest:
+            properties:
+                epistemic:
+                    $ref: '#/components/schemas/CurrentMemorySoulEpistemicPatch'
+                identity:
+                    $ref: '#/components/schemas/CurrentMemorySoulIdentityPatch'
+                interaction:
+                    $ref: '#/components/schemas/CurrentMemorySoulInteractionPatch'
+                mission:
+                    $ref: '#/components/schemas/CurrentMemorySoulMissionPatch'
+            type: object
+        CurrentMemorySoulResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CurrentMemorySoulData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
         DatabaseConnectionRequest:
             properties:
                 database_name:
@@ -1246,39 +1685,6 @@ components:
                 - deleted_rows
                 - group_id
             type: object
-        DiffEntryLine:
-            properties:
-                decision:
-                    type: string
-                display_no_new_line_warning:
-                    type: boolean
-                html:
-                    type: string
-                hunk_id:
-                    type: string
-                new_line:
-                    type: integer
-                new_lines:
-                    type: integer
-                new_start:
-                    type: integer
-                old_line:
-                    type: integer
-                old_lines:
-                    type: integer
-                old_start:
-                    type: integer
-                text:
-                    type: string
-                type:
-                    type: string
-            required:
-                - html
-                - new_line
-                - old_line
-                - text
-                - type
-            type: object
         DiscoverResponse:
             properties:
                 success:
@@ -1421,84 +1827,90 @@ components:
                         type: string
                     type: array
             type: object
-        DraftPreviewResponse:
-            properties:
-                accepted_count:
-                    type: integer
-                base_revision_id:
-                    type: string
-                can_undo:
-                    type: boolean
-                draft_content:
-                    type: string
-                draft_status:
-                    type: string
-                draft_version:
-                    format: int64
-                    type: integer
-                file_diff:
-                    $ref: '#/components/schemas/FileDiff'
-                head_content:
-                    type: string
-                path:
-                    type: string
-                pending_count:
-                    type: integer
-                ref:
-                    $ref: '#/components/schemas/ResourceRef'
-                rejected_count:
-                    type: integer
-                resource_type:
-                    type: string
-                review_id:
-                    type: string
-                review_version:
-                    format: int64
-                    type: integer
-            required:
-                - accepted_count
-                - can_undo
-                - draft_content
-                - draft_status
-                - draft_version
-                - file_diff
-                - head_content
-                - path
-                - pending_count
-                - ref
-                - rejected_count
-                - resource_type
-            type: object
-        DraftResponse:
-            properties:
-                base_revision_id:
-                    type: string
-                blob_hash:
-                    type: string
-                content_hash:
-                    type: string
-                draft_status:
-                    type: string
-                draft_updated_at:
-                    format: date-time
-                    type: string
-                draft_version:
-                    format: int64
-                    type: integer
-                path:
-                    type: string
-                ref:
-                    $ref: '#/components/schemas/ResourceRef'
-            required:
-                - blob_hash
-                - content_hash
-                - draft_status
-                - draft_version
-                - path
-                - ref
-            type: object
         EmptyObject:
             properties: {}
+            type: object
+        EpisodeMemory:
+            properties:
+                conversation_id:
+                    type: string
+                episode_type:
+                    enum:
+                        - decision
+                        - progress
+                        - result
+                        - blocker
+                        - event
+                    type: string
+                hit_count:
+                    format: int64
+                    type: integer
+                id:
+                    type: string
+                occurred_at_ms:
+                    format: int64
+                    type: integer
+                recorded_at_ms:
+                    format: int64
+                    type: integer
+                source_kind:
+                    enum:
+                        - chat_explicit
+                        - memory_review
+                    type: string
+                summary:
+                    type: string
+            required:
+                - id
+                - conversation_id
+                - source_kind
+                - episode_type
+                - summary
+                - occurred_at_ms
+                - recorded_at_ms
+                - hit_count
+            type: object
+        EpisodeMemoryDetailResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/EpisodeMemory'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        EpisodeMemoryListData:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/EpisodeMemory'
+                    type: array
+                next_page_token:
+                    type: string
+                total_size:
+                    format: int64
+                    type: integer
+            required:
+                - items
+                - total_size
+                - next_page_token
+            type: object
+        EpisodeMemoryListResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/EpisodeMemoryListData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
             type: object
         ErrorResponse:
             properties:
@@ -1733,84 +2145,6 @@ components:
                     items:
                         type: string
                     type: array
-            type: object
-        FileDiff:
-            properties:
-                binary:
-                    type: boolean
-                diff_entry_lines:
-                    items:
-                        $ref: '#/components/schemas/DiffEntryLine'
-                    type: array
-                editable_text:
-                    type: boolean
-                hunk_count:
-                    type: integer
-                path:
-                    type: string
-                status:
-                    type: string
-                supported:
-                    type: boolean
-                too_large:
-                    type: boolean
-                unsupported_reason:
-                    type: string
-            required:
-                - binary
-                - editable_text
-                - hunk_count
-                - path
-                - status
-                - supported
-                - too_large
-            type: object
-        FileResponse:
-            properties:
-                agent_persona:
-                    type: string
-                binary:
-                    type: boolean
-                blob_hash:
-                    type: string
-                content:
-                    type: string
-                content_hash:
-                    type: string
-                draft_status:
-                    type: string
-                draft_version:
-                    format: int64
-                    type: integer
-                file_type:
-                    type: string
-                mime:
-                    type: string
-                path:
-                    type: string
-                preferred_name:
-                    type: string
-                resource_type:
-                    type: string
-                response_style:
-                    type: string
-                revision_id:
-                    type: string
-                revision_no:
-                    format: int64
-                    type: integer
-                size:
-                    format: int64
-                    type: integer
-            required:
-                - binary
-                - blob_hash
-                - content_hash
-                - file_type
-                - mime
-                - path
-                - resource_type
-                - size
             type: object
         GetKBAuthorizationResponse:
             properties:
@@ -2228,46 +2562,6 @@ components:
                 - description
                 - term
             type: object
-        MetadataResponse:
-            properties:
-                agent_persona:
-                    type: string
-                auto_evo:
-                    type: boolean
-                auto_evo_apply_status:
-                    type: string
-                auto_evo_error:
-                    type: string
-                auto_evo_generation:
-                    format: int64
-                    type: integer
-                enabled_from_off:
-                    type: boolean
-                preferred_name:
-                    type: string
-                ref:
-                    $ref: '#/components/schemas/ResourceRef'
-                resource_id:
-                    type: string
-                response_style:
-                    type: string
-                updated_at:
-                    format: date-time
-                    type: string
-                updated_by:
-                    type: string
-                updated_by_name:
-                    type: string
-            required:
-                - auto_evo
-                - auto_evo_apply_status
-                - auto_evo_error
-                - auto_evo_generation
-                - enabled_from_off
-                - ref
-                - resource_id
-                - updated_at
-            type: object
         ModelFeaturesResponse:
             properties:
                 image_embed_enabled:
@@ -2466,190 +2760,10 @@ components:
                         $ref: '#/components/schemas/QuestionTypeOption'
                     type: array
             type: object
-        ResourceRef:
-            properties:
-                resource_type:
-                    type: string
-                user_id:
-                    type: string
-            required:
-                - resource_type
-                - user_id
-            type: object
         ResumeTaskRequest:
             properties:
                 task_id:
                     type: string
-            type: object
-        ReviewActionItem:
-            properties:
-                decision:
-                    type: string
-                hunk_id:
-                    type: string
-                path:
-                    type: string
-            required:
-                - decision
-                - hunk_id
-            type: object
-        ReviewActionResponse:
-            properties:
-                batch_id:
-                    type: string
-                can_undo:
-                    type: boolean
-                draft_content:
-                    type: string
-                draft_version:
-                    format: int64
-                    type: integer
-                items:
-                    items:
-                        $ref: '#/components/schemas/ReviewActionItem'
-                    type: array
-                ref:
-                    $ref: '#/components/schemas/ResourceRef'
-                review_id:
-                    type: string
-                review_version:
-                    format: int64
-                    type: integer
-            required:
-                - batch_id
-                - can_undo
-                - draft_content
-                - draft_version
-                - ref
-                - review_id
-                - review_version
-            type: object
-        ReviewUndoResponse:
-            properties:
-                can_undo:
-                    type: boolean
-                draft_content:
-                    type: string
-                draft_version:
-                    format: int64
-                    type: integer
-                items:
-                    items:
-                        $ref: '#/components/schemas/ReviewActionItem'
-                    type: array
-                ref:
-                    $ref: '#/components/schemas/ResourceRef'
-                review_id:
-                    type: string
-                review_version:
-                    format: int64
-                    type: integer
-                undone_batch_id:
-                    type: string
-            required:
-                - can_undo
-                - draft_content
-                - draft_version
-                - ref
-                - review_id
-                - review_version
-                - undone_batch_id
-            type: object
-        RevisionDetailResponse:
-            properties:
-                binary:
-                    type: boolean
-                blob_hash:
-                    type: string
-                content:
-                    type: string
-                file_type:
-                    type: string
-                mime:
-                    type: string
-                revisionSummary:
-                    $ref: '#/components/schemas/RevisionSummary'
-            required:
-                - binary
-                - blob_hash
-                - content
-                - file_type
-                - mime
-                - revisionSummary
-            type: object
-        RevisionListResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/RevisionSummary'
-                    type: array
-            type: object
-        RevisionSummary:
-            properties:
-                change_source:
-                    type: string
-                content_hash:
-                    type: string
-                created_at:
-                    format: date-time
-                    type: string
-                created_by:
-                    type: string
-                id:
-                    type: string
-                is_head:
-                    type: boolean
-                message:
-                    type: string
-                parent_revision_id:
-                    type: string
-                path:
-                    type: string
-                revision_id:
-                    type: string
-                revision_no:
-                    format: int64
-                    type: integer
-                size:
-                    format: int64
-                    type: integer
-                source_ref_id:
-                    type: string
-                source_ref_type:
-                    type: string
-            required:
-                - change_source
-                - content_hash
-                - created_at
-                - id
-                - is_head
-                - message
-                - path
-                - revision_id
-                - revision_no
-                - size
-                - source_ref_id
-                - source_ref_type
-            type: object
-        RollbackResponse:
-            properties:
-                content:
-                    type: string
-                path:
-                    type: string
-                ref:
-                    $ref: '#/components/schemas/ResourceRef'
-                revision_id:
-                    type: string
-                revision_no:
-                    format: int64
-                    type: integer
-            required:
-                - content
-                - path
-                - ref
-                - revision_id
-                - revision_no
             type: object
         SearchDatasetMemberRequest:
             properties:
@@ -4038,63 +4152,6 @@ components:
             required:
                 - enabled
             type: object
-        managedStateListOpenAPIResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/managedStateOpenAPIResponse'
-                    type: array
-            type: object
-        managedStateOpenAPIResponse:
-            properties:
-                agent_persona:
-                    type: string
-                auto_evo:
-                    type: boolean
-                auto_evo_apply_status:
-                    type: string
-                auto_evo_error:
-                    type: string
-                auto_evo_generation:
-                    format: int64
-                    type: integer
-                content:
-                    type: string
-                content_summary:
-                    type: string
-                has_pending_review_result:
-                    type: boolean
-                latest_version_change:
-                    $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
-                preferred_name:
-                    type: string
-                resource_id:
-                    type: string
-                resource_type:
-                    type: string
-                response_style:
-                    type: string
-                review_status:
-                    type: string
-                title:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
-            required:
-                - auto_evo
-                - auto_evo_apply_status
-                - auto_evo_error
-                - auto_evo_generation
-                - content
-                - content_summary
-                - has_pending_review_result
-                - resource_id
-                - resource_type
-                - review_status
-                - title
-                - version
-            type: object
         marketEditOpenAPIRequest:
             properties:
                 category:
@@ -4219,95 +4276,6 @@ components:
                     type: boolean
             required:
                 - ok
-            type: object
-        personalResourceCommitOpenAPIRequest:
-            properties:
-                expected_draft_version:
-                    format: int64
-                    type: integer
-                expected_head_revision_id:
-                    type: string
-                message:
-                    type: string
-                source_ref_id:
-                    type: string
-                source_ref_type:
-                    type: string
-            type: object
-        personalResourceGenerateOpenAPIRequest:
-            properties:
-                user_instruct:
-                    type: string
-            required:
-                - user_instruct
-            type: object
-        personalResourceGenerateOpenAPIResponse:
-            properties:
-                draft_content:
-                    type: string
-                draft_source_version:
-                    format: int64
-                    type: integer
-                draft_status:
-                    type: string
-                draft_version:
-                    format: int64
-                    type: integer
-            required:
-                - draft_content
-                - draft_source_version
-                - draft_status
-                - draft_version
-            type: object
-        personalResourcePatchOpenAPIRequest:
-            properties:
-                agent_persona:
-                    type: string
-                auto_evo:
-                    type: boolean
-                preferred_name:
-                    type: string
-                response_style:
-                    type: string
-            type: object
-        personalResourceReviewActionOpenAPIRequest:
-            properties:
-                expected_review_version:
-                    format: int64
-                    type: integer
-                items:
-                    items:
-                        $ref: '#/components/schemas/ReviewActionItem'
-                    type: array
-            type: object
-        personalResourceReviewUndoOpenAPIRequest:
-            properties:
-                expected_review_version:
-                    format: int64
-                    type: integer
-            type: object
-        personalResourceRollbackOpenAPIRequest:
-            properties:
-                expected_head_revision_id:
-                    type: string
-                message:
-                    type: string
-                revision_id:
-                    type: string
-            required:
-                - revision_id
-            type: object
-        personalResourceWriteDraftOpenAPIRequest:
-            properties:
-                content:
-                    type: string
-                conversation_id:
-                    type: string
-                expected_draft_version:
-                    format: int64
-                    type: integer
-                task_id:
-                    type: string
             type: object
         personalizationSettingOpenAPIRequest:
             properties:
@@ -4506,101 +4474,6 @@ components:
                 - id
                 - is_favorite
                 - usage_count
-            type: object
-        remoteFSCopyOpenAPIRequest:
-            properties:
-                from:
-                    type: string
-                overwrite:
-                    type: boolean
-                to:
-                    type: string
-            required:
-                - from
-                - overwrite
-                - to
-            type: object
-        remoteFSDirOpenAPIRequest:
-            properties:
-                path:
-                    type: string
-                recursive:
-                    type: boolean
-            required:
-                - path
-                - recursive
-            type: object
-        remoteFSExistsOpenAPIResponse:
-            properties:
-                exists:
-                    type: boolean
-            required:
-                - exists
-            type: object
-        remoteFSInfoOpenAPIResponse:
-            properties:
-                binary:
-                    type: boolean
-                file_type:
-                    type: string
-                mime:
-                    type: string
-                path:
-                    type: string
-                size:
-                    format: int64
-                    type: integer
-                type:
-                    type: string
-            required:
-                - path
-                - type
-            type: object
-        remoteFSItemOpenAPIResponse:
-            properties:
-                binary:
-                    type: boolean
-                file_type:
-                    type: string
-                mime:
-                    type: string
-                name:
-                    type: string
-                path:
-                    type: string
-                size:
-                    format: int64
-                    type: integer
-                type:
-                    type: string
-            required:
-                - name
-                - path
-                - type
-            type: object
-        remoteFSListOpenAPIResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/remoteFSItemOpenAPIResponse'
-                    type: array
-            type: object
-        remoteFSMoveOpenAPIRequest:
-            properties:
-                from:
-                    type: string
-                to:
-                    type: string
-            required:
-                - from
-                - to
-            type: object
-        remoteFSTrashOpenAPIRequest:
-            properties:
-                path:
-                    type: string
-            required:
-                - path
             type: object
         resourceUpdateTaskOpenAPIResponse:
             properties:
@@ -6789,6 +6662,35 @@ paths:
             summary: List agent thread steps
             tags:
                 - agent
+    /api/core/automation-groups:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /automation-groups
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /automation-groups
+    /api/core/automation-groups/{group_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /automation-groups/{group_id}
+    /api/core/automation-groups:batch-create:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /automation-groups:batch-create
     /api/core/builtin-skills:
         get:
             description: Lists immutable built-in templates and their installation state for the current user.
@@ -7166,6 +7068,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /conversations:chat
+    /api/core/conversations:estimateContextUsage:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /conversations:estimateContextUsage
+    /api/core/conversations:exportContextPrompt:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /conversations:exportContextPrompt
     /api/core/conversations:feedBackChatHistory:
         post:
             requestBody:
@@ -7443,6 +7357,15 @@ paths:
                     items:
                         type: string
                     type: array
+                - description: Filter datasets by creation source.
+                  in: query
+                  name: source
+                  required: false
+                  schema:
+                    enum:
+                        - manual
+                        - cloud
+                    type: string
             responses:
                 "200":
                     content:
@@ -9059,78 +8982,6 @@ paths:
             summary: 'Internal: apply word-group actions in batch (algorithm → core)'
             tags:
                 - word_group
-    /api/core/internal/plugin-sessions/{session_id}/projection:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /internal/plugin-sessions/{session_id}/projection
-    /api/core/internal/plugin-sessions/{session_id}:transition:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /internal/plugin-sessions/{session_id}:transition
-    /api/core/internal/plugin-sessions:plan-start:
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /internal/plugin-sessions:plan-start
-    /api/core/internal/plugin-sessions:start:
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /internal/plugin-sessions:start
-    /api/core/internal/plugin-transition-commands/{command_id}:
-        get:
-            parameters:
-                - in: path
-                  name: command_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /internal/plugin-transition-commands/{command_id}
-    /api/core/internal/subagent/tasks/{task_id}:
-        get:
-            parameters:
-                - in: path
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /internal/subagent/tasks/{task_id}
-    /api/core/internal/subagent/tasks/{task_id}/events:
-        get:
-            parameters:
-                - in: path
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /internal/subagent/tasks/{task_id}/events
     /api/core/kb/{kb_id}/acl:
         get:
             parameters:
@@ -9616,6 +9467,384 @@ paths:
             summary: Discover MCP server tools
             tags:
                 - mcp_servers
+    /api/core/memory/episodes:
+        get:
+            parameters:
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_token
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EpisodeMemoryListResponse'
+                    description: Episode Memory page
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid page size or cursor
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Episode Memory list is unavailable
+            summary: List current user's Episode Memory
+    /api/core/memory/episodes/{episode_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: episode_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: Deleted or already absent
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Episode Memory deletion failed
+            summary: Delete an Episode Memory item
+        get:
+            parameters:
+                - in: path
+                  name: episode_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EpisodeMemoryDetailResponse'
+                    description: Episode Memory item
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Episode Memory item does not exist for this user
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Episode Memory detail is unavailable
+            summary: Get an Episode Memory item
+    /api/core/memory/preferences:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryPreferenceListResponse'
+                    description: Current ordered Preference items
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference index is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Preference index is invalid or unavailable
+            summary: List current user's Preference memory
+    /api/core/memory/preferences/{name}:
+        delete:
+            description: Atomically removes the item and its now-unreferenced reference file. Missing items, including other users' items, are idempotent success.
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: Deleted or already absent
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Preference index is invalid or unavailable
+            summary: Delete a current Preference item
+        get:
+            description: A missing reference file is represented by HTTP 200 with reference_status=missing and reference=null.
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryPreferenceDetailResponse'
+                    description: Preference item detail
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference item is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Preference or reference document is invalid
+            summary: Get a current Preference item and its reference detail
+    /api/core/memory/preferences:order:
+        put:
+            description: ordered_names must be an exact, unnormalized permutation of every current Preference name. expected_etag must equal the list response etag.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CurrentMemoryPreferenceOrderRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryPreferenceListResponse'
+                    description: Reordered Preference items
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: ordered_names is not an exact permutation
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference index is missing
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference etag conflict; data.current_etag contains the latest etag
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Preference index is invalid or unavailable
+            summary: Replace the order of current user's Preference items
+    /api/core/memory/profile:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryProfileResponse'
+                    description: Current Profile document
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Profile document is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Profile document is invalid or unavailable
+            summary: Get current user's Profile memory
+        patch:
+            description: Applies a recursive partial update. Nullable scalar fields accept explicit null; list fields accept arrays, including an empty array, but not null.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CurrentMemoryProfilePatchRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryProfileResponse'
+                    description: Updated Profile document
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Invalid partial Profile document
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Profile document is missing
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Profile document kept changing during the update
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Profile document is invalid or unavailable
+            summary: Partially update current user's Profile memory
+    /api/core/memory/soul:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemorySoulResponse'
+                    description: Current Soul document
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Soul document is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Soul document is invalid or unavailable
+            summary: Get current user's Soul memory
+        patch:
+            description: Applies a recursive partial update. Core retries an internal content compare-and-swap up to three times; no revision token is exposed to callers.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CurrentMemorySoulPatchRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemorySoulResponse'
+                    description: Updated Soul document
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Invalid partial Soul document
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Soul document is missing
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Soul document kept changing during the update
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Soul document is invalid or unavailable
+            summary: Partially update current user's Soul memory
     /api/core/model_providers:
         get:
             description: Per-user model provider list. Missing catalog rows are synced from default_model_providers on each request. Query parameter category filters by provider category (default model when category and exclude_category are both omitted). Query parameter exclude_category excludes a category (e.g. exclude_category=model returns ocr and search providers). Query parameter keyword filters by provider name case-insensitively.
@@ -10075,324 +10304,6 @@ paths:
             summary: List user model providers that have groups
             tags:
                 - model_providers
-    /api/core/personal-resource/{resource_type}:
-        patch:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourcePatchOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/MetadataResponse'
-                    description: Personal resource metadata
-            summary: Update personal resource metadata
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}/draft-review/{review_id}/actions:
-        post:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: review_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceReviewActionOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ReviewActionResponse'
-                    description: Personal resource review action
-            summary: Apply personal resource review actions
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}/draft-review/{review_id}:undo:
-        post:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: review_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceReviewUndoOpenAPIRequest'
-                required: false
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ReviewUndoResponse'
-                    description: Personal resource review undo
-            summary: Undo personal resource review action batch
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}/revisions:
-        get:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/RevisionListResponse'
-                    description: Personal resource revisions
-            summary: List personal resource revisions
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}/revisions/{revision_id}:
-        get:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: revision_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/RevisionDetailResponse'
-                    description: Personal resource revision
-            summary: Get personal resource revision
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:commit:
-        post:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceCommitOpenAPIRequest'
-                required: false
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/CommitResponse'
-                    description: Personal resource commit
-            summary: Commit personal resource draft
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:discard:
-        post:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/DraftResponse'
-                    description: Personal resource draft
-            summary: Discard personal resource draft
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:draft:
-        put:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceWriteDraftOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/DraftResponse'
-                    description: Personal resource draft
-            summary: Write personal resource draft
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:draft-preview:
-        get:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/DraftPreviewResponse'
-                    description: Personal resource draft preview
-            summary: Preview personal resource draft diff
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:file:
-        get:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-                - in: query
-                  name: ref
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: revision_id
-                  required: false
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/FileResponse'
-                    description: Personal resource file
-            summary: Read personal resource file
-            tags:
-                - personal-resource
-        put:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceWriteDraftOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/DraftResponse'
-                    description: Personal resource draft
-            summary: Write personal resource draft file
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:generate:
-        post:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceGenerateOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/personalResourceGenerateOpenAPIResponse'
-                    description: Generated personal resource draft
-            summary: Generate personal resource draft
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:rollback:
-        post:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceRollbackOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/RollbackResponse'
-                    description: Personal resource rollback
-            summary: Rollback personal resource
-            tags:
-                - personal-resource
-    /api/core/personalization-items:
-        get:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/managedStateListOpenAPIResponse'
-                    description: Managed personalization items
-            summary: List managed memory and preference items
-            tags:
-                - personalization
     /api/core/personalization-setting:
         get:
             responses:
@@ -11234,442 +11145,6 @@ paths:
                 "200":
                     description: OK
             summary: POST /published-plugins/{plugin_ref:.+}:rollback
-    /api/core/remote-fs/content:
-        get:
-            description: 'Reads package content using task_id semantics: review_ sees existing draft, org_ and editor session ids see publish unless they own the current draft.'
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: 'RemoteFS package path: skills/<category>/<skill_name>[/rel_path].'
-                  in: query
-                  name: path
-                  required: true
-                  schema:
-                    type: string
-                - description: Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Optional content encoding for GET /remote-fs/content.
-                  in: query
-                  name: encoding,omitempty
-                  required: false
-                  schema:
-                    enum:
-                        - raw
-                        - base64
-                    type: string
-                - description: Conversation mode.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/octet-stream:
-                            schema:
-                                format: binary
-                                type: string
-                    description: Remote filesystem raw content
-            summary: Read remote skill filesystem content
-            tags:
-                - remote-fs
-        put:
-            description: Writes raw body bytes into the task draft. review_ may write an existing draft without changing draft ownership; org_ and editor session ids conflict with another task draft.
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: 'RemoteFS package path: skills/<category>/<skill_name>[/rel_path].'
-                  in: query
-                  name: path
-                  required: true
-                  schema:
-                    type: string
-                - description: Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Optional content encoding for GET /remote-fs/content.
-                  in: query
-                  name: encoding,omitempty
-                  required: false
-                  schema:
-                    enum:
-                        - raw
-                        - base64
-                    type: string
-                - description: Conversation mode.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            requestBody:
-                content:
-                    application/octet-stream:
-                        schema:
-                            format: binary
-                            type: string
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/okOpenAPIResponse'
-                    description: Remote filesystem write result
-            summary: Write remote skill filesystem content
-            tags:
-                - remote-fs
-    /api/core/remote-fs/copy:
-        post:
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/remoteFSCopyOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/okOpenAPIResponse'
-                    description: Remote filesystem copy result
-            summary: Copy remote skill filesystem path
-            tags:
-                - remote-fs
-    /api/core/remote-fs/dir:
-        post:
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/remoteFSDirOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/okOpenAPIResponse'
-                    description: Remote filesystem mkdir result
-            summary: Create remote skill filesystem directory or empty package
-            tags:
-                - remote-fs
-    /api/core/remote-fs/exists:
-        get:
-            description: Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: 'RemoteFS package path: skills/<category>/<skill_name>[/rel_path].'
-                  in: query
-                  name: path
-                  required: true
-                  schema:
-                    type: string
-                - description: Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Optional content encoding for GET /remote-fs/content.
-                  in: query
-                  name: encoding,omitempty
-                  required: false
-                  schema:
-                    enum:
-                        - raw
-                        - base64
-                    type: string
-                - description: Conversation mode.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/remoteFSExistsOpenAPIResponse'
-                    description: Remote filesystem exists
-            summary: Check remote skill filesystem path exists
-            tags:
-                - remote-fs
-    /api/core/remote-fs/info:
-        get:
-            description: Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: 'RemoteFS package path: skills/<category>/<skill_name>[/rel_path].'
-                  in: query
-                  name: path
-                  required: true
-                  schema:
-                    type: string
-                - description: Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Optional content encoding for GET /remote-fs/content.
-                  in: query
-                  name: encoding,omitempty
-                  required: false
-                  schema:
-                    enum:
-                        - raw
-                        - base64
-                    type: string
-                - description: Conversation mode.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/remoteFSInfoOpenAPIResponse'
-                    description: Remote filesystem info
-            summary: Get remote skill filesystem path info
-            tags:
-                - remote-fs
-    /api/core/remote-fs/list:
-        get:
-            description: List skills root/category without task_id, or list package content with task-aware view selection.
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: RemoteFS path. Use skills for categories, skills/<category> for package list, or skills/<category>/<skill_name>[/rel_path] for package content.
-                  in: query
-                  name: path
-                  required: true
-                  schema:
-                    type: string
-                - description: Optional for skills root/category list; required when path enters a package. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id,omitempty
-                  required: false
-                  schema:
-                    type: string
-                - description: Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/remoteFSListOpenAPIResponse'
-                    description: Remote filesystem list
-            summary: List remote skill filesystem path
-            tags:
-                - remote-fs
-    /api/core/remote-fs/move:
-        post:
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/remoteFSMoveOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/okOpenAPIResponse'
-                    description: Remote filesystem move result
-            summary: Move remote skill filesystem path
-            tags:
-                - remote-fs
-    /api/core/remote-fs/path:
-        delete:
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: RemoteFS path to delete.
-                  in: query
-                  name: path
-                  required: true
-                  schema:
-                    type: string
-                - description: Required for package-internal delete; not required for confirmed permanent package purge.
-                  in: query
-                  name: task_id,omitempty
-                  required: false
-                  schema:
-                    type: string
-                - description: Required true for package root physical purge.
-                  in: query
-                  name: permanent,omitempty
-                  required: false
-                  schema:
-                    type: boolean
-                - description: Required true for package root physical purge.
-                  in: query
-                  name: confirm,omitempty
-                  required: false
-                  schema:
-                    type: boolean
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/okOpenAPIResponse'
-                    description: Remote filesystem delete result
-            summary: Delete remote skill filesystem path
-            tags:
-                - remote-fs
-    /api/core/remote-fs/trash:
-        post:
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/remoteFSTrashOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/okOpenAPIResponse'
-                    description: Remote filesystem trash result
-            summary: Trash remote skill package
-            tags:
-                - remote-fs
     /api/core/schedules:
         get:
             responses:
@@ -11717,6 +11192,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /schedules/{schedule_id}:enable
+    /api/core/schedules/{schedule_id}:move:
+        post:
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /schedules/{schedule_id}:move
     /api/core/schedules/{schedule_id}:run-now:
         post:
             parameters:
@@ -13133,11 +12620,6 @@ paths:
                 "200":
                     description: OK
             summary: GET /task-center/tasks
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /task-center/tasks
     /api/core/task-center/tasks/{task_id}:
         get:
             parameters:

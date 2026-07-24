@@ -292,7 +292,7 @@ def _episode_success(
         'tool': 'episode_create',
         'success': True,
         'mutation': mutation,
-        'result': {'status': status, 'idempotency_key': key},
+        'result': {'status': status, 'retry_fingerprint': key},
         'retryable': False,
     }
 
@@ -318,7 +318,7 @@ def _tool_failure(
         },
     }
     if key is not None:
-        entry['result'] = {'idempotency_key': key}
+        entry['result'] = {'retry_fingerprint': key}
     return entry
 
 
@@ -619,7 +619,7 @@ def test_review_memory_runs_agent_with_all_memory_tools(monkeypatch):
                 'mutation': True,
                 'result': {
                     'status': 'created',
-                    'idempotency_key': 'episode-decision',
+                    'retry_fingerprint': 'episode-decision',
                 },
                 'retryable': False,
             })
@@ -1080,7 +1080,7 @@ def test_review_memory_blocks_retry_when_write_side_effect_is_uncertain(monkeypa
     assert result.retryable is False
 
 
-def test_review_memory_later_success_resolves_failure_with_same_idempotency_key(monkeypatch):
+def test_review_memory_later_success_resolves_failure_with_same_retry_fingerprint(monkeypatch):
     result = _run_review_with_tool_results(monkeypatch, [
         _tool_failure(key='episode-a'),
         _episode_success('episode-a', status='idempotent', mutation=False),

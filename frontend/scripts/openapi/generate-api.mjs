@@ -113,6 +113,27 @@ function removeUnusedGeneratedFiles(outputDir) {
   }
 }
 
+function normalizeGeneratedTypeScript(outputDir) {
+  for (const filename of [
+    "api.ts",
+    "base.ts",
+    "common.ts",
+    "configuration.ts",
+    "index.ts",
+  ]) {
+    const filePath = path.resolve(outputDir, filename);
+    if (!fs.existsSync(filePath)) continue;
+
+    const original = fs.readFileSync(filePath, "utf-8");
+    const normalized = `${original
+      .replace(/[ \t]+$/gm, "")
+      .replace(/[\r\n]+$/u, "")}\n`;
+    if (normalized !== original) {
+      fs.writeFileSync(filePath, normalized, "utf-8");
+    }
+  }
+}
+
 let updated = false;
 const openApiGeneratorCommand = resolveOpenApiGeneratorCommand();
 for (const api of selectedApis) {
@@ -140,6 +161,7 @@ for (const api of selectedApis) {
     );
     patchBasePath(api.output);
     removeUnusedGeneratedFiles(api.output);
+    normalizeGeneratedTypeScript(api.output);
     cache[api.name] = currentHash;
     updated = true;
   } catch (error) {

@@ -67,7 +67,13 @@ func TestGetUIPreferencesDefaultsAndDerivedPreferenceStatus(t *testing.T) {
 		t.Fatalf("expected all default booleans false, got %#v", resp.Data)
 	}
 
-	seedUserPreferenceFile(t, db, "u1", "preferences:\n  - name: pref.response.concise\n")
+	seedUserPreferenceFile(t, db, "u1", `preferences:
+  - name: pref.response.concise
+    summary: Keep answers concise.
+    ref: references/response-concise.md
+    created_at: "2026-07-24T00:00:00Z"
+    updated_at: "2026-07-24T00:00:00Z"
+`)
 
 	req = httptest.NewRequest(http.MethodGet, "/api/core/user/ui-preferences", nil)
 	req.Header.Set("X-User-Id", "u1")

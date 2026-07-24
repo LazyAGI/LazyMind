@@ -26,7 +26,6 @@ interface MemoryDraftModalProps {
   closeModal: () => void;
   saveDraft: () => Promise<void>;
   activeTab: string;
-  experienceSaving: boolean;
   glossarySaving: boolean;
   skillSaving: boolean;
   isReadOnly: boolean;
@@ -49,7 +48,6 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
     closeModal,
     saveDraft,
     activeTab,
-    experienceSaving,
     glossarySaving,
     skillSaving,
     isReadOnly,
@@ -97,13 +95,11 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
       onCancel={closeModal}
       onOk={isReadOnly ? closeModal : saveDraft}
       confirmLoading={
-        activeTab === "experience"
-          ? experienceSaving
-          : activeTab === "glossary"
-            ? glossarySaving
-            : activeTab === "skills"
-              ? skillSaving
-              : false
+        activeTab === "glossary"
+          ? glossarySaving
+          : activeTab === "skills"
+            ? skillSaving
+            : false
       }
       okText={isReadOnly ? t("common.close") : t("common.save")}
       cancelText={t("common.cancel")}
@@ -118,44 +114,7 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
           .join(" ") || undefined
       }
     >
-      {activeTab === "experience" ? (
-        <div className="memory-modal-grid">
-          <div className="memory-form-field">
-            <label>{t("admin.memoryTitle")}</label>
-            <Input
-              value={draft.title}
-              readOnly={isReadOnly || modalMode === "edit"}
-              className={
-                modalMode === "edit"
-                  ? "memory-experience-title-readonly"
-                  : undefined
-              }
-              placeholder={t("common.pleaseInput") + t("admin.memoryTitle")}
-              onChange={(event) =>
-                setDraft((previous: any) => ({
-                  ...previous,
-                  title: event.target.value,
-                }))
-              }
-            />
-          </div>
-          <div className="memory-form-field memory-form-field-full">
-            <label>{t("admin.memoryContent")}</label>
-            <Input.TextArea
-              rows={9}
-              value={draft.content}
-              readOnly={isReadOnly}
-              placeholder={t("common.pleaseInput") + t("admin.memoryContent")}
-              onChange={(event) =>
-                setDraft((previous: any) => ({
-                  ...previous,
-                  content: event.target.value,
-                }))
-              }
-            />
-          </div>
-        </div>
-      ) : activeTab === "glossary" ? (
+      {activeTab === "glossary" ? (
         <div className="memory-modal-grid">
           {pendingGlossaryMergeSourceIds.length ? (
             <Alert
