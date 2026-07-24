@@ -30,6 +30,12 @@ func NewAppError(httpStatus, code int, message string) *AppError {
 	return &AppError{HTTPStatus: httpStatus, Code: code, Message: message}
 }
 
+func (e *AppError) WithDetail(detail any) *AppError {
+	dup := *e
+	dup.Detail = detail
+	return &dup
+}
+
 func (e *AppError) Error() string {
 	return e.Message
 }
