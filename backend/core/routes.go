@@ -154,6 +154,7 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- text -----
 	handleAPI(r, "POST", "/chat", []string{"qa.write"}, chat.Chat)
+	handleAPI(r, "POST", "/channel-intents:classify", []string{"qa.write"}, chat.ClassifyChannelIntent)
 	handleAPI(r, "GET", "/tools", []string{"qa.read"}, chat.ListTools)
 	handleAPI(r, "POST", "/tools/{tool_name}:disable", []string{"qa.read"}, chat.DisableTool)
 	handleAPI(r, "POST", "/tools/{tool_name}:enable", []string{"qa.read"}, chat.EnableTool)
@@ -398,6 +399,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/personal-resource/{resource_type}/revisions/{revision_id}", []string{"qa.read"}, resourcefs.GetRevision)
 	handleAPI(r, "POST", "/personal-resource/{resource_type}:rollback", []string{"qa.write"}, resourcefs.Rollback)
 
+	handleAPI(r, "PATCH", "/conversations/{name}:search-config", []string{"qa.write"}, chat.PatchConversationSearchConfig)
 	handleAPI(r, "GET", "/conversations/{name}:detail", []string{"qa.read"}, chat.GetConversationDetail)
 	handleAPI(r, "GET", "/conversations/{name}:history", []string{"qa.read"}, chat.GetConversationHistory)
 	handleAPI(r, "GET", "/conversations/{name}", []string{"qa.read"}, chat.GetConversation)

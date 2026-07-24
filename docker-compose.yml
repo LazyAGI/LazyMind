@@ -293,6 +293,34 @@ services:
       redis:
         condition: service_healthy
 
+  channel-gateway:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-channel-gateway:${LAZYMIND_IMAGE_TAG:-latest}
+    build:
+      network: host
+      context: ./backend/channel-gateway
+      dockerfile: Dockerfile
+      args:
+        <<: *mirror-args
+    expose:
+      - "8085"
+    environment:
+      <<: *proxy-env
+    volumes:
+      - channel-gateway-data:/var/lib/lazymind/channel-gateway
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8085/readyz')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      db:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+      core:
+        condition: service_healthy
+    restart: unless-stopped
+
   office-convert-service:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-office-convert-service:${LAZYMIND_IMAGE_TAG:-latest}
     build:
@@ -931,3 +959,4 @@ volumes:
   opensearch-data:
   sqlite-data:
   evo-data:
+  channel-gateway-data:
