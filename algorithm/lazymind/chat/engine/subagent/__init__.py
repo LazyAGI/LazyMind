@@ -1,7 +1,7 @@
 """SubAgent infrastructure: per-task DB persistence, tools, and ReAct runner."""
 
 SUBAGENT_CORE_TOOL_NAMES = (
-    'save_artifact',
+    'save_artifacts',
     'get_artifact',
     'list_artifacts',
     'list_knowledge_bases',

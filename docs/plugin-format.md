@@ -166,7 +166,9 @@ steps:
       Your task:
       1. Do something useful.
       2. Save the result:
-           save_artifact(key='my_output', content_type='text', value=<result>)
+           save_artifacts(artifacts=[
+             {'key': 'my_output', 'content_type': 'text', 'value': <result>}
+           ])
 
       Stop after saving.
     tools:                        # 可选：该步骤 SubAgent 可用的工具名列表
@@ -426,5 +428,5 @@ slots:                    # 在 plugin.yaml 中定义
     cardinality: list
     ordered: true
 
-# SubAgent 多次调用 save_artifact(key='image_list', ...)，每次追加一项
+# SubAgent 调用 save_artifacts(artifacts=[{'key': 'image_list', ...}]) 追加内容
 ```

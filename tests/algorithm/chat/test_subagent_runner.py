@@ -214,8 +214,8 @@ def test_run_subagent_stream_happy_path(monkeypatch):
     _install_fake_translator(monkeypatch)
 
     # Simulate: text event → tool_calls → tool_results (triggers artifact emit) → text
-    tool_calls_event = {'tag': 'tool_calls', 'tool_calls': [{'id': 'c1', 'name': 'save_artifact', 'args': {}}]}
-    tool_results_event = {'tag': 'tool_results', 'tool_results': [{'id': 'c1', 'name': 'save_artifact', 'result': 'ok'}]}
+    tool_calls_event = {'tag': 'tool_calls', 'tool_calls': [{'id': 'c1', 'name': 'save_artifacts', 'args': {}}]}
+    tool_results_event = {'tag': 'tool_results', 'tool_results': [{'id': 'c1', 'name': 'save_artifacts', 'result': 'ok'}]}
     events = [
         {'tag': 'text', 'delta': 'Starting...'},
         tool_calls_event,

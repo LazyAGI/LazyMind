@@ -830,7 +830,7 @@ func ReorderSlotItems(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetSlotOrderHandler handles GET /plugin-sessions/{session_id}/slots/{slot_id}/order.
-// Returns the order_list and order_version for a slot, used by Python save_artifact
+// Returns the order_list and order_version for a slot, used by Python save_artifacts
 // to translate sort_order → list_index without exposing list_index to the AI.
 func GetSlotOrderHandler(w http.ResponseWriter, r *http.Request) {
 	sessionID := common.PathVar(r, "session_id")

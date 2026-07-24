@@ -887,8 +887,8 @@ def test_framework_tools_no_duplicates(
         loaded_plugin, mock_agentic_config, mock_write_agent_data):
     """If a plugin explicitly declares a framework tool, there should be no duplicate."""
     from lazymind.chat.plugin.plugin_manager import _merge_tools
-    merged = _merge_tools(['save_artifact', 'my_custom_tool', 'load_artifact'])
-    assert merged.count('save_artifact') == 1
+    merged = _merge_tools(['save_artifacts', 'my_custom_tool', 'load_artifact'])
+    assert merged.count('save_artifacts') == 1
     assert merged.count('load_artifact') == 1
     assert 'my_custom_tool' in merged
 
@@ -997,10 +997,10 @@ def test_resolve_plugin_step_tools_returns_merged_list(loaded_plugin):
     # step_d declares enhance_tool in state.yml; framework tools must be prepended.
     tools = _resolve_plugin_step_tools({'plugin_id': 'test-plugin', 'step_id': 'step_d'})
     assert tools is not None
-    assert 'save_artifact' in tools
+    assert 'save_artifacts' in tools
     assert 'enhance_tool' in tools
     # Framework tools come first.
-    assert tools.index('save_artifact') < tools.index('enhance_tool')
+    assert tools.index('save_artifacts') < tools.index('enhance_tool')
 
 
 def test_resolve_plugin_step_tools_no_declared_tools_returns_only_framework(loaded_plugin):
@@ -1009,7 +1009,7 @@ def test_resolve_plugin_step_tools_no_declared_tools_returns_only_framework(load
 
     tools = _resolve_plugin_step_tools({'plugin_id': 'test-plugin', 'step_id': 'step_a'})
     assert tools is not None
-    assert 'save_artifact' in tools
+    assert 'save_artifacts' in tools
     assert 'get_artifact' in tools
 
 

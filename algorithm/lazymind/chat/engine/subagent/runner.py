@@ -109,7 +109,7 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
 
     When explicit is None/empty, fall back to all DEFAULT_TOOLS.
 
-    Note: save_artifact, get_artifact, and list_artifacts are always available regardless
+    Note: save_artifacts, get_artifact, and list_artifacts are always available regardless
     of this list — they are injected as mandatory base tools in _build_subagent_tools.
     Names of base tools in the explicit list are silently ignored (already present).
     """
@@ -157,7 +157,6 @@ def _build_subagent_tools(
     consistent.
     """
     base = [
-        subagent_tools.save_artifact,
         subagent_tools.save_artifacts,
         subagent_tools.get_artifact,
         subagent_tools.list_artifacts,
@@ -202,7 +201,7 @@ def _build_partial_sort_order_hints(
                 so_str = ', '.join(str(s) for s in sort_orders)
                 hints.append(
                     f'For slot "{slot}": overwrite the item(s) at '
-                    f'sort_order={so_str} — pass sort_order=N when calling save_artifact '
+                    f'sort_order={so_str} in the corresponding save_artifacts entry '
                     f'so that only those position(s) are replaced.'
                 )
         if not hints:
@@ -419,7 +418,7 @@ def _build_subagent_plan(
             'Required output artifacts: '
             + ', '.join(required_keys)
             + '. Save every required key before finishing. When there are multiple outputs, '
-            'prefer one save_artifacts call instead of separate save_artifact calls.'
+            'use one save_artifacts call containing every output entry.'
         )
     else:
         output_lines.append(
@@ -433,7 +432,7 @@ def _build_subagent_plan(
         )
     output_lines.append(
         '## Overwrite vs. Append for list slots\n'
-        'save_artifact has an optional sort_order parameter (1-based):\n'
+        'Each save_artifacts entry has an optional sort_order parameter (1-based):\n'
         '- Omit sort_order → append a new item at the end of the list.\n'
         '- Pass sort_order=N → overwrite the item currently at display position N.\n'
         'If the objective says the user wants to replace a specific item '
@@ -863,7 +862,7 @@ def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:
     """Commit any pending draft files as new artifact revisions before the step ends.
 
     This is a safety net: if the model called patch_artifact but forgot to call
-    save_artifact, the edits are not lost — they are committed here at step boundary.
+    save_artifacts, the edits are not lost — they are committed here at step boundary.
     Only drafts for required keys or keys already saved in this run are flushed.
     """
     from . import tools as subagent_tools
@@ -887,7 +886,7 @@ def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:
             continue
         try:
             sort_order = (list_index + 1) if list_index is not None else None
-            subagent_tools.save_artifact(
+            subagent_tools._save_artifact(
                 base_key, content, content_type=original_type, sort_order=sort_order,
             )
             ctx.delete_draft(base_key, list_index)
@@ -965,7 +964,7 @@ def _evaluate_completion(
 
     If the LLM judges YES and ctx is provided, the final output is auto-saved as a
     text artifact for each missing key so the task is not penalised for a missing
-    save_artifact call when the content is clearly present in the final output.
+    save_artifacts call when the content is clearly present in the final output.
     """
     trace = _steps_to_trace(steps)
     force_text = str(force_result or '').strip()
@@ -974,7 +973,7 @@ def _evaluate_completion(
 
     prompt_lines = [
         'You are reviewing the execution of an autonomous SubAgent that stopped without '
-        'calling save_artifact for all required output keys.',
+        'calling save_artifacts for all required output keys.',
         '',
         f'Original objective: {objective}',
         f'Required artifact keys: {missing_str or saved_str}',
@@ -990,7 +989,7 @@ def _evaluate_completion(
         '',
         'Evaluation rules:',
         '- Answer YES if the agent gathered and delivered the information needed to satisfy '
-        'the objective, even if it forgot to call save_artifact. The final output text counts '
+        'the objective, even if it forgot to call save_artifacts. The final output text counts '
         'as evidence of completion.',
         '- Answer NO only if the agent clearly failed to obtain the required information '
         '(e.g. all tool calls errored out, or the output is empty / irrelevant).',
@@ -1017,7 +1016,7 @@ def _evaluate_completion(
 
         # Auto-save final output as text artifacts for each missing key when the
         # LLM judges the task as succeeded. This recovers from models that forget
-        # to call save_artifact but include the results in their final reply.
+        # to call save_artifacts but include the results in their final reply.
         if is_succeeded and ctx is not None and force_text and missing_keys:
             content = summary if summary else force_text
             _image_keys = frozenset({

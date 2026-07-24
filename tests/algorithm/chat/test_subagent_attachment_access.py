@@ -148,7 +148,7 @@ def test_subagent_attachment_edit_publishes_through_task_artifact(monkeypatch, t
         )
         return {'success': True, 'result': {'status': 'ok'}}
 
-    monkeypatch.setattr(attachment_tools, 'save_artifact', fake_save)
+    monkeypatch.setattr(attachment_tools, '_save_artifact', fake_save)
 
     result = attachment_tools._publish_attachment_edit(draft)
 

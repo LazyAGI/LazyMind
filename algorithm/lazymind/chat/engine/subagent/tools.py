@@ -130,11 +130,11 @@ def _build_artifact_value(value: Any, content_type: str):
     return {'text': str(value)}, 'text'
 
 
-def save_artifact(key: str, value: Any, content_type: str = 'text',
-                  source_tool: Optional[str] = None,
-                  sort_order: Optional[int] = None,
-                  caption: Optional[str] = None) -> Dict[str, Any]:
-    """Save an output artifact produced by this SubAgent.
+def _save_artifact(key: str, value: Any, content_type: str = 'text',
+                   source_tool: Optional[str] = None,
+                   sort_order: Optional[int] = None,
+                   caption: Optional[str] = None) -> Dict[str, Any]:
+    """Save one output artifact produced by this SubAgent.
 
     File-type values must be local absolute paths; the framework copies them into the
     workspace and stores a normalized absolute path. The same key may be saved multiple times
@@ -153,7 +153,7 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
       Use this whenever the user's instruction targets a specific item, for example:
         - "重新收集第二张图" → sort_order=2
         - "替换第三张参考图" → sort_order=3
-        - "第一张和第三张都重新生成" → call save_artifact twice: sort_order=1, sort_order=3
+        - "第一张和第三张都重新生成" → save two entries with sort_order=1 and sort_order=3
       Do NOT pass list_index directly — always use sort_order (1-based visual position).
 
     For single-cardinality slots the sort_order parameter is ignored (single slots
@@ -185,7 +185,7 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
     ctx = require_context()
     if ctx.output_slots and key not in ctx.output_slots:
         return tool_error(
-            'save_artifact',
+            'save_artifacts',
             f'Artifact key {key!r} is not declared for this step. '
             f'Allowed keys: {", ".join(ctx.output_slots)}',
         )
@@ -218,16 +218,16 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
     msg = f"Artifact '{key}' saved."
     if out_of_range_warning:
         msg += f' WARNING: {out_of_range_warning}'
-    return tool_success('save_artifact', {'status': 'ok', 'message': msg})
+    return tool_success('save_artifacts', {'status': 'ok', 'message': msg})
 
 
 def save_artifacts(artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Save multiple output artifacts in one tool call.
+    """Save one or more output artifacts in one tool call.
 
-    Use this when a domain tool returns several declared outputs. Each item accepts
-    the same fields as save_artifact: key, value, content_type, source_tool,
-    sort_order, and caption. Keeping the writes in one model turn prevents a step
-    with many outputs from exhausting the ReAct tool-turn budget.
+    Always pass a list, including when saving a single artifact. Each item accepts
+    key, value, content_type, source_tool, sort_order, and caption. Keeping all
+    writes in one model turn prevents a step with many outputs from exhausting the
+    ReAct tool-turn budget.
     """
     if not isinstance(artifacts, list) or not artifacts:
         return tool_error('save_artifacts', 'artifacts must be a non-empty list.')
@@ -242,7 +242,7 @@ def save_artifacts(artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
             return tool_error(
                 'save_artifacts', f'artifacts[{index}] requires key and value.',
             )
-        results.append(save_artifact(
+        results.append(_save_artifact(
             key=str(item['key']),
             value=item['value'],
             content_type=str(item.get('content_type') or 'text'),
@@ -648,12 +648,12 @@ def patch_artifact(
 ) -> Dict[str, Any]:
     """Apply a local patch to a previously saved artifact without committing a new revision.
 
-    Edits are written to a draft file in the workspace. Call save_artifact when you are
+    Edits are written to a draft file in the workspace. Call save_artifacts when you are
     done patching to commit the changes and produce a new revision. If you do not call
-    save_artifact, the framework will auto-flush all pending drafts when the step ends.
+    save_artifacts, the framework will auto-flush all pending drafts when the step ends.
 
     Use patch_artifact for targeted edits (fix a paragraph, update a field). Use
-    save_artifact directly when rewriting the whole artifact from scratch.
+    save_artifacts directly when rewriting the whole artifact from scratch.
 
     To discard all uncommitted edits and revert to the last saved version, call
     discard_draft(key).
@@ -691,7 +691,7 @@ def patch_artifact(
                 'status': 'error',
                 'message': (
                     f"No committed content found for artifact '{key}'. "
-                    'Call save_artifact first to create the artifact before patching.'
+                    'Call save_artifacts first to create the artifact before patching.'
                 ),
             })
         ctx.write_draft(key, original_type, text, list_index, pending_commit=False)
@@ -720,7 +720,7 @@ def patch_artifact(
         'status': 'ok',
         'message': (
             f"Draft for '{key}' updated ({lines_changed} line(s) changed). "
-            'Call save_artifact to commit, or keep patching. '
+            'Call save_artifacts to commit, or keep patching. '
             'The framework will auto-commit on step end if you forget.'
         ),
     })
@@ -1157,7 +1157,7 @@ def _publish_attachment_edit(draft: AttachmentEditDraft) -> Dict[str, Any]:
     if ctx is None:
         return draft.publish()['result']
     artifact_key = ctx.output_slots[0] if ctx.output_slots else 'edited_attachment'
-    published = save_artifact(
+    published = _save_artifact(
         artifact_key,
         draft.draft_path,
         content_type='file',
@@ -1337,7 +1337,7 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
     """Return the accessible URL or local path of a plugin artifact.
 
     Analogous to find_user_attachment but for plugin step outputs.
-    Reads session_id and plugin_id from agentic_config (same as save_artifact / get_artifact).
+    Reads session_id and plugin_id from agentic_config (same as save_artifacts / get_artifact).
 
     Args:
         slot (str): The slot id to look up (e.g. 'image_output').

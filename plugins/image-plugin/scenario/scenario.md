@@ -2,7 +2,7 @@
 
 ## 场景描述
 
-帮助用户生成、查找或编辑图片，以及生成 **动态表情包（GIF）**。工作流由 ChatAgent **动态路由**（dynamic 模式）。所有流程统一先分析，再进入素材收集，再优化 prompt，最后按工作流分支到生图或编辑。动态表情包仍走 **generate_image**（内部：并行 `video_generator` → 并行 `video_to_gif` → **串行 append** `save_artifact`），然后直接结束。
+帮助用户生成、查找或编辑图片，以及生成 **动态表情包（GIF）**。工作流由 ChatAgent **动态路由**（dynamic 模式）。所有流程统一先分析，再进入素材收集，再优化 prompt，最后按工作流分支到生图或编辑。动态表情包仍走 **generate_image**（内部：并行 `video_generator` → 并行 `video_to_gif` → **串行 append** `save_artifacts`），然后直接结束。
 
 步骤：
 
