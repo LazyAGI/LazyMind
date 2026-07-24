@@ -305,6 +305,23 @@ export type PxCategoryMetricAverage = {
   metrics: Record<PxMetricKey, number>;
 };
 
+export type EvalReportMetricKey =
+  | "correctness"
+  | "relevance"
+  | "completeness"
+  | "groundedness"
+  | "format_compliance"
+  | "answer_quality"
+  | "retrieval_quality"
+  | "overall";
+
+export type EvalReportQuestionTypeSummary = {
+  questionType: string;
+  caseCount: number;
+  scoredCaseCount: number;
+  metrics: Record<EvalReportMetricKey, number>;
+};
+
 export type EvalQuestionTypeSummary = {
   question_type?: number;
   question_type_key?: string;

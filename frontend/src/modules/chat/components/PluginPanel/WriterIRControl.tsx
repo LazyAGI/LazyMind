@@ -14,6 +14,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   countWriterBlocks,
+  getWriterOutlineInstruction,
   getWriterSpanStyles,
   type WriterBlock,
   type WriterDocument,
@@ -36,20 +37,35 @@ export interface WriterIRControlProps {
   document: WriterDocument;
   sourceRevision?: string | number;
   readOnly?: boolean;
-  onSave?: (document: WriterDocument) => Promise<void>;
+  onSave?: (
+    sourceDocument: WriterDocument,
+    revisedDocument: WriterDocument,
+    sourceRevision?: string | number,
+  ) => Promise<WriterIRSaveResult | void>;
   onEditingChange?: (editing: boolean) => void;
 }
 
-function asHeadingLevel(block: WriterBlock): 2 | 3 | 4 | 5 | 6 {
+export interface WriterIRSaveResult {
+  document: WriterDocument;
+  sourceRevision?: string | number;
+}
+
+function asHeadingLevel(block: WriterBlock): 1 | 2 | 3 | 4 | 5 | 6 {
   const raw = Number(block.numbering?.level ?? 2);
   if (!Number.isFinite(raw)) return 2;
-  return Math.min(6, Math.max(2, Math.trunc(raw))) as 2 | 3 | 4 | 5 | 6;
+  return Math.min(6, Math.max(1, Math.trunc(raw))) as 1 | 2 | 3 | 4 | 5 | 6;
+}
+
+function hasEditableWriterBlock(blocks: WriterBlock[]): boolean {
+  return blocks.some(
+    (block) => block.editable !== false || hasEditableWriterBlock(block.children ?? []),
+  );
 }
 
 function renderMarkedText(text: string, styles: string[], key: string) {
   let content = <Fragment>{text}</Fragment>;
   if (styles.includes('code')) content = <code>{content}</code>;
-  if (styles.includes('bold')) content = <strong>{content}</strong>;
+  if (styles.includes('strong') || styles.includes('bold')) content = <strong>{content}</strong>;
   if (styles.includes('italic')) content = <em>{content}</em>;
   if (styles.includes('underline')) content = <u>{content}</u>;
   if (styles.includes('strike') || styles.includes('strikethrough')) content = <s>{content}</s>;
@@ -100,7 +116,11 @@ function PreviewBlockContent({ block }: { block: WriterBlock }) {
 function BlockShell({
   block,
   children,
-}: { block: WriterBlock; children?: ReactNode }) {
+  showOutlineInstruction,
+}: { block: WriterBlock; children?: ReactNode; showOutlineInstruction: boolean }) {
+  const instruction = showOutlineInstruction
+    ? getWriterOutlineInstruction(block)
+    : null;
   return (
     <div
       className='writer-ir__block'
@@ -108,24 +128,36 @@ function BlockShell({
       data-node-type={block.type}
     >
       <PreviewBlockContent block={block} />
+      {instruction && (
+        <p className='writer-ir__outline-instruction'>{instruction}</p>
+      )}
       {children}
     </div>
   );
 }
 
-function ListItemBlock({ block }: { block: WriterBlock }) {
+function ListItemBlock({
+  block,
+  showOutlineInstruction,
+}: { block: WriterBlock; showOutlineInstruction: boolean }) {
   return (
     <li className='writer-ir__list-item'>
-      <BlockShell block={block}>
+      <BlockShell block={block} showOutlineInstruction={showOutlineInstruction}>
         {(block.children?.length ?? 0) > 0 && (
-          <BlockSequence blocks={block.children ?? []} />
+          <BlockSequence
+            blocks={block.children ?? []}
+            showOutlineInstruction={showOutlineInstruction}
+          />
         )}
       </BlockShell>
     </li>
   );
 }
 
-function BlockSequence({ blocks }: { blocks: WriterBlock[] }) {
+function BlockSequence({
+  blocks,
+  showOutlineInstruction,
+}: { blocks: WriterBlock[]; showOutlineInstruction: boolean }) {
   const rendered: ReactNode[] = [];
 
   for (let index = 0; index < blocks.length;) {
@@ -145,7 +177,11 @@ function BlockSequence({ blocks }: { blocks: WriterBlock[] }) {
       rendered.push(
         <ListTag className='writer-ir__list' key={`list-${group[0].node_id}`}>
           {group.map((item) => (
-            <ListItemBlock key={item.node_id} block={item} />
+            <ListItemBlock
+              key={item.node_id}
+              block={item}
+              showOutlineInstruction={showOutlineInstruction}
+            />
           ))}
         </ListTag>,
       );
@@ -156,16 +192,26 @@ function BlockSequence({ blocks }: { blocks: WriterBlock[] }) {
     if (block.type === 'document') {
       rendered.push(
         <section className='writer-ir__document-root' key={block.node_id}>
-          <BlockSequence blocks={block.children ?? []} />
+          <BlockSequence
+            blocks={block.children ?? []}
+            showOutlineInstruction={showOutlineInstruction}
+          />
         </section>,
       );
       continue;
     }
     rendered.push(
-      <BlockShell block={block} key={block.node_id}>
+      <BlockShell
+        block={block}
+        key={block.node_id}
+        showOutlineInstruction={showOutlineInstruction}
+      >
         {(block.children?.length ?? 0) > 0 && (
           <div className='writer-ir__children'>
-            <BlockSequence blocks={block.children ?? []} />
+            <BlockSequence
+              blocks={block.children ?? []}
+              showOutlineInstruction={showOutlineInstruction}
+            />
           </div>
         )}
       </BlockShell>,
@@ -202,6 +248,7 @@ export function WriterIRControl({
   const mountedRef = useRef(true);
   const draftRef = useRef(draft);
   const baseDocumentRef = useRef(baseDocument);
+  const baseSourceRevisionRef = useRef(sourceRevision);
   const lastSavedDocumentRef = useRef<WriterDocument | undefined>(undefined);
   const saveInFlightRef = useRef(false);
   const saveQueuedRef = useRef(false);
@@ -211,11 +258,7 @@ export function WriterIRControl({
   const futureRef = useRef(future);
 
   const dirty = draft !== baseDocument;
-  const documentRoot = useMemo(
-    () => draft.blocks.find((block) => block.type === 'document'),
-    [draft.blocks],
-  );
-  const documentReadOnly = readOnly || documentRoot?.editable === false || !onSave;
+  const documentReadOnly = readOnly || !hasEditableWriterBlock(draft.blocks) || !onSave;
   const blockCount = useMemo(() => countWriterBlocks(draft.blocks), [draft.blocks]);
   const stageLabel = t(`chat.writerIR.stages.${draft.stage}`, {
     defaultValue: draft.stage,
@@ -223,6 +266,7 @@ export function WriterIRControl({
 
   draftRef.current = draft;
   baseDocumentRef.current = baseDocument;
+  baseSourceRevisionRef.current = baseSourceRevision;
   onSaveRef.current = onSave;
   historyRef.current = history;
   futureRef.current = future;
@@ -252,6 +296,7 @@ export function WriterIRControl({
       || (savedDocument && sameWriterDocument(document, savedDocument))
     ) {
       setBaseSourceRevision(sourceRevision);
+      baseSourceRevisionRef.current = sourceRevision;
       return;
     }
     if (draft === baseDocument) {
@@ -259,6 +304,7 @@ export function WriterIRControl({
       setBaseDocument(document);
       baseDocumentRef.current = document;
       setBaseSourceRevision(sourceRevision);
+      baseSourceRevisionRef.current = sourceRevision;
       setDraft(document);
       draftRef.current = document;
       setHistory([]);
@@ -279,6 +325,7 @@ export function WriterIRControl({
     pendingExternalDocumentRef.current = null;
     setBaseDocument(pending.document);
     setBaseSourceRevision(pending.sourceRevision);
+    baseSourceRevisionRef.current = pending.sourceRevision;
     setDraft(pending.document);
     setHistory([]);
     setFuture([]);
@@ -384,14 +431,28 @@ export function WriterIRControl({
       setSaveError(undefined);
     }
     let saved = false;
+    let hasNewerDraft = false;
     try {
-      await saveDocument(snapshot);
+      const result = await saveDocument(
+        baseDocumentRef.current,
+        snapshot,
+        baseSourceRevisionRef.current,
+      );
       if (!mountedRef.current) return;
       saved = true;
-      lastSavedDocumentRef.current = snapshot;
-      baseDocumentRef.current = snapshot;
+      hasNewerDraft = draftRef.current !== snapshot;
+      const savedDocument = result?.document ?? snapshot;
+      const savedSourceRevision = result?.sourceRevision ?? baseSourceRevisionRef.current;
+      lastSavedDocumentRef.current = savedDocument;
+      baseDocumentRef.current = savedDocument;
+      baseSourceRevisionRef.current = savedSourceRevision;
       pendingExternalDocumentRef.current = null;
-      setBaseDocument(snapshot);
+      setBaseDocument(savedDocument);
+      setBaseSourceRevision(savedSourceRevision);
+      if (!hasNewerDraft) {
+        draftRef.current = savedDocument;
+        setDraft(savedDocument);
+      }
       setExternalUpdate(false);
     } catch (error) {
       if (mountedRef.current) {
@@ -400,7 +461,6 @@ export function WriterIRControl({
     } finally {
       saveInFlightRef.current = false;
       if (mountedRef.current) setSaving(false);
-      const hasNewerDraft = draftRef.current !== snapshot;
       if (saved && (saveQueuedRef.current || hasNewerDraft)) {
         saveQueuedRef.current = false;
         window.setTimeout(() => void saveRunnerRef.current(), 0);
@@ -438,6 +498,7 @@ export function WriterIRControl({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (saving) return;
       if (
         !(event.target instanceof Node)
         || !rootRef.current?.contains(event.target)
@@ -457,7 +518,7 @@ export function WriterIRControl({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleRedo, handleUndo, requestImmediateSave]);
+  }, [handleRedo, handleUndo, requestImmediateSave, saving]);
 
   const handleTextBlur = useCallback(() => {
     finishTextEdit();
@@ -482,7 +543,10 @@ export function WriterIRControl({
     baseDocumentRef.current = nextDocument;
     draftRef.current = nextDocument;
     setBaseDocument(nextDocument);
-    if (pending) setBaseSourceRevision(pending.sourceRevision);
+    if (pending) {
+      baseSourceRevisionRef.current = pending.sourceRevision;
+      setBaseSourceRevision(pending.sourceRevision);
+    }
     setDraft(nextDocument);
     setHistory([]);
     setFuture([]);
@@ -492,7 +556,14 @@ export function WriterIRControl({
   };
 
   const saveLocalVersion = () => {
+    const pending = pendingExternalDocumentRef.current;
     pendingExternalDocumentRef.current = null;
+    if (pending) {
+      baseDocumentRef.current = pending.document;
+      baseSourceRevisionRef.current = pending.sourceRevision;
+      setBaseDocument(pending.document);
+      setBaseSourceRevision(pending.sourceRevision);
+    }
     setExternalUpdate(false);
     setSaveError(undefined);
     requestImmediateSave();
@@ -527,7 +598,7 @@ export function WriterIRControl({
               type='button'
               onMouseDown={(event) => event.preventDefault()}
               onClick={handleUndo}
-              disabled={!history.length && !textEditStartRef.current}
+              disabled={saving || (!history.length && !textEditStartRef.current)}
             >
               {t('chat.writerIR.undo')}
             </button>
@@ -535,7 +606,7 @@ export function WriterIRControl({
               type='button'
               onMouseDown={(event) => event.preventDefault()}
               onClick={handleRedo}
-              disabled={!future.length}
+              disabled={saving || !future.length}
             >
               {t('chat.writerIR.redo')}
             </button>
@@ -551,11 +622,13 @@ export function WriterIRControl({
       aria-label={t('chat.writerIR.documentRegion')}
       ref={rootRef}
     >
-      {toolbarTarget === undefined
-        ? toolbar
-        : toolbarTarget
-          ? createPortal(toolbar, toolbarTarget)
-          : null}
+      {!documentReadOnly && (
+        toolbarTarget === undefined
+          ? toolbar
+          : toolbarTarget
+            ? createPortal(toolbar, toolbarTarget)
+            : null
+      )}
 
       {externalUpdate && (
         <div className='writer-ir__notice writer-ir__notice--warning' role='alert'>
@@ -580,7 +653,10 @@ export function WriterIRControl({
         <article className='writer-ir__document'>
           <h1 className='writer-ir__title'>{draft.title}</h1>
           {draft.blocks.length > 0 ? (
-            <BlockSequence blocks={draft.blocks} />
+            <BlockSequence
+              blocks={draft.blocks}
+              showOutlineInstruction={draft.stage === 'outline'}
+            />
           ) : (
             <div className='writer-ir__empty' role='status'>
               {t('chat.writerIR.emptyDocument')}
@@ -591,6 +667,7 @@ export function WriterIRControl({
         <WriterIRDocumentEditor
           document={draft}
           ariaLabel={t('chat.writerIR.documentRegion')}
+          disabled={saving}
           onChange={handleDocumentChange}
           onFocus={beginTextEdit}
           onBlur={handleTextBlur}

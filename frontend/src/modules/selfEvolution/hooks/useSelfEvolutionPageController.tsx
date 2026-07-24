@@ -31,7 +31,7 @@ import {
   MessageOutlined,
 } from "@ant-design/icons";
 import SendIcon from "@/modules/chat/assets/icons/send_icon.svg?react";
-import type { Dataset } from "@/api/generated/core-client";
+import type { Dataset, EvalSetResponse, ListEvalSetsResponse } from "@/api/generated/core-client";
 import { AgentAppsAuth } from "@/components/auth";
 import MarkdownViewer from "@/modules/knowledge/components/MarkdownViewer";
 import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
@@ -88,13 +88,17 @@ import {
   DEPRECATED_SELF_EVOLUTION_THREAD_HISTORY_STORAGE_KEY,
   getWorkflowResultLabels,
   createCoreAgentGeneratedApiClient,
+  createCoreEvalSetsApiClient,
   DiffFileTreeNode,
+  EvalReportMetricKey,
   PxCategoryMetricAverage,
   AbCategoryComparison,
   AbSummaryMetricRow,
   AbTopDiffRow,
   AbSummaryReport,
   getPxMetricMeta,
+  getEvalQuestionTypeLabel,
+  getAffectedBlockLabel,
   getKnowledgeBaseName,
   getCatalogApiErrorMessage,
   isCanceledRequest,
@@ -116,11 +120,8 @@ import {
   isEmptyResultPayload,
   stringifyResultPayload,
   getResultStringField,
-  buildCoreDownloadUrl,
-  getResultDownloadPath,
   getDiffArtifactFiles,
   normalizeFetchedDiffArtifact,
-  getDownloadFileName,
   triggerBrowserDownload,
   getNestedStringField,
   getNestedArrayField,
@@ -130,7 +131,6 @@ import {
   normalizeThreadListPayload,
   getDialogueEventAgentLabel,
   buildAutoInteractionMessagesFromEvents,
-  normalizeThreadHistoryMessages,
   normalizeThreadMessagesPayload,
   getStructuredArrayField,
   getStructuredRecordField,
@@ -164,7 +164,6 @@ import {
   requiresManualCheckpointAction,
   isThreadEventAfter,
   reduceWorkflowRuntimeState,
-  getThreadTitleFromHistoryPayload,
   getThreadTitleFromPayload,
   getThreadKnowledgeBaseId,
   getThreadModeFromPayload,
@@ -174,8 +173,11 @@ import {
   getStageLabel,
   toThreadEventStage,
   fetchThreadGateContent,
+  fetchThreadGateDownload,
   getGateEvalCaseCount,
   getGateEvalCaseRecords,
+  getGateEvalMetrics,
+  getGateEvalQuestionTypeSummaries,
   hasEmbeddedGateEvalCases,
   type ThreadEventStage,
 } from "../shared";
@@ -293,6 +295,12 @@ export function SelfEvolutionPageController({
   >([]);
   const [isKnowledgeBaseLoading, setIsKnowledgeBaseLoading] = useState(true);
   const [knowledgeBaseError, setKnowledgeBaseError] = useState("");
+  const [existingEvalSetOptions, setExistingEvalSetOptions] = useState<
+    Array<{ label: string; value: string; itemCount: number }>
+  >([]);
+  const [isExistingEvalSetLoading, setIsExistingEvalSetLoading] =
+    useState(false);
+  const [existingEvalSetError, setExistingEvalSetError] = useState("");
   const [hasLaunchValidationTriggered, setHasLaunchValidationTriggered] =
     useState(false);
   const [prompt, setPrompt] = useState("");
@@ -457,6 +465,62 @@ export function SelfEvolutionPageController({
     },
     [t],
   );
+  const fetchExistingEvalSetOptions = useCallback(
+    (datasetId?: string, signal?: AbortSignal) => {
+      const normalizedDatasetId = `${datasetId || ""}`.trim();
+      if (!normalizedDatasetId) {
+        setExistingEvalSetOptions([]);
+        setExistingEvalSetError("");
+        setIsExistingEvalSetLoading(false);
+        return;
+      }
+
+      setIsExistingEvalSetLoading(true);
+      setExistingEvalSetError("");
+      createCoreEvalSetsApiClient()
+        .apiCoreEvalSetsGet(
+          {
+            datasetIds: [normalizedDatasetId],
+            page: 1,
+            pageSize: 1000,
+          },
+          { signal },
+        )
+        .then((response) => {
+          const responseData = response.data as
+            | ListEvalSetsResponse
+            | { data?: ListEvalSetsResponse };
+          const payload =
+            "data" in responseData && responseData.data
+              ? responseData.data
+              : (responseData as ListEvalSetsResponse);
+          const options = (payload.items || [])
+            .filter(
+              (item): item is EvalSetResponse =>
+                Boolean(item.id && item.name),
+            )
+            .map((item) => ({
+              label: item.name,
+              value: item.id,
+              itemCount: item.item_count,
+            }));
+          setExistingEvalSetOptions(options);
+        })
+        .catch((error) => {
+          if (isCanceledRequest(error)) {
+            return;
+          }
+          setExistingEvalSetOptions([]);
+          setExistingEvalSetError(getCatalogApiErrorMessage(error));
+        })
+        .finally(() => {
+          if (!signal?.aborted) {
+            setIsExistingEvalSetLoading(false);
+          }
+        });
+    },
+    [],
+  );
   const selectedKnowledgeBaseLabel = knowledgeBaseOptions.find(
     (item) => item.value === selectedKb,
   )?.label;
@@ -478,7 +542,10 @@ export function SelfEvolutionPageController({
       : t("selfEvolutionRun.knowledgeBaseNotSelected"));
   const getExistingEvalSetLabel = useCallback(
     (value?: string) => {
-      const option = getExistingEvalSetOptions().find(
+      const option = [
+        ...getExistingEvalSetOptions(),
+        ...existingEvalSetOptions,
+      ].find(
         (item) => item.value === value,
       );
       if (option?.value === FIXED_EVAL_SET) {
@@ -486,7 +553,7 @@ export function SelfEvolutionPageController({
       }
       return option?.label || t("selfEvolutionRun.noExistingEvalSet");
     },
-    [t],
+    [existingEvalSetOptions, t],
   );
   const selectedEvalSetLabel = getExistingEvalSetLabel(selectedEvalSet);
   const isExtraEvalRequired = selectedEvalSet === "__none__";
@@ -552,6 +619,9 @@ export function SelfEvolutionPageController({
   const isNewSessionStepTwoDone = Boolean(newSessionDraft.selectedEvalSet);
   const isNewSessionStepThreeDone = Boolean(newSessionDraft.extraEvalStrategy);
   const isNewSessionStepFourDone = Boolean(newSessionDraft.mode);
+  const evalSetDatasetId = isNewSessionConfigOpen
+    ? newSessionDraft.selectedKb
+    : selectedKb;
   const threadTerminalStatusByStage = useMemo(
     () => buildTerminalStatusByStage(threadEvents),
     [threadEvents],
@@ -812,22 +882,43 @@ export function SelfEvolutionPageController({
       ? `${normalizedEvalName}-${runId}.json`
       : `${normalizedEvalName}-${evalSetPreviewData.eval_set_id}.json`;
   }, [datasetArtifactData]);
-  const datasetDownloadUrl = useMemo(() => {
-    if (typeof window === "undefined") {
-      return "";
-    }
-    const payload = datasetArtifactData || evalSetPreviewData;
-    const datasetBlob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json;charset=utf-8",
-    });
-    return URL.createObjectURL(datasetBlob);
-  }, [datasetArtifactData]);
   const datasetCaseColumns = useMemo<ColumnsType<DatasetCasePreviewRow>>(
     () => buildDatasetCaseColumns(t),
     [t],
   );
   const pxReportCategoryMetrics = fetchedPxCategoryMetricAverages;
-  const isSinglePxCategory = pxReportCategoryMetrics.length === 1;
+  const evalReportMetrics = useMemo(
+    () => getGateEvalMetrics(workflowResults["eval-reports"].data),
+    [workflowResults["eval-reports"].data],
+  );
+  const evalReportQuestionTypeSummaries = useMemo(
+    () =>
+      getGateEvalQuestionTypeSummaries(
+        workflowResults["eval-reports"].data,
+      ),
+    [workflowResults["eval-reports"].data],
+  );
+  const evalReportMetricMeta = useMemo<
+    Array<{ key: EvalReportMetricKey; label: string }>
+  >(
+    () => [
+      { key: "correctness", label: t("selfEvolutionRun.metricCorrectness") },
+      { key: "relevance", label: t("selfEvolutionRun.metricRelevance") },
+      { key: "completeness", label: t("selfEvolutionRun.metricCompleteness") },
+      { key: "groundedness", label: t("selfEvolutionRun.metricGroundedness") },
+      {
+        key: "format_compliance",
+        label: t("selfEvolutionRun.metricFormatCompliance"),
+      },
+      { key: "answer_quality", label: t("selfEvolutionRun.metricAnswerQuality") },
+      {
+        key: "retrieval_quality",
+        label: t("selfEvolutionRun.metricRetrievalQuality"),
+      },
+      { key: "overall", label: t("selfEvolutionRun.metricOverall") },
+    ],
+    [t],
+  );
   const evalReportSourceRecord = useMemo(
     () => getEvalReportSourceRecord(workflowResults["eval-reports"].data),
     [workflowResults["eval-reports"].data],
@@ -912,15 +1003,22 @@ export function SelfEvolutionPageController({
     [workflowResults["analysis-reports"].data],
   );
   const analysisActionableCaseRows = useMemo<AnalysisActionableCaseRow[]>(
-    () => buildAnalysisActionableCaseRows(analysisSummaryContent),
-    [analysisSummaryContent],
+    () =>
+      buildAnalysisActionableCaseRows(analysisSummaryContent).map((item) => ({
+        ...item,
+        affectedBlock: getAffectedBlockLabel(item.affectedBlock),
+      })),
+    [analysisSummaryContent, t],
   );
   const affectedBlockCountRows = useMemo(
     () =>
       buildAffectedBlockCountRows(
         analysisSummaryContent,
         t("selfEvolutionRun.uncategorized"),
-      ),
+      ).map((item) => ({
+        ...item,
+        category: getAffectedBlockLabel(item.category),
+      })),
     [analysisSummaryContent, t],
   );
   const analysisReportData = useMemo(() => {
@@ -1293,27 +1391,6 @@ export function SelfEvolutionPageController({
   const displayedCheckpointWaitPrompt = shouldShowCheckpointPrompt
     ? pendingCheckpointWaitPrompt
     : undefined;
-  const evalReportDownloadUrl = useMemo(
-    () =>
-      buildCoreDownloadUrl(
-        getResultDownloadPath(workflowResults["eval-reports"].data),
-      ),
-    [workflowResults["eval-reports"].data],
-  );
-  const diffResultDownloadUrl = useMemo(() => {
-    if (typeof window === "undefined" || !fetchedDiffText) {
-      return "";
-    }
-    const diffBlob = new Blob([fetchedDiffText], {
-      type: "text/x-diff;charset=utf-8",
-    });
-    return URL.createObjectURL(diffBlob);
-  }, [fetchedDiffText]);
-  const abtestResultDownloadUrl = useMemo(
-    () =>
-      buildCoreDownloadUrl(getResultDownloadPath(workflowResults.abtests.data)),
-    [workflowResults.abtests.data],
-  );
   const fetchDiffDownloadText = useCallback(
     async (resultData: unknown, signal?: AbortSignal) => {
       const inlineDiffText = getInlineDiffText(resultData);
@@ -1656,74 +1733,20 @@ export function SelfEvolutionPageController({
   const handleWorkflowDownload = useCallback(
     async (
       kind: WorkflowResultKind,
-      fallbackUrl: string,
       fallbackFileName: string,
       event?: MouseEvent<HTMLElement>,
     ) => {
       event?.preventDefault();
       event?.stopPropagation();
 
-      const currentData = workflowResults[kind].data;
-      const nextData = currentData ?? (await fetchWorkflowResult(kind));
-      let downloadUrl =
-        buildCoreDownloadUrl(getResultDownloadPath(nextData)) || fallbackUrl;
-      let temporaryDownloadUrl = "";
-
-      if (kind === "diffs" && !downloadUrl) {
-        const diffText = await fetchDiffDownloadText(nextData);
-        if (diffText && typeof window !== "undefined") {
-          temporaryDownloadUrl = URL.createObjectURL(
-            new Blob([diffText], {
-              type: "text/x-diff;charset=utf-8",
-            }),
-          );
-          downloadUrl = temporaryDownloadUrl;
-        }
-      }
-
-      if (
-        !downloadUrl &&
-        nextData !== undefined &&
-        !isEmptyResultPayload(nextData) &&
-        typeof window !== "undefined"
-      ) {
-        temporaryDownloadUrl = URL.createObjectURL(
-          new Blob(
-            [
-              typeof nextData === "string"
-                ? nextData
-                : stringifyResultPayload(nextData),
-            ],
-            {
-              type: "application/json;charset=utf-8",
-            },
-          ),
-        );
-        downloadUrl = temporaryDownloadUrl;
-      }
-
-      if (!downloadUrl) {
-        message.warning(
-          t("selfEvolutionRun.downloadNotAvailable", {
-            label: getWorkflowResultLabels()[kind],
-          }),
-          1.5,
-        );
-        return;
-      }
-
-      triggerBrowserDownload(
-        downloadUrl,
-        getDownloadFileName(downloadUrl, fallbackFileName),
-      );
-
-      if (temporaryDownloadUrl) {
-        window.setTimeout(() => {
-          URL.revokeObjectURL(temporaryDownloadUrl);
-        }, 0);
+      if (activeThreadId) {
+        const downloadBlob = await fetchThreadGateDownload(activeThreadId, kind);
+        const downloadUrl = URL.createObjectURL(downloadBlob);
+        triggerBrowserDownload(downloadUrl, fallbackFileName);
+        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
       }
     },
-    [fetchDiffDownloadText, fetchWorkflowResult, workflowResults],
+    [activeThreadId],
   );
   const openWorkflowArtifact = useCallback(
     (kind: WorkflowResultKind) => {
@@ -1894,12 +1917,61 @@ export function SelfEvolutionPageController({
   }, [fetchKnowledgeBaseOptions, isNewSessionConfigOpen, routeThreadId, view]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    fetchExistingEvalSetOptions(evalSetDatasetId, controller.signal);
+
+    return () => {
+      controller.abort();
+    };
+  }, [evalSetDatasetId, fetchExistingEvalSetOptions]);
+
+  useEffect(() => {
+    if (isExistingEvalSetLoading || existingEvalSetError) {
+      return;
+    }
+    const validEvalSetIds = new Set(
+      existingEvalSetOptions.map((item) => item.value),
+    );
+    if (isNewSessionConfigOpen) {
+      setNewSessionDraft((prev) =>
+        prev.selectedEvalSet &&
+        prev.selectedEvalSet !== FIXED_EVAL_SET &&
+        !validEvalSetIds.has(prev.selectedEvalSet)
+          ? { ...prev, selectedEvalSet: FIXED_EVAL_SET }
+          : prev,
+      );
+      return;
+    }
+    setSelectedEvalSet((prev) =>
+      prev !== FIXED_EVAL_SET && !validEvalSetIds.has(prev)
+        ? FIXED_EVAL_SET
+        : prev,
+    );
+  }, [
+    existingEvalSetError,
+    existingEvalSetOptions,
+    isExistingEvalSetLoading,
+    isNewSessionConfigOpen,
+  ]);
+
+  useEffect(() => {
     setWorkflowResults(createInitialWorkflowResultsState());
     setEvalReportBadCases({ loading: false, loaded: false });
     setActiveArtifactKind(undefined);
     setIsArtifactPanelOpen(false);
     setCaseArtifact(undefined);
   }, [activeThreadId]);
+
+  useEffect(() => {
+    if (!activeThreadId || !selectedViewStage) {
+      return;
+    }
+    const kind = stageArtifactKindMap[selectedViewStage];
+    if (!kind) {
+      return;
+    }
+    void fetchWorkflowResult(kind);
+  }, [activeThreadId, fetchWorkflowResult, selectedViewStage]);
 
   useEffect(() => {
     if (!activeThreadId || !activeRemoteThreadTitle) {
@@ -1932,15 +2004,6 @@ export function SelfEvolutionPageController({
       behavior: "auto",
     });
   }, [activeSessionId, displayedMessages.length]);
-
-  useEffect(
-    () => () => {
-      if (datasetDownloadUrl) {
-        URL.revokeObjectURL(datasetDownloadUrl);
-      }
-    },
-    [datasetDownloadUrl],
-  );
 
   useEffect(
     () => () => {
@@ -2014,23 +2077,97 @@ export function SelfEvolutionPageController({
     { key: "interactive", label: t("selfEvolutionRun.modeInteractive") },
   ];
 
-  const existingEvalSetMenuItems: MenuProps["items"] = [
-    ...getExistingEvalSetOptions().map((item) => ({
-      key: item.value,
-      label: getExistingEvalSetLabel(item.value),
-    })),
-  ];
+  const existingEvalSetMenuItems = useMemo<MenuProps["items"]>(() => {
+    const items: MenuProps["items"] = [
+      ...getExistingEvalSetOptions().map((item) => ({
+        key: item.value,
+        label: getExistingEvalSetLabel(item.value),
+      })),
+    ];
+    if (isExistingEvalSetLoading) {
+      items.push({
+        key: "__eval_set_loading__",
+        label: t("selfEvolutionRun.evalSetLoading"),
+        disabled: true,
+        icon: <LoadingOutlined spin />,
+      });
+      return items;
+    }
+    if (existingEvalSetError) {
+      items.push({
+        key: "__eval_set_retry__",
+        label: t("selfEvolutionRun.evalSetLoadRetry"),
+        icon: <ReloadOutlined />,
+      });
+      return items;
+    }
+    if (evalSetDatasetId && existingEvalSetOptions.length === 0) {
+      items.push({
+        key: "__eval_set_empty__",
+        label: t("selfEvolutionRun.noMatchingEvalSet"),
+        disabled: true,
+      });
+      return items;
+    }
+    items.push(
+      ...existingEvalSetOptions.map((item) => ({
+        key: item.value,
+        label: t("selfEvolutionRun.evalSetOption", {
+          name: item.label,
+          count: item.itemCount,
+        }),
+      })),
+    );
+    return items;
+  }, [
+    evalSetDatasetId,
+    existingEvalSetError,
+    existingEvalSetOptions,
+    getExistingEvalSetLabel,
+    isExistingEvalSetLoading,
+    t,
+  ]);
+
+  const onExistingEvalSetMenuClick = (
+    key: string,
+    onSelect: (nextEvalSet: string) => void,
+  ) => {
+    if (key === "__eval_set_retry__") {
+      fetchExistingEvalSetOptions(evalSetDatasetId);
+      return;
+    }
+    if (key.startsWith("__eval_set_")) {
+      return;
+    }
+    onSelect(key);
+  };
   const extraEvalStrategyMenuItems: MenuProps["items"] = [
     {
       key: FIXED_EXTRA_EVAL_STRATEGY,
       label: t("selfEvolutionRun.extraEvalGenerateWithModel"),
     },
+    ...(!isExtraEvalRequired
+      ? [
+          {
+            key: "skip",
+            label: t("selfEvolutionRun.extraEvalSkip"),
+          },
+        ]
+      : []),
   ];
   const newSessionExtraEvalStrategyMenuItems: MenuProps["items"] = [
     {
       key: FIXED_EXTRA_EVAL_STRATEGY,
       label: t("selfEvolutionRun.extraEvalGenerateWithModel"),
     },
+    ...(!isDraftExtraEvalRequired
+      ? [
+          {
+            key: "skip",
+            label: t("selfEvolutionRun.extraEvalSkip"),
+          },
+        ]
+      : []),
   ];
 
   const localizedGetStepStatusLabel = useCallback(
@@ -2125,6 +2262,9 @@ export function SelfEvolutionPageController({
           kb_id: targetSelectedKb,
           algo_id: "general_algo",
           eval_name: evalName,
+          ...(targetEvalSet && targetEvalSet !== FIXED_EVAL_SET
+            ? { eval_set_id: targetEvalSet }
+            : {}),
           num_cases: DEFAULT_EVAL_CASE_COUNT,
         },
       },
@@ -2467,13 +2607,6 @@ export function SelfEvolutionPageController({
     try {
       setLiveCheckpointWaitPrompt(undefined);
       processedWorkflowEventKeysRef.current = new Set();
-      replaceThreadEvents([]);
-      setWorkflowRuntimeState(
-        applyThreadStepListToWorkflowRuntimeState(
-          createThreadRestoreWorkflowRuntimeState(),
-          threadStepListRef.current,
-        ),
-      );
       await waitForStepEventsStreamConnected(threadId, nextStepRunId, sessionId);
       await refreshThreadStepList(threadId).catch(() => undefined);
     } finally {
@@ -2664,6 +2797,7 @@ export function SelfEvolutionPageController({
   };
 
   const syncThreadStepListState = (stepList: ThreadStepListState) => {
+    threadStepListRef.current = stepList;
     setThreadStepList(stepList);
     setWorkflowRuntimeState((prev) =>
       applyThreadStepListToWorkflowRuntimeState(prev, stepList),
@@ -2698,6 +2832,61 @@ export function SelfEvolutionPageController({
     }
     return stepList;
   };
+
+  async function advanceAutoExecutionAfterStepStream(
+    threadId: string,
+    completedStepId: string,
+    sessionId: string,
+  ) {
+    if (!isAutoMode || isAdvancingToNextStepRef.current) {
+      return false;
+    }
+
+    isAdvancingToNextStepRef.current = true;
+    try {
+      const stepList = await refreshThreadStepList(threadId);
+      const completedStep = stepList.steps.find(
+        (step) => step.stepId === completedStepId,
+      );
+      if (
+        !completedStep ||
+        normalizeThreadStepStatus(completedStep.status) !== "done"
+      ) {
+        return false;
+      }
+
+      const nextStepRunId = completedStep.nextStepRunId?.trim();
+      if (!nextStepRunId) {
+        return false;
+      }
+
+      const nextStep = stepList.steps.find(
+        (step) => step.stepId === nextStepRunId,
+      );
+      const completedStage = resolveThreadStepViewStage(completedStep);
+      const nextStage =
+        (nextStep && resolveThreadStepViewStage(nextStep)) ||
+        (completedStage
+          ? buildCheckpointPromptForCompletedStage(completedStage)?.nextStage
+          : undefined);
+
+      pendingNextStepRunIdRef.current = undefined;
+      setSelectedThreadStepId(nextStepRunId);
+      setLoadingThreadStepId(undefined);
+      loadingThreadStepIdRef.current = undefined;
+      setTerminalFlowStepStatus(undefined);
+      prepareThreadStepStreamView(nextStage);
+      await waitForStepEventsStreamConnected(
+        threadId,
+        nextStepRunId,
+        sessionId,
+      );
+      await refreshThreadStepList(threadId).catch(() => undefined);
+      return true;
+    } finally {
+      isAdvancingToNextStepRef.current = false;
+    }
+  }
 
   const prepareThreadStepStreamView = (viewStage?: string) => {
     if (viewStage) {
@@ -2774,15 +2963,14 @@ export function SelfEvolutionPageController({
     if (preloadedStepList) {
       syncThreadStepListState(preloadedStepList);
     }
-    if (getCheckpointWaitingStep(stepList)) {
-      return;
-    }
-
-    let subscribeStepId = resolveSubscribeThreadStepId(
-      stepList,
-      threadId,
-      resolveInitialThreadStepId,
-    );
+    const checkpointWaitingStep = getCheckpointWaitingStep(stepList);
+    let subscribeStepId =
+      checkpointWaitingStep?.stepId ||
+      resolveSubscribeThreadStepId(
+        stepList,
+        threadId,
+        resolveInitialThreadStepId,
+      );
     const hasResolvableStep = Boolean(
       subscribeStepId &&
         stepList.steps.some((step) => step.stepId === subscribeStepId),
@@ -2795,7 +2983,7 @@ export function SelfEvolutionPageController({
           (step.active || isThreadStepRunning(step)),
       );
 
-    if (needsActiveStep) {
+    if (needsActiveStep && !checkpointWaitingStep) {
       const waitedStepList = await waitForSubscribableThreadStep(
         () => refreshThreadStepList(threadId, signal),
         { signal },
@@ -2920,6 +3108,11 @@ export function SelfEvolutionPageController({
               appendChat: shouldAppendEventChat,
             });
             await disconnectStream();
+            await advanceAutoExecutionAfterStepStream(
+              threadId,
+              stepId,
+              sessionId,
+            );
             return;
           }
 
@@ -2937,6 +3130,11 @@ export function SelfEvolutionPageController({
           });
           if (shouldDisconnectThreadEventStream(event)) {
             await disconnectStream();
+            await advanceAutoExecutionAfterStepStream(
+              threadId,
+              stepId,
+              sessionId,
+            );
             return;
           }
         }
@@ -2953,6 +3151,11 @@ export function SelfEvolutionPageController({
               appendChat: shouldAppendEventChat,
             });
             await disconnectStream();
+            await advanceAutoExecutionAfterStepStream(
+              threadId,
+              stepId,
+              sessionId,
+            );
             return;
           }
 
@@ -2963,6 +3166,11 @@ export function SelfEvolutionPageController({
           });
           if (shouldDisconnectThreadEventStream(event)) {
             await disconnectStream();
+            await advanceAutoExecutionAfterStepStream(
+              threadId,
+              stepId,
+              sessionId,
+            );
           }
         }
       }
@@ -3085,29 +3293,11 @@ export function SelfEvolutionPageController({
         pendingNextStepRunIdRef.current = restoredNextStepRunId;
       }
 
-      let historyTitle: string | undefined;
       let historyMessages: ChatMessage[] = [];
 
       try {
         const messagesPayload = await fetchAllThreadMessages(threadId, signal);
         historyMessages = normalizeThreadMessagesPayload(messagesPayload);
-      } catch (error) {
-        if (signal?.aborted || isCanceledRequest(error)) {
-          return;
-        }
-      }
-
-      try {
-        const historyPayload = (
-          await axiosInstance.get(
-            `${AGENT_API_BASE}/threads/${encodedThreadId}/history`,
-            getSilentRestoreRequestConfig(signal),
-          )
-        ).data as ThreadRestorePayload;
-        historyTitle = getThreadTitleFromHistoryPayload(historyPayload);
-        if (historyMessages.length === 0) {
-          historyMessages = normalizeThreadHistoryMessages(historyPayload);
-        }
       } catch (error) {
         if (signal?.aborted || isCanceledRequest(error)) {
           return;
@@ -3147,7 +3337,6 @@ export function SelfEvolutionPageController({
       };
 
       const titleFromHistory =
-        historyTitle ||
         remoteThreadHistory.find((item) => item.threadId === threadId)?.title ||
         `${t("selfEvolutionRun.selfEvolutionDetail")} ${threadId.slice(0, 8)}`;
       applySessionRestore(titleFromHistory, true);
@@ -3175,7 +3364,7 @@ export function SelfEvolutionPageController({
       if (restoredMode) {
         setMode(restoredMode);
       }
-      if (!historyTitle && detailTitle) {
+      if (detailTitle) {
         applySessionRestore(detailTitle);
       }
       const threadRecord = isRecord(threadPayload)
@@ -3461,10 +3650,7 @@ export function SelfEvolutionPageController({
             activeSessionId,
             controller,
           );
-          await subscribePendingNextStepRunOrRestoreLatest(
-            activeThreadId,
-            activeSessionId,
-          );
+          await subscribePendingNextStepRun(activeThreadId, activeSessionId);
           return;
         }
 
@@ -3490,10 +3676,7 @@ export function SelfEvolutionPageController({
             { dedupeLast: true },
           );
         }
-        await subscribePendingNextStepRunOrRestoreLatest(
-          activeThreadId,
-          activeSessionId,
-        );
+        await subscribePendingNextStepRun(activeThreadId, activeSessionId);
       } catch (error) {
         appendSystemMessage(
           getCatalogApiErrorMessage(error),
@@ -3586,6 +3769,22 @@ export function SelfEvolutionPageController({
       return;
     }
 
+    const checkpointWaitingStep = getCheckpointWaitingStep(threadStepList);
+    if (
+      checkpointWaitingStep &&
+      normalizeThreadStepStatus(checkpointWaitingStep.status) === "done"
+    ) {
+      const activeThreadId = activeSession?.threadId || routeThreadId;
+      if (activeThreadId) {
+        void advanceAutoExecutionAfterStepStream(
+          activeThreadId,
+          checkpointWaitingStep.stepId,
+          activeSessionId,
+        );
+      }
+      return;
+    }
+
     const checkpointKey = [
       pendingCheckpointWaitPrompt.completedStage || "",
       pendingCheckpointWaitPrompt.nextStage || "",
@@ -3602,6 +3801,9 @@ export function SelfEvolutionPageController({
     isRestoringThread,
     isSendingMessage,
     pendingCheckpointWaitPrompt,
+    activeSession?.threadId,
+    activeSessionId,
+    routeThreadId,
     threadStepList,
     threadStepStatusByStage,
   ]);
@@ -4127,17 +4329,19 @@ export function SelfEvolutionPageController({
         selectable: true,
         selectedKeys: [selectedEvalSet],
         onClick: ({ key }) => {
-          const nextEvalSet = String(key);
-          setSelectedEvalSet(nextEvalSet);
-          if (nextEvalSet === "__none__") {
-            setExtraEvalStrategy("generate");
-          }
+          onExistingEvalSetMenuClick(String(key), (nextEvalSet) => {
+            setSelectedEvalSet(nextEvalSet);
+            if (nextEvalSet === FIXED_EVAL_SET) {
+              setExtraEvalStrategy("generate");
+            }
+          });
         },
       }}
     >
       <button
         type="button"
         className={`self-evolution-chatlike-tool ${extraClassName}`.trim()}
+        aria-busy={isExistingEvalSetLoading}
       >
         <FileTextOutlined />
         <span>{selectedEvalSetLabel}</span>
@@ -4258,16 +4462,18 @@ export function SelfEvolutionPageController({
           ? [newSessionDraft.selectedEvalSet]
           : [],
         onClick: ({ key }) => {
-          const nextEvalSet = String(key);
-          setNewSessionDraft((prev) => ({
-            ...prev,
-            selectedEvalSet: nextEvalSet,
-            extraEvalStrategy:
-              nextEvalSet === "__none__" && prev.extraEvalStrategy === "skip"
-                ? "generate"
-                : prev.extraEvalStrategy,
-          }));
-          setHasNewSessionValidationTriggered(false);
+          onExistingEvalSetMenuClick(String(key), (nextEvalSet) => {
+            setNewSessionDraft((prev) => ({
+              ...prev,
+              selectedEvalSet: nextEvalSet,
+              extraEvalStrategy:
+                nextEvalSet === FIXED_EVAL_SET &&
+                prev.extraEvalStrategy === "skip"
+                  ? "generate"
+                  : prev.extraEvalStrategy,
+            }));
+            setHasNewSessionValidationTriggered(false);
+          });
         },
       }}
     >
@@ -4278,6 +4484,7 @@ export function SelfEvolutionPageController({
             ? " is-warning"
             : ""
         }`}
+        aria-busy={isExistingEvalSetLoading}
       >
         <FileTextOutlined />
         <span>{draftEvalSetLabel}</span>
@@ -4661,202 +4868,118 @@ export function SelfEvolutionPageController({
     );
   };
 
-  const renderPxSingleCategoryPie = (
-    categoryMetric: PxCategoryMetricAverage,
-  ) => {
-    const chartSize = 220;
-    const center = chartSize / 2;
-    const radius = 74;
-    const strokeWidth = 34;
-    const circumference = 2 * Math.PI * radius;
-    const metricValues = getPxMetricMeta().map((metric) => ({
-      ...metric,
-      value: clampScore(categoryMetric.metrics[metric.key]),
-    }));
-    const valueSum = metricValues.reduce((acc, item) => acc + item.value, 0);
-    const normalized = metricValues.map((item) => ({
-      ...item,
-      ratio: valueSum > 0 ? item.value / valueSum : 1 / metricValues.length,
-    }));
-    let cumulativeOffset = 0;
+  const getEvalMetricTone = (value: number) => {
+    const score = clampScore(value);
+    return {
+      backgroundColor: `rgba(26, 115, 232, ${0.08 + score * 0.24})`,
+      color: score >= 0.58 ? "#124d91" : "#355875",
+    };
+  };
 
+  const renderEvalMetricsOverview = () => {
+    if (!evalReportMetrics) {
+      return null;
+    }
     return (
-      <div
-        className="self-evolution-px-chart-wrap"
-        aria-label={t("selfEvolutionRun.singleCategoryPieAria")}
+      <section
+        className="self-evolution-px-metrics-overview"
+        aria-label={t("selfEvolutionRun.evalMetricsOverview")}
       >
-        <svg
-          className="self-evolution-px-pie-chart"
-          viewBox={`0 0 ${chartSize} ${chartSize}`}
+        <div className="self-evolution-px-section-title">
+          <strong>{t("selfEvolutionRun.evalMetricsOverview")}</strong>
+          <span>{t("selfEvolutionRun.evalMetricsOverviewHint")}</span>
+        </div>
+        <div
+          className="self-evolution-px-metric-chart"
           role="img"
+          aria-label={t("selfEvolutionRun.evalMetricsChartAria")}
         >
-          <title>
-            {t("selfEvolutionRun.pieChartTitle", {
-              category: categoryMetric.category,
-            })}
-          </title>
-          <circle
-            cx={center}
-            cy={center}
-            r={radius}
-            fill="none"
-            stroke="#ecf2fb"
-            strokeWidth={strokeWidth}
-          />
-          <g transform={`rotate(-90 ${center} ${center})`}>
-            {normalized.map((item) => {
-              const dashLength = item.ratio * circumference;
-              const currentOffset = cumulativeOffset;
-              cumulativeOffset += dashLength;
-              return (
-                <circle
-                  key={item.key}
-                  cx={center}
-                  cy={center}
-                  r={radius}
-                  fill="none"
-                  stroke={item.color}
-                  strokeWidth={strokeWidth}
-                  strokeDasharray={`${dashLength} ${circumference - dashLength}`}
-                  strokeDashoffset={-currentOffset}
-                />
-              );
-            })}
-          </g>
-          <text
-            x={center}
-            y={center - 4}
-            textAnchor="middle"
-            className="self-evolution-px-pie-center-title"
-          >
-            {categoryMetric.category}
-          </text>
-          <text
-            x={center}
-            y={center + 20}
-            textAnchor="middle"
-            className="self-evolution-px-pie-center-value"
-          >
-            {t("selfEvolutionRun.resultItemCount", {
-              count: categoryMetric.caseCount,
-            })}
-          </text>
-        </svg>
-      </div>
+          {evalReportMetricMeta.map((metric) => {
+            const value = clampScore(evalReportMetrics[metric.key]);
+            return (
+              <div
+                key={metric.key}
+                className={`self-evolution-px-metric-row${metric.key === "overall" ? " is-primary" : ""}`}
+              >
+                <span>{metric.label}</span>
+                <strong>{formatPercent(value)}</strong>
+                <div className="self-evolution-px-metric-track" aria-hidden="true">
+                  <b style={{ width: `${value * 100}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
     );
   };
 
-  const renderPxMultiCategoryBars = (
-    categoryMetrics: PxCategoryMetricAverage[],
-  ) => {
-    const width = 960;
-    const height = 300;
-    const padding = { top: 22, right: 32, bottom: 66, left: 54 };
-    const chartWidth = width - padding.left - padding.right;
-    const chartHeight = height - padding.top - padding.bottom;
-    const categoryCount = categoryMetrics.length;
-    const yToPx = (value: number) =>
-      padding.top + (1 - clampScore(value)) * chartHeight;
-    const groupWidth = chartWidth / Math.max(categoryCount, 1);
-    const metricCount = getPxMetricMeta().length;
-    const barGap = 4;
-    const groupInnerWidth = Math.min(96, groupWidth * 0.74);
-    const barWidth = Math.max(
-      5,
-      Math.min(
-        18,
-        (groupInnerWidth - barGap * (metricCount - 1)) / metricCount,
-      ),
-    );
-    const groupBarsWidth = barWidth * metricCount + barGap * (metricCount - 1);
-    const xToCenter = (index: number) =>
-      padding.left + groupWidth * index + groupWidth / 2;
-    const axisTicks = [0, 0.25, 0.5, 0.75, 1];
-
+  const renderEvalQuestionTypeHeatmap = () => {
+    if (evalReportQuestionTypeSummaries.length === 0) {
+      return null;
+    }
     return (
-      <div
-        className="self-evolution-px-chart-wrap"
-        aria-label={t("selfEvolutionRun.multiCategoryBarAria")}
+      <section
+        className="self-evolution-px-question-types"
+        aria-label={t("selfEvolutionRun.questionTypeComparison")}
       >
-        <svg
-          className="self-evolution-px-bar-chart"
-          viewBox={`0 0 ${width} ${height}`}
-          role="img"
-        >
-          <title>{t("selfEvolutionRun.barChartTitle")}</title>
-          {axisTicks.map((tick) => {
-            const y = yToPx(tick);
-            return (
-              <g key={tick}>
-                <line
-                  x1={padding.left}
-                  y1={y}
-                  x2={width - padding.right}
-                  y2={y}
-                  className="self-evolution-px-grid-line"
-                />
-                <text
-                  x={padding.left - 8}
-                  y={y + 4}
-                  textAnchor="end"
-                  className="self-evolution-px-axis-label"
+        <div className="self-evolution-px-section-title">
+          <strong>{t("selfEvolutionRun.questionTypeComparison")}</strong>
+          <span>{t("selfEvolutionRun.questionTypeComparisonHint")}</span>
+        </div>
+        <div className="self-evolution-px-heatmap-scroll">
+          <div
+            className="self-evolution-px-heatmap"
+            role="table"
+            aria-label={t("selfEvolutionRun.questionTypeHeatmapAria")}
+          >
+            <div className="self-evolution-px-heatmap-head" role="row">
+              <span role="columnheader">
+                {t("selfEvolutionRun.questionType")}
+              </span>
+              {evalReportMetricMeta.map((metric) => (
+                <span key={metric.key} role="columnheader">
+                  {metric.label}
+                </span>
+              ))}
+            </div>
+            {evalReportQuestionTypeSummaries.map((summary) => {
+              const questionTypeLabel = getEvalQuestionTypeLabel(summary.questionType);
+              return (
+                <div
+                  key={summary.questionType}
+                  className="self-evolution-px-heatmap-row"
+                  role="row"
                 >
-                  {tick.toFixed(2)}
-                </text>
-              </g>
-            );
-          })}
-
-          <line
-            x1={padding.left}
-            y1={padding.top + chartHeight}
-            x2={width - padding.right}
-            y2={padding.top + chartHeight}
-            className="self-evolution-px-axis-line"
-          />
-
-          {categoryMetrics.map((item, categoryIndex) => {
-            const groupStartX = xToCenter(categoryIndex) - groupBarsWidth / 2;
-            return (
-              <g key={`px-bar-group-${item.category}`}>
-                {getPxMetricMeta().map((metric, metricIndex) => {
-                  const value = clampScore(item.metrics[metric.key]);
-                  const y = yToPx(value);
+                  <span role="rowheader">
+                    <strong>{questionTypeLabel}</strong>
+                  <small>
+                    {t("selfEvolutionRun.scoredCaseCount", {
+                      scored: summary.scoredCaseCount,
+                      total: summary.caseCount,
+                    })}
+                  </small>
+                </span>
+                {evalReportMetricMeta.map((metric) => {
+                  const value = clampScore(summary.metrics[metric.key]);
                   return (
-                    <rect
-                      key={`${item.category}-${metric.key}`}
-                      x={groupStartX + metricIndex * (barWidth + barGap)}
-                      y={y}
-                      width={barWidth}
-                      height={padding.top + chartHeight - y}
-                      rx={3}
-                      fill={metric.color}
-                      className="self-evolution-px-bar"
+                    <span
+                      key={metric.key}
+                      role="cell"
+                      className="self-evolution-px-heatmap-cell"
+                      style={getEvalMetricTone(value)}
+                      title={`${questionTypeLabel} ${metric.label}: ${formatPercent(value)}`}
                     >
-                      <title>{`${metric.label} ${item.category}: ${formatPercent(value)}`}</title>
-                    </rect>
+                      {formatPercent(value)}
+                    </span>
                   );
                 })}
-              </g>
-            );
-          })}
-
-          {categoryMetrics.map((item, index) => {
-            const x = xToCenter(index);
-            return (
-              <text
-                key={item.category}
-                x={x}
-                y={height - 28}
-                textAnchor="middle"
-                className="self-evolution-px-axis-label"
-              >
-                {getShortLabel(item.category, 18)}
-              </text>
-            );
-          })}
-        </svg>
-      </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
     );
   };
 
@@ -4882,7 +5005,7 @@ export function SelfEvolutionPageController({
               <Text>
                 {t("selfEvolutionRun.pxReportStats", {
                   cases: pxReportTotalCases,
-                  categories: pxReportCategoryMetrics.length,
+                  categories: evalReportQuestionTypeSummaries.length,
                 })}
               </Text>
               <button
@@ -4897,54 +5020,15 @@ export function SelfEvolutionPageController({
             </div>
           </div>
 
-          {pxReportCategoryMetrics.length === 0 ? (
+          {!evalReportMetrics &&
+          evalReportQuestionTypeSummaries.length === 0 ? (
             <Paragraph className="self-evolution-px-empty">
               {t("selfEvolutionRun.noMetricData")}
             </Paragraph>
-          ) : isSinglePxCategory ? (
-            <div className="self-evolution-px-panel">
-              {renderPxSingleCategoryPie(pxReportCategoryMetrics[0])}
-              <div className="self-evolution-px-legend">
-                {getPxMetricMeta().map((metric) => (
-                  <div
-                    key={metric.key}
-                    className="self-evolution-px-legend-item"
-                  >
-                    <span
-                      className="self-evolution-px-legend-dot"
-                      style={{ backgroundColor: metric.color }}
-                    />
-                    <span className="self-evolution-px-legend-label">
-                      {metric.label}
-                    </span>
-                    <span className="self-evolution-px-legend-value">
-                      {formatPercent(
-                        pxReportCategoryMetrics[0].metrics[metric.key],
-                      )}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
           ) : (
-            <div className="self-evolution-px-panel is-bar">
-              <div className="self-evolution-px-legend is-compact">
-                {getPxMetricMeta().map((metric) => (
-                  <div
-                    key={metric.key}
-                    className="self-evolution-px-legend-item"
-                  >
-                    <span
-                      className="self-evolution-px-legend-dot"
-                      style={{ backgroundColor: metric.color }}
-                    />
-                    <span className="self-evolution-px-legend-label">
-                      {metric.label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              {renderPxMultiCategoryBars(pxReportCategoryMetrics)}
+            <div className="self-evolution-px-analysis-grid">
+              {renderEvalMetricsOverview()}
+              {renderEvalQuestionTypeHeatmap()}
             </div>
           )}
           <div className="self-evolution-px-case-section">
@@ -6006,7 +6090,6 @@ export function SelfEvolutionPageController({
       sectionDesc: t("selfEvolutionRun.artifact1Desc"),
       title: t("selfEvolutionRun.artifact1Name"),
       desc: t("selfEvolutionRun.artifact1Detail"),
-      fallbackUrl: datasetDownloadUrl,
       fileName: datasetDownloadFileName,
       preview: renderDatasetPreview(),
     },
@@ -6017,7 +6100,6 @@ export function SelfEvolutionPageController({
       sectionDesc: t("selfEvolutionRun.artifact2Desc"),
       title: t("selfEvolutionRun.artifact2Name"),
       desc: t("selfEvolutionRun.artifact2Detail"),
-      fallbackUrl: evalReportDownloadUrl,
       fileName: "eval-report.json",
       preview: renderPxReportPreview(),
     },
@@ -6028,7 +6110,6 @@ export function SelfEvolutionPageController({
       sectionDesc: t("selfEvolutionRun.artifact3Desc"),
       title: t("selfEvolutionRun.artifact3Name"),
       desc: t("selfEvolutionRun.artifact3Detail"),
-      fallbackUrl: "",
       fileName: "analysis-report.md",
       preview: renderAnalysisReportPreview(),
     },
@@ -6039,7 +6120,6 @@ export function SelfEvolutionPageController({
       sectionDesc: t("selfEvolutionRun.artifact4Desc"),
       title: t("selfEvolutionRun.artifact4Name"),
       desc: t("selfEvolutionRun.artifact4Detail"),
-      fallbackUrl: diffResultDownloadUrl,
       fileName: "code-diff.diff",
       preview: renderCodeOptimizeDiffPreview(),
     },
@@ -6050,7 +6130,6 @@ export function SelfEvolutionPageController({
       sectionDesc: t("selfEvolutionRun.artifact5Desc"),
       title: t("selfEvolutionRun.artifact5Name"),
       desc: t("selfEvolutionRun.artifact5Detail"),
-      fallbackUrl: abtestResultDownloadUrl || abComparisonDownloadUrl,
       fileName: "ab-test-comparison.json",
       preview: renderAbTestPreview(),
     },
@@ -6377,7 +6456,6 @@ export function SelfEvolutionPageController({
             onClick={(event) =>
               void handleWorkflowDownload(
                 activeArtifactItem.kind,
-                activeArtifactItem.fallbackUrl,
                 activeArtifactItem.fileName,
                 event,
               )

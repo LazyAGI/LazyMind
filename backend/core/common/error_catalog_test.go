@@ -12,6 +12,23 @@ import (
 	"testing"
 )
 
+func TestAppErrorWithDetailReturnsCopy(t *testing.T) {
+	base := NewAppError(422, 2000228, "model not configured")
+	detail := map[string]any{"reason": "model_not_configured"}
+
+	detailed := base.WithDetail(detail)
+
+	if detailed == base {
+		t.Fatal("WithDetail returned the original AppError")
+	}
+	if base.Detail != nil {
+		t.Fatalf("base Detail = %#v, want nil", base.Detail)
+	}
+	if detailed.Detail.(map[string]any)["reason"] != "model_not_configured" {
+		t.Fatalf("Detail = %#v", detailed.Detail)
+	}
+}
+
 func TestErrorCatalogCodeHasSingleMessage(t *testing.T) {
 	messagesByCode := make(map[int]string)
 	for key, appErr := range errorCatalog {
