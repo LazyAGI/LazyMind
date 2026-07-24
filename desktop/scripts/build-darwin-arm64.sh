@@ -6,6 +6,9 @@ BUILD_ROOT="${ROOT}/desktop/build/darwin-arm64"
 RUNTIME_ROOT="${BUILD_ROOT}/runtime"
 DIST_ROOT="${ROOT}/desktop/dist"
 APP_ICON="${ROOT}/desktop/electron/assets/LazyMind.icns"
+PACKAGE_KIND="${LAZYMIND_DESKTOP_PACKAGE_KIND:-zip}"
+SIGNING_MODE="${LAZYMIND_DESKTOP_SIGNING_MODE:-adhoc}"
+NOTARIZE="${LAZYMIND_DESKTOP_NOTARIZE:-false}"
 
 GO_BIN="${GO:-go}"
 PNPM_BIN="${PNPM:-pnpm}"
@@ -18,6 +21,37 @@ GO_INSTALL_FLAGS=(-trimpath -ldflags="-s -w")
 export ELECTRON_CACHE
 export ELECTRON_BUILDER_CACHE
 export PYTHONDONTWRITEBYTECODE=1
+
+case "${PACKAGE_KIND}" in
+  zip|dmg) ;;
+  *)
+    echo "LAZYMIND_DESKTOP_PACKAGE_KIND must be zip or dmg, got: ${PACKAGE_KIND}" >&2
+    exit 2
+    ;;
+esac
+case "${SIGNING_MODE}" in
+  adhoc|developer-id|none) ;;
+  *)
+    echo "LAZYMIND_DESKTOP_SIGNING_MODE must be adhoc, developer-id, or none, got: ${SIGNING_MODE}" >&2
+    exit 2
+    ;;
+esac
+if [[ "${NOTARIZE}" == "true" && "${SIGNING_MODE}" != "developer-id" ]]; then
+  echo "LAZYMIND_DESKTOP_NOTARIZE=true requires LAZYMIND_DESKTOP_SIGNING_MODE=developer-id" >&2
+  exit 2
+fi
+if [[ "${NOTARIZE}" == "true" ]]; then
+  for variable in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+    if [[ -z "${!variable:-}" ]]; then
+      echo "${variable} is required when LAZYMIND_DESKTOP_NOTARIZE=true" >&2
+      exit 2
+    fi
+  done
+fi
+if [[ "${PACKAGE_KIND}" == "dmg" && "${SIGNING_MODE}" == "none" ]]; then
+  echo "Refusing to create an unsigned distribution DMG" >&2
+  exit 2
+fi
 
 remove_generated_path() {
   local target="$1"
@@ -134,6 +168,18 @@ prune_python_runtime "${RUNTIME_ROOT}/deps/python"
 echo "==> Staging runtime app files"
 rsync -a --delete \
   --exclude ".git" \
+  --exclude "/.env" \
+  --exclude "/.lazymind-local" \
+  --exclude "/.venv" \
+  --exclude "/.venv-test" \
+  --exclude "/.conda" \
+  --exclude "/.codex" \
+  --exclude "/.claude" \
+  --exclude "/.cursor" \
+  --exclude "/.vscode" \
+  --exclude "/data" \
+  --exclude "/volumes" \
+  --exclude "/local/config.env" \
   --exclude "local/build" \
   --exclude "local/runtime" \
   --exclude "desktop/build" \
@@ -171,19 +217,61 @@ fi
 remove_generated_path "${DIST_ROOT}/mac-arm64/LazyMind.app"
 export LAZYMIND_DESKTOP_RUNTIME_STAGE="${RUNTIME_ROOT}"
 export LAZYMIND_DESKTOP_OUTPUT_DIR="${DIST_ROOT}"
-(cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run pack:mac:arm64)
+export LAZYMIND_DESKTOP_PACKAGE_KIND
+export LAZYMIND_DESKTOP_SIGNING_MODE
+export LAZYMIND_DESKTOP_NOTARIZE
+if [[ "${PACKAGE_KIND}" == "dmg" ]]; then
+  (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run dist:mac:arm64)
+else
+  (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run pack:mac:arm64)
+fi
 
 APP_PATH="${DIST_ROOT}/mac-arm64/LazyMind.app"
 ZIP_PATH="${DIST_ROOT}/LazyMind-darwin-arm64.zip"
+DMG_PATH="${DIST_ROOT}/LazyMind-macos-arm64.dmg"
 if [[ ! -d "${APP_PATH}" ]]; then
   if [[ -d "${DIST_ROOT}/mac-arm64" ]]; then
     APP_PATH="$(find "${DIST_ROOT}/mac-arm64" -maxdepth 3 -type d -name "LazyMind.app" -print -quit)"
   fi
 fi
 if [[ -d "${APP_PATH}" ]]; then
-  ditto -c -k --keepParent "${APP_PATH}" "${ZIP_PATH}"
+  if [[ "${SIGNING_MODE}" != "none" ]]; then
+    codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
+  fi
+  if [[ "${SIGNING_MODE}" == "developer-id" ]]; then
+    if ! codesign -dv --verbose=4 "${APP_PATH}" 2>&1 | grep -q "Authority=Developer ID Application:"; then
+      echo "Expected a Developer ID Application signature: ${APP_PATH}" >&2
+      exit 1
+    fi
+  fi
+  if [[ "${PACKAGE_KIND}" == "zip" ]]; then
+    remove_generated_path "${ZIP_PATH}"
+    ditto -c -k --keepParent "${APP_PATH}" "${ZIP_PATH}"
+  else
+    if [[ ! -f "${DMG_PATH}" ]]; then
+      echo "Expected DMG not found: ${DMG_PATH}" >&2
+      exit 1
+    fi
+    if [[ "${NOTARIZE}" == "true" ]]; then
+      echo "==> Notarizing and stapling distribution DMG"
+      xcrun notarytool submit "${DMG_PATH}" \
+        --apple-id "${APPLE_ID}" \
+        --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+        --team-id "${APPLE_TEAM_ID}" \
+        --wait
+      xcrun stapler staple "${DMG_PATH}"
+      xcrun stapler validate "${APP_PATH}"
+      xcrun stapler validate "${DMG_PATH}"
+      spctl --assess --type execute --verbose=2 "${APP_PATH}"
+      spctl --assess --type open --context context:primary-signature --verbose=2 "${DMG_PATH}"
+    fi
+  fi
   echo "LazyMind.app: ${APP_PATH}"
-  echo "Zip: ${ZIP_PATH}"
+  if [[ "${PACKAGE_KIND}" == "dmg" ]]; then
+    echo "DMG: ${DMG_PATH}"
+  else
+    echo "Zip: ${ZIP_PATH}"
+  fi
 else
   echo "Expected app not found: ${APP_PATH}" >&2
   exit 1

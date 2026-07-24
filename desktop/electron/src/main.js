@@ -5,9 +5,15 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
 const { desktopRuntimeReady, runtimeExitFailureMessage, statusFailureMessage } = require("./runtime-status");
-const { runInstallerWarmupLifecycle } = require("./installer-warmup");
+const {
+  macWarmupCompleted,
+  macWarmupMarkerPath,
+  markMacWarmupCompleted,
+  runInstallerWarmupLifecycle,
+} = require("./installer-warmup");
 
 const isWindows = process.platform === "win32";
+const isMac = process.platform === "darwin";
 const isInstallerWarmup = isWindows && process.argv.includes("--installer-warmup");
 const windowsDesktopPaths = isWindows
   ? resolveWindowsDesktopPaths(process.env, app.getPath("home"))
@@ -45,6 +51,7 @@ const maxSidecarFailureBytes = 32 * 1024;
 const desktopShutdownTimeout = process.env.LAZYMIND_DESKTOP_SHUTDOWN_TIMEOUT || "20s";
 const forceExitDelayMs = 1500;
 const rendererReadyTimeoutMs = 30 * 1000;
+const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 
 let mainWindow;
 let startupWindow;
@@ -350,6 +357,15 @@ async function runInstallerWarmup() {
     log,
     formatError: serializeError,
   });
+}
+
+async function runMacInstallationWarmupIfNeeded() {
+  const version = app.getVersion();
+  if (!isMac || !isPackaged || macWarmupCompleted(macInstallationWarmupMarker, version)) {
+    return;
+  }
+  await runInstallerWarmup();
+  markMacWarmupCompleted(macInstallationWarmupMarker, version);
 }
 
 function startGuard() {
@@ -1133,7 +1149,17 @@ if (!hasSingleInstanceLock) {
         },
       );
     }
-    return createWindow();
+    return runMacInstallationWarmupIfNeeded().then(
+      () => createWindow(),
+      (error) => {
+        console.error("LazyMind macOS installation warmup failed:", error);
+        dialog.showErrorBox(
+          "LazyMind installation warmup failed",
+          `LazyMind could not prepare its local runtime. Reopen the app to retry.\n\n${serializeError(error)}`,
+        );
+        app.exit(1);
+      },
+    );
   });
   app.on("window-all-closed", () => {
     if (isInstallerWarmup) {

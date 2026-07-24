@@ -5,6 +5,18 @@ if (!runtimeStage) {
   throw new Error("LAZYMIND_DESKTOP_RUNTIME_STAGE is required");
 }
 
+const macSigningMode = process.env.LAZYMIND_DESKTOP_SIGNING_MODE || "adhoc";
+if (!["adhoc", "developer-id", "none"].includes(macSigningMode)) {
+  throw new Error(`Unsupported LAZYMIND_DESKTOP_SIGNING_MODE: ${macSigningMode}`);
+}
+const notarizeMac = process.env.LAZYMIND_DESKTOP_NOTARIZE === "true";
+if (notarizeMac && macSigningMode !== "developer-id") {
+  throw new Error("LAZYMIND_DESKTOP_NOTARIZE=true requires LAZYMIND_DESKTOP_SIGNING_MODE=developer-id");
+}
+if (notarizeMac && !process.env.APPLE_TEAM_ID) {
+  throw new Error("APPLE_TEAM_ID is required for notarytool notarization");
+}
+
 const extraResources = [
   {
     from: runtimeStage,
@@ -37,7 +49,17 @@ module.exports = {
     category: "public.app-category.productivity",
     icon: "assets/LazyMind.icns",
     target: ["dir"],
-    identity: null,
+    identity: macSigningMode === "developer-id"
+      ? undefined
+      : (macSigningMode === "adhoc" ? "-" : null),
+    hardenedRuntime: macSigningMode === "developer-id",
+    entitlements: "assets/entitlements.mac.plist",
+    entitlementsInherit: "assets/entitlements.mac.plist",
+    notarize: notarizeMac ? { teamId: process.env.APPLE_TEAM_ID } : false,
+  },
+  dmg: {
+    artifactName: "LazyMind-macos-${arch}.${ext}",
+    sign: false,
   },
   win: {
     icon: process.env.LAZYMIND_DESKTOP_WINDOWS_ICON || "assets/LazyMind.ico",
