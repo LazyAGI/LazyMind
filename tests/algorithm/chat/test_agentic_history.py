@@ -76,3 +76,19 @@ def test_normalize_history_keeps_kb_tool_calls_and_sanitizes_results():
         },
         {'role': 'assistant', 'content': '最终答案。', 'reasoning_content': ''},
     ]
+
+
+def test_normalize_history_drops_ephemeral_intentwrite_trace():
+    history = [{
+        'role': 'assistant',
+        'content': (
+            '<tool_call>{"id":"intent-1","name":"intentwrite","arguments":'
+            '{"scope":"conversation","operations":[]}}</tool_call>'
+            '<tool_result>{"id":"intent-1","name":"intentwrite","result":"updated"}</tool_result>'
+            '继续回答当前问题。'
+        ),
+    }]
+
+    assert normalize_history_for_agent(history) == [
+        {'role': 'assistant', 'content': '继续回答当前问题。', 'reasoning_content': ''},
+    ]

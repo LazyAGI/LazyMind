@@ -4,21 +4,27 @@ from datetime import datetime, timezone as datetime_timezone
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .guidance import (
-    ATTACHED_FILES_GUIDANCE,
-    DEFAULT_SYSTEM_PROMPT,
-    IMAGE_REFERENCE_MARKDOWN_GUIDANCE,
-    KNOWLEDGE_EVIDENCE_CITATION_GUIDANCE,
-    RESPONSE_LANGUAGE_GUIDANCE,
-    SEARCH_GUIDANCE,
-    TOOL_CALL_STATUS_GUIDANCE,
-    WEB_SEARCH_GUIDANCE,
-)
+from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
 
-_KNOWLEDGE_EVIDENCE_GROUPS = {'kb', 'temp_kb'}
+from .guidance import (
+    ANALYSIS_GUIDANCE,
+    CLARIFICATION_GUIDANCE,
+    DECISION_PLANNING_GUIDANCE,
+    DEFAULT_SYSTEM_PROMPT,
+    DELIVERABLE_GUIDANCE,
+    FRESH_RESEARCH_GUIDANCE,
+    LEARNING_GUIDANCE,
+    REQUEST_ANALYSIS_GUIDANCE,
+    RESPONSE_LANGUAGE_GUIDANCE,
+    SKILL_RESTRAINT_GUIDANCE,
+    TRANSFORMATION_GUIDANCE,
+)
+from .task_profile import TaskProfile
+
 _DEFAULT_UI_LOCALE = 'zh-CN'
 _CJK_PATTERN = re.compile(r'[\u3400-\u9fff]')
 _LATIN_PATTERN = re.compile(r'[A-Za-z]')
+_URL_PATTERN = re.compile(r'https?://\S+|www\.\S+', re.IGNORECASE)
 _EXPLICIT_LANGUAGE_PATTERNS = (
     (
         'Chinese',
@@ -68,7 +74,9 @@ def _explicit_language(text: object) -> str:
 
 
 def _dominant_language(text: object) -> str:
-    value = str(text or '')[:2000]
+    # URLs are identifiers, not natural-language evidence. In particular, long
+    # Feishu/Notion links must not make a Chinese request look English.
+    value = _URL_PATTERN.sub(' ', str(text or '')[:2000])
     cjk_count = len(_CJK_PATTERN.findall(value))
     latin_count = len(_LATIN_PATTERN.findall(value))
     if cjk_count >= 2 and cjk_count * 2 >= latin_count:
@@ -183,43 +191,150 @@ def _build_environment_context_prompt(environment_context: dict | None = None) -
     return f'## Environment Context\nCurrent user time: {user_time}'
 
 
-def _build_attached_files_prompt(files: list | None = None) -> str:
-    clean = [str(path).strip() for path in (files or []) if str(path).strip()]
-    if not clean:
-        return ''
-    lines = ['## Attached Files']
-    lines.extend(f'- {path}' for path in clean)
-    return '\n'.join(lines) + '\n\n' + ATTACHED_FILES_GUIDANCE
+_TOOL_APPENDIX_SECTION_TITLES = {
+    'tool_policy': 'Tool-specific policies',
+    'safety': 'Tool-specific safety constraints',
+    'output_contract': 'Tool output contracts',
+    'response_policy': 'Tool-specific response policies',
+}
 
 
-def build_system_prompt(
-    active_groups: set[str],
+def _build_tool_appendix_prompt(appendices: dict[str, list[str]] | None = None) -> str:
+    blocks = []
+    for section, title in _TOOL_APPENDIX_SECTION_TITLES.items():
+        entries = [item.strip() for item in (appendices or {}).get(section, []) if item.strip()]
+        if entries:
+            blocks.append(f'## {title}\n' + '\n\n'.join(entries))
+    return '\n\n'.join(blocks)
+
+
+def add_standard_system_sections(
+    builder: PromptBuilder,
+    has_tools: bool,
     *,
     environment_context: dict | None = None,
     use_memory: bool = True,
     user_preference: str | None = None,
     memory: str | None = None,
-    files: list | None = None,
     current_query: str | None = None,
     conversation_history: list[dict] | None = None,
-) -> str:
-    prompt_parts = [
-        DEFAULT_SYSTEM_PROMPT,
-        _build_response_language_prompt(
+    tool_prompt_appendices: dict[str, list[str]] | None = None,
+    show_tool_status: bool = True,
+    task_profile: TaskProfile | None = None,
+    dynamic_prompt_modules: bool = False,
+) -> PromptBuilder:
+    builder.system(
+        'platform_identity', '', DEFAULT_SYSTEM_PROMPT, 'platform.guidance', priority=10,
+    ).system(
+        'response_language', '', _build_response_language_prompt(
             environment_context,
             current_query=current_query,
             conversation_history=conversation_history,
             user_preference=user_preference,
         ),
-    ]
+        'platform.language', priority=20,
+    )
 
     environment_prompt = _build_environment_context_prompt(environment_context)
-    if environment_prompt:
-        prompt_parts.append(environment_prompt)
+    builder.system(
+        'environment', '', environment_prompt, 'request.environment', priority=30,
+    )
 
-    attached_files_prompt = _build_attached_files_prompt(files)
-    if attached_files_prompt:
-        prompt_parts.append(attached_files_prompt)
+    if dynamic_prompt_modules and task_profile is not None:
+        builder.system(
+            'task_profile_interpretation', '# Task profile interpretation',
+            'The enabled task modules and deliverable hints were selected by fast heuristic '
+            'rules. They are provisional guidance, may be incomplete or inaccurate, and must '
+            'not override the user\'s actual request. Independently infer the user\'s goal and '
+            'correct the response strategy when the wording, conversation context, or available '
+            'evidence indicates a better interpretation. Do not mention this internal routing '
+            'review to the user. Runtime sections explicitly marked AUTHORITATIVE remain binding.',
+            'platform.task.interpretation', priority=31,
+        )
+        outcomes = {task_profile.primary_outcome, *task_profile.secondary_outcomes}
+        builder.system(
+            'task_learning', '', LEARNING_GUIDANCE, 'platform.task.learning', priority=32,
+            skip_if='learn' not in outcomes,
+        ).system(
+            'task_fresh_research', '', FRESH_RESEARCH_GUIDANCE,
+            'platform.task.research', priority=33,
+            skip_if=not task_profile.research_required and task_profile.freshness != 'current',
+        ).system(
+            'task_decision_planning', '', DECISION_PLANNING_GUIDANCE,
+            'platform.task.decision', priority=34,
+            skip_if=not outcomes.intersection({'decide', 'plan'}),
+        ).system(
+            'task_analysis', '', ANALYSIS_GUIDANCE,
+            'platform.task.analysis', priority=34,
+            skip_if='analyze' not in outcomes,
+        ).system(
+            'task_transformation', '', TRANSFORMATION_GUIDANCE,
+            'platform.task.transformation', priority=34,
+            skip_if='transform' not in outcomes,
+        )
+        deliverables = [task_profile.deliverable_kind, *task_profile.secondary_deliverables][:2]
+        contracts = [DELIVERABLE_GUIDANCE[item] for item in deliverables if item in DELIVERABLE_GUIDANCE]
+        builder.system(
+            'task_deliverable', '# Deliverable contract', '\n'.join(contracts),
+            'platform.task.deliverable', priority=35,
+            skip_if=not contracts or (
+                task_profile.complexity == 'simple' and task_profile.deliverable_kind == 'direct_answer'
+            ),
+        ).system(
+            'task_skill_restraint', '', SKILL_RESTRAINT_GUIDANCE,
+            'platform.task.skills', priority=36,
+            skip_if=task_profile.skill_mode == 'explicit',
+        ).system(
+            'task_request_analysis', '', REQUEST_ANALYSIS_GUIDANCE,
+            'platform.task.request_analysis', priority=37,
+            skip_if=(
+                task_profile.request_assessment.status == 'ready'
+                and task_profile.complexity != 'compound'
+            ),
+        ).system(
+            'task_clarification', '', CLARIFICATION_GUIDANCE,
+            'platform.task.clarification', priority=38,
+            skip_if=task_profile.request_assessment.interaction_need != 'blocking',
+        )
+        assessment = task_profile.request_assessment
+        excluded = task_profile.excluded_resources
+        excluded_lines = [
+            *(f'- Skill: {value}' for value in excluded.skill_names),
+            *(f'- Knowledge base: {value}' for value in excluded.knowledge_base_ids),
+            *(f'- Workflow: {value}' for value in excluded.plugin_refs),
+        ]
+        if excluded_lines:
+            builder.runtime(
+                'task_resource_policy', 'Resource Usage Policy',
+                '\n'.join([
+                    'Do not use, invoke, cite, or rely on these resources in this turn, even if '
+                    'their content appears elsewhere in the assembled context:',
+                    *excluded_lines,
+                ]),
+                'runtime.task.resources', priority=4, authoritative=True, content_kind='instruction',
+            )
+        if assessment.status != 'ready':
+            issue_lines = [
+                f'- {issue.issue_type} ({issue.impact}): {issue.description} '
+                f'[evidence: {issue.evidence}]'
+                for issue in assessment.issues
+            ]
+            question_lines = [
+                f'- {question.question}'
+                + (f' Options: {", ".join(question.options)}.' if question.options else '')
+                + (f' Recommended: {question.recommended}.' if question.recommended else '')
+                for question in assessment.clarification_questions
+            ]
+            builder.runtime(
+                'task_request_assessment', 'Request Assessment',
+                '\n'.join([
+                    f'Status: {assessment.status}',
+                    f'Interaction need: {assessment.interaction_need}',
+                    *issue_lines,
+                    *question_lines,
+                ]),
+                'runtime.task.assessment', priority=5, authoritative=True, content_kind='state',
+            )
 
     if use_memory:
         if isinstance(user_preference, str) and user_preference.strip():
@@ -245,22 +360,47 @@ def build_system_prompt(
                 + user_preference.strip()
                 + '\n\n<!-- end of User Profile / Preferences -->'
             )
-            prompt_parts.append(preference_block)
+            builder.system(
+                'user_preferences', '', preference_block, 'user.profile', priority=40,
+            )
         if isinstance(memory, str) and memory.strip():
-            prompt_parts.append(f'## Agent Working Memory\n{memory.strip()}')
+            builder.system(
+                'working_memory', '', f'## Agent Working Memory\n{memory.strip()}',
+                'user.memory', priority=50,
+            )
 
-    if active_groups:
-        prompt_parts.append(TOOL_CALL_STATUS_GUIDANCE)
-    if active_groups & _KNOWLEDGE_EVIDENCE_GROUPS:
-        prompt_parts.append(SEARCH_GUIDANCE)
-        prompt_parts.append(KNOWLEDGE_EVIDENCE_CITATION_GUIDANCE)
-    if 'web_search' in active_groups:
-        prompt_parts.append(WEB_SEARCH_GUIDANCE)
-    if (
-        files
-        or 'image_generator' in active_groups
-        or 'image_editor' in active_groups
-    ):
-        prompt_parts.append(IMAGE_REFERENCE_MARKDOWN_GUIDANCE)
+    if has_tools:
+        tool_policy = (
+            '# Tool use policy\n'
+            'First decide whether tools are needed. A tool named get_*Toolkit_methods '
+            'is a Toolkit gateway: call it before using that Toolkit. Confirm before '
+            'destructive or externally visible actions unless the user '
+            'already requested that exact action.'
+        )
+        if show_tool_status:
+            tool_policy = (
+                '# Tool call status\n'
+                'Before calling a tool, write one concise, user-visible sentence explaining '
+                'what you are about to do. Keep it action-oriented and do not reveal hidden '
+                'reasoning. Then make the tool call in the same response.\n'
+                "CRITICAL: Never write a status sentence (e.g. '正在…', 'I am now checking…', "
+                "'Activating…') without immediately following it with an actual tool call in the "
+                'same response. If you cannot call a tool, do not pretend you are doing so — '
+                'answer directly instead.\n\n'
+                + tool_policy
+            )
+        builder.system(
+            'tool_policy', '', tool_policy, 'platform.tools', priority=60,
+        )
+        appendix_prompt = _build_tool_appendix_prompt(tool_prompt_appendices)
+        builder.system(
+            'tool_appendices', '', appendix_prompt, 'tool.registry', priority=70,
+        )
 
-    return '\n\n'.join(prompt_parts)
+    return builder
+
+
+def build_system_prompt(has_tools: bool, **kwargs) -> str:
+    """Render standard system sections for direct consumers and focused tests."""
+    builder = PromptBuilder.for_role(AgentRole.CHAT)
+    return add_standard_system_sections(builder, has_tools, **kwargs).build().system_prompt

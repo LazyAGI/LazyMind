@@ -1,0 +1,41 @@
+-- 20260321131500_init
+-- +migrate Down
+
+DROP TABLE IF EXISTS words CASCADE;
+DROP TABLE IF EXISTS word_group_conflicts CASCADE;
+DROP TABLE IF EXISTS user_selected_models CASCADE;
+DROP TABLE IF EXISTS user_personalization_settings CASCADE;
+DROP TABLE IF EXISTS user_model_providers CASCADE;
+DROP TABLE IF EXISTS user_model_provider_groups CASCADE;
+DROP TABLE IF EXISTS user_model_provider_group_models CASCADE;
+DROP TABLE IF EXISTS uploaded_files CASCADE;
+DROP TABLE IF EXISTS upload_sessions CASCADE;
+DROP TABLE IF EXISTS tasks CASCADE;
+DROP TABLE IF EXISTS system_user_preferences CASCADE;
+DROP TABLE IF EXISTS system_memories CASCADE;
+DROP TABLE IF EXISTS skill_share_tasks CASCADE;
+DROP TABLE IF EXISTS skill_share_items CASCADE;
+DROP TABLE IF EXISTS skill_resources CASCADE;
+DROP TABLE IF EXISTS resource_suggestions CASCADE;
+DROP TABLE IF EXISTS resource_session_snapshots CASCADE;
+DROP TABLE IF EXISTS prompts CASCADE;
+DROP TABLE IF EXISTS multi_answers_switches CASCADE;
+DROP TABLE IF EXISTS multi_answers_chat_histories CASCADE;
+DROP TABLE IF EXISTS documents CASCADE;
+DROP TABLE IF EXISTS default_prompts CASCADE;
+DROP TABLE IF EXISTS default_models CASCADE;
+DROP TABLE IF EXISTS default_model_providers CASCADE;
+DROP TABLE IF EXISTS default_datasets CASCADE;
+DROP TABLE IF EXISTS datasets CASCADE;
+DROP TABLE IF EXISTS dataset_members CASCADE;
+DROP TABLE IF EXISTS conversations CASCADE;
+DROP TABLE IF EXISTS chat_histories CASCADE;
+DROP TABLE IF EXISTS agent_user_active_threads CASCADE;
+DROP TABLE IF EXISTS agent_threads CASCADE;
+DROP TABLE IF EXISTS agent_thread_rounds CASCADE;
+DROP TABLE IF EXISTS agent_thread_records CASCADE;
+DROP TABLE IF EXISTS acl_visibility CASCADE;
+DROP TABLE IF EXISTS acl_user_groups CASCADE;
+DROP TABLE IF EXISTS acl_rows CASCADE;
+DROP TABLE IF EXISTS acl_kbs CASCADE;
+DROP TABLE IF EXISTS acl_groups CASCADE;

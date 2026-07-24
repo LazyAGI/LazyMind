@@ -1,28 +1,31 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from lazymind.common.skill_document import require_valid_skill_document
+from lazymind.common.skill_storage_key import parse_skill_storage_key
 
 
 class SkillReviewRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     requestid: str = Field(..., min_length=1)
-    start_time: datetime
-    end_time: datetime
+    session_ids: List[str] = Field(..., min_length=1)
     user_id: Optional[str] = None
     min_user_turns: int = Field(default=2, ge=0)
     min_tool_turns: int = Field(default=5, ge=0)
     artifact_dir: Optional[str] = None
-    pending_skill_ids: List[str] = Field(default_factory=list)
     model_configs: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode='after')
-    def validate_time_range(self) -> 'SkillReviewRequest':
-        if self.start_time > self.end_time:
-            raise ValueError('start_time must be earlier than or equal to end_time')
+    def normalize_scope(self) -> 'SkillReviewRequest':
+        self.session_ids = list(dict.fromkeys(
+            item for item in (str(value).strip() for value in self.session_ids) if item
+        ))
+        if not self.session_ids:
+            raise ValueError('session_ids must contain at least one non-empty id')
         normalized_user_id = str(self.user_id).strip() if self.user_id is not None else ''
         self.user_id = normalized_user_id or None
         return self
@@ -99,26 +102,38 @@ class SkillOutline(BaseModel):
     sop: List[SkillOutlineStep] = Field(default_factory=list)
 
 
+def _validate_candidate_document(skill_name: str, content: str) -> None:
+    require_valid_skill_document(content, expected_name=skill_name)
+
+
 class CandidateSkill(BaseModel):
     skill_name: str
-    category: str = 'general'
     source_trajectories: List[str] = Field(default_factory=list)
     source_skills: Dict[str, str] = Field(default_factory=dict)
     applicable_scenario: str
     content: str
     outline: SkillOutline
 
+    @model_validator(mode='after')
+    def validate_content(self) -> 'CandidateSkill':
+        _validate_candidate_document(self.skill_name, self.content)
+        return self
+
 
 class CandidateSkillLLMOutput(BaseModel):
-    skill_name: str
-    category: str = 'general'
-    applicable_scenario: str
+    name: str
     content: str
+
+    @model_validator(mode='after')
+    def validate_content(self) -> 'CandidateSkillLLMOutput':
+        _validate_candidate_document(self.name, self.content)
+        return self
 
 
 class SkillReviewResolution(BaseModel):
     id: str = Field(..., min_length=1)
     skill_name: str = Field(..., min_length=1)
+    target_skill_key: str = ''
     type: Literal['new', 'patch']
     review_status: Literal['pending', 'accepted', 'rejected', 'expired'] = 'pending'
     userid: str = ''
@@ -127,10 +142,22 @@ class SkillReviewResolution(BaseModel):
     summary: Optional[str] = None
     time: str = ''
 
+    @model_validator(mode='after')
+    def validate_target_skill_key(self) -> 'SkillReviewResolution':
+        self.target_skill_key = self.target_skill_key.strip()
+        if self.type == 'new' and self.target_skill_key:
+            raise ValueError('target_skill_key must be empty for new skill resolutions')
+        if self.type == 'patch' and not self.target_skill_key:
+            raise ValueError('target_skill_key is required for patch skill resolutions')
+        if self.type == 'patch':
+            category, name = parse_skill_storage_key(self.target_skill_key)
+            self.target_skill_key = f'{category}/{name}'
+        return self
+
 
 class UserSkillReviewResult(BaseModel):
     user_id: str
-    status: Literal['completed', 'skipped', 'failed', 'running']
+    status: Literal['completed', 'skipped', 'failed']
     qualified: bool
     session_count: int = 0
     qualified_session_count: int = 0
@@ -142,6 +169,7 @@ class UserSkillReviewResult(BaseModel):
 class SkillReviewBatchResult(BaseModel):
     success: bool
     inserted_count: int = 0
+    taskid: str = ''
     error: Optional[str] = None
 
 
@@ -149,7 +177,20 @@ class SkillReviewRunStat(BaseModel):
     id: str = Field(..., min_length=1)
     requestid: str = ''
     userid: str = ''
-    status: Literal['completed', 'skipped', 'failed', 'running']
+    status: Literal[
+        'pending',
+        'completed',
+        'skipped',
+        'failed',
+        'review_draft',
+        'review_cluster',
+        'review_miner',
+        'review_solution',
+        'review_apply',
+        'organize_plan',
+        'organize_draft',
+        'organize_apply',
+    ]
     started_at: str
     duration_ms: int = 0
     summary: Dict[str, Any] = Field(default_factory=dict)

@@ -10,11 +10,41 @@ import (
 )
 
 type SelectedRuntimeModel struct {
-	ModelType    string
-	ProviderName string
-	ModelName    string
-	BaseURL      string
-	APIKey       string
+	ModelType      string
+	ProviderName   string
+	ModelName      string
+	BaseURL        string
+	APIKey         string
+	MaxInputTokens *string
+}
+
+// LoadMaxInputTokens returns the configured context window for a runtime model role.
+// It follows the same own-selection then shared-selection precedence as LoadLLMConfig.
+func LoadMaxInputTokens(ctx context.Context, db *gorm.DB, userID, modelType string) (*string, error) {
+	var row struct {
+		SelectionID    string  `gorm:"column:selection_id"`
+		MaxInputTokens *string `gorm:"column:max_input_tokens"`
+	}
+	err := db.WithContext(ctx).
+		Table("user_selected_models usm").
+		Select("usm.id AS selection_id, m.max_input_tokens").
+		Joins("JOIN user_model_provider_group_models m ON m.id = usm.user_model_provider_group_model_id AND m.create_user_id = usm.user_id AND m.deleted_at IS NULL").
+		Where("usm.user_id = ? AND usm.model_type = ?", strings.TrimSpace(userID), modelType).
+		Limit(1).Scan(&row).Error
+	if err != nil || row.SelectionID != "" {
+		return row.MaxInputTokens, err
+	}
+	row = struct {
+		SelectionID    string  `gorm:"column:selection_id"`
+		MaxInputTokens *string `gorm:"column:max_input_tokens"`
+	}{}
+	err = db.WithContext(ctx).
+		Table("user_selected_models usm").
+		Select("usm.id AS selection_id, m.max_input_tokens").
+		Joins("JOIN user_model_provider_group_models m ON m.id = usm.user_model_provider_group_model_id AND m.deleted_at IS NULL").
+		Where("usm.share = ? AND usm.model_type = ?", true, modelType).
+		Limit(1).Scan(&row).Error
+	return row.MaxInputTokens, err
 }
 
 func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
@@ -27,7 +57,8 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 				"m.provider_name, "+
 				"m.name AS model_name, "+
 				"g.base_url, "+
-				"g.api_key",
+				"g.api_key, "+
+				"m.max_input_tokens",
 		).
 		Joins(
 			"JOIN user_model_provider_group_models m ON "+
@@ -62,7 +93,8 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 				"m.provider_name, "+
 				"m.name AS model_name, "+
 				"g.base_url, "+
-				"g.api_key",
+				"g.api_key, "+
+				"m.max_input_tokens",
 		).
 		Joins(
 			"JOIN user_model_provider_group_models m ON "+
@@ -240,6 +272,9 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 			"model":    row.ModelName,
 			"base_url": row.BaseURL,
 			"api_key":  row.APIKey,
+		}
+		if row.MaxInputTokens != nil {
+			cfg["max_input_tokens"] = *row.MaxInputTokens
 		}
 		out[strings.ToLower(strings.TrimSpace(row.ModelType))] = cfg
 	}

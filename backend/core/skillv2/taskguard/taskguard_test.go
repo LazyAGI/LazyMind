@@ -2,16 +2,17 @@ package taskguard
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"lazymind/core/common/orm"
 	"lazymind/core/skillv2/testutil"
 	"lazymind/core/state"
 )
 
 func TestEvaluateSkillOperationRules(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	createStatsTable(t, db)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
 	stateStore, err := state.NewSQLiteStore(t.TempDir() + "/state.db")
 	if err != nil {
@@ -36,10 +37,10 @@ func TestEvaluateSkillOperationRules(t *testing.T) {
 	base := SkillOperationRequest{UserID: "user_001"}
 	assertDecision("review allowed without maintenance", withOperation(base, TriggerSkillReview), true, "", "")
 
-	insertStats(t, db, "review_preparing", "review_req", "other_user", "preparing")
+	insertStats(t, db, "review_preparing", "review_req", "other_user", "review_draft")
 	assertDecision("other user does not block", withOperation(base, TriggerSkillReview), true, "", "")
 
-	insertStats(t, db, "review_analyzing_own", "review_req_own", "user_001", "analyzing")
+	insertStats(t, db, "review_analyzing_own", "review_req_own", "user_001", "review_cluster")
 	assertDecision("non-terminal maintenance rejects manual review", withOperation(base, TriggerSkillReview), false, ReasonMaintenanceTaskRunning, DispositionReject)
 	scheduled := withOperation(base, TriggerSkillReview)
 	scheduled.TriggerSource = triggerSourceScheduled
@@ -50,9 +51,17 @@ func TestEvaluateSkillOperationRules(t *testing.T) {
 	insertStats(t, db, "review_skipped_own", "review_req_skipped", "user_001", "skipped")
 	insertStats(t, db, "review_failed_own", "review_req_failed", "user_001", "failed")
 	assertDecision("terminal maintenance statuses do not block", withOperation(base, TriggerSkillReview), true, "", "")
+	insertStats(t, db, "review_retry_after_completed", "review_req_own", "user_001", "review_draft")
+	assertDecision("completed logical request ignores duplicate active row", withOperation(base, TriggerSkillReview), true, "", "")
 
 	testutil.SeedTextBlob(t, db, "draft_hash", "draft")
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "draft_hash")
+	if err := db.Model(&testutil.SkillDraftRow{}).Where("skill_id = ?", "skill1").Updates(map[string]any{
+		"task_id": "review_req_own", "draft_status": "pending_confirm",
+	}).Error; err != nil {
+		t.Fatalf("mark review draft pending confirmation: %v", err)
+	}
+	assertDecision("pending confirmation is not a running maintenance task", SkillOperationRequest{UserID: "user_001", SkillID: "skill1", Operation: StartUserEdit}, true, "", "")
 	organize := SkillOperationRequest{UserID: "user_001", SkillIDs: []string{"skill1"}, Operation: TriggerSkillOrganize}
 	decision, err := EvaluateSkillOperation(ctx, db.DB, stateStore, organize)
 	if err != nil {
@@ -85,7 +94,6 @@ func TestEvaluateSkillOperationRules(t *testing.T) {
 
 func TestEvaluateSkillOperationRemoteMaintenanceAndAutoUpdate(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	createStatsTable(t, db)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
 	testutil.SeedTextBlob(t, db, "draft_hash", "draft")
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "draft_hash")
@@ -95,7 +103,7 @@ func TestEvaluateSkillOperationRemoteMaintenanceAndAutoUpdate(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
 
-	insertStats(t, db, "org_task", "org_request", "user_001", "organizing")
+	insertStats(t, db, "org_task", "org_request", "user_001", "organize_draft")
 	orgWrite := SkillOperationRequest{UserID: "user_001", SkillID: "skill1", TaskID: "org_request", Operation: WriteSkillDraft, TriggerSource: "remote_fs"}
 	decision, err := EvaluateSkillOperation(context.Background(), db.DB, stateStore, orgWrite)
 	if err != nil {
@@ -108,7 +116,7 @@ func TestEvaluateSkillOperationRemoteMaintenanceAndAutoUpdate(t *testing.T) {
 	if err := db.Table("skill_review_stats").Where("id = ?", "org_task").Update("status", "completed").Error; err != nil {
 		t.Fatalf("complete org task: %v", err)
 	}
-	insertStats(t, db, "review_task", "review_request", "user_001", "generating")
+	insertStats(t, db, "review_task", "review_request", "user_001", "review_apply")
 	reviewWrite := orgWrite
 	reviewWrite.TaskID = "review_request"
 	decision, err = EvaluateSkillOperation(context.Background(), db.DB, stateStore, reviewWrite)
@@ -132,24 +140,49 @@ func TestEvaluateSkillOperationRemoteMaintenanceAndAutoUpdate(t *testing.T) {
 	}
 }
 
+func TestEvaluateSkillOperationFallsBackWhenStatsTableIsMissing(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	if err := db.Migrator().DropTable(&orm.SkillReviewStats{}); err != nil {
+		t.Fatalf("drop skill_review_stats: %v", err)
+	}
+	now := time.Now().UTC()
+	startedAt := now.Add(-time.Minute)
+	task := orm.ResourceUpdateTask{
+		ID:           "review-task-1",
+		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
+		ResourceType: orm.ResourceUpdateResourceTypeSkill,
+		UserID:       "user_001",
+		TriggerType:  orm.ResourceUpdateTriggerTypeManual,
+		TriggerID:    "manual-review-1",
+		Status:       orm.ResourceUpdateTaskStatusRunning,
+		RequestJSON:  json.RawMessage(`{"requestid":"review-request-1"}`),
+		NextRunAt:    now,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		StartedAt:    &startedAt,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatalf("create resource update task: %v", err)
+	}
+
+	decision, err := EvaluateSkillOperation(context.Background(), db.DB, nil, SkillOperationRequest{
+		UserID:    "user_001",
+		Operation: TriggerSkillReview,
+	})
+	if err != nil {
+		t.Fatalf("EvaluateSkillOperation: %v", err)
+	}
+	if decision.Allowed || decision.ReasonCode != ReasonMaintenanceTaskRunning || decision.BlockingTask == nil {
+		t.Fatalf("unexpected fallback decision: %#v", decision)
+	}
+	if decision.BlockingTask.ID != task.ID || decision.BlockingTask.RequestID != "review-request-1" {
+		t.Fatalf("unexpected fallback task: %#v", decision.BlockingTask)
+	}
+}
+
 func withOperation(req SkillOperationRequest, operation SkillOperation) SkillOperationRequest {
 	req.Operation = operation
 	return req
-}
-
-func createStatsTable(t *testing.T, db *testutil.TestDB) {
-	t.Helper()
-	if err := db.Exec(`CREATE TABLE IF NOT EXISTS skill_review_stats (
-		id TEXT NOT NULL PRIMARY KEY,
-		requestid TEXT NOT NULL,
-		userid TEXT NOT NULL,
-		status TEXT NOT NULL,
-		started_at TEXT NOT NULL,
-		duration_ms INTEGER NOT NULL DEFAULT 0,
-		summary TEXT NOT NULL DEFAULT '{}'
-	)`).Error; err != nil {
-		t.Fatalf("create skill_review_stats: %v", err)
-	}
 }
 
 func insertStats(t *testing.T, db *testutil.TestDB, id, requestID, userID, status string) {

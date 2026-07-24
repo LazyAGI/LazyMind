@@ -56,6 +56,19 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 			return err
 		}
 		return manager.Up(ctx, cfg, paths)
+	case "warmup":
+		opts, err := parseCommonArgs("warmup", args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		if opts.MaintenanceMode != installerWarmupMaintenanceMode {
+			return fmt.Errorf("warmup requires --maintenance %s", installerWarmupMaintenanceMode)
+		}
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
+		if err != nil {
+			return err
+		}
+		return manager.Warmup(ctx, cfg, paths)
 	case "down":
 		opts, err := parseCommonArgs("down", args[1:], c.errOut)
 		if err != nil {
@@ -290,18 +303,20 @@ func parseGuardArgs(args []string, out io.Writer) (int, RuntimeConfigOptions, er
 func addRuntimeFlags(fs *flag.FlagSet) func() RuntimeConfigOptions {
 	repoRoot := fs.String("repo-root", "", "")
 	profile := fs.String("profile", "", "")
+	maintenanceMode := fs.String("maintenance", "", "")
 	ownerToken := fs.String("owner-token", "", "")
 	runtimeRoot := fs.String("runtime-root", "", "")
 	buildRoot := fs.String("build-root", "", "")
 	resourcesRoot := fs.String("resources-root", "", "")
 	return func() RuntimeConfigOptions {
 		return RuntimeConfigOptions{
-			Profile:       *profile,
-			OwnerToken:    *ownerToken,
-			RepoRoot:      *repoRoot,
-			RuntimeRoot:   *runtimeRoot,
-			BuildRoot:     *buildRoot,
-			ResourcesRoot: *resourcesRoot,
+			Profile:         *profile,
+			MaintenanceMode: *maintenanceMode,
+			OwnerToken:      *ownerToken,
+			RepoRoot:        *repoRoot,
+			RuntimeRoot:     *runtimeRoot,
+			BuildRoot:       *buildRoot,
+			ResourcesRoot:   *resourcesRoot,
 		}
 	}
 }
@@ -309,6 +324,7 @@ func addRuntimeFlags(fs *flag.FlagSet) func() RuntimeConfigOptions {
 func (c *CLI) usage() {
 	_, _ = io.WriteString(c.out, "Usage:\n")
 	_, _ = io.WriteString(c.out, "  local-runtime-manager up\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager warmup --maintenance installer-warmup\n")
 	_, _ = io.WriteString(c.out, "  local-runtime-manager down\n")
 	_, _ = io.WriteString(c.out, "  local-runtime-manager status --json\n")
 	_, _ = io.WriteString(c.out, "  local-runtime-manager reset --scope kb|all\n")

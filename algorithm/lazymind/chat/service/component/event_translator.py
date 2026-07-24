@@ -70,6 +70,7 @@ class AgentEventFrameTranslator:
         self.language = _preview_language(query)
         self._pending_previews: dict[str, str] = {}
         self.streamed_text = False
+        self.ask_pending_emitted = False
         self.tool_call_turns = 0
         self.text_scanner, self.citation_plugin = build_stream_citation_scanner(self.citation_state)
 
@@ -80,9 +81,18 @@ class AgentEventFrameTranslator:
             task_created = {k: v for k, v in event.items() if k != 'tag'}
             frames.append(_stream_frame(extra={'task_created': task_created}))
             return frames
+        if event_type == 'artifact_created':
+            artifact = {k: v for k, v in event.items() if k != 'tag'}
+            frames.append(_stream_frame(extra={'artifact_created': artifact}))
+            return frames
         if event_type == 'ask_pending':
             ask_data = {k: v for k, v in event.items() if k != 'tag'}
+            self.ask_pending_emitted = True
             frames.append(_stream_frame(extra={'ask_pending': ask_data}))
+            return frames
+        if event_type == 'tool_limit_pending':
+            payload = {k: v for k, v in event.items() if k != 'tag'}
+            frames.append(_stream_frame(extra={'tool_limit_pending': payload}))
             return frames
         if event_type == 'intent_updated':
             payload = {k: v for k, v in event.items() if k != 'tag'}
@@ -160,6 +170,11 @@ class AgentEventFrameTranslator:
 
     def finish(self, final_result: Any) -> list[dict[str, Any]]:
         frames = self.flush()
+        # ask_user is a stop tool. Its return value is an internal execution
+        # receipt, while the preceding ask_pending event is the user-facing
+        # response. Never stream that receipt as ordinary assistant text.
+        if self.ask_pending_emitted:
+            return frames
         output = _format_final_result(final_result, self.citation_state)
         chunk_size = int(_cfg['agentic_stream_chunk_size'] or _STREAM_CHUNK_SIZE)
 

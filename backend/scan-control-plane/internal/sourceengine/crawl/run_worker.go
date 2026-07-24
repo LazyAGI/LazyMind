@@ -63,7 +63,7 @@ func (w *RunOnceWorker) RunOnce(ctx context.Context, workerID string) (store.Syn
 	if err != nil || !ok {
 		return run, ok, err
 	}
-	result, crawlErr := w.crawler.Run(ctx, w.claimFromRun(ctx, run))
+	result, crawlErr := w.run(ctx, run)
 	finish := finishRequestFromResult(run.RunID, workerID, result)
 	if crawlErr != nil {
 		finish = failedFinishRequest(run.RunID, workerID, crawlErr)
@@ -73,6 +73,21 @@ func (w *RunOnceWorker) RunOnce(ctx context.Context, workerID string) (store.Syn
 		return finished, finishedOK, finishErr
 	}
 	return finished, true, nil
+}
+
+func (w *RunOnceWorker) run(ctx context.Context, run store.SyncRun) (RunResult, error) {
+	if run.ScopeType == string(connector.ScopeTypeCleanup) {
+		return RunResult{
+			RunID:  run.RunID,
+			Status: RunStatusSucceeded,
+			Coverage: Coverage{
+				ScopeType:         connector.ScopeTypeCleanup,
+				CoveredTargetRoot: true,
+				Complete:          true,
+			},
+		}, nil
+	}
+	return w.crawler.Run(ctx, w.claimFromRun(ctx, run))
 }
 
 func (w *RunOnceWorker) claimFromRun(ctx context.Context, run store.SyncRun) BindingRunClaim {

@@ -326,6 +326,26 @@ func TestDefaultFeishuAPIClientExportsWikiFileNodeWithDriveDownload(t *testing.T
 	}
 }
 
+func TestWikiFileNodeObjectIsDocumentAndContainer(t *testing.T) {
+	t.Parallel()
+
+	obj := wikiNodeObject(map[string]any{
+		"space_id":   "space-1",
+		"node_token": "node-1",
+		"title":      "aa.doc",
+		"obj_type":   "file",
+		"obj_token":  "file-1",
+		"has_child":  false,
+	}, "space-1", "")
+
+	if !obj.IsDocument || !obj.IsContainer || obj.HasChildren {
+		t.Fatalf("wiki uploaded file should be document and container without implying children: %+v", obj)
+	}
+	if obj.Name != "aa.doc" || obj.DriveType != "file" || obj.FileExtension != ".doc" {
+		t.Fatalf("wiki uploaded file metadata changed unexpectedly: %+v", obj)
+	}
+}
+
 func TestDriveObjectMapsShortcutTargetMetadata(t *testing.T) {
 	t.Parallel()
 
@@ -561,6 +581,20 @@ func TestFeishuOpenAPIMapsFrequencyLimitAsRateLimited(t *testing.T) {
 
 	err := mapFeishuOpenAPIError("99991400", "request trigger frequency limit", http.StatusOK)
 	assertFeishuErrorCode(t, err, connector.ErrorCodeRateLimited)
+}
+
+func TestFeishuOpenAPIMapsPermissionTextAsPermissionDenied(t *testing.T) {
+	t.Parallel()
+
+	err := mapFeishuOpenAPIError("123456", "permission denied: no download permission", http.StatusOK)
+	assertFeishuErrorCode(t, err, connector.ErrorCodePermissionDenied)
+}
+
+func TestFeishuOpenAPIMapsAuthTextAsAuthInvalid(t *testing.T) {
+	t.Parallel()
+
+	err := mapFeishuOpenAPIError("123456", "access token invalid", http.StatusOK)
+	assertFeishuErrorCode(t, err, ErrorCodeAuthInvalid)
 }
 
 func newHTTPAuthTestClient(t *testing.T, baseURL string) *HTTPAuthConnectionClient {

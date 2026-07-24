@@ -124,8 +124,9 @@ const (
 	maxDatasetTags             = 10
 	maxDatasetTagRunes         = 20
 	maxDatasetDisplayNameRunes = 100
-	datasetDisplayNameRule     = "dataset name supports Chinese/English, numbers, -, _, ., up to 100 characters"
 )
+
+var errInvalidDatasetDisplayName = errors.New("dataset name supports Chinese/English, numbers, -, _, ., up to 100 characters")
 
 func validateDatasetDisplayName(name string) error {
 	trimmed := strings.TrimSpace(name)
@@ -133,7 +134,7 @@ func validateDatasetDisplayName(name string) error {
 		return fmt.Errorf("dataset name is required")
 	}
 	if trimmed != name || utf8.RuneCountInString(trimmed) > maxDatasetDisplayNameRunes {
-		return fmt.Errorf(datasetDisplayNameRule)
+		return errInvalidDatasetDisplayName
 	}
 	for _, r := range trimmed {
 		if r >= '\u4e00' && r <= '\u9fa5' {
@@ -151,7 +152,7 @@ func validateDatasetDisplayName(name string) error {
 		if r == '_' || r == '.' || r == '-' {
 			continue
 		}
-		return fmt.Errorf(datasetDisplayNameRule)
+		return errInvalidDatasetDisplayName
 	}
 	return nil
 }
@@ -449,12 +450,17 @@ func AllDatasetTags(w http.ResponseWriter, r *http.Request) {
 
 	groupIDs := acl.ResolveUserGroupIDs(userID)
 	seen := map[string]struct{}{}
+	visible := make([]orm.Dataset, 0, len(datasets))
 	// Keep JSON stable: return [] instead of null when empty.
 	tags := make([]string, 0)
 	for _, ds := range datasets {
 		if len(datasetACLForUserWithGroups(&ds, userID, groupIDs)) == 0 {
 			continue
 		}
+		visible = append(visible, ds)
+	}
+	visible = filterDatasetsByScanSourceAccess(r, visible, acl.PermissionDatasetRead)
+	for _, ds := range visible {
 		for _, t := range parseDatasetTags(ds.Ext) {
 			if _, ok := seen[t]; ok {
 				continue
@@ -466,6 +472,43 @@ func AllDatasetTags(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(tags)
 	common.ReplyJSON(w, AllDatasetTagsResponse{Tags: tags})
 }
+
+// filterAndCountCandidates applies source-level filtering to a batch of
+// ACL/keyword/tags-qualified candidates, collects items for the current page,
+// and increments the total counter. It returns the updated total and page slice.
+//
+// When collectPage is false, candidates that would have been collected for the
+// page are skipped but total is still incremented — this is used by Phase 2 to
+// finish counting the accurate total without building unnecessary page data.
+func filterAndCountCandidates(
+	candidates []orm.Dataset,
+	sourceFilter string,
+	sourceMap map[string]bool,
+	offset int,
+	pageSize int,
+	total int,
+	page []orm.Dataset,
+	pageSourceMap map[string]bool,
+	collectPage bool,
+) (int, []orm.Dataset) {
+	for _, c := range candidates {
+		// Apply source filter.
+		if sourceFilter == "cloud" && !sourceMap[c.ID] {
+			continue
+		}
+		if sourceFilter == "manual" && sourceMap[c.ID] {
+			continue
+		}
+		// Collect into page only during Phase 1.
+		if collectPage && total >= offset && len(page) < pageSize {
+			page = append(page, c)
+			pageSourceMap[c.ID] = sourceMap[c.ID]
+		}
+		total++
+	}
+	return total, page
+}
+
 func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	userID := corestore.UserID(r)
 	if userID == "" {
@@ -479,6 +522,10 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	orderBy := strings.TrimSpace(q.Get("order_by"))
 	keyword := strings.TrimSpace(q.Get("keyword"))
 	rawTags := q["tags"]
+	sourceFilter := strings.ToLower(strings.TrimSpace(q.Get("source")))
+	if sourceFilter != "cloud" && sourceFilter != "manual" {
+		sourceFilter = ""
+	}
 
 	pageSize := 20
 	if pageSizeStr != "" {
@@ -540,8 +587,15 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	page := make([]orm.Dataset, 0, pageSize)
 	scanOffset := 0
 	hasMoreRows := true
+	candidates := make([]orm.Dataset, 0, pageSize)
+	pageSourceMap := make(map[string]bool, pageSize)
 
-	for hasMoreRows {
+	// ------------------------------------------------------------------
+	// Phase 1: collect the current page while counting candidates.
+	// Stops when the page is full OR all DB rows are exhausted.
+	// The total count at this point may be incomplete — Phase 2 fixes it.
+	// ------------------------------------------------------------------
+	for hasMoreRows && len(page) < pageSize {
 		var rows []orm.Dataset
 		query := base.
 			Select(`id, kb_id, create_user_id, create_user_name, display_name, "desc", cover_image, created_at, updated_at, ext, type, share_type, dataset_state`).
@@ -559,7 +613,7 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 		if len(rows) == 0 {
 			break
 		}
-
+		// ACL + keyword + tags filtering (same as before).
 		for _, ds := range rows {
 			perms := datasetACLForUserWithGroups(&ds, userID, groupIDs)
 			if len(perms) == 0 {
@@ -571,10 +625,84 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 			if len(wantTags) > 0 && !containsAll(parseDatasetTags(ds.Ext), wantTags) {
 				continue
 			}
-			if total >= offset && len(page) < pageSize {
-				page = append(page, ds)
+			candidates = append(candidates, ds)
+		}
+		candidates = filterDatasetsByScanSourceAccess(r, candidates, acl.PermissionDatasetRead)
+
+		if len(candidates) > 0 {
+			candidateIDs := make([]string, len(candidates))
+			for i, c := range candidates {
+				candidateIDs[i] = c.ID
 			}
-			total++
+			sourceMap := batchCheckDatasetsHaveSource(r.Context(), candidateIDs)
+
+			// Delegate source filtering + page collection + counting.
+			total, page = filterAndCountCandidates(
+				candidates, sourceFilter, sourceMap,
+				offset, pageSize, total, page, pageSourceMap,
+				true, // collectPage: collect page items
+			)
+
+			candidates = candidates[:0]
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// Phase 2: if the page is filled but more DB rows remain, continue
+	// scanning to finish counting the accurate total. No page collection
+	// is done in this phase — the page is already complete.
+	// ------------------------------------------------------------------
+	if len(page) >= pageSize && hasMoreRows {
+		for hasMoreRows {
+			var rows []orm.Dataset
+			// Use a lighter SELECT — only fields needed for filtering.
+			query := base.
+				Select("id, kb_id, create_user_id, display_name, ext").
+				Order(orderClause).
+				Offset(scanOffset).
+				Limit(fetchSize)
+			if err := query.Find(&rows).Error; err != nil {
+				common.ReplyErr(w, "query datasets failed", http.StatusInternalServerError)
+				return
+			}
+			if len(rows) < fetchSize {
+				hasMoreRows = false
+			}
+			scanOffset += len(rows)
+			if len(rows) == 0 {
+				break
+			}
+			// ACL + keyword + tags filtering (same as Phase 1).
+			for _, ds := range rows {
+				perms := datasetACLForUserWithGroups(&ds, userID, groupIDs)
+				if len(perms) == 0 {
+					continue
+				}
+				if !datasetMatchesKeyword(&ds, keyword) {
+					continue
+				}
+				if len(wantTags) > 0 && !containsAll(parseDatasetTags(ds.Ext), wantTags) {
+					continue
+				}
+				candidates = append(candidates, ds)
+			}
+
+			if len(candidates) > 0 {
+				candidateIDs := make([]string, len(candidates))
+				for i, c := range candidates {
+					candidateIDs[i] = c.ID
+				}
+				sourceMap := batchCheckDatasetsHaveSource(r.Context(), candidateIDs)
+
+				// Count only — do not collect page items.
+				total, page = filterAndCountCandidates(
+					candidates, sourceFilter, sourceMap,
+					offset, pageSize, total, page, pageSourceMap,
+					false, // collectPage: count only, skip page collection
+				)
+
+				candidates = candidates[:0]
+			}
 		}
 	}
 
@@ -598,29 +726,32 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 		}
 		parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), liveParsers)
 		stats := statsMap[ds.ID]
+		createdByDataSource := pageSourceMap[ds.ID]
+
 		out = append(out, Dataset{
-			Name:           "datasets/" + ds.ID,
-			DatasetID:      ds.ID,
-			DisplayName:    ds.DisplayName,
-			Desc:           ds.Desc,
-			CoverImage:     ds.CoverImage,
-			State:          stateToPB(ds.DatasetState),
-			IsEmpty:        stats.DocumentCount == 0,
-			DocumentCount:  stats.DocumentCount,
-			DocumentSize:   stats.DocumentSize,
-			SegmentCount:   0,
-			TokenCount:     0,
-			Parsers:        parsers,
-			Algo:           algo,
-			Creator:        ds.CreateUserName,
-			IsOwner:        ds.CreateUserID == userID,
-			CreateTime:     ds.CreatedAt,
-			UpdateTime:     ds.UpdatedAt,
-			Acl:            datasetACL,
-			ShareType:      shareTypeToPB(ds.ShareType),
-			Type:           datasetTypeToPB(ds.Type),
-			Tags:           parseDatasetTags(ds.Ext),
-			DefaultDataset: isDefaultDatasetForUser(r.Context(), userID, ds.ID),
+			Name:                "datasets/" + ds.ID,
+			DatasetID:           ds.ID,
+			DisplayName:         ds.DisplayName,
+			Desc:                ds.Desc,
+			CoverImage:          ds.CoverImage,
+			State:               stateToPB(ds.DatasetState),
+			IsEmpty:             stats.DocumentCount == 0,
+			DocumentCount:       stats.DocumentCount,
+			DocumentSize:        stats.DocumentSize,
+			SegmentCount:        0,
+			TokenCount:          0,
+			Parsers:             parsers,
+			Algo:                algo,
+			Creator:             ds.CreateUserName,
+			IsOwner:             ds.CreateUserID == userID,
+			CreateTime:          ds.CreatedAt,
+			UpdateTime:          ds.UpdatedAt,
+			Acl:                 datasetACL,
+			ShareType:           shareTypeToPB(ds.ShareType),
+			Type:                datasetTypeToPB(ds.Type),
+			Tags:                parseDatasetTags(ds.Ext),
+			DefaultDataset:      isDefaultDatasetForUser(r.Context(), userID, ds.ID),
+			CreatedByDataSource: &createdByDataSource,
 		})
 	}
 
@@ -798,6 +929,23 @@ func isDatasetCreatedByDataSource(ctx context.Context, datasetID string) bool {
 		return false
 	}
 	return strings.TrimSpace(resp.Source.SourceID) != ""
+}
+func batchCheckDatasetsHaveSource(ctx context.Context, datasetIDs []string) map[string]bool {
+	if len(datasetIDs) == 0 {
+		return nil
+	}
+	scanURL := common.JoinURL(common.ScanControlPlaneEndpoint(), "/api/scan/internal/sources/by-datasets")
+	var resp struct {
+		SourceMap map[string]bool `json:"source_map"`
+	}
+	if err := common.ApiPost(ctx, scanURL, map[string]any{"dataset_ids": datasetIDs}, nil, &resp, 5*time.Second); err != nil {
+		result := make(map[string]bool, len(datasetIDs))
+		for _, id := range datasetIDs {
+			result[id] = false
+		}
+		return result
+	}
+	return resp.SourceMap
 }
 
 func algoDatasetDisplayName(userID, displayName string) string {
@@ -1044,12 +1192,20 @@ func GetDataset(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(common.ForbiddenBody))
 		return
 	}
+	if !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetRead) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(common.ForbiddenBody))
+		return
+	}
 
 	algo := parseDatasetAlgo(ds.Ext)
 	parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), fetchParsersByAlgoID(r.Context(), algo.AlgoID))
 	stats := calcDatasetStats(r.Context(), ds.ID)
 	createdByDataSource := isDatasetCreatedByDataSource(r.Context(), ds.ID)
+
 	common.ReplyJSON(w, Dataset{
+
 		Name:                "datasets/" + ds.ID,
 		DatasetID:           ds.ID,
 		DisplayName:         ds.DisplayName,
@@ -1094,7 +1250,7 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) {
+	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, "delete") {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(common.ForbiddenBody))
@@ -1268,7 +1424,7 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) {
+	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetWrite) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(common.ForbiddenBody))
@@ -1381,6 +1537,7 @@ func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	datasetACL := datasetACLForUser(&ds, userID)
 	stats := calcDatasetStats(r.Context(), ds.ID)
 	createdByDataSource := isDatasetCreatedByDataSource(r.Context(), ds.ID)
+
 	common.ReplyJSON(w, Dataset{
 		Name:                "datasets/" + ds.ID,
 		DatasetID:           ds.ID,
@@ -1436,7 +1593,7 @@ func SetDefault(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) {
+	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetRead) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(common.ForbiddenBody))
@@ -1493,7 +1650,7 @@ func UnsetDefault(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	if !canAccessDataset(&ds, userID, acl.PermRead) {
+	if !canAccessDataset(&ds, userID, acl.PermRead) || !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetRead) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(common.ForbiddenBody))

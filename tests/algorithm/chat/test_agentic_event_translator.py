@@ -102,6 +102,64 @@ def test_translator_counts_tool_call_turns_not_individual_calls():
     assert translator.tool_call_turns == 2
 
 
+def test_translator_forwards_tool_limit_pending_as_structured_frame():
+    translator = AgentEventFrameTranslator(query='q')
+    pending = {
+        'decision_id': 'decision-1',
+        'used_rounds': 21,
+        'round_limit': 21,
+        'expanded_max_rounds': 200,
+        'timeout_seconds': 120,
+    }
+
+    frames = translator.feed({'tag': 'tool_limit_pending', **pending})
+
+    assert frames == [{
+        'think': None,
+        'text': None,
+        'sources': [],
+        'tool_limit_pending': pending,
+    }]
+
+
+def test_translator_renders_every_parallel_tool_call_and_result():
+    translator = AgentEventFrameTranslator(query='批量读取这些网页')
+    calls = [
+        {
+            'id': f'call-{index}',
+            'function': {
+                'name': 'url_fetch',
+                'arguments': {'url': f'https://example.test/{index}'},
+            },
+        }
+        for index in range(5)
+    ]
+
+    call_text = ''.join(
+        frame.get('text') or ''
+        for frame in translator.feed({'tag': 'tool_calls', 'tool_calls': calls})
+    )
+    assert call_text.count('<tp id=') == 5
+    assert call_text.count('<tool_call>') == 5
+    for index in range(5):
+        assert f'https://example.test/{index}' in call_text
+
+    results = [
+        {
+            'id': f'call-{index}',
+            'name': 'url_fetch',
+            'result': {'final_url': f'https://example.test/{index}'},
+        }
+        for index in range(5)
+    ]
+    result_text = ''.join(
+        frame.get('text') or ''
+        for frame in translator.feed({'tag': 'tool_results', 'tool_results': results})
+    )
+    assert result_text.count('<trp id=') == 5
+    assert result_text.count('<tool_result>') == 5
+
+
 def test_searchbase_tool_rendering_extracts_provider_brand():
     text, preview_value = _tool_call_frame_text({
         'id': 'call-tavily',
@@ -192,3 +250,31 @@ def test_skill_reference_rendering_preserves_explicit_tool_failure():
     }, language='zh', preview_value='reference.md')
 
     assert '未能读取 **reference.md** 技能参考资料。' in result_text
+
+
+def test_create_skill_rendering_uses_single_segment_name_and_preserves_failure():
+    call_text, preview_value = _tool_call_frame_text({
+        'id': 'call-create-skill',
+        'function': {
+            'name': 'SkillManagementToolkit_create_skill',
+            'arguments': {
+                'name': 'skill',
+                'content': '---\nname: skill\ndescription: Test skill.\n---\nUse it.',
+            },
+        },
+    }, language='zh')
+
+    assert preview_value == 'skill'
+    assert '正在创建 **skill** 技能。' in call_text
+
+    result_text = _tool_result_frame_text({
+        'id': 'call-create-skill',
+        'name': 'SkillManagementToolkit_create_skill',
+        'result': {
+            'success': False,
+            'tool': 'create_skill',
+            'error': "Skill name 'internal2/skill' is invalid.",
+        },
+    }, language='zh', preview_value='internal2/skill')
+
+    assert '未能创建 **internal2/skill** 技能。' in result_text

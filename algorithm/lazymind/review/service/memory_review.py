@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
-from uuid import uuid4
 
 import lazyllm
 from lazyllm import AutoModel, LOG
 from lazyllm.tools.fs.client import FS
 from pydantic import BaseModel, ConfigDict
 
-from lazymind.chat.engine.tools import memory_editor, read_memory
+from lazymind.chat.engine.tools.memory_editor import memory_editor
+from lazymind.chat.engine.tools.memory_reader import read_memory
 from lazymind.chat.engine.tools.infra import MemoryRemoteStore
 from lazymind.chat.service.component.history import normalize_history_for_agent
 from lazymind.config import config as _cfg
@@ -31,11 +31,11 @@ def _truncate_log_text(value: Any, limit: int = 4000) -> str:
 
 
 def review_memory(
+    task_id: str,
     user_id: str,
     history: List[Dict[str, Any]],
     llm_config: Optional[Dict[str, Any]] = None,
 ) -> MemoryReviewResult:
-    task_id = f'memory_review_{uuid4()}'
     lazyllm.globals._init_sid(sid=task_id)
     lazyllm.locals._init_sid(sid=task_id)
     inject_model_config(llm_config)

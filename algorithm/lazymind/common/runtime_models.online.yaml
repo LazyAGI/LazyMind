@@ -35,3 +35,9 @@ speech_to_text:
   - source: siliconflow
     type: stt
     name: FunAudioLLM/SenseVoiceSmall
+
+video_generator:
+  - source: doubao
+    type: text2video
+    name: doubao-seedance-1-0-pro-fast-251015
+    api_key: ${LAZYLLM_DOUBAO_API_KEY}

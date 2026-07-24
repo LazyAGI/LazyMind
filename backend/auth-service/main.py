@@ -18,7 +18,7 @@ from api.cloud_oauth import router as cloud_oauth_router
 from api.group import router as group_router
 from api.role import router as role_router
 from api.user import router as user_router
-from core.errors import AppException, error_payload_from_exception
+from core.errors import AppException, ErrorCodes, app_exception_from_exception, error_payload_from_exception
 from core.state_errors import StateBackendAuthenticationError, StateBackendError
 from services import cloud_oauth_health
 
@@ -98,7 +98,8 @@ async def _log_request(request: Request, call_next):
             f'type={type(e).__name__} module={type(e).__module__} message={e}',
             flush=True,
         )
-        return JSONResponse(status_code=500, content={'code': 500, 'message': 'Internal Server Error', 'ex_mesage': ''})
+        app_exc = app_exception_from_exception(e)
+        return JSONResponse(status_code=app_exc.http_code, content=error_payload_from_exception(app_exc))
     cost_ms = int((time.time() - start) * 1000)
     if response.status_code >= 500:
         _logger.error(
@@ -147,6 +148,20 @@ def _copy_headers(headers) -> dict[str, str]:
     return d
 
 
+def _http_error_for_status(status_code: int):
+    if status_code in {400, 422}:
+        return ErrorCodes.INVALID_REQUEST
+    if status_code == 401:
+        return ErrorCodes.UNAUTHORIZED
+    if status_code == 403:
+        return ErrorCodes.FORBIDDEN
+    if status_code == 404:
+        return ErrorCodes.RESOURCE_NOT_FOUND
+    if status_code == 405:
+        return ErrorCodes.METHOD_NOT_ALLOWED
+    return ErrorCodes.HTTP_ERROR
+
+
 @app.middleware('http')
 async def _standardize_json_response(request: Request, call_next):
     response = await call_next(request)
@@ -191,12 +206,13 @@ async def _standardize_json_response(request: Request, call_next):
         payload.setdefault('ex_mesage', '')
         return JSONResponse(content=payload, status_code=response.status_code, headers=_copy_headers(response.headers))
 
-    msg = None
+    detail = None
     if isinstance(payload, dict):
-        msg = payload.get('message')
-    if not isinstance(msg, str) or not msg:
-        msg = 'An error occurred'
-    wrapped = {'code': response.status_code, 'message': msg, 'ex_mesage': ''}
+        detail = payload.get('message')
+    if not isinstance(detail, str):
+        detail = ''
+    _, code, message = _http_error_for_status(response.status_code)
+    wrapped = {'code': code, 'message': message, 'ex_mesage': detail}
     return JSONResponse(content=wrapped, status_code=response.status_code, headers=_copy_headers(response.headers))
 
 
@@ -223,33 +239,26 @@ def _handle_state_backend_error(_, exc: StateBackendError):
 
 @app.exception_handler(StarletteHTTPException)
 def _handle_http_exception(_, exc: StarletteHTTPException):
-    message = exc.detail if isinstance(exc.detail, str) else 'HTTP error'
+    err = _http_error_for_status(exc.status_code)
+    _, code, message = err
+    detail = exc.detail if isinstance(exc.detail, str) else ''
     return JSONResponse(
         status_code=exc.status_code,
-        content={'code': exc.status_code, 'message': message, 'ex_mesage': ''},
+        content={'code': code, 'message': message, 'ex_mesage': detail},
     )
 
 
 @app.exception_handler(RequestValidationError)
 def _handle_validation_error(_, exc: RequestValidationError):
+    _, code, message = ErrorCodes.INVALID_REQUEST
     return JSONResponse(
         status_code=400,
         content={
-            'code': 400,
-            'message': 'Invalid request parameters',
+            'code': code,
+            'message': message,
             'ex_mesage': json.dumps(exc.errors(), ensure_ascii=False),
         },
     )
-
-
-@app.on_event('startup')
-async def _start_cloud_oauth_health_check():
-    cloud_oauth_health.start()
-
-
-@app.on_event('shutdown')
-async def _stop_cloud_oauth_health_check():
-    await cloud_oauth_health.stop()
 
 
 def _export_openapi_artifacts() -> None:
@@ -299,5 +308,16 @@ app.include_router(cloud_oauth_router, prefix=_API_PREFIX)
 app.include_router(user_router, prefix=_API_PREFIX)
 app.include_router(role_router, prefix=_API_PREFIX)
 app.include_router(group_router, prefix=_API_PREFIX)
+
+
+@app.on_event('startup')
+async def _start_cloud_oauth_health_check():
+    cloud_oauth_health.start()
+
+
+@app.on_event('shutdown')
+async def _stop_cloud_oauth_health_check():
+    await cloud_oauth_health.stop()
+
 
 _export_openapi_artifacts()

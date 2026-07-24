@@ -140,7 +140,7 @@ func TestWorkerUsesCoreClientIdempotencyAndSupersede(t *testing.T) {
 		}
 	})
 
-	t.Run("recovers failed core task without marking source parsed", func(t *testing.T) {
+	t.Run("resumes failed core task without creating another document", func(t *testing.T) {
 		ctx := context.Background()
 		now := time.Date(2026, 5, 27, 11, 45, 0, 0, time.UTC)
 		repo := newWorkerIdempotencyStore(now)
@@ -165,20 +165,20 @@ func TestWorkerUsesCoreClientIdempotencyAndSupersede(t *testing.T) {
 		if len(core.Submissions) != 0 || conn.exportCalls != 0 {
 			t.Fatalf("failed recovery should not resubmit/export, submissions=%d exports=%d", len(core.Submissions), conn.exportCalls)
 		}
+		if len(core.Resumptions) != 1 || core.Resumptions[0].CoreTaskID != "core-task-canceled" || core.Resumptions[0].DatasetID != "dataset-1" {
+			t.Fatalf("failed recovery should resume the existing core task: %+v", core.Resumptions)
+		}
 		saved := repo.tasks[task.TaskID]
-		if saved.Status != worker.TaskStatusFailed || saved.LastError["reason"] != "CORE_TASK_FAILED" {
-			t.Fatalf("failed core task should be recorded as failed: %+v", saved)
+		if saved.Status != worker.TaskStatusSubmitted || saved.CoreTaskID != "core-task-canceled" || saved.CoreDocumentID != "core-doc-canceled" {
+			t.Fatalf("resumed core task should remain linked and submitted: %+v", saved)
 		}
 		state := repo.states[workerIdempotencyKey("source-1", "binding-1", "doc-canceled")]
-		if state.BaselineVersion != "" || state.ParseQueueState != statepkg.ParseQueueStateFailed {
-			t.Fatalf("failed core task should not advance baseline and should mark state failed: %+v", state)
-		}
-		if state.LastError["code"] != "CORE_TASK_FAILED" || state.LastError["phase"] != "parse" {
-			t.Fatalf("state should record core failure: %+v", state.LastError)
+		if state.BaselineVersion != "" || state.ParseQueueState != statepkg.ParseQueueStateQueued {
+			t.Fatalf("resumed core task should remain queued without advancing baseline: %+v", state)
 		}
 		document := repo.documents[workerIdempotencyKey("source-1", "binding-1", "doc-canceled")]
-		if document.ParseStatus != "FAILED" {
-			t.Fatalf("source document should remain failed instead of parsed: %+v", document)
+		if document.CoreDocumentID != "" {
+			t.Fatalf("resume must not bind a new core document before success: %+v", document)
 		}
 	})
 
@@ -317,6 +317,36 @@ func TestWorkerDispatchesReparseAndDeleteCoreActions(t *testing.T) {
 		}
 		if conn.exportCalls != 0 {
 			t.Fatalf("cleanup should not export source content, got %d exports", conn.exportCalls)
+		}
+	})
+
+	t.Run("deleting binding still executes its cleanup delete", func(t *testing.T) {
+		ctx := context.Background()
+		now := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+		repo := newWorkerIdempotencyStore(now)
+		bindingKey := workerIdempotencyBindingKey("source-1", "binding-1")
+		binding := repo.bindings[bindingKey]
+		binding.Status = "DELETING"
+		repo.bindings[bindingKey] = binding
+		conn := &workerSpyConnector{exportVersion: "v1"}
+		core := newWorkerIdempotencyCoreClient()
+		reducer := statepkg.NewDBStateReducer(repo, statepkg.WithClock(func() time.Time { return now }))
+		task := repo.seedPendingTask("doc-cleanup-deleting", "v1", statepkg.SourceStateOutOfScope, statepkg.PendingActionDelete)
+		task.TaskAction = taskpkg.TaskActionDelete
+		task.TargetVersionID = "v1"
+		task.IdempotencyKey = taskpkg.IdempotencyKey(task)
+		repo.tasks[task.TaskID] = task
+		doc := repo.documents[workerIdempotencyKey("source-1", "binding-1", "doc-cleanup-deleting")]
+		doc.CoreDocumentID = "core-doc-cleanup-deleting"
+		doc.CurrentVersionID = "v1"
+		repo.documents[workerIdempotencyKey("source-1", "binding-1", "doc-cleanup-deleting")] = doc
+		parseWorker := worker.NewDefaultParseWorker(repo, mustRegistry(t, conn), core, reducer, &workerIdempotencyTempObjectStore{}, worker.WithClock(func() time.Time { return now }))
+
+		if err := parseWorker.RunOnce(ctx, "worker-1"); err != nil {
+			t.Fatalf("run deleting binding cleanup: %v", err)
+		}
+		if len(core.Submissions) != 1 || core.Submissions[0].Action != coreclient.ActionDelete {
+			t.Fatalf("deleting binding cleanup was not submitted: %+v", core.Submissions)
 		}
 	})
 }
@@ -751,6 +781,7 @@ const (
 
 type workerIdempotencyCoreClient struct {
 	Submissions []coreclient.SubmitParseTaskRequest
+	Resumptions []coreclient.ResumeParseTaskRequest
 	Responses   map[string]coreclient.SubmitParseTaskResponse
 }
 
@@ -779,6 +810,17 @@ func (c *workerIdempotencyCoreClient) SubmitParseTask(ctx context.Context, req c
 	}
 	c.Responses[req.IdempotencyKey] = response
 	return response, nil
+}
+
+func (c *workerIdempotencyCoreClient) ResumeParseTask(ctx context.Context, req coreclient.ResumeParseTaskRequest) (coreclient.SubmitParseTaskResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return coreclient.SubmitParseTaskResponse{}, err
+	}
+	c.Resumptions = append(c.Resumptions, req)
+	return coreclient.SubmitParseTaskResponse{
+		CoreTaskID: req.CoreTaskID,
+		Status:     coreclient.StatusSubmitted,
+	}, nil
 }
 
 func (c *workerIdempotencyCoreClient) GetCoreTaskResult(ctx context.Context, req coreclient.GetCoreTaskResultRequest) (coreclient.CoreTaskResult, error) {

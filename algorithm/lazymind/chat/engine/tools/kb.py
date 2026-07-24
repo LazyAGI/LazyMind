@@ -5,11 +5,15 @@ from lazyllm import AutoModel, LOG
 from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
 from lazyllm.tools.rag.doc_impl import NodeGroupType
 
-from lazymind.chat.engine.tools.infra import tool_success
+from lazymind.chat.engine.tools.infra import (
+    get_core_api,
+    handle_tool_errors,
+    post_core_api,
+    tool_success,
+)
 from lazymind.chat.engine.tools._utils import (
     iter_lookup_ids,
     parse_json_dict,
-    parse_number_range,
     truncate_text,
 )
 from lazymind.chat.engine.tools.algo import DOCUMENT, search_kb, search_temp_files
@@ -32,6 +36,7 @@ _DEFAULT_RETRIEVER_TOPK = 20
 _DEFAULT_RERANK_TOPK = 20
 _DEFAULT_K_MAX = 10
 _DEFAULT_IMAGE_TOPK = 3
+_ACCESSIBLE_KB_IDS_CACHE_KEY = '_accessible_kb_ids'
 _RERANKER_MODULE = 'ModuleReranker'
 _RERANKER_MODEL = 'reranker'
 _KB_RETRIEVER_CONFIGS = [
@@ -120,6 +125,7 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
             'file_name',
             'source',
             'source_path',
+            'normalized_source_path',
             'store_num',
             'lazyllm_store_num',
             'page',
@@ -141,13 +147,22 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
         and local_path.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'))
     )
     image_markdown = None
-    source_path = metadata.get('source_path')
-    if source_path:
-        signed = static_file_url_from_any(source_path)
+    # Prefer durable normalized JPEG over volatile OCR cache (.image_cache).
+    render_path = (
+        metadata.get('normalized_source_path')
+        or metadata.get('source_path')
+        or ''
+    )
+    if isinstance(render_path, str):
+        render_path = render_path.strip()
+    else:
+        render_path = ''
+    if render_path:
+        signed = static_file_url_from_any(render_path)
         text = signed
         compact_metadata = dict(compact_metadata)
         compact_metadata['image_url'] = signed
-        compact_metadata['local_path'] = source_path
+        compact_metadata['local_path'] = render_path
         doc_file_name = global_md.get('file_name') or compact_metadata.get('file_name')
         file_label = doc_file_name or basename_from_path(signed)
         image_markdown = f'![{file_label}]({signed})'
@@ -187,7 +202,7 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
     }
     if image_markdown:
         serialized['image_markdown'] = image_markdown
-        serialized['local_path'] = source_path or local_path
+        serialized['local_path'] = render_path or local_path
     return serialized
 
 
@@ -261,22 +276,165 @@ def _annotate_result_citations(result: Any) -> Any:
     return result
 
 
-class KBToolGroup:
-    """Knowledge base search and navigation tools.
+def _string_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(',') if item.strip()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()] if str(value).strip() else []
 
-    This tool group has the highest retrieval priority. If this tool group is
-    visible, use it before Wikipedia, web search, academic search, URL fetching,
-    or answering from the model's own knowledge for every factual, definition,
-    explanation, or retrieval-style question. Do not skip it because the topic
-    looks general, familiar, popular, or likely available on the web. Use other
-    retrieval sources only after this knowledge-base search returns no useful
-    evidence.
+
+def _bounded_page_size(value: int, default: int = 20) -> int:
+    try:
+        page_size = int(value)
+    except (TypeError, ValueError):
+        page_size = default
+    if page_size <= 0:
+        return default
+    return min(page_size, 100)
+
+
+class KBToolkit:
+    """Knowledge-base discovery, inspection, search, and navigation tools.
+
+    Use this Toolkit when the user selects or @mentions a knowledge base, or
+    explicitly asks to discover, inspect, or search knowledge bases. If only the
+    gateway is visible and you decide this Toolkit is relevant, activate the
+    gateway before calling its methods. Do not activate it for unrelated requests.
+
+    Use list_knowledge_bases to discover a knowledge base, then inspect its
+    documents or aggregates. Use kb_search for open-ended semantic questions,
+    kb_keyword_search for an exact phrase in a known document, and the parent
+    or window tools only to expand context around an existing search hit.
+    Search methods require either explicit kb_ids or a knowledge-base selection
+    in the current request. Retrieved evidence carries citation markers that
+    must be preserved verbatim in the final answer.
     """
-    __public_apis__ = ['kb_search', 'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search']
 
-    def __key_source__(self) -> Any:
+    __public_apis__ = [
+        'list_knowledge_bases', 'list_knowledge_base_documents',
+        'aggregate_knowledge_base_documents', 'kb_search',
+        'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
+    ]
+    __tool_auto_activate__ = [
+        r'知识库|(?<!\w)knowledge[\s_-]+bases?(?!\w)',
+    ]
+
+    def __lazy_source__(self) -> bool:
+        """Stay lazy only while the request has no explicit knowledge-base scope."""
         agentic_config = lazyllm.globals.get('agentic_config') or {}
-        return (agentic_config.get('filters') or {}).get('kb_id')
+        return not bool((agentic_config.get('filters') or {}).get('kb_id'))
+
+    @handle_tool_errors
+    def list_knowledge_bases(
+        self,
+        keyword: str = '',
+        tags: Optional[List[str]] = None,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """List knowledge bases the current user can read."""
+        params: Dict[str, Any] = {'page_size': _bounded_page_size(page_size)}
+        if keyword:
+            params['keyword'] = keyword
+        tag_values = _string_list(tags)
+        if tag_values:
+            params['tags'] = ','.join(tag_values)
+        return tool_success('list_knowledge_bases', get_core_api('/datasets', params=params))
+
+    @handle_tool_errors
+    def list_knowledge_base_documents(
+        self,
+        knowledge_base_ids: List[str],
+        keyword: str = '',
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """List readable documents in the selected knowledge bases."""
+        payload: Dict[str, Any] = {
+            'dataset_ids': _string_list(knowledge_base_ids),
+            'page_size': _bounded_page_size(page_size),
+        }
+        if keyword:
+            payload['keyword'] = keyword
+        return tool_success(
+            'list_knowledge_base_documents',
+            post_core_api('/documents:listByDatasets', payload)['response'],
+        )
+
+    @handle_tool_errors
+    def aggregate_knowledge_base_documents(
+        self,
+        knowledge_base_ids: Optional[List[str]] = None,
+        file_types: Optional[List[str]] = None,
+        document_stages: Optional[List[str]] = None,
+        data_source_types: Optional[List[str]] = None,
+        creators: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        group_by: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Aggregate readable document counts, optionally grouped by metadata fields."""
+        payload = {
+            'dataset_ids': _string_list(knowledge_base_ids),
+            'file_types': _string_list(file_types),
+            'document_stages': _string_list(document_stages),
+            'data_source_types': _string_list(data_source_types),
+            'creators': _string_list(creators),
+            'tags': _string_list(tags),
+            'group_by': _string_list(group_by),
+        }
+        return tool_success(
+            'aggregate_knowledge_base_documents',
+            post_core_api('/system-query/documents:aggregate', payload),
+        )
+
+    @staticmethod
+    def _accessible_kb_ids() -> set[str]:
+        """Return the complete readable KB id set, cached for this agent run."""
+        config = lazyllm.globals.get('agentic_config') or {}
+        cached = config.get(_ACCESSIBLE_KB_IDS_CACHE_KEY)
+        if isinstance(cached, (list, tuple, set)):
+            return {str(item).strip() for item in cached if str(item).strip()}
+
+        accessible: set[str] = set()
+        page_token = ''
+        seen_page_tokens: set[str] = set()
+        while True:
+            params: Dict[str, Any] = {'page_size': 100}
+            if page_token:
+                params['page_token'] = page_token
+            response = get_core_api('/datasets', params=params)
+            for item in response.get('datasets') or []:
+                if not isinstance(item, dict):
+                    continue
+                dataset_id = str(item.get('dataset_id') or '').strip()
+                if dataset_id:
+                    accessible.add(dataset_id)
+
+            next_page_token = str(response.get('next_page_token') or '').strip()
+            if not next_page_token:
+                break
+            if next_page_token in seen_page_tokens:
+                raise RuntimeError('knowledge-base catalog returned a repeated page token')
+            seen_page_tokens.add(next_page_token)
+            page_token = next_page_token
+
+        config[_ACCESSIBLE_KB_IDS_CACHE_KEY] = sorted(accessible)
+        lazyllm.globals['agentic_config'] = config
+        return accessible
+
+    @staticmethod
+    def _kb_ids(explicit: Optional[List[str]] = None) -> List[str]:
+        config = lazyllm.globals.get('agentic_config') or {}
+        selected = explicit if explicit else (config.get('filters') or {}).get('kb_id')
+        ids = [str(item).strip() for item in iter_lookup_ids(selected, field_name='kb_ids') if item]
+        if not ids:
+            raise ValueError('kb_ids is required when no knowledge base is selected in the request')
+        if explicit:
+            accessible = KBToolkit._accessible_kb_ids()
+            if any(kb_id not in accessible for kb_id in ids):
+                raise ValueError('one or more requested knowledge bases are unavailable')
+        return ids
 
     def kb_search(
         self,
@@ -286,6 +444,7 @@ class KBToolGroup:
         k_max: Optional[int] = None,
         image_topk: Optional[int] = None,
         filters: Optional[Dict[str, Any]] = None,
+        kb_ids: Optional[List[str]] = None,
     ) -> Any:
         """Search the knowledge base and return text and image retrieval results.
 
@@ -313,13 +472,18 @@ class KBToolGroup:
             image_topk: Top-k for the image retrieval branch. Defaults to 3.
             filters: Metadata filters for retrieval, e.g.
                 {'file_name': 'report.pdf'}.
+            kb_ids: Knowledge-base IDs. Overrides the knowledge bases selected
+                in the current request.
         """
         agentic_config = lazyllm.globals['agentic_config']
         retrievers, reranker, image_retriever = _ensure_kb_search_runtime()
 
+        selected_ids = self._kb_ids(kb_ids)
+        effective_filters = dict(filters or agentic_config.get('filters') or {})
+        effective_filters['kb_id'] = selected_ids
         payload = {
             'query': query.strip(),
-            'filters': filters or agentic_config.get('filters') or {},
+            'filters': effective_filters,
             'user_id': agentic_config.get('user_id', ''),
         }
 
@@ -354,34 +518,21 @@ class KBToolGroup:
             The matched parent node, if the current node has a parent and the
             parent can be found.
         """
-        config = lazyllm.globals['agentic_config']
         doc = DOCUMENT
-
-        for kb_id in iter_lookup_ids(
-            (config.get('filters') or {}).get('kb_id'),
-            field_name='agentic_config.filters.kb_id',
-        ):
-            current_nodes = doc.get_nodes(uids=[node_id], kb_id=kb_id)
-            current_nodes = current_nodes if isinstance(current_nodes, list) else []
-            if not current_nodes:
-                continue
-
-            current = _serialize_doc_node_like(current_nodes[0])
+        current_nodes = doc.get_nodes(uids=[node_id])
+        current_nodes = current_nodes if isinstance(current_nodes, list) else []
+        if current_nodes:
+            current_node = current_nodes[0]
+            current = _serialize_doc_node_like(current_node)
             parent_id = current.get('parent')
-            if not parent_id:
-                result = {
-                    'node_id': node_id,
-                    'current_node': current,
-                    'parent_id': None,
-                    'total': 0,
-                    'items': [],
-                }
-                _annotate_result_citations(result)
-                return tool_success('kb_get_parent_node', result)
-
-            parent_nodes = doc.get_nodes(uids=[parent_id], kb_id=kb_id)
-            parent_nodes = parent_nodes if isinstance(parent_nodes, list) else []
-            parent = _serialize_doc_node_like(parent_nodes[0]) if parent_nodes else None
+            if parent_id:
+                global_metadata = getattr(current_node, 'global_metadata', {}) or {}
+                kb_id = global_metadata.get('kb_id') if isinstance(global_metadata, dict) else None
+                parent_nodes = doc.get_nodes(uids=[parent_id], kb_id=kb_id)
+                parent_nodes = parent_nodes if isinstance(parent_nodes, list) else []
+                parent = _serialize_doc_node_like(parent_nodes[0]) if parent_nodes else None
+            else:
+                parent = None
             result = {
                 'node_id': node_id,
                 'current_node': current,
@@ -404,52 +555,35 @@ class KBToolGroup:
 
     def kb_get_window_nodes(
         self,
-        docid: str,
-        number: Any,
-        group: str = 'block',
+        node_id: str,
+        before: int = 5,
+        after: int = 5,
     ) -> Dict[str, Any]:
-        """Get nodes by number range from a target document.
+        """Get neighboring nodes around a target node.
 
-        Retrieves one or more neighboring nodes around a specific position
-        within a known document. This provides surrounding context for a
-        node whose docid and number are already known.
+        The target node supplies its own knowledge-base, document, group, and
+        position metadata, so callers only need the node id returned by search.
 
         Args:
-            docid: Target document id.
-            number: Node number or inclusive number range. Pass an int for one
-                node, or [start, end] / "start,end" for all nodes in that
-                range.
-            group: Node group, either block or line.
+            node_id: Target document node uid returned by a search method.
+            before: Maximum number of preceding nodes. Defaults to 5.
+            after: Maximum number of following nodes. Defaults to 5.
 
         Returns:
             A compact dict with node numbers and contents only.
         """
-        start, end = parse_number_range(number)
-
-        numbers = set(range(start, end + 1))
-        if len(numbers) > _MAX_RESULT_ITEMS:
-            raise ValueError(f'number range cannot exceed {_MAX_RESULT_ITEMS} nodes')
-
-        config = lazyllm.globals['agentic_config']
+        before = int(before)
+        after = int(after)
+        if before < 0 or after < 0:
+            raise ValueError('before and after must be non-negative')
+        if before + after + 1 > _MAX_RESULT_ITEMS:
+            raise ValueError(f'window cannot exceed {_MAX_RESULT_ITEMS} nodes')
         doc = DOCUMENT
-
-        for kb_id in iter_lookup_ids(
-            (config.get('filters') or {}).get('kb_id'),
-            field_name='agentic_config.filters.kb_id',
-        ):
-            nodes = doc.get_nodes(
-                doc_ids=[docid],
-                group=group,
-                kb_id=kb_id,
-                offset=max(start - 1, 0),
-                limit=len(numbers),
-                sort_by_number=True,
-            )
+        seed_nodes = doc.get_nodes(uids=[node_id])
+        seed_nodes = seed_nodes if isinstance(seed_nodes, list) else []
+        if seed_nodes:
+            nodes = doc.get_window_nodes(seed_nodes[0], span=(-before, after), merge=False)
             nodes = nodes if isinstance(nodes, list) else []
-            nodes = [n for n in nodes if getattr(n, 'number', None) in numbers]
-            if not nodes:
-                continue
-            nodes.sort(key=lambda n: (getattr(n, 'number', 0) or 0, getattr(n, 'uid', '') or ''))
             result = {
                 'total': len(nodes),
                 'items': [_serialize_doc_node_like(n) for n in nodes],
@@ -473,6 +607,7 @@ class KBToolGroup:
         phrase: bool = True,
         size: int = 10,
         sort_by: str = 'score',
+        kb_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Search for exact keyword or phrase matches within a specific document.
 
@@ -504,7 +639,6 @@ class KBToolGroup:
         Returns:
             Matching nodes with content snippets.
         """
-        config = lazyllm.globals['agentic_config']
         index_name = resolve_index(group)
         size = max(1, min(int(size), _MAX_RESULT_ITEMS))
         doc = DOCUMENT
@@ -517,10 +651,7 @@ class KBToolGroup:
         LOG.info(f'[kb_keyword_search] store={_cfg["segment_store_type"]!r} keyword={keyword!r} docid={docid!r} '
                  f'file_name={file_name!r} group={group!r} phrase={phrase} sort_by={sort_by!r} size={size}')
 
-        for kb_id in iter_lookup_ids(
-            (config.get('filters') or {}).get('kb_id'),
-            field_name='agentic_config.filters.kb_id',
-        ):
+        for kb_id in self._kb_ids(kb_ids):
             LOG.info(f'[kb_keyword_search] trying kb_id={kb_id!r}')
             nodes = doc.keyword_search(
                 group=group, keyword=keyword, doc_id=docid,

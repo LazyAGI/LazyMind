@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -512,6 +513,10 @@ func PatchSessionSlot(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	if body.SelectedRevision < 1 {
+		common.ReplyErr(w, "selected_revision must be >= 1", http.StatusBadRequest)
+		return
+	}
 	db := store.DB()
 	if db == nil {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
@@ -531,19 +536,34 @@ func PatchSessionSlot(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "session is dismissed", http.StatusConflict)
 		return
 	}
-	// Deselect all, then select the target revision.
-	if err := db.WithContext(ctx).Model(&orm.PluginSlotRevision{}).
-		Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true).
-		Update("selected", false).Error; err != nil {
-		common.ReplyErr(w, "update slot failed", http.StatusInternalServerError)
+	// This endpoint selects a version of a cardinality=single slot. List items use
+	// the list_index rollback endpoint, which avoids an ambiguous revision number.
+	var selected orm.PluginSlotRevision
+	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("session_id = ? AND slot_id = ? AND list_index IS NULL AND revision = ? AND validity = ?",
+				sessionID, slotID, body.SelectedRevision, "effective").
+			First(&selected).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&orm.PluginSlotRevision{}).
+			Where("session_id = ? AND slot_id = ? AND list_index IS NULL AND selected = ?", sessionID, slotID, true).
+			Update("selected", false).Error; err != nil {
+			return err
+		}
+		return tx.Model(&orm.PluginSlotRevision{}).
+			Where("id = ?", selected.ID).
+			Update("selected", true).Error
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		common.ReplyErr(w, "target revision not found", http.StatusNotFound)
 		return
 	}
-	if err := db.WithContext(ctx).Model(&orm.PluginSlotRevision{}).
-		Where("session_id = ? AND slot_id = ? AND revision = ?", sessionID, slotID, body.SelectedRevision).
-		Update("selected", true).Error; err != nil {
+	if err != nil {
 		common.ReplyErr(w, "select revision failed", http.StatusInternalServerError)
 		return
 	}
+	NotifyPluginArtifactUpdated(ctx, db, sessionID, selected.StepID, selected.SlotID, selected.Slot, selected.Revision, selected.ListIndex, "selection")
 	common.ReplyOK(w, map[string]any{"selected_revision": body.SelectedRevision})
 }
 
@@ -810,7 +830,7 @@ func ReorderSlotItems(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetSlotOrderHandler handles GET /plugin-sessions/{session_id}/slots/{slot_id}/order.
-// Returns the order_list and order_version for a slot, used by Python save_artifact
+// Returns the order_list and order_version for a slot, used by Python save_artifacts
 // to translate sort_order → list_index without exposing list_index to the AI.
 func GetSlotOrderHandler(w http.ResponseWriter, r *http.Request) {
 	sessionID := common.PathVar(r, "session_id")
@@ -1011,7 +1031,7 @@ func SaveArtifactByKey(w http.ResponseWriter, r *http.Request) {
 	// Resolve slot binding for the slot via Python plugin API.
 	slotID, cardinality := resolveSlotBinding(sess.PluginID, body.Slot)
 	if slotID == "" {
-		common.ReplyErr(w, fmt.Sprintf("no slot binding for slot %q in plugin %q", body.Slot, sess.PluginID), http.StatusBadRequest)
+		common.ReplyErr(w, fmt.Sprintf("no slot binding: slot %q in plugin %q", body.Slot, sess.PluginID), http.StatusBadRequest)
 		return
 	}
 

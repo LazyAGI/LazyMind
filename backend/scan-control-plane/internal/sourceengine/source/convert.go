@@ -67,6 +67,7 @@ func bindingToResponse(binding store.Binding) SourceBindingResponse {
 		NextSyncAt:             binding.NextSyncAt,
 		IncludeExtensions:      jsonStringSlice(binding.IncludeExtensions, "items"),
 		ExcludeExtensions:      jsonStringSlice(binding.ExcludeExtensions, "items"),
+		ChatEnabled:            binding.ChatEnabled,
 		Status:                 binding.Status,
 		LastError:              store.CloneJSON(binding.LastError),
 		DeletedAt:              binding.DeletedAt,

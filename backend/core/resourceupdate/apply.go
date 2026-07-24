@@ -14,35 +14,15 @@ import (
 	"lazymind/core/evolution"
 	"lazymind/core/preferencefile"
 	"lazymind/core/resourcechange"
-	"lazymind/core/skillv2/taskguard"
 )
 
 func (w *Worker) handleAutoApplyReview(ctx context.Context, task orm.ResourceUpdateTask) taskOutcome {
 	if strings.TrimSpace(task.ReviewResultID) == "" && strings.TrimSpace(task.TriggerID) == "" {
 		return permanentOutcome("missing_review_result_id", "review_result_id required")
 	}
-	if task.ResourceType == orm.ResourceUpdateResourceTypeSkill {
-		decision, err := taskguard.EvaluateSkillOperation(ctx, w.db, w.stateStore, taskguard.SkillOperationRequest{
-			UserID:        task.UserID,
-			SkillID:       task.ResourceID,
-			Operation:     taskguard.AutoUpdateSkill,
-			TriggerSource: "scheduled",
-		})
-		if err != nil {
-			if decision.Disposition == taskguard.DispositionDefer {
-				return deferredOutcome(decision.ReasonCode, decision.Message, decision.RetryAfter)
-			}
-			return retryableOutcome(taskguard.ReasonTaskStatusUnavailable, err)
-		}
-		if !decision.Allowed {
-			return deferredOutcome(decision.ReasonCode, decision.Message, decision.RetryAfter)
-		}
-	}
 	now := w.clock().UTC()
 	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		switch task.ResourceType {
-		case orm.ResourceUpdateResourceTypeSkill:
-			return autoApplySkillReviewResult(ctx, tx, task, now)
 		case orm.ResourceUpdateResourceTypeMemory:
 			return autoApplyMemoryReviewResult(ctx, tx, task, now)
 		case orm.ResourceUpdateResourceTypeUserPreference:
@@ -73,34 +53,6 @@ func (w *Worker) handleAutoApplyReview(ctx context.Context, task orm.ResourceUpd
 		return taskOutcome{Status: orm.ResourceUpdateTaskStatusSkipped, ErrorCode: "auto_apply_skipped", ErrorMessage: err.Error()}
 	}
 	return retryableOutcome("auto_apply_failed", err)
-}
-
-func autoApplySkillReviewResult(ctx context.Context, tx *gorm.DB, task orm.ResourceUpdateTask, _ time.Time) error {
-	result, err := lockSkillReviewResult(ctx, tx, taskReviewResultID(task))
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(result.ReviewStatus) != reviewStatusPending {
-		return fmt.Errorf("%w: skill review result is %q", errReviewConflict, result.ReviewStatus)
-	}
-	if strings.TrimSpace(result.Type) != skillReviewTypePatch {
-		return fmt.Errorf("%w: auto apply only supports skill patch results", errReviewInvalid)
-	}
-	v2Resource, err := mapSkillPatchResultToV2Resource(ctx, withUpdateLock(tx), result)
-	if err == nil && strings.TrimSpace(task.ResourceID) == strings.TrimSpace(v2Resource.ID) {
-		if strings.TrimSpace(task.ResourceType) != orm.ResourceUpdateResourceTypeSkill ||
-			strings.TrimSpace(task.UserID) != strings.TrimSpace(result.UserID) {
-			return fmt.Errorf("%w: skill auto apply task mapping mismatch", errReviewConflict)
-		}
-		if !v2Resource.AutoEvo {
-			return fmt.Errorf("%w: skill auto_evo disabled", errReviewConflict)
-		}
-		return applySkillV2PatchResult(ctx, tx, result, v2Resource)
-	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-	return errReviewNotFound
 }
 
 func autoApplyMemoryReviewResult(ctx context.Context, tx *gorm.DB, task orm.ResourceUpdateTask, now time.Time) error {

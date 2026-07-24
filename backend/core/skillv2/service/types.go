@@ -159,6 +159,8 @@ type DraftSummary struct {
 	HasUncommittedDraft bool
 	TaskID              string
 	Version             int64
+	Type                string
+	Status              string
 }
 
 type TreeRef struct {

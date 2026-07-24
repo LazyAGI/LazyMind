@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -17,14 +16,16 @@ func TestRunUpAppliesMissingLowerVersionMigrationAfterManualHistoryBackfill(t *t
 		t.Fatalf("mkdir migrations dir: %v", err)
 	}
 
-	for _, name := range []string{
-		"20260423120000_create_word.up.sql",
-		"20260423120000_create_word.down.sql",
-		"20260424130000_add_user_personalization_settings.up.sql",
-		"20260424130000_add_user_personalization_settings.down.sql",
-	} {
-		copyMigrationFile(t, migrationsDir, name)
-	}
+	writeMigrationPair(t, migrationsDir, "20260423120000_create_word", `
+CREATE TABLE words (id integer PRIMARY KEY);
+`, `
+DROP TABLE words;
+`)
+	writeMigrationPair(t, migrationsDir, "20260424130000_add_user_personalization_settings", `
+SELECT 1;
+`, `
+SELECT 1;
+`)
 
 	dbPath := filepath.Join(t.TempDir(), "acl.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -226,31 +227,6 @@ DROP TABLE IF EXISTS schema_migration_history;
 	if stateCount != 0 {
 		t.Fatalf("expected schema_migrations to be empty after down to zero, got %d rows", stateCount)
 	}
-}
-
-func copyMigrationFile(t *testing.T, dstDir, name string) {
-	t.Helper()
-
-	srcPath := filepath.Join(repoMigrationsDir(t), name)
-	body, err := os.ReadFile(srcPath)
-	if err != nil {
-		t.Fatalf("read migration %s: %v", srcPath, err)
-	}
-
-	dstPath := filepath.Join(dstDir, name)
-	if err := os.WriteFile(dstPath, body, 0o644); err != nil {
-		t.Fatalf("write migration %s: %v", dstPath, err)
-	}
-}
-
-func repoMigrationsDir(t *testing.T) string {
-	t.Helper()
-
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve current file path")
-	}
-	return filepath.Join(filepath.Dir(thisFile), "..", "migrations")
 }
 
 func writeMigrationPair(t *testing.T, dir, base, upSQL, downSQL string) {

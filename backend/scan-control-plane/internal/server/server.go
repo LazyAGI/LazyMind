@@ -262,12 +262,19 @@ func (h *Handler) registerRoutes(mux *http.ServeMux) {
 	routeAPI(mux, "POST", "/api/scan/sources", []string{"scan.write"}, h.createSource)
 	routeAPI(mux, "GET", "/api/scan/sources", []string{"scan.read"}, h.listSources)
 	routeAPI(mux, "GET", "/api/scan/internal/sources/by-dataset/{dataset_id}", nil, h.getSourceByDataset)
+	routeAPI(mux, "POST", "/api/scan/internal/sources/by-datasets", nil, h.batchGetSourcesByDatasetIDs)
+
 	routeAPI(mux, "DELETE", "/api/scan/internal/sources/by-dataset/{dataset_id}", nil, h.deleteSourceByDataset)
+	routeAPI(mux, "POST", "/api/scan/internal/source-access/by-dataset:batch", nil, h.batchSourceAccessByDataset)
 	routeAPI(mux, "GET", "/api/scan/sources/{source_id}", []string{"scan.read"}, h.getSource)
 	routeAPI(mux, "PUT", "/api/scan/sources/{source_id}", []string{"scan.write"}, h.updateSource)
 	routeAPI(mux, "DELETE", "/api/scan/sources/{source_id}", []string{"scan.write"}, h.deleteSource)
 
 	// Bindings.
+
+	// Binding chat settings.
+	routeAPI(mux, "GET", "/api/scan/bindings/chat-settings", []string{"scan.read"}, h.listBindingChatSettings)
+	routeAPI(mux, "PUT", "/api/scan/bindings/{binding_id}/chat-settings", []string{"scan.write"}, h.updateBindingChatSetting)
 	routeAPI(mux, "POST", "/api/scan/sources/{source_id}/bindings", []string{"scan.write"}, h.createSourceBinding)
 	routeAPI(mux, "PUT", "/api/scan/sources/{source_id}/bindings/{binding_id}", []string{"scan.write"}, h.updateSourceBinding)
 	routeAPI(mux, "DELETE", "/api/scan/sources/{source_id}/bindings/{binding_id}", []string{"scan.write"}, h.deleteSourceBinding)
@@ -301,9 +308,11 @@ func (h *Handler) registerRoutes(mux *http.ServeMux) {
 func actorFromRequest(r *http.Request) (access.Actor, error) {
 	actor := access.Actor{
 		UserID:        strings.TrimSpace(r.Header.Get("X-User-ID")),
+		UserName:      strings.TrimSpace(r.Header.Get("X-User-Name")),
 		TenantID:      strings.TrimSpace(r.Header.Get("X-Tenant-ID")),
 		Role:          strings.TrimSpace(r.Header.Get("X-User-Role")),
 		Authorization: strings.TrimSpace(r.Header.Get("Authorization")),
+		InternalToken: strings.TrimSpace(r.Header.Get("X-LazyMind-Internal-Token")),
 	}
 	if actor.TenantID == "" {
 		actor.TenantID = strings.TrimSpace(r.URL.Query().Get("tenant_id"))

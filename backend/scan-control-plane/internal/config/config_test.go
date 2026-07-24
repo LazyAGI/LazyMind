@@ -16,6 +16,13 @@ func TestDefaultConfigUsesPrivateTempDir(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigPrewarmsTargetSearchCacheDaily(t *testing.T) {
+	cfg := defaultConfig()
+	if cfg.TargetSearchCachePrewarmInterval != 24*time.Hour {
+		t.Fatalf("target search cache prewarm interval = %s, want %s", cfg.TargetSearchCachePrewarmInterval, 24*time.Hour)
+	}
+}
+
 func TestLoadConfigFromEnv(t *testing.T) {
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN", "postgres://scan-control-plane")
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_CORE_BASE_URL", "http://core.test")
@@ -30,6 +37,7 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR", "/tmp/scan-control-plane-test")
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_MIGRATION_FILE", "/tmp/scan-control-plane-test/init.up.sql")
 	t.Setenv("SOURCEENGINE_TEMP_TTL", "2h")
+	t.Setenv("SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_ENABLED", "false")
 	t.Setenv("SOURCEENGINE_WORKER_LEASE_TTL", "45s")
 	t.Setenv("SOURCEENGINE_WORKER_MAX_BACKOFF", "3m")
 	t.Setenv("SOURCEENGINE_CRAWL_LIST_REQUEST_INTERVAL", "750ms")
@@ -65,6 +73,9 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	}
 	if cfg.TempTTL != 2*time.Hour || cfg.WorkerLeaseTTL != 45*time.Second || cfg.WorkerMaxBackoff != 3*time.Minute || cfg.CrawlListRequestInterval != 750*time.Millisecond || cfg.ParseDeadLetterAfter != 4 {
 		t.Fatalf("config did not read worker ttl/backoff/deadletter: %+v", cfg)
+	}
+	if cfg.TargetSearchCachePrewarmEnabled {
+		t.Fatalf("config did not disable target search cache prewarm: %+v", cfg)
 	}
 	if cfg.WorkerPollInterval != 6*time.Second || cfg.CoreResultPollInterval != 11*time.Second || cfg.CompensationPollInterval != 31*time.Second {
 		t.Fatalf("config did not read poll intervals: %+v", cfg)

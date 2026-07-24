@@ -90,6 +90,48 @@ def test_build_cold_start_tools_creates_one_trigger_per_plugin(loaded_plugin):
     assert 'trigger_test_plugin' in names
 
 
+def test_build_cold_start_tools_honours_mentioned_plugin_allowlist(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+    tools = plugin_manager.build_cold_start_tools(
+        allowed_plugin_refs=['builtin:test-plugin'],
+    )
+    assert [tool.__name__ for tool in tools] == ['trigger_test_plugin']
+
+
+def test_cold_start_prompt_treats_named_workflow_use_as_explicit_selection():
+    from lazymind.chat.plugin import plugin_manager
+
+    prompt = plugin_manager._COLD_START_PLUGIN_PROMPT
+    assert '"Plugin" is a legacy internal synonym only' in prompt
+    assert 'asks to use, run, start, launch, open, or enable it' in prompt
+    assert '`explicit_workflow_request=true`' in prompt
+    assert 'generic toolkit or same-domain tool' in prompt
+
+
+def test_trigger_exposes_workflow_request_flag(loaded_plugin):
+    import inspect
+    from lazymind.chat.plugin import plugin_manager
+
+    trigger = next(
+        tool for tool in plugin_manager.build_cold_start_tools()
+        if tool.__name__ == 'trigger_test_plugin'
+    )
+    assert 'explicit_workflow_request' in inspect.signature(trigger).parameters
+    assert 'explicit_plugin_request' not in inspect.signature(trigger).parameters
+
+
+def test_dynamic_launch_policy_defaults_to_hand_off():
+    from lazymind.chat.plugin import plugin_manager
+
+    policy = plugin_manager._build_cold_execution_policy('dynamic')
+    assert 'DEFAULT: use `advance_step_and_hand_off`' in policy
+    assert '帮我执行 N 步' in policy
+    assert 'complete article' in policy
+    assert [tool.__name__ for tool in plugin_manager.build_cold_advance_tools()] == [
+        'advance_step_and_hand_off', 'advance_step',
+    ]
+
+
 def test_cold_start_trigger_prepares_launch_without_creating_task(
         loaded_plugin, mock_write_agent_data, mock_agentic_config):
     from lazymind.chat.plugin import plugin_manager
@@ -105,7 +147,7 @@ def test_cold_start_trigger_prepares_launch_without_creating_task(
         'hand_off': True,
     }
     with patch.object(plugin_manager, '_evaluate_plugin_preflight', return_value=preflight):
-        result = json.loads(trigger(request_context='Draw a sunset', explicit_plugin_request=False))
+        result = json.loads(trigger(request_context='Draw a sunset', explicit_workflow_request=False))
 
     assert result['status'] == 'ready'
     assert result['outcome'] == 'ready'
@@ -140,7 +182,7 @@ def test_cold_start_trigger_hides_hand_off_choice_when_tool_is_static(
     with patch.object(plugin_manager, '_evaluate_plugin_preflight', return_value=preflight):
         result = json.loads(trigger(
             request_context='Draw a sunset',
-            explicit_plugin_request=False,
+            explicit_workflow_request=False,
         ))
 
     assert result['launch_plan']['advance_tool'] == 'advance_step_and_hand_off'
@@ -155,7 +197,7 @@ def test_cold_start_trigger_rejects_empty_input(loaded_plugin, mock_write_agent_
     tools = plugin_manager.build_cold_start_tools()
     trigger = next(t for t in tools if t.__name__ == 'trigger_test_plugin')
 
-    result = json.loads(trigger(request_context='   ', explicit_plugin_request=False))
+    result = json.loads(trigger(request_context='   ', explicit_workflow_request=False))
     assert result['status'] == 'preflight_failed'
     assert not mock_write_agent_data.called
 
@@ -176,7 +218,7 @@ def test_cold_start_trigger_need_information_does_not_prepare_launch(
         'hand_off': True,
     }
     with patch.object(plugin_manager, '_evaluate_plugin_preflight', return_value=preflight):
-        result = json.loads(trigger(request_context='Draw a sunset', explicit_plugin_request=False))
+        result = json.loads(trigger(request_context='Draw a sunset', explicit_workflow_request=False))
 
     assert result['status'] == 'need_information'
     assert 'prepared_plugin' not in mock_agentic_config
@@ -203,7 +245,7 @@ def test_explicit_plugin_request_cannot_be_rejected_as_not_applicable(
     with patch.object(plugin_manager, '_evaluate_plugin_preflight', return_value=preflight):
         result = json.loads(trigger(
             request_context='Use the test plugin to draw a sunset',
-            explicit_plugin_request=True,
+            explicit_workflow_request=True,
         ))
 
     assert result['status'] == 'ready'
@@ -228,7 +270,7 @@ def test_implicit_plugin_request_can_still_be_not_applicable(
     }
 
     with patch.object(plugin_manager, '_evaluate_plugin_preflight', return_value=preflight):
-        result = json.loads(trigger(request_context='Say hello', explicit_plugin_request=False))
+        result = json.loads(trigger(request_context='Say hello', explicit_workflow_request=False))
 
     assert result['status'] == 'not_applicable'
     assert result['outcome'] == 'not_applicable'
@@ -266,11 +308,11 @@ def test_explicit_plugin_choice_persists_across_clarification_turns(
     ):
         first = json.loads(trigger(
             request_context='Use the test plugin',
-            explicit_plugin_request=True,
+            explicit_workflow_request=True,
         ))
         second = json.loads(trigger(
             request_context='Use value 42',
-            explicit_plugin_request=False,
+            explicit_workflow_request=False,
         ))
 
     assert first['status'] == 'need_information'
@@ -304,10 +346,10 @@ def test_retrigger_preserves_original_intent_and_accumulates_confirmations(
     with patch.object(
         plugin_manager, '_evaluate_plugin_preflight', side_effect=[need_info, ready]
     ):
-        trigger(request_context='Draw a sunset', explicit_plugin_request=False)
+        trigger(request_context='Draw a sunset', explicit_workflow_request=False)
         result = json.loads(trigger(
             request_context='Use watercolor style',
-            explicit_plugin_request=False,
+            explicit_workflow_request=False,
         ))
 
     prepared = mock_agentic_config['prepared_plugin']
@@ -529,7 +571,7 @@ def test_cold_injection_without_approval_choice_registers_only_hand_off_tool(
     from lazymind.chat.plugin import plugin_manager
     mock_agentic_config['enable_plugin'] = True
 
-    tools, _, stop_tools, patch_config, context = plugin_manager.resolve_plugin_injection({
+    contribution = plugin_manager.resolve_plugin_injection({
         'plugin_mode': 'auto',
         'plugin_preflight': {
             'preflight_id': 'pf-old',
@@ -539,6 +581,10 @@ def test_cold_injection_without_approval_choice_registers_only_hand_off_tool(
             'normalized_request': 'Original request plus answers',
         },
     })
+    tools = contribution.tools
+    stop_tools = contribution.stop_tools
+    patch_config = contribution.agentic_config_patch
+    context = contribution.runtime_context
 
     names = {tool.__name__ for tool in tools}
     assert 'trigger_test_plugin' in names
@@ -592,20 +638,24 @@ def test_active_injection_switches_tools_and_request_local_policy_per_turn(
             'plugin_mode': 'dynamic',
         })
 
-    auto_tools, auto_system_prompt, auto_stop_tools, _, auto_context = auto_result
-    dynamic_tools, dynamic_system_prompt, dynamic_stop_tools, _, dynamic_context = dynamic_result
+    auto_tools = auto_result.tools
+    auto_system_prompt = auto_result.system_prompt
+    auto_stop_tools = auto_result.stop_tools
+    auto_context = auto_result.runtime_context
+    dynamic_tools = dynamic_result.tools
+    dynamic_system_prompt = dynamic_result.system_prompt
+    dynamic_stop_tools = dynamic_result.stop_tools
+    dynamic_context = dynamic_result.runtime_context
     auto_names = {tool.__name__ for tool in auto_tools}
     dynamic_names = {tool.__name__ for tool in dynamic_tools}
 
     assert 'advance_step_and_hand_off' in auto_names
-    assert 'advance_steps_and_hand_off' in auto_names
     assert 'advance_step' not in auto_names
-    assert {
-        'advance_step', 'advance_steps',
-        'advance_step_and_hand_off', 'advance_steps_and_hand_off',
-    } <= dynamic_names
-    assert set(auto_stop_tools) == {'advance_step_and_hand_off', 'advance_steps_and_hand_off'}
-    assert set(dynamic_stop_tools) == {'advance_step_and_hand_off', 'advance_steps_and_hand_off'}
+    assert {'advance_step', 'advance_step_and_hand_off'} <= dynamic_names
+    assert 'advance_steps' not in dynamic_names
+    assert 'advance_steps_and_hand_off' not in dynamic_names
+    assert set(auto_stop_tools) == {'advance_step_and_hand_off'}
+    assert set(dynamic_stop_tools) == {'advance_step_and_hand_off'}
     assert 'Current Plugin Execution Policy' not in auto_system_prompt
     assert 'Current Plugin Execution Policy' not in dynamic_system_prompt
     assert 'Current Plugin Execution Policy' in auto_context
@@ -837,8 +887,8 @@ def test_framework_tools_no_duplicates(
         loaded_plugin, mock_agentic_config, mock_write_agent_data):
     """If a plugin explicitly declares a framework tool, there should be no duplicate."""
     from lazymind.chat.plugin.plugin_manager import _merge_tools
-    merged = _merge_tools(['save_artifact', 'my_custom_tool', 'load_artifact'])
-    assert merged.count('save_artifact') == 1
+    merged = _merge_tools(['save_artifacts', 'my_custom_tool', 'load_artifact'])
+    assert merged.count('save_artifacts') == 1
     assert merged.count('load_artifact') == 1
     assert 'my_custom_tool' in merged
 
@@ -947,10 +997,10 @@ def test_resolve_plugin_step_tools_returns_merged_list(loaded_plugin):
     # step_d declares enhance_tool in state.yml; framework tools must be prepended.
     tools = _resolve_plugin_step_tools({'plugin_id': 'test-plugin', 'step_id': 'step_d'})
     assert tools is not None
-    assert 'save_artifact' in tools
+    assert 'save_artifacts' in tools
     assert 'enhance_tool' in tools
     # Framework tools come first.
-    assert tools.index('save_artifact') < tools.index('enhance_tool')
+    assert tools.index('save_artifacts') < tools.index('enhance_tool')
 
 
 def test_resolve_plugin_step_tools_no_declared_tools_returns_only_framework(loaded_plugin):
@@ -959,7 +1009,7 @@ def test_resolve_plugin_step_tools_no_declared_tools_returns_only_framework(load
 
     tools = _resolve_plugin_step_tools({'plugin_id': 'test-plugin', 'step_id': 'step_a'})
     assert tools is not None
-    assert 'save_artifact' in tools
+    assert 'save_artifacts' in tools
     assert 'get_artifact' in tools
 
 
@@ -1000,7 +1050,7 @@ def test_hand_off_tool_doc_is_mode_neutral(loaded_plugin):
     )
     doc = hand_off.__doc__ or ''
 
-    assert 'Start the next plugin step asynchronously' in doc
+    assert 'Start one or more Ready workflow steps asynchronously' in doc
     assert 'dynamic' not in doc
     assert 'auto' not in doc
 
@@ -1070,25 +1120,18 @@ def test_live_projection_does_not_offer_succeeded_current_step_as_retry(loaded_p
 def test_dynamic_guidance_respects_explicit_target_boundary(loaded_plugin):
     from lazymind.chat.plugin import plugin_manager
 
-    guidance = plugin_manager._build_mode_guidance(
-        'dynamic',
-        terminal_steps=['step_d'],
-        step_labels={'step_d': 'Finalize'},
-    )
+    guidance = plugin_manager._build_mode_guidance('dynamic')
 
     assert 'target boundary' in guidance
     assert 'Match X against the full compact' in guidance
-    assert 'Plugin Step Name Index' in guidance
+    assert 'Workflow Step Name Index' in guidance
     assert 'name index does not imply reachability or execution order' in guidance
     assert 'higher priority than generic uninterrupted phrases' in guidance
-    assert 'Do NOT hand off an' in guidance
-    assert 'confirmation at the later' in guidance
-    assert 'Execute the target boundary step with `advance_step_and_hand_off`' in guidance
+    assert 'DEFAULT: call `advance_step_and_hand_off`' in guidance
+    assert '帮我执行 N 步' in guidance
+    assert 'complete deliverable' in guidance
     assert 'Do NOT wait for the boundary step with `advance_step`' in guidance
     assert 'Do NOT call downstream steps and do NOT call `__end__`' in guidance
-    assert 'persisted session intent wins' in guidance
-    assert "target step's" in guidance
-    assert '[default approval: ...]' in guidance
     assert 'returns the next decision to the user' in guidance
 
 
@@ -1098,7 +1141,7 @@ def test_guidance_without_approval_choice_assigns_continuation_to_backend(loaded
     guidance = plugin_manager._build_mode_guidance('auto')
 
     assert 'backend controller evaluates the result' in guidance
-    assert '`advance_steps_and_hand_off` exactly once' in guidance
+    assert '`advance_step_and_hand_off` with one command' in guidance
     assert 'default approval' not in guidance.lower()
     assert 'auto mode' not in guidance.lower()
     assert 'dynamic mode' not in guidance.lower()

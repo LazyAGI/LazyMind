@@ -64,6 +64,10 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query task failed", http.StatusInternalServerError)
 		return
 	}
+	if t.CreateUserID != requestUserID(r) {
+		common.ReplyErr(w, "task not found", http.StatusNotFound)
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -85,10 +89,16 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 	}
 	arts, _ := LoadArtifacts(ctx, db, taskID)
 	for i := range arts {
+		if arts[i].Hidden {
+			continue
+		}
 		writeTaskSSE(w, flusher, TaskEvent{
 			Type: "artifact", TaskID: taskID,
 			ArtifactKey: arts[i].Slot, ContentType: arts[i].ContentType,
-			Seq: arts[i].Seq, Value: normalizeJSON(arts[i].Value, "{}"),
+			Seq: arts[i].Seq,
+			Value: SignArtifactValue(
+				arts[i].ContentType, normalizeJSON(arts[i].Value, "{}"), t.WorkspacePath,
+			),
 		})
 	}
 

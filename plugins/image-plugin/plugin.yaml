@@ -1,29 +1,32 @@
 id: image-plugin
 name: AI Image Generation
 description: >
-  Generate, find, or edit images from natural language descriptions.
+  Generate, find, or edit images from natural language descriptions, and create
+  animated GIF stickers (动态表情包) via video generation then GIF conversion
+  inside the existing generate_image step.
   The workflow is dynamic: ChatAgent routes through analyze_subject,
-  optimize_prompt, generate_image, collect_materials, and enhance_image
-  based on user intent (CREATE_NEW vs FIND_AND_EDIT vs EDIT_UPLOAD).
-  CREATE_NEW and KB_STYLE skip material collection and generate directly after
-  prompt optimization. collect_materials gathers reference images for
-  REFERENCE_GENERATE (then optimize → generate) or prepares a raw source image
-  for FIND_AND_EDIT / EDIT_UPLOAD editing workflows.
+  collect_materials, optimize_prompt, then generate_image or enhance_image
+  based on user intent (CREATE_NEW, FIND_AND_EDIT, EDIT_UPLOAD, CREATE_ANIMATED,
+  ANIMATE_UPLOAD, etc.).
 
 when_to_use: >
   Trigger this plugin ONLY when the user's image request is COMPLEX and needs
   multi-step workflow support — e.g. knowledge-base style (kb_search), web/image
   search first then generate or edit, find-and-modify ("找一张XX再改成YY"),
   reference-based generation, uploaded-image editing with detailed instructions,
-  or a rich multi-constraint description that benefits from analyze → collect →
-  optimize → generate/enhance.
+  animated GIF / 动态表情包 / 动图 (text-to-video then GIF, or animate an uploaded
+  image), or a rich multi-constraint description that benefits from analyze →
+  collect → optimize → generate/enhance.
   Examples that SHOULD trigger: "根据知识库中的风格画一张产品图",
   "先搜几张赛博朋克参考图再画一张类似的", "找哈兰德照片然后加上王老吉字样",
+  "给我生成一个动态表情包", "给我生成三个动态表情包", "把这张图做成动态表情包", "做成动图 GIF",
   "启动绘图插件", "打开图片生成插件".
-  Do NOT trigger for SIMPLE one-shot image requests. If the user uses casual
+  Do NOT trigger for SIMPLE one-shot still-image requests. If the user uses casual
   short phrasing such as "直接", "给我", "随便画", "画个猫", "帮我生成一张图"
-  without KB/search/edit/complex constraints, prefer the built-in
+  without KB/search/edit/animated/complex constraints, prefer the built-in
   image_generator / image_editor tools instead of this plugin.
+  Do NOT call video_generator / video_to_gif directly for 动态表情包 — use this
+  plugin so analyze → optimize → generate_image (video→GIF) runs end-to-end.
   Do NOT trigger if image generation is merely one sub-step within a larger
   multi-step task (e.g. "write a report and add an image"). Do NOT trigger
   for text content, quizzes, reports, summaries, or any non-visual task.
@@ -99,7 +102,26 @@ slots:
   - id: generated_image_output
     label: Generated Image
     type: image
-    cardinality: single
+    cardinality: list
+    ordered: true
+
+  - id: image_output
+    label: Origin Image
+    type: image
+    cardinality: list
+    ordered: true
+
+  - id: gif_output
+    label: Animated GIF
+    type: image
+    cardinality: list
+    ordered: true
+
+  - id: video_output
+    label: Generated Video
+    type: file
+    cardinality: list
+    ordered: true
 
 ui:
   tabs:
@@ -125,10 +147,29 @@ ui:
 
     - id: result
       label: Result
-      layout: horizontal
+      layout: composite
       slots:
         - id: generated_image_output
+        - id: image_output
+        - id: gif_output
         - id: enhanced_image_output
+        - id: video_output
+      composite_layout:
+        - generated_image_output
+        - image_output
+        - gif_output
+        - enhanced_image_output
+        - video_output
+      composite_behavior:
+        hide_empty_columns: true
+        empty_column_scope: selected
+        mutually_exclusive:
+          - slots:
+              - gif_output
+              - enhanced_image_output
+            prefer:
+              - gif_output
+              - enhanced_image_output
 
 i18n:
   zh-CN:
@@ -148,6 +189,10 @@ i18n:
       subject_analysis: {label: 主体分析}
       material_images: {label: 参考素材}
       material_summary: {label: 材料摘要}
+      raw_source_image: {label: 原始底图}
       prompt_used: {label: 优化后的提示词}
+      generated_image_output: {label: 生成图片}
       enhanced_image_output: {label: 增强图片}
       image_output: {label: 原始图片}
+      gif_output: {label: 动态 GIF}
+      video_output: {label: 生成视频}

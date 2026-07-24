@@ -42,9 +42,9 @@ type SourceListRecord struct {
 }
 
 type SourceUpdateMutation struct {
-	Source         Source
-	CreateBindings []BindingCreateMutation
-	UpdateBindings []BindingUpdateMutation
+	Source                Source
+	CreateBindings        []BindingCreateMutation
+	UpdateBindings        []BindingUpdateMutation
 	DeleteBindings []BindingDeleteMutation
 	Now            time.Time
 }

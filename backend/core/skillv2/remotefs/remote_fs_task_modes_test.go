@@ -125,11 +125,15 @@ func TestRemoteFSOrgWritesOwnDraftAndBlocksOtherDraft(t *testing.T) {
 
 func seedRunningMaintenanceTask(t *testing.T, db *testutil.TestDB, taskID, userID string) {
 	t.Helper()
+	status := "review_apply"
+	if strings.HasPrefix(taskID, "org_") {
+		status = "organize_apply"
+	}
 	if err := db.Table("skill_review_stats").Create(map[string]any{
 		"id":          taskID,
 		"requestid":   taskID,
 		"userid":      userID,
-		"status":      "running",
+		"status":      status,
 		"started_at":  "2026-07-13T10:00:00Z",
 		"duration_ms": 0,
 		"summary":     "{}",

@@ -528,6 +528,75 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 	}
 }
 
+func TestInstallerWarmupGeneratesReducedProcessGraph(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:         defaultProfileValue(),
+		RepoRoot:        repo,
+		MaintenanceMode: installerWarmupMaintenanceMode,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local", ".bin", "local-runtime-manager"))
+	var out strings.Builder
+	if err := manager.processCompose.WriteGeneratedConfig(&out, repo, paths, cfg, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
+		t.Fatalf("write generated config: %v", err)
+	}
+	var parsed processComposeConfig
+	if err := yaml.Unmarshal([]byte(out.String()), &parsed); err != nil {
+		t.Fatalf("generated config invalid yaml: %v\n%s", err, out.String())
+	}
+	for _, name := range []string{
+		localProxyProcessName,
+		authServiceProcessName,
+		coreProcessName,
+		frontendProcessName,
+		milvusLiteProcessName,
+		processorServerProcessName,
+		algoProcessName,
+		docServerProcessName,
+		chatProcessName,
+	} {
+		if _, ok := parsed.Processes[name]; !ok {
+			t.Fatalf("warmup graph missing process %s", name)
+		}
+	}
+	for _, name := range []string{fileWatcherProcessName, scanControlPlaneProcessName, processorWorkerProcessName} {
+		if _, ok := parsed.Processes[name]; ok {
+			t.Fatalf("warmup graph unexpectedly contains process %s", name)
+		}
+	}
+	for name, process := range parsed.Processes {
+		for _, item := range process.Environment {
+			if strings.HasPrefix(item, "LAZYMIND_MAINTENANCE_MODE=") {
+				t.Fatalf("process %s received installer scenario environment: %s", name, item)
+			}
+		}
+	}
+}
+
+func TestInstallerWarmupDoesNotCreateFileWatcherImportDirectory(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:         defaultProfileValue(),
+		RepoRoot:        repo,
+		MaintenanceMode: installerWarmupMaintenanceMode,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	cfg.FileWatcher.WatchHostDir = filepath.Join(t.TempDir(), "Documents", "LazyMind")
+	if err := ensureRuntimeDirs(cfg, paths); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	if _, err := os.Stat(cfg.FileWatcher.WatchHostDir); !os.IsNotExist(err) {
+		t.Fatalf("warmup touched file watcher import directory %q: %v", cfg.FileWatcher.WatchHostDir, err)
+	}
+}
+
 func TestProcessComposeDesktopUsesHiddenWindowsShellWrapper(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows-specific process-compose shell")
@@ -821,6 +890,50 @@ func TestRuntimeManagerUpRequiresBundledLazyLLMSourceInDesktopProfile(t *testing
 	runner.assertCommandCount(0)
 }
 
+func TestRuntimeManagerUpRejectsForeignOwnerBeforePythonRelocation(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile:       "desktop",
+		OwnerToken:    "new-desktop-owner",
+		RepoRoot:      repo,
+		RuntimeRoot:   filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"),
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure dirs: %v", err)
+	}
+	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	state.OwnerToken = "old-desktop-owner"
+	state.OverallStatus = "running"
+	state.Services[processComposeServiceName] = RuntimeServiceState{Kind: "host-supervisor", Status: "running"}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	relocated := false
+	manager.relocatePythonVenvs = func(RuntimeConfig, RuntimePaths) error {
+		relocated = true
+		return nil
+	}
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+	err = manager.Up(context.Background(), cfg, paths)
+	if err == nil || !strings.Contains(err.Error(), "another application instance") {
+		t.Fatalf("runtime manager up error = %v, want owner conflict", err)
+	}
+	if relocated {
+		t.Fatal("Python relocation ran before active owner rejection")
+	}
+	if !strings.Contains(output.String(), `"event":"startup.failed"`) || !strings.Contains(output.String(), "another application instance") {
+		t.Fatalf("startup output did not preserve ownership failure: %s", output.String())
+	}
+}
+
 func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
@@ -853,6 +966,56 @@ func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	}
 	if svc.Kind != "host-supervisor" {
 		t.Fatalf("kind = %q, want host-supervisor", svc.Kind)
+	}
+}
+
+func TestUpdateProbedServiceMarksStartingServiceStale(t *testing.T) {
+	services := map[string]RuntimeServiceState{
+		scanControlPlaneProcessName: {Kind: "host-process", Status: "starting"},
+	}
+
+	if updateProbedService(services, scanControlPlaneProcessName, false) {
+		t.Fatal("unhealthy service reported healthy")
+	}
+	if got := services[scanControlPlaneProcessName].Status; got != "stale" {
+		t.Fatalf("status = %q, want stale", got)
+	}
+}
+
+func TestUpdateProbedServiceRejectsStoppedService(t *testing.T) {
+	services := map[string]RuntimeServiceState{
+		fileWatcherProcessName: {Kind: "host-process", Status: "stopped"},
+	}
+
+	if updateProbedService(services, fileWatcherProcessName, false) {
+		t.Fatal("stopped service reported healthy")
+	}
+	if got := services[fileWatcherProcessName].Status; got != "stopped" {
+		t.Fatalf("status = %q, want stopped", got)
+	}
+}
+
+func TestUpdateProbedServiceMarksHealthyServiceRunning(t *testing.T) {
+	services := map[string]RuntimeServiceState{}
+
+	if !updateProbedService(services, scanControlPlaneProcessName, true) {
+		t.Fatal("healthy service reported unhealthy")
+	}
+	service := services[scanControlPlaneProcessName]
+	if service.Status != "running" || service.Kind != "host-process" {
+		t.Fatalf("service = %+v, want running host-process", service)
+	}
+}
+
+func TestProcessComposeRuntimeStatusWaitsForAuthoritativeReady(t *testing.T) {
+	if got := processComposeRuntimeStatus("starting", true); got != "starting" {
+		t.Fatalf("status = %q, want starting", got)
+	}
+	if got := processComposeRuntimeStatus("ready", true); got != "ready" {
+		t.Fatalf("status = %q, want ready", got)
+	}
+	if got := processComposeRuntimeStatus("ready", false); got != "stale" {
+		t.Fatalf("status = %q, want stale", got)
 	}
 }
 

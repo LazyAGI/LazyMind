@@ -1,5 +1,5 @@
 # Copyright (c) 2026 LazyAGI. All rights reserved.
-"""Read-only tools for working with local files.
+"""Tools for reading, searching, and safely editing local text files.
 
 Provides local directory listing, filename search, text search, file reading,
 and file metadata lookup for local files made available to the current request.
@@ -26,7 +26,8 @@ from typing import Any, Dict, List, Optional
 
 import lazyllm
 
-from lazymind.chat.engine.tools.infra import tool_error, tool_success
+from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_error, tool_success
+from lazymind.chat.engine.tools.text_edit import replace_exact_text_file
 
 _RG_BINARY = shutil.which('rg') or ''
 _RG_TIMEOUT = 30
@@ -39,14 +40,14 @@ class LocalFSScope:
     file_extensions: frozenset[str]
 
 
-class LocalFSToolGroup:
-    """Read-only tools for listing, searching, and reading local files.
+class LocalFileToolkit:
+    """Tools for listing, searching, reading, and safely editing local text files.
 
     The tools can access only the local files and directories made available
     for the current request.
     """
 
-    __public_apis__ = ['ls', 'glob', 'grep', 'read', 'info']
+    __public_apis__ = ['ls', 'glob', 'grep', 'read', 'string_replace', 'info']
 
     def _get_scopes(self) -> List[LocalFSScope]:
         config = lazyllm.globals.get('agentic_config') or {}
@@ -164,6 +165,7 @@ class LocalFSToolGroup:
             capture_output=True, text=True, timeout=_RG_TIMEOUT, cwd=cwd,
         )
 
+    @handle_tool_errors
     def ls(self, path: Optional[str] = None, max_entries: int = 200) -> Dict[str, Any]:
         """List available local directories or one directory level.
 
@@ -214,6 +216,7 @@ class LocalFSToolGroup:
             'entries': entries,
         })
 
+    @handle_tool_errors
     def glob(self, pattern: str, path: Optional[str] = None) -> Dict[str, Any]:
         """Find local files whose names match a glob pattern.
 
@@ -247,6 +250,7 @@ class LocalFSToolGroup:
             'matches': matches[:200],
         })
 
+    @handle_tool_errors
     def grep(
         self,
         pattern: str,
@@ -376,6 +380,7 @@ class LocalFSToolGroup:
             'matches': matches,
         })
 
+    @handle_tool_errors
     def read(
         self,
         filepath: str,
@@ -415,6 +420,53 @@ class LocalFSToolGroup:
             'start_line': start_line,
             'end_line': start_line + len(chunk),
             'content': ''.join(chunk),
+        })
+
+    @handle_tool_errors
+    def string_replace(
+        self,
+        filepath: str,
+        old_string: str,
+        new_string: str,
+        expected_replacements: int = 1,
+        encoding: str = 'utf-8',
+    ) -> Dict[str, Any]:
+        """Replace an exact string in an available local text file.
+
+        The file is changed only when the number of exact matches equals
+        ``expected_replacements``. Use a multiline old_string with enough
+        surrounding context to make a local edit unambiguous.
+
+        Args:
+            filepath: Local text file path to edit.
+            old_string: Exact literal text to replace; must not be empty.
+            new_string: Replacement text, which may be empty.
+            expected_replacements: Required number of exact matches, default 1.
+            encoding: Text encoding used to decode and encode the file, default utf-8.
+
+        Returns:
+            Replacement count and updated file metadata. On mismatch or any
+            error, the original file remains unchanged.
+        """
+        safe_path, scope = self._resolve_with_scope(filepath)
+        if not os.path.isfile(safe_path):
+            raise FileNotFoundError(f'File not found: {filepath}')
+        self._ensure_visible_file(scope, safe_path)
+
+        replacement = replace_exact_text_file(
+            safe_path,
+            old_string,
+            new_string,
+            expected_replacements=expected_replacements,
+            encoding=encoding,
+        )
+
+        return tool_success('string_replace', {
+            'filepath': safe_path,
+            'source_id': scope.source_id,
+            'replacements': replacement.replacements,
+            'encoding': replacement.encoding,
+            'bytes': len(replacement.content),
         })
 
     def info(self, path: Optional[str] = None) -> Dict[str, Any]:

@@ -13,6 +13,48 @@ func TestMapChunkToSegmentBuildsSignedDisplayContent(t *testing.T) {
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
 
 	sourcePath := filepath.Join(root, ".image_cache", "doc-1", "images", "demo.jpg")
+	normalizedPath := filepath.Join(root, "normalized_images", "doc-1", "demo.jpg")
+	for _, path := range []string{sourcePath, normalizedPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create dir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("img"), 0o644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+	}
+
+	seg := mapChunkToSegment("dataset-1", "doc-1", map[string]any{
+		"uid":     "chunk-1",
+		"content": "demo.jpg",
+		"metadata": map[string]any{
+			"source_path":            sourcePath,
+			"normalized_source_path": normalizedPath,
+			"file_name":              "report.pdf",
+		},
+	})
+
+	if !strings.HasPrefix(seg.DisplayContent, "![report.pdf](/static-files/") {
+		t.Fatalf("expected signed markdown display content, got %q", seg.DisplayContent)
+	}
+	if !strings.Contains(seg.DisplayContent, "normalized_images/") {
+		t.Fatalf("expected display content to use normalized_source_path, got %q", seg.DisplayContent)
+	}
+	if strings.Contains(seg.DisplayContent, ".image_cache/") {
+		t.Fatalf("display content should not use volatile image_cache path, got %q", seg.DisplayContent)
+	}
+	if len(seg.ImageKeys) != 1 || !strings.HasPrefix(seg.ImageKeys[0], "/static-files/") {
+		t.Fatalf("expected signed image key, got %#v", seg.ImageKeys)
+	}
+	if !strings.Contains(seg.ImageKeys[0], "normalized_images/") {
+		t.Fatalf("expected image key from normalized_source_path, got %#v", seg.ImageKeys)
+	}
+}
+
+func TestMapChunkToSegmentFallsBackToSourcePath(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+
+	sourcePath := filepath.Join(root, "uploads", "standalone.jpg")
 	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
 		t.Fatalf("create dir: %v", err)
 	}
@@ -21,16 +63,16 @@ func TestMapChunkToSegmentBuildsSignedDisplayContent(t *testing.T) {
 	}
 
 	seg := mapChunkToSegment("dataset-1", "doc-1", map[string]any{
-		"uid":     "chunk-1",
-		"content": "demo.jpg",
+		"uid":     "chunk-2",
+		"content": "standalone.jpg",
 		"metadata": map[string]any{
 			"source_path": sourcePath,
-			"file_name":   "report.pdf",
+			"file_name":   "standalone.jpg",
 		},
 	})
 
-	if !strings.HasPrefix(seg.DisplayContent, "![report.pdf](/static-files/") {
-		t.Fatalf("expected signed markdown display content, got %q", seg.DisplayContent)
+	if !strings.Contains(seg.DisplayContent, "standalone.jpg") {
+		t.Fatalf("expected fallback to source_path, got %q", seg.DisplayContent)
 	}
 	if len(seg.ImageKeys) != 1 || !strings.HasPrefix(seg.ImageKeys[0], "/static-files/") {
 		t.Fatalf("expected signed image key, got %#v", seg.ImageKeys)

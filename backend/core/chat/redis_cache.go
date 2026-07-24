@@ -49,25 +49,29 @@ type MultiAnswerInfo struct {
 }
 
 type ChatChunkResponse struct {
-	ConversationID    string             `json:"conversation_id"`
-	Seq               int32              `json:"seq"`
-	Message           string             `json:"message"`
-	Delta             string             `json:"delta"`
-	FinishReason      string             `json:"finish_reason"`
-	HistoryID         string             `json:"history_id"`
-	Sources           []any              `json:"sources,omitempty"`
-	PromptQuestions   []string           `json:"prompt_questions,omitempty"`
-	ReasoningContent  string             `json:"reasoning_content,omitempty"`
-	ThinkingDurationS int64              `json:"thinking_duration_s,omitempty"`
-	ToolCallTurns     int                `json:"tool_call_turns,omitempty"`
-	TaskCreated       *TaskCreatedNotice `json:"task_created,omitempty"`
-	AskPending        *AskPendingEvent   `json:"ask_pending,omitempty"`
+	ConversationID    string                   `json:"conversation_id"`
+	Seq               int32                    `json:"seq"`
+	Message           string                   `json:"message"`
+	Delta             string                   `json:"delta"`
+	FinishReason      string                   `json:"finish_reason"`
+	HistoryID         string                   `json:"history_id"`
+	Sources           []any                    `json:"sources,omitempty"`
+	PromptQuestions   []string                 `json:"prompt_questions,omitempty"`
+	ReasoningContent  string                   `json:"reasoning_content,omitempty"`
+	ThinkingDurationS int64                    `json:"thinking_duration_s,omitempty"`
+	ToolCallTurns     int                      `json:"tool_call_turns,omitempty"`
+	TaskCreated       *TaskCreatedNotice       `json:"task_created,omitempty"`
+	ArtifactCreated   *ConversationArtifactDTO `json:"artifact_created,omitempty"`
+	AskPending        *AskPendingEvent         `json:"ask_pending,omitempty"`
+	ToolLimitPending  *ToolLimitPendingEvent   `json:"tool_limit_pending,omitempty"`
+	IntentUpdated     *IntentUpdatedEvent      `json:"intent_updated,omitempty"`
 }
 
 // TaskCreatedNotice notifies the frontend (main SSE) that a SubAgent task was created,
 // so it can subscribe to the corresponding Task SSE stream.
 type TaskCreatedNotice struct {
 	TaskID            string `json:"task_id"`
+	TriggerHistoryID  string `json:"trigger_history_id"`
 	Title             string `json:"title"`
 	AgentType         string `json:"agent_type"`
 	Mode              string `json:"mode"`
@@ -260,7 +264,7 @@ func getMultiAnswerInfo(ctx context.Context, stateStore state.Store, conversatio
 // ConvEvent is a conversation-level notification pushed to the frontend via the
 // /conversations/{id}/events SSE endpoint. It is independent of any chat turn.
 type ConvEvent struct {
-	Type    string `json:"type"`    // task_created | step_waiting | plugin_completed | plugin_error | driver_input | auto_chat_started | ask_pending
+	Type    string `json:"type"`    // task_created | plugin_artifact_updated | step_waiting | plugin_completed | plugin_error | driver_input | auto_chat_started | ask_pending
 	Payload any    `json:"payload"` // *TaskCreatedNotice or plugin lifecycle payload map
 }
 

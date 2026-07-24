@@ -46,7 +46,7 @@ when_to_use: >                       # 【最关键】触发判断依据，拼�
 tool_scripts:                        # 可选：插件自定义工具脚本列表
   - path: scripts/tools.py           # 相对于插件目录的 Python 文件路径
     functions:                       # 要从该文件导入并注册为工具的函数名列表
-      - web_search_tool
+      - web_search
       - image_search_tool
 
 steps:                               # 步骤 UI 声明（仅供前端展示，执行逻辑在 state.yml）
@@ -166,11 +166,13 @@ steps:
       Your task:
       1. Do something useful.
       2. Save the result:
-           save_artifact(key='my_output', content_type='text', value=<result>)
+           save_artifacts(artifacts=[
+             {'key': 'my_output', 'content_type': 'text', 'value': <result>}
+           ])
 
       Stop after saving.
     tools:                        # 可选：该步骤 SubAgent 可用的工具名列表
-      - web_search_tool           # 框架工具（save_artifact 等）始终自动注入，无需声明
+      - web_search                # ToolConfig 名；Toolkit 会作为整体注册并按需展开
     inputs:                       # 有序输入列表；required 决定是否阻塞 Ready
       - material: revised_outline
         required: true
@@ -426,5 +428,5 @@ slots:                    # 在 plugin.yaml 中定义
     cardinality: list
     ordered: true
 
-# SubAgent 多次调用 save_artifact(key='image_list', ...)，每次追加一项
+# SubAgent 调用 save_artifacts(artifacts=[{'key': 'image_list', ...}]) 追加内容
 ```

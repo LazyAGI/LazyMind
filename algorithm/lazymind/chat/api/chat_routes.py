@@ -2,7 +2,7 @@ from typing import Annotated, Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Body, Header, Response
 from lazymind.chat.service.chat_request import ChatRequest
-from lazymind.chat.service.chat_service import handle_chat
+from lazymind.chat.service.chat_service import check_sensitive_content, handle_chat
 from lazymind.chat.service.component import get_all_tool_groups, normalize_tool_locale
 from lazymind.model_config import inject_model_config
 from lazyllm.tools.tool_config_inject import inject_tool_config
@@ -10,7 +10,13 @@ from lazyllm.tools.tool_config_inject import inject_tool_config
 router = APIRouter()
 
 
-@router.post('/api/chat/tools', summary='List all tool groups with their methods')
+@router.post('/api/chat/sensitive-check', summary='Check text against the configured sensitive-word list')
+async def sensitive_check(payload: Annotated[Dict[str, Any], Body()]):
+    matched_word = check_sensitive_content(str(payload.get('text') or ''))
+    return {'passed': matched_word is None, 'matched_word': matched_word}
+
+
+@router.post('/api/chat/tools', summary='List the tool catalog and Toolkit methods')
 async def list_chat_tools(
     response: Response,
     llm_config: Annotated[
@@ -63,4 +69,20 @@ async def chat(
         ),
     ],
 ):
+    return await handle_chat(request)
+
+
+@router.post('/api/chat/context-usage', summary='Estimate next-request ChatAgent context usage')
+async def context_usage(
+    request: Annotated[ChatRequest, Body(description='Same structured request as chat preview.')],
+):
+    request.runtime.context_usage_preview = True
+    return await handle_chat(request)
+
+
+@router.post('/api/chat/context-prompt', summary='Export next-request ChatAgent context')
+async def context_prompt(
+    request: Annotated[ChatRequest, Body(description='Same structured request as chat preview.')],
+):
+    request.runtime.context_prompt_export = True
     return await handle_chat(request)

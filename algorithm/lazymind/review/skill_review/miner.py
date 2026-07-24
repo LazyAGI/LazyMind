@@ -227,21 +227,17 @@ def _normalize_candidate_payload(
     source_trajectories: list[str],
     source_skills: dict[str, str],
 ) -> dict[str, Any]:
-    skill_name = str(payload.get('skill_name') or '').strip()
-    applicable_scenario = str(payload.get('applicable_scenario') or '').strip()
+    skill_name = str(payload.get('name') or '').strip()
     content = str(payload.get('content') or '').strip()
     if not skill_name:
-        raise ValueError('candidate payload must contain skill_name')
-    if not applicable_scenario:
-        raise ValueError('candidate payload must contain applicable_scenario')
+        raise ValueError('candidate payload must contain name')
     if not content:
         raise ValueError('candidate payload must contain content')
     return {
         'skill_name': skill_name,
-        'category': str(payload.get('category') or 'general'),
         'source_trajectories': source_trajectories,
         'source_skills': source_skills,
-        'applicable_scenario': applicable_scenario,
+        'applicable_scenario': outline.applicable_scenario,
         'content': content + '\n',
         'outline': outline.model_dump(),
     }

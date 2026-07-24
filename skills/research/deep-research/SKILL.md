@@ -1,13 +1,13 @@
 ---
 name: deep-research
-description: Use this skill instead of WebSearch for ANY question requiring comprehensive, multi-source research. Trigger on queries explicitly asking for deep analysis, such as "research X", "deep dive into X", "comprehensive review of X", "systematic comparison between X and Y", "investigate the landscape of X", or Chinese equivalents like "调研一下X", "深入研究X", "全面对比X与Y", "X的详细综述", "深度调查X". Do NOT trigger on simple factual questions. Provides systematic multi-angle research methodology, prioritizing internal knowledge base (KB) searches before performing broad web searches. Use this proactively when the user's question needs extensive information gathering and synthesis.
+description: Use only when the user explicitly requests comprehensive multi-source research, such as "research X", "deep dive into X", "comprehensive review of X", "systematic comparison between X and Y", "investigate the landscape of X", or Chinese equivalents like "调研一下X", "深入研究X", "全面对比X与Y", "X的详细综述", "深度调查X". Do NOT trigger for simple questions, how-to guidance, ordinary recommendations, or content creation merely because research could improve the answer. Follow the source priorities supplied by the system and the user.
 ---
 
 # Deep Research Skill
 
 ## Overview
 
-This skill provides a systematic methodology for conducting thorough research. **Load this skill BEFORE starting any content generation task** to ensure you gather sufficient information from multiple angles, depths, and sources. Always prioritize searching the internal Knowledge Base (KB) before reaching out to the open web.
+This skill provides a systematic methodology for genuinely comprehensive research. Load it only when the user explicitly asks for deep, systematic, multi-source investigation or when the requested deliverable inherently requires such research. Do not load it for a normal answer, introductory explanation, how-to question, or ordinary content-generation request.
 
 ## When to Use This Skill
 
@@ -16,15 +16,11 @@ This skill provides a systematic methodology for conducting thorough research. *
 ### Research Questions
 - User asks for comprehensive analysis: "research X", "deep dive into X", "detailed comparison of X and Y", "investigate the landscape of X", "thorough analysis of X"
 - User uses Chinese research triggers: "调研一下X", "深入分析X", "全面调查X", "X与Y的深度对比", "详细梳理X的发展历程", "X的现状与未来趋势"
-- User wants to understand a *complex* concept, technology, or topic in depth, rather than just seeking a simple definition.
-- The question requires synthesizing current, comprehensive information from multiple distinct sources (Internal KB + Web).
+- User explicitly wants to understand a *complex* concept, technology, or topic in depth, rather than seeking normal guidance.
+- The question requires synthesizing current, comprehensive information from multiple distinct sources.
 - A single web search or factual retrieval would be explicitly insufficient to answer properly.
 
-### Content Generation (Pre-research)
-- Creating presentations (PPT/slides)
-- Writing articles, reports, or documentation
-- Producing videos or multimedia content
-- Any content that requires real-world information, examples, or current data
+Do **not** infer deep-research intent merely because the topic is broad or because the user wants to create a presentation, article, report, video, or other content.
 
 ## Core Principle
 
@@ -32,19 +28,20 @@ This skill provides a systematic methodology for conducting thorough research. *
 
 ## Research Methodology
 
-### Phase 1: Internal Knowledge Base (KB) Retrieval
+### Phase 1: Material Retrieval and Source Planning
 
-Always start by checking if the required information already exists internally.
+Identify the evidence needed, then retrieve material from the sources prioritized or permitted by the system instructions and the user's request. Sources may include internal documents, public web pages, academic collections, user-provided files, or specific URLs. Do not assume a source priority, probe for sources that were not offered, or override the host system's routing rules.
 
-1. **Semantic Search**: Use `kb_search` with natural language queries to find conceptual matches.
-2. **Keyword Search**: Use `kb_keyword_search` for exact terminology, product names, or specific jargon.
-3. **Context Expansion**: If you find relevant nodes, optionally use `kb_get_window_nodes` or `kb_get_parent_node` to understand the full context of the internal documents.
+1. **Define Evidence Needs**: Break the question into facts, examples, viewpoints, and time-sensitive claims that require support.
+2. **Choose Appropriate Sources**: Match each evidence need to the source types and retrieval capabilities made available for this task.
+3. **Retrieve Initial Material**: Use precise semantic, keyword, or document-scoped queries as appropriate.
+4. **Assess Coverage**: Record which dimensions are supported and which still contain gaps or conflicting evidence.
 
-*Decision Gate: Evaluate the KB results. If the KB contains comprehensive, up-to-date answers covering all dimensions of the user's query, you may skip to Phase 4. If information is missing, outdated, or incomplete, proceed to Phase 2.*
+*Decision Gate: If the retrieved material is sufficiently current, diverse, and complete, proceed to Phase 4. Otherwise continue with broader exploration using other permitted sources.*
 
-### Phase 2: Broad Web Exploration
+### Phase 2: Broad Exploration
 
-If KB results are insufficient, turn to the web using `web_search` to map the external landscape:
+Use the permitted search or retrieval capabilities to map the broader landscape:
 
 1. **Initial Survey**: Search for the main topic to understand the overall context
 2. **Identify Dimensions**: From initial results, identify key subtopics, themes, angles, or aspects that need deeper exploration
@@ -71,9 +68,9 @@ Identified dimensions:
 
 For each important dimension identified in Phase2, conduct targeted research:
 
-1. **Specific Queries**: Use `web_search` with precise keywords for each subtopic.
+1. **Specific Queries**: Use the selected search or retrieval capability with precise keywords for each subtopic.
 2. **Multiple Phrasings**: Try different keyword combinations and phrasings
-3. **Fetch Full Content**: Use the `url_fetch` tool to read important sources in full, not just snippets.
+3. **Read Full Content**: Read important sources in full when summaries or snippets are insufficient.
 4. **Follow References**: When sources mention other important resources, search for those too
 
 
@@ -108,9 +105,9 @@ Ensure comprehensive coverage by seeking diverse information types:
 
 Before proceeding to content generation, verify:
 
-- [ ] Did I check the internal KB first?
+- [ ] Did I follow the source priorities established by the system and the user?
 - [ ] Have I searched from at least 3-5 different angles?
-- [ ] Have I used `url_fetch` to read the most important web sources in full?
+- [ ] Have I read the most important sources in full rather than relying only on snippets?
 - [ ] Do I have concrete data, examples, and expert perspectives?
 - [ ] Have I explored both positive aspects and challenges/limitations?
 - [ ] Is my information current and from authoritative sources?
@@ -163,9 +160,9 @@ Before proceeding to content generation, verify:
 ❌ User asks "what's new in tech today" → searching `"new technology 2026"` → misses today's news
 ✅ User asks "what's new in tech today" → searching `"new technology February 28 2026"` + `"tech news today Feb 28"` → gets today's results
 
-### When to Use url_fetch
+### When to Read Full Sources
 
-Use `url_fetch` to read full content when:
+Read the full content of a source when:
 - A search result looks highly relevant and authoritative
 - You need detailed information beyond the snippet
 - The source contains data, case studies, or expert analysis
@@ -191,6 +188,9 @@ Your research is sufficient when you can confidently answer:
 
 ## Common Mistakes to Avoid
 
+- ❌ Loading this skill for a simple how-to or ordinary content-creation question
+- ❌ Overriding the source routing or priorities supplied by the system or the user
+- ❌ Probing framework-specific sources that were not made available for the task
 - ❌ Stopping after 1-2 searches
 - ❌ Relying on search snippets without reading full sources
 - ❌ Searching only one aspect of a multi-faceted topic

@@ -20,14 +20,14 @@ async def check_model_connection(
             url=url,
             api_key=api_key,
         )
-        result = module('hi')
+        if not module._validate_api_key():
+            raise RuntimeError('API key validation failed')
         return {
             'success': True,
             'message': 'model connection is available',
             'model': model,
             'source': source,
             'url': url,
-            'result': result,
         }
     except Exception as exc:
         return {

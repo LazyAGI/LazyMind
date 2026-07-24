@@ -35,9 +35,11 @@ _ROUTER_CONFIG_DEFAULTS: dict = {
     'router_ports_per_instance': 100,
     'router_default_algo_path': '/opt/lazymind/chat',
     'router_default_instance_count': 1,
+    'router_child_processes_enabled': True,
     'router_host': '127.0.0.1',
     'core_database_url': 'sqlite+aiosqlite://',
     'enable_router': False,
+    'background_jobs_enabled': True,
 }
 
 

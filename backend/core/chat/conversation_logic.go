@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -292,7 +291,7 @@ func buildAskUserToolResultContent(
 	questionsRaw, _ := askPendingData["questions"].([]any)
 
 	if askStructured != nil {
-		lines := []string{"Questions were shown to the user via an interactive card. The user submitted all answers.", ""}
+		lines := []string{"Questions were shown via an interactive card. The user submitted the form; some answers may be omitted.", ""}
 		for i, sq := range askStructured.Questions {
 			prefix := fmt.Sprintf("Q%d: %s", i+1, sq.Text)
 			if len(sq.Choices) > 0 {
@@ -414,14 +413,34 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 }
 
 var askUserToolResultPattern = regexp.MustCompile(`(?s)(<tool_result\b[^>]*>)Question sent to user \(ask_id=[^)]+\)\.(</tool_result>)`)
+var toolResultBlockPattern = regexp.MustCompile(`(?s)<tool_result\b[^>]*>.*?</tool_result>`)
 
 // replaceAskUserToolResult replaces the placeholder ask_user tool_result content
 // in an assistant message with enriched context so the LLM understands the state.
 func replaceAskUserToolResult(assistantContent, newContent string) string {
-	if !strings.Contains(assistantContent, "Question sent to user") {
-		return assistantContent
-	}
-	return askUserToolResultPattern.ReplaceAllString(assistantContent, "${1}"+newContent+"${2}")
+	replaced := askUserToolResultPattern.ReplaceAllString(
+		assistantContent, "${1}"+newContent+"${2}",
+	)
+	return toolResultBlockPattern.ReplaceAllStringFunc(replaced, func(block string) string {
+		openEnd := strings.Index(block, ">")
+		closeStart := strings.LastIndex(block, "</tool_result>")
+		if openEnd < 0 || closeStart <= openEnd {
+			return block
+		}
+		var payload map[string]any
+		if json.Unmarshal([]byte(block[openEnd+1:closeStart]), &payload) != nil {
+			return block
+		}
+		if name, _ := payload["name"].(string); name != "ask_user" {
+			return block
+		}
+		payload["result"] = newContent
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return block
+		}
+		return block[:openEnd+1] + string(encoded) + block[closeStart:]
+	})
 }
 
 const chatActionRegeneration = "CHAT_ACTION_REGENERATION"
@@ -505,7 +524,11 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 	if input == nil {
 		return nil
 	}
-	b, err := json.Marshal(map[string]any{"input": input})
+	ext := map[string]any{"input": input}
+	if mentions, ok := raw["mentions"].([]any); ok && len(mentions) > 0 {
+		ext["mentions"] = mentions
+	}
+	b, err := json.Marshal(ext)
 	if err != nil {
 		return nil
 	}
@@ -513,6 +536,9 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 }
 
 func chatHistoryInput(raw map[string]any, query string) any {
+	if displayQuery, ok := raw["display_query"].(string); ok && strings.TrimSpace(displayQuery) != "" {
+		return []any{map[string]any{"input_type": "text", "text": strings.TrimSpace(displayQuery)}}
+	}
 	if in, ok := raw["input"].([]any); ok && len(in) > 0 {
 		return in
 	}
@@ -682,6 +708,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	filesMap := filesPerTurnMap(histories, currentFilePaths, currentSeq)
 	body := map[string]any{
 		"query":            query,
+		"user_query":       query,
 		"session_id":       sessionID,
 		"conversation_id":  convID,
 		"history":          buildHistoryMessages(histories, askAnswersStructuredFromRaw(raw)),
@@ -691,10 +718,22 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"databases":        raw["databases"],
 		"debug":            raw["debug"],
 		"reasoning":        resolveReasoning(raw),
+		"thinking_depth":   resolveThinkingDepth(raw),
 		"priority":         raw["priority"],
 		"use_memory":       useMemory,
 		"user_id":          strings.TrimSpace(userID),
 		"mode":             mode,
+		"intent_context":   loadConversationIntentContext(ctx, db, convID),
+	}
+	requestDisabledTools := stringSliceFromAny(raw["disabled_tools"])
+	if len(requestDisabledTools) > 0 {
+		body["disabled_tools"] = requestDisabledTools
+	}
+	if skip, ok := raw["skip_sensitive_filter"].(bool); ok && skip {
+		body["skip_sensitive_filter"] = true
+	}
+	if mentionContext := buildMentionResourceContext(ctx, db, userID, histories, raw); mentionContext != "" {
+		body["query"] = mentionContext + "\n\nUser query:\n" + query
 	}
 	if environmentContext, ok := raw["environment_context"].(map[string]any); ok {
 		body["environment_context"] = environmentContext
@@ -718,7 +757,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		body["plugin_context"] = mergedPC
 	}
 	if resourceContext != nil {
-		body["disabled_tools"] = resourceContext.DisabledTools
+		body["disabled_tools"] = mergeDisabledToolNames(
+			requestDisabledTools, resourceContext.DisabledTools,
+		)
 		body["available_skills"] = resourceContext.AvailableSkills
 		if useMemory {
 			body["memory"] = resourceContext.Memory
@@ -837,6 +878,16 @@ func resolveReasoning(raw map[string]any) bool {
 		return value
 	}
 	return true
+}
+
+func resolveThinkingDepth(raw map[string]any) string {
+	if value, ok := raw["thinking_depth"].(string); ok {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "low", "medium", "high", "max":
+			return strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	return "medium"
 }
 
 func datasetIDsFromSearchConfig(sc map[string]any) []string {
@@ -1061,6 +1112,13 @@ func handleStreamChat(
 	streamDualAnswer(chatCtx, reqCtx, w, flusher, db, stateStore, baseURL, reqBody, convID, query, historyID, secondaryHistoryID, target, historyExt)
 }
 
+func elapsedThinkingSeconds(elapsed time.Duration) int64 {
+	if elapsed <= 0 {
+		return 1
+	}
+	return int64((elapsed + time.Second - 1) / time.Second)
+}
+
 func streamSingleAnswer(
 	chatCtx, reqCtx context.Context,
 	w http.ResponseWriter,
@@ -1099,7 +1157,43 @@ func streamSingleAnswer(
 	var toolCallTurns int
 	var sources []any
 	var pendingAskPending any
+	var pendingConversationIntent *IntentUpdatedEvent
 	thinkStart := time.Now()
+	var thinkingDurationS int64
+	var thinkingActive bool
+	var sawToolResultPreview bool
+	progressRowCreated := target.IsRegeneration && target.Existing != nil
+	persistThinkingProgress := func() {
+		partialResult := fullResult
+		if pendingThink != "" {
+			partialResult += "<think>" + pendingThink + "</think>"
+		}
+		values := map[string]any{
+			"seq":                 seq,
+			"raw_content":         query,
+			"content":             query,
+			"result":              partialResult,
+			"thinking_duration_s": thinkingDurationS,
+			"ext":                 historyExt,
+			"update_time":         time.Now(),
+		}
+		if progressRowCreated {
+			if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(values).Error; err != nil {
+				log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to persist thinking progress")
+			}
+			return
+		}
+		now := time.Now()
+		if err := db.Create(&orm.ChatHistory{
+			ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query,
+			Result: partialResult, ThinkingDurationS: thinkingDurationS, Ext: historyExt,
+			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+		}).Error; err != nil {
+			log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to create thinking progress")
+			return
+		}
+		progressRowCreated = true
+	}
 	// text：textConversation/text，finish_reason text UNSPECIFIED
 	writeSSEChunk(w, flusher, &ChatChunkResponse{
 		ConversationID:    convID,
@@ -1114,6 +1208,13 @@ func streamSingleAnswer(
 		ThinkingDurationS: 0,
 	})
 	for d := range ch {
+		if d.ArtifactCreated != nil {
+			persistAndPublishConversationArtifact(
+				chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
+				convID, historyID, seq, d.ArtifactCreated,
+			)
+			continue
+		}
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
 			pluginModeForTask := pluginModeFromReqBody(reqBody)
@@ -1182,8 +1283,34 @@ func streamSingleAnswer(
 			}
 			continue
 		}
+		if d.ToolLimitPending != nil {
+			limitChunk := &ChatChunkResponse{
+				ConversationID:   convID,
+				Seq:              int32(seq),
+				HistoryID:        historyID,
+				FinishReason:     "FINISH_REASON_UNSPECIFIED",
+				ToolLimitPending: d.ToolLimitPending,
+			}
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, limitChunk)
+			}
+			if stateStore != nil {
+				_ = appendChatChunk(chatCtx, stateStore, convID, historyID, limitChunk)
+			}
+			continue
+		}
 		if d.IntentUpdated != nil {
-			handleIntentUpdated(chatCtx, db, stateStore, convID, d.IntentUpdated)
+			updated := handleIntentUpdated(chatCtx, db, stateStore, convID, d.IntentUpdated)
+			if updated != nil {
+				pendingConversationIntent = updated
+				intentChunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, FinishReason: "FINISH_REASON_UNSPECIFIED", IntentUpdated: updated}
+				if reqCtx.Err() == nil {
+					writeSSEChunk(w, flusher, intentChunk)
+				}
+				if stateStore != nil {
+					_ = appendChatChunk(chatCtx, stateStore, convID, historyID, intentChunk)
+				}
+			}
 			continue
 		}
 		if d.PluginPreflightUpdated != nil {
@@ -1191,16 +1318,57 @@ func streamSingleAnswer(
 			continue
 		}
 		if d.Heartbeat {
+			if thinkingActive {
+				nextDuration := elapsedThinkingSeconds(time.Since(thinkStart))
+				if nextDuration != thinkingDurationS {
+					thinkingDurationS = nextDuration
+					persistThinkingProgress()
+					thinkingChunk := &ChatChunkResponse{
+						ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
+						FinishReason: "FINISH_REASON_UNSPECIFIED", ThinkingDurationS: thinkingDurationS,
+					}
+					if reqCtx.Err() == nil {
+						writeSSEChunk(w, flusher, thinkingChunk)
+					}
+					if stateStore != nil {
+						_ = appendChatChunk(chatCtx, stateStore, convID, historyID, thinkingChunk)
+					}
+				}
+			}
 			continue
 		}
 		if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > toolCallTurns {
 			toolCallTurns = next
 		}
 		if d.ReasoningText != "" {
+			thinkingActive = true
 			pendingThink += d.ReasoningText
+			thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
+			persistThinkingProgress()
+			thinkingChunk := &ChatChunkResponse{
+				ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
+				FinishReason: "FINISH_REASON_UNSPECIFIED", ThinkingDurationS: thinkingDurationS,
+			}
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, thinkingChunk)
+			}
+			if stateStore != nil {
+				_ = appendChatChunk(chatCtx, stateStore, convID, historyID, thinkingChunk)
+			}
 			continue
 		}
+		hasToolPreview := strings.Contains(d.Text, "<tp") || strings.Contains(d.Text, "<trp")
+		if hasToolPreview {
+			thinkingActive = true
+			thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
+			if strings.Contains(d.Text, "<trp") {
+				sawToolResultPreview = true
+			}
+		} else if sawToolResultPreview && d.Text != "" {
+			thinkingActive = false
+		}
 		if pendingThink != "" {
+			thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
 			fullResult += "<think>" + pendingThink + "</think>"
 			pendingThink = ""
 		}
@@ -1223,7 +1391,7 @@ func streamSingleAnswer(
 			Sources:           sources,
 			PromptQuestions:   []string{},
 			ReasoningContent:  "",
-			ThinkingDurationS: int64(time.Since(thinkStart).Seconds()),
+			ThinkingDurationS: thinkingDurationS,
 		}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, chunk)
@@ -1235,43 +1403,59 @@ func streamSingleAnswer(
 	now := time.Now()
 	retrievalResult := marshalRetrievalResult(sources)
 	if pendingThink != "" {
+		thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
 		fullResult += "<think>" + pendingThink + "</think>"
 	}
 	// Persist ask_pending into ext so the ask card survives page reload.
 	if pendingAskPending != nil {
 		historyExt = mergeAskPendingIntoExt(historyExt, pendingAskPending)
 	}
+	if pendingConversationIntent != nil {
+		historyExt = mergeIntentUpdatedIntoExt(historyExt, pendingConversationIntent)
+	}
 	persisted := false
 	if target.IsRegeneration && target.Existing != nil {
 		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
-			"seq":              seq,
-			"raw_content":      query,
-			"content":          query,
-			"result":           fullResult,
-			"tool_call_turns":  toolCallTurns,
-			"retrieval_result": retrievalResult,
-			"feed_back":        0,
-			"reason":           "",
-			"expected_answer":  "",
-			"ext":              historyExt,
-			"update_time":      now,
+			"seq":                 seq,
+			"raw_content":         query,
+			"content":             query,
+			"result":              fullResult,
+			"tool_call_turns":     toolCallTurns,
+			"thinking_duration_s": thinkingDurationS,
+			"retrieval_result":    retrievalResult,
+			"feed_back":           0,
+			"reason":              "",
+			"expected_answer":     "",
+			"ext":                 historyExt,
+			"update_time":         now,
 		}).Error; err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to update stream chat history")
 		} else {
 			persisted = true
 		}
+	} else if progressRowCreated {
+		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
+			"seq": seq, "raw_content": query, "content": query, "result": fullResult,
+			"tool_call_turns": toolCallTurns, "thinking_duration_s": thinkingDurationS,
+			"retrieval_result": retrievalResult, "ext": historyExt, "update_time": now,
+		}).Error; err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to finalize stream chat history")
+		} else {
+			persisted = true
+		}
 	} else {
 		if err := db.Create(&orm.ChatHistory{
-			ID:              historyID,
-			Seq:             seq,
-			ConversationID:  convID,
-			RawContent:      query,
-			RetrievalResult: retrievalResult,
-			Content:         query,
-			Result:          fullResult,
-			ToolCallTurns:   toolCallTurns,
-			Ext:             historyExt,
-			TimeMixin:       orm.TimeMixin{CreateTime: now, UpdateTime: now},
+			ID:                historyID,
+			Seq:               seq,
+			ConversationID:    convID,
+			RawContent:        query,
+			RetrievalResult:   retrievalResult,
+			Content:           query,
+			Result:            fullResult,
+			ToolCallTurns:     toolCallTurns,
+			ThinkingDurationS: thinkingDurationS,
+			Ext:               historyExt,
+			TimeMixin:         orm.TimeMixin{CreateTime: now, UpdateTime: now},
 		}).Error; err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to save stream chat history")
 		} else {
@@ -1283,6 +1467,14 @@ func streamSingleAnswer(
 	}
 	if persisted {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
+		// Reaching this point means the upstream SSE channel has closed and the
+		// final history payload was persisted. Intermediate thinking persistence
+		// never reaches this update.
+		if err := db.Model(&orm.TaskCenterTask{}).
+			Where("conversation_id = ? AND task_type = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", convID, "background_chat").
+			Updates(map[string]any{"status": "succeeded", "finished_at": now, "updated_at": now}).Error; err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Msg("failed to finish background task after SSE close")
+		}
 	}
 	if persisted && !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
@@ -1303,11 +1495,55 @@ func streamSingleAnswer(
 			PromptQuestions: []string{},
 			// Do not replay reasoning on final message frame.
 			ReasoningContent:  "",
-			ThinkingDurationS: int64(time.Since(thinkStart).Seconds()),
+			ThinkingDurationS: thinkingDurationS,
 			ToolCallTurns:     toolCallTurns,
 		})
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
+	}
+}
+
+// persistAndPublishConversationArtifact is the shared main-Agent artifact path
+// for single-answer and multi-answer streams. Persist first so every client
+// notification refers to an artifact that is already queryable after refresh.
+func persistAndPublishConversationArtifact(
+	chatCtx, reqCtx context.Context,
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	db *gorm.DB,
+	stateStore state.Store,
+	reqBody map[string]any,
+	convID, historyID string,
+	seq int,
+	event *ArtifactCreatedEvent,
+) {
+	userID := userIDFromChatRequestBody(reqBody)
+	if userID == "" {
+		userID = "0"
+	}
+	notice, err := persistConversationArtifact(
+		chatCtx, db, convID, historyID, userID, event,
+	)
+	if err != nil {
+		log.Logger.Error().Err(err).Str("conversation_id", convID).
+			Str("history_id", historyID).Msg("persist main chat artifact failed")
+		return
+	}
+	chunk := &ChatChunkResponse{
+		ConversationID:  convID,
+		Seq:             int32(seq),
+		HistoryID:       historyID,
+		FinishReason:    "FINISH_REASON_UNSPECIFIED",
+		ArtifactCreated: notice,
+	}
+	if reqCtx.Err() == nil {
+		writeSSEChunk(w, flusher, chunk)
+	}
+	if stateStore != nil {
+		_ = appendChatChunk(chatCtx, stateStore, convID, historyID, chunk)
+		_ = AppendConvEvent(chatCtx, stateStore, convID, &ConvEvent{
+			Type: "artifact_created", Payload: notice,
+		})
 	}
 }
 
@@ -1354,12 +1590,39 @@ func streamDualAnswer(
 	var primaryResult, secondaryResult string
 	var primaryPendingThink, secondaryPendingThink string
 	var primaryToolCallTurns, secondaryToolCallTurns int
+	thinkStart := time.Now()
+	var primaryThinkingDurationS, secondaryThinkingDurationS int64
+	primaryProgressCreated, secondaryProgressCreated := false, false
+	persistProgress := func(id, result, pending string, duration int64, created *bool) {
+		partialResult := result
+		if pending != "" {
+			partialResult += "<think>" + pending + "</think>"
+		}
+		if *created {
+			_ = db.Model(&orm.MultiAnswersChatHistory{}).Where("id = ?", id).Updates(map[string]any{
+				"result": partialResult, "thinking_duration_s": duration, "update_time": time.Now(),
+			}).Error
+			return
+		}
+		now := time.Now()
+		if err := db.Create(&orm.MultiAnswersChatHistory{
+			ID: id, Seq: seq, ConversationID: convID, RawContent: query, Content: query,
+			Result: partialResult, ThinkingDurationS: duration, Ext: historyExt,
+			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+		}).Error; err == nil {
+			*created = true
+		}
+	}
 	primaryDone := primaryCh == nil
 	secondaryDone := secondaryCh == nil
-	var writeMu sync.Mutex
 	appendPrimary := func(delta, reasoning string, sources []any) {
 		if reasoning != "" {
 			primaryPendingThink += reasoning
+			primaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
+			persistProgress(historyID, primaryResult, primaryPendingThink, primaryThinkingDurationS, &primaryProgressCreated)
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, map[string]any{"conversation_id": convID, "seq": seq, "history_id": historyID, "thinking_duration_s": primaryThinkingDurationS})
+			}
 			return
 		}
 		if primaryPendingThink != "" {
@@ -1373,12 +1636,10 @@ func streamDualAnswer(
 			return
 		}
 		if reqCtx.Err() == nil {
-			writeMu.Lock()
 			writeSSEChunk(w, flusher, map[string]any{
 				"conversation_id": convID, "seq": seq, "delta": delta, "history_id": historyID,
 				"sources": sources,
 			})
-			writeMu.Unlock()
 		}
 		if stateStore != nil {
 			_ = appendChatChunk(chatCtx, stateStore, convID, historyID, &ChatChunkResponse{
@@ -1390,6 +1651,11 @@ func streamDualAnswer(
 	appendSecondary := func(delta, reasoning string, sources []any) {
 		if reasoning != "" {
 			secondaryPendingThink += reasoning
+			secondaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
+			persistProgress(secondaryHistoryID, secondaryResult, secondaryPendingThink, secondaryThinkingDurationS, &secondaryProgressCreated)
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, map[string]any{"conversation_id": convID, "seq": seq, "history_id": secondaryHistoryID, "thinking_duration_s": secondaryThinkingDurationS})
+			}
 			return
 		}
 		if secondaryPendingThink != "" {
@@ -1403,12 +1669,10 @@ func streamDualAnswer(
 			return
 		}
 		if reqCtx.Err() == nil {
-			writeMu.Lock()
 			writeSSEChunk(w, flusher, map[string]any{
 				"conversation_id": convID, "seq": seq, "delta": delta, "history_id": secondaryHistoryID,
 				"sources": sources,
 			})
-			writeMu.Unlock()
 		}
 		if stateStore != nil {
 			_ = appendChatChunk(chatCtx, stateStore, convID, secondaryHistoryID, &ChatChunkResponse{
@@ -1424,6 +1688,13 @@ func streamDualAnswer(
 				primaryDone = true
 				continue
 			}
+			if d.ArtifactCreated != nil {
+				persistAndPublishConversationArtifact(
+					chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
+					convID, historyID, seq, d.ArtifactCreated,
+				)
+				continue
+			}
 			if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > primaryToolCallTurns {
 				primaryToolCallTurns = next
 			}
@@ -1431,6 +1702,13 @@ func streamDualAnswer(
 		case d, ok := <-secondaryCh:
 			if !ok {
 				secondaryDone = true
+				continue
+			}
+			if d.ArtifactCreated != nil {
+				persistAndPublishConversationArtifact(
+					chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
+					convID, secondaryHistoryID, seq, d.ArtifactCreated,
+				)
 				continue
 			}
 			if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > secondaryToolCallTurns {
@@ -1446,11 +1724,20 @@ func streamDualAnswer(
 						primaryDone = true
 						primaryCh = nil
 					} else {
+						if d.ArtifactCreated != nil {
+							persistAndPublishConversationArtifact(
+								bg, reqCtx, w, flusher, db, stateStore, reqBody,
+								convID, historyID, seq, d.ArtifactCreated,
+							)
+							continue
+						}
 						if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > primaryToolCallTurns {
 							primaryToolCallTurns = next
 						}
 						if d.ReasoningText != "" {
 							primaryPendingThink += d.ReasoningText
+							primaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
+							persistProgress(historyID, primaryResult, primaryPendingThink, primaryThinkingDurationS, &primaryProgressCreated)
 							continue
 						}
 						if primaryPendingThink != "" {
@@ -1475,11 +1762,20 @@ func streamDualAnswer(
 						secondaryDone = true
 						secondaryCh = nil
 					} else {
+						if d.ArtifactCreated != nil {
+							persistAndPublishConversationArtifact(
+								bg, reqCtx, w, flusher, db, stateStore, reqBody,
+								convID, secondaryHistoryID, seq, d.ArtifactCreated,
+							)
+							continue
+						}
 						if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > secondaryToolCallTurns {
 							secondaryToolCallTurns = next
 						}
 						if d.ReasoningText != "" {
 							secondaryPendingThink += d.ReasoningText
+							secondaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
+							persistProgress(secondaryHistoryID, secondaryResult, secondaryPendingThink, secondaryThinkingDurationS, &secondaryProgressCreated)
 							continue
 						}
 						if secondaryPendingThink != "" {
@@ -1512,18 +1808,28 @@ dualPersist:
 	if secondaryPendingThink != "" {
 		secondaryResult += "<think>" + secondaryPendingThink + "</think>"
 	}
-	_ = db.Create(&orm.MultiAnswersChatHistory{
+	primaryHistory := &orm.MultiAnswersChatHistory{
 		ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: primaryResult,
-		ToolCallTurns: primaryToolCallTurns,
-		Ext:           historyExt,
-		TimeMixin:     orm.TimeMixin{CreateTime: now, UpdateTime: now},
-	}).Error
-	_ = db.Create(&orm.MultiAnswersChatHistory{
+		ToolCallTurns: primaryToolCallTurns, ThinkingDurationS: primaryThinkingDurationS,
+		Ext:       historyExt,
+		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+	}
+	if primaryProgressCreated {
+		_ = db.Model(primaryHistory).Where("id = ?", historyID).Updates(primaryHistory).Error
+	} else {
+		_ = db.Create(primaryHistory).Error
+	}
+	secondaryHistory := &orm.MultiAnswersChatHistory{
 		ID: secondaryHistoryID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: secondaryResult,
-		ToolCallTurns: secondaryToolCallTurns,
-		Ext:           historyExt,
-		TimeMixin:     orm.TimeMixin{CreateTime: now, UpdateTime: now},
-	}).Error
+		ToolCallTurns: secondaryToolCallTurns, ThinkingDurationS: secondaryThinkingDurationS,
+		Ext:       historyExt,
+		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+	}
+	if secondaryProgressCreated {
+		_ = db.Model(secondaryHistory).Where("id = ?", secondaryHistoryID).Updates(secondaryHistory).Error
+	} else {
+		_ = db.Create(secondaryHistory).Error
+	}
 	if stateStore != nil {
 		_ = setChatStatus(context.Background(), stateStore, convID, historyID, "completed", stripToolTags(primaryText))
 		_ = setChatStatus(context.Background(), stateStore, convID, secondaryHistoryID, "completed", stripToolTags(secondaryText))
@@ -1535,14 +1841,16 @@ dualPersist:
 	recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(primaryText), now)
 	if reqCtx.Err() == nil {
 		writeSSEChunk(w, flusher, map[string]any{
-			"finish_reason":   "FINISH_REASON_STOP",
-			"history_id":      historyID,
-			"tool_call_turns": primaryToolCallTurns,
+			"finish_reason":       "FINISH_REASON_STOP",
+			"history_id":          historyID,
+			"tool_call_turns":     primaryToolCallTurns,
+			"thinking_duration_s": primaryThinkingDurationS,
 		})
 		writeSSEChunk(w, flusher, map[string]any{
-			"finish_reason":   "FINISH_REASON_STOP",
-			"history_id":      secondaryHistoryID,
-			"tool_call_turns": secondaryToolCallTurns,
+			"finish_reason":       "FINISH_REASON_STOP",
+			"history_id":          secondaryHistoryID,
+			"tool_call_turns":     secondaryToolCallTurns,
+			"thinking_duration_s": secondaryThinkingDurationS,
 		})
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
@@ -1614,6 +1922,7 @@ func handleTaskCreated(
 			})
 			return &TaskCreatedNotice{
 				TaskID:            existing.ID,
+				TriggerHistoryID:  existing.TriggerHistoryID,
 				Title:             existing.Title,
 				AgentType:         existing.AgentType,
 				Mode:              existing.Mode,
@@ -1659,6 +1968,7 @@ func handleTaskCreated(
 
 	return &TaskCreatedNotice{
 		TaskID:            task.ID,
+		TriggerHistoryID:  task.TriggerHistoryID,
 		Title:             task.Title,
 		AgentType:         task.AgentType,
 		Mode:              task.Mode,
@@ -1725,6 +2035,7 @@ func handlePluginStepCreated(
 	}
 	return &TaskCreatedNotice{
 		TaskID:            task.ID,
+		TriggerHistoryID:  task.TriggerHistoryID,
 		Title:             task.Title,
 		AgentType:         "plugin_step",
 		Mode:              "manual",
@@ -1869,31 +2180,180 @@ func loadPluginPreflightContext(ctx context.Context, db *gorm.DB, convID string)
 	return preflight
 }
 
+func loadConversationIntentContext(ctx context.Context, db *gorm.DB, convID string) map[string]any {
+	if db == nil || strings.TrimSpace(convID) == "" {
+		return nil
+	}
+	var conv orm.Conversation
+	if err := db.WithContext(ctx).Select("ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+		return nil
+	}
+	ext := map[string]any{}
+	if json.Unmarshal(conv.Ext, &ext) != nil {
+		return nil
+	}
+	intent, _ := ext["intent_context"].(map[string]any)
+	return intent
+}
+
 // mergeAskPendingIntoExt merges ask_pending data into the ext JSON field so that
 // the ask card is persisted and can be restored on page reload.
-// handleIntentUpdated writes the intent emitted by the update_intent tool to DB,
-// then pushes an intent_updated convEvent so the frontend can refresh immediately.
-func handleIntentUpdated(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string, ev *IntentUpdatedEvent) {
-	if ev == nil || ev.SessionID == "" {
-		return
+var intentScalarFields = map[string]bool{"goal": true, "deliverable": true, "execution_mode": true}
+var intentListFields = map[string]bool{
+	"constraints": true, "corrections": true, "emphasized_points": true, "superseded": true,
+}
+
+func normalizeIntentDocument(raw any) map[string]any {
+	doc, _ := raw.(map[string]any)
+	if doc == nil {
+		doc = map[string]any{}
 	}
+	if text, _ := doc["text"].(string); strings.TrimSpace(text) != "" {
+		doc = map[string]any{"constraints": []any{strings.TrimSpace(text)}}
+	}
+	doc["version"] = 2
+	if _, ok := doc["revision"]; !ok {
+		doc["revision"] = 0
+	}
+	return doc
+}
+
+func intentRevision(doc map[string]any) int {
+	switch value := doc["revision"].(type) {
+	case float64:
+		return int(value)
+	case int:
+		return value
+	case int64:
+		return int(value)
+	}
+	return 0
+}
+
+func applyIntentOperations(doc map[string]any, operations []IntentOperation) (map[string]any, error) {
+	doc = normalizeIntentDocument(doc)
+	for _, operation := range operations {
+		op := strings.TrimSpace(operation.Op)
+		field := strings.TrimSpace(operation.Field)
+		value := strings.TrimSpace(operation.Value)
+		if value == "" {
+			return nil, fmt.Errorf("intent value is required")
+		}
+		if op == "set" {
+			if !intentScalarFields[field] {
+				return nil, fmt.Errorf("cannot set intent field %q", field)
+			}
+			doc[field] = value
+			continue
+		}
+		if !intentListFields[field] || (op != "add" && op != "remove" && op != "supersede") {
+			return nil, fmt.Errorf("invalid intent operation %q for field %q", op, field)
+		}
+		items, _ := doc[field].([]any)
+		if typed, ok := doc[field].([]string); ok {
+			items = make([]any, 0, len(typed))
+			for _, item := range typed {
+				items = append(items, item)
+			}
+		}
+		if op == "supersede" {
+			remaining := make([]any, 0, len(items))
+			for _, item := range items {
+				text := strings.TrimSpace(fmt.Sprint(item))
+				if text != "" && text != value {
+					remaining = append(remaining, text)
+				}
+			}
+			doc[field] = remaining
+			superseded, _ := doc["superseded"].([]any)
+			found := false
+			for _, item := range superseded {
+				if strings.TrimSpace(fmt.Sprint(item)) == value {
+					found = true
+				}
+			}
+			if !found {
+				superseded = append(superseded, value)
+			}
+			doc["superseded"] = superseded
+			continue
+		}
+		filtered := make([]any, 0, len(items)+1)
+		seen := false
+		for _, item := range items {
+			text := strings.TrimSpace(fmt.Sprint(item))
+			if text == value {
+				seen = true
+				if op == "remove" {
+					continue
+				}
+			}
+			if text != "" {
+				filtered = append(filtered, text)
+			}
+		}
+		if op != "remove" && !seen {
+			filtered = append(filtered, value)
+		}
+		doc[field] = filtered
+	}
+	doc["revision"] = intentRevision(doc) + 1
+	return doc, nil
+}
+
+// handleIntentUpdated writes the patch emitted by intentwrite to DB,
+// then pushes an intent_updated convEvent so the frontend can refresh immediately.
+func handleIntentUpdated(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string, ev *IntentUpdatedEvent) *IntentUpdatedEvent {
+	if ev == nil || len(ev.Operations) == 0 {
+		return nil
+	}
+	var conversationUpdate *IntentUpdatedEvent
 	if db != nil {
 		now := time.Now().UTC()
-		payload := fmt.Sprintf(`{"text":%q}`, ev.Content)
-		if ev.Scope == "session" {
-			db.WithContext(ctx).Exec(
-				`UPDATE plugin_sessions SET intent_context = ?, updated_at = ? WHERE id = ?`,
-				payload, now, ev.SessionID,
-			)
-		} else if ev.Scope == "step" && ev.StepID != "" {
-			rowID := fmt.Sprintf("psi_%s", common.GenerateID())
-			db.WithContext(ctx).Exec(
-				`INSERT INTO plugin_step_intents (id, session_id, step_id, intent_context, updated_at)
+		if ev.Scope == "conversation" && strings.TrimSpace(convID) != "" {
+			var conv orm.Conversation
+			if db.WithContext(ctx).Select("id", "ext").Where("id = ?", convID).First(&conv).Error == nil {
+				ext := map[string]any{}
+				_ = json.Unmarshal(conv.Ext, &ext)
+				doc := normalizeIntentDocument(ext["intent_context"])
+				if updated, err := applyIntentOperations(doc, ev.Operations); err == nil {
+					ext["intent_context"] = updated
+					raw, _ := json.Marshal(ext)
+					if db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error == nil {
+						conversationUpdate = &IntentUpdatedEvent{Scope: "conversation", IntentContext: updated}
+					}
+				}
+			}
+		} else if ev.Scope == "plugin_session" && ev.SessionID != "" {
+			var session orm.PluginSession
+			if db.WithContext(ctx).Select("intent_context").Where("id = ?", ev.SessionID).First(&session).Error == nil {
+				doc := map[string]any{}
+				_ = json.Unmarshal([]byte(session.IntentContext), &doc)
+				if updated, err := applyIntentOperations(doc, ev.Operations); err == nil {
+					payload, _ := json.Marshal(updated)
+					_ = db.WithContext(ctx).Model(&orm.PluginSession{}).Where("id = ?", ev.SessionID).
+						Updates(map[string]any{"intent_context": string(payload), "updated_at": now}).Error
+				}
+			}
+		} else if ev.Scope == "plugin_step" && ev.SessionID != "" && ev.StepID != "" {
+			var existing orm.PluginStepIntent
+			doc := map[string]any{}
+			if db.WithContext(ctx).Where("session_id = ? AND step_id = ?", ev.SessionID, ev.StepID).
+				First(&existing).Error == nil {
+				_ = json.Unmarshal([]byte(existing.IntentContext), &doc)
+			}
+			updated, err := applyIntentOperations(doc, ev.Operations)
+			if err == nil {
+				payload, _ := json.Marshal(updated)
+				rowID := fmt.Sprintf("psi_%s", common.GenerateID())
+				_ = db.WithContext(ctx).Exec(
+					`INSERT INTO plugin_step_intents (id, session_id, step_id, intent_context, updated_at)
 				 VALUES (?, ?, ?, ?, ?)
 				 ON CONFLICT (session_id, step_id) DO UPDATE
 				 SET intent_context = EXCLUDED.intent_context, updated_at = EXCLUDED.updated_at`,
-				rowID, ev.SessionID, ev.StepID, payload, now,
-			)
+					rowID, ev.SessionID, ev.StepID, string(payload), now,
+				).Error
+			}
 		}
 	}
 	if stateStore != nil {
@@ -1906,6 +2366,20 @@ func handleIntentUpdated(ctx context.Context, db *gorm.DB, stateStore state.Stor
 			},
 		})
 	}
+	return conversationUpdate
+}
+
+func mergeIntentUpdatedIntoExt(ext json.RawMessage, intent *IntentUpdatedEvent) json.RawMessage {
+	m := make(map[string]any)
+	if len(ext) > 0 {
+		_ = json.Unmarshal(ext, &m)
+	}
+	m["intent_updated"] = intent
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ext
+	}
+	return b
 }
 
 func mergeAskPendingIntoExt(ext json.RawMessage, askPending any) json.RawMessage {

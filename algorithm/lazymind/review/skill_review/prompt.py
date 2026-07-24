@@ -180,66 +180,6 @@ Return ONLY valid JSON:
 """
 
 
-def pending_skill_draft_prompt(skill_name: str, skill_content: str) -> str:
-    return f"""
-You are an expert Skill Review Refactoring Engine, your task is to convert an existing pending skill into a reusable skill draft.
-The pending skill is already structured, so extract only the three core parts needed by the skill mining pipeline:
-
-1. cluster_signature
-2. refined_trajectory
-3. guidelines
-
-# Requirements
-
-- Use the title and content to identify the reusable intent, procedure, and applicability boundary.
-- Split the skill content into meaningful operational steps for refined_trajectory.
-- Summarize the guidance embedded in each step into concise guidelines.
-- Keep the output abstract and reusable; do not copy Markdown headings mechanically.
-- Do not include implementation metadata, ids, review status, or database fields.
-- Output should be in the same language as the skill content.
-
-# Output Format
-
-Return ONLY valid JSON:
-{{
-  "cluster_signature": {{
-    "intent": "...",
-    "procedure": ["...", "...", "..."],
-    "boundaries": "..."
-  }},
-  "refined_trajectory": {{
-    "steps": [
-      {{
-        "step_index": 1,
-        "action": "...",
-        "state": "..."
-      }}
-    ]
-  }},
-  "guidelines": {{
-    "success_patterns": [
-      {{
-        "related_step": 1,
-        "guideline": "..."
-      }}
-    ],
-    "failure_patterns": [
-      {{
-        "related_step": 1,
-        "guideline": "..."
-      }}
-    ]
-  }}
-}}
-
-# Skill Title
-{skill_name}
-
-# Skill Content
-{skill_content}
-"""
-
-
 def guidelines_prompt(
     trajectory: str,
     refined_trajectory: dict
@@ -430,6 +370,7 @@ REFINED_TRAJECTORIES:
 def candidate_prompt(outline: dict[str, Any], guidelines: dict[str, Any]) -> str:
     return f"""You are an expert Skill Materializer for autonomous agents.
 Your task is to transform a **Skill Outline** into a complete reusable `SKILL.md`.
+Use the same language as the Skill Outline for all natural-language fields and Markdown content. The only exception is `skill_name`, which must remain concise English kebab-case.
 The Skill Outline already defines the workflow. Your job is **not** to redesign or expand the workflow, but to enrich each procedure step with reusable operational knowledge distilled from the provided success and failure guidelines.
 The output should read like a human-authored operational playbook rather than a collection of extracted observations.
 
@@ -524,17 +465,12 @@ The YAML frontmatter should include:
 
 * name
 * description
-* category
 
 The description should be a single concise routing sentence derived from the outline's applicable_scenario.
 It should describe:
 * when the skill applies;
 * the reusable capability it provides;
 Keep the description consistent with the applicable_scenario and do not narrow it to specific trajectories, tools, projects, or implementations.
-
-The category should:
-* be a concise lowercase classification for the skill, such as `research`, `coding`, `writing`, `data-analysis`, `tool-use`, `planning`, `debugging`, `review`, or `general`
-* describe the reusable task family, not the source trajectory, user, project, or implementation detail
 
 # Markdown Structure
 
@@ -562,11 +498,14 @@ Before producing the result, verify that:
 
 # Output Schema
 
-Return ONLY valid JSON:
+Return ONLY one valid JSON object with exactly two fields: `name` and `content`.
+`name` must exactly equal the Skill Outline's `skill_name`.
+`content` must be the complete `SKILL.md` file with frontmatter.
+
+Use this exact structural pattern (with JSON-escaped newlines):
 {{
-  "skill_name": "...",
-  "applicable_scenario": "...",
-  "content": "..."
+  "name": "<skill_name from SKILL_OUTLINE>",
+  "content": "---\nname: <same name>\ndescription: <single concise routing sentence>\n---\n\n<complete procedure>"
 }}
 
 # Input Data
@@ -578,21 +517,66 @@ STEP_GUIDELINES:
 {guidelines.model_dump_json(indent=2)}"""
 
 
-def resolution_prompt(candidate: dict[str, Any], called_skills: dict[str, str]) -> str:
+def resolution_prompt(candidate: dict[str, Any], global_skill_summaries: str) -> str:
     return (
         'Resolve whether the candidate skill should be saved as a new skill or used '
-        'to patch one of the called skills.\n\n'
+        'to patch one of the existing global skills.\n\n'
         'You receive:\n'
         '1. CANDIDATE_SKILL: a newly mined candidate skill.\n'
-        '2. CALLED_SKILLS: existing skills used in the source trajectories, as a map '
-        'from skill name to full skill content.\n\n'
-        'Choose type="patch" only when the candidate clearly improves, corrects, or '
-        'extends an existing called skill. Otherwise choose type="new".\n\n'
+        '2. GLOBAL_SKILL_SUMMARIES: all available existing skills, including name, category, '
+        'description, source, and path when available.\n\n'
+        'Choose type="patch" only when the candidate clearly improves, corrects, or extends '
+        'the same reusable workflow as one existing skill. Choose type="new" when the candidate '
+        'is a distinct workflow, even if it has a similar topic, category, tool family, or wording.\n\n'
+        'Patch decisions are conservative:\n'
+        '- patch_skill_key MUST exactly match the full key shown in bold for one provided existing skill '
+        '(for example, "internal/example" or "external/example");\n'
+        '- do not invent skill keys;\n'
+        '- do not patch merely because the category or broad subject is similar;\n'
+        '- choose new when the target object, action space, completion condition, or procedure differs materially.\n\n'
         'Return ONLY valid JSON with these keys:\n'
         '- type: "new" or "patch"\n'
-        '- patch_skill_name: required when type="patch"; the called skill name to patch\n'
-        '- summary: for patch, describe the intent of this modification; for new, use null\n'
-        '- patched_skill: when type="patch", the full patched SKILL.md content; when type="new", use an empty string\n\n'
-        f'CALLED_SKILLS:\n{json.dumps(called_skills, ensure_ascii=False, indent=2)}\n\n'
+        '- patch_skill_key: required when type="patch"; otherwise use an empty string\n'
+        '- reason: concise reason for the decision\n\n'
+        f'GLOBAL_SKILL_SUMMARIES:\n{global_skill_summaries}\n\n'
+        f'CANDIDATE_SKILL:\n{json.dumps(candidate, ensure_ascii=False, indent=2)}'
+    )
+
+
+def merge_skill_patch_prompt(
+    candidate: dict[str, Any],
+    *,
+    target_skill_key: str,
+    existing_skill_content: str,
+    decision_reason: str = '',
+) -> str:
+    return (
+        'Merge a newly mined candidate skill into an existing SKILL.md.\n\n'
+        'Use the same language as CANDIDATE_SKILL for all natural-language fields and Markdown content. '
+        'The only exception is `skill_name`, which must remain concise English kebab-case.\n\n'
+        'You receive:\n'
+        '1. TARGET_SKILL_KEY: the full storage key of the existing skill selected for patching.\n'
+        '2. EXISTING_SKILL: the full current SKILL.md content.\n'
+        '3. CANDIDATE_SKILL: the newly mined candidate skill.\n'
+        '4. DECISION_REASON: why the candidate should patch the target skill.\n\n'
+        'Produce a complete patched SKILL.md, not a diff. Preserve still-valid guidance from '
+        'the existing skill and integrate only reusable, generally applicable improvements from '
+        'the candidate. Do not add one-off task details, identifiers, temporary paths, session data, '
+        'or source trajectory metadata.\n\n'
+        'Frontmatter requirements:\n'
+        '- by default keep the existing SKILL.md frontmatter name;\n'
+        '- you MAY change the frontmatter name when the merged reusable workflow is better represented by a clearer, '
+        'more accurate concise English kebab-case skill name;\n'
+        '- rename only for semantic clarity or boundary correction, not for cosmetic wording churn;\n'
+        '- if you rename, ensure the Markdown body and description consistently describe the renamed skill boundary;\n'
+        '- keep or refine the description only when the merged workflow boundary requires it;\n'
+        '- include a non-empty Markdown body.\n\n'
+        'Return ONLY valid JSON with these keys:\n'
+        '- summary: concise description of what changed\n'
+        '- skill_name: the final frontmatter name after patching, which may keep the existing name or use a rename\n'
+        '- skill_content: the complete patched SKILL.md content\n\n'
+        f'TARGET_SKILL_KEY:\n{target_skill_key}\n\n'
+        f'DECISION_REASON:\n{decision_reason}\n\n'
+        f'EXISTING_SKILL:\n{existing_skill_content}\n\n'
         f'CANDIDATE_SKILL:\n{json.dumps(candidate, ensure_ascii=False, indent=2)}'
     )

@@ -36,6 +36,14 @@ import (
 //go:embed docs.html
 var swaggerUIHTML []byte
 
+func backgroundJobsEnabled() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("LAZYMIND_BACKGROUND_JOBS_ENABLED")))
+	if raw == "" {
+		return true
+	}
+	return raw != "0" && raw != "false" && raw != "no" && raw != "off"
+}
+
 func exportOpenAPIArtifacts(openAPIJSON []byte) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -197,25 +205,30 @@ func main() {
 	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
 	evalset.RegisterAsyncJobs()
 	plugin.RegisterPluginDraftGenerateJob()
-	asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
-	asyncjob.Start(context.Background(), store.DB(), asyncjob.Options{
-		Concurrency:  asyncConfig.Concurrency,
-		PollInterval: asyncConfig.PollInterval,
-		LockTTL:      asyncConfig.LockTTL,
-	})
-	importConfig := evalset.LoadImportRuntimeConfigFromEnv()
-	evalset.StartImportPreviewCleanup(context.Background(), store.DB(), importConfig.CleanupInterval)
-	resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
-	resourceupdate.LogStartup(resourceUpdateEnabled)
-	if resourceUpdateEnabled {
-		resourceupdate.Start(context.Background(), store.DB(), store.State(), resourceupdate.DefaultConfig())
-	}
+	startBackgroundJobs := backgroundJobsEnabled()
+	if !startBackgroundJobs {
+		log.Logger.Info().Msg("core background jobs are disabled")
+	} else {
+		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
+		asyncjob.Start(context.Background(), store.DB(), asyncjob.Options{
+			Concurrency:  asyncConfig.Concurrency,
+			PollInterval: asyncConfig.PollInterval,
+			LockTTL:      asyncConfig.LockTTL,
+		})
+		importConfig := evalset.LoadImportRuntimeConfigFromEnv()
+		evalset.StartImportPreviewCleanup(context.Background(), store.DB(), importConfig.CleanupInterval)
+		resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
+		resourceupdate.LogStartup(resourceUpdateEnabled)
+		if resourceUpdateEnabled {
+			resourceupdate.Start(context.Background(), store.DB(), store.State(), resourceupdate.DefaultConfig())
+		}
 
-	// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
-	if n, err := subagent.MarkInterrupted(context.Background(), store.DB(), 5*time.Minute); err != nil {
-		log.Logger.Warn().Err(err).Msg("mark interrupted subagent tasks failed")
-	} else if n > 0 {
-		log.Logger.Info().Int64("count", n).Msg("marked stale subagent tasks as interrupted")
+		// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
+		if n, err := subagent.MarkInterrupted(context.Background(), store.DB(), 5*time.Minute); err != nil {
+			log.Logger.Warn().Err(err).Msg("mark interrupted subagent tasks failed")
+		} else if n > 0 {
+			log.Logger.Info().Int64("count", n).Msg("marked stale subagent tasks as interrupted")
+		}
 	}
 
 	// Register plugin lifecycle hooks into the subagent EventHooks.
@@ -242,7 +255,9 @@ func main() {
 	log.Logger.Info().Msg("plugin subagent hooks registered")
 
 	// Start the schedule ticker.
-	scheduler.RunScheduler(context.Background(), store.DB(), "")
+	if startBackgroundJobs {
+		scheduler.RunScheduler(context.Background(), store.DB(), "")
+	}
 
 	r := mux.NewRouter()
 	r.UseEncodedPath()

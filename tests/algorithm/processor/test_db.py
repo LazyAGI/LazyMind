@@ -80,11 +80,17 @@ def test_require_shared_db_config_reports_missing_env(monkeypatch):
         require_shared_db_config('DocumentProcessor')
 
 
-def test_require_shared_db_config_wraps_invalid_url(monkeypatch):
+def test_require_shared_db_config_accepts_sqlite(monkeypatch):
     monkeypatch.setenv(SHARED_DB_ENV_KEY, 'sqlite:///tmp/app.db')
 
-    with pytest.raises(RuntimeError, match='valid PostgreSQL URL'):
-        require_shared_db_config('DocumentProcessor')
+    assert require_shared_db_config('DocumentProcessor') == {
+        'db_type': 'sqlite',
+        'user': '',
+        'password': '',
+        'host': '',
+        'port': 0,
+        'db_name': 'tmp/app.db',
+    }
 
 
 def test_require_shared_db_config_rejects_none_after_parse(monkeypatch):

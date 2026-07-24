@@ -70,9 +70,9 @@ func toTaskDTO(t *orm.SubAgentTask) taskDTO {
 	}
 }
 
-func toArtifactDTO(a *orm.SubAgentArtifact) artifactDTO {
+func toArtifactDTO(a *orm.SubAgentArtifact, workspacePath string) artifactDTO {
 	value := normalizeJSON(a.Value, "{}")
-	value = SignArtifactImageValue(a.ContentType, value)
+	value = SignArtifactValue(a.ContentType, value, workspacePath)
 	return artifactDTO{
 		Slot:        a.Slot,
 		ContentType: a.ContentType,
@@ -103,7 +103,8 @@ func ListConversationTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	tasks, err := ListTasksByConversation(ctx, db, convID)
+	userID := requestUserID(r)
+	tasks, err := ListTasksByConversationForUser(ctx, db, convID, userID)
 	if err != nil {
 		common.ReplyErr(w, "query tasks failed", http.StatusInternalServerError)
 		return
@@ -111,9 +112,15 @@ func ListConversationTasks(w http.ResponseWriter, r *http.Request) {
 	out := make([]taskDTO, 0, len(tasks))
 	for i := range tasks {
 		dto := toTaskDTO(&tasks[i])
-		arts, _ := LoadArtifacts(ctx, db, tasks[i].ID)
+		arts, err := LoadArtifacts(ctx, db, tasks[i].ID)
+		if err != nil {
+			common.ReplyErr(w, "query task artifacts failed", http.StatusInternalServerError)
+			return
+		}
 		for j := range arts {
-			dto.Artifacts = append(dto.Artifacts, toArtifactDTO(&arts[j]))
+			if !arts[j].Hidden {
+				dto.Artifacts = append(dto.Artifacts, toArtifactDTO(&arts[j], tasks[i].WorkspacePath))
+			}
 		}
 		steps, _ := LoadSteps(ctx, db, tasks[i].ID)
 		for j := range steps {
@@ -146,6 +153,10 @@ func GetTaskDetail(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query task failed", http.StatusInternalServerError)
 		return
 	}
+	if t.CreateUserID != requestUserID(r) {
+		common.ReplyErr(w, "task not found", http.StatusNotFound)
+		return
+	}
 	dto := toTaskDTO(t)
 	stepCount, _ := CountSteps(ctx, db, taskID)
 	common.ReplyOK(w, map[string]any{"task": dto, "step_count": stepCount})
@@ -163,6 +174,19 @@ func GetTaskArtifacts(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
 		return
 	}
+	task, err := GetTask(r.Context(), db, taskID)
+	if err != nil {
+		if IsNotFound(err) {
+			common.ReplyErr(w, "task not found", http.StatusNotFound)
+		} else {
+			common.ReplyErr(w, "query task failed", http.StatusInternalServerError)
+		}
+		return
+	}
+	if task.CreateUserID != requestUserID(r) {
+		common.ReplyErr(w, "task not found", http.StatusNotFound)
+		return
+	}
 	arts, err := LoadArtifacts(r.Context(), db, taskID)
 	if err != nil {
 		common.ReplyErr(w, "query artifacts failed", http.StatusInternalServerError)
@@ -170,9 +194,19 @@ func GetTaskArtifacts(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]artifactDTO, 0, len(arts))
 	for i := range arts {
-		out = append(out, toArtifactDTO(&arts[i]))
+		if !arts[i].Hidden {
+			out = append(out, toArtifactDTO(&arts[i], task.WorkspacePath))
+		}
 	}
 	common.ReplyOK(w, map[string]any{"artifacts": out})
+}
+
+func requestUserID(r *http.Request) string {
+	userID := store.UserID(r)
+	if userID == "" {
+		return "0"
+	}
+	return userID
 }
 
 // InternalGetTaskEvents handles GET /internal/subagent/tasks/{task_id}/events?from={offset}

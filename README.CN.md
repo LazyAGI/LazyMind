@@ -2,131 +2,170 @@
 
 **[English](README.md)** | **中文**
 
-> **企业级 RAG 知识库平台，内置自进化能力** — 不只是搭一个问答系统，而是让它能自己发现问题、自己修复、自己验证效果。
+> **让 AI 按照你的资料、标准和偏好，稳定完成真实任务。**
+
+[![GitHub stars](https://img.shields.io/github/stars/LazyAGI/LazyMind?style=flat-square)](https://github.com/LazyAGI/LazyMind/stargazers)
+[![License](https://img.shields.io/github/license/LazyAGI/LazyMind?style=flat-square)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-arm64-111827?style=flat-square&logo=apple)](desktop/README.md)
+[![Windows](https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square&logo=windows)](desktop/README.md)
+[![本地优先](https://img.shields.io/badge/部署-本地优先-16a34a?style=flat-square)](docs/quick_start.CN.md)
+
+LazyMind 是面向知识密集型工作的 **AI Skill Runtime**。它在同一个工作台里连接可复用知识、可执行 Skill、可观测工作流、可编辑产物与评测驱动的持续改进。
+
+你不必反复上传资料、调 Prompt 或全程盯着 Agent：选择一次知识与工作流，LazyMind 会继续规划、执行、展示中间结果，并把经过确认的反馈带到下一次任务中。既可以通过 **Desktop Mode** 在本机使用，也可以部署为团队共享的企业服务。
+
+**[快速开始](#快速开始)** · **[产品架构](docs/architecture.md)** · **[构建工作流](docs/plugin-format.md)** · **[桌面模式](desktop/README.md)**
 
 ---
 
-## 这是什么？
+## 它能交付什么？
 
-LazyMind 是一个**开箱即用的企业知识库 + RAG 对话平台**，同时内置了一套**自动化 RAG 质量优化闭环（evo）**。
+| 场景 | LazyMind 执行 | 你获得 |
+|------|---------------|--------|
+| **调研与评审** | 搜索资料 → 检索证据 → 对比 → 综合 → 审阅 | 基于内部资料与外部来源、过程可追溯的报告 |
+| **AI Writer** | 整理素材 → 生成大纲 → 分章节写作 → 修改 → 终审 | 可编辑、有版本记录的文档，而不是一次性回答 |
+| **AI Image** | 理解需求 → 收集参考 → 优化 Prompt → 生成/编辑 | 保留生成过程的图片与动态表情 |
+| **知识助手** | 接入资料 → 解析/OCR → 混合检索 → 重排 → 回答 | 可回溯到组织知识的答案 |
+| **质量改进** | 收集 badcase → 评测 → 诊断 → A/B Test → 部署 | 经过验证的策略优化，而不是未经检查的 Prompt 改动 |
 
-你可以用它：
+## LazyMind 如何工作
 
-- 接入本地文件、飞书文档等多种数据源，构建企业知识库
-- 提供基于知识库的 RAG 对话能力，支持多路召回与重排
-- 通过**智积阅累**模块管理技能、词表、使用习惯等运营资产
-- 用 **evo 自进化模块**自动评测 RAG 效果、分析 badcase、生成代码优化方案、A/B 测试验证收益，形成完整的质量提升闭环
+```mermaid
+flowchart LR
+    K["知识<br/>本地文件 · 云文档 · 对象存储"] --> R["检索与推理<br/>解析 · OCR · 混合检索 · 重排"]
+    S["Skill 与工作流<br/>指令 · 工具 · 状态机"] --> X["可观测执行<br/>步骤 · 审批 · 重试 · 回退"]
+    R --> X
+    X --> A["可编辑产物<br/>引用 · 版本 · 交付"]
+    A --> F["反馈与评测<br/>偏好 · badcase · A/B Test"]
+    F --> K
+    F --> S
+```
 
----
+这个闭环由三个相互连接的系统组成：
+
+| 系统 | 负责什么 | 产品行为 |
+|------|----------|----------|
+| **知识底座** | 给 AI 正确的上下文 | 多源接入、OCR、混合检索、重排与原文追溯 |
+| **状态大脑** | 让长任务不跑偏 | 步骤可见、关键点审批、产物可编辑、重试/回退与版本记录 |
+| **AI 成长引擎** | 安全地改进下一次执行 | 可审核的偏好与术语，以及评测、诊断、A/B Test 与回滚 |
 
 ## 核心亮点
 
-### 1. RAG 自进化闭环（evo）
+### 1. 交付结果，而不只是回复消息
 
-这是 LazyMind 最独特的能力。传统 RAG 系统上线后质量好不好全靠人工排查，evo 模块让系统**自己跑通优化流程**：
+选择知识与 Skill 后，LazyMind 会从资料整理继续推进到规划、生成、审阅与交付。Plugin 用状态机定义步骤、工具、输入输出和流转条件，Artifact 则保留可编辑结果与版本历史。
 
-```
-生成评测集 → 首轮评测 → 分析 badcase → 生成代码优化方案 → A/B 测试验证 → 合并部署
-```
+长任务的每一步都保持可见；用户可以在关键节点审批、直接修改 Artifact，或者从失败步骤重新执行，而不必推倒重来。
 
-整个流程既可以全自动运行，也支持人工在关键节点介入审核。
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/artifact-workspace.jpg"><img src="docs/assets/artifact-workspace.jpg" alt="在审批节点查看并编辑有实际内容的 Artifact" width="100%" /></a>
+      <br /><sub>继续执行前，查看并直接编辑 Artifact</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/artifact-version-diff.jpg"><img src="docs/assets/artifact-version-diff.jpg" alt="通过可编辑 Diff 对比 Artifact 的历史版本" width="100%" /></a>
+      <br /><sub>对比版本 Diff，并恢复需要的结果</sub>
+    </td>
+  </tr>
+</table>
 
-![evo 自进化执行路径](docs/assets/evo-pipeline.png)
+### 2. 让每次执行都基于可复用知识
 
-**实时执行编排视图** — 追踪每个优化步骤的进度与状态：
+本地目录、对象存储、飞书和 Notion 等数据源进入统一知识库；PDFReader、MinerU 或 PaddleOCR-VL 负责解析文档，再通过多路 Embedding、混合检索和重排，让结果建立在相关证据之上。
 
-![evo 执行编排](docs/assets/evo-run.png)
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/knowledge-library.png"><img src="docs/assets/knowledge-library.png" alt="在统一知识库中管理文档并查看解析状态" width="100%" /></a>
+      <br /><sub>统一管理知识文档，并清晰掌握解析状态</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/knowledge-cited-answer-latest.png"><img src="docs/assets/knowledge-cited-answer-latest.png" alt="题干与答案分别包含行内引用，并共同指向原始文档" width="100%" /></a>
+      <br /><sub>两个 (1) 分别引用题干和答案，并共同指向下方同一份原始文档</sub>
+    </td>
+  </tr>
+</table>
 
-### 2. 多数据源接入
+### 3. 把专家经验封装成可复用工作流
 
-统一管理本地目录、对象存储与 OAuth 云端知识源（飞书等）的接入、同步与运行状态。
+调研方法、写作流程与行业标准可以作为 Skill 管理，并转换为可执行 Plugin。团队可以诊断、修复、发布、版本化和回滚，而不必反复从 Prompt 与脚本重新搭建。开发方式见[插件格式规范](docs/plugin-format.md)。
 
-![数据源管理 — 新建数据源](docs/assets/datasource-create.png)
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-to-workflow-entry.jpg"><img src="docs/assets/skill-to-workflow-entry.jpg" alt="选择已有 Skill 并将其转换为可执行工作流" width="100%" /></a>
+      <br /><sub>选择已有 Skill，作为新工作流的起点</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-to-workflow-editor.png"><img src="docs/assets/skill-to-workflow-editor.png" alt="在可视化编辑器中检查和调整转换后的工作流" width="100%" /></a>
+      <br /><sub>检查、调整、发布并版本化生成的工作流</sub>
+    </td>
+  </tr>
+</table>
 
-### 3. 知识运营资产管理（智积阅累）
+### 4. 只在证据支持时改进系统
 
-集中管理词表、系统工具、技能（操作模板）与使用习惯，构建可运营、可追溯的记忆中枢。
+“智积阅累”负责沉淀用户想要什么——偏好、术语、经验与 Skill；`evo` 负责验证系统怎样做得更好——把 badcase 变成评测样例，依次执行基线评测、问题诊断、修复与 A/B Test。
 
-![智积阅累 — 技能、词表、系统工具](docs/assets/knowledge-ops.png)
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-review.png"><img src="docs/assets/skill-review.png" alt="智积阅累通过 Skill 复盘持续沉淀和改进能力" width="100%" /></a>
+      <br /><sub>智积阅累：复盘 Skill，沉淀偏好、术语与经验</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/evo-pipeline.png"><img src="docs/assets/evo-pipeline.png" alt="算法跃迁把失败转化为经过评测的改进流水线" width="100%" /></a>
+      <br /><sub>算法跃迁：经过评测验证，再安全发布改进</sub>
+    </td>
+  </tr>
+</table>
 
-### 4. 灵活的 OCR 与向量存储
+### 5. 从本地开始，在需要协作时扩展
 
-- **OCR**：内置 PDFReader / MinerU / PaddleOCR-VL（GPU）三档可选
-- **向量存储**：Milvus + OpenSearch，支持随栈部署或外接
-- **多路 Embedding**（embed_1~3）支持混合检索；只配置 embed_1 时自动切换单路模式
-
-### 5. 企业级权限体系
-
-Kong API Gateway + JWT/RBAC 四层鉴权：前端 → Kong RBAC → Core ACL → 算法服务，每一层都有独立的权限校验。
-
----
-
-## 架构概览
-
-```
-┌──────────────────────────────────────────────────────┐
-│                    前端 (8090）                       │
-│           nginx SPA — 知识库 / 对话 / 管理模块          │
-└─────────────────────┬────────────────────────────────┘
-                      │
-             ┌────────▼──────-──┐
-             │   Kong (8000)    │  API 网关 + RBAC
-             └──┬───────-───┬─-─┘
-                │           │
-       ┌────────▼─-─┐  ┌────▼──────────┐
-       │auth-service│  │  core (Go)    │  数据集 / 文档 / 任务 / 检索
-       │  FastAPI   │  │  HTTP API     │
-       └────────────┘  └──────┬────────┘
-                              │ 代理
-             ┌────────────────┼───────────────┐
-             │                │               │
-    ┌────────▼──────┐  ┌──────▼──────┐  ┌─────▼──────┐
-    │   parsing     │  │    chat     │  │    evo     │
-    │    预处理/     │  │ 知识问答/对话 │  │   自进化    │
-    │    向量化      │  │             │  │   自闭环    │
-    └───────────────┘  └─────────────┘  └────────────┘
-             │
-    ┌────────┴──────────────┐
-    │  Milvus + OpenSearch  │  向量 + 分段存储
-    └───────────────────────┘
-```
-
-完整的服务依赖图、环境变量说明和请求鉴权链路，见 [`docs/architecture.md`](docs/architecture.md)。
+Desktop Mode 使用原生进程、SQLite 和 Milvus Lite，并遵循平台规范管理数据目录；团队部署可以进一步接入 Kong、JWT/RBAC、Core ACL、外部 Milvus/OpenSearch 与私有化 OCR。两种模式保持一致的工作方式。
 
 ---
 
 ## 快速开始
 
-**本地运行前置条件：** Go、Python 3、uv、pnpm 和 Node.js。
+### 本机运行
 
-### 第一步 — 申请 MinerU API Key（高质量 PDF 解析）
-
-前往 [https://mineru.net](https://mineru.net/apiManage/token) 申请 MinerU API Key。
-
-```bash
-export LAZYLLM_MINERU_API_KEY=你的mineru_key
-```
-
-> **注意：** 同样是 `LAZYLLM_` 前缀，不是 `LAZYMIND_`。
-
-> **重要提示：** 由于 OCR 模型在服务启动时即完成初始化，**OCR 供应商的 API Key 必须在启动前配置好**。我们正在开发在前端配置 OCR Key 的功能，下个版本即可支持，敬请期待。
-
-### 第二步 — 启动服务
+前置条件：Go、Python 3、uv、pnpm 和 Node.js。
 
 ```bash
 make local-up
 ```
 
+Windows PowerShell 使用：
+
+```powershell
+make local-win-up
+```
+
 启动后访问：
-- 前端：http://localhost:8090
+
+- LazyMind：http://localhost:8090
 - API 文档：http://localhost:8090/docs.html
 - 默认账号：`admin` / `admin`
 
-### 第三步 — 在前端配置模型
+登录后进入前端的**设置**页面：
 
-登录后进入模型设置页面，使用第一步申请的 API Key 配置**大模型（LLM）**、**视觉模型（VLM）** 和 **Reranker 模型**。
+- 在**模型供应商**中添加供应商凭证与 API Key，再到**系统默认设置**中选择默认的大模型、向量模型和重排序模型；多模态向量、图文、语音、图片、视频和自进化模型均可按需配置。
+- 在**工具**中按需配置服务凭证，包括用于文档解析的 MinerU 或 PaddleOCR、网页与学术搜索引擎，以及其他集成。使用 MinerU 在线服务时，无需再通过环境变量配置 API Key。
 
-环境变量配置与完整示例见 [`docs/quick_start.CN.md`](docs/quick_start.CN.md)。
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/settings-models.png"><img src="docs/assets/settings-models.png" alt="在前端设置中选择各项系统默认模型" width="100%" /></a>
+      <br /><sub>为不同系统能力选择默认模型</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/settings-tools.png"><img src="docs/assets/settings-tools.png" alt="在前端设置中配置文档解析与搜索服务" width="100%" /></a>
+      <br /><sub>配置文档解析、搜索与其他工具凭证</sub>
+    </td>
+  </tr>
+</table>
 
 停止本地运行：
 
@@ -134,144 +173,121 @@ make local-up
 make local-down
 ```
 
----
+Windows 使用 `make local-win-down`。完整配置见 [快速开始](docs/quick_start.CN.md)。
 
-## 测试
+### 构建桌面应用
 
-兼容旧行为的快速测试命令仍然是：
+| 平台 | 命令 | 产物 |
+|------|------|------|
+| macOS arm64 | `make desktop-darwin-arm64` | macOS 桌面应用 |
+| Windows x64 | `make desktop-windows-x64` | 便携 ZIP |
+| Windows x64 | `make desktop-windows-x64-installer` | 安装程序 |
 
-```bash
-make test
-```
-
-`make test` 会继续使用宿主机当前可用的 Python、Node/npm 和 Go 环境。
-
-如果希望使用项目专用的宿主机测试环境，运行：
+### 容器部署
 
 ```bash
-make test-hermetic
+make up
 ```
 
-`make test-hermetic` 要求宿主机安装 `uv`、`fnm` 或 `nvm`，以及 Go `1.24.0`。它会在仓库内创建 Python 3.11 虚拟环境 `.venv-test/`，通过可用的 Node 版本管理器选择 Node 20，使用 `npm ci` 安装前端测试依赖，并运行与 `make test` 相同范围的 frontend、auth-service、backend/core 和 algorithm 测试。
-
-## 常用启动配置
+### 启动命令速查
 
 | 场景 | 命令 |
 |------|------|
-| 宿主机本地运行（SQLite 状态后端，无容器） | `make local-up` |
-| 停止本地运行 | `make local-down` |
-| 删除本地应用产物 | `make local-clean` |
-| 停止本地运行、清除运行数据并删除本地应用产物 | `make local-reset` |
-| 容器栈启动 | `make up` |
-| 构建镜像并启动容器栈 | `make up-build` |
-| 私有化部署 MinerU OCR | `make up LAZYMIND_DEPLOY_MINERU=1` |
-| 私有化部署 PaddleOCR  | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
+| 构建镜像并启动 | `make up-build` |
+| 私有化 MinerU OCR | `make up LAZYMIND_DEPLOY_MINERU=1` |
+| 私有化 PaddleOCR | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
 | 外接 Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
-| 开启存储 Dashboard | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 
-`make local-up` 会通过 `local/build/bin/local-runtime-manager` 在宿主机上直接运行 LazyMind。如果 `local/config.env` 不存在，Make 会从 `local/config.env.example` 复制一份，并用它作为 local build/run 配置。应用程序产物放在仓库内的 `local/build`：Go 二进制在 `local/build/bin`，managed runtime 在 `local/build/runtimes`，Python 依赖在 `local/build/deps/python`，Node 依赖在 `local/build/deps/node`，desktop staging 的 app 文件在 `local/build/app`。运行数据、SQLite 数据库、状态、启动生成文件、日志、缓存和本地文档导入路径使用平台规范目录。只有确实需要非标准路径时，才在 `local/config.env` 中覆盖对应的 `LAZYMIND_*` 路径变量。
-
-### 平台路径示例
-
-| 平台 | 应用程序产物 | 运行数据和 DB | 日志 | 缓存 | 本地文档 |
-|------|--------------|---------------|------|------|----------|
-| macOS | `<repo>/local/build` | `/Users/<User>/Library/Application Support/LazyMind` | `/Users/<User>/Library/Logs/LazyMind` | `/Users/<User>/Library/Caches/LazyMind` | `/Users/<User>/Documents/LazyMind` |
-| Windows | `<repo>\local\build` | `%LOCALAPPDATA%\LazyMind` | `%LOCALAPPDATA%\LazyMind\Logs` | `%LOCALAPPDATA%\LazyMind\Cache` | `%USERPROFILE%\Documents\LazyMind` |
-| Linux | `<repo>/local/build` | `${XDG_DATA_HOME:-/home/<user>/.local/share}/LazyMind` | `${XDG_STATE_HOME:-/home/<user>/.local/state}/LazyMind/logs` | `${XDG_CACHE_HOME:-/home/<user>/.cache}/LazyMind` | `/home/<user>/Documents/LazyMind` |
+Docker/Colima 配置见 [Colima 配置说明](docs/quick_start.CN.md#macos使用-colima-替代-docker-desktop)或完整的[快速开始](docs/quick_start.CN.md)，服务依赖、环境变量和鉴权链路见[架构文档](docs/architecture.md)。
 
 ---
 
-## 模型配置
+## 当前已具备的能力
 
-所有算法服务统一通过 `LAZYMIND_MODEL_CONFIG_PATH` 选择配置文件。默认值是 `dynamic`，
-以前端的用户级模型/API-key 选择可以随请求注入。仅在需要强制静态配置时设置为 `online` 或 `inner`。
+| 领域 | 当前能力 |
+|------|----------|
+| 知识库 | 多数据源、OCR、向量化、混合检索、重排、同步管理 |
+| Agent | RAG 对话、工具调用、子任务、Artifact、任务中心 |
+| Plugin | 状态机、动态路由、自动验收、重试/回退、可视化执行、版本化产物 |
+| Skill | 安装、组织、审核、版本、回滚、Skill → Plugin |
+| 自进化 | 评测集、评测、badcase 分析、修复、部署、A/B Test |
+| 本地体验 | macOS/Windows 本地运行时、Desktop 构建、平台规范数据目录 |
+| 企业能力 | Kong、JWT/RBAC、ACL、OAuth 数据源、可选外部存储 |
 
-| 值 | 说明 |
-|----|------|
-| `online` | 公有云 API |
-| `inner` | 内网/私有化部署 |
-| `dynamic`（默认） | 动态注入，key 随请求传入 |
-
-可配置 `llm`、`reranker`、`embed_1~embed_3`。只配置 `embed_1` 时自动启用单路 embedding 模式。
-
----
-
-## evo 自进化模块
-
-evo 是一个独立的 FastAPI 服务（端口 8047，对外暴露 8048），实现完整的 RAG 质量优化闭环：
-
-```
-dataset_gen → eval → run（分析）→ apply（代码修改）→ merge → deploy → abtest
-```
-
-**支持两种运行模式：**
-- **auto** — 全自动，无需人工干预
-- **interactive** — 在关键节点暂停，等待人工 approve / revise / cancel
-
-**自然语言驱动：**
-
-```bash
-curl -sX POST "$BASE/v1/evo/threads/$THREAD_ID/messages" \
-  -H "Content-Type: application/json" \
-  -d '{"content":"从知识库 KB_ID 生成评测集，分析报告后修改代码，做 ABTest 验证效果"}'
-```
-
-完整 API 文档见 [`evo/README.md`](evo/README.md)。
+这份列表描述的是仓库中已经实现的能力，不是未来 Roadmap。具体模块的设计与实现状态见 [docs](docs/)。
 
 ---
 
-## 可选服务
+## Roadmap
 
-| 服务 | Profile | 用途 |
-|------|---------|------|
-| **mineru** | `mineru` | MinerU PDF 解析（布局分析） |
-| **paddleocr** | `paddleocr` | PaddleOCR-VL PDF 解析（需 GPU） |
-| **milvus** | `milvus` | 向量存储 |
-| **opensearch** | `opensearch` | 分段存储 |
-| **attu** | `milvus-dashboard` | Milvus 可视化管理 |
-| **opensearch-dashboards** | `opensearch-dashboard` | OpenSearch 可视化管理 |
+LazyMind 接下来的重点不是继续堆叠孤立功能，而是让知识库、Skill、Plugin 和自进化能力在真实任务中形成完整闭环。
+
+### 近期：打磨可直接体验的旗舰场景
+
+- **知识到交付物**：围绕客户解决方案、产品手册和产品调研，提供从知识检索、结构规划、分段生成到审阅交付的完整流程。
+- **更好的局部修改**：支持选区改写、基于知识库补充、Diff、接受/拒绝修改，以及从受影响步骤局部重跑。
+- **结果交付**：完善 Markdown、DOCX、PDF 导出和可分享结果页，优先支持飞书、Notion 等内容发布目标。
+- **开箱即用的 Demo**：提供示例知识包、任务模板和完成结果，让新用户无需准备私有数据即可体验完整工作流。
+- **Desktop 体验**：继续降低安装、模型配置、数据导入和本地运行时诊断成本。
+
+### 中期：建设知识与能力分发网络
+
+- **知识库与 Skill/Plugin 广场**：支持精选内容发现、一键安装、版本更新、依赖检查和可信来源展示。
+- **可复用场景模板**：将流程、知识包、审阅规则和输出格式组合成可安装的行业方案。
+- **外部 Agent 接入**：通过 MCP、CLI、OpenAPI 和 SDK，让 Codex、Cursor、Hermes Agent、OpenClaw 等使用 LazyMind 的知识与工作流能力。
+- **更多数据连接器**：围绕周报、调研和内容生产，逐步接入协作、邮件、日历、代码和任务系统。
+- **团队协作**：增强工作流分享、审批、权限、运行记录和组织级模板治理。
+
+### 长期：从执行工作流走向自进化工作系统
+
+- 根据用户修改、步骤重跑、知识引用和最终采纳结果，自动发现流程与知识缺口。
+- 对检索策略、Prompt、模型、工具和 Plugin 版本进行持续评测与 A/B Test。
+- 将成功经验沉淀为可复用的 Skill、模板和组织记忆，并保留完整来源与版本记录。
+- 通过“横向任务模板 + 纵向行业知识包”覆盖更多行业，而不是为每个行业重复开发产品。
+
+Roadmap 会根据真实场景的完成率、结果质量、人工干预次数、执行时间和成本持续调整；具体版本内容以仓库 Issue、里程碑和发布说明为准。
 
 ---
 
 ## 项目结构
 
-```
+```text
 LazyMind/
-├── kong.yml                    # Kong 声明式配置
-├── docker-compose.yml          # 全服务编排
-├── Makefile                    # lint / 启动快捷命令
+├── frontend/                   # Web UI 与桌面前端
 ├── backend/
-│   ├── auth-service/           # FastAPI 鉴权服务（JWT、RBAC）
-│   ├── core/                   # Go HTTP API（数据集 / 文档 / 任务 / 检索）
-│   └── scripts/
-├── frontend/                   # nginx + SPA
+│   ├── auth-service/           # 鉴权、OAuth 与用户服务
+│   ├── core/                   # 数据、任务、检索、Plugin 与 ACL
+│   └── scan-control-plane/     # 数据源扫描与同步控制
 ├── algorithm/
-│   ├── chat/                   # RAG 对话（lazyllm）
-│   ├── parsing/                # 文档解析（lazyllm + MinerU/PaddleOCR）
-│   └── processor/              # 文档任务队列
-├── evo/                        # 自进化闭环服务
-├── api/                        # OpenAPI 规范（集中管理）
-├── docs/                       # 快速开始、CLI、架构文档
-└── tests/
-    ├── backend/
-    └── algorithm/
+│   └── lazymind/               # 对话、解析、检索与 Agent 运行时
+├── plugins/                    # 内置 Plugin
+├── skills/                     # 内置及精选 Skill
+├── evo/                        # 自进化与评测闭环
+├── desktop/                    # Electron 桌面应用与打包
+├── local/                      # 本地运行时管理
+├── api/                        # OpenAPI 规范
+├── docs/                       # 架构、使用与设计文档
+└── tests/                      # 跨服务测试
 ```
 
 ---
 
-## 开发
+## 开发与测试
 
 ```bash
-make lint              # Python（flake8）+ Go（gofmt）
-make lint-only-diff    # 只 lint 变更文件
+make lint              # Python + Go + 文档等静态检查
+make lint-only-diff    # 只检查变更文件
+make test              # 使用宿主机环境运行测试
+make test-hermetic     # 使用项目管理的隔离环境运行同范围测试
 ```
 
-- Go 模块：`backend/core` 使用 `module lazymind/core`
-- Python：3.11+，依赖 `algorithm/requirements.txt`（`lazyllm[rag-advanced]`）
-- OpenAPI 规范统一维护在 `api/` 目录，新增路由时需同步更新
+- Python 3.11+
+- Go 1.24.0
+- Node.js 20
+- OpenAPI 规范集中维护在 `api/`
 
 ---
 
-## 许可证
+## License
 
-详见仓库中的许可证信息。
+见 [LICENSE](LICENSE)。

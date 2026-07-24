@@ -2,6 +2,7 @@ package fs
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"lazymind/core/skillv2/testutil"
@@ -18,12 +19,20 @@ func TestDraftFSWriteText_StoresOverlayOnly(t *testing.T) {
 		Content:              "# 新内容\n",
 		ExpectedDraftVersion: 1,
 		UserID:               "user_001",
+		DraftStatus:          "pending_confirm",
 	})
 	if err != nil {
 		t.Fatalf("WriteText returned error: %v", err)
 	}
 	if resp.DraftVersion != 2 {
 		t.Fatalf("DraftVersion = %d, want 2", resp.DraftVersion)
+	}
+	var draftStatus string
+	if err := db.Table("skill_drafts").Select("draft_status").Where("skill_id = ?", "skill1").Scan(&draftStatus).Error; err != nil {
+		t.Fatalf("read draft status: %v", err)
+	}
+	if draftStatus != "pending_confirm" {
+		t.Fatalf("draft_status = %q, want pending_confirm", draftStatus)
 	}
 	testutil.AssertHeadRevision(t, db, "skill1", "rev1")
 	if got := testutil.CountRows(t, db, "skill_draft_entries", "skill_id = ? AND path = ? AND op = ?", "skill1", "SKILL.md", "upsert"); got != 1 {
@@ -96,6 +105,33 @@ func TestDraftFSMkdirEmptyDir_IsVisibleAndCommitable(t *testing.T) {
 	})
 }
 
+func TestDraftFSMkdirExistingDirectory_DoesNotAdvanceVersion(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	testutil.SeedRevisionEntry(t, db, "rev1", "notes", "dir", "", "directory")
+	draftFS := NewDraftFS(DraftFSDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	_, err := draftFS.Mkdir(context.Background(), MkdirRequest{
+		SkillID:              "skill1",
+		Path:                 "notes",
+		ExpectedDraftVersion: 1,
+		UserID:               "user_001",
+	})
+	if err == nil || !strings.Contains(err.Error(), "path already exists") {
+		t.Fatalf("Mkdir existing directory error = %v, want path already exists", err)
+	}
+	var draft testutil.SkillDraftRow
+	if err := db.Where("skill_id = ?", "skill1").Take(&draft).Error; err != nil {
+		t.Fatalf("query draft: %v", err)
+	}
+	if draft.Version != 1 {
+		t.Fatalf("draft version = %d, want 1", draft.Version)
+	}
+	if got := testutil.CountRows(t, db, "skill_draft_entries", "skill_id = ?", "skill1"); got != 0 {
+		t.Fatalf("skill_draft_entries count = %d, want 0", got)
+	}
+}
+
 func TestDraftFSDeleteDraftOnlyEmptyDir_RemovesOverlay(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
@@ -121,6 +157,35 @@ func TestDraftFSDeleteBaseEmptyDir_WritesDeleteOverlay(t *testing.T) {
 	}
 	if got := testutil.CountRows(t, db, "skill_draft_entries", "skill_id = ? AND path = ? AND op = ?", "skill1", "notes", "delete"); got != 1 {
 		t.Fatalf("notes delete overlay count = %d, want 1", got)
+	}
+}
+
+func TestDraftFSDeleteSkillMD_IsRejected(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	testutil.SeedTextBlob(t, db, "h_skill_draft", "# Draft\n")
+	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_skill_draft")
+	draftFS := NewDraftFS(DraftFSDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	_, err := draftFS.Delete(context.Background(), DeleteRequest{
+		SkillID:              "skill1",
+		Path:                 "SKILL.md",
+		ExpectedDraftVersion: 1,
+		UserID:               "user_001",
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot delete SKILL.md") {
+		t.Fatalf("Delete SKILL.md error = %v, want protected file error", err)
+	}
+
+	var draft testutil.SkillDraftRow
+	if err := db.Where("skill_id = ?", "skill1").Take(&draft).Error; err != nil {
+		t.Fatalf("query draft: %v", err)
+	}
+	if draft.Version != 1 {
+		t.Fatalf("draft version = %d, want 1", draft.Version)
+	}
+	if got := testutil.CountRows(t, db, "skill_draft_entries", "skill_id = ? AND path = ? AND op = ?", "skill1", "SKILL.md", "upsert"); got != 1 {
+		t.Fatalf("SKILL.md draft upsert count = %d, want 1", got)
 	}
 }
 

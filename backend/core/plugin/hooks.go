@@ -93,12 +93,66 @@ func dispatchPendingPluginRuns() {
 }
 
 // onArtifact is called by the subagent runner when any artifact is emitted.
-func onArtifact(ctx context.Context, db *gorm.DB, taskID, artifactKey string) {
+func onArtifact(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, artifactKey string) {
 	pctx := loadPluginChatContextFromDB(ctx, db, taskID)
 	if pctx == nil {
 		return
 	}
-	OnArtifactEvent(ctx, db, taskID, artifactKey, pctx)
+	rev := OnArtifactEvent(ctx, db, taskID, artifactKey, pctx)
+	if rev == nil {
+		return
+	}
+	// Slot revision is now durable. Notify the conversation stream so the
+	// event-driven PluginPanel can refresh immediately without polling or waiting
+	// for the whole step to finish.
+	emitPluginArtifactUpdated(stateStore, pctx.ConvID, map[string]any{
+		"session_id": pctx.SessionID,
+		"step_id":    pctx.StepID,
+		"slot_id":    rev.SlotID,
+		"slot":       rev.Slot,
+		"revision":   rev.Revision,
+	})
+}
+
+// NotifyPluginArtifactUpdated publishes a durable slot change made outside the
+// SubAgent artifact hook (for example a human edit, version selection, or rollback).
+// Event delivery is best-effort; the committed revision remains authoritative.
+func NotifyPluginArtifactUpdated(
+	ctx context.Context,
+	db *gorm.DB,
+	sessionID, stepID, slotID, slot string,
+	revision int,
+	listIndex *int,
+	changeSource string,
+) {
+	if db == nil {
+		return
+	}
+	session, err := GetSession(ctx, db, sessionID)
+	if err != nil {
+		return
+	}
+	payload := map[string]any{
+		"session_id":    sessionID,
+		"step_id":       stepID,
+		"slot_id":       slotID,
+		"slot":          slot,
+		"revision":      revision,
+		"change_source": changeSource,
+	}
+	if listIndex != nil {
+		payload["list_index"] = *listIndex
+	}
+	emitPluginArtifactUpdated(store.State(), session.ConversationID, payload)
+}
+
+func emitPluginArtifactUpdated(stateStore state.Store, conversationID string, payload map[string]any) {
+	if subagent.EventHooks == nil || conversationID == "" {
+		return
+	}
+	subagent.EventHooks.CallConversationEvent(
+		context.Background(), stateStore, conversationID, "", "plugin_artifact_updated", payload,
+	)
 }
 
 // onTerminalStatus is called by the subagent runner when a task reaches terminal status.
@@ -151,6 +205,7 @@ func loadPluginChatContextFromDB(ctx context.Context, db *gorm.DB, taskID string
 		UserID:              task.CreateUserID,
 		PluginMode:          params.PluginMode,
 		ChatSessionID:       params.ChatSessionID,
+		TriggerHistoryID:    task.TriggerHistoryID,
 		HistoryFilesPerTurn: params.HistoryFilesPerTurn,
 		HandOff:             params.HandOff,
 	}

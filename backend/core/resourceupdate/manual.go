@@ -288,6 +288,7 @@ func newManualSkillGenerateTask(userID string, stats HistoryStats, start, end, n
 		QualifiedSessionCount:          stats.QualifiedSessionCount,
 		StartPreflightAt:               formatTaskTime(now),
 		StartTriggerReason:             "manual",
+		SessionIDs:                     stats.QualifiedSessionIDs,
 		WindowFrozen:                   true,
 	}
 	body, err := json.Marshal(request)

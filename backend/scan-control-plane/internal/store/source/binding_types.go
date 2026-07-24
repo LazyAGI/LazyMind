@@ -18,10 +18,12 @@ type Binding struct {
 	CoreParentDocumentID   string
 	CoreParentDocumentName string
 	SyncMode               string
+	
 	SchedulePolicy         JSON
 	NextSyncAt             *time.Time
 	IncludeExtensions      JSON
 	ExcludeExtensions      JSON
+	ChatEnabled            bool
 	Status                 string
 	LastError              JSON
 	DeletedAt              *time.Time

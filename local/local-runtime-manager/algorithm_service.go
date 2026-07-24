@@ -554,6 +554,9 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_FILE_URL_SIGN_SECRET=" + envText("LAZYMIND_FILE_URL_SIGN_SECRET", "changeme-in-production"),
 		"LAZYMIND_FILE_URL_EXPIRE_SECONDS=" + envText("LAZYMIND_FILE_URL_EXPIRE_SECONDS", "3600"),
 		"LAZYMIND_MAX_RETRIES=" + envText("LAZYMIND_MAX_RETRIES", "20"),
+		"LAZYMIND_AGENTIC_MAX_ROUNDS_LOW=" + envText("LAZYMIND_AGENTIC_MAX_ROUNDS_LOW", "6"),
+		"LAZYMIND_AGENTIC_MAX_ROUNDS_MEDIUM=" + envText("LAZYMIND_AGENTIC_MAX_ROUNDS_MEDIUM", "20"),
+		"LAZYMIND_AGENTIC_MAX_ROUNDS_HIGH=" + envText("LAZYMIND_AGENTIC_MAX_ROUNDS_HIGH", "60"),
 		"LAZYMIND_REVIEW_MAX_RETRIES=" + envText("LAZYMIND_REVIEW_MAX_RETRIES", "5"),
 		"LAZYMIND_SKILL_REVIEW_DEBUG=" + envText("LAZYMIND_SKILL_REVIEW_DEBUG", "false"),
 		"LAZYMIND_MAX_CONCURRENCY=" + envText("LAZYMIND_MAX_CONCURRENCY", "10"),
@@ -616,13 +619,18 @@ func algorithmPIDFile(paths RuntimePaths, service string) string {
 	return filepath.Join(paths.AlgorithmPIDDir, service+".pid")
 }
 
-func waitForHostAlgorithmReadiness(ctx context.Context, cfg RuntimeConfig) error {
-	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
+func waitForHostAlgorithmReadiness(ctx context.Context, cfg RuntimeConfig, specs []AlgorithmServiceSpec) error {
+	for _, spec := range specs {
 		if err := waitForHTTPOnly(ctx, spec.Port, spec.HealthPath, spec.Name, algorithmHealthTimeout); err != nil {
 			return err
 		}
 	}
-	return waitForAlgorithmRegistration(ctx, cfg.Algorithm.ProcessorPort, algorithmHealthTimeout)
+	for _, spec := range specs {
+		if spec.Name == algoProcessName {
+			return waitForAlgorithmRegistration(ctx, cfg.Algorithm.ProcessorPort, algorithmHealthTimeout)
+		}
+	}
+	return nil
 }
 
 func waitForAlgorithmRegistration(ctx context.Context, processorPort int, timeout time.Duration) error {

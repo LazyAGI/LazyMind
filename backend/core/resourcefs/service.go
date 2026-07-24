@@ -38,6 +38,10 @@ const (
 	decisionPending  = "pending"
 	decisionAccepted = "accepted"
 	decisionRejected = "rejected"
+
+	draftStatusPendingConfirm = "pending_confirm"
+	draftStatusPending        = "pending"
+	draftStatusAutoPending    = "auto_pending"
 )
 
 func NewService(deps ServiceDeps) *Service {
@@ -236,6 +240,10 @@ func (s *Service) WriteDraft(ctx context.Context, req WriteDraftRequest) (DraftR
 			return err
 		}
 		nextVersion := draft.Version + 1
+		draftStatus := draftStatusPendingConfirm
+		if resource.AutoEvo && shouldAutoCommitPersonalDraft(req.TaskID) {
+			draftStatus = draftStatusAutoPending
+		}
 		updatedBy := nullableString(req.UpdatedBy)
 		conversationID := nullableString(req.ConversationID)
 		update := map[string]any{
@@ -247,7 +255,7 @@ func (s *Service) WriteDraft(ctx context.Context, req WriteDraftRequest) (DraftR
 			"mime":             blob.Mime,
 			"file_type":        blob.FileType,
 			"binary":           blob.Binary,
-			"draft_status":     "pending_confirm",
+			"draft_status":     draftStatus,
 			"draft_updated_at": now,
 			"task_id":          strings.TrimSpace(req.TaskID),
 			"conversation_id":  conversationID,
@@ -266,7 +274,7 @@ func (s *Service) WriteDraft(ctx context.Context, req WriteDraftRequest) (DraftR
 			Ref:            req.Ref,
 			Path:           mustPath(req.Ref.ResourceType),
 			DraftVersion:   nextVersion,
-			DraftStatus:    "pending_confirm",
+			DraftStatus:    draftStatus,
 			BaseRevisionID: valueOrEmpty(resource.HeadRevisionID),
 			BlobHash:       blob.Hash,
 			ContentHash:    blob.Hash,
@@ -275,6 +283,11 @@ func (s *Service) WriteDraft(ctx context.Context, req WriteDraftRequest) (DraftR
 		return nil
 	})
 	return out, normalizeGormErr(err)
+}
+
+func shouldAutoCommitPersonalDraft(taskID string) bool {
+	taskID = strings.TrimSpace(taskID)
+	return taskID != "" && !strings.HasPrefix(taskID, "memory_review_")
 }
 
 func (s *Service) UpdateMetadata(ctx context.Context, req UpdateMetadataRequest) (MetadataResponse, error) {
@@ -435,6 +448,11 @@ func (s *Service) UpdateMetadata(ctx context.Context, req UpdateMetadataRequest)
 			} else {
 				updates["auto_evo_started_at"] = nil
 				updates["auto_evo_finished_at"] = now
+			}
+		}
+		if enabledFromOff {
+			if err := markPendingDraftAuto(ctx, tx, resource.ID, now); err != nil {
+				return err
 			}
 		}
 		if err := tx.Model(&orm.PersonalResource{}).Where("id = ?", resource.ID).Updates(updates).Error; err != nil {
@@ -1335,6 +1353,47 @@ func markActiveReviewSessions(ctx context.Context, tx *gorm.DB, resourceID, stat
 			"status":     status,
 			"updated_at": now,
 		}).Error
+}
+
+func markPendingDraftAuto(ctx context.Context, tx *gorm.DB, resourceID string, now time.Time) error {
+	var draft orm.PersonalResourceDraft
+	if err := tx.WithContext(ctx).Where("resource_id = ?", resourceID).Take(&draft).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if !isPendingConfirmDraftStatus(draft.DraftStatus) {
+		return nil
+	}
+	updates := map[string]any{
+		"draft_status": draftStatusAutoPending,
+		"updated_at":   now,
+	}
+	if strings.TrimSpace(draft.TaskID) == "" {
+		updates["task_id"] = "personal_auto_evo_" + uuid.NewString()
+		updates["conversation_id"] = nil
+		updates["version"] = gorm.Expr("version + 1")
+	}
+	result := tx.WithContext(ctx).Model(&orm.PersonalResourceDraft{}).
+		Where("resource_id = ? AND version = ?", resourceID, draft.Version).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrConflict
+	}
+	return markActiveReviewSessions(ctx, tx, resourceID, reviewStatusInvalidated, "", now)
+}
+
+func isPendingConfirmDraftStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case draftStatusPendingConfirm, draftStatusPending:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) loadState(ctx context.Context, db *gorm.DB, ref ResourceRef) (ResourceState, error) {

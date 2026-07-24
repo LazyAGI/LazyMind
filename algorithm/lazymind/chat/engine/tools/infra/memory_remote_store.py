@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from lazymind.chat.integrations.remote_fs import RemoteFS
+from lazymind.common.integrations.remote_fs import RemoteFS
 
 
 MEMORY_TARGET_PATHS = {

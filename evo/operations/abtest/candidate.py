@@ -8,7 +8,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from evo.operations.eval.answer import answer_case, case_kb_id, failed_rag_answer
+from evo import artifacts as A
+from evo.operations.eval.answer import (
+    answer_case,
+    async_answer_case,
+    case_kb_id,
+    failed_rag_answer,
+)
 from evo.operations.route.router_algorithm import ensure_owned_algorithm, manage_owned_algorithm
 from evo.operations.route.router_ledger import RouterAlgorithmLedger
 from evo.operations.route.router_manager import (
@@ -77,8 +83,7 @@ def candidate_service(
         root = _required(os.environ, 'LAZYMIND_EVO_BASE_DIR')
         run_id = _text(getattr(ctx, 'run_id', ''))
         if not run_id:
-            raise ValueError('candidate materializer requires ctx.run_id')
-        output = next(iter(getattr(ctx, 'output_key_by_name', {}).values()), None)
+            raise ValueError('candidate operation requires ctx.run_id')
         timeout_s = _int_between(
             config.get('startup_timeout_s') or config.get('startup_timeout_seconds'),
             180,
@@ -88,12 +93,12 @@ def candidate_service(
         owner = {
             'thread_id': run_id,
             'run_id': run_id,
-            'candidate_ref': str(getattr(output, 'artifact_id', 'abtest.candidate_service')),
+            'candidate_ref': A.ABTEST_CANDIDATE_SERVICE,
             'cleanup_policy': 'thread_delete',
         }
         registration, detail = ensure_owned_algorithm(
             manager,
-            RouterAlgorithmLedger(Path(root) / 'artifact-store'),
+            RouterAlgorithmLedger(Path(root) / 'router-store'),
             spec,
             owner,
             timeout_s=timeout_s,
@@ -125,6 +130,23 @@ def candidate_service(
 
 
 def candidate_rag_answer(case: Mapping[str, Any], service: Mapping[str, Any]) -> dict[str, Any]:
+    failure, target_config = _candidate_answer_target(case, service)
+    return failure if failure is not None else answer_case(case, target_config)
+
+
+async def async_candidate_rag_answer(case: Mapping[str, Any],
+                                     service: Mapping[str, Any]
+                                     ) -> dict[str, Any]:
+    failure, target_config = _candidate_answer_target(case, service)
+    return failure if failure is not None else await async_answer_case(
+        case,
+        target_config,
+    )
+
+
+def _candidate_answer_target(case: Mapping[str, Any],
+                             service: Mapping[str, Any]
+                             ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     config = service.get('candidate_config') if isinstance(service.get('candidate_config'), Mapping) else {}
     target_config = dict(config) | {
         'router_chat_url': service.get('router_chat_url'),
@@ -132,7 +154,7 @@ def candidate_rag_answer(case: Mapping[str, Any], service: Mapping[str, Any]) ->
         'algorithm_id': service.get('algorithm_id'),
     }
     if service.get('status') == 'ready':
-        return answer_case(case, target_config)
+        return None, target_config
     target = {
         'router_chat_url': _text(target_config.get('router_chat_url')),
         'router_admin_url': _text(target_config.get('router_admin_url')),
@@ -146,7 +168,7 @@ def candidate_rag_answer(case: Mapping[str, Any], service: Mapping[str, Any]) ->
         target,
         'candidate_service_unavailable',
         _text(health.get('message')) or 'candidate not ready',
-    )
+    ), target_config
 
 
 def stop_candidate(service: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -165,7 +187,7 @@ def stop_candidate(service: Mapping[str, Any] | None) -> dict[str, Any]:
         root = _required(os.environ, 'LAZYMIND_EVO_BASE_DIR')
         manage_owned_algorithm(
             manager,
-            RouterAlgorithmLedger(Path(root) / 'artifact-store'),
+            RouterAlgorithmLedger(Path(root) / 'router-store'),
             algorithm_id,
             'stop',
             timeout_s=0,

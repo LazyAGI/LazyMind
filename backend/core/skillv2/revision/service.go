@@ -397,44 +397,50 @@ func (s *Service) enforceRevisionLimit(ctx context.Context, tx *gorm.DB, skillID
 		if int(count) <= s.maxRevisions {
 			return nil
 		}
-		var rows []skillRevisionRow
-		if err := tx.WithContext(ctx).Where("skill_id = ?", skillID).Order("revision_no ASC, created_at ASC").Find(&rows).Error; err != nil {
+		row, ok, err := s.selectRevisionToPrune(ctx, tx, skillID, protected)
+		if err != nil {
 			return err
 		}
-		deleted := false
-		for _, row := range rows {
-			if protected[row.ID] {
-				continue
-			}
-			var draftBaseCount int64
-			if err := tx.Model(&skillDraftRow{}).Where("skill_id = ? AND base_revision_id = ?", skillID, row.ID).Count(&draftBaseCount).Error; err != nil {
-				return err
-			}
-			if draftBaseCount > 0 {
-				protected[row.ID] = true
-				continue
-			}
-			var headCount int64
-			if err := tx.Model(&skillRow{}).Where("id = ? AND head_revision_id = ?", skillID, row.ID).Count(&headCount).Error; err != nil {
-				return err
-			}
-			if headCount > 0 {
-				protected[row.ID] = true
-				continue
-			}
-			if err := tx.Where("revision_id = ?", row.ID).Delete(&skillRevisionEntryRow{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Where("id = ? AND skill_id = ?", row.ID, skillID).Delete(&skillRevisionRow{}).Error; err != nil {
-				return err
-			}
-			deleted = true
-			break
-		}
-		if !deleted {
+		if !ok {
 			return fmt.Errorf("revision limit exceeded and no deletable revision found")
 		}
+		if err := tx.Where("revision_id = ?", row.ID).Delete(&skillRevisionEntryRow{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("id = ? AND skill_id = ?", row.ID, skillID).Delete(&skillRevisionRow{}).Error; err != nil {
+			return err
+		}
 	}
+}
+
+func (s *Service) selectRevisionToPrune(ctx context.Context, tx *gorm.DB, skillID string, protected map[string]bool) (skillRevisionRow, bool, error) {
+	var rows []skillRevisionRow
+	if err := tx.WithContext(ctx).Where("skill_id = ?", skillID).Order("revision_no ASC, created_at ASC").Find(&rows).Error; err != nil {
+		return skillRevisionRow{}, false, err
+	}
+	for _, row := range rows {
+		if protected[row.ID] {
+			continue
+		}
+		var draftBaseCount int64
+		if err := tx.Model(&skillDraftRow{}).Where("skill_id = ? AND base_revision_id = ?", skillID, row.ID).Count(&draftBaseCount).Error; err != nil {
+			return skillRevisionRow{}, false, err
+		}
+		if draftBaseCount > 0 {
+			protected[row.ID] = true
+			continue
+		}
+		var headCount int64
+		if err := tx.Model(&skillRow{}).Where("id = ? AND head_revision_id = ?", skillID, row.ID).Count(&headCount).Error; err != nil {
+			return skillRevisionRow{}, false, err
+		}
+		if headCount > 0 {
+			protected[row.ID] = true
+			continue
+		}
+		return row, true, nil
+	}
+	return skillRevisionRow{}, false, nil
 }
 
 type BlobStore interface {
@@ -628,9 +634,13 @@ type mergedEntry struct {
 }
 
 func mergedEntriesForDraft(ctx context.Context, tx *gorm.DB, skillID, baseRevisionID string) (map[string]mergedEntry, error) {
-	entries, err := entriesForRevision(ctx, tx, skillID, baseRevisionID)
-	if err != nil {
-		return nil, err
+	entries := map[string]mergedEntry{}
+	if baseRevisionID != "" {
+		var err error
+		entries, err = entriesForRevision(ctx, tx, skillID, baseRevisionID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var overlays []skillDraftEntryRow
 	if err := tx.WithContext(ctx).Where("skill_id = ?", skillID).Order("path ASC").Find(&overlays).Error; err != nil {

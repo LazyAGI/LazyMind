@@ -746,7 +746,7 @@ func MergeWordGroupsAndAddWord(w http.ResponseWriter, r *http.Request) {
 	}
 	for i, merge := range body.Merges {
 		if msg := validateMergeWordGroupsRequest(merge); msg != "" {
-			common.ReplyErr(w, fmt.Sprintf("merges[%d]: %s", i, msg), http.StatusBadRequest)
+			common.ReplyErr(w, fmt.Sprintf("invalid merge item: merges[%d]: %s", i, msg), http.StatusBadRequest)
 			return
 		}
 	}

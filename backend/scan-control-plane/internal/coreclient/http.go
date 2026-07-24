@@ -51,13 +51,21 @@ func (c *HTTPCoreClient) CreateDataset(ctx context.Context, req CreateDatasetReq
 		req.DisplayName = req.Name
 	}
 	var out CreateDatasetResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/datasets", req, &out, req.CreatedBy, ""); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, "/datasets", req, &out, req.CreatedBy, req.UserName); err != nil {
 		if resp, ok := recoverCreateDatasetConflict(err); ok {
 			return resp, nil
 		}
 		return CreateDatasetResponse{}, err
 	}
 	return out, nil
+}
+
+func (c *HTTPCoreClient) UpdateDataset(ctx context.Context, req UpdateDatasetRequest) error {
+	if strings.TrimSpace(req.DatasetID) == "" || strings.TrimSpace(req.DisplayName) == "" {
+		return fmt.Errorf("dataset_id and display_name are required")
+	}
+	body := map[string]any{"display_name": req.DisplayName}
+	return c.doJSON(ctx, http.MethodPatch, "/datasets/"+url.PathEscape(req.DatasetID), body, nil, req.UserID, "")
 }
 
 func (c *HTTPCoreClient) DeleteDataset(ctx context.Context, req DeleteDatasetRequest) error {
@@ -77,11 +85,12 @@ func (c *HTTPCoreClient) CreateBindingRootDocument(ctx context.Context, req Crea
 	}
 	body := map[string]any{
 		"display_name":    req.Name,
+		"type":            "FOLDER",
 		"p_id":            req.ParentDocumentID,
 		"idempotency_key": req.IdempotencyKey,
 	}
 	endpoint := "/datasets/" + url.PathEscape(req.DatasetID) + "/documents"
-	if err := c.doJSON(ctx, http.MethodPost, endpoint, body, &out, req.UserID, ""); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, endpoint, body, &out, req.UserID, req.UserName); err != nil {
 		if resp, ok := recoverBindingRootConflict(err); ok {
 			return resp, nil
 		}
@@ -241,6 +250,42 @@ func (c *HTTPCoreClient) submitReparse(ctx context.Context, req SubmitParseTaskR
 	}, nil
 }
 
+func (c *HTTPCoreClient) ResumeParseTask(ctx context.Context, req ResumeParseTaskRequest) (SubmitParseTaskResponse, error) {
+	if strings.TrimSpace(req.DatasetID) == "" || strings.TrimSpace(req.CoreTaskID) == "" {
+		return SubmitParseTaskResponse{}, fmt.Errorf("dataset_id and core_task_id are required")
+	}
+	var out struct {
+		Tasks []struct {
+			TaskID     string `json:"task_id"`
+			DocumentID string `json:"document_id"`
+			Status     string `json:"status"`
+			Message    string `json:"message"`
+		} `json:"tasks"`
+	}
+	body := map[string]any{"task_id": req.CoreTaskID}
+	endpoint := "/datasets/" + url.PathEscape(req.DatasetID) + "/tasks/" + url.PathEscape(req.CoreTaskID) + ":resume"
+	if err := c.doJSON(ctx, http.MethodPost, endpoint, body, &out, req.UserID, ""); err != nil {
+		return SubmitParseTaskResponse{}, err
+	}
+	if len(out.Tasks) == 0 {
+		return SubmitParseTaskResponse{}, &Error{Code: ErrCodeCoreSubmitFailed, Message: "core resume task returned empty tasks"}
+	}
+	result := out.Tasks[0]
+	if !strings.EqualFold(strings.TrimSpace(result.Status), "STARTED") {
+		message := strings.TrimSpace(result.Message)
+		if message == "" {
+			message = "core resume task was not started"
+		}
+		return SubmitParseTaskResponse{}, &Error{Code: ErrCodeCoreSubmitFailed, Message: message}
+	}
+	return SubmitParseTaskResponse{
+		CoreTaskID:     firstNonEmpty(strings.TrimSpace(result.TaskID), req.CoreTaskID),
+		CoreDocumentID: strings.TrimSpace(result.DocumentID),
+		Status:         StatusSubmitted,
+		Created:        false,
+	}, nil
+}
+
 func (c *HTTPCoreClient) GetCoreTaskResult(ctx context.Context, req GetCoreTaskResultRequest) (CoreTaskResult, error) {
 	if strings.TrimSpace(req.DatasetID) == "" || strings.TrimSpace(req.CoreTaskID) == "" {
 		return CoreTaskResult{}, fmt.Errorf("dataset_id and core_task_id are required")
@@ -297,7 +342,7 @@ func (c *HTTPCoreClient) uploadContent(ctx context.Context, req SubmitParseTaskR
 	}
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
-	c.setAuthHeaders(httpReq, req.UserID)
+	c.setAuthHeaders(httpReq, req.UserID, "")
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return "", err
@@ -388,7 +433,7 @@ func (c *HTTPCoreClient) doJSON(ctx context.Context, method, endpoint string, in
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
 	httpReq.Header.Set("Accept", "application/json")
-	c.setAuthHeaders(httpReq, userID)
+	c.setAuthHeaders(httpReq, userID, userName)
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return err
@@ -407,12 +452,17 @@ func (c *HTTPCoreClient) doJSON(ctx context.Context, method, endpoint string, in
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-func (c *HTTPCoreClient) setAuthHeaders(req *http.Request, userID string) {
-	if strings.TrimSpace(userID) == "" {
+func (c *HTTPCoreClient) setAuthHeaders(req *http.Request, userID, userName string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
 		userID = "scan-control-plane"
 	}
+	userName = strings.TrimSpace(userName)
+	if userName == "" {
+		userName = userID
+	}
 	req.Header.Set("X-User-Id", userID)
-	req.Header.Set("X-User-Name", userID)
+	req.Header.Set("X-User-Name", userName)
 }
 
 func (c *HTTPCoreClient) endpoint(endpoint string) string {

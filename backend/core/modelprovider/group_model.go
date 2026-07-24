@@ -33,15 +33,16 @@ type addGroupModelResponse struct {
 }
 
 type groupModelListItem struct {
-	ID                       string `json:"id"`
-	UserModelProviderID      string `json:"user_model_provider_id"`
-	UserModelProviderGroupID string `json:"user_model_provider_group_id"`
-	Name                     string `json:"name"`
-	ModelType                string `json:"model_type"`
-	ProviderName             string `json:"provider_name"`
-	GroupName                string `json:"group_name"`
-	BaseURL                  string `json:"base_url"`
-	IsDefault                bool   `json:"is_default"`
+	ID                       string  `json:"id"`
+	UserModelProviderID      string  `json:"user_model_provider_id"`
+	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
+	Name                     string  `json:"name"`
+	ModelType                string  `json:"model_type"`
+	ProviderName             string  `json:"provider_name"`
+	GroupName                string  `json:"group_name"`
+	BaseURL                  string  `json:"base_url"`
+	IsDefault                bool    `json:"is_default"`
+	MaxInputTokens           *string `json:"max_input_tokens"`
 }
 
 type groupModelListResponse struct {
@@ -238,6 +239,7 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 			GroupName:                group.Name,
 			BaseURL:                  group.BaseURL,
 			IsDefault:                m.IsDefault,
+			MaxInputTokens:           m.MaxInputTokens,
 		})
 	}
 	common.ReplyOK(w, groupModelListResponse{Models: out})
@@ -335,6 +337,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			GroupName:                grp.name,
 			BaseURL:                  grp.baseURL,
 			IsDefault:                m.IsDefault,
+			MaxInputTokens:           m.MaxInputTokens,
 		})
 	}
 	common.ReplyOK(w, groupModelListResponse{Models: out})

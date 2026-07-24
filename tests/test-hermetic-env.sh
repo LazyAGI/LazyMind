@@ -36,6 +36,7 @@ test_hermetic_hash_inputs() {
     "$ROOT/tests/test-hermetic.txt"
     "$ROOT/backend/auth-service/requirements.txt"
     "$ROOT/tests/backend/auth-service/requirements-test.txt"
+    "$ROOT/tests/algorithm/requirements-test.txt"
     "$ROOT/algorithm/requirements.txt"
     "$ROOT/algorithm/lazyllm/pyproject.toml"
     "$ROOT/tests/test-hermetic-env.sh"

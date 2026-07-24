@@ -2,10 +2,12 @@ package revision
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
 
+	skillmetadata "lazymind/core/skillv2/metadata"
 	skillreview "lazymind/core/skillv2/review"
 	skillsearch "lazymind/core/skillv2/search"
 	"lazymind/core/versionfs"
@@ -14,6 +16,8 @@ import (
 type versionStore struct {
 	service *Service
 }
+
+func (versionStore) AllowsInitialCommit() bool { return true }
 
 func (s versionStore) LoadHead(ctx context.Context, tx *gorm.DB, skillID string) (versionfs.HeadState, error) {
 	var skill skillRow
@@ -76,6 +80,10 @@ func (s versionStore) RevisionEntries(ctx context.Context, tx *gorm.DB, skillID 
 }
 
 func (s versionStore) EnsureBlobs(ctx context.Context, tx *gorm.DB, entries map[string]versionfs.Entry) error {
+	skillMD, ok := entries["SKILL.md"]
+	if !ok || skillMD.EntryType != versionfs.EntryTypeFile || skillMD.BlobHash == "" {
+		return fmt.Errorf("skill package must contain SKILL.md")
+	}
 	return s.service.ensureEntryBlobs(ctx, tx, fromVersionEntries(entries))
 }
 
@@ -84,12 +92,12 @@ func (s versionStore) NextRevisionNo(ctx context.Context, tx *gorm.DB, skillID s
 }
 
 func (s versionStore) CreateRevision(ctx context.Context, tx *gorm.DB, revision versionfs.RevisionRecord, entries map[string]versionfs.Entry) error {
-	parent := revision.ParentRevisionID
+	parent := nullableString(revision.ParentRevisionID)
 	createdBy := nullableString(revision.CreatedBy)
 	row := skillRevisionRow{
 		ID:               revision.ID,
 		SkillID:          revision.ResourceID,
-		ParentRevisionID: &parent,
+		ParentRevisionID: parent,
 		RevisionNo:       revision.RevisionNo,
 		TreeHash:         revision.TreeHash,
 		Message:          revision.Message,
@@ -106,7 +114,13 @@ func (s versionStore) CreateRevision(ctx context.Context, tx *gorm.DB, revision 
 }
 
 func (s versionStore) UpdateHead(ctx context.Context, tx *gorm.DB, skillID string, previousRevisionID string, revisionID string, now time.Time) error {
-	result := tx.WithContext(ctx).Model(&skillRow{}).Where("id = ? AND head_revision_id = ?", skillID, previousRevisionID).Updates(map[string]any{
+	query := tx.WithContext(ctx).Model(&skillRow{}).Where("id = ?", skillID)
+	if previousRevisionID == "" {
+		query = query.Where("head_revision_id IS NULL")
+	} else {
+		query = query.Where("head_revision_id = ?", previousRevisionID)
+	}
+	result := query.Updates(map[string]any{
 		"head_revision_id": revisionID,
 		"version":          gorm.Expr("version + 1"),
 		"updated_at":       now,
@@ -126,6 +140,7 @@ func (s versionStore) ResetDraftAfterCommit(ctx context.Context, tx *gorm.DB, sk
 	}
 	return tx.WithContext(ctx).Model(&skillDraftRow{}).Where("skill_id = ?", skillID).Updates(map[string]any{
 		"base_revision_id": revisionID,
+		"draft_status":     "",
 		"task_id":          "",
 		"conversation_id":  nil,
 		"version":          draft.Version,
@@ -155,10 +170,16 @@ func (s versionStore) EnforceRevisionLimit(ctx context.Context, tx *gorm.DB, ski
 }
 
 func (s versionStore) AfterCommit(ctx context.Context, tx *gorm.DB, revision versionfs.RevisionRecord, entries map[string]versionfs.Entry) error {
+	if err := skillmetadata.SyncPublished(ctx, tx, revision.ResourceID, entries, revision.CreatedAt); err != nil {
+		return err
+	}
 	return skillsearch.RebuildSkillTx(ctx, tx, revision.ResourceID, revision.CreatedAt)
 }
 
 func (s versionStore) AfterRollback(ctx context.Context, tx *gorm.DB, skillID string, revisionID string, entries map[string]versionfs.Entry, now time.Time) error {
+	if err := skillmetadata.SyncPublished(ctx, tx, skillID, entries, now); err != nil {
+		return err
+	}
 	return skillsearch.RebuildSkillTx(ctx, tx, skillID, now)
 }
 

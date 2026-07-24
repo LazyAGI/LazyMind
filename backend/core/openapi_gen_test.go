@@ -65,6 +65,58 @@ func TestOpenAPISpecCoversAllRegisteredRoutes(t *testing.T) {
 	}
 }
 
+func TestOpenAPISpecIncludesSkillMarketDelete(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+
+	for _, path := range []string{
+		"/api/core/admin/skill-market/{market_item_id}",
+		"/api/core/skill-market/admin/items/{market_item_id}",
+	} {
+		op := openAPIOperationForTest(t, spec, "delete", path)
+		if got := openAPIObjectResponseRefForTest(t, op); got != "#/components/schemas/marketDeleteOpenAPIResponse" {
+			t.Fatalf("DELETE %s response ref = %q", path, got)
+		}
+		if _, ok := openAPIParameterNamesForTest(t, op)["market_item_id"]; !ok {
+			t.Fatalf("DELETE %s missing market_item_id path parameter", path)
+		}
+	}
+}
+
+func TestOpenAPISpecIncludesDatasetSourceFilter(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+
+	op := openAPIOperationForTest(t, spec, "get", "/api/core/datasets")
+	params := openAPIParameterNamesForTest(t, op)
+	if _, ok := params["source"]; !ok {
+		t.Fatalf("dataset list must document the source query parameter")
+	}
+	sourceSchema := openAPIParameterSchemaForTest(t, op, "source")
+	if !reflect.DeepEqual(sourceSchema["enum"], []any{"manual", "cloud"}) {
+		t.Fatalf("unexpected dataset source values: %#v", sourceSchema["enum"])
+	}
+}
+
 func TestOpenAPISpecRevisionSchemasIncludeHeadMarker(t *testing.T) {
 	r := mux.NewRouter()
 	registerCoreRoutes(r)
@@ -90,6 +142,28 @@ func TestOpenAPISpecRevisionSchemasIncludeHeadMarker(t *testing.T) {
 		isHead, ok := properties["is_head"].(map[string]any)
 		if !ok || isHead["type"] != "boolean" {
 			t.Fatalf("schema %s is_head property = %#v, want boolean", schemaName, properties["is_head"])
+		}
+	}
+}
+
+func TestOpenAPISpecPromptFacetsIncludeCategoryTotal(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	for _, schemaName := range []string{"promptFacetOpenAPIResponse", "PromptFacets"} {
+		properties := schemaPropertiesForTest(t, schemas, schemaName)
+		categoryTotal, ok := properties["category_total"].(map[string]any)
+		if !ok || categoryTotal["type"] != "integer" || categoryTotal["format"] != "int64" {
+			t.Fatalf("schema %s category_total property = %#v, want int64", schemaName, properties["category_total"])
 		}
 	}
 }
@@ -130,7 +204,6 @@ func TestOpenAPISpecIncludesAgentEvoContracts(t *testing.T) {
 		{"get", "/api/core/agent/candidates/{candidate_id:.*}"},
 		{"get", "/api/core/agent/router/status"},
 		{"get", "/api/core/agent/router/algorithms"},
-		{"post", "/api/core/agent/router/algorithms"},
 		{"post", "/api/core/agent/router/algorithms/{algorithm_id}/action"},
 		{"delete", "/api/core/agent/router/algorithms/{algorithm_id}"},
 		{"get", "/api/core/agent/router/ab-strategy"},
@@ -184,7 +257,6 @@ func TestOpenAPISpecIncludesAgentEvoContracts(t *testing.T) {
 
 	paths := spec["paths"].(map[string]any)
 	for _, gateDetailPath := range []string{
-		"/api/core/agent/threads/{thread_id}/gates/eval/versions/{version}/bad-cases",
 		"/api/core/agent/threads/{thread_id}/gates/abtest/versions/{version}/case-details",
 	} {
 		if _, ok := paths[gateDetailPath]; !ok {
@@ -426,6 +498,7 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"get", "/api/core/skills", false, true, true},
 		{"get", "/api/core/skills/tags", false, false, true},
 		{"get", "/api/core/skills/categories", false, false, true},
+		{"get", "/api/core/skill-market/tags", false, false, true},
 		{"post", "/api/core/skills", true, false, true},
 		{"get", "/api/core/skills/{skill_id}", false, true, true},
 		{"patch", "/api/core/skills/{skill_id}", true, true, true},
@@ -477,7 +550,6 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"get", "/api/core/skill-review:summary", false, false, false},
 		{"post", "/api/core/skill-review:run", false, false, false},
 		{"get", "/api/core/skill-review/tasks", false, false, false},
-		{"get", "/api/core/skill-review-results/{review_result_id}", false, false, false},
 		{"get", "/api/core/agent/threads", false, true, true},
 		{"get", "/api/core/conversations/{name}:history", false, true, true},
 	}
@@ -541,6 +613,7 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		"/api/core/user-preference:confirm",
 		"/api/core/user-preference:discard",
 		"/api/core/skill-review-results",
+		"/api/core/skill-review-results/{review_result_id}",
 		"/api/core/skill-review-results/{review_result_id}:accept",
 		"/api/core/skill-review-results/{review_result_id}:reject",
 		"/api/core/memory-review-results",
@@ -720,6 +793,65 @@ func TestOpenAPISpecMarksUIPreferencesPatchFieldsOptional(t *testing.T) {
 	}
 	if required, ok := schema["required"].([]any); ok && len(required) > 0 {
 		t.Fatalf("userUIPreferencesPatchOpenAPIRequest fields should all be optional, got required=%v", required)
+	}
+}
+
+func TestOpenAPISpecIncludesLLMAndVLMMaxInputTokens(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	components, ok := spec["components"].(map[string]any)
+	if !ok {
+		t.Fatalf("components missing in openapi spec")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatalf("schemas missing in openapi spec")
+	}
+	itemSchema, ok := schemas["listModelProviderGroupModelsOpenAPIItem"].(map[string]any)
+	if !ok {
+		t.Fatalf("listModelProviderGroupModelsOpenAPIItem schema missing")
+	}
+	properties, ok := itemSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("listModelProviderGroupModelsOpenAPIItem properties missing")
+	}
+	maxInputTokens, ok := properties["max_input_tokens"].(map[string]any)
+	if !ok {
+		t.Fatalf("max_input_tokens property missing")
+	}
+	if got := maxInputTokens["type"]; got != "string" {
+		t.Fatalf("max_input_tokens type = %v, want string", got)
+	}
+	if got := maxInputTokens["nullable"]; got != true {
+		t.Fatalf("max_input_tokens nullable = %v, want true", got)
+	}
+
+	selectedItemSchema, ok := schemas["selectedModelOpenAPIItem"].(map[string]any)
+	if !ok {
+		t.Fatalf("selectedModelOpenAPIItem schema missing")
+	}
+	selectedProperties, ok := selectedItemSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("selectedModelOpenAPIItem properties missing")
+	}
+	selectedMaxInputTokens, ok := selectedProperties["max_input_tokens"].(map[string]any)
+	if !ok {
+		t.Fatalf("selected models max_input_tokens property missing")
+	}
+	if got := selectedMaxInputTokens["type"]; got != "string" {
+		t.Fatalf("selected models max_input_tokens type = %v, want string", got)
+	}
+	if got := selectedMaxInputTokens["nullable"]; got != true {
+		t.Fatalf("selected models max_input_tokens nullable = %v, want true", got)
 	}
 }
 

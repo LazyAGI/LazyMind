@@ -95,7 +95,7 @@ func (w *Worker) RunOnce(ctx context.Context) (WorkerRunResult, error) {
 			logWorkerFinishedTask(task, outcome)
 			result.Skipped++
 		default:
-			if task.AttemptCount >= w.cfg.MaxAttempts {
+			if outcome.Permanent || task.AttemptCount >= w.cfg.MaxAttempts {
 				result.Failed++
 			} else {
 				result.Retried++
@@ -176,6 +176,9 @@ func (w *Worker) claimPending(ctx context.Context, now time.Time) ([]orm.Resourc
 func (w *Worker) dispatch(ctx context.Context, task orm.ResourceUpdateTask) taskOutcome {
 	if task.TaskType == orm.ResourceUpdateTaskTypeAutoCommitSkillDraft {
 		return w.handleAutoCommitSkillDraft(ctx, task)
+	}
+	if task.TaskType == orm.ResourceUpdateTaskTypeAutoCommitPersonalDraft {
+		return w.handleAutoCommitPersonalDraft(ctx, task)
 	}
 	if task.TaskType == orm.ResourceUpdateTaskTypeAutoApplyReview {
 		return w.handleAutoApplyReview(ctx, task)

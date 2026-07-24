@@ -31,6 +31,7 @@ type Config struct {
 	RedisURL                          string
 	TempDir                           string
 	TempTTL                           time.Duration
+	TargetSearchCachePrewarmEnabled   bool
 	TargetSearchCachePrewarmInterval  time.Duration
 	TargetSearchCachePrewarmStagger   time.Duration
 	WorkerLeaseTTL                    time.Duration
@@ -64,7 +65,7 @@ func defaultConfig() Config {
 		LocalFSDefaultAgentID:             "file-watcher-local-001",
 		TempDir:                           filepath.Join(os.TempDir(), "scan-control-plane", "sourceengine"),
 		TempTTL:                           24 * time.Hour,
-		TargetSearchCachePrewarmInterval:  10 * time.Minute,
+		TargetSearchCachePrewarmInterval:  24 * time.Hour,
 		TargetSearchCachePrewarmStagger:   10 * time.Second,
 		WorkerLeaseTTL:                    60 * time.Second,
 		WorkerMaxBackoff:                  10 * time.Minute,
@@ -139,6 +140,7 @@ func (c *Config) applyEnv() {
 		c.TempDir = tempDir
 	}
 	c.TempTTL = durationEnv("SOURCEENGINE_TEMP_TTL", c.TempTTL)
+	c.TargetSearchCachePrewarmEnabled = boolEnv("SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_ENABLED", c.TargetSearchCachePrewarmEnabled)
 	c.TargetSearchCachePrewarmInterval = durationEnv("SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_INTERVAL", c.TargetSearchCachePrewarmInterval)
 	c.TargetSearchCachePrewarmStagger = durationEnv("SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER", c.TargetSearchCachePrewarmStagger)
 	c.WorkerLeaseTTL = durationEnv("SOURCEENGINE_WORKER_LEASE_TTL", c.WorkerLeaseTTL)
@@ -273,6 +275,18 @@ func durationEnv(name string, fallback time.Duration) time.Duration {
 	parsed, err := time.ParseDuration(value)
 	if err != nil {
 		return -1
+	}
+	return parsed
+}
+
+func boolEnv(name string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
 	}
 	return parsed
 }

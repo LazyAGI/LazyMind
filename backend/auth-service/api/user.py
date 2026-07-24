@@ -10,6 +10,7 @@ from schemas.user import (
     CreateUserBody,
     CreateUserResponse,
     DisableUserBody,
+    InternalUserRoleResponse,
     OkResponse,
     ResetPasswordBody,
     UserDetailResponse,
@@ -80,6 +81,20 @@ def _parse_user_ids(user_ids: list[str]) -> list[uuid.UUID]:
         except (ValueError, TypeError):
             raise_error(ErrorCodes.USER_NOT_FOUND, extra_msg=value)
     return result
+
+
+@router.get('/{user_id}/role/internal', response_model=InternalUserRoleResponse)
+def get_user_role_internal(
+    user_id: str,
+    _internal: None = Depends(require_internal_service_token),  # noqa: B008
+):
+    detail = user_service.get_user(_parse_user_id(user_id))
+    return {
+        'user_id': detail['user_id'],
+        'role': detail['role_name'],
+        'tenant_id': detail['tenant_id'],
+        'disabled': detail['status'] != 'active',
+    }
 
 
 @router.patch('/role', response_model=OkResponse)

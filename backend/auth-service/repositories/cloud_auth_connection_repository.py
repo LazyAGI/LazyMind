@@ -39,6 +39,7 @@ class CloudAuthConnectionRepository:
         owner_user_id: str = '',
         provider: str,
         auth_mode: str,
+        client_id: str | None = None,
         credential_ciphertext: str,
         auth_state_ciphertext: str,
         provider_account_id: str = '',
@@ -55,6 +56,7 @@ class CloudAuthConnectionRepository:
             owner_user_id=(owner_user_id or '').strip(),
             provider=(provider or '').strip().lower(),
             auth_mode=(auth_mode or '').strip().lower(),
+            client_id=(client_id or '').strip() or None,
             credential_ciphertext=credential_ciphertext,
             auth_state_ciphertext=auth_state_ciphertext,
             provider_account_id=(provider_account_id or '').strip(),
@@ -69,6 +71,50 @@ class CloudAuthConnectionRepository:
         session.commit()
         session.refresh(row)
         return row
+
+    @classmethod
+    def find_by_client_identity(
+        cls,
+        session: Session,
+        *,
+        owner_user_id: str,
+        provider: str,
+        auth_mode: str,
+        client_id: str,
+    ) -> CloudAuthConnection | None:
+        return (
+            session.query(CloudAuthConnection)
+            .filter(
+                CloudAuthConnection.tenant_id == '',
+                CloudAuthConnection.owner_user_id == (owner_user_id or '').strip(),
+                CloudAuthConnection.provider == (provider or '').strip().lower(),
+                CloudAuthConnection.auth_mode == (auth_mode or '').strip().lower(),
+                CloudAuthConnection.client_id == (client_id or '').strip(),
+            )
+            .first()
+        )
+
+    @classmethod
+    def list_without_client_identity(
+        cls,
+        session: Session,
+        *,
+        owner_user_id: str,
+        provider: str,
+        auth_mode: str,
+    ) -> list[CloudAuthConnection]:
+        return (
+            session.query(CloudAuthConnection)
+            .filter(
+                CloudAuthConnection.tenant_id == '',
+                CloudAuthConnection.owner_user_id == (owner_user_id or '').strip(),
+                CloudAuthConnection.provider == (provider or '').strip().lower(),
+                CloudAuthConnection.auth_mode == (auth_mode or '').strip().lower(),
+                CloudAuthConnection.client_id.is_(None),
+            )
+            .order_by(CloudAuthConnection.created_at.desc())
+            .all()
+        )
 
     @classmethod
     def save(cls, session: Session, row: CloudAuthConnection) -> CloudAuthConnection:
@@ -105,7 +151,13 @@ class CloudAuthConnectionRepository:
             if normalized_modes:
                 q = q.filter(~CloudAuthConnection.auth_mode.in_(normalized_modes))
         if status:
-            q = q.filter(CloudAuthConnection.status == status.strip().upper())
+            statuses = tuple(
+                value.strip().upper()
+                for value in status.split(',')
+                if value and value.strip()
+            )
+            if statuses:
+                q = q.filter(CloudAuthConnection.status.in_(statuses))
         return q.order_by(CloudAuthConnection.updated_at.desc(), CloudAuthConnection.created_at.desc()).all()
 
     @classmethod

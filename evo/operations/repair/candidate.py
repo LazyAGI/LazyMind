@@ -6,11 +6,11 @@ from pathlib import Path
 from statistics import fmean
 from typing import Any
 
-from evo.operations.abtest.candidate import candidate_rag_answer, candidate_service, stop_candidate
+from evo.operations.abtest.candidate import async_candidate_rag_answer, candidate_service, stop_candidate
 from evo.operations.abtest.comparison import GOODCASE_MAX_OVERALL_DROP, compare_eval_detail_for_repair
 from evo.operations.analysis.summary import build_analysis_from_answers
 from evo.operations.eval.judge import judge_case
-from evo.operations.eval.materializers import build_eval_detail_summary
+from evo.operations.eval.summary import build_eval_detail_summary
 
 from .errors import EXTERNAL_CHAT_FAILURE_TYPES
 from .trace import safe_emit
@@ -27,7 +27,7 @@ EPSILON = 0.0001
 BADCASE_MIN_OVERALL_GAIN = 0.10
 
 
-def validate_candidate_patch(
+async def validate_candidate_patch(
     root: Path,
     diff: str,
     plan: Mapping[str, Any],
@@ -92,7 +92,7 @@ def validate_candidate_patch(
         for case_id, case in selected.items():
             safe_emit(trace, 'candidate.case_started', status='started', attempt=attempt, payload={'case_id': case_id})
             try:
-                answer = candidate_rag_answer(case, service)
+                answer = await async_candidate_rag_answer(case, service)
                 answers[case_id] = answer
                 judges[case_id] = judge_case(case, answer, eval_policy)
             except Exception as exc:

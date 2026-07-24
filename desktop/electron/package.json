@@ -9,7 +9,8 @@
   "scripts": {
     "start": "electron .",
     "pack:mac:arm64": "electron-builder --config electron-builder.config.cjs --mac --arm64 --dir",
-    "pack:win:x64": "electron-builder --config electron-builder.config.cjs --win --x64"
+    "pack:win:x64": "electron-builder --config electron-builder.config.cjs --win zip --x64",
+    "pack:win:x64:installer": "electron-builder --config electron-builder.config.cjs --win nsis --x64"
   },
   "devDependencies": {
     "electron": "^31.7.7",

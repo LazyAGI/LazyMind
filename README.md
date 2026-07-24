@@ -2,297 +2,292 @@
 
 **[中文](README.CN.md)** | **English**
 
-> **Enterprise RAG knowledge-base platform with built-in self-evolution** — not just a Q&A system, but one that can find its own problems, fix them, and verify the improvement automatically.
+> **Make AI reliably complete real tasks using your knowledge, standards, and preferences.**
+
+[![GitHub stars](https://img.shields.io/github/stars/LazyAGI/LazyMind?style=flat-square)](https://github.com/LazyAGI/LazyMind/stargazers)
+[![License](https://img.shields.io/github/license/LazyAGI/LazyMind?style=flat-square)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-arm64-111827?style=flat-square&logo=apple)](desktop/README.md)
+[![Windows](https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square&logo=windows)](desktop/README.md)
+[![Local first](https://img.shields.io/badge/deployment-local--first-16a34a?style=flat-square)](docs/quick_start.md)
+
+LazyMind is an **AI Skill Runtime** for knowledge-intensive work. It connects reusable knowledge, executable Skills, observable workflows, editable artifacts, and evaluation-driven improvement in one workspace.
+
+Instead of repeatedly uploading context, tuning prompts, and supervising every agent step, you choose the knowledge and workflow once. LazyMind then plans, executes, exposes intermediate results, and carries accepted feedback into the next run. Use it locally in **Desktop Mode** or deploy it as a shared enterprise service.
+
+**[Quick start](#quick-start)** · **[Product architecture](docs/architecture.md)** · **[Build a workflow](docs/plugin-format.md)** · **[Desktop mode](desktop/README.md)**
 
 ---
 
-## What is this?
+## What can you ship with it?
 
-LazyMind is a **production-ready enterprise knowledge-base + RAG chat platform** with a built-in **automated RAG quality optimization loop (evo)**.
+| Scenario | LazyMind runs | You receive |
+|----------|---------------|-------------|
+| **Research and review** | Search sources → retrieve evidence → compare → synthesize → review | A traceable report grounded in your documents and external sources |
+| **AI Writer** | Organize sources → outline → draft sections → revise → final review | An editable, versioned document rather than a one-shot answer |
+| **AI Image** | Interpret intent → collect references → refine prompt → generate/edit | Images and animated stickers with the process retained |
+| **Knowledge assistant** | Connect sources → parse/OCR → hybrid retrieve → rerank → answer | Answers linked back to reusable organizational knowledge |
+| **Quality improvement** | Capture a bad case → evaluate → diagnose → A/B test → deploy | A verified strategy improvement, not an unchecked prompt change |
 
-You can use it to:
+## How LazyMind works
 
-- Connect local files, Feishu docs, and other data sources to build an enterprise knowledge base
-- Serve RAG-powered conversations with multi-path retrieval and reranking
-- Manage skills, vocabulary, usage habits, and other operational assets via the **Knowledge Ops** module
-- Run the **evo self-evolution loop** to automatically evaluate RAG quality, analyze bad cases, generate code fixes, run A/B tests, and close the improvement cycle end-to-end
+```mermaid
+flowchart LR
+    K["Knowledge<br/>local files · cloud docs · object storage"] --> R["Retrieve & reason<br/>parse · OCR · hybrid search · rerank"]
+    S["Skills & workflows<br/>instructions · tools · state machines"] --> X["Observable execution<br/>steps · approvals · retry · rewind"]
+    R --> X
+    X --> A["Editable artifacts<br/>citations · revisions · delivery"]
+    A --> F["Feedback & evaluation<br/>preferences · bad cases · A/B tests"]
+    F --> K
+    F --> S
+```
+
+This loop is built from three connected systems:
+
+| System | Responsibility | Product behavior |
+|--------|----------------|------------------|
+| **Knowledge Foundation** | Give AI the right context | Multi-source ingestion, OCR, hybrid retrieval, reranking, and source traceability |
+| **State Brain** | Keep long tasks on course | Visible steps, approvals, editable artifacts, retries, rewinds, and version history |
+| **AI Growth Engine** | Improve future runs safely | Reviewable preferences and terminology plus evaluation, diagnosis, A/B tests, and rollback |
+
+## Core highlights
+
+### 1. Deliver outcomes, not chat messages
+
+Choose knowledge and a Skill; LazyMind continues from source organization through planning, generation, review, and delivery. Plugins define steps, tools, inputs, outputs, and transitions as state machines, while artifacts preserve editable results and revision history.
+
+For long-running work, each step remains visible. Users can approve checkpoints, edit an artifact, or rerun from the failed step instead of restarting the whole task.
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/artifact-workspace-en.png"><img src="docs/assets/artifact-workspace-en.png" alt="A real Artifact remains editable at an approval checkpoint" width="100%" /></a>
+      <br /><sub>Inspect and edit the Artifact before continuing</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/artifact-version-diff-en.png"><img src="docs/assets/artifact-version-diff-en.png" alt="Inspect the execution trail and approve the next step without restarting" width="100%" /></a>
+      <br /><sub>Review a version diff and restore the result you need</sub>
+    </td>
+  </tr>
+</table>
+
+### 2. Ground every run in reusable knowledge
+
+Local directories, object storage, Feishu, Notion, and other sources feed a unified knowledge base. PDFReader, MinerU, or PaddleOCR-VL parses documents; multi-embedding retrieval, hybrid search, and reranking keep results grounded in relevant evidence.
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/knowledge-library-en.jpg"><img src="docs/assets/knowledge-library-en.jpg" alt="Manage parsed documents in a reusable knowledge base" width="100%" /></a>
+      <br /><sub>Organize documents and track parsing status in one knowledge base</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/knowledge-cited-answer-en.jpg"><img src="docs/assets/knowledge-cited-answer-en.jpg" alt="Answer with inline citations and an automatically generated reference list" width="100%" /></a>
+      <br /><sub>Ground answers with inline citations and traceable references</sub>
+    </td>
+  </tr>
+</table>
+
+### 3. Package expert practice into reusable workflows
+
+Research methods, writing processes, and domain standards can be managed as Skills and converted into executable Plugins. Teams can diagnose, repair, publish, version, and roll them back instead of rebuilding the same setup from prompts and scripts. See the [Plugin format specification](docs/plugin-format.md).
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-to-workflow-entry-en.png"><img src="docs/assets/skill-to-workflow-entry-en.png" alt="Create an executable workflow from an existing Skill" width="100%" /></a>
+      <br /><sub>Select a Skill as the source of a new workflow</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-to-workflow-editor-en.png"><img src="docs/assets/skill-to-workflow-editor-en.png" alt="Manage converted and custom workflows after generation" width="100%" /></a>
+      <br /><sub>Inspect, refine, publish, and version the generated workflow</sub>
+    </td>
+  </tr>
+</table>
+
+### 4. Improve only after evidence
+
+Knowledge Ops captures what the user wants—preferences, terminology, experience, and Skills. `evo` tests how the system should improve by turning bad cases into evaluation samples and running baseline evaluation, diagnosis, repair, and A/B testing.
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/skill-review-en.jpg"><img src="docs/assets/skill-review-en.jpg" alt="Knowledge Ops reviews and improves reusable Skills" width="100%" /></a>
+      <br /><sub>Knowledge Ops reviews Skills, preferences, terminology, and experience</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/evo-pipeline-en.jpg"><img src="docs/assets/evo-pipeline-en.jpg" alt="The evo workspace turns failures into an evaluated improvement pipeline" width="100%" /></a>
+      <br /><sub>Algorithm evolution validates improvements before rollout</sub>
+    </td>
+  </tr>
+</table>
+
+### 5. Start local, scale when collaboration requires it
+
+Desktop Mode uses native processes, SQLite, and Milvus Lite with platform-standard data paths. Shared deployments add Kong, JWT/RBAC, Core ACL, external Milvus/OpenSearch, and on-premises OCR. Your workflow stays recognizable across both modes.
 
 ---
 
-## Highlights
+## Quick start
 
-### 1. RAG Self-Evolution Loop (evo)
+### Run locally
 
-This is LazyMind's most distinctive capability. Traditional RAG systems rely on manual inspection after deployment. The evo module lets the system **run the entire optimization pipeline on its own**:
-
-```
-Generate dataset → Baseline eval → Analyze bad cases → Generate code fix → A/B test → Merge & deploy
-```
-
-The pipeline can run fully automatically or pause at key checkpoints for human review.
-
-![evo self-evolution pipeline](docs/assets/evo-pipeline.png)
-
-**Real-time orchestration view** — track the progress and status of each optimization step:
-
-![evo execution orchestration](docs/assets/evo-run.png)
-
-### 2. Multi-Source Data Ingestion
-
-Unified management of local directories, object storage, and OAuth cloud sources (Feishu, etc.) — including connection, sync, and runtime status.
-
-![Data source management — create new source](docs/assets/datasource-create.png)
-
-### 3. Knowledge Ops Asset Management
-
-Centrally manage vocabulary, system tools, skills (operation templates), and usage habits to build a traceable, operational memory hub.
-
-![Knowledge Ops — skills, vocabulary, system tools](docs/assets/knowledge-ops.png)
-
-### 4. Flexible OCR and Vector Storage
-
-- **OCR**: built-in PDFReader / MinerU / PaddleOCR-VL (GPU) — three tiers
-- **Vector store**: Milvus + OpenSearch, deploy in-stack or connect externally
-- **Multi-embedding** (embed_1~3) for hybrid retrieval; single-embedding mode auto-activates when only embed_1 is configured
-
-### 5. Enterprise-Grade Auth
-
-Kong API Gateway + JWT/RBAC with four verification layers: Frontend → Kong RBAC → Core ACL → Algorithm services. Each layer enforces independent permission checks.
-
----
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────┐
-│                    Frontend (8080)                   │
-│           nginx SPA — knowledge base / chat / ops    │
-└─────────────────────┬────────────────────────────────┘
-                      │
-             ┌────────▼────────┐
-             │   Kong (8000)   │  API Gateway + RBAC
-             └──┬──────-────┬──┘
-                │           │
-       ┌────────▼-──┐  ┌────▼──────────┐
-       │auth-service│  │  core (Go)    │  dataset / doc / task / retrieval
-       │  FastAPI   │  │  HTTP API     │
-       └────────────┘  └──────┬────────┘
-                              │ proxy
-             ┌────────────────┼───────────────┐
-             │                │               │
-    ┌────────▼──────┐  ┌──────▼──────┐  ┌─────▼──────┐
-    │   parsing     │  │    chat     │  │    evo     │
-    │ doc parse /   │  │  RAG chat   │  │ self-evo   │
-    │ vectorization │  │             │  │   loop     │
-    └───────────────┘  └─────────────┘  └────────────┘
-             │
-    ┌────────┴──────────────┐
-    │  Milvus + OpenSearch  │  vector + segment store
-    └───────────────────────┘
-```
-
-For the full service dependency graph, environment variables, and request auth chain, see [`docs/architecture.md`](docs/architecture.md).
-
----
-
-## Quick Start
-
-**Local prerequisites:** Go, Python 3, uv, pnpm, and Node.js.
-
-### Step 1 — Get a MinerU API key (for high-quality PDF parsing)
-
-Apply for a MinerU API key at [https://mineru.net](https://mineru.net/apiManage/token).
-
-```bash
-export LAZYLLM_MINERU_API_KEY=your_mineru_key
-```
-
-> **Note:** Same prefix — `LAZYLLM_`, not `LAZYMIND_`.
-
-> **Important:** Because reader are initialized at startup, the API key for your ocr provider **must be set before launching the stack**. We are working on frontend-based key configuration for OCR — stay tuned for the next release.
-
-### Step 2 — Start the stack
+Prerequisites: Go, Python 3, uv, pnpm, and Node.js.
 
 ```bash
 make local-up
 ```
 
-On native Windows PowerShell, use the isolated Windows lifecycle target:
+On native Windows PowerShell:
 
 ```powershell
 make local-win-up
 ```
 
 After startup:
-- Frontend: http://localhost:8090
+
+- LazyMind: http://localhost:8090
 - API docs: http://localhost:8090/docs.html
 - Default credentials: `admin` / `admin`
 
-### Step 3 — Configure models in the frontend
+After login, open **Settings** in the frontend:
 
-Log in and go to the model settings page to configure your **LLM**, **VLM**, **enbed**, **cross_embed** and **Reranker** models using the API key from Step 1.
+- Add provider credentials and API keys under **Model Providers**, then select the default LLM, embedding, and reranker under **System Defaults**. Multimodal embedding, VLM, speech, image, video, and evolution models are optional.
+- Configure service credentials under **Tools** when needed, including MinerU or PaddleOCR for document parsing, web and academic search engines, and other integrations. No environment variable is required for a hosted MinerU API key.
 
-For environment setup and detailed examples, see [`docs/quick_start.md`](docs/quick_start.md).
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/settings-models-en.jpg"><img src="docs/assets/settings-models-en.jpg" alt="Select default models in frontend settings" width="100%" /></a>
+      <br /><sub>Select the default models for each system capability</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/settings-tools-en.jpg"><img src="docs/assets/settings-tools-en.jpg" alt="Configure document parsing and search providers in frontend settings" width="100%" /></a>
+      <br /><sub>Configure document parsing, search, and integration credentials</sub>
+    </td>
+  </tr>
+</table>
 
-To stop the local runtime:
+Stop the local runtime with:
 
 ```bash
 make local-down
 ```
 
-Use `make local-win-down` on Windows.
+Use `make local-win-down` on Windows. See the [Quick Start guide](docs/quick_start.md) for complete configuration.
 
----
+### Build the desktop application
 
-## Testing
+| Platform | Command | Output |
+|----------|---------|--------|
+| macOS arm64 | `make desktop-darwin-arm64` | macOS desktop application |
+| Windows x64 | `make desktop-windows-x64` | Portable ZIP |
+| Windows x64 | `make desktop-windows-x64-installer` | Installer |
 
-The legacy quick test command remains:
-
-```bash
-make test
-```
-
-`make test` uses the Python, Node/npm, and Go tools already available on the host, matching its historical behavior.
-
-For a project-managed host environment that covers the same test scope, use:
+### Deploy with containers
 
 ```bash
-make test-hermetic
+make up
 ```
 
-`make test-hermetic` requires `uv`, either `fnm` or `nvm`, and Go `1.24.0`. It creates a repo-local Python 3.11 environment at `.venv-test/`, selects Node 20 through the available Node manager, installs frontend test dependencies with `npm ci`, and runs the same frontend, auth-service, backend/core, and algorithm tests as `make test`.
-
-## Common Startup Configurations
+### Startup Command Reference
 
 | Scenario | Command |
 |----------|---------|
-| Local runtime on host (SQLite state backend, no containers) | `make local-up` |
-| Stop local runtime | `make local-down` |
-| Windows local runtime (PowerShell/native process management) | `make local-win-up` |
-| Stop Windows local runtime | `make local-win-down` |
-| Remove local application artifacts | `make local-clean` |
-| Stop local runtime, remove runtime data, and remove local application artifacts | `make local-reset` |
-| Container stack | `make up` |
-| Deploy MinerU OCR (on-prem) | `make up LAZYMIND_DEPLOY_MINERU=1` |
-| Deploy PaddleOCR (on-prem) | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
-| External Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
-| Enable store dashboards | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
+| Build images and start | `make up-build` |
+| Deploy MinerU OCR on-premises | `make up LAZYMIND_DEPLOY_MINERU=1` |
+| Deploy PaddleOCR on-premises | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
+| Use external Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 
-`make local-up` runs LazyMind directly on the host through `local/build/bin/local-runtime-manager`. If `local/config.env` does not exist, Make copies it from `local/config.env.example` and uses it for local build/run configuration. Application artifacts are repo-local under `local/build`: Go binaries in `local/build/bin`, managed runtimes in `local/build/runtimes`, Python dependencies in `local/build/deps/python`, Node dependencies in `local/build/deps/node`, and desktop staging app files in `local/build/app`. Runtime data, SQLite databases, state, generated startup files, logs, caches, and local document imports use platform paths. Override the `LAZYMIND_*` path variables in `local/config.env` only when a non-standard location is required.
-
-`local-win-*` delegates to `local/scripts/local-win.ps1`, builds with `CGO_ENABLED=0`, uses `.exe`/`Scripts`/`.cmd` paths, and creates a Windows directory junction for frontend dependencies. Core SQLite uses a Pure Go driver, so MinGW is not required. Host-local runtimes on all three platforms install `algorithm/requirements-local.txt` and use pymilvus/Milvus Lite 3.0 under `LAZYMIND_LOCAL_MILVUS_DATA_DIR`; its storage format is intentionally incompatible with the old 2.x local database. Container builds instead install `algorithm/requirements-cloud.txt`, which explicitly pins the Cloud pymilvus client to 2.4.14.
-
-### Desktop Builds
-
-| Platform | Local source runtime | Desktop package |
-|----------|----------------------|-----------------|
-| macOS arm64 | `make local-up` / `make local-down` | `make desktop-darwin-arm64` |
-| Windows x64 | `make local-win-up` / `make local-win-down` | `make desktop-windows-x64` |
-
-Windows Desktop produces `desktop/dist/win-unpacked/` and a portable `desktop/dist/LazyMind-windows-x64-yyyyMMdd-HHmmss-<commit>.zip`, where the timestamp is the build host's local time and `<commit>` is the short Git commit. The package includes the compiled frontend and full Local/RAG runtime; it does not include raw frontend `node_modules` or model weights. See [`desktop/README.md`](desktop/README.md) for runtime ownership and platform details.
-
-### Platform Path Examples
-
-| Platform | Application artifacts | Runtime data and DB | Logs | Cache | Local documents |
-|----------|-----------------------|---------------------|------|-------|-----------------|
-| macOS | `<repo>/local/build` | `/Users/<User>/Library/Application Support/LazyMind` | `/Users/<User>/Library/Logs/LazyMind` | `/Users/<User>/Library/Caches/LazyMind` | `/Users/<User>/Documents/LazyMind` |
-| Windows | `<repo>\local\build` | `%LOCALAPPDATA%\LazyMind` | `%LOCALAPPDATA%\LazyMind\Logs` | `%LOCALAPPDATA%\LazyMind\Cache` | `%USERPROFILE%\Documents\LazyMind` |
-| Linux | `<repo>/local/build` | `${XDG_DATA_HOME:-/home/<user>/.local/share}/LazyMind` | `${XDG_STATE_HOME:-/home/<user>/.local/state}/LazyMind/logs` | `${XDG_CACHE_HOME:-/home/<user>/.cache}/LazyMind` | `/home/<user>/Documents/LazyMind` |
+See the [Colima setup guide](docs/quick_start.md#macos-use-colima-instead-of-docker-desktop) or the complete [Quick Start guide](docs/quick_start.md). The [Architecture guide](docs/architecture.md) covers service dependencies, environment variables, and the authentication chain.
 
 ---
 
-## Model Configuration
+## Available today
 
-All algorithm services use `LAZYMIND_MODEL_CONFIG_PATH`. The default is `dynamic`,
-so the frontend's per-user model/API-key selection can be injected per request.
-Set `online` or `inner` only when forcing a static config.
+| Area | Current capabilities |
+|------|----------------------|
+| Knowledge base | Multiple sources, OCR, vectorization, hybrid retrieval, reranking, sync management |
+| Agents | RAG chat, tool calls, subtasks, artifacts, task center |
+| Plugins | State machines, dynamic routing, automatic review, retry/rewind, visual execution, versioned artifacts |
+| Skills | Installation, organization, review, revisions, rollback, Skill → Plugin |
+| Self-evolution | Eval-set generation, evaluation, bad-case analysis, repair, deployment, A/B testing |
+| Local experience | macOS/Windows local runtime, desktop builds, platform-standard data paths |
+| Enterprise | Kong, JWT/RBAC, ACL, OAuth sources, optional external storage |
 
-| Value | Description |
-|-------|-------------|
-| `inner` | On-premises / intranet deployment |
-| `online` | Public cloud API |
-| `dynamic` (default) | Key injected per request |
-
-Configure `llm`, `reranker`, and `embed_1~embed_3`. If only `embed_1` is set, single-embedding mode activates automatically.
-
----
-
-## evo Self-Evolution Module
-
-evo is a standalone FastAPI service (port 8047) that implements the full RAG quality optimization loop:
-
-```
-dataset_gen → eval → run (analysis) → apply (code fix) → merge → deploy → abtest
-```
-
-**Two execution modes:**
-- **auto** — fully automated, no human intervention
-- **interactive** — pauses at key steps for human approve / revise / cancel
-
-**Natural-language driven:**
-
-```bash
-curl -sX POST "$BASE/v1/evo/threads/$THREAD_ID/messages" \
-  -H "Content-Type: application/json" \
-  -d '{"content":"Generate an eval set from KB_ID, analyze the report, fix the code, and run an A/B test"}'
-```
-
-Full API reference: [`evo/README.md`](evo/README.md).
+This table describes capabilities implemented in the repository today, not a future roadmap. See [docs](docs/) for module design and implementation details.
 
 ---
 
-## Optional Services
+## Roadmap
 
-| Service | Profile | Purpose |
-|---------|---------|---------|
-| **mineru** | `mineru` | MinerU PDF parsing (layout analysis) |
-| **paddleocr** | `paddleocr` | PaddleOCR-VL PDF parsing (GPU required) |
-| **milvus** | `milvus` | Vector store |
-| **opensearch** | `opensearch` | Segment store |
-| **attu** | `milvus-dashboard` | Milvus visual management |
-| **opensearch-dashboards** | `opensearch-dashboard` | OpenSearch visual management |
+LazyMind's next phase is not about adding more isolated features. The goal is to make knowledge bases, Skills, Plugins, and self-evolution work together in complete, real-world task loops.
+
+### Near term: flagship workflows people can try immediately
+
+- **Knowledge to deliverable**: complete workflows for customer solutions, product manuals, and product research—from retrieval and planning to drafting, review, and delivery.
+- **Better local revision**: selection-based rewriting, knowledge-grounded expansion, diffs, accept/reject controls, and partial reruns from affected steps.
+- **Result delivery**: stronger Markdown, DOCX, and PDF export, shareable result pages, and initial publishing targets such as Feishu and Notion.
+- **Ready-to-run demos**: sample knowledge packs, task templates, and completed outputs so new users can experience an end-to-end workflow without preparing private data first.
+- **Desktop experience**: simpler installation, model setup, data import, and local-runtime diagnostics.
+
+### Mid term: a distribution network for knowledge and capabilities
+
+- **Knowledge and Skill/Plugin marketplace**: curated discovery, one-click installation, updates, dependency checks, and trusted-source information.
+- **Reusable scenario packages**: combine workflows, knowledge packs, review rules, and output formats into installable industry solutions.
+- **External agent access**: expose LazyMind knowledge and workflows to Codex, Cursor, Hermes Agent, OpenClaw, and others through MCP, CLI, OpenAPI, and SDKs.
+- **More connectors**: progressively connect collaboration, email, calendar, code, and task systems for weekly reports, research, and content workflows.
+- **Team collaboration**: improve workflow sharing, approvals, permissions, run history, and organization-level template governance.
+
+### Long term: from executable workflows to a self-evolving work system
+
+- Detect workflow and knowledge gaps from user edits, reruns, citations, and final acceptance signals.
+- Continuously evaluate and A/B test retrieval strategies, prompts, models, tools, and Plugin revisions.
+- Turn successful execution patterns into reusable Skills, templates, and organizational memory with full provenance and version history.
+- Expand across industries through horizontal task templates plus vertical knowledge packs instead of rebuilding the product for every industry.
+
+The roadmap will evolve based on real workflow completion rates, output quality, human interventions, latency, and cost. Repository issues, milestones, and release notes remain the source of truth for specific releases.
 
 ---
 
-## Project Layout
+## Project layout
 
-```
+```text
 LazyMind/
-├── kong.yml                    # Kong declarative config
-├── docker-compose.yml          # All services
-├── Makefile                    # lint / startup shortcuts
+├── frontend/                   # Web UI and desktop frontend
 ├── backend/
-│   ├── auth-service/           # FastAPI auth, JWT, RBAC
-│   ├── core/                   # Go HTTP API (dataset / doc / task / retrieval)
-│   └── scripts/
-├── frontend/                   # nginx + SPA
+│   ├── auth-service/           # Authentication, OAuth, and users
+│   ├── core/                   # Data, tasks, retrieval, Plugins, and ACL
+│   └── scan-control-plane/     # Source scanning and synchronization
 ├── algorithm/
-│   ├── chat/                   # RAG chat (lazyllm)
-│   ├── parsing/                # Document parsing (lazyllm + MinerU/PaddleOCR)
-│   └── processor/              # Document task queue
-├── evo/                        # Self-evolution loop service
-├── api/                        # OpenAPI specs (centralized)
-├── docs/                       # Quick start, CLI, architecture docs
-└── tests/
-    ├── backend/
-    └── algorithm/
+│   └── lazymind/               # Chat, parsing, retrieval, and agent runtime
+├── plugins/                    # Built-in Plugins
+├── skills/                     # Built-in and curated Skills
+├── evo/                        # Self-evolution and evaluation loop
+├── desktop/                    # Electron desktop application and packaging
+├── local/                      # Host-local runtime management
+├── api/                        # OpenAPI specifications
+├── docs/                       # Architecture, usage, and design docs
+└── tests/                      # Cross-service tests
 ```
 
 ---
 
-## Development
+## Development and testing
 
 ```bash
-make lint              # Python (flake8) + Go (gofmt)
-make lint-only-diff    # Lint changed files only
+make lint              # Python, Go, docs, and other static checks
+make lint-only-diff    # Check changed files only
+make test              # Test with host-provided runtimes
+make test-hermetic     # Test the same scope in project-managed runtimes
 ```
 
-- Go module: `backend/core` uses `module lazymind/core`
-- Python: 3.11+, dependencies in `algorithm/requirements.txt` (`lazyllm[rag-advanced]`)
-- OpenAPI specs live in `api/` — keep them in sync when adding routes
+- Python 3.11+
+- Go 1.24.0
+- Node.js 20
+- OpenAPI specifications are maintained under `api/`
 
 ---
 
 ## License
 
-See repository for license information.
+See [LICENSE](LICENSE).
