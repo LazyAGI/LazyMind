@@ -59,7 +59,9 @@ _STATE_YML = textwrap.dedent("""\
         prompt: |
           Analyze the input: {{user_input}}.
           {{runtime_instruction}}
-          Save result: save_artifact(key='analysis', content_type='text', value=<text>).
+          Save result: save_artifacts(artifacts=[
+            {'key': 'analysis', 'content_type': 'text', 'value': <text>}
+          ]).
         outputs:
           - artifact_id: analysis
             content_type: text

@@ -14,6 +14,41 @@ All commands are run from the repository root by default.
 - If using a public cloud API model, have the corresponding API key ready
 - If using an on-premises model, ensure the current machine can reach the internal service
 
+### macOS: use Colima instead of Docker Desktop
+
+If Docker Desktop is unavailable, install [Colima](https://github.com/abiosoft/colima) and the Docker command-line tools with Homebrew:
+
+```bash
+brew install colima docker docker-compose docker-buildx
+```
+
+Start a Docker-compatible virtual machine:
+
+```bash
+colima start \
+  --runtime docker \
+  --vm-type vz \
+  --mount-type virtiofs \
+  --cpu 4 \
+  --memory 6 \
+  --disk 80
+```
+
+Verify that Colima and Docker Compose are ready:
+
+```bash
+colima status
+docker version
+docker compose version
+```
+
+You can now use the standard `make up` or `make up-build` commands below. When finished, stop the LazyMind stack before stopping Colima:
+
+```bash
+make down
+colima stop
+```
+
 ## Environment Variables
 
 ### 1. Model configuration

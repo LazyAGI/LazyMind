@@ -95,6 +95,14 @@ export interface ChatMessage {
   cite_message?: string;
   cite_messages?: string[];
   tool_call_turns?: number;
+  tool_limit_pending?: {
+    decision_id: string;
+    used_rounds: number;
+    round_limit: number;
+    expanded_max_rounds: number;
+    timeout_seconds: number;
+  };
+  resolved_tool_limit_decision_id?: string;
   mentions?: ChatMention[];
 	collected_inputs?: Array<{
 		task_id: string;

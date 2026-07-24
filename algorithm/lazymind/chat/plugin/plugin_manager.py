@@ -11,7 +11,7 @@ Tool types registered dynamically per-conversation:
 - get_step_result           : Read-only artifact summary for a step (ChatAgent only).
 - get_failed_steps          : Read-only failed steps with error info (ChatAgent only).
 
-Framework tools (save_artifact / get_artifact / list_artifacts) are always merged into
+Framework tools (save_artifacts / get_artifact / list_artifacts) are always merged into
 the step's tool list regardless of what the plugin's state.yml declares.  This ensures
 every SubAgent can persist and retrieve artifacts without plugin authors having to
 remember to list them explicitly.
@@ -494,7 +494,7 @@ def _trigger_plugin_step(
     # focused_sort_order is NOT injected — it is the UI scroll position,
     # not the user's intended operation target. The SubAgent reads the
     # runtime_instruction directly and decides which sort_order to pass
-    # to save_artifact based on the user's stated intent.
+    # to save_artifacts based on the user's stated intent.
     focused_tab = cfg.get('focused_tab')
     enriched_instruction = runtime_instruction or ''
     if focused_tab:

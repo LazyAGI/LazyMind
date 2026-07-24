@@ -94,6 +94,66 @@
   opacity: 0.45;
 }
 
+.writer-ir__editor-shell {
+  width: min(100%, 780px);
+  margin: 0 auto;
+}
+
+.writer-ir__format-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 18px 10px;
+  padding: 7px 8px;
+  border: 1px solid var(--writer-ir-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+}
+
+.writer-ir__format-select-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--writer-ir-muted);
+  font-size: 12px;
+}
+
+.writer-ir__format-select-label select {
+  min-height: 30px;
+  padding: 4px 28px 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  cursor: pointer;
+}
+
+.writer-ir__format-select-label select:focus-visible {
+  outline: 2px solid var(--writer-ir-accent);
+  outline-offset: 2px;
+}
+
+.writer-ir__format-select-label select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.writer-ir__format-button {
+  width: 32px;
+  padding-inline: 0 !important;
+}
+
+.writer-ir__format-button[aria-pressed='true'] {
+  border-color: var(--writer-ir-accent);
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 .writer-ir__document {
   width: min(100%, 780px);
   margin: 0 auto;
@@ -197,6 +257,12 @@
   color: #64748b;
 }
 
+.writer-ir__document--editable .writer-ir__title[contenteditable='false'] {
+  background: transparent;
+  color: #0f172a;
+  cursor: default;
+}
+
 .writer-ir__block--editable:hover {
   background: #f8fafc;
 }
@@ -210,6 +276,11 @@
   margin: 22px 0 8px;
   color: #0f172a;
   line-height: 1.45;
+}
+
+.writer-ir__heading--1 {
+  font-size: 22px;
+  font-weight: 700;
 }
 
 .writer-ir__heading--2 {
@@ -227,6 +298,15 @@
 .writer-ir__heading--6 {
   font-size: 14px;
   font-weight: 650;
+}
+
+.writer-ir__outline-instruction {
+  margin: 2px 0 14px;
+  color: var(--writer-ir-muted);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .writer-ir__paragraph,

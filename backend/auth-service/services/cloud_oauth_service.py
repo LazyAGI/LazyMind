@@ -224,6 +224,17 @@ class CloudOAuthService:
         return f'conn_{uuid.uuid4().hex}'
 
     @staticmethod
+    def _extract_app_key(row) -> tuple[str, str, str, str]:
+        """Return (owner, provider, auth_mode, app_id) for dedup checks."""
+        credential = decrypt_json(row.credential_ciphertext)
+        return (
+            (row.owner_user_id or '').strip(),
+            (row.provider or '').strip(),
+            (row.auth_mode or '').strip(),
+            (credential.get('client_id') or '').strip(),
+        )
+
+    @staticmethod
     def _encrypt_payload(payload: dict[str, Any], *, field_name: str) -> str:
         try:
             return encrypt_json(payload)
@@ -515,10 +526,15 @@ class CloudOAuthService:
                 raise_error(ErrorCodes.CLOUD_PROVIDER_UNSUPPORTED)
             if (row.auth_mode or '').strip().lower() != 'oauth_user':
                 raise_error(ErrorCodes.CLOUD_REAUTHORIZE_TARGET_OAUTH_USER_ONLY)
-            if (row.status or '').strip().upper() not in {'ACTIVE', 'EXPIRED', 'ERROR'}:
+            if (row.status or '').strip().upper() not in {'ACTIVE', 'EXPIRED', 'ERROR', 'PENDING'}:
                 raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
             account_id = (row.provider_account_id or '').strip()
-            if not account_id:
+            # PENDING connections have no provider_account_id yet.
+            # PENDING, ERROR, and ACTIVE may all legitimately have an empty
+            # provider_account_id (auth never completed, code exchange failed
+            # before fetching the profile, or fetch_account_profile errored).
+            # Skip the check and let the callback set or verify the account.
+            if not account_id and (row.status or '').strip().upper() not in ('PENDING', 'ERROR', 'ACTIVE'):
                 raise_error(ErrorCodes.CLOUD_REAUTHORIZE_ACCOUNT_ID_REQUIRED)
             return row.connection_id, account_id, (row.provider_tenant_key or '').strip()
 
@@ -794,23 +810,148 @@ class CloudOAuthService:
             scope=scope_value,
             state=oauth_state,
         )
-        connection_id = self._create_connection_record(
-            provider=provider_impl.provider_name(),
-            tenant_id=tenant_id,
-            owner_user_id=normalized_owner,
-            auth_mode=mode,
-            client_id=normalized_client_id,
-            client_secret=normalized_client_secret,
-            redirect_uri=redirect_uri,
-            scope=scope_value,
-            provider_options=provider_options,
-            oauth_state=oauth_state,
-            oauth_state_expires_at=oauth_state_expires,
-            reauthorize_connection_id=reauthorize_target_id,
-            reauthorize_provider_account_id=reauthorize_account_id,
-            reauthorize_provider_tenant_key=reauthorize_tenant_key,
-            status='PENDING',
-        )
+
+        # Reuse or revoke existing incomplete connections.
+        # When no reauthorize target is specified (new authorization): reuse the
+        # first PENDING/ERROR connection so the connection_id stays stable across
+        # page refreshes and duplicate tabs. Only refresh the oauth_state.
+        # When a reauthorize target exists: revoke other PENDING/ERROR to keep
+        # the connection list clean.
+        reused_connection_id = ''
+        with SessionLocal() as db:
+            incomplete_rows: list = []
+            for status_filter in ('PENDING', 'ERROR'):
+                incomplete_rows.extend(
+                    CloudAuthConnectionRepository.list_for_owner(
+                        db,
+                        owner_user_id=normalized_owner,
+                        provider=provider_impl.provider_name(),
+                        auth_mode='oauth_user',
+                        status=status_filter,
+                    )
+                )
+            if not reauthorize_target_id:
+                # Check ACTIVE first — scope by client_id so App X does not
+                # block App Y from creating its own connection.
+                active = CloudAuthConnectionRepository.list_for_owner(
+                    db,
+                    owner_user_id=normalized_owner,
+                    provider=provider_impl.provider_name(),
+                    auth_mode='oauth_user',
+                    status='ACTIVE',
+                )
+                active_same_app = [
+                    r for r in active
+                    if self._extract_app_key(r)[3] == normalized_client_id
+                ]
+                if active_same_app:
+                    raise_error(
+                        ErrorCodes.CLOUD_CREDENTIAL_INVALID,
+                        extra_msg='an active connection already exists for this app',
+                    )
+                # Scope incomplete rows to the same client_id so App Y's
+                # "new account" flow never reuses App X's PENDING/ERROR.
+                same_app_rows = [
+                    r for r in incomplete_rows
+                    if self._extract_app_key(r)[3] == normalized_client_id
+                ]
+                if same_app_rows:
+                    # Reuse the first PENDING/ERROR connection — refresh its
+                    # oauth_state and credential so the new authorize_url,
+                    # callback, and token exchange all use the latest secrets.
+                    reused = same_app_rows[0]
+                    reused_connection_id = reused.connection_id
+                    auth_state = self._decrypt_payload(
+                        reused.auth_state_ciphertext, field_name='auth_state'
+                    )
+                    auth_state['oauth_state'] = oauth_state
+                    auth_state['oauth_state_expires_at'] = _iso(oauth_state_expires)
+                    auth_state['reauthorize_connection_id'] = ''
+                    auth_state['reauthorize_provider_account_id'] = ''
+                    auth_state['reauthorize_provider_tenant_key'] = ''
+                    reused.auth_state_ciphertext = self._encrypt_payload(
+                        auth_state, field_name='auth_state'
+                    )
+                    # Sync credential with the latest client_id/client_secret
+                    # from the request so the callback does not use stale secrets.
+                    credential = self._decrypt_payload(
+                        reused.credential_ciphertext, field_name='credential'
+                    )
+                    credential['client_id'] = normalized_client_id
+                    credential['client_secret'] = normalized_client_secret
+                    reused.credential_ciphertext = self._encrypt_payload(
+                        credential, field_name='credential'
+                    )
+                    reused.status = 'PENDING'
+                    reused.last_error = ''
+                    reused.scope = scope_value
+                    CloudAuthConnectionRepository.save(db, reused)
+                    # Revoke extras from the same app to prevent duplicates.
+                    for extra in same_app_rows[1:]:
+                        extra.status = 'REVOKED'
+                        extra.last_error = 'superseded by new authorization attempt'
+                        CloudAuthConnectionRepository.save(db, extra)
+            elif not reauthorize_account_id:
+                # Reauthorize target is PENDING (no provider account yet).
+                # Reuse it directly instead of creating a new child connection.
+                # Only touch rows from the same app (client_id).
+                target_app_id = normalized_client_id
+                for row in incomplete_rows:
+                    if row.connection_id == reauthorize_target_id:
+                        auth_state = self._decrypt_payload(
+                            row.auth_state_ciphertext, field_name='auth_state'
+                        )
+                        auth_state['oauth_state'] = oauth_state
+                        auth_state['oauth_state_expires_at'] = _iso(oauth_state_expires)
+                        auth_state['reauthorize_connection_id'] = ''
+                        auth_state['reauthorize_provider_account_id'] = ''
+                        auth_state['reauthorize_provider_tenant_key'] = ''
+                        row.auth_state_ciphertext = self._encrypt_payload(
+                            auth_state, field_name='auth_state'
+                        )
+                        row.status = 'PENDING'
+                        row.last_error = ''
+                        row.scope = scope_value
+                        CloudAuthConnectionRepository.save(db, row)
+                        reused_connection_id = row.connection_id
+                    elif self._extract_app_key(row)[3] == target_app_id:
+                        row.status = 'REVOKED'
+                        row.last_error = 'superseded by new authorization attempt'
+                        CloudAuthConnectionRepository.save(db, row)
+            else:
+                # Reauthorize target is ACTIVE/EXPIRED/ERROR — normal
+                # reauthorize flow: revoke other PENDING/ERROR from the
+                # same app only, keep target.
+                target_app_id = normalized_client_id
+                for row in incomplete_rows:
+                    if row.connection_id == reauthorize_target_id:
+                        continue
+                    if self._extract_app_key(row)[3] != target_app_id:
+                        continue
+                    row.status = 'REVOKED'
+                    row.last_error = 'superseded by new authorization attempt'
+                    CloudAuthConnectionRepository.save(db, row)
+
+        if reused_connection_id:
+            connection_id = reused_connection_id
+        else:
+            connection_id = self._create_connection_record(
+                provider=provider_impl.provider_name(),
+                tenant_id=tenant_id,
+                owner_user_id=normalized_owner,
+                auth_mode=mode,
+                client_id=normalized_client_id,
+                client_secret=normalized_client_secret,
+                redirect_uri=redirect_uri,
+                scope=scope_value,
+                provider_options=provider_options,
+                oauth_state=oauth_state,
+                oauth_state_expires_at=oauth_state_expires,
+                reauthorize_connection_id=reauthorize_target_id,
+                reauthorize_provider_account_id=reauthorize_account_id,
+                reauthorize_provider_tenant_key=reauthorize_tenant_key,
+                status='PENDING',
+            )
 
         return {
             'connection_id': connection_id,
@@ -889,7 +1030,9 @@ class CloudOAuthService:
             reauthorize_account_id = (auth_state_payload.get('reauthorize_provider_account_id') or '').strip()
             reauthorize_tenant_key = (auth_state_payload.get('reauthorize_provider_tenant_key') or '').strip()
             profile = self._profile_from_provider(provider_impl, token)
-            if reauthorize_connection_id:
+            # Skip account-matching when the reauthorize target is PENDING
+            # (reauthorize_account_id is empty — no prior account to compare).
+            if reauthorize_connection_id and reauthorize_account_id:
                 profile_account_id = (profile.provider_account_id or '').strip()
                 if not reauthorize_account_id or not profile_account_id or profile_account_id != reauthorize_account_id:
                     row.status = 'ERROR'
@@ -937,7 +1080,7 @@ class CloudOAuthService:
                     raise_error(ErrorCodes.CLOUD_PROVIDER_UNSUPPORTED)
                 if (existing.auth_mode or '').strip().lower() != 'oauth_user':
                     raise_error(ErrorCodes.CLOUD_REAUTHORIZE_TARGET_OAUTH_USER_ONLY)
-                if (existing.status or '').strip().upper() not in {'ACTIVE', 'EXPIRED', 'ERROR'}:
+                if (existing.status or '').strip().upper() not in {'ACTIVE', 'EXPIRED', 'ERROR', 'PENDING'}:
                     row.status = 'ERROR'
                     row.last_error = 'reauthorize target connection is not active'
                     CloudAuthConnectionRepository.save(db, row)
@@ -969,7 +1112,23 @@ class CloudOAuthService:
                         **provider_account_lookup,
                         status='REVOKED',
                     )
-            if existing is not None and existing.connection_id != row.connection_id:
+            # Only merge when the existing connection belongs to the same
+            # app (client_id).  Different apps keep independent rows even
+            # if the same Feishu user authorized both.
+            is_different_app = False
+            if existing is not None:
+                existing_client_id = (
+                    decrypt_json(existing.credential_ciphertext).get('client_id') or ''
+                ).strip()
+                new_client_id = (credential.get('client_id') or '').strip()
+                is_different_app = bool(
+                    existing_client_id and new_client_id and existing_client_id != new_client_id
+                )
+            if (
+                existing is not None
+                and existing.connection_id != row.connection_id
+                and not is_different_app
+            ):
                 existing.client_id = row.client_id
                 existing.credential_ciphertext = row.credential_ciphertext
                 existing.auth_state_ciphertext = row.auth_state_ciphertext
@@ -1026,7 +1185,24 @@ class CloudOAuthService:
                 status=status,
                 exclude_auth_modes=(_OAUTH_APP_AUTH_MODE,),
             )
-            return {'items': [self._connection_payload(row) for row in rows]}
+            # Collect (owner, provider, auth_mode, app_id) combos that already
+            # have an ACTIVE connection. PENDING rows sharing the same combo
+            # are reauthorize children and should be hidden from the frontend.
+            active_app_keys: set[tuple[str, str, str, str]] = set()
+            for row in rows:
+                if (row.status or '').strip().upper() == 'ACTIVE':
+                    active_app_keys.add(self._extract_app_key(row))
+            return {
+                'items': [
+                    self._connection_payload(row)
+                    for row in rows
+                    if (row.status or '').strip().upper() != 'REVOKED'
+                    and not (
+                        (row.status or '').strip().upper() == 'PENDING'
+                        and self._extract_app_key(row) in active_app_keys
+                    )
+                ]
+            }
 
     def list_chat_enabled_connections(
         self,
@@ -1075,7 +1251,24 @@ class CloudOAuthService:
                 statuses=('ACTIVE',),
                 limit=normalized_limit,
             )
-            return {'items': [self._connection_payload(row) for row in rows]}
+            # Collect (owner, provider, auth_mode, app_id) combos that already
+            # have an ACTIVE connection. PENDING rows sharing the same combo
+            # are reauthorize children and should be hidden from the frontend.
+            active_app_keys: set[tuple[str, str, str, str]] = set()
+            for row in rows:
+                if (row.status or '').strip().upper() == 'ACTIVE':
+                    active_app_keys.add(self._extract_app_key(row))
+            return {
+                'items': [
+                    self._connection_payload(row)
+                    for row in rows
+                    if (row.status or '').strip().upper() != 'REVOKED'
+                    and not (
+                        (row.status or '').strip().upper() == 'PENDING'
+                        and self._extract_app_key(row) in active_app_keys
+                    )
+                ]
+            }
 
     def batch_connection_status(
         self,
@@ -1141,12 +1334,41 @@ class CloudOAuthService:
                 'reauthorize_provider_account_id': '',
                 'reauthorize_provider_tenant_key': '',
             }
+            # Extract app_id before clearing the credential so we can scope
+            # the PENDING cleanup to the same app only.
+            deleted_credential = self._decrypt_payload(
+                row.credential_ciphertext, field_name='credential'
+            )
+            deleted_app_id = (deleted_credential.get('client_id') or '').strip()
+
             row.credential_ciphertext = self._encrypt_payload(empty_credential, field_name='credential')
             row.auth_state_ciphertext = self._encrypt_payload(empty_auth_state, field_name='auth_state')
             row.status = 'REVOKED'
             row.last_error = 'deleted by owner'
             row.last_used_at = None
             CloudAuthConnectionRepository.save(db, row)
+
+            # Also revoke any PENDING connections for the same app so they
+            # do not appear as orphaned entries after the parent is deleted.
+            # Scope by client_id to avoid accidentally revoking PENDING
+            # connections belonging to a different Feishu app.
+            if deleted_app_id:
+                pending_rows = CloudAuthConnectionRepository.list_for_owner(
+                    db,
+                    owner_user_id=(row.owner_user_id or '').strip(),
+                    provider=(row.provider or '').strip(),
+                    auth_mode=(row.auth_mode or '').strip(),
+                    status='PENDING',
+                )
+                for pending_row in pending_rows:
+                    pending_credential = self._decrypt_payload(
+                        pending_row.credential_ciphertext, field_name='credential'
+                    )
+                    pending_app_id = (pending_credential.get('client_id') or '').strip()
+                    if pending_app_id == deleted_app_id:
+                        pending_row.status = 'REVOKED'
+                        pending_row.last_error = 'parent connection deleted by owner'
+                        CloudAuthConnectionRepository.save(db, pending_row)
 
         self._cache_delete(connection_id)
         return {

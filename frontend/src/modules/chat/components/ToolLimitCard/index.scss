@@ -1,0 +1,32 @@
+.tool-limit-card {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid #d8e2ff;
+  border-radius: 10px;
+  background: #f7f9ff;
+}
+
+.tool-limit-card__title {
+  color: #1f2937;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.tool-limit-card__description {
+  margin: 6px 0 12px;
+  color: #5b6472;
+  line-height: 1.6;
+}
+
+.tool-limit-card__countdown,
+.tool-limit-card__status {
+  margin-top: 8px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.tool-limit-card__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}

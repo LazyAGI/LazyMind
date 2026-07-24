@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from lazymind.config import config
 from lazymind.chat.api import (
+    agent_control_routes,
     chat_routes,
     generate_plugin_routes,
     generate_plugin_staged_routes,
@@ -21,6 +22,8 @@ from lazymind.review.api import memory_review_routes, skill_organize_routes, ski
 def register_chat_routers(app: FastAPI) -> FastAPI:
     # health is always available for liveness probes.
     app.include_router(health_routes.router)
+    # Agent control callbacks must remain available in both direct and router modes.
+    app.include_router(agent_control_routes.router)
     # plugin routes must always be registered: Go backend calls /api/plugin/slot-binding
     # and /api/plugin/driver regardless of whether router mode is enabled.
     app.include_router(plugin_routes.router)

@@ -205,6 +205,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations:resumeChat", []string{"qa.write"}, chat.ResumeChat)
 	handleAPI(r, "POST", "/conversations:stopChatGeneration", []string{"qa.write"}, chat.StopChatGeneration)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:stop", []string{"qa.write"}, chat.StopChatGeneration)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:toolLimitDecision", []string{"qa.write"}, chat.DecideToolLimit)
 	handleAPI(r, "GET", "/conversations/{conversation_id}:status", []string{"qa.read"}, chat.GetChatStatus)
 
 	// ----- SubAgent (Task Center) -----
@@ -294,6 +295,7 @@ func registerAllRoutes(r *mux.Router) {
 	// Stable list_index-based routes (preferred).
 	handleAPI(r, "DELETE", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, plugin.DeleteSlotItemByIndex)
 	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, plugin.PatchSlotItemByIndex)
+	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document", []string{"qa.write"}, chat.SyncWriterDocument)
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions", []string{"qa.read"}, plugin.GetSlotItemVersionsByIndex)
 	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback", []string{"qa.write"}, plugin.RollbackSlotItemByIndex)
 	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption", []string{"qa.write"}, plugin.PatchSlotCaptionByIndex)

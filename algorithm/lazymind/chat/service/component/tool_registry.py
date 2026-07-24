@@ -80,10 +80,15 @@ VIDEO_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
 }
 KNOWLEDGE_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
     'output_contract': (
-        '# Knowledge evidence citation rules\n'
-        'When answering with evidence retrieved from a knowledge base or uploaded '
-        'document index, cite using the original `[[document.chunk]]` markers present '
-        'in the retrieved evidence. Do not invent, rewrite, or fabricate citation markers.',
+        '# Knowledge evidence citation rules (mandatory)\n'
+        'When you use evidence retrieved from a knowledge base or uploaded document index, '
+        'you MUST cite that evidence in the user-visible final answer. Place the original '
+        '`[[document.chunk]]` marker immediately after each claim or paragraph it supports. '
+        'Every answer that relies on retrieved knowledge MUST contain at least one such marker. '
+        'Copy markers exactly from the corresponding retrieved evidence; do not invent, '
+        'renumber, rewrite, or fabricate citation markers. Do not replace these markers with '
+        'a manually written references list: the application converts valid markers into '
+        'inline citations and builds the references panel automatically.',
     ),
 }
 ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -94,7 +99,7 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         '`vision_extractor`, or `save_plugin_artifact`. Prefer this for images when the task is '
         'visual (edit, generate, workflow) or you only need the file location.\n'
         '- `read_user_attachment(filename, turn=N)`: extract TEXT — direct read for plain-text files, '
-        'OCR for pdf/doc/docx/pptx, or a '
+        'local structured extraction for docx (with OCR fallback), OCR for pdf/doc/pptx, or a '
         'text description via vision for images. Use only when you need document text or a textual '
         'answer about image content (e.g. "what does this document say", "describe this diagram").\n'
         'Supported uploads: images, pdf/doc/docx/pptx, and common plain-text/code/config files.\n'
@@ -422,14 +427,14 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ),
     ToolConfig(
         name='writer_create', label='AI 写作',
-        description='从资料画像和大纲构建章节草稿与最终成稿',
+        description='基于统一 Writer IR 从资料画像和大纲构建章节草稿与最终成稿',
         tool=WriterCreateToolkit(), module='content', label_en='AI Writing',
-        description_en='Create structured long-form writing from source material.',
+        description_en='Create structured long-form writing with the unified Writer IR.',
     ),
     ToolConfig(
-        name='writer_revision', label='AI 修订', description='结构化定位、规划和修改已有草稿',
+        name='writer_revision', label='AI 修订', description='基于 Writer IR 结构化定位、规划和修改已有文档',
         tool=WriterRevisionToolkit(), module='content', label_en='AI Revision',
-        description_en='Revise existing drafts through a validated patch workflow.',
+        description_en='Revise WriterDocument artifacts through a validated patch workflow.',
     ),
     ToolConfig(
         name='calculator',

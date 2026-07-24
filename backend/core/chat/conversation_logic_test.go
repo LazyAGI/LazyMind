@@ -396,6 +396,15 @@ func TestBuildChatRequestBodyDefaultsInvalidThinkingDepth(t *testing.T) {
 	}
 }
 
+func TestBuildChatRequestBodyAcceptsMaxThinkingDepth(t *testing.T) {
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+		"thinking_depth": "MAX",
+	}, nil, "", 1)
+	if got := body["thinking_depth"]; got != "max" {
+		t.Fatalf("expected max thinking depth, got %#v", got)
+	}
+}
+
 func TestBuildChatHistoryExtPreservesMultimodalInput(t *testing.T) {
 	ext := buildChatHistoryExt(map[string]any{
 		"input": []any{

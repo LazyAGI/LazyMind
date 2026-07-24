@@ -821,6 +821,39 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, nil)
 }
 
+// DecideToolLimit handles POST /conversations/{conversation_id}:toolLimitDecision.
+func DecideToolLimit(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		DecisionID string `json:"decision_id"`
+		Action     string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("invalid body: %v", err), http.StatusBadRequest)
+		return
+	}
+	convID := conversationIDFromPath(r)
+	decisionID := strings.TrimSpace(body.DecisionID)
+	action := strings.ToLower(strings.TrimSpace(body.Action))
+	if convID == "" || decisionID == "" || (action != "continue" && action != "summarize") {
+		common.ReplyErr(w, "conversation_id, decision_id and a valid action are required", http.StatusBadRequest)
+		return
+	}
+	userID := store.UserID(r)
+	if userID == "" {
+		userID = "0"
+	}
+	var conv orm.Conversation
+	if err := store.DB().Where("id = ? AND create_user_id = ?", convID, userID).First(&conv).Error; err != nil {
+		common.ReplyErr(w, fmt.Sprintf("conversation not found: %v", err), http.StatusNotFound)
+		return
+	}
+	if err := notifyToolLimitDecision(convID, decisionID, action); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("failed to deliver tool-limit decision: %v", err), http.StatusConflict)
+		return
+	}
+	common.ReplyOK(w, nil)
+}
+
 // GetChatStatus text GET /api/v1/conversations/{conversation_id}:status
 func GetChatStatus(w http.ResponseWriter, r *http.Request) {
 	convID := conversationIDFromPath(r)
