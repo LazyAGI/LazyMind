@@ -141,10 +141,12 @@ function AutoSlotGrid({
   session,
   onRefresh,
   onReference,
+  readOnly,
 }: {
   session: PluginSession;
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
+  readOnly?: boolean;
 }) {
   const { t } = useTranslation();
   if (!session.slots || session.slots.length === 0) {
@@ -162,8 +164,6 @@ function AutoSlotGrid({
     bySlot[s.slot_id].push(s);
   }
 
-  const stepOrder = getPluginStepOrder(session);
-
   return (
     <div className='plugin-panel__auto-grid'>
       {Object.entries(bySlot).map(([slotId, revisions]) => (
@@ -179,7 +179,7 @@ function AutoSlotGrid({
                 revisionCount={rev.revision_count}
                 onRefresh={onRefresh}
                 onReference={onReference}
-                readOnly={isPluginStepReadOnly(session, rev.step_id, stepOrder)}
+                readOnly={readOnly}
               />
             ))}
           </div>
@@ -293,47 +293,15 @@ function getTabStepId(tab: TabDef): string | undefined {
 }
 
 /**
- * Derive a stable workflow step order for completed-step locking.
- * Prefer UI tab order; fall back to first-seen step ids from session history.
+ * Lock slot editing only while the plugin session is actively running.
+ * When idle (waiting / failed / completed), ui_editable artifacts stay editable
+ * so the user can revise and re-run a later step from the updated content.
  */
-function getPluginStepOrder(session: PluginSession, tabs: TabDef[] = []): string[] {
-  const ordered: string[] = [];
-  const seen = new Set<string>();
-  const push = (stepId?: string) => {
-    if (!stepId || seen.has(stepId)) return;
-    seen.add(stepId);
-    ordered.push(stepId);
-  };
-  for (const tab of tabs) push(getTabStepId(tab));
-  for (const step of session.steps ?? []) push(step.step_id);
-  return ordered;
-}
-
-/**
- * Completed steps stay editable only while they remain the workflow frontier
- * (latest progressed step, waiting for review). Once a later step starts or
- * completes — or the whole session finishes — lock editing even if the
- * artifact still declares ui_editable / edit permission.
- */
-function isPluginStepReadOnly(
+function isPluginSessionReadOnly(
   session: PluginSession,
-  stepId: string | undefined,
-  stepOrder: string[],
+  autoRunning = false,
 ): boolean {
-  if (session.status === 'completed') return true;
-  if (!stepId) return false;
-
-  const past = session.projection?.past ?? [];
-  const current = session.projection?.current ?? [];
-  if (current.includes(stepId)) return false;
-  if (!past.includes(stepId)) return false;
-
-  const stepIndex = stepOrder.indexOf(stepId);
-  if (stepIndex === -1) {
-    return current.length > 0;
-  }
-  const laterSteps = new Set(stepOrder.slice(stepIndex + 1));
-  return past.some((id) => laterSteps.has(id)) || current.some((id) => laterSteps.has(id));
+  return autoRunning || session.status === 'active';
 }
 
 function revisionMatchesTabScope(
@@ -1084,6 +1052,7 @@ const STATUS_KEY: Record<string, string> = {
   active: 'chat.pluginStatusRunning',
   completed: 'chat.pluginStatusDone',
   waiting: 'chat.pluginStatusWaiting',
+  failed: 'chat.pluginStatusFailed',
 };
 
 function readPersistedExpanded(conversationId: string): boolean {
@@ -1133,10 +1102,12 @@ export function PluginPanel({
   const [stateGraphOpen, setStateGraphOpen] = useState(false);
   const [expanded, setExpanded] = useState(() => readPersistedExpanded(conversationId));
   const initialExpandedRef = useRef(expanded);
-  // Track which slots are currently being edited; destructive/navigation actions
-  // stay disabled until each editor saves or cancels.
+  // Track which slots are currently being edited; dismiss stays blocked until
+  // each editor saves or cancels. Footer retry/continue flushes pending saves.
   const editingSlots = useRef<Set<string>>(new Set());
+  const flushFns = useRef<Map<string, () => Promise<boolean>>>(new Map());
   const [anySlotEditing, setAnySlotEditing] = useState(false);
+  const [actionPending, setActionPending] = useState(false);
 
   const setExpandedMode = useCallback((nextExpanded: boolean) => {
     if (nextExpanded) setCollapsed(false);
@@ -1181,9 +1152,25 @@ export function PluginPanel({
     setAnySlotEditing(editingSlots.current.size > 0);
   }, []);
 
+  const registerFlush = useCallback((key: string, flush: () => Promise<boolean>) => {
+    flushFns.current.set(key, flush);
+    return () => {
+      flushFns.current.delete(key);
+    };
+  }, []);
+
+  const flushPendingEdits = useCallback(async (): Promise<boolean> => {
+    const flushers = [...flushFns.current.values()];
+    if (flushers.length === 0) return true;
+    const results = await Promise.all(flushers.map((flush) => flush()));
+    return results.every(Boolean);
+  }, []);
+
   useEffect(() => {
     editingSlots.current.clear();
+    flushFns.current.clear();
     setAnySlotEditing(false);
+    setActionPending(false);
   }, [session?.session_id]);
 
   useEffect(() => {
@@ -1237,18 +1224,25 @@ export function PluginPanel({
   const tabs: TabDef[] = ui.tabs ?? [];
   const hasTabs = tabs.length > 0;
   const hasIntent = true;
-  const stepOrder = getPluginStepOrder(session, tabs);
+  const sessionReadOnly = isPluginSessionReadOnly(session, autoRunning);
 
   const showActions =
     session.status === 'waiting' ||
     session.status === 'active' ||
-    session.status === 'completed';
+    session.status === 'completed' ||
+    session.status === 'failed';
   const displayStatus = autoRunning ? 'active' : session.status;
-  const buttonsDisabled = displayStatus === 'active' || anySlotEditing || autoRunning;
-  const dismissDisabled = dismissing || anySlotEditing;
-  const collapseDisabled = anySlotEditing && !collapsed;
-  // "继续" is only shown in waiting/active; completed shows rollback step picker instead.
+  // Only block footer actions while the plugin is actually running (or flush-in-progress).
+  // Dirty editors no longer disable retry — click flushes saves first, then proceeds.
+  const sessionBusy = displayStatus === 'active' || autoRunning;
+  const buttonsDisabled = sessionBusy || actionPending;
+  const dismissDisabled = dismissing || anySlotEditing || actionPending;
+  const collapseDisabled = (anySlotEditing || actionPending) && !collapsed;
+  // "继续" is only shown in waiting/active; completed/failed show rollback step picker instead.
   const showContinue = displayStatus === 'waiting' || displayStatus === 'active';
+  const showStepRollback =
+    (session.status === 'completed' || session.status === 'failed')
+    && Boolean(session.steps && session.steps.length > 0);
 
   // A failed step cannot be checkpoint-resumed — the SubAgent exited uncleanly and there is
   // no valid checkpoint to restore. Only "重试" (full restart) is meaningful in this case.
@@ -1265,23 +1259,32 @@ export function PluginPanel({
   const effectivePast = new Set(session.projection?.past ?? []);
   const continueDisabled = buttonsDisabled || currentStepStatus === 'failed';
 
+  async function runFooterAction(action: () => void) {
+    if (sessionBusy || actionPending) return;
+    setActionPending(true);
+    try {
+      const saved = await flushPendingEdits();
+      if (!saved) return;
+      action();
+    } finally {
+      setActionPending(false);
+    }
+  }
+
   function handleContinue() {
-    if (buttonsDisabled) return;
-    onSendMessage?.(t('chat.pluginContinue'));
+    void runFooterAction(() => onSendMessage?.(t('chat.pluginContinue')));
   }
 
   function handleRetry() {
-    if (buttonsDisabled) return;
-    onSendMessage?.(t('chat.pluginRetry'));
+    void runFooterAction(() => onSendMessage?.(t('chat.pluginRetry')));
   }
 
   function handleRollback(stepId: string) {
-    if (buttonsDisabled) return;
-    onSendMessage?.(`${t('chat.pluginRollbackPrefix')}${stepId}`);
+    void runFooterAction(() => onSendMessage?.(`${t('chat.pluginRollbackPrefix')}${stepId}`));
   }
 
   const panel = (
-    <SlotEditingContext.Provider value={{ setEditing: handleSlotEditingChange }}>
+    <SlotEditingContext.Provider value={{ setEditing: handleSlotEditingChange, registerFlush }}>
     <div
       className={`plugin-panel plugin-panel--${displayStatus}${collapsed ? ' plugin-panel--collapsed' : ''}${expanded ? ' plugin-panel--expanded' : ''}`}
       data-session-id={session.session_id}
@@ -1469,7 +1472,7 @@ export function PluginPanel({
                     onRefresh={refresh}
                     onReference={onReference}
                     onFocusSortOrder={handleFocusSortOrder}
-                    readOnly={isPluginStepReadOnly(session, getTabStepId(tab), stepOrder)}
+                    readOnly={sessionReadOnly}
                   />
                 </SlotDownloadContext.Provider>
               </div>
@@ -1479,6 +1482,7 @@ export function PluginPanel({
               session={session}
               onRefresh={refresh}
               onReference={onReference}
+              readOnly={sessionReadOnly}
             />
           )}
         </div>
@@ -1504,9 +1508,17 @@ export function PluginPanel({
               disabled={buttonsDisabled}
               aria-disabled={buttonsDisabled}
               onClick={handleRetry}
-              title={buttonsDisabled ? t('chat.pluginBtnDisabledHint') : t('chat.pluginRetry')}
+              title={
+                actionPending
+                  ? t('chat.pluginSavingBeforeAction')
+                  : buttonsDisabled
+                    ? t('chat.pluginBtnDisabledHint')
+                    : anySlotEditing
+                      ? t('chat.pluginRetryFlushHint')
+                      : t('chat.pluginRetry')
+              }
             >
-              {t('chat.pluginRetry')}
+              {actionPending ? t('chat.pluginSavingBeforeAction') : t('chat.pluginRetry')}
             </button>
           )}
           {showContinue && (
@@ -1519,19 +1531,21 @@ export function PluginPanel({
               title={
                 currentStepStatus === 'failed'
                   ? t('chat.pluginContinueDisabledFailed')
-                  : buttonsDisabled
-                    ? t('chat.pluginBtnDisabledHint')
-                    : t('chat.pluginContinue')
+                  : actionPending
+                    ? t('chat.pluginSavingBeforeAction')
+                    : buttonsDisabled
+                      ? t('chat.pluginBtnDisabledHint')
+                      : t('chat.pluginContinue')
               }
             >
-              {t('chat.pluginContinue')}
+              {actionPending ? t('chat.pluginSavingBeforeAction') : t('chat.pluginContinue')}
             </button>
           )}
-          {session.status === 'completed' && session.steps && session.steps.length > 0 && (
+          {showStepRollback && (
             <div style={{ flex: '1 1 100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={{ fontSize: 12, color: '#6b7280', fontWeight: 500 }}>{t('chat.pluginRollbackLabel')}</span>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {session.steps
+                {session.steps!
                   .filter((step, index, all) => effectivePast.has(step.step_id)
                     && step.validity !== 'stale'
                     && all.findIndex((candidate) => candidate.step_id === step.step_id && candidate.validity !== 'stale') === index)
@@ -1541,8 +1555,16 @@ export function PluginPanel({
                     type='button'
                     className='plugin-panel__action-btn plugin-panel__action-btn--secondary'
                     style={{ padding: '3px 10px', fontSize: 12 }}
+                    disabled={buttonsDisabled}
+                    aria-disabled={buttonsDisabled}
                     onClick={() => handleRollback(step.step_id)}
-                    title={`${t('chat.pluginRollbackPrefix')}${step.step_id}`}
+                    title={
+                      actionPending
+                        ? t('chat.pluginSavingBeforeAction')
+                        : buttonsDisabled
+                          ? t('chat.pluginBtnDisabledHint')
+                          : `${t('chat.pluginRollbackPrefix')}${step.step_id}`
+                    }
                   >
                     {step.step_id}
                   </button>

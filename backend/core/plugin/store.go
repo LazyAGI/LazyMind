@@ -1097,6 +1097,43 @@ func resolveContentType(contentType string, snapshot []byte) string {
 	return "file"
 }
 
+// UpdateSelectedHumanArtifactValue overwrites the selected human revision's artifact
+// in place without creating a new revision. Returns (nil, false, nil) when the
+// selected revision is not an updatable human artifact (e.g. AI revision).
+func UpdateSelectedHumanArtifactValue(
+	ctx context.Context, db *gorm.DB,
+	sessionID, slotID string, listIndex *int,
+	contentType string, value json.RawMessage, caption *string,
+) (*orm.PluginSlotRevision, bool, error) {
+	var selected orm.PluginSlotRevision
+	q := db.WithContext(ctx).Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
+	if listIndex == nil {
+		q = q.Where("list_index IS NULL")
+	} else {
+		q = q.Where("list_index = ?", *listIndex)
+	}
+	if err := q.First(&selected).Error; err != nil {
+		return nil, false, err
+	}
+	if selected.ChangeSource != "human" || selected.HumanArtifactID == nil || *selected.HumanArtifactID == "" {
+		return nil, false, nil
+	}
+
+	updates := map[string]any{
+		"content_type": contentType,
+		"value":        value,
+	}
+	if caption != nil {
+		updates["caption"] = caption
+	}
+	if err := db.WithContext(ctx).Model(&orm.PluginHumanArtifact{}).
+		Where("id = ?", *selected.HumanArtifactID).
+		Updates(updates).Error; err != nil {
+		return nil, false, err
+	}
+	return &selected, true, nil
+}
+
 // WriteSlotRevisionWithHumanArtifact inserts a plugin_human_artifacts row and a new
 // 'human' slot revision that points to it.  This is the write path for PatchSlotItemByIndex.
 //

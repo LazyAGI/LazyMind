@@ -2,6 +2,7 @@ import {
   createElement,
   Fragment,
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -18,6 +19,7 @@ import {
   type WriterSpan,
 } from './writerIR';
 import { WriterIRDocumentEditor } from './WriterIRDocumentEditor';
+import { SlotEditingContext } from './slotEditingContext';
 import './WriterIRControl.scss';
 
 /** Idle debounce after the latest edit before autosave. */
@@ -27,14 +29,20 @@ const WRITER_IR_AUTOSAVE_MAX_WAIT_MS = 15_000;
 /** Coalesce follow-up saves after an in-flight request finishes. */
 const WRITER_IR_SAVE_FOLLOWUP_MS = 400;
 
+type WriterIRSaveRunResult = 'noop' | 'saved' | 'error' | 'busy';
+export type WriterIRSaveMode = 'draft' | 'checkpoint';
+
 export interface WriterIRControlProps {
   document: WriterDocument;
   sourceRevision?: string | number;
   readOnly?: boolean;
+  /** Stable key used to register flush-before-retry with PluginPanel. */
+  editingKey?: string;
   onSave?: (
     sourceDocument: WriterDocument,
     revisedDocument: WriterDocument,
     sourceRevision?: string | number,
+    mode?: WriterIRSaveMode,
   ) => Promise<WriterIRSaveResult | void>;
   onEditingChange?: (editing: boolean) => void;
 }
@@ -218,10 +226,12 @@ export function WriterIRControl({
   document,
   sourceRevision,
   readOnly = false,
+  editingKey,
   onSave,
   onEditingChange,
 }: WriterIRControlProps) {
   const { t } = useTranslation();
+  const { registerFlush } = useContext(SlotEditingContext);
   const [baseDocument, setBaseDocument] = useState(document);
   const [baseSourceRevision, setBaseSourceRevision] = useState(sourceRevision);
   const [draft, setDraft] = useState(document);
@@ -247,7 +257,9 @@ export function WriterIRControl({
   const lastSavedDocumentRef = useRef<WriterDocument | undefined>(undefined);
   const saveInFlightRef = useRef(false);
   const saveQueuedRef = useRef(false);
-  const saveRunnerRef = useRef<() => Promise<void>>(async () => undefined);
+  /** Highest pending save mode; checkpoint wins over draft until consumed. */
+  const pendingSaveModeRef = useRef<WriterIRSaveMode>('draft');
+  const saveRunnerRef = useRef<() => Promise<WriterIRSaveRunResult>>(async () => 'noop');
   const onSaveRef = useRef(onSave);
   const historyRef = useRef(history);
   const futureRef = useRef(future);
@@ -264,6 +276,12 @@ export function WriterIRControl({
     if (saveFollowupTimerRef.current !== undefined) {
       window.clearTimeout(saveFollowupTimerRef.current);
       saveFollowupTimerRef.current = undefined;
+    }
+  }, []);
+
+  const escalateSaveMode = useCallback((mode: WriterIRSaveMode) => {
+    if (mode === 'checkpoint' || pendingSaveModeRef.current !== 'checkpoint') {
+      pendingSaveModeRef.current = mode;
     }
   }, []);
 
@@ -435,17 +453,22 @@ export function WriterIRControl({
     setSaveError(undefined);
   }, [draft]);
 
-  const runSave = useCallback(async () => {
+  const runSave = useCallback(async (): Promise<WriterIRSaveRunResult> => {
     const saveDocument = onSaveRef.current;
-    if (!saveDocument || documentReadOnly) return;
+    if (!saveDocument || documentReadOnly) return 'noop';
     if (saveInFlightRef.current) {
       // Keep editing; coalesce into one follow-up with the latest draft.
       saveQueuedRef.current = true;
-      return;
+      return 'busy';
     }
 
     const snapshot = draftRef.current;
-    if (snapshot === baseDocumentRef.current) return;
+    if (snapshot === baseDocumentRef.current) {
+      pendingSaveModeRef.current = 'draft';
+      return 'noop';
+    }
+    const saveMode = pendingSaveModeRef.current;
+    pendingSaveModeRef.current = 'draft';
     clearAutoSaveTimers();
     saveInFlightRef.current = true;
     saveQueuedRef.current = false;
@@ -464,8 +487,9 @@ export function WriterIRControl({
         baseDocumentRef.current,
         snapshot,
         baseSourceRevisionRef.current,
+        saveMode,
       );
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) return 'saved';
       saved = true;
       // If the user edited while this request was pending, keep their draft
       // and only advance the persisted base / revision.
@@ -497,11 +521,13 @@ export function WriterIRControl({
         dirtyStartedAtRef.current = null;
       }
       setExternalUpdate(false);
+      return 'saved';
     } catch (error) {
       lastSavedDocumentRef.current = previousSavedDocument;
       if (mountedRef.current) {
         setSaveError(error instanceof Error ? error.message : t('chat.writerIR.saveFailed'));
       }
+      return 'error';
     } finally {
       saveInFlightRef.current = false;
       if (mountedRef.current) setSaving(false);
@@ -515,9 +541,45 @@ export function WriterIRControl({
   saveRunnerRef.current = runSave;
 
   const requestImmediateSave = useCallback(() => {
+    escalateSaveMode('checkpoint');
     clearAutoSaveTimers();
     void saveRunnerRef.current();
-  }, [clearAutoSaveTimers]);
+  }, [clearAutoSaveTimers, escalateSaveMode]);
+
+  /** Await pending save as a checkpoint so retry/continue can use a durable revision. */
+  const flushPendingSave = useCallback(async (): Promise<boolean> => {
+    if (documentReadOnly || !onSaveRef.current) return true;
+    escalateSaveMode('checkpoint');
+    clearAutoSaveTimers();
+    if (saveFollowupTimerRef.current !== undefined) {
+      window.clearTimeout(saveFollowupTimerRef.current);
+      saveFollowupTimerRef.current = undefined;
+    }
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      while (saveInFlightRef.current) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 40);
+        });
+      }
+      if (saveFollowupTimerRef.current !== undefined) {
+        window.clearTimeout(saveFollowupTimerRef.current);
+        saveFollowupTimerRef.current = undefined;
+      }
+      if (draftRef.current === baseDocumentRef.current) return true;
+
+      escalateSaveMode('checkpoint');
+      const result = await runSave();
+      if (result === 'error') return false;
+      if (result === 'noop') return true;
+    }
+    return draftRef.current === baseDocumentRef.current;
+  }, [clearAutoSaveTimers, documentReadOnly, escalateSaveMode, runSave]);
+
+  useEffect(() => {
+    if (!editingKey) return undefined;
+    return registerFlush(editingKey, flushPendingSave);
+  }, [editingKey, flushPendingSave, registerFlush]);
 
   useEffect(() => {
     if (autoSaveIdleTimerRef.current !== undefined) {
@@ -541,6 +603,7 @@ export function WriterIRControl({
 
     autoSaveIdleTimerRef.current = window.setTimeout(() => {
       autoSaveIdleTimerRef.current = undefined;
+      escalateSaveMode('draft');
       void saveRunnerRef.current();
     }, WRITER_IR_AUTOSAVE_IDLE_MS);
 
@@ -549,6 +612,7 @@ export function WriterIRControl({
       const remaining = Math.max(0, WRITER_IR_AUTOSAVE_MAX_WAIT_MS - elapsed);
       autoSaveMaxTimerRef.current = window.setTimeout(() => {
         autoSaveMaxTimerRef.current = undefined;
+        escalateSaveMode('draft');
         void saveRunnerRef.current();
       }, remaining);
     }
@@ -559,7 +623,7 @@ export function WriterIRControl({
         autoSaveIdleTimerRef.current = undefined;
       }
     };
-  }, [dirty, documentReadOnly, draft, externalUpdate, saveError, saving]);
+  }, [dirty, documentReadOnly, draft, escalateSaveMode, externalUpdate, saveError, saving]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

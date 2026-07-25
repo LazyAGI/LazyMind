@@ -13,32 +13,25 @@ import {
   WRITER_ARTIFACT_SLOT_IDS,
   unwrapArtifactPayload,
 } from './writerArtifactViews';
-import { WriterIRControl, type WriterIRSaveResult } from './WriterIRControl';
+import { WriterIRControl, type WriterIRSaveMode, type WriterIRSaveResult } from './WriterIRControl';
 import {
   isWriterDocument,
   normalizeWriterDocumentForSync,
   type WriterBlock,
   type WriterDocument,
 } from './writerIR';
+import { SlotEditingContext } from './slotEditingContext';
 import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
 import i18n from '@/i18n';
 import { useTranslation } from 'react-i18next';
 import { localizeErrorCode } from '@/components/request';
 
+export { SlotEditingContext } from './slotEditingContext';
+export type { SlotEditingContextValue } from './slotEditingContext';
+
 function tr(key: string, options?: Record<string, unknown>): string {
   return i18n.t(key, options);
 }
-
-/**
- * Context for notifying the parent PluginPanel when any text slot enters/exits editing mode.
- * The parent uses this to disable the Retry / Continue footer buttons.
- */
-interface SlotEditingContextValue {
-  setEditing: (key: string, editing: boolean) => void;
-}
-export const SlotEditingContext = createContext<SlotEditingContextValue>({
-  setEditing: () => {},
-});
 
 export const SlotDownloadContext = createContext(true);
 
@@ -1875,6 +1868,7 @@ async function syncWriterDocumentSlot(
   sourceRevision: string | number | undefined,
   sourceDocument: WriterDocument,
   revisedDocument: WriterDocument,
+  mode: WriterIRSaveMode = 'checkpoint',
 ): Promise<WriterIRSaveResult> {
   if (typeof sourceRevision !== 'number' || sourceRevision <= 0) {
     throw new Error(tr('chat.writerIR.saveFailed'));
@@ -1887,6 +1881,7 @@ async function syncWriterDocumentSlot(
       base_revision: sourceRevision,
       source_document: normalizeWriterDocumentForSync(sourceDocument),
       revised_document: normalizeWriterDocumentForSync(revisedDocument),
+      mode,
     },
     { silentError: true } as never,
   );
@@ -2021,9 +2016,28 @@ function SlotJsonFile({
   const [sourceJson, setSourceJson] = useState<unknown>(null);
   const [loadedSourceKey, setLoadedSourceKey] = useState('');
   const [loadedRevision, setLoadedRevision] = useState<number>();
+  const [localRevisionCount, setLocalRevisionCount] = useState<number | undefined>(revisionCount);
   const [writerEditing, setWriterEditing] = useState(false);
   const hasPayloadRef = useRef(false);
   hasPayloadRef.current = payload !== null;
+
+  const applySavedRevision = useCallback((revision?: number) => {
+    if (typeof revision !== 'number' || revision <= 0) return;
+    setLoadedRevision((prev) => (prev === undefined || revision > prev ? revision : prev));
+    setLocalRevisionCount((prev) => Math.max(prev ?? 0, revisionCount ?? 0, revision));
+  }, [revisionCount]);
+
+  useEffect(() => {
+    if (typeof slot.revision === 'number' && slot.revision > 0) {
+      setLoadedRevision((prev) => (prev === undefined || slot.revision >= prev ? slot.revision : prev));
+    }
+  }, [slot.revision]);
+
+  useEffect(() => {
+    if (typeof revisionCount === 'number' && revisionCount > 0) {
+      setLocalRevisionCount((prev) => (prev === undefined || revisionCount >= prev ? revisionCount : prev));
+    }
+  }, [revisionCount]);
 
   useEffect(() => {
     if (!hasSource) return;
@@ -2063,7 +2077,10 @@ function SlotJsonFile({
         setSourceJson(json);
         setPayload(unwrapArtifactPayload(json));
         setLoadedSourceKey(sourceKey);
-        setLoadedRevision(slot.revision);
+        // Prefer a newer locally-saved revision over a stale session snapshot.
+        setLoadedRevision((prev) => (
+          typeof prev === 'number' && prev > slot.revision ? prev : slot.revision
+        ));
         setLoading(false);
       })
       .catch((fetchError: unknown) => {
@@ -2085,13 +2102,16 @@ function SlotJsonFile({
     && writerDocument?.ui_editable === true
     && (loadedSourceKey === sourceKey || writerEditing);
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
+  const displayRevision = loadedRevision ?? slot.revision;
+  const displayRevisionCount = localRevisionCount ?? revisionCount;
   const showVersionBadge =
-    revisionCount !== undefined && revisionCount > 0 && Boolean(sessionId && slotId);
+    displayRevisionCount !== undefined && displayRevisionCount > 0 && Boolean(sessionId && slotId);
 
   const handleSaveWriterDocument = useCallback(async (
     sourceDocument: WriterDocument,
     document: WriterDocument,
     sourceRevision?: string | number,
+    mode: WriterIRSaveMode = 'checkpoint',
   ): Promise<WriterIRSaveResult | void> => {
     if (!sessionId || !slotId || readOnly) {
       throw new Error(tr('chat.writerIR.saveFailed'));
@@ -2106,15 +2126,16 @@ function SlotJsonFile({
           sourceRevision,
           sourceDocument,
           document,
+          mode,
         );
         const serialized = replaceStructuredArtifactPayload(sourceJson, result.document);
         setSourceJson(serialized);
         // Prefer the client snapshot reference so WriterIRControl can treat the
         // prop update as identity-equal to its in-flight draft and skip a redraw.
         setPayload(document);
-        if (typeof result.sourceRevision === 'number') {
-          setLoadedRevision(result.sourceRevision);
-        }
+        applySavedRevision(
+          typeof result.sourceRevision === 'number' ? result.sourceRevision : undefined,
+        );
         // Keep the editor mounted: local payload/revision are already authoritative.
         // Session polling will catch up without a hard refresh.
         return {
@@ -2144,11 +2165,19 @@ function SlotJsonFile({
     };
     delete nextValue.url;
 
-    await patchSlotItemValue(sessionId, slotId, apiListIndex, nextValue, 'file');
+    const revision = await patchSlotItemValue(
+      sessionId, slotId, apiListIndex, nextValue, 'file', mode,
+    );
     setSourceJson(serialized);
     setPayload(document);
+    applySavedRevision(revision);
+    return {
+      document,
+      sourceRevision: typeof revision === 'number' ? revision : sourceRevision,
+    };
   }, [
     apiListIndex,
+    applySavedRevision,
     name,
     onRefresh,
     patchSlotItemValue,
@@ -2241,8 +2270,9 @@ function SlotJsonFile({
         {writerDocument ? (
           <WriterIRControl
             document={writerDocument}
-            sourceRevision={loadedRevision}
+            sourceRevision={displayRevision}
             readOnly={!canEditWriterIR}
+            editingKey={editingKey}
             onSave={canEditWriterIR ? handleSaveWriterDocument : undefined}
             onEditingChange={handleWriterEditingChange}
           />
@@ -2257,8 +2287,8 @@ function SlotJsonFile({
               sessionId={sessionId!}
               slotId={slotId!}
               listIndex={apiListIndex}
-              revisionCount={revisionCount!}
-              currentRevision={slot.revision}
+              revisionCount={displayRevisionCount!}
+              currentRevision={displayRevision}
               currentValue={slot.artifact_value}
               currentChangeSource={slot.change_source}
               contentType='json'
@@ -2314,6 +2344,8 @@ function SlotInlineStructured({
   const { patchSlotItemValue } = usePluginStore();
   const { setEditing: notifyEditing } = useContext(SlotEditingContext);
   const [writerEditing, setWriterEditing] = useState(false);
+  const [localRevision, setLocalRevision] = useState(slot.revision);
+  const [localRevisionCount, setLocalRevisionCount] = useState<number | undefined>(revisionCount);
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
   const writerDocument = isWriterDocument(payload) ? payload : null;
@@ -2322,12 +2354,32 @@ function SlotInlineStructured({
     && !readOnly
     && writerDocument?.ui_editable === true;
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
+  const displayRevision = localRevision ?? slot.revision;
+  const displayRevisionCount = localRevisionCount ?? revisionCount;
   const showVersionBadge =
-    revisionCount !== undefined && revisionCount > 0 && Boolean(sessionId && slotId);
+    displayRevisionCount !== undefined && displayRevisionCount > 0 && Boolean(sessionId && slotId);
   const [writerMarkdownDownload, setWriterMarkdownDownload] = useState<{
     url: string;
     filename: string;
   } | null>(null);
+
+  const applySavedRevision = useCallback((revision?: number) => {
+    if (typeof revision !== 'number' || revision <= 0) return;
+    setLocalRevision((prev) => (prev === undefined || revision > prev ? revision : prev));
+    setLocalRevisionCount((prev) => Math.max(prev ?? 0, revisionCount ?? 0, revision));
+  }, [revisionCount]);
+
+  useEffect(() => {
+    if (typeof slot.revision === 'number' && slot.revision > 0) {
+      setLocalRevision((prev) => (prev === undefined || slot.revision >= prev ? slot.revision : prev));
+    }
+  }, [slot.revision]);
+
+  useEffect(() => {
+    if (typeof revisionCount === 'number' && revisionCount > 0) {
+      setLocalRevisionCount((prev) => (prev === undefined || revisionCount >= prev ? revisionCount : prev));
+    }
+  }, [revisionCount]);
 
   useEffect(() => {
     if (!writerDocument) {
@@ -2349,6 +2401,7 @@ function SlotInlineStructured({
     sourceDocument: WriterDocument,
     document: WriterDocument,
     sourceRevision?: string | number,
+    mode: WriterIRSaveMode = 'checkpoint',
   ): Promise<WriterIRSaveResult | void> => {
     if (!sessionId || !slotId || readOnly) {
       throw new Error(tr('chat.writerIR.saveFailed'));
@@ -2362,6 +2415,10 @@ function SlotInlineStructured({
           sourceRevision,
           sourceDocument,
           document,
+          mode,
+        );
+        applySavedRevision(
+          typeof result.sourceRevision === 'number' ? result.sourceRevision : undefined,
         );
         // Avoid hard session refresh; WriterIRControl already applied the result.
         return result;
@@ -2371,10 +2428,17 @@ function SlotInlineStructured({
       }
     }
     const serialized = replaceStructuredArtifactPayload(slot.artifact_value, document);
-    await patchSlotItemValue(sessionId, slotId, apiListIndex, serialized, 'json');
-    return { document, sourceRevision };
+    const revision = await patchSlotItemValue(
+      sessionId, slotId, apiListIndex, serialized, 'json', mode,
+    );
+    applySavedRevision(revision);
+    return {
+      document,
+      sourceRevision: typeof revision === 'number' ? revision : sourceRevision,
+    };
   }, [
     apiListIndex,
+    applySavedRevision,
     onRefresh,
     patchSlotItemValue,
     readOnly,
@@ -2403,8 +2467,9 @@ function SlotInlineStructured({
         {writerDocument ? (
           <WriterIRControl
             document={writerDocument}
-            sourceRevision={slot.revision}
+            sourceRevision={displayRevision}
             readOnly={!canEditWriterIR}
+            editingKey={editingKey}
             onSave={canEditWriterIR ? handleSaveWriterDocument : undefined}
             onEditingChange={handleWriterEditingChange}
           />
@@ -2419,8 +2484,8 @@ function SlotInlineStructured({
               sessionId={sessionId!}
               slotId={slotId!}
               listIndex={apiListIndex}
-              revisionCount={revisionCount!}
-              currentRevision={slot.revision}
+              revisionCount={displayRevisionCount!}
+              currentRevision={displayRevision}
               currentValue={slot.artifact_value}
               currentChangeSource={slot.change_source}
               contentType='json'
