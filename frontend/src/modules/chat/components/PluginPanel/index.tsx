@@ -23,7 +23,6 @@ import type {
   InnerTabsNode,
 } from '@/modules/chat/store/pluginPanel';
 import { SlotRenderer, SlotDownloadContext, SlotEditingContext } from './SlotComponents';
-import { WriterIRToolbarTargetContext } from './WriterIRControl';
 import './PluginPanel.scss';
 
 /** Parse a JSON intent context string and return the text field, or '' if empty/invalid. */
@@ -927,66 +926,59 @@ function NamedTabSlot({
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
-  const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null);
   const slotLabel = slotDef.label ?? slotDef.id;
   const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
   const isDraggable = Boolean(slotDef.ordered) && !readOnly;
 
   return (
-    <WriterIRToolbarTargetContext.Provider value={toolbarTarget}>
-      <div className='plugin-panel__named-slot'>
-        <div className='plugin-panel__slot-heading'>
-          {(slotDef.label || slotDef.id) && (
-            <span className='plugin-panel__slot-label'>{slotLabel}</span>
-          )}
-          <div
-            className='plugin-panel__slot-toolbar writer-ir'
-            ref={setToolbarTarget}
-          />
-        </div>
-        {revisions.length === 0 ? (
-          <div
-            className='plugin-panel__slot-placeholder'
-            aria-label={`${slotLabel} pending`}
-          >
-            <span>—</span>
-          </div>
-        ) : isImageList ? (
-          <SortableImageList
-            revisions={revisions}
-            session={session}
-            slotDef={slotDef}
-            isDraggable={isDraggable}
-            onRefresh={onRefresh}
-            onReference={onReference}
-            onFocusSortOrder={onFocusSortOrder}
-            onAddItem={readOnly ? undefined : onAddItem}
-            readOnly={readOnly}
-          />
-        ) : (
-          revisions.map((rev) => (
-            <div
-              key={`${rev.slot_id}-${rev.list_index ?? -1}`}
-              onClick={() => onFocusSortOrder?.(rev.sort_order)}
-              role='button'
-              tabIndex={0}
-              aria-label={t('chat.pluginContentItemAria', { index: rev.sort_order ?? '' })}
-            >
-              <SlotRenderer
-                slot={rev}
-                expectedType={slotDef.type}
-                sessionId={session.session_id}
-                slotId={slotDef.id}
-                revisionCount={rev.revision_count}
-                onRefresh={onRefresh}
-                onReference={onReference}
-                readOnly={readOnly}
-              />
-            </div>
-          ))
+    <div className='plugin-panel__named-slot'>
+      <div className='plugin-panel__slot-heading'>
+        {(slotDef.label || slotDef.id) && (
+          <span className='plugin-panel__slot-label'>{slotLabel}</span>
         )}
       </div>
-    </WriterIRToolbarTargetContext.Provider>
+      {revisions.length === 0 ? (
+        <div
+          className='plugin-panel__slot-placeholder'
+          aria-label={`${slotLabel} pending`}
+        >
+          <span>—</span>
+        </div>
+      ) : isImageList ? (
+        <SortableImageList
+          revisions={revisions}
+          session={session}
+          slotDef={slotDef}
+          isDraggable={isDraggable}
+          onRefresh={onRefresh}
+          onReference={onReference}
+          onFocusSortOrder={onFocusSortOrder}
+          onAddItem={readOnly ? undefined : onAddItem}
+          readOnly={readOnly}
+        />
+      ) : (
+        revisions.map((rev) => (
+          <div
+            key={`${rev.slot_id}-${rev.list_index ?? -1}`}
+            onClick={() => onFocusSortOrder?.(rev.sort_order)}
+            role='button'
+            tabIndex={0}
+            aria-label={t('chat.pluginContentItemAria', { index: rev.sort_order ?? '' })}
+          >
+            <SlotRenderer
+              slot={rev}
+              expectedType={slotDef.type}
+              sessionId={session.session_id}
+              slotId={slotDef.id}
+              revisionCount={rev.revision_count}
+              onRefresh={onRefresh}
+              onReference={onReference}
+              readOnly={readOnly}
+            />
+          </div>
+        ))
+      )}
+    </div>
   );
 }
 

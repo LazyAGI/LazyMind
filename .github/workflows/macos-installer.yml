@@ -101,6 +101,37 @@ jobs:
           echo "Checked out commit: $(git rev-parse HEAD)"
           df -h /
 
+      - name: Validate signing and notarization inputs
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for variable in \
+            CSC_LINK \
+            CSC_KEY_PASSWORD \
+            APPLE_ID \
+            APPLE_APP_SPECIFIC_PASSWORD \
+            APPLE_TEAM_ID; do
+            if [[ -z "${!variable:-}" ]]; then
+              missing+=("${variable}")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing mac_dev environment secrets: ${missing[*]}"
+            exit 1
+          fi
+          if [[ ! "${APPLE_TEAM_ID}" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "::error::APPLE_TEAM_ID must be a 10-character Apple Team ID"
+            exit 1
+          fi
+          xcrun notarytool --version
+
       - name: Run Desktop tests
         run: |
           node --test \
@@ -116,7 +147,24 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: make desktop-darwin-arm64-dmg
+        run: |
+          set -euo pipefail
+
+          target_open_files=65536
+          hard_open_files="$(ulimit -Hn)"
+          if [[ "${hard_open_files}" != "unlimited" ]] && \
+             (( hard_open_files < target_open_files )); then
+            target_open_files="${hard_open_files}"
+          fi
+          ulimit -n "${target_open_files}"
+          actual_open_files="$(ulimit -Sn)"
+          echo "Open-file limit: ${actual_open_files}"
+          if (( actual_open_files < 8192 )); then
+            echo "::error::Open-file limit is too low for the bundled desktop runtime"
+            exit 1
+          fi
+
+          make desktop-darwin-arm64-dmg
 
       - name: Validate and stage installer
         id: package

@@ -12,8 +12,10 @@ const iconScript = path.join(scriptsDir, "generate-windows-icon.mjs");
 const icnsSource = path.join(scriptsDir, "..", "electron", "assets", "LazyMind.icns");
 const electronMainScript = path.join(scriptsDir, "..", "electron", "src", "main.js");
 const electronBuilderConfig = path.join(scriptsDir, "..", "electron", "electron-builder.config.cjs");
+const electronPackage = path.join(scriptsDir, "..", "electron", "package.json");
 const darwinBuildScript = path.join(scriptsDir, "build-darwin-arm64.sh");
 const installerScript = path.join(scriptsDir, "..", "installer", "installer.nsh");
+const macosWorkflow = path.join(scriptsDir, "..", "..", ".github", "workflows", "macos-installer.yml");
 
 function nsisMacro(source, name) {
   const match = source.match(new RegExp(`!macro ${name}\\b([\\s\\S]*?)!macroend`));
@@ -124,6 +126,8 @@ test("Windows installer verifies and force-cleans processes left by warmup", () 
 
 test("macOS distribution build requires Developer ID signing and notarizes the final DMG", () => {
   const source = readFileSync(darwinBuildScript, "utf8");
+  const builderSource = readFileSync(electronBuilderConfig, "utf8");
+  const packageJson = JSON.parse(readFileSync(electronPackage, "utf8"));
   assert.match(source, /PACKAGE_KIND=.*zip/);
   assert.match(source, /SIGNING_MODE=.*adhoc/);
   assert.match(
@@ -131,9 +135,34 @@ test("macOS distribution build requires Developer ID signing and notarizes the f
     /notarytool submit "\$\{DMG_PATH\}"[\s\S]*--team-id "\$\{APPLE_TEAM_ID\}"[\s\S]*stapler staple "\$\{DMG_PATH\}"/,
   );
   assert.match(source, /Authority=Developer ID Application:/);
+  assert.match(source, /verify_runtime_code_signatures "\$\{APP_PATH\}\/Contents\/Resources\/runtime"/);
+  assert.match(packageJson.scripts["dist:mac:arm64"], /--publish never$/);
+  assert.match(builderSource, /afterPack:\s*signAndStageEmbeddedRuntime/);
+  assert.match(builderSource, /afterSign:\s*restoreRuntimeAndFinalizeSignature/);
+  assert.match(builderSource, /fs\.renameSync\(runtimeRoot, stagedRuntime\)/);
+  assert.match(builderSource, /fs\.renameSync\(staged\.stagedRuntime, staged\.runtimeRoot\)/);
+  assert.match(builderSource, /notarytool[\s\S]*submit[\s\S]*notarizationArchive/);
+  assert.match(builderSource, /notarize:\s*false/);
+  assert.doesNotMatch(builderSource, /signIgnore:/);
   for (const privatePath of ["/.env", "/.lazymind-local", "/data", "/volumes", "/local/config.env"]) {
     assert.match(source, new RegExp(`--exclude "${privatePath.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}"`));
   }
+});
+
+test("macOS CI fails fast on missing credentials and raises the open-file limit", () => {
+  const source = readFileSync(macosWorkflow, "utf8");
+
+  for (const secret of [
+    "MAC_CSC_LINK",
+    "MAC_CSC_KEY_PASSWORD",
+    "APPLE_ID",
+    "APPLE_APP_SPECIFIC_PASSWORD",
+    "APPLE_TEAM_ID",
+  ]) {
+    assert.match(source, new RegExp(`secrets\\.${secret}`));
+  }
+  assert.match(source, /ulimit -n "\$\{target_open_files\}"/);
+  assert.match(source, /actual_open_files < 8192/);
 });
 
 test("packaged macOS app runs installation warmup once before its normal window", () => {

@@ -69,6 +69,7 @@ export type CsvBadcaseRow = {
   reference: string;
   answer: string;
   score: number;
+  questionType: string;
   failureType: string;
   failureTone: "red" | "orange" | "blue";
   defect: string;

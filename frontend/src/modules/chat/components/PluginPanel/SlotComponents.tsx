@@ -297,6 +297,231 @@ function TextDiffView({ currentText, otherText, otherLabel, reversed }: TextDiff
   );
 }
 
+const snapshotDiffTextCache = new Map<string, Promise<string>>();
+
+function snapshotDiffCacheKey(snapshot: unknown): string {
+  if (snapshot == null) return '';
+  if (typeof snapshot === 'string') return `s:${snapshot}`;
+  if (typeof snapshot !== 'object') return `v:${String(snapshot)}`;
+  const record = snapshot as Record<string, unknown>;
+  if (record.url || record.path) {
+    return `f:${String(record.url ?? '')}\n${String(record.path ?? '')}\n${String(record.size ?? '')}\n${String(record.filename ?? record.name ?? '')}`;
+  }
+  try {
+    return `j:${JSON.stringify(snapshot)}`;
+  } catch {
+    return `o:${Object.keys(record).join(',')}`;
+  }
+}
+
+function formatPayloadForDiff(payload: unknown): string {
+  const unwrapped = unwrapArtifactPayload(payload);
+  if (isWriterDocument(unwrapped)) {
+    return writerDocumentToMarkdown(unwrapped);
+  }
+  if (isWriterDocument(payload)) {
+    return writerDocumentToMarkdown(payload);
+  }
+  if (typeof unwrapped === 'string') return unwrapped;
+  if (unwrapped != null) return JSON.stringify(unwrapped, null, 2);
+  if (typeof payload === 'string') return payload;
+  return payload == null ? '' : JSON.stringify(payload, null, 2);
+}
+
+async function resolveSnapshotDiffText(snapshot: unknown): Promise<string> {
+  if (snapshot == null) return '';
+  if (typeof snapshot === 'string') {
+    const trimmed = snapshot.trim();
+    if (
+      trimmed.startsWith('{')
+      || trimmed.startsWith('[')
+      || (!trimmed.includes('/static-files/')
+        && !trimmed.includes('/api/core/')
+        && !trimmed.startsWith('http')
+        && !trimmed.startsWith('/var/'))
+    ) {
+      return snapshot;
+    }
+    const fetchUrl = trimmed.includes('/static-files/') || trimmed.startsWith('http')
+      ? resolveCoreAssetUrl(trimmed)
+      : await resolveMarkdownImageUrlAsync(trimmed);
+    if (!fetchUrl) return snapshot;
+    const response = await fetch(fetchUrl);
+    if (!response.ok) throw new Error(localizeErrorCode('2000509'));
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('json') || trimmed.toLowerCase().includes('.json')) {
+      return formatPayloadForDiff(await response.json());
+    }
+    const text = await response.text();
+    if (isSpaFallbackHtml(text)) throw new Error(localizeErrorCode('2000509'));
+    return text;
+  }
+
+  if (typeof snapshot !== 'object') return String(snapshot);
+  const record = snapshot as Record<string, unknown>;
+  if (record.text !== undefined) return String(record.text);
+  if (record.data !== undefined) {
+    return typeof record.data === 'string'
+      ? record.data
+      : JSON.stringify(record.data, null, 2);
+  }
+  if (isWriterDocument(record) || isWriterDocument(unwrapArtifactPayload(record))) {
+    return formatPayloadForDiff(record);
+  }
+
+  const pathForSign = String(record.url ?? record.path ?? '').trim();
+  if (!pathForSign) return JSON.stringify(record, null, 2);
+
+  const apiUrl = record.url ? resolveCoreAssetUrl(String(record.url)) : '';
+  const fetchUrl = apiUrl && !isExpiredSignedUrl(apiUrl)
+    ? apiUrl
+    : await resolveMarkdownImageUrlAsync(pathForSign);
+  if (!fetchUrl) throw new Error(localizeErrorCode('2000509'));
+
+  const response = await fetch(fetchUrl);
+  if (!response.ok) throw new Error(localizeErrorCode('2000509'));
+  const contentType = response.headers.get('content-type') || '';
+  const looksJson = contentType.includes('json')
+    || pathForSign.toLowerCase().includes('.json')
+    || String(record.type ?? '').toLowerCase() === 'json'
+    || String(record.filename ?? '').toLowerCase().endsWith('.json');
+  if (looksJson) {
+    return formatPayloadForDiff(await response.json());
+  }
+  const text = await response.text();
+  if (isSpaFallbackHtml(text)) throw new Error(localizeErrorCode('2000509'));
+  return text;
+}
+
+function loadSnapshotDiffText(snapshot: unknown): Promise<string> {
+  const key = snapshotDiffCacheKey(snapshot);
+  if (!key) return Promise.resolve('');
+  const cached = snapshotDiffTextCache.get(key);
+  if (cached) return cached;
+  const pending = resolveSnapshotDiffText(snapshot).catch((error) => {
+    snapshotDiffTextCache.delete(key);
+    throw error;
+  });
+  snapshotDiffTextCache.set(key, pending);
+  return pending;
+}
+
+function useResolvedSnapshotText(snapshot: unknown) {
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    loadSnapshotDiffText(snapshot)
+      .then((resolved) => {
+        if (!cancelled) {
+          setText(resolved);
+          setLoading(false);
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) {
+          setText('');
+          setLoading(false);
+          setError(
+            loadError instanceof Error ? loadError.message : localizeErrorCode('2000509'),
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [snapshot]);
+
+  return { text, loading, error };
+}
+
+function SnapshotTextPreview({ snapshot }: { snapshot: unknown }) {
+  const { text, loading, error } = useResolvedSnapshotText(snapshot);
+  if (loading) {
+    return <div className='plugin-slot__version-compare-hint'>{tr('common.loading')}</div>;
+  }
+  if (error) {
+    return <div className='plugin-slot__version-compare-hint'>{error || tr('chat.slots.contentLoadFailed')}</div>;
+  }
+  return (
+    <pre className='plugin-slot__version-current-text'>
+      {text || tr('chat.slots.noContent')}
+    </pre>
+  );
+}
+
+interface SnapshotTextDiffViewProps {
+  currentSnapshot: unknown;
+  otherSnapshot?: unknown;
+  otherText?: string;
+  otherLabel: string;
+  reversed?: boolean;
+}
+
+function SnapshotTextDiffView({
+  currentSnapshot,
+  otherSnapshot,
+  otherText,
+  otherLabel,
+  reversed,
+}: SnapshotTextDiffViewProps) {
+  const [currentText, setCurrentText] = useState('');
+  const [resolvedOtherText, setResolvedOtherText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      loadSnapshotDiffText(currentSnapshot),
+      otherText !== undefined
+        ? Promise.resolve(otherText)
+        : loadSnapshotDiffText(otherSnapshot),
+    ])
+      .then(([current, other]) => {
+        if (!cancelled) {
+          setCurrentText(current);
+          setResolvedOtherText(other);
+          setLoading(false);
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) {
+          setCurrentText('');
+          setResolvedOtherText('');
+          setLoading(false);
+          setError(
+            loadError instanceof Error ? loadError.message : localizeErrorCode('2000509'),
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSnapshot, otherSnapshot, otherText]);
+
+  if (loading) {
+    return <div className='plugin-slot__version-compare-hint'>{tr('common.loading')}</div>;
+  }
+  if (error) {
+    return <div className='plugin-slot__version-compare-hint'>{error || tr('chat.slots.contentLoadFailed')}</div>;
+  }
+  return (
+    <TextDiffView
+      currentText={currentText}
+      otherText={resolvedOtherText}
+      otherLabel={otherLabel}
+      reversed={reversed}
+    />
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Global version popover state — only one popover open at a time.
 // ---------------------------------------------------------------------------
@@ -842,8 +1067,8 @@ export function SlotVersionPopover({
             {isDraftSelected && draftText !== undefined ? (
               /* Draft selected: show draft vs current diff with discard + flush actions */
               <div className='plugin-slot__version-compare'>
-                <TextDiffView
-                  currentText={extractText(activeCurrentValue)}
+                <SnapshotTextDiffView
+                  currentSnapshot={activeCurrentValue}
                   otherText={draftText}
                   otherLabel={tr('chat.slots.draft')}
                   reversed={true}
@@ -868,9 +1093,9 @@ export function SlotVersionPopover({
               </div>
             ) : effectiveSelectedVersion && !effectiveSelectedVersion.selected ? (
               <div className='plugin-slot__version-compare'>
-                <TextDiffView
-                  currentText={extractText(activeCurrentValue)}
-                  otherText={extractText(effectiveSelectedVersion.content_snapshot)}
+                <SnapshotTextDiffView
+                  currentSnapshot={activeCurrentValue}
+                  otherSnapshot={effectiveSelectedVersion.content_snapshot}
                   otherLabel={tr('chat.slots.versionSourceLabel', {
                     version: `v${effectiveSelectedVersion.revision}`,
                     source: effectiveSelectedVersion.change_source === 'human' ? tr('chat.slots.manualEdit') : tr('chat.slots.aiGenerated'),
@@ -889,9 +1114,7 @@ export function SlotVersionPopover({
             ) : (
               <div className='plugin-slot__version-compare plugin-slot__version-compare--same'>
                 {effectiveSelectedVersion ? (
-                  <pre className='plugin-slot__version-current-text'>
-                    {extractText(activeCurrentValue) || tr('chat.slots.noContent')}
-                  </pre>
+                  <SnapshotTextPreview snapshot={activeCurrentValue} />
                 ) : (
                   <div className='plugin-slot__version-compare-hint'>{tr('chat.slots.selectVersionCompare')}</div>
                 )}
@@ -1799,10 +2022,11 @@ function SlotJsonFile({
   const [loadedSourceKey, setLoadedSourceKey] = useState('');
   const [loadedRevision, setLoadedRevision] = useState<number>();
   const [writerEditing, setWriterEditing] = useState(false);
+  const hasPayloadRef = useRef(false);
+  hasPayloadRef.current = payload !== null;
 
   useEffect(() => {
     if (!hasSource) return;
-    setLoading(true);
     setError(null);
   }, [hasSource, sourceKey]);
 
@@ -1824,7 +2048,8 @@ function SlotJsonFile({
     }
 
     const controller = new AbortController();
-    setLoading(true);
+    // Soft refresh: keep the editor mounted when content is already on screen.
+    if (!hasPayloadRef.current) setLoading(true);
     setError(null);
 
     fetch(url, { signal: controller.signal })
@@ -1884,12 +2109,18 @@ function SlotJsonFile({
         );
         const serialized = replaceStructuredArtifactPayload(sourceJson, result.document);
         setSourceJson(serialized);
-        setPayload(result.document);
+        // Prefer the client snapshot reference so WriterIRControl can treat the
+        // prop update as identity-equal to its in-flight draft and skip a redraw.
+        setPayload(document);
         if (typeof result.sourceRevision === 'number') {
           setLoadedRevision(result.sourceRevision);
         }
-        onRefresh?.();
-        return result;
+        // Keep the editor mounted: local payload/revision are already authoritative.
+        // Session polling will catch up without a hard refresh.
+        return {
+          ...result,
+          document,
+        };
       } catch (syncError) {
         onRefresh?.();
         throw syncError;
@@ -1916,7 +2147,6 @@ function SlotJsonFile({
     await patchSlotItemValue(sessionId, slotId, apiListIndex, nextValue, 'file');
     setSourceJson(serialized);
     setPayload(document);
-    onRefresh?.();
   }, [
     apiListIndex,
     name,
@@ -1991,7 +2221,7 @@ function SlotJsonFile({
   return (
     <div className='plugin-slot plugin-slot--artifact'>
       <div className='plugin-slot__artifact-body'>
-        {loadedSourceKey !== sourceKey && !error && (
+        {loadedSourceKey !== sourceKey && !error && payload === null && (
           <div className='writer-ir__notice writer-ir__notice--warning' role='status'>
             {tr('chat.writerIR.refreshing')}
           </div>
@@ -2031,7 +2261,7 @@ function SlotJsonFile({
               currentRevision={slot.revision}
               currentValue={slot.artifact_value}
               currentChangeSource={slot.change_source}
-              contentType='file'
+              contentType='json'
               onRollbackDone={onRefresh}
             />
           )}
@@ -2133,7 +2363,7 @@ function SlotInlineStructured({
           sourceDocument,
           document,
         );
-        onRefresh?.();
+        // Avoid hard session refresh; WriterIRControl already applied the result.
         return result;
       } catch (syncError) {
         onRefresh?.();
@@ -2142,7 +2372,7 @@ function SlotInlineStructured({
     }
     const serialized = replaceStructuredArtifactPayload(slot.artifact_value, document);
     await patchSlotItemValue(sessionId, slotId, apiListIndex, serialized, 'json');
-    onRefresh?.();
+    return { document, sourceRevision };
   }, [
     apiListIndex,
     onRefresh,

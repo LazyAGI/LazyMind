@@ -1,21 +1,18 @@
 import {
-  createContext,
   createElement,
   Fragment,
   useCallback,
-  useContext,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
-import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  countWriterBlocks,
   getWriterOutlineInstruction,
   getWriterSpanStyles,
+  sameWriterDocument,
+  sameWriterDocumentForSync,
   type WriterBlock,
   type WriterDocument,
   type WriterSpan,
@@ -23,15 +20,12 @@ import {
 import { WriterIRDocumentEditor } from './WriterIRDocumentEditor';
 import './WriterIRControl.scss';
 
-const WRITER_IR_AUTOSAVE_DELAY_MS = 2_000;
-
-export const WriterIRToolbarTargetContext = createContext<HTMLElement | null | undefined>(
-  undefined,
-);
-
-function sameWriterDocument(left: WriterDocument, right: WriterDocument): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
+/** Idle debounce after the latest edit before autosave. */
+const WRITER_IR_AUTOSAVE_IDLE_MS = 3_000;
+/** Max time a dirty draft can wait before a save is forced. */
+const WRITER_IR_AUTOSAVE_MAX_WAIT_MS = 15_000;
+/** Coalesce follow-up saves after an in-flight request finishes. */
+const WRITER_IR_SAVE_FOLLOWUP_MS = 400;
 
 export interface WriterIRControlProps {
   document: WriterDocument;
@@ -228,7 +222,6 @@ export function WriterIRControl({
   onEditingChange,
 }: WriterIRControlProps) {
   const { t } = useTranslation();
-  const toolbarTarget = useContext(WriterIRToolbarTargetContext);
   const [baseDocument, setBaseDocument] = useState(document);
   const [baseSourceRevision, setBaseSourceRevision] = useState(sourceRevision);
   const [draft, setDraft] = useState(document);
@@ -243,8 +236,10 @@ export function WriterIRControl({
     sourceRevision?: string | number;
   } | null>(null);
   const rootRef = useRef<HTMLElement>(null);
-  const toolbarRef = useRef<HTMLElement>(null);
-  const autoSaveTimerRef = useRef<number | undefined>(undefined);
+  const autoSaveIdleTimerRef = useRef<number | undefined>(undefined);
+  const autoSaveMaxTimerRef = useRef<number | undefined>(undefined);
+  const saveFollowupTimerRef = useRef<number | undefined>(undefined);
+  const dirtyStartedAtRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
   const draftRef = useRef(draft);
   const baseDocumentRef = useRef(baseDocument);
@@ -257,12 +252,33 @@ export function WriterIRControl({
   const historyRef = useRef(history);
   const futureRef = useRef(future);
 
+  const clearAutoSaveTimers = useCallback(() => {
+    if (autoSaveIdleTimerRef.current !== undefined) {
+      window.clearTimeout(autoSaveIdleTimerRef.current);
+      autoSaveIdleTimerRef.current = undefined;
+    }
+    if (autoSaveMaxTimerRef.current !== undefined) {
+      window.clearTimeout(autoSaveMaxTimerRef.current);
+      autoSaveMaxTimerRef.current = undefined;
+    }
+    if (saveFollowupTimerRef.current !== undefined) {
+      window.clearTimeout(saveFollowupTimerRef.current);
+      saveFollowupTimerRef.current = undefined;
+    }
+  }, []);
+
+  const scheduleFollowupSave = useCallback(() => {
+    if (saveFollowupTimerRef.current !== undefined) {
+      window.clearTimeout(saveFollowupTimerRef.current);
+    }
+    saveFollowupTimerRef.current = window.setTimeout(() => {
+      saveFollowupTimerRef.current = undefined;
+      void saveRunnerRef.current();
+    }, WRITER_IR_SAVE_FOLLOWUP_MS);
+  }, []);
+
   const dirty = draft !== baseDocument;
   const documentReadOnly = readOnly || !hasEditableWriterBlock(draft.blocks) || !onSave;
-  const blockCount = useMemo(() => countWriterBlocks(draft.blocks), [draft.blocks]);
-  const stageLabel = t(`chat.writerIR.stages.${draft.stage}`, {
-    defaultValue: draft.stage,
-  });
 
   draftRef.current = draft;
   baseDocumentRef.current = baseDocument;
@@ -270,14 +286,6 @@ export function WriterIRControl({
   onSaveRef.current = onSave;
   historyRef.current = history;
   futureRef.current = future;
-
-  const focusToolbar = useCallback(() => {
-    window.requestAnimationFrame(() => {
-      toolbarRef.current
-        ?.querySelector<HTMLButtonElement>('button:not(:disabled)')
-        ?.focus();
-    });
-  }, []);
 
   useEffect(() => {
     const sourceMatchesBase = sourceRevision !== undefined || baseSourceRevision !== undefined
@@ -293,10 +301,24 @@ export function WriterIRControl({
     const savedDocument = lastSavedDocumentRef.current;
     if (
       sameWriterDocument(document, baseDocument)
-      || (savedDocument && sameWriterDocument(document, savedDocument))
+      || sameWriterDocumentForSync(document, baseDocument)
+      || (savedDocument && (
+        sameWriterDocument(document, savedDocument)
+        || sameWriterDocumentForSync(document, savedDocument)
+      ))
+      // Parent echoed the live draft (common right after save); only advance revision.
+      || document === draftRef.current
+      || sameWriterDocumentForSync(document, draftRef.current)
     ) {
       setBaseSourceRevision(sourceRevision);
       baseSourceRevisionRef.current = sourceRevision;
+      if (
+        document === draftRef.current
+        || sameWriterDocumentForSync(document, draftRef.current)
+      ) {
+        baseDocumentRef.current = draftRef.current;
+        setBaseDocument(draftRef.current);
+      }
       return;
     }
     if (draft === baseDocument) {
@@ -333,8 +355,9 @@ export function WriterIRControl({
   }, [dirty]);
 
   useEffect(() => {
-    onEditingChange?.(dirty || saving);
-  }, [dirty, onEditingChange, saving]);
+    // Only surface local dirty state. In-flight saves must not lock parent UI.
+    onEditingChange?.(dirty);
+  }, [dirty, onEditingChange]);
 
   useEffect(
     () => () => onEditingChange?.(false),
@@ -355,11 +378,9 @@ export function WriterIRControl({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      if (autoSaveTimerRef.current !== undefined) {
-        window.clearTimeout(autoSaveTimerRef.current);
-      }
+      clearAutoSaveTimers();
     };
-  }, []);
+  }, [clearAutoSaveTimers]);
 
   const beginTextEdit = useCallback(() => {
     if (!textEditStartRef.current) textEditStartRef.current = draft;
@@ -418,14 +439,20 @@ export function WriterIRControl({
     const saveDocument = onSaveRef.current;
     if (!saveDocument || documentReadOnly) return;
     if (saveInFlightRef.current) {
+      // Keep editing; coalesce into one follow-up with the latest draft.
       saveQueuedRef.current = true;
       return;
     }
 
     const snapshot = draftRef.current;
     if (snapshot === baseDocumentRef.current) return;
+    clearAutoSaveTimers();
     saveInFlightRef.current = true;
     saveQueuedRef.current = false;
+    // Mark the in-flight snapshot so parent prop echoes during save do not look
+    // like external updates.
+    const previousSavedDocument = lastSavedDocumentRef.current;
+    lastSavedDocumentRef.current = snapshot;
     if (mountedRef.current) {
       setSaving(true);
       setSaveError(undefined);
@@ -440,21 +467,38 @@ export function WriterIRControl({
       );
       if (!mountedRef.current) return;
       saved = true;
+      // If the user edited while this request was pending, keep their draft
+      // and only advance the persisted base / revision.
       hasNewerDraft = draftRef.current !== snapshot;
       const savedDocument = result?.document ?? snapshot;
       const savedSourceRevision = result?.sourceRevision ?? baseSourceRevisionRef.current;
       lastSavedDocumentRef.current = savedDocument;
-      baseDocumentRef.current = savedDocument;
       baseSourceRevisionRef.current = savedSourceRevision;
       pendingExternalDocumentRef.current = null;
-      setBaseDocument(savedDocument);
       setBaseSourceRevision(savedSourceRevision);
-      if (!hasNewerDraft) {
+      if (hasNewerDraft) {
+        // Keep the live draft; only advance the persisted base/revision.
+        baseDocumentRef.current = savedDocument;
+        setBaseDocument(savedDocument);
+        dirtyStartedAtRef.current = Date.now();
+      } else if (sameWriterDocumentForSync(snapshot, savedDocument)) {
+        // Semantically unchanged: keep the current draft reference so the
+        // contentEditable DOM is not rewritten after save.
+        baseDocumentRef.current = snapshot;
+        setBaseDocument(snapshot);
+        lastSavedDocumentRef.current = snapshot;
+        dirtyStartedAtRef.current = null;
+      } else {
+        // Server normalized the document; adopt it and let the editor sync.
+        baseDocumentRef.current = savedDocument;
         draftRef.current = savedDocument;
+        setBaseDocument(savedDocument);
         setDraft(savedDocument);
+        dirtyStartedAtRef.current = null;
       }
       setExternalUpdate(false);
     } catch (error) {
+      lastSavedDocumentRef.current = previousSavedDocument;
       if (mountedRef.current) {
         setSaveError(error instanceof Error ? error.message : t('chat.writerIR.saveFailed'));
       }
@@ -463,42 +507,62 @@ export function WriterIRControl({
       if (mountedRef.current) setSaving(false);
       if (saved && (saveQueuedRef.current || hasNewerDraft)) {
         saveQueuedRef.current = false;
-        window.setTimeout(() => void saveRunnerRef.current(), 0);
+        scheduleFollowupSave();
       }
     }
-  }, [documentReadOnly, t]);
+  }, [clearAutoSaveTimers, documentReadOnly, scheduleFollowupSave, t]);
 
   saveRunnerRef.current = runSave;
 
   const requestImmediateSave = useCallback(() => {
-    if (autoSaveTimerRef.current !== undefined) {
-      window.clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = undefined;
-    }
+    clearAutoSaveTimers();
     void saveRunnerRef.current();
-  }, []);
+  }, [clearAutoSaveTimers]);
 
   useEffect(() => {
-    if (autoSaveTimerRef.current !== undefined) {
-      window.clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = undefined;
+    if (autoSaveIdleTimerRef.current !== undefined) {
+      window.clearTimeout(autoSaveIdleTimerRef.current);
+      autoSaveIdleTimerRef.current = undefined;
     }
-    if (!dirty || documentReadOnly || saveError || externalUpdate) return undefined;
-    autoSaveTimerRef.current = window.setTimeout(() => {
-      autoSaveTimerRef.current = undefined;
+    if (!dirty || documentReadOnly || saveError || externalUpdate || saving) {
+      if (!dirty) {
+        dirtyStartedAtRef.current = null;
+        if (autoSaveMaxTimerRef.current !== undefined) {
+          window.clearTimeout(autoSaveMaxTimerRef.current);
+          autoSaveMaxTimerRef.current = undefined;
+        }
+      }
+      return undefined;
+    }
+
+    if (dirtyStartedAtRef.current === null) {
+      dirtyStartedAtRef.current = Date.now();
+    }
+
+    autoSaveIdleTimerRef.current = window.setTimeout(() => {
+      autoSaveIdleTimerRef.current = undefined;
       void saveRunnerRef.current();
-    }, WRITER_IR_AUTOSAVE_DELAY_MS);
+    }, WRITER_IR_AUTOSAVE_IDLE_MS);
+
+    if (autoSaveMaxTimerRef.current === undefined) {
+      const elapsed = Date.now() - (dirtyStartedAtRef.current ?? Date.now());
+      const remaining = Math.max(0, WRITER_IR_AUTOSAVE_MAX_WAIT_MS - elapsed);
+      autoSaveMaxTimerRef.current = window.setTimeout(() => {
+        autoSaveMaxTimerRef.current = undefined;
+        void saveRunnerRef.current();
+      }, remaining);
+    }
+
     return () => {
-      if (autoSaveTimerRef.current !== undefined) {
-        window.clearTimeout(autoSaveTimerRef.current);
-        autoSaveTimerRef.current = undefined;
+      if (autoSaveIdleTimerRef.current !== undefined) {
+        window.clearTimeout(autoSaveIdleTimerRef.current);
+        autoSaveIdleTimerRef.current = undefined;
       }
     };
-  }, [dirty, documentReadOnly, draft, externalUpdate, saveError]);
+  }, [dirty, documentReadOnly, draft, externalUpdate, saveError, saving]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (saving) return;
       if (
         !(event.target instanceof Node)
         || !rootRef.current?.contains(event.target)
@@ -518,12 +582,12 @@ export function WriterIRControl({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleRedo, handleUndo, requestImmediateSave, saving]);
+  }, [handleRedo, handleUndo, requestImmediateSave]);
 
+  // Blur only closes the text-edit history group; autosave idle/max timers persist.
   const handleTextBlur = useCallback(() => {
     finishTextEdit();
-    if (!externalUpdate) requestImmediateSave();
-  }, [externalUpdate, finishTextEdit, requestImmediateSave]);
+  }, [finishTextEdit]);
 
   const handleDocumentChange = useCallback((nextDocument: WriterDocument) => {
     draftRef.current = nextDocument;
@@ -553,7 +617,6 @@ export function WriterIRControl({
     setFuture([]);
     setSaveError(undefined);
     setExternalUpdate(false);
-    focusToolbar();
   };
 
   const saveLocalVersion = () => {
@@ -570,67 +633,12 @@ export function WriterIRControl({
     requestImmediateSave();
   };
 
-  const saveStatus = saving
-    ? t('chat.writerIR.saving')
-    : dirty
-      ? t('chat.writerIR.unsaved')
-      : t('chat.writerIR.saved');
-
-  const toolbar = (
-    <header
-      className={`writer-ir__toolbar${toolbarTarget !== undefined ? ' writer-ir__toolbar--external' : ''}`}
-      ref={toolbarRef}
-    >
-      <div className='writer-ir__document-meta'>
-        <span>{t('chat.writerIR.stage', { stage: stageLabel })}</span>
-        <span>{t('chat.writerIR.blockCount', { count: blockCount })}</span>
-        <strong
-          className={`writer-ir__autosave-status${dirty ? ' writer-ir__autosave-status--dirty' : ''}`}
-          aria-live='polite'
-          aria-atomic='true'
-        >
-          {saveStatus}
-        </strong>
-      </div>
-      <div className='writer-ir__toolbar-actions'>
-        {!documentReadOnly && (
-          <>
-            <button
-              type='button'
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={handleUndo}
-              disabled={saving || (!history.length && !textEditStartRef.current)}
-            >
-              {t('chat.writerIR.undo')}
-            </button>
-            <button
-              type='button'
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={handleRedo}
-              disabled={saving || !future.length}
-            >
-              {t('chat.writerIR.redo')}
-            </button>
-          </>
-        )}
-      </div>
-    </header>
-  );
-
   return (
     <section
       className='writer-ir'
       aria-label={t('chat.writerIR.documentRegion')}
       ref={rootRef}
     >
-      {!documentReadOnly && (
-        toolbarTarget === undefined
-          ? toolbar
-          : toolbarTarget
-            ? createPortal(toolbar, toolbarTarget)
-            : null
-      )}
-
       {externalUpdate && (
         <div className='writer-ir__notice writer-ir__notice--warning' role='alert'>
           <span>{t('chat.writerIR.externalUpdate')}</span>
@@ -668,7 +676,6 @@ export function WriterIRControl({
         <WriterIRDocumentEditor
           document={draft}
           ariaLabel={t('chat.writerIR.documentRegion')}
-          disabled={saving}
           onChange={handleDocumentChange}
           onFocus={beginTextEdit}
           onBlur={handleTextBlur}

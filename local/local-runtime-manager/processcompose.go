@@ -253,7 +253,6 @@ func runtimeProcessEnvironment(base []string, cfg RuntimeConfig, plan runtimePro
 			"HF_HUB_OFFLINE=1",
 			"TRANSFORMERS_OFFLINE=1",
 			"PIP_NO_INDEX=1",
-			"PYTHONDONTWRITEBYTECODE=0",
 		)
 	}
 	switch processName {

@@ -106,6 +106,32 @@ assert_desktop_runtime_app() {
   fi
 }
 
+verify_runtime_code_signatures() {
+  local runtime_root="$1"
+  local checked=0
+  local failed=0
+
+  while IFS= read -r -d '' candidate; do
+    if ! file -b "${candidate}" | grep -q "Mach-O"; then
+      continue
+    fi
+    checked=$((checked + 1))
+    if ! codesign --verify --strict "${candidate}"; then
+      echo "Invalid embedded runtime signature: ${candidate}" >&2
+      failed=$((failed + 1))
+    fi
+  done < <(
+    find "${runtime_root}" -type f \
+      \( -name "*.so" -o -name "*.dylib" -o -perm -111 \) -print0
+  )
+
+  echo "Verified ${checked} embedded runtime Mach-O signatures"
+  if (( failed > 0 )); then
+    echo "${failed} embedded runtime signatures failed verification" >&2
+    return 1
+  fi
+}
+
 prune_runtime_app() {
   local app_root="$1"
   if [[ -d "${app_root}/frontend" ]]; then
@@ -243,6 +269,7 @@ if [[ -d "${APP_PATH}" ]]; then
       echo "Expected a Developer ID Application signature: ${APP_PATH}" >&2
       exit 1
     fi
+    verify_runtime_code_signatures "${APP_PATH}/Contents/Resources/runtime"
   fi
   if [[ "${PACKAGE_KIND}" == "zip" ]]; then
     remove_generated_path "${ZIP_PATH}"

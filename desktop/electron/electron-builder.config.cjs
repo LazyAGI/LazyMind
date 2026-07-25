@@ -4,6 +4,10 @@ const path = require("node:path");
 const util = require("node:util");
 
 const execFile = util.promisify(childProcess.execFile);
+const delay = (milliseconds) => new Promise((resolve) => {
+  setTimeout(resolve, milliseconds);
+});
+const stagedRuntimePaths = new Map();
 
 const runtimeStage = process.env.LAZYMIND_DESKTOP_RUNTIME_STAGE;
 if (!runtimeStage) {
@@ -56,10 +60,17 @@ function collectRuntimeMachOBinaries(root) {
         continue;
       }
 
-      const descriptor = fs.openSync(absolutePath, "r");
       const magic = Buffer.allocUnsafe(4);
-      const bytesRead = fs.readSync(descriptor, magic, 0, magic.length, 0);
-      fs.closeSync(descriptor);
+      let descriptor;
+      let bytesRead;
+      try {
+        descriptor = fs.openSync(absolutePath, "r");
+        bytesRead = fs.readSync(descriptor, magic, 0, magic.length, 0);
+      } finally {
+        if (descriptor !== undefined) {
+          fs.closeSync(descriptor);
+        }
+      }
       if (bytesRead === magic.length && MACH_O_MAGICS.has(magic.readUInt32BE(0))) {
         binaries.push(absolutePath);
       }
@@ -69,7 +80,45 @@ function collectRuntimeMachOBinaries(root) {
   return binaries.sort();
 }
 
-async function signEmbeddedRuntime(context) {
+async function codesignWithRetry(args, binary) {
+  const maximumAttempts = 3;
+  for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+    try {
+      await execFile("/usr/bin/codesign", args);
+      return;
+    } catch (error) {
+      if (attempt === maximumAttempts) {
+        throw error;
+      }
+      console.warn(
+        `codesign attempt ${attempt}/${maximumAttempts} failed for ${binary}; retrying`,
+      );
+      await delay(attempt * 1000);
+    }
+  }
+}
+
+async function developerIdSigningContext(context) {
+  const { keychainFile } = await context.packager.codeSigningInfo.value;
+  const identityArgs = ["find-identity", "-v", "-p", "codesigning"];
+  if (keychainFile) {
+    identityArgs.push(keychainFile);
+  }
+  const { stdout: identities } = await execFile("/usr/bin/security", identityArgs);
+  const match = identities.match(
+    /^\s*\d+\)\s+([0-9A-F]{40})\s+"Developer ID Application:/m,
+  );
+  if (!match) {
+    throw new Error("No Developer ID Application signing identity was found");
+  }
+  return {
+    entitlements: path.join(__dirname, "assets", "entitlements.mac.plist"),
+    identity: match[1],
+    keychainFile,
+  };
+}
+
+async function signAndStageEmbeddedRuntime(context) {
   if (macSigningMode !== "developer-id") {
     return;
   }
@@ -83,20 +132,7 @@ async function signEmbeddedRuntime(context) {
   );
   const binaries = collectRuntimeMachOBinaries(runtimeRoot);
   console.log(`Signing ${binaries.length} embedded runtime Mach-O binaries`);
-  const { keychainFile } = await context.packager.codeSigningInfo.value;
-  const identityArgs = ["find-identity", "-v", "-p", "codesigning"];
-  if (keychainFile) {
-    identityArgs.push(keychainFile);
-  }
-  const { stdout: identities } = await execFile("/usr/bin/security", identityArgs);
-  const match = identities.match(
-    /^\s*\d+\)\s+([0-9A-F]{40})\s+"Developer ID Application:/m,
-  );
-  if (!match) {
-    throw new Error("No Developer ID Application signing identity was found");
-  }
-  const identity = match[1];
-  const entitlements = path.join(__dirname, "assets", "entitlements.mac.plist");
+  const { entitlements, identity, keychainFile } = await developerIdSigningContext(context);
 
   // Keep a small amount of concurrency so timestamp requests are faster
   // without overwhelming Apple's timestamp service.
@@ -117,10 +153,85 @@ async function signEmbeddedRuntime(context) {
         args.push("--keychain", keychainFile);
       }
       args.push(binary);
-      await execFile("/usr/bin/codesign", args);
+      await codesignWithRetry(args, binary);
     }
   });
   await Promise.all(workers);
+
+  // electron-osx-sign opens every file below the app concurrently even when
+  // signIgnore matches it. Keep the large Python runtime outside the app while
+  // electron-builder signs the Electron bundle, then restore and reseal it in
+  // afterSign before manual notarization.
+  const stagedRuntime = path.join(context.appOutDir, ".lazymind-runtime-for-signing");
+  fs.rmSync(stagedRuntime, { recursive: true, force: true });
+  fs.renameSync(runtimeRoot, stagedRuntime);
+  stagedRuntimePaths.set(context.appOutDir, { runtimeRoot, stagedRuntime });
+  console.log("Staged embedded runtime outside the app for Electron bundle signing");
+}
+
+async function restoreRuntimeAndFinalizeSignature(context) {
+  if (macSigningMode !== "developer-id") {
+    return;
+  }
+
+  const staged = stagedRuntimePaths.get(context.appOutDir);
+  if (!staged || !fs.existsSync(staged.stagedRuntime)) {
+    throw new Error("Staged embedded runtime was not found after Electron bundle signing");
+  }
+  fs.mkdirSync(path.dirname(staged.runtimeRoot), { recursive: true });
+  fs.renameSync(staged.stagedRuntime, staged.runtimeRoot);
+  stagedRuntimePaths.delete(context.appOutDir);
+
+  const appPath = path.join(context.appOutDir, "LazyMind.app");
+  const { entitlements, identity, keychainFile } = await developerIdSigningContext(context);
+  const signArgs = [
+    "--sign",
+    identity,
+    "--force",
+    "--timestamp",
+    "--options",
+    "runtime",
+    "--entitlements",
+    entitlements,
+  ];
+  if (keychainFile) {
+    signArgs.push("--keychain", keychainFile);
+  }
+  signArgs.push(appPath);
+  await codesignWithRetry(signArgs, appPath);
+  await execFile("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath]);
+  console.log("Restored embedded runtime and resealed the outer app signature");
+
+  if (notarizeMac) {
+    const notarizationArchive = path.join(context.appOutDir, "LazyMind-notarize.zip");
+    fs.rmSync(notarizationArchive, { force: true });
+    try {
+      await execFile("/usr/bin/ditto", [
+        "-c",
+        "-k",
+        "--keepParent",
+        appPath,
+        notarizationArchive,
+      ]);
+      const { stdout } = await execFile("/usr/bin/xcrun", [
+        "notarytool",
+        "submit",
+        notarizationArchive,
+        "--apple-id",
+        process.env.APPLE_ID,
+        "--password",
+        process.env.APPLE_APP_SPECIFIC_PASSWORD,
+        "--team-id",
+        process.env.APPLE_TEAM_ID,
+        "--wait",
+      ]);
+      process.stdout.write(stdout);
+      await execFile("/usr/bin/xcrun", ["stapler", "staple", appPath]);
+      await execFile("/usr/bin/xcrun", ["stapler", "validate", appPath]);
+    } finally {
+      fs.rmSync(notarizationArchive, { force: true });
+    }
+  }
 }
 if (process.env.LAZYMIND_DESKTOP_WINDOWS_ICON) {
   extraResources.push({
@@ -154,10 +265,8 @@ module.exports = {
     hardenedRuntime: macSigningMode === "developer-id",
     entitlements: "assets/entitlements.mac.plist",
     entitlementsInherit: "assets/entitlements.mac.plist",
-    // The embedded runtime contains many non-code data files. Sign only its
-    // Mach-O binaries, then let electron-osx-sign handle the Electron bundle.
-    signIgnore: ["/Contents/Resources/runtime/"],
-    notarize: notarizeMac ? { teamId: process.env.APPLE_TEAM_ID } : false,
+    // Notarization runs after the large runtime has been restored in afterSign.
+    notarize: false,
   },
   dmg: {
     artifactName: "LazyMind-macos-${arch}.${ext}",
@@ -182,5 +291,6 @@ module.exports = {
     useZip: true,
     runAfterFinish: true,
   },
-  afterPack: signEmbeddedRuntime,
+  afterPack: signAndStageEmbeddedRuntime,
+  afterSign: restoreRuntimeAndFinalizeSignature,
 };
