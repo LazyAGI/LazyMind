@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal
 
-from .artifact import ArtifactCommit, ArtifactKey, ArtifactSnapshot
+from .artifact import ArtifactCommit, ArtifactKey, ArtifactRef, ArtifactSnapshot
 from .errors import DefinitionError, OperationExecutionError
 from .execution import ExecutionCleanupError, ExecutionHandle, start_execution
 from .operation import OperationContext, OperationInvocation, OperationResult
@@ -47,6 +47,8 @@ class _TerminationFailure(ExceptionGroup):
 class _Command:
     kind: Literal['start', 'pause', 'resume', 'retry', 'cancel', 'release', 'close']
     reply: asyncio.Future[RuntimeSnapshot]
+    retry_keys: tuple[ArtifactKey, ...] = ()
+    request_id: str = ''
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,8 +175,18 @@ class RunSession:
     async def resume(self) -> RuntimeSnapshot:
         return await self._request('resume')
 
-    async def retry(self) -> RuntimeSnapshot:
-        return await self._request('retry')
+    async def retry(self, artifact_keys: tuple[ArtifactKey, ...] = (),
+                    request_id: str = ''
+                    ) -> RuntimeSnapshot:
+        if not all(isinstance(key, ArtifactKey) for key in artifact_keys):
+            raise TypeError('retry artifact_keys must contain ArtifactKey values')
+        if artifact_keys:
+            _text(request_id, 'retry request_id')
+        return await self._request(
+            'retry',
+            retry_keys=artifact_keys,
+            request_id=request_id,
+        )
 
     async def cancel(self) -> RuntimeSnapshot:
         return await self._request('cancel')
@@ -265,9 +277,14 @@ class RunSession:
 
     async def _request(self, kind: Literal[
         'start', 'pause', 'resume', 'retry', 'cancel', 'release', 'close'
-    ]) -> RuntimeSnapshot:
+    ], *, retry_keys: tuple[ArtifactKey, ...] = (),
+        request_id: str = ''
+    ) -> RuntimeSnapshot:
         reply = self._reply()
-        await self._enqueue(_Command(kind, reply), _CONTROL_PRIORITY)
+        await self._enqueue(
+            _Command(kind, reply, retry_keys, request_id),
+            _CONTROL_PRIORITY,
+        )
         return await reply
 
     def _reply(self) -> asyncio.Future[RuntimeSnapshot]:
@@ -297,14 +314,16 @@ class RunSession:
             'start': self._start,
             'pause': self._pause,
             'resume': self._resume,
-            'retry': self._retry,
             'cancel': self._cancel,
             'release': self._release,
             'close': self._close,
         }
         try:
             await self._flush_failure()
-            await actions[command.kind]()
+            if command.kind == 'retry':
+                await self._retry(command.retry_keys, command.request_id)
+            else:
+                await actions[command.kind]()
         except Exception as exc:
             reply_error: Exception = exc
             if self._failure_pending is not None:
@@ -362,11 +381,18 @@ class RunSession:
             raise DefinitionError(f'cannot resume run from {self._status}')
         await self._enter_running()
 
-    async def _retry(self) -> None:
+    async def _retry(self, artifact_keys: tuple[ArtifactKey, ...] = (),
+                     request_id: str = ''
+                     ) -> None:
         if self._status != 'failed':
             raise DefinitionError(f'cannot retry run from {self._status}')
         if self._active:
             await self._terminate(tuple(self._active.values()))
+        if artifact_keys:
+            await self._replace_artifact_retries(
+                artifact_keys,
+                request_id,
+            )
         await self._enter_running()
 
     async def _cancel(self) -> None:
@@ -440,14 +466,10 @@ class RunSession:
             raise DefinitionError(f'artifact is not currently effective: {key}')
 
         pending = await self._store.retry_requests(self.run_id, pending_only=True)
-        logical_key = (operation.spec.op_id, key.partition_key if operation.spec.driver_input else '')
-        for request in pending:
-            producer = self._definition.producer_by_artifact[request.artifact_key.artifact_id]
-            other_key = (
-                producer.spec.op_id,
-                request.artifact_key.partition_key if producer.spec.driver_input else '',
-            )
-            if request.request_id != request_id and other_key == logical_key:
+        logical_key = self._retry_invocation(key)
+        for pending_request in pending:
+            other_key = self._retry_invocation(pending_request.artifact_key)
+            if pending_request.request_id != request_id and other_key == logical_key:
                 raise DefinitionError('one invocation already has a pending artifact retry')
 
         request = await self._store.request_retry(
@@ -466,6 +488,55 @@ class RunSession:
             await self._schedule()
         else:
             await self._publish()
+
+    async def _replace_artifact_retries(
+        self,
+        artifact_keys: tuple[ArtifactKey, ...],
+        request_id: str,
+    ) -> tuple[ArtifactRetryRequest, ...]:
+        entries = await self._retry_entries(artifact_keys, request_id)
+        return await self._store.replace_pending_retries(self.run_id, entries)
+
+    async def _retry_entries(
+        self,
+        artifact_keys: tuple[ArtifactKey, ...],
+        request_id: str,
+    ) -> tuple[tuple[str, ArtifactKey, ArtifactRef], ...]:
+        if self._decision is None:
+            await self._refresh_plan()
+        if self._decision is None:
+            raise RuntimeError('retry planning state is unavailable')
+
+        entries: list[tuple[str, ArtifactKey, ArtifactRef]] = []
+        seen: set[tuple[str, str]] = set()
+        for key in artifact_keys:
+            operation = self._definition.producer_by_artifact.get(key.artifact_id)
+            if operation is None:
+                raise DefinitionError(f'artifact has no producer operation: {key}')
+            current = self._decision.view.records.get(key)
+            if current is None:
+                raise DefinitionError(f'artifact is not currently effective: {key}')
+            invocation = self._retry_invocation(key)
+            if invocation in seen:
+                raise DefinitionError('one invocation cannot have multiple retry targets')
+            seen.add(invocation)
+            child_id = ':'.join((
+                request_id,
+                key.artifact_id,
+                key.partition_key or '_',
+                str(current.ref.version),
+            ))
+            entries.append((child_id, key, current.ref))
+        return tuple(entries)
+
+    def _retry_invocation(self, key: ArtifactKey) -> tuple[str, str]:
+        operation = self._definition.producer_by_artifact.get(key.artifact_id)
+        if operation is None:
+            raise DefinitionError(f'artifact has no producer operation: {key}')
+        return (
+            operation.spec.op_id,
+            key.partition_key if operation.spec.driver_input else '',
+        )
 
     async def _refresh_plan(self) -> None:
         self._artifacts = await self._store.snapshot(

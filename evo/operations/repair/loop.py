@@ -39,14 +39,17 @@ def prepare_candidate_workspace(
     plan: Mapping[str, Any],
     repair_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if plan.get('status') != 'planned':
+    policy = _runtime_policy(plan, repair_policy)
+    if (
+        plan.get('status') != 'planned'
+        and _text(policy.get('mode')) != 'auto'
+    ):
         return {
             'status': 'failed',
             'reason': f"repair plan is not planned: {_text(plan.get('status')) or 'missing_status'}",
             'repair_plan_ref': _plan_ref(plan),
             'workspace_kind': 'managed_worktree',
         }
-    policy = _runtime_policy(plan, repair_policy)
     source = algorithm_source_root(policy.get('candidate_source_dir') or os.getenv('LAZYMIND_EVO_CHAT_SOURCE')
                                    or DEFAULT_SOURCE)
     workspace = workspace_path(policy, plan)
@@ -71,6 +74,7 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
                           plan: Mapping[str, Any] | None = None,
                           trace: Any | None = None) -> dict[str, Any]:
     plan = plan if isinstance(plan, Mapping) else {}
+    policy = _runtime_policy(plan, repair_policy)
     baseline_algo_id = next((text for judge in baseline_judges for text in (algo_id(judge),) if text), '')
     ready = _ready_workspace(workspace, plan, repair_policy)
     if ready.get('status') != 'ready':
@@ -79,11 +83,20 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
         return _result('failed', plan, workspace, [], {}, reason, baseline_algo_id,
                        trace_cursor(trace))
     root = Path(str(workspace['workspace_ref'])).resolve()
+    if plan.get('status') != 'planned':
+        return _finish_auto_without_patch(
+            root,
+            plan,
+            workspace,
+            [],
+            baseline_algo_id,
+            trace,
+            'repair plan is not runnable; using unchanged workspace',
+        )
     case_map = {_text(case.get('id')): case for case in cases
                 if isinstance(case, Mapping) and _text(case.get('id'))}
     baseline_map = {_text(judge.get('case_id')): judge for judge in baseline_judges
                     if isinstance(judge, Mapping) and _text(judge.get('case_id'))}
-    policy = _runtime_policy(plan, repair_policy)
     missing_validation = _validation_input_gap(plan, case_map, baseline_map)
     if missing_validation:
         safe_emit(trace, 'repair.loop_completed', status='failed', terminal=True,
@@ -201,6 +214,16 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
             baseline_algo_id,
             trace_cursor(trace),
         )
+    if _text(policy.get('mode')) == 'auto':
+        return _finish_auto_without_patch(
+            root,
+            plan,
+            workspace,
+            attempts,
+            baseline_algo_id,
+            trace,
+            'repair exhausted attempts; using unchanged workspace',
+        )
     safe_emit(trace, 'repair.loop_completed', status='failed', terminal=True,
               payload={'status': 'failed', 'attempt_count': len(attempts)})
     reset_workspace(root)
@@ -220,7 +243,10 @@ def build_verified_patch(run_id: str, loop: Mapping[str, Any]) -> dict[str, Any]
     raw_diff = loop.get('winning_patch_diff')
     diff = raw_diff if isinstance(raw_diff, str) else str(raw_diff or '')
     diff_by_file = _diff_by_file(diff)
-    if not diff_by_file:
+    if not diff_by_file and (
+        status != 'exhausted_with_patch'
+        or diff.strip()
+    ):
         raise ValueError('final repair patch requires a non-empty diff')
     workspace_ref = _text(loop.get('workspace_ref'))
     if not workspace_ref:
@@ -237,9 +263,15 @@ def build_verified_patch(run_id: str, loop: Mapping[str, Any]) -> dict[str, Any]
 
 def _ready_workspace(workspace: Mapping[str, Any], plan: Mapping[str, Any],
                      repair_policy: Mapping[str, Any]) -> dict[str, str]:
-    if workspace.get('status') != 'ready' or plan.get('status') != 'planned':
-        return {'status': 'failed', 'reason': 'repair plan is not runnable'}
     policy = _runtime_policy(plan, repair_policy)
+    if (
+        workspace.get('status') != 'ready'
+        or (
+            plan.get('status') != 'planned'
+            and _text(policy.get('mode')) != 'auto'
+        )
+    ):
+        return {'status': 'failed', 'reason': 'repair plan is not runnable'}
     objective_hash = hashlib.sha1(json.dumps(plan.get('objective') or {}, sort_keys=True).encode()).hexdigest()[:12]
     try:
         root = Path(_text(workspace.get('workspace_ref'))).resolve()
@@ -426,6 +458,38 @@ def _latest_prevalidated_patch(attempts: list[Mapping[str, Any]]) -> Mapping[str
     return {}
 
 
+def _finish_auto_without_patch(
+    root: Path,
+    plan: Mapping[str, Any],
+    workspace: Mapping[str, Any],
+    attempts: list[Mapping[str, Any]],
+    baseline_algo_id: str,
+    trace: Any,
+    message: str,
+) -> dict[str, Any]:
+    safe_emit(
+        trace,
+        'repair.loop_completed',
+        status='completed',
+        terminal=True,
+        payload={
+            'status': 'exhausted_with_patch',
+            'attempt_count': len(attempts),
+        },
+    )
+    reset_workspace(root)
+    return _result(
+        'exhausted_with_patch',
+        plan,
+        workspace,
+        attempts,
+        {},
+        message,
+        baseline_algo_id,
+        trace_cursor(trace),
+    )
+
+
 def _worker_failure(run: Any) -> str:
     last_error = getattr(run, 'last_error', None)
     if last_error:
@@ -524,6 +588,7 @@ def _runtime_policy(plan: Mapping[str, Any], repair_policy: Mapping[str, Any] | 
         'opencode_timeout_s',
         'max_patch_bytes',
         'llm_config',
+        'mode',
     }
     return {
         **{key: safe[key] for key in safe_keys if key in safe},

@@ -317,19 +317,92 @@ class ArtifactStore:
                     f'artifact already has a pending retry: {conflict["request_id"]}'
                 )
 
-            created_at = time.time()
-            await self._connection.execute(
-                """
-                INSERT INTO retry_requests(
-                  run_id, request_id, artifact_id, partition_key, base_version,
-                  status, created_at, result_version
-                ) VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL)
-                """,
-                (
-                    run_id, request_id, artifact_key.artifact_id,
-                    artifact_key.partition_key, base_ref.version, created_at,
-                ),
+            request = await self._insert_retry(
+                run_id,
+                request_id,
+                artifact_key,
+                base_ref,
             )
+        return request
+
+    async def replace_pending_retries(
+        self,
+        run_id: str,
+        entries: Iterable[tuple[str, ArtifactKey, ArtifactRef]],
+    ) -> tuple[ArtifactRetryRequest, ...]:
+        _text(run_id, 'run_id')
+        requests = _validated_retry_entries(entries)
+
+        results: list[ArtifactRetryRequest] = []
+        async with self._transaction():
+            await self._require_run(run_id)
+            cursor = await self._connection.execute(
+                """
+                SELECT * FROM retry_requests
+                WHERE run_id = ? AND status = 'pending'
+                """,
+                (run_id,),
+            )
+            pending = {
+                ArtifactKey(row['artifact_id'], row['partition_key']): row
+                for row in await cursor.fetchall()
+            }
+            retained_ids: set[str] = set()
+            missing: list[tuple[str, ArtifactKey, ArtifactRef]] = []
+            for request_id, artifact_key, base_ref in requests:
+                current = await self._head_ref(run_id, artifact_key)
+                if current != base_ref:
+                    raise DefinitionError(
+                        'retry target is no longer the current artifact version'
+                    )
+                row = pending.get(artifact_key)
+                if row is not None and int(row['base_version']) == base_ref.version:
+                    retained_ids.add(str(row['request_id']))
+                    results.append(_retry_request(row))
+                else:
+                    missing.append((request_id, artifact_key, base_ref))
+
+            if retained_ids:
+                placeholders = ','.join('?' for _ in retained_ids)
+                await self._connection.execute(
+                    f"""
+                    UPDATE retry_requests SET status = 'cancelled'
+                    WHERE run_id = ? AND status = 'pending'
+                      AND request_id NOT IN ({placeholders})
+                    """,
+                    (run_id, *sorted(retained_ids)),
+                )
+            else:
+                await self._cancel_pending_retries(run_id)
+
+            for request_id, artifact_key, base_ref in missing:
+                existing = await self._retry_row(run_id, request_id)
+                if existing is not None:
+                    raise DefinitionError(f'retry request id reused: {request_id}')
+                results.append(await self._insert_retry(
+                    run_id,
+                    request_id,
+                    artifact_key,
+                    base_ref,
+                ))
+        return tuple(results)
+
+    async def _insert_retry(self, run_id: str, request_id: str,
+                            artifact_key: ArtifactKey, base_ref: ArtifactRef
+                            ) -> ArtifactRetryRequest:
+        created_at = time.time()
+        await self._connection.execute(
+            """
+            INSERT INTO retry_requests(
+              run_id, request_id, artifact_id, partition_key, base_version,
+              status, created_at, result_version
+            ) VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL)
+            """,
+            (
+                run_id, request_id, artifact_key.artifact_id,
+                artifact_key.partition_key, base_ref.version, created_at,
+            ),
+        )
         return ArtifactRetryRequest(
             request_id,
             artifact_key,
@@ -1153,6 +1226,27 @@ class ArtifactStore:
                         continue
                 await rollback
                 raise
+
+
+def _validated_retry_entries(
+    entries: Iterable[tuple[str, ArtifactKey, ArtifactRef]],
+) -> tuple[tuple[str, ArtifactKey, ArtifactRef], ...]:
+    requests = tuple(entries)
+    request_ids: set[str] = set()
+    artifact_keys: set[ArtifactKey] = set()
+    for request_id, artifact_key, base_ref in requests:
+        _text(request_id, 'retry request_id')
+        if not isinstance(artifact_key, ArtifactKey):
+            raise TypeError('artifact_key must be ArtifactKey')
+        if not isinstance(base_ref, ArtifactRef) or base_ref.key != artifact_key:
+            raise DefinitionError('base_ref must identify artifact_key')
+        if request_id in request_ids:
+            raise DefinitionError(f'duplicate retry request id: {request_id}')
+        if artifact_key in artifact_keys:
+            raise DefinitionError(f'duplicate retry artifact: {artifact_key}')
+        request_ids.add(request_id)
+        artifact_keys.add(artifact_key)
+    return requests
 
 
 def _run_state(row: Mapping[str, object]) -> StoredRunState:

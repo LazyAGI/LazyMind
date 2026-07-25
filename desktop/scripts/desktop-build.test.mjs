@@ -12,6 +12,7 @@ const iconScript = path.join(scriptsDir, "generate-windows-icon.mjs");
 const icnsSource = path.join(scriptsDir, "..", "electron", "assets", "LazyMind.icns");
 const electronMainScript = path.join(scriptsDir, "..", "electron", "src", "main.js");
 const electronBuilderConfig = path.join(scriptsDir, "..", "electron", "electron-builder.config.cjs");
+const darwinBuildScript = path.join(scriptsDir, "build-darwin-arm64.sh");
 const installerScript = path.join(scriptsDir, "..", "installer", "installer.nsh");
 
 function nsisMacro(source, name) {
@@ -119,6 +120,33 @@ test("Windows installer verifies and force-cleans processes left by warmup", () 
     /\$0 == 10[\s\S]*force-stop --install-dir "\$INSTDIR"[\s\S]*Goto LMWarmupCheckStopped/,
   );
   assert.match(install, /\$4 == 1[\s\S]*StrCpy \$3 4[\s\S]*\$3 != 0/);
+});
+
+test("macOS distribution build requires Developer ID signing and notarizes the final DMG", () => {
+  const source = readFileSync(darwinBuildScript, "utf8");
+  assert.match(source, /PACKAGE_KIND=.*zip/);
+  assert.match(source, /SIGNING_MODE=.*adhoc/);
+  assert.match(
+    source,
+    /notarytool submit "\$\{DMG_PATH\}"[\s\S]*--team-id "\$\{APPLE_TEAM_ID\}"[\s\S]*stapler staple "\$\{DMG_PATH\}"/,
+  );
+  assert.match(source, /Authority=Developer ID Application:/);
+  for (const privatePath of ["/.env", "/.lazymind-local", "/data", "/volumes", "/local/config.env"]) {
+    assert.match(source, new RegExp(`--exclude "${privatePath.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}"`));
+  }
+});
+
+test("packaged macOS app runs installation warmup once before its normal window", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(
+    source,
+    /runMacInstallationWarmupIfNeeded\(\)\.then\(\s*\(\) => createWindow\(\)/,
+  );
+  assert.match(
+    source,
+    /await runInstallerWarmup\(\);\s*markMacWarmupCompleted/,
+    "warmup must only be marked complete after the shared lifecycle succeeds",
+  );
 });
 
 test("Desktop does not create the Chat window after shutdown begins", () => {

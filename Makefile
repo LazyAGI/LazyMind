@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
 
 LOCAL_CONFIG_ENV ?= local/config.env
@@ -56,7 +56,7 @@ endif
 ifneq (,$(wildcard .env))
 include .env
 endif
-_ENV_EXPORT_VARS := $(filter MIRROR_PROFILE LAZYMIND_% LAZYLLM_% LANGFUSE_% OTEL_% PIP_% UV_% NPM_% DOCKER_% APT_% ALPINE_% GOPROXY GOSUMDB GITHUB_% MILVUS_% MINIO_% POSTGRES_% REDIS_% OPENSEARCH_%,$(.VARIABLES))
+_ENV_EXPORT_VARS := $(filter MIRROR_PROFILE LAZYMIND_% LAZYLLM_% LANGFUSE_% OTEL_% PIP_% UV_% NPM_% ELECTRON_% DOCKER_% APT_% ALPINE_% GOPROXY GOSUMDB GITHUB_% MILVUS_% MINIO_% POSTGRES_% REDIS_% OPENSEARCH_%,$(.VARIABLES))
 export $(_ENV_EXPORT_VARS)
 
 # ---------------------------------------------------------------------------
@@ -193,6 +193,7 @@ help:
 	@echo "  make local-up - Build/start local LazyMind without containers"
 	@echo "  make local-up-lan - Build/start local LazyMind for LAN access with local admin auto-login enabled"
 	@echo "  make desktop-darwin-arm64 - Build Darwin arm64 Desktop app"
+	@echo "  make desktop-darwin-arm64-dmg - Build signed/notarized Darwin arm64 DMG"
 	@echo "  make desktop-darwin-arm64-clean - Remove Darwin arm64 Desktop build outputs"
 	@echo "  make desktop-windows-x64 - Build Windows x64 Desktop portable ZIP"
 	@echo "  make desktop-windows-x64-installer - Build Windows x64 per-user installer"
@@ -441,12 +442,19 @@ local-runtime-manager-build:
 desktop-darwin-arm64:
 	@bash desktop/scripts/build-darwin-arm64.sh
 
+desktop-darwin-arm64-dmg:
+	@LAZYMIND_DESKTOP_PACKAGE_KIND=dmg \
+		LAZYMIND_DESKTOP_SIGNING_MODE=developer-id \
+		LAZYMIND_DESKTOP_NOTARIZE=true \
+		bash desktop/scripts/build-darwin-arm64.sh
+
 desktop-darwin-arm64-clean:
 	@echo "🧹 Removing Darwin arm64 Desktop generated outputs..."
 	@for path in \
 		"$(CURDIR)/desktop/build/darwin-arm64" \
 		"$(CURDIR)/desktop/dist/mac-arm64" \
-		"$(CURDIR)/desktop/dist/LazyMind-darwin-arm64.zip"; do \
+		"$(CURDIR)/desktop/dist/LazyMind-darwin-arm64.zip" \
+		"$(CURDIR)/desktop/dist/LazyMind-macos-arm64.dmg"; do \
 		if [ -e "$$path" ]; then \
 			chflags -R nouchg "$$path" 2>/dev/null || true; \
 			chmod -R u+rwX "$$path" 2>/dev/null || true; \

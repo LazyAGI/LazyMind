@@ -421,6 +421,61 @@ func TestPostThreadActionForwardsOnlyCommandFields(t *testing.T) {
 	}
 }
 
+func TestPostThreadRetryForwardsStageInsteadOfUntilStep(t *testing.T) {
+	db := newAgentTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now().UTC()
+	if err := db.DB.Create(&orm.AgentThread{
+		ThreadID:     "thr_1",
+		Status:       "failed",
+		CreateUserID: "u1",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}).Error; err != nil {
+		t.Fatalf("seed thread: %v", err)
+	}
+
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1" {
+			_ = json.NewEncoder(w).Encode(evoThread{
+				ThreadID: "thr_1", Status: "running", CurrentStep: "analysis",
+			})
+			return
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/threads/thr_1/retry" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode upstream body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "accepted"})
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	body := `{"command_id":"cmd_retry","until_step":"analysis","extra":true}`
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/core/agent/threads/thr_1/retry",
+		strings.NewReader(body),
+	)
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"thread_id": "thr_1"})
+	rec := httptest.NewRecorder()
+
+	postThreadAction(rec, req, "retry")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected ok, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(got) != 2 || got["command_id"] != "cmd_retry" || got["stage"] != "analysis" {
+		t.Fatalf("unexpected upstream retry body: %#v", got)
+	}
+}
+
 func TestPostThreadActionForwardsOnlyEmptyCommandFields(t *testing.T) {
 	db := newAgentTestDB(t)
 	store.Init(db.DB, nil, nil)

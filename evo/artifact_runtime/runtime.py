@@ -115,8 +115,18 @@ class ArtifactRuntime:
     async def resume(self, run_id: str) -> RuntimeSnapshot:
         return await self._session_command(run_id, RunSession.resume)
 
-    async def retry(self, run_id: str) -> RuntimeSnapshot:
-        return await self._session_command(run_id, RunSession.retry)
+    async def retry(self, run_id: str, artifact_keys: Iterable[ArtifactKey] = (), *,
+                    request_id: str = ''
+                    ) -> RuntimeSnapshot:
+        keys = tuple(artifact_keys)
+        if not all(isinstance(key, ArtifactKey) for key in keys):
+            raise TypeError('retry artifact_keys must contain ArtifactKey values')
+        if keys:
+            _text(request_id, 'retry request_id')
+        return await self._session_command(
+            run_id,
+            lambda session: session.retry(keys, request_id),
+        )
 
     async def cancel(self, run_id: str) -> RuntimeSnapshot:
         return await self._session_command(run_id, RunSession.cancel)
