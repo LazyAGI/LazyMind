@@ -60,6 +60,14 @@
   color: #b45309;
 }
 
+.writer-ir__autosave-status--saving {
+  color: #1d4ed8;
+}
+
+.writer-ir__autosave-status--dirty.writer-ir__autosave-status--saving {
+  color: #b45309;
+}
+
 .writer-ir button {
   min-height: 30px;
   padding: 4px 10px;
@@ -207,6 +215,141 @@
   color: #1e40af;
 }
 
+.writer-ir__format-group--color {
+  position: relative;
+}
+
+.writer-ir__format-button--color-trigger {
+  position: relative;
+  width: auto !important;
+  min-width: 40px;
+  gap: 3px;
+  padding: 0 6px 0 8px !important;
+}
+
+.writer-ir__color-trigger-letter {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 12px;
+  padding-bottom: 4px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 2px;
+}
+
+.writer-ir__color-indicator {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 0;
+  display: block;
+  height: 3px;
+  border-radius: 1px;
+  background: #1f2329;
+}
+
+.writer-ir__color-trigger-caret {
+  font-size: 9px;
+  color: #8f959e;
+}
+
+.writer-ir__color-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 232px;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 12px 28px rgba(15, 23, 42, 0.14);
+}
+
+.writer-ir__color-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.writer-ir__color-section-title {
+  color: #646a73;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.writer-ir__color-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.writer-ir__color-tile {
+  width: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0 !important;
+  border: 1px solid rgba(15, 23, 42, 0.12) !important;
+  border-radius: 4px !important;
+  background: #fff;
+  cursor: pointer;
+}
+
+.writer-ir__color-tile--letter {
+  color: #1f2329;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  background: #fff !important;
+}
+
+.writer-ir__color-tile--clear {
+  background:
+    linear-gradient(
+      135deg,
+      transparent 46%,
+      #c0c4cc 46%,
+      #c0c4cc 54%,
+      transparent 54%
+    ),
+    #fff !important;
+}
+
+.writer-ir__color-tile:hover:not(:disabled) {
+  border-color: rgba(15, 23, 42, 0.28) !important;
+}
+
+.writer-ir__color-tile--active {
+  border-color: #3370ff !important;
+  box-shadow: 0 0 0 1px #3370ff;
+}
+
+.writer-ir__color-reset {
+  width: 100%;
+  min-height: 32px !important;
+  margin-top: 2px;
+  border: 1px solid #dee0e3 !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+  color: #1f2329 !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+}
+
+.writer-ir__color-reset:hover:not(:disabled) {
+  background: #f5f6f7 !important;
+  border-color: #c0c4cc !important;
+}
+
 @keyframes writer-ir-format-toolbar-in {
   from {
     opacity: 0;
@@ -296,10 +439,179 @@
 }
 
 .writer-ir__document--editable .writer-ir__block--heading {
+  position: relative;
   margin-top: 0;
   margin-bottom: 0;
   padding-top: 0;
   padding-bottom: 0;
+}
+
+.writer-ir__document--editable .writer-ir__block--draggable {
+  position: relative;
+  padding-left: 22px;
+}
+
+.writer-ir__document--editable .writer-ir__block--foldable.writer-ir__block--draggable {
+  padding-left: 40px;
+}
+
+.writer-ir__fold-toggle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px !important;
+  min-width: 18px !important;
+  min-height: 18px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 4px !important;
+  background: transparent !important;
+  color: #3370ff !important;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.writer-ir__drag-handle {
+  position: absolute;
+  /* Align with the first text line, not the block top edge. */
+  top: calc(6px + (1.75em - 18px) / 2);
+  left: 0;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px !important;
+  min-width: 18px !important;
+  min-height: 18px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 4px !important;
+  background: transparent !important;
+  color: #8f959e !important;
+  opacity: 0;
+  cursor: grab;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.writer-ir__block--foldable > .writer-ir__drag-handle {
+  left: 18px;
+}
+
+.writer-ir__block--list_item > .writer-ir__drag-handle {
+  top: calc((1.75em - 18px) / 2);
+}
+
+.writer-ir__block--code > .writer-ir__drag-handle {
+  top: calc(10px + 12px + (1.65em - 18px) / 2);
+}
+
+/* Editable headings: keep spacing modest; control top/height are synced in JS. */
+.writer-ir__document--editable .writer-ir__heading {
+  margin-top: 4px;
+  margin-bottom: 6px;
+}
+
+.writer-ir__document--editable .writer-ir__block--heading > .writer-ir__fold-toggle,
+.writer-ir__document--editable .writer-ir__block--heading > .writer-ir__drag-handle {
+  top: 4px;
+  min-height: 0 !important;
+  align-items: center;
+}
+
+/* Only show handles when hovering this block's own row — not nested children. */
+.writer-ir__block--draggable:hover:not(:has(.writer-ir__children:hover)):not(:has(:scope > .writer-ir__block:hover)) > .writer-ir__drag-handle,
+.writer-ir__drag-handle:hover,
+.writer-ir__drag-handle:focus-visible,
+.writer-ir__block--dragging > .writer-ir__drag-handle {
+  opacity: 1;
+}
+
+.writer-ir__block--foldable:hover:not(:has(.writer-ir__children:hover)):not(:has(:scope > .writer-ir__block:hover)) > .writer-ir__fold-toggle,
+.writer-ir__fold-toggle:hover,
+.writer-ir__fold-toggle:focus-visible,
+.writer-ir__block--folded > .writer-ir__fold-toggle {
+  opacity: 1;
+}
+
+.writer-ir__drag-handle:hover:not(:disabled),
+.writer-ir__drag-handle:focus-visible {
+  background: rgba(15, 23, 42, 0.06) !important;
+  color: #3370ff !important;
+}
+
+.writer-ir__drag-grip {
+  display: block;
+  width: 10px;
+  height: 14px;
+  background-image: radial-gradient(circle, currentColor 1.1px, transparent 1.2px);
+  background-position: 0 0;
+  background-size: 5px 5px;
+}
+
+.writer-ir__document--dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.writer-ir__document--dragging .writer-ir__drag-handle {
+  cursor: grabbing;
+}
+
+.writer-ir__block--dragging {
+  opacity: 0.45;
+  background: #eff6ff;
+}
+
+.writer-ir__block--drop-child {
+  box-shadow: inset 0 0 0 2px #3370ff;
+  background: rgba(51, 112, 255, 0.06);
+}
+
+.writer-ir__block--drop-after {
+  box-shadow: inset 0 -2px 0 #3370ff;
+}
+
+.writer-ir__block--drop-before {
+  box-shadow: inset 0 2px 0 #3370ff;
+}
+
+.writer-ir__fold-toggle:hover:not(:disabled),
+.writer-ir__fold-toggle:focus-visible {
+  background: rgba(51, 112, 255, 0.08) !important;
+}
+
+.writer-ir__fold-caret {
+  display: block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid currentColor;
+  transform-origin: 50% 45%;
+  transition: transform 120ms ease;
+}
+
+.writer-ir__fold-toggle--collapsed .writer-ir__fold-caret {
+  transform: rotate(-90deg);
+}
+
+.writer-ir__section-hidden {
+  display: none !important;
+}
+
+.writer-ir__document--editable .writer-ir__fold-toggle[contenteditable='false'] {
+  background: transparent !important;
+  color: #3370ff !important;
+}
+
+.writer-ir__document--editable .writer-ir__drag-handle[contenteditable='false'] {
+  background: transparent !important;
+  color: #8f959e !important;
 }
 
 .writer-ir__document--editable .writer-ir__block--paragraph,
@@ -311,7 +623,14 @@
 
 .writer-ir__document--editable .writer-ir__block--code {
   margin: 0;
-  padding: 0;
+  /* Keep left gutter for the drag handle (see --draggable padding-left). */
+  padding-top: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+}
+
+.writer-ir__document--editable .writer-ir__block--code.writer-ir__block--draggable {
+  padding-left: 22px;
 }
 
 .writer-ir__document--editable .writer-ir__block--list_item {
@@ -345,6 +664,8 @@
   margin: 22px 0 8px;
   color: #0f172a;
   line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .writer-ir__heading--1 {
