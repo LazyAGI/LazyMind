@@ -5,6 +5,8 @@ import "errors"
 const (
 	DefaultCandidateLimit = 20
 	MaxCandidateLimit     = 100
+	DefaultRecentLimit    = 3
+	MaxRecentLimit        = 100
 	DefaultPageSize       = 20
 	MaxPageSize           = 100
 
@@ -19,6 +21,8 @@ const (
 
 	CreateStatusCreated    = "created"
 	CreateStatusIdempotent = "idempotent"
+	DeleteStatusDeleted    = "deleted"
+	DeleteStatusNotFound   = "not_found"
 )
 
 var ErrNotFound = errors.New("episode not found")
@@ -35,6 +39,11 @@ type CreateInput struct {
 }
 
 type CreateResult struct {
+	Status string `json:"status"`
+	ID     string `json:"id"`
+}
+
+type DeleteResult struct {
 	Status string `json:"status"`
 	ID     string `json:"id"`
 }

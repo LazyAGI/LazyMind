@@ -44,6 +44,39 @@ func InternalCreate(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, result)
 }
 
+func InternalDelete(w http.ResponseWriter, r *http.Request) {
+	if !requireInternalToken(w, r) {
+		return
+	}
+	userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+	episodeID := strings.TrimSpace(common.PathVar(r, "episode_id"))
+	if userID == "" {
+		common.ReplyErr(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+	if episodeID == "" {
+		common.ReplyErr(w, "episode_id is required", http.StatusBadRequest)
+		return
+	}
+	repo, err := repository()
+	if err != nil {
+		common.ReplyErr(w, "episode repository unavailable", http.StatusInternalServerError)
+		return
+	}
+	status := DeleteStatusDeleted
+	if err := repo.Delete(r.Context(), userID, episodeID); err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			common.ReplyErr(w, "delete episode failed", http.StatusInternalServerError)
+			return
+		}
+		status = DeleteStatusNotFound
+	}
+	common.ReplyOK(w, DeleteResult{
+		Status: status,
+		ID:     episodeID,
+	})
+}
+
 func InternalSearchCandidates(w http.ResponseWriter, r *http.Request) {
 	if !requireInternalToken(w, r) {
 		return
@@ -108,6 +141,58 @@ func InternalListByConversation(w http.ResponseWriter, r *http.Request) {
 	items, err := repo.ListByConversation(r.Context(), userID, conversationID)
 	if err != nil {
 		common.ReplyErr(w, "list conversation episodes failed", http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, map[string]any{"items": items})
+}
+
+func InternalListRecent(w http.ResponseWriter, r *http.Request) {
+	if !requireInternalToken(w, r) {
+		return
+	}
+	var request struct {
+		UserID      string `json:"user_id"`
+		EpisodeType string `json:"episode_type"`
+		Limit       int    `json:"limit"`
+	}
+	if err := decodeJSONBody(r, &request); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	request.UserID = strings.TrimSpace(request.UserID)
+	request.EpisodeType = strings.TrimSpace(request.EpisodeType)
+	if request.UserID == "" {
+		common.ReplyErr(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+	if !validEpisodeType(request.EpisodeType) {
+		common.ReplyErr(w, "episode_type is invalid", http.StatusBadRequest)
+		return
+	}
+	if request.Limit == 0 {
+		request.Limit = DefaultRecentLimit
+	}
+	if request.Limit < 1 || request.Limit > MaxRecentLimit {
+		common.ReplyErr(
+			w,
+			fmt.Sprintf("limit must be between 1 and %d", MaxRecentLimit),
+			http.StatusBadRequest,
+		)
+		return
+	}
+	repo, err := repository()
+	if err != nil {
+		common.ReplyErr(w, "episode repository unavailable", http.StatusInternalServerError)
+		return
+	}
+	items, err := repo.ListRecent(
+		r.Context(),
+		request.UserID,
+		request.EpisodeType,
+		request.Limit,
+	)
+	if err != nil {
+		common.ReplyErr(w, "list recent episodes failed", http.StatusInternalServerError)
 		return
 	}
 	common.ReplyOK(w, map[string]any{"items": items})

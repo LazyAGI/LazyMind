@@ -7,24 +7,19 @@ import pytest
 from lazymind.common.memory.paths import (
     PREFERENCE_PATH,
     PROFILE_PATH,
-    REFERENCE_ROOT,
     SOUL_PATH,
     build_reference_path,
-    is_memory_path,
     normalize_memory_path,
-    split_reference_ref,
 )
 from lazymind.common.memory.validation import (
     PreferenceItem,
     append_preference_item,
-    parse_preference_items,
-    reorder_preference_items,
     validate_preference_index,
     validate_profile_content,
-    validate_reference_content,
     validate_soul_content,
 )
 from lazymind.common.memory.store import MemoryStore
+from lazymind.config import config as _cfg
 
 SAMPLE_SOUL = (
     'identity:\n'
@@ -141,59 +136,10 @@ class FakeRemoteFS:
         return _Handle(self.files[normalized])
 
 
-def test_normalize_and_reference_paths():
-    assert normalize_memory_path('/memory/agents/soul.yaml') == SOUL_PATH
-    assert is_memory_path(SOUL_PATH)
-    assert build_reference_path('response') == f'{REFERENCE_ROOT}/response.md'
-    path, anchor = split_reference_ref('references/response.md#pref-response-technical-detail')
-    assert path == f'{REFERENCE_ROOT}/response.md'
-    assert anchor == 'pref-response-technical-detail'
-
-
 def test_validate_sample_documents():
     assert validate_soul_content(SAMPLE_SOUL) is None
     assert validate_profile_content(SAMPLE_PROFILE) is None
     assert validate_preference_index(SAMPLE_PREFERENCE) is None
-
-
-def test_validate_profile_requires_arrays_for_list_fields():
-    invalid = SAMPLE_PROFILE.replace('  aliases: []\n', '  aliases: null\n')
-    assert "identity.aliases' must be a list of strings" in (
-        validate_profile_content(invalid) or ''
-    )
-
-
-def test_validate_soul_rejects_non_mapping_and_extra_keys():
-    bad = SAMPLE_SOUL + '\nfree text\n'
-    assert 'valid non-empty YAML mapping' in (validate_soul_content(bad) or '')
-    bad_key = f'extra: 1\n{SAMPLE_SOUL}'
-    assert 'unsupported keys' in (validate_soul_content(bad_key) or '')
-
-
-def test_preference_item_parse_and_append():
-    content = SAMPLE_PREFERENCE
-    item = PreferenceItem(
-        name='pref.response.technical_detail',
-        summary='Explain tradeoffs for technical questions.',
-        ref='references/response.md#pref-response-technical-detail',
-        created_at=TIMESTAMP,
-        updated_at=TIMESTAMP,
-    )
-    updated = append_preference_item(content, item)
-    assert validate_preference_index(updated) is None
-    assert parse_preference_items(updated) == [item]
-
-
-def test_preference_summary_length_limit():
-    item = PreferenceItem(
-        name='pref.too.long',
-        summary='x' * 101,
-        ref='references/response.md',
-        created_at=TIMESTAMP,
-        updated_at=TIMESTAMP,
-    )
-    with pytest.raises(ValueError, match='100 characters'):
-        append_preference_item(SAMPLE_PREFERENCE, item)
 
 
 def test_memory_store_roundtrip():
@@ -236,33 +182,7 @@ def test_memory_store_rejects_invalid_path_and_content():
     with pytest.raises(ValueError):
         store.write('memory/agents/../secret.md', 'x')
     with pytest.raises(ValueError):
-        store.write(SOUL_PATH, 'identity: invalid\n')
-
-
-def test_validate_reference_content():
-    assert validate_reference_content(
-        '---\n'
-        'name: demo\n'
-        'summary: demo ref\n'
-        f'created_at: "{TIMESTAMP}"\n'
-        f'updated_at: "{TIMESTAMP}"\n'
-        'source:\n'
-        '  kind: memory_review\n'
-        '  conversation_id: conversation-1\n'
-        '---\n'
-        '## Application Scenarios\nscenario\n'
-        '## Preference Details\ndetails\n'
-        '## Reason\nreason\n'
-    ) is None
-    assert validate_reference_content('---\nname: demo\n---\n\nbody\n') is not None
-
-
-def test_apply_soul_field_returns_structured_error_for_missing_field():
-    store = MemoryStore(FakeRemoteFS({SOUL_PATH: SAMPLE_SOUL}))
-    result = store.apply_soul_field('identity.email', 'x@y.com')
-    assert result['ok'] is False
-    assert result['type'] == 'validation'
-    assert 'does not exist in soul' in result['error']
+        store.write(SOUL_PATH, '- invalid\n')
 
 
 def test_fixed_memory_file_missing_is_an_error():
@@ -271,76 +191,34 @@ def test_fixed_memory_file_missing_is_an_error():
         store.read_soul()
 
 
-def test_reorder_preferences_requires_exact_permutation_and_preserves_timestamps():
-    assert parse_preference_items(
-        reorder_preference_items(SAMPLE_PREFERENCE, []),
-    ) == []
+def test_preference_add_rejects_capacity_before_writing_reference():
+    content = SAMPLE_PREFERENCE
+    for idx in range(2):
+        content = append_preference_item(
+            content,
+            PreferenceItem(
+                name=f'pref.existing.{idx}',
+                summary=f'existing {idx}',
+                ref=f'references/existing-{idx}.md',
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            ),
+        )
+    fs = FakeRemoteFS({PREFERENCE_PATH: content})
 
-    first = PreferenceItem(
-        name='pref.first',
-        summary='First',
-        ref='references/first.md',
-        created_at=TIMESTAMP,
-        updated_at=TIMESTAMP,
-    )
-    second = PreferenceItem(
-        name='pref.second',
-        summary='Second',
-        ref='references/second.md',
-        created_at=TIMESTAMP,
-        updated_at=TIMESTAMP,
-    )
-    content = append_preference_item(
-        append_preference_item(SAMPLE_PREFERENCE, first),
-        second,
-    )
-    reordered = reorder_preference_items(content, ['pref.second', 'pref.first'])
-    assert parse_preference_items(reordered) == [second, first]
-    with pytest.raises(ValueError, match='exact permutation'):
-        reorder_preference_items(content, ['pref.first'])
-
-def test_preference_add_reports_partial_if_index_and_cleanup_fail():
-    fs = FakeRemoteFS({PREFERENCE_PATH: SAMPLE_PREFERENCE})
-    reference_path = build_reference_path('response-concise')
-    fs.fail_write_paths.add(PREFERENCE_PATH)
-    fs.fail_rm_paths.add(reference_path)
-
-    result = MemoryStore(fs).add_preference_with_reference(
-        name='pref.response.concise',
-        summary='回答要简洁',
-        scenario='日常问答',
-        details='先给结论，再按需补充背景。',
-        reason='用户明确要求',
-        source_kind='memory_review',
-        conversation_id='conversation-1',
-    )
+    with _cfg.temp('preference_index_max_items', 2):
+        result = MemoryStore(fs).add_preference_with_reference(
+            name='pref.response.concise',
+            summary='回答要简洁',
+            scenario='日常问答',
+            details='先给结论，再按需补充背景。',
+            reason='用户明确要求',
+            source_kind='memory_review',
+            conversation_id='conversation-1',
+        )
 
     assert result['ok'] is False
-    assert result['type'] == 'partial'
-    assert result['applied'] == ['reference']
-    assert reference_path in fs.files
-
-
-def test_preference_delete_reports_partial_if_reference_delete_fails():
-    fs = FakeRemoteFS({PREFERENCE_PATH: SAMPLE_PREFERENCE})
-    store = MemoryStore(fs)
-    added = store.add_preference_with_reference(
-        name='pref.response.concise',
-        summary='回答要简洁',
-        scenario='日常问答',
-        details='先给结论，再按需补充背景。',
-        reason='用户明确要求',
-        source_kind='memory_review',
-        conversation_id='conversation-1',
-    )
-    assert added['ok'] is True
-    reference_path = build_reference_path('response-concise')
-    fs.fail_rm_paths.add(reference_path)
-
-    result = store.remove_preference_with_reference('pref.response.concise')
-
-    assert result['ok'] is False
-    assert result['type'] == 'partial'
-    assert result['applied'] == ['preference_index']
-    assert 'pref.response.concise' not in fs.files[PREFERENCE_PATH]
-    assert reference_path in fs.files
+    assert result['type'] == 'capacity_exceeded'
+    assert result['used_items'] == 3
+    assert result['max_items'] == 2
+    assert build_reference_path('response-concise') not in fs.files

@@ -74,6 +74,11 @@ class EpisodeCreateResult(BaseModel):
     id: str
 
 
+class EpisodeDeleteResult(BaseModel):
+    status: Literal['deleted', 'not_found']
+    id: str
+
+
 class EpisodeSearchResult(BaseModel):
     episode: EpisodeRecord
     lexical_score: float

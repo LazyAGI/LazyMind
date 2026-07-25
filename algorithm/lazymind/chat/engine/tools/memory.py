@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Literal, Union
 
 import lazyllm
 import requests
+from lazyllm.tools import serial_tool
 from pydantic import ValidationError
 
 from lazymind.chat.engine.tools.infra import tool_error, tool_success
@@ -211,6 +212,7 @@ class MemoryTools:
     """Persistent memory APIs for Chat and Memory Review agents."""
 
     __public_apis__ = [
+        'read_memory',
         'read_memory_reference',
         'soul_editor',
         'profile_editor',
@@ -220,6 +222,82 @@ class MemoryTools:
 
     def __lazy_source__(self) -> bool:
         return False
+
+    def read_memory(
+        self,
+        target: Literal['soul', 'profile', 'preference'],
+    ) -> Dict[str, Any]:
+        """Read one complete current-memory YAML document.
+
+        Use this when the exact current Soul, Profile, or Preference index is
+        needed. Preference reference details remain available through
+        ``read_memory_reference``.
+
+        Args:
+            target: One of ``soul``, ``profile``, or ``preference``.
+        """
+        raw_target = str(target or '').strip().lower()
+        readers = {
+            'soul': ('read_soul', SOUL_PATH),
+            'profile': ('read_profile', PROFILE_PATH),
+            'preference': ('read_preference', PREFERENCE_PATH),
+        }
+        if raw_target not in readers:
+            return _record_state_memory_result(
+                tool_error(
+                    'read_memory',
+                    "target must be 'soul', 'profile', or 'preference'.",
+                    error_type='validation',
+                ),
+                mutation=False,
+            )
+
+        reader_name, path = readers[raw_target]
+        try:
+            content = getattr(MemoryStore(), reader_name)()
+        except FileNotFoundError:
+            return _record_state_memory_result(
+                tool_error(
+                    'read_memory',
+                    f'{raw_target} document not found.',
+                    error_type='not_found',
+                ),
+                mutation=False,
+            )
+        except (RuntimeError, ValueError) as exc:
+            return _record_state_memory_result(
+                tool_error(
+                    'read_memory',
+                    f'Failed to read {raw_target}: {exc}',
+                    error_type='store',
+                ),
+                mutation=False,
+            )
+        except Exception as exc:
+            return _record_state_memory_result(
+                tool_error(
+                    'read_memory',
+                    f'Failed to read {raw_target}: {exc}',
+                    error_type='store',
+                ),
+                mutation=False,
+            )
+
+        payload = tool_success('read_memory', {
+            'target': raw_target,
+            'path': path,
+            'content': content,
+            'content_length': len(content),
+        })
+        return _record_tool_result(
+            payload,
+            mutation=False,
+            ledger_result={
+                'target': raw_target,
+                'path': path,
+                'content_length': len(content),
+            },
+        )
 
     def read_memory_reference(self, refs: Union[str, List[str]]) -> Dict[str, Any]:
         """Read detailed user-preference reference files on demand.
@@ -305,28 +383,36 @@ class MemoryTools:
             },
         )
 
-    def soul_editor(self, field: str, value: str) -> Dict[str, Any]:
-        """Update one existing leaf value in the agent soul document.
+    @serial_tool(group='current_memory')
+    def soul_editor(self, changes: Dict[str, str]) -> Dict[str, Any]:
+        """Update existing leaf values in the agent soul document in one write.
 
         Use this only when the user explicitly asks to change the assistant's
         default identity, mission, interaction style, or epistemic behavior.
         Do not use it for user-specific facts; those belong in profile or
-        preference editors. Only fields already present in the loaded soul
-        document can be updated; keys cannot be added or renamed.
+        preference editors. Include every Soul change from the current turn in
+        one call. Only fields already present in the loaded Soul YAML document
+        can be updated; keys cannot be added or renamed.
 
         Args:
-            field: Dot-path of an existing soul leaf field.
-            value: New non-empty string value for the field.
+            changes: Non-empty mapping of existing Soul leaf dot-paths to new
+                non-empty string values.
         """
-        raw_field = str(field or '').strip()
-        raw_value = str(value if value is not None else '')
-        if not raw_field:
+        if not isinstance(changes, dict) or not changes:
             return _record_state_memory_result(
-                tool_error('soul_editor', 'field is required.', error_type='validation'),
+                tool_error(
+                    'soul_editor',
+                    'changes must be a non-empty mapping.',
+                    error_type='validation',
+                ),
                 mutation=False,
             )
 
-        result = MemoryStore().apply_soul_field(raw_field, raw_value)
+        raw_changes = {
+            str(field): str(value if value is not None else '')
+            for field, value in changes.items()
+        }
+        result = MemoryStore().apply_soul_fields(raw_changes)
         if not result.get('ok'):
             return _record_state_memory_result(
                 _memory_result_error('soul_editor', result),
@@ -337,42 +423,51 @@ class MemoryTools:
         return _record_state_memory_result(
             _memory_applied(
                 'soul_editor',
-                field=raw_field,
+                fields=list(result.get('fields') or raw_changes),
+                change_count=len(raw_changes),
                 path=SOUL_PATH,
-                value=raw_value.strip(),
                 content_length=len(result['content']),
             ),
             mutation=True,
         )
 
-    def profile_editor(self, field: str, value: str) -> Dict[str, Any]:
-        """Update one existing leaf value in the user profile document.
+    @serial_tool(group='current_memory')
+    def profile_editor(self, changes: Dict[str, str]) -> Dict[str, Any]:
+        """Update existing leaf values in the user profile document in one write.
 
         Use this only for a current, stable user fact that the user explicitly
         states or corrects, such as preferred name, locale, role, organization,
         or accessibility needs. Do not infer a fact, and do not use this for
         long-form behavioral preferences; those belong in
         ``preference_editor``.
-        Only fields already present in the loaded profile document can be
-        updated; keys cannot be added or renamed. Value type follows the
+        Include every Profile change from the current turn in one call. Only
+        fields already present in the loaded Profile YAML document can be
+        updated; keys cannot be added or renamed. Value type follows each
         currently stored leaf (string/null or string list).
 
-        For list fields, pass a JSON string array such as
-        ``["zh-CN","en-US"]`` or a comma-separated list.
+        For list fields, use a JSON string array value such as
+        ``{"locale.languages": "[\\"zh-CN\\",\\"en-US\\"]"}`` or a
+        comma-separated string value.
 
         Args:
-            field: Dot-path of an existing profile leaf field.
-            value: Serialized value for the field.
+            changes: Non-empty mapping of existing Profile leaf dot-paths to
+                serialized values.
         """
-        raw_field = str(field or '').strip()
-        raw_value = '' if value is None else str(value)
-        if not raw_field:
+        if not isinstance(changes, dict) or not changes:
             return _record_state_memory_result(
-                tool_error('profile_editor', 'field is required.', error_type='validation'),
+                tool_error(
+                    'profile_editor',
+                    'changes must be a non-empty mapping.',
+                    error_type='validation',
+                ),
                 mutation=False,
             )
 
-        result = MemoryStore().apply_profile_field(raw_field, raw_value)
+        raw_changes = {
+            str(field): '' if value is None else str(value)
+            for field, value in changes.items()
+        }
+        result = MemoryStore().apply_profile_fields(raw_changes)
         if not result.get('ok'):
             return _record_state_memory_result(
                 _memory_result_error('profile_editor', result),
@@ -383,9 +478,9 @@ class MemoryTools:
         return _record_state_memory_result(
             _memory_applied(
                 'profile_editor',
-                field=raw_field,
+                fields=list(result.get('fields') or raw_changes),
+                change_count=len(raw_changes),
                 path=PROFILE_PATH,
-                value=raw_value,
                 content_length=len(result['content']),
             ),
             mutation=True,
@@ -402,10 +497,15 @@ class MemoryTools:
     ) -> Dict[str, Any]:
         """Add or delete a user preference index entry.
 
-        Use this only for a service preference the user explicitly states that
-        is stable, long-term, and reusable across conversations. Each added
-        entry writes ``preference.yaml`` and a matching reference file under
-        ``memory/users/references/``. This tool cannot update or reorder preferences.
+        Use this conservatively and only for a service preference the user
+        explicitly states that is stable, long-term, and reusable across
+        conversations. Do not save fragmented remarks, one-off requests,
+        temporary task details, casual statements, or objective user facts.
+        Facts such as name, locale, timezone, role, organization, industry,
+        expertise, or accessibility needs belong in Profile when a matching
+        field exists. Each added entry writes ``preference.yaml`` and a matching
+        reference file under ``memory/users/references/``.
+        This tool cannot update or reorder preferences.
         Never delete and re-add an entry as an update because ordering is
         controlled only by the user.
 
@@ -730,6 +830,211 @@ class MemoryTools:
             mutation=create_result.status == 'created',
             ledger_result={
                 'status': create_result.status,
+                'retry_fingerprint': retry_fingerprint,
+            },
+        )
+
+
+class MemoryReviewEpisodeTools:
+    """Episode maintenance tools available only to the Memory Review agent."""
+
+    __public_apis__ = [
+        'episode_search',
+        'episode_delete',
+    ]
+
+    def __lazy_source__(self) -> bool:
+        return False
+
+    @staticmethod
+    def _review_context(tool_name: str) -> tuple[str, Dict[str, Any] | None]:
+        config = _agentic_config()
+        source_kind = str(
+            config.get('memory_source_kind')
+            or config.get('episode_source_kind')
+            or ''
+        ).strip()
+        if source_kind != 'memory_review':
+            return '', tool_error(
+                tool_name,
+                'This tool is available only during Memory Review.',
+                error_type='missing_context',
+            )
+        user_id = str(config.get('user_id') or '').strip()
+        if not user_id:
+            return '', tool_error(
+                tool_name,
+                'user_id is required in agentic_config.',
+                error_type='missing_context',
+            )
+        return user_id, None
+
+    def episode_search(self, query: str, limit: int = 20) -> Dict[str, Any]:
+        """Search the current user's Episodes for Preference deduplication.
+
+        Call this exactly once after each successful Preference addition, using
+        the Preference's executable summary plus distinctive scenario terms.
+        Search results are candidates only; compare their complete summaries
+        before deciding whether any Episode is a pure duplicate. This
+        maintenance search does not increment Episode hit counts.
+
+        Args:
+            query: Preference summary plus distinctive application-scenario terms.
+            limit: Maximum results to return, between 1 and 20.
+        """
+        user_id, context_error = self._review_context('episode_search')
+        if context_error is not None:
+            return _record_tool_result(
+                context_error,
+                mutation=False,
+            )
+        normalized_query = str(query or '').strip()
+        if not normalized_query:
+            return _record_tool_result(
+                tool_error(
+                    'episode_search',
+                    'query is required.',
+                    error_type='validation',
+                ),
+                mutation=False,
+            )
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
+            return _record_tool_result(
+                tool_error(
+                    'episode_search',
+                    'limit must be an integer between 1 and 20.',
+                    error_type='validation',
+                ),
+                mutation=False,
+            )
+
+        try:
+            results = get_episode_store().search(user_id, normalized_query)[:limit]
+        except Exception as raw_exc:
+            exc = (
+                raw_exc
+                if isinstance(raw_exc, EpisodeReadError)
+                else EpisodeReadError.from_exception(raw_exc)
+            )
+            root_exc = exc.__cause__ if isinstance(exc.__cause__, Exception) else raw_exc
+            _log_tool_exception('episode_search', root_exc)
+            return _record_tool_result(
+                {
+                    'success': False,
+                    'tool': 'episode_search',
+                    'error': {
+                        'code': exc.code,
+                        'message': (
+                            'Episode storage is temporarily unavailable.'
+                            if exc.retryable
+                            else 'Failed to search Episodes.'
+                        ),
+                        'detail': {'exception_type': type(root_exc).__name__},
+                    },
+                    'retryable': exc.retryable,
+                },
+                mutation=False,
+            )
+
+        items = [
+            {
+                'id': result.episode.id,
+                'summary': result.episode.summary,
+                'episode_type': result.episode.episode_type.value,
+                'occurred_at_ms': result.episode.occurred_at_ms,
+                'conversation_id': result.episode.source.conversation_id,
+                'score': result.score,
+            }
+            for result in results
+        ]
+        return _record_tool_result(
+            tool_success(
+                'episode_search',
+                {
+                    'items': items,
+                    'candidate_count': len(items),
+                },
+            ),
+            mutation=False,
+            ledger_result={'candidate_count': len(items)},
+        )
+
+    def episode_delete(self, episode_id: str) -> Dict[str, Any]:
+        """Delete one pure-duplicate Episode during Memory Review.
+
+        Use only after ``episode_search`` returned the Episode and comparison
+        proves that it merely restates a newly added Preference. Keep the
+        Episode whenever it contains independent time, reason, result, phase
+        transition, blocker, or other historical context.
+
+        Args:
+            episode_id: Exact Episode ID returned by ``episode_search``.
+        """
+        user_id, context_error = self._review_context('episode_delete')
+        if context_error is not None:
+            return _record_tool_result(
+                context_error,
+                mutation=False,
+            )
+        normalized_episode_id = str(episode_id or '').strip()
+        if not normalized_episode_id:
+            return _record_tool_result(
+                tool_error(
+                    'episode_delete',
+                    'episode_id is required.',
+                    error_type='validation',
+                ),
+                mutation=False,
+            )
+        retry_fingerprint = f'episode_delete:{normalized_episode_id}'
+
+        try:
+            result = get_episode_store().delete(user_id, normalized_episode_id)
+        except Exception as raw_exc:
+            exc = (
+                raw_exc
+                if isinstance(raw_exc, EpisodeReadError)
+                else EpisodeReadError.from_exception(raw_exc)
+            )
+            root_exc = exc.__cause__ if isinstance(exc.__cause__, Exception) else raw_exc
+            _log_tool_exception('episode_delete', root_exc)
+            return _record_tool_result(
+                {
+                    'success': False,
+                    'tool': 'episode_delete',
+                    'error': {
+                        'code': (
+                            'storage_unavailable'
+                            if exc.retryable
+                            else 'storage_failed'
+                        ),
+                        'message': (
+                            'Episode storage is temporarily unavailable.'
+                            if exc.retryable
+                            else 'Failed to delete Episode.'
+                        ),
+                        'detail': {'exception_type': type(root_exc).__name__},
+                    },
+                    'retryable': exc.retryable,
+                },
+                mutation=False,
+                ledger_result={
+                    'status': 'failed',
+                    'retry_fingerprint': retry_fingerprint,
+                },
+            )
+
+        payload = result.model_dump(mode='json')
+        return _record_tool_result(
+            {
+                'success': True,
+                'tool': 'episode_delete',
+                'result': payload,
+                'retryable': False,
+            },
+            mutation=result.status == 'deleted',
+            ledger_result={
+                **payload,
                 'retry_fingerprint': retry_fingerprint,
             },
         )

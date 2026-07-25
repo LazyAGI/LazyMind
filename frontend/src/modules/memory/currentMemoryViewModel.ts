@@ -1,5 +1,24 @@
 import type { PreferenceMemoryItem } from "./currentMemoryApi";
 
+export type PreferenceResidentUsageTone = "normal" | "warning" | "error";
+
+export const getPreferenceResidentUsageTone = (
+  usedItems: number,
+  maxItems: number,
+  overLimit: boolean,
+): PreferenceResidentUsageTone => {
+  const ratio = usedItems / maxItems;
+  if (overLimit || ratio >= 1) {
+    return "error";
+  }
+  return ratio >= 0.8 ? "warning" : "normal";
+};
+
+export const isPreferenceResident = (
+  index: number,
+  maxItems?: number,
+): boolean => maxItems === undefined || index < maxItems;
+
 export const movePreferenceItem = <T extends PreferenceMemoryItem>(
   items: T[],
   activeName: string,

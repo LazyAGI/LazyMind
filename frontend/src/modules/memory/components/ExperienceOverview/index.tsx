@@ -6,8 +6,10 @@ export default function ExperienceOverview() {
   return (
     <div className="memory-experience-overview">
       <CurrentMemoryIdentitySection />
-      <PreferenceMemorySection />
-      <EpisodeMemorySection />
+      <div className="memory-experience-detail-grid">
+        <PreferenceMemorySection />
+        <EpisodeMemorySection />
+      </div>
     </div>
   );
 }

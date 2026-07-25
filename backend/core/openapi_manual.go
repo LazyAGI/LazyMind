@@ -125,6 +125,19 @@ func manualSchemas() map[string]any {
 			prop("message", strSchema()),
 			prop("data", refSchema("CurrentMemoryProfileData")),
 		),
+		"CurrentMemoryAvatarData": objReq(
+			[]string{"kind", "content_type", "size", "updated_at"},
+			prop("kind", enumStringSchema("soul", "profile")),
+			prop("content_type", enumStringSchema("image/png", "image/jpeg", "image/webp")),
+			prop("size", int64Schema()),
+			prop("updated_at", int64Schema()),
+		),
+		"CurrentMemoryAvatarResponse": objReq(
+			[]string{"code", "message", "data"},
+			prop("code", intSchema()),
+			prop("message", strSchema()),
+			prop("data", refSchema("CurrentMemoryAvatarData")),
+		),
 		"CurrentMemoryProfileIdentityPatch": obj(
 			prop("preferred_name", nullableSchema(strSchema())),
 			prop("aliases", array(strSchema())),
@@ -157,6 +170,12 @@ func manualSchemas() map[string]any {
 			prop("created_at", dateTimeSchema()),
 			prop("updated_at", dateTimeSchema()),
 		),
+		"CurrentMemoryPreferenceResidentIndexUsage": objReq(
+			[]string{"used_items", "max_items", "over_limit"},
+			prop("used_items", int64Schema()),
+			prop("max_items", int64Schema()),
+			prop("over_limit", boolSchema()),
+		),
 		"CurrentMemoryReferenceSource": objReq(
 			[]string{"kind", "conversation_id"},
 			prop("kind", enumStringSchema("memory_review", "chat_explicit")),
@@ -174,9 +193,10 @@ func manualSchemas() map[string]any {
 			prop("reason", strSchema()),
 		),
 		"CurrentMemoryPreferenceListData": objReq(
-			[]string{"items", "total_size", "etag", "updated_at"},
+			[]string{"items", "total_size", "resident_index_usage", "etag", "updated_at"},
 			prop("items", array(refSchema("CurrentMemoryPreferenceItem"))),
 			prop("total_size", int64Schema()),
+			prop("resident_index_usage", refSchema("CurrentMemoryPreferenceResidentIndexUsage")),
 			prop("etag", strSchema()),
 			prop("updated_at", int64Schema()),
 		),
@@ -716,6 +736,8 @@ func manualPaths() map[string]any {
 				},
 			},
 		},
+		"/memory/soul/avatar":    currentMemoryAvatarPath("Soul"),
+		"/memory/profile/avatar": currentMemoryAvatarPath("Profile"),
 		"/memory/preferences": map[string]any{
 			"get": map[string]any{
 				"summary": "List current user's Preference memory",
@@ -969,6 +991,60 @@ func sseOp(summary string, body map[string]any, resp map[string]any) map[string]
 
 func response(status int, desc string, schema map[string]any) map[string]any {
 	return map[string]any{"description": desc, "content": map[string]any{"application/json": map[string]any{"schema": schema}}}
+}
+
+func currentMemoryAvatarPath(label string) map[string]any {
+	errorResponse := refSchema("CurrentMemoryErrorResponse")
+	return map[string]any{
+		"get": map[string]any{
+			"summary": "Get current user's " + label + " avatar",
+			"responses": map[string]any{
+				"200": avatarBinaryResponse(label + " avatar"),
+				"401": response(401, "Gateway user identity is missing", errorResponse),
+				"404": response(404, label+" avatar is not configured", errorResponse),
+				"500": response(500, "Stored avatar is invalid or unavailable", errorResponse),
+			},
+		},
+		"put": map[string]any{
+			"summary": "Upload current user's " + label + " avatar",
+			"requestBody": map[string]any{
+				"required": true,
+				"content": map[string]any{
+					"multipart/form-data": map[string]any{
+						"schema": objReq(
+							[]string{"file"},
+							prop("file", map[string]any{"type": "string", "format": "binary"}),
+						),
+					},
+				},
+			},
+			"responses": map[string]any{
+				"200": response(200, "Uploaded avatar metadata", refSchema("CurrentMemoryAvatarResponse")),
+				"400": response(400, "Avatar file is invalid or unsupported", errorResponse),
+				"401": response(401, "Gateway user identity is missing", errorResponse),
+				"413": response(413, "Avatar file exceeds 2 MiB", errorResponse),
+				"500": response(500, "Avatar upload failed", errorResponse),
+			},
+		},
+		"delete": map[string]any{
+			"summary": "Delete current user's " + label + " avatar",
+			"responses": map[string]any{
+				"204": map[string]any{"description": "Deleted or already absent"},
+				"401": response(401, "Gateway user identity is missing", errorResponse),
+				"500": response(500, "Avatar deletion failed", errorResponse),
+			},
+		},
+	}
+}
+
+func avatarBinaryResponse(description string) map[string]any {
+	content := map[string]any{}
+	for _, contentType := range []string{"image/png", "image/jpeg", "image/webp"} {
+		content[contentType] = map[string]any{
+			"schema": map[string]any{"type": "string", "format": "binary"},
+		}
+	}
+	return map[string]any{"description": description, "content": content}
 }
 
 func aclResponse(schema map[string]any) map[string]any {

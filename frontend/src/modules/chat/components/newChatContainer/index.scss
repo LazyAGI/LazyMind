@@ -69,6 +69,18 @@
         align-items: flex-end;
         gap: 4px;
 
+        .chat-user-bubble-row {
+          display: flex;
+          max-width: 100%;
+          align-items: flex-start;
+          justify-content: flex-end;
+          gap: 10px;
+        }
+
+        .chat-user-avatar {
+          margin-top: 2px;
+        }
+
 		.chat-collected-inputs {
 		  width: min(680px, 72vw);
 		  border: 1px solid #d9e5f5;
@@ -181,6 +193,7 @@
           display: flex;
           align-items: center;
           gap: 2px;
+          margin-right: 42px;
 
           .ant-btn {
             color: #8d9ab2;
@@ -337,7 +350,12 @@
           width: 100%;
           align-items: stretch;
 
+          .chat-user-bubble-row {
+            width: 100%;
+          }
+
           .chat-user {
+            flex: 1;
             background: transparent;
             border-radius: 0;
             padding: 0;
@@ -626,4 +644,10 @@ pre {
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+@media (max-width: 720px) {
+  .chat-user-avatar {
+    --identity-avatar-size: 28px !important;
+  }
 }

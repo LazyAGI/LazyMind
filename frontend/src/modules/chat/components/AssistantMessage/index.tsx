@@ -1,4 +1,4 @@
-import { Avatar, Button, Divider, Flex, message, Spin, Tooltip } from "antd";
+import { Button, Divider, Flex, message, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
 import { useEffect, useReducer, useRef } from "react";
 import type { MouseEvent } from "react";
@@ -27,11 +27,7 @@ import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
-
-const BotAvatarIcon = new URL(
-  "../../assets/images/bot_avatar.png",
-  import.meta.url,
-).href;
+import { IdentityAvatar } from "@/modules/identityAvatar";
 
 async function copyTextToClipboard(text: string) {
   const normalizedText = text.trim();
@@ -940,10 +936,10 @@ const AssistantMessage = (props: any) => {
         className="chat-assistant-msg-multi-answer-wrap"
         onMouseUp={handleMouseUp}
       >
-        <Avatar
+        <IdentityAvatar
           className="chat-avatar"
-          size={"small"}
-          icon={<img src={BotAvatarIcon} />}
+          kind="soul"
+          size={32}
         />
         <div className="chat-bot-box-multi">
           <div className="chat-bot">
@@ -1028,10 +1024,10 @@ const AssistantMessage = (props: any) => {
       className="chat-assistant-msg-single-answer-wrap"
       onMouseUp={handleMouseUp}
     >
-      <Avatar
+      <IdentityAvatar
         className="chat-avatar"
-        size={"small"}
-        icon={<img src={BotAvatarIcon} />}
+        kind="soul"
+        size={32}
       />
       <div className="chat-bot-box-single">
         <div className="chat-bot">

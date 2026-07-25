@@ -33,14 +33,26 @@ func (e *ETagConflictError) Unwrap() error {
 }
 
 type Module struct {
-	repository *Repository
-	clock      func() time.Time
+	repository              *Repository
+	clock                   func() time.Time
+	preferenceIndexMaxItems int
 }
 
 func NewModule(db *gorm.DB) *Module {
+	return NewModuleWithPreferenceIndexMaxItems(
+		db,
+		mustPreferenceIndexMaxItemsFromEnv(),
+	)
+}
+
+func NewModuleWithPreferenceIndexMaxItems(db *gorm.DB, maxItems int) *Module {
+	if maxItems <= 0 {
+		panic("preference index max items must be positive")
+	}
 	return &Module{
-		repository: NewRepository(db),
-		clock:      time.Now,
+		repository:              NewRepository(db),
+		clock:                   time.Now,
+		preferenceIndexMaxItems: maxItems,
 	}
 }
 
@@ -141,7 +153,7 @@ func (m *Module) ListPreferences(
 	if err != nil {
 		return CurrentMemoryPreferenceListData{}, err
 	}
-	return preferenceListData(document, entry), nil
+	return preferenceListData(document, entry, m.preferenceIndexMaxItems), nil
 }
 
 func (m *Module) GetPreference(
@@ -280,6 +292,7 @@ func (m *Module) ReorderPreferences(
 		result = preferenceListData(
 			PreferenceDocument{Preferences: reordered},
 			entry,
+			m.preferenceIndexMaxItems,
 		)
 		return nil
 	})
@@ -490,14 +503,22 @@ func (m *Module) readFile(
 func preferenceListData(
 	document PreferenceDocument,
 	entry orm.MemoryCurrentEntry,
+	maxItems int,
 ) CurrentMemoryPreferenceListData {
 	items := make([]CurrentMemoryPreferenceItem, 0, len(document.Preferences))
 	for _, item := range document.Preferences {
 		items = append(items, publicPreferenceItem(item))
 	}
+	totalSize := int64(len(items))
+	maxSize := int64(maxItems)
 	return CurrentMemoryPreferenceListData{
 		Items:     items,
-		TotalSize: int64(len(items)),
+		TotalSize: totalSize,
+		ResidentIndexUsage: CurrentMemoryPreferenceResidentIndexUsage{
+			UsedItems: totalSize,
+			MaxItems:  maxSize,
+			OverLimit: totalSize > maxSize,
+		},
 		ETag:      ContentETag(entry.Content),
 		UpdatedAt: formatUpdatedAt(entry.UpdatedAt),
 	}

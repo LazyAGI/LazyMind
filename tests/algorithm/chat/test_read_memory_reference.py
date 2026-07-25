@@ -9,26 +9,34 @@ from lazymind.chat.engine.tools.memory import (
     MAX_REFERENCE_READ_COUNT,
     MemoryTools,
 )
-from lazymind.common.memory.paths import REFERENCE_ROOT
+from lazymind.common.memory.paths import (
+    PREFERENCE_PATH,
+    PROFILE_PATH,
+    SOUL_PATH,
+)
 
 
-def test_read_memory_reference_returns_section_content():
-    ref = 'references/response.md#pref-response-technical-detail'
+@pytest.mark.parametrize(
+    ('target', 'reader_name', 'path'),
+    [
+        ('soul', 'read_soul', SOUL_PATH),
+        ('profile', 'read_profile', PROFILE_PATH),
+        ('preference', 'read_preference', PREFERENCE_PATH),
+    ],
+)
+def test_read_memory_returns_complete_target_document(target, reader_name, path):
     tools = MemoryTools()
     with patch('lazymind.chat.engine.tools.memory.MemoryStore') as store_cls:
-        store_cls.return_value.read_reference.return_value = (
-            '## Pref Response Technical Detail\n'
-            'Explain motivations and tradeoffs.\n'
-        )
-        payload = tools.read_memory_reference(ref)
+        getattr(store_cls.return_value, reader_name).return_value = 'dynamic:\n  value: current\n'
+        payload = tools.read_memory(target)
 
     assert payload['success'] is True
-    item = payload['result']['items'][0]
-    assert item['ref'] == ref
-    assert item['path'] == f'{REFERENCE_ROOT}/response.md'
-    assert item['anchor'] == 'pref-response-technical-detail'
-    assert 'Explain motivations and tradeoffs.' in item['content']
-    assert payload['result']['ref_count'] == 1
+    assert payload['result'] == {
+        'target': target,
+        'path': path,
+        'content': 'dynamic:\n  value: current\n',
+        'content_length': 26,
+    }
 
 
 def test_read_memory_reference_reads_multiple_refs():
@@ -50,35 +58,11 @@ def test_read_memory_reference_reads_multiple_refs():
     assert store_cls.return_value.read_reference.call_count == 2
 
 
-def test_read_memory_reference_returns_large_reference_in_full():
-    long_content = '\n'.join(f'line {idx}' for idx in range(500)) + '\n'
-    tools = MemoryTools()
-    with patch('lazymind.chat.engine.tools.memory.MemoryStore') as store_cls:
-        store_cls.return_value.read_reference.return_value = long_content
-        payload = tools.read_memory_reference('references/response.md')
-
-    item = payload['result']['items'][0]
-    assert item['content'] == long_content
-    assert item['content_length'] == len(long_content)
-
-
-def test_read_memory_reference_rejects_empty_refs():
-    payload = MemoryTools().read_memory_reference('   ')
-    assert payload['success'] is False
-    assert 'refs is required' in payload['error']['reason']
-
-
 def test_read_memory_reference_rejects_too_many_refs():
     refs = [f'references/topic-{idx}.md' for idx in range(MAX_REFERENCE_READ_COUNT + 1)]
     payload = MemoryTools().read_memory_reference(refs)
     assert payload['success'] is False
     assert 'At most' in payload['error']['reason']
-
-
-def test_read_memory_reference_rejects_invalid_ref():
-    payload = MemoryTools().read_memory_reference('memory/users/profile.yaml')
-    assert payload['success'] is False
-    assert 'Invalid ref' in payload['error']['reason']
 
 
 def test_read_memory_reference_handles_not_found():
@@ -89,42 +73,6 @@ def test_read_memory_reference_handles_not_found():
 
     assert payload['success'] is False
     assert 'Reference not found' in payload['error']['reason']
-
-
-def test_read_memory_reference_handles_store_error():
-    tools = MemoryTools()
-    with patch('lazymind.chat.engine.tools.memory.MemoryStore') as store_cls:
-        store_cls.return_value.read_reference.side_effect = RuntimeError('remote down')
-        payload = tools.read_memory_reference('references/response.md')
-
-    assert payload['success'] is False
-    assert 'Failed to read' in payload['error']['reason']
-
-
-@pytest.mark.parametrize('ref', [
-    'references/response.md',
-    'references/response.md#tone',
-])
-def test_read_memory_reference_accepts_single_ref_string(ref):
-    tools = MemoryTools()
-    with patch('lazymind.chat.engine.tools.memory.MemoryStore') as store_cls:
-        store_cls.return_value.read_reference.return_value = 'content'
-        payload = tools.read_memory_reference(ref)
-
-    assert payload['success'] is True
-    store_cls.return_value.read_reference.assert_called_once_with(ref)
-
-
-def test_read_memory_reference_deduplicates_repeated_refs():
-    ref = 'references/response.md'
-    tools = MemoryTools()
-    with patch('lazymind.chat.engine.tools.memory.MemoryStore') as store_cls:
-        store_cls.return_value.read_reference.return_value = 'content'
-        payload = tools.read_memory_reference([ref, ref])
-
-    assert payload['success'] is True
-    assert payload['result']['ref_count'] == 1
-    store_cls.return_value.read_reference.assert_called_once_with(ref)
 
 
 def test_read_memory_reference_records_read_result_without_mutation():

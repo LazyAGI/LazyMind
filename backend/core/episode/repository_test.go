@@ -149,6 +149,83 @@ func TestRepositoryReadsAreTenantScoped(t *testing.T) {
 	}
 }
 
+func TestRepositoryListRecentFiltersTypeAndUsesStableEventTimeOrdering(t *testing.T) {
+	repo := newSQLiteRepository(t)
+	repo.clockMS = func() int64 { return 5_000 }
+	var sequence int
+	repo.newID = func() string {
+		sequence++
+		return fmt.Sprintf("ep_%032d", sequence)
+	}
+	create := func(userID, episodeType, summary string, occurredAtMS int64) CreateResult {
+		return mustCreateEpisode(t, repo, CreateInput{
+			UserID:           userID,
+			ConversationID:   "conversation-" + userID,
+			SourceKind:       SourceKindMemoryReview,
+			EpisodeType:      episodeType,
+			Summary:          summary,
+			SearchText:       summary,
+			TokenizerVersion: "jieba-v1",
+			OccurredAtMS:     occurredAtMS,
+		})
+	}
+	create("user-1", EpisodeTypeProgress, "oldest", 100)
+	firstTie := create("user-1", EpisodeTypeProgress, "first tie", 300)
+	secondTie := create("user-1", EpisodeTypeProgress, "second tie", 300)
+	third := create("user-1", EpisodeTypeProgress, "third", 200)
+	create("user-1", EpisodeTypeResult, "newer result", 500)
+	create("user-2", EpisodeTypeProgress, "other user progress", 600)
+
+	items, err := repo.ListRecent(
+		context.Background(),
+		"user-1",
+		EpisodeTypeProgress,
+		3,
+	)
+	if err != nil {
+		t.Fatalf("list recent progress: %v", err)
+	}
+	wantIDs := []string{secondTie.ID, firstTie.ID, third.ID}
+	if len(items) != len(wantIDs) {
+		t.Fatalf("recent progress = %#v, want IDs %#v", items, wantIDs)
+	}
+	for index, wantID := range wantIDs {
+		if items[index].ID != wantID {
+			t.Fatalf("recent progress[%d] = %q, want %q", index, items[index].ID, wantID)
+		}
+		if items[index].UserID != "user-1" ||
+			items[index].EpisodeType != EpisodeTypeProgress {
+			t.Fatalf("recent progress[%d] escaped scope: %#v", index, items[index])
+		}
+	}
+}
+
+func TestRepositoryListRecentValidatesArguments(t *testing.T) {
+	repo := newSQLiteRepository(t)
+	for _, testCase := range []struct {
+		name        string
+		userID      string
+		episodeType string
+		limit       int
+	}{
+		{name: "missing user", episodeType: EpisodeTypeProgress, limit: 3},
+		{name: "invalid type", userID: "user-1", episodeType: "unknown", limit: 3},
+		{name: "limit too small", userID: "user-1", episodeType: EpisodeTypeProgress, limit: 0},
+		{name: "limit too large", userID: "user-1", episodeType: EpisodeTypeProgress, limit: 101},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if _, err := repo.ListRecent(
+				context.Background(),
+				testCase.userID,
+				testCase.episodeType,
+				testCase.limit,
+			); err == nil {
+				t.Fatal("invalid recent list arguments unexpectedly accepted")
+			}
+		})
+	}
+}
+
 func TestRepositoryDeleteIsTenantScoped(t *testing.T) {
 	repo := newSQLiteRepository(t)
 	ctx := context.Background()

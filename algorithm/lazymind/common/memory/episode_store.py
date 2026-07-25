@@ -14,8 +14,10 @@ from lazymind.config import config as _cfg
 from .models import (
     EpisodeCreateInput,
     EpisodeCreateResult,
+    EpisodeDeleteResult,
     EpisodeRecord,
     EpisodeSearchResult,
+    EpisodeType,
 )
 from .ranking import episode_query_coverage, informative_query_terms, tokenize_episode_text
 
@@ -171,6 +173,28 @@ class EpisodeStore:
             id=episode_id,
         )
 
+    def delete(self, user_id: str, episode_id: str) -> EpisodeDeleteResult:
+        normalized_user_id = str(user_id).strip()
+        normalized_episode_id = str(episode_id).strip()
+        if not normalized_user_id:
+            raise ValueError('user_id is required')
+        if not normalized_episode_id:
+            raise ValueError('episode_id is required')
+        try:
+            data = self._request(
+                'DELETE',
+                f'{_EPISODE_INTERNAL_PATH}/{normalized_episode_id}',
+                params={'user_id': normalized_user_id},
+            )
+            result = EpisodeDeleteResult.model_validate(data)
+            if result.id != normalized_episode_id:
+                raise ValueError('Episode Core returned an unexpected delete id')
+        except EpisodeReadError:
+            raise
+        except Exception as exc:
+            raise EpisodeReadError.from_exception(exc) from exc
+        return result
+
     def list_by_conversation(
         self,
         user_id: str,
@@ -206,6 +230,44 @@ class EpisodeStore:
             record.recorded_at_ms,
             record.id,
         ))
+        return records
+
+    def list_recent(
+        self,
+        user_id: str,
+        episode_type: EpisodeType,
+        limit: int,
+    ) -> list[EpisodeRecord]:
+        normalized_user_id = str(user_id).strip()
+        if not normalized_user_id:
+            raise ValueError('user_id is required')
+        normalized_type = EpisodeType(episode_type)
+        if isinstance(limit, bool) or limit < 1 or limit > 100:
+            raise ValueError('limit must be between 1 and 100')
+        try:
+            data = self._request(
+                'POST',
+                f'{_EPISODE_INTERNAL_PATH}:listRecent',
+                json={
+                    'user_id': normalized_user_id,
+                    'episode_type': normalized_type.value,
+                    'limit': limit,
+                },
+            )
+            items = data.get('items')
+            if not isinstance(items, list):
+                raise RuntimeError('Episode Core returned an invalid recent list result')
+            if len(items) > limit:
+                raise ValueError('Episode Core returned too many recent records')
+            records = [self._record(item) for item in items]
+            if any(record.user_id != normalized_user_id for record in records):
+                raise ValueError('recent Episode belongs to another user')
+            if any(record.episode_type != normalized_type for record in records):
+                raise ValueError('recent Episode has an unexpected type')
+        except EpisodeReadError:
+            raise
+        except Exception as exc:
+            raise EpisodeReadError.from_exception(exc) from exc
         return records
 
     def search(

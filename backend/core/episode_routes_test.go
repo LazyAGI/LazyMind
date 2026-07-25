@@ -18,7 +18,9 @@ func TestEpisodeMemoryRoutesAreRegistered(t *testing.T) {
 		"/memory/episodes/{episode_id}":              "GET",
 		"/memory/episodes/{episode_id}|delete":       "DELETE",
 		"/internal/memory/episodes":                  "POST",
+		"/internal/memory/episodes/{episode_id}":     "DELETE",
 		"/internal/memory/episodes:searchCandidates": "POST",
+		"/internal/memory/episodes:listRecent":       "POST",
 		"/internal/memory/episodes|conversation":     "GET",
 		"/internal/memory/episodes:recordHits":       "POST",
 	} {

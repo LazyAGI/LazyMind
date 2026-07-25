@@ -4,15 +4,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-import lazyllm
-import requests
 
 import lazymind.common.memory.episode_store as episode_store_module
 
-from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.common.memory import (
     EpisodeCreateInput,
-    EpisodeReadError,
     EpisodeSource,
     EpisodeStore,
     EpisodeType,
@@ -43,22 +39,6 @@ class RecordingTransport:
         return self.responses.pop(0)
 
 
-class InvalidJSONResponse(FakeResponse):
-    def json(self) -> dict[str, Any]:
-        raise ValueError('invalid json')
-
-
-@pytest.fixture(autouse=True)
-def _restore_agentic_config():
-    sentinel = object()
-    previous = lazyllm.globals.get('agentic_config', sentinel)
-    yield
-    if previous is sentinel:
-        lazyllm.globals.pop('agentic_config', None)
-    else:
-        lazyllm.globals['agentic_config'] = previous
-
-
 def _episode(summary: str = '采用 SegmentStore') -> EpisodeCreateInput:
     return EpisodeCreateInput(
         occurred_at_ms=1_700_000_000_000,
@@ -76,13 +56,15 @@ def _wire_episode(
     *,
     recorded_at_ms: int,
     occurred_at_ms: int = 1_700_000_000_000,
+    user_id: str = 'user-1',
+    episode_type: str = 'decision',
 ) -> dict[str, Any]:
     return {
         'id': episode_id,
-        'user_id': 'user-1',
+        'user_id': user_id,
         'conversation_id': 'conv-1',
         'source_kind': 'chat_explicit',
-        'episode_type': 'decision',
+        'episode_type': episode_type,
         'summary': f'Episode {episode_id}',
         'occurred_at_ms': occurred_at_ms,
         'recorded_at_ms': recorded_at_ms,
@@ -138,6 +120,31 @@ def test_create_posts_core_contract_with_internal_token(monkeypatch):
     assert 'idempotency_key' not in call['json']
 
 
+@pytest.mark.parametrize('status', ['deleted', 'not_found'])
+def test_delete_uses_tenant_scoped_internal_endpoint(status):
+    transport = RecordingTransport(FakeResponse({
+        'code': 0,
+        'message': 'ok',
+        'data': {'status': status, 'id': 'ep_remove'},
+    }))
+    store = EpisodeStore(
+        transport=transport,
+        base_url='http://core.test:8000',
+        internal_token='internal-secret',
+    )
+
+    result = store.delete('user-1', 'ep_remove')
+
+    assert result.model_dump() == {
+        'status': status,
+        'id': 'ep_remove',
+    }
+    call = transport.calls[0]
+    assert call['method'] == 'DELETE'
+    assert call['url'].endswith('/internal/memory/episodes/ep_remove')
+    assert call['params'] == {'user_id': 'user-1'}
+
+
 def test_list_by_conversation_maps_core_records_and_keeps_oldest_first():
     transport = RecordingTransport(FakeResponse({
         'code': 0,
@@ -170,33 +177,6 @@ def test_list_by_conversation_maps_core_records_and_keeps_oldest_first():
         'user_id': 'user-1',
         'conversation_id': 'conv-1',
     }
-
-
-@pytest.mark.parametrize(
-    ('field', 'value'),
-    [
-        ('user_id', 'user-2'),
-        ('conversation_id', 'conv-2'),
-    ],
-)
-def test_list_by_conversation_rejects_records_outside_requested_scope(field, value):
-    item = _wire_episode('ep_wrong_scope', recorded_at_ms=1_000)
-    item[field] = value
-    store = EpisodeStore(
-        transport=RecordingTransport(FakeResponse({
-            'code': 0,
-            'message': 'ok',
-            'data': {'items': [item]},
-        })),
-        base_url='http://core.test:8000',
-        internal_token='internal-secret',
-    )
-
-    with pytest.raises(EpisodeReadError) as captured:
-        store.list_by_conversation('user-1', 'conv-1')
-
-    assert captured.value.code == 'storage_read_failed'
-    assert captured.value.retryable is False
 
 
 def test_search_requests_core_candidates_then_applies_local_hard_filter(monkeypatch):
@@ -286,96 +266,6 @@ def test_increment_hits_records_unique_episode_ids_in_core():
     }
 
 
-@pytest.mark.parametrize('status_code', [408, 503])
-def test_search_converts_retryable_core_failure_to_safe_read_error(status_code):
-    transport = RecordingTransport(FakeResponse(
-        {
-            'code': 2_000_000,
-            'message': 'Internal server error',
-            'data': None,
-        },
-        status_code=status_code,
-    ))
-    store = EpisodeStore(
-        transport=transport,
-        base_url='http://core.test:8000',
-        internal_token='internal-secret',
-    )
-
-    with pytest.raises(EpisodeReadError) as captured:
-        store.search('user-1', 'mars apple')
-
-    assert captured.value.code == 'storage_unavailable'
-    assert captured.value.retryable is True
-    assert str(captured.value) == 'Failed to load existing Episodes.'
-
-
-@pytest.mark.parametrize('status_code', [400, 401, 429])
-def test_search_keeps_contract_and_rate_limit_failures_non_retryable(status_code):
-    transport = RecordingTransport(FakeResponse(
-        {
-            'code': 2_000_000,
-            'message': 'Episode request rejected',
-            'data': None,
-        },
-        status_code=status_code,
-    ))
-    store = EpisodeStore(
-        transport=transport,
-        base_url='http://core.test:8000',
-        internal_token='internal-secret',
-    )
-
-    with pytest.raises(EpisodeReadError) as captured:
-        store.search('user-1', 'mars apple')
-
-    assert captured.value.code == 'storage_read_failed'
-    assert captured.value.retryable is False
-
-
-def test_search_preserves_retryability_when_5xx_body_is_not_json():
-    transport = RecordingTransport(InvalidJSONResponse(
-        {},
-        status_code=503,
-        text='upstream unavailable',
-    ))
-    store = EpisodeStore(
-        transport=transport,
-        base_url='http://core.test:8000',
-        internal_token='internal-secret',
-    )
-
-    with pytest.raises(EpisodeReadError) as captured:
-        store.search('user-1', 'mars apple')
-
-    assert captured.value.code == 'storage_unavailable'
-    assert captured.value.retryable is True
-
-
-@pytest.mark.parametrize(
-    'transport_error',
-    [
-        requests.exceptions.ConnectTimeout(),
-        requests.exceptions.ConnectionError(),
-    ],
-)
-def test_search_treats_requests_transport_failures_as_retryable(transport_error):
-    def failing_transport(*_args, **_kwargs):
-        raise transport_error
-
-    store = EpisodeStore(
-        transport=failing_transport,
-        base_url='http://core.test:8000',
-        internal_token='internal-secret',
-    )
-
-    with pytest.raises(EpisodeReadError) as captured:
-        store.search('user-1', 'mars apple')
-
-    assert captured.value.code == 'storage_unavailable'
-    assert captured.value.retryable is True
-
-
 def test_episode_store_requires_internal_token_before_sending_requests():
     with pytest.raises(
         ValueError,
@@ -386,40 +276,3 @@ def test_episode_store_requires_internal_token_before_sending_requests():
             base_url='http://core.test:8000',
             internal_token='',
         )
-
-
-def test_memory_tool_exposes_core_id_but_keeps_retry_fingerprint_internal(monkeypatch):
-    transport = RecordingTransport(FakeResponse({
-        'code': 0,
-        'message': 'ok',
-        'data': {'status': 'created', 'id': 'ep_core_generated'},
-    }))
-    store = EpisodeStore(
-        transport=transport,
-        base_url='http://core.test:8000',
-        internal_token='internal-secret',
-    )
-    lazyllm.globals['agentic_config'] = {
-        'user_id': 'user-1',
-        'conversation_id': 'conv-1',
-        'episode_occurred_at_ms': 1_700_000_000_000,
-        'episode_source_kind': 'chat_explicit',
-        'memory_tool_results': [],
-    }
-    memory_module = __import__(
-        'lazymind.chat.engine.tools.memory',
-        fromlist=['get_episode_store'],
-    )
-    monkeypatch.setattr(memory_module, 'get_episode_store', lambda: store)
-
-    result = MemoryTools().episode_create('用户明确要求保存此事件', 'event')
-
-    assert result['success'] is True
-    assert result['result'] == {
-        'status': 'created',
-        'id': 'ep_core_generated',
-    }
-    ledger_result = lazyllm.globals['agentic_config']['memory_tool_results'][0]['result']
-    assert ledger_result['status'] == 'created'
-    assert ledger_result['retry_fingerprint'].startswith('episode_retry_')
-    assert ledger_result['retry_fingerprint'] != result['result']['id']

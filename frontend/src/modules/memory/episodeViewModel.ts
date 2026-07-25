@@ -8,6 +8,15 @@ export interface EpisodeDateGroup<T extends EpisodeListItem> {
   items: T[];
 }
 
+export const sortEpisodesByRecordedTime = <T extends EpisodeListItem>(
+  episodes: T[],
+): T[] =>
+  [...episodes].sort(
+    (left, right) =>
+      right.recordedAtMs - left.recordedAtMs ||
+      right.id.localeCompare(left.id),
+  );
+
 const createDateKeyFormatter = (timeZone?: string) =>
   new Intl.DateTimeFormat("en-US", {
     day: "2-digit",
@@ -36,22 +45,16 @@ export const groupEpisodesByRecordedDate = <
   const formatter = createDateKeyFormatter(timeZone);
   const groups = new Map<string, T[]>();
 
-  [...episodes]
-    .sort(
-      (left, right) =>
-        right.recordedAtMs - left.recordedAtMs ||
-        right.id.localeCompare(left.id),
-    )
-    .forEach((episode) => {
-      const dateKey = formatDateKey(episode.recordedAtMs, formatter);
-      const items = groups.get(dateKey);
+  sortEpisodesByRecordedTime(episodes).forEach((episode) => {
+    const dateKey = formatDateKey(episode.recordedAtMs, formatter);
+    const items = groups.get(dateKey);
 
-      if (items) {
-        items.push(episode);
-      } else {
-        groups.set(dateKey, [episode]);
-      }
-    });
+    if (items) {
+      items.push(episode);
+    } else {
+      groups.set(dateKey, [episode]);
+    }
+  });
 
   return Array.from(groups, ([dateKey, items]) => ({ dateKey, items }));
 };

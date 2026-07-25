@@ -22,6 +22,12 @@ func NewHandler(db *gorm.DB) *Handler {
 	return &Handler{module: NewModule(db)}
 }
 
+func NewHandlerWithPreferenceIndexMaxItems(db *gorm.DB, maxItems int) *Handler {
+	return &Handler{
+		module: NewModuleWithPreferenceIndexMaxItems(db, maxItems),
+	}
+}
+
 func GetSoul(w http.ResponseWriter, r *http.Request) {
 	NewHandler(store.DB()).GetSoul(w, r)
 }

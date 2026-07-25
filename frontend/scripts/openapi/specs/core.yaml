@@ -978,6 +978,44 @@ components:
                 - id
                 - word
             type: object
+        CurrentMemoryAvatarData:
+            properties:
+                content_type:
+                    enum:
+                        - image/png
+                        - image/jpeg
+                        - image/webp
+                    type: string
+                kind:
+                    enum:
+                        - soul
+                        - profile
+                    type: string
+                size:
+                    format: int64
+                    type: integer
+                updated_at:
+                    format: int64
+                    type: integer
+            required:
+                - kind
+                - content_type
+                - size
+                - updated_at
+            type: object
+        CurrentMemoryAvatarResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CurrentMemoryAvatarData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
         CurrentMemoryConflictData:
             properties:
                 current_etag:
@@ -1052,6 +1090,8 @@ components:
                     items:
                         $ref: '#/components/schemas/CurrentMemoryPreferenceItem'
                     type: array
+                resident_index_usage:
+                    $ref: '#/components/schemas/CurrentMemoryPreferenceResidentIndexUsage'
                 total_size:
                     format: int64
                     type: integer
@@ -1061,6 +1101,7 @@ components:
             required:
                 - items
                 - total_size
+                - resident_index_usage
                 - etag
                 - updated_at
             type: object
@@ -1088,6 +1129,21 @@ components:
             required:
                 - ordered_names
                 - expected_etag
+            type: object
+        CurrentMemoryPreferenceResidentIndexUsage:
+            properties:
+                max_items:
+                    format: int64
+                    type: integer
+                over_limit:
+                    type: boolean
+                used_items:
+                    format: int64
+                    type: integer
+            required:
+                - used_items
+                - max_items
+                - over_limit
             type: object
         CurrentMemoryProfileAccessibility:
             properties:
@@ -9771,6 +9827,105 @@ paths:
                                 $ref: '#/components/schemas/CurrentMemoryErrorResponse'
                     description: Stored Profile document is invalid or unavailable
             summary: Partially update current user's Profile memory
+    /api/core/memory/profile/avatar:
+        delete:
+            responses:
+                "204":
+                    description: Deleted or already absent
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar deletion failed
+            summary: Delete current user's Profile avatar
+        get:
+            responses:
+                "200":
+                    content:
+                        image/jpeg:
+                            schema:
+                                format: binary
+                                type: string
+                        image/png:
+                            schema:
+                                format: binary
+                                type: string
+                        image/webp:
+                            schema:
+                                format: binary
+                                type: string
+                    description: Profile avatar
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Profile avatar is not configured
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored avatar is invalid or unavailable
+            summary: Get current user's Profile avatar
+        put:
+            requestBody:
+                content:
+                    multipart/form-data:
+                        schema:
+                            properties:
+                                file:
+                                    format: binary
+                                    type: string
+                            required:
+                                - file
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryAvatarResponse'
+                    description: Uploaded avatar metadata
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar file is invalid or unsupported
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar file exceeds 2 MiB
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar upload failed
+            summary: Upload current user's Profile avatar
     /api/core/memory/soul:
         get:
             responses:
@@ -9845,6 +10000,105 @@ paths:
                                 $ref: '#/components/schemas/CurrentMemoryErrorResponse'
                     description: Stored Soul document is invalid or unavailable
             summary: Partially update current user's Soul memory
+    /api/core/memory/soul/avatar:
+        delete:
+            responses:
+                "204":
+                    description: Deleted or already absent
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar deletion failed
+            summary: Delete current user's Soul avatar
+        get:
+            responses:
+                "200":
+                    content:
+                        image/jpeg:
+                            schema:
+                                format: binary
+                                type: string
+                        image/png:
+                            schema:
+                                format: binary
+                                type: string
+                        image/webp:
+                            schema:
+                                format: binary
+                                type: string
+                    description: Soul avatar
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Soul avatar is not configured
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored avatar is invalid or unavailable
+            summary: Get current user's Soul avatar
+        put:
+            requestBody:
+                content:
+                    multipart/form-data:
+                        schema:
+                            properties:
+                                file:
+                                    format: binary
+                                    type: string
+                            required:
+                                - file
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryAvatarResponse'
+                    description: Uploaded avatar metadata
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar file is invalid or unsupported
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar file exceeds 2 MiB
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar upload failed
+            summary: Upload current user's Soul avatar
     /api/core/model_providers:
         get:
             description: Per-user model provider list. Missing catalog rows are synced from default_model_providers on each request. Query parameter category filters by provider category (default model when category and exclude_category are both omitted). Query parameter exclude_category excludes a category (e.g. exclude_category=model returns ocr and search providers). Query parameter keyword filters by provider name case-insensitively.

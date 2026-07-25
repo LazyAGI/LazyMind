@@ -9,6 +9,7 @@ import (
 	"path"
 	"strings"
 
+	"lazymind/core/common"
 	"lazymind/core/currentmemory"
 	skillhttperr "lazymind/core/skillv2/httperr"
 )
@@ -244,7 +245,19 @@ func memoryTruthy(value string) bool {
 }
 
 func replyMemoryError(w http.ResponseWriter, err error) {
+	var capacityError *currentmemory.PreferenceCapacityExceededError
 	switch {
+	case errors.As(err, &capacityError):
+		common.ReplyErrWithData(
+			w,
+			capacityError.Error(),
+			map[string]any{
+				"code":       "capacity_exceeded",
+				"used_items": capacityError.UsedItems,
+				"max_items":  capacityError.MaxItems,
+			},
+			http.StatusConflict,
+		)
 	case errors.Is(err, currentmemory.ErrInvalidDocument):
 		skillhttperr.ReplyWithCode(w, err.Error(), http.StatusBadRequest, skillhttperr.CodeInvalidRequest)
 	case errors.Is(err, errMemoryInvalidPath):

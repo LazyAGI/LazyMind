@@ -43,17 +43,40 @@ var (
 )
 
 type memoryCurrentService struct {
-	db         *gorm.DB
-	repository *currentmemory.Repository
-	clock      func() time.Time
+	db                      *gorm.DB
+	repository              *currentmemory.Repository
+	clock                   func() time.Time
+	preferenceIndexMaxItems int
 }
 
 func newMemoryCurrentService(db *gorm.DB) *memoryCurrentService {
-	return &memoryCurrentService{
-		db:         db,
-		repository: currentmemory.NewRepository(db),
-		clock:      time.Now,
+	return newMemoryCurrentServiceWithPreferenceIndexMaxItems(
+		db,
+		mustPreferenceIndexMaxItems(),
+	)
+}
+
+func newMemoryCurrentServiceWithPreferenceIndexMaxItems(
+	db *gorm.DB,
+	maxItems int,
+) *memoryCurrentService {
+	if maxItems <= 0 {
+		panic("preference index max items must be positive")
 	}
+	return &memoryCurrentService{
+		db:                      db,
+		repository:              currentmemory.NewRepository(db),
+		clock:                   time.Now,
+		preferenceIndexMaxItems: maxItems,
+	}
+}
+
+func mustPreferenceIndexMaxItems() int {
+	value, err := currentmemory.PreferenceIndexMaxItemsFromEnv()
+	if err != nil {
+		panic(err)
+	}
+	return value
 }
 
 func (s *memoryCurrentService) ensureInitialized(ctx context.Context, userID string) error {
@@ -188,6 +211,14 @@ func (s *memoryCurrentService) write(
 	if err := currentmemory.ValidateDocumentForPath(entryPath, content); err != nil {
 		return orm.MemoryCurrentEntry{}, err
 	}
+	nextPreferenceItems := -1
+	if entryPath == memoryPreferencePath {
+		document, parseErr := currentmemory.ParsePreferences(content)
+		if parseErr != nil {
+			return orm.MemoryCurrentEntry{}, parseErr
+		}
+		nextPreferenceItems = len(document.Preferences)
+	}
 	if err := s.ensureInitialized(ctx, userID); err != nil {
 		return orm.MemoryCurrentEntry{}, err
 	}
@@ -199,6 +230,23 @@ func (s *memoryCurrentService) write(
 		}
 		if existing, ok := byPath[entryPath]; ok && existing.EntryType == memoryEntryDir {
 			return fmt.Errorf("%w: cannot write file over directory", errMemoryConflict)
+		}
+		if nextPreferenceItems >= 0 {
+			currentPreferenceItems := 0
+			if existing, ok := byPath[entryPath]; ok {
+				document, parseErr := currentmemory.ParsePreferences(existing.Content)
+				if parseErr != nil {
+					return parseErr
+				}
+				currentPreferenceItems = len(document.Preferences)
+			}
+			if capacityErr := currentmemory.ValidatePreferenceCapacity(
+				currentPreferenceItems,
+				nextPreferenceItems,
+				s.preferenceIndexMaxItems,
+			); capacityErr != nil {
+				return capacityErr
+			}
 		}
 		now := s.clock().UTC()
 		if err := s.ensureParentDirectories(ctx, tx, userID, entryPath, byPath, now); err != nil {

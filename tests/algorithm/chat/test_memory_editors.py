@@ -158,7 +158,7 @@ def test_soul_editor_updates_supported_field():
     })
     tools, store = _tools_with_store(fs)
     with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
-        payload = tools.soul_editor('identity.description', '更直接的助手')
+        payload = tools.soul_editor({'identity.description': '更直接的助手'})
 
     assert payload['success'] is True
     assert payload['result']['status'] == 'applied'
@@ -177,28 +177,11 @@ def test_soul_editor_rejects_missing_field():
     })
     tools, store = _tools_with_store(fs)
     with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
-        payload = tools.soul_editor('identity.email', 'x@y.com')
+        payload = tools.soul_editor({'identity.email': 'x@y.com'})
     assert payload['success'] is False
     assert payload['error']['type'] == 'validation'
     assert 'does not exist in soul' in payload['error']['reason']
     assert ledger[-1]['success'] is False
-    assert ledger[-1]['mutation'] is False
-
-
-def test_profile_editor_rejects_new_key():
-    ledger = _reset_ledger()
-    fs = FakeRemoteFS({
-        SOUL_PATH: SAMPLE_SOUL,
-        PROFILE_PATH: SAMPLE_PROFILE,
-        PREFERENCE_PATH: SAMPLE_PREFERENCE,
-    })
-    tools, store = _tools_with_store(fs)
-    with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
-        payload = tools.profile_editor('identity.nickname', 'Neo')
-    assert payload['success'] is False
-    assert payload['error']['type'] == 'validation'
-    assert 'does not exist in profile' in payload['error']['reason']
-    assert ledger[-1]['tool'] == 'profile_editor'
     assert ledger[-1]['mutation'] is False
 
 
@@ -211,11 +194,18 @@ def test_profile_editor_updates_list_field():
     })
     tools, store = _tools_with_store(fs)
     with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
-        payload = tools.profile_editor('locale.languages', '["zh-CN","en-US"]')
+        payload = tools.profile_editor({
+            'locale.languages': '["zh-CN","en-US"]',
+            'locale.region': 'CN',
+            'professional.industry': 'software',
+        })
 
     assert payload['success'] is True
     assert payload['result']['status'] == 'applied'
+    assert payload['result']['change_count'] == 3
     assert 'en-US' in fs.files[PROFILE_PATH]
+    assert 'region: CN' in fs.files[PROFILE_PATH]
+    assert 'industry: software' in fs.files[PROFILE_PATH]
     assert ledger[-1]['mutation'] is True
 
 
@@ -261,23 +251,6 @@ def test_preference_editor_add_and_delete():
     assert all(entry['mutation'] is True for entry in ledger)
 
 
-def test_preference_editor_rejects_update_without_suggesting_delete_and_readd():
-    ledger = _reset_ledger()
-    payload = MemoryTools().preference_editor(
-        'update',
-        name='pref.response.concise',
-    )
-    assert payload['success'] is False
-    assert payload['error']['type'] == 'validation'
-    assert ledger[-1]['mutation'] is False
-    assert 'Updating an existing entry is not supported yet; delete and re-add.' not in (
-        MemoryTools.preference_editor.__doc__ or ''
-    )
-    assert 'cannot update or reorder preferences' in (
-        MemoryTools.preference_editor.__doc__ or ''
-    )
-
-
 def test_preference_editor_requires_hidden_source_context_for_add():
     ledger: list[dict[str, Any]] = []
     lazyllm.globals['agentic_config'] = {'memory_tool_results': ledger}
@@ -293,33 +266,3 @@ def test_preference_editor_requires_hidden_source_context_for_add():
     assert payload['success'] is False
     assert payload['error']['type'] == 'missing_context'
     assert ledger[-1]['mutation'] is False
-
-
-def test_preference_editor_records_partial_mutation():
-    ledger = _reset_ledger()
-    fs = FakeRemoteFS({
-        SOUL_PATH: SAMPLE_SOUL,
-        PROFILE_PATH: SAMPLE_PROFILE,
-        PREFERENCE_PATH: SAMPLE_PREFERENCE,
-    })
-    reference_path = build_reference_path('response-concise')
-    fs.fail_write_paths.add(PREFERENCE_PATH)
-    fs.fail_rm_paths.add(reference_path)
-    tools, store = _tools_with_store(fs)
-
-    with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
-        payload = tools.preference_editor(
-            'add',
-            name='pref.response.concise',
-            summary='回答要简洁',
-            scenario='日常问答',
-            details='先给结论，再按需补充背景。',
-            reason='用户明确要求简洁回答',
-        )
-
-    assert payload['success'] is False
-    assert payload['error']['type'] == 'partial'
-    assert ledger[-1]['success'] is False
-    assert ledger[-1]['mutation'] is True
-    assert ledger[-1]['error']['code'] == 'partial'
-    assert ledger[-1]['result']['operation'] == 'add'

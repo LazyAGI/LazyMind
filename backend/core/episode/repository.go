@@ -155,6 +155,40 @@ func (r *Repository) ListByConversation(
 	return items, nil
 }
 
+func (r *Repository) ListRecent(
+	ctx context.Context,
+	userID string,
+	episodeType string,
+	limit int,
+) ([]Episode, error) {
+	userID = strings.TrimSpace(userID)
+	episodeType = strings.TrimSpace(episodeType)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id is required")
+	}
+	if !validEpisodeType(episodeType) {
+		return nil, fmt.Errorf("episode_type is invalid")
+	}
+	if limit < 1 || limit > MaxRecentLimit {
+		return nil, fmt.Errorf("limit must be between 1 and %d", MaxRecentLimit)
+	}
+	var rows []orm.EpisodeMemory
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND episode_type = ?", userID, episodeType).
+		Order("occurred_at_ms DESC").
+		Order("recorded_at_ms DESC").
+		Order("id DESC").
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list recent episodes: %w", err)
+	}
+	items := make([]Episode, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, episodeFromRow(row))
+	}
+	return items, nil
+}
+
 func (r *Repository) List(
 	ctx context.Context,
 	userID string,

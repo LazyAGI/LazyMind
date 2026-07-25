@@ -51,6 +51,103 @@ func TestInternalCreateRequiresConfiguredMatchingToken(t *testing.T) {
 	}
 }
 
+func TestInternalDeleteIsTenantScopedAndIdempotent(t *testing.T) {
+	repo := newSQLiteRepository(t)
+	store.Init(repo.db, repo.db, nil)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal-secret")
+	created := mustCreateEpisode(t, repo, CreateInput{
+		UserID:           "user-1",
+		ConversationID:   "conversation-1",
+		SourceKind:       SourceKindMemoryReview,
+		EpisodeType:      EpisodeTypeDecision,
+		Summary:          "Use training content as the fitness record",
+		SearchText:       "training content fitness record",
+		TokenizerVersion: "jieba-v1",
+		OccurredAtMS:     1_721_800_000_000,
+	})
+
+	performDelete := func(userID, token string) (int, DeleteResult) {
+		request := httptest.NewRequest(
+			http.MethodDelete,
+			"/internal/memory/episodes/"+created.ID+"?user_id="+userID,
+			nil,
+		)
+		request.Header.Set("X-LazyMind-Internal-Token", token)
+		request = mux.SetURLVars(request, map[string]string{"episode_id": created.ID})
+		recorder := httptest.NewRecorder()
+		InternalDelete(recorder, request)
+		var response struct {
+			Data DeleteResult `json:"data"`
+		}
+		if recorder.Code == http.StatusOK {
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode delete response: %v", err)
+			}
+		}
+		return recorder.Code, response.Data
+	}
+
+	if status, _ := performDelete("user-1", "wrong-secret"); status != http.StatusUnauthorized {
+		t.Fatalf("wrong-token delete status = %d, want %d", status, http.StatusUnauthorized)
+	}
+	if status, result := performDelete("user-2", "internal-secret"); status != http.StatusOK ||
+		result.Status != DeleteStatusNotFound ||
+		result.ID != created.ID {
+		t.Fatalf("cross-tenant delete = status %d result %#v", status, result)
+	}
+	if _, err := repo.Get(t.Context(), "user-1", created.ID); err != nil {
+		t.Fatalf("cross-tenant delete removed owner episode: %v", err)
+	}
+	if status, result := performDelete("user-1", "internal-secret"); status != http.StatusOK ||
+		result.Status != DeleteStatusDeleted ||
+		result.ID != created.ID {
+		t.Fatalf("owner delete = status %d result %#v", status, result)
+	}
+	if status, result := performDelete("user-1", "internal-secret"); status != http.StatusOK ||
+		result.Status != DeleteStatusNotFound ||
+		result.ID != created.ID {
+		t.Fatalf("idempotent delete = status %d result %#v", status, result)
+	}
+}
+
+func TestInternalDeleteValidatesRequiredContext(t *testing.T) {
+	repo := newSQLiteRepository(t)
+	store.Init(repo.db, repo.db, nil)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal-secret")
+
+	for _, testCase := range []struct {
+		name      string
+		userID    string
+		episodeID string
+	}{
+		{name: "missing user", episodeID: "ep_1"},
+		{name: "missing episode", userID: "user-1"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			request := httptest.NewRequest(
+				http.MethodDelete,
+				"/internal/memory/episodes/"+testCase.episodeID+"?user_id="+testCase.userID,
+				nil,
+			)
+			request.Header.Set("X-LazyMind-Internal-Token", "internal-secret")
+			request = mux.SetURLVars(
+				request,
+				map[string]string{"episode_id": testCase.episodeID},
+			)
+			recorder := httptest.NewRecorder()
+			InternalDelete(recorder, request)
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf(
+					"status = %d, want %d; body=%s",
+					recorder.Code,
+					http.StatusBadRequest,
+					recorder.Body.String(),
+				)
+			}
+		})
+	}
+}
+
 func TestValidateInternalTokenConfigFailsClosed(t *testing.T) {
 	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "")
 	if err := ValidateInternalTokenConfig(); err == nil {
@@ -176,6 +273,111 @@ func TestInternalListByConversationWireContract(t *testing.T) {
 		response.Data.Items[0].ID != first.ID ||
 		response.Data.Items[1].ID != second.ID {
 		t.Fatalf("conversation items = %#v", response.Data.Items)
+	}
+}
+
+func TestInternalListRecentWireContract(t *testing.T) {
+	repo := newSQLiteRepository(t)
+	store.Init(repo.db, repo.db, nil)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal-secret")
+	older := mustCreateEpisode(t, repo, CreateInput{
+		UserID:           "user-1",
+		ConversationID:   "conversation-1",
+		SourceKind:       SourceKindMemoryReview,
+		EpisodeType:      EpisodeTypeProgress,
+		Summary:          "Older progress",
+		SearchText:       "older progress",
+		TokenizerVersion: "jieba-v1",
+		OccurredAtMS:     1_000,
+	})
+	newer := mustCreateEpisode(t, repo, CreateInput{
+		UserID:           "user-1",
+		ConversationID:   "conversation-2",
+		SourceKind:       SourceKindChatExplicit,
+		EpisodeType:      EpisodeTypeProgress,
+		Summary:          "Newer progress",
+		SearchText:       "newer progress",
+		TokenizerVersion: "jieba-v1",
+		OccurredAtMS:     2_000,
+	})
+	mustCreateEpisode(t, repo, CreateInput{
+		UserID:           "user-1",
+		ConversationID:   "conversation-3",
+		SourceKind:       SourceKindMemoryReview,
+		EpisodeType:      EpisodeTypeResult,
+		Summary:          "Newest result",
+		SearchText:       "newest result",
+		TokenizerVersion: "jieba-v1",
+		OccurredAtMS:     3_000,
+	})
+
+	recorder := performJSONHandler(
+		t,
+		InternalListRecent,
+		http.MethodPost,
+		"/internal/memory/episodes:listRecent",
+		map[string]any{
+			"user_id":      "user-1",
+			"episode_type": EpisodeTypeProgress,
+			"limit":        2,
+		},
+		"internal-secret",
+	)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Code int `json:"code"`
+		Data struct {
+			Items []Episode `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode recent list response: %v", err)
+	}
+	if response.Code != 0 ||
+		len(response.Data.Items) != 2 ||
+		response.Data.Items[0].ID != newer.ID ||
+		response.Data.Items[1].ID != older.ID {
+		t.Fatalf("unexpected recent list response: %#v", response)
+	}
+}
+
+func TestInternalListRecentValidatesTokenAndRequest(t *testing.T) {
+	repo := newSQLiteRepository(t)
+	store.Init(repo.db, repo.db, nil)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal-secret")
+	validBody := map[string]any{
+		"user_id":      "user-1",
+		"episode_type": EpisodeTypeProgress,
+		"limit":        3,
+	}
+	if recorder := performJSONHandler(
+		t,
+		InternalListRecent,
+		http.MethodPost,
+		"/internal/memory/episodes:listRecent",
+		validBody,
+		"wrong-secret",
+	); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("token validation status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+	for _, body := range []map[string]any{
+		{"episode_type": EpisodeTypeProgress, "limit": 3},
+		{"user_id": "user-1", "episode_type": "unknown", "limit": 3},
+		{"user_id": "user-1", "episode_type": EpisodeTypeProgress, "limit": 101},
+	} {
+		recorder := performJSONHandler(
+			t,
+			InternalListRecent,
+			http.MethodPost,
+			"/internal/memory/episodes:listRecent",
+			body,
+			"internal-secret",
+		)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("body %#v status = %d, want %d", body, recorder.Code, http.StatusBadRequest)
+		}
 	}
 }
 

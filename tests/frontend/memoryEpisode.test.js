@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   groupEpisodesByRecordedDate,
   mergeEpisodePages,
+  sortEpisodesByRecordedTime,
 } from "../../frontend/src/modules/memory/episodeViewModel.ts";
 
 const episodeClientMocks = vi.hoisted(() => ({
@@ -34,6 +35,27 @@ beforeEach(() => {
 });
 
 describe("Episode creation-time list", () => {
+  it("sorts a page by creation time without mutating the API result", () => {
+    const source = [
+      { id: "older", recordedAtMs: 10 },
+      { id: "newer", recordedAtMs: 30 },
+      { id: "middle", recordedAtMs: 20 },
+    ];
+
+    const sorted = sortEpisodesByRecordedTime(source);
+
+    expect(sorted.map((item) => item.id)).toEqual([
+      "newer",
+      "middle",
+      "older",
+    ]);
+    expect(source.map((item) => item.id)).toEqual([
+      "older",
+      "newer",
+      "middle",
+    ]);
+  });
+
   it("sorts episodes by creation time descending and groups them by local date", () => {
     const groups = groupEpisodesByRecordedDate(
       [

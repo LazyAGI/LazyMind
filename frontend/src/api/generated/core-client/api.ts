@@ -742,6 +742,32 @@ export interface CreatedAlias {
     'id': string;
     'word': string;
 }
+export interface CurrentMemoryAvatarData {
+    'content_type': CurrentMemoryAvatarDataContentTypeEnum;
+    'kind': CurrentMemoryAvatarDataKindEnum;
+    'size': number;
+    'updated_at': number;
+}
+
+export const CurrentMemoryAvatarDataContentTypeEnum = {
+    ImagePng: 'image/png',
+    ImageJpeg: 'image/jpeg',
+    ImageWebp: 'image/webp'
+} as const;
+
+export type CurrentMemoryAvatarDataContentTypeEnum = typeof CurrentMemoryAvatarDataContentTypeEnum[keyof typeof CurrentMemoryAvatarDataContentTypeEnum];
+export const CurrentMemoryAvatarDataKindEnum = {
+    Soul: 'soul',
+    Profile: 'profile'
+} as const;
+
+export type CurrentMemoryAvatarDataKindEnum = typeof CurrentMemoryAvatarDataKindEnum[keyof typeof CurrentMemoryAvatarDataKindEnum];
+
+export interface CurrentMemoryAvatarResponse {
+    'code': number;
+    'data': CurrentMemoryAvatarData;
+    'message': string;
+}
 export interface CurrentMemoryConflictData {
     'current_etag'?: string;
 }
@@ -777,6 +803,7 @@ export interface CurrentMemoryPreferenceItem {
 export interface CurrentMemoryPreferenceListData {
     'etag': string;
     'items': Array<CurrentMemoryPreferenceItem>;
+    'resident_index_usage': CurrentMemoryPreferenceResidentIndexUsage;
     'total_size': number;
     'updated_at': number;
 }
@@ -788,6 +815,11 @@ export interface CurrentMemoryPreferenceListResponse {
 export interface CurrentMemoryPreferenceOrderRequest {
     'expected_etag': string;
     'ordered_names': Array<string>;
+}
+export interface CurrentMemoryPreferenceResidentIndexUsage {
+    'max_items': number;
+    'over_limit': boolean;
+    'used_items': number;
 }
 export interface CurrentMemoryProfileAccessibility {
     'communication_needs': Array<string>;
@@ -9457,6 +9489,106 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Delete current user\'s Profile avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileAvatarDelete: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/profile/avatar`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get current user\'s Profile avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileAvatarGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/profile/avatar`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'image/jpeg,image/png,image/webp,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Upload current user\'s Profile avatar
+         * @param {File} file
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileAvatarPut: async (file: File, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'file' is not null or undefined
+            assertParamExists('apiCoreMemoryProfileAvatarPut', 'file', file)
+            const localVarPath = `/api/core/memory/profile/avatar`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            const localVarFormParams = new ((configuration && configuration.formDataCtor) || FormData)();
+
+
+            if (file !== undefined) {
+                localVarFormParams.append('file', file as any);
+            }
+            localVarHeaderParameter['Content-Type'] = 'multipart/form-data';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = localVarFormParams;
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Get current user\'s Profile memory
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -9514,6 +9646,106 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(currentMemoryProfilePatchRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Delete current user\'s Soul avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulAvatarDelete: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/soul/avatar`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get current user\'s Soul avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulAvatarGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/soul/avatar`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'image/jpeg,image/png,image/webp,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Upload current user\'s Soul avatar
+         * @param {File} file
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulAvatarPut: async (file: File, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'file' is not null or undefined
+            assertParamExists('apiCoreMemorySoulAvatarPut', 'file', file)
+            const localVarPath = `/api/core/memory/soul/avatar`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            const localVarFormParams = new ((configuration && configuration.formDataCtor) || FormData)();
+
+
+            if (file !== undefined) {
+                localVarFormParams.append('file', file as any);
+            }
+            localVarHeaderParameter['Content-Type'] = 'multipart/form-data';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = localVarFormParams;
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -12875,6 +13107,43 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Delete current user\'s Profile avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryProfileAvatarDelete(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfileAvatarDelete(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfileAvatarDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get current user\'s Profile avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryProfileAvatarGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfileAvatarGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfileAvatarGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Upload current user\'s Profile avatar
+         * @param {File} file
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryProfileAvatarPut(file: File, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryAvatarResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfileAvatarPut(file, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfileAvatarPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Get current user\'s Profile memory
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -12896,6 +13165,43 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfilePatch(currentMemoryProfilePatchRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfilePatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Delete current user\'s Soul avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemorySoulAvatarDelete(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulAvatarDelete(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulAvatarDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get current user\'s Soul avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemorySoulAvatarGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulAvatarGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulAvatarGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Upload current user\'s Soul avatar
+         * @param {File} file
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemorySoulAvatarPut(file: File, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryAvatarResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulAvatarPut(file, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulAvatarPut']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -14586,6 +14892,34 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Delete current user\'s Profile avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileAvatarDelete(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreMemoryProfileAvatarDelete(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get current user\'s Profile avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileAvatarGet(options?: RawAxiosRequestConfig): AxiosPromise<File> {
+            return localVarFp.apiCoreMemoryProfileAvatarGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Upload current user\'s Profile avatar
+         * @param {DefaultApiApiCoreMemoryProfileAvatarPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileAvatarPut(requestParameters: DefaultApiApiCoreMemoryProfileAvatarPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryAvatarResponse> {
+            return localVarFp.apiCoreMemoryProfileAvatarPut(requestParameters.file, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Get current user\'s Profile memory
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -14602,6 +14936,34 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreMemoryProfilePatch(requestParameters: DefaultApiApiCoreMemoryProfilePatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryProfileResponse> {
             return localVarFp.apiCoreMemoryProfilePatch(requestParameters.currentMemoryProfilePatchRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Delete current user\'s Soul avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulAvatarDelete(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreMemorySoulAvatarDelete(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get current user\'s Soul avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulAvatarGet(options?: RawAxiosRequestConfig): AxiosPromise<File> {
+            return localVarFp.apiCoreMemorySoulAvatarGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Upload current user\'s Soul avatar
+         * @param {DefaultApiApiCoreMemorySoulAvatarPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulAvatarPut(requestParameters: DefaultApiApiCoreMemorySoulAvatarPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryAvatarResponse> {
+            return localVarFp.apiCoreMemorySoulAvatarPut(requestParameters.file, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -15774,10 +16136,24 @@ export interface DefaultApiApiCoreMemoryPreferencesOrderPutRequest {
 }
 
 /**
+ * Request parameters for apiCoreMemoryProfileAvatarPut operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreMemoryProfileAvatarPutRequest {
+    readonly file: File
+}
+
+/**
  * Request parameters for apiCoreMemoryProfilePatch operation in DefaultApi.
  */
 export interface DefaultApiApiCoreMemoryProfilePatchRequest {
     readonly currentMemoryProfilePatchRequest: CurrentMemoryProfilePatchRequest
+}
+
+/**
+ * Request parameters for apiCoreMemorySoulAvatarPut operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreMemorySoulAvatarPutRequest {
+    readonly file: File
 }
 
 /**
@@ -17055,6 +17431,37 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Delete current user\'s Profile avatar
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryProfileAvatarDelete(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryProfileAvatarDelete(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get current user\'s Profile avatar
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryProfileAvatarGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryProfileAvatarGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Upload current user\'s Profile avatar
+     * @param {DefaultApiApiCoreMemoryProfileAvatarPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryProfileAvatarPut(requestParameters: DefaultApiApiCoreMemoryProfileAvatarPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryProfileAvatarPut(requestParameters.file, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Get current user\'s Profile memory
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -17072,6 +17479,37 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreMemoryProfilePatch(requestParameters: DefaultApiApiCoreMemoryProfilePatchRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreMemoryProfilePatch(requestParameters.currentMemoryProfilePatchRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Delete current user\'s Soul avatar
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemorySoulAvatarDelete(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemorySoulAvatarDelete(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get current user\'s Soul avatar
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemorySoulAvatarGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemorySoulAvatarGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Upload current user\'s Soul avatar
+     * @param {DefaultApiApiCoreMemorySoulAvatarPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemorySoulAvatarPut(requestParameters: DefaultApiApiCoreMemorySoulAvatarPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemorySoulAvatarPut(requestParameters.file, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

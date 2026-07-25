@@ -28,11 +28,18 @@ export interface PreferenceMemoryItem {
   updatedAt: string;
 }
 
+export interface PreferenceResidentIndexUsage {
+  usedItems: number;
+  maxItems: number;
+  overLimit: boolean;
+}
+
 export interface PreferenceMemoryList {
   items: PreferenceMemoryItem[];
   etag: string;
   totalSize: number;
   updatedAt: number;
+  residentIndexUsage?: PreferenceResidentIndexUsage;
 }
 
 export interface PreferenceMemoryReference {
@@ -72,12 +79,24 @@ const mapPreferenceItem = (
 
 const mapPreferenceList = (
   data: CurrentMemoryPreferenceListData,
-): PreferenceMemoryList => ({
-  items: data.items.map(mapPreferenceItem),
-  etag: data.etag,
-  totalSize: data.total_size,
-  updatedAt: data.updated_at,
-});
+): PreferenceMemoryList => {
+  const residentIndexUsage = data.resident_index_usage;
+  return {
+    items: data.items.map(mapPreferenceItem),
+    etag: data.etag,
+    totalSize: data.total_size,
+    updatedAt: data.updated_at,
+    ...(residentIndexUsage
+      ? {
+          residentIndexUsage: {
+            usedItems: residentIndexUsage.used_items,
+            maxItems: residentIndexUsage.max_items,
+            overLimit: residentIndexUsage.over_limit,
+          },
+        }
+      : {}),
+  };
+};
 
 const mapReference = (
   reference: CurrentMemoryReference,

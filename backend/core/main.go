@@ -19,6 +19,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/currentmemory"
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/log"
@@ -132,7 +133,11 @@ func exportRegisteredOpenAPIArtifacts() error {
 }
 
 func validateStartupConfig() error {
-	return episode.ValidateInternalTokenConfig()
+	if err := episode.ValidateInternalTokenConfig(); err != nil {
+		return err
+	}
+	_, err := currentmemory.PreferenceIndexMaxItemsFromEnv()
+	return err
 }
 
 func main() {

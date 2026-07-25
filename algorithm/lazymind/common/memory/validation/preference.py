@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 import yaml
 
-from ..paths import REFERENCE_ROOT, normalize_memory_path, split_reference_ref
+from ..paths import REFERENCE_ROOT, split_reference_ref
 from .common import parse_yaml_mapping, reject_unknown_keys, validate_iso_datetime
 
 _SUMMARY_MAX_CHARS = 100
@@ -160,37 +160,6 @@ def remove_preference_item(content: str, name: str) -> str:
     if len(kept) == len(items):
         raise ValueError(f'preference item {normalized_name!r} not found.')
     return render_preference_index(content, kept)
-
-
-def reorder_preference_items(content: str, ordered_names: list[str]) -> str:
-    items = parse_preference_items(content)
-    names = [str(name or '').strip() for name in ordered_names]
-    if any(not name for name in names):
-        raise ValueError('ordered_names must contain every preference name.')
-    if len(names) != len(set(names)):
-        raise ValueError('ordered_names must not contain duplicates.')
-    current_names = {item.name for item in items}
-    requested_names = set(names)
-    if requested_names != current_names or len(names) != len(items):
-        missing = sorted(current_names - requested_names)
-        unknown = sorted(requested_names - current_names)
-        details: list[str] = []
-        if missing:
-            details.append(f"missing: {', '.join(missing)}")
-        if unknown:
-            details.append(f"unknown: {', '.join(unknown)}")
-        raise ValueError(
-            'ordered_names must be an exact permutation of existing preferences'
-            + (f" ({'; '.join(details)})" if details else '')
-            + '.'
-        )
-    by_name = {item.name: item for item in items}
-    return render_preference_index(content, [by_name[name] for name in names])
-
-
-def preference_ref_path(ref: str) -> str:
-    path, _ = split_reference_ref(ref)
-    return normalize_memory_path(path)
 
 
 def _parse_datetime(value: str) -> datetime:

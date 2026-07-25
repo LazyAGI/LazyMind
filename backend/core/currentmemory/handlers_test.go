@@ -195,7 +195,7 @@ func TestProfilePatchDistinguishesOmittedNullAndEmptyList(t *testing.T) {
 
 func TestPreferencePublicHandlersListDetailReorderAndDelete(t *testing.T) {
 	db := newCurrentMemoryTestDB(t)
-	handler := NewHandler(db.DB)
+	handler := NewHandlerWithPreferenceIndexMaxItems(db.DB, 2)
 	repository := NewRepository(db.DB)
 	if err := repository.EnsureInitialized(t.Context(), "user-1"); err != nil {
 		t.Fatalf("initialize memory: %v", err)
@@ -264,6 +264,30 @@ func TestPreferencePublicHandlersListDetailReorderAndDelete(t *testing.T) {
 		listed.Data.ETag == "" ||
 		listed.Data.UpdatedAt == 0 {
 		t.Fatalf("unexpected list response: %#v", listed.Data)
+	}
+	if listed.Data.ResidentIndexUsage.UsedItems != 2 ||
+		listed.Data.ResidentIndexUsage.MaxItems != 2 ||
+		listed.Data.ResidentIndexUsage.OverLimit {
+		t.Fatalf(
+			"unexpected resident index usage: %#v",
+			listed.Data.ResidentIndexUsage,
+		)
+	}
+	overLimitHandler := NewHandlerWithPreferenceIndexMaxItems(db.DB, 1)
+	overLimitRecorder := httptest.NewRecorder()
+	overLimitHandler.ListPreferences(overLimitRecorder, listRequest)
+	var overLimitListed struct {
+		Data CurrentMemoryPreferenceListData `json:"data"`
+	}
+	if err := json.Unmarshal(overLimitRecorder.Body.Bytes(), &overLimitListed); err != nil {
+		t.Fatalf("decode over-limit list response: %v", err)
+	}
+	if !overLimitListed.Data.ResidentIndexUsage.OverLimit ||
+		overLimitListed.Data.ResidentIndexUsage.MaxItems != 1 {
+		t.Fatalf(
+			"unexpected over-limit usage: %#v",
+			overLimitListed.Data.ResidentIndexUsage,
+		)
 	}
 	if bytes.Contains(listRecorder.Body.Bytes(), []byte(`"ref"`)) {
 		t.Fatalf("public preference list leaked ref: %s", listRecorder.Body.String())

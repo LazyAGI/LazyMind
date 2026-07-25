@@ -8,7 +8,7 @@ from lazyllm import AutoModel, LOG
 from lazyllm.tools.fs.client import FS
 from pydantic import BaseModel, ConfigDict
 
-from lazymind.chat.engine.tools.memory import MemoryTools
+from lazymind.chat.engine.tools.memory import MemoryReviewEpisodeTools, MemoryTools
 from lazymind.chat.service.component.history import normalize_history_for_agent
 from lazymind.common.memory import EpisodeReadError, get_episode_store, load_memory_context
 from lazymind.config import config as _cfg
@@ -21,6 +21,7 @@ _WRITE_TOOLS = frozenset({
     'profile_editor',
     'preference_editor',
     'episode_create',
+    'episode_delete',
 })
 _SAFE_REVIEW_ERROR_MESSAGES = {
     'storage_unavailable': 'Persistent memory storage is temporarily unavailable.',
@@ -202,7 +203,7 @@ def review_memory(
     llm = AutoModel(model='llm')
     review_agent = lazyllm.tools.agent.ReactAgent(
         llm=llm,
-        tools=[MemoryTools()],
+        tools=[MemoryTools(), MemoryReviewEpisodeTools()],
         max_retries=_cfg['review_max_retries'],
         return_trace=False,
         prompt=' ',

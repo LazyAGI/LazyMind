@@ -5,14 +5,11 @@ from typing import Optional
 
 import yaml
 
+from lazymind.config import config as _cfg
+
 from .validation.common import parse_yaml_mapping
 from .validation.preference import parse_preference_items, validate_preference_index
 from .store import MemoryStore
-
-# Cap preference index items when preparing prompt/runtime context.
-MAX_PREFERENCE_CONTEXT_ITEMS = 100
-MAX_PREFERENCE_CONTEXT_CHARS = 50_000
-
 
 @dataclass(frozen=True)
 class MemoryContext:
@@ -51,14 +48,18 @@ def load_memory_context(
 def truncate_preference_index(
     content: str,
     *,
-    max_items: int = MAX_PREFERENCE_CONTEXT_ITEMS,
-    max_chars: int = MAX_PREFERENCE_CONTEXT_CHARS,
+    max_items: Optional[int] = None,
+    max_chars: Optional[int] = None,
 ) -> str:
     """Render the first preferences in stored order for prompt injection.
 
     ``created_at`` is intentionally omitted from the resident prompt projection;
     only ``updated_at`` is exposed.
     """
+    if max_items is None:
+        max_items = int(_cfg['preference_index_max_items'])
+    if max_chars is None:
+        max_chars = int(_cfg['preference_context_max_chars'])
     text = content if isinstance(content, str) else ''
     if max_items < 0:
         raise ValueError('max_items must be >= 0')

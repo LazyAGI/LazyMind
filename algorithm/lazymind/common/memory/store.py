@@ -4,6 +4,7 @@ import re
 from typing import Any, Optional
 
 from lazymind.common.integrations.remote_fs import RemoteFS
+from lazymind.config import config as _cfg
 
 from .paths import (
     AGENTS_ROOT,
@@ -19,6 +20,7 @@ from .paths import (
     split_reference_ref,
 )
 from .validation import (
+    parse_preference_items,
     validate_preference_index,
     validate_profile_content,
     validate_reference_content,
@@ -95,35 +97,43 @@ class MemoryStore:
                 return
             raise RuntimeError(f'failed to delete {path}: {exc}') from exc
 
-    def apply_soul_field(self, field: str, value: str) -> dict[str, Any]:
-        from .editors.soul import set_soul_field
+    def apply_soul_fields(self, changes: dict[str, str]) -> dict[str, Any]:
         from .result import memory_ok
 
         loaded = self._read_document(SOUL_PATH, label='soul')
         if not loaded.get('ok'):
             return loaded
-        edited = set_soul_field(loaded['content'], field, value)
+        from .editors.soul import set_soul_fields
+
+        edited = set_soul_fields(loaded['content'], changes)
         if not edited.get('ok'):
             return edited
         written = self._write_document(SOUL_PATH, edited['content'])
         if not written.get('ok'):
             return written
-        return memory_ok(content=edited['content'])
+        return memory_ok(
+            content=edited['content'],
+            fields=list(edited.get('fields') or changes),
+        )
 
-    def apply_profile_field(self, field: str, value: str) -> dict[str, Any]:
-        from .editors.profile import set_profile_field
+    def apply_profile_fields(self, changes: dict[str, str]) -> dict[str, Any]:
         from .result import memory_ok
 
         loaded = self._read_document(PROFILE_PATH, label='profile')
         if not loaded.get('ok'):
             return loaded
-        edited = set_profile_field(loaded['content'], field, value)
+        from .editors.profile import set_profile_fields
+
+        edited = set_profile_fields(loaded['content'], changes)
         if not edited.get('ok'):
             return edited
         written = self._write_document(PROFILE_PATH, edited['content'])
         if not written.get('ok'):
             return written
-        return memory_ok(content=edited['content'])
+        return memory_ok(
+            content=edited['content'],
+            fields=list(edited.get('fields') or changes),
+        )
 
     def add_preference_with_reference(
         self,
@@ -142,6 +152,21 @@ class MemoryStore:
         loaded = self._read_document(PREFERENCE_PATH, label='preference')
         if not loaded.get('ok'):
             return loaded
+        current_items = len(parse_preference_items(loaded['content']))
+        max_items = int(_cfg['preference_index_max_items'])
+        if current_items >= max_items:
+            from .result import memory_err
+
+            attempted_items = current_items + 1
+            return memory_err(
+                (
+                    'preference index capacity exceeded: '
+                    f'used_items={attempted_items} max_items={max_items}'
+                ),
+                type='capacity_exceeded',
+                used_items=attempted_items,
+                max_items=max_items,
+            )
         edited = add_preference_entry(
             loaded['content'],
             name=name,

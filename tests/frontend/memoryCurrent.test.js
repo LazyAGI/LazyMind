@@ -32,8 +32,10 @@ import {
   reorderPreferenceMemories,
 } from "../../frontend/src/modules/memory/currentMemoryApi.ts";
 import {
+  getPreferenceResidentUsageTone,
   isCurrentMemoryConflict,
   isCurrentMemoryResourceNotFound,
+  isPreferenceResident,
   mergePreferenceOrderWithLatest,
   movePreferenceItem,
 } from "../../frontend/src/modules/memory/currentMemoryViewModel.ts";
@@ -57,6 +59,11 @@ describe("Preference Core interface", () => {
           ],
           etag: "preferences-v7",
           total_size: 1,
+          resident_index_usage: {
+            used_items: 1,
+            max_items: 100,
+            over_limit: false,
+          },
           updated_at: 1784880000000,
         },
       },
@@ -73,11 +80,36 @@ describe("Preference Core interface", () => {
       ],
       etag: "preferences-v7",
       totalSize: 1,
+      residentIndexUsage: {
+        usedItems: 1,
+        maxItems: 100,
+        overLimit: false,
+      },
       updatedAt: 1784880000000,
     });
     expect(
       currentMemoryClientMocks.apiCoreMemoryPreferencesGet,
     ).toHaveBeenCalledWith();
+  });
+
+  it("keeps compatibility with a list response that has no usage metadata", async () => {
+    currentMemoryClientMocks.apiCoreMemoryPreferencesGet.mockResolvedValue({
+      data: {
+        data: {
+          items: [],
+          etag: "preferences-v6",
+          total_size: 0,
+          updated_at: 1784880000000,
+        },
+      },
+    });
+
+    await expect(listPreferenceMemories()).resolves.toEqual({
+      items: [],
+      etag: "preferences-v6",
+      totalSize: 0,
+      updatedAt: 1784880000000,
+    });
   });
 
   it("loads the selected item with its structured Reference detail", async () => {
@@ -282,6 +314,29 @@ describe("Preference reorder behavior", () => {
         },
       }),
     ).toBe(false);
+  });
+});
+
+describe("Preference resident usage behavior", () => {
+  it.each([
+    [0, 100, false, "normal"],
+    [79, 100, false, "normal"],
+    [80, 100, false, "warning"],
+    [100, 100, false, "error"],
+    [120, 100, true, "error"],
+  ])(
+    "maps %d / %d overLimit=%s to %s",
+    (usedItems, maxItems, overLimit, expected) => {
+      expect(
+        getPreferenceResidentUsageTone(usedItems, maxItems, overLimit),
+      ).toBe(expected);
+    },
+  );
+
+  it("marks only entries before the configured limit as resident", () => {
+    expect(isPreferenceResident(99, 100)).toBe(true);
+    expect(isPreferenceResident(100, 100)).toBe(false);
+    expect(isPreferenceResident(100, undefined)).toBe(true);
   });
 });
 

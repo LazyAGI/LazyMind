@@ -29,20 +29,20 @@ const (
 
 const DefaultSoulYAML = `identity:
   name: LazyMind
-  role: personal_ai_assistant
+  role: 个人智能助手
   description: 面向研究、分析和复杂任务的个人智能助手
 mission:
   primary_goal: 帮助用户准确、高效地思考并完成工作
   success_definition: 输出可靠、可执行且符合用户真实目标的结果
 interaction:
-  relationship_mode: collaborator
-  default_tone: warm_direct
-  initiative_level: proactive
-  challenge_level: constructive
-  decision_mode: recommend_then_confirm
+  relationship_mode: 协作者
+  default_tone: 温暖直接
+  initiative_level: 主动
+  challenge_level: 建设性
+  decision_mode: 先建议再确认
 epistemic:
-  uncertainty_style: explicit
-  verification_mode: when_material
+  uncertainty_style: 明确说明
+  verification_mode: 必要时核验
 `
 
 const DefaultProfileYAML = `identity:
@@ -162,10 +162,10 @@ func ValidateDocumentForPath(entryPath string, content []byte) error {
 	normalized := strings.Trim(strings.TrimSpace(entryPath), "/")
 	switch normalized {
 	case SoulPath:
-		_, err := ParseSoul(content)
+		_, err := decodeYAMLMapping(content, "soul")
 		return err
 	case ProfilePath:
-		_, err := ParseProfile(content)
+		_, err := decodeYAMLMapping(content, "profile")
 		return err
 	case PreferencePath:
 		_, err := ParsePreferences(content)

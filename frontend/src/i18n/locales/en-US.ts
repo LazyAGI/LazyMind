@@ -1815,6 +1815,22 @@ const enUS = {
   },
 
   // Admin
+  identityAvatar: {
+    agentAlt: "Agent avatar",
+    userAlt: "User avatar",
+    change: "Change avatar",
+    restore: "Restore default avatar",
+    restoreConfirm:
+      "All conversations will immediately use the default identity icon.",
+    uploadSuccess: "Avatar updated and synced to conversations",
+    restoreSuccess: "Default avatar restored",
+    loadFailed: "Failed to load avatar",
+    validation: {
+      empty: "Choose a non-empty image",
+      type: "Only PNG, JPG/JPEG, and WebP images are supported",
+      size: "The image must not exceed 2 MiB",
+    },
+  },
   admin: {
     userManagement: "User Management",
     dataSourceManagement: "Data Source Management",
@@ -2830,11 +2846,11 @@ const enUS = {
     memoryCurrentSoulTitle: "Soul",
     memoryCurrentSoulDescription:
       "The agent's current identity, mission, and default behavior",
-    memoryCurrentSoulEyebrow: "SOUL · AGENT IDENTITY",
+    memoryCurrentSoulEyebrow: "AGENT IDENTITY",
     memoryCurrentProfileTitle: "Profile",
     memoryCurrentProfileDescription:
       "Stable user facts that are currently in effect",
-    memoryCurrentProfileEyebrow: "PROFILE · USER IDENTITY",
+    memoryCurrentProfileEyebrow: "USER IDENTITY",
     memoryCurrentUnknownTime: "Unknown time",
     memoryCurrentLoadFailed: "Failed to load {{type}}",
     memoryCurrentEmpty: "No {{type}} information yet",
@@ -2889,6 +2905,15 @@ const enUS = {
     memoryPreferenceLoadFailed: "Failed to load preferences",
     memoryPreferenceEmpty: "No preferences yet",
     memoryPreferenceUpdatedAt: "Updated {{time}}",
+    memoryPreferenceResidentIndex: "Resident index",
+    memoryPreferenceResidentUsageAria:
+      "Resident index usage: {{used}} of {{max}}",
+    memoryPreferenceNotResident: "Not resident",
+    memoryPreferenceOverLimitTitle: "Resident index capacity exceeded",
+    memoryPreferenceOverLimitDescription:
+      "New preferences are paused. Delete, consolidate, or reorder preferences so the highest-priority {{max}} items remain resident.",
+    memoryPreferencePage:
+      "Page {{page}} · {{count}} on this page / {{total}} total",
     memoryPreferenceReorderHandle:
       "Drag {{name}}, item {{position}} of {{total}}. Press Space, then use arrow keys to reorder.",
     memoryPreferenceReorderFailed: "Failed to reorder preferences",
@@ -2937,6 +2962,8 @@ const enUS = {
     memoryEpisodeHitCount: "Referenced {{count}} times",
     memoryEpisodeShown: "Showing {{count}} of {{total}}",
     memoryEpisodeLoadMore: "Load more",
+    memoryEpisodePage:
+      "Page {{page}} · {{count}} on this page / {{total}} total",
     memoryEpisodeViewDetail: "View episode memory details",
     memoryEpisodeDetailTitle: "Episode details",
     memoryEpisodeDetailLoadFailed: "Failed to load episode details",

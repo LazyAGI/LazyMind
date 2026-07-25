@@ -4,12 +4,12 @@ import pytest
 
 from lazymind.common.memory import (
     load_memory_context,
-    profile_languages,
     truncate_preference_index,
 )
 from lazymind.common.memory.paths import PREFERENCE_PATH, PROFILE_PATH, SOUL_PATH
 from lazymind.common.memory.validation import PreferenceItem, append_preference_item
 from lazymind.common.memory.store import MemoryStore
+from lazymind.config import config as _cfg
 
 SAMPLE_PREFERENCE = 'preferences: []\n'
 TIMESTAMP = '2026-07-20T09:30:00+08:00'
@@ -55,53 +55,29 @@ class FakeRemoteFS:
         self.dirs.add(path.strip('/'))
 
 
-def test_truncate_preference_index_keeps_frontmatter_and_cap():
+def test_truncate_preference_index_uses_configured_item_and_character_limits():
     content = SAMPLE_PREFERENCE
-    for idx in range(105):
+    for idx in range(4):
         content = append_preference_item(
             content,
             PreferenceItem(
-                name=f'pref.item.{idx}',
-                summary=f'summary {idx}',
-                ref=f'references/topic.md#item-{idx}',
-                created_at=TIMESTAMP,
-                updated_at=TIMESTAMP,
-            ),
-        )
-    truncated = truncate_preference_index(content, max_items=100)
-    assert truncated.count('- name:') == 100
-    assert 'pref.item.0' in truncated
-    assert 'pref.item.99' in truncated
-    assert 'pref.item.100' not in truncated
-    assert 'created_at:' not in truncated
-    assert truncated.count('updated_at:') == 100
-
-
-def test_truncate_preference_index_caps_total_chars():
-    content = SAMPLE_PREFERENCE
-    for idx in range(120):
-        content = append_preference_item(
-            content,
-            PreferenceItem(
-                name=f'pref.long.{idx}',
+                name=f'pref.configured.{idx}',
                 summary='x' * 100,
                 ref=f'references/topic.md#item-{idx}',
                 created_at=TIMESTAMP,
                 updated_at=TIMESTAMP,
             ),
         )
-    truncated = truncate_preference_index(content, max_items=100, max_chars=10_000)
-    assert len(truncated) <= 10_000
-    assert truncated.startswith('preferences:')
-    assert 'created_at:' not in truncated
 
+    with _cfg.temp('preference_index_max_items', 2):
+        with _cfg.temp('preference_context_max_chars', 5000):
+            truncated = truncate_preference_index(content)
 
-def test_profile_languages():
-    profile = (
-        'locale:\n'
-        '  languages: ["zh-CN", "en-US"]\n'
-    )
-    assert profile_languages(profile) == ['zh-CN', 'en-US']
+    assert truncated.count('- name:') == 2
+    assert 'pref.configured.0' in truncated
+    assert 'pref.configured.1' in truncated
+    assert 'pref.configured.2' not in truncated
+    assert len(truncated) <= 5000
 
 
 def test_load_memory_context_reads_store_without_references():

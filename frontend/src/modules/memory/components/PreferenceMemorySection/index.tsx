@@ -17,6 +17,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   DeleteOutlined,
   HolderOutlined,
+  LeftOutlined,
   RightOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
@@ -27,6 +28,7 @@ import {
   Empty,
   Modal,
   Popconfirm,
+  Progress,
   Skeleton,
   Tag,
   message,
@@ -44,19 +46,24 @@ import {
   type PreferenceMemoryList,
 } from "../../currentMemoryApi";
 import {
+  getPreferenceResidentUsageTone,
   isCurrentMemoryConflict,
   isCurrentMemoryResourceNotFound,
+  isPreferenceResident,
   mergePreferenceOrderWithLatest,
   movePreferenceItem,
 } from "../../currentMemoryViewModel";
 import { getMemorySourceLabelKey } from "../../memorySourceLabels";
 import SafeReferenceMarkdown from "./SafeReferenceMarkdown";
 
+const PAGE_SIZE = 5;
+
 interface SortablePreferenceRowProps {
   deleting: boolean;
   disabled: boolean;
   index: number;
   item: PreferenceMemoryItem;
+  resident: boolean;
   total: number;
   onDelete: (item: PreferenceMemoryItem) => Promise<void>;
   onOpen: (item: PreferenceMemoryItem) => void;
@@ -67,6 +74,7 @@ function SortablePreferenceRow({
   disabled,
   index,
   item,
+  resident,
   total,
   onDelete,
   onOpen,
@@ -95,7 +103,11 @@ function SortablePreferenceRow({
   return (
     <article
       ref={setNodeRef}
-      className={`memory-preference-item ${isDragging ? "is-dragging" : ""}`}
+      className={[
+        "memory-preference-item",
+        isDragging ? "is-dragging" : "",
+        resident ? "" : "is-not-resident",
+      ].filter(Boolean).join(" ")}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
@@ -128,6 +140,12 @@ function SortablePreferenceRow({
           <span>{item.summary}</span>
           <small>
             {t("admin.memoryPreferenceUpdatedAt", { time: updatedAt })}
+            {!resident ? (
+              <span className="memory-preference-residency-label">
+                {" · "}
+                {t("admin.memoryPreferenceNotResident")}
+              </span>
+            ) : null}
           </small>
         </span>
         <RightOutlined />
@@ -170,6 +188,7 @@ export default function PreferenceMemorySection() {
   const [orderError, setOrderError] = useState("");
   const [preDragList, setPreDragList] =
     useState<PreferenceMemoryList | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
   const [deletingNames, setDeletingNames] = useState<Set<string>>(new Set());
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -208,6 +227,30 @@ export default function PreferenceMemorySection() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const pageCount = Math.max(
+    1,
+    Math.ceil((list?.items.length || 0) / PAGE_SIZE),
+  );
+  const visibleItems = useMemo(() => {
+    const start = pageIndex * PAGE_SIZE;
+    return list?.items.slice(start, start + PAGE_SIZE) || [];
+  }, [list?.items, pageIndex]);
+  const residentIndexUsage = list?.residentIndexUsage;
+  const residentUsageRatio = residentIndexUsage
+    ? residentIndexUsage.usedItems / residentIndexUsage.maxItems
+    : 0;
+  const residentUsageTone = residentIndexUsage
+    ? getPreferenceResidentUsageTone(
+        residentIndexUsage.usedItems,
+        residentIndexUsage.maxItems,
+        residentIndexUsage.overLimit,
+      )
+    : "normal";
+
+  useEffect(() => {
+    setPageIndex((current) => Math.min(current, pageCount - 1));
+  }, [pageCount]);
 
   const applyOrder = async (
     optimisticItems: PreferenceMemoryItem[],
@@ -335,6 +378,18 @@ export default function PreferenceMemorySection() {
                 (candidate) => candidate.name !== item.name,
               ),
               totalSize: Math.max(0, current.totalSize - 1),
+              residentIndexUsage: current.residentIndexUsage
+                ? {
+                    ...current.residentIndexUsage,
+                    usedItems: Math.max(
+                      0,
+                      current.residentIndexUsage.usedItems - 1,
+                    ),
+                    overLimit:
+                      current.residentIndexUsage.usedItems - 1 >
+                      current.residentIndexUsage.maxItems,
+                  }
+                : undefined,
             }
           : current,
       );
@@ -426,6 +481,44 @@ export default function PreferenceMemorySection() {
         </span>
       </div>
 
+      {residentIndexUsage ? (
+        <div
+          className={`memory-preference-usage is-${residentUsageTone}`}
+          aria-label={t("admin.memoryPreferenceResidentUsageAria", {
+            max: residentIndexUsage.maxItems,
+            used: residentIndexUsage.usedItems,
+          })}
+        >
+          <div className="memory-preference-usage-copy">
+            <span>{t("admin.memoryPreferenceResidentIndex")}</span>
+            <strong>
+              {residentIndexUsage.usedItems} / {residentIndexUsage.maxItems}
+            </strong>
+          </div>
+          <Progress
+            percent={Math.min(100, residentUsageRatio * 100)}
+            showInfo={false}
+            size="small"
+            status={residentUsageTone === "error" ? "exception" : "normal"}
+            strokeColor={
+              residentUsageTone === "warning" ? "#d99218" : undefined
+            }
+          />
+        </div>
+      ) : null}
+
+      {residentIndexUsage?.overLimit ? (
+        <Alert
+          className="memory-preference-capacity-alert"
+          description={t("admin.memoryPreferenceOverLimitDescription", {
+            max: residentIndexUsage.maxItems,
+          })}
+          message={t("admin.memoryPreferenceOverLimitTitle")}
+          showIcon
+          type="error"
+        />
+      ) : null}
+
       {orderConflict ? (
         <Alert
           action={
@@ -499,34 +592,74 @@ export default function PreferenceMemorySection() {
           />
         </div>
       ) : (
-        <DndContext
-          collisionDetection={closestCenter}
-          sensors={sensors}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext
-            items={list.items.map((item) => item.name)}
-            strategy={verticalListSortingStrategy}
+        <>
+          <DndContext
+            collisionDetection={closestCenter}
+            sensors={sensors}
+            onDragEnd={handleDragEnd}
           >
-            <div
-              className="memory-preference-list"
-              aria-busy={ordering}
+            <SortableContext
+              items={visibleItems.map((item) => item.name)}
+              strategy={verticalListSortingStrategy}
             >
-              {list.items.map((item, index) => (
-                <SortablePreferenceRow
-                  deleting={deletingNames.has(item.name)}
-                  disabled={ordering || orderConflict}
-                  index={index}
-                  item={item}
-                  key={item.name}
-                  total={list.items.length}
-                  onDelete={deleteItem}
-                  onOpen={(selected) => void openDetail(selected)}
-                />
-              ))}
+              <div
+                className="memory-preference-list"
+                aria-busy={ordering}
+              >
+                {visibleItems.map((item, index) => (
+                  <SortablePreferenceRow
+                    deleting={deletingNames.has(item.name)}
+                    disabled={ordering || orderConflict}
+                    index={pageIndex * PAGE_SIZE + index}
+                    item={item}
+                    key={item.name}
+                    resident={isPreferenceResident(
+                      pageIndex * PAGE_SIZE + index,
+                      residentIndexUsage?.maxItems,
+                    )}
+                    total={list.items.length}
+                    onDelete={deleteItem}
+                    onOpen={(selected) => void openDetail(selected)}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+
+          <div className="memory-preference-pagination">
+            <span>
+              {t("admin.memoryPreferencePage", {
+                count: visibleItems.length,
+                page: pageIndex + 1,
+                total: list.totalSize,
+              })}
+            </span>
+            <div className="memory-preference-pagination-actions">
+              <Button
+                aria-label={t("common.previous")}
+                disabled={pageIndex === 0 || ordering}
+                icon={<LeftOutlined />}
+                size="small"
+                onClick={() =>
+                  setPageIndex((current) => Math.max(0, current - 1))
+                }
+              />
+              <Button
+                aria-label={t("common.next")}
+                disabled={pageIndex >= pageCount - 1 || ordering}
+                icon={<RightOutlined />}
+                size="small"
+                onClick={() =>
+                  setPageIndex((current) =>
+                    Math.min(pageCount - 1, current + 1),
+                  )
+                }
+              >
+                {t("common.next")}
+              </Button>
             </div>
-          </SortableContext>
-        </DndContext>
+          </div>
+        </>
       )}
 
       <Modal

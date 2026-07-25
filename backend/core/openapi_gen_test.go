@@ -89,7 +89,9 @@ func TestOpenAPIEpisodeRoutesExposeOnlyPublicContract(t *testing.T) {
 	}
 	for _, internalPath := range []string{
 		"/api/core/internal/memory/episodes",
+		"/api/core/internal/memory/episodes/{episode_id}",
 		"/api/core/internal/memory/episodes:searchCandidates",
+		"/api/core/internal/memory/episodes:listRecent",
 		"/api/core/internal/memory/episodes:recordHits",
 	} {
 		if _, exists := paths[internalPath]; exists {
@@ -179,8 +181,14 @@ func TestOpenAPICurrentMemoryContractAndPrivateRouteIsolation(t *testing.T) {
 	}{
 		{"get", "/api/core/memory/soul"},
 		{"patch", "/api/core/memory/soul"},
+		{"get", "/api/core/memory/soul/avatar"},
+		{"put", "/api/core/memory/soul/avatar"},
+		{"delete", "/api/core/memory/soul/avatar"},
 		{"get", "/api/core/memory/profile"},
 		{"patch", "/api/core/memory/profile"},
+		{"get", "/api/core/memory/profile/avatar"},
+		{"put", "/api/core/memory/profile/avatar"},
+		{"delete", "/api/core/memory/profile/avatar"},
 		{"get", "/api/core/memory/preferences"},
 		{"put", "/api/core/memory/preferences:order"},
 		{"get", "/api/core/memory/preferences/{name}"},
@@ -247,6 +255,10 @@ func TestOpenAPICurrentMemoryContractAndPrivateRouteIsolation(t *testing.T) {
 	if profileUpdatedAt["type"] != "integer" || profileUpdatedAt["format"] != "int64" {
 		t.Fatalf("Profile updated_at must be epoch milliseconds: %#v", profileUpdatedAt)
 	}
+	avatarData := schemaPropertiesForTest(t, schemas, "CurrentMemoryAvatarData")
+	if _, exists := avatarData["updated_at"]; !exists {
+		t.Fatal("Avatar response missing updated_at")
+	}
 	preferenceList := schemaPropertiesForTest(
 		t,
 		schemas,
@@ -259,6 +271,11 @@ func TestOpenAPICurrentMemoryContractAndPrivateRouteIsolation(t *testing.T) {
 			"Preference list updated_at must be epoch milliseconds: %#v",
 			preferenceUpdatedAt,
 		)
+	}
+	residentUsage := preferenceList["resident_index_usage"].(map[string]any)
+	if residentUsage["$ref"] !=
+		"#/components/schemas/CurrentMemoryPreferenceResidentIndexUsage" {
+		t.Fatalf("Preference resident usage schema = %#v", residentUsage)
 	}
 	publicItem := schemaPropertiesForTest(t, schemas, "CurrentMemoryPreferenceItem")
 	if _, exists := publicItem["ref"]; exists {

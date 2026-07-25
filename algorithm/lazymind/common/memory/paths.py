@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 
-MEMORY_ROOT = 'memory'
 AGENTS_ROOT = 'memory/agents'
 USERS_ROOT = 'memory/users'
 REFERENCE_ROOT = 'memory/users/references'
@@ -34,21 +33,6 @@ def is_reference_path(path: str) -> bool:
 
 def is_fixed_memory_file(path: str) -> bool:
     return normalize_memory_path(path) in {SOUL_PATH, PROFILE_PATH, PREFERENCE_PATH}
-
-
-def is_memory_path(path: str) -> bool:
-    normalized = normalize_memory_path(path)
-    if normalized in {
-        MEMORY_ROOT,
-        AGENTS_ROOT,
-        USERS_ROOT,
-        REFERENCE_ROOT,
-        SOUL_PATH,
-        PROFILE_PATH,
-        PREFERENCE_PATH,
-    }:
-        return True
-    return is_reference_path(normalized)
 
 
 def reference_filename(path: str) -> str:

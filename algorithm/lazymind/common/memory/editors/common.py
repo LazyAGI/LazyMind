@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
@@ -98,32 +98,22 @@ def coerce_value_to_existing_type(existing: Any, raw_value: str) -> Any:
     )
 
 
-def update_yaml_document(content: str, field: str, value: Any) -> str:
-    document = parse_yaml_mapping(content)
-    if not document:
-        raise ValueError('document must contain a non-empty YAML mapping.')
-    set_existing_nested_field(document, field, value)
-    return render_yaml_document(document)
-
-
-def set_existing_yaml_field(
+def set_existing_yaml_fields(
     content: str,
-    field: str,
-    value: str,
+    changes: Mapping[str, str],
     *,
     entity: str,
     validate,
     require_non_empty_string: bool = False,
 ) -> dict[str, Any]:
-    """Update one existing YAML leaf; keys cannot be added or renamed.
+    """Update existing YAML leaves; keys cannot be added or renamed.
 
     Editable fields are discovered from the loaded RemoteFS document. Returns a
     structured result: ``{'ok': True, 'content': ...}`` or
     ``{'ok': False, 'error': ..., 'type': ...}``.
     """
-    normalized_field = str(field or '').strip()
-    if not normalized_field:
-        return memory_err('field is required.', type='validation')
+    if not isinstance(changes, Mapping) or not changes:
+        return memory_err('changes must be a non-empty mapping.', type='validation')
 
     document = parse_yaml_mapping(content)
     if not document:
@@ -133,32 +123,52 @@ def set_existing_yaml_field(
         )
 
     editable = editable_fields_from_document(document)
-    if normalized_field not in editable:
+    normalized_changes: dict[str, str] = {}
+    for field, value in changes.items():
+        normalized_field = str(field or '').strip()
+        if not normalized_field:
+            return memory_err('change fields must be non-empty.', type='validation')
+        if normalized_field in normalized_changes:
+            return memory_err(
+                f'duplicate field {normalized_field!r} in changes.',
+                type='validation',
+            )
+        normalized_changes[normalized_field] = value
+
+    unsupported = sorted(set(normalized_changes) - editable)
+    if unsupported:
         supported = ', '.join(sorted(editable)) or '(none)'
+        subject = (
+            f'field {unsupported[0]!r} does'
+            if len(unsupported) == 1
+            else f'fields {unsupported!r} do'
+        )
         return memory_err(
-            f'field {normalized_field!r} does not exist in {entity}; '
+            f'{subject} not exist in {entity}; '
             f'editable fields from the loaded document: {supported}.',
             type='validation',
         )
 
-    try:
-        existing = get_nested_field(document, normalized_field)
-        parsed = coerce_value_to_existing_type(existing, value)
-    except ValueError as exc:
-        return memory_err(str(exc), type='validation')
+    for normalized_field, value in normalized_changes.items():
+        try:
+            existing = get_nested_field(document, normalized_field)
+            parsed = coerce_value_to_existing_type(existing, value)
+        except (TypeError, ValueError) as exc:
+            return memory_err(str(exc), type='validation')
 
-    if require_non_empty_string and (not isinstance(parsed, str) or not parsed.strip()):
-        return memory_err(
-            f'{entity} field {normalized_field!r} requires a non-empty string value.',
-            type='validation',
-        )
+        if require_non_empty_string and (not isinstance(parsed, str) or not parsed.strip()):
+            return memory_err(
+                f'{entity} field {normalized_field!r} requires a non-empty string value.',
+                type='validation',
+            )
+        try:
+            set_existing_nested_field(document, normalized_field, parsed)
+        except ValueError as exc:
+            return memory_err(str(exc), type='validation')
 
-    try:
-        updated = update_yaml_document(content, normalized_field, parsed)
-    except ValueError as exc:
-        return memory_err(str(exc), type='validation')
+    updated = render_yaml_document(document)
 
     error = validate(updated)
     if error:
         return memory_err(error, type='validation')
-    return memory_ok(content=updated)
+    return memory_ok(content=updated, fields=list(normalized_changes))

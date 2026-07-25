@@ -549,8 +549,8 @@ func TestMemoryMountValidatesDomainDocumentsWithoutRestrictingGenericFiles(t *te
 		path string
 		body string
 	}{
-		{name: "soul", path: memorySoulPath, body: "identity: invalid\n"},
-		{name: "profile", path: memoryProfilePath, body: "custom: true\n"},
+		{name: "soul", path: memorySoulPath, body: "- invalid\n"},
+		{name: "profile", path: memoryProfilePath, body: "plain text\n"},
 		{name: "preference", path: memoryPreferencePath, body: "preferences: wrong\n"},
 		{
 			name: "reference",
@@ -577,6 +577,43 @@ func TestMemoryMountValidatesDomainDocumentsWithoutRestrictingGenericFiles(t *te
 		})
 	}
 
+	soulRequest := httptest.NewRequest(
+		http.MethodGet,
+		"/remote-fs/content?path="+memorySoulPath+"&user_id=u1",
+		nil,
+	)
+	soulRecorder := httptest.NewRecorder()
+	handler.Content(soulRecorder, soulRequest)
+	if soulRecorder.Code != http.StatusOK || soulRecorder.Body.String() != defaultSoulYAML {
+		t.Fatalf(
+			"invalid write changed soul: status=%d body=%q",
+			soulRecorder.Code,
+			soulRecorder.Body.String(),
+		)
+	}
+
+	for _, testCase := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "dynamic soul", path: memorySoulPath, body: "custom:\n  style: direct\n"},
+		{name: "dynamic profile", path: memoryProfilePath, body: "custom:\n  nickname: Neo\n"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			request := httptest.NewRequest(
+				http.MethodPut,
+				"/remote-fs/content?path="+testCase.path+"&user_id=u1",
+				strings.NewReader(testCase.body),
+			)
+			recorder := httptest.NewRecorder()
+			handler.Content(recorder, request)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+
 	genericRequest := httptest.NewRequest(
 		http.MethodPut,
 		"/remote-fs/content?path=memory/work/notes.txt&user_id=u1",
@@ -591,20 +628,72 @@ func TestMemoryMountValidatesDomainDocumentsWithoutRestrictingGenericFiles(t *te
 			genericRecorder.Body.String(),
 		)
 	}
+}
 
-	soulRequest := httptest.NewRequest(
-		http.MethodGet,
-		"/remote-fs/content?path="+memorySoulPath+"&user_id=u1",
-		nil,
-	)
-	soulRecorder := httptest.NewRecorder()
-	handler.Content(soulRecorder, soulRequest)
-	if soulRecorder.Code != http.StatusOK || soulRecorder.Body.String() != defaultSoulYAML {
-		t.Fatalf(
-			"invalid write changed soul: status=%d body=%q",
-			soulRecorder.Code,
-			soulRecorder.Body.String(),
+func TestMemoryMountEnforcesPreferenceCapacityWithoutBlockingShrink(t *testing.T) {
+	db := newRemoteFSTestDB(t)
+	service := newMemoryCurrentServiceWithPreferenceIndexMaxItems(db.DB, 2)
+	handler := newMemoryCurrentHandler(service)
+	const timestamp = "2026-07-20T09:30:00+08:00"
+	renderPreferences := func(names ...string) string {
+		t.Helper()
+		items := make([]currentmemoryapi.PreferenceItem, 0, len(names))
+		for _, name := range names {
+			items = append(items, currentmemoryapi.PreferenceItem{
+				Name:      name,
+				Summary:   "summary " + name,
+				Ref:       "references/" + strings.TrimPrefix(name, "pref.") + ".md",
+				CreatedAt: timestamp,
+				UpdatedAt: timestamp,
+			})
+		}
+		content, err := currentmemoryapi.RenderPreferences(
+			currentmemoryapi.PreferenceDocument{Preferences: items},
 		)
+		if err != nil {
+			t.Fatalf("render preferences: %v", err)
+		}
+		return string(content)
+	}
+	write := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(
+			http.MethodPut,
+			"/remote-fs/content?path="+memoryPreferencePath+"&user_id=u1",
+			strings.NewReader(body),
+		)
+		recorder := httptest.NewRecorder()
+		handler.Content(recorder, request, memoryPreferencePath)
+		return recorder
+	}
+
+	if recorder := write(renderPreferences("pref.one", "pref.two")); recorder.Code != http.StatusOK {
+		t.Fatalf("write at capacity status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	exceeded := write(renderPreferences("pref.one", "pref.two", "pref.three"))
+	if exceeded.Code != http.StatusConflict ||
+		!strings.Contains(exceeded.Body.String(), `"code":"capacity_exceeded"`) ||
+		!strings.Contains(exceeded.Body.String(), `"used_items":3`) ||
+		!strings.Contains(exceeded.Body.String(), `"max_items":2`) {
+		t.Fatalf("capacity response status=%d body=%s", exceeded.Code, exceeded.Body.String())
+	}
+
+	repository := currentmemoryapi.NewRepository(db.DB)
+	overLimit := []byte(renderPreferences("pref.one", "pref.two", "pref.three"))
+	if err := repository.UpdateFileContent(
+		t.Context(),
+		"u1",
+		currentmemoryapi.PreferencePath,
+		overLimit,
+		service.clock().UTC(),
+	); err != nil {
+		t.Fatalf("seed over-limit preferences: %v", err)
+	}
+	if recorder := write(renderPreferences("pref.three", "pref.two", "pref.one")); recorder.Code != http.StatusOK {
+		t.Fatalf("reorder over limit status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := write(renderPreferences("pref.one", "pref.two")); recorder.Code != http.StatusOK {
+		t.Fatalf("shrink to capacity status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 

@@ -46,12 +46,6 @@ def validate_iso_datetime(value: Any, *, field: str) -> Optional[str]:
     return None
 
 
-def require_no_body(body: str, *, entity: str) -> Optional[str]:
-    if body and body.strip():
-        return f'{entity} must contain YAML frontmatter only; free-form body is not allowed.'
-    return None
-
-
 def require_mapping(value: Any, *, field: str) -> Optional[str]:
     if value is None:
         return None
@@ -72,10 +66,4 @@ def optional_str(value: Any, *, field: str) -> Optional[str]:
         return None
     if not isinstance(value, str):
         return f"Field '{field}' must be a string or null."
-    return None
-
-
-def str_list(value: Any, *, field: str) -> Optional[str]:
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        return f"Field '{field}' must be a list of strings."
     return None

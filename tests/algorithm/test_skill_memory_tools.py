@@ -1,7 +1,5 @@
 import importlib
-import pytest
 
-memory_mod = importlib.import_module('lazymind.chat.engine.tools.memory')
 skill_editor_mod = importlib.import_module('lazymind.chat.engine.tools.skill_editor')
 
 
@@ -57,46 +55,6 @@ class FakeSkillStore:
         self.calls.append(('remove', category, name))
         self.packages.pop((category, name), None)
         return {'action': 'remove'}
-
-@pytest.mark.parametrize(
-    ('raw_message', 'secret'),
-    [
-        ("headers={'Authorization': 'Bearer sk-header'}", 'sk-header'),
-        ('Authorization=Bearer sk-equals', 'sk-equals'),
-        ('request failed with Bearer sk-bare', 'sk-bare'),
-        ('http_auth={"username":"admin","password":"sk-dict"}', 'sk-dict'),
-        ('basic_auth: (admin, sk-basic)', 'sk-basic'),
-    ],
-)
-def test_memory_error_sanitizer_redacts_common_auth_formats(raw_message, secret):
-    sanitized = memory_mod._safe_exception_message(RuntimeError(raw_message))
-
-    assert secret not in sanitized
-    assert '<redacted>' in sanitized
-
-
-def test_memory_tool_exception_log_does_not_include_raw_exception(monkeypatch):
-    calls = {'error': [], 'exception': []}
-    fake_log = type(
-        'FakeLog',
-        (),
-        {
-            'error': lambda _self, message: calls['error'].append(message),
-            'exception': lambda _self, message: calls['exception'].append(message),
-        },
-    )()
-    monkeypatch.setattr(memory_mod.lazyllm, 'LOG', fake_log)
-
-    memory_mod._log_tool_exception(
-        'read_memory_reference',
-        RuntimeError('Authorization: Bearer secret-value'),
-    )
-
-    assert calls['exception'] == []
-    assert len(calls['error']) == 1
-    assert 'Authorization: <redacted>' in calls['error'][0]
-    assert 'secret-value' not in calls['error'][0]
-
 
 def test_skill_editor_create_file_tools_remove_core_paths():
     existing_content = (

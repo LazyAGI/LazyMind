@@ -192,8 +192,14 @@ MEMORY_TOOLS_POLICY_APPENDIX: SystemPromptAppendix = {
         'Conversation history is already included in the model messages and is the authoritative '
         'source for earlier turns in the current chat. Resolve short follow-ups and omitted subjects '
         'from that history. Persistent memory (soul / profile / preference index) is injected when '
-        'available; use `MemoryTools_read_memory_reference` only for preference reference details '
-        'that are not covered by the injected summaries.',
+        'available; use `MemoryTools_read_memory` when the exact current YAML document must be '
+        'checked, and use `MemoryTools_read_memory_reference` only for preference reference details '
+        'that are not covered by the injected summaries. Batch all Soul changes into one '
+        '`MemoryTools_soul_editor` call and all Profile changes into one '
+        '`MemoryTools_profile_editor` call; never emit parallel calls to either editor. Use '
+        '`MemoryTools_preference_editor` conservatively: do not save fragmented remarks, one-off '
+        'requests, temporary task details, or casual statements. Objective user facts belong in '
+        'Profile when a matching field exists, not in Preference.',
         'Call `MemoryTools_episode_create` only when the user explicitly asks to record, remember, '
         'or save a historical event. Do not call it merely because information seems useful. '
         'use_memory=false does not disable explicit Episode creation. Never claim that information '

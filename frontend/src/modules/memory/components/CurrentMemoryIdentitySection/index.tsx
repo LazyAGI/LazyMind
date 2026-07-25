@@ -1,22 +1,28 @@
-import {
-  EditOutlined,
-  IdcardOutlined,
-  RobotOutlined,
-  UserOutlined,
-} from "@ant-design/icons";
+import { EditOutlined } from "@ant-design/icons";
 import {
   Alert,
   Button,
   Empty,
   Input,
+  message,
   Modal,
+  Popconfirm,
   Select,
   Skeleton,
   Tag,
+  Upload,
 } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
+import {
+  IDENTITY_AVATAR_ACCEPT,
+  IdentityAvatar,
+  IdentityAvatarValidationError,
+  useIdentityAvatarStore,
+  validateIdentityAvatarFile,
+  type IdentityAvatarKind,
+} from "@/modules/identityAvatar";
 import {
   getProfileMemory,
   getSoulMemory,
@@ -157,6 +163,123 @@ interface IdentityDocumentCardProps<TDocument, TPatch> {
   save: (patch: TPatch) => Promise<CurrentMemorySnapshot<TDocument>>;
   fieldsFor: (document: TDocument) => IdentityField<TPatch>[];
   summaryFor: (document: TDocument) => IdentityCardSummary;
+}
+
+function IdentityAvatarEditor({
+  kind,
+  size = 58,
+}: {
+  kind: IdentityAvatarKind;
+  size?: number;
+}) {
+  const { t } = useTranslation();
+  const entry = useIdentityAvatarStore((state) => state.avatars[kind]);
+  const load = useIdentityAvatarStore((state) => state.load);
+  const remove = useIdentityAvatarStore((state) => state.remove);
+  const upload = useIdentityAvatarStore((state) => state.upload);
+  const [errorMessage, setErrorMessage] = useState("");
+  const busy = entry.status === "loading";
+  const hasCustomAvatar = Boolean(entry.url);
+
+  const handleUpload = async (file: File) => {
+    setErrorMessage("");
+    try {
+      validateIdentityAvatarFile(file);
+      await upload(kind, file);
+      message.success(t("identityAvatar.uploadSuccess"));
+    } catch (error) {
+      setErrorMessage(
+        error instanceof IdentityAvatarValidationError
+          ? t(`identityAvatar.validation.${error.reason}`)
+          : getLocalizedErrorMessage(error),
+      );
+    }
+  };
+
+  const handleRemove = async () => {
+    setErrorMessage("");
+    try {
+      await remove(kind);
+      message.success(t("identityAvatar.restoreSuccess"));
+    } catch (error) {
+      setErrorMessage(getLocalizedErrorMessage(error));
+    }
+  };
+
+  return (
+    <div
+      className={`memory-identity-avatar-editor${busy ? " is-loading" : ""}`}
+    >
+      <Upload
+        accept={IDENTITY_AVATAR_ACCEPT}
+        beforeUpload={(file) => {
+          void handleUpload(file);
+          return Upload.LIST_IGNORE;
+        }}
+        disabled={busy}
+        maxCount={1}
+        multiple={false}
+        showUploadList={false}
+      >
+        <button
+          aria-label={t("identityAvatar.change")}
+          className="memory-identity-avatar-button"
+          disabled={busy}
+          type="button"
+        >
+          <IdentityAvatar
+            className="memory-identity-avatar"
+            kind={kind}
+            size={size}
+          />
+          <span className="memory-identity-avatar-overlay">
+            {busy ? t("common.loading") : t("identityAvatar.change")}
+          </span>
+        </button>
+      </Upload>
+
+      {hasCustomAvatar ? (
+        <Popconfirm
+          cancelText={t("common.cancel")}
+          description={t("identityAvatar.restoreConfirm")}
+          okText={t("identityAvatar.restore")}
+          title={t("identityAvatar.restore")}
+          onConfirm={() => void handleRemove()}
+        >
+          <Button
+            className="memory-identity-avatar-restore"
+            disabled={busy}
+            size="small"
+            type="link"
+          >
+            {t("identityAvatar.restore")}
+          </Button>
+        </Popconfirm>
+      ) : null}
+
+      {entry.status === "error" || errorMessage ? (
+        <Alert
+          action={
+            entry.status === "error" ? (
+              <Button
+                size="small"
+                onClick={() => {
+                  setErrorMessage("");
+                  void load(kind, true);
+                }}
+              >
+                {t("common.retry")}
+              </Button>
+            ) : null
+          }
+          className="memory-identity-avatar-error"
+          message={errorMessage || t("identityAvatar.loadFailed")}
+          showIcon
+          type="error"
+        />
+      ) : null}
+    </div>
+  );
 }
 
 function IdentityDocumentCard<TDocument, TPatch>({
@@ -310,9 +433,11 @@ function IdentityDocumentCard<TDocument, TPatch>({
             )}
           </span>
           <span className="memory-identity-main">
-            <span className="memory-identity-avatar">
-              {isSoul ? <RobotOutlined /> : <UserOutlined />}
-            </span>
+            <IdentityAvatar
+              className="memory-identity-avatar"
+              kind={kind}
+              size={58}
+            />
             <span>
               <strong>{name}</strong>
               <small>{role}</small>
@@ -354,9 +479,7 @@ function IdentityDocumentCard<TDocument, TPatch>({
       >
         <div className={`memory-identity-detail is-${kind}`}>
           <div className="memory-identity-detail-hero">
-            <span className="memory-identity-avatar">
-              {isSoul ? <RobotOutlined /> : <UserOutlined />}
-            </span>
+            <IdentityAvatarEditor kind={kind} />
             <div>
               <h4>{name}</h4>
               <p>{description}</p>
@@ -407,7 +530,6 @@ function IdentityDocumentCard<TDocument, TPatch>({
                   <div className="memory-identity-field-row">
                     <span className="memory-identity-field-key">
                       {field.label}
-                      <code>{field.path}</code>
                     </span>
                     <span className="memory-identity-field-value">
                       {fieldDisplayValue(
@@ -690,15 +812,6 @@ export default function CurrentMemoryIdentitySection() {
       className="memory-current-identity-section"
       aria-label={t("admin.memoryCurrentIdentityTitle")}
     >
-      <div className="memory-current-section-heading">
-        <span className="memory-current-section-icon">
-          <IdcardOutlined />
-        </span>
-        <div>
-          <h3>{t("admin.memoryCurrentIdentityTitle")}</h3>
-          <p>{t("admin.memoryCurrentIdentityDescription")}</p>
-        </div>
-      </div>
       <div className="memory-identity-grid">
         <IdentityDocumentCard
           fieldsFor={soulFieldsFor}

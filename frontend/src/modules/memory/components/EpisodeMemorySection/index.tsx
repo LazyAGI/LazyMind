@@ -2,6 +2,8 @@ import {
   ClockCircleOutlined,
   DeleteOutlined,
   EyeOutlined,
+  LeftOutlined,
+  RightOutlined,
 } from "@ant-design/icons";
 import {
   Alert,
@@ -14,7 +16,7 @@ import {
   Tag,
   message,
 } from "antd";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
@@ -23,13 +25,10 @@ import {
   listEpisodes,
   type EpisodeRecord,
 } from "../../episodeApi";
-import {
-  groupEpisodesByRecordedDate,
-  mergeEpisodePages,
-} from "../../episodeViewModel";
+import { sortEpisodesByRecordedTime } from "../../episodeViewModel";
 import { getMemorySourceLabelKey } from "../../memorySourceLabels";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 5;
 
 const getEpisodeTypeTone = (episodeType: string) => {
   const normalized = episodeType.trim().toLowerCase();
@@ -55,8 +54,9 @@ export default function EpisodeMemorySection() {
   const [episodes, setEpisodes] = useState<EpisodeRecord[]>([]);
   const [totalSize, setTotalSize] = useState(0);
   const [nextPageToken, setNextPageToken] = useState("");
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageTokens, setPageTokens] = useState<string[]>([""]);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -70,12 +70,15 @@ export default function EpisodeMemorySection() {
 
     setLoading(true);
     setLoadError("");
-    void listEpisodes({ pageSize: PAGE_SIZE })
+    void listEpisodes({
+      pageSize: PAGE_SIZE,
+      pageToken: pageTokens[pageIndex] || undefined,
+    })
       .then((page) => {
         if (ignore) {
           return;
         }
-        setEpisodes(page.items);
+        setEpisodes(sortEpisodesByRecordedTime(page.items));
         setTotalSize(page.totalSize);
         setNextPageToken(page.nextPageToken);
       })
@@ -95,24 +98,7 @@ export default function EpisodeMemorySection() {
     return () => {
       ignore = true;
     };
-  }, [reloadKey]);
-
-  const dateGroups = useMemo(
-    () => groupEpisodesByRecordedDate(episodes),
-    [episodes],
-  );
-
-  const formatDate = useCallback(
-    (timestampMs: number) =>
-      timestampMs
-        ? new Intl.DateTimeFormat(i18n.resolvedLanguage || i18n.language, {
-            day: "numeric",
-            month: "long",
-            year: "numeric",
-          }).format(new Date(timestampMs))
-        : t("admin.memoryEpisodeUnknownTime"),
-    [i18n.language, i18n.resolvedLanguage, t],
-  );
+  }, [pageIndex, pageTokens, reloadKey]);
 
   const formatDateTime = useCallback(
     (timestampMs: number) =>
@@ -158,26 +144,24 @@ export default function EpisodeMemorySection() {
     [t],
   );
 
-  const handleLoadMore = async () => {
-    if (!nextPageToken || loadingMore) {
+  const handleNextPage = () => {
+    if (!nextPageToken || loading) {
       return;
     }
 
-    setLoadingMore(true);
-    try {
-      const page = await listEpisodes({
-        pageSize: PAGE_SIZE,
-        pageToken: nextPageToken,
-      });
-      setEpisodes((current) => mergeEpisodePages(current, page.items));
-      setTotalSize(page.totalSize);
-      setNextPageToken(page.nextPageToken);
-    } catch (error) {
-      console.error("Load more Episode memory failed:", error);
-      message.error(getLocalizedErrorMessage(error));
-    } finally {
-      setLoadingMore(false);
+    const nextIndex = pageIndex + 1;
+    setPageTokens((current) => [
+      ...current.slice(0, nextIndex),
+      nextPageToken,
+    ]);
+    setPageIndex(nextIndex);
+  };
+
+  const handlePreviousPage = () => {
+    if (pageIndex === 0 || loading) {
+      return;
     }
+    setPageIndex((current) => Math.max(0, current - 1));
   };
 
   const handleOpenDetail = async (episode: EpisodeRecord) => {
@@ -213,6 +197,9 @@ export default function EpisodeMemorySection() {
         current.filter((item) => item.id !== episode.id),
       );
       setTotalSize((current) => Math.max(0, current - 1));
+      if (episodes.length === 1 && pageIndex > 0) {
+        setPageIndex((current) => Math.max(0, current - 1));
+      }
       if (detail?.id === episode.id) {
         setDetailOpen(false);
         setDetail(null);
@@ -276,93 +263,100 @@ export default function EpisodeMemorySection() {
         />
       ) : (
         <>
-          <div className="memory-episode-groups">
-            {dateGroups.map((group) => (
-              <section className="memory-episode-day" key={group.dateKey}>
-                <h4>{formatDate(group.items[0].recordedAtMs)}</h4>
-                <div className="memory-episode-list">
-                  {group.items.map((episode) => {
-                    const tone = getEpisodeTypeTone(episode.episodeType);
-                    const deleting = deletingIds.has(episode.id);
+          <div className="memory-episode-list">
+            {episodes.map((episode) => {
+              const tone = getEpisodeTypeTone(episode.episodeType);
+              const deleting = deletingIds.has(episode.id);
 
-                    return (
-                      <article className="memory-episode-card" key={episode.id}>
-                        <button
-                          type="button"
-                          className="memory-episode-card-main"
-                          aria-label={t("admin.memoryEpisodeViewDetail")}
-                          onClick={() => void handleOpenDetail(episode)}
-                        >
-                          <span
-                            className="memory-episode-time"
-                            title={t("admin.memoryEpisodeOccurredAt")}
-                          >
-                            {formatDateTime(episode.occurredAtMs)}
+              return (
+                <article className="memory-episode-card" key={episode.id}>
+                  <button
+                    type="button"
+                    className="memory-episode-card-main"
+                    aria-label={t("admin.memoryEpisodeViewDetail")}
+                    onClick={() => void handleOpenDetail(episode)}
+                  >
+                    <span
+                      className="memory-episode-time"
+                      title={t("admin.memoryEpisodeRecordedAt")}
+                    >
+                      {formatDateTime(episode.recordedAtMs)}
+                    </span>
+                    <span className="memory-episode-card-copy">
+                      <span className="memory-episode-card-meta">
+                        <Tag className={`memory-episode-type is-${tone}`}>
+                          {getEpisodeTypeLabel(episode.episodeType)}
+                        </Tag>
+                        {episode.sourceKind ? (
+                          <span>
+                            {getEpisodeSourceLabel(episode.sourceKind)}
                           </span>
-                          <span className="memory-episode-card-copy">
-                            <span className="memory-episode-card-meta">
-                              <Tag className={`memory-episode-type is-${tone}`}>
-                                {getEpisodeTypeLabel(episode.episodeType)}
-                              </Tag>
-                              {episode.sourceKind ? (
-                                <span>
-                                  {getEpisodeSourceLabel(episode.sourceKind)}
-                                </span>
-                              ) : null}
-                            </span>
-                            <strong>
-                              {episode.summary ||
-                                t("admin.memoryEpisodeNoSummary")}
-                            </strong>
-                          </span>
-                          <span className="memory-episode-hit-count">
-                            {t("admin.memoryEpisodeHitCount", {
-                              count: episode.hitCount,
-                            })}
-                          </span>
-                          <EyeOutlined className="memory-episode-view-icon" />
-                        </button>
-                        <Popconfirm
-                          cancelText={t("common.cancel")}
-                          description={t(
-                            "admin.memoryEpisodeDeleteConfirmDescription",
-                          )}
-                          okButtonProps={{ danger: true, loading: deleting }}
-                          okText={t("common.delete")}
-                          title={t("admin.memoryEpisodeDeleteConfirmTitle")}
-                          onConfirm={() => handleDelete(episode)}
-                        >
-                          <Button
-                            aria-label={t("admin.memoryEpisodeDelete")}
-                            className="memory-episode-delete"
-                            danger
-                            disabled={deleting}
-                            icon={<DeleteOutlined />}
-                            loading={deleting}
-                            size="small"
-                            type="text"
-                          />
-                        </Popconfirm>
-                      </article>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
+                        ) : null}
+                      </span>
+                      <strong>
+                        {episode.summary ||
+                          t("admin.memoryEpisodeNoSummary")}
+                      </strong>
+                    </span>
+                    <span className="memory-episode-hit-count">
+                      {t("admin.memoryEpisodeHitCount", {
+                        count: episode.hitCount,
+                      })}
+                    </span>
+                    <EyeOutlined className="memory-episode-view-icon" />
+                  </button>
+                  <Popconfirm
+                    cancelText={t("common.cancel")}
+                    description={t(
+                      "admin.memoryEpisodeDeleteConfirmDescription",
+                    )}
+                    okButtonProps={{ danger: true, loading: deleting }}
+                    okText={t("common.delete")}
+                    title={t("admin.memoryEpisodeDeleteConfirmTitle")}
+                    onConfirm={() => handleDelete(episode)}
+                  >
+                    <Button
+                      aria-label={t("admin.memoryEpisodeDelete")}
+                      className="memory-episode-delete"
+                      danger
+                      disabled={deleting}
+                      icon={<DeleteOutlined />}
+                      loading={deleting}
+                      size="small"
+                      type="text"
+                    />
+                  </Popconfirm>
+                </article>
+              );
+            })}
           </div>
 
           <div className="memory-episode-pagination">
             <span>
-              {t("admin.memoryEpisodeShown", {
+              {t("admin.memoryEpisodePage", {
                 count: episodes.length,
+                page: pageIndex + 1,
                 total: totalSize,
               })}
             </span>
-            {nextPageToken ? (
-              <Button loading={loadingMore} onClick={() => void handleLoadMore()}>
-                {t("admin.memoryEpisodeLoadMore")}
+            <div className="memory-episode-pagination-actions">
+              <Button
+                aria-label={t("common.previous")}
+                disabled={pageIndex === 0 || loading}
+                icon={<LeftOutlined />}
+                size="small"
+                onClick={handlePreviousPage}
+              />
+              <Button
+                aria-label={t("common.next")}
+                disabled={!nextPageToken || loading}
+                icon={<RightOutlined />}
+                size="small"
+                onClick={handleNextPage}
+              >
+                {t("common.next")}
               </Button>
-            ) : null}
+            </div>
           </div>
         </>
       )}
