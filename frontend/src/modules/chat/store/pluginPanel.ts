@@ -542,9 +542,6 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
   fetchPluginUI: async (pluginId) => {
     const lang = i18n.language || "";
     const cacheKey = `${pluginId}:${lang}`;
-    // Return cached value if already fetched for this language.
-    const cached = get().pluginUIByPlugin[cacheKey];
-    if (cached) return cached;
     try {
       const res = await PluginInfoApi().getPlugin(pluginId, {
         headers: lang ? { "Accept-Language": lang } : undefined,

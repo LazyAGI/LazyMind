@@ -14,7 +14,6 @@ from lazyllm.tools.writer.data_models import (
     InputResource,
     SectionInstruction,
     TargetDocument,
-    WriterAuthoring,
     WriterBlock,
     WriterDocument,
     WritingTask,
@@ -57,7 +56,7 @@ def build_writer_status_ir(status: str, content: str, *, source: str) -> str:
         metadata={'source': source, 'kind': 'step_status', 'status': status},
         ui_editable=False,
     )
-    return document.model_dump_json()
+    return document.model_dump_json(exclude_defaults=True)
 
 
 def _json_dumps(value: Any) -> str:
@@ -217,7 +216,7 @@ class WriterToolkitBase:
     def build_writing_task(self, query: str) -> str:
         """Build a writing task from the user's original request."""
         task = WritingTask(query=query, task_type='write')
-        return _json_dumps(task.model_dump())
+        return _json_dumps(task.model_dump(exclude_defaults=True))
 
     def build_resources(
         self,
@@ -309,7 +308,7 @@ class WriterToolkitBase:
             scope='auto',
             target_document=target_document,
         )
-        return _json_dumps(task.model_dump())
+        return _json_dumps(task.model_dump(exclude_defaults=True))
 
     def build_revision_task(
         self,
@@ -329,7 +328,7 @@ class WriterToolkitBase:
         return self.build_revise_task(
             query=query,
             target_document_json=(
-                _json_dumps(target.model_dump()) if target else ''
+                _json_dumps(target.model_dump(exclude_defaults=True)) if target else ''
             ),
         )
 
@@ -401,7 +400,9 @@ class WriterToolkitBase:
         result = WriterPlanningTools(
             llm=AutoModel(model='llm'), artifact_store=str(root),
         ).generate_outline(task=task_path, context=context_path)
-        return _set_document_editable(_primary_data(result), stage='outline').model_dump_json()
+        return _set_document_editable(
+            _primary_data(result), stage='outline',
+        ).model_dump_json(exclude_defaults=True)
 
     def prepare_outline(self, source_document_json: str) -> str:
         """Normalize a supplied document into an editable outline."""
@@ -418,10 +419,16 @@ class WriterToolkitBase:
             block.content = lines[0]
             block.spans = []
             block.numbering['level'] = 1
-            block.authoring = block.authoring or WriterAuthoring()
-            if len(lines) > 1 and not block.authoring.constraints.section_goal:
-                block.authoring.constraints.section_goal = '\n'.join(lines[1:])
-        return _set_document_editable(document, stage='outline').model_dump_json()
+            if len(lines) > 1:
+                block.children.insert(0, WriterBlock(
+                    node_id=f'{block.node_id}-description',
+                    type='paragraph',
+                    content='\n'.join(lines[1:]),
+                    stage='outline',
+                ))
+        return _set_document_editable(
+            document, stage='outline',
+        ).model_dump_json(exclude_defaults=True)
 
     def generate_section_instructions(
         self,
@@ -592,7 +599,7 @@ class WriterToolkitBase:
             stage='final',
         )
         return _json_dumps({
-            'final_document': final_document.model_dump(),
+            'final_document': final_document.model_dump(exclude_defaults=True),
             'final_document_md': markdown,
         })
 
@@ -749,7 +756,7 @@ class WriterToolkitBase:
         )
         return _json_dumps({
             'patch_result': _primary_data(result),
-            'revised_document': revised.model_dump(),
+            'revised_document': revised.model_dump(exclude_defaults=True),
         })
 
     def apply_revision(
@@ -804,7 +811,7 @@ class WriterToolkitBase:
         ).document_to_docir(target)
         return _json_dumps({
             'source_document': _primary_data(result),
-            'target_document': target.model_dump(),
+            'target_document': target.model_dump(exclude_defaults=True),
         })
 
     def create_document(self, title: str, parent_uri: str = '') -> str:
@@ -844,7 +851,7 @@ class WriterToolkitBase:
         )
         return _json_dumps({
             'publish_result': _primary_data(result),
-            'published_document': persisted.model_dump(),
+            'published_document': persisted.model_dump(exclude_defaults=True),
             'published_link': _published_link(target),
         })
 
@@ -918,7 +925,7 @@ class WriterToolkitBase:
         published = _set_document_editable(_primary_data(refreshed), stage='final')
         return _json_dumps({
             'publish_result': _primary_data(write_result),
-            'published_document': published.model_dump(),
+            'published_document': published.model_dump(exclude_defaults=True),
             'published_link': _published_link(target),
         })
 
