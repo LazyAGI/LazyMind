@@ -16,6 +16,14 @@ const electronPackage = path.join(scriptsDir, "..", "electron", "package.json");
 const darwinBuildScript = path.join(scriptsDir, "build-darwin-arm64.sh");
 const installerScript = path.join(scriptsDir, "..", "installer", "installer.nsh");
 const macosWorkflow = path.join(scriptsDir, "..", "..", ".github", "workflows", "macos-installer.yml");
+const macosFinalizeWorkflow = path.join(
+  scriptsDir,
+  "..",
+  "..",
+  ".github",
+  "workflows",
+  "macos-notarization-finalize.yml",
+);
 
 function nsisMacro(source, name) {
   const match = source.match(new RegExp(`!macro ${name}\\b([\\s\\S]*?)!macroend`));
@@ -124,7 +132,7 @@ test("Windows installer verifies and force-cleans processes left by warmup", () 
   assert.match(install, /\$4 == 1[\s\S]*StrCpy \$3 4[\s\S]*\$3 != 0/);
 });
 
-test("macOS distribution build requires Developer ID signing and notarizes the final DMG", () => {
+test("macOS distribution build signs the final DMG and submits one asynchronous notarization", () => {
   const source = readFileSync(darwinBuildScript, "utf8");
   const builderSource = readFileSync(electronBuilderConfig, "utf8");
   const packageJson = JSON.parse(readFileSync(electronPackage, "utf8"));
@@ -132,7 +140,7 @@ test("macOS distribution build requires Developer ID signing and notarizes the f
   assert.match(source, /SIGNING_MODE=.*adhoc/);
   assert.match(
     source,
-    /notarytool submit "\$\{DMG_PATH\}"[\s\S]*--team-id "\$\{APPLE_TEAM_ID\}"[\s\S]*stapler staple "\$\{DMG_PATH\}"/,
+    /notarytool submit "\$\{DMG_PATH\}"[\s\S]*--team-id "\$\{APPLE_TEAM_ID\}"[\s\S]*--output-format json/,
   );
   assert.match(source, /Authority=Developer ID Application:/);
   assert.match(source, /verify_runtime_code_signatures "\$\{APP_PATH\}\/Contents\/Resources\/runtime"/);
@@ -141,9 +149,12 @@ test("macOS distribution build requires Developer ID signing and notarizes the f
   assert.match(builderSource, /afterSign:\s*restoreRuntimeAndFinalizeSignature/);
   assert.match(builderSource, /fs\.renameSync\(runtimeRoot, stagedRuntime\)/);
   assert.match(builderSource, /fs\.renameSync\(staged\.stagedRuntime, staged\.runtimeRoot\)/);
-  assert.match(builderSource, /notarytool[\s\S]*submit[\s\S]*notarizationArchive/);
+  assert.doesNotMatch(builderSource, /notarytool[\s\S]*submit/);
   assert.match(builderSource, /notarize:\s*false/);
+  assert.match(builderSource, /sign:\s*macSigningMode === "developer-id"/);
   assert.doesNotMatch(builderSource, /signIgnore:/);
+  assert.doesNotMatch(source, /notarytool submit[\s\S]*--wait/);
+  assert.doesNotMatch(source, /stapler staple/);
   for (const privatePath of ["/.env", "/.lazymind-local", "/data", "/volumes", "/local/config.env"]) {
     assert.match(source, new RegExp(`--exclude "${privatePath.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}"`));
   }
@@ -163,6 +174,35 @@ test("macOS CI fails fast on missing credentials and raises the open-file limit"
   }
   assert.match(source, /ulimit -n "\$\{target_open_files\}"/);
   assert.match(source, /actual_open_files < 8192/);
+});
+
+test("macOS CI stores pending artifacts and finalizes the same submission manually", () => {
+  const buildWorkflow = readFileSync(macosWorkflow, "utf8");
+  const finalizeWorkflow = readFileSync(macosFinalizeWorkflow, "utf8");
+
+  assert.match(buildWorkflow, /artifact_name="LazyMind-macos-arm64-pending"/);
+  assert.match(buildWorkflow, /name="LazyMind-macos-arm64-development"/);
+  assert.match(buildWorkflow, /name:\s*LazyMind-macos-notarization-submission/);
+  assert.match(buildWorkflow, /\.pending\.dmg/);
+  assert.match(buildWorkflow, /\.unnotarized\.dmg/);
+  assert.match(buildWorkflow, /git show-ref --verify --quiet "refs\/tags\/\$\{REQUESTED_REF\}"/);
+  assert.match(buildWorkflow, /tag_commit=.*git rev-parse "refs\/tags\/\$\{tag_candidate\}\^\{commit\}"/);
+  assert.match(
+    buildWorkflow,
+    /LAZYMIND_DESKTOP_NOTARIZE:\s*\$\{\{\s*steps\.release\.outputs\.is_tag\s*\}\}/,
+  );
+  assert.match(
+    buildWorkflow,
+    /if:\s*steps\.release\.outputs\.is_tag == 'true'[\s\S]*name:\s*LazyMind-macos-notarization-submission/,
+  );
+  assert.doesNotMatch(buildWorkflow, /stapler validate/);
+
+  assert.match(finalizeWorkflow, /source_run_id:/);
+  assert.match(finalizeWorkflow, /run-id:\s*\$\{\{\s*inputs\.source_run_id\s*\}\}/);
+  assert.match(finalizeWorkflow, /notarytool info "\$\{submission_id\}"/);
+  assert.match(finalizeWorkflow, /notarytool log "\$\{SUBMISSION_ID\}"/);
+  assert.match(finalizeWorkflow, /stapler staple "\$\{final_path\}"/);
+  assert.match(finalizeWorkflow, /name:\s*LazyMind-macos-arm64-notarized/);
 });
 
 test("packaged macOS app runs installation warmup once before its normal window", () => {

@@ -255,6 +255,7 @@ fi
 APP_PATH="${DIST_ROOT}/mac-arm64/LazyMind.app"
 ZIP_PATH="${DIST_ROOT}/LazyMind-darwin-arm64.zip"
 DMG_PATH="${DIST_ROOT}/LazyMind-macos-arm64.dmg"
+NOTARIZATION_SUBMISSION_PATH="${DIST_ROOT}/notarization-submission.json"
 if [[ ! -d "${APP_PATH}" ]]; then
   if [[ -d "${DIST_ROOT}/mac-arm64" ]]; then
     APP_PATH="$(find "${DIST_ROOT}/mac-arm64" -maxdepth 3 -type d -name "LazyMind.app" -print -quit)"
@@ -280,17 +281,27 @@ if [[ -d "${APP_PATH}" ]]; then
       exit 1
     fi
     if [[ "${NOTARIZE}" == "true" ]]; then
-      echo "==> Notarizing and stapling distribution DMG"
+      dmg_size="$(du -h "${DMG_PATH}" | awk '{print $1}')"
+      submission_tmp="${NOTARIZATION_SUBMISSION_PATH}.tmp"
+      rm -f "${submission_tmp}" "${NOTARIZATION_SUBMISSION_PATH}"
+      codesign --verify --strict --verbose=2 "${DMG_PATH}"
+      echo "==> $(date -u +%Y-%m-%dT%H:%M:%SZ) asynchronously submitting ${dmg_size} distribution DMG for notarization"
       xcrun notarytool submit "${DMG_PATH}" \
         --apple-id "${APPLE_ID}" \
         --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
         --team-id "${APPLE_TEAM_ID}" \
-        --wait
-      xcrun stapler staple "${DMG_PATH}"
-      xcrun stapler validate "${APP_PATH}"
-      xcrun stapler validate "${DMG_PATH}"
-      spctl --assess --type execute --verbose=2 "${APP_PATH}"
-      spctl --assess --type open --context context:primary-signature --verbose=2 "${DMG_PATH}"
+        --output-format json > "${submission_tmp}"
+      submission_id="$(
+        node -e '
+          const fs = require("fs");
+          const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+          if (!value.id) process.exit(1);
+          process.stdout.write(value.id);
+        ' "${submission_tmp}"
+      )"
+      mv "${submission_tmp}" "${NOTARIZATION_SUBMISSION_PATH}"
+      echo "==> DMG notarization submitted: ${submission_id}"
+      echo "Notarization submission: ${NOTARIZATION_SUBMISSION_PATH}"
     fi
   fi
   echo "LazyMind.app: ${APP_PATH}"
