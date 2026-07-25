@@ -102,7 +102,9 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "writer document sync failed", http.StatusBadGateway)
 		return
 	}
-	if !result.Changed {
+	// Draft with no Feishu delta: nothing to persist. Checkpoint still wants a
+	// versioned snapshot even when the provider reports no_change.
+	if !result.Changed && mode != "checkpoint" {
 		writerSyncReply(w, "no_change", current.Revision, false, result)
 		return
 	}

@@ -28,6 +28,8 @@ const WRITER_IR_AUTOSAVE_IDLE_MS = 3_000;
 const WRITER_IR_AUTOSAVE_MAX_WAIT_MS = 15_000;
 /** Coalesce follow-up saves after an in-flight request finishes. */
 const WRITER_IR_SAVE_FOLLOWUP_MS = 400;
+/** After this much idle time since the latest edit, create a checkpoint version. */
+const WRITER_IR_IDLE_CHECKPOINT_MS = 5 * 60_000;
 
 type WriterIRSaveRunResult = 'noop' | 'saved' | 'error' | 'busy';
 export type WriterIRSaveMode = 'draft' | 'checkpoint';
@@ -249,12 +251,15 @@ export function WriterIRControl({
   const autoSaveIdleTimerRef = useRef<number | undefined>(undefined);
   const autoSaveMaxTimerRef = useRef<number | undefined>(undefined);
   const saveFollowupTimerRef = useRef<number | undefined>(undefined);
+  const idleCheckpointTimerRef = useRef<number | undefined>(undefined);
   const dirtyStartedAtRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
   const draftRef = useRef(draft);
   const baseDocumentRef = useRef(baseDocument);
   const baseSourceRevisionRef = useRef(sourceRevision);
   const lastSavedDocumentRef = useRef<WriterDocument | undefined>(undefined);
+  /** Content last captured as a versioned revision (checkpoint / new revision). */
+  const lastCheckpointDocumentRef = useRef<WriterDocument>(document);
   const saveInFlightRef = useRef(false);
   const saveQueuedRef = useRef(false);
   /** Highest pending save mode; checkpoint wins over draft until consumed. */
@@ -276,6 +281,13 @@ export function WriterIRControl({
     if (saveFollowupTimerRef.current !== undefined) {
       window.clearTimeout(saveFollowupTimerRef.current);
       saveFollowupTimerRef.current = undefined;
+    }
+  }, []);
+
+  const clearIdleCheckpointTimer = useCallback(() => {
+    if (idleCheckpointTimerRef.current !== undefined) {
+      window.clearTimeout(idleCheckpointTimerRef.current);
+      idleCheckpointTimerRef.current = undefined;
     }
   }, []);
 
@@ -345,6 +357,7 @@ export function WriterIRControl({
       baseDocumentRef.current = document;
       setBaseSourceRevision(sourceRevision);
       baseSourceRevisionRef.current = sourceRevision;
+      lastCheckpointDocumentRef.current = document;
       setDraft(document);
       draftRef.current = document;
       setHistory([]);
@@ -397,8 +410,39 @@ export function WriterIRControl({
     return () => {
       mountedRef.current = false;
       clearAutoSaveTimers();
+      clearIdleCheckpointTimer();
     };
-  }, [clearAutoSaveTimers]);
+  }, [clearAutoSaveTimers, clearIdleCheckpointTimer]);
+
+  // After 5 minutes without edits, create a versioned checkpoint even if draft
+  // autosave already persisted the content in place.
+  useEffect(() => {
+    if (documentReadOnly || saveError || externalUpdate) {
+      clearIdleCheckpointTimer();
+      return undefined;
+    }
+    if (sameWriterDocumentForSync(draft, lastCheckpointDocumentRef.current)) {
+      clearIdleCheckpointTimer();
+      return undefined;
+    }
+    clearIdleCheckpointTimer();
+    idleCheckpointTimerRef.current = window.setTimeout(() => {
+      idleCheckpointTimerRef.current = undefined;
+      if (sameWriterDocumentForSync(draftRef.current, lastCheckpointDocumentRef.current)) {
+        return;
+      }
+      escalateSaveMode('checkpoint');
+      void saveRunnerRef.current();
+    }, WRITER_IR_IDLE_CHECKPOINT_MS);
+    return () => clearIdleCheckpointTimer();
+  }, [
+    clearIdleCheckpointTimer,
+    documentReadOnly,
+    draft,
+    escalateSaveMode,
+    externalUpdate,
+    saveError,
+  ]);
 
   const beginTextEdit = useCallback(() => {
     if (!textEditStartRef.current) textEditStartRef.current = draft;
@@ -463,15 +507,24 @@ export function WriterIRControl({
     }
 
     const snapshot = draftRef.current;
-    if (snapshot === baseDocumentRef.current) {
+    const saveMode = pendingSaveModeRef.current;
+    const sameAsBase = snapshot === baseDocumentRef.current
+      || sameWriterDocumentForSync(snapshot, baseDocumentRef.current);
+    const sameAsCheckpoint = sameWriterDocumentForSync(
+      snapshot,
+      lastCheckpointDocumentRef.current,
+    );
+    // Draft only runs when dirty. Checkpoint may still run after a draft save
+    // when content differs from the last versioned snapshot (idle checkpoint).
+    if (sameAsCheckpoint || (sameAsBase && saveMode !== 'checkpoint')) {
       pendingSaveModeRef.current = 'draft';
       return 'noop';
     }
-    const saveMode = pendingSaveModeRef.current;
     pendingSaveModeRef.current = 'draft';
     clearAutoSaveTimers();
     saveInFlightRef.current = true;
     saveQueuedRef.current = false;
+    const previousRevision = baseSourceRevisionRef.current;
     // Mark the in-flight snapshot so parent prop echoes during save do not look
     // like external updates.
     const previousSavedDocument = lastSavedDocumentRef.current;
@@ -500,6 +553,16 @@ export function WriterIRControl({
       baseSourceRevisionRef.current = savedSourceRevision;
       pendingExternalDocumentRef.current = null;
       setBaseSourceRevision(savedSourceRevision);
+      // New revision or explicit checkpoint becomes the version baseline.
+      if (
+        saveMode === 'checkpoint'
+        || savedSourceRevision !== previousRevision
+      ) {
+        lastCheckpointDocumentRef.current = sameWriterDocumentForSync(snapshot, savedDocument)
+          ? snapshot
+          : savedDocument;
+        clearIdleCheckpointTimer();
+      }
       if (hasNewerDraft) {
         // Keep the live draft; only advance the persisted base/revision.
         baseDocumentRef.current = savedDocument;
@@ -536,7 +599,7 @@ export function WriterIRControl({
         scheduleFollowupSave();
       }
     }
-  }, [clearAutoSaveTimers, documentReadOnly, scheduleFollowupSave, t]);
+  }, [clearAutoSaveTimers, clearIdleCheckpointTimer, documentReadOnly, scheduleFollowupSave, t]);
 
   saveRunnerRef.current = runSave;
 
@@ -671,6 +734,7 @@ export function WriterIRControl({
     textEditStartRef.current = null;
     baseDocumentRef.current = nextDocument;
     draftRef.current = nextDocument;
+    lastCheckpointDocumentRef.current = nextDocument;
     setBaseDocument(nextDocument);
     if (pending) {
       baseSourceRevisionRef.current = pending.sourceRevision;
