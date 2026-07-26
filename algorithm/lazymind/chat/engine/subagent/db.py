@@ -329,6 +329,50 @@ class SubAgentDB:
         except Exception:
             return None
 
+    def load_bound_slot_artifacts(
+        self, task_id: str, slot: str
+    ) -> List[Dict[str, Any]]:
+        """Return the exact revisions frozen as inputs for a plugin step attempt.
+
+        A plugin attempt records ``material_revision_id`` before its SubAgent task
+        starts. Reading through that binding prevents a later human edit or version
+        selection from changing the inputs of an already-running attempt.
+        """
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    text(
+                        'SELECT '
+                        '  psr.slot, '
+                        '  psr.slot_id, '
+                        '  psr.revision, '
+                        '  psr.list_index, '
+                        '  psr.artifact_seq, '
+                        '  psr.human_artifact_id, '
+                        '  psr.content_snapshot, '
+                        '  psr.change_source, '
+                        '  COALESCE(producer_exact.task_id, producer_legacy.task_id) AS task_id '
+                        'FROM plugin_attempt_input_bindings paib '
+                        'INNER JOIN plugin_session_steps consumer '
+                        '  ON consumer.id = paib.attempt_id '
+                        'INNER JOIN plugin_slot_revisions psr '
+                        '  ON psr.id = paib.material_revision_id '
+                        'LEFT JOIN plugin_session_steps producer_exact '
+                        '  ON producer_exact.id = psr.producer_attempt_id '
+                        'LEFT JOIN plugin_session_steps producer_legacy '
+                        '  ON producer_legacy.session_id = psr.session_id '
+                        '  AND producer_legacy.step_id = psr.step_id '
+                        '  AND producer_legacy.attempt = psr.attempt '
+                        'WHERE consumer.task_id = :task_id '
+                        '  AND (paib.bind_as = :slot OR paib.material_id = :slot OR psr.slot = :slot) '
+                        'ORDER BY psr.list_index ASC NULLS FIRST, paib.created_at ASC'
+                    ),
+                    {'task_id': task_id, 'slot': slot},
+                ).mappings().all()
+            return [dict(row) for row in rows]
+        except Exception:
+            return []
+
     def load_slot_order_list(self, session_id: str, slot: str) -> List[int]:
         """Return list_index values in UI display order for a plugin slot."""
         try:

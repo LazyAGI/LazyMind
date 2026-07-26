@@ -2,6 +2,18 @@ package main
 
 import "testing"
 
+func TestOpenAPIArtifactExportCanBeDisabledForSignedDesktopBundle(t *testing.T) {
+	t.Setenv("LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED", "false")
+	if openAPIArtifactExportEnabled() {
+		t.Fatal("OpenAPI artifact export should be disabled")
+	}
+
+	t.Setenv("LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED", "")
+	if !openAPIArtifactExportEnabled() {
+		t.Fatal("OpenAPI artifact export should remain enabled by default")
+	}
+}
+
 func TestCoreListenAddrDefaultsToCloudPort(t *testing.T) {
 	t.Setenv("LAZYMIND_CORE_HOST", "")
 	t.Setenv("LAZYMIND_CORE_PORT", "")

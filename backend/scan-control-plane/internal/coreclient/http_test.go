@@ -92,7 +92,7 @@ func TestHTTPCoreClientResourceRoutesUseCoreDocumentAPIs(t *testing.T) {
 	if datasetUserName != "User One" {
 		t.Fatalf("dataset create should carry caller user name, got %q", datasetUserName)
 	}
-	if rootDocBody["display_name"] != "Binding" || rootDocBody["p_id"] != "" || rootDocBody["idempotency_key"] != "binding-root-1" {
+	if rootDocBody["display_name"] != "Binding" || rootDocBody["type"] != "FOLDER" || rootDocBody["p_id"] != "" || rootDocBody["idempotency_key"] != "binding-root-1" {
 		t.Fatalf("binding root request should create a top-level Core document: %+v", rootDocBody)
 	}
 	if rootUserID != "user-1" {
@@ -526,6 +526,44 @@ func TestHTTPCoreClientGetCoreTaskResultUsesCoreTaskRoute(t *testing.T) {
 	result, err := client.GetCoreTaskResult(context.Background(), GetCoreTaskResultRequest{DatasetID: "dataset-1", CoreTaskID: "core-task-1"})
 	if err != nil || result.Status != ResultStatusSucceeded || result.CoreDocumentID != "core-doc-1" {
 		t.Fatalf("unexpected result=%+v err=%v", result, err)
+	}
+}
+
+func TestHTTPCoreClientResumeParseTaskUsesExistingCoreTask(t *testing.T) {
+	t.Parallel()
+
+	var body map[string]any
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/datasets/dataset-1/tasks/core-task-1:resume" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("X-User-Id"); got != "user-1" {
+			t.Fatalf("unexpected user id %q", got)
+		}
+		decodeJSON(t, r, &body)
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"tasks": []map[string]any{{
+				"task_id":     "core-task-1",
+				"document_id": "core-doc-1",
+				"status":      "STARTED",
+			}},
+		})
+	})
+
+	client := newHTTPTestCoreClient(t, handler)
+	result, err := client.ResumeParseTask(context.Background(), ResumeParseTaskRequest{
+		DatasetID:  "dataset-1",
+		CoreTaskID: "core-task-1",
+		UserID:     "user-1",
+	})
+	if err != nil {
+		t.Fatalf("resume parse task: %v", err)
+	}
+	if body["task_id"] != "core-task-1" {
+		t.Fatalf("resume body should reference the existing task: %+v", body)
+	}
+	if result.Status != StatusSubmitted || result.CoreTaskID != "core-task-1" || result.CoreDocumentID != "core-doc-1" || result.Created {
+		t.Fatalf("unexpected resume result: %+v", result)
 	}
 }
 

@@ -236,7 +236,7 @@ def _format_result(ok: bool, **fields: Any) -> str:
 def validate_image_ref(url: str) -> str:
     """Probe whether an image URL or path is accessible — no full download.
 
-    Use BEFORE save_artifact. If status is ok, save the returned `url` field
+    Use BEFORE save_artifacts. If status is ok, save the returned `url` field
     (http URL or local path). If invalid, skip — do NOT add to the frontend.
 
     Args:
@@ -280,7 +280,7 @@ def image_search_tool(query: str) -> str:
     to a web search scoped for reference images.
 
     IMPORTANT: URLs are candidates only. Call validate_image_ref on each URL
-    before save_artifact. Save only when status is ok (use the returned url).
+    before save_artifacts. Save only when status is ok (use the returned url).
 
     Args:
         query (str): A descriptive phrase for the type of reference image needed.

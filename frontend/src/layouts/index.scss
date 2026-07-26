@@ -654,6 +654,12 @@
       background: rgba(15, 23, 42, 0.05);
       color: #111827;
     }
+
+    &.is-active {
+      background: rgba(15, 23, 42, 0.06);
+      color: #111827;
+      font-weight: 600;
+    }
   }
 
   .user-item {

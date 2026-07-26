@@ -102,6 +102,26 @@ def test_translator_counts_tool_call_turns_not_individual_calls():
     assert translator.tool_call_turns == 2
 
 
+def test_translator_forwards_tool_limit_pending_as_structured_frame():
+    translator = AgentEventFrameTranslator(query='q')
+    pending = {
+        'decision_id': 'decision-1',
+        'used_rounds': 21,
+        'round_limit': 21,
+        'expanded_max_rounds': 200,
+        'timeout_seconds': 120,
+    }
+
+    frames = translator.feed({'tag': 'tool_limit_pending', **pending})
+
+    assert frames == [{
+        'think': None,
+        'text': None,
+        'sources': [],
+        'tool_limit_pending': pending,
+    }]
+
+
 def test_translator_renders_every_parallel_tool_call_and_result():
     translator = AgentEventFrameTranslator(query='批量读取这些网页')
     calls = [

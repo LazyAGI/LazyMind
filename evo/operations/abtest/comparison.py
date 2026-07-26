@@ -4,7 +4,12 @@ from collections.abc import Mapping
 from statistics import fmean
 from typing import Any
 
-from evo.operations.public_contracts import AGGREGATES, AbtestComparison, EvalSummary, dump_contract
+from evo.operations.public_contracts import (
+    AGGREGATES,
+    AbtestComparison,
+    dump_contract,
+    normalize_eval_summary,
+)
 
 
 COMPARE_METRICS = (
@@ -24,11 +29,14 @@ def compare_abtest(
     candidate: Mapping[str, Any],
     service: Mapping[str, Any],
 ) -> dict[str, Any]:
-    baseline_summary = EvalSummary.model_validate(_with_scored_count(baseline)).model_dump(mode='json')
-    candidate_summary = EvalSummary.model_validate(_with_scored_count(candidate)).model_dump(mode='json')
+    baseline_summary = normalize_eval_summary(baseline)
+    candidate_summary = normalize_eval_summary(candidate)
     origin = _eval_body(baseline_summary)
     after = _eval_body(candidate_summary)
-    delta = {key: round(float(after[key]) - float(origin[key]), 4) for key in AGGREGATES}
+    delta = {
+        key: round(_aggregate(after, key) - _aggregate(origin, key), 4)
+        for key in AGGREGATES
+    }
     failures = []
     if service.get('status') != 'ready':
         failures.append('candidate service is not ready')
@@ -45,8 +53,8 @@ def compare_abtest(
     if {row['case_id'] for row in origin['cases']} != {row['case_id'] for row in after['cases']}:
         failures.append('baseline and candidate case sets differ')
     reasons = list(failures)
-    if delta['avg_overall'] < 0:
-        reasons.append('candidate avg_overall regressed')
+    if delta['overall'] < 0:
+        reasons.append('candidate overall regressed')
     if delta['correct_rate'] < 0:
         reasons.append('candidate correct_rate regressed')
     verdict = 'reject' if reasons else 'accept'
@@ -118,11 +126,17 @@ def compare_eval_detail_for_repair(
 
 
 def _eval_body(summary: Mapping[str, Any]) -> dict[str, Any]:
-    return {key: summary[key] for key in ('scored_case_num', *AGGREGATES, 'cases')}
+    return {
+        key: summary[key]
+        for key in ('scored_case_num', 'correct_rate', 'good_rate', 'metrics', 'cases')
+    }
 
 
-def _with_scored_count(summary: Mapping[str, Any]) -> dict[str, Any]:
-    return dict(summary) | {'scored_case_num': int(summary.get('scored_case_num', -1))}
+def _aggregate(summary: Mapping[str, Any], key: str) -> float:
+    if key in {'correct_rate', 'good_rate'}:
+        return _float(summary.get(key))
+    metrics = summary.get('metrics') if isinstance(summary.get('metrics'), Mapping) else {}
+    return _float(metrics.get(key))
 
 
 def _summary_metrics(summary: Mapping[str, Any]) -> dict[str, float]:

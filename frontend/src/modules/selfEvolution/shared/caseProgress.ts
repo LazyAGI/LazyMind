@@ -30,7 +30,13 @@ export function getCaseProgressActionStatus(event: NormalizedThreadEvent): StepS
   const eventData = getEventPayloadData(event.payload);
   const after = getNestedRecordField(eventData, ["after"]);
   const status = getStringField(eventData, ["status"]) || getStringField(after, ["status"]);
-  if (event.action === "finish" || event.action === "completed" || status === "success" || status === "ended" || status === "skipped") {
+  if (
+    event.action === "finish" ||
+    event.action === "completed" ||
+    ["success", "succeeded", "completed", "done", "ended", "skipped"].includes(
+      status || "",
+    )
+  ) {
     return "done";
   }
   if (event.action === "failed" || status === "failed") {

@@ -54,6 +54,7 @@ func ErrorCodeOf(err error) string {
 
 type Client interface {
 	SubmitParseTask(ctx context.Context, req SubmitParseTaskRequest) (SubmitParseTaskResponse, error)
+	ResumeParseTask(ctx context.Context, req ResumeParseTaskRequest) (SubmitParseTaskResponse, error)
 	GetCoreTaskResult(ctx context.Context, req GetCoreTaskResultRequest) (CoreTaskResult, error)
 }
 
@@ -148,6 +149,12 @@ type SubmitParseTaskResponse struct {
 	Status         string `json:"status"`
 	VersionID      string `json:"version_id"`
 	Created        bool   `json:"created"`
+}
+
+type ResumeParseTaskRequest struct {
+	DatasetID  string `json:"dataset_id"`
+	CoreTaskID string `json:"core_task_id"`
+	UserID     string `json:"user_id,omitempty"`
 }
 
 type GetCoreTaskResultRequest struct {

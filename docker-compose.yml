@@ -294,6 +294,34 @@ services:
       redis:
         condition: service_healthy
 
+  channel-gateway:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-channel-gateway:${LAZYMIND_IMAGE_TAG:-latest}
+    build:
+      network: host
+      context: ./backend/channel-gateway
+      dockerfile: Dockerfile
+      args:
+        <<: *mirror-args
+    expose:
+      - "8085"
+    environment:
+      <<: *proxy-env
+    volumes:
+      - channel-gateway-data:/var/lib/lazymind/channel-gateway
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8085/readyz')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      db:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+      core:
+        condition: service_healthy
+    restart: unless-stopped
+
   office-convert-service:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-office-convert-service:${LAZYMIND_IMAGE_TAG:-latest}
     build:
@@ -335,6 +363,7 @@ services:
     environment:
       <<: *core-env
       MIGRATIONS_DIR: /migrations
+      MIGRATION_FAKE_VERSIONS: ${MIGRATION_FAKE_VERSIONS:-}
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
       LAZYMIND_SUBAGENT_DB_DSN: ${ACL_DB_DSN}
@@ -696,7 +725,7 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
-      - ./data/evo:/var/lib/lazymind/evo:ro
+      - evo-data:/var/lib/lazymind/evo:ro
       - ./data/subagent:/data/subagent
       - *algorithm-src-mount
       - *lazyllm-src-mount
@@ -737,6 +766,8 @@ services:
       LAZYMIND_FILE_URL_SIGN_SECRET: changeme-in-production
       LAZYMIND_FILE_URL_EXPIRE_SECONDS: "3600"
       LAZYMIND_MAX_RETRIES: "20"
+      LAZYMIND_AGENTIC_TOOL_LIMIT_WAIT_TIMEOUT: ${LAZYMIND_AGENTIC_TOOL_LIMIT_WAIT_TIMEOUT:-120}
+      LAZYMIND_AGENTIC_EXPANDED_MAX_ROUNDS: ${LAZYMIND_AGENTIC_EXPANDED_MAX_ROUNDS:-200}
       LAZYMIND_REVIEW_MAX_RETRIES: "5"
       LAZYMIND_SKILL_REVIEW_DEBUG: "false"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
@@ -761,7 +792,9 @@ services:
         condition: service_healthy
 
   evo-api:
+    init: true
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-evo-api:${LAZYMIND_IMAGE_TAG:-latest}
+    entrypoint: ["python", "-m", "evo.app"]
     build:
       network: host
       context: .
@@ -932,3 +965,4 @@ volumes:
   opensearch-data:
   sqlite-data:
   evo-data:
+  channel-gateway-data:

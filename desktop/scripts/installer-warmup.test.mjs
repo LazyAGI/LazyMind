@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
 const {
   assertMaintenanceRuntimeStopped,
+  macWarmupCompleted,
+  macWarmupMarkerPath,
+  markMacWarmupCompleted,
   runInstallerWarmupLifecycle,
 } = require("../electron/src/installer-warmup.js");
 
@@ -104,4 +110,15 @@ test("maintenance stopped verification rejects mismatched ownership", () => {
     () => assertMaintenanceRuntimeStopped({ ...stoppedStatus(), ownerMatched: false }),
     /ownerMatched=false/,
   );
+});
+
+test("macOS installation warmup marker is version-specific and written atomically", () => {
+  const userDataDir = mkdtempSync(path.join(tmpdir(), "lazymind-warmup-"));
+  const markerPath = macWarmupMarkerPath(userDataDir);
+
+  assert.equal(macWarmupCompleted(markerPath, "0.1.0"), false);
+  markMacWarmupCompleted(markerPath, "0.1.0");
+  assert.equal(macWarmupCompleted(markerPath, "0.1.0"), true);
+  assert.equal(macWarmupCompleted(markerPath, "0.2.0"), false);
+  assert.equal(JSON.parse(readFileSync(markerPath, "utf8")).completed, true);
 });

@@ -65,6 +65,24 @@ def test_intentwrite_emits_atomic_patch_with_current_evidence():
     assert len(payload['operations']) == 2
 
 
+def test_intentwrite_normalizes_singular_constraint_field():
+    tool = build_intentwrite_tool(
+        conversation_id='conv-1', current_query='知识底座已经基本完成', current_intent={},
+    )
+    with patch('lazymind.chat.engine.tools.intent_writer._write_agent_data') as write:
+        result = tool('conversation', [
+            _operation(
+                op='add',
+                field='constraint',
+                value='知识底座已基本完成',
+                evidence='知识底座已经基本完成',
+            ),
+        ])
+
+    assert result == 'Intent updated for conversation.'
+    assert write.call_args.kwargs['operations'][0]['field'] == 'constraints'
+
+
 def test_intentwrite_rejects_non_user_evidence():
     tool = build_intentwrite_tool(
         conversation_id='conv-1', current_query='请总结经验', current_intent={},

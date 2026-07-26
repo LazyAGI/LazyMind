@@ -6,33 +6,32 @@ import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync, isExpiredSignedUrl }
 import { buildDiffLinesWithInline } from "@/modules/memory/shared";
 import { DiffLineContent } from "@/modules/memory/components/DiffLineContent";
 import { uploadFileInChunks } from "@/modules/chat/utils/chunkUpload";
+import { PluginSessionApi } from "@/modules/chat/utils/request";
 import { FilePreviewDrawer } from "./FilePreviewDrawer";
 import {
   WriterArtifactContent,
   WRITER_ARTIFACT_SLOT_IDS,
   unwrapArtifactPayload,
 } from './writerArtifactViews';
-import { WriterIRControl } from './WriterIRControl';
-import { isWriterDocument, type WriterBlock, type WriterDocument } from './writerIR';
+import { WriterIRControl, type WriterIRSaveMode, type WriterIRSaveResult } from './WriterIRControl';
+import {
+  isWriterDocument,
+  normalizeWriterDocumentForSync,
+  type WriterBlock,
+  type WriterDocument,
+} from './writerIR';
+import { SlotEditingContext } from './slotEditingContext';
 import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
 import i18n from '@/i18n';
 import { useTranslation } from 'react-i18next';
 import { localizeErrorCode } from '@/components/request';
 
+export { SlotEditingContext } from './slotEditingContext';
+export type { SlotEditingContextValue } from './slotEditingContext';
+
 function tr(key: string, options?: Record<string, unknown>): string {
   return i18n.t(key, options);
 }
-
-/**
- * Context for notifying the parent PluginPanel when any text slot enters/exits editing mode.
- * The parent uses this to disable the Retry / Continue footer buttons.
- */
-interface SlotEditingContextValue {
-  setEditing: (key: string, editing: boolean) => void;
-}
-export const SlotEditingContext = createContext<SlotEditingContextValue>({
-  setEditing: () => {},
-});
 
 export const SlotDownloadContext = createContext(true);
 
@@ -288,6 +287,231 @@ function TextDiffView({ currentText, otherText, otherLabel, reversed }: TextDiff
         )}
       </div>
     </div>
+  );
+}
+
+const snapshotDiffTextCache = new Map<string, Promise<string>>();
+
+function snapshotDiffCacheKey(snapshot: unknown): string {
+  if (snapshot == null) return '';
+  if (typeof snapshot === 'string') return `s:${snapshot}`;
+  if (typeof snapshot !== 'object') return `v:${String(snapshot)}`;
+  const record = snapshot as Record<string, unknown>;
+  if (record.url || record.path) {
+    return `f:${String(record.url ?? '')}\n${String(record.path ?? '')}\n${String(record.size ?? '')}\n${String(record.filename ?? record.name ?? '')}`;
+  }
+  try {
+    return `j:${JSON.stringify(snapshot)}`;
+  } catch {
+    return `o:${Object.keys(record).join(',')}`;
+  }
+}
+
+function formatPayloadForDiff(payload: unknown): string {
+  const unwrapped = unwrapArtifactPayload(payload);
+  if (isWriterDocument(unwrapped)) {
+    return writerDocumentToMarkdown(unwrapped);
+  }
+  if (isWriterDocument(payload)) {
+    return writerDocumentToMarkdown(payload);
+  }
+  if (typeof unwrapped === 'string') return unwrapped;
+  if (unwrapped != null) return JSON.stringify(unwrapped, null, 2);
+  if (typeof payload === 'string') return payload;
+  return payload == null ? '' : JSON.stringify(payload, null, 2);
+}
+
+async function resolveSnapshotDiffText(snapshot: unknown): Promise<string> {
+  if (snapshot == null) return '';
+  if (typeof snapshot === 'string') {
+    const trimmed = snapshot.trim();
+    if (
+      trimmed.startsWith('{')
+      || trimmed.startsWith('[')
+      || (!trimmed.includes('/static-files/')
+        && !trimmed.includes('/api/core/')
+        && !trimmed.startsWith('http')
+        && !trimmed.startsWith('/var/'))
+    ) {
+      return snapshot;
+    }
+    const fetchUrl = trimmed.includes('/static-files/') || trimmed.startsWith('http')
+      ? resolveCoreAssetUrl(trimmed)
+      : await resolveMarkdownImageUrlAsync(trimmed);
+    if (!fetchUrl) return snapshot;
+    const response = await fetch(fetchUrl);
+    if (!response.ok) throw new Error(localizeErrorCode('2000509'));
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('json') || trimmed.toLowerCase().includes('.json')) {
+      return formatPayloadForDiff(await response.json());
+    }
+    const text = await response.text();
+    if (isSpaFallbackHtml(text)) throw new Error(localizeErrorCode('2000509'));
+    return text;
+  }
+
+  if (typeof snapshot !== 'object') return String(snapshot);
+  const record = snapshot as Record<string, unknown>;
+  if (record.text !== undefined) return String(record.text);
+  if (record.data !== undefined) {
+    return typeof record.data === 'string'
+      ? record.data
+      : JSON.stringify(record.data, null, 2);
+  }
+  if (isWriterDocument(record) || isWriterDocument(unwrapArtifactPayload(record))) {
+    return formatPayloadForDiff(record);
+  }
+
+  const pathForSign = String(record.url ?? record.path ?? '').trim();
+  if (!pathForSign) return JSON.stringify(record, null, 2);
+
+  const apiUrl = record.url ? resolveCoreAssetUrl(String(record.url)) : '';
+  const fetchUrl = apiUrl && !isExpiredSignedUrl(apiUrl)
+    ? apiUrl
+    : await resolveMarkdownImageUrlAsync(pathForSign);
+  if (!fetchUrl) throw new Error(localizeErrorCode('2000509'));
+
+  const response = await fetch(fetchUrl);
+  if (!response.ok) throw new Error(localizeErrorCode('2000509'));
+  const contentType = response.headers.get('content-type') || '';
+  const looksJson = contentType.includes('json')
+    || pathForSign.toLowerCase().includes('.json')
+    || String(record.type ?? '').toLowerCase() === 'json'
+    || String(record.filename ?? '').toLowerCase().endsWith('.json');
+  if (looksJson) {
+    return formatPayloadForDiff(await response.json());
+  }
+  const text = await response.text();
+  if (isSpaFallbackHtml(text)) throw new Error(localizeErrorCode('2000509'));
+  return text;
+}
+
+function loadSnapshotDiffText(snapshot: unknown): Promise<string> {
+  const key = snapshotDiffCacheKey(snapshot);
+  if (!key) return Promise.resolve('');
+  const cached = snapshotDiffTextCache.get(key);
+  if (cached) return cached;
+  const pending = resolveSnapshotDiffText(snapshot).catch((error) => {
+    snapshotDiffTextCache.delete(key);
+    throw error;
+  });
+  snapshotDiffTextCache.set(key, pending);
+  return pending;
+}
+
+function useResolvedSnapshotText(snapshot: unknown) {
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    loadSnapshotDiffText(snapshot)
+      .then((resolved) => {
+        if (!cancelled) {
+          setText(resolved);
+          setLoading(false);
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) {
+          setText('');
+          setLoading(false);
+          setError(
+            loadError instanceof Error ? loadError.message : localizeErrorCode('2000509'),
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [snapshot]);
+
+  return { text, loading, error };
+}
+
+function SnapshotTextPreview({ snapshot }: { snapshot: unknown }) {
+  const { text, loading, error } = useResolvedSnapshotText(snapshot);
+  if (loading) {
+    return <div className='plugin-slot__version-compare-hint'>{tr('common.loading')}</div>;
+  }
+  if (error) {
+    return <div className='plugin-slot__version-compare-hint'>{error || tr('chat.slots.contentLoadFailed')}</div>;
+  }
+  return (
+    <pre className='plugin-slot__version-current-text'>
+      {text || tr('chat.slots.noContent')}
+    </pre>
+  );
+}
+
+interface SnapshotTextDiffViewProps {
+  currentSnapshot: unknown;
+  otherSnapshot?: unknown;
+  otherText?: string;
+  otherLabel: string;
+  reversed?: boolean;
+}
+
+function SnapshotTextDiffView({
+  currentSnapshot,
+  otherSnapshot,
+  otherText,
+  otherLabel,
+  reversed,
+}: SnapshotTextDiffViewProps) {
+  const [currentText, setCurrentText] = useState('');
+  const [resolvedOtherText, setResolvedOtherText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      loadSnapshotDiffText(currentSnapshot),
+      otherText !== undefined
+        ? Promise.resolve(otherText)
+        : loadSnapshotDiffText(otherSnapshot),
+    ])
+      .then(([current, other]) => {
+        if (!cancelled) {
+          setCurrentText(current);
+          setResolvedOtherText(other);
+          setLoading(false);
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) {
+          setCurrentText('');
+          setResolvedOtherText('');
+          setLoading(false);
+          setError(
+            loadError instanceof Error ? loadError.message : localizeErrorCode('2000509'),
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSnapshot, otherSnapshot, otherText]);
+
+  if (loading) {
+    return <div className='plugin-slot__version-compare-hint'>{tr('common.loading')}</div>;
+  }
+  if (error) {
+    return <div className='plugin-slot__version-compare-hint'>{error || tr('chat.slots.contentLoadFailed')}</div>;
+  }
+  return (
+    <TextDiffView
+      currentText={currentText}
+      otherText={resolvedOtherText}
+      otherLabel={otherLabel}
+      reversed={reversed}
+    />
   );
 }
 
@@ -836,8 +1060,8 @@ export function SlotVersionPopover({
             {isDraftSelected && draftText !== undefined ? (
               /* Draft selected: show draft vs current diff with discard + flush actions */
               <div className='plugin-slot__version-compare'>
-                <TextDiffView
-                  currentText={extractText(activeCurrentValue)}
+                <SnapshotTextDiffView
+                  currentSnapshot={activeCurrentValue}
                   otherText={draftText}
                   otherLabel={tr('chat.slots.draft')}
                   reversed={true}
@@ -862,9 +1086,9 @@ export function SlotVersionPopover({
               </div>
             ) : effectiveSelectedVersion && !effectiveSelectedVersion.selected ? (
               <div className='plugin-slot__version-compare'>
-                <TextDiffView
-                  currentText={extractText(activeCurrentValue)}
-                  otherText={extractText(effectiveSelectedVersion.content_snapshot)}
+                <SnapshotTextDiffView
+                  currentSnapshot={activeCurrentValue}
+                  otherSnapshot={effectiveSelectedVersion.content_snapshot}
                   otherLabel={tr('chat.slots.versionSourceLabel', {
                     version: `v${effectiveSelectedVersion.revision}`,
                     source: effectiveSelectedVersion.change_source === 'human' ? tr('chat.slots.manualEdit') : tr('chat.slots.aiGenerated'),
@@ -883,9 +1107,7 @@ export function SlotVersionPopover({
             ) : (
               <div className='plugin-slot__version-compare plugin-slot__version-compare--same'>
                 {effectiveSelectedVersion ? (
-                  <pre className='plugin-slot__version-current-text'>
-                    {extractText(activeCurrentValue) || tr('chat.slots.noContent')}
-                  </pre>
+                  <SnapshotTextPreview snapshot={activeCurrentValue} />
                 ) : (
                   <div className='plugin-slot__version-compare-hint'>{tr('chat.slots.selectVersionCompare')}</div>
                 )}
@@ -933,6 +1155,7 @@ interface SlotImageProps {
   /** Called when the user clicks the reference (cite) button. */
   onReference?: (slot: SlotRevision) => void;
   readOnly?: boolean;
+  hideMutationActions?: boolean;
 }
 
 export function SlotImage({
@@ -945,6 +1168,7 @@ export function SlotImage({
   onRefresh,
   onReference,
   readOnly,
+  hideMutationActions,
 }: SlotImageProps) {
   const raw = slot.artifact_value;
   const { displayUrl: url, pending, hasSource } = useSlotImageUrl(raw);
@@ -1035,12 +1259,13 @@ export function SlotImage({
   }
 
   const hasActions = Boolean(sessionId && slotId && slot.list_index !== undefined) && !readOnly;
+  const showMutationActions = hasActions && !hideMutationActions;
 
   // Overlays rendered directly on top of the image (no separate action bar)
   const overlays = hasActions ? (
     <>
       {/* Delete + Upload buttons — top-right, shown on hover via CSS */}
-      {confirmDelete ? (
+      {showMutationActions && (confirmDelete ? (
         <span className='plugin-slot__delete-confirm plugin-slot__delete-confirm--overlay'>
           <span className='plugin-slot__delete-confirm-text'>{tr('chat.slots.confirmDeleteQuestion')}</span>
           <button
@@ -1072,7 +1297,7 @@ export function SlotImage({
             aria-label={tr('chat.slots.deleteImage')}
           >×</button>
         </span>
-      )}
+      ))}
 
       {/* Version badge — bottom-left, always visible, overlaid on image */}
       {revisionCount !== undefined && revisionCount > 0 && (
@@ -1117,7 +1342,7 @@ export function SlotImage({
           {overlays}
         </div>
         {/* Hidden file input */}
-        {hasActions && (
+        {showMutationActions && (
           <input
             ref={fileInputRef}
             type='file'
@@ -1617,9 +1842,68 @@ function replaceStructuredArtifactPayload(
   return document;
 }
 
+/** True when the document has a cloud provider target (Feishu uri or document_id). */
+function hasProviderTarget(document?: WriterDocument | null): boolean {
+  const binding = document?.provider_binding;
+  if (!binding) return false;
+
+  return (
+    (typeof binding.uri === 'string' && binding.uri.trim() !== '')
+    || (
+      typeof binding.document_id === 'string'
+      && binding.document_id.trim() !== ''
+    )
+  );
+}
+
 function ensureJsonFilename(name: string): string {
   const trimmed = name.trim() || 'writer-document.json';
   return trimmed.toLowerCase().endsWith('.json') ? trimmed : `${trimmed}.json`;
+}
+
+async function syncWriterDocumentSlot(
+  sessionId: string,
+  slotId: string,
+  listIndex: number,
+  sourceRevision: string | number | undefined,
+  sourceDocument: WriterDocument,
+  revisedDocument: WriterDocument,
+  mode: WriterIRSaveMode = 'checkpoint',
+): Promise<WriterIRSaveResult> {
+  if (typeof sourceRevision !== 'number' || sourceRevision <= 0) {
+    throw new Error(tr('chat.writerIR.saveFailed'));
+  }
+  const response = await PluginSessionApi().syncWriterDocument(
+    sessionId,
+    slotId,
+    listIndex,
+    {
+      base_revision: sourceRevision,
+      source_document: normalizeWriterDocumentForSync(sourceDocument),
+      revised_document: normalizeWriterDocumentForSync(revisedDocument),
+      mode,
+    },
+    { silentError: true } as never,
+  );
+  const result = response?.data?.data;
+  if (
+    response?.data?.code !== 0
+    || !result
+    || (result.status !== 'synced' && result.status !== 'no_change')
+    || typeof result.revision !== 'number'
+    || result.revision <= 0
+    || result.feishu_synced !== true
+    || (result.status === 'synced' && result.artifact_saved !== true)
+    || (result.status === 'no_change' && result.artifact_saved !== false)
+    || result.patch_result?.success !== true
+    || !isWriterDocument(result.document)
+  ) {
+    throw new Error(tr('chat.writerIR.saveFailed'));
+  }
+  return {
+    document: result.document,
+    sourceRevision: result.revision,
+  };
 }
 
 function writerBlockToMarkdown(block: WriterBlock, depth = 0): string {
@@ -1670,7 +1954,7 @@ function shouldRenderInlineStructuredContent(
   const payload = getInlineStructuredArtifactPayload(slot);
   if (payload === null) return false;
   if (isWriterDocument(payload)) {
-    return expectedType !== 'image' && expectedType !== 'file';
+    return expectedType !== 'image';
   }
   if (expectedType !== 'text') return false;
   if (slot.content_type === 'json') return true;
@@ -1731,11 +2015,32 @@ function SlotJsonFile({
   const [payload, setPayload] = useState<unknown>(null);
   const [sourceJson, setSourceJson] = useState<unknown>(null);
   const [loadedSourceKey, setLoadedSourceKey] = useState('');
+  const [loadedRevision, setLoadedRevision] = useState<number>();
+  const [localRevisionCount, setLocalRevisionCount] = useState<number | undefined>(revisionCount);
   const [writerEditing, setWriterEditing] = useState(false);
+  const hasPayloadRef = useRef(false);
+  hasPayloadRef.current = payload !== null;
+
+  const applySavedRevision = useCallback((revision?: number) => {
+    if (typeof revision !== 'number' || revision <= 0) return;
+    setLoadedRevision((prev) => (prev === undefined || revision > prev ? revision : prev));
+    setLocalRevisionCount((prev) => Math.max(prev ?? 0, revisionCount ?? 0, revision));
+  }, [revisionCount]);
+
+  useEffect(() => {
+    if (typeof slot.revision === 'number' && slot.revision > 0) {
+      setLoadedRevision((prev) => (prev === undefined || slot.revision >= prev ? slot.revision : prev));
+    }
+  }, [slot.revision]);
+
+  useEffect(() => {
+    if (typeof revisionCount === 'number' && revisionCount > 0) {
+      setLocalRevisionCount((prev) => (prev === undefined || revisionCount >= prev ? revisionCount : prev));
+    }
+  }, [revisionCount]);
 
   useEffect(() => {
     if (!hasSource) return;
-    setLoading(true);
     setError(null);
   }, [hasSource, sourceKey]);
 
@@ -1746,6 +2051,7 @@ function SlotJsonFile({
       setPayload(null);
       setSourceJson(null);
       setLoadedSourceKey('');
+      setLoadedRevision(undefined);
       return;
     }
     if (resolving) return;
@@ -1756,7 +2062,8 @@ function SlotJsonFile({
     }
 
     const controller = new AbortController();
-    setLoading(true);
+    // Soft refresh: keep the editor mounted when content is already on screen.
+    if (!hasPayloadRef.current) setLoading(true);
     setError(null);
 
     fetch(url, { signal: controller.signal })
@@ -1770,6 +2077,10 @@ function SlotJsonFile({
         setSourceJson(json);
         setPayload(unwrapArtifactPayload(json));
         setLoadedSourceKey(sourceKey);
+        // Prefer a newer locally-saved revision over a stale session snapshot.
+        setLoadedRevision((prev) => (
+          typeof prev === 'number' && prev > slot.revision ? prev : slot.revision
+        ));
         setLoading(false);
       })
       .catch((fetchError: unknown) => {
@@ -1779,23 +2090,62 @@ function SlotJsonFile({
       });
 
     return () => controller.abort();
-  }, [hasSource, reloadToken, resolving, sourceKey, url]);
+  }, [hasSource, reloadToken, resolving, slot.revision, sourceKey, url]);
 
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
   const showArtifactActions = !WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
   const writerDocument = isWriterDocument(payload) ? payload : null;
+  const usesWriterSync = apiListIndex === -1 && hasProviderTarget(writerDocument);
   const canEditWriterIR = Boolean(sessionId && slotId)
     && !readOnly
     && writerDocument?.ui_editable === true
     && (loadedSourceKey === sourceKey || writerEditing);
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
+  const displayRevision = loadedRevision ?? slot.revision;
+  const displayRevisionCount = localRevisionCount ?? revisionCount;
   const showVersionBadge =
-    revisionCount !== undefined && revisionCount > 0 && Boolean(sessionId && slotId);
+    displayRevisionCount !== undefined && displayRevisionCount > 0 && Boolean(sessionId && slotId);
 
-  const handleSaveWriterDocument = useCallback(async (document: WriterDocument) => {
+  const handleSaveWriterDocument = useCallback(async (
+    sourceDocument: WriterDocument,
+    document: WriterDocument,
+    sourceRevision?: string | number,
+    mode: WriterIRSaveMode = 'checkpoint',
+  ): Promise<WriterIRSaveResult | void> => {
     if (!sessionId || !slotId || readOnly) {
       throw new Error(tr('chat.writerIR.saveFailed'));
+    }
+
+    if (usesWriterSync) {
+      try {
+        const result = await syncWriterDocumentSlot(
+          sessionId,
+          slot.slot_id,
+          apiListIndex,
+          sourceRevision,
+          sourceDocument,
+          document,
+          mode,
+        );
+        const serialized = replaceStructuredArtifactPayload(sourceJson, result.document);
+        setSourceJson(serialized);
+        // Prefer the client snapshot reference so WriterIRControl can treat the
+        // prop update as identity-equal to its in-flight draft and skip a redraw.
+        setPayload(document);
+        applySavedRevision(
+          typeof result.sourceRevision === 'number' ? result.sourceRevision : undefined,
+        );
+        // Keep the editor mounted: local payload/revision are already authoritative.
+        // Session polling will catch up without a hard refresh.
+        return {
+          ...result,
+          document,
+        };
+      } catch (syncError) {
+        onRefresh?.();
+        throw syncError;
+      }
     }
 
     const serialized = replaceStructuredArtifactPayload(sourceJson, document);
@@ -1815,11 +2165,30 @@ function SlotJsonFile({
     };
     delete nextValue.url;
 
-    await patchSlotItemValue(sessionId, slotId, apiListIndex, nextValue, 'file');
+    const revision = await patchSlotItemValue(
+      sessionId, slotId, apiListIndex, nextValue, 'file', mode,
+    );
     setSourceJson(serialized);
     setPayload(document);
-    onRefresh?.();
-  }, [apiListIndex, name, onRefresh, patchSlotItemValue, raw, readOnly, sessionId, slotId, sourceJson]);
+    applySavedRevision(revision);
+    return {
+      document,
+      sourceRevision: typeof revision === 'number' ? revision : sourceRevision,
+    };
+  }, [
+    apiListIndex,
+    applySavedRevision,
+    name,
+    onRefresh,
+    patchSlotItemValue,
+    raw,
+    readOnly,
+    sessionId,
+    slot.slot_id,
+    slotId,
+    sourceJson,
+    usesWriterSync,
+  ]);
 
   const handleWriterEditingChange = useCallback((editing: boolean) => {
     setWriterEditing(editing);
@@ -1881,7 +2250,7 @@ function SlotJsonFile({
   return (
     <div className='plugin-slot plugin-slot--artifact'>
       <div className='plugin-slot__artifact-body'>
-        {loadedSourceKey !== sourceKey && !error && (
+        {loadedSourceKey !== sourceKey && !error && payload === null && (
           <div className='writer-ir__notice writer-ir__notice--warning' role='status'>
             {tr('chat.writerIR.refreshing')}
           </div>
@@ -1901,8 +2270,9 @@ function SlotJsonFile({
         {writerDocument ? (
           <WriterIRControl
             document={writerDocument}
-            sourceRevision={loadedSourceKey}
+            sourceRevision={displayRevision}
             readOnly={!canEditWriterIR}
+            editingKey={editingKey}
             onSave={canEditWriterIR ? handleSaveWriterDocument : undefined}
             onEditingChange={handleWriterEditingChange}
           />
@@ -1917,11 +2287,11 @@ function SlotJsonFile({
               sessionId={sessionId!}
               slotId={slotId!}
               listIndex={apiListIndex}
-              revisionCount={revisionCount!}
-              currentRevision={slot.revision}
+              revisionCount={displayRevisionCount!}
+              currentRevision={displayRevision}
               currentValue={slot.artifact_value}
               currentChangeSource={slot.change_source}
-              contentType='file'
+              contentType='json'
               onRollbackDone={onRefresh}
             />
           )}
@@ -1974,24 +2344,109 @@ function SlotInlineStructured({
   const { patchSlotItemValue } = usePluginStore();
   const { setEditing: notifyEditing } = useContext(SlotEditingContext);
   const [writerEditing, setWriterEditing] = useState(false);
+  const [localRevision, setLocalRevision] = useState(slot.revision);
+  const [localRevisionCount, setLocalRevisionCount] = useState<number | undefined>(revisionCount);
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
   const writerDocument = isWriterDocument(payload) ? payload : null;
+  const usesWriterSync = apiListIndex === -1 && hasProviderTarget(writerDocument);
   const canEditWriterIR = Boolean(sessionId && slotId)
     && !readOnly
     && writerDocument?.ui_editable === true;
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-ir`;
+  const displayRevision = localRevision ?? slot.revision;
+  const displayRevisionCount = localRevisionCount ?? revisionCount;
   const showVersionBadge =
-    revisionCount !== undefined && revisionCount > 0 && Boolean(sessionId && slotId);
+    displayRevisionCount !== undefined && displayRevisionCount > 0 && Boolean(sessionId && slotId);
+  const [writerMarkdownDownload, setWriterMarkdownDownload] = useState<{
+    url: string;
+    filename: string;
+  } | null>(null);
 
-  const handleSaveWriterDocument = useCallback(async (document: WriterDocument) => {
+  const applySavedRevision = useCallback((revision?: number) => {
+    if (typeof revision !== 'number' || revision <= 0) return;
+    setLocalRevision((prev) => (prev === undefined || revision > prev ? revision : prev));
+    setLocalRevisionCount((prev) => Math.max(prev ?? 0, revisionCount ?? 0, revision));
+  }, [revisionCount]);
+
+  useEffect(() => {
+    if (typeof slot.revision === 'number' && slot.revision > 0) {
+      setLocalRevision((prev) => (prev === undefined || slot.revision >= prev ? slot.revision : prev));
+    }
+  }, [slot.revision]);
+
+  useEffect(() => {
+    if (typeof revisionCount === 'number' && revisionCount > 0) {
+      setLocalRevisionCount((prev) => (prev === undefined || revisionCount >= prev ? revisionCount : prev));
+    }
+  }, [revisionCount]);
+
+  useEffect(() => {
+    if (!writerDocument) {
+      setWriterMarkdownDownload(null);
+      return;
+    }
+    const blob = new Blob([writerDocumentToMarkdown(writerDocument)], {
+      type: 'text/markdown;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    setWriterMarkdownDownload({
+      url,
+      filename: writerMarkdownFilename(slot.caption || resolvedSlotId),
+    });
+    return () => URL.revokeObjectURL(url);
+  }, [resolvedSlotId, slot.caption, writerDocument]);
+
+  const handleSaveWriterDocument = useCallback(async (
+    sourceDocument: WriterDocument,
+    document: WriterDocument,
+    sourceRevision?: string | number,
+    mode: WriterIRSaveMode = 'checkpoint',
+  ): Promise<WriterIRSaveResult | void> => {
     if (!sessionId || !slotId || readOnly) {
       throw new Error(tr('chat.writerIR.saveFailed'));
     }
+    if (usesWriterSync) {
+      try {
+        const result = await syncWriterDocumentSlot(
+          sessionId,
+          slot.slot_id,
+          apiListIndex,
+          sourceRevision,
+          sourceDocument,
+          document,
+          mode,
+        );
+        applySavedRevision(
+          typeof result.sourceRevision === 'number' ? result.sourceRevision : undefined,
+        );
+        // Avoid hard session refresh; WriterIRControl already applied the result.
+        return result;
+      } catch (syncError) {
+        onRefresh?.();
+        throw syncError;
+      }
+    }
     const serialized = replaceStructuredArtifactPayload(slot.artifact_value, document);
-    await patchSlotItemValue(sessionId, slotId, apiListIndex, serialized, 'json');
-    onRefresh?.();
-  }, [apiListIndex, onRefresh, patchSlotItemValue, readOnly, sessionId, slot, slotId]);
+    const revision = await patchSlotItemValue(
+      sessionId, slotId, apiListIndex, serialized, 'json', mode,
+    );
+    applySavedRevision(revision);
+    return {
+      document,
+      sourceRevision: typeof revision === 'number' ? revision : sourceRevision,
+    };
+  }, [
+    apiListIndex,
+    applySavedRevision,
+    onRefresh,
+    patchSlotItemValue,
+    readOnly,
+    sessionId,
+    slot,
+    slotId,
+    usesWriterSync,
+  ]);
 
   const handleWriterEditingChange = useCallback((editing: boolean) => {
     setWriterEditing(editing);
@@ -2012,8 +2467,9 @@ function SlotInlineStructured({
         {writerDocument ? (
           <WriterIRControl
             document={writerDocument}
-            sourceRevision={slot.revision}
+            sourceRevision={displayRevision}
             readOnly={!canEditWriterIR}
+            editingKey={editingKey}
             onSave={canEditWriterIR ? handleSaveWriterDocument : undefined}
             onEditingChange={handleWriterEditingChange}
           />
@@ -2028,13 +2484,25 @@ function SlotInlineStructured({
               sessionId={sessionId!}
               slotId={slotId!}
               listIndex={apiListIndex}
-              revisionCount={revisionCount!}
-              currentRevision={slot.revision}
+              revisionCount={displayRevisionCount!}
+              currentRevision={displayRevision}
               currentValue={slot.artifact_value}
               currentChangeSource={slot.change_source}
               contentType='json'
               onRollbackDone={onRefresh}
             />
+          )}
+        </div>
+        <div className='plugin-slot__artifact-actions'>
+          {allowDownload && writerMarkdownDownload && (
+            <a
+              className='plugin-slot__file-action-btn'
+              href={writerMarkdownDownload.url}
+              download={writerMarkdownDownload.filename}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {tr('chat.slots.download')}
+            </a>
           )}
         </div>
       </div>
@@ -2375,6 +2843,7 @@ export function SlotRenderer({
   onRefresh,
   onReference,
   readOnly,
+  hideImageMutationActions,
 }: {
   slot: SlotRevision;
   cardMode?: boolean;
@@ -2386,6 +2855,7 @@ export function SlotRenderer({
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
   readOnly?: boolean;
+  hideImageMutationActions?: boolean;
 }) {
   useTranslation();
   if (slot.artifact_value === undefined || slot.artifact_value === null) {
@@ -2405,6 +2875,7 @@ export function SlotRenderer({
         onRefresh={onRefresh}
         onReference={onReference}
         readOnly={readOnly}
+        hideMutationActions={hideImageMutationActions}
       />
     );
   }

@@ -243,7 +243,7 @@ func buildAdapters(cfg config.Config) (Components, error) {
 	if err != nil {
 		return Components{}, err
 	}
-	adminVerifier, err := newAuthServiceAdminVerifier(cfg.AuthServiceBaseURL, nil)
+	adminVerifier, err := newAuthServiceAdminVerifier(cfg.AuthServiceBaseURL, cfg.AuthServiceInternalToken, nil)
 	if err != nil {
 		return Components{}, fmt.Errorf("configure auth service admin verifier: %w", err)
 	}
@@ -519,6 +519,10 @@ type targetTreeCachePrewarmer struct {
 }
 
 func buildTargetSearchCachePrewarmer(built Components, cfg config.Config) (*targetTreeCachePrewarmer, error) {
+	if !cfg.TargetSearchCachePrewarmEnabled {
+		fmt.Fprintln(os.Stdout, "target search cache prewarmer disabled")
+		return nil, nil
+	}
 	if built.TargetSearchCacheStore == nil {
 		return nil, nil
 	}
