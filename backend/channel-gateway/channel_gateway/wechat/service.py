@@ -44,11 +44,13 @@ class WeChatConnectionService:
         store: GatewayStore,
         cipher: JsonCipher,
         on_account_connected: Callable[[str], None] | None = None,
+        on_account_disconnected: Callable[[str], None] | None = None,
     ):
         self._settings = settings
         self._store = store
         self._cipher = cipher
         self._on_account_connected = on_account_connected
+        self._on_account_disconnected = on_account_disconnected
         self._wechat = WeChatClient(
             settings.wechat_ilink_base_url,
             settings.wechat_poll_timeout_seconds,
@@ -228,6 +230,20 @@ class WeChatConnectionService:
             raise GatewayError(422, 'PROVIDER_NOT_SUPPORTED', f'暂不支持频道类型：{provider}')
         rows = self._store.list_accounts(owner_user_id, provider)
         return {'items': [self._account_view(row) for row in rows]}
+
+    def disconnect_account(self, owner_user_id: str, account_id: str) -> None:
+        account = self._store.get_account(owner_user_id, account_id)
+        if not account:
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '微信账号不存在或已解除连接')
+        if self._on_account_disconnected:
+            self._on_account_disconnected(account_id)
+        if not self._store.delete_account(owner_user_id, account_id):
+            raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '微信账号状态已经变化，请刷新后重试')
+        _logger.info(
+            'wechat_account_disconnected account_id=%s owner_user_id=%s',
+            account_id,
+            owner_user_id,
+        )
 
     def _start_worker(self, session_id: str, qr_version: int) -> None:
         key = (session_id, qr_version)

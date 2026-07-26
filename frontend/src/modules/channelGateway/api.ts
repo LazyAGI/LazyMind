@@ -78,6 +78,12 @@ export async function listChannelAccounts(
   return resp.data;
 }
 
+export async function disconnectChannelAccount(accountId: string): Promise<void> {
+  await axiosInstance.delete(
+    `${CHANNEL_GATEWAY_V1}/channel-accounts/${encodeURIComponent(accountId)}`,
+  );
+}
+
 export async function createConnectionSession(
   provider: ChannelProvider,
   options?: { idempotencyKey?: string },

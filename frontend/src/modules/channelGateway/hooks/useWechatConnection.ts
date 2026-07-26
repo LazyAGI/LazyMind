@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   cancelConnectionSession,
   createConnectionSession,
+  disconnectChannelAccount,
   getConnectionSession,
   listChannelAccounts,
   refreshConnectionSession,
@@ -61,6 +62,7 @@ export function useWechatConnection() {
   const [session, setSession] = useState<ConnectionSession | null>(null);
   const [sessionStarting, setSessionStarting] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [disconnectingAccountId, setDisconnectingAccountId] = useState<string | null>(null);
   const [challengeValue, setChallengeValue] = useState('');
   const pollTimerRef = useRef<number | null>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -208,6 +210,26 @@ export function useWechatConnection() {
     }
   }, [actionLoading, applySession, clearPollTimer, t]);
 
+  const disconnectAccount = useCallback(async (accountId: string) => {
+    if (disconnectingAccountId) {
+      return;
+    }
+    setDisconnectingAccountId(accountId);
+    try {
+      await disconnectChannelAccount(accountId);
+      message.success(t('channelGateway.wechat.disconnectSuccess'));
+      await loadAccounts();
+    } catch (error) {
+      message.error(
+        getErrorMessage(error, t('channelGateway.wechat.disconnectFailed')),
+      );
+    } finally {
+      if (mountedRef.current) {
+        setDisconnectingAccountId(null);
+      }
+    }
+  }, [disconnectingAccountId, loadAccounts, t]);
+
   const refreshQr = useCallback(async () => {
     const sessionId = sessionIdRef.current;
     if (!sessionId || actionLoading) {
@@ -302,11 +324,13 @@ export function useWechatConnection() {
     session,
     sessionStarting,
     actionLoading,
+    disconnectingAccountId,
     challengeValue,
     setChallengeValue,
     loadAccounts,
     startScan,
     cancelScan,
+    disconnectAccount,
     refreshQr,
     submitChallenge,
     closeSessionPanel,
