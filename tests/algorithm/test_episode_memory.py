@@ -325,8 +325,8 @@ def test_memory_tools_registers_as_eager_container_with_episode_schema():
     assert set(episode_schema['required']) == {'summary', 'episode_type'}
     for editor_name in ('MemoryTools_soul_editor', 'MemoryTools_profile_editor'):
         editor_schema = descriptions[editor_name]['parameters']
-        assert set(editor_schema['properties']) == {'changes'}
-        assert set(editor_schema['required']) == {'changes'}
+        assert set(editor_schema['properties']) == {'operations'}
+        assert set(editor_schema['required']) == {'operations'}
         assert manager.tools_info[editor_name].serial_group == 'current_memory'
 
 

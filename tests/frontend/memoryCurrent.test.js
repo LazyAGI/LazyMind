@@ -485,14 +485,14 @@ describe("Soul and Profile Core interface", () => {
     expect(
       currentMemoryClientMocks.apiCoreMemorySoulPatch,
     ).toHaveBeenCalledWith({
-      currentMemorySoulPatchRequest: {
+      currentMemoryOperationsRequest: {
         interaction: { initiative_level: "reactive" },
       },
     });
     expect(
       currentMemoryClientMocks.apiCoreMemoryProfilePatch,
     ).toHaveBeenCalledWith({
-      currentMemoryProfilePatchRequest: {
+      currentMemoryOperationsRequest: {
         identity: { preferred_name: null },
       },
     });
