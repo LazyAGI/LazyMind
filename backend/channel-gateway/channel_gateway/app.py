@@ -59,6 +59,7 @@ service = WeChatConnectionService(
     store=store,
     cipher=cipher,
     on_account_connected=runtime.start_account,
+    on_account_disconnected=runtime.stop_account,
 )
 
 
@@ -164,6 +165,20 @@ def list_channel_accounts(
     gateway: Annotated[WeChatConnectionService, Depends(connection_service)],
 ):
     return gateway.list_accounts(owner_user_id, provider)
+
+
+@app.delete(
+    '/api/channel-gateway/v1/channel-accounts/{account_id}',
+    status_code=204,
+)
+@permission_required('qa.write')
+def disconnect_channel_account(
+    account_id: str,
+    owner_user_id: Annotated[str, Depends(current_owner)],
+    gateway: Annotated[WeChatConnectionService, Depends(connection_service)],
+):
+    gateway.disconnect_account(owner_user_id, account_id)
+    return Response(status_code=204)
 
 
 @app.post(
