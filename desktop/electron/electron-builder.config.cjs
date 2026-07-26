@@ -201,37 +201,6 @@ async function restoreRuntimeAndFinalizeSignature(context) {
   await codesignWithRetry(signArgs, appPath);
   await execFile("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath]);
   console.log("Restored embedded runtime and resealed the outer app signature");
-
-  if (notarizeMac) {
-    const notarizationArchive = path.join(context.appOutDir, "LazyMind-notarize.zip");
-    fs.rmSync(notarizationArchive, { force: true });
-    try {
-      await execFile("/usr/bin/ditto", [
-        "-c",
-        "-k",
-        "--keepParent",
-        appPath,
-        notarizationArchive,
-      ]);
-      const { stdout } = await execFile("/usr/bin/xcrun", [
-        "notarytool",
-        "submit",
-        notarizationArchive,
-        "--apple-id",
-        process.env.APPLE_ID,
-        "--password",
-        process.env.APPLE_APP_SPECIFIC_PASSWORD,
-        "--team-id",
-        process.env.APPLE_TEAM_ID,
-        "--wait",
-      ]);
-      process.stdout.write(stdout);
-      await execFile("/usr/bin/xcrun", ["stapler", "staple", appPath]);
-      await execFile("/usr/bin/xcrun", ["stapler", "validate", appPath]);
-    } finally {
-      fs.rmSync(notarizationArchive, { force: true });
-    }
-  }
 }
 if (process.env.LAZYMIND_DESKTOP_WINDOWS_ICON) {
   extraResources.push({
@@ -270,7 +239,7 @@ module.exports = {
   },
   dmg: {
     artifactName: "LazyMind-macos-${arch}.${ext}",
-    sign: false,
+    sign: macSigningMode === "developer-id",
   },
   win: {
     icon: process.env.LAZYMIND_DESKTOP_WINDOWS_ICON || "assets/LazyMind.ico",

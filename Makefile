@@ -445,7 +445,7 @@ desktop-darwin-arm64:
 desktop-darwin-arm64-dmg:
 	@LAZYMIND_DESKTOP_PACKAGE_KIND=dmg \
 		LAZYMIND_DESKTOP_SIGNING_MODE=developer-id \
-		LAZYMIND_DESKTOP_NOTARIZE=true \
+		LAZYMIND_DESKTOP_NOTARIZE="$${LAZYMIND_DESKTOP_NOTARIZE:-true}" \
 		bash desktop/scripts/build-darwin-arm64.sh
 
 desktop-darwin-arm64-clean:
