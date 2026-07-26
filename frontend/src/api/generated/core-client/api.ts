@@ -776,6 +776,24 @@ export interface CurrentMemoryErrorResponse {
     'data'?: CurrentMemoryConflictData;
     'message': string;
 }
+export interface CurrentMemoryOperation {
+    'op': CurrentMemoryOperationOpEnum;
+    'path': string;
+    'value'?: string;
+}
+
+export const CurrentMemoryOperationOpEnum = {
+    Set: 'set',
+    Clear: 'clear',
+    Add: 'add',
+    Remove: 'remove'
+} as const;
+
+export type CurrentMemoryOperationOpEnum = typeof CurrentMemoryOperationOpEnum[keyof typeof CurrentMemoryOperationOpEnum];
+
+export interface CurrentMemoryOperationsRequest {
+    'operations': Array<CurrentMemoryOperation>;
+}
 export interface CurrentMemoryPreferenceDetailData {
     'item': CurrentMemoryPreferenceItem;
     'reference': CurrentMemoryReference | null;
@@ -821,18 +839,11 @@ export interface CurrentMemoryPreferenceResidentIndexUsage {
     'over_limit': boolean;
     'used_items': number;
 }
-export interface CurrentMemoryProfileAccessibility {
-    'communication_needs': Array<string>;
-}
-export interface CurrentMemoryProfileAccessibilityPatch {
-    'communication_needs'?: Array<string>;
-}
 export interface CurrentMemoryProfileData {
     'document': CurrentMemoryProfileDocument;
     'updated_at': number;
 }
 export interface CurrentMemoryProfileDocument {
-    'accessibility': CurrentMemoryProfileAccessibility;
     'identity': CurrentMemoryProfileIdentity;
     'locale': CurrentMemoryProfileLocale;
     'professional': CurrentMemoryProfileProfessional;
@@ -840,40 +851,16 @@ export interface CurrentMemoryProfileDocument {
 export interface CurrentMemoryProfileIdentity {
     'aliases': Array<string>;
     'preferred_name': string | null;
-    'pronouns': string | null;
-}
-export interface CurrentMemoryProfileIdentityPatch {
-    'aliases'?: Array<string>;
-    'preferred_name'?: string | null;
-    'pronouns'?: string | null;
 }
 export interface CurrentMemoryProfileLocale {
     'languages': Array<string>;
-    'region': string | null;
-    'timezone': string | null;
-}
-export interface CurrentMemoryProfileLocalePatch {
-    'languages'?: Array<string>;
-    'region'?: string | null;
-    'timezone'?: string | null;
-}
-export interface CurrentMemoryProfilePatchRequest {
-    'accessibility'?: CurrentMemoryProfileAccessibilityPatch;
-    'identity'?: CurrentMemoryProfileIdentityPatch;
-    'locale'?: CurrentMemoryProfileLocalePatch;
-    'professional'?: CurrentMemoryProfileProfessionalPatch;
+    'residence': string | null;
 }
 export interface CurrentMemoryProfileProfessional {
     'expertise_domains': Array<string>;
-    'industry': string | null;
-    'organization': string | null;
-    'roles': Array<string>;
-}
-export interface CurrentMemoryProfileProfessionalPatch {
-    'expertise_domains'?: Array<string>;
-    'industry'?: string | null;
-    'organization'?: string | null;
-    'roles'?: Array<string>;
+    'industries': Array<string>;
+    'occupations': Array<string>;
+    'organizations': Array<string>;
 }
 export interface CurrentMemoryProfileResponse {
     'code': number;
@@ -916,47 +903,21 @@ export interface CurrentMemorySoulEpistemic {
     'uncertainty_style': string;
     'verification_mode': string;
 }
-export interface CurrentMemorySoulEpistemicPatch {
-    'uncertainty_style'?: string;
-    'verification_mode'?: string;
-}
 export interface CurrentMemorySoulIdentity {
     'description': string;
     'name': string;
     'role': string;
 }
-export interface CurrentMemorySoulIdentityPatch {
-    'description'?: string;
-    'name'?: string;
-    'role'?: string;
-}
 export interface CurrentMemorySoulInteraction {
-    'challenge_level': string;
-    'decision_mode': string;
+    'default_challenge_level': string;
+    'default_decision_mode': string;
+    'default_initiative_level': string;
+    'default_relationship_mode': string;
     'default_tone': string;
-    'initiative_level': string;
-    'relationship_mode': string;
-}
-export interface CurrentMemorySoulInteractionPatch {
-    'challenge_level'?: string;
-    'decision_mode'?: string;
-    'default_tone'?: string;
-    'initiative_level'?: string;
-    'relationship_mode'?: string;
 }
 export interface CurrentMemorySoulMission {
     'primary_goal': string;
     'success_definition': string;
-}
-export interface CurrentMemorySoulMissionPatch {
-    'primary_goal'?: string;
-    'success_definition'?: string;
-}
-export interface CurrentMemorySoulPatchRequest {
-    'epistemic'?: CurrentMemorySoulEpistemicPatch;
-    'identity'?: CurrentMemorySoulIdentityPatch;
-    'interaction'?: CurrentMemorySoulInteractionPatch;
-    'mission'?: CurrentMemorySoulMissionPatch;
 }
 export interface CurrentMemorySoulResponse {
     'code': number;
@@ -9618,15 +9579,15 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         * Applies a recursive partial update. Nullable scalar fields accept explicit null; list fields accept arrays, including an empty array, but not null.
-         * @summary Partially update current user\'s Profile memory
-         * @param {CurrentMemoryProfilePatchRequest} currentMemoryProfilePatchRequest
+         * Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
+         * @summary Apply operations to current user\'s Profile memory
+         * @param {CurrentMemoryOperationsRequest} currentMemoryOperationsRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryProfilePatch: async (currentMemoryProfilePatchRequest: CurrentMemoryProfilePatchRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'currentMemoryProfilePatchRequest' is not null or undefined
-            assertParamExists('apiCoreMemoryProfilePatch', 'currentMemoryProfilePatchRequest', currentMemoryProfilePatchRequest)
+        apiCoreMemoryProfilePatch: async (currentMemoryOperationsRequest: CurrentMemoryOperationsRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'currentMemoryOperationsRequest' is not null or undefined
+            assertParamExists('apiCoreMemoryProfilePatch', 'currentMemoryOperationsRequest', currentMemoryOperationsRequest)
             const localVarPath = `/api/core/memory/profile`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -9645,7 +9606,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(currentMemoryProfilePatchRequest, localVarRequestOptions, configuration)
+            localVarRequestOptions.data = serializeDataIfNeeded(currentMemoryOperationsRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -9783,15 +9744,15 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         * Applies a recursive partial update. Core retries an internal content compare-and-swap up to three times; no revision token is exposed to callers.
-         * @summary Partially update current user\'s Soul memory
-         * @param {CurrentMemorySoulPatchRequest} currentMemorySoulPatchRequest
+         * Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
+         * @summary Apply operations to current user\'s Soul memory
+         * @param {CurrentMemoryOperationsRequest} currentMemoryOperationsRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemorySoulPatch: async (currentMemorySoulPatchRequest: CurrentMemorySoulPatchRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'currentMemorySoulPatchRequest' is not null or undefined
-            assertParamExists('apiCoreMemorySoulPatch', 'currentMemorySoulPatchRequest', currentMemorySoulPatchRequest)
+        apiCoreMemorySoulPatch: async (currentMemoryOperationsRequest: CurrentMemoryOperationsRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'currentMemoryOperationsRequest' is not null or undefined
+            assertParamExists('apiCoreMemorySoulPatch', 'currentMemoryOperationsRequest', currentMemoryOperationsRequest)
             const localVarPath = `/api/core/memory/soul`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -9810,7 +9771,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(currentMemorySoulPatchRequest, localVarRequestOptions, configuration)
+            localVarRequestOptions.data = serializeDataIfNeeded(currentMemoryOperationsRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -13155,14 +13116,14 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Applies a recursive partial update. Nullable scalar fields accept explicit null; list fields accept arrays, including an empty array, but not null.
-         * @summary Partially update current user\'s Profile memory
-         * @param {CurrentMemoryProfilePatchRequest} currentMemoryProfilePatchRequest
+         * Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
+         * @summary Apply operations to current user\'s Profile memory
+         * @param {CurrentMemoryOperationsRequest} currentMemoryOperationsRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemoryProfilePatch(currentMemoryProfilePatchRequest: CurrentMemoryProfilePatchRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryProfileResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfilePatch(currentMemoryProfilePatchRequest, options);
+        async apiCoreMemoryProfilePatch(currentMemoryOperationsRequest: CurrentMemoryOperationsRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryProfileResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfilePatch(currentMemoryOperationsRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfilePatch']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -13217,14 +13178,14 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Applies a recursive partial update. Core retries an internal content compare-and-swap up to three times; no revision token is exposed to callers.
-         * @summary Partially update current user\'s Soul memory
-         * @param {CurrentMemorySoulPatchRequest} currentMemorySoulPatchRequest
+         * Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
+         * @summary Apply operations to current user\'s Soul memory
+         * @param {CurrentMemoryOperationsRequest} currentMemoryOperationsRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemorySoulPatch(currentMemorySoulPatchRequest: CurrentMemorySoulPatchRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemorySoulResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulPatch(currentMemorySoulPatchRequest, options);
+        async apiCoreMemorySoulPatch(currentMemoryOperationsRequest: CurrentMemoryOperationsRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemorySoulResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulPatch(currentMemoryOperationsRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulPatch']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -14928,14 +14889,14 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreMemoryProfileGet(options).then((request) => request(axios, basePath));
         },
         /**
-         * Applies a recursive partial update. Nullable scalar fields accept explicit null; list fields accept arrays, including an empty array, but not null.
-         * @summary Partially update current user\'s Profile memory
+         * Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
+         * @summary Apply operations to current user\'s Profile memory
          * @param {DefaultApiApiCoreMemoryProfilePatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreMemoryProfilePatch(requestParameters: DefaultApiApiCoreMemoryProfilePatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryProfileResponse> {
-            return localVarFp.apiCoreMemoryProfilePatch(requestParameters.currentMemoryProfilePatchRequest, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreMemoryProfilePatch(requestParameters.currentMemoryOperationsRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -14975,14 +14936,14 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreMemorySoulGet(options).then((request) => request(axios, basePath));
         },
         /**
-         * Applies a recursive partial update. Core retries an internal content compare-and-swap up to three times; no revision token is exposed to callers.
-         * @summary Partially update current user\'s Soul memory
+         * Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
+         * @summary Apply operations to current user\'s Soul memory
          * @param {DefaultApiApiCoreMemorySoulPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreMemorySoulPatch(requestParameters: DefaultApiApiCoreMemorySoulPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemorySoulResponse> {
-            return localVarFp.apiCoreMemorySoulPatch(requestParameters.currentMemorySoulPatchRequest, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreMemorySoulPatch(requestParameters.currentMemoryOperationsRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -16146,7 +16107,7 @@ export interface DefaultApiApiCoreMemoryProfileAvatarPutRequest {
  * Request parameters for apiCoreMemoryProfilePatch operation in DefaultApi.
  */
 export interface DefaultApiApiCoreMemoryProfilePatchRequest {
-    readonly currentMemoryProfilePatchRequest: CurrentMemoryProfilePatchRequest
+    readonly currentMemoryOperationsRequest: CurrentMemoryOperationsRequest
 }
 
 /**
@@ -16160,7 +16121,7 @@ export interface DefaultApiApiCoreMemorySoulAvatarPutRequest {
  * Request parameters for apiCoreMemorySoulPatch operation in DefaultApi.
  */
 export interface DefaultApiApiCoreMemorySoulPatchRequest {
-    readonly currentMemorySoulPatchRequest: CurrentMemorySoulPatchRequest
+    readonly currentMemoryOperationsRequest: CurrentMemoryOperationsRequest
 }
 
 /**
@@ -17471,14 +17432,14 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-     * Applies a recursive partial update. Nullable scalar fields accept explicit null; list fields accept arrays, including an empty array, but not null.
-     * @summary Partially update current user\'s Profile memory
+     * Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
+     * @summary Apply operations to current user\'s Profile memory
      * @param {DefaultApiApiCoreMemoryProfilePatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreMemoryProfilePatch(requestParameters: DefaultApiApiCoreMemoryProfilePatchRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryProfilePatch(requestParameters.currentMemoryProfilePatchRequest, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreMemoryProfilePatch(requestParameters.currentMemoryOperationsRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -17523,14 +17484,14 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-     * Applies a recursive partial update. Core retries an internal content compare-and-swap up to three times; no revision token is exposed to callers.
-     * @summary Partially update current user\'s Soul memory
+     * Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
+     * @summary Apply operations to current user\'s Soul memory
      * @param {DefaultApiApiCoreMemorySoulPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreMemorySoulPatch(requestParameters: DefaultApiApiCoreMemorySoulPatchRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemorySoulPatch(requestParameters.currentMemorySoulPatchRequest, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreMemorySoulPatch(requestParameters.currentMemoryOperationsRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

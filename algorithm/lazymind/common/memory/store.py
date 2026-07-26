@@ -20,6 +20,8 @@ from .paths import (
     split_reference_ref,
 )
 from .validation import (
+    normalize_profile_content,
+    normalize_soul_content,
     parse_preference_items,
     validate_preference_index,
     validate_profile_content,
@@ -64,13 +66,29 @@ class MemoryStore:
             raise RuntimeError(f'failed to write {normalized}: {exc}') from exc
 
     def read_soul(self) -> str:
-        return self.read(SOUL_PATH)
+        return self._read_versioned(
+            SOUL_PATH,
+            normalize=normalize_soul_content,
+        )
 
     def read_profile(self) -> str:
-        return self.read(PROFILE_PATH)
+        return self._read_versioned(
+            PROFILE_PATH,
+            normalize=normalize_profile_content,
+        )
 
     def read_preference(self) -> str:
         return self.read(PREFERENCE_PATH)
+
+    def _read_versioned(self, path: str, *, normalize) -> str:
+        raw = self.read(path)
+        try:
+            stored, visible = normalize(raw)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        if stored != raw:
+            self.write(path, stored)
+        return visible
 
     def read_reference(self, ref: str) -> str:
         path, anchor = split_reference_ref(ref)
@@ -97,15 +115,19 @@ class MemoryStore:
                 return
             raise RuntimeError(f'failed to delete {path}: {exc}') from exc
 
-    def apply_soul_fields(self, changes: dict[str, str]) -> dict[str, Any]:
+    def apply_soul_operations(
+        self,
+        operations: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         from .result import memory_ok
 
         loaded = self._read_document(SOUL_PATH, label='soul')
         if not loaded.get('ok'):
             return loaded
-        from .editors.soul import set_soul_fields
+        _, visible = normalize_soul_content(loaded['content'])
+        from .editors.soul import apply_soul_operations
 
-        edited = set_soul_fields(loaded['content'], changes)
+        edited = apply_soul_operations(visible, operations)
         if not edited.get('ok'):
             return edited
         written = self._write_document(SOUL_PATH, edited['content'])
@@ -113,18 +135,22 @@ class MemoryStore:
             return written
         return memory_ok(
             content=edited['content'],
-            fields=list(edited.get('fields') or changes),
+            operations=list(edited.get('operations') or operations),
         )
 
-    def apply_profile_fields(self, changes: dict[str, str]) -> dict[str, Any]:
+    def apply_profile_operations(
+        self,
+        operations: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         from .result import memory_ok
 
         loaded = self._read_document(PROFILE_PATH, label='profile')
         if not loaded.get('ok'):
             return loaded
-        from .editors.profile import set_profile_fields
+        _, visible = normalize_profile_content(loaded['content'])
+        from .editors.profile import apply_profile_operations
 
-        edited = set_profile_fields(loaded['content'], changes)
+        edited = apply_profile_operations(visible, operations)
         if not edited.get('ok'):
             return edited
         written = self._write_document(PROFILE_PATH, edited['content'])
@@ -132,7 +158,7 @@ class MemoryStore:
             return written
         return memory_ok(
             content=edited['content'],
-            fields=list(edited.get('fields') or changes),
+            operations=list(edited.get('operations') or operations),
         )
 
     def add_preference_with_reference(

@@ -384,35 +384,31 @@ class MemoryTools:
         )
 
     @serial_tool(group='current_memory')
-    def soul_editor(self, changes: Dict[str, str]) -> Dict[str, Any]:
-        """Update existing leaf values in the agent soul document in one write.
+    def soul_editor(self, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Apply one atomic batch of operations to the agent Soul.
 
         Use this only when the user explicitly asks to change the assistant's
         default identity, mission, interaction style, or epistemic behavior.
         Do not use it for user-specific facts; those belong in profile or
         preference editors. Include every Soul change from the current turn in
-        one call. Only fields already present in the loaded Soul YAML document
-        can be updated; keys cannot be added or renamed.
+        one call. Soul fields are required strings, so only ``set`` operations
+        on existing business-field dot paths are supported.
 
         Args:
-            changes: Non-empty mapping of existing Soul leaf dot-paths to new
-                non-empty string values.
+            operations: Non-empty list of ``{"op": "set", "path": "...",
+                "value": "..."}`` mappings.
         """
-        if not isinstance(changes, dict) or not changes:
+        if not isinstance(operations, list) or not operations:
             return _record_state_memory_result(
                 tool_error(
                     'soul_editor',
-                    'changes must be a non-empty mapping.',
+                    'operations must be a non-empty list.',
                     error_type='validation',
                 ),
                 mutation=False,
             )
 
-        raw_changes = {
-            str(field): str(value if value is not None else '')
-            for field, value in changes.items()
-        }
-        result = MemoryStore().apply_soul_fields(raw_changes)
+        result = MemoryStore().apply_soul_operations(operations)
         if not result.get('ok'):
             return _record_state_memory_result(
                 _memory_result_error('soul_editor', result),
@@ -423,8 +419,8 @@ class MemoryTools:
         return _record_state_memory_result(
             _memory_applied(
                 'soul_editor',
-                fields=list(result.get('fields') or raw_changes),
-                change_count=len(raw_changes),
+                operations=list(result.get('operations') or operations),
+                change_count=len(operations),
                 path=SOUL_PATH,
                 content_length=len(result['content']),
             ),
@@ -432,42 +428,34 @@ class MemoryTools:
         )
 
     @serial_tool(group='current_memory')
-    def profile_editor(self, changes: Dict[str, str]) -> Dict[str, Any]:
-        """Update existing leaf values in the user profile document in one write.
+    def profile_editor(self, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Apply one atomic batch of operations to the user Profile.
 
         Use this only for a current, stable user fact that the user explicitly
-        states or corrects, such as preferred name, locale, role, organization,
-        or accessibility needs. Do not infer a fact, and do not use this for
-        long-form behavioral preferences; those belong in
-        ``preference_editor``.
-        Include every Profile change from the current turn in one call. Only
-        fields already present in the loaded Profile YAML document can be
-        updated; keys cannot be added or renamed. Value type follows each
-        currently stored leaf (string/null or string list).
-
-        For list fields, use a JSON string array value such as
-        ``{"locale.languages": "[\\"zh-CN\\",\\"en-US\\"]"}`` or a
-        comma-separated string value.
+        states or corrects, such as preferred name, language, residence,
+        occupation, organization, industry, or expertise domain. Do not infer
+        a fact, and do not use this for long-form behavioral preferences; those
+        belong in ``preference_editor``.
+        Include every Profile change from the current turn in one call. Scalar
+        fields support ``set`` and ``clear``. List fields support ``add``,
+        ``remove``, and ``clear``. Operate on individual list values instead of
+        replacing complete arrays.
 
         Args:
-            changes: Non-empty mapping of existing Profile leaf dot-paths to
-                serialized values.
+            operations: Non-empty list of operation mappings with ``op``,
+                ``path``, and ``value`` when required.
         """
-        if not isinstance(changes, dict) or not changes:
+        if not isinstance(operations, list) or not operations:
             return _record_state_memory_result(
                 tool_error(
                     'profile_editor',
-                    'changes must be a non-empty mapping.',
+                    'operations must be a non-empty list.',
                     error_type='validation',
                 ),
                 mutation=False,
             )
 
-        raw_changes = {
-            str(field): '' if value is None else str(value)
-            for field, value in changes.items()
-        }
-        result = MemoryStore().apply_profile_fields(raw_changes)
+        result = MemoryStore().apply_profile_operations(operations)
         if not result.get('ok'):
             return _record_state_memory_result(
                 _memory_result_error('profile_editor', result),
@@ -478,8 +466,8 @@ class MemoryTools:
         return _record_state_memory_result(
             _memory_applied(
                 'profile_editor',
-                fields=list(result.get('fields') or raw_changes),
-                change_count=len(raw_changes),
+                operations=list(result.get('operations') or operations),
+                change_count=len(operations),
                 path=PROFILE_PATH,
                 content_length=len(result['content']),
             ),
@@ -501,8 +489,8 @@ class MemoryTools:
         explicitly states that is stable, long-term, and reusable across
         conversations. Do not save fragmented remarks, one-off requests,
         temporary task details, casual statements, or objective user facts.
-        Facts such as name, locale, timezone, role, organization, industry,
-        expertise, or accessibility needs belong in Profile when a matching
+        Facts such as name, common languages, residence, occupation,
+        organization, industry, or expertise belong in Profile when a matching
         field exists. Each added entry writes ``preference.yaml`` and a matching
         reference file under ``memory/users/references/``.
         This tool cannot update or reorder preferences.

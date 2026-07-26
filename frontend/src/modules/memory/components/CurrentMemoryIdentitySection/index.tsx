@@ -1,4 +1,4 @@
-import { EditOutlined } from "@ant-design/icons";
+import { EditOutlined, PlusOutlined } from "@ant-design/icons";
 import {
   Alert,
   Button,
@@ -7,7 +7,6 @@ import {
   message,
   Modal,
   Popconfirm,
-  Select,
   Skeleton,
   Tag,
   Upload,
@@ -65,97 +64,30 @@ const fieldDisplayValue = (
 const stringFieldValue = (value: IdentityFieldValue) =>
   typeof value === "string" ? value : "";
 
-const nullableStringFieldValue = (value: IdentityFieldValue) =>
-  typeof value === "string" && value ? value : null;
-
-const stringListFieldValue = (value: IdentityFieldValue) =>
-  Array.isArray(value) ? value : [];
-
-const buildSoulInteractionPatch = (
-  key: keyof SoulDocument["interaction"],
+const buildSoulSetPatch = (
+  path: string,
   value: IdentityFieldValue,
-): SoulPatch => {
-  const next = stringFieldValue(value);
-  switch (key) {
-    case "relationship_mode":
-      return { interaction: { relationship_mode: next } };
-    case "default_tone":
-      return { interaction: { default_tone: next } };
-    case "initiative_level":
-      return { interaction: { initiative_level: next } };
-    case "challenge_level":
-      return { interaction: { challenge_level: next } };
-    case "decision_mode":
-      return { interaction: { decision_mode: next } };
-  }
-};
+): SoulPatch => ({
+  operations: [{ op: "set", path, value: stringFieldValue(value) }],
+});
 
-const buildSoulEpistemicPatch = (
-  key: keyof SoulDocument["epistemic"],
-  value: IdentityFieldValue,
-): SoulPatch => {
-  const next = stringFieldValue(value);
-  switch (key) {
-    case "uncertainty_style":
-      return { epistemic: { uncertainty_style: next } };
-    case "verification_mode":
-      return { epistemic: { verification_mode: next } };
-  }
-};
-
-const buildProfileIdentityPatch = (
-  key: keyof ProfileDocument["identity"],
+const buildProfileScalarPatch = (
+  path: string,
   value: IdentityFieldValue,
 ): ProfilePatch => {
-  switch (key) {
-    case "preferred_name":
-      return {
-        identity: { preferred_name: nullableStringFieldValue(value) },
-      };
-    case "aliases":
-      return { identity: { aliases: stringListFieldValue(value) } };
-    case "pronouns":
-      return { identity: { pronouns: nullableStringFieldValue(value) } };
-  }
+  const next = stringFieldValue(value).trim();
+  return next
+    ? { operations: [{ op: "set", path, value: next }] }
+    : { operations: [{ op: "clear", path }] };
 };
 
-const buildProfileLocalePatch = (
-  key: keyof ProfileDocument["locale"],
+const buildProfileListPatch = (
+  op: "add" | "remove",
+  path: string,
   value: IdentityFieldValue,
-): ProfilePatch => {
-  switch (key) {
-    case "languages":
-      return { locale: { languages: stringListFieldValue(value) } };
-    case "timezone":
-      return { locale: { timezone: nullableStringFieldValue(value) } };
-    case "region":
-      return { locale: { region: nullableStringFieldValue(value) } };
-  }
-};
-
-const buildProfileProfessionalPatch = (
-  key: keyof ProfileDocument["professional"],
-  value: IdentityFieldValue,
-): ProfilePatch => {
-  switch (key) {
-    case "roles":
-      return { professional: { roles: stringListFieldValue(value) } };
-    case "organization":
-      return {
-        professional: { organization: nullableStringFieldValue(value) },
-      };
-    case "industry":
-      return {
-        professional: { industry: nullableStringFieldValue(value) },
-      };
-    case "expertise_domains":
-      return {
-        professional: {
-          expertise_domains: stringListFieldValue(value),
-        },
-      };
-  }
-};
+): ProfilePatch => ({
+  operations: [{ op, path, value: stringFieldValue(value).trim() }],
+});
 
 interface IdentityDocumentCardProps<TDocument, TPatch> {
   kind: MemoryKind;
@@ -302,8 +234,10 @@ function IdentityDocumentCard<TDocument, TPatch>({
     draftValue,
     editingField,
     reloadConflictSnapshot,
+    retrySave,
     saveError,
     saveField,
+    savePatch,
     saving,
     updateDraftValue,
   } = useIdentityFieldEditor({
@@ -506,7 +440,7 @@ function IdentityDocumentCard<TDocument, TPatch>({
                     disabled={saving}
                     size="small"
                     type="primary"
-                    onClick={() => void saveField()}
+                    onClick={() => void retrySave()}
                   >
                     {t("admin.memoryCurrentRetrySave")}
                   </Button>
@@ -532,9 +466,33 @@ function IdentityDocumentCard<TDocument, TPatch>({
                       {field.label}
                     </span>
                     <span className="memory-identity-field-value">
-                      {fieldDisplayValue(
-                        field.value,
-                        t("admin.memoryCurrentNotConfigured"),
+                      {Array.isArray(field.value) ? (
+                        field.value.length ? (
+                          field.value.map((item) => (
+                            <Tag
+                              closable={Boolean(field.buildRemovePatch)}
+                              key={item}
+                              onClose={(event) => {
+                                event.preventDefault();
+                                if (field.buildRemovePatch) {
+                                  void savePatch(
+                                    field.buildRemovePatch(item),
+                                    false,
+                                  );
+                                }
+                              }}
+                            >
+                              {item}
+                            </Tag>
+                          ))
+                        ) : (
+                          t("admin.memoryCurrentNotConfigured")
+                        )
+                      ) : (
+                        fieldDisplayValue(
+                          field.value,
+                          t("admin.memoryCurrentNotConfigured"),
+                        )
                       )}
                     </span>
                     <Button
@@ -542,7 +500,13 @@ function IdentityDocumentCard<TDocument, TPatch>({
                         field: field.label,
                       })}
                       disabled={saving}
-                      icon={<EditOutlined />}
+                      icon={
+                        field.valueType === "string-list" ? (
+                          <PlusOutlined />
+                        ) : (
+                          <EditOutlined />
+                        )
+                      }
                       size="small"
                       type="text"
                       onClick={() => beginEdit(field)}
@@ -552,25 +516,19 @@ function IdentityDocumentCard<TDocument, TPatch>({
                   {editing ? (
                     <div className="memory-identity-field-editor">
                       {field.valueType === "string-list" ? (
-                        <Select
+                        <Input
                           autoFocus
                           disabled={saving}
-                          mode="tags"
-                          open={false}
                           value={
-                            Array.isArray(draftValue) ? draftValue : []
+                            typeof draftValue === "string" ? draftValue : ""
                           }
-                          onChange={(value) => {
-                            updateDraftValue(value);
+                          onChange={(event) => {
+                            updateDraftValue(event.target.value);
                           }}
-                          onInputKeyDown={(event) => {
-                            if (
-                              event.key === "Enter" &&
-                              !event.nativeEvent.isComposing
-                            ) {
-                              window.setTimeout(() => {
-                                void saveField();
-                              }, 0);
+                          onPressEnter={(event) => {
+                            if (!event.nativeEvent.isComposing) {
+                              event.preventDefault();
+                              void saveField();
                             }
                           }}
                         />
@@ -636,53 +594,46 @@ export default function CurrentMemoryIdentitySection() {
         label: t("admin.memorySoulIdentityName"),
         value: document.identity.name,
         valueType: "required-string",
-        buildPatch: (value) => ({
-          identity: { name: stringFieldValue(value) },
-        }),
+        buildPatch: (value) => buildSoulSetPatch("identity.name", value),
       },
       {
         path: "identity.role",
         label: t("admin.memorySoulIdentityRole"),
         value: document.identity.role,
         valueType: "required-string",
-        buildPatch: (value) => ({
-          identity: { role: stringFieldValue(value) },
-        }),
+        buildPatch: (value) => buildSoulSetPatch("identity.role", value),
       },
       {
         path: "identity.description",
         label: t("admin.memorySoulIdentityDescription"),
         value: document.identity.description,
         valueType: "required-string",
-        buildPatch: (value) => ({
-          identity: { description: stringFieldValue(value) },
-        }),
+        buildPatch: (value) =>
+          buildSoulSetPatch("identity.description", value),
       },
       {
         path: "mission.primary_goal",
         label: t("admin.memorySoulPrimaryGoal"),
         value: document.mission.primary_goal,
         valueType: "required-string",
-        buildPatch: (value) => ({
-          mission: { primary_goal: stringFieldValue(value) },
-        }),
+        buildPatch: (value) =>
+          buildSoulSetPatch("mission.primary_goal", value),
       },
       {
         path: "mission.success_definition",
         label: t("admin.memorySoulSuccessDefinition"),
         value: document.mission.success_definition,
         valueType: "required-string",
-        buildPatch: (value) => ({
-          mission: { success_definition: stringFieldValue(value) },
-        }),
+        buildPatch: (value) =>
+          buildSoulSetPatch("mission.success_definition", value),
       },
       ...(
         [
-          "relationship_mode",
+          "default_relationship_mode",
           "default_tone",
-          "initiative_level",
-          "challenge_level",
-          "decision_mode",
+          "default_initiative_level",
+          "default_challenge_level",
+          "default_decision_mode",
         ] as const
       ).map((key) => ({
         path: `interaction.${key}`,
@@ -690,7 +641,7 @@ export default function CurrentMemoryIdentitySection() {
         value: document.interaction[key],
         valueType: "required-string" as const,
         buildPatch: (value: IdentityFieldValue) =>
-          buildSoulInteractionPatch(key, value),
+          buildSoulSetPatch(`interaction.${key}`, value),
       })),
       ...(["uncertainty_style", "verification_mode"] as const).map((key) => ({
         path: `epistemic.${key}`,
@@ -698,7 +649,7 @@ export default function CurrentMemoryIdentitySection() {
         value: document.epistemic[key],
         valueType: "required-string" as const,
         buildPatch: (value: IdentityFieldValue) =>
-          buildSoulEpistemicPatch(key, value),
+          buildSoulSetPatch(`epistemic.${key}`, value),
       })),
     ],
     [t],
@@ -710,7 +661,6 @@ export default function CurrentMemoryIdentitySection() {
         [
           ["preferred_name", "nullable-string"],
           ["aliases", "string-list"],
-          ["pronouns", "nullable-string"],
         ] as const
       ).map(([key, valueType]) => ({
         path: `identity.${key}`,
@@ -718,13 +668,20 @@ export default function CurrentMemoryIdentitySection() {
         value: document.identity[key],
         valueType,
         buildPatch: (value: IdentityFieldValue) =>
-          buildProfileIdentityPatch(key, value),
+          valueType === "string-list"
+            ? buildProfileListPatch("add", `identity.${key}`, value)
+            : buildProfileScalarPatch(`identity.${key}`, value),
+        ...(valueType === "string-list"
+          ? {
+              buildRemovePatch: (value: string) =>
+                buildProfileListPatch("remove", `identity.${key}`, value),
+            }
+          : {}),
       })),
       ...(
         [
           ["languages", "string-list"],
-          ["timezone", "nullable-string"],
-          ["region", "nullable-string"],
+          ["residence", "nullable-string"],
         ] as const
       ).map(([key, valueType]) => ({
         path: `locale.${key}`,
@@ -732,13 +689,21 @@ export default function CurrentMemoryIdentitySection() {
         value: document.locale[key],
         valueType,
         buildPatch: (value: IdentityFieldValue) =>
-          buildProfileLocalePatch(key, value),
+          valueType === "string-list"
+            ? buildProfileListPatch("add", `locale.${key}`, value)
+            : buildProfileScalarPatch(`locale.${key}`, value),
+        ...(valueType === "string-list"
+          ? {
+              buildRemovePatch: (value: string) =>
+                buildProfileListPatch("remove", `locale.${key}`, value),
+            }
+          : {}),
       })),
       ...(
         [
-          ["roles", "string-list"],
-          ["organization", "nullable-string"],
-          ["industry", "nullable-string"],
+          ["occupations", "string-list"],
+          ["organizations", "string-list"],
+          ["industries", "string-list"],
           ["expertise_domains", "string-list"],
         ] as const
       ).map(([key, valueType]) => ({
@@ -747,19 +712,10 @@ export default function CurrentMemoryIdentitySection() {
         value: document.professional[key],
         valueType,
         buildPatch: (value: IdentityFieldValue) =>
-          buildProfileProfessionalPatch(key, value),
+          buildProfileListPatch("add", `professional.${key}`, value),
+        buildRemovePatch: (value: string) =>
+          buildProfileListPatch("remove", `professional.${key}`, value),
       })),
-      {
-        path: "accessibility.communication_needs",
-        label: t("admin.memoryProfileAccessibility_communication_needs"),
-        value: document.accessibility.communication_needs,
-        valueType: "string-list",
-        buildPatch: (value) => ({
-          accessibility: {
-            communication_needs: stringListFieldValue(value),
-          },
-        }),
-      },
     ],
     [t],
   );
@@ -770,9 +726,9 @@ export default function CurrentMemoryIdentitySection() {
       role: document.identity.role,
       mission: document.mission.primary_goal,
       tags: [
-        document.interaction.relationship_mode,
-        document.interaction.initiative_level,
-        document.interaction.challenge_level,
+        document.interaction.default_relationship_mode,
+        document.interaction.default_initiative_level,
+        document.interaction.default_challenge_level,
         document.epistemic.uncertainty_style,
       ],
     }),
@@ -786,21 +742,21 @@ export default function CurrentMemoryIdentitySection() {
         t("admin.memoryCurrentProfileFallbackName"),
       role:
         [
-          ...document.professional.roles,
-          document.professional.industry,
+          ...document.professional.occupations,
+          ...document.professional.industries,
         ]
           .filter(Boolean)
           .join(" · ") || t("admin.memoryCurrentProfileFallbackRole"),
       mission:
         [
           document.locale.languages.join(" · "),
-          document.locale.timezone,
-          document.locale.region,
+          document.locale.residence,
         ]
           .filter(Boolean)
           .join(" · ") || t("admin.memoryCurrentProfileNoLocale"),
       tags: [
         ...document.professional.expertise_domains,
+        ...document.professional.organizations,
         ...document.identity.aliases,
       ],
     }),

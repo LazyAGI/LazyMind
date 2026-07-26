@@ -28,12 +28,12 @@ func manualSchemas() map[string]any {
 			prop("success_definition", strSchema()),
 		),
 		"CurrentMemorySoulInteraction": objReq(
-			[]string{"relationship_mode", "default_tone", "initiative_level", "challenge_level", "decision_mode"},
-			prop("relationship_mode", strSchema()),
+			[]string{"default_relationship_mode", "default_tone", "default_initiative_level", "default_challenge_level", "default_decision_mode"},
+			prop("default_relationship_mode", strSchema()),
 			prop("default_tone", strSchema()),
-			prop("initiative_level", strSchema()),
-			prop("challenge_level", strSchema()),
-			prop("decision_mode", strSchema()),
+			prop("default_initiative_level", strSchema()),
+			prop("default_challenge_level", strSchema()),
+			prop("default_decision_mode", strSchema()),
 		),
 		"CurrentMemorySoulEpistemic": objReq(
 			[]string{"uncertainty_style", "verification_mode"},
@@ -58,61 +58,38 @@ func manualSchemas() map[string]any {
 			prop("message", strSchema()),
 			prop("data", refSchema("CurrentMemorySoulData")),
 		),
-		"CurrentMemorySoulIdentityPatch": obj(
-			prop("name", strSchema()),
-			prop("role", strSchema()),
-			prop("description", strSchema()),
+		"CurrentMemoryOperation": objReq(
+			[]string{"op", "path"},
+			prop("op", enumStringSchema("set", "clear", "add", "remove")),
+			prop("path", strSchema()),
+			prop("value", strSchema()),
 		),
-		"CurrentMemorySoulMissionPatch": obj(
-			prop("primary_goal", strSchema()),
-			prop("success_definition", strSchema()),
-		),
-		"CurrentMemorySoulInteractionPatch": obj(
-			prop("relationship_mode", strSchema()),
-			prop("default_tone", strSchema()),
-			prop("initiative_level", strSchema()),
-			prop("challenge_level", strSchema()),
-			prop("decision_mode", strSchema()),
-		),
-		"CurrentMemorySoulEpistemicPatch": obj(
-			prop("uncertainty_style", strSchema()),
-			prop("verification_mode", strSchema()),
-		),
-		"CurrentMemorySoulPatchRequest": obj(
-			prop("identity", refSchema("CurrentMemorySoulIdentityPatch")),
-			prop("mission", refSchema("CurrentMemorySoulMissionPatch")),
-			prop("interaction", refSchema("CurrentMemorySoulInteractionPatch")),
-			prop("epistemic", refSchema("CurrentMemorySoulEpistemicPatch")),
+		"CurrentMemoryOperationsRequest": objReq(
+			[]string{"operations"},
+			prop("operations", array(refSchema("CurrentMemoryOperation"))),
 		),
 		"CurrentMemoryProfileIdentity": objReq(
-			[]string{"preferred_name", "aliases", "pronouns"},
+			[]string{"preferred_name", "aliases"},
 			prop("preferred_name", nullableSchema(strSchema())),
 			prop("aliases", array(strSchema())),
-			prop("pronouns", nullableSchema(strSchema())),
 		),
 		"CurrentMemoryProfileLocale": objReq(
-			[]string{"languages", "timezone", "region"},
+			[]string{"languages", "residence"},
 			prop("languages", array(strSchema())),
-			prop("timezone", nullableSchema(strSchema())),
-			prop("region", nullableSchema(strSchema())),
+			prop("residence", nullableSchema(strSchema())),
 		),
 		"CurrentMemoryProfileProfessional": objReq(
-			[]string{"roles", "organization", "industry", "expertise_domains"},
-			prop("roles", array(strSchema())),
-			prop("organization", nullableSchema(strSchema())),
-			prop("industry", nullableSchema(strSchema())),
+			[]string{"occupations", "organizations", "industries", "expertise_domains"},
+			prop("occupations", array(strSchema())),
+			prop("organizations", array(strSchema())),
+			prop("industries", array(strSchema())),
 			prop("expertise_domains", array(strSchema())),
 		),
-		"CurrentMemoryProfileAccessibility": objReq(
-			[]string{"communication_needs"},
-			prop("communication_needs", array(strSchema())),
-		),
 		"CurrentMemoryProfileDocument": objReq(
-			[]string{"identity", "locale", "professional", "accessibility"},
+			[]string{"identity", "locale", "professional"},
 			prop("identity", refSchema("CurrentMemoryProfileIdentity")),
 			prop("locale", refSchema("CurrentMemoryProfileLocale")),
 			prop("professional", refSchema("CurrentMemoryProfileProfessional")),
-			prop("accessibility", refSchema("CurrentMemoryProfileAccessibility")),
 		),
 		"CurrentMemoryProfileData": objReq(
 			[]string{"document", "updated_at"},
@@ -137,31 +114,6 @@ func manualSchemas() map[string]any {
 			prop("code", intSchema()),
 			prop("message", strSchema()),
 			prop("data", refSchema("CurrentMemoryAvatarData")),
-		),
-		"CurrentMemoryProfileIdentityPatch": obj(
-			prop("preferred_name", nullableSchema(strSchema())),
-			prop("aliases", array(strSchema())),
-			prop("pronouns", nullableSchema(strSchema())),
-		),
-		"CurrentMemoryProfileLocalePatch": obj(
-			prop("languages", array(strSchema())),
-			prop("timezone", nullableSchema(strSchema())),
-			prop("region", nullableSchema(strSchema())),
-		),
-		"CurrentMemoryProfileProfessionalPatch": obj(
-			prop("roles", array(strSchema())),
-			prop("organization", nullableSchema(strSchema())),
-			prop("industry", nullableSchema(strSchema())),
-			prop("expertise_domains", array(strSchema())),
-		),
-		"CurrentMemoryProfileAccessibilityPatch": obj(
-			prop("communication_needs", array(strSchema())),
-		),
-		"CurrentMemoryProfilePatchRequest": obj(
-			prop("identity", refSchema("CurrentMemoryProfileIdentityPatch")),
-			prop("locale", refSchema("CurrentMemoryProfileLocalePatch")),
-			prop("professional", refSchema("CurrentMemoryProfileProfessionalPatch")),
-			prop("accessibility", refSchema("CurrentMemoryProfileAccessibilityPatch")),
 		),
 		"CurrentMemoryPreferenceItem": objReq(
 			[]string{"name", "summary", "created_at", "updated_at"},
@@ -699,9 +651,9 @@ func manualPaths() map[string]any {
 				},
 			},
 			"patch": map[string]any{
-				"summary":     "Partially update current user's Soul memory",
-				"description": "Applies a recursive partial update. Core retries an internal content compare-and-swap up to three times; no revision token is exposed to callers.",
-				"requestBody": jsonBody(refSchema("CurrentMemorySoulPatchRequest"), true),
+				"summary":     "Apply operations to current user's Soul memory",
+				"description": "Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.",
+				"requestBody": jsonBody(refSchema("CurrentMemoryOperationsRequest"), true),
 				"responses": map[string]any{
 					"200": response(200, "Updated Soul document", refSchema("CurrentMemorySoulResponse")),
 					"400": response(400, "Invalid partial Soul document", refSchema("CurrentMemoryErrorResponse")),
@@ -723,9 +675,9 @@ func manualPaths() map[string]any {
 				},
 			},
 			"patch": map[string]any{
-				"summary":     "Partially update current user's Profile memory",
-				"description": "Applies a recursive partial update. Nullable scalar fields accept explicit null; list fields accept arrays, including an empty array, but not null.",
-				"requestBody": jsonBody(refSchema("CurrentMemoryProfilePatchRequest"), true),
+				"summary":     "Apply operations to current user's Profile memory",
+				"description": "Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.",
+				"requestBody": jsonBody(refSchema("CurrentMemoryOperationsRequest"), true),
 				"responses": map[string]any{
 					"200": response(200, "Updated Profile document", refSchema("CurrentMemoryProfileResponse")),
 					"400": response(400, "Invalid partial Profile document", refSchema("CurrentMemoryErrorResponse")),

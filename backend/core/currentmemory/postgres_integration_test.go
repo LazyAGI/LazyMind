@@ -66,12 +66,10 @@ func TestCurrentMemoryPostgresContract(t *testing.T) {
 	profile, err = module.PatchProfile(
 		t.Context(),
 		"postgres-user",
-		map[string]any{
-			"identity": map[string]any{
-				"preferred_name": nil,
-				"aliases":        []any{},
-			},
-		},
+		CurrentMemoryOperationsRequest{Operations: []CurrentMemoryOperation{
+			{Op: "clear", Path: "identity.preferred_name"},
+			{Op: "clear", Path: "identity.aliases"},
+		}},
 	)
 	if err != nil {
 		t.Fatalf("patch Profile null and empty array: %v", err)
@@ -83,8 +81,8 @@ func TestCurrentMemoryPostgresContract(t *testing.T) {
 
 	remoteProfile := strings.Replace(
 		DefaultProfileYAML,
-		"timezone: null",
-		"timezone: Europe/London",
+		"residence: null",
+		"residence: Europe/London",
 		1,
 	)
 	if err := repository.UpdateFileContent(
@@ -100,14 +98,17 @@ func TestCurrentMemoryPostgresContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("public Module read after repository write: %v", err)
 	}
-	if profile.Document.Locale.Timezone == nil ||
-		*profile.Document.Locale.Timezone != "Europe/London" {
+	if profile.Document.Locale.Residence == nil ||
+		*profile.Document.Locale.Residence != "Europe/London" {
 		t.Fatalf("Module did not observe repository write: %#v", profile.Document.Locale)
 	}
+	soulName := "PostgreSQL Soul"
 	if _, err := module.PatchSoul(
 		t.Context(),
 		"postgres-user",
-		map[string]any{"identity": map[string]any{"name": "PostgreSQL Soul"}},
+		CurrentMemoryOperationsRequest{Operations: []CurrentMemoryOperation{
+			{Op: "set", Path: "identity.name", Value: &soulName},
+		}},
 	); err != nil {
 		t.Fatalf("public Soul patch: %v", err)
 	}

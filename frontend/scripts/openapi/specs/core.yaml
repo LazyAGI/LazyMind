@@ -1033,6 +1033,32 @@ components:
                 - code
                 - message
             type: object
+        CurrentMemoryOperation:
+            properties:
+                op:
+                    enum:
+                        - set
+                        - clear
+                        - add
+                        - remove
+                    type: string
+                path:
+                    type: string
+                value:
+                    type: string
+            required:
+                - op
+                - path
+            type: object
+        CurrentMemoryOperationsRequest:
+            properties:
+                operations:
+                    items:
+                        $ref: '#/components/schemas/CurrentMemoryOperation'
+                    type: array
+            required:
+                - operations
+            type: object
         CurrentMemoryPreferenceDetailData:
             properties:
                 item:
@@ -1145,22 +1171,6 @@ components:
                 - max_items
                 - over_limit
             type: object
-        CurrentMemoryProfileAccessibility:
-            properties:
-                communication_needs:
-                    items:
-                        type: string
-                    type: array
-            required:
-                - communication_needs
-            type: object
-        CurrentMemoryProfileAccessibilityPatch:
-            properties:
-                communication_needs:
-                    items:
-                        type: string
-                    type: array
-            type: object
         CurrentMemoryProfileData:
             properties:
                 document:
@@ -1174,8 +1184,6 @@ components:
             type: object
         CurrentMemoryProfileDocument:
             properties:
-                accessibility:
-                    $ref: '#/components/schemas/CurrentMemoryProfileAccessibility'
                 identity:
                     $ref: '#/components/schemas/CurrentMemoryProfileIdentity'
                 locale:
@@ -1186,7 +1194,6 @@ components:
                 - identity
                 - locale
                 - professional
-                - accessibility
             type: object
         CurrentMemoryProfileIdentity:
             properties:
@@ -1197,26 +1204,9 @@ components:
                 preferred_name:
                     nullable: true
                     type: string
-                pronouns:
-                    nullable: true
-                    type: string
             required:
                 - preferred_name
                 - aliases
-                - pronouns
-            type: object
-        CurrentMemoryProfileIdentityPatch:
-            properties:
-                aliases:
-                    items:
-                        type: string
-                    type: array
-                preferred_name:
-                    nullable: true
-                    type: string
-                pronouns:
-                    nullable: true
-                    type: string
             type: object
         CurrentMemoryProfileLocale:
             properties:
@@ -1224,40 +1214,12 @@ components:
                     items:
                         type: string
                     type: array
-                region:
-                    nullable: true
-                    type: string
-                timezone:
+                residence:
                     nullable: true
                     type: string
             required:
                 - languages
-                - timezone
-                - region
-            type: object
-        CurrentMemoryProfileLocalePatch:
-            properties:
-                languages:
-                    items:
-                        type: string
-                    type: array
-                region:
-                    nullable: true
-                    type: string
-                timezone:
-                    nullable: true
-                    type: string
-            type: object
-        CurrentMemoryProfilePatchRequest:
-            properties:
-                accessibility:
-                    $ref: '#/components/schemas/CurrentMemoryProfileAccessibilityPatch'
-                identity:
-                    $ref: '#/components/schemas/CurrentMemoryProfileIdentityPatch'
-                locale:
-                    $ref: '#/components/schemas/CurrentMemoryProfileLocalePatch'
-                professional:
-                    $ref: '#/components/schemas/CurrentMemoryProfileProfessionalPatch'
+                - residence
             type: object
         CurrentMemoryProfileProfessional:
             properties:
@@ -1265,38 +1227,23 @@ components:
                     items:
                         type: string
                     type: array
-                industry:
-                    nullable: true
-                    type: string
-                organization:
-                    nullable: true
-                    type: string
-                roles:
+                industries:
+                    items:
+                        type: string
+                    type: array
+                occupations:
+                    items:
+                        type: string
+                    type: array
+                organizations:
                     items:
                         type: string
                     type: array
             required:
-                - roles
-                - organization
-                - industry
+                - occupations
+                - organizations
+                - industries
                 - expertise_domains
-            type: object
-        CurrentMemoryProfileProfessionalPatch:
-            properties:
-                expertise_domains:
-                    items:
-                        type: string
-                    type: array
-                industry:
-                    nullable: true
-                    type: string
-                organization:
-                    nullable: true
-                    type: string
-                roles:
-                    items:
-                        type: string
-                    type: array
             type: object
         CurrentMemoryProfileResponse:
             properties:
@@ -1391,13 +1338,6 @@ components:
                 - uncertainty_style
                 - verification_mode
             type: object
-        CurrentMemorySoulEpistemicPatch:
-            properties:
-                uncertainty_style:
-                    type: string
-                verification_mode:
-                    type: string
-            type: object
         CurrentMemorySoulIdentity:
             properties:
                 description:
@@ -1411,46 +1351,24 @@ components:
                 - role
                 - description
             type: object
-        CurrentMemorySoulIdentityPatch:
-            properties:
-                description:
-                    type: string
-                name:
-                    type: string
-                role:
-                    type: string
-            type: object
         CurrentMemorySoulInteraction:
             properties:
-                challenge_level:
+                default_challenge_level:
                     type: string
-                decision_mode:
+                default_decision_mode:
+                    type: string
+                default_initiative_level:
+                    type: string
+                default_relationship_mode:
                     type: string
                 default_tone:
-                    type: string
-                initiative_level:
-                    type: string
-                relationship_mode:
                     type: string
             required:
-                - relationship_mode
+                - default_relationship_mode
                 - default_tone
-                - initiative_level
-                - challenge_level
-                - decision_mode
-            type: object
-        CurrentMemorySoulInteractionPatch:
-            properties:
-                challenge_level:
-                    type: string
-                decision_mode:
-                    type: string
-                default_tone:
-                    type: string
-                initiative_level:
-                    type: string
-                relationship_mode:
-                    type: string
+                - default_initiative_level
+                - default_challenge_level
+                - default_decision_mode
             type: object
         CurrentMemorySoulMission:
             properties:
@@ -1461,24 +1379,6 @@ components:
             required:
                 - primary_goal
                 - success_definition
-            type: object
-        CurrentMemorySoulMissionPatch:
-            properties:
-                primary_goal:
-                    type: string
-                success_definition:
-                    type: string
-            type: object
-        CurrentMemorySoulPatchRequest:
-            properties:
-                epistemic:
-                    $ref: '#/components/schemas/CurrentMemorySoulEpistemicPatch'
-                identity:
-                    $ref: '#/components/schemas/CurrentMemorySoulIdentityPatch'
-                interaction:
-                    $ref: '#/components/schemas/CurrentMemorySoulInteractionPatch'
-                mission:
-                    $ref: '#/components/schemas/CurrentMemorySoulMissionPatch'
             type: object
         CurrentMemorySoulResponse:
             properties:
@@ -9782,12 +9682,12 @@ paths:
                     description: Stored Profile document is invalid or unavailable
             summary: Get current user's Profile memory
         patch:
-            description: Applies a recursive partial update. Nullable scalar fields accept explicit null; list fields accept arrays, including an empty array, but not null.
+            description: Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
             requestBody:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/CurrentMemoryProfilePatchRequest'
+                            $ref: '#/components/schemas/CurrentMemoryOperationsRequest'
                 required: true
             responses:
                 "200":
@@ -9826,7 +9726,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/CurrentMemoryErrorResponse'
                     description: Stored Profile document is invalid or unavailable
-            summary: Partially update current user's Profile memory
+            summary: Apply operations to current user's Profile memory
     /api/core/memory/profile/avatar:
         delete:
             responses:
@@ -9955,12 +9855,12 @@ paths:
                     description: Stored Soul document is invalid or unavailable
             summary: Get current user's Soul memory
         patch:
-            description: Applies a recursive partial update. Core retries an internal content compare-and-swap up to three times; no revision token is exposed to callers.
+            description: Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
             requestBody:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/CurrentMemorySoulPatchRequest'
+                            $ref: '#/components/schemas/CurrentMemoryOperationsRequest'
                 required: true
             responses:
                 "200":
@@ -9999,7 +9899,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/CurrentMemoryErrorResponse'
                     description: Stored Soul document is invalid or unavailable
-            summary: Partially update current user's Soul memory
+            summary: Apply operations to current user's Soul memory
     /api/core/memory/soul/avatar:
         delete:
             responses:

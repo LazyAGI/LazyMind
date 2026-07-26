@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
@@ -57,12 +56,12 @@ func NewModuleWithPreferenceIndexMaxItems(db *gorm.DB, maxItems int) *Module {
 }
 
 func (m *Module) GetSoul(ctx context.Context, userID string) (CurrentMemorySoulData, error) {
-	document, entry, err := readTypedDocument(
+	document, entry, err := readNormalizedDocument(
 		ctx,
 		m,
 		userID,
 		SoulPath,
-		ParseSoul,
+		NormalizeSoul,
 	)
 	if err != nil {
 		return CurrentMemorySoulData{}, err
@@ -76,16 +75,17 @@ func (m *Module) GetSoul(ctx context.Context, userID string) (CurrentMemorySoulD
 func (m *Module) PatchSoul(
 	ctx context.Context,
 	userID string,
-	patch map[string]any,
+	request CurrentMemoryOperationsRequest,
 ) (CurrentMemorySoulData, error) {
-	document, updatedAt, err := patchTypedDocument(
+	document, updatedAt, err := applyOperationsToDocument(
 		ctx,
 		m,
 		userID,
 		SoulPath,
-		patch,
-		ParseSoul,
+		request.Operations,
+		NormalizeSoul,
 		RenderSoul,
+		applySoulOperations,
 	)
 	if err != nil {
 		return CurrentMemorySoulData{}, err
@@ -100,12 +100,12 @@ func (m *Module) GetProfile(
 	ctx context.Context,
 	userID string,
 ) (CurrentMemoryProfileData, error) {
-	document, entry, err := readTypedDocument(
+	document, entry, err := readNormalizedDocument(
 		ctx,
 		m,
 		userID,
 		ProfilePath,
-		ParseProfile,
+		NormalizeProfile,
 	)
 	if err != nil {
 		return CurrentMemoryProfileData{}, err
@@ -119,16 +119,17 @@ func (m *Module) GetProfile(
 func (m *Module) PatchProfile(
 	ctx context.Context,
 	userID string,
-	patch map[string]any,
+	request CurrentMemoryOperationsRequest,
 ) (CurrentMemoryProfileData, error) {
-	document, updatedAt, err := patchTypedDocument(
+	document, updatedAt, err := applyOperationsToDocument(
 		ctx,
 		m,
 		userID,
 		ProfilePath,
-		patch,
-		ParseProfile,
+		request.Operations,
+		NormalizeProfile,
 		RenderProfile,
+		applyProfileOperations,
 	)
 	if err != nil {
 		return CurrentMemoryProfileData{}, err
@@ -392,19 +393,66 @@ func readTypedDocument[T any](
 	return document, entry, nil
 }
 
-func patchTypedDocument[T any](
+func readNormalizedDocument[T any](
 	ctx context.Context,
 	module *Module,
 	userID string,
 	entryPath string,
-	patch map[string]any,
-	parse func([]byte) (T, error),
+	normalize func([]byte) (T, []byte, error),
+) (T, orm.MemoryCurrentEntry, error) {
+	var zero T
+	for attempt := 0; attempt < publicPatchCASAttempts; attempt++ {
+		entry, err := module.readFile(ctx, userID, entryPath)
+		if err != nil {
+			return zero, orm.MemoryCurrentEntry{}, err
+		}
+		document, content, err := normalize(entry.Content)
+		if err != nil {
+			return zero, orm.MemoryCurrentEntry{}, fmt.Errorf(
+				"%w: %v",
+				ErrCorruptDocument,
+				err,
+			)
+		}
+		if string(content) == string(entry.Content) {
+			return document, entry, nil
+		}
+		now := module.now()
+		updated, err := module.repository.CompareAndSwapFileContent(
+			ctx,
+			userID,
+			entryPath,
+			entry.Content,
+			content,
+			now,
+		)
+		if err != nil {
+			return zero, orm.MemoryCurrentEntry{}, err
+		}
+		if updated {
+			entry.Content = content
+			entry.Size = int64(len(content))
+			entry.UpdatedAt = now
+			return document, entry, nil
+		}
+	}
+	return zero, orm.MemoryCurrentEntry{}, ErrConflict
+}
+
+func applyOperationsToDocument[T any](
+	ctx context.Context,
+	module *Module,
+	userID string,
+	entryPath string,
+	operations []CurrentMemoryOperation,
+	normalize func([]byte) (T, []byte, error),
 	render func(T) ([]byte, error),
+	apply func(T, []CurrentMemoryOperation) (T, error),
 ) (T, time.Time, error) {
 	var zero T
-	if countPatchLeaves(patch) == 0 {
+	if len(operations) == 0 {
 		return zero, time.Time{}, fmt.Errorf(
-			"%w: at least one field is required",
+			"%w: at least one operation is required",
 			ErrInvalidRequest,
 		)
 	}
@@ -413,27 +461,15 @@ func patchTypedDocument[T any](
 		if err != nil {
 			return zero, time.Time{}, err
 		}
-		if _, err := parse(entry.Content); err != nil {
-			return zero, time.Time{}, fmt.Errorf(
-				"%w: %v",
-				ErrCorruptDocument,
-				err,
-			)
-		}
-		var current map[string]any
-		if err := yaml.Unmarshal(entry.Content, &current); err != nil {
-			return zero, time.Time{}, fmt.Errorf(
-				"%w: %v",
-				ErrCorruptDocument,
-				err,
-			)
-		}
-		mergePatchMapping(current, patch)
-		mergedContent, err := yaml.Marshal(current)
+		document, _, err := normalize(entry.Content)
 		if err != nil {
-			return zero, time.Time{}, err
+			return zero, time.Time{}, fmt.Errorf(
+				"%w: %v",
+				ErrCorruptDocument,
+				err,
+			)
 		}
-		document, err := parse(mergedContent)
+		document, err = apply(document, operations)
 		if err != nil {
 			return zero, time.Time{}, fmt.Errorf(
 				"%w: %v",
@@ -466,6 +502,209 @@ func patchTypedDocument[T any](
 		}
 	}
 	return zero, time.Time{}, ErrConflict
+}
+
+func applySoulOperations(
+	document SoulDocument,
+	operations []CurrentMemoryOperation,
+) (SoulDocument, error) {
+	for _, operation := range operations {
+		if strings.TrimSpace(operation.Op) != "set" {
+			return SoulDocument{}, fmt.Errorf(
+				"soul operation %q only supports op 'set'",
+				operation.Path,
+			)
+		}
+		value, err := requiredOperationValue(operation)
+		if err != nil {
+			return SoulDocument{}, err
+		}
+		switch strings.TrimSpace(operation.Path) {
+		case "identity.name":
+			document.Identity.Name = value
+		case "identity.role":
+			document.Identity.Role = value
+		case "identity.description":
+			document.Identity.Description = value
+		case "mission.primary_goal":
+			document.Mission.PrimaryGoal = value
+		case "mission.success_definition":
+			document.Mission.SuccessDefinition = value
+		case "interaction.default_relationship_mode":
+			document.Interaction.DefaultRelationshipMode = value
+		case "interaction.default_tone":
+			document.Interaction.DefaultTone = value
+		case "interaction.default_initiative_level":
+			document.Interaction.DefaultInitiativeLevel = value
+		case "interaction.default_challenge_level":
+			document.Interaction.DefaultChallengeLevel = value
+		case "interaction.default_decision_mode":
+			document.Interaction.DefaultDecisionMode = value
+		case "epistemic.uncertainty_style":
+			document.Epistemic.UncertaintyStyle = value
+		case "epistemic.verification_mode":
+			document.Epistemic.VerificationMode = value
+		default:
+			return SoulDocument{}, fmt.Errorf(
+				"unsupported soul operation path %q",
+				operation.Path,
+			)
+		}
+	}
+	return document, nil
+}
+
+func applyProfileOperations(
+	document ProfileDocument,
+	operations []CurrentMemoryOperation,
+) (ProfileDocument, error) {
+	for _, operation := range operations {
+		path := strings.TrimSpace(operation.Path)
+		switch path {
+		case "identity.preferred_name":
+			value, err := applyNullableStringOperation(operation)
+			if err != nil {
+				return ProfileDocument{}, err
+			}
+			document.Identity.PreferredName = value
+		case "locale.residence":
+			value, err := applyNullableStringOperation(operation)
+			if err != nil {
+				return ProfileDocument{}, err
+			}
+			document.Locale.Residence = value
+		case "identity.aliases":
+			value, err := applyStringListOperation(document.Identity.Aliases, operation)
+			if err != nil {
+				return ProfileDocument{}, err
+			}
+			document.Identity.Aliases = value
+		case "locale.languages":
+			value, err := applyStringListOperation(document.Locale.Languages, operation)
+			if err != nil {
+				return ProfileDocument{}, err
+			}
+			document.Locale.Languages = value
+		case "professional.occupations":
+			value, err := applyStringListOperation(document.Professional.Occupations, operation)
+			if err != nil {
+				return ProfileDocument{}, err
+			}
+			document.Professional.Occupations = value
+		case "professional.organizations":
+			value, err := applyStringListOperation(document.Professional.Organizations, operation)
+			if err != nil {
+				return ProfileDocument{}, err
+			}
+			document.Professional.Organizations = value
+		case "professional.industries":
+			value, err := applyStringListOperation(document.Professional.Industries, operation)
+			if err != nil {
+				return ProfileDocument{}, err
+			}
+			document.Professional.Industries = value
+		case "professional.expertise_domains":
+			value, err := applyStringListOperation(document.Professional.ExpertiseDomains, operation)
+			if err != nil {
+				return ProfileDocument{}, err
+			}
+			document.Professional.ExpertiseDomains = value
+		default:
+			return ProfileDocument{}, fmt.Errorf(
+				"unsupported profile operation path %q",
+				path,
+			)
+		}
+	}
+	return document, nil
+}
+
+func requiredOperationValue(operation CurrentMemoryOperation) (string, error) {
+	if operation.Value == nil {
+		return "", fmt.Errorf(
+			"operation %q on %q requires value",
+			operation.Op,
+			operation.Path,
+		)
+	}
+	value := strings.TrimSpace(*operation.Value)
+	if value == "" {
+		return "", fmt.Errorf(
+			"operation %q on %q requires a non-empty value",
+			operation.Op,
+			operation.Path,
+		)
+	}
+	return value, nil
+}
+
+func applyNullableStringOperation(operation CurrentMemoryOperation) (*string, error) {
+	switch strings.TrimSpace(operation.Op) {
+	case "set":
+		value, err := requiredOperationValue(operation)
+		if err != nil {
+			return nil, err
+		}
+		return &value, nil
+	case "clear":
+		if operation.Value != nil {
+			return nil, fmt.Errorf(
+				"clear operation on %q must not include value",
+				operation.Path,
+			)
+		}
+		return nil, nil
+	default:
+		return nil, fmt.Errorf(
+			"profile scalar path %q only supports set or clear",
+			operation.Path,
+		)
+	}
+}
+
+func applyStringListOperation(
+	current []string,
+	operation CurrentMemoryOperation,
+) ([]string, error) {
+	values := append([]string{}, current...)
+	switch strings.TrimSpace(operation.Op) {
+	case "add":
+		value, err := requiredOperationValue(operation)
+		if err != nil {
+			return nil, err
+		}
+		for _, existing := range values {
+			if existing == value {
+				return values, nil
+			}
+		}
+		return append(values, value), nil
+	case "remove":
+		value, err := requiredOperationValue(operation)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]string, 0, len(values))
+		for _, existing := range values {
+			if existing != value {
+				result = append(result, existing)
+			}
+		}
+		return result, nil
+	case "clear":
+		if operation.Value != nil {
+			return nil, fmt.Errorf(
+				"clear operation on %q must not include value",
+				operation.Path,
+			)
+		}
+		return []string{}, nil
+	default:
+		return nil, fmt.Errorf(
+			"profile list path %q only supports add, remove, or clear",
+			operation.Path,
+		)
+	}
 }
 
 func (m *Module) readFile(
@@ -581,30 +820,6 @@ func reorderPreferenceItems(
 		result = append(result, item)
 	}
 	return result, nil
-}
-
-func mergePatchMapping(current map[string]any, patch map[string]any) {
-	for key, patchValue := range patch {
-		patchMapping, isMapping := patchValue.(map[string]any)
-		currentMapping, currentIsMapping := current[key].(map[string]any)
-		if isMapping && currentIsMapping {
-			mergePatchMapping(currentMapping, patchMapping)
-			continue
-		}
-		current[key] = patchValue
-	}
-}
-
-func countPatchLeaves(patch map[string]any) int {
-	count := 0
-	for _, value := range patch {
-		if nested, ok := value.(map[string]any); ok {
-			count += countPatchLeaves(nested)
-			continue
-		}
-		count++
-	}
-	return count
 }
 
 func formatUpdatedAt(value time.Time) int64 {

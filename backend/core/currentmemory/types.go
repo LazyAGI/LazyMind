@@ -1,5 +1,15 @@
 package currentmemory
 
+type CurrentMemoryOperation struct {
+	Op    string  `json:"op"`
+	Path  string  `json:"path"`
+	Value *string `json:"value,omitempty"`
+}
+
+type CurrentMemoryOperationsRequest struct {
+	Operations []CurrentMemoryOperation `json:"operations"`
+}
+
 type CurrentMemorySoulData struct {
 	Document  SoulDocument `json:"document"`
 	UpdatedAt int64        `json:"updated_at"`

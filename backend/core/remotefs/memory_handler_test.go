@@ -56,9 +56,9 @@ func TestMemoryMountLazyInitializesDefaultsPerUser(t *testing.T) {
 		listBody.Items[1].Path != memoryUsersPath {
 		t.Fatalf("unexpected memory root items: %+v", listBody.Items)
 	}
-	if strings.Contains(defaultSoulYAML, "schema_version") ||
-		strings.Contains(defaultProfileYAML, "schema_version") {
-		t.Fatal("fixed Memory defaults must not contain schema_version")
+	if !strings.Contains(defaultSoulYAML, "schema_version: 2") ||
+		!strings.Contains(defaultProfileYAML, "schema_version: 2") {
+		t.Fatal("Soul and Profile defaults must contain their storage schema version")
 	}
 
 	for entryPath, expected := range map[string]string{
@@ -92,8 +92,8 @@ func TestMemoryMountLazyInitializesDefaultsPerUser(t *testing.T) {
 
 	updatedProfile := strings.Replace(
 		defaultProfileYAML,
-		"timezone: null",
-		"timezone: Asia/Shanghai",
+		"residence: null",
+		"residence: Asia/Shanghai",
 		1,
 	)
 	writeReq := httptest.NewRequest(
@@ -608,7 +608,7 @@ func TestMemoryMountValidatesDomainDocumentsWithoutRestrictingGenericFiles(t *te
 			)
 			recorder := httptest.NewRecorder()
 			handler.Content(recorder, request)
-			if recorder.Code != http.StatusOK {
+			if recorder.Code != http.StatusBadRequest {
 				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 			}
 		})
@@ -704,8 +704,8 @@ func TestMemoryMountAndPublicCurrentMemoryShareAuthoritativeState(t *testing.T) 
 
 	updatedProfile := strings.Replace(
 		defaultProfileYAML,
-		"timezone: null",
-		"timezone: Asia/Shanghai",
+		"residence: null",
+		"residence: Asia/Shanghai",
 		1,
 	)
 	remoteWrite := httptest.NewRequest(
@@ -728,7 +728,8 @@ func TestMemoryMountAndPublicCurrentMemoryShareAuthoritativeState(t *testing.T) 
 	publicReadRecorder := httptest.NewRecorder()
 	publicHandler.GetProfile(publicReadRecorder, publicRead)
 	if publicReadRecorder.Code != http.StatusOK ||
-		!strings.Contains(publicReadRecorder.Body.String(), `"timezone":"Asia/Shanghai"`) {
+		!strings.Contains(publicReadRecorder.Body.String(), `"residence":"Asia/Shanghai"`) ||
+		strings.Contains(publicReadRecorder.Body.String(), `"schema_version"`) {
 		t.Fatalf(
 			"public profile read status=%d body=%s",
 			publicReadRecorder.Code,
@@ -739,7 +740,9 @@ func TestMemoryMountAndPublicCurrentMemoryShareAuthoritativeState(t *testing.T) 
 	publicPatch := httptest.NewRequest(
 		http.MethodPatch,
 		"/memory/soul",
-		strings.NewReader(`{"identity":{"name":"Shared state"}}`),
+		strings.NewReader(
+			`{"operations":[{"op":"set","path":"identity.name","value":"Shared state"}]}`,
+		),
 	)
 	publicPatch.Header.Set("X-User-Id", "user-1")
 	publicPatchRecorder := httptest.NewRecorder()

@@ -1,20 +1,21 @@
 import {
   Configuration,
   DefaultApiFactory,
+  type CurrentMemoryOperation,
+  type CurrentMemoryOperationsRequest,
   type CurrentMemoryPreferenceItem,
   type CurrentMemoryPreferenceListData,
   type CurrentMemoryProfileDocument,
-  type CurrentMemoryProfilePatchRequest,
   type CurrentMemoryReference,
   type CurrentMemorySoulDocument,
-  type CurrentMemorySoulPatchRequest,
 } from "@/api/generated/core-client";
 import { axiosInstance, BASE_URL } from "@/components/request";
 
 export type SoulDocument = CurrentMemorySoulDocument;
-export type SoulPatch = CurrentMemorySoulPatchRequest;
+export type MemoryOperation = CurrentMemoryOperation;
+export type SoulPatch = CurrentMemoryOperationsRequest;
 export type ProfileDocument = CurrentMemoryProfileDocument;
-export type ProfilePatch = CurrentMemoryProfilePatchRequest;
+export type ProfilePatch = CurrentMemoryOperationsRequest;
 
 export interface CurrentMemorySnapshot<TDocument> {
   document: TDocument;
@@ -129,7 +130,7 @@ export async function patchSoulMemory(
 ): Promise<CurrentMemorySnapshot<SoulDocument>> {
   const { data } = (
     await currentMemoryApi.apiCoreMemorySoulPatch({
-      currentMemorySoulPatchRequest: patch,
+      currentMemoryOperationsRequest: patch,
     })
   ).data;
   return {
@@ -153,7 +154,7 @@ export async function patchProfileMemory(
 ): Promise<CurrentMemorySnapshot<ProfileDocument>> {
   const { data } = (
     await currentMemoryApi.apiCoreMemoryProfilePatch({
-      currentMemoryProfilePatchRequest: patch,
+      currentMemoryOperationsRequest: patch,
     })
   ).data;
   return {

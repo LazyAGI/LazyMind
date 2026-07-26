@@ -19,6 +19,7 @@ export interface IdentityField<TPatch> {
   value: IdentityFieldValue;
   valueType: "required-string" | "nullable-string" | "string-list";
   buildPatch: (value: IdentityFieldValue) => TPatch;
+  buildRemovePatch?: (value: string) => TPatch;
 }
 
 interface UseIdentityFieldEditorOptions<TDocument, TPatch> {
@@ -40,9 +41,7 @@ const normalizeDraftValue = <TPatch,>(
   if (field.valueType === "nullable-string") {
     return String(value || "").trim() || null;
   }
-  return Array.isArray(value)
-    ? value.map((item) => item.trim()).filter(Boolean)
-    : [];
+  return String(value || "").trim();
 };
 
 export const useIdentityFieldEditor = <TDocument, TPatch>({
@@ -59,20 +58,22 @@ export const useIdentityFieldEditor = <TDocument, TPatch>({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [conflict, setConflict] = useState(false);
+  const pendingPatchRef = useRef<TPatch | null>(null);
 
   const updateDraftValue = useCallback((value: IdentityFieldValue) => {
     draftValueRef.current = value;
     setDraftValue(value);
   }, []);
 
-  const beginEdit = useCallback((field: IdentityField<TPatch>) => {
-    setEditingField(field);
-    updateDraftValue(
-      Array.isArray(field.value) ? [...field.value] : field.value,
-    );
-    setSaveError("");
-    setConflict(false);
-  }, [updateDraftValue]);
+  const beginEdit = useCallback(
+    (field: IdentityField<TPatch>) => {
+      setEditingField(field);
+      updateDraftValue(Array.isArray(field.value) ? "" : field.value);
+      setSaveError("");
+      setConflict(false);
+    },
+    [updateDraftValue],
+  );
 
   const clearEditor = useCallback(() => {
     setEditingField(null);
@@ -87,6 +88,37 @@ export const useIdentityFieldEditor = <TDocument, TPatch>({
     }
   }, [clearEditor, saving]);
 
+  const savePatch = useCallback(
+    async (patch: TPatch, clearOnSuccess = true) => {
+      if (saving) {
+        return;
+      }
+      pendingPatchRef.current = patch;
+      setSaving(true);
+      setSaveError("");
+      setConflict(false);
+      try {
+        setSnapshot(await save(patch));
+        if (clearOnSuccess) {
+          clearEditor();
+        }
+        message.success(t("admin.memoryCurrentSaveSuccess"));
+      } catch (error) {
+        console.error(`Save ${kind} memory field failed:`, error);
+        if (isCurrentMemoryConflict(error)) {
+          setConflict(true);
+        } else {
+          const errorMessage = getLocalizedErrorMessage(error);
+          setSaveError(errorMessage);
+          message.error(errorMessage);
+        }
+      } finally {
+        setSaving(false);
+      }
+    },
+    [clearEditor, kind, save, saving, setSnapshot, t],
+  );
+
   const saveField = useCallback(async () => {
     if (!editingField || saving) {
       return;
@@ -96,39 +128,22 @@ export const useIdentityFieldEditor = <TDocument, TPatch>({
       draftValueRef.current,
     );
     if (
-      editingField.valueType === "required-string" &&
+      (editingField.valueType === "required-string" ||
+        editingField.valueType === "string-list") &&
       !String(nextValue).trim()
     ) {
       setSaveError(t("admin.memoryCurrentRequiredField"));
       return;
     }
 
-    setSaving(true);
-    setSaveError("");
-    setConflict(false);
-    try {
-      setSnapshot(await save(editingField.buildPatch(nextValue)));
-      clearEditor();
-      message.success(t("admin.memoryCurrentSaveSuccess"));
-    } catch (error) {
-      console.error(`Save ${kind} memory field failed:`, error);
-      if (isCurrentMemoryConflict(error)) {
-        setConflict(true);
-      } else {
-        setSaveError(getLocalizedErrorMessage(error));
-      }
-    } finally {
-      setSaving(false);
+    await savePatch(editingField.buildPatch(nextValue));
+  }, [editingField, savePatch, saving, t]);
+
+  const retrySave = useCallback(async () => {
+    if (pendingPatchRef.current) {
+      await savePatch(pendingPatchRef.current);
     }
-  }, [
-    clearEditor,
-    editingField,
-    kind,
-    save,
-    saving,
-    setSnapshot,
-    t,
-  ]);
+  }, [savePatch]);
 
   const reloadConflictSnapshot = useCallback(async () => {
     if (saving) {
@@ -153,8 +168,10 @@ export const useIdentityFieldEditor = <TDocument, TPatch>({
     draftValue,
     editingField,
     reloadConflictSnapshot,
+    retrySave,
     saveError,
     saveField,
+    savePatch,
     saving,
     updateDraftValue,
   };

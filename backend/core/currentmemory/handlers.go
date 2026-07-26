@@ -78,12 +78,12 @@ func (h *Handler) PatchSoul(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	patch, err := decodePatchBody(r)
+	request, err := decodeOperationsBody(r)
 	if err != nil {
 		replyPublicError(w, err)
 		return
 	}
-	result, err := h.module.PatchSoul(r.Context(), userID, patch)
+	result, err := h.module.PatchSoul(r.Context(), userID, request)
 	if err != nil {
 		replyPublicError(w, err)
 		return
@@ -109,12 +109,12 @@ func (h *Handler) PatchProfile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	patch, err := decodePatchBody(r)
+	request, err := decodeOperationsBody(r)
 	if err != nil {
 		replyPublicError(w, err)
 		return
 	}
-	result, err := h.module.PatchProfile(r.Context(), userID, patch)
+	result, err := h.module.PatchProfile(r.Context(), userID, request)
 	if err != nil {
 		replyPublicError(w, err)
 		return
@@ -203,18 +203,18 @@ func requirePublicUser(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return userID, true
 }
 
-func decodePatchBody(r *http.Request) (map[string]any, error) {
-	var patch map[string]any
-	if err := decodeJSONBody(r, &patch); err != nil {
-		return nil, err
+func decodeOperationsBody(r *http.Request) (CurrentMemoryOperationsRequest, error) {
+	var request CurrentMemoryOperationsRequest
+	if err := decodeJSONBody(r, &request); err != nil {
+		return CurrentMemoryOperationsRequest{}, err
 	}
-	if patch == nil || countPatchLeaves(patch) == 0 {
-		return nil, fmt.Errorf(
-			"%w: at least one field is required",
+	if len(request.Operations) == 0 {
+		return CurrentMemoryOperationsRequest{}, fmt.Errorf(
+			"%w: at least one operation is required",
 			ErrInvalidRequest,
 		)
 	}
-	return patch, nil
+	return request, nil
 }
 
 func decodeJSONBody(r *http.Request, target any) error {

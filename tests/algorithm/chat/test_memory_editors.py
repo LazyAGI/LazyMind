@@ -16,6 +16,7 @@ from lazymind.common.memory.paths import (
 from lazymind.common.memory.store import MemoryStore
 
 SAMPLE_SOUL = (
+    'schema_version: 2\n'
     'identity:\n'
     '  name: "LazyMind"\n'
     '  role: "personal_ai_assistant"\n'
@@ -24,32 +25,29 @@ SAMPLE_SOUL = (
     '  primary_goal: "帮助用户准确、高效地思考并完成工作"\n'
     '  success_definition: "输出可靠、可执行且符合用户真实目标的结果"\n'
     'interaction:\n'
-    '  relationship_mode: "collaborator"\n'
+    '  default_relationship_mode: "collaborator"\n'
     '  default_tone: "warm_direct"\n'
-    '  initiative_level: "proactive"\n'
-    '  challenge_level: "constructive"\n'
-    '  decision_mode: "recommend_then_confirm"\n'
+    '  default_initiative_level: "proactive"\n'
+    '  default_challenge_level: "constructive"\n'
+    '  default_decision_mode: "recommend_then_confirm"\n'
     'epistemic:\n'
     '  uncertainty_style: "explicit"\n'
     '  verification_mode: "when_material"\n'
 )
 
 SAMPLE_PROFILE = (
+    'schema_version: 2\n'
     'identity:\n'
     '  preferred_name: null\n'
     '  aliases: []\n'
-    '  pronouns: null\n'
     'locale:\n'
     '  languages: ["zh-CN"]\n'
-    '  timezone: "Asia/Shanghai"\n'
-    '  region: "CN"\n'
+    '  residence: "CN"\n'
     'professional:\n'
-    '  roles: []\n'
-    '  organization: null\n'
-    '  industry: null\n'
+    '  occupations: []\n'
+    '  organizations: []\n'
+    '  industries: []\n'
     '  expertise_domains: []\n'
-    'accessibility:\n'
-    '  communication_needs: []\n'
 )
 
 SAMPLE_PREFERENCE = 'preferences: []\n'
@@ -158,7 +156,9 @@ def test_soul_editor_updates_supported_field():
     })
     tools, store = _tools_with_store(fs)
     with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
-        payload = tools.soul_editor({'identity.description': '更直接的助手'})
+        payload = tools.soul_editor([
+            {'op': 'set', 'path': 'identity.description', 'value': '更直接的助手'},
+        ])
 
     assert payload['success'] is True
     assert payload['result']['status'] == 'applied'
@@ -177,10 +177,12 @@ def test_soul_editor_rejects_missing_field():
     })
     tools, store = _tools_with_store(fs)
     with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
-        payload = tools.soul_editor({'identity.email': 'x@y.com'})
+        payload = tools.soul_editor([
+            {'op': 'set', 'path': 'identity.email', 'value': 'x@y.com'},
+        ])
     assert payload['success'] is False
     assert payload['error']['type'] == 'validation'
-    assert 'does not exist in soul' in payload['error']['reason']
+    assert 'does not exist in document' in payload['error']['reason']
     assert ledger[-1]['success'] is False
     assert ledger[-1]['mutation'] is False
 
@@ -194,18 +196,20 @@ def test_profile_editor_updates_list_field():
     })
     tools, store = _tools_with_store(fs)
     with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
-        payload = tools.profile_editor({
-            'locale.languages': '["zh-CN","en-US"]',
-            'locale.region': 'CN',
-            'professional.industry': 'software',
-        })
+        payload = tools.profile_editor([
+            {'op': 'add', 'path': 'locale.languages', 'value': 'en-US'},
+            {'op': 'add', 'path': 'locale.languages', 'value': 'en-US'},
+            {'op': 'set', 'path': 'locale.residence', 'value': '中国'},
+            {'op': 'add', 'path': 'professional.industries', 'value': 'software'},
+        ])
 
     assert payload['success'] is True
     assert payload['result']['status'] == 'applied'
-    assert payload['result']['change_count'] == 3
-    assert 'en-US' in fs.files[PROFILE_PATH]
-    assert 'region: CN' in fs.files[PROFILE_PATH]
-    assert 'industry: software' in fs.files[PROFILE_PATH]
+    assert payload['result']['change_count'] == 4
+    assert fs.files[PROFILE_PATH].count('en-US') == 1
+    assert 'residence:' in fs.files[PROFILE_PATH]
+    assert '中国' in fs.files[PROFILE_PATH]
+    assert 'software' in fs.files[PROFILE_PATH]
     assert ledger[-1]['mutation'] is True
 
 

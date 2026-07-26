@@ -56,11 +56,16 @@ func TestSoulPublicHandlersAreUserScopedAndPatchFields(t *testing.T) {
 	if bytes.Contains(getRecorder.Body.Bytes(), []byte(`"etag"`)) {
 		t.Fatalf("Soul response must not expose etag: %s", getRecorder.Body.String())
 	}
+	if bytes.Contains(getRecorder.Body.Bytes(), []byte(`"schema_version"`)) {
+		t.Fatalf("Soul response must not expose schema_version: %s", getRecorder.Body.String())
+	}
 
 	patchRequest := httptest.NewRequest(
 		http.MethodPatch,
 		"/memory/soul",
-		bytes.NewBufferString(`{"identity":{"name":"小懒"}}`),
+		bytes.NewBufferString(
+			`{"operations":[{"op":"set","path":"identity.name","value":"小懒"}]}`,
+		),
 	)
 	patchRequest.Header.Set("X-User-Id", "user-1")
 	patchRecorder := httptest.NewRecorder()
@@ -81,11 +86,12 @@ func TestSoulPublicHandlersAreUserScopedAndPatchFields(t *testing.T) {
 		t.Fatalf("patch did not preserve full Soul document: %#v", patched.Data.Document)
 	}
 	for _, body := range []string{
-		`{"identity":{"name":null}}`,
-		`{"identity":{"name":123}}`,
-		`{"identity":{"name":true}}`,
-		`{"identity":null}`,
-		`{"identity":{"unknown":"value"}}`,
+		`{"operations":[]}`,
+		`{"operations":[{"op":"clear","path":"identity.name"}]}`,
+		`{"operations":[{"op":"set","path":"identity.name"}]}`,
+		`{"operations":[{"op":"set","path":"identity.name","value":""}]}`,
+		`{"operations":[{"op":"set","path":"identity.unknown","value":"value"}]}`,
+		`{"operations":[{"op":"add","path":"identity.name","value":"value"}]}`,
 		`{}`,
 	} {
 		request := httptest.NewRequest(
@@ -120,7 +126,7 @@ func TestSoulPublicHandlersAreUserScopedAndPatchFields(t *testing.T) {
 	}
 }
 
-func TestProfilePatchDistinguishesOmittedNullAndEmptyList(t *testing.T) {
+func TestProfileOperationsSupportScalarAndItemEditing(t *testing.T) {
 	db := newCurrentMemoryTestDB(t)
 	handler := NewHandler(db.DB)
 
@@ -128,7 +134,12 @@ func TestProfilePatchDistinguishesOmittedNullAndEmptyList(t *testing.T) {
 		http.MethodPatch,
 		"/memory/profile",
 		bytes.NewBufferString(
-			`{"identity":{"preferred_name":"Alice","aliases":["A"]},"locale":{"timezone":"Asia/Shanghai"}}`,
+			`{"operations":[`+
+				`{"op":"set","path":"identity.preferred_name","value":"Alice"},`+
+				`{"op":"add","path":"identity.aliases","value":"A"},`+
+				`{"op":"add","path":"identity.aliases","value":"A"},`+
+				`{"op":"set","path":"locale.residence","value":"上海"}`+
+				`]}`,
 		),
 	)
 	firstPatch.Header.Set("X-User-Id", "user-1")
@@ -137,12 +148,27 @@ func TestProfilePatchDistinguishesOmittedNullAndEmptyList(t *testing.T) {
 	if firstRecorder.Code != http.StatusOK {
 		t.Fatalf("first patch status=%d body=%s", firstRecorder.Code, firstRecorder.Body.String())
 	}
+	if bytes.Contains(firstRecorder.Body.Bytes(), []byte(`"schema_version"`)) {
+		t.Fatalf("Profile response must not expose schema_version: %s", firstRecorder.Body.String())
+	}
+	var firstResult struct {
+		Data CurrentMemoryProfileData `json:"data"`
+	}
+	if err := json.Unmarshal(firstRecorder.Body.Bytes(), &firstResult); err != nil {
+		t.Fatal(err)
+	}
+	if len(firstResult.Data.Document.Identity.Aliases) != 1 {
+		t.Fatalf("duplicate add must be idempotent: %#v", firstResult.Data.Document.Identity)
+	}
 
 	clearPatch := httptest.NewRequest(
 		http.MethodPatch,
 		"/memory/profile",
 		bytes.NewBufferString(
-			`{"identity":{"preferred_name":null,"aliases":[]}}`,
+			`{"operations":[`+
+				`{"op":"clear","path":"identity.preferred_name"},`+
+				`{"op":"remove","path":"identity.aliases","value":"A"}`+
+				`]}`,
 		),
 	)
 	clearPatch.Header.Set("X-User-Id", "user-1")
@@ -161,17 +187,18 @@ func TestProfilePatchDistinguishesOmittedNullAndEmptyList(t *testing.T) {
 		len(cleared.Data.Document.Identity.Aliases) != 0 {
 		t.Fatalf("profile clear semantics failed: %#v", cleared.Data.Document.Identity)
 	}
-	if cleared.Data.Document.Locale.Timezone == nil ||
-		*cleared.Data.Document.Locale.Timezone != "Asia/Shanghai" {
-		t.Fatalf("omitted timezone changed: %#v", cleared.Data.Document.Locale)
+	if cleared.Data.Document.Locale.Residence == nil ||
+		*cleared.Data.Document.Locale.Residence != "上海" {
+		t.Fatalf("untouched residence changed: %#v", cleared.Data.Document.Locale)
 	}
 
 	for _, body := range []string{
-		`{"identity":{"aliases":null}}`,
-		`{"identity":{"preferred_name":123}}`,
-		`{"identity":{"aliases":[123]}}`,
-		`{"identity":{"aliases":[true]}}`,
-		`{"identity":{"unknown":"value"}}`,
+		`{"operations":[{"op":"add","path":"identity.preferred_name","value":"A"}]}`,
+		`{"operations":[{"op":"set","path":"identity.aliases","value":"A"}]}`,
+		`{"operations":[{"op":"add","path":"identity.aliases"}]}`,
+		`{"operations":[{"op":"clear","path":"identity.aliases","value":"A"}]}`,
+		`{"operations":[{"op":"set","path":"identity.unknown","value":"value"}]}`,
+		`{"operations":[]}`,
 		`{}`,
 	} {
 		request := httptest.NewRequest(
@@ -190,6 +217,115 @@ func TestProfilePatchDistinguishesOmittedNullAndEmptyList(t *testing.T) {
 				recorder.Body.String(),
 			)
 		}
+	}
+}
+
+func TestOldUserReadMigratesAndPersistsSoulAndProfile(t *testing.T) {
+	db := newCurrentMemoryTestDB(t)
+	module := NewModule(db.DB)
+	repository := NewRepository(db.DB)
+	if err := repository.EnsureInitialized(t.Context(), "legacy-user"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := repository.UpdateFileContent(
+		t.Context(),
+		"legacy-user",
+		SoulPath,
+		[]byte(legacySoulV1YAML),
+		now,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.UpdateFileContent(
+		t.Context(),
+		"legacy-user",
+		ProfilePath,
+		[]byte(legacyProfileV1YAML),
+		now,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	soul, err := module.GetSoul(t.Context(), "legacy-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := module.GetProfile(t.Context(), "legacy-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if soul.Document.Interaction.DefaultRelationshipMode != "协作者" ||
+		profile.Document.Locale.Residence == nil ||
+		*profile.Document.Locale.Residence != "上海" {
+		t.Fatalf("migrated documents lost values: soul=%#v profile=%#v", soul, profile)
+	}
+
+	storedSoul, err := repository.GetEntry(t.Context(), "legacy-user", SoulPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedProfile, err := repository.GetEntry(t.Context(), "legacy-user", ProfilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(storedSoul.Content, []byte("schema_version: 2")) ||
+		!bytes.Contains(storedProfile.Content, []byte("schema_version: 2")) {
+		t.Fatalf(
+			"migration was not persisted: soul=%s profile=%s",
+			storedSoul.Content,
+			storedProfile.Content,
+		)
+	}
+}
+
+func TestOldUserProfileEditMigratesAndAppliesOperationsInOneWrite(t *testing.T) {
+	db := newCurrentMemoryTestDB(t)
+	module := NewModule(db.DB)
+	repository := NewRepository(db.DB)
+	if err := repository.EnsureInitialized(t.Context(), "legacy-editor"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.UpdateFileContent(
+		t.Context(),
+		"legacy-editor",
+		ProfilePath,
+		[]byte(legacyProfileV1YAML),
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	organization := "新组织"
+	result, err := module.PatchProfile(
+		t.Context(),
+		"legacy-editor",
+		CurrentMemoryOperationsRequest{Operations: []CurrentMemoryOperation{
+			{
+				Op:    "add",
+				Path:  "professional.organizations",
+				Value: &organization,
+			},
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Document.Locale.Residence == nil ||
+		*result.Document.Locale.Residence != "上海" ||
+		len(result.Document.Professional.Organizations) != 2 {
+		t.Fatalf("migration plus operation result = %#v", result.Document)
+	}
+	entry, err := repository.GetEntry(t.Context(), "legacy-editor", ProfilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsAll(
+		string(entry.Content),
+		"schema_version: 2",
+		"- LazyMind",
+		"- 新组织",
+	) {
+		t.Fatalf("combined migrated write =\n%s", entry.Content)
 	}
 }
 
@@ -655,7 +791,9 @@ func TestSoulPatchRetriesContentCASAndStopsAfterThreeConflicts(t *testing.T) {
 	request := httptest.NewRequest(
 		http.MethodPatch,
 		"/memory/soul",
-		bytes.NewBufferString(`{"identity":{"name":"CAS merged"}}`),
+		bytes.NewBufferString(
+			`{"operations":[{"op":"set","path":"identity.name","value":"CAS merged"}]}`,
+		),
 	)
 	request.Header.Set("X-User-Id", "user-1")
 	recorder := httptest.NewRecorder()
@@ -710,7 +848,9 @@ func TestSoulPatchRetriesContentCASAndStopsAfterThreeConflicts(t *testing.T) {
 	exhaustedRequest := httptest.NewRequest(
 		http.MethodPatch,
 		"/memory/soul",
-		bytes.NewBufferString(`{"identity":{"role":"never-committed"}}`),
+		bytes.NewBufferString(
+			`{"operations":[{"op":"set","path":"identity.role","value":"never-committed"}]}`,
+		),
 	)
 	exhaustedRequest.Header.Set("X-User-Id", "user-1")
 	exhaustedRecorder := httptest.NewRecorder()

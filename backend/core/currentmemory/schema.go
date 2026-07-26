@@ -25,9 +25,13 @@ const (
 
 	EntryFile = "file"
 	EntryDir  = "dir"
+
+	CurrentSoulSchemaVersion    = 2
+	CurrentProfileSchemaVersion = 2
 )
 
-const DefaultSoulYAML = `identity:
+const DefaultSoulYAML = `schema_version: 2
+identity:
   name: LazyMind
   role: 个人智能助手
   description: 面向研究、分析和复杂任务的个人智能助手
@@ -35,31 +39,28 @@ mission:
   primary_goal: 帮助用户准确、高效地思考并完成工作
   success_definition: 输出可靠、可执行且符合用户真实目标的结果
 interaction:
-  relationship_mode: 协作者
+  default_relationship_mode: 协作者
   default_tone: 温暖直接
-  initiative_level: 主动
-  challenge_level: 建设性
-  decision_mode: 先建议再确认
+  default_initiative_level: 主动
+  default_challenge_level: 建设性
+  default_decision_mode: 先建议再确认
 epistemic:
   uncertainty_style: 明确说明
   verification_mode: 必要时核验
 `
 
-const DefaultProfileYAML = `identity:
+const DefaultProfileYAML = `schema_version: 2
+identity:
   preferred_name: null
   aliases: []
-  pronouns: null
 locale:
   languages: []
-  timezone: null
-  region: null
+  residence: null
 professional:
-  roles: []
-  organization: null
-  industry: null
+  occupations: []
+  organizations: []
+  industries: []
   expertise_domains: []
-accessibility:
-  communication_needs: []
 `
 
 const DefaultPreferenceYAML = "preferences: []\n"
@@ -67,6 +68,12 @@ const DefaultPreferenceYAML = "preferences: []\n"
 var (
 	ErrInvalidDocument = errors.New("invalid current memory document")
 	referenceNameRE    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	soulMigrationChain = map[int]func([]byte) ([]byte, error){
+		1: migrateSoulV1ToV2,
+	}
+	profileMigrationChain = map[int]func([]byte) ([]byte, error){
+		1: migrateProfileV1ToV2,
+	}
 )
 
 type SoulIdentity struct {
@@ -81,11 +88,11 @@ type SoulMission struct {
 }
 
 type SoulInteraction struct {
-	RelationshipMode string `json:"relationship_mode" yaml:"relationship_mode"`
-	DefaultTone      string `json:"default_tone" yaml:"default_tone"`
-	InitiativeLevel  string `json:"initiative_level" yaml:"initiative_level"`
-	ChallengeLevel   string `json:"challenge_level" yaml:"challenge_level"`
-	DecisionMode     string `json:"decision_mode" yaml:"decision_mode"`
+	DefaultRelationshipMode string `json:"default_relationship_mode" yaml:"default_relationship_mode"`
+	DefaultTone             string `json:"default_tone" yaml:"default_tone"`
+	DefaultInitiativeLevel  string `json:"default_initiative_level" yaml:"default_initiative_level"`
+	DefaultChallengeLevel   string `json:"default_challenge_level" yaml:"default_challenge_level"`
+	DefaultDecisionMode     string `json:"default_decision_mode" yaml:"default_decision_mode"`
 }
 
 type SoulEpistemic struct {
@@ -103,31 +110,34 @@ type SoulDocument struct {
 type ProfileIdentity struct {
 	PreferredName *string  `json:"preferred_name" yaml:"preferred_name"`
 	Aliases       []string `json:"aliases" yaml:"aliases"`
-	Pronouns      *string  `json:"pronouns" yaml:"pronouns"`
 }
 
 type ProfileLocale struct {
 	Languages []string `json:"languages" yaml:"languages"`
-	Timezone  *string  `json:"timezone" yaml:"timezone"`
-	Region    *string  `json:"region" yaml:"region"`
+	Residence *string  `json:"residence" yaml:"residence"`
 }
 
 type ProfileProfessional struct {
-	Roles            []string `json:"roles" yaml:"roles"`
-	Organization     *string  `json:"organization" yaml:"organization"`
-	Industry         *string  `json:"industry" yaml:"industry"`
+	Occupations      []string `json:"occupations" yaml:"occupations"`
+	Organizations    []string `json:"organizations" yaml:"organizations"`
+	Industries       []string `json:"industries" yaml:"industries"`
 	ExpertiseDomains []string `json:"expertise_domains" yaml:"expertise_domains"`
 }
 
-type ProfileAccessibility struct {
-	CommunicationNeeds []string `json:"communication_needs" yaml:"communication_needs"`
+type ProfileDocument struct {
+	Identity     ProfileIdentity     `json:"identity" yaml:"identity"`
+	Locale       ProfileLocale       `json:"locale" yaml:"locale"`
+	Professional ProfileProfessional `json:"professional" yaml:"professional"`
 }
 
-type ProfileDocument struct {
-	Identity      ProfileIdentity      `json:"identity" yaml:"identity"`
-	Locale        ProfileLocale        `json:"locale" yaml:"locale"`
-	Professional  ProfileProfessional  `json:"professional" yaml:"professional"`
-	Accessibility ProfileAccessibility `json:"accessibility" yaml:"accessibility"`
+type storedSoulDocument struct {
+	SchemaVersion int `yaml:"schema_version"`
+	SoulDocument  `yaml:",inline"`
+}
+
+type storedProfileDocument struct {
+	SchemaVersion   int `yaml:"schema_version"`
+	ProfileDocument `yaml:",inline"`
 }
 
 type PreferenceItem struct {
@@ -162,10 +172,30 @@ func ValidateDocumentForPath(entryPath string, content []byte) error {
 	normalized := strings.Trim(strings.TrimSpace(entryPath), "/")
 	switch normalized {
 	case SoulPath:
-		_, err := decodeYAMLMapping(content, "soul")
+		version, err := documentSchemaVersion(content, "soul")
+		if err != nil {
+			return err
+		}
+		if version == 1 {
+			_, err = migrateSoulV1ToV2(content)
+		} else if version == CurrentSoulSchemaVersion {
+			_, err = ParseSoul(content)
+		} else {
+			err = invalidDocument("unsupported soul schema_version %d", version)
+		}
 		return err
 	case ProfilePath:
-		_, err := decodeYAMLMapping(content, "profile")
+		version, err := documentSchemaVersion(content, "profile")
+		if err != nil {
+			return err
+		}
+		if version == 1 {
+			_, err = migrateProfileV1ToV2(content)
+		} else if version == CurrentProfileSchemaVersion {
+			_, err = ParseProfile(content)
+		} else {
+			err = invalidDocument("unsupported profile schema_version %d", version)
+		}
 		return err
 	case PreferencePath:
 		_, err := ParsePreferences(content)
@@ -186,14 +216,17 @@ func ParseSoul(content []byte) (SoulDocument, error) {
 	if err != nil {
 		return SoulDocument{}, err
 	}
-	sections, err := exactMapping(root, "soul", []string{"identity", "mission", "interaction", "epistemic"})
+	sections, err := exactMapping(root, "soul", []string{"schema_version", "identity", "mission", "interaction", "epistemic"})
 	if err != nil {
+		return SoulDocument{}, err
+	}
+	if err := validateSchemaVersion(sections["schema_version"], CurrentSoulSchemaVersion, "soul"); err != nil {
 		return SoulDocument{}, err
 	}
 	for section, fields := range map[string][]string{
 		"identity":    {"name", "role", "description"},
 		"mission":     {"primary_goal", "success_definition"},
-		"interaction": {"relationship_mode", "default_tone", "initiative_level", "challenge_level", "decision_mode"},
+		"interaction": {"default_relationship_mode", "default_tone", "default_initiative_level", "default_challenge_level", "default_decision_mode"},
 		"epistemic":   {"uncertainty_style", "verification_mode"},
 	} {
 		values, mapErr := exactMapping(sections[section], section, fields)
@@ -209,11 +242,11 @@ func ParseSoul(content []byte) (SoulDocument, error) {
 			}
 		}
 	}
-	var document SoulDocument
-	if err := root.Decode(&document); err != nil {
+	var stored storedSoulDocument
+	if err := root.Decode(&stored); err != nil {
 		return SoulDocument{}, invalidDocument("invalid soul: %v", err)
 	}
-	return document, nil
+	return stored.SoulDocument, nil
 }
 
 func ParseProfile(content []byte) (ProfileDocument, error) {
@@ -221,23 +254,21 @@ func ParseProfile(content []byte) (ProfileDocument, error) {
 	if err != nil {
 		return ProfileDocument{}, err
 	}
-	sections, err := exactMapping(root, "profile", []string{"identity", "locale", "professional", "accessibility"})
+	sections, err := exactMapping(root, "profile", []string{"schema_version", "identity", "locale", "professional"})
 	if err != nil {
 		return ProfileDocument{}, err
 	}
+	if err := validateSchemaVersion(sections["schema_version"], CurrentProfileSchemaVersion, "profile"); err != nil {
+		return ProfileDocument{}, err
+	}
 	sectionFields := map[string][]string{
-		"identity":      {"preferred_name", "aliases", "pronouns"},
-		"locale":        {"languages", "timezone", "region"},
-		"professional":  {"roles", "organization", "industry", "expertise_domains"},
-		"accessibility": {"communication_needs"},
+		"identity":     {"preferred_name", "aliases"},
+		"locale":       {"languages", "residence"},
+		"professional": {"occupations", "organizations", "industries", "expertise_domains"},
 	}
 	stringFields := map[string]bool{
-		"identity.preferred_name":   true,
-		"identity.pronouns":         true,
-		"locale.timezone":           true,
-		"locale.region":             true,
-		"professional.organization": true,
-		"professional.industry":     true,
+		"identity.preferred_name": true,
+		"locale.residence":        true,
 	}
 	for section, fields := range sectionFields {
 		values, mapErr := exactMapping(sections[section], section, fields)
@@ -261,11 +292,313 @@ func ParseProfile(content []byte) (ProfileDocument, error) {
 			}
 		}
 	}
-	var document ProfileDocument
-	if err := root.Decode(&document); err != nil {
+	var stored storedProfileDocument
+	if err := root.Decode(&stored); err != nil {
 		return ProfileDocument{}, invalidDocument("invalid profile: %v", err)
 	}
-	return document, nil
+	return stored.ProfileDocument, nil
+}
+
+func NormalizeSoul(content []byte) (SoulDocument, []byte, error) {
+	version, err := documentSchemaVersion(content, "soul")
+	if err != nil {
+		return SoulDocument{}, nil, err
+	}
+	normalized := append([]byte(nil), content...)
+	for version < CurrentSoulSchemaVersion {
+		migrate := soulMigrationChain[version]
+		if migrate == nil {
+			return SoulDocument{}, nil, invalidDocument(
+				"missing soul migration from schema_version %d",
+				version,
+			)
+		}
+		normalized, err = migrate(normalized)
+		if err != nil {
+			return SoulDocument{}, nil, err
+		}
+		version++
+	}
+	if version != CurrentSoulSchemaVersion {
+		return SoulDocument{}, nil, invalidDocument("unsupported soul schema_version %d", version)
+	}
+	document, err := ParseSoul(normalized)
+	if err != nil {
+		return SoulDocument{}, nil, err
+	}
+	rendered, err := RenderSoul(document)
+	return document, rendered, err
+}
+
+func NormalizeProfile(content []byte) (ProfileDocument, []byte, error) {
+	version, err := documentSchemaVersion(content, "profile")
+	if err != nil {
+		return ProfileDocument{}, nil, err
+	}
+	normalized := append([]byte(nil), content...)
+	for version < CurrentProfileSchemaVersion {
+		migrate := profileMigrationChain[version]
+		if migrate == nil {
+			return ProfileDocument{}, nil, invalidDocument(
+				"missing profile migration from schema_version %d",
+				version,
+			)
+		}
+		normalized, err = migrate(normalized)
+		if err != nil {
+			return ProfileDocument{}, nil, err
+		}
+		version++
+	}
+	if version != CurrentProfileSchemaVersion {
+		return ProfileDocument{}, nil, invalidDocument("unsupported profile schema_version %d", version)
+	}
+	document, err := ParseProfile(normalized)
+	if err != nil {
+		return ProfileDocument{}, nil, err
+	}
+	rendered, err := RenderProfile(document)
+	return document, rendered, err
+}
+
+type legacySoulInteraction struct {
+	RelationshipMode string `yaml:"relationship_mode"`
+	DefaultTone      string `yaml:"default_tone"`
+	InitiativeLevel  string `yaml:"initiative_level"`
+	ChallengeLevel   string `yaml:"challenge_level"`
+	DecisionMode     string `yaml:"decision_mode"`
+}
+
+type legacySoulDocument struct {
+	Identity    SoulIdentity          `yaml:"identity"`
+	Mission     SoulMission           `yaml:"mission"`
+	Interaction legacySoulInteraction `yaml:"interaction"`
+	Epistemic   SoulEpistemic         `yaml:"epistemic"`
+}
+
+type legacyProfileIdentity struct {
+	PreferredName *string  `yaml:"preferred_name"`
+	Aliases       []string `yaml:"aliases"`
+	Pronouns      *string  `yaml:"pronouns"`
+}
+
+type legacyProfileLocale struct {
+	Languages []string `yaml:"languages"`
+	Timezone  *string  `yaml:"timezone"`
+	Region    *string  `yaml:"region"`
+}
+
+type legacyProfileProfessional struct {
+	Roles            []string `yaml:"roles"`
+	Organization     *string  `yaml:"organization"`
+	Industry         *string  `yaml:"industry"`
+	ExpertiseDomains []string `yaml:"expertise_domains"`
+}
+
+type legacyProfileAccessibility struct {
+	CommunicationNeeds []string `yaml:"communication_needs"`
+}
+
+type legacyProfileDocument struct {
+	Identity      legacyProfileIdentity      `yaml:"identity"`
+	Locale        legacyProfileLocale        `yaml:"locale"`
+	Professional  legacyProfileProfessional  `yaml:"professional"`
+	Accessibility legacyProfileAccessibility `yaml:"accessibility"`
+}
+
+func parseLegacySoul(content []byte) (legacySoulDocument, error) {
+	root, err := decodeYAMLMapping(content, "soul")
+	if err != nil {
+		return legacySoulDocument{}, err
+	}
+	topFields := []string{"identity", "mission", "interaction", "epistemic"}
+	if mappingHasKey(root, "schema_version") {
+		topFields = append([]string{"schema_version"}, topFields...)
+	}
+	sections, err := exactMapping(root, "soul", topFields)
+	if err != nil {
+		return legacySoulDocument{}, err
+	}
+	if versionNode := sections["schema_version"]; versionNode != nil {
+		if err := validateSchemaVersion(versionNode, 1, "soul"); err != nil {
+			return legacySoulDocument{}, err
+		}
+	}
+	for section, fields := range map[string][]string{
+		"identity":    {"name", "role", "description"},
+		"mission":     {"primary_goal", "success_definition"},
+		"interaction": {"relationship_mode", "default_tone", "initiative_level", "challenge_level", "decision_mode"},
+		"epistemic":   {"uncertainty_style", "verification_mode"},
+	} {
+		values, mapErr := exactMapping(sections[section], section, fields)
+		if mapErr != nil {
+			return legacySoulDocument{}, mapErr
+		}
+		for _, field := range fields {
+			if !isStringNode(values[field]) || strings.TrimSpace(values[field].Value) == "" {
+				return legacySoulDocument{}, invalidDocument(
+					"soul %q must be a non-empty string",
+					section+"."+field,
+				)
+			}
+		}
+	}
+	var legacy legacySoulDocument
+	if err := root.Decode(&legacy); err != nil {
+		return legacySoulDocument{}, invalidDocument("invalid legacy soul: %v", err)
+	}
+	return legacy, nil
+}
+
+func migrateSoulV1ToV2(content []byte) ([]byte, error) {
+	legacy, err := parseLegacySoul(content)
+	if err != nil {
+		return nil, err
+	}
+	return RenderSoul(SoulDocument{
+		Identity: legacy.Identity,
+		Mission:  legacy.Mission,
+		Interaction: SoulInteraction{
+			DefaultRelationshipMode: legacy.Interaction.RelationshipMode,
+			DefaultTone:             legacy.Interaction.DefaultTone,
+			DefaultInitiativeLevel:  legacy.Interaction.InitiativeLevel,
+			DefaultChallengeLevel:   legacy.Interaction.ChallengeLevel,
+			DefaultDecisionMode:     legacy.Interaction.DecisionMode,
+		},
+		Epistemic: legacy.Epistemic,
+	})
+}
+
+func parseLegacyProfile(content []byte) (legacyProfileDocument, error) {
+	root, err := decodeYAMLMapping(content, "profile")
+	if err != nil {
+		return legacyProfileDocument{}, err
+	}
+	topFields := []string{"identity", "locale", "professional", "accessibility"}
+	if mappingHasKey(root, "schema_version") {
+		topFields = append([]string{"schema_version"}, topFields...)
+	}
+	sections, err := exactMapping(root, "profile", topFields)
+	if err != nil {
+		return legacyProfileDocument{}, err
+	}
+	if versionNode := sections["schema_version"]; versionNode != nil {
+		if err := validateSchemaVersion(versionNode, 1, "profile"); err != nil {
+			return legacyProfileDocument{}, err
+		}
+	}
+	sectionFields := map[string][]string{
+		"identity":      {"preferred_name", "aliases", "pronouns"},
+		"locale":        {"languages", "timezone", "region"},
+		"professional":  {"roles", "organization", "industry", "expertise_domains"},
+		"accessibility": {"communication_needs"},
+	}
+	stringFields := map[string]bool{
+		"identity.preferred_name":   true,
+		"identity.pronouns":         true,
+		"locale.timezone":           true,
+		"locale.region":             true,
+		"professional.organization": true,
+		"professional.industry":     true,
+	}
+	for section, fields := range sectionFields {
+		values, mapErr := exactMapping(sections[section], section, fields)
+		if mapErr != nil {
+			return legacyProfileDocument{}, mapErr
+		}
+		for _, field := range fields {
+			value := values[field]
+			fullName := section + "." + field
+			if stringFields[fullName] {
+				if !isNullNode(value) && !isStringNode(value) {
+					return legacyProfileDocument{}, invalidDocument(
+						"field %q must be a string or null",
+						fullName,
+					)
+				}
+				continue
+			}
+			if err := validateOptionalStringList(value, fullName); err != nil {
+				return legacyProfileDocument{}, err
+			}
+		}
+	}
+	var legacy legacyProfileDocument
+	if err := root.Decode(&legacy); err != nil {
+		return legacyProfileDocument{}, invalidDocument("invalid legacy profile: %v", err)
+	}
+	return legacy, nil
+}
+
+func migrateProfileV1ToV2(content []byte) ([]byte, error) {
+	legacy, err := parseLegacyProfile(content)
+	if err != nil {
+		return nil, err
+	}
+	organizations := []string{}
+	if legacy.Professional.Organization != nil &&
+		strings.TrimSpace(*legacy.Professional.Organization) != "" {
+		organizations = append(organizations, strings.TrimSpace(*legacy.Professional.Organization))
+	}
+	industries := []string{}
+	if legacy.Professional.Industry != nil &&
+		strings.TrimSpace(*legacy.Professional.Industry) != "" {
+		industries = append(industries, strings.TrimSpace(*legacy.Professional.Industry))
+	}
+	return RenderProfile(ProfileDocument{
+		Identity: ProfileIdentity{
+			PreferredName: legacy.Identity.PreferredName,
+			Aliases:       legacy.Identity.Aliases,
+		},
+		Locale: ProfileLocale{
+			Languages: legacy.Locale.Languages,
+			Residence: legacy.Locale.Region,
+		},
+		Professional: ProfileProfessional{
+			Occupations:      legacy.Professional.Roles,
+			Organizations:    organizations,
+			Industries:       industries,
+			ExpertiseDomains: legacy.Professional.ExpertiseDomains,
+		},
+	})
+}
+
+func documentSchemaVersion(content []byte, label string) (int, error) {
+	root, err := decodeYAMLMapping(content, label)
+	if err != nil {
+		return 0, err
+	}
+	for index := 0; index+1 < len(root.Content); index += 2 {
+		key := root.Content[index]
+		if isStringNode(key) && key.Value == "schema_version" {
+			var version int
+			if err := root.Content[index+1].Decode(&version); err != nil || version < 1 {
+				return 0, invalidDocument("%s schema_version must be a positive integer", label)
+			}
+			return version, nil
+		}
+	}
+	return 1, nil
+}
+
+func validateSchemaVersion(node *yaml.Node, expected int, label string) error {
+	var version int
+	if node == nil || node.Decode(&version) != nil || version != expected {
+		return invalidDocument("%s schema_version must be %d", label, expected)
+	}
+	return nil
+}
+
+func mappingHasKey(node *yaml.Node, expected string) bool {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return false
+	}
+	for index := 0; index+1 < len(node.Content); index += 2 {
+		if isStringNode(node.Content[index]) && node.Content[index].Value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func ParsePreferences(content []byte) (PreferenceDocument, error) {
@@ -403,11 +736,35 @@ func ParseReference(content []byte) (ReferenceDocument, error) {
 }
 
 func RenderSoul(document SoulDocument) ([]byte, error) {
-	return renderValidatedYAML(SoulPath, document)
+	return renderValidatedYAML(SoulPath, storedSoulDocument{
+		SchemaVersion: CurrentSoulSchemaVersion,
+		SoulDocument:  document,
+	})
 }
 
 func RenderProfile(document ProfileDocument) ([]byte, error) {
-	return renderValidatedYAML(ProfilePath, document)
+	if document.Identity.Aliases == nil {
+		document.Identity.Aliases = []string{}
+	}
+	if document.Locale.Languages == nil {
+		document.Locale.Languages = []string{}
+	}
+	if document.Professional.Occupations == nil {
+		document.Professional.Occupations = []string{}
+	}
+	if document.Professional.Organizations == nil {
+		document.Professional.Organizations = []string{}
+	}
+	if document.Professional.Industries == nil {
+		document.Professional.Industries = []string{}
+	}
+	if document.Professional.ExpertiseDomains == nil {
+		document.Professional.ExpertiseDomains = []string{}
+	}
+	return renderValidatedYAML(ProfilePath, storedProfileDocument{
+		SchemaVersion:   CurrentProfileSchemaVersion,
+		ProfileDocument: document,
+	})
 }
 
 func RenderPreferences(document PreferenceDocument) ([]byte, error) {

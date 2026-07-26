@@ -363,9 +363,10 @@ def add_standard_system_sections(
                 'This is the assistant identity and default behavior baseline. '
                 'It does not contain user facts, current-task instructions, tool '
                 'capabilities, or safety rules. System rules and real permissions '
-                'always override Soul. Current-turn requests may temporarily adjust '
-                'tone or length, but must not change the core identity unless Soul '
-                'itself is updated.\n\n'
+                'always override Soul. Fields under `interaction` whose names start '
+                'with `default_` are defaults that explicit current-turn requests may '
+                'temporarily override. Current-turn requests must not change the core '
+                'identity unless Soul itself is updated.\n\n'
                 + soul.strip()
                 + '\n\n<!-- end of Agent Soul -->'
             )
@@ -376,7 +377,8 @@ def add_standard_system_sections(
             profile_block = (
                 '## User Profile\n'
                 'Stable structured facts about who the user is now '
-                '(name, locale, role, domains, accessibility needs). '
+                '(name, aliases, common languages, residence, occupations, '
+                'organizations, industries, and expertise domains). '
                 'Use them only when relevant to the current request. '
                 'Do not invent missing fields or treat profile as a history log.\n\n'
                 + profile.strip()

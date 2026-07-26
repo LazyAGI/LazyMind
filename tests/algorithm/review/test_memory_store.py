@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import pytest
+import yaml
 
 from lazymind.common.memory.paths import (
     PREFERENCE_PATH,
@@ -22,6 +23,7 @@ from lazymind.common.memory.store import MemoryStore
 from lazymind.config import config as _cfg
 
 SAMPLE_SOUL = (
+    'schema_version: 2\n'
     'identity:\n'
     '  name: "LazyMind"\n'
     '  role: "personal_ai_assistant"\n'
@@ -30,32 +32,29 @@ SAMPLE_SOUL = (
     '  primary_goal: "g"\n'
     '  success_definition: "s"\n'
     'interaction:\n'
-    '  relationship_mode: "collaborator"\n'
+    '  default_relationship_mode: "collaborator"\n'
     '  default_tone: "warm_direct"\n'
-    '  initiative_level: "proactive"\n'
-    '  challenge_level: "constructive"\n'
-    '  decision_mode: "recommend_then_confirm"\n'
+    '  default_initiative_level: "proactive"\n'
+    '  default_challenge_level: "constructive"\n'
+    '  default_decision_mode: "recommend_then_confirm"\n'
     'epistemic:\n'
     '  uncertainty_style: "explicit"\n'
     '  verification_mode: "when_material"\n'
 )
 
 SAMPLE_PROFILE = (
+    'schema_version: 2\n'
     'identity:\n'
     '  preferred_name: null\n'
     '  aliases: []\n'
-    '  pronouns: null\n'
     'locale:\n'
     '  languages: ["zh-CN"]\n'
-    '  timezone: "Asia/Shanghai"\n'
-    '  region: "CN"\n'
+    '  residence: "CN"\n'
     'professional:\n'
-    '  roles: []\n'
-    '  organization: null\n'
-    '  industry: null\n'
+    '  occupations: []\n'
+    '  organizations: []\n'
+    '  industries: []\n'
     '  expertise_domains: []\n'
-    'accessibility:\n'
-    '  communication_needs: []\n'
 )
 
 SAMPLE_PREFERENCE = 'preferences: []\n'
@@ -149,8 +148,12 @@ def test_memory_store_roundtrip():
         PREFERENCE_PATH: SAMPLE_PREFERENCE,
     })
     store = MemoryStore(fs)
-    assert store.read_soul() == SAMPLE_SOUL
-    assert store.read_profile() == SAMPLE_PROFILE
+    soul = store.read_soul()
+    profile = store.read_profile()
+    assert 'schema_version' not in soul
+    assert 'schema_version' not in profile
+    assert yaml.safe_load(soul)['identity']['name'] == 'LazyMind'
+    assert yaml.safe_load(profile)['locale']['residence'] == 'CN'
     assert store.read_preference() == SAMPLE_PREFERENCE
 
     store.write(
@@ -175,6 +178,51 @@ def test_memory_store_roundtrip():
     )
     section = store.read_reference('references/response.md#pref-response-technical-detail')
     assert 'Explain motivations and tradeoffs.' in section
+
+
+def test_memory_store_migrates_legacy_documents_and_hides_version():
+    legacy_soul = (
+        SAMPLE_SOUL.removeprefix('schema_version: 2\n')
+        .replace('default_relationship_mode:', 'relationship_mode:')
+        .replace('default_initiative_level:', 'initiative_level:')
+        .replace('default_challenge_level:', 'challenge_level:')
+        .replace('default_decision_mode:', 'decision_mode:')
+    )
+    legacy_profile = (
+        'identity:\n'
+        '  preferred_name: Alice\n'
+        '  aliases: [A]\n'
+        '  pronouns: she/her\n'
+        'locale:\n'
+        '  languages: [中文]\n'
+        '  timezone: Asia/Shanghai\n'
+        '  region: 上海\n'
+        'professional:\n'
+        '  roles: [产品经理]\n'
+        '  organization: LazyMind\n'
+        '  industry: 人工智能\n'
+        '  expertise_domains: [Agent Memory]\n'
+        'accessibility:\n'
+        '  communication_needs: []\n'
+    )
+    fs = FakeRemoteFS({
+        SOUL_PATH: legacy_soul,
+        PROFILE_PATH: legacy_profile,
+    })
+    store = MemoryStore(fs)
+
+    visible_soul = store.read_soul()
+    visible_profile = store.read_profile()
+
+    assert 'schema_version' not in visible_soul
+    assert 'schema_version' not in visible_profile
+    assert fs.files[SOUL_PATH].startswith('schema_version: 2\n')
+    assert fs.files[PROFILE_PATH].startswith('schema_version: 2\n')
+    profile = yaml.safe_load(visible_profile)
+    assert profile['locale']['residence'] == '上海'
+    assert profile['professional']['occupations'] == ['产品经理']
+    assert profile['professional']['organizations'] == ['LazyMind']
+    assert profile['professional']['industries'] == ['人工智能']
 
 
 def test_memory_store_rejects_invalid_path_and_content():

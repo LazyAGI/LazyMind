@@ -308,18 +308,23 @@ func TestOpenAPICurrentMemoryContractAndPrivateRouteIsolation(t *testing.T) {
 			referenceSchema,
 		)
 	}
-	profileIdentityPatch := schemaPropertiesForTest(
+	operationsRequest := schemaPropertiesForTest(
 		t,
 		schemas,
-		"CurrentMemoryProfileIdentityPatch",
+		"CurrentMemoryOperationsRequest",
 	)
-	preferredName := profileIdentityPatch["preferred_name"].(map[string]any)
-	if nullable, _ := preferredName["nullable"].(bool); !nullable {
-		t.Fatalf("Profile scalar patch must accept null: %#v", preferredName)
+	operations := operationsRequest["operations"].(map[string]any)
+	items := operations["items"].(map[string]any)
+	if items["$ref"] != "#/components/schemas/CurrentMemoryOperation" {
+		t.Fatalf("operations items schema = %#v", items)
 	}
-	aliases := profileIdentityPatch["aliases"].(map[string]any)
-	if nullable, _ := aliases["nullable"].(bool); nullable {
-		t.Fatalf("Profile list patch must reject null: %#v", aliases)
+	operation := schemaPropertiesForTest(
+		t,
+		schemas,
+		"CurrentMemoryOperation",
+	)
+	if _, exists := operation["value"]; !exists {
+		t.Fatal("CurrentMemoryOperation must expose an optional value")
 	}
 }
 

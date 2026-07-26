@@ -8,10 +8,10 @@ from .context import (
 )
 from .editors import (
     add_preference_entry,
+    apply_profile_operations,
+    apply_soul_operations,
     delete_preference_entry,
     preference_name_to_reference_name,
-    set_profile_fields,
-    set_soul_fields,
     validate_preference_name,
 )
 from .models import (
@@ -118,8 +118,8 @@ __all__ = [
     'preference_name_to_reference_name',
     'profile_languages',
     'remove_preference_item',
-    'set_profile_fields',
-    'set_soul_fields',
+    'apply_profile_operations',
+    'apply_soul_operations',
     'split_reference_ref',
     'tokenize_episode_text',
     'truncate_preference_index',
