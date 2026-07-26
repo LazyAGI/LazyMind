@@ -52,9 +52,13 @@ class EpisodeReadError(RuntimeError):
 
 class _EpisodeHTTPError(RuntimeError):
     def __init__(self, status_code: int, message: str):
-        super().__init__(message)
+        super().__init__(status_code, message)
         self.status_code = status_code
+        self.message = message
         self.retryable = status_code == 408 or status_code >= 500
+
+    def __str__(self) -> str:
+        return self.message
 
 
 def _default_transport(method: str, url: str, **kwargs: Any) -> requests.Response:

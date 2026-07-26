@@ -32,6 +32,7 @@ class EpisodeSource(BaseModel):
             raise ValueError('must not be blank')
         return normalized
 
+
 class EpisodeCreateInput(BaseModel):
     """Internal create contract; agent-visible fields are supplied by MemoryTools."""
 
@@ -61,6 +62,7 @@ class EpisodeCreateInput(BaseModel):
         if isinstance(value, bool) or value <= 0:
             raise ValueError('must be a positive Unix timestamp in milliseconds')
         return value
+
 
 class EpisodeRecord(EpisodeCreateInput):
     id: str

@@ -177,6 +177,7 @@ def _memory_result_error(tool_name: str, result: Dict[str, Any]) -> Dict[str, An
 
 MAX_REFERENCE_READ_COUNT = 10
 
+
 def _normalize_refs(refs: Union[str, List[str]]) -> list[str]:
     if isinstance(refs, str):
         raw_items = [refs]

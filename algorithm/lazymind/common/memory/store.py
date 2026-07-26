@@ -221,8 +221,8 @@ class MemoryStore:
 
                 return memory_err(
                     (
-                        f"preference add partially applied: reference "
-                        f"{reference_name!r} was created but the index write failed; "
+                        f'preference add partially applied: reference '
+                        f'{reference_name!r} was created but the index write failed; '
                         f'cleanup also failed: {cleanup_exc}'
                     ),
                     type='partial',
@@ -255,7 +255,7 @@ class MemoryStore:
 
             return memory_err(
                 (
-                    f"preference delete partially applied: index entry "
+                    f'preference delete partially applied: index entry '
                     f"{edited['item'].name!r} was removed but reference "
                     f'{reference_name!r} could not be deleted: {exc}'
                 ),

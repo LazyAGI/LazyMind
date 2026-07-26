@@ -166,17 +166,24 @@ func readPostgresEpisodeMigrations(t *testing.T) (string, string) {
 		t.Fatal("resolve PostgreSQL integration test file")
 	}
 	migrationsDir := filepath.Join(filepath.Dir(file), "..", "migrations")
-	read := func(name string) string {
+	read := func(suffix string) string {
 		t.Helper()
-		body, err := os.ReadFile(filepath.Join(migrationsDir, name))
+		matches, err := filepath.Glob(filepath.Join(migrationsDir, "*_"+suffix))
 		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
+			t.Fatalf("find %s migration: %v", suffix, err)
+		}
+		if len(matches) != 1 {
+			t.Fatalf("find %s migration: got %d matches, want 1", suffix, len(matches))
+		}
+		body, err := os.ReadFile(matches[0])
+		if err != nil {
+			t.Fatalf("read %s: %v", matches[0], err)
 		}
 		return string(body)
 	}
 	return read(
-			"20260724120000_create_episode_memories.up.sql",
+			"create_episode_memories.up.sql",
 		), read(
-			"20260724120000_create_episode_memories.down.sql",
+			"create_episode_memories.down.sql",
 		)
 }

@@ -11,6 +11,7 @@ from .validation.common import parse_yaml_mapping
 from .validation.preference import parse_preference_items, validate_preference_index
 from .store import MemoryStore
 
+
 @dataclass(frozen=True)
 class MemoryContext:
     soul: str
