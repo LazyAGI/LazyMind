@@ -12,6 +12,8 @@ import { useTranslation } from 'react-i18next';
 import {
   getWriterOutlineInstruction,
   getWriterSpanStyles,
+  normalizeWriterCodeLanguage,
+  repairWriterCodeToolbarPollution,
   sameWriterDocument,
   sameWriterDocumentForSync,
   type WriterBlock,
@@ -19,6 +21,7 @@ import {
   type WriterSpan,
 } from './writerIR';
 import { WriterIRDocumentEditor } from './WriterIRDocumentEditor';
+import { highlightCode } from '../MarkdownViewer/syntaxHighlight';
 import { SlotEditingContext } from './slotEditingContext';
 import './WriterIRControl.scss';
 
@@ -97,8 +100,22 @@ function PreviewBlockContent({ block }: { block: WriterBlock }) {
     );
   }
   if (block.type === 'code') {
+    const language = normalizeWriterCodeLanguage(block.language);
+    const highlighted = highlightCode(block.content ?? '', language);
     return (
-      <pre className='writer-ir__code'><code><SpanContent block={block} /></code></pre>
+      <div className='writer-ir__code-shell'>
+        <div className='writer-ir__code-header'>{language}</div>
+        <pre className='writer-ir__code'>
+          {highlighted ? (
+            <code
+              className={`language-${language}`}
+              dangerouslySetInnerHTML={{ __html: highlighted }}
+            />
+          ) : (
+            <code><SpanContent block={block} /></code>
+          )}
+        </pre>
+      </div>
     );
   }
   if (block.type === 'paragraph') {
@@ -234,7 +251,7 @@ export function WriterIRControl({
   const { registerFlush } = useContext(SlotEditingContext);
   const [baseDocument, setBaseDocument] = useState(document);
   const [baseSourceRevision, setBaseSourceRevision] = useState(sourceRevision);
-  const [draft, setDraft] = useState(document);
+  const [draft, setDraft] = useState(() => repairWriterCodeToolbarPollution(document));
   const [history, setHistory] = useState<WriterDocument[]>([]);
   const [future, setFuture] = useState<WriterDocument[]>([]);
   const [saving, setSaving] = useState(false);
@@ -402,6 +419,14 @@ export function WriterIRControl({
       clearAutoSaveTimers();
     };
   }, [clearAutoSaveTimers]);
+
+  useEffect(() => {
+    const current = draftRef.current;
+    const repaired = repairWriterCodeToolbarPollution(current);
+    if (repaired === current) return;
+    draftRef.current = repaired;
+    setDraft(repaired);
+  }, []);
 
   const beginTextEdit = useCallback(() => {
     if (!textEditStartRef.current) textEditStartRef.current = draft;

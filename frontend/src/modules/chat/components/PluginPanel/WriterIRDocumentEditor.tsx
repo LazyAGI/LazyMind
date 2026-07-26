@@ -18,6 +18,7 @@ import {
   type FocusEvent as ReactFocusEvent,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -33,6 +34,7 @@ import {
   indentWriterBlock,
   insertWriterChildParagraph,
   liftWriterBlockAfterParent,
+  normalizeWriterCodeLanguage,
   relocateWriterBlock,
   sameWriterDocument,
   sameWriterDocumentForSync,
@@ -41,6 +43,7 @@ import {
   toggleWriterBlockInlineStyle,
   updateWriterBlockContent,
   updateWriterBlockFormat,
+  updateWriterCodeLanguage,
   updateWriterDocumentTitle,
   WRITER_BACKGROUND_DARK_PALETTE,
   WRITER_BACKGROUND_LIGHT_PALETTE,
@@ -58,6 +61,30 @@ import {
   type WriterSpan,
   type WriterSpanColorField,
 } from './writerIR';
+import { highlightCode } from '../MarkdownViewer/syntaxHighlight';
+
+const WRITER_CODE_LANGUAGES = [
+  ['text', 'Plain text'],
+  ['javascript', 'JavaScript'],
+  ['typescript', 'TypeScript'],
+  ['jsx', 'JSX'],
+  ['tsx', 'TSX'],
+  ['python', 'Python'],
+  ['java', 'Java'],
+  ['go', 'Go'],
+  ['rust', 'Rust'],
+  ['c', 'C'],
+  ['cpp', 'C++'],
+  ['csharp', 'C#'],
+  ['sql', 'SQL'],
+  ['bash', 'Shell'],
+  ['json', 'JSON'],
+  ['yaml', 'YAML'],
+  ['markup', 'HTML / XML'],
+  ['css', 'CSS'],
+  ['markdown', 'Markdown'],
+  ['docker', 'Dockerfile'],
+] as const;
 
 interface WriterIRDocumentEditorProps {
   document: WriterDocument;
@@ -161,6 +188,30 @@ interface WriterFoldLabels {
   expand: string;
 }
 
+interface WriterEditorLabels extends WriterFoldLabels {
+  codeBlock: string;
+  codeLanguage: string;
+  collapseCode: string;
+  expandCode: string;
+  enableCodeWrap: string;
+  disableCodeWrap: string;
+  copyCode: string;
+  codeCopied: string;
+}
+
+const DEFAULT_WRITER_EDITOR_LABELS: WriterEditorLabels = {
+  collapse: 'Collapse',
+  expand: 'Expand',
+  codeBlock: 'Code block',
+  codeLanguage: 'Code language',
+  collapseCode: 'Collapse code',
+  expandCode: 'Expand code',
+  enableCodeWrap: 'Wrap lines',
+  disableCodeWrap: 'Disable wrapping',
+  copyCode: 'Copy',
+  codeCopied: 'Copied',
+};
+
 function renderFoldToggle(
   nodeId: string,
   collapsed: boolean,
@@ -199,11 +250,74 @@ function renderDragHandle(nodeId: string, label: string): string {
   ].join('');
 }
 
+function renderCodeLanguageSelect(block: WriterBlock, label: string): string {
+  const language = normalizeWriterCodeLanguage(block.language);
+  const knownLanguage = WRITER_CODE_LANGUAGES.some(([value]) => value === language);
+  const options = [
+    ...(!knownLanguage
+      ? [`<option value="${escapeHtmlAttribute(language)}">${escapeHtml(language)}</option>`]
+      : []),
+    ...WRITER_CODE_LANGUAGES.map(([value, name]) => (
+      `<option value="${value}"${value === language ? ' selected' : ''}>${name}</option>`
+    )),
+  ].join('');
+  return [
+    `<select class="writer-ir__code-language" data-writer-code-language="${escapeHtmlAttribute(block.node_id)}" data-writer-code-language-editable="${block.editable !== false ? 'true' : 'false'}"`,
+    ` aria-label="${escapeHtmlAttribute(label)}" title="${escapeHtmlAttribute(label)}"`,
+    block.editable === false ? ' disabled' : '',
+    `>${options}</select>`,
+  ].join('');
+}
+
+function codeLineCount(content: string): number {
+  return Math.max(1, content.split('\n').length);
+}
+
+function codeLineNumbers(content: string): string {
+  const lineCount = codeLineCount(content);
+  return Array.from({ length: lineCount }, (_, index) => index + 1).join('\n');
+}
+
+function codeContentHeight(content: string): string {
+  return `${codeLineCount(content) * 1.7}em`;
+}
+
+function renderCodeTrailingCaret(content: string): string {
+  if (content && !content.endsWith('\n')) return '';
+  return [
+    '<span class="writer-ir__code-trailing-line" data-writer-code-trailing-line="true">',
+    '<span data-writer-code-trailing-caret="true" contenteditable="false">\u200b</span>',
+    '</span>',
+  ].join('');
+}
+
+function renderCodeToolbar(block: WriterBlock, labels: WriterEditorLabels): string {
+  return [
+    '<div class="writer-ir__code-header" contenteditable="false">',
+    `<button type="button" class="writer-ir__code-tool writer-ir__code-title" data-writer-code-action="collapse" data-code-node-id="${escapeHtmlAttribute(block.node_id)}" aria-expanded="true" title="${escapeHtmlAttribute(labels.collapseCode)}">`,
+    '<span class="writer-ir__code-collapse-caret" aria-hidden="true"></span>',
+    `<span>${escapeHtml(labels.codeBlock)}</span>`,
+    '</button>',
+    '<div class="writer-ir__code-actions">',
+    renderCodeLanguageSelect(block, labels.codeLanguage),
+    `<button type="button" class="writer-ir__code-tool writer-ir__code-wrap" data-writer-code-action="wrap" data-code-node-id="${escapeHtmlAttribute(block.node_id)}" aria-pressed="true" title="${escapeHtmlAttribute(labels.disableCodeWrap)}">`,
+    '<span class="writer-ir__code-wrap-icon" aria-hidden="true"></span>',
+    `<span data-writer-code-action-label="true">${escapeHtml(labels.disableCodeWrap)}</span>`,
+    '</button>',
+    `<button type="button" class="writer-ir__code-tool writer-ir__code-copy" data-writer-code-action="copy" data-code-node-id="${escapeHtmlAttribute(block.node_id)}" title="${escapeHtmlAttribute(labels.copyCode)}">`,
+    '<span class="writer-ir__code-copy-icon" aria-hidden="true"></span>',
+    `<span data-writer-code-action-label="true">${escapeHtml(labels.copyCode)}</span>`,
+    '</button>',
+    '</div>',
+    '</div>',
+  ].join('');
+}
+
 function renderBlockSequence(
   blocks: WriterBlock[],
   showOutlineInstruction: boolean,
   collapsedNodeIds: ReadonlySet<string> = new Set(),
-  foldLabels: WriterFoldLabels,
+  foldLabels: WriterEditorLabels,
   dragLabel: string,
 ): string {
   const rendered: string[] = [];
@@ -283,7 +397,7 @@ function renderBlock(
   block: WriterBlock,
   showOutlineInstruction: boolean,
   collapsedNodeIds: ReadonlySet<string> = new Set(),
-  foldLabels: WriterFoldLabels = { collapse: 'Collapse', expand: 'Expand' },
+  foldLabels: WriterEditorLabels = DEFAULT_WRITER_EDITOR_LABELS,
   dragLabel = 'Drag',
   hiddenByAncestor = false,
   foldState?: { foldable: boolean; collapsed: boolean },
@@ -366,7 +480,11 @@ function renderBlock(
     ].join('');
   }
   if (block.type === 'code') {
-    return `<div ${attributes}>${dragHandle}<pre data-writer-block-content="true" class="writer-ir__code"><code>${text}</code></pre>${outlineInstruction}${children}</div>`;
+    const language = normalizeWriterCodeLanguage(block.language);
+    const content = block.content ?? '';
+    const highlighted = highlightCode(content, language);
+    const code = highlighted || (content ? text : '');
+    return `<div ${attributes}>${dragHandle}<div class="writer-ir__code-shell" data-writer-code-shell="${escapeHtmlAttribute(block.node_id)}">${renderCodeToolbar(block, foldLabels)}<pre data-writer-block-content="true" class="writer-ir__code writer-ir__code--wrapped" data-line-numbers="${escapeHtmlAttribute(codeLineNumbers(content))}" style="--writer-code-content-height: ${codeContentHeight(content)}"><code class="language-${escapeHtmlAttribute(language)}">${code}${renderCodeTrailingCaret(content)}</code></pre></div>${outlineInstruction}${children}</div>`;
   }
   if (block.type === 'paragraph') {
     return `<div ${attributes}>${dragHandle}<p data-writer-block-content="true" class="writer-ir__paragraph">${text}</p>${outlineInstruction}${children}</div>`;
@@ -386,7 +504,7 @@ function renderBlock(
 function renderDocument(
   document: WriterDocument,
   collapsedNodeIds: ReadonlySet<string> = new Set(),
-  foldLabels: WriterFoldLabels = { collapse: 'Collapse', expand: 'Expand' },
+  foldLabels: WriterEditorLabels = DEFAULT_WRITER_EDITOR_LABELS,
   dragLabel = 'Drag',
 ): string {
   const documentRoot = document.blocks.find((block) => block.type === 'document');
@@ -417,7 +535,9 @@ function inferredBlockType(element: HTMLElement): string {
 
 function textFromElement(element: HTMLElement): string {
   const clone = element.cloneNode(true) as HTMLElement;
-  clone.querySelectorAll('[data-writer-empty-placeholder]').forEach(
+  clone.querySelectorAll(
+    '[data-writer-empty-placeholder], [data-writer-code-trailing-caret]',
+  ).forEach(
     (placeholder) => placeholder.remove(),
   );
   for (const child of Array.from(clone.children)) {
@@ -484,7 +604,11 @@ function childElements(element: HTMLElement, selector: string): HTMLElement[] {
 
 function blockContentElement(element: HTMLElement): HTMLElement {
   if (element.matches('[data-writer-block-content]')) return element;
-  return childElements(element, '[data-writer-block-content]')[0] ?? element;
+  return childElements(element, '[data-writer-block-content]')[0]
+    ?? element.querySelector<HTMLElement>(
+      ':scope > .writer-ir__code-shell > [data-writer-block-content]',
+    )
+    ?? element;
 }
 
 /** Align fold/drag controls to the first text line of each block (avoids CSS em/margin drift). */
@@ -656,6 +780,11 @@ interface WriterEditorSelection {
   end: number;
 }
 
+type WriterSelectAllScope =
+  | { type: 'code'; nodeId: string }
+  | { type: 'editor' }
+  | null;
+
 function closestWriterBlock(node: Node | null, editor: HTMLElement): HTMLElement | null {
   const element = node instanceof HTMLElement ? node : node?.parentElement;
   const block = element?.closest<HTMLElement>('[data-writer-block][data-node-id]') ?? null;
@@ -686,10 +815,22 @@ function readEditorSelection(editor: HTMLElement): WriterEditorSelection | null 
   const beforeEnd = globalThis.document.createRange();
   beforeEnd.selectNodeContents(contentElement);
   beforeEnd.setEnd(range.endContainer, range.endOffset);
+
+  const textOffset = (textRange: Range): number => {
+    const contents = textRange.cloneContents();
+    const ignoredLength = Array.from(
+      contents.querySelectorAll<HTMLElement>('[data-writer-code-trailing-caret]'),
+    ).reduce(
+      (length, placeholder) => length + Array.from(placeholder.textContent ?? '').length,
+      0,
+    );
+    return Math.max(0, Array.from(textRange.toString()).length - ignoredLength);
+  };
+
   return {
     nodeId: startBlock.dataset.nodeId!,
-    start: Array.from(beforeStart.toString()).length,
-    end: Array.from(beforeEnd.toString()).length,
+    start: textOffset(beforeStart),
+    end: textOffset(beforeEnd),
   };
 }
 
@@ -703,9 +844,27 @@ function textBoundaryAt(
   contentElement: HTMLElement,
   offset: number,
 ): { node: Node; offset: number } {
+  const trailingLine = contentElement.querySelector<HTMLElement>(
+    '[data-writer-code-trailing-line]',
+  );
+  if (
+    trailingLine
+    && !textFromElement(trailingLine)
+    && offset >= Array.from(textFromElement(contentElement)).length
+  ) {
+    return { node: trailingLine, offset: 0 };
+  }
+
   const walker = globalThis.document.createTreeWalker(
     contentElement,
     NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: (node) => (
+        node.parentElement?.closest('[data-writer-code-trailing-caret]')
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT
+      ),
+    },
   );
   let remaining = Math.max(0, offset);
   let textNode = walker.nextNode();
@@ -795,6 +954,58 @@ function restoreEditorSelection(
   if (options?.scrollIntoView) scrollSelectionIntoView(editor);
 }
 
+function selectWriterEditorContents(editor: HTMLElement): void {
+  const range = globalThis.document.createRange();
+  range.selectNodeContents(editor);
+  const selection = globalThis.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  editor.focus({ preventScroll: true });
+}
+
+function writerEditorPlainText(editor: HTMLElement): string {
+  const title = editor.querySelector<HTMLElement>('[data-writer-document-title]')
+    ?.textContent
+    ?.replace(/\u00a0/g, ' ') ?? '';
+  const blockText = Array.from(
+    editor.querySelectorAll<HTMLElement>('[data-writer-block-content]'),
+  ).flatMap((contentElement) => {
+    if (contentElement.closest('[hidden]')) return [];
+    const block = contentElement.closest<HTMLElement>('[data-writer-block]');
+    if (block?.dataset.nodeType === 'divider') return ['---'];
+    return [textFromElement(contentElement)];
+  });
+  return [title, ...blockText].join('\n');
+}
+
+function replaceWriterEditorContents(
+  source: WriterDocument,
+  content: string,
+): { document: WriterDocument; nodeId: string } {
+  const paragraph: WriterBlock = {
+    ...createWriterParagraph(source.stage),
+    content,
+    spans: [{ text: content, style: {} }],
+  };
+  const documentRoot = source.blocks.find((block) => block.type === 'document');
+  const blocks = documentRoot
+    ? [{ ...documentRoot, children: [paragraph] }]
+    : [paragraph];
+  const metadata = source.metadata
+    && Object.prototype.hasOwnProperty.call(source.metadata, 'block_count')
+    ? { ...source.metadata, block_count: countWriterBlocks(blocks) }
+    : source.metadata;
+  return {
+    document: {
+      ...source,
+      title: '',
+      blocks,
+      metadata,
+    },
+    nodeId: paragraph.node_id,
+  };
+}
+
 export function WriterIRDocumentEditor({
   document,
   ariaLabel,
@@ -813,6 +1024,7 @@ export function WriterIRDocumentEditor({
   const pendingSelectionRef = useRef<WriterEditorSelection | null>(null);
   const isComposingRef = useRef(false);
   const handledEnterKeyDownRef = useRef(false);
+  const selectAllScopeRef = useRef<WriterSelectAllScope>(null);
   const [activeSelection, setActiveSelection] = useState<WriterEditorSelection | null>(null);
   const [formatToolbarStyle, setFormatToolbarStyle] = useState<CSSProperties | undefined>();
   const [colorPanelOpen, setColorPanelOpen] = useState(false);
@@ -822,9 +1034,17 @@ export function WriterIRDocumentEditor({
   const lastCollapseVersionRef = useRef(0);
   const draggingNodeIdRef = useRef<string | null>(null);
   const dropHintRef = useRef<WriterBlockRelocateTarget | null>(null);
-  const foldLabels = useMemo<WriterFoldLabels>(() => ({
+  const foldLabels = useMemo<WriterEditorLabels>(() => ({
     collapse: t('chat.writerIR.collapseSection'),
     expand: t('chat.writerIR.expandSection'),
+    codeBlock: t('chat.writerIR.codeBlock'),
+    codeLanguage: t('chat.writerIR.codeLanguage'),
+    collapseCode: t('chat.writerIR.collapseCode'),
+    expandCode: t('chat.writerIR.expandCode'),
+    enableCodeWrap: t('chat.writerIR.enableCodeWrap'),
+    disableCodeWrap: t('chat.writerIR.disableCodeWrap'),
+    copyCode: t('chat.writerIR.copyCode'),
+    codeCopied: t('chat.writerIR.codeCopied'),
   }), [t]);
   const dragLabel = t('chat.writerIR.dragBlock');
 
@@ -1032,6 +1252,78 @@ export function WriterIRDocumentEditor({
     };
   }, [disabled, document, onChange]);
 
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return undefined;
+    editor.querySelectorAll<HTMLSelectElement>('[data-writer-code-language]').forEach((select) => {
+      const nodeId = select.dataset.writerCodeLanguage;
+      const block = nodeId ? findWriterBlock(document.blocks, nodeId) : undefined;
+      select.disabled = disabled || !block || block.editable === false;
+    });
+    const handleCodeLanguageChange = (event: Event) => {
+      if (disabled) return;
+      const select = event.target;
+      if (!(select instanceof HTMLSelectElement)) return;
+      const nodeId = select.dataset.writerCodeLanguage;
+      if (!nodeId) return;
+      const nextDocument = updateWriterCodeLanguage(document, nodeId, select.value);
+      if (nextDocument === document) return;
+      lastEmittedDocumentRef.current = undefined;
+      onChange(nextDocument);
+    };
+    editor.addEventListener('change', handleCodeLanguageChange);
+    const handleCodeToolClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const button = target.closest<HTMLButtonElement>('[data-writer-code-action]');
+      if (!button || !editor.contains(button)) return;
+      const nodeId = button.dataset.codeNodeId;
+      const shell = nodeId
+        ? editor.querySelector<HTMLElement>(`[data-writer-code-shell="${CSS.escape(nodeId)}"]`)
+        : null;
+      if (!nodeId || !shell) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const action = button.dataset.writerCodeAction;
+      const code = shell.querySelector<HTMLElement>('.writer-ir__code');
+      const label = button.querySelector<HTMLElement>('[data-writer-code-action-label]');
+      if (action === 'collapse') {
+        const collapsed = shell.classList.toggle('writer-ir__code-shell--collapsed');
+        button.setAttribute('aria-expanded', String(!collapsed));
+        button.title = collapsed ? foldLabels.expandCode : foldLabels.collapseCode;
+        return;
+      }
+      if (action === 'wrap' && code) {
+        const wrapped = code.classList.toggle('writer-ir__code--wrapped');
+        button.setAttribute('aria-pressed', String(wrapped));
+        const nextLabel = wrapped ? foldLabels.disableCodeWrap : foldLabels.enableCodeWrap;
+        button.title = nextLabel;
+        if (label) label.textContent = nextLabel;
+        return;
+      }
+      if (action !== 'copy') return;
+      const block = findWriterBlock(document.blocks, nodeId);
+      if (!block) return;
+      void navigator.clipboard.writeText(block.content ?? '').then(() => {
+        button.classList.add('writer-ir__code-copy--copied');
+        button.title = foldLabels.codeCopied;
+        if (label) label.textContent = foldLabels.codeCopied;
+        window.setTimeout(() => {
+          if (!button.isConnected) return;
+          button.classList.remove('writer-ir__code-copy--copied');
+          button.title = foldLabels.copyCode;
+          if (label) label.textContent = foldLabels.copyCode;
+        }, 1_600);
+      }).catch(() => undefined);
+    };
+    editor.addEventListener('click', handleCodeToolClick);
+    return () => {
+      editor.removeEventListener('change', handleCodeLanguageChange);
+      editor.removeEventListener('click', handleCodeToolClick);
+    };
+  }, [disabled, document, foldLabels, onChange]);
+
   const recordSelection = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -1058,14 +1350,26 @@ export function WriterIRDocumentEditor({
 
   const handleInput = (event: FormEvent<HTMLElement>) => {
     if (disabled) return;
+    selectAllScopeRef.current = null;
+    const target = event.target;
+    if (
+      target instanceof Element
+      && target.closest('.writer-ir__code-header')
+    ) return;
     const nextDocument = parseEditorDocument(event.currentTarget, document);
     for (const contentElement of Array.from(
       event.currentTarget.querySelectorAll<HTMLElement>('[data-writer-block-content]'),
     )) {
-      if (!textFromElement(contentElement)) continue;
-      contentElement.querySelectorAll('[data-writer-empty-placeholder]').forEach(
-        (placeholder) => placeholder.remove(),
-      );
+      const content = textFromElement(contentElement);
+      if (content) {
+        contentElement.querySelectorAll('[data-writer-empty-placeholder]').forEach(
+          (placeholder) => placeholder.remove(),
+        );
+      }
+      if (contentElement.matches('.writer-ir__code')) {
+        contentElement.dataset.lineNumbers = codeLineNumbers(content);
+        contentElement.style.setProperty('--writer-code-content-height', codeContentHeight(content));
+      }
     }
     lastEmittedDocumentRef.current = nextDocument;
     onChange(nextDocument);
@@ -1077,13 +1381,46 @@ export function WriterIRDocumentEditor({
       event.relatedTarget instanceof Node
       && event.currentTarget.contains(event.relatedTarget)
     ) return;
+    selectAllScopeRef.current = null;
     savedSelectionRef.current = null;
     setActiveSelection(null);
     onBlur();
   };
 
+  const replaceEditorSelection = useCallback((content: string) => {
+    const result = replaceWriterEditorContents(document, content);
+    const nextSelection = {
+      nodeId: result.nodeId,
+      start: Array.from(content).length,
+      end: Array.from(content).length,
+    };
+    selectAllScopeRef.current = null;
+    savedSelectionRef.current = nextSelection;
+    pendingSelectionRef.current = nextSelection;
+    setActiveSelection(nextSelection);
+    lastEmittedDocumentRef.current = undefined;
+    onChange(result.document);
+  }, [document, onChange]);
+
+  const handleCopy = (event: ReactClipboardEvent<HTMLElement>) => {
+    if (selectAllScopeRef.current?.type !== 'editor') return;
+    event.preventDefault();
+    event.clipboardData.setData('text/plain', writerEditorPlainText(event.currentTarget));
+  };
+
+  const handleCut = (event: ReactClipboardEvent<HTMLElement>) => {
+    if (disabled || selectAllScopeRef.current?.type !== 'editor') return;
+    event.preventDefault();
+    event.clipboardData.setData('text/plain', writerEditorPlainText(event.currentTarget));
+    replaceEditorSelection('');
+  };
+
   const handlePaste = (event: ReactClipboardEvent<HTMLElement>) => {
     event.preventDefault();
+    if (selectAllScopeRef.current?.type === 'editor') {
+      replaceEditorSelection(event.clipboardData.getData('text/plain'));
+      return;
+    }
     globalThis.document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
   };
 
@@ -1097,6 +1434,7 @@ export function WriterIRDocumentEditor({
   const showFormatToolbar = Boolean(
     !disabled
     && canFormatBlock
+    && activeBlock?.type !== 'code'
     && activeSelection
     && activeSelection.end > activeSelection.start,
   );
@@ -1516,9 +1854,26 @@ export function WriterIRDocumentEditor({
   }, [disabled, document, insertSoftLineBreak, onChange]);
 
   const handleBeforeInput = (event: FormEvent<HTMLElement>) => {
-    const inputType = (event.nativeEvent as InputEvent).inputType;
+    const nativeEvent = event.nativeEvent as InputEvent;
+    const inputType = nativeEvent.inputType;
+    if (selectAllScopeRef.current?.type === 'editor') {
+      if (inputType.startsWith('delete')) {
+        event.preventDefault();
+        replaceEditorSelection('');
+        return;
+      }
+      if (inputType === 'insertText' || inputType === 'insertCompositionText') {
+        event.preventDefault();
+        replaceEditorSelection(nativeEvent.data ?? '');
+        return;
+      }
+    }
     if (inputType !== 'insertParagraph' && inputType !== 'insertLineBreak') return;
     event.preventDefault();
+    if (selectAllScopeRef.current?.type === 'editor') {
+      replaceEditorSelection('');
+      return;
+    }
     if (handledEnterKeyDownRef.current) {
       handledEnterKeyDownRef.current = false;
       return;
@@ -1529,6 +1884,62 @@ export function WriterIRDocumentEditor({
   };
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const commandKey = event.metaKey || event.ctrlKey;
+    const key = event.key.toLowerCase();
+    const target = event.target;
+    if (
+      commandKey
+      && !event.altKey
+      && key === 'a'
+      && !(target instanceof Element && target.closest('.writer-ir__code-header'))
+    ) {
+      event.preventDefault();
+      const editor = event.currentTarget;
+      const selection = readEditorSelection(editor);
+      const block = selection
+        ? findWriterBlock(document.blocks, selection.nodeId)
+        : undefined;
+      const previousScope = selectAllScopeRef.current;
+      if (
+        block?.type === 'code'
+        && !(
+          previousScope?.type === 'code'
+          && previousScope.nodeId === block.node_id
+          && selection?.start === 0
+          && selection.end === Array.from(block.content ?? '').length
+        )
+      ) {
+        const nextSelection = {
+          nodeId: block.node_id,
+          start: 0,
+          end: Array.from(block.content ?? '').length,
+        };
+        selectAllScopeRef.current = { type: 'code', nodeId: block.node_id };
+        savedSelectionRef.current = nextSelection;
+        setActiveSelection(nextSelection);
+        restoreEditorSelection(editor, nextSelection);
+        return;
+      }
+
+      selectAllScopeRef.current = { type: 'editor' };
+      savedSelectionRef.current = null;
+      setActiveSelection(null);
+      selectWriterEditorContents(editor);
+      return;
+    }
+
+    if (
+      event.key === 'Enter'
+      && selectAllScopeRef.current?.type === 'editor'
+      && !isComposingRef.current
+      && !event.nativeEvent.isComposing
+      && event.keyCode !== 229
+    ) {
+      event.preventDefault();
+      replaceEditorSelection('');
+      return;
+    }
+
     if (
       event.key === 'Enter'
       && !isComposingRef.current
@@ -1583,8 +1994,7 @@ export function WriterIRDocumentEditor({
       return;
     }
 
-    if (!(event.metaKey || event.ctrlKey)) return;
-    const key = event.key.toLowerCase();
+    if (!commandKey) return;
     if (key !== 'b' && key !== 'i') return;
     event.preventDefault();
     recordSelection();
@@ -1594,6 +2004,25 @@ export function WriterIRDocumentEditor({
   const handleEditorFocus = () => {
     onFocus();
     window.requestAnimationFrame(recordSelection);
+  };
+
+  const handleEditorMouseDown = (event: ReactMouseEvent<HTMLElement>) => {
+    if (disabled) return;
+    selectAllScopeRef.current = null;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const trailingLine = target.closest<HTMLElement>('[data-writer-code-trailing-line]');
+    if (!trailingLine || !event.currentTarget.contains(trailingLine)) return;
+
+    event.preventDefault();
+    const range = globalThis.document.createRange();
+    range.setStart(trailingLine, 0);
+    range.setEnd(trailingLine, 0);
+    const selection = globalThis.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    event.currentTarget.focus({ preventScroll: true });
+    recordSelection();
   };
 
   const handleKeyUp = (event: ReactKeyboardEvent<HTMLElement>) => {
@@ -1863,6 +2292,8 @@ export function WriterIRDocumentEditor({
         onBeforeInput={handleBeforeInput}
         onInput={handleInput}
         onFocus={handleEditorFocus}
+        onCopy={handleCopy}
+        onCut={handleCut}
         onPaste={handlePaste}
         onKeyDown={handleKeyDown}
         onCompositionStart={() => {
@@ -1871,6 +2302,7 @@ export function WriterIRDocumentEditor({
         onCompositionEnd={() => {
           isComposingRef.current = false;
         }}
+        onMouseDown={handleEditorMouseDown}
         onMouseUp={recordSelection}
         onKeyUp={handleKeyUp}
       />
