@@ -22,14 +22,12 @@ import { WriterIRDocumentEditor } from './WriterIRDocumentEditor';
 import { SlotEditingContext } from './slotEditingContext';
 import './WriterIRControl.scss';
 
-/** Idle debounce after the latest edit before autosave. */
+/** Idle debounce after the latest edit before draft autosave. */
 const WRITER_IR_AUTOSAVE_IDLE_MS = 3_000;
-/** Max time a dirty draft can wait before a save is forced. */
+/** Max time a dirty draft can wait before a draft save is forced. */
 const WRITER_IR_AUTOSAVE_MAX_WAIT_MS = 15_000;
 /** Coalesce follow-up saves after an in-flight request finishes. */
 const WRITER_IR_SAVE_FOLLOWUP_MS = 400;
-/** After this much idle time since the latest edit, create a checkpoint version. */
-const WRITER_IR_IDLE_CHECKPOINT_MS = 5 * 60_000;
 
 type WriterIRSaveRunResult = 'noop' | 'saved' | 'error' | 'busy';
 export type WriterIRSaveMode = 'draft' | 'checkpoint';
@@ -251,14 +249,13 @@ export function WriterIRControl({
   const autoSaveIdleTimerRef = useRef<number | undefined>(undefined);
   const autoSaveMaxTimerRef = useRef<number | undefined>(undefined);
   const saveFollowupTimerRef = useRef<number | undefined>(undefined);
-  const idleCheckpointTimerRef = useRef<number | undefined>(undefined);
   const dirtyStartedAtRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
   const draftRef = useRef(draft);
   const baseDocumentRef = useRef(baseDocument);
   const baseSourceRevisionRef = useRef(sourceRevision);
   const lastSavedDocumentRef = useRef<WriterDocument | undefined>(undefined);
-  /** Content last captured as a versioned revision (checkpoint / new revision). */
+  /** Content last captured as a versioned revision (Save button / conversation flush). */
   const lastCheckpointDocumentRef = useRef<WriterDocument>(document);
   const saveInFlightRef = useRef(false);
   const saveQueuedRef = useRef(false);
@@ -281,13 +278,6 @@ export function WriterIRControl({
     if (saveFollowupTimerRef.current !== undefined) {
       window.clearTimeout(saveFollowupTimerRef.current);
       saveFollowupTimerRef.current = undefined;
-    }
-  }, []);
-
-  const clearIdleCheckpointTimer = useCallback(() => {
-    if (idleCheckpointTimerRef.current !== undefined) {
-      window.clearTimeout(idleCheckpointTimerRef.current);
-      idleCheckpointTimerRef.current = undefined;
     }
   }, []);
 
@@ -410,39 +400,8 @@ export function WriterIRControl({
     return () => {
       mountedRef.current = false;
       clearAutoSaveTimers();
-      clearIdleCheckpointTimer();
     };
-  }, [clearAutoSaveTimers, clearIdleCheckpointTimer]);
-
-  // After 5 minutes without edits, create a versioned checkpoint even if draft
-  // autosave already persisted the content in place.
-  useEffect(() => {
-    if (documentReadOnly || saveError || externalUpdate) {
-      clearIdleCheckpointTimer();
-      return undefined;
-    }
-    if (sameWriterDocumentForSync(draft, lastCheckpointDocumentRef.current)) {
-      clearIdleCheckpointTimer();
-      return undefined;
-    }
-    clearIdleCheckpointTimer();
-    idleCheckpointTimerRef.current = window.setTimeout(() => {
-      idleCheckpointTimerRef.current = undefined;
-      if (sameWriterDocumentForSync(draftRef.current, lastCheckpointDocumentRef.current)) {
-        return;
-      }
-      escalateSaveMode('checkpoint');
-      void saveRunnerRef.current();
-    }, WRITER_IR_IDLE_CHECKPOINT_MS);
-    return () => clearIdleCheckpointTimer();
-  }, [
-    clearIdleCheckpointTimer,
-    documentReadOnly,
-    draft,
-    escalateSaveMode,
-    externalUpdate,
-    saveError,
-  ]);
+  }, [clearAutoSaveTimers]);
 
   const beginTextEdit = useCallback(() => {
     if (!textEditStartRef.current) textEditStartRef.current = draft;
@@ -514,8 +473,8 @@ export function WriterIRControl({
       snapshot,
       lastCheckpointDocumentRef.current,
     );
-    // Draft only runs when dirty. Checkpoint may still run after a draft save
-    // when content differs from the last versioned snapshot (idle checkpoint).
+    // Draft only when dirty. Checkpoint (Save / conversation flush) may still
+    // run after draft autosave when content is not yet versioned.
     if (sameAsCheckpoint || (sameAsBase && saveMode !== 'checkpoint')) {
       pendingSaveModeRef.current = 'draft';
       return 'noop';
@@ -553,7 +512,7 @@ export function WriterIRControl({
       baseSourceRevisionRef.current = savedSourceRevision;
       pendingExternalDocumentRef.current = null;
       setBaseSourceRevision(savedSourceRevision);
-      // New revision or explicit checkpoint becomes the version baseline.
+      // Versioned save becomes the checkpoint baseline.
       if (
         saveMode === 'checkpoint'
         || savedSourceRevision !== previousRevision
@@ -561,7 +520,6 @@ export function WriterIRControl({
         lastCheckpointDocumentRef.current = sameWriterDocumentForSync(snapshot, savedDocument)
           ? snapshot
           : savedDocument;
-        clearIdleCheckpointTimer();
       }
       if (hasNewerDraft) {
         // Keep the live draft; only advance the persisted base/revision.
@@ -599,17 +557,25 @@ export function WriterIRControl({
         scheduleFollowupSave();
       }
     }
-  }, [clearAutoSaveTimers, clearIdleCheckpointTimer, documentReadOnly, scheduleFollowupSave, t]);
+  }, [clearAutoSaveTimers, documentReadOnly, scheduleFollowupSave, t]);
 
   saveRunnerRef.current = runSave;
 
-  const requestImmediateSave = useCallback(() => {
+  /** Ctrl/Cmd+S and error retry: persist draft only (no new version). */
+  const requestDraftSave = useCallback(() => {
+    escalateSaveMode('draft');
+    clearAutoSaveTimers();
+    void saveRunnerRef.current();
+  }, [clearAutoSaveTimers, escalateSaveMode]);
+
+  /** Explicit Save button: create a versioned checkpoint. */
+  const requestCheckpointSave = useCallback(() => {
     escalateSaveMode('checkpoint');
     clearAutoSaveTimers();
     void saveRunnerRef.current();
   }, [clearAutoSaveTimers, escalateSaveMode]);
 
-  /** Await pending save as a checkpoint so retry/continue can use a durable revision. */
+  /** Flush before conversation actions (continue/retry → chat): version the draft. */
   const flushPendingSave = useCallback(async (): Promise<boolean> => {
     if (documentReadOnly || !onSaveRef.current) return true;
     escalateSaveMode('checkpoint');
@@ -629,14 +595,17 @@ export function WriterIRControl({
         window.clearTimeout(saveFollowupTimerRef.current);
         saveFollowupTimerRef.current = undefined;
       }
-      if (draftRef.current === baseDocumentRef.current) return true;
+      // Skip only when this content is already a versioned checkpoint.
+      if (sameWriterDocumentForSync(draftRef.current, lastCheckpointDocumentRef.current)) {
+        return true;
+      }
 
       escalateSaveMode('checkpoint');
       const result = await runSave();
       if (result === 'error') return false;
       if (result === 'noop') return true;
     }
-    return draftRef.current === baseDocumentRef.current;
+    return sameWriterDocumentForSync(draftRef.current, lastCheckpointDocumentRef.current);
   }, [clearAutoSaveTimers, documentReadOnly, escalateSaveMode, runSave]);
 
   useEffect(() => {
@@ -698,7 +667,7 @@ export function WriterIRControl({
       const key = event.key.toLowerCase();
       if (key === 's') {
         event.preventDefault();
-        requestImmediateSave();
+        requestDraftSave();
       } else if (key === 'z' && event.shiftKey) {
         event.preventDefault();
         handleRedo();
@@ -709,7 +678,7 @@ export function WriterIRControl({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleRedo, handleUndo, requestImmediateSave]);
+  }, [handleRedo, handleUndo, requestDraftSave]);
 
   // Blur only closes the text-edit history group; autosave idle/max timers persist.
   const handleTextBlur = useCallback(() => {
@@ -758,7 +727,7 @@ export function WriterIRControl({
     }
     setExternalUpdate(false);
     setSaveError(undefined);
-    requestImmediateSave();
+    requestCheckpointSave();
   };
 
   return (
@@ -780,7 +749,7 @@ export function WriterIRControl({
         <div className='writer-ir__notice writer-ir__notice--error' role='alert'>
           <span>{t('chat.writerIR.saveError', { error: saveError })}</span>
           <div>
-            <button type='button' onClick={requestImmediateSave}>{t('common.retry')}</button>
+            <button type='button' onClick={requestDraftSave}>{t('common.retry')}</button>
             <button type='button' onClick={discardChanges}>{t('chat.writerIR.discard')}</button>
           </div>
         </div>
