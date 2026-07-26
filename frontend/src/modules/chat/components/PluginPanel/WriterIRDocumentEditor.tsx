@@ -27,7 +27,6 @@ import {
   createWriterParagraph,
   findWriterBlock,
   findWriterBlockParent,
-  getWriterOutlineInstruction,
   getWriterSpanColor,
   getWriterSpanStyles,
   convertWriterBlockToParagraph,
@@ -154,13 +153,6 @@ function renderEditableBlockText(block: WriterBlock): string {
 function headingLevel(block: WriterBlock): number {
   const level = Number(block.numbering?.level ?? 2);
   return Number.isFinite(level) ? Math.min(6, Math.max(1, Math.trunc(level))) : 2;
-}
-
-function renderOutlineInstruction(block: WriterBlock, show: boolean): string {
-  if (!show) return '';
-  const instruction = getWriterOutlineInstruction(block);
-  if (!instruction) return '';
-  return `<p class="writer-ir__outline-instruction" data-writer-outline-instruction="true" contenteditable="false">${escapeHtml(instruction)}</p>`;
 }
 
 function headingSectionEndIndex(blocks: WriterBlock[], headingIndex: number): number {
@@ -315,7 +307,6 @@ function renderCodeToolbar(block: WriterBlock, labels: WriterEditorLabels): stri
 
 function renderBlockSequence(
   blocks: WriterBlock[],
-  showOutlineInstruction: boolean,
   collapsedNodeIds: ReadonlySet<string> = new Set(),
   foldLabels: WriterEditorLabels,
   dragLabel: string,
@@ -337,7 +328,6 @@ function renderBlockSequence(
       ) {
         items.push(renderBlock(
           blocks[index],
-          showOutlineInstruction,
           collapsedNodeIds,
           foldLabels,
           dragLabel,
@@ -363,14 +353,13 @@ function renderBlockSequence(
       const collapsed = foldable && collapsedNodeIds.has(block.node_id);
       rendered.push(renderBlock(
         block,
-        showOutlineInstruction,
         collapsedNodeIds,
         foldLabels,
         dragLabel,
         hiddenByAncestor,
         { foldable, collapsed },
       ));
-      // Nested sections hide via block.children. Only flat outlines (no children)
+      // Nested sections hide via block.children. Only flat heading sequences (no children)
       // suppress following siblings until the next same/higher heading.
       if (collapsed && (block.children?.length ?? 0) === 0) {
         suppressBelowLevel = level;
@@ -381,7 +370,6 @@ function renderBlockSequence(
 
     rendered.push(renderBlock(
       block,
-      showOutlineInstruction,
       collapsedNodeIds,
       foldLabels,
       dragLabel,
@@ -395,7 +383,6 @@ function renderBlockSequence(
 
 function renderBlock(
   block: WriterBlock,
-  showOutlineInstruction: boolean,
   collapsedNodeIds: ReadonlySet<string> = new Set(),
   foldLabels: WriterEditorLabels = DEFAULT_WRITER_EDITOR_LABELS,
   dragLabel = 'Drag',
@@ -408,7 +395,6 @@ function renderBlock(
       ` class="writer-ir__document-root">`,
       renderBlockSequence(
         block.children ?? [],
-        showOutlineInstruction,
         collapsedNodeIds,
         foldLabels,
         dragLabel,
@@ -437,13 +423,11 @@ function renderBlock(
     hiddenByAncestor ? 'hidden' : '',
   ].filter(Boolean).join(' ');
   const text = renderEditableBlockText(block);
-  const outlineInstruction = renderOutlineInstruction(block, showOutlineInstruction);
   const nestedCollapsed = collapsed;
   const children = block.children?.length
     ? block.type === 'list_item'
       ? renderBlockSequence(
         block.children,
-        showOutlineInstruction,
         collapsedNodeIds,
         foldLabels,
         dragLabel,
@@ -453,7 +437,6 @@ function renderBlock(
       }"${nestedCollapsed ? ' hidden' : ''}>${
         renderBlockSequence(
           block.children,
-          showOutlineInstruction,
           collapsedNodeIds,
           foldLabels,
           dragLabel,
@@ -474,7 +457,6 @@ function renderBlock(
       foldToggle,
       dragHandle,
       `<h${level} data-writer-block-content="true" class="writer-ir__heading writer-ir__heading--${level}">${text}</h${level}>`,
-      outlineInstruction,
       children,
       '</div>',
     ].join('');
@@ -484,21 +466,21 @@ function renderBlock(
     const content = block.content ?? '';
     const highlighted = highlightCode(content, language);
     const code = highlighted || (content ? text : '');
-    return `<div ${attributes}>${dragHandle}<div class="writer-ir__code-shell" data-writer-code-shell="${escapeHtmlAttribute(block.node_id)}">${renderCodeToolbar(block, foldLabels)}<pre data-writer-block-content="true" class="writer-ir__code writer-ir__code--wrapped" data-line-numbers="${escapeHtmlAttribute(codeLineNumbers(content))}" style="--writer-code-content-height: ${codeContentHeight(content)}"><code class="language-${escapeHtmlAttribute(language)}">${code}${renderCodeTrailingCaret(content)}</code></pre></div>${outlineInstruction}${children}</div>`;
+    return `<div ${attributes}>${dragHandle}<div class="writer-ir__code-shell" data-writer-code-shell="${escapeHtmlAttribute(block.node_id)}">${renderCodeToolbar(block, foldLabels)}<pre data-writer-block-content="true" class="writer-ir__code writer-ir__code--wrapped" data-line-numbers="${escapeHtmlAttribute(codeLineNumbers(content))}" style="--writer-code-content-height: ${codeContentHeight(content)}"><code class="language-${escapeHtmlAttribute(language)}">${code}${renderCodeTrailingCaret(content)}</code></pre></div>${children}</div>`;
   }
   if (block.type === 'paragraph') {
-    return `<div ${attributes}>${dragHandle}<p data-writer-block-content="true" class="writer-ir__paragraph">${text}</p>${outlineInstruction}${children}</div>`;
+    return `<div ${attributes}>${dragHandle}<p data-writer-block-content="true" class="writer-ir__paragraph">${text}</p>${children}</div>`;
   }
   if (block.type === 'quote') {
-    return `<div ${attributes}>${dragHandle}<blockquote data-writer-block-content="true" class="writer-ir__quote">${text}</blockquote>${outlineInstruction}${children}</div>`;
+    return `<div ${attributes}>${dragHandle}<blockquote data-writer-block-content="true" class="writer-ir__quote">${text}</blockquote>${children}</div>`;
   }
   if (block.type === 'divider') {
     return `<div ${attributes}>${dragHandle}<hr data-writer-block-content="true" class="writer-ir__divider"></div>`;
   }
   if (block.type === 'list_item') {
-    return `<li ${attributes}>${dragHandle}<span data-writer-block-content="true">${text}</span>${outlineInstruction}${children}</li>`;
+    return `<li ${attributes}>${dragHandle}<span data-writer-block-content="true">${text}</span>${children}</li>`;
   }
-  return `<div ${attributes}>${dragHandle}<div data-writer-block-content="true" class="writer-ir__fallback">${text}</div>${outlineInstruction}${children}</div>`;
+  return `<div ${attributes}>${dragHandle}<div data-writer-block-content="true" class="writer-ir__fallback">${text}</div>${children}</div>`;
 }
 
 function renderDocument(
@@ -515,7 +497,6 @@ function renderDocument(
     '</h1>',
     renderBlockSequence(
       document.blocks,
-      document.stage === 'outline',
       collapsedNodeIds,
       foldLabels,
       dragLabel,
@@ -543,7 +524,6 @@ function textFromElement(element: HTMLElement): string {
   for (const child of Array.from(clone.children)) {
     if (
       child.matches('[data-writer-children]')
-      || child.matches('[data-writer-outline-instruction]')
       || child.matches('[data-writer-fold-toggle]')
       || child.matches('[data-writer-drag-handle]')
       || child.matches('ul, ol')
@@ -579,8 +559,7 @@ function textFromBlockElement(
     if (
       child instanceof HTMLElement
       && child.matches(
-        '[data-writer-block], [data-writer-children], '
-        + '[data-writer-outline-instruction], ul, ol',
+        '[data-writer-block], [data-writer-children], ul, ol',
       )
     ) {
       break;

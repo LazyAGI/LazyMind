@@ -362,13 +362,6 @@ export function countWriterBlocks(blocks: WriterBlock[]): number {
   );
 }
 
-export function getWriterOutlineInstruction(block: WriterBlock): string | null {
-  const instruction = block.authoring?.instruction;
-  if (typeof instruction !== 'string') return null;
-  const trimmed = instruction.trim();
-  return trimmed || null;
-}
-
 export function findWriterBlock(
   blocks: WriterBlock[],
   nodeId: string,
@@ -1031,7 +1024,7 @@ export function splitWriterBlock(
 
 /**
  * Nest the current block as the last child of its previous sibling.
- * Used for Tab-based outline hierarchy.
+ * Used for Tab-based block hierarchy.
  */
 export function indentWriterBlock(
   document: WriterDocument,
@@ -1150,7 +1143,7 @@ export function insertWriterChildParagraph(
 
 /**
  * Split a heading at the caret: keep the leading text as the heading, and move
- * the trailing text into a new first-child paragraph (outline-style Enter).
+ * the trailing text into a new first-child paragraph.
  */
 export function splitWriterHeadingIntoChild(
   document: WriterDocument,

@@ -10,7 +10,6 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  getWriterOutlineInstruction,
   getWriterSpanStyles,
   normalizeWriterCodeLanguage,
   repairWriterCodeToolbarPollution,
@@ -135,11 +134,7 @@ function PreviewBlockContent({ block }: { block: WriterBlock }) {
 function BlockShell({
   block,
   children,
-  showOutlineInstruction,
-}: { block: WriterBlock; children?: ReactNode; showOutlineInstruction: boolean }) {
-  const instruction = showOutlineInstruction
-    ? getWriterOutlineInstruction(block)
-    : null;
+}: { block: WriterBlock; children?: ReactNode }) {
   return (
     <div
       className='writer-ir__block'
@@ -147,36 +142,24 @@ function BlockShell({
       data-node-type={block.type}
     >
       <PreviewBlockContent block={block} />
-      {instruction && (
-        <p className='writer-ir__outline-instruction'>{instruction}</p>
-      )}
       {children}
     </div>
   );
 }
 
-function ListItemBlock({
-  block,
-  showOutlineInstruction,
-}: { block: WriterBlock; showOutlineInstruction: boolean }) {
+function ListItemBlock({ block }: { block: WriterBlock }) {
   return (
     <li className='writer-ir__list-item'>
-      <BlockShell block={block} showOutlineInstruction={showOutlineInstruction}>
+      <BlockShell block={block}>
         {(block.children?.length ?? 0) > 0 && (
-          <BlockSequence
-            blocks={block.children ?? []}
-            showOutlineInstruction={showOutlineInstruction}
-          />
+          <BlockSequence blocks={block.children ?? []} />
         )}
       </BlockShell>
     </li>
   );
 }
 
-function BlockSequence({
-  blocks,
-  showOutlineInstruction,
-}: { blocks: WriterBlock[]; showOutlineInstruction: boolean }) {
+function BlockSequence({ blocks }: { blocks: WriterBlock[] }) {
   const rendered: ReactNode[] = [];
 
   for (let index = 0; index < blocks.length;) {
@@ -199,7 +182,6 @@ function BlockSequence({
             <ListItemBlock
               key={item.node_id}
               block={item}
-              showOutlineInstruction={showOutlineInstruction}
             />
           ))}
         </ListTag>,
@@ -211,10 +193,7 @@ function BlockSequence({
     if (block.type === 'document') {
       rendered.push(
         <section className='writer-ir__document-root' key={block.node_id}>
-          <BlockSequence
-            blocks={block.children ?? []}
-            showOutlineInstruction={showOutlineInstruction}
-          />
+          <BlockSequence blocks={block.children ?? []} />
         </section>,
       );
       continue;
@@ -223,14 +202,10 @@ function BlockSequence({
       <BlockShell
         block={block}
         key={block.node_id}
-        showOutlineInstruction={showOutlineInstruction}
       >
         {(block.children?.length ?? 0) > 0 && (
           <div className='writer-ir__children'>
-            <BlockSequence
-              blocks={block.children ?? []}
-              showOutlineInstruction={showOutlineInstruction}
-            />
+            <BlockSequence blocks={block.children ?? []} />
           </div>
         )}
       </BlockShell>,
@@ -784,10 +759,7 @@ export function WriterIRControl({
         <article className='writer-ir__document'>
           <h1 className='writer-ir__title'>{draft.title}</h1>
           {draft.blocks.length > 0 ? (
-            <BlockSequence
-              blocks={draft.blocks}
-              showOutlineInstruction={draft.stage === 'outline'}
-            />
+            <BlockSequence blocks={draft.blocks} />
           ) : (
             <div className='writer-ir__empty' role='status'>
               {t('chat.writerIR.emptyDocument')}
