@@ -143,6 +143,8 @@ test("macOS distribution build signs the final DMG and submits one asynchronous 
     /notarytool submit "\$\{DMG_PATH\}"[\s\S]*--team-id "\$\{APPLE_TEAM_ID\}"[\s\S]*--output-format json/,
   );
   assert.match(source, /Authority=Developer ID Application:/);
+  assert.match(source, /signature_info="\$\(codesign -dv --verbose=4/);
+  assert.doesNotMatch(source, /codesign -dv[^\n]*\|\s*grep -q/);
   assert.match(source, /verify_runtime_code_signatures "\$\{APP_PATH\}\/Contents\/Resources\/runtime"/);
   assert.match(packageJson.scripts["dist:mac:arm64"], /--publish never$/);
   assert.match(builderSource, /afterPack:\s*signAndStageEmbeddedRuntime/);
