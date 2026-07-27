@@ -3,13 +3,11 @@ from __future__ import annotations
 from .context import (
     MemoryContext,
     load_memory_context,
-    profile_languages,
     truncate_preference_index,
 )
 from .editors import (
     add_preference_entry,
-    apply_profile_operations,
-    apply_soul_operations,
+    apply_memory_operations,
     delete_preference_entry,
     preference_name_to_reference_name,
     validate_preference_name,
@@ -43,9 +41,8 @@ from .validation import (
     parse_preference_items,
     remove_preference_item,
     validate_preference_index,
-    validate_profile_content,
     validate_reference_content,
-    validate_soul_content,
+    validate_stored_memory_content,
 )
 from .store import MemoryStore
 
@@ -103,6 +100,7 @@ __all__ = [
     'EpisodeType',
     'add_preference_entry',
     'append_preference_item',
+    'apply_memory_operations',
     'build_reference_path',
     'delete_preference_entry',
     'episode_query_coverage',
@@ -116,16 +114,12 @@ __all__ = [
     'normalize_memory_path',
     'parse_preference_items',
     'preference_name_to_reference_name',
-    'profile_languages',
     'remove_preference_item',
-    'apply_profile_operations',
-    'apply_soul_operations',
     'split_reference_ref',
     'tokenize_episode_text',
     'truncate_preference_index',
     'validate_preference_index',
     'validate_preference_name',
-    'validate_profile_content',
     'validate_reference_content',
-    'validate_soul_content',
+    'validate_stored_memory_content',
 ]

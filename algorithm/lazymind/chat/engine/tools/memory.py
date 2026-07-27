@@ -53,6 +53,7 @@ _HTTP_AUTH_VALUE = re.compile(
     '''
 )
 _BEARER_VALUE = re.compile(r'''(?ix)\bbearer\s+[^\s,;'"}\]]+''')
+_INTERNAL_MEMORY_METADATA = re.compile(r'\bschema_version\b', re.IGNORECASE)
 
 
 def _agentic_config() -> dict[str, Any]:
@@ -70,7 +71,14 @@ def _safe_exception_message(exc: Exception) -> str:
     )
     message = _BEARER_VALUE.sub('Bearer <redacted>', message)
     message = _SECRET_VALUE.sub(lambda match: f'{match.group(1)}=<redacted>', message)
-    return message[:500]
+    return _visible_memory_message(message)[:500]
+
+
+def _visible_memory_message(message: object) -> str:
+    return _INTERNAL_MEMORY_METADATA.sub(
+        'internal memory metadata',
+        str(message or ''),
+    )
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -159,7 +167,7 @@ def _log_tool_exception(tool: str, exc: Exception) -> None:
 
 
 def _memory_write_error(tool_name: str, message: str) -> Dict[str, Any]:
-    text = str(message or '').strip()
+    text = _visible_memory_message(message).strip()
     return tool_error(tool_name, f'Failed to write via RemoteFS: {text}', error_type='store')
 
 
@@ -169,7 +177,9 @@ def _memory_applied(tool_name: str, **result: Any) -> Dict[str, Any]:
 
 def _memory_result_error(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     error_type = str(result.get('type') or 'validation')
-    reason = str(result.get('error') or f'{tool_name} failed.')
+    reason = _visible_memory_message(
+        result.get('error') or f'{tool_name} failed.'
+    )
     if error_type == 'store':
         return _memory_write_error(tool_name, reason)
     return tool_error(tool_name, reason, error_type=error_type)
@@ -269,7 +279,7 @@ class MemoryTools:
             return _record_state_memory_result(
                 tool_error(
                     'read_memory',
-                    f'Failed to read {raw_target}: {exc}',
+                    f'Failed to read {raw_target}: {_safe_exception_message(exc)}',
                     error_type='store',
                 ),
                 mutation=False,
@@ -278,7 +288,7 @@ class MemoryTools:
             return _record_state_memory_result(
                 tool_error(
                     'read_memory',
-                    f'Failed to read {raw_target}: {exc}',
+                    f'Failed to read {raw_target}: {_safe_exception_message(exc)}',
                     error_type='store',
                 ),
                 mutation=False,
@@ -388,16 +398,17 @@ class MemoryTools:
     def soul_editor(self, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Apply one atomic batch of operations to the agent Soul.
 
-        Use this only when the user explicitly asks to change the assistant's
-        default identity, mission, interaction style, or epistemic behavior.
+        Use this only when the user explicitly asks to change an Agent
+        definition or stable behavior represented by an existing Soul field.
         Do not use it for user-specific facts; those belong in profile or
         preference editors. Include every Soul change from the current turn in
-        one call. Soul fields are required strings, so only ``set`` operations
-        on existing business-field dot paths are supported.
+        one call. The loaded YAML determines editable leaf paths and operations:
+        string/null leaves support ``set`` and ``clear``; string-list leaves
+        support ``add``, ``remove``, and ``clear``.
 
         Args:
-            operations: Non-empty list of ``{"op": "set", "path": "...",
-                "value": "..."}`` mappings.
+            operations: Non-empty list of operation mappings with ``op``,
+                ``path``, and ``value`` when required.
         """
         if not isinstance(operations, list) or not operations:
             return _record_state_memory_result(
@@ -423,6 +434,7 @@ class MemoryTools:
                 operations=list(result.get('operations') or operations),
                 change_count=len(operations),
                 path=SOUL_PATH,
+                content=result['content'],
                 content_length=len(result['content']),
             ),
             mutation=True,
@@ -433,14 +445,15 @@ class MemoryTools:
         """Apply one atomic batch of operations to the user Profile.
 
         Use this only for a current, stable user fact that the user explicitly
-        states or corrects, such as preferred name, language, residence,
-        occupation, organization, industry, or expertise domain. Do not infer
-        a fact, and do not use this for long-form behavioral preferences; those
-        belong in ``preference_editor``.
-        Include every Profile change from the current turn in one call. Scalar
-        fields support ``set`` and ``clear``. List fields support ``add``,
-        ``remove``, and ``clear``. Operate on individual list values instead of
-        replacing complete arrays.
+        states or corrects and that is represented by an existing Profile
+        field. Do not infer a fact, and do not use this for long-form behavioral
+        preferences; those belong in ``preference_editor``.
+        Include every Profile change from the current turn in one call. The
+        currently loaded YAML determines the editable leaf paths and operations.
+        String and null fields support ``set`` and ``clear``; clearing a string
+        writes an empty string. String-list fields support ``add``, ``remove``,
+        and ``clear``. Operate on individual list values instead of replacing
+        complete arrays.
 
         Args:
             operations: Non-empty list of operation mappings with ``op``,
@@ -470,6 +483,7 @@ class MemoryTools:
                 operations=list(result.get('operations') or operations),
                 change_count=len(operations),
                 path=PROFILE_PATH,
+                content=result['content'],
                 content_length=len(result['content']),
             ),
             mutation=True,
@@ -490,10 +504,9 @@ class MemoryTools:
         explicitly states that is stable, long-term, and reusable across
         conversations. Do not save fragmented remarks, one-off requests,
         temporary task details, casual statements, or objective user facts.
-        Facts such as name, common languages, residence, occupation,
-        organization, industry, or expertise belong in Profile when a matching
-        field exists. Each added entry writes ``preference.yaml`` and a matching
-        reference file under ``memory/users/references/``.
+        Objective user facts belong in Profile when a matching field exists.
+        Each added entry writes ``preference.yaml`` and a matching reference
+        file under ``memory/users/references/``.
         This tool cannot update or reorder preferences.
         Never delete and re-add an entry as an update because ordering is
         controlled only by the user.

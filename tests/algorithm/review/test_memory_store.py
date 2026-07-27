@@ -16,9 +16,8 @@ from lazymind.common.memory.validation import (
     PreferenceItem,
     append_preference_item,
     validate_preference_index,
-    validate_profile_content,
-    validate_soul_content,
 )
+from lazymind.common.memory.validation.document import validate_stored_memory_content
 from lazymind.common.memory.store import MemoryStore
 from lazymind.config import config as _cfg
 
@@ -136,9 +135,35 @@ class FakeRemoteFS:
 
 
 def test_validate_sample_documents():
-    assert validate_soul_content(SAMPLE_SOUL) is None
-    assert validate_profile_content(SAMPLE_PROFILE) is None
+    assert validate_stored_memory_content(SAMPLE_SOUL, label='soul') is None
+    assert validate_stored_memory_content(SAMPLE_PROFILE, label='profile') is None
     assert validate_preference_index(SAMPLE_PREFERENCE) is None
+
+
+def test_profile_validation_discovers_current_fields_and_rejects_unsupported_types():
+    dynamic_profile = (
+        'schema_version: 2\n'
+        'personal:\n'
+        '  nickname: Neo\n'
+        '  interests: [AI]\n'
+        '  headline: null\n'
+    )
+
+    assert validate_stored_memory_content(dynamic_profile, label='profile') is None
+    error = validate_stored_memory_content(
+        dynamic_profile.replace('  interests: [AI]\n', '  interests: [AI, 7]\n'),
+        label='profile',
+    )
+    assert error is not None
+    assert 'personal.interests' in error
+    assert 'list of strings' in error
+    for invalid_leaf in ('  score: 7\n', '  active: true\n'):
+        error = validate_stored_memory_content(
+            dynamic_profile.replace('  headline: null\n', invalid_leaf),
+            label='profile',
+        )
+        assert error is not None
+        assert 'unsupported type' in error
 
 
 def test_memory_store_roundtrip():
@@ -180,7 +205,7 @@ def test_memory_store_roundtrip():
     assert 'Explain motivations and tradeoffs.' in section
 
 
-def test_memory_store_migrates_legacy_documents_and_hides_version():
+def test_memory_store_does_not_migrate_versionless_documents():
     legacy_soul = (
         SAMPLE_SOUL.removeprefix('schema_version: 2\n')
         .replace('default_relationship_mode:', 'relationship_mode:')
@@ -211,18 +236,99 @@ def test_memory_store_migrates_legacy_documents_and_hides_version():
     })
     store = MemoryStore(fs)
 
-    visible_soul = store.read_soul()
-    visible_profile = store.read_profile()
+    with pytest.raises(ValueError, match='internal version metadata is missing'):
+        store.read_soul()
+    with pytest.raises(ValueError, match='internal version metadata is missing'):
+        store.read_profile()
+    assert fs.files[SOUL_PATH] == legacy_soul
+    assert fs.files[PROFILE_PATH] == legacy_profile
 
-    assert 'schema_version' not in visible_soul
-    assert 'schema_version' not in visible_profile
-    assert fs.files[SOUL_PATH].startswith('schema_version: 2\n')
-    assert fs.files[PROFILE_PATH].startswith('schema_version: 2\n')
-    profile = yaml.safe_load(visible_profile)
-    assert profile['locale']['residence'] == '上海'
-    assert profile['professional']['occupations'] == ['产品经理']
-    assert profile['professional']['organizations'] == ['LazyMind']
-    assert profile['professional']['industries'] == ['人工智能']
+
+@pytest.mark.parametrize(
+    ('invalid', 'expected_error'),
+    (
+        (
+            SAMPLE_PROFILE.replace('  aliases: []\n', '  aliases: not-a-list\n'),
+            'identity.aliases',
+        ),
+        (
+            SAMPLE_PROFILE.replace('  residence: "CN"\n', '  residence: [CN]\n'),
+            'locale.residence',
+        ),
+        (
+            SAMPLE_PROFILE.replace('  aliases: []\n', '  aliases: []\n  extra: value\n'),
+            'leaf fields',
+        ),
+        (
+            SAMPLE_PROFILE.replace('  aliases: []\n', '  known_as: []\n'),
+            'leaf fields',
+        ),
+        (
+            SAMPLE_PROFILE.replace('  aliases: []\n', '  aliases:\n    nested: []\n'),
+            'mapping structure',
+        ),
+    ),
+)
+def test_memory_store_rejects_profile_type_changes_before_writing(
+    monkeypatch,
+    invalid,
+    expected_error,
+):
+    fs = FakeRemoteFS({PROFILE_PATH: SAMPLE_PROFILE})
+    store = MemoryStore(fs)
+    original = fs.files[PROFILE_PATH]
+
+    def fake_apply(_content, operations, *, label):
+        assert label == 'profile'
+        return {
+            'ok': True,
+            'content': invalid.replace('schema_version: 2\n', '', 1),
+            'stored_content': invalid,
+            'operations': operations,
+        }
+
+    monkeypatch.setattr(
+        'lazymind.common.memory.store.apply_memory_operations',
+        fake_apply,
+    )
+
+    result = store.apply_profile_operations([
+        {'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'},
+    ])
+
+    assert result['ok'] is False
+    assert result['type'] == 'validation'
+    assert expected_error in result['error']
+    assert fs.files[PROFILE_PATH] == original
+
+
+def test_memory_store_writes_the_same_stored_profile_it_validates(monkeypatch):
+    edited_profile = SAMPLE_PROFILE.replace('  aliases: []\n', '  aliases: [Neo]\n')
+    visible_profile = edited_profile.removeprefix('schema_version: 2\n')
+    fs = FakeRemoteFS({PROFILE_PATH: SAMPLE_PROFILE})
+    store = MemoryStore(fs)
+
+    def fake_apply(_content, operations, *, label):
+        assert label == 'profile'
+        return {
+            'ok': True,
+            'content': visible_profile,
+            'stored_content': edited_profile,
+            'operations': operations,
+        }
+
+    monkeypatch.setattr(
+        'lazymind.common.memory.store.apply_memory_operations',
+        fake_apply,
+    )
+
+    result = store.apply_profile_operations([
+        {'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'},
+    ])
+
+    assert result['ok'] is True
+    assert result['content'] == visible_profile
+    assert fs.files[PROFILE_PATH] == edited_profile
 
 
 def test_memory_store_rejects_invalid_path_and_content():

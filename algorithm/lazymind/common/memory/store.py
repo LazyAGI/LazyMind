@@ -6,6 +6,7 @@ from typing import Any, Optional
 from lazymind.common.integrations.remote_fs import RemoteFS
 from lazymind.config import config as _cfg
 
+from .field_contract import validate_memory_transition
 from .paths import (
     AGENTS_ROOT,
     PREFERENCE_PATH,
@@ -20,14 +21,17 @@ from .paths import (
     split_reference_ref,
 )
 from .validation import (
-    normalize_profile_content,
-    normalize_soul_content,
     parse_preference_items,
     validate_preference_index,
-    validate_profile_content,
     validate_reference_content,
-    validate_soul_content,
 )
+from .validation.common import parse_yaml_mapping
+from .validation.document import (
+    is_internal_memory_path,
+    split_stored_memory_content,
+    validate_stored_memory_content,
+)
+from .editors.document import apply_memory_operations
 
 _ANCHOR_HEADING_RE = re.compile(r'(?m)^(#{1,6})\s+(?P<title>.+?)\s*$')
 
@@ -68,26 +72,24 @@ class MemoryStore:
     def read_soul(self) -> str:
         return self._read_versioned(
             SOUL_PATH,
-            normalize=normalize_soul_content,
+            label='soul',
         )
 
     def read_profile(self) -> str:
         return self._read_versioned(
             PROFILE_PATH,
-            normalize=normalize_profile_content,
+            label='profile',
         )
 
     def read_preference(self) -> str:
         return self.read(PREFERENCE_PATH)
 
-    def _read_versioned(self, path: str, *, normalize) -> str:
+    def _read_versioned(self, path: str, *, label: str) -> str:
         raw = self.read(path)
         try:
-            stored, visible = normalize(raw)
+            _, visible = split_stored_memory_content(raw, label=label)
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
-        if stored != raw:
-            self.write(path, stored)
         return visible
 
     def read_reference(self, ref: str) -> str:
@@ -119,41 +121,82 @@ class MemoryStore:
         self,
         operations: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        from .result import memory_ok
-
-        loaded = self._read_document(SOUL_PATH, label='soul')
-        if not loaded.get('ok'):
-            return loaded
-        _, visible = normalize_soul_content(loaded['content'])
-        from .editors.soul import apply_soul_operations
-
-        edited = apply_soul_operations(visible, operations)
-        if not edited.get('ok'):
-            return edited
-        written = self._write_document(SOUL_PATH, edited['content'])
-        if not written.get('ok'):
-            return written
-        return memory_ok(
-            content=edited['content'],
-            operations=list(edited.get('operations') or operations),
+        return self._apply_memory_operations(
+            SOUL_PATH,
+            label='soul',
+            operations=operations,
+            apply=apply_memory_operations,
         )
 
     def apply_profile_operations(
         self,
         operations: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        return self._apply_memory_operations(
+            PROFILE_PATH,
+            label='profile',
+            operations=operations,
+            apply=apply_memory_operations,
+        )
+
+    def _apply_memory_operations(
+        self,
+        path: str,
+        *,
+        label: str,
+        operations: list[dict[str, Any]],
+        apply,
+    ) -> dict[str, Any]:
         from .result import memory_ok
 
-        loaded = self._read_document(PROFILE_PATH, label='profile')
+        loaded = self._read_document(path, label=label)
         if not loaded.get('ok'):
             return loaded
-        _, visible = normalize_profile_content(loaded['content'])
-        from .editors.profile import apply_profile_operations
-
-        edited = apply_profile_operations(visible, operations)
+        edited = apply(loaded['content'], operations, label=label)
         if not edited.get('ok'):
             return edited
-        written = self._write_document(PROFILE_PATH, edited['content'])
+        stored_content = edited.get('stored_content')
+        if not isinstance(stored_content, str) or not stored_content.strip():
+            from .result import memory_err
+
+            return memory_err(
+                f'{label} editor did not produce valid stored content.',
+                type='validation',
+            )
+        try:
+            _, before_visible = split_stored_memory_content(
+                loaded['content'],
+                label=label,
+            )
+            _, after_visible = split_stored_memory_content(
+                stored_content,
+                label=label,
+            )
+            before_stored = parse_yaml_mapping(loaded['content'])
+            after_stored = parse_yaml_mapping(stored_content)
+            before_metadata = {
+                key: value
+                for key, value in before_stored.items()
+                if is_internal_memory_path(key)
+            }
+            after_metadata = {
+                key: value
+                for key, value in after_stored.items()
+                if is_internal_memory_path(key)
+            }
+            if before_metadata != after_metadata:
+                raise ValueError(f'{label} internal metadata cannot be changed.')
+            validate_memory_transition(
+                parse_yaml_mapping(before_visible),
+                parse_yaml_mapping(after_visible),
+                label=label,
+            )
+        except ValueError as exc:
+            from .result import memory_err
+
+            return memory_err(str(exc), type='validation')
+
+        written = self._write_document(path, stored_content)
         if not written.get('ok'):
             return written
         return memory_ok(
@@ -300,9 +343,9 @@ class MemoryStore:
 
     def _validate(self, path: str, content: str) -> None:
         if path == SOUL_PATH:
-            error = validate_soul_content(content)
+            error = validate_stored_memory_content(content, label='soul')
         elif path == PROFILE_PATH:
-            error = validate_profile_content(content)
+            error = validate_stored_memory_content(content, label='profile')
         elif path == PREFERENCE_PATH:
             error = validate_preference_index(content)
         elif is_reference_path(path):

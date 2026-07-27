@@ -3,6 +3,8 @@ from __future__ import annotations
 from html import escape
 from typing import TYPE_CHECKING, Iterable
 
+from lazymind.common.memory.field_contract import memory_operation_rules
+
 if TYPE_CHECKING:
     from lazymind.common.memory import EpisodeRecord
 
@@ -34,18 +36,18 @@ MEMORY_REVIEW_PROMPT = (
     "# Memory Type Rules\n"
     "## Soul\n"
     "- Use MemoryTools_soul_editor only when the conversation contains an explicit, durable user "
-    "request to change the Agent's identity, mission, default interaction style, or epistemic behavior.\n"
+    "request to change an Agent definition or stable behavior represented by an existing Soul field.\n"
     "- Ordinary conversation content, task instructions, user facts, and inferred preferences must "
     "never change Soul.\n"
     "- Update only existing leaf fields shown in current_soul. Put all Soul field changes in one "
-    "MemoryTools_soul_editor operations call. Soul supports only set operations.\n\n"
+    "MemoryTools_soul_editor operations call.\n\n"
     "## Profile\n"
     "- Use MemoryTools_profile_editor only when the user explicitly states or corrects a current "
-    "objective fact, such as preferred name, aliases, common languages, residence, occupation, "
-    "organization, industry, or expertise domain.\n"
+    "objective fact represented by an existing Profile field.\n"
     "- Update only existing leaf fields shown in current_profile. Put all Profile changes in one "
-    "MemoryTools_profile_editor operations call. Use set/clear for scalar fields and add/remove/clear "
-    "for list fields. Never replace a complete list merely because the user mentioned one item. "
+    "MemoryTools_profile_editor operations call.\n"
+    f"{memory_operation_rules()}\n"
+    "- Never replace a complete list merely because the user mentioned one item. "
     "Never infer Profile facts, and do not store transient task context as Profile.\n\n"
     "## Preference\n"
     "- Preference is an exceptional promotion from ordinary Episode memory. Use "
@@ -62,9 +64,8 @@ MEMORY_REVIEW_PROMPT = (
     "Episode if the information still has durable historical value; otherwise Skip.\n"
     "- Be conservative: do not save fragmented remarks, one-off requests, temporary task details, "
     "casual statements, or facts that lack a reusable service behavior.\n"
-    "- Objective user facts such as name, aliases, common languages, residence, occupation, "
-    "organization, industry, or expertise belong in Profile when a matching "
-    "field exists; never store them as Preferences.\n"
+    "- Objective user facts belong in Profile when a matching field exists; never store them as "
+    "Preferences.\n"
     "- Delete a preference only when the user explicitly withdraws it. Preference update is not "
     "supported in V1; never simulate an update with delete followed by add.\n"
     "- Preference order is controlled by the user. Never reorder entries or use deletion and re-addition "

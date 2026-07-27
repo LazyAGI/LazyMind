@@ -7,15 +7,13 @@ from .preference import (
     preference_name_to_reference_name,
     validate_preference_name,
 )
-from .profile import apply_profile_operations
-from .soul import apply_soul_operations
+from .document import apply_memory_operations
 
 __all__ = [
     'add_preference_entry',
+    'apply_memory_operations',
     'build_add_preference_item',
     'delete_preference_entry',
     'preference_name_to_reference_name',
-    'apply_profile_operations',
-    'apply_soul_operations',
     'validate_preference_name',
 ]

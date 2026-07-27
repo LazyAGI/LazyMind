@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
 import lazyllm
+import yaml
 
 from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.common.memory.paths import (
@@ -182,7 +183,7 @@ def test_soul_editor_rejects_missing_field():
         ])
     assert payload['success'] is False
     assert payload['error']['type'] == 'validation'
-    assert 'does not exist in document' in payload['error']['reason']
+    assert 'unsupported soul operation path' in payload['error']['reason']
     assert ledger[-1]['success'] is False
     assert ledger[-1]['mutation'] is False
 
@@ -211,6 +212,149 @@ def test_profile_editor_updates_list_field():
     assert '中国' in fs.files[PROFILE_PATH]
     assert 'software' in fs.files[PROFILE_PATH]
     assert ledger[-1]['mutation'] is True
+
+
+def test_profile_editor_discovers_fields_from_loaded_document():
+    _reset_ledger()
+    dynamic_profile = (
+        'schema_version: 2\n'
+        'personal:\n'
+        '  nickname: Neo\n'
+        '  interests: [AI]\n'
+        '  headline: null\n'
+    )
+    fs = FakeRemoteFS({
+        SOUL_PATH: SAMPLE_SOUL,
+        PROFILE_PATH: dynamic_profile,
+        PREFERENCE_PATH: SAMPLE_PREFERENCE,
+    })
+    tools, store = _tools_with_store(fs)
+
+    with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
+        payload = tools.profile_editor([
+            {'op': 'set', 'path': 'personal.nickname', 'value': 'Trinity'},
+            {'op': 'add', 'path': 'personal.interests', 'value': 'Agents'},
+            {'op': 'set', 'path': 'personal.headline', 'value': 'Engineer'},
+        ])
+
+    assert payload['success'] is True
+    stored = fs.files[PROFILE_PATH]
+    assert 'nickname: Trinity' in stored
+    assert 'interests:' in stored
+    assert '- AI' in stored
+    assert '- Agents' in stored
+    assert 'headline: Engineer' in stored
+
+
+def test_soul_editor_uses_the_same_dynamic_field_contract():
+    ledger = _reset_ledger()
+    dynamic_soul = (
+        'schema_version: 2\n'
+        'custom:\n'
+        '  title: Assistant\n'
+        '  capabilities: [Research]\n'
+        '  note: null\n'
+    )
+    fs = FakeRemoteFS({
+        SOUL_PATH: dynamic_soul,
+        PROFILE_PATH: SAMPLE_PROFILE,
+        PREFERENCE_PATH: SAMPLE_PREFERENCE,
+    })
+    tools, store = _tools_with_store(fs)
+
+    with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
+        payload = tools.soul_editor([
+            {'op': 'clear', 'path': 'custom.title'},
+            {'op': 'add', 'path': 'custom.capabilities', 'value': 'Planning'},
+            {'op': 'set', 'path': 'custom.note', 'value': 'Direct'},
+        ])
+
+    assert payload['success'] is True
+    stored = yaml.safe_load(fs.files[SOUL_PATH])
+    assert stored['custom'] == {
+        'title': '',
+        'capabilities': ['Research', 'Planning'],
+        'note': 'Direct',
+    }
+    assert 'schema_version' not in payload['result']['content']
+    assert 'schema_version' not in str(ledger)
+
+
+def test_read_memory_returns_only_visible_document_content():
+    ledger = _reset_ledger()
+    fs = FakeRemoteFS({
+        SOUL_PATH: SAMPLE_SOUL,
+        PROFILE_PATH: SAMPLE_PROFILE,
+        PREFERENCE_PATH: SAMPLE_PREFERENCE,
+    })
+    tools, store = _tools_with_store(fs)
+
+    with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
+        payload = tools.read_memory('soul')
+
+    assert payload['success'] is True
+    assert 'schema_version' not in payload['result']['content']
+    assert 'identity:' in payload['result']['content']
+    assert 'schema_version' not in str(ledger)
+
+
+def test_profile_editor_preserves_loaded_field_types():
+    _reset_ledger()
+    dynamic_profile = (
+        'schema_version: 2\n'
+        'personal:\n'
+        '  nickname: Neo\n'
+        '  interests: [AI]\n'
+        '  headline: null\n'
+        '  secondary_headline: null\n'
+    )
+    fs = FakeRemoteFS({
+        SOUL_PATH: SAMPLE_SOUL,
+        PROFILE_PATH: dynamic_profile,
+        PREFERENCE_PATH: SAMPLE_PREFERENCE,
+    })
+    tools, store = _tools_with_store(fs)
+
+    with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
+        applied = tools.profile_editor([
+            {'op': 'clear', 'path': 'personal.nickname'},
+            {'op': 'clear', 'path': 'personal.interests'},
+            {'op': 'remove', 'path': 'personal.interests', 'value': 'missing'},
+            {'op': 'set', 'path': 'personal.headline', 'value': 'Engineer'},
+            {'op': 'clear', 'path': 'personal.secondary_headline'},
+        ])
+
+        assert applied['success'] is True
+        document = yaml.safe_load(fs.files[PROFILE_PATH])
+        assert document['personal'] == {
+            'nickname': '',
+            'interests': [],
+            'headline': 'Engineer',
+            'secondary_headline': None,
+        }
+        unchanged = fs.files[PROFILE_PATH]
+
+        for operation in (
+            {'op': 'add', 'path': 'personal.nickname', 'value': 'N'},
+            {'op': 'set', 'path': 'personal.interests', 'value': 'Agents'},
+            {'op': 'clear', 'path': 'personal.headline', 'value': 'unexpected'},
+            {'op': 'set', 'path': 'personal.unknown', 'value': 'value'},
+            {'op': 'set', 'path': 'personal', 'value': 'value'},
+            {'op': 'set', 'path': 'schema_version', 'value': '3'},
+            {'op': 'set', 'path': 'schema_version.nested', 'value': '3'},
+        ):
+            rejected = tools.profile_editor([operation])
+            assert rejected['success'] is False
+            assert rejected['error']['type'] == 'validation'
+            assert 'schema_version' not in str(rejected)
+            assert fs.files[PROFILE_PATH] == unchanged
+
+        rejected_batch = tools.profile_editor([
+            {'op': 'set', 'path': 'personal.nickname', 'value': 'Morpheus'},
+            {'op': 'add', 'path': 'personal.headline', 'value': 'Invalid'},
+        ])
+        assert rejected_batch['success'] is False
+        assert fs.files[PROFILE_PATH] == unchanged
 
 
 def test_preference_editor_add_and_delete():

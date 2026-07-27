@@ -116,3 +116,33 @@ def test_system_prompt_ignores_tool_appendices_when_no_tools_are_registered() ->
     )
 
     assert 'Must not be injected.' not in prompt
+
+
+def test_system_prompt_explains_profile_operations_by_yaml_type() -> None:
+    prompt = build_system_prompt(
+        True,
+        profile=(
+            'personal:\n'
+            '  nickname: Neo\n'
+            '  interests: [AI]\n'
+            '  headline: null\n'
+        ),
+    )
+
+    assert 'nickname: Neo' in prompt
+    assert 'A YAML string supports `set` and `clear`' in prompt
+    assert 'A YAML `null` supports `set` and `clear`' in prompt
+    assert 'A YAML list of strings supports `add`, `remove`, and `clear`' in prompt
+    assert 'Use only existing leaf dot paths' in prompt
+
+
+def test_system_prompt_uses_query_history_and_environment_not_profile_language() -> None:
+    prompt = build_system_prompt(
+        True,
+        current_query='What changed?',
+        profile='locale:\n  languages: [Chinese]\n',
+        environment_context={'locale': 'zh-CN'},
+    )
+
+    assert 'Selected response language for this turn: English' in prompt
+    assert 'profile locale.languages' not in prompt

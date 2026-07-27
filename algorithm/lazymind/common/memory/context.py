@@ -7,7 +7,6 @@ import yaml
 
 from lazymind.config import config as _cfg
 
-from .validation.common import parse_yaml_mapping
 from .validation.preference import parse_preference_items, validate_preference_index
 from .store import MemoryStore
 
@@ -86,17 +85,6 @@ def truncate_preference_index(
             break
         projected.append(candidate)
     return _render_preference_context(projected)
-
-
-def profile_languages(profile: str) -> list[str]:
-    document = parse_yaml_mapping(profile or '')
-    locale = document.get('locale') if isinstance(document, dict) else None
-    if not isinstance(locale, dict):
-        return []
-    languages = locale.get('languages')
-    if not isinstance(languages, list):
-        return []
-    return [str(item).strip() for item in languages if str(item).strip()]
 
 
 def _render_preference_context(items: list[dict[str, str]]) -> str:

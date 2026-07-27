@@ -5,7 +5,7 @@ import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
-from lazymind.common.memory import profile_languages
+from lazymind.common.memory.field_contract import memory_operation_rules
 
 from .guidance import (
     ANALYSIS_GUIDANCE,
@@ -109,35 +109,15 @@ def _locale_language(locale: str) -> str:
     return locale.strip() or _DEFAULT_UI_LOCALE
 
 
-def _language_from_profile(profile: str | None) -> str:
-    for item in profile_languages(profile or ''):
-        normalized = item.strip().lower()
-        if normalized.startswith('zh'):
-            return 'Chinese'
-        if normalized.startswith('en'):
-            return 'English'
-    return ''
-
-
 def _resolve_response_language(
     *,
     current_query: str | None = None,
     conversation_history: list[dict] | None = None,
-    profile: str | None = None,
-    preference: str | None = None,
     environment_context: dict | None = None,
 ) -> tuple[str, str]:
     current_instruction = _explicit_language(current_query)
     if current_instruction:
         return current_instruction, 'explicit instruction in the current request'
-
-    profile_language = _language_from_profile(profile)
-    if profile_language:
-        return profile_language, 'profile locale.languages'
-
-    saved_preference = _explicit_language(preference) or _explicit_language(profile)
-    if saved_preference:
-        return saved_preference, 'explicit saved user preference'
 
     request_language = _dominant_language(current_query)
     if request_language:
@@ -156,14 +136,10 @@ def _build_response_language_prompt(
     *,
     current_query: str | None = None,
     conversation_history: list[dict] | None = None,
-    profile: str | None = None,
-    preference: str | None = None,
 ) -> str:
     language, source = _resolve_response_language(
         current_query=current_query,
         conversation_history=conversation_history,
-        profile=profile,
-        preference=preference,
         environment_context=environment_context,
     )
     return (
@@ -249,8 +225,6 @@ def add_standard_system_sections(
             environment_context,
             current_query=current_query,
             conversation_history=conversation_history,
-            profile=profile,
-            preference=preference,
         ),
         'platform.language', priority=20,
     )
@@ -357,16 +331,25 @@ def add_standard_system_sections(
             )
 
     if use_memory:
+        if any(
+            isinstance(content, str) and content.strip()
+            for content in (soul, profile)
+        ):
+            builder.system(
+                'memory_field_contract',
+                'Memory Field Contract',
+                memory_operation_rules(),
+                'memory.field_contract',
+                priority=37,
+            )
         if isinstance(soul, str) and soul.strip():
             soul_block = (
                 '## Agent Soul\n'
                 'This is the assistant identity and default behavior baseline. '
                 'It does not contain user facts, current-task instructions, tool '
                 'capabilities, or safety rules. System rules and real permissions '
-                'always override Soul. Fields under `interaction` whose names start '
-                'with `default_` are defaults that explicit current-turn requests may '
-                'temporarily override. Current-turn requests must not change the core '
-                'identity unless Soul itself is updated.\n\n'
+                'always override Soul. Current-turn requests must not change the '
+                'stored identity unless Soul itself is updated.\n\n'
                 + soul.strip()
                 + '\n\n<!-- end of Agent Soul -->'
             )
@@ -376,9 +359,7 @@ def add_standard_system_sections(
         if isinstance(profile, str) and profile.strip():
             profile_block = (
                 '## User Profile\n'
-                'Stable structured facts about who the user is now '
-                '(name, aliases, common languages, residence, occupations, '
-                'organizations, industries, and expertise domains). '
+                'Stable structured facts about who the user is now. '
                 'Use them only when relevant to the current request. '
                 'Do not invent missing fields or treat profile as a history log.\n\n'
                 + profile.strip()

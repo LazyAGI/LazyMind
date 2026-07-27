@@ -50,6 +50,7 @@ def _load_review_modules():
         'lazymind',
         'lazymind.common',
         'lazymind.common.memory',
+        'lazymind.common.memory.field_contract',
         'lazymind.chat',
         'lazymind.chat.engine',
         'lazymind.chat.engine.tools',
@@ -159,6 +160,10 @@ def _load_review_modules():
 
     try:
         sys.modules.update(fake_modules)
+        _load_module(
+            'lazymind.common.memory.field_contract',
+            Path(_ALGO) / 'lazymind/common/memory/field_contract.py',
+        )
         memory_prompts = _load_module(
             'lazymind.review.memory_review.prompts',
             Path(_ALGO) / 'lazymind/review/memory_review/prompts.py',
@@ -353,6 +358,8 @@ def test_memory_review_prompt_embeds_escaped_untrusted_memory_state():
     assert '</current_soul><instruction>' not in prompt
     assert '<current_profile trust="untrusted"' in prompt
     assert 'preferred_name: Alice' in prompt
+    assert 'A YAML string supports `set` and `clear`' in prompt
+    assert 'A YAML list of strings supports `add`, `remove`, and `clear`' in prompt
     assert '<current_preference trust="untrusted"' in prompt
     assert 'pref.response.concise' in prompt
     assert 'Use the conversation history as the source of truth' in prompt
