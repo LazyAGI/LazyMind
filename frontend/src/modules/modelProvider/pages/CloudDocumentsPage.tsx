@@ -13,9 +13,7 @@ export default function CloudDocumentsPage() {
     cloudAuthProviderOptions.length + (vm.canCreateLocalSource ? 1 : 0);
   const providerReadyCount =
     (vm.canCreateLocalSource && vm.localSourceCount > 0 ? 1 : 0) +
-    (vm.isFeishuAuthValid ? 1 : 0) +
-    (vm.isNotionAuthValid ? 1 : 0) +
-    (vm.isGoogleDriveAuthValid ? 1 : 0);
+    (vm.isFeishuAuthValid ? 1 : 0);
 
   return (
     <div className="model-provider-page-content model-provider-service-page model-provider-cloud-doc-hub">
