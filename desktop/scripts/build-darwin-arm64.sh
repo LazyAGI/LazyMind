@@ -266,7 +266,8 @@ if [[ -d "${APP_PATH}" ]]; then
     codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
   fi
   if [[ "${SIGNING_MODE}" == "developer-id" ]]; then
-    if ! codesign -dv --verbose=4 "${APP_PATH}" 2>&1 | grep -q "Authority=Developer ID Application:"; then
+    signature_info="$(codesign -dv --verbose=4 "${APP_PATH}" 2>&1)"
+    if [[ "${signature_info}" != *"Authority=Developer ID Application:"* ]]; then
       echo "Expected a Developer ID Application signature: ${APP_PATH}" >&2
       exit 1
     fi

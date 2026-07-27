@@ -124,6 +124,15 @@ class WeChatRuntime:
             self._workers[account_id] = (thread, stop_event)
             thread.start()
 
+    def stop_account(self, account_id: str) -> None:
+        with self._lock:
+            worker = self._workers.get(account_id)
+        if not worker:
+            return
+        thread, stop_event = worker
+        stop_event.set()
+        thread.join(timeout=1.0)
+
     def _run_account(self, account_id: str, stop_event: threading.Event) -> None:
         try:
             startup_failures = 0
@@ -231,6 +240,8 @@ class WeChatRuntime:
                     cursor=cursor,
                     timeout_ms=timeout_ms,
                 )
+                if self._shutdown.is_set() or stop_event.is_set():
+                    return
                 failures = 0
                 suggested_timeout = result.get('longpolling_timeout_ms')
                 if (
