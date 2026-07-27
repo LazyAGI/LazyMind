@@ -1,10 +1,7 @@
 package migrate
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -14,22 +11,12 @@ import (
 )
 
 const (
-	versionModeDirName     = "version_mode"
-	devModeDirName         = "dev_mode"
-	versionMappingFileName = "version_mapping.json"
-	devVersionBase         = uint64(100000000000000)
+	versionModeDirName = "version_mode"
+	devModeDirName     = "dev_mode"
+	devVersionBase     = uint64(100000000000000)
 )
 
 var releaseVersionPattern = regexp.MustCompile(`^v0_([1-9]\d*)$`)
-
-type versionMappingDocument struct {
-	SchemaVersion int                            `json:"schema_version"`
-	Versions      map[string]versionMappingEntry `json:"versions"`
-}
-
-type versionMappingEntry struct {
-	VersionMigrationID *uint64 `json:"version_migration_id"`
-}
 
 type modeMigration struct {
 	Name        string
@@ -66,9 +53,8 @@ func combineDevVersion(modeVersion, devVersion uint64) (uint64, error) {
 func (r *Runner) loadCatalog() (migrationCatalog, error) {
 	versionDir := filepath.Join(r.dir, versionModeDirName)
 	devDir := filepath.Join(r.dir, devModeDirName)
-	mappingPath := filepath.Join(r.dir, versionMappingFileName)
 
-	structured := pathExists(versionDir) || pathExists(devDir) || pathExists(mappingPath)
+	structured := pathExists(versionDir) || pathExists(devDir)
 	if !structured {
 		migrations, err := loadMigrationDir(r.dir, "", 0)
 		if err != nil {
@@ -80,68 +66,10 @@ func (r *Runner) loadCatalog() (migrationCatalog, error) {
 		return newCatalog(migrations, nil, migrations), nil
 	}
 
-	versionMigrations, err := loadMigrationDir(versionDir, "", 0)
-	if err != nil {
-		return migrationCatalog{}, fmt.Errorf("load %s: %w", versionModeDirName, err)
-	}
-	for _, migration := range versionMigrations {
-		if migration.Version >= devVersionBase {
-			return migrationCatalog{}, fmt.Errorf(
-				"version migration %d must be lower than %d",
-				migration.Version,
-				devVersionBase,
-			)
-		}
-	}
-	if err := validateSupersededFiles(versionMigrations); err != nil {
-		return migrationCatalog{}, err
-	}
-
-	mapping, err := loadVersionMapping(mappingPath)
-	if err != nil {
-		return migrationCatalog{}, err
-	}
-
-	versionByID := make(map[uint64]migrationFile, len(versionMigrations))
-	for _, migration := range versionMigrations {
-		versionByID[migration.Version] = migration
-	}
-
 	modeByNumber := make(map[uint64]*modeMigration)
-	mappedVersionIDs := make(map[uint64]string)
-	for release, entry := range mapping.Versions {
-		modeVersion, err := parseReleaseVersion(release)
-		if err != nil {
-			return migrationCatalog{}, err
-		}
-		mode := ensureMode(modeByNumber, release, modeVersion)
-		if entry.VersionMigrationID == nil {
-			continue
-		}
-		versionID := *entry.VersionMigrationID
-		if versionID == 0 {
-			return migrationCatalog{}, fmt.Errorf("%s: %s has zero version_migration_id", versionMappingFileName, release)
-		}
-		if previous, ok := mappedVersionIDs[versionID]; ok {
-			return migrationCatalog{}, fmt.Errorf(
-				"%s: version migration %d is mapped by both %s and %s",
-				versionMappingFileName,
-				versionID,
-				previous,
-				release,
-			)
-		}
-		migration, ok := versionByID[versionID]
-		if !ok || migration.UpPath == "" {
-			return migrationCatalog{}, fmt.Errorf(
-				"%s: %s references missing version migration %d",
-				versionMappingFileName,
-				release,
-				versionID,
-			)
-		}
-		mode.Aggregate = &migration
-		mappedVersionIDs[versionID] = release
+	versionMigrations, err := loadVersionModeDirectories(versionDir, modeByNumber)
+	if err != nil {
+		return migrationCatalog{}, err
 	}
 
 	if pathExists(devDir) {
@@ -196,7 +124,7 @@ func (r *Runner) loadCatalog() (migrationCatalog, error) {
 		}
 		if mode.Aggregate.Version <= previousAggregate {
 			return migrationCatalog{}, fmt.Errorf(
-				"version migration IDs must increase with release versions; %s maps to %d after %d",
+				"aggregate migration IDs must increase with release versions; %s has %d after %d",
 				mode.Name,
 				mode.Aggregate.Version,
 				previousAggregate,
@@ -205,26 +133,18 @@ func (r *Runner) loadCatalog() (migrationCatalog, error) {
 		previousAggregate = mode.Aggregate.Version
 	}
 
-	legacy := make([]migrationFile, 0, len(versionMigrations)-len(mappedVersionIDs))
 	all := make([]migrationFile, 0, len(versionMigrations))
-	for _, migration := range versionMigrations {
-		if _, mapped := mappedVersionIDs[migration.Version]; !mapped {
-			legacy = append(legacy, migration)
-		}
-		all = append(all, migration)
-	}
+	all = append(all, versionMigrations...)
 	for _, mode := range modes {
 		all = append(all, mode.Dev...)
 	}
 
-	sort.Slice(legacy, func(i, j int) bool { return legacy[i].Version < legacy[j].Version })
 	sort.Slice(all, func(i, j int) bool { return all[i].Version < all[j].Version })
 	if err := validateUniqueMigrationVersions(all); err != nil {
 		return migrationCatalog{}, err
 	}
 
 	return migrationCatalog{
-		Legacy:            legacy,
 		Modes:             modes,
 		All:               all,
 		VersionMigrations: versionMigrations,
@@ -258,37 +178,77 @@ func catalogExecutionSteps(catalog migrationCatalog) []catalogStep {
 	return steps
 }
 
-func loadVersionMapping(path string) (versionMappingDocument, error) {
-	if !pathExists(path) {
-		return versionMappingDocument{
-			SchemaVersion: 1,
-			Versions:      map[string]versionMappingEntry{},
-		}, nil
+func loadVersionModeDirectories(
+	versionDir string,
+	modes map[uint64]*modeMigration,
+) ([]migrationFile, error) {
+	if !pathExists(versionDir) {
+		return nil, nil
 	}
-	body, err := os.ReadFile(path)
+	entries, err := os.ReadDir(versionDir)
 	if err != nil {
-		return versionMappingDocument{}, err
+		return nil, fmt.Errorf("load %s: %w", versionModeDirName, err)
 	}
-	var mapping versionMappingDocument
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&mapping); err != nil {
-		return versionMappingDocument{}, fmt.Errorf("parse %s: %w", versionMappingFileName, err)
+
+	versionMigrations := make([]migrationFile, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			if migrationFilePattern.MatchString(entry.Name()) {
+				return nil, fmt.Errorf(
+					"%s must contain v0_N directories; found migration file %s",
+					versionModeDirName,
+					entry.Name(),
+				)
+			}
+			continue
+		}
+
+		release := entry.Name()
+		modeVersion, err := parseReleaseVersion(release)
+		if err != nil {
+			return nil, err
+		}
+		migrations, err := loadMigrationDir(filepath.Join(versionDir, release), "", 0)
+		if err != nil {
+			return nil, fmt.Errorf("load %s/%s: %w", versionModeDirName, release, err)
+		}
+		if len(migrations) != 1 {
+			return nil, fmt.Errorf(
+				"%s/%s must contain exactly one aggregate migration; found %d",
+				versionModeDirName,
+				release,
+				len(migrations),
+			)
+		}
+		migration := migrations[0]
+		if migration.UpPath == "" || migration.DownPath == "" {
+			return nil, fmt.Errorf(
+				"%s/%s aggregate migration %d requires both up and down files",
+				versionModeDirName,
+				release,
+				migration.Version,
+			)
+		}
+		if migration.Version >= devVersionBase {
+			return nil, fmt.Errorf(
+				"version migration %d must be lower than %d",
+				migration.Version,
+				devVersionBase,
+			)
+		}
+
+		mode := ensureMode(modes, release, modeVersion)
+		mode.Aggregate = &migration
+		versionMigrations = append(versionMigrations, migration)
 	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return versionMappingDocument{}, fmt.Errorf("%s contains trailing JSON data", versionMappingFileName)
+
+	sort.Slice(versionMigrations, func(i, j int) bool {
+		return versionMigrations[i].Version < versionMigrations[j].Version
+	})
+	if err := validateSupersededFiles(versionMigrations); err != nil {
+		return nil, err
 	}
-	if mapping.SchemaVersion != 1 {
-		return versionMappingDocument{}, fmt.Errorf(
-			"%s: unsupported schema_version %d",
-			versionMappingFileName,
-			mapping.SchemaVersion,
-		)
-	}
-	if mapping.Versions == nil {
-		mapping.Versions = map[string]versionMappingEntry{}
-	}
-	return mapping, nil
+	return versionMigrations, nil
 }
 
 func loadMigrationDir(dir, release string, modeVersion uint64) ([]migrationFile, error) {

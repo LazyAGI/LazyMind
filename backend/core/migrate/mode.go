@@ -24,7 +24,7 @@ func validateAppliedHistory(catalog migrationCatalog, applied []historyRecord) e
 		}
 		if _, ok := allowedSuperseded[record.Version]; !ok {
 			return fmt.Errorf(
-				"applied migration version %d has no migration file or version mapping; refusing to execute SQL",
+				"applied migration version %d has no migration file or release directory; refusing to execute SQL",
 				record.Version,
 			)
 		}

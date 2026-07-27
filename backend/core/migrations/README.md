@@ -2,10 +2,13 @@
 
 ```text
 migrations/
-├── version_mapping.json
 ├── version_mode/
-│   ├── 20260321131500_init.up.sql
-│   └── 20260723183515_squash_post_init.up.sql
+│   ├── v0_1/
+│   │   ├── 20260321131500_init.up.sql
+│   │   └── 20260321131500_init.down.sql
+│   └── v0_2/
+│       ├── 20260723183515_squash_post_init.up.sql
+│       └── 20260723183515_squash_post_init.down.sql
 └── dev_mode/
     └── v0_2/
         ├── 20260506120000_seed_default_model_catalog.up.sql
@@ -13,32 +16,17 @@ migrations/
         └── ...
 ```
 
-`version_mode` contains stable or squashed migrations. Existing migration IDs and
-filenames stay unchanged. `dev_mode/v0_N` contains the SQL files accumulated while
-developing release `v0_N`. The numeric suffix `N` is the internal mode version.
+`version_mode/v0_N` contains the stable aggregate for release `v0_N` and must
+contain exactly one matching up/down pair. `dev_mode/v0_N` contains the SQL files
+accumulated while developing that release. Matching directory names are the
+mapping, so no separate mapping file is required. The numeric suffix `N` is the
+internal mode version.
 
-`version_mapping.json` is the only mapping file:
-
-```json
-{
-  "schema_version": 1,
-  "versions": {
-    "v0_2": {
-      "version_migration_id": 20260723183515
-    }
-  }
-}
-```
-
-An entry with `version_migration_id` seals the release and points to one file in
-`version_mode`. An entry without it is an open dev release; the entry can also be
-omitted because the `dev_mode/v0_N` directory identifies the open release. Dev
-migration IDs are not copied into this file; the runner reads them from
-`dev_mode/v0_N`.
-
-The mapped aggregate does not need a `Supersedes` directive for its dev files;
-the release mapping performs that canonicalization. `Supersedes` remains
-supported for legacy squash migrations.
+Existing migration IDs and filenames stay unchanged when a file is moved into a
+release directory. The aggregate does not need a `Supersedes` directive for the
+dev files in its matching directory; the directory association performs that
+canonicalization. `Supersedes` remains supported for legacy history
+compatibility.
 
 ## History rules
 
@@ -54,18 +42,18 @@ full_version = N * 100000000000000 + file_timestamp
 
 For example, `dev_mode/v0_2/20260915100000_create_projects.up.sql` is recorded as
 `220260915100000`. This gives every dev migration a single complete ID and avoids
-collisions between releases. A sealed release is represented only by its mapped
-`version_migration_id`.
+collisions between releases. A sealed release is represented only by its
+aggregate migration ID.
 
 For each release, the runner applies these rules:
 
 1. If the aggregate version is already recorded, skip the release. Dev records
    for the same release are an error.
 2. If some dev migrations are recorded, continue only the missing dev files.
-3. Once all current dev files are recorded and an aggregate mapping exists,
+3. Once all current dev files are recorded and an aggregate directory exists,
    atomically replace all full dev history rows with the aggregate history row.
    The aggregate SQL is not executed.
-4. If neither path has started and an aggregate mapping exists, execute the
+4. If neither path has started and an aggregate directory exists, execute the
    aggregate SQL.
 5. Otherwise execute the dev files in timestamp order.
 

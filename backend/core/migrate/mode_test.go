@@ -1,7 +1,6 @@
 package migrate
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,10 +23,18 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if len(catalog.VersionMigrations) != 2 {
 		t.Fatalf("version migration count=%d, want 2", len(catalog.VersionMigrations))
 	}
-	if len(catalog.Modes) != 1 {
-		t.Fatalf("mode count=%d, want 1", len(catalog.Modes))
+	if len(catalog.Modes) != 2 {
+		t.Fatalf("mode count=%d, want 2", len(catalog.Modes))
 	}
-	mode := catalog.Modes[0]
+	v01 := catalog.Modes[0]
+	if v01.Name != "v0_1" || v01.ModeVersion != 1 ||
+		v01.Aggregate == nil || v01.Aggregate.Version != 20260321131500 {
+		t.Fatalf("unexpected v0_1 mode: %#v", v01)
+	}
+	if len(v01.Dev) != 0 {
+		t.Fatalf("v0_1 dev migration count=%d, want 0", len(v01.Dev))
+	}
+	mode := catalog.Modes[1]
 	if mode.Name != "v0_2" || mode.ModeVersion != 2 ||
 		mode.Aggregate == nil || mode.Aggregate.Version != 20260723183515 {
 		t.Fatalf("unexpected v0_2 mode: %#v", mode)
@@ -98,30 +105,39 @@ func TestParseReleaseVersionUsesV0MinorVersion(t *testing.T) {
 	}
 }
 
-func TestVersionMappingRejectsDuplicatedDevMigrationIDs(t *testing.T) {
+func TestVersionModeRejectsMultipleAggregateMigrations(t *testing.T) {
 	dir := newStructuredMigrationDir(t)
-	body := `{
-  "schema_version": 1,
-  "versions": {
-    "v0_1": {
-      "dev_migration_ids": [20260725093000]
-    }
-  }
-}`
-	if err := os.WriteFile(filepath.Join(dir, versionMappingFileName), []byte(body), 0o644); err != nil {
-		t.Fatalf("write version mapping: %v", err)
-	}
+	versionDir := versionModeDir(t, dir, "v0_1")
+	writeMigrationPair(t, versionDir, "20260725093000_first", "SELECT 1;", "SELECT 1;")
+	writeMigrationPair(t, versionDir, "20260801110000_second", "SELECT 1;", "SELECT 1;")
 
 	runner := &Runner{dir: dir}
 	_, err := runner.loadCatalog()
-	if err == nil || !strings.Contains(err.Error(), `unknown field "dev_migration_ids"`) {
-		t.Fatalf("expected unknown dev_migration_ids error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "must contain exactly one aggregate migration") {
+		t.Fatalf("expected multiple aggregate migrations error, got %v", err)
+	}
+}
+
+func TestVersionModeRejectsMigrationOutsideReleaseDirectory(t *testing.T) {
+	dir := newStructuredMigrationDir(t)
+	writeMigrationPair(
+		t,
+		filepath.Join(dir, versionModeDirName),
+		"20260802120000_release",
+		"SELECT 1;",
+		"SELECT 1;",
+	)
+
+	runner := &Runner{dir: dir}
+	_, err := runner.loadCatalog()
+	if err == nil || !strings.Contains(err.Error(), "must contain v0_N directories") {
+		t.Fatalf("expected release directory error, got %v", err)
 	}
 }
 
 func TestRunnerUsesAggregateForUntouchedMode(t *testing.T) {
 	dir := newStructuredMigrationDir(t)
-	writeMigrationPair(t, filepath.Join(dir, versionModeDirName), "20260802120000_release", `
+	writeMigrationPair(t, versionModeDir(t, dir, "v0_1"), "20260802120000_release", `
 CREATE TABLE users (id integer PRIMARY KEY, source text NOT NULL);
 INSERT INTO users (id, source) VALUES (1, 'aggregate');
 `, `
@@ -132,7 +148,6 @@ CREATE TABLE users (id integer PRIMARY KEY, source text NOT NULL);
 `, `
 DROP TABLE users;
 `)
-	writeVersionMapping(t, dir, `"v0_1": {"version_migration_id": 20260802120000}`)
 
 	dbPath := filepath.Join(t.TempDir(), "acl.db")
 	runner := openSquashTestRunner(t, dbPath, dir)
@@ -158,29 +173,19 @@ DROP TABLE users;
 	}
 }
 
-func TestRunnerInterleavesUnmappedVersionMigrationsWithMappedModes(t *testing.T) {
+func TestRunnerExecutesVersionModesInReleaseOrder(t *testing.T) {
 	dir := newStructuredMigrationDir(t)
-	versionDir := filepath.Join(dir, versionModeDirName)
-	writeMigrationPair(t, versionDir, "20260101000000_release_one", `
+	writeMigrationPair(t, versionModeDir(t, dir, "v0_1"), "20260101000000_release_one", `
 CREATE TABLE migration_order (sequence integer PRIMARY KEY);
 INSERT INTO migration_order (sequence) VALUES (1);
 `, `
 DROP TABLE migration_order;
 `)
-	writeMigrationPair(t, versionDir, "20260201000000_legacy_bridge", `
+	writeMigrationPair(t, versionModeDir(t, dir, "v0_2"), "20260301000000_release_two", `
 INSERT INTO migration_order (sequence) VALUES (2);
 `, `
 DELETE FROM migration_order WHERE sequence = 2;
 `)
-	writeMigrationPair(t, versionDir, "20260301000000_release_two", `
-INSERT INTO migration_order (sequence) VALUES (3);
-`, `
-DELETE FROM migration_order WHERE sequence = 3;
-`)
-	writeVersionMapping(t, dir, strings.Join([]string{
-		`"v0_1": {"version_migration_id": 20260101000000}`,
-		`"v0_2": {"version_migration_id": 20260301000000}`,
-	}, ","))
 
 	dbPath := filepath.Join(t.TempDir(), "acl.db")
 	runner := openSquashTestRunner(t, dbPath, dir)
@@ -197,14 +202,14 @@ SELECT GROUP_CONCAT(sequence, ',') FROM (SELECT sequence FROM migration_order OR
 `).Scan(&order); err != nil {
 		t.Fatalf("read migration order: %v", err)
 	}
-	if order != "1,2,3" {
-		t.Fatalf("migration order=%q, want 1,2,3", order)
+	if order != "1,2" {
+		t.Fatalf("migration order=%q, want 1,2", order)
 	}
 }
 
 func TestRunnerContinuesPartialDevModeThenCanonicalizesHistory(t *testing.T) {
 	dir := newStructuredMigrationDir(t)
-	writeMigrationPair(t, filepath.Join(dir, versionModeDirName), "20260802120000_release", `
+	writeMigrationPair(t, versionModeDir(t, dir, "v0_1"), "20260802120000_release", `
 CREATE TABLE users (id integer PRIMARY KEY);
 CREATE INDEX idx_users_id ON users(id);
 `, `
@@ -221,7 +226,6 @@ CREATE INDEX idx_users_id ON users(id);
 `, `
 DROP INDEX idx_users_id;
 `)
-	writeVersionMapping(t, dir, `"v0_1": {"version_migration_id": 20260802120000}`)
 
 	firstFullVersion, err := combineDevVersion(1, testDevV1A)
 	if err != nil {
@@ -267,7 +271,7 @@ SELECT COUNT(1) FROM sqlite_master WHERE type = 'index' AND name = 'idx_users_id
 
 func TestRunnerAllowsDifferentModesToUseDifferentSources(t *testing.T) {
 	dir := newStructuredMigrationDir(t)
-	writeMigrationPair(t, filepath.Join(dir, versionModeDirName), "20260802120000_release", `
+	writeMigrationPair(t, versionModeDir(t, dir, "v0_1"), "20260802120000_release", `
 CREATE TABLE users (id integer PRIMARY KEY);
 `, `
 DROP TABLE users;
@@ -277,10 +281,6 @@ CREATE TABLE projects (id integer PRIMARY KEY);
 `, `
 DROP TABLE projects;
 `)
-	writeVersionMapping(t, dir, strings.Join([]string{
-		`"v0_1": {"version_migration_id": 20260802120000}`,
-		`"v0_2": {}`,
-	}, ","))
 
 	dbPath := filepath.Join(t.TempDir(), "acl.db")
 	runner := openSquashTestRunner(t, dbPath, dir)
@@ -313,13 +313,12 @@ DROP TABLE projects;
 
 func TestRunnerRejectsDeletedPartialDevMigrationBeforeAggregateSQL(t *testing.T) {
 	dir := newStructuredMigrationDir(t)
-	writeMigrationPair(t, filepath.Join(dir, versionModeDirName), "20260802120000_release", `
+	writeMigrationPair(t, versionModeDir(t, dir, "v0_1"), "20260802120000_release", `
 CREATE TABLE aggregate_should_not_run (id integer PRIMARY KEY);
 `, `
 DROP TABLE aggregate_should_not_run;
 `)
 	devModeDir(t, dir, "v0_1")
-	writeVersionMapping(t, dir, `"v0_1": {"version_migration_id": 20260802120000}`)
 
 	deletedFullVersion, err := combineDevVersion(1, testDevV1A)
 	if err != nil {
@@ -336,7 +335,7 @@ DROP TABLE aggregate_should_not_run;
 	runner := openSquashTestRunner(t, dbPath, dir)
 	defer runner.Close()
 	err = runner.Up(0)
-	if err == nil || !strings.Contains(err.Error(), "has no migration file or version mapping") {
+	if err == nil || !strings.Contains(err.Error(), "has no migration file or release directory") {
 		t.Fatalf("expected deleted dev migration error, got %v", err)
 	}
 	assertTableExists(t, db, "aggregate_should_not_run", false)
@@ -346,7 +345,7 @@ DROP TABLE aggregate_should_not_run;
 
 func TestRunnerRejectsMixedAggregateAndDevHistoryForSameMode(t *testing.T) {
 	dir := newStructuredMigrationDir(t)
-	writeMigrationPair(t, filepath.Join(dir, versionModeDirName), "20260802120000_release", `
+	writeMigrationPair(t, versionModeDir(t, dir, "v0_1"), "20260802120000_release", `
 SELECT 1;
 `, `
 SELECT 1;
@@ -356,7 +355,6 @@ SELECT 1;
 `, `
 SELECT 1;
 `)
-	writeVersionMapping(t, dir, `"v0_1": {"version_migration_id": 20260802120000}`)
 
 	devVersion, err := combineDevVersion(1, testDevV1A)
 	if err != nil {
@@ -399,12 +397,13 @@ func devModeDir(t *testing.T, root, release string) string {
 	return dir
 }
 
-func writeVersionMapping(t *testing.T, dir, versions string) {
+func versionModeDir(t *testing.T, root, release string) string {
 	t.Helper()
-	body := fmt.Sprintf("{\n  \"schema_version\": 1,\n  \"versions\": {%s}\n}\n", versions)
-	if err := os.WriteFile(filepath.Join(dir, versionMappingFileName), []byte(body), 0o644); err != nil {
-		t.Fatalf("write version mapping: %v", err)
+	dir := filepath.Join(root, versionModeDirName, release)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir version mode %s: %v", release, err)
 	}
+	return dir
 }
 
 func removeMigrationPair(t *testing.T, dir, base string) {

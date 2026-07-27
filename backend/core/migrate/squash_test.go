@@ -149,7 +149,7 @@ DROP TABLE source_alpha;
 	runner := openSquashTestRunner(t, dbPath, dir)
 	defer runner.Close()
 	err := runner.Up(0)
-	if err == nil || !strings.Contains(err.Error(), "has no migration file or version mapping") {
+	if err == nil || !strings.Contains(err.Error(), "has no migration file or release directory") {
 		t.Fatalf("expected unexpected orphan error, got %v", err)
 	}
 	assertHistoryVersionCount(t, db, testSourceVersionA, 1)

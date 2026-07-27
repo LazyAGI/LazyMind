@@ -165,8 +165,7 @@ func migrationCreateDir(release string) (string, error) {
 	root := migrationsDir()
 	release = strings.TrimSpace(release)
 	structured := pathExists(filepath.Join(root, "version_mode")) ||
-		pathExists(filepath.Join(root, "dev_mode")) ||
-		pathExists(filepath.Join(root, "version_mapping.json"))
+		pathExists(filepath.Join(root, "dev_mode"))
 	if release == "" {
 		if structured {
 			return "", fmt.Errorf("-version v0_N is required for the structured migration layout")
