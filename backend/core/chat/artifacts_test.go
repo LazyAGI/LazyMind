@@ -218,7 +218,11 @@ func TestPersistConversationFileArtifactValidatesSharedWorkspace(t *testing.T) {
 	if err := json.Unmarshal(stored.Value, &storedValue); err != nil {
 		t.Fatalf("decode canonical value: %v", err)
 	}
-	if storedValue["size"] != float64(4) || storedValue["path"] != path {
+	expectedStoredPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("resolve expected stored path: %v", err)
+	}
+	if storedValue["size"] != float64(4) || storedValue["path"] != expectedStoredPath {
 		t.Fatalf("file metadata was not canonicalized: %#v", storedValue)
 	}
 }

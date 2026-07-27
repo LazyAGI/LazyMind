@@ -130,7 +130,10 @@ jobs:
           MIGRATION_TEST_POSTGRES_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
         run: cd backend/core && go test ./migrate -v
 
-      - name: Test
+      - name: Test backend core
+        run: cd backend/core && go test ./... -v
+
+      - name: Test backend core integration module
         run: cd tests/backend/core && go mod tidy && go test ./... -v
 
   test-evo-cli:
