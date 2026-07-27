@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -57,6 +58,101 @@ func TestDatasetCatalogServiceListFiltersStatsAndPaginates(t *testing.T) {
 	}
 	if len(second.Datasets) != 1 || second.Datasets[0].DatasetID != "ds-old" {
 		t.Fatalf("second datasets = %#v, want ds-old", second.Datasets)
+	}
+	if second.HasMore {
+		t.Fatalf("second page HasMore = true, want false")
+	}
+}
+
+func TestDatasetCatalogServiceListScansPastInvisibleFirstBatch(t *testing.T) {
+	db := newDocumentTestDB(t)
+	installDatasetCatalogScanTransport(t)
+	service := mustDatasetCatalogService(t, db.DB)
+
+	base := time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC)
+	for i := 0; i < 510; i++ {
+		id := fmt.Sprintf("ds-hidden-%03d", i)
+		seedDatasetCatalogDataset(t, db, id, "user-hidden", "Hidden", "", nil, base.Add(time.Duration(510-i)*time.Second))
+	}
+	seedDatasetCatalogDataset(t, db, "ds-visible-1", "user-1", "Visible 1", "", nil, base.Add(-time.Minute))
+	seedDatasetCatalogDataset(t, db, "ds-visible-2", "user-1", "Visible 2", "", nil, base.Add(-2*time.Minute))
+
+	got, err := service.ListDatasets(context.Background(), DatasetListRequest{
+		UserID: "user-1",
+		Limit:  100,
+	})
+	if err != nil {
+		t.Fatalf("ListDatasets returned error: %v", err)
+	}
+	if len(got.Datasets) != 2 || got.Datasets[0].DatasetID != "ds-visible-1" || got.Datasets[1].DatasetID != "ds-visible-2" {
+		t.Fatalf("datasets = %#v, want visible datasets after hidden first batch", got.Datasets)
+	}
+	if got.TotalSize != 2 || got.HasMore {
+		t.Fatalf("total/hasMore = %d/%v, want 2/false", got.TotalSize, got.HasMore)
+	}
+}
+
+func TestDatasetCatalogServiceListNextPageNoDuplicatesAndNoFinalToken(t *testing.T) {
+	db := newDocumentTestDB(t)
+	installDatasetCatalogScanTransport(t)
+	service := mustDatasetCatalogService(t, db.DB)
+
+	base := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		seedDatasetCatalogDataset(t, db, fmt.Sprintf("ds-visible-%d", i+1), "user-1", "Visible", "", nil, base.Add(-time.Duration(i)*time.Minute))
+	}
+
+	first, err := service.ListDatasets(context.Background(), DatasetListRequest{UserID: "user-1", Limit: 2})
+	if err != nil {
+		t.Fatalf("first ListDatasets returned error: %v", err)
+	}
+	if len(first.Datasets) != 2 || !first.HasMore || first.NextOffset != 2 {
+		t.Fatalf("first page = len %d hasMore %v offset %d, want 2/true/2", len(first.Datasets), first.HasMore, first.NextOffset)
+	}
+
+	second, err := service.ListDatasets(context.Background(), DatasetListRequest{UserID: "user-1", Offset: first.NextOffset, Limit: 2})
+	if err != nil {
+		t.Fatalf("second ListDatasets returned error: %v", err)
+	}
+	if len(second.Datasets) != 1 || second.Datasets[0].DatasetID != "ds-visible-3" {
+		t.Fatalf("second datasets = %#v, want ds-visible-3", second.Datasets)
+	}
+	if second.HasMore {
+		t.Fatalf("second HasMore = true, want false")
+	}
+	seen := map[string]bool{}
+	for _, ds := range first.Datasets {
+		seen[ds.DatasetID] = true
+	}
+	if seen[second.Datasets[0].DatasetID] {
+		t.Fatalf("second page repeated first page dataset %q", second.Datasets[0].DatasetID)
+	}
+}
+
+func TestDatasetCatalogServiceListPageSizeBoundaries(t *testing.T) {
+	db := newDocumentTestDB(t)
+	installDatasetCatalogScanTransport(t)
+	service := mustDatasetCatalogService(t, db.DB)
+
+	base := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 120; i++ {
+		seedDatasetCatalogDataset(t, db, fmt.Sprintf("ds-boundary-%03d", i), "user-1", "Boundary", "", nil, base.Add(-time.Duration(i)*time.Second))
+	}
+
+	defaulted, err := service.ListDatasets(context.Background(), DatasetListRequest{UserID: "user-1", Limit: 0})
+	if err != nil {
+		t.Fatalf("default ListDatasets returned error: %v", err)
+	}
+	if len(defaulted.Datasets) != 20 || defaulted.TotalSize != 120 || !defaulted.HasMore {
+		t.Fatalf("default page len/total/hasMore = %d/%d/%v, want 20/120/true", len(defaulted.Datasets), defaulted.TotalSize, defaulted.HasMore)
+	}
+
+	maxed, err := service.ListDatasets(context.Background(), DatasetListRequest{UserID: "user-1", Limit: 500})
+	if err != nil {
+		t.Fatalf("max ListDatasets returned error: %v", err)
+	}
+	if len(maxed.Datasets) != 100 || maxed.TotalSize != 120 || !maxed.HasMore || maxed.NextOffset != 100 {
+		t.Fatalf("max page len/total/hasMore/offset = %d/%d/%v/%d, want 100/120/true/100", len(maxed.Datasets), maxed.TotalSize, maxed.HasMore, maxed.NextOffset)
 	}
 }
 

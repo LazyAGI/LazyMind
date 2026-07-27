@@ -2,12 +2,19 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"gorm.io/gorm"
 
+	"lazymind/core/acl"
+	"lazymind/core/common/orm"
 	"lazymind/core/compat/contract"
 	compatknowledge "lazymind/core/compat/knowledge"
 	"lazymind/core/doc"
@@ -20,6 +27,37 @@ type fakeDatasetCatalogService struct {
 	getRes  doc.Dataset
 	listErr error
 	getErr  error
+}
+
+type pagedDatasetCatalogService struct {
+	items []doc.Dataset
+	reqs  []doc.DatasetListRequest
+}
+
+func (s *pagedDatasetCatalogService) ListDatasets(ctx context.Context, req doc.DatasetListRequest) (doc.DatasetListResult, error) {
+	s.reqs = append(s.reqs, req)
+	start := req.Offset
+	if start > len(s.items) {
+		start = len(s.items)
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = len(s.items)
+	}
+	end := start + limit
+	if end > len(s.items) {
+		end = len(s.items)
+	}
+	return doc.DatasetListResult{
+		Datasets:   s.items[start:end],
+		TotalSize:  int64(len(s.items)),
+		NextOffset: end,
+		HasMore:    end < len(s.items),
+	}, nil
+}
+
+func (s *pagedDatasetCatalogService) GetDataset(ctx context.Context, req doc.DatasetGetRequest) (doc.Dataset, error) {
+	return doc.Dataset{}, nil
 }
 
 func (s *fakeDatasetCatalogService) ListDatasets(ctx context.Context, req doc.DatasetListRequest) (doc.DatasetListResult, error) {
@@ -80,6 +118,41 @@ func TestKnowledgeAdapterListPassesUserFiltersAndPaging(t *testing.T) {
 	nextOffset, err := contract.DecodeOffsetPageToken(result.Page.NextPageToken)
 	if err != nil || nextOffset != 42 {
 		t.Fatalf("next token offset=%d err=%v, want 42", nextOffset, err)
+	}
+}
+
+func TestKnowledgeAdapterPaginationUsesNextTokenWithoutDuplicates(t *testing.T) {
+	service := &pagedDatasetCatalogService{
+		items: []doc.Dataset{
+			{DatasetID: "ds-1", DisplayName: "One"},
+			{DatasetID: "ds-2", DisplayName: "Two"},
+			{DatasetID: "ds-3", DisplayName: "Three"},
+		},
+	}
+	adapter := mustKnowledgeAdapter(t, service)
+	first, err := adapter.List(context.Background(), contract.CallContext{UserID: "user-1"}, compatknowledge.ListInput{
+		Page: contract.PageRequest{PageSize: 2},
+	})
+	if err != nil {
+		t.Fatalf("first List returned error: %v", err)
+	}
+	if len(first.Items) != 2 || first.Items[0].ID != "ds-1" || first.Items[1].ID != "ds-2" || first.Page.NextPageToken == "" {
+		t.Fatalf("first page = %#v, want ds-1/ds-2 with next token", first)
+	}
+	second, err := adapter.List(context.Background(), contract.CallContext{UserID: "user-1"}, compatknowledge.ListInput{
+		Page: contract.PageRequest{PageSize: 2, PageToken: first.Page.NextPageToken},
+	})
+	if err != nil {
+		t.Fatalf("second List returned error: %v", err)
+	}
+	if len(second.Items) != 1 || second.Items[0].ID != "ds-3" {
+		t.Fatalf("second page = %#v, want ds-3", second)
+	}
+	if second.Page.NextPageToken != "" {
+		t.Fatalf("second NextPageToken = %q, want empty", second.Page.NextPageToken)
+	}
+	if len(service.reqs) != 2 || service.reqs[1].Offset != 2 {
+		t.Fatalf("service reqs = %#v, want second offset 2", service.reqs)
 	}
 }
 
@@ -147,6 +220,35 @@ func TestKnowledgeAdapterInvalidPageToken(t *testing.T) {
 	}
 }
 
+func TestKnowledgeAdapterListUsesRealServiceUserIsolation(t *testing.T) {
+	db := newKnowledgeAdapterTestDB(t)
+	installKnowledgeAdapterScanTransport(t)
+	seedKnowledgeAdapterDataset(t, db, "ds-user-a", "user-a", "Dataset A", time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC))
+	seedKnowledgeAdapterDataset(t, db, "ds-user-b", "user-b", "Dataset B", time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC))
+	service, err := doc.NewDatasetCatalogService(doc.DatasetCatalogServiceDeps{DB: db.DB})
+	if err != nil {
+		t.Fatalf("NewDatasetCatalogService: %v", err)
+	}
+	adapter := mustKnowledgeAdapter(t, service)
+
+	result, err := adapter.List(context.Background(), contract.CallContext{UserID: "user-a"}, compatknowledge.ListInput{
+		Page: contract.PageRequest{PageSize: 20},
+	})
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, item := range result.Items {
+		ids[item.ID] = true
+	}
+	if !ids["ds-user-a"] {
+		t.Fatalf("List items = %#v, want ds-user-a", result.Items)
+	}
+	if ids["ds-user-b"] {
+		t.Fatalf("List items = %#v, must not include ds-user-b", result.Items)
+	}
+}
+
 func TestNewKnowledgeCatalogAdapterRejectsNilDependencies(t *testing.T) {
 	if _, err := NewKnowledgeCatalogAdapter(nil); err == nil {
 		t.Fatalf("NewKnowledgeCatalogAdapter nil service error = nil, want error")
@@ -163,4 +265,76 @@ func mustKnowledgeAdapter(t *testing.T, service DatasetCatalogService) *Knowledg
 		t.Fatalf("NewKnowledgeCatalogAdapter: %v", err)
 	}
 	return adapter
+}
+
+type knowledgeAdapterRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f knowledgeAdapterRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func newKnowledgeAdapterTestDB(t *testing.T) *orm.DB {
+	t.Helper()
+	t.Setenv("LAZYMIND_READONLY_SCHEMA", "main")
+	dsn := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"), time.Now().UnixNano())
+	db, err := orm.Connect(orm.DriverSQLite, dsn)
+	if err != nil {
+		t.Fatalf("connect sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.Dataset{}, &orm.Document{}, &orm.DefaultDataset{}, &orm.ACLModel{}, &orm.UserGroupModel{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	acl.InitStore(db)
+	return db
+}
+
+func installKnowledgeAdapterScanTransport(t *testing.T) {
+	t.Helper()
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = knowledgeAdapterRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/api/scan/internal/source-access/by-dataset:batch":
+			return knowledgeAdapterJSONResponse(http.StatusOK, `{"items":[]}`), nil
+		case "/api/scan/internal/sources/by-datasets":
+			return knowledgeAdapterJSONResponse(http.StatusOK, `{"source_map":{}}`), nil
+		default:
+			return knowledgeAdapterJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
+}
+
+func knowledgeAdapterJSONResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func seedKnowledgeAdapterDataset(t *testing.T, db *orm.DB, id, userID, name string, updatedAt time.Time) {
+	t.Helper()
+	ext, err := json.Marshal(map[string]any{"tags": []string{}})
+	if err != nil {
+		t.Fatalf("marshal ext: %v", err)
+	}
+	if err := db.Create(&orm.Dataset{
+		ID:           id,
+		KbID:         "kb-" + id,
+		DisplayName:  name,
+		Desc:         "",
+		DatasetState: 0,
+		ShareType:    0,
+		Type:         1,
+		Ext:          ext,
+		BaseModel: orm.BaseModel{
+			CreateUserID:   userID,
+			CreateUserName: userID,
+			CreatedAt:      updatedAt,
+			UpdatedAt:      updatedAt,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create dataset %s: %v", id, err)
+	}
 }

@@ -25,6 +25,9 @@ func TestKnowledgeRuntimeWithRealPostgreSQLCatalog(t *testing.T) {
 	}
 
 	driver, dsn := dbConfigFromCoreEnv(t)
+	if driver != orm.DriverPostgres {
+		t.Fatalf("Knowledge PostgreSQL integration requires ACL_DB_DRIVER=%q, got %q", orm.DriverPostgres, driver)
+	}
 	db, err := orm.Connect(driver, dsn)
 	if err != nil {
 		t.Fatalf("connect core db: %v", err)
@@ -61,6 +64,7 @@ func TestKnowledgeRuntimeWithRealPostgreSQLCatalog(t *testing.T) {
 	if len(list.Items) == 0 {
 		t.Fatalf("Knowledge.List returned no datasets for user %q", userID)
 	}
+	t.Logf("Knowledge integration DB driver=%s list_count=%d user_id=%s", driver, len(list.Items), userID)
 
 	first := list.Items[0]
 	if strings.TrimSpace(first.ID) == "" {

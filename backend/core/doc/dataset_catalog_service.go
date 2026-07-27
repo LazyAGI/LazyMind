@@ -76,7 +76,7 @@ type DatasetListRequest struct {
 
 type DatasetListResult struct {
 	Datasets   []Dataset
-	TotalSize  int64
+	TotalSize  int64 // Total user-visible datasets after ACL, scan source, keyword, tags, and source filters.
 	NextOffset int
 	HasMore    bool
 }
@@ -126,7 +126,7 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 	candidates := make([]orm.Dataset, 0, pageSize)
 	pageSourceMap := make(map[string]bool, pageSize)
 
-	for hasMoreRows && len(page) < pageSize {
+	for hasMoreRows {
 		var rows []orm.Dataset
 		query := base.
 			Select(`id, kb_id, create_user_id, create_user_name, display_name, "desc", cover_image, created_at, updated_at, ext, type, share_type, dataset_state`).
