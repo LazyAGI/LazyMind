@@ -2912,6 +2912,7 @@ const zhCN = {
     memoryCurrentRequiredField: "该字段不能为空",
     memoryCurrentSaveSuccess: "字段已保存并立即生效",
     memoryCurrentSaveField: "保存字段",
+    memoryCurrentClearField: "清空",
     memoryCurrentEditField: "编辑{{field}}",
     memoryCurrentViewDetail: "查看{{type}}详情",
     memoryCurrentViewAllFields: "点击查看完整结构",

@@ -67,8 +67,10 @@ func (m *Module) GetSoul(ctx context.Context, userID string) (CurrentMemorySoulD
 		return CurrentMemorySoulData{}, err
 	}
 	return CurrentMemorySoulData{
-		Document:  document,
-		UpdatedAt: formatUpdatedAt(entry.UpdatedAt),
+		Document:        document,
+		TemplateVersion: soulTemplate.SchemaVersion,
+		Presentation:    soulTemplate.Presentation,
+		UpdatedAt:       formatUpdatedAt(entry.UpdatedAt),
 	}, nil
 }
 
@@ -77,6 +79,9 @@ func (m *Module) PatchSoul(
 	userID string,
 	request CurrentMemoryOperationsRequest,
 ) (CurrentMemorySoulData, error) {
+	if _, err := m.EnsureLatestEntry(ctx, userID, SoulPath); err != nil {
+		return CurrentMemorySoulData{}, err
+	}
 	document, updatedAt, err := applyOperationsToDocument(
 		ctx,
 		m,
@@ -91,8 +96,10 @@ func (m *Module) PatchSoul(
 		return CurrentMemorySoulData{}, err
 	}
 	return CurrentMemorySoulData{
-		Document:  document,
-		UpdatedAt: formatUpdatedAt(updatedAt),
+		Document:        document,
+		TemplateVersion: soulTemplate.SchemaVersion,
+		Presentation:    soulTemplate.Presentation,
+		UpdatedAt:       formatUpdatedAt(updatedAt),
 	}, nil
 }
 
@@ -111,8 +118,10 @@ func (m *Module) GetProfile(
 		return CurrentMemoryProfileData{}, err
 	}
 	return CurrentMemoryProfileData{
-		Document:  document,
-		UpdatedAt: formatUpdatedAt(entry.UpdatedAt),
+		Document:        document,
+		TemplateVersion: profileTemplate.SchemaVersion,
+		Presentation:    profileTemplate.Presentation,
+		UpdatedAt:       formatUpdatedAt(entry.UpdatedAt),
 	}, nil
 }
 
@@ -121,6 +130,9 @@ func (m *Module) PatchProfile(
 	userID string,
 	request CurrentMemoryOperationsRequest,
 ) (CurrentMemoryProfileData, error) {
+	if _, err := m.EnsureLatestEntry(ctx, userID, ProfilePath); err != nil {
+		return CurrentMemoryProfileData{}, err
+	}
 	document, updatedAt, err := applyOperationsToDocument(
 		ctx,
 		m,
@@ -135,9 +147,28 @@ func (m *Module) PatchProfile(
 		return CurrentMemoryProfileData{}, err
 	}
 	return CurrentMemoryProfileData{
-		Document:  document,
-		UpdatedAt: formatUpdatedAt(updatedAt),
+		Document:        document,
+		TemplateVersion: profileTemplate.SchemaVersion,
+		Presentation:    profileTemplate.Presentation,
+		UpdatedAt:       formatUpdatedAt(updatedAt),
 	}, nil
+}
+
+func (m *Module) EnsureLatestEntry(
+	ctx context.Context,
+	userID string,
+	entryPath string,
+) (orm.MemoryCurrentEntry, error) {
+	switch entryPath {
+	case SoulPath:
+		_, entry, err := readNormalizedDocument(ctx, m, userID, SoulPath, NormalizeSoul)
+		return entry, err
+	case ProfilePath:
+		_, entry, err := readNormalizedDocument(ctx, m, userID, ProfilePath, NormalizeProfile)
+		return entry, err
+	default:
+		return m.readFile(ctx, userID, entryPath)
+	}
 }
 
 func (m *Module) ListPreferences(
@@ -508,115 +539,88 @@ func applySoulOperations(
 	document SoulDocument,
 	operations []CurrentMemoryOperation,
 ) (SoulDocument, error) {
-	for _, operation := range operations {
-		if strings.TrimSpace(operation.Op) != "set" {
-			return SoulDocument{}, fmt.Errorf(
-				"soul operation %q only supports op 'set'",
-				operation.Path,
-			)
-		}
-		value, err := requiredOperationValue(operation)
-		if err != nil {
-			return SoulDocument{}, err
-		}
-		switch strings.TrimSpace(operation.Path) {
-		case "identity.name":
-			document.Identity.Name = value
-		case "identity.role":
-			document.Identity.Role = value
-		case "identity.description":
-			document.Identity.Description = value
-		case "mission.primary_goal":
-			document.Mission.PrimaryGoal = value
-		case "mission.success_definition":
-			document.Mission.SuccessDefinition = value
-		case "interaction.default_relationship_mode":
-			document.Interaction.DefaultRelationshipMode = value
-		case "interaction.default_tone":
-			document.Interaction.DefaultTone = value
-		case "interaction.default_initiative_level":
-			document.Interaction.DefaultInitiativeLevel = value
-		case "interaction.default_challenge_level":
-			document.Interaction.DefaultChallengeLevel = value
-		case "interaction.default_decision_mode":
-			document.Interaction.DefaultDecisionMode = value
-		case "epistemic.uncertainty_style":
-			document.Epistemic.UncertaintyStyle = value
-		case "epistemic.verification_mode":
-			document.Epistemic.VerificationMode = value
-		default:
-			return SoulDocument{}, fmt.Errorf(
-				"unsupported soul operation path %q",
-				operation.Path,
-			)
-		}
-	}
-	return document, nil
+	return applyMemoryOperations(document, operations, "soul")
 }
 
 func applyProfileOperations(
 	document ProfileDocument,
 	operations []CurrentMemoryOperation,
 ) (ProfileDocument, error) {
+	return applyMemoryOperations(document, operations, "profile")
+}
+
+func applyMemoryOperations(
+	document MemoryDocument,
+	operations []CurrentMemoryOperation,
+	label string,
+) (MemoryDocument, error) {
+	next := cloneDocument(document)
 	for _, operation := range operations {
 		path := strings.TrimSpace(operation.Path)
-		switch path {
-		case "identity.preferred_name":
-			value, err := applyNullableStringOperation(operation)
-			if err != nil {
-				return ProfileDocument{}, err
+		if path == "" || path == "schema_version" {
+			return nil, fmt.Errorf("unsupported %s operation path %q", label, path)
+		}
+		contractValue, exists := nestedValue(document, path)
+		if !exists {
+			return nil, fmt.Errorf("unsupported %s operation path %q", label, path)
+		}
+		op := strings.TrimSpace(operation.Op)
+		var updated any
+		switch contractValue.(type) {
+		case string:
+			switch op {
+			case "set":
+				value, err := requiredOperationValue(operation)
+				if err != nil {
+					return nil, err
+				}
+				updated = value
+			case "clear":
+				if operation.Value != nil {
+					return nil, fmt.Errorf("clear operation on %q must not include value", path)
+				}
+				updated = ""
+			default:
+				return nil, fmt.Errorf("%s string path %q only supports set or clear", label, path)
 			}
-			document.Identity.PreferredName = value
-		case "locale.residence":
-			value, err := applyNullableStringOperation(operation)
-			if err != nil {
-				return ProfileDocument{}, err
+		case nil:
+			switch op {
+			case "set":
+				value, err := requiredOperationValue(operation)
+				if err != nil {
+					return nil, err
+				}
+				updated = value
+			case "clear":
+				if operation.Value != nil {
+					return nil, fmt.Errorf("clear operation on %q must not include value", path)
+				}
+				updated = nil
+			default:
+				return nil, fmt.Errorf("%s null path %q only supports set or clear", label, path)
 			}
-			document.Locale.Residence = value
-		case "identity.aliases":
-			value, err := applyStringListOperation(document.Identity.Aliases, operation)
-			if err != nil {
-				return ProfileDocument{}, err
+		case []any:
+			current, ok := nestedValue(next, path)
+			if !ok {
+				return nil, fmt.Errorf("unsupported %s operation path %q", label, path)
 			}
-			document.Identity.Aliases = value
-		case "locale.languages":
-			value, err := applyStringListOperation(document.Locale.Languages, operation)
-			if err != nil {
-				return ProfileDocument{}, err
+			values, ok := current.([]any)
+			if !ok {
+				return nil, fmt.Errorf("%s list path %q changed type", label, path)
 			}
-			document.Locale.Languages = value
-		case "professional.occupations":
-			value, err := applyStringListOperation(document.Professional.Occupations, operation)
+			value, err := applyStringListOperation(values, operation, label)
 			if err != nil {
-				return ProfileDocument{}, err
+				return nil, err
 			}
-			document.Professional.Occupations = value
-		case "professional.organizations":
-			value, err := applyStringListOperation(document.Professional.Organizations, operation)
-			if err != nil {
-				return ProfileDocument{}, err
-			}
-			document.Professional.Organizations = value
-		case "professional.industries":
-			value, err := applyStringListOperation(document.Professional.Industries, operation)
-			if err != nil {
-				return ProfileDocument{}, err
-			}
-			document.Professional.Industries = value
-		case "professional.expertise_domains":
-			value, err := applyStringListOperation(document.Professional.ExpertiseDomains, operation)
-			if err != nil {
-				return ProfileDocument{}, err
-			}
-			document.Professional.ExpertiseDomains = value
+			updated = value
 		default:
-			return ProfileDocument{}, fmt.Errorf(
-				"unsupported profile operation path %q",
-				path,
-			)
+			return nil, fmt.Errorf("unsupported %s operation path %q", label, path)
+		}
+		if !setNestedValue(next, path, updated) {
+			return nil, fmt.Errorf("unsupported %s operation path %q", label, path)
 		}
 	}
-	return document, nil
+	return next, nil
 }
 
 func requiredOperationValue(operation CurrentMemoryOperation) (string, error) {
@@ -638,35 +642,12 @@ func requiredOperationValue(operation CurrentMemoryOperation) (string, error) {
 	return value, nil
 }
 
-func applyNullableStringOperation(operation CurrentMemoryOperation) (*string, error) {
-	switch strings.TrimSpace(operation.Op) {
-	case "set":
-		value, err := requiredOperationValue(operation)
-		if err != nil {
-			return nil, err
-		}
-		return &value, nil
-	case "clear":
-		if operation.Value != nil {
-			return nil, fmt.Errorf(
-				"clear operation on %q must not include value",
-				operation.Path,
-			)
-		}
-		return nil, nil
-	default:
-		return nil, fmt.Errorf(
-			"profile scalar path %q only supports set or clear",
-			operation.Path,
-		)
-	}
-}
-
 func applyStringListOperation(
-	current []string,
+	current []any,
 	operation CurrentMemoryOperation,
-) ([]string, error) {
-	values := append([]string{}, current...)
+	label string,
+) ([]any, error) {
+	values := append([]any{}, current...)
 	switch strings.TrimSpace(operation.Op) {
 	case "add":
 		value, err := requiredOperationValue(operation)
@@ -684,7 +665,7 @@ func applyStringListOperation(
 		if err != nil {
 			return nil, err
 		}
-		result := make([]string, 0, len(values))
+		result := make([]any, 0, len(values))
 		for _, existing := range values {
 			if existing != value {
 				result = append(result, existing)
@@ -698,10 +679,11 @@ func applyStringListOperation(
 				operation.Path,
 			)
 		}
-		return []string{}, nil
+		return []any{}, nil
 	default:
 		return nil, fmt.Errorf(
-			"profile list path %q only supports add, remove, or clear",
+			"%s list path %q only supports add, remove, or clear",
+			label,
 			operation.Path,
 		)
 	}

@@ -11,13 +11,17 @@ type CurrentMemoryOperationsRequest struct {
 }
 
 type CurrentMemorySoulData struct {
-	Document  SoulDocument `json:"document"`
-	UpdatedAt int64        `json:"updated_at"`
+	Document        SoulDocument       `json:"document"`
+	TemplateVersion int                `json:"template_version"`
+	Presentation    MemoryPresentation `json:"presentation"`
+	UpdatedAt       int64              `json:"updated_at"`
 }
 
 type CurrentMemoryProfileData struct {
-	Document  ProfileDocument `json:"document"`
-	UpdatedAt int64           `json:"updated_at"`
+	Document        ProfileDocument    `json:"document"`
+	TemplateVersion int                `json:"template_version"`
+	Presentation    MemoryPresentation `json:"presentation"`
+	UpdatedAt       int64              `json:"updated_at"`
 }
 
 type CurrentMemoryPreferenceItem struct {

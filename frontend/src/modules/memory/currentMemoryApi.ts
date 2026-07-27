@@ -5,20 +5,24 @@ import {
   type CurrentMemoryOperationsRequest,
   type CurrentMemoryPreferenceItem,
   type CurrentMemoryPreferenceListData,
-  type CurrentMemoryProfileDocument,
+  type CurrentMemoryPresentation,
   type CurrentMemoryReference,
-  type CurrentMemorySoulDocument,
 } from "@/api/generated/core-client";
 import { axiosInstance, BASE_URL } from "@/components/request";
 
-export type SoulDocument = CurrentMemorySoulDocument;
+export type MemoryValue = string | null | string[] | MemoryDocument;
+export type MemoryDocument = Record<string, MemoryValue>;
+export type SoulDocument = MemoryDocument;
 export type MemoryOperation = CurrentMemoryOperation;
-export type SoulPatch = CurrentMemoryOperationsRequest;
-export type ProfileDocument = CurrentMemoryProfileDocument;
-export type ProfilePatch = CurrentMemoryOperationsRequest;
+export type MemoryPatch = CurrentMemoryOperationsRequest;
+export type SoulPatch = MemoryPatch;
+export type ProfileDocument = MemoryDocument;
+export type ProfilePatch = MemoryPatch;
 
 export interface CurrentMemorySnapshot<TDocument> {
   document: TDocument;
+  templateVersion: number;
+  presentation: CurrentMemoryPresentation;
   updatedAt: number;
 }
 
@@ -120,7 +124,9 @@ export async function getSoulMemory(): Promise<
 > {
   const { data } = (await currentMemoryApi.apiCoreMemorySoulGet()).data;
   return {
-    document: data.document,
+    document: data.document as SoulDocument,
+    templateVersion: data.template_version,
+    presentation: data.presentation,
     updatedAt: data.updated_at,
   };
 }
@@ -134,7 +140,9 @@ export async function patchSoulMemory(
     })
   ).data;
   return {
-    document: data.document,
+    document: data.document as SoulDocument,
+    templateVersion: data.template_version,
+    presentation: data.presentation,
     updatedAt: data.updated_at,
   };
 }
@@ -144,7 +152,9 @@ export async function getProfileMemory(): Promise<
 > {
   const { data } = (await currentMemoryApi.apiCoreMemoryProfileGet()).data;
   return {
-    document: data.document,
+    document: data.document as ProfileDocument,
+    templateVersion: data.template_version,
+    presentation: data.presentation,
     updatedAt: data.updated_at,
   };
 }
@@ -158,7 +168,9 @@ export async function patchProfileMemory(
     })
   ).data;
   return {
-    document: data.document,
+    document: data.document as ProfileDocument,
+    templateVersion: data.template_version,
+    presentation: data.presentation,
     updatedAt: data.updated_at,
   };
 }

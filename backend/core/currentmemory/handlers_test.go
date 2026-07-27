@@ -49,7 +49,7 @@ func TestSoulPublicHandlersAreUserScopedAndPatchFields(t *testing.T) {
 		t.Fatalf("decode get response: %v", err)
 	}
 	if initial.Code != 0 ||
-		initial.Data.Document.Identity.Name != "LazyMind" ||
+		memoryString(t, initial.Data.Document, "identity.name") != "LazyMind" ||
 		initial.Data.UpdatedAt == 0 {
 		t.Fatalf("unexpected get response: %#v", initial)
 	}
@@ -81,13 +81,12 @@ func TestSoulPublicHandlersAreUserScopedAndPatchFields(t *testing.T) {
 	if err := json.Unmarshal(patchRecorder.Body.Bytes(), &patched); err != nil {
 		t.Fatalf("decode patch response: %v", err)
 	}
-	if patched.Data.Document.Identity.Name != "小懒" ||
-		patched.Data.Document.Mission.PrimaryGoal == "" {
+	if memoryString(t, patched.Data.Document, "identity.name") != "小懒" ||
+		memoryString(t, patched.Data.Document, "mission.primary_goal") == "" {
 		t.Fatalf("patch did not preserve full Soul document: %#v", patched.Data.Document)
 	}
 	for _, body := range []string{
 		`{"operations":[]}`,
-		`{"operations":[{"op":"clear","path":"identity.name"}]}`,
 		`{"operations":[{"op":"set","path":"identity.name"}]}`,
 		`{"operations":[{"op":"set","path":"identity.name","value":""}]}`,
 		`{"operations":[{"op":"set","path":"identity.unknown","value":"value"}]}`,
@@ -157,8 +156,8 @@ func TestProfileOperationsSupportScalarAndItemEditing(t *testing.T) {
 	if err := json.Unmarshal(firstRecorder.Body.Bytes(), &firstResult); err != nil {
 		t.Fatal(err)
 	}
-	if len(firstResult.Data.Document.Identity.Aliases) != 1 {
-		t.Fatalf("duplicate add must be idempotent: %#v", firstResult.Data.Document.Identity)
+	if len(memoryList(t, firstResult.Data.Document, "identity.aliases")) != 1 {
+		t.Fatalf("duplicate add must be idempotent: %#v", firstResult.Data.Document)
 	}
 
 	clearPatch := httptest.NewRequest(
@@ -183,13 +182,12 @@ func TestProfileOperationsSupportScalarAndItemEditing(t *testing.T) {
 	if err := json.Unmarshal(clearRecorder.Body.Bytes(), &cleared); err != nil {
 		t.Fatalf("decode clear response: %v", err)
 	}
-	if cleared.Data.Document.Identity.PreferredName != nil ||
-		len(cleared.Data.Document.Identity.Aliases) != 0 {
-		t.Fatalf("profile clear semantics failed: %#v", cleared.Data.Document.Identity)
+	if memoryString(t, cleared.Data.Document, "identity.preferred_name") != "" ||
+		len(memoryList(t, cleared.Data.Document, "identity.aliases")) != 0 {
+		t.Fatalf("profile clear semantics failed: %#v", cleared.Data.Document)
 	}
-	if cleared.Data.Document.Locale.Residence == nil ||
-		*cleared.Data.Document.Locale.Residence != "上海" {
-		t.Fatalf("untouched residence changed: %#v", cleared.Data.Document.Locale)
+	if memoryString(t, cleared.Data.Document, "locale.residence") != "上海" {
+		t.Fatalf("untouched residence changed: %#v", cleared.Data.Document)
 	}
 
 	for _, body := range []string{
@@ -220,7 +218,7 @@ func TestProfileOperationsSupportScalarAndItemEditing(t *testing.T) {
 	}
 }
 
-func TestOldUserReadMigratesAndPersistsSoulAndProfile(t *testing.T) {
+func TestOldUserReadReconcilesAndPersistsSoulAndProfile(t *testing.T) {
 	db := newCurrentMemoryTestDB(t)
 	module := NewModule(db.DB)
 	repository := NewRepository(db.DB)
@@ -255,10 +253,10 @@ func TestOldUserReadMigratesAndPersistsSoulAndProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if soul.Document.Interaction.DefaultRelationshipMode != "协作者" ||
-		profile.Document.Locale.Residence == nil ||
-		*profile.Document.Locale.Residence != "上海" {
-		t.Fatalf("migrated documents lost values: soul=%#v profile=%#v", soul, profile)
+	if memoryString(t, soul.Document, "identity.name") != "Legacy" ||
+		memoryValue(t, profile.Document, "locale.residence") != nil ||
+		memoryString(t, profile.Document, "identity.preferred_name") != "Alice" {
+		t.Fatalf("reconciled documents lost same-path values: soul=%#v profile=%#v", soul, profile)
 	}
 
 	storedSoul, err := repository.GetEntry(t.Context(), "legacy-user", SoulPath)
@@ -272,14 +270,14 @@ func TestOldUserReadMigratesAndPersistsSoulAndProfile(t *testing.T) {
 	if !bytes.Contains(storedSoul.Content, []byte("schema_version: 2")) ||
 		!bytes.Contains(storedProfile.Content, []byte("schema_version: 2")) {
 		t.Fatalf(
-			"migration was not persisted: soul=%s profile=%s",
+			"reconciliation was not persisted: soul=%s profile=%s",
 			storedSoul.Content,
 			storedProfile.Content,
 		)
 	}
 }
 
-func TestOldUserProfileEditMigratesAndAppliesOperationsInOneWrite(t *testing.T) {
+func TestOldUserProfileEditReconcilesAndAppliesOperationsInOneWrite(t *testing.T) {
 	db := newCurrentMemoryTestDB(t)
 	module := NewModule(db.DB)
 	repository := NewRepository(db.DB)
@@ -310,10 +308,9 @@ func TestOldUserProfileEditMigratesAndAppliesOperationsInOneWrite(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Document.Locale.Residence == nil ||
-		*result.Document.Locale.Residence != "上海" ||
-		len(result.Document.Professional.Organizations) != 2 {
-		t.Fatalf("migration plus operation result = %#v", result.Document)
+	if memoryValue(t, result.Document, "locale.residence") != nil ||
+		len(memoryList(t, result.Document, "professional.organizations")) != 1 {
+		t.Fatalf("reconciliation plus operation result = %#v", result.Document)
 	}
 	entry, err := repository.GetEntry(t.Context(), "legacy-editor", ProfilePath)
 	if err != nil {
@@ -322,7 +319,6 @@ func TestOldUserProfileEditMigratesAndAppliesOperationsInOneWrite(t *testing.T) 
 	if !containsAll(
 		string(entry.Content),
 		"schema_version: 2",
-		"- LazyMind",
 		"- 新组织",
 	) {
 		t.Fatalf("combined migrated write =\n%s", entry.Content)
@@ -774,7 +770,14 @@ func TestSoulPatchRetriesContentCASAndStopsAfterThreeConflicts(t *testing.T) {
 			hookErr = err
 			return
 		}
-		document.Mission.PrimaryGoal = "Preserve a concurrent RemoteFS update"
+		if !setNestedValue(
+			document,
+			"mission.primary_goal",
+			"Preserve a concurrent RemoteFS update",
+		) {
+			hookErr = errors.New("mission.primary_goal not found")
+			return
+		}
 		content, err := RenderSoul(document)
 		if err != nil {
 			hookErr = err
@@ -808,8 +811,8 @@ func TestSoulPatchRetriesContentCASAndStopsAfterThreeConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if merged.Document.Identity.Name != "CAS merged" ||
-		merged.Document.Mission.PrimaryGoal != "Preserve a concurrent RemoteFS update" {
+	if memoryString(t, merged.Document, "identity.name") != "CAS merged" ||
+		memoryString(t, merged.Document, "mission.primary_goal") != "Preserve a concurrent RemoteFS update" {
 		t.Fatalf("CAS retry lost a concurrent field: %#v", merged.Document)
 	}
 
@@ -831,7 +834,14 @@ func TestSoulPatchRetriesContentCASAndStopsAfterThreeConflicts(t *testing.T) {
 			hookErr = err
 			return
 		}
-		document.Epistemic.VerificationMode = fmt.Sprintf("concurrent-%d", hookCalls)
+		if !setNestedValue(
+			document,
+			"epistemic.verification_mode",
+			fmt.Sprintf("concurrent-%d", hookCalls),
+		) {
+			hookErr = errors.New("epistemic.verification_mode not found")
+			return
+		}
 		content, err := RenderSoul(document)
 		if err != nil {
 			hookErr = err

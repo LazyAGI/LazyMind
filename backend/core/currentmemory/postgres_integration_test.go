@@ -60,7 +60,7 @@ func TestCurrentMemoryPostgresContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initialize and read Profile: %v", err)
 	}
-	if profile.Document.Identity.Aliases == nil {
+	if memoryList(t, profile.Document, "identity.aliases") == nil {
 		t.Fatal("default Profile aliases must be an array")
 	}
 	profile, err = module.PatchProfile(
@@ -74,9 +74,9 @@ func TestCurrentMemoryPostgresContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("patch Profile null and empty array: %v", err)
 	}
-	if profile.Document.Identity.PreferredName != nil ||
-		len(profile.Document.Identity.Aliases) != 0 {
-		t.Fatalf("Profile tri-state result = %#v", profile.Document.Identity)
+	if memoryString(t, profile.Document, "identity.preferred_name") != "" ||
+		len(memoryList(t, profile.Document, "identity.aliases")) != 0 {
+		t.Fatalf("Profile tri-state result = %#v", profile.Document)
 	}
 
 	remoteProfile := strings.Replace(
@@ -98,9 +98,8 @@ func TestCurrentMemoryPostgresContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("public Module read after repository write: %v", err)
 	}
-	if profile.Document.Locale.Residence == nil ||
-		*profile.Document.Locale.Residence != "Europe/London" {
-		t.Fatalf("Module did not observe repository write: %#v", profile.Document.Locale)
+	if memoryString(t, profile.Document, "locale.residence") != "Europe/London" {
+		t.Fatalf("Module did not observe repository write: %#v", profile.Document)
 	}
 	soulName := "PostgreSQL Soul"
 	if _, err := module.PatchSoul(
@@ -121,7 +120,7 @@ func TestCurrentMemoryPostgresContract(t *testing.T) {
 		t.Fatalf("repository read after public Soul patch: %v", err)
 	}
 	soul, err := ParseSoul(soulEntry.Content)
-	if err != nil || soul.Identity.Name != "PostgreSQL Soul" {
+	if err != nil || memoryString(t, soul, "identity.name") != "PostgreSQL Soul" {
 		t.Fatalf("repository did not observe public Soul patch: %#v err=%v", soul, err)
 	}
 

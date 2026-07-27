@@ -16,40 +16,48 @@ func manualSchemas() map[string]any {
 			prop("code", intSchema()),
 			prop("message", strSchema()),
 		),
-		"CurrentMemorySoulIdentity": objReq(
-			[]string{"name", "role", "description"},
-			prop("name", strSchema()),
-			prop("role", strSchema()),
-			prop("description", strSchema()),
+		"CurrentMemoryDocument": map[string]any{
+			"type": "object",
+			"additionalProperties": map[string]any{
+				"oneOf": []any{
+					map[string]any{
+						"type":     "string",
+						"nullable": true,
+					},
+					array(strSchema()),
+					refSchema("CurrentMemoryDocument"),
+				},
+			},
+		},
+		"CurrentMemoryLocalizedText": map[string]any{
+			"type":                 "object",
+			"additionalProperties": strSchema(),
+		},
+		"CurrentMemoryPresentationField": objReq(
+			[]string{"path", "labels", "summary_role"},
+			prop("path", strSchema()),
+			prop("labels", refSchema("CurrentMemoryLocalizedText")),
+			prop("summary_role", enumStringSchema("title", "subtitle", "description", "tag", "none")),
 		),
-		"CurrentMemorySoulMission": objReq(
-			[]string{"primary_goal", "success_definition"},
-			prop("primary_goal", strSchema()),
-			prop("success_definition", strSchema()),
+		"CurrentMemoryPresentationSection": objReq(
+			[]string{"path", "labels", "fields"},
+			prop("path", strSchema()),
+			prop("labels", refSchema("CurrentMemoryLocalizedText")),
+			prop("fields", array(refSchema("CurrentMemoryPresentationField"))),
 		),
-		"CurrentMemorySoulInteraction": objReq(
-			[]string{"default_relationship_mode", "default_tone", "default_initiative_level", "default_challenge_level", "default_decision_mode"},
-			prop("default_relationship_mode", strSchema()),
-			prop("default_tone", strSchema()),
-			prop("default_initiative_level", strSchema()),
-			prop("default_challenge_level", strSchema()),
-			prop("default_decision_mode", strSchema()),
-		),
-		"CurrentMemorySoulEpistemic": objReq(
-			[]string{"uncertainty_style", "verification_mode"},
-			prop("uncertainty_style", strSchema()),
-			prop("verification_mode", strSchema()),
-		),
-		"CurrentMemorySoulDocument": objReq(
-			[]string{"identity", "mission", "interaction", "epistemic"},
-			prop("identity", refSchema("CurrentMemorySoulIdentity")),
-			prop("mission", refSchema("CurrentMemorySoulMission")),
-			prop("interaction", refSchema("CurrentMemorySoulInteraction")),
-			prop("epistemic", refSchema("CurrentMemorySoulEpistemic")),
+		"CurrentMemoryPresentation": objReq(
+			[]string{"fallbacks", "sections"},
+			prop("fallbacks", map[string]any{
+				"type":                 "object",
+				"additionalProperties": refSchema("CurrentMemoryLocalizedText"),
+			}),
+			prop("sections", array(refSchema("CurrentMemoryPresentationSection"))),
 		),
 		"CurrentMemorySoulData": objReq(
-			[]string{"document", "updated_at"},
-			prop("document", refSchema("CurrentMemorySoulDocument")),
+			[]string{"document", "template_version", "presentation", "updated_at"},
+			prop("document", refSchema("CurrentMemoryDocument")),
+			prop("template_version", intSchema()),
+			prop("presentation", refSchema("CurrentMemoryPresentation")),
 			prop("updated_at", int64Schema()),
 		),
 		"CurrentMemorySoulResponse": objReq(
@@ -68,32 +76,11 @@ func manualSchemas() map[string]any {
 			[]string{"operations"},
 			prop("operations", array(refSchema("CurrentMemoryOperation"))),
 		),
-		"CurrentMemoryProfileIdentity": objReq(
-			[]string{"preferred_name", "aliases"},
-			prop("preferred_name", nullableSchema(strSchema())),
-			prop("aliases", array(strSchema())),
-		),
-		"CurrentMemoryProfileLocale": objReq(
-			[]string{"languages", "residence"},
-			prop("languages", array(strSchema())),
-			prop("residence", nullableSchema(strSchema())),
-		),
-		"CurrentMemoryProfileProfessional": objReq(
-			[]string{"occupations", "organizations", "industries", "expertise_domains"},
-			prop("occupations", array(strSchema())),
-			prop("organizations", array(strSchema())),
-			prop("industries", array(strSchema())),
-			prop("expertise_domains", array(strSchema())),
-		),
-		"CurrentMemoryProfileDocument": objReq(
-			[]string{"identity", "locale", "professional"},
-			prop("identity", refSchema("CurrentMemoryProfileIdentity")),
-			prop("locale", refSchema("CurrentMemoryProfileLocale")),
-			prop("professional", refSchema("CurrentMemoryProfileProfessional")),
-		),
 		"CurrentMemoryProfileData": objReq(
-			[]string{"document", "updated_at"},
-			prop("document", refSchema("CurrentMemoryProfileDocument")),
+			[]string{"document", "template_version", "presentation", "updated_at"},
+			prop("document", refSchema("CurrentMemoryDocument")),
+			prop("template_version", intSchema()),
+			prop("presentation", refSchema("CurrentMemoryPresentation")),
 			prop("updated_at", int64Schema()),
 		),
 		"CurrentMemoryProfileResponse": objReq(

@@ -29,7 +29,7 @@ const (
 	memoryEntryDir  = currentmemory.EntryDir
 )
 
-const (
+var (
 	defaultSoulYAML       = currentmemory.DefaultSoulYAML
 	defaultProfileYAML    = currentmemory.DefaultProfileYAML
 	defaultPreferenceYAML = currentmemory.DefaultPreferenceYAML
@@ -45,6 +45,7 @@ var (
 type memoryCurrentService struct {
 	db                      *gorm.DB
 	repository              *currentmemory.Repository
+	currentMemory           *currentmemory.Module
 	clock                   func() time.Time
 	preferenceIndexMaxItems int
 }
@@ -66,6 +67,7 @@ func newMemoryCurrentServiceWithPreferenceIndexMaxItems(
 	return &memoryCurrentService{
 		db:                      db,
 		repository:              currentmemory.NewRepository(db),
+		currentMemory:           currentmemory.NewModuleWithPreferenceIndexMaxItems(db, maxItems),
 		clock:                   time.Now,
 		preferenceIndexMaxItems: maxItems,
 	}
@@ -184,6 +186,20 @@ func (s *memoryCurrentService) exists(ctx context.Context, userID, rawPath strin
 }
 
 func (s *memoryCurrentService) read(ctx context.Context, userID, rawPath string) (orm.MemoryCurrentEntry, error) {
+	entryPath, err := normalizeMemoryCurrentPath(rawPath)
+	if err != nil {
+		return orm.MemoryCurrentEntry{}, err
+	}
+	if entryPath == memorySoulPath || entryPath == memoryProfilePath {
+		entry, ensureErr := s.currentMemory.EnsureLatestEntry(ctx, userID, entryPath)
+		if errors.Is(ensureErr, currentmemory.ErrNotFound) {
+			return orm.MemoryCurrentEntry{}, errMemoryNotFound
+		}
+		if ensureErr != nil {
+			return orm.MemoryCurrentEntry{}, ensureErr
+		}
+		return entry, nil
+	}
 	entry, err := s.info(ctx, userID, rawPath)
 	if err != nil {
 		return orm.MemoryCurrentEntry{}, err

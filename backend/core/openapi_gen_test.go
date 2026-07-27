@@ -261,6 +261,16 @@ func TestOpenAPICurrentMemoryContractAndPrivateRouteIsolation(t *testing.T) {
 	}
 
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	documentSchema := schemas["CurrentMemoryDocument"].(map[string]any)
+	documentValue := documentSchema["additionalProperties"].(map[string]any)
+	documentValueOptions := documentValue["oneOf"].([]any)
+	nullableString := documentValueOptions[0].(map[string]any)
+	if nullableString["type"] != "string" || nullableString["nullable"] != true {
+		t.Fatalf(
+			"CurrentMemoryDocument null must be declared by a nullable string branch: %#v",
+			documentValueOptions,
+		)
+	}
 	for name := range schemas {
 		if strings.HasPrefix(strings.ToLower(name), "remotefs") {
 			t.Fatalf("private RemoteFS schema leaked into public OpenAPI: %s", name)
@@ -274,6 +284,11 @@ func TestOpenAPICurrentMemoryContractAndPrivateRouteIsolation(t *testing.T) {
 	if soulUpdatedAt["type"] != "integer" || soulUpdatedAt["format"] != "int64" {
 		t.Fatalf("Soul updated_at must be epoch milliseconds: %#v", soulUpdatedAt)
 	}
+	for _, field := range []string{"document", "template_version", "presentation"} {
+		if _, exists := soulData[field]; !exists {
+			t.Fatalf("Soul response missing %s", field)
+		}
+	}
 	profileData := schemaPropertiesForTest(t, schemas, "CurrentMemoryProfileData")
 	if _, exists := profileData["etag"]; exists {
 		t.Fatal("Profile response must not expose etag")
@@ -281,6 +296,26 @@ func TestOpenAPICurrentMemoryContractAndPrivateRouteIsolation(t *testing.T) {
 	profileUpdatedAt := profileData["updated_at"].(map[string]any)
 	if profileUpdatedAt["type"] != "integer" || profileUpdatedAt["format"] != "int64" {
 		t.Fatalf("Profile updated_at must be epoch milliseconds: %#v", profileUpdatedAt)
+	}
+	for _, field := range []string{"document", "template_version", "presentation"} {
+		if _, exists := profileData[field]; !exists {
+			t.Fatalf("Profile response missing %s", field)
+		}
+	}
+	for _, removed := range []string{
+		"CurrentMemorySoulIdentity",
+		"CurrentMemorySoulMission",
+		"CurrentMemorySoulInteraction",
+		"CurrentMemorySoulEpistemic",
+		"CurrentMemorySoulDocument",
+		"CurrentMemoryProfileIdentity",
+		"CurrentMemoryProfileLocale",
+		"CurrentMemoryProfileProfessional",
+		"CurrentMemoryProfileDocument",
+	} {
+		if _, exists := schemas[removed]; exists {
+			t.Fatalf("fixed business schema %s must not remain in OpenAPI", removed)
+		}
 	}
 	avatarData := schemaPropertiesForTest(t, schemas, "CurrentMemoryAvatarData")
 	if _, exists := avatarData["updated_at"]; !exists {

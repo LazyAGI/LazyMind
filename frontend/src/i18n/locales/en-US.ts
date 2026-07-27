@@ -3018,6 +3018,7 @@ const enUS = {
     memoryCurrentRequiredField: "This field cannot be empty",
     memoryCurrentSaveSuccess: "Field saved and now in effect",
     memoryCurrentSaveField: "Save field",
+    memoryCurrentClearField: "Clear",
     memoryCurrentEditField: "Edit {{field}}",
     memoryCurrentViewDetail: "View {{type}} details",
     memoryCurrentViewAllFields: "View complete structure",

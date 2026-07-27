@@ -15,11 +15,14 @@ export type IdentityFieldValue = string | null | string[];
 
 export interface IdentityField<TPatch> {
   path: string;
+  sectionPath: string;
+  sectionLabel: string;
   label: string;
   value: IdentityFieldValue;
-  valueType: "required-string" | "nullable-string" | "string-list";
+  valueType: "string" | "string-list";
   buildPatch: (value: IdentityFieldValue) => TPatch;
   buildRemovePatch?: (value: string) => TPatch;
+  buildClearPatch: () => TPatch;
 }
 
 interface UseIdentityFieldEditorOptions<TDocument, TPatch> {
@@ -35,11 +38,8 @@ const normalizeDraftValue = <TPatch,>(
   field: IdentityField<TPatch>,
   value: IdentityFieldValue,
 ): IdentityFieldValue => {
-  if (field.valueType === "required-string") {
+  if (field.valueType === "string") {
     return String(value || "").trim();
-  }
-  if (field.valueType === "nullable-string") {
-    return String(value || "").trim() || null;
   }
   return String(value || "").trim();
 };
@@ -128,8 +128,7 @@ export const useIdentityFieldEditor = <TDocument, TPatch>({
       draftValueRef.current,
     );
     if (
-      (editingField.valueType === "required-string" ||
-        editingField.valueType === "string-list") &&
+      editingField.valueType === "string-list" &&
       !String(nextValue).trim()
     ) {
       setSaveError(t("admin.memoryCurrentRequiredField"));

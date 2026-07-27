@@ -101,6 +101,23 @@ function patchBasePath(outputDir) {
   }
 }
 
+function patchNullableRecursiveMemoryValue(outputDir) {
+  const apiTsPath = path.resolve(outputDir, "api.ts");
+  if (!fs.existsSync(apiTsPath)) return;
+
+  const original = fs.readFileSync(apiTsPath, "utf-8");
+  const patched = original.replace(
+    /export type CurrentMemoryDocumentValue = (?!null \| )/,
+    "export type CurrentMemoryDocumentValue = null | ",
+  );
+  if (patched !== original) {
+    fs.writeFileSync(apiTsPath, patched, "utf-8");
+    console.log(
+      `🔧 Preserved nullable CurrentMemoryDocumentValue in ${path.relative(cwdPath, apiTsPath)}`,
+    );
+  }
+}
+
 function removeUnusedGeneratedFiles(outputDir) {
   const unusedFiles = ["git_push.sh"];
 
@@ -160,6 +177,7 @@ for (const api of selectedApis) {
       { stdio: "inherit", cwd: cwdPath },
     );
     patchBasePath(api.output);
+    patchNullableRecursiveMemoryValue(api.output);
     removeUnusedGeneratedFiles(api.output);
     normalizeGeneratedTypeScript(api.output);
     cache[api.name] = currentHash;

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"lazymind/core/common/orm"
 	currentmemoryapi "lazymind/core/currentmemory"
@@ -130,7 +131,54 @@ func TestMemoryMountLazyInitializesDefaultsPerUser(t *testing.T) {
 	}
 }
 
-func TestMemoryMountDoesNotRecreateDeletedFixedFiles(t *testing.T) {
+func TestMemoryMountReadReconcilesLegacyProfileAndPersistsLatestTemplate(t *testing.T) {
+	db := newRemoteFSTestDB(t)
+	handler := NewHandler(db.DB)
+	repository := currentmemoryapi.NewRepository(db.DB)
+	if err := repository.EnsureInitialized(t.Context(), "legacy-user"); err != nil {
+		t.Fatal(err)
+	}
+	legacyProfile := []byte(`identity:
+  preferred_name: Alice
+  obsolete: remove-me
+`)
+	if err := repository.UpdateFileContent(
+		t.Context(),
+		"legacy-user",
+		currentmemoryapi.ProfilePath,
+		legacyProfile,
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/remote-fs/content?path="+memoryProfilePath+"&user_id=legacy-user",
+		nil,
+	)
+	recorder := httptest.NewRecorder()
+	handler.Content(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("legacy profile read status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "schema_version: 2") ||
+		!strings.Contains(recorder.Body.String(), "preferred_name: Alice") ||
+		!strings.Contains(recorder.Body.String(), "professional:") ||
+		strings.Contains(recorder.Body.String(), "obsolete:") {
+		t.Fatalf("unexpected reconciled profile:\n%s", recorder.Body.String())
+	}
+
+	stored, err := repository.GetEntry(t.Context(), "legacy-user", currentmemoryapi.ProfilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(stored.Content) != recorder.Body.String() {
+		t.Fatalf("RemoteFS returned content that was not persisted:\n%s", stored.Content)
+	}
+}
+
+func TestMemoryMountRecreatesDeletedFixedFiles(t *testing.T) {
 	db := newRemoteFSTestDB(t)
 	handler := NewHandler(db.DB)
 
@@ -171,9 +219,10 @@ func TestMemoryMountDoesNotRecreateDeletedFixedFiles(t *testing.T) {
 	)
 	readRec := httptest.NewRecorder()
 	handler.Content(readRec, readReq)
-	if readRec.Code != http.StatusNotFound {
+	if readRec.Code != http.StatusOK ||
+		!strings.Contains(readRec.Body.String(), "schema_version: 2") {
 		t.Fatalf(
-			"deleted fixed file was recreated: status=%d body=%s",
+			"deleted fixed file was not recreated from the latest template: status=%d body=%s",
 			readRec.Code,
 			readRec.Body.String(),
 		)
@@ -773,8 +822,14 @@ func TestMemoryMountAndPublicCurrentMemoryShareAuthoritativeState(t *testing.T) 
 	if err != nil {
 		t.Fatalf("parse RemoteFS Soul response: %v", err)
 	}
-	if soul.Identity.Name != "Shared state" {
-		t.Fatalf("RemoteFS did not observe public patch: %#v", soul.Identity)
+	identity, ok := soul["identity"].(currentmemoryapi.MemoryDocument)
+	if !ok {
+		rawIdentity, rawOK := soul["identity"].(map[string]any)
+		identity = currentmemoryapi.MemoryDocument(rawIdentity)
+		ok = rawOK
+	}
+	if !ok || identity["name"] != "Shared state" {
+		t.Fatalf("RemoteFS did not observe public patch: %#v", soul)
 	}
 }
 

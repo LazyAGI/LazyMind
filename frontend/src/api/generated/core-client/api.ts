@@ -771,6 +771,11 @@ export interface CurrentMemoryAvatarResponse {
 export interface CurrentMemoryConflictData {
     'current_etag'?: string;
 }
+/**
+ * @type CurrentMemoryDocumentValue
+ */
+export type CurrentMemoryDocumentValue = null | Array<string> | string | { [key: string]: CurrentMemoryDocumentValue; };
+
 export interface CurrentMemoryErrorResponse {
     'code': number;
     'data'?: CurrentMemoryConflictData;
@@ -839,28 +844,36 @@ export interface CurrentMemoryPreferenceResidentIndexUsage {
     'over_limit': boolean;
     'used_items': number;
 }
+export interface CurrentMemoryPresentation {
+    'fallbacks': { [key: string]: { [key: string]: string; }; };
+    'sections': Array<CurrentMemoryPresentationSection>;
+}
+export interface CurrentMemoryPresentationField {
+    'labels': { [key: string]: string; };
+    'path': string;
+    'summary_role': CurrentMemoryPresentationFieldSummaryRoleEnum;
+}
+
+export const CurrentMemoryPresentationFieldSummaryRoleEnum = {
+    Title: 'title',
+    Subtitle: 'subtitle',
+    Description: 'description',
+    Tag: 'tag',
+    None: 'none'
+} as const;
+
+export type CurrentMemoryPresentationFieldSummaryRoleEnum = typeof CurrentMemoryPresentationFieldSummaryRoleEnum[keyof typeof CurrentMemoryPresentationFieldSummaryRoleEnum];
+
+export interface CurrentMemoryPresentationSection {
+    'fields': Array<CurrentMemoryPresentationField>;
+    'labels': { [key: string]: string; };
+    'path': string;
+}
 export interface CurrentMemoryProfileData {
-    'document': CurrentMemoryProfileDocument;
+    'document': { [key: string]: CurrentMemoryDocumentValue; };
+    'presentation': CurrentMemoryPresentation;
+    'template_version': number;
     'updated_at': number;
-}
-export interface CurrentMemoryProfileDocument {
-    'identity': CurrentMemoryProfileIdentity;
-    'locale': CurrentMemoryProfileLocale;
-    'professional': CurrentMemoryProfileProfessional;
-}
-export interface CurrentMemoryProfileIdentity {
-    'aliases': Array<string>;
-    'preferred_name': string | null;
-}
-export interface CurrentMemoryProfileLocale {
-    'languages': Array<string>;
-    'residence': string | null;
-}
-export interface CurrentMemoryProfileProfessional {
-    'expertise_domains': Array<string>;
-    'industries': Array<string>;
-    'occupations': Array<string>;
-    'organizations': Array<string>;
 }
 export interface CurrentMemoryProfileResponse {
     'code': number;
@@ -890,34 +903,10 @@ export const CurrentMemoryReferenceSourceKindEnum = {
 export type CurrentMemoryReferenceSourceKindEnum = typeof CurrentMemoryReferenceSourceKindEnum[keyof typeof CurrentMemoryReferenceSourceKindEnum];
 
 export interface CurrentMemorySoulData {
-    'document': CurrentMemorySoulDocument;
+    'document': { [key: string]: CurrentMemoryDocumentValue; };
+    'presentation': CurrentMemoryPresentation;
+    'template_version': number;
     'updated_at': number;
-}
-export interface CurrentMemorySoulDocument {
-    'epistemic': CurrentMemorySoulEpistemic;
-    'identity': CurrentMemorySoulIdentity;
-    'interaction': CurrentMemorySoulInteraction;
-    'mission': CurrentMemorySoulMission;
-}
-export interface CurrentMemorySoulEpistemic {
-    'uncertainty_style': string;
-    'verification_mode': string;
-}
-export interface CurrentMemorySoulIdentity {
-    'description': string;
-    'name': string;
-    'role': string;
-}
-export interface CurrentMemorySoulInteraction {
-    'default_challenge_level': string;
-    'default_decision_mode': string;
-    'default_initiative_level': string;
-    'default_relationship_mode': string;
-    'default_tone': string;
-}
-export interface CurrentMemorySoulMission {
-    'primary_goal': string;
-    'success_definition': string;
 }
 export interface CurrentMemorySoulResponse {
     'code': number;

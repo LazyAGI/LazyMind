@@ -28,10 +28,8 @@ import {
   patchProfileMemory,
   patchSoulMemory,
   type CurrentMemorySnapshot,
-  type ProfileDocument,
-  type ProfilePatch,
-  type SoulDocument,
-  type SoulPatch,
+  type MemoryDocument,
+  type MemoryPatch,
 } from "../../currentMemoryApi";
 import {
   isCurrentMemoryResourceNotFound,
@@ -64,37 +62,155 @@ const fieldDisplayValue = (
 const stringFieldValue = (value: IdentityFieldValue) =>
   typeof value === "string" ? value : "";
 
-const buildSoulSetPatch = (
+const buildScalarPatch = (
   path: string,
   value: IdentityFieldValue,
-): SoulPatch => ({
-  operations: [{ op: "set", path, value: stringFieldValue(value) }],
-});
-
-const buildProfileScalarPatch = (
-  path: string,
-  value: IdentityFieldValue,
-): ProfilePatch => {
+): MemoryPatch => {
   const next = stringFieldValue(value).trim();
   return next
     ? { operations: [{ op: "set", path, value: next }] }
     : { operations: [{ op: "clear", path }] };
 };
 
-const buildProfileListPatch = (
+const buildListPatch = (
   op: "add" | "remove",
   path: string,
   value: IdentityFieldValue,
-): ProfilePatch => ({
+): MemoryPatch => ({
   operations: [{ op, path, value: stringFieldValue(value).trim() }],
 });
 
-interface IdentityDocumentCardProps<TDocument, TPatch> {
+const buildClearPatch = (path: string): MemoryPatch => ({
+  operations: [{ op: "clear", path }],
+});
+
+type Presentation = CurrentMemorySnapshot<MemoryDocument>["presentation"];
+
+const localizedText = (
+  labels: Record<string, string> | undefined,
+  locale: string,
+  fallback: string,
+) => {
+  const normalizedLocale = locale.replace("_", "-");
+  return (
+    labels?.[normalizedLocale] ||
+    labels?.["en-US"] ||
+    fallback
+  );
+};
+
+const documentValueAt = (
+  document: MemoryDocument,
+  path: string,
+): IdentityFieldValue | undefined => {
+  let current: unknown = document;
+  for (const part of path.split(".")) {
+    if (
+      !current ||
+      Array.isArray(current) ||
+      typeof current !== "object" ||
+      !(part in current)
+    ) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[part];
+  }
+  if (
+    current === null ||
+    typeof current === "string" ||
+    (Array.isArray(current) &&
+      current.every((item) => typeof item === "string"))
+  ) {
+    return current as IdentityFieldValue;
+  }
+  return undefined;
+};
+
+const valuesForSummaryRole = (
+  document: MemoryDocument,
+  presentation: Presentation,
+  role: "title" | "subtitle" | "description" | "tag",
+) =>
+  presentation.sections.flatMap((section) =>
+    section.fields
+      .filter((field) => field.summary_role === role)
+      .flatMap((field) => {
+        const value = documentValueAt(document, field.path);
+        return Array.isArray(value)
+          ? value.filter(Boolean)
+          : value?.trim()
+            ? [value.trim()]
+            : [];
+      }),
+  );
+
+const fieldsFromPresentation = (
+  snapshot: CurrentMemorySnapshot<MemoryDocument>,
+  locale: string,
+): IdentityField<MemoryPatch>[] =>
+  snapshot.presentation.sections.flatMap((section) =>
+    section.fields.flatMap((field) => {
+      const value = documentValueAt(snapshot.document, field.path);
+      if (value === undefined) {
+        return [];
+      }
+      const valueType = Array.isArray(value) ? "string-list" : "string";
+      return [{
+        path: field.path,
+        sectionPath: section.path,
+        sectionLabel: localizedText(
+          section.labels,
+          locale,
+          section.path.split(".").at(-1) || section.path,
+        ),
+        label: localizedText(
+          field.labels,
+          locale,
+          field.path.split(".").at(-1) || field.path,
+        ),
+        value,
+        valueType,
+        buildPatch: (nextValue: IdentityFieldValue) =>
+          valueType === "string-list"
+            ? buildListPatch("add", field.path, nextValue)
+            : buildScalarPatch(field.path, nextValue),
+        ...(valueType === "string-list"
+          ? {
+              buildRemovePatch: (item: string) =>
+                buildListPatch("remove", field.path, item),
+            }
+          : {}),
+        buildClearPatch: () => buildClearPatch(field.path),
+      }];
+    }),
+  );
+
+const summaryFromPresentation = (
+  snapshot: CurrentMemorySnapshot<MemoryDocument>,
+  locale: string,
+): IdentityCardSummary => {
+  const { document, presentation } = snapshot;
+  const fallback = (role: "title" | "subtitle" | "description") =>
+    localizedText(presentation.fallbacks[role], locale, "");
+  const title = valuesForSummaryRole(document, presentation, "title");
+  const subtitle = valuesForSummaryRole(document, presentation, "subtitle");
+  const description = valuesForSummaryRole(
+    document,
+    presentation,
+    "description",
+  );
+  return {
+    name: title[0] || fallback("title"),
+    role: subtitle.join(" · ") || fallback("subtitle"),
+    mission: description.join(" · ") || fallback("description"),
+    tags: valuesForSummaryRole(document, presentation, "tag"),
+  };
+};
+
+interface IdentityDocumentCardProps {
   kind: MemoryKind;
-  load: () => Promise<CurrentMemorySnapshot<TDocument>>;
-  save: (patch: TPatch) => Promise<CurrentMemorySnapshot<TDocument>>;
-  fieldsFor: (document: TDocument) => IdentityField<TPatch>[];
-  summaryFor: (document: TDocument) => IdentityCardSummary;
+  load: () => Promise<CurrentMemorySnapshot<MemoryDocument>>;
+  save: (patch: MemoryPatch) => Promise<CurrentMemorySnapshot<MemoryDocument>>;
 }
 
 function IdentityAvatarEditor({
@@ -214,16 +330,14 @@ function IdentityAvatarEditor({
   );
 }
 
-function IdentityDocumentCard<TDocument, TPatch>({
+function IdentityDocumentCard({
   kind,
   load,
   save,
-  fieldsFor,
-  summaryFor,
-}: IdentityDocumentCardProps<TDocument, TPatch>) {
+}: IdentityDocumentCardProps) {
   const { i18n, t } = useTranslation();
   const [snapshot, setSnapshot] =
-    useState<CurrentMemorySnapshot<TDocument> | null>(null);
+    useState<CurrentMemorySnapshot<MemoryDocument> | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [detailOpen, setDetailOpen] = useState(false);
@@ -269,8 +383,14 @@ function IdentityDocumentCard<TDocument, TPatch>({
   }, [refresh]);
 
   const fields = useMemo(
-    () => (snapshot ? fieldsFor(snapshot.document) : []),
-    [fieldsFor, snapshot],
+    () =>
+      snapshot
+        ? fieldsFromPresentation(
+            snapshot,
+            i18n.resolvedLanguage || i18n.language,
+          )
+        : [],
+    [i18n.language, i18n.resolvedLanguage, snapshot],
   );
   const displayUpdatedAt = useMemo(() => {
     if (!snapshot?.updatedAt) {
@@ -341,7 +461,10 @@ function IdentityDocumentCard<TDocument, TPatch>({
     );
   }
 
-  const { mission, name, role, tags } = summaryFor(snapshot.document);
+  const { mission, name, role, tags } = summaryFromPresentation(
+    snapshot,
+    i18n.resolvedLanguage || i18n.language,
+  );
   const configuredCount = fields.filter((field) =>
     Array.isArray(field.value)
       ? field.value.length > 0
@@ -379,8 +502,8 @@ function IdentityDocumentCard<TDocument, TPatch>({
           </span>
           <span className="memory-identity-mission">{mission}</span>
           <span className="memory-identity-tags">
-            {tags.filter(Boolean).slice(0, 4).map((tag) => (
-              <Tag bordered={false} key={tag}>
+            {tags.filter(Boolean).slice(0, 4).map((tag, index) => (
+              <Tag bordered={false} key={`${tag}-${index}`}>
                 {tag}
               </Tag>
             ))}
@@ -454,13 +577,19 @@ function IdentityDocumentCard<TDocument, TPatch>({
           ) : null}
 
           <div className="memory-identity-fields">
-            {fields.map((field) => {
+            {fields.map((field, fieldIndex) => {
               const editing = editingField?.path === field.path;
               return (
-                <div
-                  className={`memory-identity-field ${editing ? "is-editing" : ""}`}
-                  key={field.path}
-                >
+                <div key={field.path}>
+                  {fieldIndex === 0 ||
+                  fields[fieldIndex - 1].sectionPath !== field.sectionPath ? (
+                    <h5 className="memory-identity-section-title">
+                      {field.sectionLabel}
+                    </h5>
+                  ) : null}
+                  <div
+                    className={`memory-identity-field ${editing ? "is-editing" : ""}`}
+                  >
                   <div className="memory-identity-field-row">
                     <span className="memory-identity-field-key">
                       {field.label}
@@ -511,6 +640,20 @@ function IdentityDocumentCard<TDocument, TPatch>({
                       type="text"
                       onClick={() => beginEdit(field)}
                     />
+                    {(Array.isArray(field.value)
+                      ? field.value.length > 0
+                      : Boolean(field.value?.trim())) ? (
+                      <Button
+                        disabled={saving}
+                        size="small"
+                        type="text"
+                        onClick={() =>
+                          void savePatch(field.buildClearPatch(), false)
+                        }
+                      >
+                        {t("admin.memoryCurrentClearField")}
+                      </Button>
+                    ) : null}
                   </div>
 
                   {editing ? (
@@ -574,6 +717,7 @@ function IdentityDocumentCard<TDocument, TPatch>({
                       </div>
                     </div>
                   ) : null}
+                  </div>
                 </div>
               );
             })}
@@ -587,182 +731,6 @@ function IdentityDocumentCard<TDocument, TPatch>({
 export default function CurrentMemoryIdentitySection() {
   const { t } = useTranslation();
 
-  const soulFieldsFor = useCallback(
-    (document: SoulDocument): IdentityField<SoulPatch>[] => [
-      {
-        path: "identity.name",
-        label: t("admin.memorySoulIdentityName"),
-        value: document.identity.name,
-        valueType: "required-string",
-        buildPatch: (value) => buildSoulSetPatch("identity.name", value),
-      },
-      {
-        path: "identity.role",
-        label: t("admin.memorySoulIdentityRole"),
-        value: document.identity.role,
-        valueType: "required-string",
-        buildPatch: (value) => buildSoulSetPatch("identity.role", value),
-      },
-      {
-        path: "identity.description",
-        label: t("admin.memorySoulIdentityDescription"),
-        value: document.identity.description,
-        valueType: "required-string",
-        buildPatch: (value) =>
-          buildSoulSetPatch("identity.description", value),
-      },
-      {
-        path: "mission.primary_goal",
-        label: t("admin.memorySoulPrimaryGoal"),
-        value: document.mission.primary_goal,
-        valueType: "required-string",
-        buildPatch: (value) =>
-          buildSoulSetPatch("mission.primary_goal", value),
-      },
-      {
-        path: "mission.success_definition",
-        label: t("admin.memorySoulSuccessDefinition"),
-        value: document.mission.success_definition,
-        valueType: "required-string",
-        buildPatch: (value) =>
-          buildSoulSetPatch("mission.success_definition", value),
-      },
-      ...(
-        [
-          "default_relationship_mode",
-          "default_tone",
-          "default_initiative_level",
-          "default_challenge_level",
-          "default_decision_mode",
-        ] as const
-      ).map((key) => ({
-        path: `interaction.${key}`,
-        label: t(`admin.memorySoulInteraction_${key}`),
-        value: document.interaction[key],
-        valueType: "required-string" as const,
-        buildPatch: (value: IdentityFieldValue) =>
-          buildSoulSetPatch(`interaction.${key}`, value),
-      })),
-      ...(["uncertainty_style", "verification_mode"] as const).map((key) => ({
-        path: `epistemic.${key}`,
-        label: t(`admin.memorySoulEpistemic_${key}`),
-        value: document.epistemic[key],
-        valueType: "required-string" as const,
-        buildPatch: (value: IdentityFieldValue) =>
-          buildSoulSetPatch(`epistemic.${key}`, value),
-      })),
-    ],
-    [t],
-  );
-
-  const profileFieldsFor = useCallback(
-    (document: ProfileDocument): IdentityField<ProfilePatch>[] => [
-      ...(
-        [
-          ["preferred_name", "nullable-string"],
-          ["aliases", "string-list"],
-        ] as const
-      ).map(([key, valueType]) => ({
-        path: `identity.${key}`,
-        label: t(`admin.memoryProfileIdentity_${key}`),
-        value: document.identity[key],
-        valueType,
-        buildPatch: (value: IdentityFieldValue) =>
-          valueType === "string-list"
-            ? buildProfileListPatch("add", `identity.${key}`, value)
-            : buildProfileScalarPatch(`identity.${key}`, value),
-        ...(valueType === "string-list"
-          ? {
-              buildRemovePatch: (value: string) =>
-                buildProfileListPatch("remove", `identity.${key}`, value),
-            }
-          : {}),
-      })),
-      ...(
-        [
-          ["languages", "string-list"],
-          ["residence", "nullable-string"],
-        ] as const
-      ).map(([key, valueType]) => ({
-        path: `locale.${key}`,
-        label: t(`admin.memoryProfileLocale_${key}`),
-        value: document.locale[key],
-        valueType,
-        buildPatch: (value: IdentityFieldValue) =>
-          valueType === "string-list"
-            ? buildProfileListPatch("add", `locale.${key}`, value)
-            : buildProfileScalarPatch(`locale.${key}`, value),
-        ...(valueType === "string-list"
-          ? {
-              buildRemovePatch: (value: string) =>
-                buildProfileListPatch("remove", `locale.${key}`, value),
-            }
-          : {}),
-      })),
-      ...(
-        [
-          ["occupations", "string-list"],
-          ["organizations", "string-list"],
-          ["industries", "string-list"],
-          ["expertise_domains", "string-list"],
-        ] as const
-      ).map(([key, valueType]) => ({
-        path: `professional.${key}`,
-        label: t(`admin.memoryProfileProfessional_${key}`),
-        value: document.professional[key],
-        valueType,
-        buildPatch: (value: IdentityFieldValue) =>
-          buildProfileListPatch("add", `professional.${key}`, value),
-        buildRemovePatch: (value: string) =>
-          buildProfileListPatch("remove", `professional.${key}`, value),
-      })),
-    ],
-    [t],
-  );
-
-  const soulSummaryFor = useCallback(
-    (document: SoulDocument): IdentityCardSummary => ({
-      name: document.identity.name,
-      role: document.identity.role,
-      mission: document.mission.primary_goal,
-      tags: [
-        document.interaction.default_relationship_mode,
-        document.interaction.default_initiative_level,
-        document.interaction.default_challenge_level,
-        document.epistemic.uncertainty_style,
-      ],
-    }),
-    [],
-  );
-
-  const profileSummaryFor = useCallback(
-    (document: ProfileDocument): IdentityCardSummary => ({
-      name:
-        document.identity.preferred_name ||
-        t("admin.memoryCurrentProfileFallbackName"),
-      role:
-        [
-          ...document.professional.occupations,
-          ...document.professional.industries,
-        ]
-          .filter(Boolean)
-          .join(" · ") || t("admin.memoryCurrentProfileFallbackRole"),
-      mission:
-        [
-          document.locale.languages.join(" · "),
-          document.locale.residence,
-        ]
-          .filter(Boolean)
-          .join(" · ") || t("admin.memoryCurrentProfileNoLocale"),
-      tags: [
-        ...document.professional.expertise_domains,
-        ...document.professional.organizations,
-        ...document.identity.aliases,
-      ],
-    }),
-    [t],
-  );
-
   return (
     <section
       className="memory-current-identity-section"
@@ -770,18 +738,14 @@ export default function CurrentMemoryIdentitySection() {
     >
       <div className="memory-identity-grid">
         <IdentityDocumentCard
-          fieldsFor={soulFieldsFor}
           kind="soul"
           load={getSoulMemory}
           save={patchSoulMemory}
-          summaryFor={soulSummaryFor}
         />
         <IdentityDocumentCard
-          fieldsFor={profileFieldsFor}
           kind="profile"
           load={getProfileMemory}
           save={patchProfileMemory}
-          summaryFor={profileSummaryFor}
         />
       </div>
     </section>

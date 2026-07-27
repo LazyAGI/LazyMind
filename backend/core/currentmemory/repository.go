@@ -72,15 +72,6 @@ func (r *Repository) ensureInitializedOnce(
 		return errors.New("memory user_id is required")
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var count int64
-		if err := tx.Model(&orm.MemoryCurrentEntry{}).
-			Where("user_id = ?", userID).
-			Count(&count).Error; err != nil {
-			return err
-		}
-		if count > 0 {
-			return nil
-		}
 		entries := DefaultEntries(userID, now.UTC())
 		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error
 	})
