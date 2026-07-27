@@ -4,7 +4,10 @@ const CORE = `${BASE_URL}/api/core`;
 
 export interface StepInfo {
   step_id: string;
+  title?: string;
   status: string;
+  current_phase?: string;
+  summary?: string;
   artifact?: string;
 }
 

@@ -10,6 +10,7 @@ import {
   type DiffEntryLineOpenAPIResponse,
   type DiffFileOpenAPIResponse,
   type DiffTreeOpenAPIResponse,
+  type MarketDeleteOpenAPIResponse,
   type MarketItemOpenAPIResponse,
   type MarketListOpenAPIResponse,
   type SkillCreateManagedOpenAPIRequest,
@@ -1780,6 +1781,14 @@ export async function publishSkillToMarket(
     marketItemId: body.market_item_id || "",
     sourceSkillId: body.source_skill_id || "",
   };
+}
+
+export async function deleteSkillMarketItem(marketItemId: string): Promise<boolean> {
+  const response = await skillMarketApi.apiCoreAdminSkillMarketMarketItemIdDelete({
+    marketItemId,
+  });
+  const payload = unwrapEnvelope<MarketDeleteOpenAPIResponse>(response.data);
+  return payload.deleted;
 }
 
 export async function installSkillFromMarket(marketItemId: string): Promise<string> {

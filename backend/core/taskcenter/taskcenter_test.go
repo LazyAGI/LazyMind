@@ -2,6 +2,7 @@ package taskcenter
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -145,5 +146,129 @@ func TestResolveTaskStatusDoesNotTreatStreamingHistoryAsComplete(t *testing.T) {
 	}
 	if got := resolveTaskStatus(context.Background(), db.DB, task); got != "running" {
 		t.Fatalf("streaming progress must remain running, got %q", got)
+	}
+}
+
+func TestResolveTaskForResponseAddsTimeoutFailureReason(t *testing.T) {
+	db := newTestTaskDB(t)
+	createdAt := time.Now().UTC().Add(-3 * time.Hour)
+	task := orm.TaskCenterTask{
+		ID:             "stale-task",
+		UserID:         "user-1",
+		ConversationID: "stale-conv",
+		TaskType:       "scheduled",
+		Status:         "running",
+		ProgressJSON:   orm.RawJSON(`{"processed":1}`),
+		CreatedAt:      createdAt,
+		UpdatedAt:      createdAt,
+	}
+
+	resolved := resolveTaskForResponse(context.Background(), db.DB, task)
+	if resolved.Status != "failed" {
+		t.Fatalf("expected stale task to resolve as failed, got %q", resolved.Status)
+	}
+	var progress map[string]any
+	if err := json.Unmarshal(resolved.ProgressJSON, &progress); err != nil {
+		t.Fatalf("decode progress: %v", err)
+	}
+	if progress["failure_reason"] != taskExecutionTimeoutReason {
+		t.Fatalf("unexpected failure reason: %#v", progress["failure_reason"])
+	}
+	if progress["processed"] != float64(1) {
+		t.Fatalf("existing progress was not preserved: %#v", progress)
+	}
+}
+
+func TestUpdateTaskFailurePersistsReasonAndTerminalState(t *testing.T) {
+	db := newTestTaskDB(t)
+	ctx := context.Background()
+	task := orm.TaskCenterTask{
+		ID:             "failed-task",
+		UserID:         "user-1",
+		ConversationID: "failed-conv",
+		TaskType:       "scheduled",
+		Status:         "running",
+		ProgressJSON:   orm.RawJSON(`{"processed":1}`),
+	}
+	if err := CreateTask(ctx, db.DB, &task); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateTaskFailure(ctx, db.DB, task.ID, "插件调用超时"); err != nil {
+		t.Fatal(err)
+	}
+
+	var got orm.TaskCenterTask
+	if err := db.First(&got, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "failed" || got.FinishedAt == nil {
+		t.Fatalf("expected persisted terminal failure, got %#v", got)
+	}
+	var progress map[string]any
+	if err := json.Unmarshal(got.ProgressJSON, &progress); err != nil {
+		t.Fatalf("decode progress: %v", err)
+	}
+	if progress["failure_reason"] != "插件调用超时" || progress["processed"] != float64(1) {
+		t.Fatalf("unexpected progress: %#v", progress)
+	}
+}
+
+func TestLoadStepsIncludesNaturalStatusContext(t *testing.T) {
+	db := newTestTaskDB(t)
+	if err := db.AutoMigrate(&orm.SubAgentTask{}, &orm.PluginSessionStep{}, &orm.SubAgentArtifact{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	subTask := orm.SubAgentTask{
+		ID:                "sub-task-1",
+		ConversationID:    "conv-1",
+		SeqInConversation: 1,
+		AgentType:         "plugin_step",
+		Title:             "生成图片",
+		Params:            json.RawMessage(`{}`),
+		Mode:              "auto",
+		Status:            "failed",
+		CurrentPhase:      "调用图片插件",
+		Summary:           "插件调用超时",
+		LastHeartbeat:     now,
+		InputSlots:        json.RawMessage(`[]`),
+		OutputSlots:       json.RawMessage(`[]`),
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+	if err := db.Create(&subTask).Error; err != nil {
+		t.Fatal(err)
+	}
+	sessionStep := orm.PluginSessionStep{
+		ID:        "session-step-1",
+		SessionID: "session-1",
+		StepID:    "generate_image",
+		Attempt:   1,
+		TaskID:    subTask.ID,
+		Status:    "failed",
+		Validity:  "effective",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := db.Create(&sessionStep).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	pluginSteps := loadStepsForPluginSession(context.Background(), db.DB, sessionStep.SessionID)
+	if len(pluginSteps) != 1 {
+		t.Fatalf("expected one plugin step, got %d", len(pluginSteps))
+	}
+	got := pluginSteps[0]
+	if got.Title != subTask.Title || got.CurrentPhase != subTask.CurrentPhase || got.Summary != subTask.Summary {
+		t.Fatalf("plugin step lost natural status context: %#v", got)
+	}
+
+	conversationSteps := loadStepsForConversation(context.Background(), db.DB, subTask.ConversationID)
+	if len(conversationSteps) != 1 {
+		t.Fatalf("expected one conversation step, got %d", len(conversationSteps))
+	}
+	got = conversationSteps[0]
+	if got.Title != subTask.Title || got.CurrentPhase != subTask.CurrentPhase || got.Summary != subTask.Summary {
+		t.Fatalf("conversation step lost natural status context: %#v", got)
 	}
 }

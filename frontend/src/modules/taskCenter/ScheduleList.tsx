@@ -36,6 +36,7 @@ import { KnowledgeBaseServiceApi } from '@/modules/chat/utils/request';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { axiosInstance, BASE_URL, localizeErrorCode } from '@/components/request';
 import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
+import { taskStatusDescription } from './taskStatusDescription';
 
 /* ── KnowledgeSelect: reusable KB selector with embedding guard ────────── */
 interface KnowledgeSelectProps {
@@ -379,18 +380,8 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
       render: (v: string, record: Task) => (
         <div className='schedule-history-status'><Tag color={v === 'succeeded' ? 'green' : v === 'failed' ? 'red' : 'blue'}>
           {v === 'waiting_inputs' ? t('taskCenter.statusWaitingInputs') : t(`taskCenter.status${capitalize(v)}`) || v}
-        </Tag>{record.waiting_reason ? <small>{record.waiting_reason}</small> : null}</div>
+        </Tag><small>{taskStatusDescription(record, t)}</small></div>
       ),
-    },
-    {
-      title: t('taskCenter.steps'),
-      dataIndex: 'steps',
-      width: 64,
-      render: (steps: Task['steps']) => {
-        if (!steps?.length) return '—';
-        const done = steps.filter((s) => s.status === 'succeeded').length;
-        return `${done}/${steps.length}`;
-      },
     },
     {
       title: t('taskCenter.createdAt'),

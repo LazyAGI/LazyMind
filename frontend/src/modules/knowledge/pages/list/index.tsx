@@ -1042,7 +1042,10 @@ const KnowledgePage: FC = () => {
           onClick={() => {
             createKnowledgeRef.current?.onOpen();
           }}
-          onSearch={() => {
+          onSearch={(value) => {
+            // Ant Design Search fires onSearch on clear before Form.Item updates;
+            // sync keyword first so getTableData reads the cleared value.
+            form.setFieldsValue({ keyword: value ?? "" });
             getTableData();
           }}
           extra={

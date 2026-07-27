@@ -8,6 +8,7 @@ import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
 import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
+import { taskStatusDescription } from './taskStatusDescription';
 
 const SECTION_LIMIT = 5;
 const ATTENTION_LIMIT = 3;
@@ -126,7 +127,7 @@ function AttentionSection({ tasks, expanded, onToggle, onSelect, onOpenGraph }: 
           <Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip>
           <small>{taskMeta(task, t)}</small>
         </div>
-        <p>{taskDescription(task, t)}</p>
+        <p>{taskStatusDescription(task, t)}</p>
         <footer><time>{formatDate(task.updated_at)}</time><Button type='link' size='small' onClick={() => onSelect(task)}>{t('taskCenter.confirmAction')} <RightOutlined /></Button></footer>
       </article>
     ))}</div> : <WorkbenchEmpty />}
@@ -144,7 +145,7 @@ function RunningSection({ tasks, expanded, onToggle, onSelect, onOpenGraph }: { 
         return <button type='button' className='running-task-row' key={task.id} onClick={() => onSelect(task)}>
           <span className='task-leading-icon running'><SyncOutlined spin /></span>
           <span className='workbench-task-main'><Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip><small>{taskMeta(task, t)}</small></span>
-          <span className='running-task-state'><span><StatusTag status={task.status} onClick={task.plugin_session_id ? () => onOpenGraph(task) : undefined} /><small>{taskDescription(task, t)}</small></span>{progress !== null ? <Progress percent={progress} size='small' /> : null}</span>
+          <span className='running-task-state'><span><StatusTag status={task.status} onClick={task.plugin_session_id ? () => onOpenGraph(task) : undefined} /><small>{taskStatusDescription(task, t)}</small></span>{progress !== null ? <Progress percent={progress} size='small' /> : null}</span>
           <time>{formatDate(task.updated_at)}</time>
           <span className='workbench-row-action'>{t('taskCenter.viewAction')} <RightOutlined /></span>
         </button>;
@@ -177,7 +178,7 @@ function StatusCardSection({ status, tasks, totalCount, onViewAll, onSelect, onO
           <Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip>
           <small>{taskMeta(task, t)}</small>
         </div>
-        <p>{taskDescription(task, t)}</p>
+        <p>{taskStatusDescription(task, t)}</p>
         <footer><time>{formatDate(task.finished_at || task.updated_at)}</time><Button type='link' size='small' onClick={() => onSelect(task)}>{t('taskCenter.viewAction')} <RightOutlined /></Button></footer>
       </article>
     ))}</div> : <WorkbenchEmpty />}
@@ -192,7 +193,7 @@ function RecentSection({ tasks, expanded, onToggle, onSelect }: { tasks: Task[];
       <button type='button' className='recent-task-row' key={task.id} onClick={() => onSelect(task)}>
         <CheckCircleFilled className='recent-task-check' />
         <span className='workbench-task-main'><Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip><small>{taskMeta(task, t)}</small></span>
-        <span className='recent-task-summary'>{taskDescription(task, t)}</span>
+        <span className='recent-task-summary'>{taskStatusDescription(task, t)}</span>
         <time>{formatDate(task.finished_at || task.updated_at)}</time>
         <RightOutlined className='recent-task-arrow' />
       </button>
@@ -207,10 +208,6 @@ function WorkbenchEmpty() {
 
 function taskTitle(task: Task, t: (key: string) => string) {
   return task.conversation_title || task.title || t('taskCenter.noTitle');
-}
-
-function taskDescription(task: Task, t: (key: string) => string) {
-  return task.title || task.schedule_name || t('taskCenter.noDescription');
 }
 
 function taskMeta(task: Task, t: (key: string) => string) {

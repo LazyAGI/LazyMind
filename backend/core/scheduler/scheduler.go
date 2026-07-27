@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -438,16 +440,20 @@ func renderPromptTemplate(tpl string, t time.Time) string {
 }
 
 // sendScheduledChatRequest fires a chat request for a scheduled task in a background
-// goroutine. Status is no longer written here; resolveTaskStatus derives it on read
-// from chat_histories (present = completed, absent + old = failed).
+// goroutine and persists either the finalized output or a concrete failure reason.
 func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBody map[string]any) {
 	coreURL := common.CoreSelfEndpoint() + "/conversations:chat"
-	body, _ := json.Marshal(reqBody)
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		failScheduledTask(db, taskID, "创建任务请求失败："+err.Error())
+		return
+	}
 	reqCtx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, coreURL, bytes.NewReader(body))
 	if err != nil {
 		fmt.Printf("[Scheduler] sendScheduledChatRequest: build request failed for task %s: %v\n", taskID, err)
+		failScheduledTask(db, taskID, "创建任务请求失败："+err.Error())
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -456,19 +462,39 @@ func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBod
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		fmt.Printf("[Scheduler] sendScheduledChatRequest: HTTP error for task %s: %v\n", taskID, err)
+		failScheduledTask(db, taskID, scheduledRequestFailureReason(err))
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		failScheduledTask(db, taskID, fmt.Sprintf("任务请求失败：服务返回 HTTP %d", resp.StatusCode))
 		return
 	}
 	// Drain the response body so the upstream goroutines can finish writing to
-	// Redis and DB before we exit. We do not use the status code to set task
-	// status — resolveTaskStatus handles that on read.
-	buf := make([]byte, 4096)
-	for {
-		if _, err := resp.Body.Read(buf); err != nil {
-			break
-		}
+	// Redis and DB before the task output is finalized.
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		fmt.Printf("[Scheduler] sendScheduledChatRequest: response stream failed for task %s: %v\n", taskID, err)
+		failScheduledTask(db, taskID, scheduledRequestFailureReason(err))
+		return
 	}
-	resp.Body.Close()
 	finalizeTaskOutput(context.Background(), db, taskID, convID)
+}
+
+func scheduledRequestFailureReason(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "任务执行超时（超过2小时）"
+	case errors.Is(err, context.Canceled):
+		return "任务执行被中断"
+	default:
+		return "任务请求失败：" + err.Error()
+	}
+}
+
+func failScheduledTask(db *gorm.DB, taskID, reason string) {
+	if err := taskcenter.UpdateTaskFailure(context.Background(), db, taskID, reason); err != nil {
+		fmt.Printf("[Scheduler] failed to persist failure reason for task %s: %v\n", taskID, err)
+	}
 }
 
 // ── API handlers ──────────────────────────────────────────────────────────────

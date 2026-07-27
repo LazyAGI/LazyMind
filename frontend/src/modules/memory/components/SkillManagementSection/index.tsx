@@ -10,6 +10,7 @@ import { useMemoryManagementOutletContext } from "../../context";
 import type { SkillViewMode, StructuredAsset } from "../../shared";
 import type { MarketSkillAsset } from "./skillMarketMockData";
 import {
+  deleteSkillMarketItem,
   getSkillMarketItem,
   installSkillFromMarket,
   listBuiltinSkills,
@@ -70,6 +71,7 @@ export default function SkillManagementSection() {
   const [marketListPageSize, setMarketListPageSize] = useState(DEFAULT_MARKET_PAGE_SIZE);
   const [marketListTotal, setMarketListTotal] = useState(0);
   const [marketInstallingId, setMarketInstallingId] = useState<string>();
+  const [marketDeletingId, setMarketDeletingId] = useState<string>();
   const [trashAssets, setTrashAssets] = useState<StructuredAsset[]>([]);
   const [trashLoading, setTrashLoading] = useState(false);
   const [trashListPage, setTrashListPage] = useState(1);
@@ -699,6 +701,57 @@ export default function SkillManagementSection() {
     })();
   };
 
+  const handleMarketDelete = (item: StructuredAsset) => {
+    const marketItem = item as MarketSkillAsset;
+    if (!isAdmin || marketItem.marketSource !== "admin" || marketDeletingId) {
+      return;
+    }
+    const marketItemId = marketItem.marketItemId || item.id;
+    if (!marketItemId) {
+      return;
+    }
+
+    Modal.confirm({
+      title: t("admin.memorySkillMarketDeleteConfirmTitle"),
+      content: t("admin.memorySkillMarketDeleteConfirmContent"),
+      okText: t("common.delete"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setMarketDeletingId(marketItemId);
+        try {
+          const deleted = await deleteSkillMarketItem(marketItemId);
+          if (!deleted) {
+            throw new Error("Skill market delete was not confirmed");
+          }
+
+          const nextTotal = Math.max(0, marketListTotal - 1);
+          const lastPage = Math.max(1, Math.ceil(nextTotal / marketListPageSize));
+          setMarketCatalogAssets((previous) =>
+            previous.filter(
+              (asset) => (asset.marketItemId || asset.id) !== marketItemId,
+            ),
+          );
+          setMarketListTotal(nextTotal);
+
+          await loadMarketTags();
+          if (marketListPage > lastPage) {
+            setMarketListPage(lastPage);
+          } else {
+            await loadMarketCatalog();
+          }
+          message.success(t("admin.memorySkillMarketDeleteSuccess"));
+        } catch (error) {
+          console.error("Delete market skill failed:", error);
+          message.error(t("admin.memorySkillMarketDeleteFailed"));
+          throw error;
+        } finally {
+          setMarketDeletingId(undefined);
+        }
+      },
+    });
+  };
+
   const installingUid = marketInstallingId || [...builtinSkillEnableLoading][0];
   const marketFilters = (
     <div className="memory-skill-market-toolbar-filters">
@@ -862,9 +915,12 @@ export default function SkillManagementSection() {
             loading={marketCatalogLoading}
             skillAssets={marketSkillAssets}
             installedSkills={skillAssets}
+            isAdmin={isAdmin}
             onInstall={handleMarketInstall}
             onDetail={handleMarketDetail}
+            onDelete={handleMarketDelete}
             installingUid={installingUid}
+            deletingUid={marketDeletingId}
             page={marketListPage}
             pageSize={marketListPageSize}
             total={marketListTotal}
