@@ -173,6 +173,36 @@ func TestListSkillsKeywordTotalPagingAndStableSort(t *testing.T) {
 	}
 }
 
+func TestListSkillsStableSortUsesExplicitSkillID(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	ensureSkillSearchIndexTable(t, db)
+	for _, item := range []struct {
+		skillID    string
+		revisionID string
+	}{
+		{skillID: "skill-m", revisionID: "rev-m"},
+		{skillID: "skill-z", revisionID: "rev-z"},
+		{skillID: "skill-a", revisionID: "rev-a"},
+	} {
+		seedSkillWithHeadRevision(t, db, item.skillID, item.revisionID)
+		setSkillMetadata(t, db, item.skillID, "Planner "+item.skillID, "writing", "daily notes", `["team"]`)
+		seedSearchIndex(t, db, item.skillID, item.revisionID, "needle")
+	}
+
+	got, err := newListSkillService(t, db).ListSkills(context.Background(), ListSkillsRequest{
+		UserID:  "user_001",
+		Keyword: "needle",
+	})
+	if err != nil {
+		t.Fatalf("ListSkills returned error: %v", err)
+	}
+	gotIDs := itemIDs(got.Items)
+	wantIDs := []string{"skill-z", "skill-m", "skill-a"}
+	if fmt.Sprint(gotIDs) != fmt.Sprint(wantIDs) {
+		t.Fatalf("item IDs = %v, want explicit skills.id DESC order %v", gotIDs, wantIDs)
+	}
+}
+
 func TestListSkillsKeywordQueryCountDoesNotScaleWithCandidates(t *testing.T) {
 	one := listKeywordQueryCountForCandidates(t, 1)
 	fifty := listKeywordQueryCountForCandidates(t, 50)

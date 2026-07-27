@@ -15,11 +15,11 @@ func (stubSkillPort) List(context.Context, contract.CallContext, skill.ListInput
 	return skill.ListResult{}, nil
 }
 
-func (stubSkillPort) Get(context.Context, contract.CallContext, string) (skill.GetResult, error) {
-	return skill.GetResult{}, nil
+func (stubSkillPort) GetMetadata(context.Context, contract.CallContext, string) (skill.Summary, error) {
+	return skill.Summary{}, nil
 }
 
-func (stubSkillPort) ReadContent(context.Context, contract.CallContext, string) (skill.Content, error) {
+func (stubSkillPort) ReadContent(context.Context, contract.CallContext, string, string) (skill.Content, error) {
 	return skill.Content{}, nil
 }
 

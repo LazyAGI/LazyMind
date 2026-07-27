@@ -9,20 +9,19 @@ import (
 
 	"lazymind/core/compat/contract"
 	compatskill "lazymind/core/compat/skill"
+	skillrevision "lazymind/core/skillv2/revision"
 	skillservice "lazymind/core/skillv2/service"
+	"lazymind/core/skillv2/testutil"
 )
 
 type fakeSkillService struct {
 	listReqs []skillservice.ListSkillsRequest
 	getReqs  []skillservice.GetSkillRequest
-	readRefs []skillservice.FileRef
 	items    []skillservice.SkillSummary
 	total    int64
 	detail   skillservice.SkillDetail
-	file     skillservice.FileContent
 	listErr  error
 	getErr   error
-	readErr  error
 }
 
 func (s *fakeSkillService) ListSkills(ctx context.Context, req skillservice.ListSkillsRequest) (skillservice.ListSkillsResponse, error) {
@@ -56,12 +55,24 @@ func (s *fakeSkillService) GetSkill(ctx context.Context, req skillservice.GetSki
 	return s.detail, nil
 }
 
-func (s *fakeSkillService) ReadFile(ctx context.Context, ref skillservice.FileRef) (skillservice.FileContent, error) {
-	s.readRefs = append(s.readRefs, ref)
-	if s.readErr != nil {
-		return skillservice.FileContent{}, s.readErr
+type fakeRevisionReader struct {
+	readReqs []skillrevision.ReadRevisionFileRequest
+	file     skillrevision.FileContent
+	readErr  error
+}
+
+func (r *fakeRevisionReader) ReadRevisionFile(ctx context.Context, req skillrevision.ReadRevisionFileRequest) (skillrevision.FileContent, error) {
+	r.readReqs = append(r.readReqs, req)
+	if r.readErr != nil {
+		return skillrevision.FileContent{}, r.readErr
 	}
-	return s.file, nil
+	return r.file, nil
+}
+
+type forbiddenRevisionReader struct{}
+
+func (forbiddenRevisionReader) ReadRevisionFile(ctx context.Context, req skillrevision.ReadRevisionFileRequest) (skillrevision.FileContent, error) {
+	return skillrevision.FileContent{}, errors.New("revision reader should not be called")
 }
 
 func TestSkillAdapterListPassesUserID(t *testing.T) {
@@ -198,21 +209,24 @@ func TestSkillAdapterInvalidPageToken(t *testing.T) {
 	}
 }
 
-func TestSkillAdapterGetPassesUserID(t *testing.T) {
+func TestSkillAdapterGetMetadataPassesUserID(t *testing.T) {
 	service := &fakeSkillService{}
 	adapter := mustAdapter(t, service)
-	_, err := adapter.Get(context.Background(), contract.CallContext{UserID: "user-1"}, "skill-1")
+	summary, err := adapter.GetMetadata(context.Background(), contract.CallContext{UserID: "user-1"}, "skill-1")
 	if err != nil {
-		t.Fatalf("Get returned error: %v", err)
+		t.Fatalf("GetMetadata returned error: %v", err)
+	}
+	if summary.ID != "skill-1" || summary.Name != "demo" {
+		t.Fatalf("summary = %#v, want metadata only", summary)
 	}
 	if len(service.getReqs) != 1 || service.getReqs[0].UserID != "user-1" || service.getReqs[0].SkillID != "skill-1" {
 		t.Fatalf("GetSkill reqs = %#v, want user/skill", service.getReqs)
 	}
 }
 
-func TestSkillAdapterGetNotFoundMapsToCompatNotFound(t *testing.T) {
+func TestSkillAdapterGetMetadataNotFoundMapsToCompatNotFound(t *testing.T) {
 	adapter := mustAdapter(t, &fakeSkillService{getErr: gorm.ErrRecordNotFound})
-	_, err := adapter.Get(context.Background(), contract.CallContext{UserID: "user-1"}, "missing")
+	_, err := adapter.GetMetadata(context.Background(), contract.CallContext{UserID: "user-1"}, "missing")
 	if code, ok := contract.CodeOf(err); !ok || code != contract.NotFound {
 		t.Fatalf("error code = %v, %v; want NOT_FOUND", code, ok)
 	}
@@ -222,20 +236,42 @@ func TestSkillAdapterGetNotFoundMapsToCompatNotFound(t *testing.T) {
 }
 
 func TestSkillAdapterReadContentReadsSkillMD(t *testing.T) {
-	service := &fakeSkillService{file: skillservice.FileContent{Path: "SKILL.md", Content: "hello"}}
-	adapter := mustAdapter(t, service)
-	content, err := adapter.ReadContent(context.Background(), contract.CallContext{UserID: "user-1"}, "skill-1")
+	service := &fakeSkillService{}
+	reader := &fakeRevisionReader{file: skillrevision.FileContent{Path: "SKILL.md", Content: "hello"}}
+	adapter := mustAdapterWithReader(t, service, reader)
+	content, err := adapter.ReadContent(context.Background(), contract.CallContext{UserID: "user-1"}, "skill-1", "revA")
 	if err != nil {
 		t.Fatalf("ReadContent returned error: %v", err)
 	}
-	if content.Path != "SKILL.md" || content.Text != "hello" {
-		t.Fatalf("content = %#v, want SKILL.md text", content)
+	if content.Path != "SKILL.md" || content.Text != "hello" || content.RevisionID != "revA" {
+		t.Fatalf("content = %#v, want revA SKILL.md text", content)
 	}
 	if len(service.getReqs) != 1 || service.getReqs[0].UserID != "user-1" {
 		t.Fatalf("GetSkill reqs = %#v, want ownership check", service.getReqs)
 	}
-	if len(service.readRefs) != 1 || service.readRefs[0].RefType != "head" || service.readRefs[0].Path != "SKILL.md" {
-		t.Fatalf("ReadFile refs = %#v, want head SKILL.md", service.readRefs)
+	if len(reader.readReqs) != 1 || reader.readReqs[0].RevisionID != "revA" || reader.readReqs[0].Path != "SKILL.md" {
+		t.Fatalf("ReadRevisionFile reqs = %#v, want revA SKILL.md", reader.readReqs)
+	}
+}
+
+func TestSkillAdapterReadContentChecksOwnerBeforeRevisionRead(t *testing.T) {
+	service := &fakeSkillService{getErr: gorm.ErrRecordNotFound}
+	adapter := mustAdapterWithReader(t, service, forbiddenRevisionReader{})
+	_, err := adapter.ReadContent(context.Background(), contract.CallContext{UserID: "user-1"}, "skill-1", "revA")
+	if code, ok := contract.CodeOf(err); !ok || code != contract.NotFound {
+		t.Fatalf("error code = %v, %v; want NOT_FOUND", code, ok)
+	}
+	if len(service.getReqs) != 1 {
+		t.Fatalf("GetSkill calls = %d, want 1", len(service.getReqs))
+	}
+}
+
+func TestSkillAdapterReadContentRevisionNotFoundMapsToCompatNotFound(t *testing.T) {
+	reader := &fakeRevisionReader{readErr: gorm.ErrRecordNotFound}
+	adapter := mustAdapterWithReader(t, &fakeSkillService{}, reader)
+	_, err := adapter.ReadContent(context.Background(), contract.CallContext{UserID: "user-1"}, "skill-1", "deleted-rev")
+	if code, ok := contract.CodeOf(err); !ok || code != contract.NotFound {
+		t.Fatalf("error code = %v, %v; want NOT_FOUND", code, ok)
 	}
 }
 
@@ -249,8 +285,11 @@ func TestSkillAdapterReturnsCompatErrorUnchanged(t *testing.T) {
 }
 
 func TestNewSkillAdapterRejectsNilDependencies(t *testing.T) {
-	if _, err := NewSkillAdapter(nil); err == nil {
+	if _, err := NewSkillAdapter(nil, &fakeRevisionReader{}); err == nil {
 		t.Fatalf("NewSkillAdapter nil service error = nil, want error")
+	}
+	if _, err := NewSkillAdapter(&fakeSkillService{}, nil); err == nil {
+		t.Fatalf("NewSkillAdapter nil revision reader error = nil, want error")
 	}
 }
 
@@ -263,9 +302,29 @@ func TestNewSkillAdapterForDBRejectsNilDependencies(t *testing.T) {
 	}
 }
 
+func TestNewSkillAdapterForDBInjectsRevisionReader(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	service := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+		DB:        db.DB,
+		BlobStore: skillservice.NewBlobStore(db.DB, skillservice.NewLocalObjectStore(t.TempDir())),
+	})
+	adapter, err := NewSkillAdapterForDB(service, db.DB)
+	if err != nil {
+		t.Fatalf("NewSkillAdapterForDB returned error: %v", err)
+	}
+	if adapter.revisionReader == nil {
+		t.Fatalf("revisionReader is nil")
+	}
+}
+
 func mustAdapter(t *testing.T, service SkillService) *SkillAdapter {
 	t.Helper()
-	adapter, err := NewSkillAdapter(service)
+	return mustAdapterWithReader(t, service, &fakeRevisionReader{})
+}
+
+func mustAdapterWithReader(t *testing.T, service SkillService, reader RevisionReader) *SkillAdapter {
+	t.Helper()
+	adapter, err := NewSkillAdapter(service, reader)
 	if err != nil {
 		t.Fatalf("NewSkillAdapter: %v", err)
 	}

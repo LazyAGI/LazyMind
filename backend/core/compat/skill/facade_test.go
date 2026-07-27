@@ -9,13 +9,16 @@ import (
 )
 
 type fakePort struct {
-	listInput        ListInput
-	getSkillID       string
-	readSkillID      string
-	readContentCalls int
-	listErr          error
-	getErr           error
-	readErr          error
+	listInput           ListInput
+	getSkillID          string
+	readSkillID         string
+	readRevisionID      string
+	readContentCalls    int
+	currentHeadRevision string
+	contentRevisionID   string
+	listErr             error
+	getErr              error
+	readErr             error
 }
 
 func (p *fakePort) List(ctx context.Context, callCtx contract.CallContext, input ListInput) (ListResult, error) {
@@ -26,21 +29,31 @@ func (p *fakePort) List(ctx context.Context, callCtx contract.CallContext, input
 	return ListResult{Page: contract.PageResult{}}, nil
 }
 
-func (p *fakePort) Get(ctx context.Context, callCtx contract.CallContext, skillID string) (GetResult, error) {
+func (p *fakePort) GetMetadata(ctx context.Context, callCtx contract.CallContext, skillID string) (Summary, error) {
 	p.getSkillID = skillID
 	if p.getErr != nil {
-		return GetResult{}, p.getErr
+		return Summary{}, p.getErr
 	}
-	return GetResult{Skill: Summary{ID: skillID, Name: "demo"}}, nil
+	revisionID := p.currentHeadRevision
+	if revisionID == "" {
+		revisionID = "revA"
+	}
+	p.currentHeadRevision = "revB"
+	return Summary{ID: skillID, Name: "demo", HeadRevisionID: revisionID}, nil
 }
 
-func (p *fakePort) ReadContent(ctx context.Context, callCtx contract.CallContext, skillID string) (Content, error) {
+func (p *fakePort) ReadContent(ctx context.Context, callCtx contract.CallContext, skillID, revisionID string) (Content, error) {
 	p.readContentCalls++
 	p.readSkillID = skillID
+	p.readRevisionID = revisionID
 	if p.readErr != nil {
 		return Content{}, p.readErr
 	}
-	return Content{Path: "SKILL.md", Text: "content"}, nil
+	contentRevisionID := p.contentRevisionID
+	if contentRevisionID == "" {
+		contentRevisionID = revisionID
+	}
+	return Content{Path: "SKILL.md", RevisionID: contentRevisionID, Text: "content"}, nil
 }
 
 func TestFacadeListRequiresUserID(t *testing.T) {
@@ -99,25 +112,40 @@ func TestFacadeGetWithoutContentDoesNotReadContent(t *testing.T) {
 		t.Fatalf("Content = %#v, want nil", result.Content)
 	}
 	if port.getSkillID != "skill-1" {
-		t.Fatalf("Get skillID = %q, want trimmed", port.getSkillID)
+		t.Fatalf("GetMetadata skillID = %q, want trimmed", port.getSkillID)
 	}
 	if port.readContentCalls != 0 {
 		t.Fatalf("ReadContent calls = %d, want 0", port.readContentCalls)
 	}
 }
 
-func TestFacadeGetWithContentCombinesResult(t *testing.T) {
-	port := &fakePort{}
+func TestFacadeGetWithContentUsesMetadataRevision(t *testing.T) {
+	port := &fakePort{currentHeadRevision: "revA"}
 	facade := mustFacade(t, port)
 	result, err := facade.Get(context.Background(), contract.CallContext{UserID: "user"}, GetInput{SkillID: "skill-1", IncludeContent: true})
 	if err != nil {
 		t.Fatalf("Get returned error: %v", err)
 	}
-	if port.readContentCalls != 1 || port.readSkillID != "skill-1" {
-		t.Fatalf("ReadContent calls/id = %d/%q, want 1/skill-1", port.readContentCalls, port.readSkillID)
+	if port.readContentCalls != 1 || port.readSkillID != "skill-1" || port.readRevisionID != "revA" {
+		t.Fatalf("ReadContent calls/id/revision = %d/%q/%q, want 1/skill-1/revA", port.readContentCalls, port.readSkillID, port.readRevisionID)
 	}
-	if result.Content == nil || result.Content.Text != "content" {
+	if result.Skill.HeadRevisionID != "revA" {
+		t.Fatalf("HeadRevisionID = %q, want revA", result.Skill.HeadRevisionID)
+	}
+	if result.Content == nil || result.Content.Text != "content" || result.Content.RevisionID != "revA" {
 		t.Fatalf("Content = %#v, want SKILL.md content", result.Content)
+	}
+}
+
+func TestFacadeGetRejectsContentRevisionMismatch(t *testing.T) {
+	port := &fakePort{currentHeadRevision: "revA", contentRevisionID: "revB"}
+	facade := mustFacade(t, port)
+	_, err := facade.Get(context.Background(), contract.CallContext{UserID: "user"}, GetInput{SkillID: "skill-1", IncludeContent: true})
+	if code, ok := contract.CodeOf(err); !ok || code != contract.Internal {
+		t.Fatalf("error code = %v, %v; want INTERNAL", code, ok)
+	}
+	if port.readContentCalls != 1 || port.readRevisionID != "revA" {
+		t.Fatalf("ReadContent calls/revision = %d/%q, want 1/revA", port.readContentCalls, port.readRevisionID)
 	}
 }
 

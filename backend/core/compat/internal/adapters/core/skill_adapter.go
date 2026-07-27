@@ -9,6 +9,7 @@ import (
 
 	"lazymind/core/compat/contract"
 	compatskill "lazymind/core/compat/skill"
+	skillrevision "lazymind/core/skillv2/revision"
 	skillservice "lazymind/core/skillv2/service"
 )
 
@@ -17,18 +18,25 @@ const skillMDPath = "SKILL.md"
 type SkillService interface {
 	ListSkills(ctx context.Context, req skillservice.ListSkillsRequest) (skillservice.ListSkillsResponse, error)
 	GetSkill(ctx context.Context, req skillservice.GetSkillRequest) (skillservice.SkillDetail, error)
-	ReadFile(ctx context.Context, ref skillservice.FileRef) (skillservice.FileContent, error)
+}
+
+type RevisionReader interface {
+	ReadRevisionFile(ctx context.Context, req skillrevision.ReadRevisionFileRequest) (skillrevision.FileContent, error)
 }
 
 type SkillAdapter struct {
-	service SkillService
+	service        SkillService
+	revisionReader RevisionReader
 }
 
-func NewSkillAdapter(service SkillService) (*SkillAdapter, error) {
+func NewSkillAdapter(service SkillService, revisionReader RevisionReader) (*SkillAdapter, error) {
 	if service == nil {
 		return nil, contract.NewError(contract.Internal, "skill.adapter.new", "skill service is required", false, nil)
 	}
-	return &SkillAdapter{service: service}, nil
+	if revisionReader == nil {
+		return nil, contract.NewError(contract.Internal, "skill.adapter.new", "revision reader is required", false, nil)
+	}
+	return &SkillAdapter{service: service, revisionReader: revisionReader}, nil
 }
 
 func NewSkillAdapterForDB(service *skillservice.SkillService, db *gorm.DB) (*SkillAdapter, error) {
@@ -38,7 +46,11 @@ func NewSkillAdapterForDB(service *skillservice.SkillService, db *gorm.DB) (*Ski
 	if db == nil {
 		return nil, contract.NewError(contract.Internal, "skill.adapter.new", "gorm db is required", false, nil)
 	}
-	return NewSkillAdapter(service)
+	revisionReader := skillrevision.NewService(skillrevision.ServiceDeps{
+		DB:        db,
+		BlobStore: skillrevision.NewBlobStore(db, skillrevision.NewLocalObjectStore("")),
+	})
+	return NewSkillAdapter(service, revisionReader)
 }
 
 func (a *SkillAdapter) List(ctx context.Context, callCtx contract.CallContext, input compatskill.ListInput) (compatskill.ListResult, error) {
@@ -77,34 +89,40 @@ func (a *SkillAdapter) List(ctx context.Context, callCtx contract.CallContext, i
 	return result, nil
 }
 
-func (a *SkillAdapter) Get(ctx context.Context, callCtx contract.CallContext, skillID string) (compatskill.GetResult, error) {
+func (a *SkillAdapter) GetMetadata(ctx context.Context, callCtx contract.CallContext, skillID string) (compatskill.Summary, error) {
 	userID := strings.TrimSpace(callCtx.UserID)
 	if userID == "" {
-		return compatskill.GetResult{}, contract.InvalidArgumentError("skill.get", "user_id is required")
+		return compatskill.Summary{}, contract.InvalidArgumentError("skill.get", "user_id is required")
 	}
 	detail, err := a.service.GetSkill(ctx, skillservice.GetSkillRequest{SkillID: skillID, UserID: userID})
 	if err != nil {
-		return compatskill.GetResult{}, mapServiceError("skill.get", err)
+		return compatskill.Summary{}, mapServiceError("skill.get", err)
 	}
-	return compatskill.GetResult{Skill: mapSummary(detail.SkillSummary)}, nil
+	return mapSummary(detail.SkillSummary), nil
 }
 
-func (a *SkillAdapter) ReadContent(ctx context.Context, callCtx contract.CallContext, skillID string) (compatskill.Content, error) {
+func (a *SkillAdapter) ReadContent(ctx context.Context, callCtx contract.CallContext, skillID, revisionID string) (compatskill.Content, error) {
 	userID := strings.TrimSpace(callCtx.UserID)
 	if userID == "" {
 		return compatskill.Content{}, contract.InvalidArgumentError("skill.read_content", "user_id is required")
 	}
+	revisionID = strings.TrimSpace(revisionID)
+	if revisionID == "" {
+		return compatskill.Content{}, contract.InvalidArgumentError("skill.read_content", "revision_id is required")
+	}
+	// Revision reads do not perform owner checks, so the adapter binds access to
+	// the metadata path before reading immutable revision content.
 	if _, err := a.service.GetSkill(ctx, skillservice.GetSkillRequest{SkillID: skillID, UserID: userID}); err != nil {
 		return compatskill.Content{}, mapServiceError("skill.read_content", err)
 	}
-	file, err := a.service.ReadFile(ctx, skillservice.FileRef{SkillID: skillID, RefType: "head", Path: skillMDPath})
+	file, err := a.revisionReader.ReadRevisionFile(ctx, skillrevision.ReadRevisionFileRequest{SkillID: skillID, RevisionID: revisionID, Path: skillMDPath})
 	if err != nil {
 		return compatskill.Content{}, mapServiceError("skill.read_content", err)
 	}
 	if file.Binary {
 		return compatskill.Content{}, contract.NewError(contract.Unsupported, "skill.read_content", "SKILL.md is binary", false, nil)
 	}
-	return compatskill.Content{Path: file.Path, Text: file.Content}, nil
+	return compatskill.Content{Path: file.Path, RevisionID: revisionID, Text: file.Content}, nil
 }
 
 func mapSummary(item skillservice.SkillSummary) compatskill.Summary {
