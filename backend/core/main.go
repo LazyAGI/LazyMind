@@ -170,6 +170,9 @@ func main() {
 	} else if err := migrate.RunUp(); err != nil {
 		log.Logger.Fatal().Err(err).Msg("run SQL migrations failed")
 	}
+	if err := modelprovider.MigrateLegacyAPIKeys(db.DB); err != nil {
+		log.Logger.Fatal().Err(err).Msg("migrate model provider credentials failed")
+	}
 	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
 	modelprovider.MustSeedModelCatalog(context.Background(), db.DB, catalogPath)
 	datasourceCatalogPath := filepath.Join(".", "config", "datasource_catalog.yaml")

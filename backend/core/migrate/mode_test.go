@@ -39,8 +39,8 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		mode.Aggregate == nil || mode.Aggregate.Version != 20260723183515 {
 		t.Fatalf("unexpected v0_2 mode: %#v", mode)
 	}
-	if len(mode.Dev) != 88 {
-		t.Fatalf("v0_2 dev migration count=%d, want 88", len(mode.Dev))
+	if len(mode.Dev) != 89 {
+		t.Fatalf("v0_2 dev migration count=%d, want 89", len(mode.Dev))
 	}
 	if !containsMigrationFileVersion(mode.Dev, 20260703130000) {
 		t.Fatal("v0_2 dev migrations are missing create_plugin_step_intents")
@@ -48,11 +48,11 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if !containsVersion(mode.Aggregate.Supersedes, 20260703130000) {
 		t.Fatal("v0_2 aggregate Supersedes is missing create_plugin_step_intents")
 	}
-	if len(mode.Aggregate.Supersedes) != len(mode.Dev) {
+	if len(mode.Aggregate.Supersedes) != len(mode.Dev)-1 {
 		t.Fatalf(
-			"v0_2 aggregate Supersedes count=%d, dev migration count=%d",
+			"v0_2 aggregate Supersedes count=%d, pre-aggregate dev migration count=%d",
 			len(mode.Aggregate.Supersedes),
-			len(mode.Dev),
+			len(mode.Dev)-1,
 		)
 	}
 	for _, migration := range mode.Dev {
@@ -68,7 +68,7 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 				wantVersion,
 			)
 		}
-		if !containsVersion(mode.Aggregate.Supersedes, migration.FileVersion) {
+		if migration.FileVersion <= mode.Aggregate.Version && !containsVersion(mode.Aggregate.Supersedes, migration.FileVersion) {
 			t.Fatalf("v0_2 aggregate Supersedes is missing dev migration %d", migration.FileVersion)
 		}
 	}

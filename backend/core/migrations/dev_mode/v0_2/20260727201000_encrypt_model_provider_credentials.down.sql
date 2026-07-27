@@ -1,0 +1,2 @@
+ALTER TABLE user_model_provider_groups DROP COLUMN credential_version;
+ALTER TABLE user_model_provider_groups DROP COLUMN api_key_ciphertext;

@@ -149,11 +149,12 @@ func SetSelectedProvider(w http.ResponseWriter, r *http.Request) {
 		DefaultProviderID string `gorm:"column:default_model_provider_id"`
 		BaseURL           string `gorm:"column:base_url"`
 		APIKey            string `gorm:"column:api_key"`
+		APIKeyCiphertext  string `gorm:"column:api_key_ciphertext"`
 	}
 	var groups []groupWithCategory
 	if len(groupIDs) > 0 {
 		if err := db.WithContext(r.Context()).Table("user_model_provider_groups g").
-			Select("g.id, p.category, p.default_model_provider_id, g.base_url, g.api_key").
+			Select("g.id, p.category, p.default_model_provider_id, g.base_url, g.api_key, g.api_key_ciphertext").
 			Joins("JOIN user_model_providers p ON p.id = g.user_model_provider_id AND p.create_user_id = g.create_user_id AND p.deleted_at IS NULL").
 			Where("g.id IN ? AND g.create_user_id = ? AND p.create_user_id = ? AND g.deleted_at IS NULL", groupIDs, userID, userID).
 			Scan(&groups).Error; err != nil {
@@ -163,6 +164,12 @@ func SetSelectedProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	categoryByGroupID := make(map[string]string, len(groups))
 	for _, group := range groups {
+		resolvedAPIKey, decryptErr := ResolveAPIKey(group.APIKey, group.APIKeyCiphertext)
+		if decryptErr != nil {
+			common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
+			return
+		}
+		group.APIKey = resolvedAPIKey
 		if !isSelectableProviderGroup(r.Context(), db, group.DefaultProviderID, group.BaseURL, group.APIKey) {
 			common.ReplyErr(w, "group is not selectable without api_key when using the default base_url", http.StatusBadRequest)
 			return
@@ -316,6 +323,7 @@ func loadSelectedProviders(ctx context.Context, db *gorm.DB, userID string) ([]s
 		GroupName           string `gorm:"column:group_name"`
 		BaseURL             string `gorm:"column:base_url"`
 		APIKey              string `gorm:"column:api_key"`
+		APIKeyCiphertext    string `gorm:"column:api_key_ciphertext"`
 		DefaultProviderID   string `gorm:"column:default_model_provider_id"`
 	}
 	var rows []row
@@ -328,7 +336,7 @@ func loadSelectedProviders(ctx context.Context, db *gorm.DB, userID string) ([]s
 				"p.name AS provider_name, "+
 				"g.name AS group_name, "+
 				"g.base_url, "+
-				"g.api_key, "+
+				"g.api_key, g.api_key_ciphertext, "+
 				"p.default_model_provider_id",
 		).
 		Joins(
@@ -352,6 +360,10 @@ func loadSelectedProviders(ctx context.Context, db *gorm.DB, userID string) ([]s
 		return nil, err
 	}
 	for _, row := range rows {
+		row.APIKey, err = ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
+		if err != nil {
+			return nil, err
+		}
 		if !isSelectableProviderGroup(ctx, db, row.DefaultProviderID, row.BaseURL, row.APIKey) {
 			continue
 		}

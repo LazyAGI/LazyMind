@@ -164,6 +164,13 @@ func (r *Runner) Up(limit int) error {
 	if err != nil {
 		return err
 	}
+	if err := validateKnownAppliedHistory(catalog, applied); err != nil {
+		return err
+	}
+	applied, err = r.normalizeCanonicalHistory(catalog, applied)
+	if err != nil {
+		return err
+	}
 	if err := validateAppliedHistory(catalog, applied); err != nil {
 		return err
 	}
@@ -192,8 +199,22 @@ func (r *Runner) Up(limit int) error {
 
 		mode := *step.Mode
 		if mode.Aggregate != nil && historyContains(applied, mode.Aggregate.Version) {
-			if appliedDevVersions(mode, applied) > 0 {
+			if appliedPreAggregateDevVersions(mode, applied) > 0 {
 				return mixedModeHistoryError(mode)
+			}
+			for _, mig := range postAggregateDevMigrations(mode) {
+				if historyContains(applied, mig.Version) {
+					continue
+				}
+				if limit > 0 && executed >= limit {
+					return nil
+				}
+				if err := r.applyUpMigration(mig, currentMax); err != nil {
+					return err
+				}
+				applied = addHistoryRecord(applied, mig)
+				currentMax = highestAppliedVersion(applied)
+				executed++
 			}
 			continue
 		}

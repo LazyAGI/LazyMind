@@ -88,12 +88,17 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 	out := make([]groupListItem, 0, len(rows))
 	for i := range rows {
 		g := rows[i]
+		apiKey, err := apiKeyForGroup(db.WithContext(r.Context()), &g)
+		if err != nil {
+			common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
+			return
+		}
 		out = append(out, groupListItem{
 			ID:                  g.ID,
 			UserModelProviderID: g.UserModelProviderID,
 			Name:                g.Name,
 			BaseURL:             g.BaseURL,
-			APIKey:              g.APIKey,
+			APIKey:              apiKey,
 			IsVerified:          g.IsVerified,
 		})
 	}
@@ -169,6 +174,11 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	apiKeyRequired := isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL)
+	apiKeyCiphertext, err := encryptModelProviderAPIKey(apiKey)
+	if err != nil {
+		common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
+		return
+	}
 
 	var checkData *CheckModelProviderData
 	if apiKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
@@ -197,7 +207,9 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		UserModelProviderID: parent.ID,
 		Name:                name,
 		BaseURL:             baseURL,
-		APIKey:              apiKey,
+		APIKey:              "",
+		APIKeyCiphertext:    apiKeyCiphertext,
+		CredentialVersion:   modelProviderCredentialVersion,
 		IsVerified:          checkData != nil || !apiKeyRequired,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
@@ -217,7 +229,6 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "create group failed", http.StatusInternalServerError)
 		return
 	}
-
 	common.ReplyOK(w, createGroupResponse{
 		ID:                  row.ID,
 		UserModelProviderID: row.UserModelProviderID,
@@ -286,6 +297,11 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query group failed", http.StatusInternalServerError)
 		return
 	}
+	storedAPIKey, err := apiKeyForGroup(db.WithContext(r.Context()), &row)
+	if err != nil {
+		common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
+		return
+	}
 
 	if name == "" {
 		name = row.Name
@@ -310,11 +326,20 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	if baseURLChanged {
 		updates["is_verified"] = false
 		updates["api_key"] = ""
+		updates["api_key_ciphertext"] = ""
+		updates["credential_version"] = modelProviderCredentialVersion
 		skipVerify = true
 	}
 	if apiKey != "" {
-		updates["api_key"] = apiKey
-		if apiKey != row.APIKey {
+		encryptedUpdates, encryptErr := encryptedAPIKeyUpdates(apiKey)
+		if encryptErr != nil {
+			common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
+			return
+		}
+		for key, value := range encryptedUpdates {
+			updates[key] = value
+		}
+		if apiKey != storedAPIKey {
 			updates["is_verified"] = false
 		}
 	}
@@ -322,7 +347,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	var checkData *CheckModelProviderData
 	effectiveAPIKey := apiKey
 	if effectiveAPIKey == "" && !baseURLChanged {
-		effectiveAPIKey = row.APIKey
+		effectiveAPIKey = storedAPIKey
 	}
 	if effectiveAPIKey == "" {
 		updates["is_verified"] = true
