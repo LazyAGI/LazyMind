@@ -130,11 +130,11 @@ def _build_artifact_value(value: Any, content_type: str):
     return {'text': str(value)}, 'text'
 
 
-def save_artifact(key: str, value: Any, content_type: str = 'text',
-                  source_tool: Optional[str] = None,
-                  sort_order: Optional[int] = None,
-                  caption: Optional[str] = None) -> Dict[str, Any]:
-    """Save an output artifact produced by this SubAgent.
+def _save_artifact(key: str, value: Any, content_type: str = 'text',
+                   source_tool: Optional[str] = None,
+                   sort_order: Optional[int] = None,
+                   caption: Optional[str] = None) -> Dict[str, Any]:
+    """Save one output artifact produced by this SubAgent.
 
     File-type values must be local absolute paths; the framework copies them into the
     workspace and stores a normalized absolute path. The same key may be saved multiple times
@@ -153,7 +153,7 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
       Use this whenever the user's instruction targets a specific item, for example:
         - "重新收集第二张图" → sort_order=2
         - "替换第三张参考图" → sort_order=3
-        - "第一张和第三张都重新生成" → call save_artifact twice: sort_order=1, sort_order=3
+        - "第一张和第三张都重新生成" → save two entries with sort_order=1 and sort_order=3
       Do NOT pass list_index directly — always use sort_order (1-based visual position).
 
     For single-cardinality slots the sort_order parameter is ignored (single slots
@@ -185,7 +185,7 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
     ctx = require_context()
     if ctx.output_slots and key not in ctx.output_slots:
         return tool_error(
-            'save_artifact',
+            'save_artifacts',
             f'Artifact key {key!r} is not declared for this step. '
             f'Allowed keys: {", ".join(ctx.output_slots)}',
         )
@@ -218,7 +218,43 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
     msg = f"Artifact '{key}' saved."
     if out_of_range_warning:
         msg += f' WARNING: {out_of_range_warning}'
-    return tool_success('save_artifact', {'status': 'ok', 'message': msg})
+    return tool_success('save_artifacts', {'status': 'ok', 'message': msg})
+
+
+def save_artifacts(artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Save one or more output artifacts in one tool call.
+
+    Always pass a list, including when saving a single artifact. Each item accepts
+    key, value, content_type, source_tool, sort_order, and caption. Keeping all
+    writes in one model turn prevents a step with many outputs from exhausting the
+    ReAct tool-turn budget.
+    """
+    if not isinstance(artifacts, list) or not artifacts:
+        return tool_error('save_artifacts', 'artifacts must be a non-empty list.')
+    if len(artifacts) > 50:
+        return tool_error('save_artifacts', 'At most 50 artifacts may be saved at once.')
+
+    results: List[Dict[str, Any]] = []
+    for index, item in enumerate(artifacts):
+        if not isinstance(item, dict):
+            return tool_error('save_artifacts', f'artifacts[{index}] must be an object.')
+        if 'key' not in item or 'value' not in item:
+            return tool_error(
+                'save_artifacts', f'artifacts[{index}] requires key and value.',
+            )
+        results.append(_save_artifact(
+            key=str(item['key']),
+            value=item['value'],
+            content_type=str(item.get('content_type') or 'text'),
+            source_tool=item.get('source_tool'),
+            sort_order=item.get('sort_order'),
+            caption=item.get('caption'),
+        ))
+    return tool_success('save_artifacts', {
+        'status': 'ok',
+        'saved_count': len(results),
+        'results': results,
+    })
 
 
 def _write_artifact_draft(
@@ -331,7 +367,10 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
     except Exception:
         plugin_session_id = ''
 
-    if plugin_session_id and sort_order is not None:
+    bound_rows = ctx.db.load_bound_slot_artifacts(ctx.task_id, key) if plugin_session_id else []
+    if bound_rows:
+        result = _get_bound_plugin_artifacts(ctx, key, bound_rows, sort_order)
+    elif plugin_session_id and sort_order is not None:
         result = _get_plugin_artifact_by_sort_order(ctx, key, plugin_session_id, sort_order)
     elif plugin_session_id and sort_order is None:
         result = _get_plugin_artifact_all(ctx, key, plugin_session_id)
@@ -365,11 +404,12 @@ def _resolve_artifact_text(
 
     Resolution priority:
     1. Draft file (reflects latest patch_artifact edits in this step).
-    2. Plugin session selected revision via load_slot_artifact_by_sort_order —
+    2. Exact revision frozen in the current plugin attempt's input binding.
+    3. Plugin session selected revision via load_slot_artifact_by_sort_order —
        this is the ONLY path that surfaces human-edited artifacts stored in
        plugin_human_artifacts; must be checked before sub_agent_artifacts.
-    3. Local in-memory cache (same step, sub_agent_artifacts).
-    4. DB sub_agent_artifacts (previous steps).
+    4. Local in-memory cache (same step, sub_agent_artifacts).
+    5. DB sub_agent_artifacts (previous steps).
 
     Returns (None, 'text') when no content is found.
     """
@@ -392,6 +432,19 @@ def _resolve_artifact_text(
 
     if plugin_session_id:
         so = sort_order if sort_order is not None else 1
+        bound_rows = ctx.db.load_bound_slot_artifacts(ctx.task_id, key)
+        if bound_rows:
+            row = bound_rows[so - 1] if 1 <= so <= len(bound_rows) else None
+            if row is None:
+                return None, 'text'
+            value, content_type = ctx.db.resolve_slot_revision_value(row)
+            if value is None:
+                return None, 'text'
+            original_type = 'json' if content_type == 'json' else 'text'
+            if content_type == 'file':
+                original_type = value.get('type', 'text')
+            return _extract_text_from_value(ctx, value, original_type), original_type
+
         row = ctx.db.load_slot_artifact_by_sort_order(plugin_session_id, key, so)
         if row is not None:
             value, content_type = ctx.db.resolve_slot_revision_value(row)
@@ -528,6 +581,44 @@ def _get_plugin_artifact_by_sort_order(
     })
 
 
+def _get_bound_plugin_artifacts(
+    ctx: Any,
+    key: str,
+    rows: list[Dict[str, Any]],
+    sort_order: Optional[int],
+) -> Dict[str, Any]:
+    """Resolve artifacts from the immutable input bindings of this attempt."""
+    selected_rows = rows
+    if sort_order is not None:
+        if sort_order < 1 or sort_order > len(rows):
+            return tool_success('get_artifact', {
+                'status': 'empty',
+                'message': f"No bound artifact found for key '{key}' at sort_order={sort_order}.",
+            })
+        selected_rows = [rows[sort_order - 1]]
+
+    artifacts = []
+    for position, row in enumerate(selected_rows, start=1):
+        value, content_type = ctx.db.resolve_slot_revision_value(row)
+        if value is None:
+            continue
+        artifact_sort_order = sort_order if sort_order is not None else position
+        artifacts.append({
+            'slot': key,
+            'content_type': content_type,
+            'value': value,
+            'sort_order': artifact_sort_order,
+            'revision': row.get('revision'),
+            '_from_attempt_binding': True,
+        })
+    if not artifacts:
+        return tool_success('get_artifact', {
+            'status': 'empty',
+            'message': f"Bound artifact key '{key}' could not be resolved.",
+        })
+    return tool_success('get_artifact', {'status': 'ok', 'key': key, 'artifacts': artifacts})
+
+
 def _get_plugin_artifact_all(ctx: Any, key: str, session_id: str) -> Dict[str, Any]:
     """Return all selected revisions for a plugin slot key (sort_order=None)."""
     resolved_rows = ctx.db.load_selected_slot_artifacts_resolved_with_order(session_id)
@@ -557,12 +648,12 @@ def patch_artifact(
 ) -> Dict[str, Any]:
     """Apply a local patch to a previously saved artifact without committing a new revision.
 
-    Edits are written to a draft file in the workspace. Call save_artifact when you are
+    Edits are written to a draft file in the workspace. Call save_artifacts when you are
     done patching to commit the changes and produce a new revision. If you do not call
-    save_artifact, the framework will auto-flush all pending drafts when the step ends.
+    save_artifacts, the framework will auto-flush all pending drafts when the step ends.
 
     Use patch_artifact for targeted edits (fix a paragraph, update a field). Use
-    save_artifact directly when rewriting the whole artifact from scratch.
+    save_artifacts directly when rewriting the whole artifact from scratch.
 
     To discard all uncommitted edits and revert to the last saved version, call
     discard_draft(key).
@@ -600,7 +691,7 @@ def patch_artifact(
                 'status': 'error',
                 'message': (
                     f"No committed content found for artifact '{key}'. "
-                    'Call save_artifact first to create the artifact before patching.'
+                    'Call save_artifacts first to create the artifact before patching.'
                 ),
             })
         ctx.write_draft(key, original_type, text, list_index, pending_commit=False)
@@ -629,7 +720,7 @@ def patch_artifact(
         'status': 'ok',
         'message': (
             f"Draft for '{key}' updated ({lines_changed} line(s) changed). "
-            'Call save_artifact to commit, or keep patching. '
+            'Call save_artifacts to commit, or keep patching. '
             'The framework will auto-commit on step end if you forget.'
         ),
     })
@@ -1066,7 +1157,7 @@ def _publish_attachment_edit(draft: AttachmentEditDraft) -> Dict[str, Any]:
     if ctx is None:
         return draft.publish()['result']
     artifact_key = ctx.output_slots[0] if ctx.output_slots else 'edited_attachment'
-    published = save_artifact(
+    published = _save_artifact(
         artifact_key,
         draft.draft_path,
         content_type='file',
@@ -1246,7 +1337,7 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
     """Return the accessible URL or local path of a plugin artifact.
 
     Analogous to find_user_attachment but for plugin step outputs.
-    Reads session_id and plugin_id from agentic_config (same as save_artifact / get_artifact).
+    Reads session_id and plugin_id from agentic_config (same as save_artifacts / get_artifact).
 
     Args:
         slot (str): The slot id to look up (e.g. 'image_output').

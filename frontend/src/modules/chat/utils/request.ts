@@ -134,6 +134,17 @@ export const taskStreamUrl = (taskId: string) =>
 export const convEventsUrl = (conversationId: string) =>
   `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events`;
 
+export function decideToolLimit(
+  conversationId: string,
+  decisionId: string,
+  action: "continue" | "summarize",
+) {
+  return axiosInstance.post(
+    `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}:toolLimitDecision`,
+    { decision_id: decisionId, action },
+  );
+}
+
 export function TaskServiceApi() {
   return {
     listConversationTasks(conversationId: string, options?: RawAxiosRequestConfig) {
@@ -178,10 +189,14 @@ export function PluginInfoApi() {
   };
 }
 
+export type SlotSaveMode = 'draft' | 'checkpoint';
+
 export interface SyncWriterDocumentRequest {
   base_revision: number;
   source_document: Record<string, unknown>;
   revised_document: Record<string, unknown>;
+  /** draft: overwrite selected human artifact; checkpoint (default): new revision. */
+  mode?: SlotSaveMode;
 }
 
 export interface SyncWriterDocumentPatchResult {
@@ -266,10 +281,22 @@ export function PluginSessionApi() {
         { ...options, data: orderVersion !== undefined ? { order_version: orderVersion } : undefined },
       );
     },
-    patchSlotItem(sessionId: string, slotId: string, listIndex: number, value: any, contentType?: string, options?: RawAxiosRequestConfig) {
+    patchSlotItem(
+      sessionId: string,
+      slotId: string,
+      listIndex: number,
+      value: any,
+      contentType?: string,
+      mode?: SlotSaveMode,
+      options?: RawAxiosRequestConfig,
+    ) {
       return axiosInstance.patch(
         `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}`,
-        { value, ...(contentType ? { content_type: contentType } : {}) },
+        {
+          value,
+          ...(contentType ? { content_type: contentType } : {}),
+          ...(mode ? { mode } : {}),
+        },
         options,
       );
     },

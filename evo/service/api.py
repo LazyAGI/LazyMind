@@ -4,7 +4,7 @@ import os
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -24,6 +24,7 @@ from .contracts import (
     ControlRequest,
     MessageBody,
     RegisterAlgorithmBody,
+    RetryRequest,
     ServiceError,
     ThreadCreate,
 )
@@ -107,7 +108,7 @@ def create_app(root: str | Path | None = None) -> FastAPI:
 
     @app.post('/threads/{thread_id}/retry')
     async def retry_thread(thread_id: str,
-                           payload: CommandRequest
+                           payload: RetryRequest
                            ) -> dict[str, str]:
         return await _service(app).retry(thread_id, payload)
 
@@ -275,7 +276,7 @@ def create_app(root: str | Path | None = None) -> FastAPI:
 
     @app.get('/router/algorithms')
     async def router_algorithms(thread_id: str = '', algorithm_id: str = '',
-                                status: str = ''
+                                status: Literal['all', 'starting', 'active', 'disabled', 'missing'] = 'all'
                                 ) -> dict[str, Any]:
         return await _service(app).router.algorithms(
             thread_id=thread_id,

@@ -140,3 +140,51 @@ def test_read_chat_document_text_joins_nodes(monkeypatch):
 
     monkeypatch.setattr(ar, '_get_document_reader', lambda: reader)
     assert ar.read_chat_document_text('/tmp/demo.pdf') == 'line one\n\nline two'
+
+
+def test_read_chat_document_text_reads_docx_locally_without_ocr(monkeypatch, tmp_path):
+    from docx import Document
+
+    path = tmp_path / 'requirements.docx'
+    document = Document()
+    document.add_paragraph('第一段要求')
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = '指标'
+    table.cell(0, 1).text = '性能'
+    document.add_paragraph('最后一段')
+    document.save(path)
+    monkeypatch.setattr(
+        ar,
+        '_get_document_reader',
+        lambda: (_ for _ in ()).throw(AssertionError('DOCX must not use OCR when local parsing succeeds')),
+    )
+
+    body = ar.read_chat_document_text(str(path))
+
+    assert body.splitlines() == ['第一段要求', '指标\t性能', '最后一段']
+
+
+def test_read_chat_document_text_falls_back_to_ocr_for_invalid_docx(monkeypatch, tmp_path):
+    path = tmp_path / 'broken.docx'
+    path.write_bytes(b'not-a-docx')
+
+    def reader(_path):
+        return [SimpleNamespace(text='OCR fallback')]
+
+    monkeypatch.setattr(ar, '_get_document_reader', lambda: reader)
+
+    assert ar.read_chat_document_text(str(path)) == 'OCR fallback'
+
+
+def test_read_chat_document_text_falls_back_to_ocr_for_image_only_docx(monkeypatch, tmp_path):
+    from docx import Document
+
+    path = tmp_path / 'image-only.docx'
+    Document().save(path)
+    monkeypatch.setattr(
+        ar,
+        '_get_document_reader',
+        lambda: lambda _path: [SimpleNamespace(text='OCR image text')],
+    )
+
+    assert ar.read_chat_document_text(str(path)) == 'OCR image text'

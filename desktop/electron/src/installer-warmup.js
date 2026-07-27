@@ -1,3 +1,6 @@
+const fs = require("node:fs");
+const path = require("node:path");
+
 function serializeWarmupError(error) {
   if (error instanceof Error) {
     return error.stack || error.message;
@@ -73,8 +76,35 @@ async function runInstallerWarmupLifecycle({
   }
 }
 
+function macWarmupMarkerPath(userDataDir) {
+  return path.join(userDataDir, "installation-warmup.json");
+}
+
+function macWarmupCompleted(markerPath, version) {
+  try {
+    const marker = JSON.parse(fs.readFileSync(markerPath, "utf8"));
+    return marker?.version === version && marker?.completed === true;
+  } catch {
+    return false;
+  }
+}
+
+function markMacWarmupCompleted(markerPath, version) {
+  fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+  const temporaryPath = `${markerPath}.${process.pid}.tmp`;
+  fs.writeFileSync(temporaryPath, `${JSON.stringify({
+    version,
+    completed: true,
+    completedAt: new Date().toISOString(),
+  }, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temporaryPath, markerPath);
+}
+
 module.exports = {
   assertMaintenanceRuntimeReady,
   assertMaintenanceRuntimeStopped,
+  macWarmupCompleted,
+  macWarmupMarkerPath,
+  markMacWarmupCompleted,
   runInstallerWarmupLifecycle,
 };

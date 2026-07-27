@@ -53,7 +53,13 @@ const IMPORT_TASK_PROCESSING_STATUSES = new Set([
   "queued",
 ]);
 
-const IMPORT_TASK_SUCCESS_STATUSES = new Set(["success", "completed", "done", "finished"]);
+const IMPORT_TASK_SUCCESS_STATUSES = new Set([
+  "succeeded",
+  "success",
+  "completed",
+  "done",
+  "finished",
+]);
 
 export interface DatasetItemListResult {
   items: DatasetItem[];

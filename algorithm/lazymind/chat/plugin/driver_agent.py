@@ -239,6 +239,12 @@ def evaluate_step(
     try:
         _init_driver_sid(session_id, plugin_id, step_id)
         driver_db = _init_driver_artifact_context(session_id, plugin_id, step_id)
+        lazyllm.set_trace_context({
+            'session_id': session_id or '',
+            'sampled': True,
+            'module_trace': {'default': True},
+            'request_tags': ['plugin_driver'],
+        })
         llm = _build_llm(llm_config)
         tools: List[Any] = []
         try:

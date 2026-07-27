@@ -20,12 +20,13 @@ import {
   Source,
 } from "@/api/generated/chatbot-client";
 import { AgentAppsAuth } from "@/components/auth";
-import { ChatServiceApi } from "@/modules/chat/utils/request";
+import { ChatServiceApi, decideToolLimit } from "@/modules/chat/utils/request";
 import { usePluginStore } from "@/modules/chat/store/pluginPanel";
 import { PluginPanel } from "@/modules/chat/components/PluginPanel";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
+import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
 
 const BotAvatarIcon = new URL(
@@ -850,6 +851,34 @@ const AssistantMessage = (props: any) => {
   }
 
   function renderBottom() {
+    if (
+      item.tool_limit_pending &&
+      item.tool_limit_pending.decision_id !== item.resolved_tool_limit_decision_id &&
+      sessionId &&
+      item.finish_reason ===
+        ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
+    ) {
+      return (
+        <ToolLimitCard
+          key={item.tool_limit_pending.decision_id}
+          pending={item.tool_limit_pending}
+          onDecision={async (action) => {
+            const decisionId = item.tool_limit_pending.decision_id;
+            await decideToolLimit(
+              sessionId,
+              decisionId,
+              action,
+            );
+            updateMessage({
+              id: item.id,
+              history_id: item.history_id,
+              tool_limit_pending: undefined,
+              resolved_tool_limit_decision_id: decisionId,
+            });
+          }}
+        />
+      );
+    }
     // Render ask_pending card if present
     if (item.ask_pending) {
       const askPending = item.ask_pending;

@@ -405,6 +405,8 @@ export function SelfEvolutionPageController({
   const pendingNextStepRunIdRef = useRef<string>();
   const isAdvancingToNextStepRef = useRef(false);
   const autoContinuedCheckpointKeyRef = useRef("");
+  // Set when user clicks a stage in the overview; blocks auto-advance from stealing the view.
+  const userPinnedViewStepIdRef = useRef<string>();
   const streamingStageCompletedRef = useRef<Partial<Record<ThreadEventStage, boolean>>>({});
   const loadingThreadStepIdRef = useRef<string>();
   const restoreRequestIdRef = useRef(0);
@@ -2344,6 +2346,7 @@ export function SelfEvolutionPageController({
     setSelectedThreadStepId(undefined);
     setLoadingThreadStepId(undefined);
     loadingThreadStepIdRef.current = undefined;
+    userPinnedViewStepIdRef.current = undefined;
   };
 
   const mergeThreadEvents = (events: NormalizedThreadEvent[]) => {
@@ -2605,9 +2608,26 @@ export function SelfEvolutionPageController({
   ) => {
     isAdvancingToNextStepRef.current = true;
     try {
+      const nextStep = threadStepListRef.current.steps.find(
+        (step) => step.stepId === nextStepRunId,
+      );
+      const nextStage = nextStep
+        ? resolveThreadStepViewStage(nextStep)
+        : undefined;
+      const pinnedStepId = userPinnedViewStepIdRef.current;
+      const shouldUpdateView =
+        !pinnedStepId || pinnedStepId === nextStepRunId;
+      if (shouldUpdateView) {
+        setSelectedThreadStepId(nextStepRunId);
+        if (nextStage) {
+          setSelectedViewStage(nextStage);
+        }
+        userPinnedViewStepIdRef.current = undefined;
+      }
       setLiveCheckpointWaitPrompt(undefined);
-      processedWorkflowEventKeysRef.current = new Set();
-      await waitForStepEventsStreamConnected(threadId, nextStepRunId, sessionId);
+      await waitForStepEventsStreamConnected(threadId, nextStepRunId, sessionId, {
+        autoAdvanceOnComplete: true,
+      });
       await refreshThreadStepList(threadId).catch(() => undefined);
     } finally {
       isAdvancingToNextStepRef.current = false;
@@ -2871,15 +2891,27 @@ export function SelfEvolutionPageController({
           : undefined);
 
       pendingNextStepRunIdRef.current = undefined;
-      setSelectedThreadStepId(nextStepRunId);
       setLoadingThreadStepId(undefined);
       loadingThreadStepIdRef.current = undefined;
       setTerminalFlowStepStatus(undefined);
-      prepareThreadStepStreamView(nextStage);
+      // Keep accumulated events so the middle panel can refresh onto the next
+      // stage without wiping progress already received for that stage.
+      const pinnedStepId = userPinnedViewStepIdRef.current;
+      const shouldUpdateView =
+        !pinnedStepId || pinnedStepId === nextStepRunId;
+      if (shouldUpdateView) {
+        setSelectedThreadStepId(nextStepRunId);
+        if (nextStage) {
+          setSelectedViewStage(nextStage);
+        }
+        userPinnedViewStepIdRef.current = undefined;
+      }
+      setLiveCheckpointWaitPrompt(undefined);
       await waitForStepEventsStreamConnected(
         threadId,
         nextStepRunId,
         sessionId,
+        { autoAdvanceOnComplete: true },
       );
       await refreshThreadStepList(threadId).catch(() => undefined);
       return true;
@@ -2887,21 +2919,6 @@ export function SelfEvolutionPageController({
       isAdvancingToNextStepRef.current = false;
     }
   }
-
-  const prepareThreadStepStreamView = (viewStage?: string) => {
-    if (viewStage) {
-      setSelectedViewStage(viewStage);
-    }
-    processedWorkflowEventKeysRef.current = new Set();
-    replaceThreadEvents([]);
-    setWorkflowRuntimeState(
-      applyThreadStepListToWorkflowRuntimeState(
-        createThreadRestoreWorkflowRuntimeState(),
-        threadStepListRef.current,
-      ),
-    );
-    setLiveCheckpointWaitPrompt(undefined);
-  };
 
   const onSelectThreadStep = async (
     step: ThreadStepSummary,
@@ -2921,6 +2938,10 @@ export function SelfEvolutionPageController({
     loadingThreadStepIdRef.current = step.stepId;
     setLoadingThreadStepId(step.stepId);
     setSelectedThreadStepId(step.stepId);
+    // Pin only when browsing a non-live step so auto-advance won't steal the view.
+    // Selecting the live/running step clears the pin and keeps following execution.
+    userPinnedViewStepIdRef.current =
+      step.active || isThreadStepRunning(step) ? undefined : step.stepId;
     setIsArtifactPanelOpen(false);
     setCaseArtifact(undefined);
     setActiveArtifactKind(undefined);
@@ -2932,11 +2953,20 @@ export function SelfEvolutionPageController({
     );
 
     try {
-      prepareThreadStepStreamView(viewStage);
+      // Keep accumulated events so switching stages only changes the view filter.
+      // Clearing here caused the middle panel to go empty when re-entering a live
+      // stage whose stream no longer replays historical case progress.
+      if (viewStage) {
+        setSelectedViewStage(viewStage);
+      }
+      setLiveCheckpointWaitPrompt(undefined);
+      // Manual stage browsing must not trigger auto-advance; otherwise selecting
+      // a completed step1 immediately jumps to step2 when its historical stream ends.
       await waitForStepEventsStreamConnected(
         activeThreadId,
         step.stepId,
         activeSessionId,
+        { autoAdvanceOnComplete: false, appendChat: false },
       );
     } catch (error) {
       message.error(getCatalogApiErrorMessage(error), 2);
@@ -3016,6 +3046,7 @@ export function SelfEvolutionPageController({
     threadId: string,
     stepId: string,
     sessionId: string,
+    options?: { autoAdvanceOnComplete?: boolean; appendChat?: boolean },
   ) =>
     new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -3033,6 +3064,8 @@ export function SelfEvolutionPageController({
       };
       void subscribeThreadEvents(threadId, stepId, sessionId, {
         onStreamConnected: settleResolve,
+        autoAdvanceOnComplete: options?.autoAdvanceOnComplete,
+        appendChat: options?.appendChat,
       }).catch(settleReject);
     });
 
@@ -3040,7 +3073,11 @@ export function SelfEvolutionPageController({
     threadId: string,
     stepId: string,
     sessionId = activeSessionId,
-    options?: { onStreamConnected?: () => void },
+    options?: {
+      onStreamConnected?: () => void;
+      autoAdvanceOnComplete?: boolean;
+      appendChat?: boolean;
+    },
   ) => {
     const activeSubscription = threadEventsAbortRef.current;
     if (
@@ -3060,7 +3097,16 @@ export function SelfEvolutionPageController({
     const controller = new AbortController();
     const subscription = { threadId, stepId, controller };
     threadEventsAbortRef.current = subscription;
-    const shouldAppendEventChat = mode === "auto";
+    const shouldAppendEventChat = options?.appendChat ?? mode === "auto";
+    // Default true so live execution still auto-advances; user browsing opts out.
+    const shouldAutoAdvanceOnComplete = options?.autoAdvanceOnComplete !== false;
+
+    const maybeAdvanceAfterStepStream = async () => {
+      if (!shouldAutoAdvanceOnComplete) {
+        return;
+      }
+      await advanceAutoExecutionAfterStepStream(threadId, stepId, sessionId);
+    };
 
     try {
       const response = await openStepEventsResponse(
@@ -3108,11 +3154,7 @@ export function SelfEvolutionPageController({
               appendChat: shouldAppendEventChat,
             });
             await disconnectStream();
-            await advanceAutoExecutionAfterStepStream(
-              threadId,
-              stepId,
-              sessionId,
-            );
+            await maybeAdvanceAfterStepStream();
             return;
           }
 
@@ -3130,11 +3172,7 @@ export function SelfEvolutionPageController({
           });
           if (shouldDisconnectThreadEventStream(event)) {
             await disconnectStream();
-            await advanceAutoExecutionAfterStepStream(
-              threadId,
-              stepId,
-              sessionId,
-            );
+            await maybeAdvanceAfterStepStream();
             return;
           }
         }
@@ -3151,11 +3189,7 @@ export function SelfEvolutionPageController({
               appendChat: shouldAppendEventChat,
             });
             await disconnectStream();
-            await advanceAutoExecutionAfterStepStream(
-              threadId,
-              stepId,
-              sessionId,
-            );
+            await maybeAdvanceAfterStepStream();
             return;
           }
 
@@ -3166,11 +3200,7 @@ export function SelfEvolutionPageController({
           });
           if (shouldDisconnectThreadEventStream(event)) {
             await disconnectStream();
-            await advanceAutoExecutionAfterStepStream(
-              threadId,
-              stepId,
-              sessionId,
-            );
+            await maybeAdvanceAfterStepStream();
           }
         }
       }
@@ -3726,6 +3756,7 @@ export function SelfEvolutionPageController({
       setSelectedThreadStepId(undefined);
       setLoadingThreadStepId(undefined);
       loadingThreadStepIdRef.current = undefined;
+      userPinnedViewStepIdRef.current = undefined;
       setSelectedViewStage(undefined);
       await subscribePendingNextStepRunOrRestoreLatest(
         activeThreadId,
@@ -4953,27 +4984,27 @@ export function SelfEvolutionPageController({
                 >
                   <span role="rowheader">
                     <strong>{questionTypeLabel}</strong>
-                  <small>
-                    {t("selfEvolutionRun.scoredCaseCount", {
-                      scored: summary.scoredCaseCount,
-                      total: summary.caseCount,
-                    })}
-                  </small>
-                </span>
-                {evalReportMetricMeta.map((metric) => {
-                  const value = clampScore(summary.metrics[metric.key]);
-                  return (
-                    <span
-                      key={metric.key}
-                      role="cell"
-                      className="self-evolution-px-heatmap-cell"
-                      style={getEvalMetricTone(value)}
-                      title={`${questionTypeLabel} ${metric.label}: ${formatPercent(value)}`}
-                    >
-                      {formatPercent(value)}
-                    </span>
-                  );
-                })}
+                    <small>
+                      {t("selfEvolutionRun.scoredCaseCount", {
+                        scored: summary.scoredCaseCount,
+                        total: summary.caseCount,
+                      })}
+                    </small>
+                  </span>
+                  {evalReportMetricMeta.map((metric) => {
+                    const value = clampScore(summary.metrics[metric.key]);
+                    return (
+                      <span
+                        key={metric.key}
+                        role="cell"
+                        className="self-evolution-px-heatmap-cell"
+                        style={getEvalMetricTone(value)}
+                        title={`${questionTypeLabel} ${metric.label}: ${formatPercent(value)}`}
+                      >
+                        {formatPercent(value)}
+                      </span>
+                    );
+                  })}
                 </div>
               );
             })}

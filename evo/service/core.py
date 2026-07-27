@@ -16,7 +16,13 @@ from evo.operations import evo_flow_definition
 from evo.operations.repair.trace import RepairTraceStore
 from evo.repair_model import EvoModelConfigError, resolve_evo_model
 
-from .contracts import CommandRequest, ControlRequest, ServiceError, ThreadCreate
+from .contracts import (
+    CommandRequest,
+    ControlRequest,
+    RetryRequest,
+    ServiceError,
+    ThreadCreate,
+)
 from .projections import ProjectionService
 from .public import public_message_history, public_thread_state, public_value
 from .router import RouterService
@@ -65,6 +71,8 @@ class EvoService:
             terminate_timeout=terminate_timeout,
         )
         service = cls(root, definition, flow)
+        await asyncio.to_thread(service.router.reconcile_unpublished)
+        await asyncio.to_thread(service.router.reconcile_published)
         await service._restore_auto_threads()
         return service
 
@@ -190,16 +198,24 @@ class EvoService:
         return await self._control(thread_id, action)
 
     async def retry(self, thread_id: str,
-                    request: CommandRequest | Mapping[str, Any]
+                    request: RetryRequest | Mapping[str, Any]
                     ) -> dict[str, str]:
-        request = _command(request)
-        _validate_stage(request.until_step)
+        request = _retry_request(request)
+        _validate_retry_stage(request.stage)
+        command_id = (
+            request.command_id.strip()
+            or f'retry:{thread_id}:{time.time_ns()}'
+        )
 
         async def action() -> dict[str, str]:
-            await self.flow.retry(thread_id)
+            await self.flow.retry(
+                thread_id,
+                stage=request.stage,
+                request_id=command_id,
+            )
             if await self._thread_mode(thread_id) == 'auto':
                 self._ensure_auto_task(thread_id)
-            return _accepted(thread_id, request.command_id, 'retry')
+            return _accepted(thread_id, command_id, 'retry')
 
         return await self._control(thread_id, action)
 
@@ -247,7 +263,14 @@ class EvoService:
                       ) -> MessageTurnResult:
         lock = self._message_locks.setdefault(thread_id, asyncio.Lock())
         async with lock:
-            return await self.messages.run('user', thread_id, request)
+            result = await self.messages.run('user', thread_id, request)
+        snapshot, mode = await asyncio.gather(
+            self.flow.snapshot(thread_id),
+            self._thread_mode(thread_id),
+        )
+        if mode == 'auto' and snapshot.status not in _AUTO_STOPPED:
+            self._ensure_auto_task(thread_id)
+        return result
 
     async def message_history(self, thread_id: str, page_size: int,
                               page_token: str
@@ -417,6 +440,7 @@ def _seed_values(thread_id: str, request: ThreadCreate) -> dict[str, object]:
         A.EVAL_POLICY: {'judge_llm_config': llm_config},
         A.REPAIR_POLICY: {
             'llm_config': llm_config,
+            'mode': request.mode,
             'thread_id': thread_id,
             'workspace_namespace': thread_id,
         },
@@ -447,6 +471,10 @@ def _control_request(request: ControlRequest | Mapping[str, Any]) -> ControlRequ
     return request if isinstance(request, ControlRequest) else ControlRequest.model_validate(request)
 
 
+def _retry_request(request: RetryRequest | Mapping[str, Any]) -> RetryRequest:
+    return request if isinstance(request, RetryRequest) else RetryRequest.model_validate(request)
+
+
 def _accepted(thread_id: str, command_id: str, command: str) -> dict[str, str]:
     return {
         'status': 'accepted',
@@ -464,6 +492,11 @@ def _page_offset(token: str) -> int:
 def _validate_stage(stage: str) -> None:
     if stage and stage not in _STAGES:
         raise ServiceError(422, f'until_step must be one of: {", ".join(_STAGES)}')
+
+
+def _validate_retry_stage(stage: str) -> None:
+    if stage and stage not in _STAGES:
+        raise ServiceError(422, f'stage must be one of: {", ".join(_STAGES)}')
 
 
 def _next_stage(stage: str) -> str:
