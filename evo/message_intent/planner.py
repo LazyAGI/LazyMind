@@ -18,6 +18,7 @@ Return JSON only. Do not use markdown or explanations.
 
 The next action kinds are:
 - flow: start, approve, pause, resume, retry, cancel. approve requires a stage.
+  retry accepts an optional stage when the user names or numbers a stage.
 - query: progress, stage_result, artifact, artifact_history.
 - artifact: patch, replace, retry, rollback. Always use an artifact id from intent_catalog.
 - case: add or delete. add accepts either a complete case object or an instruction.
@@ -26,6 +27,8 @@ The next action kinds are:
 - clarify or final.
 
 Artifact retry means rerun the producer of one concrete artifact with the same inputs.
+Flow retry reruns a complete stage and its downstream stages. Without a stage it reruns
+the current failed stage.
 Do not invent rerun_step, rerun_case_stage, invalidate_from_step, continue, or patch_collection.
 Changing an artifact, rolling back, adding/deleting a case, and cancelling a run require a
 separate confirmation. Return the executable action first; the application creates that

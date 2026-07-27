@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
@@ -110,8 +111,28 @@ class ArtifactFlow:
     async def resume(self, run_id: str) -> FlowSnapshot:
         return await self._project(await self._runtime.resume(run_id))
 
-    async def retry(self, run_id: str) -> FlowSnapshot:
-        return await self._project(await self._runtime.retry(run_id))
+    async def retry(self, run_id: str, *, stage: str = '',
+                    request_id: str = ''
+                    ) -> FlowSnapshot:
+        current = await self.snapshot(run_id)
+        if current.status != 'failed':
+            raise DefinitionError(f'cannot retry flow from {current.status}')
+
+        target_index = self._retry_stage_index(current, stage)
+        keys = self._retry_entry_keys(current, target_index)
+        if target_index < self._stage_index(current.current_stage) and not keys:
+            raise DefinitionError(
+                f'flow stage has no effective retry entry: '
+                f'{self._definition.stages[target_index].name}'
+            )
+        retry_id = request_id.strip()
+        if keys and not retry_id:
+            retry_id = f'flow-retry:{run_id}:{uuid.uuid4().hex}'
+        return await self._project(await self._runtime.retry(
+            run_id,
+            keys,
+            request_id=retry_id,
+        ))
 
     async def cancel(self, run_id: str) -> FlowSnapshot:
         return await self._project(await self._runtime.cancel(run_id))
@@ -197,6 +218,55 @@ class ArtifactFlow:
         if pending is None or pending.stage != stage:
             raise DefinitionError(f'flow is not awaiting approval for: {stage}')
         return target
+
+    def _retry_stage_index(self, snapshot: FlowSnapshot, stage: str) -> int:
+        current_index = self._stage_index(snapshot.current_stage)
+        target_index = current_index if not stage.strip() else self._stage_index(stage)
+        if target_index > current_index:
+            raise DefinitionError(
+                f'cannot retry future flow stage: '
+                f'{self._definition.stages[target_index].name}'
+            )
+        return target_index
+
+    def _stage_index(self, stage: str) -> int:
+        index = next(
+            (
+                index
+                for index, definition in enumerate(self._definition.stages)
+                if definition.name == stage
+            ),
+            None,
+        )
+        if index is None:
+            raise DefinitionError(f'unknown flow stage: {stage}')
+        return index
+
+    def _retry_entry_keys(self, snapshot: FlowSnapshot,
+                          stage_index: int
+                          ) -> tuple[ArtifactKey, ...]:
+        completed = snapshot.runtime.completed_artifacts
+        keys: list[ArtifactKey] = []
+        for operation in self._definition.stage_entry_operations(stage_index):
+            output_ids = {
+                output.artifact_id
+                for output in operation.spec.outputs.values()
+            }
+            by_invocation: dict[str, ArtifactKey] = {}
+            for key in sorted(
+                completed,
+                key=lambda item: (item.artifact_id, item.partition_key),
+            ):
+                if key.artifact_id not in output_ids:
+                    continue
+                invocation = (
+                    key.partition_key
+                    if operation.spec.driver_input is not None
+                    else ''
+                )
+                by_invocation.setdefault(invocation, key)
+            keys.extend(by_invocation.values())
+        return tuple(keys)
 
 
 def _approval_commit_id(stage: str, result_ref: ArtifactRef) -> str:

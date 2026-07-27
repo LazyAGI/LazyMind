@@ -46,8 +46,8 @@ class FlowAction(StrictModel):
     def validate_stage(self) -> FlowAction:
         if self.command == 'approve' and not self.stage:
             raise ValueError('approve requires stage')
-        if self.command != 'approve' and self.stage:
-            raise ValueError('stage is only valid for approve')
+        if self.command not in {'approve', 'retry'} and self.stage:
+            raise ValueError('stage is only valid for approve or retry')
         return self
 
 

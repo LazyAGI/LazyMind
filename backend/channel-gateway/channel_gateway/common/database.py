@@ -529,6 +529,37 @@ class GatewayStore:
                 ).fetchall()
             )
 
+    def delete_account(self, owner_user_id: str, account_id: str) -> bool:
+        with self._connect() as connection:
+            account = connection.execute(
+                """
+                SELECT id FROM channel_accounts
+                WHERE id = %s AND owner_user_id = %s
+                FOR UPDATE
+                """,
+                (account_id, owner_user_id),
+            ).fetchone()
+            if not account:
+                return False
+            connection.execute(
+                """
+                UPDATE channel_connection_sessions
+                SET account_id = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE account_id = %s
+                """,
+                (account_id,),
+            )
+            deleted = connection.execute(
+                """
+                DELETE FROM channel_accounts
+                WHERE id = %s AND owner_user_id = %s
+                RETURNING id
+                """,
+                (account_id, owner_user_id),
+            ).fetchone()
+            return deleted is not None
+
     def recoverable_sessions(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
             return list(

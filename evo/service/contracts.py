@@ -68,6 +68,11 @@ class CommandRequest(StrictModel):
     until_step: str = ''
 
 
+class RetryRequest(StrictModel):
+    command_id: str = ''
+    stage: str = ''
+
+
 class ControlRequest(StrictModel):
     command_id: str = ''
 
@@ -105,7 +110,7 @@ class RegisterAlgorithmBody(StrictModel):
 
 
 class AlgorithmActionBody(StrictModel):
-    action: Literal['healthcheck', 'restart', 'stop']
+    action: Literal['healthcheck', 'start', 'restart', 'stop']
     wait_ready_seconds: float = Field(default=180.0, gt=0, le=900)
 
 
@@ -117,6 +122,6 @@ class AbStrategyBody(StrictModel):
 
 __all__ = [
     'AbStrategyBody', 'AlgorithmActionBody', 'AlgorithmOwner', 'CommandRequest',
-    'ControlRequest', 'MessageBody', 'RegisterAlgorithmBody', 'StrictModel',
+    'ControlRequest', 'MessageBody', 'RegisterAlgorithmBody', 'RetryRequest', 'StrictModel',
     'ServiceError', 'ThreadCreate', 'ThreadInputs',
 ]

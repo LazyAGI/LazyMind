@@ -87,7 +87,7 @@ class ActionExecutor:
     async def execute(self, prepared: PreparedAction) -> object:
         action = prepared.action
         if isinstance(action, FlowAction):
-            return await self._execute_flow(action)
+            return await self._execute_flow(action, prepared.command_id)
         if isinstance(action, QueryAction):
             return await self._execute_query(action)
         if isinstance(action, ArtifactAction) and action.command == 'retry':
@@ -118,7 +118,9 @@ class ActionExecutor:
                 )
         return snapshot
 
-    async def _execute_flow(self, action: FlowAction) -> object:
+    async def _execute_flow(self, action: FlowAction,
+                            command_id: str = ''
+                            ) -> object:
         if action.command == 'start':
             return await self.flow.start(self.thread_id)
         if action.command == 'approve':
@@ -128,7 +130,11 @@ class ActionExecutor:
         if action.command == 'resume':
             return await self.flow.resume(self.thread_id)
         if action.command == 'retry':
-            return await self.flow.retry(self.thread_id)
+            return await self.flow.retry(
+                self.thread_id,
+                stage=action.stage,
+                request_id=command_id,
+            )
         return await self.flow.cancel(self.thread_id)
 
     async def _execute_query(self, action: QueryAction) -> object:
@@ -312,7 +318,11 @@ def _summary(action: PlannedAction) -> str:
             'approve': f'批准 {action.stage} 阶段',
             'pause': '暂停流程',
             'resume': '恢复流程',
-            'retry': '重试失败流程',
+            'retry': (
+                f'重新执行 {action.stage} 阶段'
+                if action.stage
+                else '重试失败阶段'
+            ),
             'cancel': '终止流程',
         }[action.command]
     if isinstance(action, QueryAction):

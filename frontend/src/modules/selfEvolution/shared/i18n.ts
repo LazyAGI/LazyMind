@@ -138,9 +138,13 @@ export function getEvalQuestionTypeLabel(questionType: string): string {
   const normalized = questionType.trim().toLowerCase().replace(/[\s-]+/g, "_");
   const labels: Record<string, string> = {
     single_hop: t("selfEvolutionRun.qtSingleHop"),
+    multi_hop: t("selfEvolutionRun.qtMultiHop"),
     single_doc_multi_hop: t("selfEvolutionRun.qtSingleDocMultiHop"),
     multi_doc_multi_hop: t("selfEvolutionRun.qtMultiDocMultiHop"),
+    table: t("selfEvolutionRun.qtTable"),
     table_list: t("selfEvolutionRun.qtTableList"),
+    formula: t("selfEvolutionRun.qtFormula"),
+    code: t("selfEvolutionRun.qtCode"),
   };
   return labels[normalized] || questionType.replace(/_/g, " ");
 }

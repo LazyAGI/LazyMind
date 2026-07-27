@@ -181,12 +181,11 @@ slots:
 
 ui:
   tabs:
-    - id: context
+    - id: prepare
       step_id: prepare
-      label: Context
+      label: Preparation
       layout: list
       slots:
-        - id: context_ir
         - id: source_ir
 
     - id: outline
@@ -221,7 +220,7 @@ i18n:
       write_document: {label: 成稿}
       publish: {label: 交付文稿}
     tabs:
-      context: {label: 写作准备}
+      prepare: {label: 写作准备}
       outline: {label: 大纲}
       result: {label: 成稿}
       publish: {label: 交付文稿}
@@ -230,7 +229,7 @@ i18n:
       resource_profiles: {label: 资源画像}
       writing_context: {label: 写作上下文}
       context_ir: {label: 上下文构造结果}
-      source_ir: {label: 来源文档}
+      source_ir: {label: 资源文档}
       target_document: {label: 云文档目标}
       outline_ir: {label: 大纲}
       section_instructions: {label: 章节规划}

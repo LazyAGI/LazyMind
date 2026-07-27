@@ -44,7 +44,19 @@ func backgroundJobsEnabled() bool {
 	return raw != "0" && raw != "false" && raw != "no" && raw != "off"
 }
 
+func openAPIArtifactExportEnabled() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED")))
+	if raw == "" {
+		return true
+	}
+	return raw != "0" && raw != "false" && raw != "no" && raw != "off"
+}
+
 func exportOpenAPIArtifacts(openAPIJSON []byte) {
+	if !openAPIArtifactExportEnabled() {
+		return
+	}
+
 	wd, err := os.Getwd()
 	if err != nil {
 		log.Logger.Warn().Err(err).Msg("get working directory failed; skip exporting OpenAPI artifacts")

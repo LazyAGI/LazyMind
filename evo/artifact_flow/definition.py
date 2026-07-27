@@ -43,6 +43,11 @@ class FlowDefinition:
         repr=False,
         compare=False,
     )
+    _entry_operations_by_stage: tuple[tuple[Operation, ...], ...] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         operations = tuple(self.operations)
@@ -124,12 +129,26 @@ class FlowDefinition:
 
         object.__setattr__(self, '_stage_by_artifact_id', MappingProxyType(artifact_stages))
         object.__setattr__(self, '_stage_by_operation_id', MappingProxyType(operation_stages))
+        object.__setattr__(
+            self,
+            '_entry_operations_by_stage',
+            _stage_entry_operations(operations, stages, operation_stages),
+        )
 
     def stage_index_for_artifact(self, artifact_id: str) -> int | None:
         return self._stage_by_artifact_id.get(artifact_id)
 
     def stage_index_for_operation(self, operation_id: str) -> int | None:
         return self._stage_by_operation_id.get(operation_id)
+
+    def stage_entry_operations(self, stage_index: int) -> tuple[Operation, ...]:
+        if (
+            not isinstance(stage_index, int)
+            or stage_index < 0
+            or stage_index >= len(self.stages)
+        ):
+            raise ValueError(f'unknown flow stage index: {stage_index}')
+        return self._entry_operations_by_stage[stage_index]
 
 
 def _stage_ownership(operations: tuple[Operation, ...],
@@ -176,6 +195,43 @@ def _stage_ownership(operations: tuple[Operation, ...],
     _validate_stage_results(stages, producers, operation_stages)
     _validate_approval_gates(operations, stages, producers, operation_stages)
     return artifact_stages, operation_stages
+
+
+def _stage_entry_operations(
+    operations: tuple[Operation, ...],
+    stages: tuple[FlowStage, ...],
+    operation_stages: Mapping[str, int],
+) -> tuple[tuple[Operation, ...], ...]:
+    producers = {
+        output.artifact_id: operation
+        for operation in operations
+        for output in operation.spec.outputs.values()
+    }
+    entries: list[list[Operation]] = [[] for _ in stages]
+    for operation in operations:
+        stage_index = operation_stages[operation.spec.op_id]
+        dependency_ids = {
+            artifact_id
+            for binding in operation.spec.inputs.values()
+            for artifact_id in (
+                binding.artifact_id,
+                binding.partition_set_id,
+            )
+            if artifact_id
+        }
+        has_stage_input = any(
+            (
+                producer is not None
+                and operation_stages.get(producer.spec.op_id) == stage_index
+            )
+            for producer in (
+                producers.get(artifact_id)
+                for artifact_id in dependency_ids
+            )
+        )
+        if not has_stage_input:
+            entries[stage_index].append(operation)
+    return tuple(tuple(stage_entries) for stage_entries in entries)
 
 
 def _validate_stage_results(stages: tuple[FlowStage, ...],

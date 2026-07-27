@@ -18,7 +18,7 @@ from evo.artifact_runtime import (
     scalar,
 )
 
-from .abtest.candidate import async_candidate_rag_answer, candidate_service
+from .abtest.candidate import async_candidate_rag_answer, candidate_service, finalize_candidate
 from .abtest.comparison import compare_abtest
 from .analysis.classify import classify_case
 from .analysis.cluster import cluster_traces
@@ -505,13 +505,15 @@ async def candidate_summary_operation(ctx: OperationContext,
 async def compare_abtest_operation(ctx: OperationContext, baseline: object,
                                    candidate: object, service: object
                                    ) -> OperationResult:
+    comparison = compare_abtest(
+        ctx.run_id,
+        _mapping(baseline, 'baseline'),
+        _mapping(candidate, 'candidate'),
+        _mapping(service, 'service'),
+    )
+    finalize_candidate(_mapping(service, 'service'), comparison)
     return OperationResult({
-        'comparison': compare_abtest(
-            ctx.run_id,
-            _mapping(baseline, 'baseline'),
-            _mapping(candidate, 'candidate'),
-            _mapping(service, 'service'),
-        ),
+        'comparison': comparison,
     })
 
 

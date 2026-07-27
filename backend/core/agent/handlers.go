@@ -498,9 +498,20 @@ func postThreadAction(w http.ResponseWriter, r *http.Request, action string) {
 			return
 		}
 		commandPayload := map[string]any{}
-		for _, key := range []string{"command_id", "until_step"} {
+		keys := []string{"command_id", "until_step"}
+		if action == "retry" {
+			keys = []string{"command_id", "stage"}
+		}
+		for _, key := range keys {
 			if value, ok := payload[key]; ok {
 				commandPayload[key] = value
+			}
+		}
+		if action == "retry" {
+			if _, hasStage := commandPayload["stage"]; !hasStage {
+				if value, ok := payload["until_step"]; ok {
+					commandPayload["stage"] = value
+				}
 			}
 		}
 		proxy, statusCode, err = newEvoClient(forwardedUpstreamHeaders(r)).PostCommand(r.Context(), threadID, action, commandPayload)

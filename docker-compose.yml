@@ -724,7 +724,7 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
-      - ./data/evo:/var/lib/lazymind/evo:ro
+      - evo-data:/var/lib/lazymind/evo:ro
       - ./data/subagent:/data/subagent
       - *algorithm-src-mount
       - *lazyllm-src-mount

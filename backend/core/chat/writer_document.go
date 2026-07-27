@@ -17,6 +17,9 @@ type writerDocumentSyncBody struct {
 	BaseRevision    int             `json:"base_revision"`
 	SourceDocument  json.RawMessage `json:"source_document"`
 	RevisedDocument json.RawMessage `json:"revised_document"`
+	// Mode controls versioning: "draft" updates the selected human artifact in
+	// place when possible; "checkpoint" (default) always creates a new revision.
+	Mode string `json:"mode"`
 }
 
 // SyncWriterDocument writes an edited WriterDocument to Feishu, then commits
@@ -33,6 +36,14 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 	if json.NewDecoder(r.Body).Decode(&body) != nil || body.BaseRevision <= 0 ||
 		len(body.SourceDocument) == 0 || len(body.RevisedDocument) == 0 {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	mode := body.Mode
+	if mode == "" {
+		mode = "checkpoint"
+	}
+	if mode != "draft" && mode != "checkpoint" {
+		common.ReplyErr(w, "invalid mode: must be draft or checkpoint", http.StatusBadRequest)
 		return
 	}
 
@@ -91,7 +102,9 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "writer document sync failed", http.StatusBadGateway)
 		return
 	}
-	if !result.Changed {
+	// Draft with no Feishu delta: nothing to persist. Checkpoint still wants a
+	// versioned snapshot even when the provider reports no_change.
+	if !result.Changed && mode != "checkpoint" {
 		writerSyncReply(w, "no_change", current.Revision, false, result)
 		return
 	}
@@ -108,20 +121,40 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "marshal WriterDocument artifact failed", http.StatusInternalServerError)
 		return
 	}
-	cardinality := "single"
-	if current.ListIndex != nil {
-		cardinality = "list"
+
+	var revision *orm.PluginSlotRevision
+	if mode == "draft" {
+		updated, ok, updateErr := plugin.UpdateSelectedHumanArtifactValue(
+			ctx, db, sessionID, slotID, index, "json", artifact, nil,
+		)
+		if updateErr != nil {
+			common.ReplyErrWithData(w, "artifact save failed", map[string]any{
+				"status": "artifact_save_failed", "feishu_synced": true, "artifact_saved": false,
+				"patch_result": result.PatchResult, "document": result.PersistedDocument,
+			}, http.StatusInternalServerError)
+			return
+		}
+		if ok {
+			revision = updated
+		}
 	}
-	revision, err := plugin.WriteSlotRevisionWithHumanArtifact(
-		ctx, db, sessionID, slotID, current.Slot, current.StepID, current.Attempt,
-		cardinality, index, "json", artifact, nil,
-	)
-	if err != nil {
-		common.ReplyErrWithData(w, "artifact save failed", map[string]any{
-			"status": "artifact_save_failed", "feishu_synced": true, "artifact_saved": false,
-			"patch_result": result.PatchResult, "document": result.PersistedDocument,
-		}, http.StatusInternalServerError)
-		return
+	if revision == nil {
+		cardinality := "single"
+		if current.ListIndex != nil {
+			cardinality = "list"
+		}
+		created, createErr := plugin.WriteSlotRevisionWithHumanArtifact(
+			ctx, db, sessionID, slotID, current.Slot, current.StepID, current.Attempt,
+			cardinality, index, "json", artifact, nil,
+		)
+		if createErr != nil {
+			common.ReplyErrWithData(w, "artifact save failed", map[string]any{
+				"status": "artifact_save_failed", "feishu_synced": true, "artifact_saved": false,
+				"patch_result": result.PatchResult, "document": result.PersistedDocument,
+			}, http.StatusInternalServerError)
+			return
+		}
+		revision = created
 	}
 	plugin.NotifyPluginArtifactUpdated(
 		ctx, db, sessionID, revision.StepID, revision.SlotID, revision.Slot,

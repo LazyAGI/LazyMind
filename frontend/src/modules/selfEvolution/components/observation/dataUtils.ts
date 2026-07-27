@@ -73,12 +73,15 @@ export function normalizeBadcaseRows(t: TFunction, value: unknown): CsvBadcaseRo
       ]) ??
       0;
     const failureType = getStringField(item, ["failure_type", "failure_reason", "fail_reason", "category"]) || t("selfEvolutionRun.observation.pendingAnalysis");
+    const questionType =
+      getStringField(item, ["question_type", "questionType", "question_type_key", "question_type_name"]) || "-";
     return {
       caseId: getStringField(item, ["case_id", "caseId", "case", "id"]) || `case-${String(index + 1).padStart(3, "0")}`,
       query: getStringField(item, ["query", "question", "prompt"]) || "-",
       reference: getStringField(item, ["reference", "ground_truth", "expected_answer"]) || "-",
       answer: getStringField(item, ["answer", "actual_answer", "prediction"]) || "-",
       score,
+      questionType,
       failureType,
       failureTone: score < 0.5 ? "orange" : score < 0.6 ? "red" : "blue",
       defect: getStringField(item, ["Defect", "defect"]) || "-",
