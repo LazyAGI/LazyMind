@@ -74,6 +74,7 @@ DROP TABLE IF EXISTS public.plugin_session_steps CASCADE;
 DROP TABLE IF EXISTS public.plugin_sessions CASCADE;
 DROP TABLE IF EXISTS public.plugin_slot_order CASCADE;
 DROP TABLE IF EXISTS public.plugin_slot_revisions CASCADE;
+DROP TABLE IF EXISTS public.plugin_step_intents CASCADE;
 DROP TABLE IF EXISTS public.plugin_transition_commands CASCADE;
 DROP TABLE IF EXISTS public.plugins CASCADE;
 DROP TABLE IF EXISTS public.prompt_categories CASCADE;
@@ -409,4 +410,3 @@ CREATE UNIQUE INDEX uk_system_memories_user_id ON public.system_memories USING b
 --
 
 CREATE UNIQUE INDEX uk_system_user_preferences_user_id ON public.system_user_preferences USING btree (user_id);
-

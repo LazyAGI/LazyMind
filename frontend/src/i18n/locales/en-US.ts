@@ -1777,7 +1777,7 @@ const enUS = {
     createFromCloudDocuments: "From cloud docs",
     createFromCloudDocumentsTitle: "Create from cloud documents",
     createFromCloudDocumentsIntro:
-      "Select Feishu, Notion, or a local path (admin), configure the sync scope, and a knowledge base will be created automatically. Feishu requires valid authorization; you will be redirected to cloud document settings if not authorized.",
+      "Select Feishu, Notion, or a local path (admin), configure the sync scope, and a knowledge base will be created automatically. Google Drive currently supports online search and can be authorized from Cloud Documents.",
     createFromCloudDocumentsSuccess: "Knowledge base created",
     editKnowledgeBase: "Edit Knowledge Base",
     selectTag: "Select knowledge base tag",

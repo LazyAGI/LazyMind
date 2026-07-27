@@ -1742,7 +1742,7 @@ const zhCN = {
     createFromCloudDocuments: "从云文档创建",
     createFromCloudDocumentsTitle: "从云文档创建知识库",
     createFromCloudDocumentsIntro:
-      "选择飞书、Notion 或本地路径（管理员），配置同步范围后将自动创建知识库。飞书需先完成有效授权；未授权时将跳转到云文档配置。",
+      "选择飞书、Notion 或本地路径（管理员），配置同步范围后将自动创建知识库。Google Drive 当前用于在线检索，可前往云文档完成授权配置。",
     createFromCloudDocumentsSuccess: "知识库已创建",
     editKnowledgeBase: "编辑知识库",
     selectTag: "请选择知识库标签",

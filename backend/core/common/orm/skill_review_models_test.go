@@ -91,7 +91,7 @@ func TestSkillReviewStatsRegisteredForLocalDDL(t *testing.T) {
 
 func TestDetailedSkillReviewStatsStatusMigrationHasNoEnumConstraint(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
-	migrationPath := filepath.Join(filepath.Dir(file), "..", "..", "migrations", "20260714190000_allow_detailed_skill_review_stats_status.up.sql")
+	migrationPath := filepath.Join(filepath.Dir(file), "..", "..", "migrations", "dev_mode", "v0_2", "20260714190000_allow_detailed_skill_review_stats_status.up.sql")
 	body, err := os.ReadFile(migrationPath)
 	if err != nil {
 		t.Fatal(err)
