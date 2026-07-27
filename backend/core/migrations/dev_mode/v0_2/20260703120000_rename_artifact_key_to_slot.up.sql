@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 -- Step 1: 列重命名 + 索引重建
 
 -- sub_agent_artifacts
@@ -75,3 +76,6 @@ WHERE input_slots::text LIKE '%enhanced_image_url%';
 UPDATE sub_agent_tasks
 SET input_slots = replace(input_slots::text, '"generated_image_url"',  '"image_output"')::json
 WHERE input_slots::text LIKE '%generated_image_url%';
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

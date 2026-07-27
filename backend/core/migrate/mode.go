@@ -213,6 +213,30 @@ func (r *Runner) pruneHistory(versions []uint64, applied []historyRecord) ([]his
 	return updated, nil
 }
 
+func (r *Runner) recordMigrationWithoutSQL(
+	migration migrationFile,
+	applied []historyRecord,
+) ([]historyRecord, uint64, error) {
+	updated := addHistoryRecord(applied, migration)
+	nextVersion := highestAppliedVersion(updated)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return applied, highestAppliedVersion(applied), err
+	}
+	if err := r.insertHistory(tx, migration.Version, migration.Name); err != nil {
+		_ = tx.Rollback()
+		return applied, highestAppliedVersion(applied), err
+	}
+	if err := r.writeState(tx, &nextVersion, false); err != nil {
+		_ = tx.Rollback()
+		return applied, highestAppliedVersion(applied), err
+	}
+	if err := tx.Commit(); err != nil {
+		return applied, highestAppliedVersion(applied), err
+	}
+	return updated, nextVersion, nil
+}
+
 func removeHistoryRecords(applied []historyRecord, versions []uint64) []historyRecord {
 	removed := make(map[uint64]struct{}, len(versions))
 	for _, version := range versions {

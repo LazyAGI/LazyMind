@@ -1,5 +1,6 @@
 -- 20260531090000_create_eval_set_tables
 -- +migrate Up
+-- +migrate Dialect postgres
 
 CREATE TABLE public.eval_set_shards (
     id character varying(64) NOT NULL,
@@ -99,3 +100,6 @@ CREATE INDEX idx_eval_set_items_set_type
     ON public.eval_set_items(shard_id, eval_set_id, question_type);
 CREATE INDEX idx_eval_set_items_set_updated
     ON public.eval_set_items(shard_id, eval_set_id, updated_at DESC);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS public.personal_resources (
     id VARCHAR(36) PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,
@@ -128,3 +129,6 @@ CREATE TABLE IF NOT EXISTS public.personal_resource_review_action_items (
 
 CREATE INDEX IF NOT EXISTS idx_personal_resource_review_items_batch
     ON public.personal_resource_review_action_items(batch_id);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

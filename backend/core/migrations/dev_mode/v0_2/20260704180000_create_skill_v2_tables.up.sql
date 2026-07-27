@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS public.skills (
     id VARCHAR(36) PRIMARY KEY,
     owner_user_id VARCHAR(255) NOT NULL,
@@ -165,3 +166,6 @@ ALTER TABLE public.skill_share_items
 
 CREATE INDEX IF NOT EXISTS idx_skill_share_items_source_skill
     ON public.skill_share_items(source_skill_id);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

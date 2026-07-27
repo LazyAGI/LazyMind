@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 ALTER TABLE user_selected_models ADD COLUMN share BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Only one share=true row per model_key (model_type column) globally.
@@ -6,3 +7,6 @@ ALTER TABLE user_selected_models ADD COLUMN share BOOLEAN NOT NULL DEFAULT FALSE
 CREATE UNIQUE INDEX uk_user_selected_models_shared_model
   ON user_selected_models (model_type)
   WHERE share = TRUE;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

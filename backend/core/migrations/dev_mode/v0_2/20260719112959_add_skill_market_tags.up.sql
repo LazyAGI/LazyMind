@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 ALTER TABLE public.skill_market_items
     ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'::jsonb;
 
@@ -29,3 +30,6 @@ SET owner_user_id = CONCAT('skill-market:', market_items.id),
 FROM public.skill_market_items AS market_items
 WHERE search_indexes.skill_id = market_items.source_skill_id
   AND search_indexes.owner_user_id <> CONCAT('skill-market:', market_items.id);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

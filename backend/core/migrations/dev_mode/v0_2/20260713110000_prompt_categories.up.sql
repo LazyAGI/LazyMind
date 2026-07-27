@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS prompt_categories (
     id VARCHAR(64) PRIMARY KEY,
     name VARCHAR(64) NOT NULL,
@@ -10,3 +11,6 @@ CREATE TABLE IF NOT EXISTS prompt_categories (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_prompt_categories_user_name
     ON prompt_categories (create_user_id, name);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

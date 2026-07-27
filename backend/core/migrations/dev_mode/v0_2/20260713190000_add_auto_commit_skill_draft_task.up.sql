@@ -1,5 +1,6 @@
 -- 20260713190000_add_auto_commit_skill_draft_task
 -- +migrate Up
+-- +migrate Dialect postgres
 
 ALTER TABLE public.resource_update_tasks
     DROP CONSTRAINT IF EXISTS chk_resource_update_tasks_task_type;
@@ -13,3 +14,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_skill_maintenance_admission
     WHERE resource_type = 'skill'
       AND task_type IN ('generate_review', 'organize_skill')
       AND status IN ('pending', 'running');
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

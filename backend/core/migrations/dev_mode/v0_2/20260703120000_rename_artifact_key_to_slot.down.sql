@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 -- 仅回滚列重命名，不回滚数据值（开发环境可接受）
 ALTER TABLE sub_agent_artifacts RENAME COLUMN slot TO artifact_key;
 DROP INDEX IF EXISTS idx_saa_task_slot;
@@ -14,3 +15,6 @@ ALTER TABLE plugin_human_artifacts RENAME COLUMN slot TO artifact_key;
 DROP INDEX IF EXISTS idx_plugin_human_artifacts_session_slot;
 CREATE INDEX idx_plugin_human_artifacts_session_key
     ON plugin_human_artifacts (session_id, artifact_key);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

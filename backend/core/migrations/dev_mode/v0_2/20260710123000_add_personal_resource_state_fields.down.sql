@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 ALTER TABLE public.personal_resources
     DROP COLUMN IF EXISTS updated_by_name,
     DROP COLUMN IF EXISTS updated_by,
@@ -8,3 +9,6 @@ ALTER TABLE public.personal_resources
     DROP COLUMN IF EXISTS auto_evo_generation,
     DROP COLUMN IF EXISTS auto_evo_apply_status,
     DROP COLUMN IF EXISTS auto_evo;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

@@ -1,4 +1,5 @@
 -- +migrate Down
+-- +migrate Dialect postgres
 
 UPDATE default_models SET model_type = 'VLM' WHERE model_type = 'vlm';
 UPDATE default_models SET model_type = 'embedding' WHERE model_type = 'embed_main';
@@ -16,3 +17,6 @@ UPDATE user_selected_models SET model_type = 'VLM' WHERE model_type = 'vlm';
 UPDATE user_selected_models SET model_type = 'embedding' WHERE model_type = 'embed_main';
 UPDATE user_selected_models SET model_type = 'multimodal_embedding' WHERE model_type = 'embed_image';
 UPDATE user_selected_models SET model_type = 'rerank' WHERE model_type = 'reranker';
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

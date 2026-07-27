@@ -1,5 +1,6 @@
 -- 20260609120000_add_resource_update_schema
 -- +migrate Down
+-- +migrate Dialect postgres
 
 DROP INDEX IF EXISTS public.idx_conversations_user_not_deleted;
 DROP INDEX IF EXISTS public.idx_chat_histories_conversation_create_time;
@@ -36,3 +37,6 @@ ALTER TABLE public.chat_histories
 DROP TABLE IF EXISTS public.conversation_idle_events;
 DROP TABLE IF EXISTS public.skill_review_scheduler_state;
 DROP TABLE IF EXISTS public.resource_update_tasks;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

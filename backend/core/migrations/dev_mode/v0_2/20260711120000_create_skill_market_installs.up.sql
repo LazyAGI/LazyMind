@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS public.skill_market_installs (
     market_item_id VARCHAR(36) NOT NULL,
     user_id VARCHAR(255) NOT NULL,
@@ -39,3 +40,6 @@ ORDER BY market_items.id, user_skills.owner_user_id, revisions.created_at DESC
 ON CONFLICT (market_item_id, user_id) DO UPDATE SET
     skill_id = EXCLUDED.skill_id,
     updated_at = EXCLUDED.updated_at;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 -- Add plugin_id column to plugin_drafts for per-user uniqueness enforcement.
 -- plugin_id mirrors the `id:` field inside plugin_yaml_content and is kept in sync
 -- on every save that touches plugin_yaml_content.
@@ -10,3 +11,6 @@ ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS plugin_id VARCHAR(255) NOT NU
 CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_drafts_user_plugin_id
     ON plugin_drafts (created_by, plugin_id)
     WHERE plugin_id != '';
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

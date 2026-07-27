@@ -1,5 +1,6 @@
 -- 20260612110000_create_mcp_tables
 -- +migrate Up
+-- +migrate Dialect postgres
 
 CREATE TABLE IF NOT EXISTS public.mcp_servers (
     id character varying(64) NOT NULL,
@@ -41,3 +42,6 @@ CREATE TABLE IF NOT EXISTS public.mcp_server_tools (
 
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_server
     ON public.mcp_server_tools USING btree (mcp_server_id, deleted_at);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

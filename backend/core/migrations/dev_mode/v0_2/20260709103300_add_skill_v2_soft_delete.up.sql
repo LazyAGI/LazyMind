@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 ALTER TABLE public.skills
     ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP,
     ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(255);
@@ -15,3 +16,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_skills_owner_relative_root
 
 CREATE INDEX IF NOT EXISTS idx_skills_owner_deleted
     ON public.skills(owner_user_id, deleted_at);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

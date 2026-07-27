@@ -1,5 +1,6 @@
 -- 20260622120000_create_local_fs_chat_settings
 -- +migrate Up
+-- +migrate Dialect postgres
 
 CREATE TABLE IF NOT EXISTS public.local_fs_chat_settings (
     id bigserial NOT NULL,
@@ -13,3 +14,6 @@ CREATE TABLE IF NOT EXISTS public.local_fs_chat_settings (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_local_fs_chat_settings_user
     ON public.local_fs_chat_settings USING btree (create_user_id);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

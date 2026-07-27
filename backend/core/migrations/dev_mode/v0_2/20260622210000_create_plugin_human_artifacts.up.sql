@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 -- plugin_human_artifacts stores content written by human edits to plugin slots.
 -- Structure mirrors sub_agent_artifacts but uses session_id instead of task_id
 -- (human edits have no associated SubAgent task).
@@ -32,3 +33,6 @@ CREATE INDEX IF NOT EXISTS idx_plugin_human_artifacts_session_key
 ALTER TABLE plugin_slot_revisions
     ADD COLUMN IF NOT EXISTS human_artifact_id VARCHAR(36)
         REFERENCES plugin_human_artifacts(id);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

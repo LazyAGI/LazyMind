@@ -1,5 +1,6 @@
 -- 20260609120000_add_resource_update_schema
 -- +migrate Up
+-- +migrate Dialect postgres
 
 CREATE TABLE public.resource_update_tasks (
     id character varying(36) NOT NULL,
@@ -127,3 +128,6 @@ CREATE INDEX idx_chat_histories_conversation_create_time
 CREATE INDEX idx_conversations_user_not_deleted
     ON public.conversations(create_user_id, id)
     WHERE deleted_at IS NULL;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 ALTER TABLE plugin_drafts DROP COLUMN IF EXISTS base_revision_id;
 ALTER TABLE plugin_sessions DROP COLUMN IF EXISTS plugin_remote_root;
 ALTER TABLE plugin_sessions DROP COLUMN IF EXISTS plugin_tree_hash;
@@ -9,3 +10,6 @@ DROP TABLE IF EXISTS plugin_revision_entries;
 DROP TABLE IF EXISTS plugin_revisions;
 DROP TABLE IF EXISTS plugin_blobs;
 DROP TABLE IF EXISTS plugins;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

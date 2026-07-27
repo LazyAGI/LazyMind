@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 ALTER TABLE public.system_memories
     ADD COLUMN IF NOT EXISTS agent_persona text DEFAULT ''::text NOT NULL,
     ADD COLUMN IF NOT EXISTS user_address text DEFAULT ''::text NOT NULL,
@@ -20,3 +21,6 @@ ALTER TABLE public.system_user_preferences
     DROP COLUMN IF EXISTS response_style,
     DROP COLUMN IF EXISTS user_address,
     DROP COLUMN IF EXISTS agent_persona;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

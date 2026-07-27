@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 -- Rollback Phase 3: Data History & Rich Media Support
 
 DROP TABLE IF EXISTS plugin_slot_order;
@@ -11,3 +12,6 @@ DROP INDEX IF EXISTS idx_saa_task_visible;
 ALTER TABLE sub_agent_artifacts
   DROP COLUMN IF EXISTS hidden,
   DROP COLUMN IF EXISTS caption;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

@@ -1,5 +1,6 @@
 -- 20260622130000_add_agent_thread_steps
 -- +migrate Up
+-- +migrate Dialect postgres
 
 ALTER TABLE public.agent_thread_records
     ADD COLUMN IF NOT EXISTS step_id character varying(128) DEFAULT ''::character varying NOT NULL;
@@ -28,3 +29,6 @@ CREATE INDEX IF NOT EXISTS idx_agent_thread_steps_thread_order
 
 CREATE INDEX IF NOT EXISTS idx_agent_thread_steps_thread_active
     ON public.agent_thread_steps USING btree (thread_id, active, updated_at);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

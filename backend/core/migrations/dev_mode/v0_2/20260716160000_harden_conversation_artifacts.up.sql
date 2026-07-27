@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 DROP INDEX IF EXISTS idx_conversation_artifacts_conversation_id;
 DROP INDEX IF EXISTS idx_conversation_artifacts_create_user_id;
 
@@ -25,3 +26,6 @@ BEGIN
             CHECK (length(btrim(filename)) > 0);
     END IF;
 END $$;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

@@ -1,5 +1,6 @@
 -- 20260531100000_create_async_jobs
 -- +migrate Up
+-- +migrate Dialect postgres
 
 CREATE TABLE public.async_jobs (
     id character varying(64) NOT NULL,
@@ -39,3 +40,6 @@ CREATE INDEX idx_async_jobs_idempotency_key ON public.async_jobs(idempotency_key
 CREATE UNIQUE INDEX idx_async_jobs_type_idempotency_key_unique
     ON public.async_jobs(job_type, idempotency_key)
     WHERE idempotency_key <> '';
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.
