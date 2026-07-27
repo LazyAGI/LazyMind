@@ -20,6 +20,7 @@ type SourceCreationModalsVm = Pick<
   | "handleCreateProviderSelect"
   | "isFeishuAuthValid"
   | "isNotionAuthValid"
+  | "isGoogleDriveAuthValid"
   | "isFeishuSetupReady"
   | "isNotionSetupReady"
   | "authSelectModalOpen"
