@@ -7,15 +7,15 @@ migrations/
 │   ├── 20260321131500_init.up.sql
 │   └── 20260723183515_squash_post_init.up.sql
 └── dev_mode/
-    └── v1/
+    └── v0_2/
         ├── 20260506120000_seed_default_model_catalog.up.sql
         ├── 20260703130000_create_plugin_step_intents.up.sql
         └── ...
 ```
 
 `version_mode` contains stable or squashed migrations. Existing migration IDs and
-filenames stay unchanged. `dev_mode/vN` contains the SQL files accumulated while
-developing release `vN`.
+filenames stay unchanged. `dev_mode/v0_N` contains the SQL files accumulated while
+developing release `v0_N`. The numeric suffix `N` is the internal mode version.
 
 `version_mapping.json` is the only mapping file:
 
@@ -23,7 +23,7 @@ developing release `vN`.
 {
   "schema_version": 1,
   "versions": {
-    "v1": {
+    "v0_2": {
       "version_migration_id": 20260723183515
     }
   }
@@ -32,9 +32,9 @@ developing release `vN`.
 
 An entry with `version_migration_id` seals the release and points to one file in
 `version_mode`. An entry without it is an open dev release; the entry can also be
-omitted because the `dev_mode/vN` directory identifies the open release. Dev
+omitted because the `dev_mode/v0_N` directory identifies the open release. Dev
 migration IDs are not copied into this file; the runner reads them from
-`dev_mode/vN`.
+`dev_mode/v0_N`.
 
 The mapped aggregate does not need a `Supersedes` directive for its dev files;
 the release mapping performs that canonicalization. `Supersedes` remains
@@ -52,7 +52,7 @@ For a dev file, the history version is:
 full_version = N * 100000000000000 + file_timestamp
 ```
 
-For example, `dev_mode/v2/20260915100000_create_projects.up.sql` is recorded as
+For example, `dev_mode/v0_2/20260915100000_create_projects.up.sql` is recorded as
 `220260915100000`. This gives every dev migration a single complete ID and avoids
 collisions between releases. A sealed release is represented only by its mapped
 `version_migration_id`.
@@ -69,8 +69,8 @@ For each release, the runner applies these rules:
    aggregate SQL.
 5. Otherwise execute the dev files in timestamp order.
 
-Different releases may use different paths. For example, `v1` may have one
-aggregate history row while `v2` still has full dev history rows.
+Different releases may use different paths. For example, `v0_1` may have one
+aggregate history row while `v0_2` still has full dev history rows.
 
 Old `Supersedes` squash migrations are canonicalized automatically when all
 declared source versions are present. `MIGRATION_FAKE_VERSIONS` is not used.
@@ -86,7 +86,7 @@ canonicalized that release to its aggregate history row.
 Create a new dev migration with:
 
 ```sh
-go run ./cmd/dbmigrate create -name create_users -version v1
+go run ./cmd/dbmigrate create -name create_users -version v0_2
 ```
 
 `goto` is intentionally unavailable when dev modes are configured because one

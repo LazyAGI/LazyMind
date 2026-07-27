@@ -16,13 +16,16 @@ func TestMigrationCreateDirRequiresReleaseForStructuredLayout(t *testing.T) {
 	if _, err := migrationCreateDir(""); err == nil {
 		t.Fatal("expected missing release error")
 	}
-	got, err := migrationCreateDir("v2")
+	got, err := migrationCreateDir("v0_2")
 	if err != nil {
-		t.Fatalf("migrationCreateDir v2: %v", err)
+		t.Fatalf("migrationCreateDir v0_2: %v", err)
 	}
-	want := filepath.Join(root, "dev_mode", "v2")
+	want := filepath.Join(root, "dev_mode", "v0_2")
 	if got != want {
 		t.Fatalf("migration create dir=%q, want %q", got, want)
+	}
+	if _, err := migrationCreateDir("v2"); err == nil {
+		t.Fatal("expected legacy v2 release name to be rejected")
 	}
 }
 

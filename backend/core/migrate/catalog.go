@@ -20,7 +20,7 @@ const (
 	devVersionBase         = uint64(100000000000000)
 )
 
-var releaseVersionPattern = regexp.MustCompile(`^v([1-9]\d*)$`)
+var releaseVersionPattern = regexp.MustCompile(`^v0_([1-9]\d*)$`)
 
 type versionMappingDocument struct {
 	SchemaVersion int                            `json:"schema_version"`
@@ -386,7 +386,7 @@ func loadMigrationDir(dir, release string, modeVersion uint64) ([]migrationFile,
 func parseReleaseVersion(release string) (uint64, error) {
 	matches := releaseVersionPattern.FindStringSubmatch(release)
 	if len(matches) != 2 {
-		return 0, fmt.Errorf("invalid release version %q; expected vN", release)
+		return 0, fmt.Errorf("invalid release version %q; expected v0_N", release)
 	}
 	version, err := strconv.ParseUint(matches[1], 10, 64)
 	if err != nil || version == 0 {

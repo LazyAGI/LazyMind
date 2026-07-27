@@ -61,9 +61,9 @@ func usage() {
 Env: ACL_DB_DRIVER, ACL_DB_DSN, MIGRATIONS_DIR (default: ./migrations)
 
 Commands:
-  migrate [-m "message"] [-version vN]  text（text orm/models text DDL，text Postgres + ACL_DB_DSN）
+  migrate [-m "message"] [-version v0_N]  text（text orm/models text DDL，text Postgres + ACL_DB_DSN）
   upgrade                       text（text）
-  create -name <name> [-version vN] [-with-ddl]  textCreatetext（text -with-ddl text DDL）
+  create -name <name> [-version v0_N] [-with-ddl]  textCreatetext（text -with-ddl text DDL）
   up [-n <steps>]               text upgrade；-n text
   down [-n <steps>]              text N text
   goto -version <v>              text
@@ -96,7 +96,7 @@ func dbConfigFromEnv() (driver, dsn string) {
 func migrateCmd(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	msg := fs.String("m", "auto", "migration message (used as migration name)")
-	release := fs.String("version", "", "development release directory, e.g. v1")
+	release := fs.String("version", "", "development release directory, e.g. v0_2")
 	_ = fs.Parse(args)
 	name := strings.TrimSpace(*msg)
 	if name == "" {
@@ -108,7 +108,7 @@ func migrateCmd(args []string) {
 func createCmd(args []string) {
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
 	name := fs.String("name", "", "migration name, e.g. init or add_xxx")
-	release := fs.String("version", "", "development release directory, e.g. v1")
+	release := fs.String("version", "", "development release directory, e.g. v0_2")
 	withDDL := fs.Bool("with-ddl", false, "generate full CREATE TABLE from orm/models (requires postgres + ACL_DB_DSN)")
 	_ = fs.Parse(args)
 	if strings.TrimSpace(*name) == "" {
@@ -159,7 +159,7 @@ func createCmdWith(name string, withDDL bool, release string) {
 	fmt.Println(downPath)
 }
 
-var releaseVersionPattern = regexp.MustCompile(`^v[1-9]\d*$`)
+var releaseVersionPattern = regexp.MustCompile(`^v0_[1-9]\d*$`)
 
 func migrationCreateDir(release string) (string, error) {
 	root := migrationsDir()
@@ -169,12 +169,12 @@ func migrationCreateDir(release string) (string, error) {
 		pathExists(filepath.Join(root, "version_mapping.json"))
 	if release == "" {
 		if structured {
-			return "", fmt.Errorf("-version vN is required for the structured migration layout")
+			return "", fmt.Errorf("-version v0_N is required for the structured migration layout")
 		}
 		return root, nil
 	}
 	if !releaseVersionPattern.MatchString(release) {
-		return "", fmt.Errorf("invalid version %q; expected vN", release)
+		return "", fmt.Errorf("invalid version %q; expected v0_N", release)
 	}
 	return filepath.Join(root, "dev_mode", release), nil
 }

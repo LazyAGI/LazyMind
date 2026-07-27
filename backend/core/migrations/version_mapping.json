@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "versions": {
-    "v1": {
+    "v0_2": {
       "version_migration_id": 20260723183515
     }
   }

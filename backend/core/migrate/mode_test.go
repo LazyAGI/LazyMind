@@ -28,44 +28,73 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		t.Fatalf("mode count=%d, want 1", len(catalog.Modes))
 	}
 	mode := catalog.Modes[0]
-	if mode.Name != "v1" || mode.Aggregate == nil || mode.Aggregate.Version != 20260723183515 {
-		t.Fatalf("unexpected v1 aggregate: %#v", mode.Aggregate)
+	if mode.Name != "v0_2" || mode.ModeVersion != 2 ||
+		mode.Aggregate == nil || mode.Aggregate.Version != 20260723183515 {
+		t.Fatalf("unexpected v0_2 mode: %#v", mode)
 	}
 	if len(mode.Dev) != 88 {
-		t.Fatalf("v1 dev migration count=%d, want 88", len(mode.Dev))
+		t.Fatalf("v0_2 dev migration count=%d, want 88", len(mode.Dev))
 	}
 	if !containsMigrationFileVersion(mode.Dev, 20260703130000) {
-		t.Fatal("v1 dev migrations are missing create_plugin_step_intents")
+		t.Fatal("v0_2 dev migrations are missing create_plugin_step_intents")
 	}
 	if !containsVersion(mode.Aggregate.Supersedes, 20260703130000) {
-		t.Fatal("v1 aggregate Supersedes is missing create_plugin_step_intents")
+		t.Fatal("v0_2 aggregate Supersedes is missing create_plugin_step_intents")
 	}
 	if len(mode.Aggregate.Supersedes) != len(mode.Dev) {
 		t.Fatalf(
-			"v1 aggregate Supersedes count=%d, dev migration count=%d",
+			"v0_2 aggregate Supersedes count=%d, dev migration count=%d",
 			len(mode.Aggregate.Supersedes),
 			len(mode.Dev),
 		)
 	}
 	for _, migration := range mode.Dev {
+		wantVersion, err := combineDevVersion(2, migration.FileVersion)
+		if err != nil {
+			t.Fatalf("combine v0_2 dev migration %d: %v", migration.FileVersion, err)
+		}
+		if migration.Version != wantVersion {
+			t.Fatalf(
+				"v0_2 dev migration %d full version=%d, want %d",
+				migration.FileVersion,
+				migration.Version,
+				wantVersion,
+			)
+		}
 		if !containsVersion(mode.Aggregate.Supersedes, migration.FileVersion) {
-			t.Fatalf("v1 aggregate Supersedes is missing dev migration %d", migration.FileVersion)
+			t.Fatalf("v0_2 aggregate Supersedes is missing dev migration %d", migration.FileVersion)
 		}
 	}
 	up, err := os.ReadFile(mode.Aggregate.UpPath)
 	if err != nil {
-		t.Fatalf("read v1 aggregate up: %v", err)
+		t.Fatalf("read v0_2 aggregate up: %v", err)
 	}
 	down, err := os.ReadFile(mode.Aggregate.DownPath)
 	if err != nil {
-		t.Fatalf("read v1 aggregate down: %v", err)
+		t.Fatalf("read v0_2 aggregate down: %v", err)
 	}
 	if !strings.Contains(string(up), "CREATE TABLE public.plugin_step_intents") ||
 		!strings.Contains(string(up), "CREATE UNIQUE INDEX uk_plugin_step_intent") {
-		t.Fatal("v1 aggregate up is missing plugin_step_intents schema")
+		t.Fatal("v0_2 aggregate up is missing plugin_step_intents schema")
 	}
 	if !strings.Contains(string(down), "DROP TABLE IF EXISTS public.plugin_step_intents CASCADE") {
-		t.Fatal("v1 aggregate down is missing plugin_step_intents rollback")
+		t.Fatal("v0_2 aggregate down is missing plugin_step_intents rollback")
+	}
+}
+
+func TestParseReleaseVersionUsesV0MinorVersion(t *testing.T) {
+	got, err := parseReleaseVersion("v0_2")
+	if err != nil {
+		t.Fatalf("parse v0_2: %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("parse v0_2=%d, want 2", got)
+	}
+
+	for _, release := range []string{"v1", "v2", "v0_0", "v0_02", "v0_"} {
+		if _, err := parseReleaseVersion(release); err == nil {
+			t.Fatalf("parseReleaseVersion(%q) succeeded, want error", release)
+		}
 	}
 }
 
@@ -74,7 +103,7 @@ func TestVersionMappingRejectsDuplicatedDevMigrationIDs(t *testing.T) {
 	body := `{
   "schema_version": 1,
   "versions": {
-    "v1": {
+    "v0_1": {
       "dev_migration_ids": [20260725093000]
     }
   }
@@ -98,12 +127,12 @@ INSERT INTO users (id, source) VALUES (1, 'aggregate');
 `, `
 DROP TABLE users;
 `)
-	writeMigrationPair(t, devModeDir(t, dir, "v1"), "20260725093000_create_users", `
+	writeMigrationPair(t, devModeDir(t, dir, "v0_1"), "20260725093000_create_users", `
 CREATE TABLE users (id integer PRIMARY KEY, source text NOT NULL);
 `, `
 DROP TABLE users;
 `)
-	writeVersionMapping(t, dir, `"v1": {"version_migration_id": 20260802120000}`)
+	writeVersionMapping(t, dir, `"v0_1": {"version_migration_id": 20260802120000}`)
 
 	dbPath := filepath.Join(t.TempDir(), "acl.db")
 	runner := openSquashTestRunner(t, dbPath, dir)
@@ -149,8 +178,8 @@ INSERT INTO migration_order (sequence) VALUES (3);
 DELETE FROM migration_order WHERE sequence = 3;
 `)
 	writeVersionMapping(t, dir, strings.Join([]string{
-		`"v1": {"version_migration_id": 20260101000000}`,
-		`"v2": {"version_migration_id": 20260301000000}`,
+		`"v0_1": {"version_migration_id": 20260101000000}`,
+		`"v0_2": {"version_migration_id": 20260301000000}`,
 	}, ","))
 
 	dbPath := filepath.Join(t.TempDir(), "acl.db")
@@ -181,7 +210,7 @@ CREATE INDEX idx_users_id ON users(id);
 `, `
 DROP TABLE users;
 `)
-	devDir := devModeDir(t, dir, "v1")
+	devDir := devModeDir(t, dir, "v0_1")
 	writeMigrationPair(t, devDir, "20260725093000_create_users", `
 CREATE TABLE users (id integer PRIMARY KEY);
 `, `
@@ -192,7 +221,7 @@ CREATE INDEX idx_users_id ON users(id);
 `, `
 DROP INDEX idx_users_id;
 `)
-	writeVersionMapping(t, dir, `"v1": {"version_migration_id": 20260802120000}`)
+	writeVersionMapping(t, dir, `"v0_1": {"version_migration_id": 20260802120000}`)
 
 	firstFullVersion, err := combineDevVersion(1, testDevV1A)
 	if err != nil {
@@ -205,7 +234,7 @@ DROP INDEX idx_users_id;
 	dbPath := filepath.Join(t.TempDir(), "acl.db")
 	db := openSquashTestDB(t, dbPath)
 	defer db.Close()
-	seedHistory(t, db, []historyRecord{{Version: firstFullVersion, Name: "v1/create_users"}})
+	seedHistory(t, db, []historyRecord{{Version: firstFullVersion, Name: "v0_1/create_users"}})
 	if _, err := db.Exec(`CREATE TABLE users (id integer PRIMARY KEY)`); err != nil {
 		t.Fatalf("seed dev schema: %v", err)
 	}
@@ -243,14 +272,14 @@ CREATE TABLE users (id integer PRIMARY KEY);
 `, `
 DROP TABLE users;
 `)
-	writeMigrationPair(t, devModeDir(t, dir, "v2"), "20260915100000_create_projects", `
+	writeMigrationPair(t, devModeDir(t, dir, "v0_2"), "20260915100000_create_projects", `
 CREATE TABLE projects (id integer PRIMARY KEY);
 `, `
 DROP TABLE projects;
 `)
 	writeVersionMapping(t, dir, strings.Join([]string{
-		`"v1": {"version_migration_id": 20260802120000}`,
-		`"v2": {}`,
+		`"v0_1": {"version_migration_id": 20260802120000}`,
+		`"v0_2": {}`,
 	}, ","))
 
 	dbPath := filepath.Join(t.TempDir(), "acl.db")
@@ -289,8 +318,8 @@ CREATE TABLE aggregate_should_not_run (id integer PRIMARY KEY);
 `, `
 DROP TABLE aggregate_should_not_run;
 `)
-	devModeDir(t, dir, "v1")
-	writeVersionMapping(t, dir, `"v1": {"version_migration_id": 20260802120000}`)
+	devModeDir(t, dir, "v0_1")
+	writeVersionMapping(t, dir, `"v0_1": {"version_migration_id": 20260802120000}`)
 
 	deletedFullVersion, err := combineDevVersion(1, testDevV1A)
 	if err != nil {
@@ -301,7 +330,7 @@ DROP TABLE aggregate_should_not_run;
 	defer db.Close()
 	seedHistory(t, db, []historyRecord{{
 		Version: deletedFullVersion,
-		Name:    "v1/deleted_migration",
+		Name:    "v0_1/deleted_migration",
 	}})
 
 	runner := openSquashTestRunner(t, dbPath, dir)
@@ -322,12 +351,12 @@ SELECT 1;
 `, `
 SELECT 1;
 `)
-	writeMigrationPair(t, devModeDir(t, dir, "v1"), "20260725093000_create_users", `
+	writeMigrationPair(t, devModeDir(t, dir, "v0_1"), "20260725093000_create_users", `
 SELECT 1;
 `, `
 SELECT 1;
 `)
-	writeVersionMapping(t, dir, `"v1": {"version_migration_id": 20260802120000}`)
+	writeVersionMapping(t, dir, `"v0_1": {"version_migration_id": 20260802120000}`)
 
 	devVersion, err := combineDevVersion(1, testDevV1A)
 	if err != nil {
@@ -338,7 +367,7 @@ SELECT 1;
 	defer db.Close()
 	seedHistory(t, db, []historyRecord{
 		{Version: testAggregateV1, Name: "release"},
-		{Version: devVersion, Name: "v1/create_users"},
+		{Version: devVersion, Name: "v0_1/create_users"},
 	})
 
 	runner := openSquashTestRunner(t, dbPath, dir)
