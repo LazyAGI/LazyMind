@@ -98,9 +98,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
   const oauthAttemptRef = useRef<PendingOAuthAttempt | null>(null);
   const canCreateLocalSource = isAdminRole(AgentAppsAuth.getUserInfo()?.role);
   const creatableSourceTypeOptions = sourceTypeOptions.filter(
-    (item) =>
-      (item.type === "local" || item.type === "feishu") &&
-      (!item.adminOnly || canCreateLocalSource),
+    (item) => !item.adminOnly || canCreateLocalSource,
   );
   const scanAgents: ScanV2AgentHint[] = [];
   const [localScanChatEnabled, setLocalScanChatEnabled] = useState(false);
