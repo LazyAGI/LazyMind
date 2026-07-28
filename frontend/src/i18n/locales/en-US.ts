@@ -3280,6 +3280,7 @@ const enUS = {
     memoryVersionEmpty: "No version history yet",
     memoryVersionSelectEmpty: "Select a version record to view details",
     memoryVersionDiffEmpty: "No diff content",
+    memoryVersionDiffDirectoryHint: "Directory {{status}}; no file content to compare",
     memoryVersionRange: "Version Change",
     memoryVersionChangedAt: "Changed At",
     memoryVersionChangeSource: "Change Source",

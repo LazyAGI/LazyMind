@@ -3150,6 +3150,7 @@ const zhCN = {
     memoryVersionEmpty: "暂无历史版本",
     memoryVersionSelectEmpty: "请选择一条版本记录查看详情",
     memoryVersionDiffEmpty: "暂无差异内容",
+    memoryVersionDiffDirectoryHint: "目录{{status}}，无文件内容可对比",
     memoryVersionRange: "版本变化",
     memoryVersionChangedAt: "修改时间",
     memoryVersionChangeSource: "修改来源",
