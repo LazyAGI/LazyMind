@@ -59,6 +59,9 @@ jobs:
       - name: Doc check
         run: pip install pytest && python -m pytest tests/doc_check/ -v
 
+  # =======================================================================
+  # Frontend：先出HTML报告 -> 再卡点
+  # =======================================================================
   test-frontend:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
@@ -67,16 +70,33 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install and test
-        run: cd tests/frontend && npm install && npm test
+      - name: Install and test with coverage
+        run: |
+          cd tests/frontend
+          npm install
+          npm install -D c8
+          npx c8 --reporter=html --reporter=cobertura npm test
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-frontend
+          path: tests/frontend/coverage
+
+      - name: Check total coverage ≥80%
+        run: |
+          cd tests/frontend
+          npx c8 check-coverage --lines 80 --functions 80 --branches 80
 
   # =======================================================================
-  # auth-service：全量 + 增量覆盖率，卡点 80%
+  # auth-service：先HTML -> 再卡点
   # =======================================================================
   test-auth-service:
     needs: [lint, doc_check]
@@ -84,7 +104,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -94,32 +113,33 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install deps + coverage tools
+      - name: Install deps
         run: |
           pip install -r backend/auth-service/requirements.txt
           pip install -r tests/backend/auth-service/requirements-test.txt
           pip install 'httpx<0.28' 'anyio<4.5' coverage diff-cover
 
-      - name: Run tests with coverage
+      - name: Run tests and generate HTML
         run: |
           coverage run --source=backend/auth-service -m pytest tests/backend/auth-service/ -v
+          coverage html -d htmlcov-auth
           coverage xml -o coverage-auth.xml
 
-      - name: Check total coverage ≥80%
-        run: coverage report --include=backend/auth-service/* --fail-under=10
-
-      - name: Check incremental coverage ≥80%
-        run: |
-          diff-cover coverage-auth.xml --compare-branch=origin/main --fail-under=10
-
-      - name: Upload coverage
+      - name: Upload HTML report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-auth
-          path: coverage-auth.xml
+          path: htmlcov-auth
+
+      - name: Check total coverage ≥80%
+        run: coverage report --include=backend/auth-service/* --fail-under=80
+
+      - name: Check incremental coverage ≥80%
+        run: |
+          diff-cover coverage-auth.xml --compare-branch=origin/main --fail-under=80
 
   # =======================================================================
-  # backend-core (Go)：全量覆盖率卡点 80%
+  # backend-core (Go)：先HTML -> 再卡点
   # =======================================================================
   test-backend-core:
     needs: [lint, doc_check]
@@ -153,21 +173,27 @@ jobs:
           MIGRATION_TEST_POSTGRES_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
         run: cd backend/core && go test ./migrate -v
 
-      - name: Test with coverage
+      - name: Test with coverage & generate HTML
         run: |
           cd backend/core
           go test ./... -coverprofile=coverage-core.out
-          go tool cover -func=coverage-core.out | grep total | awk '{print $2}' | sed 's/%//g' > coverage.txt
-          if [ $(cat coverage.txt | cut -d. -f1) -lt 10 ]; then exit 1; fi
+          go tool cover -html=coverage-core.out -o coverage-core.html
+          go tool cover -func=coverage-core.out
 
-      - name: Upload coverage
+      - name: Upload HTML report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-core
-          path: backend/core/coverage-core.out
+          path: backend/core/coverage-core.html
+
+      - name: Check total coverage ≥80%
+        run: |
+          cd backend/core
+          go tool cover -func=coverage-core.out | grep total | awk '{print $2}' | sed 's/%//g' > cov.txt
+          if [ $(cat cov.txt | cut -d. -f1) -lt 80 ]; then exit 1; fi
 
   # =======================================================================
-  # evo-cli：全量 + 增量覆盖率，卡点 80%
+  # evo-cli：先HTML -> 再卡点
   # =======================================================================
   test-evo-cli:
     needs: [lint, doc_check]
@@ -175,7 +201,6 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -186,7 +211,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install deps + coverage tools
+      - name: Install deps
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq cmake
           pip install scikit-build-core pybind11 coverage diff-cover
@@ -195,26 +220,27 @@ jobs:
           pip install -r evo/requirements.txt
           pip install pytest httpx
 
-      - name: Run tests with coverage
+      - name: Run tests and generate HTML
         run: |
           coverage run --source=evo -m pytest tests/evo/ tests/test_cli.py -v
+          coverage html -d htmlcov-evo
           coverage xml -o coverage-evo.xml
 
-      - name: Check total coverage ≥80%
-        run: coverage report --include=evo/* --fail-under=10
-
-      - name: Check incremental coverage ≥80%
-        run: |
-          diff-cover coverage-evo.xml --compare-branch=origin/main --fail-under=10
-
-      - name: Upload coverage
+      - name: Upload HTML report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-evo
-          path: coverage-evo.xml
+          path: htmlcov-evo
+
+      - name: Check total coverage ≥80%
+        run: coverage report --include=evo/* --fail-under=80
+
+      - name: Check incremental coverage ≥80%
+        run: |
+          diff-cover coverage-evo.xml --compare-branch=origin/main --fail-under=80
 
   # =======================================================================
-  # algorithm：全量 + 增量覆盖率，卡点 80%
+  # algorithm：先HTML -> 再卡点
   # =======================================================================
   test-algorithm:
     needs: [lint, doc_check]
@@ -222,7 +248,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -233,7 +258,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install deps + coverage tools
+      - name: Install deps
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq cmake
           pip install scikit-build-core pybind11 coverage diff-cover
@@ -244,35 +269,37 @@ jobs:
 
       - name: Verify lazyllm install
         run: |
-          python -c "from lazyllm.tools.agent.skillManager import SkillManager; print('tools OK')"
+          python -c "from lazyllm.tools.agent.skill_manager import SkillManager; print('tools OK')"
           python -c "from lazyllm.module import ModuleBase; print('module OK')"
           python -c "from lazyllm import fc_register; print('fc_register OK')"
 
-      - name: Run tests with coverage
+      - name: Run tests and generate HTML
         env:
           LAZYLLM_INIT_DOC: "1"
         run: |
           coverage run --source=algorithm -m pytest tests/algorithm/ -v
+          coverage html -d htmlcov-algorithm
           coverage xml -o coverage-algorithm.xml
 
-      - name: Check total coverage ≥80%
-        run: coverage report --include=algorithm/* --fail-under=10
-
-      - name: Check incremental coverage ≥80%
-        run: |
-          diff-cover coverage-algorithm.xml --compare-branch=origin/main --fail-under=10
-
-      - name: Upload coverage
+      - name: Upload HTML report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-algorithm
-          path: coverage-algorithm.xml
+          path: htmlcov-algorithm
+
+      - name: Check total coverage ≥80%
+        run: coverage report --include=algorithm/* --fail-under=80
+
+      - name: Check incremental coverage ≥80%
+        run: |
+          diff-cover coverage-algorithm.xml --compare-branch=origin/main --fail-under=80
 
   # =======================================================================
-  # 汇总所有模块覆盖率 → 发到 PR 评论（简洁版，只显示百分比）
+  # 汇总展示
   # =======================================================================
   coverage-report:
     needs:
+      - test-frontend
       - test-auth-service
       - test-backend-core
       - test-evo-cli
@@ -282,38 +309,23 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install tools
-        run: pip install coverage diff-cover
+        run: pip install coverage
 
-      - name: Download all coverage files
+      - name: Download all reports
         uses: actions/download-artifact@v4
 
-      - name: Generate summary
+      - name: Show summary
         run: |
-          echo "## 📊 模块覆盖率摘要" > comment.md
+          echo "## 📊 覆盖率结果（已生成HTML报告）" > comment.md
           echo "" >> comment.md
-
-          echo "### auth-service" >> comment.md
-          coverage report --data-file coverage-auth/coverage-auth.xml --include=backend/auth-service/* | grep TOTAL >> comment.md
+          echo "✅ 所有HTML覆盖率报告已上传，可在Artifacts查看" >> comment.md
           echo "" >> comment.md
-
-          echo "### evo-cli" >> comment.md
-          coverage report --data-file coverage-evo/coverage-evo.xml --include=evo/* | grep TOTAL >> comment.md
-          echo "" >> comment.md
-
-          echo "### algorithm" >> comment.md
-          coverage report --data-file coverage-algorithm/coverage-algorithm.xml --include=algorithm/* | grep TOTAL >> comment.md
-          echo "" >> comment.md
-
-          echo "### backend-core (Go)" >> comment.md
-          go tool cover -func coverage-core/coverage-core.out | grep total >> comment.md
 
       - name: Post to PR
         uses: marocchino/sticky-pull-request-comment@v2
