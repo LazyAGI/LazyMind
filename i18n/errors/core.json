@@ -1035,6 +1035,7 @@
   "2001988": { "en-US": "LibreOffice is unavailable", "zh-CN": "LibreOffice 不可用" },
   "2001989": { "en-US": "Invalid dataset name format", "zh-CN": "数据集名称格式无效" },
   "2001990": { "en-US": "The core Skill file SKILL.md cannot be deleted", "zh-CN": "不能删除 Skill 核心文件 SKILL.md" },
+  "2001991": { "en-US": "Database migration configuration is invalid", "zh-CN": "数据库迁移配置无效" },
   "active_task_not_found": { "en-US": "Active task not found", "zh-CN": "活跃任务不存在" },
   "algo_failed": { "en-US": "Algorithm service operation failed", "zh-CN": "算法服务操作失败" },
   "auto_apply_failed": { "en-US": "Automatic apply failed", "zh-CN": "自动应用失败" },

@@ -147,6 +147,15 @@ func fileRelativePath(fullPath string) string {
 	}
 	cleanPath := filepath.Clean(p)
 	subRoot := filepath.Clean(subagentWorkspaceRoot())
+	// macOS temporary directories commonly cross the /var -> /private/var
+	// symlink. Resolve both sides before the containment check so a validated
+	// workspace file can still be signed.
+	resolvedPath, pathErr := filepath.EvalSymlinks(cleanPath)
+	resolvedSubRoot, rootErr := filepath.EvalSymlinks(subRoot)
+	if pathErr == nil && rootErr == nil {
+		cleanPath = resolvedPath
+		subRoot = resolvedSubRoot
+	}
 	if rel, err := filepath.Rel(subRoot, cleanPath); err == nil &&
 		rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "subagent/" + filepath.ToSlash(rel)
@@ -156,6 +165,12 @@ func fileRelativePath(fullPath string) string {
 		return ""
 	}
 	cleanRoot := filepath.Clean(root)
+	resolvedPath, pathErr = filepath.EvalSymlinks(cleanPath)
+	resolvedRoot, uploadRootErr := filepath.EvalSymlinks(cleanRoot)
+	if pathErr == nil && uploadRootErr == nil {
+		cleanPath = resolvedPath
+		cleanRoot = resolvedRoot
+	}
 	rel, err := filepath.Rel(cleanRoot, cleanPath)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return ""

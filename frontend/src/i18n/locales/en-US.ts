@@ -434,6 +434,10 @@ const enUS = {
       googleDriveConfigTitle: "Configure Google Drive OAuth",
       googleDriveAuthorize: "Save and Authorize",
       googleDriveConfigHint: "Enable the Drive API in Google Cloud Console and add this exact address to the OAuth Web client's authorized redirect URIs: {{callbackUrl}}",
+      googleDriveRedirectReadyTitle: "OAuth callback URL is ready",
+      googleDriveInvalidRedirectTitle: "The current address cannot be used for Google OAuth",
+      googleDriveInvalidRedirectHint:
+        "Google will reject {{callbackUrl}}. HTTP is allowed only for localhost, 127.0.0.1, or ::1. Other environments require HTTPS on a public domain and cannot use a raw IP address. Reopen LazyMind through a local loopback URL or an HTTPS domain/tunnel.",
       googleDriveSetupGuideAction: "Setup Guide",
       googleDriveClientIdRequired: "Enter the OAuth Client ID",
       googleDriveClientSecretRequired: "Enter the OAuth Client Secret",
@@ -1777,7 +1781,7 @@ const enUS = {
     createFromCloudDocuments: "From cloud docs",
     createFromCloudDocumentsTitle: "Create from cloud documents",
     createFromCloudDocumentsIntro:
-      "Select Feishu, Notion, or a local path (admin), configure the sync scope, and a knowledge base will be created automatically. Feishu requires valid authorization; you will be redirected to cloud document settings if not authorized.",
+      "Select Feishu, Notion, or a local path (admin), configure the sync scope, and a knowledge base will be created automatically. Google Drive currently supports online search and can be authorized from Cloud Documents.",
     createFromCloudDocumentsSuccess: "Knowledge base created",
     editKnowledgeBase: "Edit Knowledge Base",
     selectTag: "Select knowledge base tag",
@@ -2110,7 +2114,7 @@ const enUS = {
     dataSourceTypeFeishuDesc: "Set App ID / App Secret first, then connect via OAuth",
     dataSourceTypeNotion: "Notion",
     dataSourceTypeNotionDesc:
-      "Connect Notion pages or databases, sync by authorization scope and serve chat.",
+      "Connect Notion pages or databases; configure the OAuth Redirect URI with the HTTPS setup guide.",
     dataSourceTypeGoogleDrive: "Google Drive",
     dataSourceGoogleDriveSetupHint:
       "Authorize a Google Drive account for online chat search. Files are not imported into a knowledge base.",
@@ -2123,6 +2127,10 @@ const enUS = {
     dataSourceGoogleDriveCallbackLabel: "Current OAuth callback URL",
     dataSourceGoogleDriveHttpsHint:
       "Register the exact URL above in the Google OAuth Web client. Use HTTPS in production; localhost or 127.0.0.1 may use HTTP under Google's local development rules.",
+    dataSourceGoogleDriveInvalidCallbackTitle:
+      "Google will reject the current address",
+    dataSourceGoogleDriveInvalidCallbackHint:
+      "Google OAuth Web clients do not accept HTTP private-network addresses or raw-IP redirects. For same-machine testing, open LazyMind through http://localhost or http://127.0.0.1. For LAN, remote, or production access, configure a public HTTPS domain or HTTPS tunnel and reopen this page from that address.",
     dataSourceTypeDatabase: "External Database",
     dataSourceTypeDatabaseDesc:
       "Connect MySQL or PostgreSQL with a read-only account for direct chat queries.",
@@ -2161,7 +2169,7 @@ const enUS = {
     dataSourceNotionCredentialModalTitle: "Configure Notion OAuth App",
     dataSourceNotionCredentialSaveAndSelect: "Save and Authorize Notion",
     dataSourceNotionCredentialHint:
-      "Go to Notion Developers to create a Public Integration, get OAuth Client ID and Client Secret; the Redirect URI must be set to /oauth/notion/data-source/callback.",
+      "View the Notion setup guide first. Create a Public Integration in Notion Developers, get the OAuth Client ID and Client Secret, and register the complete HTTPS Redirect URI shown in the guide.",
     dataSourceNotionCredentialSaved: "Notion OAuth credentials saved",
     dataSourceNotionCredentialReset: "Notion OAuth credentials disconnected",
     dataSourceNotionResetCredentialAction: "Reset credentials",
@@ -2190,7 +2198,7 @@ const enUS = {
     dataSourceNotionTargetTypeDatabase: "Database",
     dataSourceNotionTargetLabel: "Notion page or database",
     dataSourceNotionSetupGuideHint:
-      ": View detailed Notion OAuth setup steps, required credentials, and Redirect URI instructions.",
+      ": View detailed Notion OAuth setup steps, required credentials, and HTTPS Redirect URI instructions.",
     dataSourceDatabaseTitle: "External Database",
     dataSourceDatabaseSubtitle:
       "Configure MySQL and PostgreSQL database connections for read-only chat queries.",
@@ -2390,7 +2398,9 @@ const enUS = {
       openDriveApi: "Open Google Drive API",
       openCredentials: "Open Credentials",
       openAudience: "Open Google Auth Platform Audience",
+      openRedirectRules: "View Google's Redirect URI rules",
       callbackUrl: "Authorized redirect URI: {{uri}}",
+      unsupportedCallbackUrl: "The current address cannot be registered as a Google OAuth callback: {{uri}}",
       steps: {
         openConsoleTitle: "Create or select a Google Cloud project",
         openConsoleDesc:
@@ -2423,6 +2433,10 @@ const enUS = {
           "If you open LazyMind with 127.0.0.1 or a deployment domain instead of localhost, replace the origin in the callback URL with that same browser origin.",
         redirectHttpsHint:
           "Use HTTPS for production domains. Local development may use an exactly registered http://localhost or http://127.0.0.1 URL in a Google Web OAuth client. Scheme, host, port, and path must all match.",
+        redirectUnsupportedHint:
+          "Google permits HTTP only for localhost, 127.0.0.1, or ::1. Other callbacks must use HTTPS with a public top-level domain, and cannot use 10.x, 172.16-31.x, 192.168.x, or any other raw IP address.",
+        redirectRecoveryHint:
+          "If the browser and LazyMind run on the same machine, reopen the system through http://localhost or http://127.0.0.1. For LAN or remote access, configure a public HTTPS domain or an HTTPS tunnel such as Cloudflare Tunnel or ngrok, then open LazyMind from the new address. This page will generate the matching callback URI automatically.",
         copyCredentialsTitle: "Copy Client ID and Client Secret",
         copyCredentialsDesc:
           "After the Web client is created, copy the OAuth Client ID and Client Secret. Keep the secret private.",
@@ -2450,11 +2464,11 @@ const enUS = {
       backManagement: "Back to Data Source Management",
       title: "Data Source Management - New Data Source - Notion",
       subtitle:
-        "Create a Public Integration in Notion Developers, get OAuth credentials, configure the Redirect URI, then complete Notion data source authorization in LazyMind.",
+        "Create a Public Integration in Notion Developers, get OAuth credentials, configure the HTTPS Redirect URI, then complete Notion data source authorization in LazyMind.",
       summaryAria: "Notion setup process overview",
       summaryTitle: "Setup Flow",
       openDevelopers: "Open Notion Developers",
-      callbackUrl: "Callback URL: {{uri}}",
+      callbackUrl: "Callback URL generated from the current page: {{uri}}",
       steps: {
         openDevelopersTitle: "Open Notion Developers",
         openDevelopersDesc:
@@ -2478,9 +2492,9 @@ const enUS = {
           "Client Secret: the integration secret. Keep it private; it can only be fully viewed when created.",
         redirectTitle: "Configure Redirect URI",
         redirectDesc:
-          "In the Redirect URIs section of integration settings, add LazyMind's OAuth callback URL. It must match the callback URL used by the system, otherwise authorization fails after redirect.",
+          "Notion requires Redirect URIs to use HTTPS. Access LazyMind from an HTTPS domain or HTTPS tunnel, then add the complete callback URL shown on this page in the Redirect URIs section of the integration settings.",
         redirectProductionHint:
-          "Use the current deployment domain over HTTPS in production. For local development, use the localhost or 127.0.0.1 URL shown on this page. The Redirect URI must exactly match the browser origin and the callback used by the system.",
+          "If the current URL starts with http://localhost or http://127.0.0.1, it is only useful for local page preview and should not be registered in Notion. First access LazyMind through a public HTTPS domain or HTTPS tunnel, then copy the new https://.../oauth/notion/data-source/callback URL. The Redirect URI must exactly match the browser origin and the callback used by the system.",
         capabilitiesTitle: "Configure Integration Capabilities",
         capabilitiesDesc:
           "In integration settings, select the required capabilities such as Read content and Read comments. LazyMind needs at least Read content to read Notion content.",

@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+
+	"lazymind/core/modelprovider"
 )
 
 const searchProviderCategory = "search"
@@ -72,11 +74,12 @@ func loadConfiguredSciverseDatasourceCredentialForUser(
 	userID string,
 ) (*selectedToolProviderCredential, error) {
 	var row struct {
-		ProviderName string `gorm:"column:provider_name"`
-		APIKey       string `gorm:"column:api_key"`
+		ProviderName     string `gorm:"column:provider_name"`
+		APIKey           string `gorm:"column:api_key"`
+		APIKeyCiphertext string `gorm:"column:api_key_ciphertext"`
 	}
 	err := db.WithContext(ctx).Table("user_model_provider_groups g").
-		Select("p.name AS provider_name, g.api_key").
+		Select("p.name AS provider_name, g.api_key, g.api_key_ciphertext").
 		Joins(
 			"JOIN user_model_providers p ON "+
 				"p.id = g.user_model_provider_id AND "+
@@ -84,7 +87,7 @@ func loadConfiguredSciverseDatasourceCredentialForUser(
 				"p.deleted_at IS NULL",
 		).
 		Where(
-			"g.create_user_id = ? AND g.deleted_at IS NULL AND g.is_verified = ? AND TRIM(g.api_key) <> '' AND p.category = ? AND p.name IN ?",
+			"g.create_user_id = ? AND g.deleted_at IS NULL AND g.is_verified = ? AND (TRIM(g.api_key) <> '' OR TRIM(g.api_key_ciphertext) <> '') AND p.category = ? AND p.name IN ?",
 			userID,
 			true,
 			datasourceProviderCategory,
@@ -93,6 +96,10 @@ func loadConfiguredSciverseDatasourceCredentialForUser(
 		Order("g.updated_at DESC").
 		Limit(1).
 		Scan(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	row.APIKey, err = modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
 	if err != nil {
 		return nil, err
 	}
@@ -107,10 +114,11 @@ func loadConfiguredSciverseDatasourceCredentialForUser(
 
 func scanSelectedSearchToolCredential(q *gorm.DB) (*selectedToolProviderCredential, error) {
 	var row struct {
-		ProviderName string `gorm:"column:provider_name"`
-		APIKey       string `gorm:"column:api_key"`
+		ProviderName     string `gorm:"column:provider_name"`
+		APIKey           string `gorm:"column:api_key"`
+		APIKeyCiphertext string `gorm:"column:api_key_ciphertext"`
 	}
-	err := q.Select("p.name AS provider_name, g.api_key").
+	err := q.Select("p.name AS provider_name, g.api_key, g.api_key_ciphertext").
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = usp.user_model_provider_group_id AND "+
@@ -136,6 +144,10 @@ func scanSelectedSearchToolCredential(q *gorm.DB) (*selectedToolProviderCredenti
 		Order("usp.updated_at DESC").
 		Limit(1).
 		Scan(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	row.APIKey, err = modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
 	if err != nil {
 		return nil, err
 	}

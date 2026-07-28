@@ -352,7 +352,7 @@ func decodeHeaders(raw json.RawMessage) (map[string]any, error) {
 		Nonce string `json:"nonce"`
 		V     string `json:"v"`
 	}
-	if decoded, ok, err := secretcrypto.DecodeAESGCM(raw, encryptionKey()); ok {
+	if decoded, ok, err := decodeEncryptedHeaders(raw); ok {
 		if err != nil {
 			return nil, err
 		}
@@ -374,11 +374,28 @@ func decodeHeaders(raw json.RawMessage) (map[string]any, error) {
 	return headers, nil
 }
 
+func decodeEncryptedHeaders(raw json.RawMessage) ([]byte, bool, error) {
+	decoded, ok, err := secretcrypto.DecodeAESGCM(raw, encryptionKey())
+	if !ok || err == nil {
+		return decoded, ok, err
+	}
+	if encryptionKey() == legacyMCPEncryptionKey {
+		return nil, true, err
+	}
+	legacyDecoded, legacyOK, legacyErr := secretcrypto.DecodeAESGCM(raw, legacyMCPEncryptionKey)
+	if legacyOK && legacyErr == nil {
+		return legacyDecoded, true, nil
+	}
+	return nil, true, err
+}
+
+const legacyMCPEncryptionKey = "lazymind-core-mcp-default-secret"
+
 func encryptionKey() string {
 	if key := strings.TrimSpace(os.Getenv("LAZYMIND_MCP_SECRET_KEY")); key != "" {
 		return key
 	}
-	return "lazymind-core-mcp-default-secret"
+	return legacyMCPEncryptionKey
 }
 
 func apiKeyPreview(raw json.RawMessage) string {

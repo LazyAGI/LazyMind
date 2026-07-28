@@ -1,10 +1,13 @@
 import { ArrowLeftOutlined, GoogleOutlined } from "@ant-design/icons";
-import { Button, Typography } from "antd";
+import { Alert, Button, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import GoogleDriveConnectionSection from "@/modules/modelProvider/components/GoogleDriveConnectionSection";
-import { getCloudDataSourceCallbackUrl } from "@/modules/dataSource/oauth/urls";
+import {
+  getCloudDataSourceCallbackUrl,
+  isGoogleOAuthRedirectUriSupported,
+} from "@/modules/dataSource/oauth/urls";
 import { CLOUD_DOCUMENTS_PATH } from "@/modules/modelProvider/utils/cloudDocumentUrls";
 import "@/modules/modelProvider/index.scss";
 import "./googleDriveConnectionPage.scss";
@@ -15,6 +18,7 @@ export default function GoogleDriveConnectionPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const callbackUrl = getCloudDataSourceCallbackUrl("googledrive");
+  const callbackUrlSupported = isGoogleOAuthRedirectUriSupported(callbackUrl);
 
   return (
     <div className="google-drive-provider-page">
@@ -36,12 +40,19 @@ export default function GoogleDriveConnectionPage() {
       </header>
 
       <main className="google-drive-provider-content">
-        <div className="google-drive-provider-callback">
+        <div className={`google-drive-provider-callback${callbackUrlSupported ? "" : " is-invalid"}`}>
           <Text strong>{t("admin.dataSourceGoogleDriveCallbackLabel")}</Text>
           <code>{callbackUrl}</code>
-          <Paragraph>
-            {t("admin.dataSourceGoogleDriveHttpsHint")}
-          </Paragraph>
+          {callbackUrlSupported ? (
+            <Paragraph>{t("admin.dataSourceGoogleDriveHttpsHint")}</Paragraph>
+          ) : (
+            <Alert
+              showIcon
+              type="error"
+              message={t("admin.dataSourceGoogleDriveInvalidCallbackTitle")}
+              description={t("admin.dataSourceGoogleDriveInvalidCallbackHint")}
+            />
+          )}
         </div>
         <GoogleDriveConnectionSection />
       </main>
