@@ -71,7 +71,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
