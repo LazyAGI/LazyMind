@@ -416,11 +416,15 @@ export default function SkillPackageEditor({
       return [];
     }
     return buildAntTreeData(treeRoot, diffStatusMap, (item, status) => {
-      const canDeleteFolder =
-        item.type === "dir" &&
+      const isDirectory = item.type === "dir";
+      const canDelete =
         canEdit &&
         !reviewMode &&
-        status !== "deleted";
+        status !== "deleted" &&
+        (isDirectory || item.path !== SKILL_MD_PATH);
+      const deleteLabel = isDirectory
+        ? t("admin.memorySkillPackageDeleteFolder")
+        : t("admin.memorySkillPackageDelete");
       return (
         <span className="memory-skill-tree-node-title">
           <EllipsisText text={item.name} className="memory-skill-tree-node-name" />
@@ -429,15 +433,15 @@ export default function SkillPackageEditor({
               {t(`admin.memorySkillDiffStatus_${status}`, { defaultValue: status })}
             </Tag>
           ) : null}
-          {canDeleteFolder ? (
-            <Tooltip title={t("admin.memorySkillPackageDeleteFolder")}>
+          {canDelete ? (
+            <Tooltip title={deleteLabel}>
               <button
                 type="button"
                 className="memory-skill-tree-node-delete"
-                aria-label={t("admin.memorySkillPackageDeleteFolder")}
+                aria-label={deleteLabel}
                 onClick={(event) => {
                   event.stopPropagation();
-                  handleDeletePath(item.path, true);
+                  handleDeletePath(item.path, isDirectory);
                 }}
                 onMouseDown={(event) => event.stopPropagation()}
               >

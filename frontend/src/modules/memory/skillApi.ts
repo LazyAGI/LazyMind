@@ -1123,7 +1123,7 @@ export async function removeSkillAsset(skillId: string) {
 }
 
 export async function trashSkillAsset(skillId: string) {
-  return removeSkillAsset(skillId);
+  return skillsApi.apiCoreSkillsSkillIdTrashPost({ skillId });
 }
 
 export async function listTrashedSkillAssetsPage(

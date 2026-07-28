@@ -3300,6 +3300,7 @@ const zhCN = {
     memorySkillPackageDeleteConfirmContent: "将删除 {{path}}，提交修改后生效。",
     memorySkillPackageDeleteSuccess: "文件已删除",
     memorySkillPackageDeleteFailed: "删除文件失败",
+    memorySkillPackageDelete: "删除文件",
     memorySkillPackageDeleteFolder: "删除文件夹",
     memorySkillPackageDeleteFolderConfirmTitle: "确定删除文件夹？",
     memorySkillPackageDeleteFolderConfirmContent: "将删除 {{path}}，提交修改后生效。",
