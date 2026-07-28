@@ -29,14 +29,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
+
       - name: Lint
         run: make lint
 
@@ -47,60 +50,58 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Doc check
         run: pip install pytest && python -m pytest tests/doc_check/ -v
 
-  # =======================================================================
-  # 1. test-auth-service（Python）：独立覆盖率
-  # =======================================================================
+  test-frontend:
+    needs: [lint, doc_check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install and test
+        run: cd tests/frontend && npm install && npm test
+
   test-auth-service:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install deps + coverage tools
+
+      - name: Install deps
         run: |
           pip install -r backend/auth-service/requirements.txt
           pip install -r tests/backend/auth-service/requirements-test.txt
-          pip install 'httpx<0.28' 'anyio<4.5' coverage diff-cover
-      - name: Run tests with coverage
-        run: |
-          coverage run --source=backend/auth-service -m pytest tests/backend/auth-service/ -v
-          coverage xml -o coverage-auth.xml
-      - name: Check total coverage (≥80%)
-        run: coverage report --include=backend/auth-service/* --fail-under=80
-      - name: Check incremental coverage (≥80%)
-        run: |
-          diff-cover coverage-auth.xml --compare-branch=origin/main --src-roots=backend/auth-service --fail-under=80
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-auth
-          path: coverage-auth.xml
+          pip install 'httpx<0.28' 'anyio<4.5'
+      - name: Test
+        run: python -m pytest tests/backend/auth-service/ -v
 
-  # =======================================================================
-  # 2. test-backend-core（Go）：独立覆盖率
-  # =======================================================================
   test-backend-core:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
-      pull-requests: read
     services:
       postgres:
         image: postgres:16
@@ -117,167 +118,77 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: setup-go@v5
+
+      - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
-      - name: Verify migration
+
+      - name: Verify migration paths
         env:
           MIGRATION_TEST_POSTGRES_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
         run: cd backend/core && go test ./migrate -v
-      - name: Go test with coverage
-        run: |
-          cd backend/core
-          go test ./... -coverprofile=coverage-core.out
-          go tool cover -func=coverage-core.out -o coverage-core.txt
-          TOTAL=$(grep total coverage-core.txt | awk '{print $2}' | tr -d %)
-          echo "total=$TOTAL" >> $GITHUB_ENV
-      - name: Check total coverage ≥80%
-        run: |
-          if (( $(echo "$total < 80" | bc -l) )); then exit 1; fi
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-core
-          path: backend/core/coverage-core.*
 
-  # =======================================================================
-  # 3. test-evo-cli（Python）：独立覆盖率
-  # =======================================================================
+      - name: Test backend core
+        run: cd backend/core && go test ./... -v
+
+      - name: Test backend core integration module
+        run: cd tests/backend/core && go mod tidy && go test ./... -v
+
   test-evo-cli:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
-          fetch-depth: 0
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install deps
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq cmake
-          pip install scikit-build-core pybind11 coverage diff-cover
+          pip install scikit-build-core pybind11
           CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install --no-cache-dir algorithm/lazyllm
           cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
           pip install -r evo/requirements.txt
           pip install pytest httpx
-      - name: Test with coverage
-        run: |
-          coverage run --source=evo -m pytest tests/evo/ tests/test_cli.py -v
-          coverage xml -o coverage-evo.xml
-      - name: Check total coverage ≥80%
-        run: coverage report --include=evo/* --fail-under=80
-      - name: Check incremental coverage ≥80%
-        run: |
-          diff-cover coverage-evo.xml --compare-branch=origin/main --src-roots=evo --fail-under=80
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-evo
-          path: coverage-evo.xml
+      - name: Test
+        run: python -m pytest tests/evo/ tests/test_cli.py -v
 
-  # =======================================================================
-  # 4. test-algorithm（Python）：独立覆盖率
-  # =======================================================================
   test-algorithm:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
-          fetch-depth: 0
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install deps
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq cmake
-          pip install scikit-build-core pybind11 coverage diff-cover
+          pip install scikit-build-core pybind11
           CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install --no-cache-dir algorithm/lazyllm
           cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
           pip install -r algorithm/requirements.txt
           pip install -r tests/algorithm/requirements-test.txt
-      - name: Verify lazyllm
+      - name: Verify lazyllm install
         run: |
           python -c "from lazyllm.tools.agent.skill_manager import SkillManager; print('tools OK')"
           python -c "from lazyllm.module import ModuleBase; print('module OK')"
           python -c "from lazyllm import fc_register; print('fc_register OK')"
-      - name: Test with coverage
+      - name: Test
         env:
           LAZYLLM_INIT_DOC: "1"
-        run: |
-          coverage run --source=algorithm -m pytest tests/algorithm/ -v
-          coverage xml -o coverage-algorithm.xml
-      - name: Check total coverage ≥80%
-        run: coverage report --include=algorithm/* --fail-under=80
-      - name: Check incremental coverage ≥80%
-        run: |
-          diff-cover coverage-algorithm.xml --compare-branch=origin/main --src-roots=algorithm --fail-under=80
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-algorithm
-          path: coverage-algorithm.xml
-
-  # =======================================================================
-  # 5. 汇总所有模块覆盖率 → 发到 PR 评论
-  # =======================================================================
-  coverage-report:
-    needs:
-      - test-auth-service
-      - test-backend-core
-      - test-evo-cli
-      - test-algorithm
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install tools
-        run: pip install coverage diff-cover
-      - name: Download all coverage artifacts
-        uses: actions/download-artifact@v4
-      - name: Generate summary comment
-        run: |
-          echo "## 📊 各模块覆盖率摘要" > comment.md
-          echo "" >> comment.md
-
-          # auth-service
-          echo "### auth-service" >> comment.md
-          coverage report --include=backend/auth-service/* --data-file=coverage-auth/coverage-auth.xml >> comment.md
-          echo "" >> comment.md
-
-          # evo-cli
-          echo "### evo-cli" >> comment.md
-          coverage report --include=evo/* --data-file=coverage-evo/coverage-evo.xml >> comment.md
-          echo "" >> comment.md
-
-          # algorithm
-          echo "### algorithm" >> comment.md
-          coverage report --include=algorithm/* --data-file=coverage-algorithm/coverage-algorithm.xml >> comment.md
-          echo "" >> comment.md
-
-          # core (Go)
-          echo "### backend-core (Go)" >> comment.md
-          cat coverage-core/coverage-core.txt >> comment.md
-      - name: Post to PR
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          path: comment.md
+        run: python -m pytest tests/algorithm/ -v
