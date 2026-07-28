@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 ALTER TABLE prompts
     ADD COLUMN IF NOT EXISTS category VARCHAR(64) NOT NULL DEFAULT 'custom';
 
@@ -18,3 +19,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_prompt_user_states_user_prompt
     ON prompt_user_states (create_user_id, prompt_id);
 
 DROP TABLE IF EXISTS default_prompts CASCADE;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

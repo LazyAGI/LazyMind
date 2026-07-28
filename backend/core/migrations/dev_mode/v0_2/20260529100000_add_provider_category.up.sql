@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 -- Add category and capabilities columns to default_model_providers and user_model_providers.
 -- Create user_selected_providers table for OCR/search group selection (symmetric to user_selected_models).
 
@@ -30,3 +31,6 @@ CREATE TABLE public.user_selected_providers (
 );
 
 ALTER SEQUENCE public.user_selected_providers_id_seq OWNED BY public.user_selected_providers.id;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

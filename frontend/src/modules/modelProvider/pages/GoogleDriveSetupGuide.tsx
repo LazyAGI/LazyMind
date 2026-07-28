@@ -11,6 +11,7 @@ import {
   getAppUrl,
   getCloudDataSourceCallbackUrl,
   getDataSourceManagementUrl,
+  isGoogleOAuthRedirectUriSupported,
 } from "@/modules/dataSource/oauth/urls";
 import { CLOUD_DOCUMENTS_GOOGLE_DRIVE_PATH } from "@/modules/modelProvider/utils/cloudDocumentUrls";
 import "./feishuSetupGuide.scss";
@@ -21,6 +22,7 @@ const GOOGLE_CLOUD_CONSOLE_URL = "https://console.cloud.google.com/apis/dashboar
 const GOOGLE_DRIVE_API_URL = "https://console.cloud.google.com/apis/library/drive.googleapis.com";
 const GOOGLE_CLOUD_CREDENTIALS_URL = "https://console.cloud.google.com/apis/credentials";
 const GOOGLE_AUTH_AUDIENCE_URL = "https://console.cloud.google.com/auth/audience";
+const GOOGLE_OAUTH_CLIENT_HELP_URL = "https://support.google.com/cloud/answer/15549257";
 
 type GuideStep = {
   title: string;
@@ -33,6 +35,7 @@ type GuideStep = {
 function buildGuideSteps(t: TFunction): GuideStep[] {
   const stepKey = (key: string) => `admin.dataSourceGoogleDriveSetupGuide.steps.${key}`;
   const redirectUri = getCloudDataSourceCallbackUrl("googledrive");
+  const redirectUriSupported = isGoogleOAuthRedirectUriSupported(redirectUri);
   return [
     {
       title: t(stepKey("openConsoleTitle")),
@@ -71,12 +74,16 @@ function buildGuideSteps(t: TFunction): GuideStep[] {
     {
       title: t(stepKey("redirectTitle")),
       description: t(stepKey("redirectDesc")),
+      linkLabel: t("admin.dataSourceGoogleDriveSetupGuide.openRedirectRules"),
+      linkHref: GOOGLE_OAUTH_CLIENT_HELP_URL,
       details: [
-        t("admin.dataSourceGoogleDriveSetupGuide.callbackUrl", {
+        t(redirectUriSupported
+          ? "admin.dataSourceGoogleDriveSetupGuide.callbackUrl"
+          : "admin.dataSourceGoogleDriveSetupGuide.unsupportedCallbackUrl", {
           uri: redirectUri,
         }),
-        t(stepKey("redirectOriginHint")),
-        t(stepKey("redirectHttpsHint")),
+        t(stepKey(redirectUriSupported ? "redirectOriginHint" : "redirectUnsupportedHint")),
+        t(stepKey(redirectUriSupported ? "redirectHttpsHint" : "redirectRecoveryHint")),
       ],
     },
     {

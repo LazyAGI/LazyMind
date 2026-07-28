@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 -- Repair environments where migration version 20260618100000 was already
 -- consumed by a different historical migration and phase3_data_history was
 -- therefore skipped.  The current ORM and plugin queries require both fields.
@@ -7,3 +8,6 @@ ALTER TABLE sub_agent_artifacts
 
 CREATE INDEX IF NOT EXISTS idx_saa_task_visible
   ON sub_agent_artifacts(task_id, slot, hidden, seq);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

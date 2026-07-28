@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS plugin_step_intents (
     id             VARCHAR(36) PRIMARY KEY,
     session_id     VARCHAR(36) NOT NULL,
@@ -8,3 +9,6 @@ CREATE TABLE IF NOT EXISTS plugin_step_intents (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_plugin_step_intent
     ON plugin_step_intents (session_id, step_id);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

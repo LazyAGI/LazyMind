@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS conversation_artifacts (
     id varchar(36) PRIMARY KEY,
     conversation_id varchar(36) NOT NULL,
@@ -17,3 +18,6 @@ CREATE INDEX IF NOT EXISTS idx_conversation_artifacts_history_id
     ON conversation_artifacts (history_id);
 CREATE INDEX IF NOT EXISTS idx_conversation_artifacts_create_user_id
     ON conversation_artifacts (create_user_id);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

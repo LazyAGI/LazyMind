@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 ALTER TABLE public.personal_resources
     ADD COLUMN IF NOT EXISTS auto_evo BOOLEAN NOT NULL DEFAULT TRUE,
     ADD COLUMN IF NOT EXISTS auto_evo_apply_status VARCHAR(32) NOT NULL DEFAULT 'idle',
@@ -8,3 +9,6 @@ ALTER TABLE public.personal_resources
     ADD COLUMN IF NOT EXISTS ext JSON,
     ADD COLUMN IF NOT EXISTS updated_by VARCHAR(255) NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS updated_by_name VARCHAR(255) NOT NULL DEFAULT '';
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

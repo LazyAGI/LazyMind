@@ -8,26 +8,13 @@ import (
 )
 
 func validateAppliedHistory(catalog migrationCatalog, applied []historyRecord) error {
-	known := make(map[uint64]struct{}, len(catalog.All))
-	allowedSuperseded := make(map[uint64]struct{})
-	appliedSet := make(map[uint64]struct{}, len(applied))
-	for _, migration := range catalog.All {
-		known[migration.Version] = struct{}{}
-		for _, source := range migration.Supersedes {
-			allowedSuperseded[source] = struct{}{}
-		}
+	if err := validateKnownAppliedHistory(catalog, applied); err != nil {
+		return err
 	}
+
+	appliedSet := make(map[uint64]struct{}, len(applied))
 	for _, record := range applied {
 		appliedSet[record.Version] = struct{}{}
-		if _, ok := known[record.Version]; ok {
-			continue
-		}
-		if _, ok := allowedSuperseded[record.Version]; !ok {
-			return fmt.Errorf(
-				"applied migration version %d has no migration file or release directory; refusing to execute SQL",
-				record.Version,
-			)
-		}
 	}
 
 	for _, migration := range catalog.VersionMigrations {
@@ -57,8 +44,31 @@ func validateAppliedHistory(catalog migrationCatalog, applied []historyRecord) e
 		if mode.Aggregate == nil || !historyContains(applied, mode.Aggregate.Version) {
 			continue
 		}
-		if appliedDevVersions(mode, applied) > 0 {
+		if appliedPreAggregateDevVersions(mode, applied) > 0 {
 			return mixedModeHistoryError(mode)
+		}
+	}
+	return nil
+}
+
+func validateKnownAppliedHistory(catalog migrationCatalog, applied []historyRecord) error {
+	known := make(map[uint64]struct{}, len(catalog.All))
+	allowedSuperseded := make(map[uint64]struct{})
+	for _, migration := range catalog.All {
+		known[migration.Version] = struct{}{}
+		for _, source := range migration.Supersedes {
+			allowedSuperseded[source] = struct{}{}
+		}
+	}
+	for _, record := range applied {
+		if _, ok := known[record.Version]; ok {
+			continue
+		}
+		if _, ok := allowedSuperseded[record.Version]; !ok {
+			return fmt.Errorf(
+				"applied migration version %d has no migration file or release directory; refusing to execute SQL",
+				record.Version,
+			)
 		}
 	}
 	return nil
@@ -143,11 +153,20 @@ func (r *Runner) normalizeCanonicalHistory(
 ) ([]historyRecord, error) {
 	var err error
 	for _, migration := range catalog.VersionMigrations {
-		if len(migration.Supersedes) == 0 || historyContains(applied, migration.Version) {
+		if len(migration.Supersedes) == 0 {
 			continue
 		}
 		appliedSet := historyVersionSet(applied)
 		appliedSources, missingSources := partitionVersions(migration.Supersedes, appliedSet)
+		if historyContains(applied, migration.Version) {
+			if len(appliedSources) > 0 {
+				applied, err = r.pruneHistory(appliedSources, applied)
+				if err != nil {
+					return applied, err
+				}
+			}
+			continue
+		}
 		if len(appliedSources) == 0 || len(missingSources) > 0 {
 			continue
 		}
@@ -169,6 +188,93 @@ func (r *Runner) normalizeCanonicalHistory(
 		}
 	}
 	return applied, nil
+}
+
+func (r *Runner) pruneHistory(versions []uint64, applied []historyRecord) ([]historyRecord, error) {
+	updated := removeHistoryRecords(applied, versions)
+	nextVersion := highestAppliedVersion(updated)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return applied, err
+	}
+	for _, version := range versions {
+		if err := r.deleteHistory(tx, version); err != nil {
+			_ = tx.Rollback()
+			return applied, err
+		}
+	}
+	if err := r.writeState(tx, &nextVersion, false); err != nil {
+		_ = tx.Rollback()
+		return applied, err
+	}
+	if err := tx.Commit(); err != nil {
+		return applied, err
+	}
+	return updated, nil
+}
+
+func (r *Runner) recordMigrationWithoutSQL(
+	migration migrationFile,
+	applied []historyRecord,
+) ([]historyRecord, uint64, error) {
+	updated := addHistoryRecord(applied, migration)
+	nextVersion := highestAppliedVersion(updated)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return applied, highestAppliedVersion(applied), err
+	}
+	if err := r.insertHistory(tx, migration.Version, migration.Name); err != nil {
+		_ = tx.Rollback()
+		return applied, highestAppliedVersion(applied), err
+	}
+	if err := r.writeState(tx, &nextVersion, false); err != nil {
+		_ = tx.Rollback()
+		return applied, highestAppliedVersion(applied), err
+	}
+	if err := tx.Commit(); err != nil {
+		return applied, highestAppliedVersion(applied), err
+	}
+	return updated, nextVersion, nil
+}
+
+func removeHistoryRecords(applied []historyRecord, versions []uint64) []historyRecord {
+	removed := make(map[uint64]struct{}, len(versions))
+	for _, version := range versions {
+		removed[version] = struct{}{}
+	}
+	updated := make([]historyRecord, 0, len(applied))
+	for _, record := range applied {
+		if _, ok := removed[record.Version]; !ok {
+			updated = append(updated, record)
+		}
+	}
+	return updated
+}
+
+func postAggregateDevMigrations(mode modeMigration) []migrationFile {
+	if mode.Aggregate == nil {
+		return nil
+	}
+	out := make([]migrationFile, 0)
+	for _, migration := range mode.Dev {
+		if migration.FileVersion > mode.Aggregate.Version {
+			out = append(out, migration)
+		}
+	}
+	return out
+}
+
+func appliedPreAggregateDevVersions(mode modeMigration, applied []historyRecord) int {
+	if mode.Aggregate == nil {
+		return appliedDevVersions(mode, applied)
+	}
+	count := 0
+	for _, migration := range mode.Dev {
+		if migration.FileVersion <= mode.Aggregate.Version && historyContains(applied, migration.Version) {
+			count++
+		}
+	}
+	return count
 }
 
 func orderAppliedHistory(catalog migrationCatalog, applied []historyRecord) []historyRecord {

@@ -1,5 +1,6 @@
 -- 20260612120000_create_resource_versions
 -- +migrate Up
+-- +migrate Dialect postgres
 
 CREATE TABLE IF NOT EXISTS public.resource_versions (
     id character varying(36) NOT NULL,
@@ -25,3 +26,6 @@ ON public.resource_versions (resource_type, resource_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_resource_versions_user_resource
 ON public.resource_versions (user_id, resource_type, resource_id, created_at DESC);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

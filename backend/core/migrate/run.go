@@ -30,6 +30,7 @@ const (
 
 var migrationFilePattern = regexp.MustCompile(`^(\d+)_(.+)\.(up|down)\.sql$`)
 var supersedesDirectivePattern = regexp.MustCompile(`(?i)^--\s*\+migrate\s+supersedes\s*:?\s*(.*)$`)
+var dialectDirectivePattern = regexp.MustCompile(`(?i)^--\s*\+migrate\s+dialect\s*:?\s*(.*)$`)
 
 type Runner struct {
 	driver string
@@ -164,6 +165,13 @@ func (r *Runner) Up(limit int) error {
 	if err != nil {
 		return err
 	}
+	if err := validateKnownAppliedHistory(catalog, applied); err != nil {
+		return err
+	}
+	applied, err = r.normalizeCanonicalHistory(catalog, applied)
+	if err != nil {
+		return err
+	}
 	if err := validateAppliedHistory(catalog, applied); err != nil {
 		return err
 	}
@@ -192,8 +200,22 @@ func (r *Runner) Up(limit int) error {
 
 		mode := *step.Mode
 		if mode.Aggregate != nil && historyContains(applied, mode.Aggregate.Version) {
-			if appliedDevVersions(mode, applied) > 0 {
+			if appliedPreAggregateDevVersions(mode, applied) > 0 {
 				return mixedModeHistoryError(mode)
+			}
+			for _, mig := range postAggregateDevMigrations(mode) {
+				if historyContains(applied, mig.Version) {
+					continue
+				}
+				if limit > 0 && executed >= limit {
+					return nil
+				}
+				if err := r.applyUpMigration(mig, currentMax); err != nil {
+					return err
+				}
+				applied = addHistoryRecord(applied, mig)
+				currentMax = highestAppliedVersion(applied)
+				executed++
 			}
 			continue
 		}
@@ -210,6 +232,12 @@ func (r *Runner) Up(limit int) error {
 			}
 			if ranSQL {
 				executed++
+				for _, included := range postAggregateDevMigrations(mode) {
+					applied, currentMax, err = r.recordMigrationWithoutSQL(included, applied)
+					if err != nil {
+						return err
+					}
+				}
 			}
 			continue
 		}
@@ -660,7 +688,12 @@ func (r *Runner) applyUpMigration(mig migrationFile, currentMax uint64) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(string(body)); err != nil {
+	sqlBody, err := migrationSQLForDriver(string(body), r.driver)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("migration %d: %w", mig.Version, err)
+	}
+	if _, err := tx.Exec(sqlBody); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -703,7 +736,12 @@ func (r *Runner) applyDownMigration(mig migrationFile, remaining []historyRecord
 		_ = tx.Rollback()
 		return err
 	}
-	if _, err := tx.Exec(string(body)); err != nil {
+	sqlBody, err := migrationSQLForDriver(string(body), r.driver)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("migration %d: %w", mig.Version, err)
+	}
+	if _, err := tx.Exec(sqlBody); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -724,6 +762,35 @@ func (r *Runner) applyDownMigration(mig migrationFile, remaining []historyRecord
 	}
 	log.Logger.Info().Uint64("version", mig.Version).Str("name", mig.Name).Msg("migration down applied")
 	return nil
+}
+
+func migrationSQLForDriver(body, driver string) (string, error) {
+	lines := strings.Split(body, "\n")
+	hasDialect := false
+	active := true
+	matched := false
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		match := dialectDirectivePattern.FindStringSubmatch(strings.TrimSpace(line))
+		if len(match) == 0 {
+			if !hasDialect || active {
+				out = append(out, line)
+			}
+			continue
+		}
+		hasDialect = true
+		active = false
+		for _, candidate := range strings.Split(match[1], ",") {
+			if strings.EqualFold(strings.TrimSpace(candidate), driver) || strings.TrimSpace(candidate) == "*" {
+				active = true
+				matched = true
+			}
+		}
+	}
+	if hasDialect && !matched {
+		return "", fmt.Errorf("no SQL block for database dialect %q", driver)
+	}
+	return strings.Join(out, "\n"), nil
 }
 
 func (r *Runner) insertHistory(exec sqlExecer, version uint64, name string) error {

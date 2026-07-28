@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 ALTER TABLE public.uploaded_files
     ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64) NOT NULL DEFAULT '';
 
@@ -6,3 +7,6 @@ CREATE INDEX IF NOT EXISTS idx_uploaded_files_reusable_hash
     WHERE deleted_at IS NULL
       AND content_hash <> ''
       AND status IN ('UPLOADED', 'BOUND');
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

@@ -1,5 +1,6 @@
 -- 20260625100000_create_taskcenter_tables
 -- +migrate Up
+-- +migrate Dialect postgres
 
 CREATE TABLE IF NOT EXISTS public.task_center_tasks (
     id character varying(36) NOT NULL,
@@ -38,3 +39,6 @@ CREATE TABLE IF NOT EXISTS public.user_schedules (
 
 CREATE INDEX IF NOT EXISTS idx_us_user ON public.user_schedules(user_id);
 CREATE INDEX IF NOT EXISTS idx_us_next_run ON public.user_schedules(next_run_at) WHERE enabled = true;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

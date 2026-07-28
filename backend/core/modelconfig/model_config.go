@@ -7,15 +7,18 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+
+	"lazymind/core/modelprovider"
 )
 
 type SelectedRuntimeModel struct {
-	ModelType      string
-	ProviderName   string
-	ModelName      string
-	BaseURL        string
-	APIKey         string
-	MaxInputTokens *string
+	ModelType        string
+	ProviderName     string
+	ModelName        string
+	BaseURL          string
+	APIKey           string
+	APIKeyCiphertext string
+	MaxInputTokens   *string
 }
 
 // LoadMaxInputTokens returns the configured context window for a runtime model role.
@@ -57,7 +60,7 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 				"m.provider_name, "+
 				"m.name AS model_name, "+
 				"g.base_url, "+
-				"g.api_key, "+
+				"g.api_key, g.api_key_ciphertext, "+
 				"m.max_input_tokens",
 		).
 		Joins(
@@ -77,6 +80,9 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 	if err != nil {
 		return nil, err
 	}
+	if err := decryptRuntimeModels(ownRows); err != nil {
+		return nil, err
+	}
 
 	// Collect which model_types the user already has.
 	coveredTypes := make(map[string]struct{}, len(ownRows))
@@ -93,7 +99,7 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 				"m.provider_name, "+
 				"m.name AS model_name, "+
 				"g.base_url, "+
-				"g.api_key, "+
+				"g.api_key, g.api_key_ciphertext, "+
 				"m.max_input_tokens",
 		).
 		Joins(
@@ -109,6 +115,9 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 		Where("usm.share = ?", true).
 		Scan(&sharedRows).Error
 	if err != nil {
+		return nil, err
+	}
+	if err := decryptRuntimeModels(sharedRows); err != nil {
 		return nil, err
 	}
 
@@ -182,9 +191,10 @@ func splitOCRAuthKeys(raw string) []string {
 }
 
 type selectedProviderConfig struct {
-	ProviderName string
-	BaseURL      string
-	APIKey       string
+	ProviderName     string
+	BaseURL          string
+	APIKey           string
+	APIKeyCiphertext string
 }
 
 func loadSelectedProviderConfig(
@@ -199,7 +209,7 @@ func loadSelectedProviderConfig(
 		Select(
 			"p.name AS provider_name, "+
 				"g.base_url, "+
-				"g.api_key",
+				"g.api_key, g.api_key_ciphertext",
 		).
 		Joins("JOIN user_model_provider_groups g ON g.id = usp.user_model_provider_group_id AND g.deleted_at IS NULL").
 		Joins("JOIN user_model_providers p ON p.id = g.user_model_provider_id AND p.deleted_at IS NULL").
@@ -215,6 +225,10 @@ func loadSelectedProviderConfig(
 	}
 	if row.ProviderName == "" && row.BaseURL == "" {
 		return nil, nil
+	}
+	row.APIKey, err = modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
+	if err != nil {
+		return nil, err
 	}
 	return &row, nil
 }
@@ -239,7 +253,7 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	var row SelectedRuntimeModel
 	err := db.WithContext(ctx).
 		Table("user_model_provider_group_models m").
-		Select("m.provider_name, m.name AS model_name, g.base_url, g.api_key").
+		Select("m.provider_name, m.name AS model_name, g.base_url, g.api_key, g.api_key_ciphertext").
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
@@ -255,6 +269,10 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	if row.ProviderName == "" && row.ModelName == "" {
 		return nil, nil
 	}
+	row.APIKey, err = modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
+	if err != nil {
+		return nil, err
+	}
 	cfg := map[string]any{
 		"source":   strings.ToLower(strings.TrimSpace(row.ProviderName)),
 		"model":    row.ModelName,
@@ -262,6 +280,17 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 		"api_key":  row.APIKey,
 	}
 	return cfg, nil
+}
+
+func decryptRuntimeModels(rows []SelectedRuntimeModel) error {
+	for i := range rows {
+		apiKey, err := modelprovider.ResolveAPIKey(rows[i].APIKey, rows[i].APIKeyCiphertext)
+		if err != nil {
+			return err
+		}
+		rows[i].APIKey = apiKey
+	}
+	return nil
 }
 
 func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {

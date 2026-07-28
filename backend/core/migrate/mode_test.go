@@ -39,8 +39,8 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		mode.Aggregate == nil || mode.Aggregate.Version != 20260723183515 {
 		t.Fatalf("unexpected v0_2 mode: %#v", mode)
 	}
-	if len(mode.Dev) != 88 {
-		t.Fatalf("v0_2 dev migration count=%d, want 88", len(mode.Dev))
+	if len(mode.Dev) != 89 {
+		t.Fatalf("v0_2 dev migration count=%d, want 89", len(mode.Dev))
 	}
 	if !containsMigrationFileVersion(mode.Dev, 20260703130000) {
 		t.Fatal("v0_2 dev migrations are missing create_plugin_step_intents")
@@ -48,11 +48,11 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if !containsVersion(mode.Aggregate.Supersedes, 20260703130000) {
 		t.Fatal("v0_2 aggregate Supersedes is missing create_plugin_step_intents")
 	}
-	if len(mode.Aggregate.Supersedes) != len(mode.Dev) {
+	if len(mode.Aggregate.Supersedes) != len(mode.Dev)-1 {
 		t.Fatalf(
-			"v0_2 aggregate Supersedes count=%d, dev migration count=%d",
+			"v0_2 aggregate Supersedes count=%d, pre-aggregate dev migration count=%d",
 			len(mode.Aggregate.Supersedes),
-			len(mode.Dev),
+			len(mode.Dev)-1,
 		)
 	}
 	for _, migration := range mode.Dev {
@@ -68,7 +68,7 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 				wantVersion,
 			)
 		}
-		if !containsVersion(mode.Aggregate.Supersedes, migration.FileVersion) {
+		if migration.FileVersion <= mode.Aggregate.Version && !containsVersion(mode.Aggregate.Supersedes, migration.FileVersion) {
 			t.Fatalf("v0_2 aggregate Supersedes is missing dev migration %d", migration.FileVersion)
 		}
 	}
@@ -84,8 +84,16 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		!strings.Contains(string(up), "CREATE UNIQUE INDEX uk_plugin_step_intent") {
 		t.Fatal("v0_2 aggregate up is missing plugin_step_intents schema")
 	}
+	if !strings.Contains(string(up), `ADD COLUMN "api_key_ciphertext"`) ||
+		!strings.Contains(string(up), `ADD COLUMN "credential_version"`) {
+		t.Fatal("v0_2 aggregate up is missing encrypted provider credential columns")
+	}
 	if !strings.Contains(string(down), "DROP TABLE IF EXISTS public.plugin_step_intents CASCADE") {
 		t.Fatal("v0_2 aggregate down is missing plugin_step_intents rollback")
+	}
+	if !strings.Contains(string(down), `DROP COLUMN "api_key_ciphertext"`) ||
+		!strings.Contains(string(down), `DROP COLUMN "credential_version"`) {
+		t.Fatal("v0_2 aggregate down is missing encrypted provider credential rollback")
 	}
 }
 
@@ -170,6 +178,59 @@ DROP TABLE users;
 	}
 	if source != "aggregate" {
 		t.Fatalf("source=%q, want aggregate", source)
+	}
+}
+
+func TestRunnerRepairsMixedAggregateHistoryAndAppliesPostAggregateDev(t *testing.T) {
+	dir := newStructuredMigrationDir(t)
+	writeMigrationPair(t, versionModeDir(t, dir, "v0_1"), "20260802120000_release", `
+-- +migrate Supersedes: 20260725093000
+CREATE TABLE users (id integer PRIMARY KEY);
+`, `
+DROP TABLE users;
+`)
+	devDir := devModeDir(t, dir, "v0_1")
+	writeMigrationPair(t, devDir, "20260725093000_create_users", `
+CREATE TABLE users (id integer PRIMARY KEY);
+`, `
+DROP TABLE users;
+`)
+	writeMigrationPair(t, devDir, "20260803110000_add_users_name", `
+ALTER TABLE users ADD COLUMN name text NOT NULL DEFAULT '';
+`, `
+ALTER TABLE users DROP COLUMN name;
+`)
+
+	dbPath := filepath.Join(t.TempDir(), "acl.db")
+	db := openSquashTestDB(t, dbPath)
+	defer db.Close()
+	seedHistory(t, db, []historyRecord{
+		{Version: testAggregateV1, Name: "release"},
+		{Version: testDevV1A, Name: "create_users"},
+	})
+	if _, err := db.Exec(`CREATE TABLE users (id integer PRIMARY KEY)`); err != nil {
+		t.Fatalf("seed aggregate schema: %v", err)
+	}
+
+	runner := openSquashTestRunner(t, dbPath, dir)
+	defer runner.Close()
+	if err := runner.Up(0); err != nil {
+		t.Fatalf("repair mixed history and apply post-aggregate dev: %v", err)
+	}
+
+	postVersion, err := combineDevVersion(1, 20260803110000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHistoryVersionCount(t, db, testAggregateV1, 1)
+	assertHistoryVersionCount(t, db, testDevV1A, 0)
+	assertHistoryVersionCount(t, db, postVersion, 1)
+	var columnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'name'`).Scan(&columnCount); err != nil {
+		t.Fatalf("query users.name: %v", err)
+	}
+	if columnCount != 1 {
+		t.Fatalf("users.name column count=%d, want 1", columnCount)
 	}
 }
 

@@ -1,5 +1,6 @@
 -- 20260630120000_create_external_database_connections
 -- +migrate Up
+-- +migrate Dialect postgres
 
 CREATE TABLE IF NOT EXISTS public.external_database_connections (
     id character varying(64) NOT NULL,
@@ -25,3 +26,6 @@ CREATE TABLE IF NOT EXISTS public.external_database_connections (
 
 CREATE INDEX IF NOT EXISTS idx_external_database_connections_user
     ON public.external_database_connections USING btree (create_user_id, deleted_at, updated_at);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

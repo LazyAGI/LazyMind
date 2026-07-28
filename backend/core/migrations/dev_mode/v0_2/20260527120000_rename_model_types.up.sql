@@ -1,4 +1,5 @@
 -- +migrate Up
+-- +migrate Dialect postgres
 
 -- Align legacy model_type values with runtime_models.yaml role keys.
 
@@ -18,3 +19,6 @@ UPDATE user_selected_models SET model_type = 'vlm' WHERE model_type = 'VLM';
 UPDATE user_selected_models SET model_type = 'embed_main' WHERE model_type = 'embedding';
 UPDATE user_selected_models SET model_type = 'embed_image' WHERE model_type = 'multimodal_embedding';
 UPDATE user_selected_models SET model_type = 'reranker' WHERE model_type = 'rerank';
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

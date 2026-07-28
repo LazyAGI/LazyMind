@@ -1,5 +1,6 @@
 -- 20260613120000_create_subagent_tables
 -- +migrate Up
+-- +migrate Dialect postgres
 
 CREATE TABLE public.sub_agent_tasks (
     id character varying(36) NOT NULL,
@@ -56,3 +57,6 @@ CREATE TABLE public.sub_agent_artifacts (
 );
 
 CREATE INDEX idx_saa_task_key ON public.sub_agent_artifacts(task_id, artifact_key, seq);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 -- Phase 3: Data History & Rich Media Support
 -- Adds: hidden/caption to sub_agent_artifacts,
 --       plugin_slot_order table,
@@ -25,3 +26,6 @@ CREATE TABLE IF NOT EXISTS plugin_slot_order (
 ALTER TABLE plugin_slot_revisions
   ADD COLUMN IF NOT EXISTS content_snapshot JSONB,
   ADD COLUMN IF NOT EXISTS change_source    VARCHAR(16) NOT NULL DEFAULT 'ai';
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

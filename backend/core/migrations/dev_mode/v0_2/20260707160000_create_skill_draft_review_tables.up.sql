@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS public.skill_draft_review_sessions (
     id VARCHAR(36) PRIMARY KEY,
     skill_id VARCHAR(36) NOT NULL,
@@ -53,3 +54,6 @@ CREATE INDEX IF NOT EXISTS idx_skill_draft_review_items_session_hunk
 
 CREATE INDEX IF NOT EXISTS idx_skill_draft_review_items_batch
     ON public.skill_draft_review_action_items(batch_id);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, shell, dialog, clipboard } = require("electron");
 const { spawn, execFile } = require("node:child_process");
-const { randomUUID } = require("node:crypto");
+const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
@@ -43,6 +43,7 @@ const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
   (isPackaged ? path.join(runtimeResourcesRoot, "app") : path.resolve(__dirname, "..", "..", ".."));
 const explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
 const desktopLogsDir = app.getPath("logs");
+const desktopCredentialIdentityPath = path.join(app.getPath("userData"), "credential-device.json");
 const startupLogPath = path.join(desktopLogsDir, "desktop-startup.log");
 const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
   path.join(runtimeResourcesRoot, "bin", `local-runtime-manager${isWindows ? ".exe" : ""}`);
@@ -79,6 +80,35 @@ let startupState = {
   updatedAt: new Date().toISOString(),
 };
 
+function loadOrCreateDesktopCredentialIdentity() {
+  fs.mkdirSync(path.dirname(desktopCredentialIdentityPath), { recursive: true });
+  try {
+    const parsed = JSON.parse(fs.readFileSync(desktopCredentialIdentityPath, "utf8"));
+    if (parsed?.version === 1 && parsed?.deviceId && parsed?.deviceSecret) {
+      return parsed;
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw new Error(`Failed to read desktop credential identity: ${error.message}`);
+    }
+  }
+  const identity = {
+    version: 1,
+    deviceId: randomUUID(),
+    deviceSecret: randomBytes(32).toString("base64url"),
+  };
+  fs.writeFileSync(desktopCredentialIdentityPath, `${JSON.stringify(identity)}\n`, { mode: 0o600, flag: "wx" });
+  return identity;
+}
+
+function deriveDesktopCredentialKey(identity, purpose) {
+  return createHmac("sha256", Buffer.from(identity.deviceSecret, "base64url"))
+    .update(`lazymind/desktop/${identity.deviceId}/${purpose}/v1`)
+    .digest("base64url");
+}
+
+const desktopCredentialIdentity = loadOrCreateDesktopCredentialIdentity();
+
 function sidecarArgs(command, extra = []) {
   const args = [
     command,
@@ -107,6 +137,9 @@ function sidecarEnv() {
     VITE_LAZYMIND_MODE: "desktop",
     PYTHONDONTWRITEBYTECODE: "1",
   };
+  env.LAZYMIND_MODEL_PROVIDER_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "model-provider");
+  env.LAZYMIND_MCP_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "mcp");
+  env.LAZYMIND_AUTH_CLOUD_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "cloud-oauth");
   if (explicitRuntimeRoot) {
     env.LAZYMIND_RUNTIME_ROOT = explicitRuntimeRoot;
   } else {

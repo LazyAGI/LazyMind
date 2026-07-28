@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 DROP TABLE IF EXISTS plugin_transition_commands;
 DROP TABLE IF EXISTS plugin_route_decisions;
 DROP TABLE IF EXISTS plugin_attempt_input_bindings;
@@ -10,3 +11,6 @@ ALTER TABLE plugin_session_steps DROP COLUMN IF EXISTS validity;
 ALTER TABLE plugin_sessions DROP COLUMN IF EXISTS graph_schema_version;
 ALTER TABLE plugin_sessions DROP COLUMN IF EXISTS graph_hash;
 ALTER TABLE plugin_sessions DROP COLUMN IF EXISTS state_version;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

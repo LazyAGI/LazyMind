@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS state_version BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS graph_hash VARCHAR(64) NOT NULL DEFAULT '';
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS graph_schema_version VARCHAR(16) NOT NULL DEFAULT '';
@@ -51,3 +52,6 @@ CREATE TABLE IF NOT EXISTS plugin_transition_commands (
     updated_at TIMESTAMP NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ptc_session ON plugin_transition_commands(session_id, created_at);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

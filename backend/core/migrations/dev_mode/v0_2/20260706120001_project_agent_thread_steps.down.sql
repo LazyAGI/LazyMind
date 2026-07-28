@@ -1,5 +1,6 @@
 -- 20260706120000_project_agent_thread_steps
 -- +migrate Down
+-- +migrate Dialect postgres
 
 DROP INDEX IF EXISTS public.idx_agent_thread_steps_stage;
 
@@ -27,3 +28,6 @@ ALTER TABLE public.agent_thread_steps
 
 ALTER TABLE public.agent_thread_steps
     DROP COLUMN IF EXISTS stage;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

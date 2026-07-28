@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 DROP TABLE IF EXISTS public.task_run_inputs;
 DROP TABLE IF EXISTS public.task_run_outputs;
 DROP INDEX IF EXISTS public.idx_task_center_schedule_execution;
@@ -19,3 +20,6 @@ DROP TABLE IF EXISTS public.automation_groups;
 
 -- Soft-deleted task conversations are not restored because users may also have
 -- deleted them independently. user_schedules.run_count remains derivable data.
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

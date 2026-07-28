@@ -1,5 +1,6 @@
 -- 20260706120000_project_agent_thread_steps
 -- +migrate Up
+-- +migrate Dialect postgres
 
 ALTER TABLE public.agent_thread_steps
     ADD COLUMN IF NOT EXISTS stage character varying(32) DEFAULT ''::character varying NOT NULL;
@@ -28,3 +29,6 @@ ALTER TABLE public.agent_thread_steps
 
 CREATE INDEX IF NOT EXISTS idx_agent_thread_steps_stage
     ON public.agent_thread_steps USING btree (stage);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

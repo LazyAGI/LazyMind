@@ -77,6 +77,59 @@ Create a new dev migration with:
 go run ./cmd/dbmigrate create -name create_users -version v0_2
 ```
 
+## Required verification
+
+Every schema or data change in `dev_mode/v0_N` must be reflected in the matching
+`version_mode/v0_N` aggregate `up` and `down` files in the same change. The CI
+migration tests build isolated databases through the supported paths:
+
+1. all release aggregates in order;
+2. release aggregates through `v0_(N-1)`, then every `dev_mode/v0_N` migration.
+
+It compares normalized columns, constraints, indexes, sequences, views, and
+non-volatile table data, verifies all ORM tables exist, and checks that the current
+aggregate down migration restores the previous release schema. CI also exercises
+mixed-history recovery and post-aggregate dev upgrades.
+
+PostgreSQL and SQLite use the same catalog, version/dev directories, history
+tables, ordering, and runner. SQLite never runs `AutoMigrate` at application
+startup. A fresh database executes the explicit v0.1 and v0.2 release migrations;
+an unversioned v0.1 Desktop database executes the same idempotent v0.1 baseline
+and then the explicit v0.2 table-rebuild/data migration. Rename, drop, constraints,
+indexes, seed data, and preserved columns are therefore part of reviewed migration
+files rather than being inferred from the ORM at user startup.
+
+SQL that works unchanged on both engines is written normally. When the engines
+need different syntax, keep both implementations in the same migration file:
+
+```sql
+-- +migrate Dialect postgres
+ALTER TABLE public.items ADD COLUMN payload jsonb;
+-- +migrate Dialect sqlite
+ALTER TABLE items ADD COLUMN payload text;
+```
+
+A file containing dialect directives must contain a matching block for every
+supported database on which it will run. The same rule applies to its down file.
+CI exercises SQLite from an empty database, upgrades a legacy database while
+preserving and transforming data, compares the v0.1→v0.2 aggregate path with the
+v0.1→all-v0.2-dev path, checks every ORM table and column, migrates legacy
+plaintext credentials, and repeats upgrades for idempotency. With
+`MIGRATION_TEST_POSTGRES_DSN` set, CI also builds and compares the PostgreSQL
+aggregate and dev paths.
+
+`go run ./cmd/sqliteschema` prints a deterministic SQLite DDL snapshot from the
+current ORM for use while authoring a migration. It is a development-only
+generator; its output must be reviewed and committed into both the current dev
+migration and matching release aggregate. Production does not invoke it.
+
+Run the PostgreSQL verification locally with a disposable server:
+
+```sh
+MIGRATION_TEST_POSTGRES_DSN='postgres://user:password@127.0.0.1:5432/postgres?sslmode=disable' \
+  go test ./migrate -run TestRepositoryPostgresMigrationPaths -v
+```
+
 `goto` is intentionally unavailable when dev modes are configured because one
 numeric target cannot unambiguously select aggregate versus dev history. Use
 `up` and `down`.

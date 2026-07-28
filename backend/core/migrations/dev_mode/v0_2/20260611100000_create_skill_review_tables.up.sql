@@ -1,5 +1,6 @@
 -- 20260611100000_create_skill_review_tables
 -- +migrate Up
+-- +migrate Dialect postgres
 
 CREATE TABLE IF NOT EXISTS public.skill_review_results (
     id TEXT NOT NULL,
@@ -64,3 +65,6 @@ CREATE TABLE IF NOT EXISTS public.memory_review (
 
 CREATE INDEX IF NOT EXISTS idx_memory_review_pending_scan
 ON public.memory_review (target, user_id, state, review_status, "time" ASC);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

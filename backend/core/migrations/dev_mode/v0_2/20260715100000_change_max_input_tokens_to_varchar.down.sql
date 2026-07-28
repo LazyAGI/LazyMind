@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 ALTER TABLE default_models
     ALTER COLUMN max_input_tokens TYPE BIGINT
     USING CASE
@@ -15,3 +16,6 @@ ALTER TABLE user_model_provider_group_models
         WHEN max_input_tokens ~ '^[0-9]+M$' THEN SUBSTRING(max_input_tokens FROM '^[0-9]+')::BIGINT * 1000000
         ELSE max_input_tokens::BIGINT
     END;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

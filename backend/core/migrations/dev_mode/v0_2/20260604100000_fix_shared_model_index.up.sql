@@ -1,4 +1,5 @@
 -- +migrate Up
+-- +migrate Dialect postgres
 
 -- The previous index was incorrectly created on user_model_provider_group_model_id
 -- instead of model_type. This prevented two different model_keys (e.g. llm and
@@ -27,3 +28,6 @@ WHERE id IN (
 CREATE UNIQUE INDEX uk_user_selected_models_shared_model
   ON user_selected_models (model_type)
   WHERE share = TRUE;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

@@ -104,7 +104,14 @@ func (s *BlobStore) Put(ctx context.Context, tx *gorm.DB, path string, data []by
 		row.Content = data
 		info.StorageBackend = row.StorageBackend
 	}
-	if err := tx.Create(&row).Error; err != nil {
+	create := tx
+	if binary {
+		// A nil []byte is encoded as an empty blob by the SQLite driver. Omit the
+		// nullable column so the database stores SQL NULL as required by the
+		// storage-shape constraint.
+		create = create.Omit("content")
+	}
+	if err := create.Create(&row).Error; err != nil {
 		return blobInfo{}, err
 	}
 	return info, nil

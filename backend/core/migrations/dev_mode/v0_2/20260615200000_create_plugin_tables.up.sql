@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 -- Create Plugin tables: plugin_sessions, plugin_session_steps, plugin_slot_revisions
 -- Plugin sessions track one plugin workflow per conversation.
 -- SubAgent tables (sub_agent_tasks / sub_agent_steps / sub_agent_artifacts) are reused unchanged.
@@ -50,3 +51,6 @@ CREATE TABLE IF NOT EXISTS plugin_slot_revisions (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_psr_slot_rev ON plugin_slot_revisions(session_id, slot_id, revision);
 CREATE INDEX        IF NOT EXISTS idx_psr_artifact  ON plugin_slot_revisions(artifact_key);
 CREATE INDEX        IF NOT EXISTS idx_psr_session   ON plugin_slot_revisions(session_id, slot_id);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

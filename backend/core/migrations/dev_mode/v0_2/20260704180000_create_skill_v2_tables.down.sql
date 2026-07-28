@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 DROP INDEX IF EXISTS public.idx_skill_share_items_source_skill;
 
 ALTER TABLE public.skill_share_items
@@ -11,3 +12,6 @@ DROP TABLE IF EXISTS public.skill_revision_entries;
 DROP TABLE IF EXISTS public.skill_revisions;
 DROP TABLE IF EXISTS public.skill_blobs;
 DROP TABLE IF EXISTS public.skills;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

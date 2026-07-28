@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS plugins (
     id VARCHAR(36) PRIMARY KEY,
     plugin_ref VARCHAR(512) NOT NULL UNIQUE,
@@ -70,3 +71,6 @@ ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS plugin_revision_no BIGINT N
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS plugin_tree_hash VARCHAR(64) NOT NULL DEFAULT '';
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS plugin_remote_root VARCHAR(1024) NOT NULL DEFAULT '';
 ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS base_revision_id VARCHAR(36) NOT NULL DEFAULT '';
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

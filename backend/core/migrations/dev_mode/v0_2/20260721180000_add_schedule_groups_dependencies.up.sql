@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 CREATE TABLE public.automation_groups (
     id varchar(36) PRIMARY KEY, user_id varchar(255) NOT NULL, name varchar(128) NOT NULL,
     remark text NOT NULL DEFAULT '', timezone varchar(64) NOT NULL DEFAULT 'Asia/Shanghai',
@@ -83,3 +84,6 @@ SET run_count = (
       AND t.user_id = s.user_id
       AND t.archived_at IS NULL
 );
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

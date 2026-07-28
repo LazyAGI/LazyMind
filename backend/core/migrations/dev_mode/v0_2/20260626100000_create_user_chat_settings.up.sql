@@ -1,5 +1,6 @@
 -- 20260626100000_create_user_chat_settings
 -- +migrate Up
+-- +migrate Dialect postgres
 
 CREATE TABLE IF NOT EXISTS public.user_chat_settings (
     user_id      VARCHAR(255) NOT NULL,
@@ -9,3 +10,6 @@ CREATE TABLE IF NOT EXISTS public.user_chat_settings (
     updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     CONSTRAINT user_chat_settings_pkey PRIMARY KEY (user_id)
 );
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

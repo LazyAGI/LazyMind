@@ -1,5 +1,6 @@
 -- 20260610123000_create_user_disabled_tools
 -- +migrate Up
+-- +migrate Dialect postgres
 
 CREATE TABLE IF NOT EXISTS public.user_disabled_tools (
     id bigserial NOT NULL,
@@ -14,3 +15,6 @@ CREATE TABLE IF NOT EXISTS public.user_disabled_tools (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_user_disabled_tools_user_tool
     ON public.user_disabled_tools USING btree (create_user_id, tool_name);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

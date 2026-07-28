@@ -1,3 +1,4 @@
+-- +migrate Dialect postgres
 ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS source_skill_revision_id VARCHAR(36) NOT NULL DEFAULT '';
 ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS source_skill_revision_no BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS source_skill_tree_hash VARCHAR(64) NOT NULL DEFAULT '';
@@ -46,3 +47,6 @@ CREATE TABLE IF NOT EXISTS plugin_repair_runs (
     updated_at TIMESTAMP NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_plugin_repair_runs_draft ON plugin_repair_runs(draft_id, created_at);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

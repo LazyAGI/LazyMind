@@ -427,4 +427,51 @@ func init() {
 	registerAdditionalErrorAlias("invalid empty version in Supersedes directive", "Database migration configuration is invalid", http.StatusBadRequest, 2001991)
 	registerAdditionalErrorPattern("invalid version %q in Supersedes directive", "Database migration configuration is invalid", http.StatusBadRequest, 2001991)
 	registerAdditionalErrorPattern("duplicate version %d in Supersedes directive", "Database migration configuration is invalid", http.StatusBadRequest, 2001991)
+
+	// Stable aliases found by the repository-wide API/error-constructor audit.
+	// Reuse the public generic codes while preserving the source text as Detail.
+	for _, source := range []string{
+		"invalid channel intent request", "invalid channel intent state", "invalid channel command registry",
+		"invalid channel intent response", "basic chat does not support background execution",
+		"basic chat does not support ask answers", "basic chat does not support plugin mentions",
+		"conversation_id, decision_id and a valid action are required", "conversation and x-user-id are required",
+		"invalid search config patch", "at most 20 knowledge bases are allowed",
+		"selected_revision must be >= 1", "group name required", "multiple json values",
+		"model max_input_tokens is only supported for llm, vlm, or embed models",
+		"model max_input_tokens must be a positive integer or use a k or m suffix, for example 512, 128k, or 1m",
+		"session_ids required", "invalid cadence expression", "invalid cadence metadata",
+		"cadence interval must be between 1 and 52", "task description contains sensitive content",
+		"task description contains sensitive word",
+	} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	for _, source := range []string{
+		"cannot disable workflows while a workflow is attached to the conversation", "revision conflict",
+		"tool-limit decision is no longer active",
+	} {
+		registerAdditionalErrorAlias(source, "Conflict", http.StatusConflict, 2000107)
+	}
+	registerAdditionalErrorAlias("knowledge base is not readable", "forbidden", http.StatusForbidden, 2000102)
+	registerAdditionalErrorAlias("feishu authorization required", "unauthorized", http.StatusUnauthorized, 2000104)
+	registerAdditionalErrorAlias("dataset_ids is required", "dataset_ids required", http.StatusBadRequest, 2001349)
+	for _, source := range []string{
+		"no chat model configured", "failed to deliver tool-limit decision", "update search config failed",
+		"marshal writerdocument artifact failed", "artifact save failed", "decrypt api key failed",
+		"encrypt api key failed", "failed to create waiting task",
+		"unsupported model provider credential ciphertext", "decode sensitive-word check",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
+	for _, source := range []string{
+		"channel intent classification failed", "writer document sync failed", "sensitive-word check unavailable",
+		"sensitive-word check failed",
+	} {
+		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
+	}
+	registerAdditionalErrorPattern("chat service returned status %d", "Upstream service error", http.StatusBadGateway, 2000110)
+	registerAdditionalErrorPattern("migrate model provider credential %s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("session_ids must belong to user %q and must not contain plugin conversations", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("cron expression produces no future times within 5 years", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("cron expression has no previous time within 5 years", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorPattern("no sql block for database dialect %q", "Database migration configuration is invalid", http.StatusBadRequest, 2001991)
 }

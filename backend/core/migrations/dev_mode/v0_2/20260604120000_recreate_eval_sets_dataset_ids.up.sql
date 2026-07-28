@@ -1,5 +1,6 @@
 -- 20260604120000_recreate_eval_sets_dataset_ids
 -- +migrate Up
+-- +migrate Dialect postgres
 --
 -- Breaking eval-set development-data reset:
 -- old eval_sets.dataset_id data is intentionally not migrated.
@@ -152,3 +153,6 @@ CREATE TABLE IF NOT EXISTS public.eval_set_import_previews (
 CREATE INDEX IF NOT EXISTS idx_eval_set_import_previews_status ON public.eval_set_import_previews(status);
 CREATE INDEX IF NOT EXISTS idx_eval_set_import_previews_expires_at ON public.eval_set_import_previews(expires_at);
 CREATE INDEX IF NOT EXISTS idx_eval_set_import_previews_user ON public.eval_set_import_previews(create_user_id);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

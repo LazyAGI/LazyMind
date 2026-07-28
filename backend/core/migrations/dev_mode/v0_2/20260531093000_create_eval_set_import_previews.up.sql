@@ -1,5 +1,6 @@
 -- 20260531093000_create_eval_set_import_previews
 -- +migrate Up
+-- +migrate Dialect postgres
 
 CREATE TABLE public.eval_set_import_previews (
     token character varying(64) NOT NULL,
@@ -24,3 +25,6 @@ CREATE TABLE public.eval_set_import_previews (
 CREATE INDEX idx_eval_set_import_previews_status ON public.eval_set_import_previews(status);
 CREATE INDEX idx_eval_set_import_previews_expires_at ON public.eval_set_import_previews(expires_at);
 CREATE INDEX idx_eval_set_import_previews_user ON public.eval_set_import_previews(create_user_id);
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.
