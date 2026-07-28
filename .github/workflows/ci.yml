@@ -1,3 +1,4 @@
+# CI: run lint, documentation checks, and tests for pushes and pull requests.
 name: CI
 
 on:
@@ -125,8 +126,8 @@ jobs:
           name: coverage-auth
           path: htmlcov-auth
 
-      - name: Check total coverage ≥10%
-        run: coverage report --include=backend/auth-service/* --fail-under=10
+      - name: Check total coverage ≥80%
+        run: coverage report --include=backend/auth-service/* --fail-under=80
 
       - name: Check incremental coverage ≥10%
         run: diff-cover coverage-auth.xml --compare-branch=origin/main --fail-under=10
@@ -184,7 +185,6 @@ jobs:
           name: coverage-core
           path: backend/core/coverage-core.html
 
-      # -------------- 这里修复了取值错误 --------------
       - name: Check total coverage ≥10%
         run: |
           cd backend/core
