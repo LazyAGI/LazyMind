@@ -105,7 +105,25 @@ function readMetricValue(
   body: Record<string, unknown> | undefined,
   field: string,
 ): number {
-  return getNumberField(body, [field]) ?? 0;
+  if (!body) {
+    return 0;
+  }
+
+  // Direct top-level field (e.g. correct_rate, avg_correctness).
+  const direct = getNumberField(body, [field]);
+  if (typeof direct === "number") {
+    return direct;
+  }
+
+  // Eval/AB bodies nest score metrics under content.metrics / case.metrics,
+  // often without the avg_ prefix used by COMPARISON_METRIC_FIELDS.
+  const unprefixed = field.startsWith("avg_") ? field.slice("avg_".length) : field;
+  const metrics = getNestedRecordField(body, ["metrics"]);
+  return (
+    getNumberField(metrics, [field, unprefixed]) ??
+    getNumberField(body, [unprefixed]) ??
+    0
+  );
 }
 
 function buildMetricRows(

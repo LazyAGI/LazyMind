@@ -481,6 +481,8 @@ function collectStreamingEvalProgressFromEvents(
 ) {
   let current = 0;
   let total = 0;
+  const completedCases = new Set<string>();
+  const seenCases = new Set<string>();
   events.forEach((event) => {
     if (event.stage !== "eval") {
       return;
@@ -489,12 +491,21 @@ function collectStreamingEvalProgressFromEvents(
     if (!eventTypes.has(eventType)) {
       return;
     }
+    const caseId = getEventCaseId(event.payload);
+    if (caseId) {
+      seenCases.add(caseId);
+      if (getStreamingDatasetCaseEventStatus(event) === "done") {
+        completedCases.add(caseId);
+      }
+    }
     const progress = getNestedRecordField(event.payload, ["progress"]);
     const eventData = getEventPayloadData(event.payload);
     const nextCurrent =
-      getNumberField(progress, ["current"]) ?? getNumberField(eventData, ["current"]);
+      getNumberField(progress, ["current", "completed", "done", "processed"]) ??
+      getNumberField(eventData, ["current", "completed", "done", "processed"]);
     const nextTotal =
-      getNumberField(progress, ["total"]) ?? getNumberField(eventData, ["total", "case_num"]);
+      getNumberField(progress, ["total", "case_num", "num_cases", "count"]) ??
+      getNumberField(eventData, ["total", "case_num", "num_cases", "count"]);
     if (typeof nextCurrent === "number") {
       current = Math.max(current, nextCurrent);
     }
@@ -502,6 +513,11 @@ function collectStreamingEvalProgressFromEvents(
       total = Math.max(total, nextTotal);
     }
   });
+  // Prefer counting completed cases when progress.current is missing/stale.
+  current = Math.max(current, completedCases.size);
+  if (total <= 0 && seenCases.size > 0) {
+    total = seenCases.size;
+  }
   return { current, total };
 }
 
@@ -510,7 +526,7 @@ export function getStreamingEvalProgress(events: NormalizedThreadEvent[]) {
     events,
     new Set(["eval.judge", "eval.answer_and_judge"]),
   );
-  if (judgeProgress.total > 0) {
+  if (judgeProgress.total > 0 || judgeProgress.current > 0) {
     return judgeProgress;
   }
   return collectStreamingEvalProgressFromEvents(events, new Set(["eval.answer"]));
@@ -597,6 +613,8 @@ function collectStreamingAbtestProgressFromEvents(
 ) {
   let current = 0;
   let total = 0;
+  const completedCases = new Set<string>();
+  const seenCases = new Set<string>();
   events.forEach((event) => {
     if (event.stage !== "abtest") {
       return;
@@ -605,12 +623,21 @@ function collectStreamingAbtestProgressFromEvents(
     if (!eventTypes.has(eventType)) {
       return;
     }
+    const caseId = getEventCaseId(event.payload);
+    if (caseId) {
+      seenCases.add(caseId);
+      if (getStreamingDatasetCaseEventStatus(event) === "done") {
+        completedCases.add(caseId);
+      }
+    }
     const progress = getNestedRecordField(event.payload, ["progress"]);
     const eventData = getEventPayloadData(event.payload);
     const nextCurrent =
-      getNumberField(progress, ["current"]) ?? getNumberField(eventData, ["current"]);
+      getNumberField(progress, ["current", "completed", "done", "processed"]) ??
+      getNumberField(eventData, ["current", "completed", "done", "processed"]);
     const nextTotal =
-      getNumberField(progress, ["total"]) ?? getNumberField(eventData, ["total", "case_num"]);
+      getNumberField(progress, ["total", "case_num", "num_cases", "count"]) ??
+      getNumberField(eventData, ["total", "case_num", "num_cases", "count"]);
     if (typeof nextCurrent === "number") {
       current = Math.max(current, nextCurrent);
     }
@@ -618,6 +645,11 @@ function collectStreamingAbtestProgressFromEvents(
       total = Math.max(total, nextTotal);
     }
   });
+  // Prefer counting completed cases when progress.current is missing/stale.
+  current = Math.max(current, completedCases.size);
+  if (total <= 0 && seenCases.size > 0) {
+    total = seenCases.size;
+  }
   return { current, total };
 }
 
@@ -626,7 +658,7 @@ export function getStreamingAbtestProgress(events: NormalizedThreadEvent[]) {
     events,
     new Set(["abtest.candidate_judge"]),
   );
-  if (judgeProgress.total > 0) {
+  if (judgeProgress.total > 0 || judgeProgress.current > 0) {
     return judgeProgress;
   }
   return collectStreamingAbtestProgressFromEvents(
