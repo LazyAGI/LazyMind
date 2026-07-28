@@ -1,11 +1,12 @@
 .detail-container {
   position: relative;
 
-  height: calc(99vh);
+  height: 100%;
+  min-height: 0;
   width: 100%;
 
   display: flex;
-  align-items: center;
+  align-items: stretch;
   overflow: hidden;
 
   .chat-conversation-pane {
