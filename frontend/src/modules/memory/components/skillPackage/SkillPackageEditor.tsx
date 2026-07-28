@@ -359,21 +359,96 @@ export default function SkillPackageEditor({
     void loadFileView(selectedPath);
   }, [loadFileView, loading, selectedFile, selectedPath]);
 
+  const handleDeletePath = useCallback(
+    (path: string, isDirectory: boolean) => {
+      if (!path || !draftStatus || reviewMode) {
+        return;
+      }
+      Modal.confirm({
+        title: isDirectory
+          ? t("admin.memorySkillPackageDeleteFolderConfirmTitle")
+          : t("admin.memorySkillPackageDeleteConfirmTitle"),
+        content: isDirectory
+          ? t("admin.memorySkillPackageDeleteFolderConfirmContent", { path })
+          : t("admin.memorySkillPackageDeleteConfirmContent", { path }),
+        okText: t("common.delete"),
+        cancelText: t("common.cancel"),
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          try {
+            const nextVersion = await deleteSkillDraftPath(skillId, {
+              path,
+              expectedDraftVersion: draftStatus.draftVersion,
+              recursive: isDirectory,
+            });
+            setDraftStatus((previous) =>
+              previous
+                ? { ...previous, draftVersion: nextVersion, hasUncommittedDraft: true }
+                : previous,
+            );
+            await refreshPackage();
+            message.success(
+              isDirectory
+                ? t("admin.memorySkillPackageDeleteFolderSuccess")
+                : t("admin.memorySkillPackageDeleteSuccess"),
+            );
+          } catch (error) {
+            console.error(
+              isDirectory ? "Delete skill folder failed:" : "Delete skill file failed:",
+              error,
+            );
+          }
+        },
+      });
+    },
+    [draftStatus, refreshPackage, reviewMode, skillId, t],
+  );
+
+  const handleDeleteFile = () => {
+    if (!selectedPath) {
+      return;
+    }
+    handleDeletePath(selectedPath, false);
+  };
+
   const treeData = useMemo<DataNode[]>(() => {
     if (!treeRoot) {
       return [];
     }
-    return buildAntTreeData(treeRoot, diffStatusMap, (item, status) => (
-      <span className="memory-skill-tree-node-title">
-        <EllipsisText text={item.name} className="memory-skill-tree-node-name" />
-        {status && status !== "unchanged" ? (
-          <Tag bordered={false} color={getDiffStatusColor(status)} className="memory-skill-tree-status">
-            {t(`admin.memorySkillDiffStatus_${status}`, { defaultValue: status })}
-          </Tag>
-        ) : null}
-      </span>
-    ));
-  }, [diffStatusMap, t, treeRoot]);
+    return buildAntTreeData(treeRoot, diffStatusMap, (item, status) => {
+      const canDeleteFolder =
+        item.type === "dir" &&
+        canEdit &&
+        !reviewMode &&
+        status !== "deleted";
+      return (
+        <span className="memory-skill-tree-node-title">
+          <EllipsisText text={item.name} className="memory-skill-tree-node-name" />
+          {status && status !== "unchanged" ? (
+            <Tag bordered={false} color={getDiffStatusColor(status)} className="memory-skill-tree-status">
+              {t(`admin.memorySkillDiffStatus_${status}`, { defaultValue: status })}
+            </Tag>
+          ) : null}
+          {canDeleteFolder ? (
+            <Tooltip title={t("admin.memorySkillPackageDeleteFolder")}>
+              <button
+                type="button"
+                className="memory-skill-tree-node-delete"
+                aria-label={t("admin.memorySkillPackageDeleteFolder")}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleDeletePath(item.path, true);
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                <DeleteOutlined />
+              </button>
+            </Tooltip>
+          ) : null}
+        </span>
+      );
+    });
+  }, [canEdit, diffStatusMap, handleDeletePath, reviewMode, t, treeRoot]);
 
   const handleSaveFile = async () => {
     if (!selectedPath || !canEdit || reviewMode || saving) {
@@ -667,37 +742,6 @@ export default function SkillPackageEditor({
       />
     </Space.Compact>
   );
-
-  const handleDeleteFile = () => {
-    if (!selectedPath || !draftStatus || reviewMode) {
-      return;
-    }
-    Modal.confirm({
-      title: t("admin.memorySkillPackageDeleteConfirmTitle"),
-      content: t("admin.memorySkillPackageDeleteConfirmContent", { path: selectedPath }),
-      okText: t("common.delete"),
-      cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          const nextVersion = await deleteSkillDraftPath(skillId, {
-            path: selectedPath,
-            expectedDraftVersion: draftStatus.draftVersion,
-            recursive: false,
-          });
-          setDraftStatus((previous) =>
-            previous
-              ? { ...previous, draftVersion: nextVersion, hasUncommittedDraft: true }
-              : previous,
-          );
-          await refreshPackage();
-          message.success(t("admin.memorySkillPackageDeleteSuccess"));
-        } catch (error) {
-          console.error("Delete skill file failed:", error);
-        }
-      },
-    });
-  };
 
   const handleUploadFile = async (file: File) => {
     if (!selectedPath || !draftStatus || reviewMode) {

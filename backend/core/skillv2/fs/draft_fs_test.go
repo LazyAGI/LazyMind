@@ -205,6 +205,51 @@ func TestDraftFSDeleteNonEmptyDirectory_RequiresRecursive(t *testing.T) {
 	}
 }
 
+func TestDraftFSDeleteNonEmptyDirectory_Recursive(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	testutil.SeedTextBlob(t, db, "h_a", "# A\n")
+	testutil.SeedTextBlob(t, db, "h_b", "# B\n")
+	testutil.SeedRevisionEntry(t, db, "rev1", "references", "dir", "", "directory")
+	testutil.SeedRevisionEntry(t, db, "rev1", "references/nested", "dir", "", "directory")
+	testutil.SeedRevisionEntry(t, db, "rev1", "references/a.md", "file", "h_a", "markdown")
+	testutil.SeedRevisionEntry(t, db, "rev1", "references/nested/b.md", "file", "h_b", "markdown")
+	draftFS := NewDraftFS(DraftFSDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	resp, err := draftFS.Delete(context.Background(), DeleteRequest{
+		SkillID:              "skill1",
+		Path:                 "references",
+		Recursive:            true,
+		ExpectedDraftVersion: 1,
+		UserID:               "user_001",
+	})
+	if err != nil {
+		t.Fatalf("Delete recursive directory returned error: %v", err)
+	}
+	if resp.DraftVersion != 2 {
+		t.Fatalf("draft version = %d, want 2", resp.DraftVersion)
+	}
+	if got := testutil.CountRows(t, db, "skill_draft_entries", "skill_id = ? AND path = ? AND op = ?", "skill1", "references", "delete"); got != 1 {
+		t.Fatalf("references delete overlay count = %d, want 1", got)
+	}
+	if got := testutil.CountRows(t, db, "skill_draft_entries", "skill_id = ? AND path LIKE ?", "skill1", "references/%"); got != 0 {
+		t.Fatalf("descendant draft overlay count = %d, want 0", got)
+	}
+
+	entries, err := draftEntriesForSkill(context.Background(), db.DB, "skill1")
+	if err != nil {
+		t.Fatalf("draftEntriesForSkill: %v", err)
+	}
+	for _, path := range []string{"references", "references/nested", "references/a.md", "references/nested/b.md"} {
+		if _, ok := entries[path]; ok {
+			t.Fatalf("merged draft still contains deleted path %q", path)
+		}
+	}
+	if _, ok := entries["SKILL.md"]; !ok {
+		t.Fatal("SKILL.md missing from merged draft after directory delete")
+	}
+}
+
 func TestDraftFSFileDirectoryTypeConflict(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")

@@ -3439,6 +3439,12 @@ const enUS = {
     memorySkillPackageDeleteConfirmContent: "{{path}} will be deleted after you commit changes.",
     memorySkillPackageDeleteSuccess: "File deleted",
     memorySkillPackageDeleteFailed: "Failed to delete file",
+    memorySkillPackageDeleteFolder: "Delete folder",
+    memorySkillPackageDeleteFolderConfirmTitle: "Delete this folder?",
+    memorySkillPackageDeleteFolderConfirmContent:
+      "{{path}} will be deleted after you commit changes.",
+    memorySkillPackageDeleteFolderSuccess: "Folder deleted",
+    memorySkillPackageDeleteFolderFailed: "Failed to delete folder",
     memorySkillPackageRefresh: "Refresh",
     memorySkillDraftPending: "Uncommitted draft",
     memorySkillDraftCommit: "Commit changes",
