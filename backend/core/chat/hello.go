@@ -1,4 +1,4 @@
-package core
+package chat
 
 // Hello 新增一个简单函数，用于测试增量覆盖率
 func Hello() string {
