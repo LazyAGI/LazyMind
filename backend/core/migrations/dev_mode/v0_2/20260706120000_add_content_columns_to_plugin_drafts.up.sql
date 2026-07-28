@@ -1,0 +1,10 @@
+-- +migrate Dialect postgres
+ALTER TABLE plugin_drafts
+  ADD COLUMN IF NOT EXISTS plugin_yaml_content TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS state_yaml_content  TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS scenario_content    TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS scripts_content     TEXT NOT NULL DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS generate_status     VARCHAR(16) NOT NULL DEFAULT '';
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.
