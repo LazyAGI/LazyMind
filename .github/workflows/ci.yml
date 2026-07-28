@@ -179,6 +179,14 @@ jobs:
           go tool cover -html=coverage-core.out -o coverage-core.html
           go tool cover -func=coverage-core.out
 
+      - name: Install gocov and gocov-xml
+        run: go install github.com/axw/gocov/gocov@latest && go install github.com/AlekSi/gocov-xml@latest
+
+      - name: Convert coverage to cobertura XML
+        run: |
+          cd backend/core
+          gocov convert coverage-core.out | gocov-xml > coverage-core.xml
+
       - name: Upload Go coverage HTML
         uses: actions/upload-artifact@v4
         with:
@@ -188,7 +196,6 @@ jobs:
       - name: Check total coverage ≥10%
         run: |
           cd backend/core
-          # 只提取最后一行 total 的数字，去掉所有文字和符号
           COV=$(go tool cover -func=coverage-core.out | awk '/total:/{gsub(/%/,""); print $3}' | cut -d. -f1)
           echo "Total coverage: $COV%"
           if [ "$COV" -lt 10 ]; then
@@ -202,7 +209,7 @@ jobs:
       - name: Check incremental coverage ≥10%
         run: |
           cd backend/core
-          diff-cover coverage-core.out --compare-branch=origin/main --fail-under=10
+          diff-cover coverage-core.xml --compare-branch=origin/main --fail-under=10
 
   test-evo-cli:
     needs: [lint, doc_check]
