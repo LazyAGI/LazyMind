@@ -3429,11 +3429,15 @@ CREATE TABLE IF NOT EXISTS `plugin_blobs` (`hash` varchar(64),`size` integer NOT
 
 CREATE TABLE IF NOT EXISTS `plugin_drafts` (`id` varchar(36),`name` varchar(255) NOT NULL DEFAULT "",`content` text NOT NULL DEFAULT "",`created_by` varchar(255) NOT NULL DEFAULT "",`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,`plugin_yaml_content` text NOT NULL DEFAULT "",`state_yaml_content` text NOT NULL DEFAULT "",`state_layout_content` text NOT NULL DEFAULT "",`scenario_content` text NOT NULL DEFAULT "",`scripts_content` text NOT NULL DEFAULT "{}",`generate_status` varchar(32) NOT NULL DEFAULT "",`generate_error` text NOT NULL DEFAULT "",`generate_warning` text NOT NULL DEFAULT "",`version` integer NOT NULL DEFAULT 1,`source_type` varchar(16) NOT NULL DEFAULT "",`source_skill_id` varchar(36) NOT NULL DEFAULT "",`source_skill_name` varchar(255) NOT NULL DEFAULT "",`source_skill_revision_id` varchar(36) NOT NULL DEFAULT "",`source_skill_revision_no` integer NOT NULL DEFAULT 0,`source_skill_tree_hash` varchar(64) NOT NULL DEFAULT "",`source_analysis_id` varchar(36) NOT NULL DEFAULT "",`design_brief_content` text NOT NULL DEFAULT "",`plugin_id` varchar(255) NOT NULL DEFAULT "",`base_revision_id` varchar(36) NOT NULL DEFAULT "",PRIMARY KEY (`id`));
 
+CREATE TABLE IF NOT EXISTS `plugin_generation_analyses` (`id` varchar(36),`draft_id` varchar(36) NOT NULL,`user_id` varchar(255) NOT NULL,`source_type` varchar(16) NOT NULL,`source_skill_id` varchar(36) NOT NULL DEFAULT "",`source_skill_revision_id` varchar(36) NOT NULL DEFAULT "",`source_skill_revision_no` integer NOT NULL DEFAULT 0,`source_skill_tree_hash` varchar(64) NOT NULL DEFAULT "",`status` varchar(32) NOT NULL,`verdict_code` varchar(64) NOT NULL DEFAULT "",`verdict_message` text NOT NULL DEFAULT "",`candidates_json` text NOT NULL DEFAULT "[]",`selected_candidate_id` varchar(128) NOT NULL DEFAULT "",`coverage_report_json` text NOT NULL DEFAULT "{}",`tool_mapping_report_json` text NOT NULL DEFAULT "{}",`script_report_json` text NOT NULL DEFAULT "{}",`source_package_json` text NOT NULL DEFAULT "{}",`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,PRIMARY KEY (`id`));
+
 CREATE TABLE IF NOT EXISTS `plugin_human_artifacts` (`id` varchar(36),`session_id` varchar(36) NOT NULL,`slot` varchar(64) NOT NULL,`content_type` varchar(32) NOT NULL,`value` jsonb NOT NULL,`caption` text,`created_at` datetime NOT NULL,PRIMARY KEY (`id`));
 
 CREATE TABLE IF NOT EXISTS `plugin_revision_entries` (`revision_id` varchar(36),`path` varchar(1024),`entry_type` varchar(16) NOT NULL DEFAULT "file",`blob_hash` varchar(64),`size` integer NOT NULL DEFAULT 0,`mime` varchar(128),`file_type` varchar(32) NOT NULL DEFAULT "unknown",`is_binary` numeric NOT NULL DEFAULT false,`mode` integer NOT NULL DEFAULT 420,PRIMARY KEY (`revision_id`,`path`));
 
 CREATE TABLE IF NOT EXISTS `plugin_revisions` (`id` varchar(36),`plugin_resource_id` varchar(36) NOT NULL,`parent_revision_id` varchar(36),`revision_no` integer NOT NULL,`tree_hash` varchar(64) NOT NULL,`compiled_graph` jsonb,`graph_hash` varchar(64) NOT NULL DEFAULT "",`graph_schema_version` varchar(16) NOT NULL DEFAULT "",`message` text NOT NULL DEFAULT "",`created_by` varchar(255),`created_at` datetime NOT NULL,PRIMARY KEY (`id`));
+
+CREATE TABLE IF NOT EXISTS `plugin_repair_runs` (`id` varchar(36),`draft_id` varchar(36) NOT NULL,`user_id` varchar(255) NOT NULL,`base_plugin_revision_id` varchar(36) NOT NULL DEFAULT "",`draft_version_before` integer NOT NULL,`target` varchar(32) NOT NULL,`mode` varchar(32) NOT NULL,`source_analysis_id` varchar(36) NOT NULL DEFAULT "",`source_skill_revision_id` varchar(36) NOT NULL DEFAULT "",`repair_hint` text NOT NULL DEFAULT "",`diagnostics_before_json` text NOT NULL DEFAULT "{}",`changes_json` text NOT NULL DEFAULT "{}",`diagnostics_after_json` text NOT NULL DEFAULT "{}",`status` varchar(32) NOT NULL,`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,PRIMARY KEY (`id`));
 
 CREATE TABLE IF NOT EXISTS `plugin_route_decisions` (`id` varchar(36),`session_id` varchar(36) NOT NULL,`from_step_id` varchar(64) NOT NULL,`source_attempt_id` varchar(36) NOT NULL DEFAULT "",`activated_json` jsonb NOT NULL,`pruned_json` jsonb NOT NULL,`bypassed_json` jsonb NOT NULL,`witness_json` jsonb NOT NULL,`validity` varchar(16) NOT NULL DEFAULT "effective",`state_version` integer NOT NULL,`created_at` datetime NOT NULL,PRIMARY KEY (`id`));
 
@@ -3476,6 +3480,8 @@ CREATE TABLE IF NOT EXISTS `skill_draft_review_action_items` (`id` varchar(36),`
 CREATE TABLE IF NOT EXISTS `skill_draft_review_sessions` (`id` varchar(36),`skill_id` varchar(36) NOT NULL,`base_revision_id` varchar(36) NOT NULL,`draft_version_at_start` integer NOT NULL,`draft_snapshot_hash` varchar(64) NOT NULL,`status` varchar(32) NOT NULL DEFAULT "active",`version` integer NOT NULL DEFAULT 1,`undo_limit` integer NOT NULL DEFAULT 20,`created_by` varchar(255),`updated_by` varchar(255),`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,PRIMARY KEY (`id`));
 
 CREATE TABLE IF NOT EXISTS `skill_drafts` (`skill_id` varchar(36),`base_revision_id` varchar(36),`draft_status` varchar(32) NOT NULL DEFAULT "",`draft_updated_at` datetime,`task_id` varchar(128) NOT NULL DEFAULT "",`conversation_id` varchar(128),`updated_by` varchar(255),`version` integer NOT NULL DEFAULT 1,`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,PRIMARY KEY (`skill_id`));
+
+CREATE TABLE IF NOT EXISTS `skill_market_installs` (`market_item_id` varchar(36) NOT NULL,`user_id` varchar(255) NOT NULL,`skill_id` varchar(36) NOT NULL,`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,PRIMARY KEY (`market_item_id`,`user_id`));
 
 CREATE TABLE IF NOT EXISTS `skill_market_items` (`id` varchar(36),`source_skill_id` varchar(36) NOT NULL,`status` varchar(32) NOT NULL DEFAULT "draft",`tags` json NOT NULL DEFAULT '[]',`icon` text NOT NULL DEFAULT "",`sort_order` integer NOT NULL DEFAULT 0,`version_note` text NOT NULL DEFAULT "",`created_by` varchar(255),`updated_by` varchar(255),`published_at` datetime,`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,PRIMARY KEY (`id`));
 
@@ -3661,6 +3667,10 @@ CREATE INDEX IF NOT EXISTS `idx_plugin_drafts_created_by` ON `plugin_drafts`(`cr
 
 CREATE UNIQUE INDEX IF NOT EXISTS `idx_plugin_drafts_user_plugin_id` ON `plugin_drafts`(`created_by`,`plugin_id`) WHERE plugin_id != '';
 
+CREATE INDEX IF NOT EXISTS `idx_plugin_generation_analyses_draft` ON `plugin_generation_analyses`(`draft_id`,`created_at`);
+
+CREATE INDEX IF NOT EXISTS `idx_plugin_repair_runs_draft` ON `plugin_repair_runs`(`draft_id`,`created_at`);
+
 CREATE INDEX IF NOT EXISTS `idx_plugin_revisions_resource` ON `plugin_revisions`(`plugin_resource_id`);
 
 CREATE INDEX IF NOT EXISTS `idx_plugin_route_decisions_session_id` ON `plugin_route_decisions`(`session_id`);
@@ -3716,6 +3726,10 @@ CREATE INDEX IF NOT EXISTS `idx_skill_draft_review_items_batch` ON `skill_draft_
 CREATE INDEX IF NOT EXISTS `idx_skill_draft_review_items_session_hunk` ON `skill_draft_review_action_items`(`review_session_id`,`path`,`hunk_id`);
 
 CREATE INDEX IF NOT EXISTS `idx_skill_draft_review_sessions_skill_status` ON `skill_draft_review_sessions`(`skill_id`,`status`,`updated_at`);
+
+CREATE INDEX IF NOT EXISTS `idx_skill_market_installs_skill` ON `skill_market_installs`(`skill_id`);
+
+CREATE INDEX IF NOT EXISTS `idx_skill_market_installs_user` ON `skill_market_installs`(`user_id`,`market_item_id`);
 
 CREATE INDEX IF NOT EXISTS `idx_skill_review_scheduler_state_scan` ON `skill_review_scheduler_state`(`locked_until`,`next_run_at`,`last_quantity_check_at`);
 
