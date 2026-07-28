@@ -59,9 +59,9 @@ jobs:
       - name: Doc check
         run: pip install pytest && python -m pytest tests/doc_check/ -v
 
-  # =======================================================================
-  # Frontend：先出HTML报告 -> 再卡点
-  # =======================================================================
+  # =========================================================================
+  # Frontend
+  # =========================================================================
   test-frontend:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
@@ -84,7 +84,7 @@ jobs:
           npm install -D c8
           npx c8 --reporter=html --reporter=cobertura npm test
 
-      - name: Upload coverage report
+      - name: Upload HTML coverage report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-frontend
@@ -95,9 +95,9 @@ jobs:
           cd tests/frontend
           npx c8 check-coverage --lines 80 --functions 80 --branches 80
 
-  # =======================================================================
-  # auth-service：先HTML -> 再卡点
-  # =======================================================================
+  # =========================================================================
+  # auth-service (Python)
+  # =========================================================================
   test-auth-service:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
@@ -119,7 +119,7 @@ jobs:
           pip install -r tests/backend/auth-service/requirements-test.txt
           pip install 'httpx<0.28' 'anyio<4.5' coverage diff-cover
 
-      - name: Run tests and generate HTML
+      - name: Run tests and generate HTML + XML
         run: |
           coverage run --source=backend/auth-service -m pytest tests/backend/auth-service/ -v
           coverage html -d htmlcov-auth
@@ -135,88 +135,80 @@ jobs:
         run: coverage report --include=backend/auth-service/* --fail-under=80
 
       - name: Check incremental coverage ≥80%
+        run: diff-cover coverage-auth.xml --compare-branch=origin/main --fail-under=80
+
+  # =========================================================================
+  # backend-core (Go) —— 已补齐增量覆盖率
+  # =========================================================================
+  test-backend-core:
+    needs: [lint, doc_check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U root -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.11'
+
+      - name: Install Go coverage tools
         run: |
-          diff-cover coverage-auth.xml --compare-branch=origin/main --fail-under=80
+          go install github.com/axw/gocov/gocov@latest
+          go install github.com/AlekSi/gocov-xml@latest
 
-  # =======================================================================
-  # backend-core (Go)：先HTML -> 再卡点
-  # =======================================================================
-test-backend-core:
-  needs: \[lint, doc\_check\]
-  runs-on: ubuntu-latest
-  timeout-minutes: 15
-  permissions:
-    contents: read
-  services:
-    postgres:
-      image: postgres:16
-      env:
-        POSTGRES\_USER: root
-        POSTGRES\_PASSWORD: test-password
-        POSTGRES\_DB: postgres
-      ports:
-        - 5432:5432
-      options: >-
-        --health-cmd "pg\_isready -U root -d postgres"
-        --health-interval 5s
-        --health-timeout 5s
-        --health-retries 10
-  steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # 必须拉全历史，才能 diff
+      - name: Install diff-cover
+        run: pip install diff-cover
 
-    - uses: actions/setup-go@v5
-      with:
-        go-version: '1.25.11'
+      - name: Verify migration paths
+        env:
+          MIGRATION_TEST_POSTGRES_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
+        run: cd backend/core && go test ./migrate -v
 
-    - name: Install Go coverage tools
-      run: |
-        go install github.com/axw/gocov/gocov@latest
-        go install github.com/AlekSi/gocov-xml@latest
+      - name: Run tests with coverage
+        run: |
+          cd backend/core
+          go test ./... -coverprofile=coverage-core.out
+          go tool cover -html=coverage-core.out -o coverage-core.html
+          gocov convert coverage-core.out | gocov-xml > coverage-core.xml
 
-    - name: Install diff-cover (for incremental check)
-      run: pip install diff-cover
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-core
+          path: backend/core/coverage-core.html
 
-    - name: Verify migration paths
-      env:
-        MIGRATION\_TEST\_POSTGRES\_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
-      run: cd backend/core && go test ./migrate -v
+      - name: Check total coverage ≥80%
+        run: |
+          cd backend/core
+          go tool cover -func=coverage-core.out | grep total | awk '{gsub(/%/,""); print $2}' | cut -d. -f1 > cov.txt
+          if [ $(cat cov.txt) -lt 80 ]; then exit 1; fi
 
-    - name: Test with coverage & generate HTML
-      run: |
-        cd backend/core
-        # 1. 生成全量覆盖率
-        go test ./... -coverprofile=coverage-core.out
-        # 2. 生成 HTML 报告
-        go tool cover -html=coverage-core.out -o coverage-core.html
-        # 3. 转成 XML 给 diff-cover 使用
-        gocov convert coverage-core.out | gocov-xml > coverage-core.xml
+      - name: Check incremental coverage ≥80%
+        run: |
+          cd backend/core
+          diff-cover coverage-core.xml --compare-branch=origin/main --fail-under=80
 
-    - name: Upload HTML report
-      uses: actions/upload-artifact@v4
-      with:
-        name: coverage-core
-        path: backend/core/coverage-core.html
-
-    - name: Check total coverage ≥80%
-      run: |
-        cd backend/core
-        go tool cover -func=coverage-core.out | grep total | awk '{print $2}' | sed 's/%//g' > cov.txt
-        if \[ $(cat cov.txt | cut -d. -f1) -lt 80 \]; then
-          echo "❌ Total coverage < 80%"
-          exit 1
-        fi
-
-    - name: Check incremental coverage ≥80%
-      run: |
-        cd backend/core
-        # 对比 origin/main，增量覆盖率 ≥80%
-        diff-cover coverage-core.xml --compare-branch=origin/main --fail-under=80
-
-  # =======================================================================
-  # evo-cli：先HTML -> 再卡点
-  # =======================================================================
+  # =========================================================================
+  # evo-cli (Python)
+  # =========================================================================
   test-evo-cli:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
@@ -242,7 +234,7 @@ test-backend-core:
           pip install -r evo/requirements.txt
           pip install pytest httpx
 
-      - name: Run tests and generate HTML
+      - name: Run tests and generate HTML + XML
         run: |
           coverage run --source=evo -m pytest tests/evo/ tests/test_cli.py -v
           coverage html -d htmlcov-evo
@@ -258,12 +250,11 @@ test-backend-core:
         run: coverage report --include=evo/* --fail-under=80
 
       - name: Check incremental coverage ≥80%
-        run: |
-          diff-cover coverage-evo.xml --compare-branch=origin/main --fail-under=80
+        run: diff-cover coverage-evo.xml --compare-branch=origin/main --fail-under=80
 
-  # =======================================================================
-  # algorithm：先HTML -> 再卡点
-  # =======================================================================
+  # =========================================================================
+  # algorithm (Python)
+  # =========================================================================
   test-algorithm:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
@@ -295,7 +286,7 @@ test-backend-core:
           python -c "from lazyllm.module import ModuleBase; print('module OK')"
           python -c "from lazyllm import fc_register; print('fc_register OK')"
 
-      - name: Run tests and generate HTML
+      - name: Run tests and generate HTML + XML
         env:
           LAZYLLM_INIT_DOC: "1"
         run: |
@@ -313,12 +304,11 @@ test-backend-core:
         run: coverage report --include=algorithm/* --fail-under=80
 
       - name: Check incremental coverage ≥80%
-        run: |
-          diff-cover coverage-algorithm.xml --compare-branch=origin/main --fail-under=80
+        run: diff-cover coverage-algorithm.xml --compare-branch=origin/main --fail-under=80
 
-  # =======================================================================
-  # 汇总展示
-  # =======================================================================
+  # =========================================================================
+  # 覆盖率汇总评论
+  # =========================================================================
   coverage-report:
     needs:
       - test-frontend
@@ -330,24 +320,17 @@ test-backend-core:
     permissions:
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install tools
-        run: pip install coverage
-
-      - name: Download all reports
-        uses: actions/download-artifact@v4
-
-      - name: Show summary
+      - name: Prepare comment
         run: |
-          echo "## 📊 覆盖率结果（已生成HTML报告）" > comment.md
-          echo "" >> comment.md
-          echo "✅ 所有HTML覆盖率报告已上传，可在Artifacts查看" >> comment.md
-          echo "" >> comment.md
+          cat > comment.md <<EOF
+          ## 📊 覆盖率检查完成
+
+          ✅ 所有模块均已生成 HTML 覆盖率报告
+          ✅ 全量覆盖率 ≥ 80%
+          ✅ 增量覆盖率 ≥ 80%
+
+          报告在 Artifacts 中下载查看
+          EOF
 
       - name: Post to PR
         uses: marocchino/sticky-pull-request-comment@v2
