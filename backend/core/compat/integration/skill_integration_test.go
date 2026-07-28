@@ -2,19 +2,28 @@ package integration_test
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
+	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"lazymind/core/common/orm"
 	"lazymind/core/compat/contract"
 	adaptercore "lazymind/core/compat/internal/adapters/core"
 	compatruntime "lazymind/core/compat/runtime"
 	compatskill "lazymind/core/compat/skill"
+	skillremotefs "lazymind/core/skillv2/remotefs"
 	skillservice "lazymind/core/skillv2/service"
 
 	"gorm.io/gorm"
@@ -283,6 +292,227 @@ func TestSkillRuntimeExplicitRevisionContentWithRealPostgres(t *testing.T) {
 	t.Logf("postgres compat binary SKILL.md mapped to UNSUPPORTED: skill=%s revision=%s", binarySkill.SkillID, binarySkill.HeadRevisionID)
 }
 
+func TestSkillRuntimeKeywordSpecialCharactersWithRealPostgres(t *testing.T) {
+	if strings.TrimSpace(os.Getenv("COMPAT_INTEGRATION")) != "1" {
+		t.Skip("set COMPAT_INTEGRATION=1 to run compat integration tests")
+	}
+	userID := strings.TrimSpace(os.Getenv("COMPAT_TEST_USER_ID"))
+	if userID == "" {
+		t.Fatal("COMPAT_TEST_USER_ID is required")
+	}
+
+	driver, dsn := dbConfigFromCoreEnv(t)
+	if driver != "postgres" {
+		t.Fatalf("driver = %q, want postgres", driver)
+	}
+	t.Log("PostgreSQL driver confirmation: postgres")
+	db, err := orm.Connect(driver, dsn)
+	if err != nil {
+		t.Fatalf("connect core db: %v", err)
+	}
+	sqlDB, err := db.DB.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	objectRoot := t.TempDir()
+	svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+		DB:        db.DB,
+		BlobStore: skillservice.NewBlobStore(db.DB, skillservice.NewLocalObjectStore(objectRoot)),
+	})
+	adapter, err := adaptercore.NewSkillAdapterForDB(svc, db.DB)
+	if err != nil {
+		t.Fatalf("NewSkillAdapterForDB: %v", err)
+	}
+	rt, err := compatruntime.New(compatruntime.Dependencies{SkillPort: adapter})
+	if err != nil {
+		t.Fatalf("Runtime.New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	prefix := uniqueIntegrationPrefix("keyword")
+	var createdSkillIDs []string
+	t.Cleanup(func() { cleanupIntegrationSkills(t, context.Background(), db.DB, createdSkillIDs) })
+	for _, tc := range []struct {
+		name    string
+		keyword string
+		similar string
+	}{
+		{name: "underscore", keyword: "a_b", similar: "axb"},
+		{name: "percent", keyword: "a%b", similar: "axxb"},
+		{name: "backslash", keyword: `a\b`, similar: "ab"},
+	} {
+		contentSkill := createIntegrationSkillWithTags(t, ctx, db.DB, svc, userID, prefix+"-"+tc.name, "content", "content literal "+tc.keyword, []string{prefix, "content"})
+		tagSkill := createIntegrationSkillWithTags(t, ctx, db.DB, svc, userID, prefix+"-"+tc.name, "tag", "tag-only content", []string{prefix, tc.keyword})
+		similarSkill := createIntegrationSkillWithTags(t, ctx, db.DB, svc, userID, prefix+"-"+tc.name, "similar", "similar literal "+tc.similar, []string{prefix, tc.similar})
+		createdSkillIDs = append(createdSkillIDs, contentSkill.SkillID, tagSkill.SkillID, similarSkill.SkillID)
+
+		got, err := rt.Skill.List(ctx, contract.CallContext{UserID: userID}, compatskill.ListInput{
+			Keyword: tc.keyword,
+			Page:    contract.PageRequest{PageSize: 10},
+		})
+		if err != nil {
+			t.Fatalf("Skill.List keyword %q: %v", tc.keyword, err)
+		}
+		if got.Page.Total == nil || *got.Page.Total < 2 {
+			t.Fatalf("keyword %q total = %v, want at least content+tag matches", tc.keyword, got.Page.Total)
+		}
+		ids := map[string]bool{}
+		for _, item := range got.Items {
+			ids[item.ID] = true
+		}
+		if !ids[contentSkill.SkillID] || !ids[tagSkill.SkillID] {
+			t.Fatalf("keyword %q ids = %#v, want content and tag skills", tc.keyword, ids)
+		}
+		if ids[similarSkill.SkillID] {
+			t.Fatalf("keyword %q matched similar skill %s", tc.keyword, similarSkill.SkillID)
+		}
+		t.Logf("postgres keyword literal %s PASS: keyword=%q total=%d content=%s tag=%s", tc.name, tc.keyword, *got.Page.Total, contentSkill.SkillID, tagSkill.SkillID)
+	}
+}
+
+func TestSkillRuntimeDraftOnlyEmptyHeadWithRealPostgres(t *testing.T) {
+	if strings.TrimSpace(os.Getenv("COMPAT_INTEGRATION")) != "1" {
+		t.Skip("set COMPAT_INTEGRATION=1 to run compat integration tests")
+	}
+	userID := strings.TrimSpace(os.Getenv("COMPAT_TEST_USER_ID"))
+	if userID == "" {
+		t.Fatal("COMPAT_TEST_USER_ID is required")
+	}
+
+	driver, dsn := dbConfigFromCoreEnv(t)
+	if driver != "postgres" {
+		t.Fatalf("driver = %q, want postgres", driver)
+	}
+	t.Log("PostgreSQL driver confirmation: postgres")
+	db, err := orm.Connect(driver, dsn)
+	if err != nil {
+		t.Fatalf("connect core db: %v", err)
+	}
+	sqlDB, err := db.DB.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	objectRoot := t.TempDir()
+	svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+		DB:        db.DB,
+		BlobStore: skillservice.NewBlobStore(db.DB, skillservice.NewLocalObjectStore(objectRoot)),
+	})
+	adapter, err := adaptercore.NewSkillAdapterForDB(svc, db.DB)
+	if err != nil {
+		t.Fatalf("NewSkillAdapterForDB: %v", err)
+	}
+	rt, err := compatruntime.New(compatruntime.Dependencies{SkillPort: adapter})
+	if err != nil {
+		t.Fatalf("Runtime.New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	prefix := uniqueIntegrationPrefix("draft-only")
+	fixture := createDraftOnlyIntegrationSkill(t, ctx, db.DB, userID, prefix)
+	t.Cleanup(func() { cleanupIntegrationSkills(t, context.Background(), db.DB, []string{fixture.SkillID}) })
+
+	metadata, err := rt.Skill.Get(ctx, contract.CallContext{UserID: userID}, compatskill.GetInput{SkillID: fixture.SkillID})
+	if err != nil {
+		t.Fatalf("Skill.Get draft-only metadata: %v", err)
+	}
+	if metadata.Skill.HeadRevisionID != "" || metadata.Content != nil {
+		t.Fatalf("draft-only metadata = %#v, want empty head and no content", metadata)
+	}
+	_, err = rt.Skill.Get(ctx, contract.CallContext{UserID: userID}, compatskill.GetInput{SkillID: fixture.SkillID, IncludeContent: true})
+	if code, ok := contract.CodeOf(err); !ok || code != contract.NotFound {
+		t.Fatalf("draft-only include_content error code = %v, %v, err=%v; want NOT_FOUND", code, ok, err)
+	}
+	t.Log("draft-only nil head behavior PASS")
+}
+
+func TestSkillRemoteFSBinaryWriteWithRealPostgres(t *testing.T) {
+	if strings.TrimSpace(os.Getenv("COMPAT_INTEGRATION")) != "1" {
+		t.Skip("set COMPAT_INTEGRATION=1 to run compat integration tests")
+	}
+	userID := strings.TrimSpace(os.Getenv("COMPAT_TEST_USER_ID"))
+	if userID == "" {
+		t.Fatal("COMPAT_TEST_USER_ID is required")
+	}
+
+	driver, dsn := dbConfigFromCoreEnv(t)
+	if driver != "postgres" {
+		t.Fatalf("driver = %q, want postgres", driver)
+	}
+	t.Log("PostgreSQL driver confirmation: postgres")
+	db, err := orm.Connect(driver, dsn)
+	if err != nil {
+		t.Fatalf("connect core db: %v", err)
+	}
+	sqlDB, err := db.DB.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	objectRoot := t.TempDir()
+	svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+		DB:        db.DB,
+		BlobStore: skillservice.NewBlobStore(db.DB, skillservice.NewLocalObjectStore(objectRoot)),
+	})
+	handler := skillremotefs.NewHandler(skillremotefs.HandlerDeps{
+		DB:        db.DB,
+		BlobStore: skillremotefs.NewBlobStore(db.DB, skillremotefs.NewLocalObjectStore(objectRoot)),
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	prefix := uniqueIntegrationPrefix("remote-binary")
+	fixture := createIntegrationSkill(t, ctx, db.DB, svc, userID, prefix, "skill", "remote fs seed "+prefix)
+	t.Cleanup(func() { cleanupIntegrationSkills(t, context.Background(), db.DB, []string{fixture.SkillID}) })
+
+	data := minimalIntegrationPNGBytes()
+	remotePath := "skills/" + fixture.Category + "/" + fixture.Name + "/assets/logo.png"
+	relPath := "assets/logo.png"
+	taskID := prefix + "-task"
+	put := httptest.NewRecorder()
+	handler.Content(put, httptest.NewRequest(http.MethodPut, remoteFSContentURL(remotePath, userID, taskID, ""), bytes.NewReader(data)))
+	if put.Code != http.StatusOK {
+		t.Fatalf("remote fs binary PUT status=%d body=%s", put.Code, put.Body.String())
+	}
+	t.Log("remote fs binary PUT PASS")
+
+	blobHash := currentIntegrationDraftBlobHash(t, ctx, db.DB, fixture.SkillID, relPath)
+	state := integrationBlobStorageStateForHash(t, ctx, db.DB, blobHash)
+	if !state.Binary ||
+		state.StorageBackend != "local_file" ||
+		!state.ContentIsNull ||
+		!state.StorageKey.Valid ||
+		state.StorageKey.String == "" ||
+		state.FileType != "image" ||
+		state.Mime != "image/png" {
+		t.Fatalf("remote fs binary blob state = %#v, want external binary SQL NULL content", state)
+	}
+	t.Log("remote fs binary blob storage PASS")
+
+	raw := httptest.NewRecorder()
+	handler.Content(raw, httptest.NewRequest(http.MethodGet, remoteFSContentURL(remotePath, userID, taskID, "raw"), nil))
+	if raw.Code != http.StatusOK || !bytes.Equal(raw.Body.Bytes(), data) {
+		t.Fatalf("remote fs binary raw read status=%d len=%d", raw.Code, raw.Body.Len())
+	}
+	t.Log("remote fs binary raw read PASS")
+
+	encoded := httptest.NewRecorder()
+	handler.Content(encoded, httptest.NewRequest(http.MethodGet, remoteFSContentURL(remotePath, userID, taskID, "base64"), nil))
+	if encoded.Code != http.StatusOK || !strings.Contains(encoded.Body.String(), base64.StdEncoding.EncodeToString(data)) {
+		t.Fatalf("remote fs binary base64 read status=%d body=%s", encoded.Code, encoded.Body.String())
+	}
+	t.Log("remote fs binary base64 read PASS")
+}
+
 func assertCompatRejected(t *testing.T, err error, operation string) {
 	t.Helper()
 	code, ok := contract.CodeOf(err)
@@ -304,6 +534,10 @@ func uniqueIntegrationPrefix(scope string) string {
 }
 
 func createIntegrationSkill(t *testing.T, ctx context.Context, db *gorm.DB, svc *skillservice.SkillService, userID, prefix, suffix, body string) integrationSkill {
+	return createIntegrationSkillWithTags(t, ctx, db, svc, userID, prefix, suffix, body, []string{prefix, "compat-integration"})
+}
+
+func createIntegrationSkillWithTags(t *testing.T, ctx context.Context, db *gorm.DB, svc *skillservice.SkillService, userID, prefix, suffix, body string, tags []string) integrationSkill {
 	t.Helper()
 	fixture := integrationSkill{
 		Name:        prefix + "-" + suffix,
@@ -319,7 +553,7 @@ func createIntegrationSkill(t *testing.T, ctx context.Context, db *gorm.DB, svc 
 		Name:           fixture.Name,
 		Category:       fixture.Category,
 		Description:    fixture.Description,
-		Tags:           []string{prefix, "compat-integration"},
+		Tags:           append([]string(nil), tags...),
 		Source: skillservice.SourceInput{
 			Type:       "local_zip",
 			StoredPath: zipPath,
@@ -332,6 +566,129 @@ func createIntegrationSkill(t *testing.T, ctx context.Context, db *gorm.DB, svc 
 	fixture.SkillID = resp.SkillID
 	fixture.HeadRevisionID = resp.HeadRevisionID
 	return fixture
+}
+
+func createDraftOnlyIntegrationSkill(t *testing.T, ctx context.Context, db *gorm.DB, userID, prefix string) integrationSkill {
+	t.Helper()
+	now := time.Now().UTC()
+	fixture := integrationSkill{
+		SkillID:     uuid.NewString(),
+		Name:        prefix + "-draft",
+		Category:    prefix + "-category",
+		Description: prefix + " draft-only description",
+	}
+	tags, err := json.Marshal([]string{prefix, "compat-integration"})
+	if err != nil {
+		t.Fatalf("marshal draft tags: %v", err)
+	}
+	if err := db.WithContext(ctx).Table("skills").Create(map[string]any{
+		"id":                    fixture.SkillID,
+		"owner_user_id":         userID,
+		"owner_user_name":       "compat integration",
+		"create_user_id":        userID,
+		"create_user_name":      "compat integration",
+		"category":              fixture.Category,
+		"skill_name":            fixture.Name,
+		"description":           fixture.Description,
+		"tags":                  string(tags),
+		"relative_root":         fixture.Category + "/" + fixture.Name,
+		"skill_md_path":         "SKILL.md",
+		"version":               1,
+		"auto_evo":              false,
+		"auto_evo_apply_status": "idle",
+		"auto_evo_generation":   0,
+		"auto_evo_error":        "",
+		"is_enabled":            false,
+		"update_status":         "up_to_date",
+		"ext":                   "{}",
+		"created_at":            now,
+		"updated_at":            now,
+	}).Error; err != nil {
+		t.Fatalf("create draft-only skill: %v", err)
+	}
+	if err := db.WithContext(ctx).Table("skill_drafts").Create(map[string]any{
+		"skill_id":         fixture.SkillID,
+		"draft_status":     "pending_confirm",
+		"task_id":          prefix + "-task",
+		"version":          1,
+		"draft_updated_at": now,
+		"created_at":       now,
+		"updated_at":       now,
+	}).Error; err != nil {
+		t.Fatalf("create draft-only draft: %v", err)
+	}
+	return fixture
+}
+
+func remoteFSContentURL(pathValue, userID, taskID, encoding string) string {
+	values := url.Values{"path": {pathValue}, "user_id": {userID}, "task_id": {taskID}}
+	if encoding != "" {
+		values.Set("encoding", encoding)
+	}
+	return "/remote-fs/content?" + values.Encode()
+}
+
+func currentIntegrationDraftBlobHash(t *testing.T, ctx context.Context, db *gorm.DB, skillID, relPath string) string {
+	t.Helper()
+	var row struct {
+		BlobHash string `gorm:"column:blob_hash"`
+	}
+	if err := db.WithContext(ctx).Table("skill_draft_entries").
+		Select("blob_hash").
+		Where("skill_id = ? AND path = ? AND op = ?", skillID, relPath, "upsert").
+		Take(&row).Error; err != nil {
+		t.Fatalf("query current draft blob hash: %v", err)
+	}
+	return row.BlobHash
+}
+
+type integrationBlobStorageState struct {
+	Hash           string         `gorm:"column:hash"`
+	Binary         bool           `gorm:"column:binary"`
+	StorageBackend string         `gorm:"column:storage_backend"`
+	StorageKey     sql.NullString `gorm:"column:storage_key"`
+	ContentIsNull  bool           `gorm:"column:content_is_null"`
+	ContentLen     sql.NullInt64  `gorm:"column:content_len"`
+	FileType       string         `gorm:"column:file_type"`
+	Mime           string         `gorm:"column:mime"`
+}
+
+func integrationBlobStorageStateForHash(t *testing.T, ctx context.Context, db *gorm.DB, hash string) integrationBlobStorageState {
+	t.Helper()
+	var state integrationBlobStorageState
+	if err := db.WithContext(ctx).Raw(`
+		SELECT
+			hash,
+			"binary",
+			storage_backend,
+			storage_key,
+			content IS NULL AS content_is_null,
+			length(content) AS content_len,
+			file_type,
+			mime
+		FROM skill_blobs
+		WHERE hash = ?
+	`, hash).Scan(&state).Error; err != nil {
+		t.Fatalf("query blob storage state: %v", err)
+	}
+	if state.Hash == "" {
+		t.Fatalf("blob %q not found", hash)
+	}
+	return state
+}
+
+func minimalIntegrationPNGBytes() []byte {
+	return []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+		0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
+		0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+		0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+		0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+		0x42, 0x60, 0x82,
+	}
 }
 
 func replaceIntegrationSkillContent(t *testing.T, ctx context.Context, svc *skillservice.SkillService, userID string, fixture integrationSkill, body string) string {
@@ -427,6 +784,12 @@ func cleanupIntegrationSkills(t *testing.T, ctx context.Context, db *gorm.DB, sk
 			return
 		}
 	}
+	var draftBlobHashes []string
+	if err := db.WithContext(ctx).Table("skill_draft_entries").Where("skill_id IN ? AND blob_hash IS NOT NULL", skillIDs).Distinct().Pluck("blob_hash", &draftBlobHashes).Error; err != nil {
+		t.Errorf("cleanup collect draft blobs: %v", err)
+		return
+	}
+	blobHashes = appendUniqueStrings(blobHashes, draftBlobHashes...)
 	for _, stmt := range []struct {
 		table string
 		where string
@@ -448,6 +811,24 @@ func cleanupIntegrationSkills(t *testing.T, ctx context.Context, db *gorm.DB, sk
 		}
 	}
 	t.Logf("cleanup completed for compat integration skills: %s", strings.Join(skillIDs, ","))
+}
+
+func appendUniqueStrings(values []string, candidates ...string) []string {
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		seen[value] = struct{}{}
+	}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		values = append(values, candidate)
+	}
+	return values
 }
 
 func dbConfigFromCoreEnv(t *testing.T) (string, string) {

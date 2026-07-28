@@ -46,6 +46,9 @@ func (f *Facade) Get(ctx context.Context, callCtx contract.CallContext, input Ge
 	if !input.IncludeContent {
 		return result, nil
 	}
+	if strings.TrimSpace(metadata.HeadRevisionID) == "" {
+		return GetResult{}, contract.NewError(contract.NotFound, "skill.get", "skill content is not available", false, nil)
+	}
 	content, err := f.port.ReadContent(ctx, callCtx, skillID, metadata.HeadRevisionID)
 	if err != nil {
 		return GetResult{}, err

@@ -660,7 +660,7 @@ func (s *SkillService) applyListSkillFilters(query *gorm.DB, req ListSkillsReque
 		query = query.Where("category = ?", req.Category)
 	}
 	for _, tag := range req.Tags {
-		query = query.Where(tagsTextExpr(s.db)+" LIKE ?", "%"+escapeLike(jsonString(tag))+"%")
+		query = query.Where(tagsTextExpr(s.db)+" LIKE ? ESCAPE '!'", jsonStringElementLikePattern(tag))
 	}
 	return query
 }

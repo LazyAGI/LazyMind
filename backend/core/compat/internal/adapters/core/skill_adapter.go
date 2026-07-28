@@ -151,15 +151,10 @@ func mapServiceError(operation string, err error) error {
 	if errors.As(err, &compatErr) {
 		return err
 	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound), strings.Contains(msg, "not found"):
+	case errors.Is(err, gorm.ErrRecordNotFound):
 		return contract.NewError(contract.NotFound, operation, "skill not found", false, err)
-	case strings.Contains(msg, "stale"), strings.Contains(msg, "conflict"), strings.Contains(msg, "already exists"), strings.Contains(msg, "duplicate"):
-		return contract.NewError(contract.Conflict, operation, "skill conflict", false, err)
-	case strings.Contains(msg, "unsupported"):
-		return contract.NewError(contract.Unsupported, operation, "unsupported skill operation", false, err)
-	case strings.Contains(msg, "db is not configured"), strings.Contains(msg, "connection refused"), strings.Contains(msg, "timeout"):
+	case errors.Is(err, context.DeadlineExceeded):
 		return contract.NewError(contract.BackendUnavailable, operation, "backend unavailable", true, err)
 	default:
 		return contract.NewError(contract.Internal, operation, "internal error", false, err)

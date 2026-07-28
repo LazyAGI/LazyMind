@@ -15,6 +15,7 @@ type fakePort struct {
 	readRevisionID      string
 	readContentCalls    int
 	currentHeadRevision string
+	emptyHeadRevision   bool
 	contentRevisionID   string
 	listErr             error
 	getErr              error
@@ -35,7 +36,7 @@ func (p *fakePort) GetMetadata(ctx context.Context, callCtx contract.CallContext
 		return Summary{}, p.getErr
 	}
 	revisionID := p.currentHeadRevision
-	if revisionID == "" {
+	if revisionID == "" && !p.emptyHeadRevision {
 		revisionID = "revA"
 	}
 	p.currentHeadRevision = "revB"
@@ -113,6 +114,36 @@ func TestFacadeGetWithoutContentDoesNotReadContent(t *testing.T) {
 	}
 	if port.getSkillID != "skill-1" {
 		t.Fatalf("GetMetadata skillID = %q, want trimmed", port.getSkillID)
+	}
+	if port.readContentCalls != 0 {
+		t.Fatalf("ReadContent calls = %d, want 0", port.readContentCalls)
+	}
+}
+
+func TestFacadeGetWithoutContentAllowsEmptyHeadRevision(t *testing.T) {
+	port := &fakePort{emptyHeadRevision: true}
+	facade := mustFacade(t, port)
+	result, err := facade.Get(context.Background(), contract.CallContext{UserID: "user"}, GetInput{SkillID: "skill-1"})
+	if err != nil {
+		t.Fatalf("Get returned error: %v", err)
+	}
+	if result.Skill.HeadRevisionID != "" || result.Content != nil {
+		t.Fatalf("result = %#v, want metadata without content and empty head", result)
+	}
+	if port.readContentCalls != 0 {
+		t.Fatalf("ReadContent calls = %d, want 0", port.readContentCalls)
+	}
+}
+
+func TestFacadeGetWithContentAndEmptyHeadReturnsNotFoundWithoutReadContent(t *testing.T) {
+	port := &fakePort{emptyHeadRevision: true}
+	facade := mustFacade(t, port)
+	_, err := facade.Get(context.Background(), contract.CallContext{UserID: "user"}, GetInput{SkillID: "skill-1", IncludeContent: true})
+	if code, ok := contract.CodeOf(err); !ok || code != contract.NotFound {
+		t.Fatalf("error code = %v, %v; want NOT_FOUND", code, ok)
+	}
+	if compatErr, ok := err.(*contract.Error); !ok || compatErr.Operation != "skill.get" || compatErr.Message != "skill content is not available" {
+		t.Fatalf("err = %#v, want stable skill.get content unavailable error", err)
 	}
 	if port.readContentCalls != 0 {
 		t.Fatalf("ReadContent calls = %d, want 0", port.readContentCalls)

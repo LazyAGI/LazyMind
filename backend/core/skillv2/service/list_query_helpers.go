@@ -29,10 +29,19 @@ func jsonString(value string) string {
 	return string(raw)
 }
 
+func jsonStringContent(value string) string {
+	encoded := jsonString(value)
+	return strings.TrimSuffix(strings.TrimPrefix(encoded, `"`), `"`)
+}
+
+func jsonStringElementLikePattern(value string) string {
+	return `%"` + escapeLike(jsonStringContent(value)) + `"%`
+}
+
 func escapeLike(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `%`, `\%`)
-	value = strings.ReplaceAll(value, `_`, `\_`)
+	value = strings.ReplaceAll(value, `!`, `!!`)
+	value = strings.ReplaceAll(value, `%`, `!%`)
+	value = strings.ReplaceAll(value, `_`, `!_`)
 	return value
 }
 

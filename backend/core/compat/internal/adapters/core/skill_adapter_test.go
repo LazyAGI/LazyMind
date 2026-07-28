@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"gorm.io/gorm"
@@ -111,8 +113,8 @@ func TestSkillAdapterListPassesFiltersAndPagingToService(t *testing.T) {
 	}
 }
 
-func TestSkillAdapterListErrorMapsToBackendUnavailable(t *testing.T) {
-	service := &fakeSkillService{listErr: errors.New("connection refused")}
+func TestSkillAdapterListDeadlineExceededMapsToBackendUnavailable(t *testing.T) {
+	service := &fakeSkillService{listErr: fmt.Errorf("wrapped: %w", context.DeadlineExceeded)}
 	adapter := mustAdapter(t, service)
 	_, err := adapter.List(context.Background(), contract.CallContext{UserID: "user-1"}, compatskill.ListInput{
 		Keyword: "alpha",
@@ -123,6 +125,39 @@ func TestSkillAdapterListErrorMapsToBackendUnavailable(t *testing.T) {
 	}
 	if compatErr, ok := err.(*contract.Error); !ok || compatErr.Message != "backend unavailable" {
 		t.Fatalf("err = %#v, want sanitized backend unavailable message", err)
+	}
+}
+
+func TestSkillAdapterMapsOnlyDeterministicErrors(t *testing.T) {
+	compatErr := contract.NewError(contract.Unsupported, "test", "unsupported", false, errors.New("cause"))
+	for _, tc := range []struct {
+		name      string
+		err       error
+		wantCode  contract.ErrorCode
+		wantSame  error
+		retryable bool
+	}{
+		{name: "wrapped gorm not found", err: fmt.Errorf("wrapped: %w", gorm.ErrRecordNotFound), wantCode: contract.NotFound},
+		{name: "plain not found text", err: errors.New("not found"), wantCode: contract.Internal},
+		{name: "wrapped deadline", err: fmt.Errorf("wrapped: %w", context.DeadlineExceeded), wantCode: contract.BackendUnavailable, retryable: true},
+		{name: "plain timeout text", err: errors.New("timeout"), wantCode: contract.Internal},
+		{name: "compat passthrough", err: compatErr, wantCode: contract.Unsupported, wantSame: compatErr},
+		{name: "unknown", err: errors.New("connection refused"), wantCode: contract.Internal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			adapter := mustAdapter(t, &fakeSkillService{listErr: tc.err})
+			_, err := adapter.List(context.Background(), contract.CallContext{UserID: "user-1"}, compatskill.ListInput{})
+			if tc.wantSame != nil && !errors.Is(err, tc.wantSame) {
+				t.Fatalf("err = %v, want passthrough %v", err, tc.wantSame)
+			}
+			code, ok := contract.CodeOf(err)
+			if !ok || code != tc.wantCode {
+				t.Fatalf("error code = %v, %v; want %s", code, ok, tc.wantCode)
+			}
+			if compat, ok := err.(*contract.Error); ok && compat.Retryable != tc.retryable {
+				t.Fatalf("retryable = %v, want %v", compat.Retryable, tc.retryable)
+			}
+		})
 	}
 }
 
@@ -315,6 +350,88 @@ func TestNewSkillAdapterForDBInjectsRevisionReader(t *testing.T) {
 	if adapter.revisionReader == nil {
 		t.Fatalf("revisionReader is nil")
 	}
+}
+
+func TestNewSkillAdapterForDBDoesNotMutateSQLiteSkillUniqueIndexes(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	assertSQLiteIndexExists(t, db.DB, "uk_skills_owner_identity")
+	assertSQLiteIndexExists(t, db.DB, "uk_skills_owner_relative_root")
+	assertSQLiteTableSQLContains(t, db.DB, "skill_blobs", "skill_blob_storage_shape")
+
+	_ = skillrevision.NewService(skillrevision.ServiceDeps{
+		DB:        db.DB,
+		BlobStore: skillrevision.NewBlobStore(db.DB, skillrevision.NewLocalObjectStore(t.TempDir())),
+	})
+	assertSQLiteIndexExists(t, db.DB, "uk_skills_owner_identity")
+	assertSQLiteIndexExists(t, db.DB, "uk_skills_owner_relative_root")
+	assertSQLiteTableSQLContains(t, db.DB, "skill_blobs", "skill_blob_storage_shape")
+
+	service := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+		DB:        db.DB,
+		BlobStore: skillservice.NewBlobStore(db.DB, skillservice.NewLocalObjectStore(t.TempDir())),
+	})
+	if _, err := NewSkillAdapterForDB(service, db.DB); err != nil {
+		t.Fatalf("NewSkillAdapterForDB returned error: %v", err)
+	}
+	assertSQLiteIndexExists(t, db.DB, "uk_skills_owner_identity")
+	assertSQLiteIndexExists(t, db.DB, "uk_skills_owner_relative_root")
+	assertSQLiteTableSQLContains(t, db.DB, "skill_blobs", "skill_blob_storage_shape")
+
+	insertSkillFixture(t, db.DB, "skill-1", "owner-1", "writing", "planner", "writing/planner")
+	if err := insertSkillRow(db.DB, "skill-2", "owner-1", "writing", "planner", "writing/planner-2"); err == nil {
+		t.Fatal("duplicate owner/category/skill_name insert succeeded, want unique constraint failure")
+	}
+	if err := insertSkillRow(db.DB, "skill-3", "owner-1", "writing", "planner-3", "writing/planner"); err == nil {
+		t.Fatal("duplicate owner/relative_root insert succeeded, want unique constraint failure")
+	}
+}
+
+func assertSQLiteIndexExists(t *testing.T, db *gorm.DB, name string) {
+	t.Helper()
+	var count int64
+	if err := db.Raw("SELECT count(*) FROM sqlite_master WHERE type = ? AND name = ?", "index", name).Scan(&count).Error; err != nil {
+		t.Fatalf("query sqlite index %s: %v", name, err)
+	}
+	if count != 1 {
+		t.Fatalf("sqlite index %s count = %d, want 1", name, count)
+	}
+}
+
+func assertSQLiteTableSQLContains(t *testing.T, db *gorm.DB, table, needle string) {
+	t.Helper()
+	var sql string
+	if err := db.Raw("SELECT sql FROM sqlite_master WHERE type = ? AND name = ?", "table", table).Scan(&sql).Error; err != nil {
+		t.Fatalf("query sqlite table %s: %v", table, err)
+	}
+	if !strings.Contains(sql, needle) {
+		t.Fatalf("sqlite table %s SQL does not contain %q: %s", table, needle, sql)
+	}
+}
+
+func insertSkillFixture(t *testing.T, db *gorm.DB, id, owner, category, name, relativeRoot string) {
+	t.Helper()
+	if err := insertSkillRow(db, id, owner, category, name, relativeRoot); err != nil {
+		t.Fatalf("insert skill fixture %s: %v", id, err)
+	}
+}
+
+func insertSkillRow(db *gorm.DB, id, owner, category, name, relativeRoot string) error {
+	now := testutil.TimeFixture()
+	return db.Create(&testutil.SkillRow{
+		ID:                 id,
+		OwnerUserID:        owner,
+		CreateUserID:       owner,
+		Category:           category,
+		SkillName:          name,
+		Tags:               []byte("[]"),
+		RelativeRoot:       relativeRoot,
+		SkillMDPath:        "SKILL.md",
+		AutoEvoApplyStatus: "idle",
+		IsEnabled:          true,
+		UpdateStatus:       "up_to_date",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}).Error
 }
 
 func mustAdapter(t *testing.T, service SkillService) *SkillAdapter {

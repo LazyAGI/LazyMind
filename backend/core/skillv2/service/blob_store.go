@@ -82,30 +82,42 @@ func (s *BlobStore) Put(ctx context.Context, tx *gorm.DB, path string, data []by
 		return blobInfo{}, err
 	}
 
-	row := skillBlobRow{
-		Hash:      hash,
-		Size:      int64(len(data)),
-		Mime:      mime,
-		FileType:  fileType,
-		Binary:    binary,
-		CreatedAt: nowProvider.Now(),
-	}
+	now := nowProvider.Now()
 	if binary {
 		key := strings.Join([]string{"skillv2", hash[:2], hash}, "/")
 		if err := s.objects.Put(ctx, key, data); err != nil {
 			return blobInfo{}, err
 		}
-		row.StorageBackend = "local_file"
-		row.StorageKey = &key
-		info.StorageBackend = row.StorageBackend
-		info.StorageKey = row.StorageKey
+		if err := tx.Table("skill_blobs").Create(map[string]any{
+			"hash":            hash,
+			"size":            int64(len(data)),
+			"mime":            mime,
+			"file_type":       fileType,
+			"binary":          true,
+			"storage_backend": "local_file",
+			"storage_key":     key,
+			"content":         nil,
+			"created_at":      now,
+		}).Error; err != nil {
+			return blobInfo{}, err
+		}
+		info.StorageBackend = "local_file"
+		info.StorageKey = &key
 	} else {
-		row.StorageBackend = "postgres"
-		row.Content = data
-		info.StorageBackend = row.StorageBackend
-	}
-	if err := tx.Create(&row).Error; err != nil {
-		return blobInfo{}, err
+		if err := tx.Table("skill_blobs").Create(map[string]any{
+			"hash":            hash,
+			"size":            int64(len(data)),
+			"mime":            mime,
+			"file_type":       fileType,
+			"binary":          false,
+			"storage_backend": "postgres",
+			"storage_key":     nil,
+			"content":         data,
+			"created_at":      now,
+		}).Error; err != nil {
+			return blobInfo{}, err
+		}
+		info.StorageBackend = "postgres"
 	}
 	return info, nil
 }
