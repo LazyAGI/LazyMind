@@ -815,13 +815,14 @@ services:
       LAZYMIND_OPENSEARCH_PASSWORD: ${LAZYMIND_OPENSEARCH_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYLLM_INIT_DOC: 1
-      PYTHONPATH: /app/algorithm/lazyllm:/opt/lazyllm:/app/algorithm
+      PYTHONPATH: /opt/lazyllm:/app/algorithm
       <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *upload-paths, *ocr-env, *llm-api-keys]
     volumes:
       - evo-data:/var/lib/lazymind/evo
       - ./data/traces:/var/lib/lazymind/traces
       - ./data/core/uploads:/var/lib/lazymind/uploads:ro
       - *algorithm-src-mount
+      - *lazyllm-src-mount
       - ./evo:/app/evo:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8047/healthz || exit 1"]
