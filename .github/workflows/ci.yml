@@ -141,56 +141,78 @@ jobs:
   # =======================================================================
   # backend-core (Go)：先HTML -> 再卡点
   # =======================================================================
-  test-backend-core:
-    needs: [lint, doc_check]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: root
-          POSTGRES_PASSWORD: test-password
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U root -d postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@v4
+test-backend-core:
+  needs: \[lint, doc\_check\]
+  runs-on: ubuntu-latest
+  timeout-minutes: 15
+  permissions:
+    contents: read
+  services:
+    postgres:
+      image: postgres:16
+      env:
+        POSTGRES\_USER: root
+        POSTGRES\_PASSWORD: test-password
+        POSTGRES\_DB: postgres
+      ports:
+        - 5432:5432
+      options: >-
+        --health-cmd "pg\_isready -U root -d postgres"
+        --health-interval 5s
+        --health-timeout 5s
+        --health-retries 10
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 必须拉全历史，才能 diff
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.11'
+    - uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.11'
 
-      - name: Verify migration paths
-        env:
-          MIGRATION_TEST_POSTGRES_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
-        run: cd backend/core && go test ./migrate -v
+    - name: Install Go coverage tools
+      run: |
+        go install github.com/axw/gocov/gocov@latest
+        go install github.com/AlekSi/gocov-xml@latest
 
-      - name: Test with coverage & generate HTML
-        run: |
-          cd backend/core
-          go test ./... -coverprofile=coverage-core.out
-          go tool cover -html=coverage-core.out -o coverage-core.html
-          go tool cover -func=coverage-core.out
+    - name: Install diff-cover (for incremental check)
+      run: pip install diff-cover
 
-      - name: Upload HTML report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-core
-          path: backend/core/coverage-core.html
+    - name: Verify migration paths
+      env:
+        MIGRATION\_TEST\_POSTGRES\_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
+      run: cd backend/core && go test ./migrate -v
 
-      - name: Check total coverage ≥80%
-        run: |
-          cd backend/core
-          go tool cover -func=coverage-core.out | grep total | awk '{print $2}' | sed 's/%//g' > cov.txt
-          if [ $(cat cov.txt | cut -d. -f1) -lt 80 ]; then exit 1; fi
+    - name: Test with coverage & generate HTML
+      run: |
+        cd backend/core
+        # 1. 生成全量覆盖率
+        go test ./... -coverprofile=coverage-core.out
+        # 2. 生成 HTML 报告
+        go tool cover -html=coverage-core.out -o coverage-core.html
+        # 3. 转成 XML 给 diff-cover 使用
+        gocov convert coverage-core.out | gocov-xml > coverage-core.xml
+
+    - name: Upload HTML report
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-core
+        path: backend/core/coverage-core.html
+
+    - name: Check total coverage ≥80%
+      run: |
+        cd backend/core
+        go tool cover -func=coverage-core.out | grep total | awk '{print $2}' | sed 's/%//g' > cov.txt
+        if \[ $(cat cov.txt | cut -d. -f1) -lt 80 \]; then
+          echo "❌ Total coverage < 80%"
+          exit 1
+        fi
+
+    - name: Check incremental coverage ≥80%
+      run: |
+        cd backend/core
+        # 对比 origin/main，增量覆盖率 ≥80%
+        diff-cover coverage-core.xml --compare-branch=origin/main --fail-under=80
 
   # =======================================================================
   # evo-cli：先HTML -> 再卡点
