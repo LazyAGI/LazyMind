@@ -1,4 +1,3 @@
-# CI: run lint, documentation checks, and tests for pushes and pull requests.
 name: CI
 
 on:
@@ -94,7 +93,6 @@ jobs:
           pip install -r backend/auth-service/requirements.txt
           pip install -r tests/backend/auth-service/requirements-test.txt
           pip install 'httpx<0.28' 'anyio<4.5'
-
       - name: Test
         run: python -m pytest tests/backend/auth-service/ -v
 
@@ -159,7 +157,6 @@ jobs:
           cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
           pip install -r evo/requirements.txt
           pip install pytest httpx
-
       - name: Test
         run: python -m pytest tests/evo/ tests/test_cli.py -v
 
@@ -186,13 +183,11 @@ jobs:
           cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
           pip install -r algorithm/requirements.txt
           pip install -r tests/algorithm/requirements-test.txt
-
       - name: Verify lazyllm install
         run: |
           python -c "from lazyllm.tools.agent.skill_manager import SkillManager; print('tools OK')"
           python -c "from lazyllm.module import ModuleBase; print('module OK')"
           python -c "from lazyllm import fc_register; print('fc_register OK')"
-
       - name: Test
         env:
           LAZYLLM_INIT_DOC: "1"
