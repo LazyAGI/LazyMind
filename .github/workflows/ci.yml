@@ -71,7 +71,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: setup-node@v4
         with:
           node-version: '20'
 
@@ -195,6 +195,14 @@ jobs:
             echo "ERROR: coverage too low ($COV% < 10%)"
             exit 1
           fi
+
+      - name: Install diff-cover
+        run: pip install diff-cover
+
+      - name: Check incremental coverage ≥10%
+        run: |
+          cd backend/core
+          diff-cover coverage-core.out --compare-branch=origin/main --fail-under=10
 
   test-evo-cli:
     needs: [lint, doc_check]
