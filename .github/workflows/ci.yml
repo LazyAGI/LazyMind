@@ -59,9 +59,6 @@ jobs:
       - name: Doc check
         run: pip install pytest && python -m pytest tests/doc_check/ -v
 
-  # =========================================================================
-  # Frontend + 全量覆盖率 + HTML
-  # =========================================================================
   test-frontend:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
@@ -95,9 +92,6 @@ jobs:
           cd tests/frontend
           npx c8 check-coverage --lines 10 --functions 10 --branches 10
 
-  # =========================================================================
-  # auth-service + 全量+增量 + HTML
-  # =========================================================================
   test-auth-service:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
@@ -137,9 +131,6 @@ jobs:
       - name: Check incremental coverage ≥10%
         run: diff-cover coverage-auth.xml --compare-branch=origin/main --fail-under=10
 
-  # =========================================================================
-  # backend-core (Go) + 全量覆盖率 + HTML + 卡点
-  # =========================================================================
   test-backend-core:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
@@ -174,14 +165,12 @@ jobs:
           MIGRATION_TEST_POSTGRES_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
         run: cd backend/core && go test ./migrate -v
 
-      # 原有测试保留
       - name: Test backend core
         run: cd backend/core && go test ./... -v
 
       - name: Test backend core integration module
         run: cd tests/backend/core && go mod tidy && go test ./... -v
 
-      # 全量覆盖率 & HTML
       - name: Generate coverage for backend-core
         run: |
           cd backend/core
@@ -195,19 +184,18 @@ jobs:
           name: coverage-core
           path: backend/core/coverage-core.html
 
-      # 全量卡点 10%
+      # -------------- 这里修复了取值错误 --------------
       - name: Check total coverage ≥10%
         run: |
           cd backend/core
-          go tool cover -func=coverage-core.out | grep total | awk '{gsub(/%/,""); print $2}' | cut -d. -f1 > cov.txt
-          if [ $(cat cov.txt) -lt 10 ]; then
-            echo "Coverage too low: $(cat cov.txt)%"
+          # 只提取最后一行 total 的数字，去掉所有文字和符号
+          COV=$(go tool cover -func=coverage-core.out | awk '/total:/{gsub(/%/,""); print $3}' | cut -d. -f1)
+          echo "Total coverage: $COV%"
+          if [ "$COV" -lt 10 ]; then
+            echo "ERROR: coverage too low ($COV% < 10%)"
             exit 1
           fi
 
-  # =========================================================================
-  # evo-cli + 全量+增量 + HTML
-  # =========================================================================
   test-evo-cli:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
@@ -251,9 +239,6 @@ jobs:
       - name: Check incremental coverage ≥10%
         run: diff-cover coverage-evo.xml --compare-branch=origin/main --fail-under=10
 
-  # =========================================================================
-  # algorithm + 全量+增量 + HTML
-  # =========================================================================
   test-algorithm:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
@@ -305,9 +290,6 @@ jobs:
       - name: Check incremental coverage ≥10%
         run: diff-cover coverage-algorithm.xml --compare-branch=origin/main --fail-under=10
 
-  # =========================================================================
-  # 汇总评论
-  # =========================================================================
   coverage-report:
     needs:
       - test-frontend
