@@ -179,13 +179,13 @@ jobs:
           go tool cover -html=coverage-core.out -o coverage-core.html
           go tool cover -func=coverage-core.out
 
-      - name: Install gocov and gocov-xml
-        run: go install github.com/axw/gocov/gocov@latest && go install github.com/AlekSi/gocov-xml@latest
+      - name: Install gocover-cobertura
+        run: go install github.com/boumenot/gocover-cobertura@latest
 
-      - name: Convert coverage to cobertura XML
+      - name: Convert Go coverage to cobertura XML
         run: |
           cd backend/core
-          gocov convert coverage-core.out | gocov-xml > coverage-core.xml
+          gocover-cobertura < coverage-core.out > coverage-core.xml
 
       - name: Upload Go coverage HTML
         uses: actions/upload-artifact@v4
