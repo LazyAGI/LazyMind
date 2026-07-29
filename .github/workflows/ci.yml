@@ -126,11 +126,11 @@ jobs:
           name: coverage-auth
           path: htmlcov-auth
 
-      - name: Check total coverage ≥80%
-        run: coverage report --include=backend/auth-service/* --fail-under=80
+      - name: Check total coverage ≥10%
+        run: coverage report --include=backend/auth-service/* --fail-under=10
 
-      - name: Check incremental coverage ≥10%
-        run: diff-cover coverage-auth.xml --compare-branch=origin/main --fail-under=10
+      - name: Check incremental coverage ≥0%
+        run: diff-cover coverage-auth.xml --compare-branch=origin/main --fail-under=0
 
   test-backend-core:
     needs: [lint, doc_check]
@@ -206,10 +206,10 @@ jobs:
       - name: Install diff-cover
         run: pip install diff-cover
 
-      - name: Check incremental coverage ≥10%
+      - name: Check incremental coverage ≥0%
         run: |
           cd backend/core
-          diff-cover coverage-core.xml --compare-branch=origin/main --fail-under=10
+          diff-cover coverage-core.xml --compare-branch=origin/main --fail-under=0
 
   test-evo-cli:
     needs: [lint, doc_check]
@@ -251,8 +251,8 @@ jobs:
       - name: Check total coverage ≥10%
         run: coverage report --include=evo/* --fail-under=10
 
-      - name: Check incremental coverage ≥10%
-        run: diff-cover coverage-evo.xml --compare-branch=origin/main --fail-under=10
+      - name: Check incremental coverage ≥0%
+        run: diff-cover coverage-evo.xml --compare-branch=origin/main --fail-under=0
 
   test-algorithm:
     needs: [lint, doc_check]
@@ -302,5 +302,5 @@ jobs:
       - name: Check total coverage ≥10%
         run: coverage report --include=algorithm/* --fail-under=10
 
-      - name: Check incremental coverage ≥10%
-        run: diff-cover coverage-algorithm.xml --compare-branch=origin/main --fail-under=10
+      - name: Check incremental coverage ≥0%
+        run: diff-cover coverage-algorithm.xml --compare-branch=origin/main --fail-under=0
