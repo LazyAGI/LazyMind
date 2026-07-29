@@ -6,6 +6,9 @@ BUILD_ROOT="${ROOT}/desktop/build/darwin-arm64"
 RUNTIME_ROOT="${BUILD_ROOT}/runtime"
 DIST_ROOT="${ROOT}/desktop/dist"
 APP_ICON="${ROOT}/desktop/electron/assets/LazyMind.icns"
+PACKAGE_KIND="${LAZYMIND_DESKTOP_PACKAGE_KIND:-zip}"
+SIGNING_MODE="${LAZYMIND_DESKTOP_SIGNING_MODE:-adhoc}"
+NOTARIZE="${LAZYMIND_DESKTOP_NOTARIZE:-false}"
 
 GO_BIN="${GO:-go}"
 PNPM_BIN="${PNPM:-pnpm}"
@@ -18,6 +21,37 @@ GO_INSTALL_FLAGS=(-trimpath -ldflags="-s -w")
 export ELECTRON_CACHE
 export ELECTRON_BUILDER_CACHE
 export PYTHONDONTWRITEBYTECODE=1
+
+case "${PACKAGE_KIND}" in
+  zip|dmg) ;;
+  *)
+    echo "LAZYMIND_DESKTOP_PACKAGE_KIND must be zip or dmg, got: ${PACKAGE_KIND}" >&2
+    exit 2
+    ;;
+esac
+case "${SIGNING_MODE}" in
+  adhoc|developer-id|none) ;;
+  *)
+    echo "LAZYMIND_DESKTOP_SIGNING_MODE must be adhoc, developer-id, or none, got: ${SIGNING_MODE}" >&2
+    exit 2
+    ;;
+esac
+if [[ "${NOTARIZE}" == "true" && "${SIGNING_MODE}" != "developer-id" ]]; then
+  echo "LAZYMIND_DESKTOP_NOTARIZE=true requires LAZYMIND_DESKTOP_SIGNING_MODE=developer-id" >&2
+  exit 2
+fi
+if [[ "${NOTARIZE}" == "true" ]]; then
+  for variable in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+    if [[ -z "${!variable:-}" ]]; then
+      echo "${variable} is required when LAZYMIND_DESKTOP_NOTARIZE=true" >&2
+      exit 2
+    fi
+  done
+fi
+if [[ "${PACKAGE_KIND}" == "dmg" && "${SIGNING_MODE}" == "none" ]]; then
+  echo "Refusing to create an unsigned distribution DMG" >&2
+  exit 2
+fi
 
 remove_generated_path() {
   local target="$1"
@@ -69,6 +103,32 @@ assert_desktop_runtime_app() {
   if [[ ! -d "${lazyllm_source}" ]]; then
     echo "bundled LazyLLM source is required: ${lazyllm_source}" >&2
     exit 1
+  fi
+}
+
+verify_runtime_code_signatures() {
+  local runtime_root="$1"
+  local checked=0
+  local failed=0
+
+  while IFS= read -r -d '' candidate; do
+    if ! file -b "${candidate}" | grep -q "Mach-O"; then
+      continue
+    fi
+    checked=$((checked + 1))
+    if ! codesign --verify --strict "${candidate}"; then
+      echo "Invalid embedded runtime signature: ${candidate}" >&2
+      failed=$((failed + 1))
+    fi
+  done < <(
+    find "${runtime_root}" -type f \
+      \( -name "*.so" -o -name "*.dylib" -o -perm -111 \) -print0
+  )
+
+  echo "Verified ${checked} embedded runtime Mach-O signatures"
+  if (( failed > 0 )); then
+    echo "${failed} embedded runtime signatures failed verification" >&2
+    return 1
   fi
 }
 
@@ -134,6 +194,18 @@ prune_python_runtime "${RUNTIME_ROOT}/deps/python"
 echo "==> Staging runtime app files"
 rsync -a --delete \
   --exclude ".git" \
+  --exclude "/.env" \
+  --exclude "/.lazymind-local" \
+  --exclude "/.venv" \
+  --exclude "/.venv-test" \
+  --exclude "/.conda" \
+  --exclude "/.codex" \
+  --exclude "/.claude" \
+  --exclude "/.cursor" \
+  --exclude "/.vscode" \
+  --exclude "/data" \
+  --exclude "/volumes" \
+  --exclude "/local/config.env" \
   --exclude "local/build" \
   --exclude "local/runtime" \
   --exclude "desktop/build" \
@@ -171,19 +243,74 @@ fi
 remove_generated_path "${DIST_ROOT}/mac-arm64/LazyMind.app"
 export LAZYMIND_DESKTOP_RUNTIME_STAGE="${RUNTIME_ROOT}"
 export LAZYMIND_DESKTOP_OUTPUT_DIR="${DIST_ROOT}"
-(cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run pack:mac:arm64)
+export LAZYMIND_DESKTOP_PACKAGE_KIND
+export LAZYMIND_DESKTOP_SIGNING_MODE
+export LAZYMIND_DESKTOP_NOTARIZE
+if [[ "${PACKAGE_KIND}" == "dmg" ]]; then
+  (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run dist:mac:arm64)
+else
+  (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run pack:mac:arm64)
+fi
 
 APP_PATH="${DIST_ROOT}/mac-arm64/LazyMind.app"
 ZIP_PATH="${DIST_ROOT}/LazyMind-darwin-arm64.zip"
+DMG_PATH="${DIST_ROOT}/LazyMind-macos-arm64.dmg"
+NOTARIZATION_SUBMISSION_PATH="${DIST_ROOT}/notarization-submission.json"
 if [[ ! -d "${APP_PATH}" ]]; then
   if [[ -d "${DIST_ROOT}/mac-arm64" ]]; then
     APP_PATH="$(find "${DIST_ROOT}/mac-arm64" -maxdepth 3 -type d -name "LazyMind.app" -print -quit)"
   fi
 fi
 if [[ -d "${APP_PATH}" ]]; then
-  ditto -c -k --keepParent "${APP_PATH}" "${ZIP_PATH}"
+  if [[ "${SIGNING_MODE}" != "none" ]]; then
+    codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
+  fi
+  if [[ "${SIGNING_MODE}" == "developer-id" ]]; then
+    signature_info="$(codesign -dv --verbose=4 "${APP_PATH}" 2>&1)"
+    if [[ "${signature_info}" != *"Authority=Developer ID Application:"* ]]; then
+      echo "Expected a Developer ID Application signature: ${APP_PATH}" >&2
+      exit 1
+    fi
+    verify_runtime_code_signatures "${APP_PATH}/Contents/Resources/runtime"
+  fi
+  if [[ "${PACKAGE_KIND}" == "zip" ]]; then
+    remove_generated_path "${ZIP_PATH}"
+    ditto -c -k --keepParent "${APP_PATH}" "${ZIP_PATH}"
+  else
+    if [[ ! -f "${DMG_PATH}" ]]; then
+      echo "Expected DMG not found: ${DMG_PATH}" >&2
+      exit 1
+    fi
+    if [[ "${NOTARIZE}" == "true" ]]; then
+      dmg_size="$(du -h "${DMG_PATH}" | awk '{print $1}')"
+      submission_tmp="${NOTARIZATION_SUBMISSION_PATH}.tmp"
+      rm -f "${submission_tmp}" "${NOTARIZATION_SUBMISSION_PATH}"
+      codesign --verify --strict --verbose=2 "${DMG_PATH}"
+      echo "==> $(date -u +%Y-%m-%dT%H:%M:%SZ) asynchronously submitting ${dmg_size} distribution DMG for notarization"
+      xcrun notarytool submit "${DMG_PATH}" \
+        --apple-id "${APPLE_ID}" \
+        --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+        --team-id "${APPLE_TEAM_ID}" \
+        --output-format json > "${submission_tmp}"
+      submission_id="$(
+        node -e '
+          const fs = require("fs");
+          const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+          if (!value.id) process.exit(1);
+          process.stdout.write(value.id);
+        ' "${submission_tmp}"
+      )"
+      mv "${submission_tmp}" "${NOTARIZATION_SUBMISSION_PATH}"
+      echo "==> DMG notarization submitted: ${submission_id}"
+      echo "Notarization submission: ${NOTARIZATION_SUBMISSION_PATH}"
+    fi
+  fi
   echo "LazyMind.app: ${APP_PATH}"
-  echo "Zip: ${ZIP_PATH}"
+  if [[ "${PACKAGE_KIND}" == "dmg" ]]; then
+    echo "DMG: ${DMG_PATH}"
+  else
+    echo "Zip: ${ZIP_PATH}"
+  fi
 else
   echo "Expected app not found: ${APP_PATH}" >&2
   exit 1

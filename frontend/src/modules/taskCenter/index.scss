@@ -84,6 +84,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 
 .task-metrics {
   display: flex;
+  flex-wrap: wrap;
   min-height: 72px;
   align-items: center;
   padding: 0 18px;
@@ -95,16 +96,22 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 
 .task-metric {
   display: flex;
-  min-width: 220px;
+  flex: 1 1 0;
+  min-width: 0;
   height: 40px;
-  margin-right: 26px;
-  padding: 0 26px 0 3px;
+  padding: 0 16px;
   align-items: center;
   gap: 11px;
   border-right: 1px solid $border-light;
 
-  > div { display: flex; align-items: baseline; gap: 8px; }
-  span:not(.metric-icon) { color: $muted; font-size: 13px; }
+  > div { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
+  span:not(.metric-icon) {
+    overflow: hidden;
+    color: $muted;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   strong {
     color: #344054;
     font-size: 19px;
@@ -118,6 +125,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   display: grid;
   width: 38px;
   height: 38px;
+  flex: 0 0 38px;
   place-items: center;
   border-radius: 10px;
   font-size: 17px;
@@ -125,9 +133,16 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   &.orange { color: $orange; background: $orange-soft; }
   &.blue { color: $blue; background: $blue-soft; }
   &.green { color: $green; background: $green-soft; }
+  &.red { color: $red; background: $red-soft; }
+  &.gray { color: #7a8493; background: #f1f3f5; }
 }
 
-.task-metrics-note { margin-left: auto; color: #8a93a2; font-size: 12px; }
+.task-metrics-note {
+  flex: 0 0 210px;
+  color: #8a93a2;
+  font-size: 12px;
+  text-align: right;
+}
 
 .task-toolbar,
 .schedule-toolbar {
@@ -207,11 +222,18 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   &.attention { color: $orange; background: $orange-soft; }
   &.running { color: $blue; background: $blue-soft; }
   &.recent { color: $green; background: $green-soft; }
+  &.failed { color: $red; background: $red-soft; }
+  &.canceled { color: #7a8493; background: #f1f3f5; }
 }
 
 .workbench-section.attention .workbench-section-title h2 span { color: $orange; background: $orange-soft; }
 .workbench-section.running .workbench-section-title h2 span { color: $blue; background: $blue-soft; }
 .workbench-section.recent .workbench-section-title h2 span { color: $green; background: $green-soft; }
+.workbench-section.failed .workbench-section-title h2 span { color: $red; background: $red-soft; }
+.workbench-section.canceled .workbench-section-title h2 span { color: #7a8493; background: #f1f3f5; }
+
+.workbench-section.failed .attention-task-card:hover { border-color: #f2aaaa; }
+.workbench-section.canceled .attention-task-card:hover { border-color: #cbd1d8; }
 
 .attention-task-grid {
   display: grid;
@@ -377,7 +399,12 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 .recent-task-check { color: $green; font-size: 14px; }
 .recent-task-summary { overflow: hidden; color: #586273; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .recent-task-arrow { color: #a3acb8; font-size: 9px; }
-.workbench-empty { margin: 22px 0; }
+.workbench-empty {
+  margin: 22px 0;
+  color: $muted;
+  font-size: 12px;
+  text-align: center;
+}
 
 .all-tasks-toolbar {
   display: flex;
@@ -489,11 +516,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 
 .schedule-board {
   margin-top: 14px;
-  padding: 0 14px 14px;
-  border: 1px solid $border;
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: $shadow;
+  padding: 0;
 }
 
 .schedule-board-header {
@@ -511,6 +534,111 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 
 .schedule-grid.large { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .schedule-grid.compact { overflow: hidden; border: 1px solid $border; border-radius: 11px; }
+
+.schedule-group-grid.large { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.schedule-group-grid.compact { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.schedule-group-view { display: grid; gap: 18px; }
+.schedule-group-card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid $border;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: $shadow;
+
+  > header { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 11px; }
+  > header h3 { margin: 0; font-size: 16px; }
+  > header p { margin: 3px 0 0; overflow: hidden; color: $muted; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+  > footer { display: flex; min-height: 38px; padding-top: 11px; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid $border-light; }
+  > footer > div { min-width: 0; overflow: hidden; white-space: nowrap; }
+  > footer .ant-tag { margin-inline-end: 5px; }
+}
+
+.schedule-group-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 10px; background: $blue-soft; color: $blue; font-size: 19px; }
+.schedule-group-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 13px 0 11px; padding: 11px 0; gap: 12px; border-top: 1px solid $border-light; color: #5f6b7c; font-size: 12px; }
+.schedule-filter-note { display: flex; margin-bottom: 10px; padding: 8px 12px; align-items: center; justify-content: space-between; border: 1px solid $border; border-radius: 9px; background: #fff; color: #5f6b7c; font-size: 12px; }
+
+.ungrouped-schedule-section {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+
+  > header { display: flex; padding: 0 0 12px; align-items: center; justify-content: space-between; }
+  > header h3 { margin: 0; font-size: 16px; }
+  > header p { margin: 2px 0 0; color: $muted; font-size: 11px; }
+  > header > span { color: $muted; font-size: 12px; }
+}
+
+.schedule-card[draggable='true'] { cursor: grab; }
+.schedule-card-identity small { display: block; margin-top: 5px; color: $blue; font-size: 11px; }
+
+.batch-task-editor { display: grid; max-height: 62vh; gap: 12px; overflow: auto; }
+.schedule-create-modal .ant-modal-body { max-height: calc(100vh - 210px); overflow: auto; }
+.creation-type-picker { display: grid; margin-bottom: 22px; grid-template-columns: 1fr 1fr; gap: 14px; }
+.creation-type-picker button {
+  position: relative;
+  display: grid;
+  min-height: 88px;
+  padding: 15px 18px;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid $border;
+  border-radius: 10px;
+  color: #202735;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+
+  &.is-selected { border-color: $blue; box-shadow: 0 0 0 1px $blue inset; background: #f8fbff; }
+  > span { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 10px; color: $blue; background: $blue-soft; font-size: 24px; }
+  > div { display: grid; gap: 5px; }
+  strong { font-size: 16px; }
+  small { color: $muted; }
+  > .anticon-check-circle { align-self: start; color: $blue; font-size: 18px; }
+}
+.schedule-create-modal .ant-input-textarea-show-count { margin-bottom: 18px; }
+.schedule-create-modal .ant-input-textarea-show-count::after { margin-top: 3px; color: $muted; font-size: 12px; line-height: 15px; }
+.schedule-create-modal .ant-form-item { margin-bottom: 12px; }
+.schedule-create-modal .ant-form-item-label { padding-right: 14px; }
+.schedule-create-modal .ant-form-item-label > label { width: 100%; color: #252b36; font-weight: 520; gap: 4px; }
+.schedule-create-modal .ant-form-item-label > label.ant-form-item-required::before { display: none; }
+.schedule-create-modal .ant-form-item-label > label.ant-form-item-required::after { display: inline-block; margin-left: 4px; color: #ff4d4f; content: '*'; }
+.create-field-row { display: grid; grid-template-columns: 145px minmax(0, 1fr); align-items: start; gap: 0; }
+.create-field-row + .create-field-row { margin-top: 12px; }
+.create-field-row + .ant-form { margin-top: 12px; }
+.create-field-row > label { display: flex; padding: 7px 14px 0 0; align-items: center; gap: 4px; color: #252b36; font-size: 14px; font-weight: 520; }
+.create-field-row > label.is-required::after { margin-left: 4px; color: #ff4d4f; content: '*'; }
+.create-field-row > div { min-width: 0; }
+.create-field-row .ant-select { width: 100%; }
+.field-label-text { display: inline-block; width: 88px; text-align: justify; text-align-last: justify; white-space: nowrap; }
+.field-help, .schedule-create-modal .ant-form-item-extra { margin-top: 6px; color: $muted; font-size: 12px; line-height: 1.55; }
+.field-help-inline { color: $muted; font-size: 12px; }
+.visual-scheduler { display: flex; position: relative; min-height: 38px; align-items: center; flex-wrap: wrap; gap: 7px; }
+.visual-scheduler > span { color: #4b5566; font-size: 13px; }
+.visual-scheduler .schedule-interval { width: 48px; color: #202735; }
+.visual-scheduler .schedule-unit { width: 72px; }
+.month-day-picker { position: relative; }
+.month-day-picker > .ant-btn { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.month-day-panel { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; display: grid; width: 300px; padding: 10px; grid-template-columns: repeat(7, 1fr); gap: 4px; border: 1px solid $border; border-radius: 9px; background: #fff; box-shadow: $shadow; }
+.month-day-panel .ant-btn { min-width: 0; padding-inline: 3px; }
+.group-create-editor { display: grid; gap: 12px; }
+.group-task-heading { display: flex; margin-top: 4px; align-items: center; justify-content: space-between; }
+.group-task-heading.has-tabs { display: none; }
+.group-task-heading p { margin: 0; font-weight: 600; }
+.single-task-tabs > .ant-tabs-nav { display: none; }
+.batch-task-card {
+  display: grid;
+  padding: 13px 0;
+  gap: 0;
+  border: 1px solid $border;
+  border-radius: 10px;
+  background: #fafbfc;
+
+  > header { display: flex; align-items: center; justify-content: space-between; }
+}
+.batch-task-card .create-field-row { padding-right: 13px; grid-template-columns: 145px minmax(0, 1fr); }
 
 .schedule-card {
   min-width: 0;
@@ -612,6 +740,8 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 }
 
 .schedule-empty { margin: 50px 0; }
+.schedule-history-status { display: grid; justify-items: start; gap: 4px; }
+.schedule-history-status small { color: $muted; line-height: 1.35; }
 .schedule-detail-content section { margin-bottom: 12px; padding: 18px; border: 1px solid $border; border-radius: 10px; background: #fff; }
 .schedule-detail-content h3 { margin: 0 0 10px; font-size: 14px; }
 .schedule-detail-content p { margin: 0; color: $muted; line-height: 1.7; }
@@ -640,9 +770,9 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 @media (max-width: 1280px) {
   .task-center-header, .task-center-tabs > .ant-tabs-nav { padding-inline: 25px; }
   .task-center-tabs > .ant-tabs-content-holder { padding-inline: 25px; }
-  .task-metric { min-width: 185px; margin-right: 18px; padding-right: 18px; }
+  .task-metric { padding-inline: 12px; }
   .task-metrics-note { display: none; }
-  .attention-task-grid, .schedule-grid.large { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .attention-task-grid, .schedule-grid.large, .schedule-group-grid.large { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .running-task-head { grid-template-columns: minmax(210px, 1.2fr) minmax(250px, 1fr) 145px 58px; }
   .running-task-row { grid-template-columns: 38px minmax(210px, 1.2fr) minmax(250px, 1fr) 145px 58px; }
   .schedule-grid.compact .schedule-card { grid-template-columns: minmax(280px, 1.2fr) minmax(210px, 0.8fr) 260px; }
@@ -666,6 +796,12 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 }
 
 @media (max-width: 720px) {
+  .creation-type-picker { grid-template-columns: 1fr; }
+  .create-field-row { grid-template-columns: 1fr; gap: 6px; }
+  .create-field-row > label { padding: 0; }
+  .schedule-create-modal .ant-form-item { display: block; }
+  .schedule-create-modal .ant-form-item-label { max-width: none; padding: 0 0 6px; }
+  .schedule-create-modal .ant-form-item-control { max-width: none; }
   .task-center-title-line { align-items: stretch; flex-direction: column; gap: 12px; }
   .task-center-title-line .ant-btn { align-self: flex-start; }
   .task-center-tabs > .ant-tabs-nav .ant-tabs-nav-list { gap: 12px; }
@@ -674,7 +810,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   .task-metric:last-of-type { border-bottom: 0; }
   .task-toolbar, .schedule-toolbar { align-items: stretch; flex-wrap: wrap; }
   .task-toolbar .ant-input-affix-wrapper, .schedule-toolbar .ant-input-affix-wrapper { width: 100%; }
-  .attention-task-grid, .schedule-grid.large { grid-template-columns: 1fr; }
+  .attention-task-grid, .schedule-grid.large, .schedule-group-grid.large { grid-template-columns: 1fr; }
   .running-task-row { grid-template-columns: 38px minmax(0, 1fr) auto; }
   .running-task-state, .workbench-row-action { display: none; }
   .recent-task-row { grid-template-columns: 20px minmax(0, 1fr) 14px; }

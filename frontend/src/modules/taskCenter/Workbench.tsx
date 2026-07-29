@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Empty, Input, Progress, Select, Spin, Tooltip } from 'antd';
-import { CheckCircleFilled, ClockCircleOutlined, ReloadOutlined, RightOutlined, SearchOutlined, SyncOutlined, UserOutlined } from '@ant-design/icons';
+import { Button, Input, Progress, Select, Spin, Tooltip } from 'antd';
+import { CheckCircleFilled, ClockCircleOutlined, CloseCircleOutlined, ReloadOutlined, RightOutlined, SearchOutlined, StopOutlined, SyncOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { listTasks } from './api';
+import { listTasks, removeTask } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
 import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
@@ -23,10 +23,13 @@ export default function Workbench({ active }: WorkbenchProps) {
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [type, setType] = useState('');
+  const [statusCounts, setStatusCounts] = useState({ all: 0, pending: 0, waiting: 0, running: 0, succeeded: 0, failed: 0, canceled: 0 });
   const [selected, setSelected] = useState<Task | null>(null);
   const [graphTask, setGraphTask] = useState<Task | null>(null);
   const [attentionExpanded, setAttentionExpanded] = useState(false);
   const [runningExpanded, setRunningExpanded] = useState(false);
+  const [failedExpanded, setFailedExpanded] = useState(false);
+  const [canceledExpanded, setCanceledExpanded] = useState(false);
   const [recentExpanded, setRecentExpanded] = useState(false);
 
   const load = useCallback(async () => {
@@ -34,6 +37,7 @@ export default function Workbench({ active }: WorkbenchProps) {
     try {
       const response = await listTasks({ keyword: keyword || undefined, task_type: type || undefined, page: 1, page_size: 60 });
       setTasks(response.items ?? []);
+      if (response.status_counts) setStatusCounts(response.status_counts);
     } catch {
       // API errors are reported by the shared request interceptor.
     } finally {
@@ -45,8 +49,10 @@ export default function Workbench({ active }: WorkbenchProps) {
     if (active) void load();
   }, [active, load]);
 
-  const waiting = tasks.filter((task) => ['waiting', 'interrupted', 'pending', 'failed'].includes(task.status));
+  const waiting = tasks.filter((task) => ['waiting', 'interrupted', 'pending'].includes(task.status));
   const running = tasks.filter((task) => task.status === 'running');
+  const failed = tasks.filter((task) => task.status === 'failed');
+  const canceled = tasks.filter((task) => task.status === 'canceled');
   const completed = tasks.filter((task) => ['completed', 'succeeded'].includes(task.status));
   const completedToday = completed.filter(isTaskFinishedToday);
   const recent = completed.filter((task) => isTaskFinishedWithinDays(task, 7));
@@ -62,6 +68,8 @@ export default function Workbench({ active }: WorkbenchProps) {
         <Metric icon={<UserOutlined />} tone='orange' label={t('taskCenter.needsAttention')} value={waiting.length} />
         <Metric icon={<ClockCircleOutlined />} tone='blue' label={t('taskCenter.helpingYou')} value={running.length} />
         <Metric icon={<CheckCircleFilled />} tone='green' label={t('taskCenter.completedToday')} value={completedToday.length} />
+        <Metric icon={<CloseCircleOutlined />} tone='red' label={t('taskCenter.statusFailed')} value={statusCounts.failed} />
+        <Metric icon={<StopOutlined />} tone='gray' label={t('taskCenter.statusCanceled')} value={statusCounts.canceled} />
         <span className='task-metrics-note'>{t('taskCenter.summaryHint')}</span>
       </div>
       <div className='task-toolbar'>
@@ -78,9 +86,11 @@ export default function Workbench({ active }: WorkbenchProps) {
       <Spin spinning={loading}>
         <AttentionSection tasks={waiting} expanded={attentionExpanded} onToggle={() => setAttentionExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
         <RunningSection tasks={running} expanded={runningExpanded} onToggle={() => setRunningExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
+        <StatusCardSection status='failed' tasks={failed} expanded={failedExpanded} onToggle={() => setFailedExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
+        <StatusCardSection status='canceled' tasks={canceled} expanded={canceledExpanded} onToggle={() => setCanceledExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
         <RecentSection tasks={recent} expanded={recentExpanded} onToggle={() => setRecentExpanded((value) => !value)} onSelect={setSelected} />
       </Spin>
-      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} />
+      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} onDelete={async (task) => { await removeTask(task.id); setSelected(null); await load(); }} />
       {graphTask?.plugin_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.plugin_session_id} pluginId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
     </div>
   );
@@ -144,6 +154,37 @@ function RunningSection({ tasks, expanded, onToggle, onSelect, onOpenGraph }: { 
   </section>;
 }
 
+function StatusCardSection({ status, tasks, expanded, onToggle, onSelect, onOpenGraph }: { status: 'failed' | 'canceled'; tasks: Task[]; expanded: boolean; onToggle: () => void; onSelect: (task: Task) => void; onOpenGraph: (task: Task) => void }) {
+  const { t } = useTranslation();
+  const failed = status === 'failed';
+  return <section className={`workbench-section ${status}`}>
+    <SectionHeading
+      icon={failed ? <CloseCircleOutlined /> : <StopOutlined />}
+      tone={status}
+      title={t(failed ? 'taskCenter.statusFailed' : 'taskCenter.statusCanceled')}
+      description={t(failed ? 'taskCenter.failedDescription' : 'taskCenter.canceledDescription')}
+      count={tasks.length}
+      expanded={expanded}
+      canExpand={tasks.length > ATTENTION_LIMIT}
+      onToggle={onToggle}
+    />
+    {tasks.length ? <div className='attention-task-grid'>{tasks.slice(0, expanded ? undefined : ATTENTION_LIMIT).map((task) => (
+      <article className='attention-task-card' key={task.id}>
+        <div className='attention-task-card-top'>
+          <span className={`task-type-icon task-type-${task.task_type}`}>{failed ? <CloseCircleOutlined /> : <StopOutlined />}</span>
+          <StatusTag status={task.status} onClick={task.plugin_session_id ? () => onOpenGraph(task) : undefined} />
+        </div>
+        <div className='attention-task-card-title'>
+          <Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip>
+          <small>{taskMeta(task, t)}</small>
+        </div>
+        <p>{taskDescription(task, t)}</p>
+        <footer><time>{formatDate(task.finished_at || task.updated_at)}</time><Button type='link' size='small' onClick={() => onSelect(task)}>{t('taskCenter.viewAction')} <RightOutlined /></Button></footer>
+      </article>
+    ))}</div> : <WorkbenchEmpty />}
+  </section>;
+}
+
 function RecentSection({ tasks, expanded, onToggle, onSelect }: { tasks: Task[]; expanded: boolean; onToggle: () => void; onSelect: (task: Task) => void }) {
   const { t } = useTranslation();
   return <section className='workbench-section recent'>
@@ -162,7 +203,7 @@ function RecentSection({ tasks, expanded, onToggle, onSelect }: { tasks: Task[];
 
 function WorkbenchEmpty() {
   const { t } = useTranslation();
-  return <Empty className='workbench-empty' image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('taskCenter.empty')} />;
+  return <p className='workbench-empty'>{t('taskCenter.empty')}</p>;
 }
 
 function taskTitle(task: Task, t: (key: string) => string) {

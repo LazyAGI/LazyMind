@@ -25,6 +25,7 @@ openpyxl-image-loader
 cryptography==45.0.5
 pymysql
 pyahocorasick
+jieba==0.42.1
 autocorrect-py==2.14.0
 rapidfuzz==3.14.3
 regex>=2024.0.0

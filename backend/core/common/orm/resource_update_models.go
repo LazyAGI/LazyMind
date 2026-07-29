@@ -6,10 +6,11 @@ import (
 )
 
 const (
-	ResourceUpdateTaskTypeGenerateReview       = "generate_review"
-	ResourceUpdateTaskTypeAutoApplyReview      = "auto_apply_review"
-	ResourceUpdateTaskTypeAutoCommitSkillDraft = "auto_commit_skill_draft"
-	ResourceUpdateTaskTypeOrganizeSkill        = "organize_skill"
+	ResourceUpdateTaskTypeGenerateReview          = "generate_review"
+	ResourceUpdateTaskTypeAutoApplyReview         = "auto_apply_review"
+	ResourceUpdateTaskTypeAutoCommitSkillDraft    = "auto_commit_skill_draft"
+	ResourceUpdateTaskTypeAutoCommitPersonalDraft = "auto_commit_personal_draft"
+	ResourceUpdateTaskTypeOrganizeSkill           = "organize_skill"
 
 	ResourceUpdateResourceTypeSkill          = "skill"
 	ResourceUpdateResourceTypeMemory         = "memory"

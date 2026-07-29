@@ -20,7 +20,6 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
-	"lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/plugin"
 	"lazymind/core/state"
@@ -37,6 +36,25 @@ func writeConversationJSON(w http.ResponseWriter, status int, v any) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func applyBasicChatOnlyPolicy(reqBody map[string]any) {
+	agenticConfig, _ := reqBody["agentic_config"].(map[string]any)
+	if agenticConfig == nil {
+		agenticConfig = map[string]any{}
+		reqBody["agentic_config"] = agenticConfig
+	}
+	agenticConfig["enable_plugin"] = false
+	agenticConfig["enable_subagent"] = false
+	reqBody["enable_plugin"] = false
+	reqBody["enable_subagent"] = false
+	reqBody["plugin_context"] = map[string]any{}
+	reqBody["plugin_catalog"] = []map[string]any{}
+	reqBody["disabled_tools"] = mergeDisabledToolNames(
+		stringSliceFromAny(reqBody["disabled_tools"]),
+		[]string{"ask_user", "schedule", "task", "task_center"},
+	)
+	delete(reqBody, "has_subagents")
 }
 
 // writeSSEChunk text SSE text： data: {"result":{...}}\n\n
@@ -90,6 +108,28 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if json.Unmarshal(bodyBytes, &raw) != nil {
 		common.ReplyErr(w, "invalid json", http.StatusBadRequest)
 		return
+	}
+	basicChatOnly, _ := raw["basic_chat_only"].(bool)
+	if basicChatOnly {
+		if runInBackground, _ := raw["run_in_background"].(bool); runInBackground {
+			common.ReplyErr(w, "basic chat does not support background execution", http.StatusConflict)
+			return
+		}
+		if _, hasAskAnswers := raw["ask_answers_structured"]; hasAskAnswers {
+			common.ReplyErr(w, "basic chat does not support ask answers", http.StatusConflict)
+			return
+		}
+		mentions, mentionErr := parseChatMentions(raw)
+		if mentionErr != nil {
+			common.ReplyErr(w, mentionErr.Error(), http.StatusBadRequest)
+			return
+		}
+		for _, mention := range mentions {
+			if mention.Type == "plugin" {
+				common.ReplyErr(w, "basic chat does not support plugin mentions", http.StatusConflict)
+				return
+			}
+		}
 	}
 	setConversationDefaultValue(raw)
 	if !checkInput(raw) {
@@ -165,6 +205,14 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if query == "" {
 		common.ReplyErr(w, "query required", http.StatusBadRequest)
 		return
+	}
+	// Automated aggregate tasks send a large, structured model query while the
+	// conversation should display only the user's task request. Keep those two
+	// representations separate: query remains the model input and display_query
+	// is used only for persisted/rendered chat history.
+	displayQuery := query
+	if v, ok := raw["display_query"].(string); ok && strings.TrimSpace(v) != "" {
+		displayQuery = strings.TrimSpace(v)
 	}
 
 	userID := store.UserID(r)
@@ -274,102 +322,100 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
-	// resolvePluginModeWithFallback determines the effective plugin_mode for this request.
-	// It is injected into plugin_context (below) so Python can use it; it is not sent
-	// as a top-level reqBody field because Python reads it exclusively from plugin_context.
-	pluginMode := resolvePluginModeWithFallback(raw, reqBody)
-	existingPluginContext, _ := reqBody["plugin_context"].(map[string]any)
-	if existingPluginContext == nil {
-		existingPluginContext = map[string]any{}
-	}
-	existingPluginContext["plugin_mode"] = pluginMode
-	reqBody["plugin_context"] = existingPluginContext
-	if preflight := loadPluginPreflightContext(r.Context(), db, convID); len(preflight) > 0 {
-		existing, _ := reqBody["plugin_context"].(map[string]any)
-		if existing == nil {
-			existing = map[string]any{}
+	if basicChatOnly {
+		applyBasicChatOnlyPolicy(reqBody)
+	} else {
+		// resolvePluginModeWithFallback determines the effective plugin_mode for this request.
+		// It is injected into plugin_context (below) so Python can use it; it is not sent
+		// as a top-level reqBody field because Python reads it exclusively from plugin_context.
+		pluginMode := resolvePluginModeWithFallback(raw, reqBody)
+		existingPluginContext, _ := reqBody["plugin_context"].(map[string]any)
+		if existingPluginContext == nil {
+			existingPluginContext = map[string]any{}
 		}
-		existing["plugin_mode"] = pluginMode
-		existing["plugin_preflight"] = preflight
-		reqBody["plugin_context"] = existing
-	}
-
-	// Promote enable_plugin and enable_subagent from agentic_config to top-level
-	// so Python chat_routes can receive them as explicit parameters.
-	if ac, ok := reqBody["agentic_config"].(map[string]any); ok {
-		if v, ok := ac["enable_plugin"]; ok {
-			reqBody["enable_plugin"] = v
-		}
-		if v, ok := ac["enable_subagent"]; ok {
-			reqBody["enable_subagent"] = v
-		}
-	}
-	if err := applyPluginSelection(
-		r.Context(), db, userID, reqBody, mentionedResources.PluginRefs,
-		mentionedResources.ExcludedPluginRefs,
-	); err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusForbidden)
-		return
-	}
-
-	if activeSess, err := plugin.GetLatestSession(r.Context(), db, convID); err == nil && activeSess != nil {
-		existing, hasPC := reqBody["plugin_context"].(map[string]any)
-		if !hasPC || existing == nil {
-			// Case 1: inject from DB.
-			reqBody["plugin_context"] = map[string]any{
-				"session_id":   activeSess.ID,
-				"plugin_id":    activeSess.PluginID,
-				"current_step": activeSess.CurrentStepID,
-				"plugin_mode":  pluginMode,
-				"plugin_ref":   activeSess.PluginRef, "revision_id": activeSess.PluginRevisionID, "revision_no": activeSess.PluginRevisionNo, "tree_hash": activeSess.PluginTreeHash, "remote_root": activeSess.PluginRemoteRoot,
-			}
-			fmt.Printf("[PLUGIN_CONTEXT_INJECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s plugin_mode=%s\n",
-				convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID, pluginMode)
-		} else {
-			// Case 2: validate/correct stale fields from frontend.
-			stale := false
-			if sid, _ := existing["session_id"].(string); sid != activeSess.ID {
-				existing["session_id"] = activeSess.ID
-				stale = true
-			}
-			if pid, _ := existing["plugin_id"].(string); pid != activeSess.PluginID {
-				existing["plugin_id"] = activeSess.PluginID
-				stale = true
-			}
-			if cs, _ := existing["current_step"].(string); cs != activeSess.CurrentStepID {
-				existing["current_step"] = activeSess.CurrentStepID
-				stale = true
+		existingPluginContext["plugin_mode"] = pluginMode
+		reqBody["plugin_context"] = existingPluginContext
+		if preflight := loadPluginPreflightContext(r.Context(), db, convID); len(preflight) > 0 {
+			existing, _ := reqBody["plugin_context"].(map[string]any)
+			if existing == nil {
+				existing = map[string]any{}
 			}
 			existing["plugin_mode"] = pluginMode
-			existing["plugin_ref"] = activeSess.PluginRef
-			existing["revision_id"] = activeSess.PluginRevisionID
-			existing["revision_no"] = activeSess.PluginRevisionNo
-			existing["tree_hash"] = activeSess.PluginTreeHash
-			existing["remote_root"] = activeSess.PluginRemoteRoot
-			if stale {
-				fmt.Printf("[PLUGIN_CONTEXT_CORRECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s\n",
-					convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)
+			existing["plugin_preflight"] = preflight
+			reqBody["plugin_context"] = existing
+		}
+
+		// Promote enable_plugin and enable_subagent from agentic_config to top-level
+		// so Python chat_routes can receive them as explicit parameters.
+		if ac, ok := reqBody["agentic_config"].(map[string]any); ok {
+			if v, ok := ac["enable_plugin"]; ok {
+				reqBody["enable_plugin"] = v
+			}
+			if v, ok := ac["enable_subagent"]; ok {
+				reqBody["enable_subagent"] = v
 			}
 		}
-	} else if existing, hasPC := reqBody["plugin_context"].(map[string]any); hasPC {
-		// No active session in DB but frontend sent a plugin_context — clear it to avoid
-		// Python entering advance-step mode with a stale/non-existent session.
-		if preflight, ok := existing["plugin_preflight"].(map[string]any); ok && len(preflight) > 0 {
+		if err := applyPluginSelection(
+			r.Context(), db, userID, reqBody, mentionedResources.PluginRefs,
+			mentionedResources.ExcludedPluginRefs,
+		); err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusForbidden)
+			return
+		}
+
+		if activeSess, err := plugin.GetLatestSession(r.Context(), db, convID); err == nil && activeSess != nil {
+			existing, hasPC := reqBody["plugin_context"].(map[string]any)
+			if !hasPC || existing == nil {
+				// Case 1: inject from DB.
+				reqBody["plugin_context"] = map[string]any{
+					"session_id":   activeSess.ID,
+					"plugin_id":    activeSess.PluginID,
+					"current_step": activeSess.CurrentStepID,
+					"plugin_mode":  pluginMode,
+					"plugin_ref":   activeSess.PluginRef, "revision_id": activeSess.PluginRevisionID, "revision_no": activeSess.PluginRevisionNo, "tree_hash": activeSess.PluginTreeHash, "remote_root": activeSess.PluginRemoteRoot,
+				}
+				fmt.Printf("[PLUGIN_CONTEXT_INJECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s plugin_mode=%s\n",
+					convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID, pluginMode)
+			} else {
+				// Case 2: validate/correct stale fields from frontend.
+				stale := false
+				if sid, _ := existing["session_id"].(string); sid != activeSess.ID {
+					existing["session_id"] = activeSess.ID
+					stale = true
+				}
+				if pid, _ := existing["plugin_id"].(string); pid != activeSess.PluginID {
+					existing["plugin_id"] = activeSess.PluginID
+					stale = true
+				}
+				if cs, _ := existing["current_step"].(string); cs != activeSess.CurrentStepID {
+					existing["current_step"] = activeSess.CurrentStepID
+					stale = true
+				}
+				existing["plugin_mode"] = pluginMode
+				existing["plugin_ref"] = activeSess.PluginRef
+				existing["revision_id"] = activeSess.PluginRevisionID
+				existing["revision_no"] = activeSess.PluginRevisionNo
+				existing["tree_hash"] = activeSess.PluginTreeHash
+				existing["remote_root"] = activeSess.PluginRemoteRoot
+				if stale {
+					fmt.Printf("[PLUGIN_CONTEXT_CORRECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s\n",
+						convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)
+				}
+			}
+		} else if existing, hasPC := reqBody["plugin_context"].(map[string]any); hasPC {
+			// No active session in DB but frontend sent a plugin_context — clear it to avoid
+			// Python entering advance-step mode with a stale/non-existent session.
 			for _, key := range []string{"session_id", "plugin_id", "current_step", "plugin_ref", "revision_id", "revision_no", "tree_hash", "remote_root"} {
 				delete(existing, key)
 			}
 			existing["plugin_mode"] = pluginMode
 			reqBody["plugin_context"] = existing
-		} else {
-			for _, key := range []string{"session_id", "plugin_id", "current_step", "plugin_ref", "revision_id", "revision_no", "tree_hash", "remote_root"} {
-				delete(existing, key)
+			if _, hasPreflight := existing["plugin_preflight"]; !hasPreflight {
+				fmt.Printf("[PLUGIN_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
 			}
-			existing["plugin_mode"] = pluginMode
-			reqBody["plugin_context"] = existing
-			fmt.Printf("[PLUGIN_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
 		}
 	}
-	historyExt := buildChatHistoryExt(raw, query)
+	historyExt := buildChatHistoryExt(raw, displayQuery)
 	if err := applyChatAttachmentConversion(r.Context(), reqBody); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "prepare chat attachments failed", err), http.StatusBadGateway)
 		return
@@ -379,7 +425,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	stateStore := store.State()
 
 	if !stream {
-		handleNonStreamChat(w, reqCtx, db, stateStore, baseURL, reqBody, convID, query, target, historyExt)
+		handleNonStreamChat(w, reqCtx, db, stateStore, baseURL, reqBody, convID, displayQuery, target, historyExt)
 		return
 	}
 
@@ -387,7 +433,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	// task center. Status is derived on read via resolveTaskStatus (chat_histories
 	// presence), so no status callback is needed after the SSE drains.
 	if runInBackground, _ := raw["run_in_background"].(bool); runInBackground {
-		taskTitle := query
+		taskTitle := displayQuery
 		if len([]rune(taskTitle)) > 40 {
 			taskTitle = string([]rune(taskTitle)[:40]) + "..."
 		}
@@ -398,7 +444,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			Title:          &taskTitle,
 			Status:         "running",
 		}
-		_ = taskcenter.CreateTask(reqCtx, db, bgTask)
+		if taskcenter.CreateTask(reqCtx, db, bgTask) == nil {
+			_ = db.WithContext(reqCtx).Model(&orm.Conversation{}).
+				Where("id = ? AND create_user_id = ?", convID, userID).
+				Update("is_task_conv", true).Error
+		}
 	}
 
 	// Mark the last assistant turn that had an ask_pending as answered.
@@ -411,7 +461,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, query, target, dualReply, historyExt)
+	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, displayQuery, target, dualReply, historyExt)
 }
 
 // ResumeChat text POST /api/v1/conversations:resumeChat
@@ -810,6 +860,39 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, nil)
 }
 
+// DecideToolLimit handles POST /conversations/{conversation_id}:toolLimitDecision.
+func DecideToolLimit(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		DecisionID string `json:"decision_id"`
+		Action     string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("invalid body: %v", err), http.StatusBadRequest)
+		return
+	}
+	convID := conversationIDFromPath(r)
+	decisionID := strings.TrimSpace(body.DecisionID)
+	action := strings.ToLower(strings.TrimSpace(body.Action))
+	if convID == "" || decisionID == "" || (action != "continue" && action != "summarize") {
+		common.ReplyErr(w, "conversation_id, decision_id and a valid action are required", http.StatusBadRequest)
+		return
+	}
+	userID := store.UserID(r)
+	if userID == "" {
+		userID = "0"
+	}
+	var conv orm.Conversation
+	if err := store.DB().Where("id = ? AND create_user_id = ?", convID, userID).First(&conv).Error; err != nil {
+		common.ReplyErr(w, fmt.Sprintf("conversation not found: %v", err), http.StatusNotFound)
+		return
+	}
+	if err := notifyToolLimitDecision(convID, decisionID, action); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("failed to deliver tool-limit decision: %v", err), http.StatusConflict)
+		return
+	}
+	common.ReplyOK(w, nil)
+}
+
 // GetChatStatus text GET /api/v1/conversations/{conversation_id}:status
 func GetChatStatus(w http.ResponseWriter, r *http.Request) {
 	convID := conversationIDFromPath(r)
@@ -984,7 +1067,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	}
 	item := map[string]any{
 		"seq":               h.Seq,
-		"query":             h.RawContent,
+		"query":             displayChatHistoryContent(h.RawContent),
 		"result":            stripThinkTags(stripToolTags(h.Result)),
 		"id":                h.ID,
 		"feed_back":         h.FeedBack,
@@ -1013,12 +1096,66 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	return item
 }
 
+func displayChatHistoryContent(raw string) string {
+	const openTag = "<current-task-request>"
+	const closeTag = "</current-task-request>"
+	start := strings.LastIndex(raw, openTag)
+	if start < 0 {
+		return raw
+	}
+	start += len(openTag)
+	endOffset := strings.Index(raw[start:], closeTag)
+	if endOffset < 0 {
+		return raw
+	}
+	content := strings.TrimSpace(raw[start : start+endOffset])
+	content = strings.TrimPrefix(content, "这是当前需要执行的任务要求，请使用上方已完成的历史执行结果作答：")
+	return strings.TrimSpace(content)
+}
+
 func conversationHistoryResponseItems(histories []orm.ChatHistory) []map[string]any {
 	list := make([]map[string]any, 0, len(histories))
 	for _, h := range histories {
 		list = append(list, chatHistoryToResponseItem(h))
 	}
 	return list
+}
+
+func collectedInputsForConversation(ctx context.Context, db *gorm.DB, convID string) []map[string]any {
+	var rows []struct {
+		UpstreamTaskID       string
+		SourceConversationID string
+		SummaryText          string
+		SnapshotJSON         string
+		Position             int
+	}
+	err := db.WithContext(ctx).Table("task_run_inputs tri").
+		Select("tri.upstream_task_id, tro.conversation_id AS source_conversation_id, tro.summary_text, tri.snapshot_json, tri.position").
+		Joins("JOIN task_center_tasks downstream ON downstream.id = tri.downstream_task_id AND downstream.archived_at IS NULL").
+		Joins("JOIN task_run_outputs tro ON tro.id = tri.output_id").
+		Where("downstream.conversation_id = ?", convID).
+		Order("tri.position ASC").Scan(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	result := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		var snapshot map[string]any
+		_ = json.Unmarshal([]byte(row.SnapshotJSON), &snapshot)
+		item := map[string]any{
+			"task_id":         row.UpstreamTaskID,
+			"conversation_id": row.SourceConversationID,
+			"summary":         row.SummaryText,
+			"position":        row.Position,
+		}
+		for _, key := range []string{"source_name", "executed_at", "mode"} {
+			if value, ok := snapshot[key]; ok {
+				item[key] = value
+			}
+		}
+		result = append(result, item)
+	}
+	return result
 }
 
 func filterConversationSearchConfigDatasetList(ctx context.Context, db *gorm.DB, searchCfg any) any {
@@ -1165,10 +1302,14 @@ func GetConversationHistory(w http.ResponseWriter, r *http.Request) {
 	if end < total {
 		nextToken = encodeListPageToken(end, pageSize, total)
 	}
+	historyItems := conversationHistoryResponseItems(page)
+	if collectedInputs := collectedInputsForConversation(r.Context(), store.DB(), convID); len(collectedInputs) > 0 && len(historyItems) > 0 {
+		historyItems[0]["collected_inputs"] = collectedInputs
+	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{
 		"conversation_id": convID,
 		"name":            "conversations/" + convID,
-		"history":         conversationHistoryResponseItems(page),
+		"history":         historyItems,
 		"total_size":      total,
 		"next_page_token": nextToken,
 	})
@@ -1187,19 +1328,24 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		userID = "0"
 	}
 	db := store.DB()
-	res := db.Where("id = ? AND create_user_id = ?", convID, userID).Delete(&orm.Conversation{})
-	if res.RowsAffected == 0 {
+	now := time.Now().UTC()
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&orm.Conversation{}).
+			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, []string{convID}, now)
+	}); errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 		return
-	}
-	db.Where("conversation_id = ?", convID).Delete(&orm.ChatHistory{})
-	db.Where("conversation_id = ?", convID).Delete(&orm.MultiAnswersChatHistory{})
-	db.Where("conversation_id = ?", convID).Delete(&orm.ConversationArtifact{})
-	// Cascade-delete task center entries for this conversation.
-	db.Where("conversation_id = ?", convID).Delete(&orm.TaskCenterTask{})
-	if err := removeConversationArtifactFiles(userID, convID); err != nil {
-		log.Logger.Warn().Err(err).Str("conversation_id", convID).
-			Msg("remove main chat artifact files failed")
+	} else if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
@@ -1255,28 +1401,15 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("id IN ?", ownedIDs).Delete(&orm.Conversation{}).Error; err != nil {
+		now := time.Now().UTC()
+		if err := tx.Model(&orm.Conversation{}).Where("id IN ? AND deleted_at IS NULL", ownedIDs).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.ChatHistory{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.MultiAnswersChatHistory{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.ConversationArtifact{}).Error; err != nil {
-			return err
-		}
-		return tx.Where("conversation_id IN ?", ownedIDs).Delete(&orm.TaskCenterTask{}).Error
+		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, ownedIDs, now)
 	}); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "batch delete conversations failed", err), http.StatusInternalServerError)
 		return
-	}
-	for _, conversationID := range ownedIDs {
-		if err := removeConversationArtifactFiles(userID, conversationID); err != nil {
-			log.Logger.Warn().Err(err).Str("conversation_id", conversationID).
-				Msg("remove main chat artifact files failed")
-		}
 	}
 
 	writeConversationJSON(w, http.StatusOK, map[string]any{
@@ -1306,7 +1439,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db := store.DB()
-	q := db.Model(&orm.Conversation{}).Where("create_user_id = ?", userID)
+	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL", userID)
 	if keyword != "" {
 		q = q.Where("display_name LIKE ?", "%"+keyword+"%")
 	}

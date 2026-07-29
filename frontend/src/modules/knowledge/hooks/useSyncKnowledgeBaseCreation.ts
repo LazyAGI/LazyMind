@@ -3,6 +3,7 @@ import { Form } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
+import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
 import {
   createFeishuAccountId,
   getOAuthStateFromConnection,
@@ -31,6 +32,10 @@ import type {
 import { sourceTypeOptions } from "@/modules/dataSource/constants/sourceTypeOptions";
 import { useLocalPathTree } from "@/modules/dataSource/hooks/useLocalPathTree";
 import { useFeishuTargetTree } from "@/modules/dataSource/hooks/useFeishuTargetTree";
+import {
+  getCloudConnectionItems,
+  mapCloudConnectionToDataSourceConnection,
+} from "@/modules/dataSource/mappers/dataSourceConnection";
 import type {
   CloudSetupIntent,
   DataSourceSaveMode,
@@ -80,6 +85,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
   const [notionOauthConnection, setNotionOauthConnection] =
     useState<FeishuDataSourceConnection | null>(null);
   const [notionAuthAccounts, setNotionAuthAccounts] = useState<FeishuAuthAccount[]>([]);
+  const [isGoogleDriveAuthValid, setIsGoogleDriveAuthValid] = useState(false);
   const [cloudSetupProvider, setCloudSetupProvider] =
     useState<CloudDataSourceProvider>("feishu");
   const [feishuSetupModalOpen, setFeishuSetupModalOpen] = useState(false);
@@ -162,6 +168,25 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
 
   const refreshSourcesAfterCreate = useCallback(async () => {
     await onSuccessRef.current?.();
+  }, []);
+
+  const refreshGoogleDriveAuthState = useCallback(async () => {
+    try {
+      const response =
+        await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
+          provider: "googledrive",
+          status: null,
+        });
+      const hasConnectedAccount = getCloudConnectionItems(response.data)
+        .map((item) => mapCloudConnectionToDataSourceConnection(item, "googledrive"))
+        .some(
+          (connection) =>
+            connection.status === "connected" && Boolean(connection.connectionId),
+        );
+      setIsGoogleDriveAuthValid(hasConnectedAccount);
+    } catch {
+      setIsGoogleDriveAuthValid(false);
+    }
   }, []);
 
   const ctx = {} as ManagementContext;
@@ -328,6 +353,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
   useEffect(() => {
     void ctx.refreshFeishuAuthAccounts();
     void ctx.refreshNotionAuthAccounts();
+    void refreshGoogleDriveAuthState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -365,6 +391,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     isNotionSetupReady,
     isFeishuAuthValid,
     isNotionAuthValid,
+    isGoogleDriveAuthValid,
     validFeishuAccounts,
     validNotionAccounts,
     localPathOptions,

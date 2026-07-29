@@ -2,16 +2,17 @@ package taskguard
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"lazymind/core/common/orm"
 	"lazymind/core/skillv2/testutil"
 	"lazymind/core/state"
 )
 
 func TestEvaluateSkillOperationRules(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	createStatsTable(t, db)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
 	stateStore, err := state.NewSQLiteStore(t.TempDir() + "/state.db")
 	if err != nil {
@@ -93,7 +94,6 @@ func TestEvaluateSkillOperationRules(t *testing.T) {
 
 func TestEvaluateSkillOperationRemoteMaintenanceAndAutoUpdate(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	createStatsTable(t, db)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
 	testutil.SeedTextBlob(t, db, "draft_hash", "draft")
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "draft_hash")
@@ -140,24 +140,49 @@ func TestEvaluateSkillOperationRemoteMaintenanceAndAutoUpdate(t *testing.T) {
 	}
 }
 
+func TestEvaluateSkillOperationFallsBackWhenStatsTableIsMissing(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	if err := db.Migrator().DropTable(&orm.SkillReviewStats{}); err != nil {
+		t.Fatalf("drop skill_review_stats: %v", err)
+	}
+	now := time.Now().UTC()
+	startedAt := now.Add(-time.Minute)
+	task := orm.ResourceUpdateTask{
+		ID:           "review-task-1",
+		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
+		ResourceType: orm.ResourceUpdateResourceTypeSkill,
+		UserID:       "user_001",
+		TriggerType:  orm.ResourceUpdateTriggerTypeManual,
+		TriggerID:    "manual-review-1",
+		Status:       orm.ResourceUpdateTaskStatusRunning,
+		RequestJSON:  json.RawMessage(`{"requestid":"review-request-1"}`),
+		NextRunAt:    now,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		StartedAt:    &startedAt,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatalf("create resource update task: %v", err)
+	}
+
+	decision, err := EvaluateSkillOperation(context.Background(), db.DB, nil, SkillOperationRequest{
+		UserID:    "user_001",
+		Operation: TriggerSkillReview,
+	})
+	if err != nil {
+		t.Fatalf("EvaluateSkillOperation: %v", err)
+	}
+	if decision.Allowed || decision.ReasonCode != ReasonMaintenanceTaskRunning || decision.BlockingTask == nil {
+		t.Fatalf("unexpected fallback decision: %#v", decision)
+	}
+	if decision.BlockingTask.ID != task.ID || decision.BlockingTask.RequestID != "review-request-1" {
+		t.Fatalf("unexpected fallback task: %#v", decision.BlockingTask)
+	}
+}
+
 func withOperation(req SkillOperationRequest, operation SkillOperation) SkillOperationRequest {
 	req.Operation = operation
 	return req
-}
-
-func createStatsTable(t *testing.T, db *testutil.TestDB) {
-	t.Helper()
-	if err := db.Exec(`CREATE TABLE IF NOT EXISTS skill_review_stats (
-		id TEXT NOT NULL PRIMARY KEY,
-		requestid TEXT NOT NULL,
-		userid TEXT NOT NULL,
-		status TEXT NOT NULL,
-		started_at TEXT NOT NULL,
-		duration_ms INTEGER NOT NULL DEFAULT 0,
-		summary TEXT NOT NULL DEFAULT '{}'
-	)`).Error; err != nil {
-		t.Fatalf("create skill_review_stats: %v", err)
-	}
 }
 
 func insertStats(t *testing.T, db *testutil.TestDB, id, requestID, userID, status string) {

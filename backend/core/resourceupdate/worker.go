@@ -177,6 +177,9 @@ func (w *Worker) dispatch(ctx context.Context, task orm.ResourceUpdateTask) task
 	if task.TaskType == orm.ResourceUpdateTaskTypeAutoCommitSkillDraft {
 		return w.handleAutoCommitSkillDraft(ctx, task)
 	}
+	if task.TaskType == orm.ResourceUpdateTaskTypeAutoCommitPersonalDraft {
+		return w.handleAutoCommitPersonalDraft(ctx, task)
+	}
 	if task.TaskType == orm.ResourceUpdateTaskTypeAutoApplyReview {
 		return w.handleAutoApplyReview(ctx, task)
 	}

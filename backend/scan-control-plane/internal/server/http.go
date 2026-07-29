@@ -11,6 +11,7 @@ import (
 	sourceengine "github.com/lazymind/scan_control_plane/internal/sourceengine/source"
 	taskengine "github.com/lazymind/scan_control_plane/internal/sourceengine/task"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/tree"
+	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
 
 type ErrorResponse struct {
@@ -61,25 +62,29 @@ func errorPayload(err error) (string, string, map[string]any) {
 	}
 	var sourceErr *sourceengine.EngineError
 	if errors.As(err, &sourceErr) {
-		return string(sourceErr.Code), sourceErr.Error(), detailsOrEmpty(sourceErr.Details)
+		return resolveErrorPayload(string(sourceErr.Code), sourceErr.Error(), sourceErr.Details)
 	}
 	var accessErr *access.Error
 	if errors.As(err, &accessErr) {
-		return string(accessErr.Code), accessErr.Error(), emptyDetails()
+		return resolveErrorPayload(string(accessErr.Code), accessErr.Error(), nil)
 	}
 	var treeErr *tree.QueryError
 	if errors.As(err, &treeErr) {
-		return string(treeErr.Code), treeErr.Error(), detailsOrEmpty(treeErr.Details)
+		return resolveErrorPayload(string(treeErr.Code), treeErr.Error(), treeErr.Details)
 	}
 	var taskErr *taskengine.ServiceError
 	if errors.As(err, &taskErr) {
-		return string(taskErr.Code), taskErr.Error(), detailsOrEmpty(taskErr.Details)
+		return resolveErrorPayload(string(taskErr.Code), taskErr.Error(), taskErr.Details)
 	}
 	var connectorErr *connector.ConnectorError
 	if errors.As(err, &connectorErr) {
-		return connectorHTTPCode(connectorErr.Code), connectorErr.Error(), emptyDetails()
+		return resolveErrorPayload(connectorHTTPCode(connectorErr.Code), connectorErr.Message, nil)
 	}
-	return "INTERNAL_ERROR", err.Error(), emptyDetails()
+	var storeErr *store.StoreError
+	if errors.As(err, &storeErr) {
+		return resolveErrorPayload(string(storeErr.Code), storeErr.Error(), nil)
+	}
+	return resolveErrorPayload("INTERNAL_ERROR", err.Error(), nil)
 }
 
 func detailsOrEmpty(details map[string]any) map[string]any {
@@ -117,6 +122,9 @@ func connectorHTTPCode(code connector.ErrorCode) string {
 }
 
 func statusForCode(code string) int {
+	if status, exists := catalogStatus(code); exists {
+		return status
+	}
 	switch code {
 	case "INVALID_REQUEST", "PARSE_BATCH_OBJECT_LIMIT_EXCEEDED", "CONNECTOR_NOT_FOUND", "INVALID_TARGET", "UNSUPPORTED_LIST_MODE", "UNSUPPORTED_EXPORT":
 		return http.StatusBadRequest

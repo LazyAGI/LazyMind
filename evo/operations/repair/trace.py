@@ -5,6 +5,7 @@ import math
 import os
 import re
 import time
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -238,6 +239,15 @@ class RepairTraceSink:
             'seq_end': self.seq_end,
             'status': 'partial' if self.failures else 'ok',
         }
+
+
+def create_trace_sink(thread_id: str, materialization_key: str) -> RepairTraceSink | None:
+    try:
+        root = Path(os.getenv('LAZYMIND_EVO_BASE_DIR') or '/var/lib/lazymind/evo')
+        trace_id = f'{thread_id}:{materialization_key}:{uuid.uuid4().hex}'
+        return RepairTraceSink(RepairTraceStore(root), thread_id, trace_id, materialization_key)
+    except (OSError, ValueError):
+        return None
 
 
 def safe_emit(trace: Any | None, event_type: str, **kwargs: Any) -> None:

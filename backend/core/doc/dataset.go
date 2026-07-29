@@ -124,8 +124,9 @@ const (
 	maxDatasetTags             = 10
 	maxDatasetTagRunes         = 20
 	maxDatasetDisplayNameRunes = 100
-	datasetDisplayNameRule     = "dataset name supports Chinese/English, numbers, -, _, ., up to 100 characters"
 )
+
+var errInvalidDatasetDisplayName = errors.New("dataset name supports Chinese/English, numbers, -, _, ., up to 100 characters")
 
 func validateDatasetDisplayName(name string) error {
 	trimmed := strings.TrimSpace(name)
@@ -133,7 +134,7 @@ func validateDatasetDisplayName(name string) error {
 		return fmt.Errorf("dataset name is required")
 	}
 	if trimmed != name || utf8.RuneCountInString(trimmed) > maxDatasetDisplayNameRunes {
-		return fmt.Errorf(datasetDisplayNameRule)
+		return errInvalidDatasetDisplayName
 	}
 	for _, r := range trimmed {
 		if r >= '\u4e00' && r <= '\u9fa5' {
@@ -151,7 +152,7 @@ func validateDatasetDisplayName(name string) error {
 		if r == '_' || r == '.' || r == '-' {
 			continue
 		}
-		return fmt.Errorf(datasetDisplayNameRule)
+		return errInvalidDatasetDisplayName
 	}
 	return nil
 }
@@ -471,6 +472,43 @@ func AllDatasetTags(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(tags)
 	common.ReplyJSON(w, AllDatasetTagsResponse{Tags: tags})
 }
+
+// filterAndCountCandidates applies source-level filtering to a batch of
+// ACL/keyword/tags-qualified candidates, collects items for the current page,
+// and increments the total counter. It returns the updated total and page slice.
+//
+// When collectPage is false, candidates that would have been collected for the
+// page are skipped but total is still incremented — this is used by Phase 2 to
+// finish counting the accurate total without building unnecessary page data.
+func filterAndCountCandidates(
+	candidates []orm.Dataset,
+	sourceFilter string,
+	sourceMap map[string]bool,
+	offset int,
+	pageSize int,
+	total int,
+	page []orm.Dataset,
+	pageSourceMap map[string]bool,
+	collectPage bool,
+) (int, []orm.Dataset) {
+	for _, c := range candidates {
+		// Apply source filter.
+		if sourceFilter == "cloud" && !sourceMap[c.ID] {
+			continue
+		}
+		if sourceFilter == "manual" && sourceMap[c.ID] {
+			continue
+		}
+		// Collect into page only during Phase 1.
+		if collectPage && total >= offset && len(page) < pageSize {
+			page = append(page, c)
+			pageSourceMap[c.ID] = sourceMap[c.ID]
+		}
+		total++
+	}
+	return total, page
+}
+
 func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	userID := corestore.UserID(r)
 	if userID == "" {
@@ -552,6 +590,11 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	candidates := make([]orm.Dataset, 0, pageSize)
 	pageSourceMap := make(map[string]bool, pageSize)
 
+	// ------------------------------------------------------------------
+	// Phase 1: collect the current page while counting candidates.
+	// Stops when the page is full OR all DB rows are exhausted.
+	// The total count at this point may be incomplete — Phase 2 fixes it.
+	// ------------------------------------------------------------------
 	for hasMoreRows && len(page) < pageSize {
 		var rows []orm.Dataset
 		query := base.
@@ -570,6 +613,7 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 		if len(rows) == 0 {
 			break
 		}
+		// ACL + keyword + tags filtering (same as before).
 		for _, ds := range rows {
 			perms := datasetACLForUserWithGroups(&ds, userID, groupIDs)
 			if len(perms) == 0 {
@@ -592,23 +636,74 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 			}
 			sourceMap := batchCheckDatasetsHaveSource(r.Context(), candidateIDs)
 
-			for _, c := range candidates {
-				if sourceFilter == "cloud" && !sourceMap[c.ID] {
-					continue
-				}
-				if sourceFilter == "manual" && sourceMap[c.ID] {
-					continue
-				}
-				if total >= offset && len(page) < pageSize {
-					page = append(page, c)
-					pageSourceMap[c.ID] = sourceMap[c.ID]
-				}
-				total++
-			}
+			// Delegate source filtering + page collection + counting.
+			total, page = filterAndCountCandidates(
+				candidates, sourceFilter, sourceMap,
+				offset, pageSize, total, page, pageSourceMap,
+				true, // collectPage: collect page items
+			)
 
 			candidates = candidates[:0]
 		}
+	}
 
+	// ------------------------------------------------------------------
+	// Phase 2: if the page is filled but more DB rows remain, continue
+	// scanning to finish counting the accurate total. No page collection
+	// is done in this phase — the page is already complete.
+	// ------------------------------------------------------------------
+	if len(page) >= pageSize && hasMoreRows {
+		for hasMoreRows {
+			var rows []orm.Dataset
+			// Use a lighter SELECT — only fields needed for filtering.
+			query := base.
+				Select("id, kb_id, create_user_id, display_name, ext").
+				Order(orderClause).
+				Offset(scanOffset).
+				Limit(fetchSize)
+			if err := query.Find(&rows).Error; err != nil {
+				common.ReplyErr(w, "query datasets failed", http.StatusInternalServerError)
+				return
+			}
+			if len(rows) < fetchSize {
+				hasMoreRows = false
+			}
+			scanOffset += len(rows)
+			if len(rows) == 0 {
+				break
+			}
+			// ACL + keyword + tags filtering (same as Phase 1).
+			for _, ds := range rows {
+				perms := datasetACLForUserWithGroups(&ds, userID, groupIDs)
+				if len(perms) == 0 {
+					continue
+				}
+				if !datasetMatchesKeyword(&ds, keyword) {
+					continue
+				}
+				if len(wantTags) > 0 && !containsAll(parseDatasetTags(ds.Ext), wantTags) {
+					continue
+				}
+				candidates = append(candidates, ds)
+			}
+
+			if len(candidates) > 0 {
+				candidateIDs := make([]string, len(candidates))
+				for i, c := range candidates {
+					candidateIDs[i] = c.ID
+				}
+				sourceMap := batchCheckDatasetsHaveSource(r.Context(), candidateIDs)
+
+				// Count only — do not collect page items.
+				total, page = filterAndCountCandidates(
+					candidates, sourceFilter, sourceMap,
+					offset, pageSize, total, page, pageSourceMap,
+					false, // collectPage: count only, skip page collection
+				)
+
+				candidates = candidates[:0]
+			}
+		}
 	}
 
 	end := offset + len(page)

@@ -106,6 +106,7 @@ type ChatRuntimeOptions struct {
 	ContextUsagePreview           bool           `json:"context_usage_preview,omitempty"`
 	ContextPromptExport           bool           `json:"context_prompt_export,omitempty"`
 	ContextPreviewAllowLLMRouting bool           `json:"context_preview_allow_llm_routing,omitempty"`
+	SkipSensitiveFilter           bool           `json:"skip_sensitive_filter,omitempty"`
 }
 
 type ChatPersonalizationOptions struct {
@@ -138,6 +139,7 @@ type LazyChatData struct {
 	TaskCreated            *TaskCreatedEvent            `json:"task_created,omitempty"`
 	ArtifactCreated        *ArtifactCreatedEvent        `json:"artifact_created,omitempty"`
 	AskPending             *AskPendingEvent             `json:"ask_pending,omitempty"`
+	ToolLimitPending       *ToolLimitPendingEvent       `json:"tool_limit_pending,omitempty"`
 	IntentUpdated          *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
 	PluginPreflightUpdated *PluginPreflightUpdatedEvent `json:"plugin_preflight_updated,omitempty"`
 	Heartbeat              bool                         `json:"heartbeat,omitempty"`
@@ -173,9 +175,10 @@ type ArtifactCreatedEvent struct {
 // AskQuestion is a single question within an AskPendingEvent.
 // type is one of "boolean", "single", "multiple", "text".
 type AskQuestion struct {
-	Text    string   `json:"text"`
-	Type    string   `json:"type"`
-	Choices []string `json:"choices,omitempty"`
+	Text       string   `json:"text"`
+	Type       string   `json:"type"`
+	Choices    []string `json:"choices,omitempty"`
+	AllowOther *bool    `json:"allow_other,omitempty"`
 }
 
 // AskPendingEvent is emitted by ask_user (via _write_agent_data) on the main SSE stream.
@@ -184,6 +187,14 @@ type AskQuestion struct {
 type AskPendingEvent struct {
 	AskID     string        `json:"ask_id"`
 	Questions []AskQuestion `json:"questions"`
+}
+
+type ToolLimitPendingEvent struct {
+	DecisionID        string  `json:"decision_id"`
+	UsedRounds        int     `json:"used_rounds"`
+	RoundLimit        int     `json:"round_limit"`
+	ExpandedMaxRounds int     `json:"expanded_max_rounds"`
+	TimeoutSeconds    float64 `json:"timeout_seconds"`
 }
 
 // IntentUpdatedEvent is emitted by intentwrite (via _write_agent_data) on the main SSE stream.
@@ -369,6 +380,7 @@ type UpstreamStreamChunk struct {
 	TaskCreated            *TaskCreatedEvent            `json:"task_created,omitempty"`
 	ArtifactCreated        *ArtifactCreatedEvent        `json:"artifact_created,omitempty"`
 	AskPending             *AskPendingEvent             `json:"ask_pending,omitempty"`
+	ToolLimitPending       *ToolLimitPendingEvent       `json:"tool_limit_pending,omitempty"`
 	IntentUpdated          *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
 	PluginPreflightUpdated *PluginPreflightUpdatedEvent `json:"plugin_preflight_updated,omitempty"`
 	Heartbeat              bool                         `json:"heartbeat,omitempty"`
@@ -464,6 +476,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if allow, ok := body["context_preview_allow_llm_routing"].(bool); ok {
 		req.Runtime.ContextPreviewAllowLLMRouting = allow
+	}
+	if skip, ok := body["skip_sensitive_filter"].(bool); ok {
+		req.Runtime.SkipSensitiveFilter = skip
 	}
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
 		req.Runtime.LLMConfig = llmConfig
@@ -806,20 +821,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 				// textFailedtext RawText：text，text，text
 				continue
 			}
-			chunk := UpstreamStreamChunk{
-				Text:                   d.Resp.Data.Text,
-				Think:                  d.Resp.Data.ReasoningText,
-				Status:                 d.Resp.Data.Status,
-				Sources:                d.Resp.Data.Sources,
-				ReasoningText:          d.Resp.Data.ReasoningText,
-				TaskCreated:            d.Resp.Data.TaskCreated,
-				ArtifactCreated:        d.Resp.Data.ArtifactCreated,
-				AskPending:             d.Resp.Data.AskPending,
-				IntentUpdated:          d.Resp.Data.IntentUpdated,
-				PluginPreflightUpdated: d.Resp.Data.PluginPreflightUpdated,
-				Heartbeat:              d.Resp.Data.Heartbeat,
-				ToolCallTurns:          d.Resp.Data.ToolCallTurns,
-			}
+			chunk := upstreamStreamChunkFromData(d.Resp.Data)
 			select {
 			case out <- chunk:
 			case <-ctx.Done():
@@ -828,4 +830,22 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 		}
 	}()
 	return out, nil
+}
+
+func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
+	return UpstreamStreamChunk{
+		Text:                   data.Text,
+		Think:                  data.ReasoningText,
+		Status:                 data.Status,
+		Sources:                data.Sources,
+		ReasoningText:          data.ReasoningText,
+		TaskCreated:            data.TaskCreated,
+		ArtifactCreated:        data.ArtifactCreated,
+		AskPending:             data.AskPending,
+		ToolLimitPending:       data.ToolLimitPending,
+		IntentUpdated:          data.IntentUpdated,
+		PluginPreflightUpdated: data.PluginPreflightUpdated,
+		Heartbeat:              data.Heartbeat,
+		ToolCallTurns:          data.ToolCallTurns,
+	}
 }

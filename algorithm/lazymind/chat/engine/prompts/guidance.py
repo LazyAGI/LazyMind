@@ -59,7 +59,9 @@ CLARIFICATION_GUIDANCE = '''# Clarification required
 The request assessment below identifies an issue that may require user input. Explain the concrete
 issue and its impact, offer 2–3 meaningful resolutions when possible, recommend one, and ask only
 the minimum question needed. If interaction_need is blocking, do not perform the affected work first.
-Use `ask_user` when it is available; otherwise ask one concise clarification question and stop.'''
+When `ask_user` is available, the clarification MUST be sent by calling it; emitting the question as
+assistant text is not a valid fallback. Only when the tool is absent may you ask one concise question
+in assistant text and stop.'''
 
 DELIVERABLE_GUIDANCE = {
     'tutorial': (
@@ -93,7 +95,11 @@ DELIVERABLE_GUIDANCE = {
         'Deliver a diagnosis with ranked hypotheses, evidence needed, tests in efficient order, likely '
         'causes, and corrective actions.'
     ),
-    'artifact': 'Deliver the requested finished artifact in the requested format, not merely advice about it.',
+    'artifact': (
+        'Deliver the requested finished artifact in the requested format, not merely advice about it. '
+        'For a downloadable file, call save_chat_artifact as soon as the complete file exists, before '
+        'optional refinements, extra validation, or the final response.'
+    ),
     'execution_result': 'Perform the authorized action and report the concrete result, including any failure.',
 }
 RESPONSE_LANGUAGE_GUIDANCE = (

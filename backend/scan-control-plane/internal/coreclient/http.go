@@ -85,6 +85,7 @@ func (c *HTTPCoreClient) CreateBindingRootDocument(ctx context.Context, req Crea
 	}
 	body := map[string]any{
 		"display_name":    req.Name,
+		"type":            "FOLDER",
 		"p_id":            req.ParentDocumentID,
 		"idempotency_key": req.IdempotencyKey,
 	}
@@ -246,6 +247,42 @@ func (c *HTTPCoreClient) submitReparse(ctx context.Context, req SubmitParseTaskR
 		CoreDocumentID: firstNonEmpty(documentID, req.SourceDocumentID),
 		Status:         status,
 		Created:        created,
+	}, nil
+}
+
+func (c *HTTPCoreClient) ResumeParseTask(ctx context.Context, req ResumeParseTaskRequest) (SubmitParseTaskResponse, error) {
+	if strings.TrimSpace(req.DatasetID) == "" || strings.TrimSpace(req.CoreTaskID) == "" {
+		return SubmitParseTaskResponse{}, fmt.Errorf("dataset_id and core_task_id are required")
+	}
+	var out struct {
+		Tasks []struct {
+			TaskID     string `json:"task_id"`
+			DocumentID string `json:"document_id"`
+			Status     string `json:"status"`
+			Message    string `json:"message"`
+		} `json:"tasks"`
+	}
+	body := map[string]any{"task_id": req.CoreTaskID}
+	endpoint := "/datasets/" + url.PathEscape(req.DatasetID) + "/tasks/" + url.PathEscape(req.CoreTaskID) + ":resume"
+	if err := c.doJSON(ctx, http.MethodPost, endpoint, body, &out, req.UserID, ""); err != nil {
+		return SubmitParseTaskResponse{}, err
+	}
+	if len(out.Tasks) == 0 {
+		return SubmitParseTaskResponse{}, &Error{Code: ErrCodeCoreSubmitFailed, Message: "core resume task returned empty tasks"}
+	}
+	result := out.Tasks[0]
+	if !strings.EqualFold(strings.TrimSpace(result.Status), "STARTED") {
+		message := strings.TrimSpace(result.Message)
+		if message == "" {
+			message = "core resume task was not started"
+		}
+		return SubmitParseTaskResponse{}, &Error{Code: ErrCodeCoreSubmitFailed, Message: message}
+	}
+	return SubmitParseTaskResponse{
+		CoreTaskID:     firstNonEmpty(strings.TrimSpace(result.TaskID), req.CoreTaskID),
+		CoreDocumentID: strings.TrimSpace(result.DocumentID),
+		Status:         StatusSubmitted,
+		Created:        false,
 	}, nil
 }
 

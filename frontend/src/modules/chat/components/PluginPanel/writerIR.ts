@@ -3,9 +3,9 @@ export type WriterStage = 'outline' | 'draft' | 'final' | string;
 export interface WriterSpan {
   text: string;
   /** Current snapshot field. */
-  style?: string[];
+  style?: string[] | Record<string, unknown>;
   /** Compatibility with writer_ir_clean.py. */
-  stype?: string[];
+  stype?: string[] | Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -24,6 +24,8 @@ export interface WriterBlock {
   provider_binding?: Record<string, unknown>;
   provider_payload?: Record<string, unknown>;
   editable?: boolean;
+  /** Syntax language for code blocks. Unknown values fall back to plain text. */
+  language?: string;
   [key: string]: unknown;
 }
 
@@ -32,6 +34,7 @@ export interface WriterDocument {
   stage: WriterStage;
   title: string;
   blocks: WriterBlock[];
+  ui_editable?: boolean;
   revision?: string | null;
   metadata?: Record<string, unknown>;
   provider_binding?: Record<string, unknown>;
@@ -45,6 +48,102 @@ export interface WriterIRParseResult {
 }
 
 export type WriterBlockMoveDirection = 'up' | 'down';
+export type WriterInlineStyle = 'strong' | 'italic';
+export type WriterBlockFormat = 'paragraph' | 'heading' | 'code' | 'list_item';
+/** Feishu Docx FontColor / FontBackgroundColor value fields. */
+export type WriterSpanColorField = 'text_color' | 'background_color';
+
+const WRITER_CODE_LANGUAGE_ALIASES: Record<string, string> = {
+  cs: 'csharp',
+  dockerfile: 'docker',
+  golang: 'go',
+  html: 'markup',
+  js: 'javascript',
+  md: 'markdown',
+  plaintext: 'text',
+  py: 'python',
+  sh: 'bash',
+  shell: 'bash',
+  ts: 'typescript',
+  xml: 'markup',
+  yml: 'yaml',
+};
+
+export function normalizeWriterCodeLanguage(language: unknown): string {
+  if (typeof language !== 'string') return 'text';
+  const normalized = language.trim().toLowerCase();
+  return WRITER_CODE_LANGUAGE_ALIASES[normalized] || normalized || 'text';
+}
+
+export interface WriterPaletteColor {
+  id: number;
+  hex: string;
+  /** i18n key suffix under chat.writerIR.colors.* */
+  name: string;
+}
+
+/**
+ * Feishu FontColor 1-7, ordered for the picker UI
+ * (gray first, then chromatic colors — default/black is handled separately).
+ */
+export const WRITER_TEXT_COLOR_PALETTE: readonly WriterPaletteColor[] = [
+  { id: 7, hex: '#8F959E', name: 'gray' },
+  { id: 1, hex: '#D83931', name: 'red' },
+  { id: 2, hex: '#DE7802', name: 'orange' },
+  { id: 3, hex: '#DC9B04', name: 'yellow' },
+  { id: 4, hex: '#2EA121', name: 'green' },
+  { id: 5, hex: '#245BDB', name: 'blue' },
+  { id: 6, hex: '#6425D0', name: 'purple' },
+] as const;
+
+/** Feishu FontBackgroundColor light series 1-7 (picker order). */
+export const WRITER_BACKGROUND_LIGHT_PALETTE: readonly WriterPaletteColor[] = [
+  { id: 7, hex: '#DEE0E3', name: 'gray' },
+  { id: 1, hex: '#FBBFBC', name: 'red' },
+  { id: 2, hex: '#FED4A4', name: 'orange' },
+  { id: 3, hex: '#FFF67A', name: 'yellow' },
+  { id: 4, hex: '#B7EDB1', name: 'green' },
+  { id: 5, hex: '#BACEFD', name: 'blue' },
+  { id: 6, hex: '#CDB2FA', name: 'purple' },
+] as const;
+
+/** Feishu FontBackgroundColor dark/saturated series 8-14. */
+export const WRITER_BACKGROUND_DARK_PALETTE: readonly WriterPaletteColor[] = [
+  { id: 14, hex: '#BBBFC4', name: 'gray' },
+  { id: 8, hex: '#F76964', name: 'red' },
+  { id: 9, hex: '#FFA53D', name: 'orange' },
+  { id: 10, hex: '#FFE928', name: 'yellow' },
+  { id: 11, hex: '#62D256', name: 'green' },
+  { id: 12, hex: '#4E83FD', name: 'blue' },
+  { id: 13, hex: '#935AF6', name: 'purple' },
+] as const;
+
+/** @deprecated Prefer light/dark palettes; kept for callers that need all ids. */
+export const WRITER_BACKGROUND_COLOR_PALETTE: readonly WriterPaletteColor[] = [
+  ...WRITER_BACKGROUND_LIGHT_PALETTE,
+  ...WRITER_BACKGROUND_DARK_PALETTE,
+] as const;
+
+const WRITER_TEXT_COLOR_HEX = Object.fromEntries(
+  WRITER_TEXT_COLOR_PALETTE.map((item) => [item.id, item.hex]),
+) as Record<number, string>;
+
+const WRITER_BACKGROUND_COLOR_HEX = Object.fromEntries(
+  WRITER_BACKGROUND_COLOR_PALETTE.map((item) => [item.id, item.hex]),
+) as Record<number, string>;
+
+/** Default body text color shown on the toolbar "A" control. */
+export const WRITER_DEFAULT_TEXT_COLOR_HEX = '#1F2329';
+
+export function writerTextColorHex(colorId: number | null | undefined): string | undefined {
+  if (typeof colorId !== 'number' || !Number.isFinite(colorId)) return undefined;
+  return WRITER_TEXT_COLOR_HEX[Math.trunc(colorId)];
+}
+
+export function writerBackgroundColorHex(colorId: number | null | undefined): string | undefined {
+  if (typeof colorId !== 'number' || !Number.isFinite(colorId)) return undefined;
+  return WRITER_BACKGROUND_COLOR_HEX[Math.trunc(colorId)];
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -98,8 +197,13 @@ function validateBlock(
         }
         for (const key of ['style', 'stype'] as const) {
           const styles = span[key];
-          if (styles !== undefined && (!Array.isArray(styles) || styles.some((item) => typeof item !== 'string'))) {
-            issues.push(`${path}.spans[${index}].${key} must be a string array`);
+          const validStyleArray = Array.isArray(styles)
+            && styles.every((item) => typeof item === 'string');
+          const validStyleMap = isRecord(styles);
+          if (styles !== undefined && !validStyleArray && !validStyleMap) {
+            issues.push(
+              `${path}.spans[${index}].${key} must be a string array or object`,
+            );
             valid = false;
           }
         }
@@ -150,6 +254,9 @@ export function parseWriterDocument(value: unknown): WriterIRParseResult {
       validateBlock(block, `blocks[${index}]`, ids, issues);
     });
   }
+  if (value.ui_editable !== undefined && typeof value.ui_editable !== 'boolean') {
+    issues.push('ui_editable must be a boolean');
+  }
   if (value.revision !== undefined && value.revision !== null && typeof value.revision !== 'string') {
     issues.push('revision must be a string or null');
   }
@@ -165,7 +272,87 @@ export function isWriterDocument(value: unknown): value is WriterDocument {
 export function getWriterSpanStyles(span: WriterSpan): string[] {
   if (Array.isArray(span.style)) return span.style;
   if (Array.isArray(span.stype)) return span.stype;
+  const styleMap = isRecord(span.style)
+    ? span.style
+    : isRecord(span.stype)
+      ? span.stype
+      : null;
+  if (styleMap) {
+    return Object.entries(styleMap)
+      .filter(([, enabled]) => enabled === true)
+      .map(([style]) => style === 'inline_code' ? 'code' : style);
+  }
   return [];
+}
+
+function writerStyleMap(span: WriterSpan): Record<string, unknown> {
+  const source = span.style ?? span.stype;
+  if (isRecord(source)) return { ...source };
+  if (!Array.isArray(source)) return {};
+  return Object.fromEntries(source.map((style) => [
+    style === 'strong' ? 'bold' : style === 'code' ? 'inline_code' : style,
+    true,
+  ]));
+}
+
+function normalizeWriterBlockForSync(block: WriterBlock): WriterBlock {
+  const spans = block.spans?.map((span) => {
+    const normalized = { ...span, style: writerStyleMap(span) };
+    delete normalized.stype;
+    return normalized;
+  });
+  const children = block.children?.map(normalizeWriterBlockForSync);
+  return {
+    ...block,
+    ...(spans ? { spans } : {}),
+    ...(children ? { children } : {}),
+  };
+}
+
+/**
+ * Convert legacy array/stype rich-text values to the Writer IR wire contract
+ * accepted by the backend.
+ */
+export function normalizeWriterDocumentForSync(
+  document: WriterDocument,
+): WriterDocument {
+  return {
+    ...document,
+    blocks: document.blocks.map(normalizeWriterBlockForSync),
+  };
+}
+
+/** Semantic equality for WriterDocument, ignoring object identity. */
+export function sameWriterDocument(
+  left: WriterDocument | undefined | null,
+  right: WriterDocument | undefined | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/**
+ * Compare documents after applying the same sync normalization used on the wire.
+ * Useful when the server echoes a normalized copy of what the client just saved.
+ */
+export function sameWriterDocumentForSync(
+  left: WriterDocument | undefined | null,
+  right: WriterDocument | undefined | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return sameWriterDocument(
+    normalizeWriterDocumentForSync(left),
+    normalizeWriterDocumentForSync(right),
+  );
+}
+
+function hasWriterInlineStyle(span: WriterSpan, style: WriterInlineStyle): boolean {
+  const styles = getWriterSpanStyles(span);
+  return style === 'strong'
+    ? styles.includes('strong') || styles.includes('bold')
+    : styles.includes(style);
 }
 
 export function countWriterBlocks(blocks: WriterBlock[]): number {
@@ -185,6 +372,37 @@ export function findWriterBlock(
     if (nested) return nested;
   }
   return undefined;
+}
+
+export function findWriterBlockParent(
+  blocks: WriterBlock[],
+  nodeId: string,
+): WriterBlock | undefined {
+  for (const block of blocks) {
+    if ((block.children ?? []).some((child) => child.node_id === nodeId)) {
+      return block;
+    }
+    const nested = findWriterBlockParent(block.children ?? [], nodeId);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+export function updateWriterCodeLanguage(
+  document: WriterDocument,
+  nodeId: string,
+  language: string,
+): WriterDocument {
+  const normalized = normalizeWriterCodeLanguage(language);
+  const result = replaceBlockInTree(document.blocks, nodeId, (block) => {
+    if (
+      block.type !== 'code'
+      || block.editable === false
+      || block.language === normalized
+    ) return block;
+    return { ...block, language: normalized };
+  });
+  return result.changed ? { ...document, blocks: result.blocks } : document;
 }
 
 function replaceBlockInTree(
@@ -208,12 +426,17 @@ function replaceBlockInTree(
 }
 
 function spanForEditedContent(block: WriterBlock, content: string): WriterSpan[] {
-  const usesSType = (block.spans ?? []).some(
-    (span) => Array.isArray(span.stype) && !Array.isArray(span.style),
+  const styleTemplate = (block.spans ?? []).find(
+    (span) => span.style !== undefined || span.stype !== undefined,
   );
+  const usesSType = styleTemplate?.style === undefined
+    && styleTemplate?.stype !== undefined;
+  const emptyStyles = isRecord(
+    usesSType ? styleTemplate?.stype : styleTemplate?.style,
+  ) ? {} : [];
   return usesSType
-    ? [{ text: content, stype: [] }]
-    : [{ text: content, style: [] }];
+    ? [{ text: content, stype: emptyStyles }]
+    : [{ text: content, style: emptyStyles }];
 }
 
 function sliceWriterSpans(
@@ -259,15 +482,37 @@ function styledSpanForInsertedText(
   text: string,
 ): WriterSpan {
   if (Array.isArray(template?.style)) return { text, style: [...template.style] };
+  if (isRecord(template?.style)) return { text, style: { ...template.style } };
   if (Array.isArray(template?.stype)) return { text, stype: [...template.stype] };
+  if (isRecord(template?.stype)) return { text, stype: { ...template.stype } };
   return spanForEditedContent(block, text)[0];
 }
 
+function haveSameWriterStyleValue(
+  left: WriterSpan['style'],
+  right: WriterSpan['style'],
+): boolean {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((style, index) => style === right[index]);
+  }
+  if (isRecord(left) || isRecord(right)) {
+    if (!isRecord(left) || !isRecord(right)) return false;
+    const leftKeys = Object.keys(left);
+    return leftKeys.length === Object.keys(right).length
+      && leftKeys.every(
+        (key) => Object.prototype.hasOwnProperty.call(right, key)
+          && Object.is(left[key], right[key]),
+      );
+  }
+  return left === right;
+}
+
 function haveSameWriterStyles(left: WriterSpan, right: WriterSpan): boolean {
-  const leftStyles = getWriterSpanStyles(left);
-  const rightStyles = getWriterSpanStyles(right);
-  return leftStyles.length === rightStyles.length
-    && leftStyles.every((style, index) => style === rightStyles[index]);
+  return haveSameWriterStyleValue(left.style, right.style)
+    && haveSameWriterStyleValue(left.stype, right.stype);
 }
 
 function canMergeWriterSpans(left: WriterSpan, right: WriterSpan): boolean {
@@ -275,24 +520,6 @@ function canMergeWriterSpans(left: WriterSpan, right: WriterSpan): boolean {
   if (
     Object.keys(left).some((key) => !allowedKeys.has(key))
     || Object.keys(right).some((key) => !allowedKeys.has(key))
-  ) return false;
-  if (Array.isArray(left.style) !== Array.isArray(right.style)) return false;
-  if (Array.isArray(left.stype) !== Array.isArray(right.stype)) return false;
-  if (
-    Array.isArray(left.style)
-    && Array.isArray(right.style)
-    && (
-      left.style.length !== right.style.length
-      || left.style.some((style, index) => style !== right.style?.[index])
-    )
-  ) return false;
-  if (
-    Array.isArray(left.stype)
-    && Array.isArray(right.stype)
-    && (
-      left.stype.length !== right.stype.length
-      || left.stype.some((style, index) => style !== right.stype?.[index])
-    )
   ) return false;
   return haveSameWriterStyles(left, right);
 }
@@ -383,21 +610,277 @@ export function updateWriterBlockContent(
   return result.changed ? { ...document, blocks: result.blocks } : document;
 }
 
+const WRITER_CODE_LANGUAGE_MENU_TEXT = [
+  'Plain text',
+  'JavaScript',
+  'TypeScript',
+  'JSX',
+  'TSX',
+  'Python',
+  'Java',
+  'Go',
+  'Rust',
+  'C',
+  'C++',
+  'C#',
+  'SQL',
+  'Shell',
+  'JSON',
+  'YAML',
+  'HTML / XML',
+  'CSS',
+  'Markdown',
+  'Dockerfile',
+].join('');
+
+function isWriterCodeToolbarPollution(content: string): boolean {
+  const prefixes = ['代码块', 'Code block'];
+  const suffixes = [
+    '取消自动换行复制',
+    '自动换行复制',
+    '取消自动换行已复制',
+    '自动换行已复制',
+    'Disable wrappingCopy',
+    'Wrap linesCopy',
+    'Disable wrappingCopied',
+    'Wrap linesCopied',
+  ];
+  return prefixes.some((prefix) => suffixes.some(
+    (suffix) => content === `${prefix}${WRITER_CODE_LANGUAGE_MENU_TEXT}${suffix}`,
+  ));
+}
+
+/**
+ * Repairs documents affected by the short-lived code-toolbar parsing bug.
+ * The match is intentionally exact so legitimate code is never modified.
+ */
+export function repairWriterCodeToolbarPollution(
+  document: WriterDocument,
+): WriterDocument {
+  const pollutedNodeIds: string[] = [];
+  const visit = (blocks: WriterBlock[]) => {
+    blocks.forEach((block) => {
+      if (
+        block.type === 'code'
+        && isWriterCodeToolbarPollution(block.content ?? '')
+      ) pollutedNodeIds.push(block.node_id);
+      visit(block.children ?? []);
+    });
+  };
+  visit(document.blocks);
+  return pollutedNodeIds.reduce(
+    (current, nodeId) => updateWriterBlockContent(current, nodeId, ''),
+    document,
+  );
+}
+
+function withWriterInlineStyle(
+  span: WriterSpan,
+  style: WriterInlineStyle,
+  enabled: boolean,
+): WriterSpan {
+  const key = span.style === undefined && span.stype !== undefined ? 'stype' : 'style';
+  const aliases = style === 'strong' ? new Set(['strong', 'bold']) : new Set([style]);
+  const currentStyles = span[key];
+  if (isRecord(currentStyles)) {
+    const nextStyles = { ...currentStyles };
+    aliases.forEach((alias) => delete nextStyles[alias]);
+    if (enabled) nextStyles[style === 'strong' ? 'bold' : style] = true;
+    return { ...span, [key]: nextStyles };
+  }
+  const styles = getWriterSpanStyles(span).filter((item) => !aliases.has(item));
+  if (enabled) styles.push(style);
+  return { ...span, [key]: styles };
+}
+
+export function toggleWriterBlockInlineStyle(
+  document: WriterDocument,
+  nodeId: string,
+  start: number,
+  end: number,
+  style: WriterInlineStyle,
+): WriterDocument {
+  if (start < 0 || end <= start) return document;
+  const result = replaceBlockInTree(document.blocks, nodeId, (block) => {
+    if (block.type === 'document' || block.editable === false) return block;
+    const contentLength = Array.from(block.content ?? '').length;
+    const safeStart = Math.min(start, contentLength);
+    const safeEnd = Math.min(end, contentLength);
+    if (safeEnd <= safeStart) return block;
+
+    const sourceSpans = block.spans?.length
+      && block.spans.map((span) => span.text).join('') === (block.content ?? '')
+      ? block.spans
+      : spanForEditedContent(block, block.content ?? '');
+    const selected = sliceWriterSpans(sourceSpans, safeStart, safeEnd);
+    const enable = !selected.every((span) => hasWriterInlineStyle(span, style));
+    const spans = mergeAdjacentWriterSpans([
+      ...sliceWriterSpans(sourceSpans, 0, safeStart),
+      ...selected.map((span) => withWriterInlineStyle(span, style, enable)),
+      ...sliceWriterSpans(sourceSpans, safeEnd, contentLength),
+    ]);
+    return { ...block, spans };
+  });
+  return result.changed ? { ...document, blocks: result.blocks } : document;
+}
+
+export function writerBlockRangeHasInlineStyle(
+  block: WriterBlock,
+  start: number,
+  end: number,
+  style: WriterInlineStyle,
+): boolean {
+  if (start < 0 || end <= start) return false;
+  const contentLength = Array.from(block.content ?? '').length;
+  const safeStart = Math.min(start, contentLength);
+  const safeEnd = Math.min(end, contentLength);
+  if (safeEnd <= safeStart) return false;
+  const sourceSpans = block.spans?.length
+    && block.spans.map((span) => span.text).join('') === (block.content ?? '')
+    ? block.spans
+    : spanForEditedContent(block, block.content ?? '');
+  const selected = sliceWriterSpans(sourceSpans, safeStart, safeEnd);
+  return selected.length > 0
+    && selected.every((span) => hasWriterInlineStyle(span, style));
+}
+
+export function getWriterSpanColor(
+  span: WriterSpan,
+  field: WriterSpanColorField,
+): number | undefined {
+  const styleMap = writerStyleMap(span);
+  const value = styleMap[field];
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const colorId = Math.trunc(value);
+  return colorId > 0 ? colorId : undefined;
+}
+
+function withWriterSpanColor(
+  span: WriterSpan,
+  field: WriterSpanColorField,
+  colorId: number | null,
+): WriterSpan {
+  const key = span.style === undefined && span.stype !== undefined ? 'stype' : 'style';
+  const nextStyles = writerStyleMap(span);
+  if (colorId == null) delete nextStyles[field];
+  else nextStyles[field] = Math.trunc(colorId);
+  return { ...span, [key]: nextStyles };
+}
+
+export function applyWriterBlockSpanColor(
+  document: WriterDocument,
+  nodeId: string,
+  start: number,
+  end: number,
+  field: WriterSpanColorField,
+  colorId: number | null,
+): WriterDocument {
+  if (start < 0 || end <= start) return document;
+  const result = replaceBlockInTree(document.blocks, nodeId, (block) => {
+    if (block.type === 'document' || block.editable === false) return block;
+    const contentLength = Array.from(block.content ?? '').length;
+    const safeStart = Math.min(start, contentLength);
+    const safeEnd = Math.min(end, contentLength);
+    if (safeEnd <= safeStart) return block;
+
+    const sourceSpans = block.spans?.length
+      && block.spans.map((span) => span.text).join('') === (block.content ?? '')
+      ? block.spans
+      : spanForEditedContent(block, block.content ?? '');
+    const spans = mergeAdjacentWriterSpans([
+      ...sliceWriterSpans(sourceSpans, 0, safeStart),
+      ...sliceWriterSpans(sourceSpans, safeStart, safeEnd).map(
+        (span) => withWriterSpanColor(span, field, colorId),
+      ),
+      ...sliceWriterSpans(sourceSpans, safeEnd, contentLength),
+    ]);
+    return { ...block, spans };
+  });
+  return result.changed ? { ...document, blocks: result.blocks } : document;
+}
+
+/**
+ * Shared color for a selection: number when uniform, null when unset,
+ * undefined when the selection mixes multiple colors.
+ */
+export function writerBlockRangeSpanColor(
+  block: WriterBlock,
+  start: number,
+  end: number,
+  field: WriterSpanColorField,
+): number | null | undefined {
+  if (start < 0 || end <= start) return null;
+  const contentLength = Array.from(block.content ?? '').length;
+  const safeStart = Math.min(start, contentLength);
+  const safeEnd = Math.min(end, contentLength);
+  if (safeEnd <= safeStart) return null;
+  const sourceSpans = block.spans?.length
+    && block.spans.map((span) => span.text).join('') === (block.content ?? '')
+    ? block.spans
+    : spanForEditedContent(block, block.content ?? '');
+  const selected = sliceWriterSpans(sourceSpans, safeStart, safeEnd);
+  if (selected.length === 0) return null;
+  const first = getWriterSpanColor(selected[0], field) ?? null;
+  for (let index = 1; index < selected.length; index += 1) {
+    const current = getWriterSpanColor(selected[index], field) ?? null;
+    if (current !== first) return undefined;
+  }
+  return first;
+}
+
+export function updateWriterBlockFormat(
+  document: WriterDocument,
+  nodeId: string,
+  format: WriterBlockFormat,
+  options?: number | { headingLevel?: number; ordered?: boolean },
+): WriterDocument {
+  const resolved = typeof options === 'number'
+    ? { headingLevel: options }
+    : (options ?? {});
+  const result = replaceBlockInTree(document.blocks, nodeId, (block) => {
+    if (
+      block.type === 'document'
+      || block.editable === false
+      || (block.children?.length ?? 0) > 0
+    ) return block;
+    const nextLevel = Math.min(6, Math.max(1, Math.trunc(resolved.headingLevel ?? 1)));
+    const nextOrdered = Boolean(resolved.ordered);
+    if (
+      block.type === format
+      && (format !== 'heading' || Number(block.numbering?.level) === nextLevel)
+      && (format !== 'list_item' || Boolean(block.numbering?.ordered) === nextOrdered)
+    ) {
+      return block;
+    }
+
+    const numbering = { ...(block.numbering ?? {}) };
+    delete numbering.level;
+    delete numbering.ordered;
+    if (format === 'heading') numbering.level = nextLevel;
+    if (format === 'list_item') numbering.ordered = nextOrdered;
+    return { ...block, type: format, numbering };
+  });
+  return result.changed ? { ...document, blocks: result.blocks } : document;
+}
+
 export function updateWriterDocumentTitle(
   document: WriterDocument,
   title: string,
 ): WriterDocument {
+  if (document.title === title) return document;
   const metadata = document.metadata
     ? { ...document.metadata, title }
     : document.metadata;
-  const rootResult = replaceBlockInTree(document.blocks, document.document_id, (block) => {
-    if (block.type !== 'document') return block;
-    return {
+  const documentRoot = document.blocks.find(
+    (block) => block.type === 'document' && block.editable !== false,
+  );
+  const rootResult = documentRoot
+    ? replaceBlockInTree(document.blocks, documentRoot.node_id, (block) => ({
       ...block,
       content: title,
       spans: spanForEditedContent(block, title),
-    };
-  });
+    }))
+    : { blocks: document.blocks };
   return {
     ...document,
     title,
@@ -448,7 +931,7 @@ export function createWriterParagraph(stage: WriterStage): WriterBlock {
     node_id: nodeId,
     type: 'paragraph',
     content: '',
-    spans: [{ text: '', style: [] }],
+    spans: [{ text: '', style: {} }],
     children: [],
     stage,
     status: '',
@@ -460,6 +943,164 @@ export function createWriterParagraph(stage: WriterStage): WriterBlock {
     provider_payload: {},
     editable: true,
   };
+}
+
+export function splitWriterBlock(
+  document: WriterDocument,
+  nodeId: string,
+  start: number,
+  end = start,
+): { document: WriterDocument; insertedNodeId?: string } {
+  const target = findWriterBlock(document.blocks, nodeId);
+  if (
+    !target
+    || !['paragraph', 'heading', 'list_item', 'quote'].includes(target.type)
+    || target.editable === false
+    || !Number.isFinite(start)
+    || !Number.isFinite(end)
+  ) {
+    return { document };
+  }
+
+  const content = target.content ?? '';
+  const characters = Array.from(content);
+  const safeStart = Math.min(characters.length, Math.max(0, Math.trunc(start)));
+  const safeEnd = Math.min(
+    characters.length,
+    Math.max(safeStart, Math.trunc(end)),
+  );
+  const sourceSpans = target.spans?.length
+    && target.spans.map((span) => span.text).join('') === content
+    ? target.spans
+    : spanForEditedContent(target, content);
+  const leadingContent = characters.slice(0, safeStart).join('');
+  const trailingContent = characters.slice(safeEnd).join('');
+  const leadingSpans = sliceWriterSpans(sourceSpans, 0, safeStart);
+  const trailingSpans = sliceWriterSpans(sourceSpans, safeEnd, characters.length);
+  const insertedType = target.type === 'heading' ? 'paragraph' : target.type;
+  const insertedBlock: WriterBlock = {
+    ...target,
+    node_id: createNodeId(),
+    type: insertedType,
+    content: trailingContent,
+    spans: trailingSpans.length > 0
+      ? trailingSpans
+      : spanForEditedContent(target, trailingContent),
+    children: [],
+    numbering: insertedType === target.type
+      ? { ...(target.numbering ?? {}) }
+      : {},
+    provider_binding: {},
+    provider_payload: {},
+  };
+
+  const result = updateChildrenArray(document.blocks, (siblings) => {
+    const index = siblings.findIndex((block) => block.node_id === nodeId);
+    if (index < 0) return { siblings, changed: false };
+
+    const next = siblings.slice();
+    next.splice(
+      index,
+      1,
+      {
+        ...siblings[index],
+        content: leadingContent,
+        spans: leadingSpans.length > 0
+          ? leadingSpans
+          : spanForEditedContent(target, leadingContent),
+      },
+      insertedBlock,
+    );
+    return { siblings: next, changed: true };
+  });
+
+  return result.changed
+    ? {
+      document: withUpdatedBlocks(document, result.blocks),
+      insertedNodeId: insertedBlock.node_id,
+    }
+    : { document };
+}
+
+/**
+ * Nest the current block as the last child of its previous sibling.
+ * Used for Tab-based block hierarchy.
+ */
+export function indentWriterBlock(
+  document: WriterDocument,
+  nodeId: string,
+): { document: WriterDocument; insertedNodeId?: string } {
+  const target = findWriterBlock(document.blocks, nodeId);
+  if (!target || target.type === 'document' || target.editable === false) {
+    return { document };
+  }
+
+  const result = updateChildrenArray(document.blocks, (siblings) => {
+    const index = siblings.findIndex((block) => block.node_id === nodeId);
+    if (index <= 0) return { siblings, changed: false };
+
+    const previous = siblings[index - 1];
+    if (previous.type === 'document' || previous.editable === false) {
+      return { siblings, changed: false };
+    }
+
+    const next = siblings.slice();
+    next.splice(index, 1);
+    next[index - 1] = {
+      ...previous,
+      children: [...(previous.children ?? []), target],
+    };
+    return { siblings: next, changed: true };
+  });
+
+  return result.changed
+    ? { document: withUpdatedBlocks(document, result.blocks), insertedNodeId: nodeId }
+    : { document };
+}
+
+/**
+ * Move an empty nested block out of its parent children list and place it as
+ * the next sibling of that parent. Used when Enter is pressed on an empty
+ * indented block so editing does not keep deepening the tree.
+ */
+export function liftWriterBlockAfterParent(
+  document: WriterDocument,
+  nodeId: string,
+): { document: WriterDocument; insertedNodeId?: string } {
+  const target = findWriterBlock(document.blocks, nodeId);
+  const parent = findWriterBlockParent(document.blocks, nodeId);
+  if (
+    !target
+    || !parent
+    || target.type === 'document'
+    || parent.type === 'document'
+    || target.editable === false
+  ) {
+    return { document };
+  }
+
+  const result = updateChildrenArray(document.blocks, (siblings) => {
+    const parentIndex = siblings.findIndex((block) => block.node_id === parent.node_id);
+    if (parentIndex < 0) return { siblings, changed: false };
+
+    const parentBlock = siblings[parentIndex];
+    const childIndex = (parentBlock.children ?? []).findIndex(
+      (child) => child.node_id === nodeId,
+    );
+    if (childIndex < 0) return { siblings, changed: false };
+
+    const nextChildren = (parentBlock.children ?? []).filter(
+      (_, index) => index !== childIndex,
+    );
+    const next = siblings.slice();
+    next[parentIndex] = { ...parentBlock, children: nextChildren };
+    next.splice(parentIndex + 1, 0, target);
+    return { siblings: next, changed: true };
+  });
+
+  return result.changed
+    ? { document: withUpdatedBlocks(document, result.blocks), insertedNodeId: nodeId }
+    : { document };
 }
 
 export function insertWriterParagraphAfter(
@@ -478,6 +1119,115 @@ export function insertWriterParagraphAfter(
   });
   return result.changed
     ? { document: withUpdatedBlocks(document, result.blocks), insertedNodeId: paragraph.node_id }
+    : { document };
+}
+
+/** Insert an empty paragraph as the first child of a block (e.g. Enter at end of heading). */
+export function insertWriterChildParagraph(
+  document: WriterDocument,
+  parentNodeId: string,
+): { document: WriterDocument; insertedNodeId?: string } {
+  const parent = findWriterBlock(document.blocks, parentNodeId);
+  if (!parent || parent.type === 'document' || parent.editable === false) {
+    return { document };
+  }
+  const paragraph = createWriterParagraph(document.stage);
+  const result = replaceBlockInTree(document.blocks, parentNodeId, (block) => ({
+    ...block,
+    children: [paragraph, ...(block.children ?? [])],
+  }));
+  return result.changed
+    ? { document: withUpdatedBlocks(document, result.blocks), insertedNodeId: paragraph.node_id }
+    : { document };
+}
+
+/**
+ * Split a heading at the caret: keep the leading text as the heading, and move
+ * the trailing text into a new first-child paragraph.
+ */
+export function splitWriterHeadingIntoChild(
+  document: WriterDocument,
+  nodeId: string,
+  start: number,
+  end = start,
+): { document: WriterDocument; insertedNodeId?: string } {
+  const target = findWriterBlock(document.blocks, nodeId);
+  if (
+    !target
+    || target.type !== 'heading'
+    || target.editable === false
+    || !Number.isFinite(start)
+    || !Number.isFinite(end)
+  ) {
+    return { document };
+  }
+
+  const content = target.content ?? '';
+  const characters = Array.from(content);
+  const safeStart = Math.min(characters.length, Math.max(0, Math.trunc(start)));
+  const safeEnd = Math.min(
+    characters.length,
+    Math.max(safeStart, Math.trunc(end)),
+  );
+  const sourceSpans = target.spans?.length
+    && target.spans.map((span) => span.text).join('') === content
+    ? target.spans
+    : spanForEditedContent(target, content);
+  const leadingContent = characters.slice(0, safeStart).join('');
+  const trailingContent = characters.slice(safeEnd).join('');
+  const leadingSpans = sliceWriterSpans(sourceSpans, 0, safeStart);
+  const trailingSpans = sliceWriterSpans(sourceSpans, safeEnd, characters.length);
+
+  const childParagraph: WriterBlock = {
+    ...createWriterParagraph(document.stage),
+    content: trailingContent,
+    spans: trailingSpans.length > 0
+      ? trailingSpans
+      : spanForEditedContent(target, trailingContent),
+  };
+
+  const result = replaceBlockInTree(document.blocks, nodeId, (block) => ({
+    ...block,
+    content: leadingContent,
+    spans: leadingSpans.length > 0
+      ? leadingSpans
+      : spanForEditedContent(target, leadingContent),
+    children: [childParagraph, ...(block.children ?? [])],
+  }));
+
+  return result.changed
+    ? {
+      document: withUpdatedBlocks(document, result.blocks),
+      insertedNodeId: childParagraph.node_id,
+    }
+    : { document };
+}
+
+/** Convert a block to a paragraph in place (empty heading / list exit). */
+export function convertWriterBlockToParagraph(
+  document: WriterDocument,
+  nodeId: string,
+): { document: WriterDocument; insertedNodeId?: string } {
+  const target = findWriterBlock(document.blocks, nodeId);
+  if (
+    !target
+    || target.type === 'document'
+    || target.type === 'paragraph'
+    || target.editable === false
+  ) {
+    return { document };
+  }
+
+  const result = replaceBlockInTree(document.blocks, nodeId, (block) => {
+    if (block.type === 'paragraph') return block;
+    const numbering = { ...(block.numbering ?? {}) };
+    delete numbering.level;
+    delete numbering.ordered;
+    return { ...block, type: 'paragraph', numbering };
+  });
+
+  return result.changed
+    ? { document: withUpdatedBlocks(document, result.blocks), insertedNodeId: nodeId }
     : { document };
 }
 
@@ -516,4 +1266,106 @@ export function moveWriterBlock(
     return { siblings: next, changed: true };
   });
   return result.changed ? withUpdatedBlocks(document, result.blocks) : document;
+}
+
+function isWriterBlockDescendant(
+  root: WriterBlock,
+  nodeId: string,
+): boolean {
+  return Boolean(findWriterBlock(root.children ?? [], nodeId));
+}
+
+function extractWriterBlock(
+  blocks: WriterBlock[],
+  nodeId: string,
+): { blocks: WriterBlock[]; extracted: WriterBlock } | null {
+  let extracted: WriterBlock | undefined;
+  const result = updateChildrenArray(blocks, (siblings) => {
+    const index = siblings.findIndex((block) => block.node_id === nodeId);
+    if (index < 0) return { siblings, changed: false };
+    extracted = siblings[index];
+    return {
+      siblings: siblings.filter((_, siblingIndex) => siblingIndex !== index),
+      changed: true,
+    };
+  });
+  if (!result.changed || !extracted) return null;
+  return { blocks: result.blocks, extracted };
+}
+
+export type WriterBlockRelocateTarget =
+  | { type: 'child'; parentId: string; index?: number }
+  | { type: 'after'; afterId: string }
+  | { type: 'before'; beforeId: string };
+
+/**
+ * Move a block under a heading (as child) or beside another block (as sibling).
+ * Used by drag-and-drop restructuring in the editor.
+ */
+export function relocateWriterBlock(
+  document: WriterDocument,
+  nodeId: string,
+  target: WriterBlockRelocateTarget,
+): WriterDocument {
+  const source = findWriterBlock(document.blocks, nodeId);
+  if (!source || source.type === 'document' || source.editable === false) {
+    return document;
+  }
+
+  if (target.type === 'child') {
+    if (target.parentId === nodeId) return document;
+    const parent = findWriterBlock(document.blocks, target.parentId);
+    if (
+      !parent
+      || parent.type === 'document'
+      || parent.editable === false
+      || isWriterBlockDescendant(source, target.parentId)
+    ) {
+      return document;
+    }
+  } else {
+    const anchorId = target.type === 'after' ? target.afterId : target.beforeId;
+    if (anchorId === nodeId) return document;
+    const anchor = findWriterBlock(document.blocks, anchorId);
+    if (!anchor || anchor.type === 'document') return document;
+    if (isWriterBlockDescendant(source, anchorId)) return document;
+  }
+
+  const extracted = extractWriterBlock(document.blocks, nodeId);
+  if (!extracted) return document;
+  const moving = extracted.extracted;
+
+  if (target.type === 'child') {
+    const inserted = updateChildrenArray(extracted.blocks, (siblings) => {
+      const parentIndex = siblings.findIndex(
+        (block) => block.node_id === target.parentId,
+      );
+      if (parentIndex < 0) return { siblings, changed: false };
+      const parentBlock = siblings[parentIndex];
+      const children = [...(parentBlock.children ?? [])];
+      const index = target.index == null
+        ? children.length
+        : Math.min(children.length, Math.max(0, Math.trunc(target.index)));
+      children.splice(index, 0, moving);
+      const next = siblings.slice();
+      next[parentIndex] = { ...parentBlock, children };
+      return { siblings: next, changed: true };
+    });
+    return inserted.changed
+      ? withUpdatedBlocks(document, inserted.blocks)
+      : document;
+  }
+
+  const anchorId = target.type === 'after' ? target.afterId : target.beforeId;
+  const inserted = updateChildrenArray(extracted.blocks, (siblings) => {
+    const anchorIndex = siblings.findIndex((block) => block.node_id === anchorId);
+    if (anchorIndex < 0) return { siblings, changed: false };
+    const next = siblings.slice();
+    const insertAt = target.type === 'after' ? anchorIndex + 1 : anchorIndex;
+    next.splice(insertAt, 0, moving);
+    return { siblings: next, changed: true };
+  });
+  return inserted.changed
+    ? withUpdatedBlocks(document, inserted.blocks)
+    : document;
 }

@@ -24,6 +24,7 @@ func NewTestDB(t *testing.T) *TestDB {
 	}
 	if err := db.AutoMigrate(
 		&orm.ResourceUpdateTask{},
+		&orm.SkillReviewStats{},
 		&SkillRow{},
 		&SkillBlobRow{},
 		&SkillRevisionRow{},
@@ -46,17 +47,6 @@ func NewTestDB(t *testing.T) *TestDB {
 		  AND task_type IN ('generate_review', 'organize_skill')
 		  AND status IN ('pending', 'running')`).Error; err != nil {
 		t.Fatalf("create active skill maintenance admission index: %v", err)
-	}
-	if err := db.Exec(`CREATE TABLE IF NOT EXISTS skill_review_stats (
-		id TEXT NOT NULL PRIMARY KEY,
-		requestid TEXT NOT NULL,
-		userid TEXT NOT NULL,
-		status TEXT NOT NULL,
-		started_at TEXT NOT NULL,
-		duration_ms INTEGER NOT NULL DEFAULT 0,
-		summary TEXT NOT NULL DEFAULT '{}'
-	)`).Error; err != nil {
-		t.Fatalf("create skill review stats table: %v", err)
 	}
 	return &TestDB{DB: db}
 }

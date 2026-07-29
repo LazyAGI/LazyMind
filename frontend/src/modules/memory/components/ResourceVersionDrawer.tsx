@@ -13,7 +13,12 @@ import {
   Tree,
   message,
 } from "antd";
-import { FileSearchOutlined, RollbackOutlined } from "@ant-design/icons";
+import {
+  FileOutlined,
+  FileSearchOutlined,
+  FolderOutlined,
+  RollbackOutlined,
+} from "@ant-design/icons";
 import { getLocalizedErrorMessage } from "@/components/request";
 import type { ResourceVersionType } from "../resourceVersionApi";
 import {
@@ -82,12 +87,32 @@ const buildRevisionDiffTreeData = (
     const parts = file.path.split("/").filter(Boolean);
     parts.forEach((part, index) => {
       const path = parts.slice(0, index + 1).join("/");
-      if (nodes.has(path)) return;
-      const isFile = index === parts.length - 1 && file.type !== "dir";
-      const status = isFile ? file.status : "";
+      const isLeaf = index === parts.length - 1;
+      const isDirLeaf = isLeaf && file.type === "dir";
+      const isFile = isLeaf && file.type !== "dir";
+      const status = isFile || isDirLeaf ? file.status : "";
+      const existing = nodes.get(path);
+      if (existing) {
+        // Prefer explicit directory status when a later dir entry arrives.
+        if (isDirLeaf && status && status !== "unchanged") {
+          existing.title = (
+            <span className="memory-skill-tree-node-title">
+              <Tooltip title={part} placement="right">
+                <span className="memory-version-skill-tree-name">{part}</span>
+              </Tooltip>
+              <Tag bordered={false} color={getDiffStatusColor(status)}>
+                {t(`admin.memorySkillDiffStatus_${status}`, { defaultValue: status })}
+              </Tag>
+            </span>
+          );
+        }
+        return;
+      }
       const node: MutableNode = {
         key: path,
         children: [],
+        icon: isFile ? <FileOutlined /> : <FolderOutlined />,
+        isLeaf: isFile,
         selectable: isFile,
         title: (
           <span className="memory-skill-tree-node-title">
@@ -110,6 +135,26 @@ const buildRevisionDiffTreeData = (
     });
   });
   return roots;
+};
+
+const isDiffContentRequestable = (
+  file?: SkillDiffFileRecord | null,
+): file is SkillDiffFileRecord =>
+  Boolean(
+    file &&
+      file.type !== "dir" &&
+      file.status?.toLowerCase() !== "unchanged" &&
+      !file.binary &&
+      !file.tooLarge,
+  );
+
+const pickDefaultDiffFilePath = (files: SkillDiffFileRecord[]) => {
+  const fileEntries = files.filter((file) => file.type !== "dir");
+  return (
+    fileEntries.find((file) => file.status !== "unchanged")?.path ||
+    fileEntries[0]?.path ||
+    ""
+  );
 };
 
 const changeSourceColorMap: Record<string, string> = {
@@ -284,12 +329,16 @@ function SkillRevisionDiffPanel({
         </div>
         <Tree
           blockNode
+          showIcon
           defaultExpandAll
           treeData={treeData}
           selectedKeys={selectedPath ? [selectedPath] : []}
           onSelect={(keys) => {
             const path = String(keys[0] || "");
-            if (path) onSelect(path);
+            const file = files.find(
+              (item) => item.path === path && item.type !== "dir",
+            );
+            if (file) onSelect(file.path);
           }}
         />
       </aside>
@@ -299,8 +348,20 @@ function SkillRevisionDiffPanel({
           <div className="memory-version-file-loading"><Spin /></div>
         ) : error ? (
           <Alert showIcon type="error" message={error} />
+        ) : selectedFile?.type === "dir" ? (
+          <Alert
+            showIcon
+            type="info"
+            message={t("admin.memoryVersionDiffDirectoryHint", {
+              status: t(`admin.memorySkillDiffStatus_${selectedFile.status}`, {
+                defaultValue: selectedFile.status,
+              }),
+            })}
+          />
         ) : selectedFile?.binary ? (
           <Alert showIcon type="info" message={t("admin.memoryVersionBinaryFileHint")} />
+        ) : selectedFile?.tooLarge ? (
+          <Alert showIcon type="warning" message={t("admin.memorySkillPackageDiffTooLarge")} />
         ) : lines.length ? (
           <div className="memory-version-diff" aria-label={t("admin.memoryVersionTabDiff")}>
             {lines.map((line, index) => (
@@ -567,6 +628,7 @@ export default function ResourceVersionDrawer({
   const [selectedFileContent, setSelectedFileContent] = useState("");
   const [fileLoading, setFileLoading] = useState(false);
   const [diffFiles, setDiffFiles] = useState<SkillDiffFileRecord[]>([]);
+  const [diffRevisionId, setDiffRevisionId] = useState("");
   const [diffBaseRevisionId, setDiffBaseRevisionId] = useState("");
   const [selectedDiffPath, setSelectedDiffPath] = useState("");
   const [selectedDiffLines, setSelectedDiffLines] = useState<ReturnType<typeof buildDiffLinesWithInline>>([]);
@@ -605,9 +667,11 @@ export default function ResourceVersionDrawer({
     setSelectedFilePath("");
     setSelectedFileContent("");
     setDiffFiles([]);
+    setDiffRevisionId("");
     setDiffBaseRevisionId("");
     setSelectedDiffPath("");
     setSelectedDiffLines([]);
+    setDiffLoading(false);
     setDiffError("");
     setDetailError("");
     setRevisions([]);
@@ -703,9 +767,11 @@ export default function ResourceVersionDrawer({
       setSelectedFilePath("");
       setSelectedFileContent("");
       setDiffFiles([]);
+      setDiffRevisionId("");
       setDiffBaseRevisionId("");
       setSelectedDiffPath("");
       setSelectedDiffLines([]);
+      setDiffLoading(false);
       setDiffError("");
       setDetailError("");
       return undefined;
@@ -713,9 +779,17 @@ export default function ResourceVersionDrawer({
 
     let ignore = false;
     fileRequestIdRef.current += 1;
+    diffRequestIdRef.current += 1;
     setDetailLoading(true);
     setFileLoading(false);
     setDetailError("");
+    setDiffFiles([]);
+    setDiffRevisionId("");
+    setDiffBaseRevisionId("");
+    setSelectedDiffPath("");
+    setSelectedDiffLines([]);
+    setDiffLoading(false);
+    setDiffError("");
     void (async () => {
       try {
         if (isSkillResource) {
@@ -759,17 +833,14 @@ export default function ResourceVersionDrawer({
             path: file.path,
             status: "added",
             binary: file.binary,
-            type: "file",
+            type: file.type === "dir" ? "dir" : "file",
             tooLarge: false,
             diffEntryLines: [],
           }));
-          const defaultDiffPath =
-            nextDiffFiles.find((file) => file.status !== "unchanged")?.path ||
-            nextDiffFiles[0]?.path ||
-            "";
           setDiffFiles(nextDiffFiles);
+          setDiffRevisionId(selectedRevisionId);
           setDiffBaseRevisionId(previousRevision?.revisionId || "");
-          setSelectedDiffPath(defaultDiffPath);
+          setSelectedDiffPath(pickDefaultDiffFilePath(nextDiffFiles));
           setSelectedDiffLines([]);
           return;
         }
@@ -825,8 +896,42 @@ export default function ResourceVersionDrawer({
   ]);
 
   useEffect(() => {
-    if (!open || !isSkillResource || !selectedRevisionId || !selectedDiffPath) {
+    if (
+      !open ||
+      !isSkillResource ||
+      !selectedRevisionId ||
+      diffRevisionId !== selectedRevisionId ||
+      !selectedDiffPath ||
+      !diffFiles.some((file) => file.path === selectedDiffPath)
+    ) {
       setSelectedDiffLines([]);
+      return undefined;
+    }
+
+    const selectedDiffFile = diffFiles.find(
+      (file) => file.path === selectedDiffPath,
+    );
+
+    // Diff panel never calls revision /file. Directories, unchanged,
+    // binary and too-large entries only need status presentation.
+    if (!isDiffContentRequestable(selectedDiffFile)) {
+      setSelectedDiffLines([]);
+      setDiffLoading(false);
+      setDiffError("");
+      return undefined;
+    }
+
+    if (selectedDiffFile.diffEntryLines.length) {
+      setSelectedDiffLines(mapDiffEntryLines(selectedDiffFile.diffEntryLines));
+      setDiffLoading(false);
+      setDiffError("");
+      return undefined;
+    }
+
+    if (!diffBaseRevisionId) {
+      setSelectedDiffLines([]);
+      setDiffLoading(false);
+      setDiffError("");
       return undefined;
     }
 
@@ -837,27 +942,47 @@ export default function ResourceVersionDrawer({
     setDiffError("");
     void (async () => {
       try {
-        if (diffBaseRevisionId) {
-          const file = await compareSkillRevisionFileDiff(
-            resourceId,
-            diffBaseRevisionId,
-            selectedRevisionId,
-            selectedDiffPath,
-          );
+        // Re-check before requesting in case state changed mid-flight.
+        const latestSelected = diffFiles.find(
+          (file) => file.path === selectedDiffPath,
+        );
+        if (!isDiffContentRequestable(latestSelected)) {
           if (!ignore && diffRequestIdRef.current === requestId) {
-            setSelectedDiffLines(mapDiffEntryLines(file.diffEntryLines));
+            setSelectedDiffLines([]);
           }
           return;
         }
 
-        const fileContent = await getSkillRevisionFile(
+        const file = await compareSkillRevisionFileDiff(
           resourceId,
+          diffBaseRevisionId,
           selectedRevisionId,
           selectedDiffPath,
         );
-        if (!ignore && diffRequestIdRef.current === requestId) {
-          setSelectedDiffLines(buildDiffLinesWithInline("", fileContent));
+        if (ignore || diffRequestIdRef.current !== requestId) {
+          return;
         }
+
+        if (file.binary || file.tooLarge || file.type === "dir") {
+          setDiffFiles((prev) =>
+            prev.map((item) =>
+              item.path === selectedDiffPath
+                ? {
+                    ...item,
+                    binary: file.binary,
+                    tooLarge: file.tooLarge,
+                    type: file.type || item.type,
+                    status: file.status || item.status,
+                    diffEntryLines: file.diffEntryLines,
+                  }
+                : item,
+            ),
+          );
+          setSelectedDiffLines([]);
+          return;
+        }
+
+        setSelectedDiffLines(mapDiffEntryLines(file.diffEntryLines));
       } catch (error) {
         if (!ignore && diffRequestIdRef.current === requestId) {
           console.error("Load revision diff file failed:", error);
@@ -876,6 +1001,8 @@ export default function ResourceVersionDrawer({
     };
   }, [
     diffBaseRevisionId,
+    diffFiles,
+    diffRevisionId,
     isSkillResource,
     open,
     resourceId,

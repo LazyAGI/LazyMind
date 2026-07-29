@@ -73,7 +73,17 @@ func PatchFileContent(content string, patch PreferencePatch) (string, Preference
 	}
 	file.hasFrontmatter = true
 	if patch.Content != nil {
-		file.Content = *patch.Content
+		submittedMeta, submittedBody, hasFrontmatter, parseErr :=
+			splitPreferenceFrontmatter(*patch.Content)
+		if parseErr == nil && hasFrontmatter && isPreferenceFrontmatter(submittedMeta) {
+			file.AgentPersona = yamlString(submittedMeta, "agent_persona")
+			file.PreferredName = yamlString(submittedMeta, "preferred_name")
+			file.ResponseStyle = yamlString(submittedMeta, "response_style")
+			file.meta = submittedMeta
+			file.Content = stripLeadingPreferenceFrontmatters(submittedBody)
+		} else {
+			file.Content = stripLeadingPreferenceFrontmatters(*patch.Content)
+		}
 	}
 	if patch.AgentPersona != nil {
 		file.AgentPersona = *patch.AgentPersona
@@ -93,6 +103,25 @@ func PatchFileContent(content string, patch PreferencePatch) (string, Preference
 		return "", PreferenceFile{}, err
 	}
 	return next, parsed, nil
+}
+
+func stripLeadingPreferenceFrontmatters(content string) string {
+	for {
+		meta, body, hasFrontmatter, err := splitPreferenceFrontmatter(content)
+		if err != nil || !hasFrontmatter || !isPreferenceFrontmatter(meta) {
+			return content
+		}
+		content = body
+	}
+}
+
+func isPreferenceFrontmatter(meta *yaml.Node) bool {
+	for _, key := range []string{"agent_persona", "preferred_name", "response_style"} {
+		if !yamlHasKey(meta, key) {
+			return false
+		}
+	}
+	return true
 }
 
 func splitPreferenceFrontmatter(content string) (*yaml.Node, string, bool, error) {

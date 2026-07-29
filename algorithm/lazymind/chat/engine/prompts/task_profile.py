@@ -19,7 +19,7 @@ Deliverable = Literal[
     'artifact', 'execution_result',
 ]
 SkillMode = Literal['suppress', 'candidates', 'explicit']
-ThinkingDepth = Literal['low', 'medium', 'high']
+ThinkingDepth = Literal['low', 'medium', 'high', 'max']
 
 OUTCOMES = {
     'answer', 'learn', 'research', 'analyze', 'transform',
@@ -33,6 +33,11 @@ DELIVERABLES = {
     'artifact', 'execution_result',
 }
 SKILL_MODES = {'suppress', 'candidates', 'explicit'}
+_TRIVIAL_CHAT_INPUT = re.compile(
+    r'^(?:[你您]好|嗨|哈喽|哈罗|在吗|测试|'
+    r'hi|hello|hey|test)[\s!！,.，。?？~～]*$',
+    re.I,
+)
 
 
 @dataclass(frozen=True)
@@ -176,7 +181,7 @@ _SIGNALS: tuple[tuple[Outcome, re.Pattern[str]], ...] = (
         r'\bcommit\b|\bpush\b|\bmerge\b|\brevert\b|\brename\b|\bupload\b', re.I,
     )),
     ('create', re.compile(
-        r'创建|生成|写一份|写个|帮我写|制作一份|做一个|设计一个|画一个|'
+        r'创建|生成|编写|撰写|写一份|写个|帮我写|制作一份|做一个|设计一个|画一个|'
         r'起草|拟一份|想几个|给.{0,4}个点子|搭一个原型|实现一个|补一个测试|'
         r'产出|create|generate|draft|design|compose|implement|brainstorm|mock\s+up|\bwrite\b', re.I,
     )),
@@ -900,7 +905,25 @@ def resolve_task_profile(
         needs_llm = True
     resources = _normalize_explicit_resources(explicit_resources)
     rule = _apply_explicit_resources(rule, resources, query)
-    depth = thinking_depth if thinking_depth in {'low', 'medium', 'high'} else 'low'
+    stripped_query = str(query or '').strip()
+    has_explicit_resources = bool(
+        resources.skill_names or resources.knowledge_base_ids
+        or resources.plugin_refs or resources.mentions
+    )
+    trivial_input = (
+        not has_attachments
+        and not has_explicit_resources
+        and (not stripped_query or bool(_TRIVIAL_CHAT_INPUT.fullmatch(stripped_query)))
+    )
+    if trivial_input:
+        return replace(
+            rule,
+            freshness='stable',
+            confidence=1.0,
+            routing_review_required=False,
+            routing_review_reason='',
+        )
+    depth = thinking_depth if thinking_depth in {'low', 'medium', 'high', 'max'} else 'low'
     simple_stable_answer = (
         rule.primary_outcome == 'answer'
         and not rule.secondary_outcomes
@@ -916,7 +939,7 @@ def resolve_task_profile(
             or rule.input_mode in {'conversation_context', 'mixed'}
             or rule.freshness == 'current'
         )
-    elif depth == 'high':
+    elif depth in {'high', 'max'}:
         needs_llm = needs_llm or not simple_stable_answer
     review_reasons = []
     if len({rule.primary_outcome, *rule.secondary_outcomes}) > 1:

@@ -336,10 +336,17 @@ export function buildStreamingAnalysisCaseRows(
     };
 
     if (eventType === "analysis.trace_summary") {
-      row.traceSummaryStatus = status;
+      if (row.traceSummaryStatus !== "done" || status === "done") {
+        row.traceSummaryStatus = status;
+      }
     }
     if (eventType === "analysis.classify_case") {
-      row.classifyCaseStatus = status;
+      if (row.classifyCaseStatus !== "done" || status === "done") {
+        row.classifyCaseStatus = status;
+      }
+      if (status === "done") {
+        row.traceSummaryStatus = "done";
+      }
     }
 
     rows.set(caseId, row);
@@ -351,6 +358,7 @@ export function buildStreamingAnalysisCaseRows(
 export function getStreamingAnalysisProgress(events: NormalizedThreadEvent[]) {
   let current = 0;
   let total = 0;
+  const completedCases = new Set<string>();
   events.forEach((event) => {
     if (event.stage !== "analysis") {
       return;
@@ -358,6 +366,12 @@ export function getStreamingAnalysisProgress(events: NormalizedThreadEvent[]) {
     const eventType = getStreamingAnalysisEventType(event);
     if (eventType !== "analysis.classify_case") {
       return;
+    }
+    if (getStreamingDatasetCaseEventStatus(event) === "done") {
+      const caseId = getEventCaseId(event.payload);
+      if (caseId) {
+        completedCases.add(caseId);
+      }
     }
     const progress = getNestedRecordField(event.payload, ["progress"]);
     const eventData = getEventPayloadData(event.payload);
@@ -374,6 +388,7 @@ export function getStreamingAnalysisProgress(events: NormalizedThreadEvent[]) {
       total = Math.max(total, nextTotal);
     }
   });
+  current = Math.max(current, completedCases.size);
   if (total > 0) {
     return { current, total };
   }
@@ -1449,7 +1464,11 @@ export function buildPxCaseDetailRows(caseRecords: Record<string, unknown>[]) {
       return [];
     }
     seen.add(caseId);
+    const metrics =
+      getStructuredRecordField(item, ["metrics"]) ||
+      getNestedRecordField(item, ["metrics"]);
     const score =
+      getNumberField(metrics, ["overall"]) ??
       getNumberField(item, [
         "score",
         "metric_score",

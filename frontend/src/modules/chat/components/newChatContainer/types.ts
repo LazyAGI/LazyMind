@@ -95,9 +95,39 @@ export interface ChatMessage {
   cite_message?: string;
   cite_messages?: string[];
   tool_call_turns?: number;
+  tool_limit_pending?: {
+    decision_id: string;
+    used_rounds: number;
+    round_limit: number;
+    expanded_max_rounds: number;
+    timeout_seconds: number;
+  };
+  resolved_tool_limit_decision_id?: string;
   mentions?: ChatMention[];
+	collected_inputs?: Array<{
+		task_id: string;
+		conversation_id?: string;
+		source_name?: string;
+		executed_at?: string;
+		mode?: string;
+		summary?: string;
+	}>;
   intent_updated?: {
     scope: "conversation";
     intent_context: Record<string, unknown>;
   };
+  ask_pending?: {
+    ask_id: string;
+    questions: Array<{
+      text: string;
+      type: "boolean" | "single" | "multiple" | "text";
+      choices?: string[];
+      allow_other?: boolean;
+    }>;
+    title?: string;
+    description?: string;
+  };
+  ask_answered?: boolean;
+  ask_saved_answers?: Record<number, unknown>;
+  is_history?: boolean;
 }

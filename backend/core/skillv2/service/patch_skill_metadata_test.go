@@ -238,6 +238,9 @@ func TestPatchSkillAutoEvoMarksPendingDraftAuto(t *testing.T) {
 	if draft.DraftStatus != skillDraftStatusAutoPending {
 		t.Fatalf("draft_status = %q, want %q", draft.DraftStatus, skillDraftStatusAutoPending)
 	}
+	if !strings.HasPrefix(draft.TaskID, "review_auto_evo_") {
+		t.Fatalf("task_id = %q, want generated auto-evo review task", draft.TaskID)
+	}
 	detail, err := svc.GetSkill(context.Background(), GetSkillRequest{SkillID: "skill1", UserID: "user_001"})
 	if err != nil {
 		t.Fatalf("GetSkill returned error: %v", err)

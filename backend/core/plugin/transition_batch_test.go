@@ -30,6 +30,7 @@ func setupBatchTransitionSession(t *testing.T) (*orm.DB, string) {
 	t.Helper()
 	db := newTestDB(t)
 	if err := db.AutoMigrate(
+		&orm.Conversation{},
 		&orm.PluginRevision{},
 		&orm.PluginAttemptInputBinding{},
 		&orm.PluginRouteDecision{},

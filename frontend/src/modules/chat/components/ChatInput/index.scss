@@ -261,6 +261,11 @@
           min-width: 0;
           flex-wrap: wrap;
 
+          .chat-thinking-depth-select {
+            width: 152px;
+            flex: 0 0 152px;
+          }
+
           .input-bottom-actions-left-item {
             /* Frame 1312321162 */
             font-size: 12px;

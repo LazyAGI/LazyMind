@@ -82,42 +82,37 @@ func (s *BlobStore) Put(ctx context.Context, tx *gorm.DB, path string, data []by
 		return blobInfo{}, err
 	}
 
-	now := nowProvider.Now()
+	row := skillBlobRow{
+		Hash:      hash,
+		Size:      int64(len(data)),
+		Mime:      mime,
+		FileType:  fileType,
+		Binary:    binary,
+		CreatedAt: nowProvider.Now(),
+	}
 	if binary {
 		key := strings.Join([]string{"skillv2", hash[:2], hash}, "/")
 		if err := s.objects.Put(ctx, key, data); err != nil {
 			return blobInfo{}, err
 		}
-		if err := tx.Table("skill_blobs").Create(map[string]any{
-			"hash":            hash,
-			"size":            int64(len(data)),
-			"mime":            mime,
-			"file_type":       fileType,
-			"binary":          true,
-			"storage_backend": "local_file",
-			"storage_key":     key,
-			"content":         nil,
-			"created_at":      now,
-		}).Error; err != nil {
-			return blobInfo{}, err
-		}
-		info.StorageBackend = "local_file"
-		info.StorageKey = &key
+		row.StorageBackend = "local_file"
+		row.StorageKey = &key
+		info.StorageBackend = row.StorageBackend
+		info.StorageKey = row.StorageKey
 	} else {
-		if err := tx.Table("skill_blobs").Create(map[string]any{
-			"hash":            hash,
-			"size":            int64(len(data)),
-			"mime":            mime,
-			"file_type":       fileType,
-			"binary":          false,
-			"storage_backend": "postgres",
-			"storage_key":     nil,
-			"content":         data,
-			"created_at":      now,
-		}).Error; err != nil {
-			return blobInfo{}, err
-		}
-		info.StorageBackend = "postgres"
+		row.StorageBackend = "postgres"
+		row.Content = data
+		info.StorageBackend = row.StorageBackend
+	}
+	create := tx
+	if binary {
+		// A nil []byte is encoded as an empty blob by the SQLite driver. Omit the
+		// nullable column so the database stores SQL NULL as required by the
+		// storage-shape constraint.
+		create = create.Omit("content")
+	}
+	if err := create.Create(&row).Error; err != nil {
+		return blobInfo{}, err
 	}
 	return info, nil
 }
