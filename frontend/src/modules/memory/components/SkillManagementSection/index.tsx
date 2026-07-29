@@ -41,6 +41,7 @@ import "./index.scss";
 
 const DEFAULT_MARKET_PAGE_SIZE = 8;
 const MAX_SKILL_ORGANIZE_SELECTION = 20;
+const SKILL_ORGANIZE_MESSAGE_KEY = "skill-organize-task";
 
 export default function SkillManagementSection() {
   const listContentRef = useRef<HTMLDivElement>(null);
@@ -136,6 +137,7 @@ export default function SkillManagementSection() {
   useEffect(
     () => () => {
       organizePollingControllerRef.current?.abort();
+      message.destroy(SKILL_ORGANIZE_MESSAGE_KEY);
     },
     [],
   );
@@ -558,74 +560,87 @@ export default function SkillManagementSection() {
     }
   };
 
-  const handleOrganizeSubmit = () => {
+  const handleOrganizeSubmit = async () => {
     const skills = [...selectedOrganizeSkills.values()];
     if (skills.length === 0 || organizeSubmitting) {
       return;
     }
 
-    Modal.confirm({
-      title: t("admin.memorySkillOrganizeConfirmTitle", {
-        count: skills.length,
-      }),
-      content: t("admin.memorySkillOrganizeConfirmContent"),
-      okText: t("admin.memorySkillOrganizeConfirmSubmit"),
-      cancelText: t("common.cancel"),
-      onOk: async () => {
-        organizePollingControllerRef.current?.abort();
-        const pollingController = new AbortController();
-        organizePollingControllerRef.current = pollingController;
-        setOrganizeSubmitting(true);
-        try {
-          const result = await organizeSkills(
-            skills.map((skill) => `skills/${skill.category}/${skill.name}`),
-          );
-          if (!result.requestId || !result.taskId) {
-            throw new Error("Skill organize task was not accepted");
-          }
-          const task = await waitForSkillOrganize(
-            result.requestId,
-            pollingController.signal,
-          );
-          if (task.status === "failed") {
-            throw new Error("Skill organize task failed");
-          }
-          if (task.status === "skipped") {
-            message.warning(t("admin.memorySkillOrganizeSkipped"));
-            cancelSkillOrganize();
-            return;
-          }
-          await refreshSkillAssets({ page: skillListPage });
-          message.success(
-            t("admin.memorySkillOrganizeSuccess", { count: skills.length }),
-          );
-          cancelSkillOrganize();
-        } catch (error) {
-          if (pollingController.signal.aborted) {
-            return;
-          }
-          console.error("Skill organize task failed:", error);
-          const reasonCode = String(
-            (error as { response?: { data?: { data?: { code?: unknown } } } })
-              ?.response?.data?.data?.code ?? "",
-          );
-          if (reasonCode === "skill_organize_draft_conflict") {
-            message.error(t("admin.memorySkillOrganizeDraftConflict"));
-          } else if (reasonCode === "skill_maintenance_task_running") {
-            message.error(t("admin.memorySkillOrganizeTaskRunning"));
-          } else {
-            message.error(t("admin.memorySkillOrganizeFailed"));
-          }
-        } finally {
-          if (organizePollingControllerRef.current === pollingController) {
-            organizePollingControllerRef.current = null;
-          }
-          if (!pollingController.signal.aborted) {
-            setOrganizeSubmitting(false);
-          }
-        }
-      },
+    organizePollingControllerRef.current?.abort();
+    const pollingController = new AbortController();
+    organizePollingControllerRef.current = pollingController;
+    const skillCount = skills.length;
+    setOrganizeSubmitting(true);
+    // Exit selection mode immediately so the page stays usable while the
+    // organize task runs in the background.
+    cancelSkillOrganize();
+    message.loading({
+      content: t("admin.memorySkillOrganizeStarted", { count: skillCount }),
+      key: SKILL_ORGANIZE_MESSAGE_KEY,
+      duration: 0,
     });
+
+    try {
+      const result = await organizeSkills(
+        skills.map((skill) => `skills/${skill.category}/${skill.name}`),
+      );
+      if (!result.requestId || !result.taskId) {
+        throw new Error("Skill organize task was not accepted");
+      }
+
+      const task = await waitForSkillOrganize(
+        result.requestId,
+        pollingController.signal,
+      );
+      if (task.status === "failed") {
+        throw new Error("Skill organize task failed");
+      }
+      if (task.status === "skipped") {
+        message.warning({
+          content: t("admin.memorySkillOrganizeSkipped"),
+          key: SKILL_ORGANIZE_MESSAGE_KEY,
+        });
+        return;
+      }
+      await refreshSkillAssets({ page: skillListPage });
+      message.success({
+        content: t("admin.memorySkillOrganizeSuccess", { count: skillCount }),
+        key: SKILL_ORGANIZE_MESSAGE_KEY,
+      });
+    } catch (error) {
+      if (pollingController.signal.aborted) {
+        message.destroy(SKILL_ORGANIZE_MESSAGE_KEY);
+        return;
+      }
+      console.error("Skill organize task failed:", error);
+      const reasonCode = String(
+        (error as { response?: { data?: { data?: { code?: unknown } } } })
+          ?.response?.data?.data?.code ?? "",
+      );
+      if (reasonCode === "skill_organize_draft_conflict") {
+        message.error({
+          content: t("admin.memorySkillOrganizeDraftConflict"),
+          key: SKILL_ORGANIZE_MESSAGE_KEY,
+        });
+      } else if (reasonCode === "skill_maintenance_task_running") {
+        message.error({
+          content: t("admin.memorySkillOrganizeTaskRunning"),
+          key: SKILL_ORGANIZE_MESSAGE_KEY,
+        });
+      } else {
+        message.error({
+          content: t("admin.memorySkillOrganizeFailed"),
+          key: SKILL_ORGANIZE_MESSAGE_KEY,
+        });
+      }
+    } finally {
+      if (organizePollingControllerRef.current === pollingController) {
+        organizePollingControllerRef.current = null;
+      }
+      if (!pollingController.signal.aborted) {
+        setOrganizeSubmitting(false);
+      }
+    }
   };
 
   const handleMarketInstall = (item: StructuredAsset) => {
@@ -851,15 +866,24 @@ export default function SkillManagementSection() {
         onCreateSkill={openSkillCreateModal}
         organizeMode={organizeMode}
         organizeDisabled={
-          skillLoading || manualSkillReviewButtonBusy || skillListTotal <= 0
+          skillLoading ||
+          manualSkillReviewButtonBusy ||
+          organizeSubmitting ||
+          skillListTotal <= 0
         }
         onOrganizeSkills={() => {
           setSelectedOrganizeSkills(new Map());
           setOrganizeMode(true);
         }}
         manualSkillReviewCount={manualSkillReviewCount}
-        manualSkillReviewDisabled={manualSkillReviewButtonDisabled}
-        manualSkillReviewDisabledReason={manualSkillReviewDisabledReason}
+        manualSkillReviewDisabled={
+          manualSkillReviewButtonDisabled || organizeSubmitting
+        }
+        manualSkillReviewDisabledReason={
+          organizeSubmitting
+            ? t("admin.memorySkillOrganizeTaskRunning")
+            : manualSkillReviewDisabledReason
+        }
         onSkillReviewClick={handleSkillReviewClick}
         messageCenterCount={messageCenterCount}
         onMessageCenterClick={handleSkillMessageCenter}

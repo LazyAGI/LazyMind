@@ -3617,6 +3617,7 @@ const zhCN = {
     memorySkillOrganizeConfirmTitle: "整理 {{count}} 个技能？",
     memorySkillOrganizeConfirmContent: "任务提交后将在后台运行，整理期间请勿重复提交。",
     memorySkillOrganizeConfirmSubmit: "确认整理",
+    memorySkillOrganizeStarted: "已提交 {{count}} 个技能的整理任务，正在后台运行…",
     memorySkillOrganizeSuccess: "已完成 {{count}} 个技能的整理",
     memorySkillOrganizeSkipped: "技能整理任务已跳过",
     memorySkillOrganizeDraftConflict: "所选技能中有未完成的草稿，请处理后重试",

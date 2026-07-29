@@ -1,4 +1,4 @@
-import { Button, Empty, Input, Select, Table } from "antd";
+import { Button, Empty, Input, Popconfirm, Select, Table } from "antd";
 import { ApartmentOutlined } from "@ant-design/icons";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import type { ColumnsType } from "antd/es/table";
@@ -143,15 +143,29 @@ export default function SkillInstalledView({
             <Button onClick={onOrganizeCancel} disabled={organizeLoading}>
               {t("common.cancel")}
             </Button>
-            <Button
-              type="primary"
-              icon={<ApartmentOutlined />}
-              loading={organizeLoading}
-              disabled={selectedOrganizeSkillIds.length === 0}
-              onClick={onOrganizeSubmit}
+            <Popconfirm
+              title={t("admin.memorySkillOrganizeConfirmTitle", {
+                count: selectedOrganizeSkillIds.length,
+              })}
+              description={t("admin.memorySkillOrganizeConfirmContent")}
+              okText={t("admin.memorySkillOrganizeConfirmSubmit")}
+              cancelText={t("common.cancel")}
+              disabled={
+                selectedOrganizeSkillIds.length === 0 || organizeLoading
+              }
+              onConfirm={() => {
+                void onOrganizeSubmit();
+              }}
             >
-              {t("admin.memorySkillOrganizeSubmit")}
-            </Button>
+              <Button
+                type="primary"
+                icon={<ApartmentOutlined />}
+                loading={organizeLoading}
+                disabled={selectedOrganizeSkillIds.length === 0}
+              >
+                {t("admin.memorySkillOrganizeSubmit")}
+              </Button>
+            </Popconfirm>
           </div>
         </div>
       ) : null}

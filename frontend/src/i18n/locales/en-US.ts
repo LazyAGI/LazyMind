@@ -3790,6 +3790,7 @@ const enUS = {
     memorySkillOrganizeConfirmTitle: "Organize {{count}} skills?",
     memorySkillOrganizeConfirmContent: "The task will run in the background. Do not submit it again while it is running.",
     memorySkillOrganizeConfirmSubmit: "Confirm",
+    memorySkillOrganizeStarted: "Submitted organize task for {{count}} skills. Running in the background…",
     memorySkillOrganizeSuccess: "Organized {{count}} skills",
     memorySkillOrganizeSkipped: "The skill organize task was skipped",
     memorySkillOrganizeDraftConflict: "Some selected skills have unfinished drafts. Resolve them and try again.",
