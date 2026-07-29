@@ -140,8 +140,32 @@ func subagentWorkspaceRoot() string {
 	return "/data/subagent"
 }
 
+const dockerUploadRootMarker = "/var/lib/lazymind/uploads"
+
+// rewriteCanonicalUploadPath maps Docker-style /var/lib/lazymind/uploads/...
+// paths onto the configured LAZYMIND_UPLOAD_ROOT used by local runtime.
+func rewriteCanonicalUploadPath(fullPath string) string {
+	p := filepath.ToSlash(strings.TrimSpace(fullPath))
+	if p == "" {
+		return fullPath
+	}
+	root := strings.TrimRight(strings.TrimSpace(uploadRoot()), "/")
+	if root == "" || root == dockerUploadRootMarker {
+		return fullPath
+	}
+	marker := dockerUploadRootMarker + "/"
+	if p == dockerUploadRootMarker {
+		return root
+	}
+	if strings.HasPrefix(p, marker) {
+		rel := strings.TrimPrefix(p, marker)
+		return filepath.Join(root, filepath.FromSlash(rel))
+	}
+	return fullPath
+}
+
 func fileRelativePath(fullPath string) string {
-	p := strings.TrimSpace(fullPath)
+	p := strings.TrimSpace(rewriteCanonicalUploadPath(fullPath))
 	if p == "" {
 		return ""
 	}

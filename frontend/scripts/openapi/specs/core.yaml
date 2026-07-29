@@ -5778,6 +5778,8 @@ components:
             type: object
         userUIPreferencesOpenAPIResponse:
             properties:
+                accepted_user_agreement_version:
+                    type: string
                 chat_preference_notice_dismissed:
                     type: boolean
                 developer_mode_active:
@@ -5787,6 +5789,7 @@ components:
                 user_preference_configured:
                     type: boolean
             required:
+                - accepted_user_agreement_version
                 - chat_preference_notice_dismissed
                 - developer_mode_active
                 - updated_at
@@ -5794,6 +5797,8 @@ components:
             type: object
         userUIPreferencesPatchOpenAPIRequest:
             properties:
+                accepted_user_agreement_version:
+                    type: string
                 chat_preference_notice_dismissed:
                     type: boolean
                 developer_mode_active:

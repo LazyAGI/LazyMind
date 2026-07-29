@@ -536,10 +536,28 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 }
 
 func chatHistoryInput(raw map[string]any, query string) any {
+	in, hasInput := raw["input"].([]any)
 	if displayQuery, ok := raw["display_query"].(string); ok && strings.TrimSpace(displayQuery) != "" {
-		return []any{map[string]any{"input_type": "text", "text": strings.TrimSpace(displayQuery)}}
+		// Keep multimodal attachments while replacing the text payload with the
+		// user-visible display_query. Dropping images here breaks later plugin
+		// steps that recover uploads from chat_histories.ext.
+		out := []any{map[string]any{"input_type": "text", "text": strings.TrimSpace(displayQuery)}}
+		if hasInput {
+			for _, item := range in {
+				entry, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				typ, _ := entry["input_type"].(string)
+				typ = strings.ToLower(strings.TrimSpace(typ))
+				if typ == "image" || typ == "file" {
+					out = append(out, entry)
+				}
+			}
+		}
+		return out
 	}
-	if in, ok := raw["input"].([]any); ok && len(in) > 0 {
+	if hasInput && len(in) > 0 {
 		return in
 	}
 	query = strings.TrimSpace(query)
@@ -681,10 +699,6 @@ func filesPerTurnMap(histories []orm.ChatHistory, currentFiles any, currentSeq i
 			uri, _ := item["uri"].(string)
 			uri = strings.TrimSpace(uri)
 			if uri == "" {
-				continue
-			}
-			lower := strings.ToLower(uri)
-			if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
 				continue
 			}
 			out[seqKey] = append(out[seqKey], uri)

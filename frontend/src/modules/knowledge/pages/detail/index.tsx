@@ -1,6 +1,7 @@
 import {
   Alert,
   message,
+  Modal,
   Button,
   Badge,
   Dropdown,
@@ -52,6 +53,7 @@ import ImportTaskManage, {
 } from "./components/ImportTaskManage";
 import TreeUtils from "@/modules/knowledge/utils/tree";
 import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
+import { isFFmpegDependencyError } from "@/modules/knowledge/utils/taskError";
 import TypedConfirmModal, {
   type TypedConfirmModalRef,
 } from "@/components/ui/TypedConfirmModal";
@@ -121,6 +123,7 @@ const Detail = () => {
   const importTaskRef = useRef<IImportTaskManageRef>();
   const pollingRef = useRef(new Polling());
   const importingTaskListRef = useRef([]);
+  const promptedDependencyTaskIdsRef = useRef(new Set<string>());
   const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
 
@@ -288,6 +291,7 @@ const Detail = () => {
     if (completeTasks.length > 0) {
       getDetail();
     }
+    void notifyDependencyFailures(completeTasks);
 
     // There are multiple tasks to complete or the root node needs to be updated.
     if (
@@ -320,6 +324,36 @@ const Detail = () => {
     knowledgeListRef.current!.updateDocument({
       documentId: parentNode.document_id ?? "",
     });
+  }
+
+  async function notifyDependencyFailures(tasks: any[]) {
+    for (const task of tasks) {
+      const taskId = String(task?.task_id || "");
+      if (!taskId || promptedDependencyTaskIdsRef.current.has(taskId)) {
+        continue;
+      }
+      try {
+        const response = await TaskServiceApi().getTask(
+          id,
+          taskId,
+          { silentError: true } as never,
+        );
+        const finishedTask = response.data as any;
+        if (!isFFmpegDependencyError(finishedTask?.err_msg)) {
+          continue;
+        }
+        promptedDependencyTaskIdsRef.current.add(taskId);
+        Modal.confirm({
+          title: t("knowledge.ffmpegRequiredTitle"),
+          content: t("knowledge.ffmpegRequiredDesc"),
+          okText: t("knowledge.configureFfmpeg"),
+          cancelText: t("common.close"),
+          onOk: () => navigate("/model-providers/tools#ffmpeg-dependency"),
+        });
+      } catch (error) {
+        console.error("Failed to inspect completed task:", error);
+      }
+    }
   }
 
   function openImportModal(data?: any) {

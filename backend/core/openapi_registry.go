@@ -1999,13 +1999,15 @@ type personalizationSettingOpenAPIResponse struct {
 }
 
 type userUIPreferencesPatchOpenAPIRequest struct {
-	ChatPreferenceNoticeDismissed *bool `json:"chat_preference_notice_dismissed,omitempty"`
-	DeveloperModeActive           *bool `json:"developer_mode_active,omitempty"`
+	ChatPreferenceNoticeDismissed *bool   `json:"chat_preference_notice_dismissed,omitempty"`
+	DeveloperModeActive           *bool   `json:"developer_mode_active,omitempty"`
+	AcceptedUserAgreementVersion  *string `json:"accepted_user_agreement_version,omitempty"`
 }
 
 type userUIPreferencesOpenAPIResponse struct {
 	ChatPreferenceNoticeDismissed bool   `json:"chat_preference_notice_dismissed"`
 	DeveloperModeActive           bool   `json:"developer_mode_active"`
+	AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
 	UserPreferenceConfigured      bool   `json:"user_preference_configured"`
 	UpdatedAt                     string `json:"updated_at"`
 }

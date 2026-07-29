@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Any, Dict, List, Literal, Optional
+from urllib.parse import urlparse
 
 from lazymind.chat.engine.attachment_reader import (
     is_chat_attachment_file,
@@ -16,6 +17,11 @@ from lazymind.chat.engine.tools.attachment_edit import (
     effective_attachment_path,
 )
 
+from lazymind.chat.service.utils.static_file_url import (
+    local_path_from_static_file_url,
+    resolve_local_image_path,
+)
+
 from .context import get_context, require_context, LARGE_ARTIFACT_THRESHOLD
 
 # Valid artifact content types.
@@ -23,6 +29,52 @@ _CONTENT_TYPES = {'text', 'json', 'image', 'file', 'file_list'}
 
 UPLOAD_MARKER = '/var/lib/lazymind/uploads/'
 SUBAGENT_MARKER = '/data/subagent/'
+
+
+def _materialize_local_path(path: str) -> str:
+    """Resolve Docker-canonical upload paths onto the real LAZYMIND_UPLOAD_ROOT.
+
+    Docker stores/returns ``/var/lib/lazymind/uploads/...``. Local runtime keeps
+    the same relative layout under ``~/.local/share/LazyMind/data/core/uploads``.
+    Remap before exists checks, signing, and vision tools so local works without
+    a ``/var/lib/lazymind/uploads`` mount.
+    """
+    raw = str(path or '').strip()
+    if not raw:
+        return raw
+    if raw.lower().startswith(('http://', 'https://')):
+        return raw
+    resolved = resolve_local_image_path(raw) or local_path_from_static_file_url(raw)
+    if resolved and (resolved == raw or os.path.exists(resolved) or not os.path.exists(raw)):
+        return resolved
+    return raw
+
+
+def _sign_static_file_url(path: str) -> Optional[str]:
+    """Ask Go core to sign a local upload path. Returns None on any failure."""
+    raw = str(path or '').strip()
+    if not raw or raw.lower().startswith(('http://', 'https://')):
+        return None
+    if raw.startswith('/static-files/'):
+        return raw
+    try:
+        import httpx
+        from lazymind.config import config as _cfg
+        core_url = str(_cfg['core_api_url']).rstrip('/')
+        resp = httpx.post(
+            f'{core_url}/static-files:sign',
+            json={'paths': [raw]},
+            timeout=3.0,
+        )
+        if resp.status_code != 200:
+            return None
+        payload = resp.json()
+        data = payload.get('data') if isinstance(payload.get('data'), dict) else payload
+        urls = (data or {}).get('urls') or {}
+        signed = urls.get(raw)
+        return str(signed).strip() if signed else None
+    except Exception:
+        return None
 
 
 def _is_valid_image_ref(path: str) -> bool:
@@ -69,6 +121,10 @@ def _build_artifact_value(value: Any, content_type: str):
         return {'data': value}, 'json'
     if content_type == 'image':
         src = str(value).strip()
+        if src.startswith('/static-files/'):
+            return {'path': src}, 'image'
+        if not src.lower().startswith(('http://', 'https://')):
+            src = _materialize_local_path(src)
         if not _is_valid_image_ref(src):
             raise ValueError(
                 f'Invalid image reference {src!r}: expected http(s) URL, /static-files/ path, '
@@ -1026,12 +1082,20 @@ def _resolve_attachment(
     if not files and not history_files_per_turn:
         return None, 'No attached files found in this conversation.'
 
+    def _display_name(path: str) -> str:
+        raw = str(path or '')
+        if raw.lower().startswith(('http://', 'https://')):
+            parsed = urlparse(raw)
+            base = os.path.basename(parsed.path)
+            return base or raw
+        return os.path.basename(raw)
+
     def _dedupe_turn(paths: List[str]) -> List[tuple[str, str]]:
         """Return (display_name, abs_path) pairs with intra-turn dedup (no size)."""
         seen: Dict[str, int] = {}
         result: List[tuple[str, str]] = []
         for path in paths:
-            base = os.path.basename(path)
+            base = _display_name(path)
             name_no_ext, ext = os.path.splitext(base)
             if base not in seen:
                 seen[base] = 0
@@ -1112,7 +1176,10 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
     matched, err = _resolve_attachment(filename, turn)
     if err:
         return tool_success('read_user_attachment', {'status': 'error', 'message': err})
-    if not os.path.exists(matched):
+    is_remote = str(matched or '').lower().startswith(('http://', 'https://'))
+    if not is_remote:
+        matched = _materialize_local_path(matched)
+    if not is_remote and not os.path.exists(matched):
         return tool_success('read_user_attachment', {
             'status': 'error',
             'message': f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
@@ -1298,38 +1365,29 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
     matched, err = _resolve_attachment(filename, turn)
     if err:
         return tool_success('find_user_attachment', {'status': 'error', 'message': err})
-    if not os.path.exists(matched):
+    is_remote = str(matched or '').lower().startswith(('http://', 'https://'))
+    if not is_remote:
+        matched = _materialize_local_path(matched)
+    if not is_remote and not os.path.exists(matched):
         return tool_success('find_user_attachment', {
             'status': 'error',
             'message': f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
         })
 
-    # Try to get a signed URL from Go /static-files:sign.
-    signed_url: Optional[str] = None
-    try:
-        import httpx
-        from lazymind.config import config as _cfg
-        core_url = str(_cfg['core_api_url']).rstrip('/')
-        resp = httpx.post(
-            f'{core_url}/static-files:sign',
-            json={'path': matched},
-            timeout=3.0,
-        )
-        if resp.status_code == 200:
-            signed_url = resp.json().get('data', {}).get('url') or resp.json().get('url')
-    except Exception:
-        pass
+    signed_url = None if is_remote else _sign_static_file_url(matched)
 
+    display_name = os.path.basename(urlparse(matched).path) if is_remote else os.path.basename(matched)
     result: Dict[str, Any] = {
         'status': 'ok',
-        'filename': os.path.basename(matched),
+        'filename': display_name or matched,
         'path': matched,
     }
     if signed_url:
         result['url'] = signed_url
     else:
-        result['url'] = matched  # fallback to local path
-        result['message'] = 'Signed URL unavailable; use the local path instead.'
+        result['url'] = matched
+        if not is_remote:
+            result['message'] = 'Signed URL unavailable; use the local path instead.'
     return tool_success('find_user_attachment', result)
 
 
@@ -1407,24 +1465,12 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
             'message': f"Artifact '{slot}' has no resolvable path.",
         })
 
+    if not path.lower().startswith(('http://', 'https://', '/static-files/')):
+        path = _materialize_local_path(path)
+
     # Re-sign local paths when the slots API did not already provide a URL.
     if not signed_url:
-        try:
-            import httpx
-            from lazymind.config import config as _cfg
-            core_url = str(_cfg['core_api_url']).rstrip('/')
-            resp = httpx.post(
-                f'{core_url}/static-files:sign',
-                json={'paths': [path]},
-                timeout=3.0,
-            )
-            if resp.status_code == 200:
-                payload = resp.json()
-                data = payload.get('data') if isinstance(payload.get('data'), dict) else payload
-                urls = data.get('urls') or {}
-                signed_url = urls.get(path)
-        except Exception:
-            pass
+        signed_url = _sign_static_file_url(path)
 
     out: Dict[str, Any] = {
         'status': 'ok',
