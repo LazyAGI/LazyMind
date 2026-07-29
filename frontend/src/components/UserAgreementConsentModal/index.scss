@@ -10,7 +10,15 @@
   }
 }
 
+.user-agreement-consent-language {
+  position: absolute;
+  z-index: 1;
+  top: 12px;
+  right: 16px;
+}
+
 .user-agreement-consent-hero {
+  position: relative;
   padding: 30px 32px 24px;
   text-align: center;
   background:

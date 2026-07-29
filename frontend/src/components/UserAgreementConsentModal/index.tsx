@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button, Checkbox, Modal, message } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
+import LegalLanguageToggle from '@/legal/LegalLanguageToggle';
 import logoImage from '@/public/Lazy.png';
 import {
   consumeUserAgreementReadFlag,
@@ -53,6 +54,9 @@ export default function UserAgreementConsentModal({
       footer={null}
     >
       <div className="user-agreement-consent-hero">
+        <div className="user-agreement-consent-language">
+          <LegalLanguageToggle />
+        </div>
         <img
           className="user-agreement-consent-logo"
           src={logoImage}

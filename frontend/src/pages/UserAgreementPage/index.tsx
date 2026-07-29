@@ -4,7 +4,8 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import agreementMarkdown from '@/legal/user-agreement.md?raw';
+import LegalLanguageToggle from '@/legal/LegalLanguageToggle';
+import { getUserAgreementMarkdown } from '@/legal/agreementContent';
 import {
   markUserAgreementRead,
   USER_AGREEMENT_VERSION,
@@ -17,7 +18,7 @@ interface AgreementLocationState {
 }
 
 export default function UserAgreementPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
   const requestedFrom = (location.state as AgreementLocationState | null)?.from;
@@ -27,6 +28,7 @@ export default function UserAgreementPage() {
     requestedFrom !== '/legal/user-agreement'
       ? requestedFrom
       : '/';
+  const agreementMarkdown = getUserAgreementMarkdown(i18n.language);
 
   const handleReadAndReturn = () => {
     markUserAgreementRead();
@@ -44,7 +46,9 @@ export default function UserAgreementPage() {
           {t('legal.detailsBack')}
         </Button>
         <img src={logoImage} alt="LazyMind" />
-        <span aria-hidden="true" />
+        <div className="user-agreement-page-language">
+          <LegalLanguageToggle />
+        </div>
       </header>
 
       <main className="user-agreement-page-main">
@@ -55,7 +59,7 @@ export default function UserAgreementPage() {
 
         <article className="user-agreement-page-content">
           <Markdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>
-            {agreementMarkdown.trim()}
+            {agreementMarkdown}
           </Markdown>
         </article>
       </main>
