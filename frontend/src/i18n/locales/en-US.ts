@@ -1593,7 +1593,7 @@ const enUS = {
     promptCategoryCreateSuccess: "Category created",
     promptCategoryCreateFailed: "Could not create the category. Please retry.",
     promptCategoryDeleteTitle: "Delete this category?",
-    promptCategoryDeleteDescription: "Phrases in {{name}} will move to Custom.",
+    promptCategoryDeleteDescription: "Delete “{{name}}”? All phrases in this category will be moved to General.",
     promptCategoryDeleteSuccess: "Category deleted",
     promptCategoryDeleteFailed: "Could not delete the category. Please retry.",
     promptCategoryRequired: "Select a phrase category",

@@ -123,9 +123,13 @@ func DeletePromptCategory(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Where("id = ? AND create_user_id = ?", categoryID, userID).First(&category).Error; err != nil {
 			return err
 		}
+		// Reassign prompts under this category to "general" so they remain accessible.
 		if err := tx.Model(&orm.Prompt{}).
 			Where("category = ? AND create_user_id = ? AND deleted_at IS NULL", categoryID, userID).
-			Update("deleted_at", time.Now().UTC()).Error; err != nil {
+			Updates(map[string]any{
+				"category":   "general",
+				"updated_at": time.Now().UTC(),
+			}).Error; err != nil {
 			return err
 		}
 		return tx.Unscoped().Delete(&category).Error

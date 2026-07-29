@@ -1550,7 +1550,7 @@ const zhCN = {
     promptCategoryCreateSuccess: "分类创建成功",
     promptCategoryCreateFailed: "分类创建失败，请重试",
     promptCategoryDeleteTitle: "确认删除该分类？",
-    promptCategoryDeleteDescription: "删除“{{name}}”后，该分类下的话术也会一并删除。",
+    promptCategoryDeleteDescription: "确定删除“{{name}}”吗？分类下的所有话术将自动移至“通用场景”分类。",
     promptCategoryDeleteSuccess: "分类删除成功",
     promptCategoryDeleteFailed: "分类删除失败，请重试",
     promptCategoryRequired: "请选择话术分类",
