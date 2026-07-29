@@ -232,11 +232,20 @@ func (r *Runner) Up(limit int) error {
 			}
 			if ranSQL {
 				executed++
+				// Post-aggregate migrations are not part of the squash snapshot.
+				// They must execute (idempotent CREATE/ALTER) instead of being
+				// recorded as applied without SQL; otherwise fresh Desktop/SQLite
+				// installs can miss later columns such as accepted_user_agreement_version.
 				for _, included := range postAggregateDevMigrations(mode) {
-					applied, currentMax, err = r.recordMigrationWithoutSQL(included, applied)
-					if err != nil {
+					if limit > 0 && executed >= limit {
+						return nil
+					}
+					if err := r.applyUpMigration(included, currentMax); err != nil {
 						return err
 					}
+					applied = addHistoryRecord(applied, included)
+					currentMax = highestAppliedVersion(applied)
+					executed++
 				}
 			}
 			continue
@@ -693,7 +702,7 @@ func (r *Runner) applyUpMigration(mig migrationFile, currentMax uint64) error {
 		_ = tx.Rollback()
 		return fmt.Errorf("migration %d: %w", mig.Version, err)
 	}
-	if _, err := tx.Exec(sqlBody); err != nil {
+	if err := execMigrationSQL(tx, r.driver, sqlBody); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -741,7 +750,7 @@ func (r *Runner) applyDownMigration(mig migrationFile, remaining []historyRecord
 		_ = tx.Rollback()
 		return fmt.Errorf("migration %d: %w", mig.Version, err)
 	}
-	if _, err := tx.Exec(sqlBody); err != nil {
+	if err := execMigrationSQL(tx, r.driver, sqlBody); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -791,6 +800,52 @@ func migrationSQLForDriver(body, driver string) (string, error) {
 		return "", fmt.Errorf("no SQL block for database dialect %q", driver)
 	}
 	return strings.Join(out, "\n"), nil
+}
+
+// execMigrationSQL runs migration SQL for the active driver.
+// SQLite has no ADD/DROP COLUMN IF NOT EXISTS, so post-aggregate migrations that
+// also bake columns into seed/aggregate CREATE must tolerate duplicate/missing
+// column errors when upgrading fresh versus already-patched databases.
+func execMigrationSQL(exec sqlExecer, driver, sqlBody string) error {
+	_, err := exec.Exec(sqlBody)
+	if err == nil || driver != "sqlite" {
+		return err
+	}
+	if isBenignSQLiteColumnChangeError(sqlBody, err) {
+		return nil
+	}
+	return err
+}
+
+func isBenignSQLiteColumnChangeError(sqlBody string, err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	normalized := strings.ToLower(stripSQLLineComments(sqlBody))
+	switch {
+	case strings.Contains(msg, "duplicate column name") &&
+		strings.Contains(normalized, "add column"):
+		return true
+	case strings.Contains(msg, "no such column") &&
+		strings.Contains(normalized, "drop column"):
+		return true
+	default:
+		return false
+	}
+}
+
+func stripSQLLineComments(sqlBody string) string {
+	lines := strings.Split(sqlBody, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "--") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 func (r *Runner) insertHistory(exec sqlExecer, version uint64, name string) error {
