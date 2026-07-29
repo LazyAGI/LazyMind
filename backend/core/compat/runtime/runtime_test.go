@@ -34,6 +34,20 @@ func (stubKnowledgeCatalogPort) Get(context.Context, contract.CallContext, knowl
 	return knowledge.GetResult{}, nil
 }
 
+type stubKnowledgeDocumentPort struct{}
+
+func (stubKnowledgeDocumentPort) GetDocumentMetadata(context.Context, contract.CallContext, knowledge.GetDocumentMetadataInput) (knowledge.DocumentDetail, error) {
+	return knowledge.DocumentDetail{ID: "doc-1", KnowledgeID: "ds-1"}, nil
+}
+
+func (stubKnowledgeDocumentPort) ReadDocumentContent(context.Context, contract.CallContext, knowledge.ReadDocumentContentInput) (knowledge.DocumentContent, error) {
+	return knowledge.DocumentContent{}, nil
+}
+
+func (stubKnowledgeDocumentPort) ListDocumentChunks(context.Context, contract.CallContext, knowledge.ListDocumentChunksInput) (knowledge.ListDocumentChunksResult, error) {
+	return knowledge.ListDocumentChunksResult{}, nil
+}
+
 func TestNewCreatesSkillFacadeWhenPortProvided(t *testing.T) {
 	rt, err := New(Dependencies{SkillPort: stubSkillPort{}})
 	if err != nil {
@@ -54,6 +68,43 @@ func TestNewCreatesKnowledgeFacadeWhenCatalogProvided(t *testing.T) {
 	}
 	if rt.Skill != nil {
 		t.Fatalf("Skill facade = %#v, want nil", rt.Skill)
+	}
+}
+
+func TestNewCreatesKnowledgeFacadeWhenDocumentProvided(t *testing.T) {
+	rt, err := New(Dependencies{KnowledgeDocument: stubKnowledgeDocumentPort{}})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	if rt.Knowledge == nil {
+		t.Fatalf("Knowledge facade is nil")
+	}
+	got, err := rt.Knowledge.GetDocument(context.Background(), contract.CallContext{UserID: "user"}, knowledge.GetDocumentInput{
+		KnowledgeID: "ds-1",
+		DocumentID:  "doc-1",
+	})
+	if err != nil {
+		t.Fatalf("GetDocument returned error: %v", err)
+	}
+	if got.Document.ID != "doc-1" {
+		t.Fatalf("GetDocument = %#v, want doc-1", got)
+	}
+}
+
+func TestRuntimeCatalogOnlyGetDocumentUnsupported(t *testing.T) {
+	rt, err := New(Dependencies{KnowledgeCatalog: stubKnowledgeCatalogPort{}})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	if rt.Knowledge == nil {
+		t.Fatalf("Knowledge facade is nil")
+	}
+	_, err = rt.Knowledge.GetDocument(context.Background(), contract.CallContext{UserID: "user"}, knowledge.GetDocumentInput{
+		KnowledgeID: "ds-1",
+		DocumentID:  "doc-1",
+	})
+	if code, ok := contract.CodeOf(err); !ok || code != contract.Unsupported {
+		t.Fatalf("code = %v, %v; want UNSUPPORTED", code, ok)
 	}
 }
 
@@ -82,5 +133,15 @@ func TestRuntimeDoesNotContainRequestState(t *testing.T) {
 	}
 	if typ.NumField() != 2 {
 		t.Fatalf("Runtime field count = %d, want 2", typ.NumField())
+	}
+}
+
+func TestNewKeepsSkillWiringWithKnowledgeDocument(t *testing.T) {
+	rt, err := New(Dependencies{SkillPort: stubSkillPort{}, KnowledgeDocument: stubKnowledgeDocumentPort{}})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	if rt.Skill == nil || rt.Knowledge == nil {
+		t.Fatalf("Skill=%#v Knowledge=%#v, want both wired", rt.Skill, rt.Knowledge)
 	}
 }

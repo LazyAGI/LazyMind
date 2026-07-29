@@ -34,3 +34,50 @@ type GetInput struct {
 type GetResult struct {
 	Knowledge Summary // Knowledge catalog summary.
 }
+
+type GetDocumentInput struct {
+	KnowledgeID    string               // Dataset ID that owns the document.
+	DocumentID     string               // Stable Core document ID.
+	IncludeContent bool                 // Read safe text content when true.
+	IncludeChunks  bool                 // Read one chunk page when true.
+	ChunksPage     contract.PageRequest // Chunk pagination input.
+}
+
+type GetDocumentResult struct {
+	Document DocumentDetail
+}
+
+type DocumentDetail struct {
+	ID           string
+	KnowledgeID  string
+	Name         string
+	Source       string
+	Tags         []string
+	ParseStatus  string
+	MIMEType     string
+	SizeBytes    int64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	CreatedBy    string
+	OriginalFile *FileRef
+	Content      *DocumentContent
+	Chunks       []DocumentChunk
+	ChunksPage   *contract.PageResult
+}
+
+type FileRef struct {
+	FileName    string
+	DownloadURL string
+}
+
+type DocumentContent struct {
+	MIMEType  string
+	Text      string
+	Truncated bool
+}
+
+type DocumentChunk struct {
+	ID     string
+	Text   string
+	Number int32
+}
