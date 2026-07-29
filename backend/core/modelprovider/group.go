@@ -717,8 +717,14 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	storedAPIKeys, err := apiKeyForGroup(db.WithContext(r.Context()), &row)
+	if err != nil {
+		common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
+		return
+	}
+
 	// Check for duplicate.
-	existing := splitAPIKeys(row.APIKey)
+	existing := splitAPIKeys(storedAPIKeys)
 	for _, k := range existing {
 		if k == newKey {
 			common.ReplyErr(w, "api_key already exists", http.StatusConflict)
@@ -740,12 +746,15 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 	// Append the new key.
 	existing = append(existing, newKey)
 	updatedKeys := strings.Join(existing, "\n")
+	encryptedUpdates, err := encryptedAPIKeyUpdates(updatedKeys)
+	if err != nil {
+		common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
+		return
+	}
 	now := time.Now()
-	if err := db.WithContext(r.Context()).Model(&row).Updates(map[string]interface{}{
-		"api_key":     updatedKeys,
-		"is_verified": true,
-		"updated_at":  now,
-	}).Error; err != nil {
+	encryptedUpdates["is_verified"] = true
+	encryptedUpdates["updated_at"] = now
+	if err := db.WithContext(r.Context()).Model(&row).Updates(encryptedUpdates).Error; err != nil {
 		common.ReplyErr(w, "update api_key failed", http.StatusInternalServerError)
 		return
 	}
@@ -811,7 +820,12 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing := splitAPIKeys(row.APIKey)
+	storedAPIKeys, err := apiKeyForGroup(db.WithContext(r.Context()), &row)
+	if err != nil {
+		common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
+		return
+	}
+	existing := splitAPIKeys(storedAPIKeys)
 	found := false
 	filtered := make([]string, 0, len(existing))
 	for _, k := range existing {
@@ -828,11 +842,14 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	updatedKeys := strings.Join(filtered, "\n")
-	if err := db.WithContext(r.Context()).Model(&row).Updates(map[string]interface{}{
-		"api_key":     updatedKeys,
-		"is_verified": len(filtered) > 0,
-		"updated_at":  now,
-	}).Error; err != nil {
+	encryptedUpdates, err := encryptedAPIKeyUpdates(updatedKeys)
+	if err != nil {
+		common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
+		return
+	}
+	encryptedUpdates["is_verified"] = len(filtered) > 0
+	encryptedUpdates["updated_at"] = now
+	if err := db.WithContext(r.Context()).Model(&row).Updates(encryptedUpdates).Error; err != nil {
 		common.ReplyErr(w, "update api_key failed", http.StatusInternalServerError)
 		return
 	}

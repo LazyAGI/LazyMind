@@ -422,6 +422,31 @@ const enUS = {
       parsingCategoryTitle: "Document Parsing",
       parsingCategoryDesc: "Manage document parsing services such as MinerU and PaddleOCR for converting files into indexable text.",
       parsingSearchPlaceholder: "Search parsing services",
+      dependencyCategoryTitle: "Dependency Installation",
+      dependencyCategoryDesc: "Manage local runtime dependencies. Video-to-GIF and MP4 parsing require FFmpeg.",
+      dependencyFfmpegTitle: "FFmpeg",
+      dependencyFfmpegSummary: "Required for video-to-GIF and knowledge-base MP4 frame extraction.",
+      dependencyFfmpegModalTitle: "Configure FFmpeg",
+      dependencyFfmpegImpact: "Without FFmpeg, video_to_gif and MP4 document parsing will fail.",
+      dependencyInstallBundledTitle: "Install into LazyMind directory",
+      dependencyInstallBundledDesc: "Download FFmpeg into the local LazyMind runtime folder (deps/ffmpeg/bin) without changing the system install.",
+      dependencyInstallAction: "Download and install",
+      dependencyInstalledAction: "Installed",
+      dependencyCustomPathTitle: "Use an existing local FFmpeg",
+      dependencyCustomPathDesc: "Enter an ffmpeg executable path, or a directory that contains ffmpeg and ffprobe.",
+      dependencyCustomPathPlaceholder: "e.g. /opt/homebrew/bin/ffmpeg or /opt/homebrew/bin",
+      dependencyBrowseAction: "Browse",
+      dependencySavePathAction: "Save path",
+      dependencyRecheckAction: "Re-check",
+      dependencyDetected: "Detected ffmpeg={{ffmpeg}}, ffprobe={{ffprobe}}",
+      dependencyLoadFailed: "Failed to load dependency status",
+      dependencySaveFailed: "Failed to save dependency settings",
+      dependencyInstallFailed: "Failed to install FFmpeg",
+      dependencyInstallSuccess: "FFmpeg installed. New video tasks can use it immediately.",
+      dependencySaved: "Dependency settings saved. New video tasks can use it immediately.",
+      dependencyCustomPathRequired: "Enter or choose an ffmpeg path first",
+      dependencyCheckReady: "FFmpeg is ready",
+      dependencyCheckMissing: "FFmpeg is still missing",
       toolsModuleTitle: "Tools",
       toolsModuleDesc: "Manage document parsing, search engines, academic retrieval, built-in system tools, and MCP services.",
       toolsCategoryTitle: "Search Engines",
@@ -1203,6 +1228,9 @@ const enUS = {
     toolLimitAutoContinued: "No response received; summarizing the current results",
     toolLimitSummarizing: "Tool use stopped; summarizing current results",
     toolLimitDecisionFailed: "The decision was not applied; it may have timed out and started summarizing",
+    ffmpegGifRequiredTitle: "Animated sticker failed because FFmpeg is missing",
+    ffmpegGifRequiredDesc: "The video was generated, but converting it to an animated GIF requires FFmpeg. Configure or install FFmpeg; this task can still return the video.",
+    configureFfmpeg: "Configure or download FFmpeg",
     askCardInputPlaceholder: "Enter your reply…",
     askCardOtherPlaceholder: "Please specify…",
     askCardOtherOption: "Other",
@@ -1885,6 +1913,9 @@ const enUS = {
     importSuccessTitle: "Import Succeeded",
     importFailedTitle: "Import Failed",
     parseTaskError: "Failure reason",
+    ffmpegRequiredTitle: "Video parsing failed because FFmpeg is missing",
+    ffmpegRequiredDesc: "FFmpeg was not detected. Configure an existing FFmpeg path or download it into the LazyMind directory, then retry the import.",
+    configureFfmpeg: "Configure or download FFmpeg",
     taskSuspendSuccess: "Task suspended successfully",
     taskRetrySuccess: "Task retried successfully",
     taskDeleteSuccess: "Task deleted successfully",
@@ -2404,15 +2435,27 @@ const enUS = {
       steps: {
         openConsoleTitle: "Create or select a Google Cloud project",
         openConsoleDesc:
-          "Sign in to Google Cloud Console and create a new project or select an existing project that will hold the LazyMind OAuth configuration.",
+          "Sign in to Google Cloud Console and create a new project or select an existing project that will hold the LazyMind OAuth configuration. If you do not have a project, open the project selector and click New Project.",
+        openConsoleProjectName:
+          "Use a project name such as LazyMind OAuth. Keep Organization and Location at their defaults when there is no special requirement.",
+        openConsoleProjectId:
+          "The project ID can stay as Google's generated value. After creation, verify that the project selector at the top still points to this project.",
         enableApiTitle: "Enable Google Drive API",
         enableApiDesc:
           "In APIs and services, enable Google Drive API for the selected project. LazyMind calls the official Google Drive API for search, find, and read operations.",
+        enableApiSearch:
+          "If the Drive API page does not open directly, go to APIs & Services > Library, search for Google Drive API, open it, and click Enable.",
+        enableApiConfirmProject:
+          "Before enabling the API, verify again that the selected project is the project you just created or selected.",
         consentTitle: "Configure OAuth consent screen",
         consentDesc:
           "Open Audience in Google Auth Platform, verify that the selected project owns the OAuth client, then configure the app audience and test users.",
         consentUserType:
           "Choose External for personal Google accounts, or Internal if your Google Workspace organization restricts the app to members.",
+        consentAppInfo:
+          "Use LazyMind as the app name and select your current email as the user support email. Logo, homepage, privacy policy, and terms can be skipped or left empty during testing when the page allows it.",
+        consentContact:
+          "Use your current email as the developer contact email. Keep Publishing status as Testing; Google verification is not required for listed test users.",
         consentTestUsers:
           "If the app is in Testing status, click Add users under Test users, add the email that will sign in to Google Drive, save, and wait about one minute before authorizing again.",
         consentRetry:
@@ -2426,6 +2469,8 @@ const enUS = {
           "Application type must be Web application.",
         credentialsName:
           "Use a clear name such as LazyMind Google Drive so it is easy to identify later.",
+        credentialsJavaScriptOrigins:
+          "Authorized JavaScript origins can be left empty. LazyMind only needs Authorized redirect URIs.",
         redirectTitle: "Add the LazyMind callback URL",
         redirectDesc:
           "In Authorized redirect URIs, add the exact callback URL used by the frontend address you open in the browser.",
@@ -2437,9 +2482,13 @@ const enUS = {
           "Google permits HTTP only for localhost, 127.0.0.1, or ::1. Other callbacks must use HTTPS with a public top-level domain, and cannot use 10.x, 172.16-31.x, 192.168.x, or any other raw IP address.",
         redirectRecoveryHint:
           "If the browser and LazyMind run on the same machine, reopen the system through http://localhost or http://127.0.0.1. For LAN or remote access, configure a public HTTPS domain or an HTTPS tunnel such as Cloudflare Tunnel or ngrok, then open LazyMind from the new address. This page will generate the matching callback URI automatically.",
+        redirectQuickTunnelHint:
+          "When using Cloudflare Quick Tunnel, run cloudflared tunnel --url http://localhost:8090 first, open LazyMind from the generated https://*.trycloudflare.com URL, then register the callback shown here, for example https://*.trycloudflare.com/oauth/googledrive/data-source/callback.",
         copyCredentialsTitle: "Copy Client ID and Client Secret",
         copyCredentialsDesc:
           "After the Web client is created, copy the OAuth Client ID and Client Secret. Keep the secret private.",
+        copyPopup:
+          "After clicking Create, Google shows a result popup. Copy both Client ID and Client Secret before closing it. You can also reopen the Web client later from Credentials.",
         copyClientId:
           "Client ID maps to the OAuth Client ID field in LazyMind.",
         copyClientSecret:
@@ -3280,6 +3329,7 @@ const enUS = {
     memoryVersionEmpty: "No version history yet",
     memoryVersionSelectEmpty: "Select a version record to view details",
     memoryVersionDiffEmpty: "No diff content",
+    memoryVersionDiffDirectoryHint: "Directory {{status}}; no file content to compare",
     memoryVersionRange: "Version Change",
     memoryVersionChangedAt: "Changed At",
     memoryVersionChangeSource: "Change Source",

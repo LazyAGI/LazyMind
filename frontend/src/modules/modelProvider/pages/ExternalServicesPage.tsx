@@ -28,6 +28,7 @@ import {
   withModelProviderJsonOptions,
 } from "../api";
 import ToolManagementSection from "../components/ToolManagementSection";
+import DependencyInstallSection from "../components/DependencyInstallSection";
 import {
   DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
@@ -1114,6 +1115,7 @@ export default function ExternalServicesPage() {
 
           <div className="model-provider-tools-substack">
             {renderServiceCategory("parsing")}
+            <DependencyInstallSection />
             {renderServiceCategory("search")}
             {renderServiceCategory("academic")}
             {developerActive ? <ToolManagementSection view="builtin" /> : null}

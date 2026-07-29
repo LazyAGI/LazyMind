@@ -416,6 +416,10 @@ CREATE UNIQUE INDEX uk_system_user_preferences_user_id ON public.system_user_pre
 
 -- +migrate Dialect sqlite
 PRAGMA defer_foreign_keys = ON;
+DROP TABLE IF EXISTS plugin_repair_runs;
+DROP TABLE IF EXISTS plugin_generation_analyses;
+DROP TABLE IF EXISTS skill_market_installs;
+
 ALTER TABLE "acl_groups" RENAME TO "__v02_acl_groups";
 ALTER TABLE "acl_kbs" RENAME TO "__v02_acl_kbs";
 ALTER TABLE "acl_rows" RENAME TO "__v02_acl_rows";

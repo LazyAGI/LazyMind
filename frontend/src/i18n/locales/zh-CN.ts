@@ -391,6 +391,31 @@ const zhCN = {
       parsingCategoryTitle: "文档解析",
       parsingCategoryDesc: "集中管理 MinerU、PaddleOCR 等文档解析服务，用于把文件转换为可索引文本。",
       parsingSearchPlaceholder: "搜索文档解析服务",
+      dependencyCategoryTitle: "依赖安装",
+      dependencyCategoryDesc: "管理本地运行环境依赖。安装或指定路径后，视频转 GIF 与 MP4 解析等功能才会可用。",
+      dependencyFfmpegTitle: "FFmpeg",
+      dependencyFfmpegSummary: "用于视频转 GIF 动图，以及知识库 MP4 抽帧解析。",
+      dependencyFfmpegModalTitle: "配置 FFmpeg",
+      dependencyFfmpegImpact: "缺少 FFmpeg 时，动态表情包（video_to_gif）和知识库 MP4 解析会失败。",
+      dependencyInstallBundledTitle: "安装到 LazyMind 目录",
+      dependencyInstallBundledDesc: "下载 FFmpeg 到本地 LazyMind 运行目录（deps/ffmpeg/bin），不修改系统全局安装。",
+      dependencyInstallAction: "下载并安装",
+      dependencyInstalledAction: "已安装",
+      dependencyCustomPathTitle: "使用本机已有 FFmpeg",
+      dependencyCustomPathDesc: "填写 ffmpeg 可执行文件路径，或包含 ffmpeg/ffprobe 的目录；ffprobe 需与 ffmpeg 同目录。",
+      dependencyCustomPathPlaceholder: "例如 /opt/homebrew/bin/ffmpeg 或 /opt/homebrew/bin",
+      dependencyBrowseAction: "选择文件",
+      dependencySavePathAction: "保存路径",
+      dependencyRecheckAction: "重新检测",
+      dependencyDetected: "已检测到 ffmpeg={{ffmpeg}}，ffprobe={{ffprobe}}",
+      dependencyLoadFailed: "加载依赖状态失败",
+      dependencySaveFailed: "保存依赖配置失败",
+      dependencyInstallFailed: "安装 FFmpeg 失败",
+      dependencyInstallSuccess: "FFmpeg 已安装，新的视频任务可立即使用",
+      dependencySaved: "依赖配置已保存，新的视频任务可立即使用",
+      dependencyCustomPathRequired: "请先填写或选择 ffmpeg 路径",
+      dependencyCheckReady: "FFmpeg 已就绪",
+      dependencyCheckMissing: "仍未检测到可用的 FFmpeg",
       toolsModuleTitle: "工具",
       toolsModuleDesc: "集中管理文档解析、搜索引擎、学术检索、内置系统工具和 MCP 服务。",
       toolsCategoryTitle: "搜索引擎",
@@ -1161,6 +1186,9 @@ const zhCN = {
     toolLimitAutoContinued: "等待超时，系统正在总结当前成果",
     toolLimitSummarizing: "已停止工具调用，正在整理当前成果",
     toolLimitDecisionFailed: "操作未生效，可能已超时并开始总结，请留意后续输出",
+    ffmpegGifRequiredTitle: "缺少 FFmpeg，动态表情包生成失败",
+    ffmpegGifRequiredDesc: "视频已经生成，但转换 GIF 动态表情包需要 FFmpeg。请配置已有路径或下载安装；当前任务仍可返回视频结果。",
+    configureFfmpeg: "配置或下载 FFmpeg",
     askCardInputPlaceholder: "输入回复…",
     askCardOtherPlaceholder: "请输入其他内容…",
     askCardOtherOption: "其他",
@@ -1850,6 +1878,9 @@ const zhCN = {
     importSuccessTitle: "导入成功",
     importFailedTitle: "导入失败",
     parseTaskError: "失败原因",
+    ffmpegRequiredTitle: "缺少 FFmpeg，视频解析失败",
+    ffmpegRequiredDesc: "当前环境未检测到 FFmpeg。请先配置已有的 FFmpeg 路径，或下载并安装到 LazyMind 目录，然后重试入库。",
+    configureFfmpeg: "配置或下载 FFmpeg",
     taskSuspendSuccess: "中止任务成功",
     taskRetrySuccess: "重试任务成功",
     taskDeleteSuccess: "删除任务成功",
@@ -2338,15 +2369,27 @@ const zhCN = {
       steps: {
         openConsoleTitle: "创建或选择 Google Cloud 项目",
         openConsoleDesc:
-          "登录 Google Cloud Console，创建一个新项目，或选择已有项目来保存 LazyMind 使用的 OAuth 配置。",
+          "登录 Google Cloud Console，创建一个新项目，或选择已有项目来保存 LazyMind 使用的 OAuth 配置。没有现成项目时，点击项目下拉框，再点击“新建项目”。",
+        openConsoleProjectName:
+          "项目名称可填写 LazyMind OAuth；组织/位置没有要求时保持默认即可。",
+        openConsoleProjectId:
+          "项目 ID 可保持 Google 自动生成；创建后确认页面顶部项目选择器仍选中这个项目。",
         enableApiTitle: "启用 Google Drive API",
         enableApiDesc:
           "在 API 和服务中，为当前项目启用 Google Drive API。LazyMind 会调用 Google Drive 官方 API 完成 search、find 和 read。",
+        enableApiSearch:
+          "如果没有直接打开到 Drive API 页面，进入“API 和服务 > 库”，搜索 Google Drive API，打开后点击“启用”。",
+        enableApiConfirmProject:
+          "启用前再次确认右上角/顶部项目是刚才创建或选择的项目，避免把 API 开到别的项目里。",
         consentTitle: "配置 OAuth 同意屏幕",
         consentDesc:
           "进入 Google Auth Platform 的 Audience，确认当前项目和 OAuth 客户端所属项目一致，再配置应用受众和测试用户。",
         consentUserType:
           "个人 Google 账号请选择 External；如果是 Google Workspace 且只允许组织内成员使用，可以选择 Internal。",
+        consentAppInfo:
+          "应用名称可填写 LazyMind；用户支持邮箱选择当前登录邮箱；Logo、主页、隐私政策、服务条款在测试阶段可先留空或按页面要求跳过。",
+        consentContact:
+          "开发者联系邮箱填写当前登录邮箱。发布状态保持 Testing，不需要提交 Google 验证即可让测试用户授权。",
         consentTestUsers:
           "如果应用处于 Testing 状态，在 Test users 中点击 Add users，添加实际登录 Google Drive 的邮箱并保存；等待约一分钟后再授权，否则 Google 会返回 access_denied。",
         consentRetry:
@@ -2360,6 +2403,8 @@ const zhCN = {
           "Application type 必须选择 Web application。",
         credentialsName:
           "建议命名为 LazyMind Google Drive，方便后续在 Google Cloud 和 LazyMind 中识别。",
+        credentialsJavaScriptOrigins:
+          "Authorized JavaScript origins 可以留空；LazyMind 只需要配置 Authorized redirect URIs。",
         redirectTitle: "添加 LazyMind 回调地址",
         redirectDesc:
           "在 Authorized redirect URIs 中添加 LazyMind 前端实际使用的 OAuth 回调地址，必须和浏览器打开的系统地址一致。",
@@ -2371,9 +2416,13 @@ const zhCN = {
           "Google 仅允许 localhost、127.0.0.1 或 ::1 使用 HTTP；其他回调必须使用带公共顶级域名的 HTTPS，并且不能使用 10.x、172.16-31.x、192.168.x 或其他原始 IP 地址。",
         redirectRecoveryHint:
           "如果浏览器和 LazyMind 在同一台机器上，请改用 http://localhost 或 http://127.0.0.1 打开系统；如果通过局域网或远程访问，请配置 HTTPS 公共域名或 Cloudflare Tunnel/ngrok 等 HTTPS 隧道，再从新地址打开系统。页面会自动生成对应的回调 URI。",
+        redirectQuickTunnelHint:
+          "使用 Cloudflare Quick Tunnel 时，先运行 cloudflared tunnel --url http://localhost:8090，然后从生成的 https://*.trycloudflare.com 打开 LazyMind，并把本页展示的 https://*.trycloudflare.com/oauth/googledrive/data-source/callback 填到 Authorized redirect URIs。",
         copyCredentialsTitle: "复制 Client ID 和 Client Secret",
         copyCredentialsDesc:
           "Web 客户端创建完成后，复制 OAuth Client ID 和 Client Secret。Client Secret 需要保密。",
+        copyPopup:
+          "点击 Create 后，Google 会弹出创建结果；先复制 Client ID 和 Client Secret，再关闭弹窗。关闭后也可以在 Credentials 页面重新打开这个 Web client 查看。",
         copyClientId:
           "Client ID 对应 LazyMind 弹窗中的 OAuth Client ID 字段。",
         copyClientSecret:
@@ -3150,6 +3199,7 @@ const zhCN = {
     memoryVersionEmpty: "暂无历史版本",
     memoryVersionSelectEmpty: "请选择一条版本记录查看详情",
     memoryVersionDiffEmpty: "暂无差异内容",
+    memoryVersionDiffDirectoryHint: "目录{{status}}，无文件内容可对比",
     memoryVersionRange: "版本变化",
     memoryVersionChangedAt: "修改时间",
     memoryVersionChangeSource: "修改来源",

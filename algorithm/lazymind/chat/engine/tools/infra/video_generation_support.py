@@ -21,6 +21,7 @@ from lazymind.chat.service.utils.static_file_url import (
     basename_from_path,
     static_file_url_from_any,
 )
+from lazymind.common.ffmpeg_deps import resolve_ffmpeg_binaries
 
 _DEFAULT_VIDEO_RESOLUTION = '480p'
 _DEFAULT_VIDEO_DURATION = 5
@@ -204,10 +205,14 @@ def run_video_to_gif(
     dest = dest_dir / f'{uuid.uuid4().hex}.gif'
     palette = dest_dir / f'{uuid.uuid4().hex}_palette.png'
 
+    ffmpeg_bin, _ffprobe_bin = resolve_ffmpeg_binaries()
+    if not ffmpeg_bin:
+        raise RuntimeError('ffmpeg not found')
+
     # Two-pass palette conversion: better colors and clearer frame diffs than single-pass gif.
     # Put -ss/-t before -i so they are input options (required for paletteuse's second -i).
     vf = f'fps={out_fps},scale={out_width}:-1:flags=lanczos'
-    input_opts = ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error']
+    input_opts = [ffmpeg_bin, '-y', '-hide_banner', '-loglevel', 'error']
     if start is not None:
         input_opts.extend(['-ss', str(float(start))])
     if duration is not None:

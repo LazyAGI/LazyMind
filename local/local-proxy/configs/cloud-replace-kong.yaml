@@ -19,8 +19,9 @@ cors:
 
 timeouts:
   connect: 10s
-  read: 30s
-  write: 30s
+  # Upstream ResponseHeaderTimeout. FFmpeg bundled install downloads before responding.
+  read: 30m
+  write: 30m
 
 log:
   level: "info"

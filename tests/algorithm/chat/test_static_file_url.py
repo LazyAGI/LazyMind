@@ -1,6 +1,7 @@
 import lazymind.chat.service.utils.static_file_url as sfu_mod
 
 from lazymind.chat.service.utils.static_file_url import (
+    _upload_root,
     basename_from_path,
     local_path_from_static_file_url,
     resolve_local_image_path,
@@ -11,6 +12,28 @@ from lazymind.chat.service.utils.static_file_url import (
 
 def _mock_upload_root(monkeypatch, upload_root):
     monkeypatch.setattr(sfu_mod, '_upload_root', lambda: str(upload_root.resolve()))
+
+
+def test_upload_root_prefers_env_over_config_default(tmp_path, monkeypatch):
+    upload_root = tmp_path / 'local-uploads'
+    upload_root.mkdir()
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(upload_root))
+    monkeypatch.delenv('LAZYMIND_SHARED_UPLOAD_DIR', raising=False)
+    assert _upload_root() == str(upload_root.resolve())
+
+
+def test_local_path_from_marker_uses_env_upload_root(tmp_path, monkeypatch):
+    upload_root = tmp_path / 'local-uploads'
+    image = upload_root / 'tmp' / 'users' / 'u1' / 'dog.jpg'
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b'jpg')
+    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(upload_root))
+    monkeypatch.delenv('LAZYMIND_SHARED_UPLOAD_DIR', raising=False)
+
+    remapped = local_path_from_static_file_url(
+        '/var/lib/lazymind/uploads/tmp/users/u1/dog.jpg'
+    )
+    assert remapped == str(image.resolve())
 
 
 def test_static_file_url_from_full_path_signs_upload_relative_path(tmp_path, monkeypatch):

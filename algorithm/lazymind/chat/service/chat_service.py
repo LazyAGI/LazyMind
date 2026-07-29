@@ -126,6 +126,28 @@ def _normalize_kb_id_filter(raw_kb_id: Any) -> str | list[str] | None:
     return None
 
 
+def _active_skills_from_history(
+    history: list[dict[str, Any]],
+    available_skills: list[str] | None,
+) -> list[str]:
+    available = [str(skill) for skill in (available_skills or []) if str(skill).strip()]
+    activated = set()
+    for message in history:
+        for tool_call in message.get('tool_calls') or []:
+            function = tool_call.get('function') if isinstance(tool_call, dict) else None
+            if not isinstance(function, dict) or function.get('name') != 'get_skill':
+                continue
+            arguments = function.get('arguments', {})
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    continue
+            if isinstance(arguments, dict) and isinstance(arguments.get('name'), str):
+                activated.add(arguments['name'].strip())
+    return [skill for skill in available if skill in activated]
+
+
 def check_sensitive_content(query: str) -> Optional[SensitiveMatch]:
     return sensitive_filter.evaluate(query)
 
@@ -638,6 +660,10 @@ async def _handle_chat_impl(
     selected_skills = agent.available_skills
     if task_profile is not None:
         selected_skills = select_skill_candidates(agent.available_skills, language_query, task_profile)
+        selected_skills = list(dict.fromkeys([
+            *_active_skills_from_history(agent_history, agent.available_skills),
+            *(selected_skills or []),
+        ]))
         skill_config = selected_skills or False
     set_trace_context({
         'trace_id': conversation.session_id,

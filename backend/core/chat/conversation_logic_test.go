@@ -436,11 +436,29 @@ func TestBuildChatHistoryExtPreservesMultimodalInput(t *testing.T) {
 
 func TestBuildChatHistoryExtUsesDisplayQueryForAutomatedContext(t *testing.T) {
 	ext := buildChatHistoryExt(map[string]any{
-		"input":         []any{map[string]any{"input_type": "text", "text": "large internal model context"}},
+		"input": []any{
+			map[string]any{"input_type": "text", "text": "large internal model context"},
+			map[string]any{"input_type": "image", "uri": "/uploads/dog.jpg"},
+		},
 		"display_query": "用户任务描述",
 	}, "用户任务描述")
-	if !strings.Contains(string(ext), "用户任务描述") || strings.Contains(string(ext), "large internal model context") {
-		t.Fatalf("history ext must contain display query only: %s", ext)
+	var payload struct {
+		Input []map[string]any `json:"input"`
+	}
+	if err := json.Unmarshal(ext, &payload); err != nil {
+		t.Fatalf("unmarshal ext: %v", err)
+	}
+	if len(payload.Input) != 2 {
+		t.Fatalf("expected text+image input items, got %#v", payload.Input)
+	}
+	if got := payload.Input[0]["text"]; got != "用户任务描述" {
+		t.Fatalf("expected display query text, got %#v", got)
+	}
+	if strings.Contains(string(ext), "large internal model context") {
+		t.Fatalf("history ext must not keep internal model text: %s", ext)
+	}
+	if got := payload.Input[1]["uri"]; got != "/uploads/dog.jpg" {
+		t.Fatalf("expected image uri to be preserved, got %#v", got)
 	}
 }
 

@@ -63,6 +63,7 @@ func TestRepositorySQLiteFreshAndUpgradePaths(t *testing.T) {
 		runRepositorySQLiteMigrations(t, dsn)
 		db := openRepositorySQLite(t, dsn)
 		assertGORMModelsMatchDatabase(t, db)
+		assertSQLiteRepairIndexes(t, db)
 		assertSQLiteCredentialColumns(t, db)
 	})
 
@@ -111,6 +112,7 @@ INSERT INTO user_model_provider_groups (
 		}
 
 		assertGORMModelsMatchDatabase(t, db)
+		assertSQLiteRepairIndexes(t, db)
 		assertSQLiteCredentialColumns(t, db)
 		var row orm.UserModelProviderGroup
 		if err := db.Where("id = ?", "legacy-group").Take(&row).Error; err != nil {
@@ -245,6 +247,23 @@ func assertSQLiteCredentialColumns(t *testing.T, db *gorm.DB) {
 	for _, column := range []string{"api_key", "api_key_ciphertext", "credential_version"} {
 		if !db.Migrator().HasColumn(&orm.UserModelProviderGroup{}, column) {
 			t.Fatalf("SQLite user_model_provider_groups is missing column %s", column)
+		}
+	}
+}
+
+func assertSQLiteRepairIndexes(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, check := range []struct {
+		model any
+		index string
+	}{
+		{&orm.SkillMarketInstall{}, "idx_skill_market_installs_user"},
+		{&orm.SkillMarketInstall{}, "idx_skill_market_installs_skill"},
+		{&orm.PluginGenerationAnalysis{}, "idx_plugin_generation_analyses_draft"},
+		{&orm.PluginRepairRun{}, "idx_plugin_repair_runs_draft"},
+	} {
+		if !db.Migrator().HasIndex(check.model, check.index) {
+			t.Fatalf("SQLite migration is missing index %s", check.index)
 		}
 	}
 }

@@ -42,12 +42,20 @@ function buildGuideSteps(t: TFunction): GuideStep[] {
       description: t(stepKey("openConsoleDesc")),
       linkLabel: t("admin.dataSourceGoogleDriveSetupGuide.openConsole"),
       linkHref: GOOGLE_CLOUD_CONSOLE_URL,
+      details: [
+        t(stepKey("openConsoleProjectName")),
+        t(stepKey("openConsoleProjectId")),
+      ],
     },
     {
       title: t(stepKey("enableApiTitle")),
       description: t(stepKey("enableApiDesc")),
       linkLabel: t("admin.dataSourceGoogleDriveSetupGuide.openDriveApi"),
       linkHref: GOOGLE_DRIVE_API_URL,
+      details: [
+        t(stepKey("enableApiSearch")),
+        t(stepKey("enableApiConfirmProject")),
+      ],
     },
     {
       title: t(stepKey("consentTitle")),
@@ -56,6 +64,8 @@ function buildGuideSteps(t: TFunction): GuideStep[] {
       linkHref: GOOGLE_AUTH_AUDIENCE_URL,
       details: [
         t(stepKey("consentUserType")),
+        t(stepKey("consentAppInfo")),
+        t(stepKey("consentContact")),
         t(stepKey("consentTestUsers")),
         t(stepKey("consentRetry")),
         t(stepKey("consentScopes")),
@@ -69,6 +79,7 @@ function buildGuideSteps(t: TFunction): GuideStep[] {
       details: [
         t(stepKey("credentialsType")),
         t(stepKey("credentialsName")),
+        t(stepKey("credentialsJavaScriptOrigins")),
       ],
     },
     {
@@ -84,12 +95,14 @@ function buildGuideSteps(t: TFunction): GuideStep[] {
         }),
         t(stepKey(redirectUriSupported ? "redirectOriginHint" : "redirectUnsupportedHint")),
         t(stepKey(redirectUriSupported ? "redirectHttpsHint" : "redirectRecoveryHint")),
+        t(stepKey("redirectQuickTunnelHint")),
       ],
     },
     {
       title: t(stepKey("copyCredentialsTitle")),
       description: t(stepKey("copyCredentialsDesc")),
       details: [
+        t(stepKey("copyPopup")),
         t(stepKey("copyClientId")),
         t(stepKey("copyClientSecret")),
       ],
