@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	_ "time/tzdata" // embed IANA zones for packaged desktop runtimes
 
 	"gorm.io/gorm"
 
@@ -71,10 +72,14 @@ func CancelSchedule(ctx context.Context, db *gorm.DB, userID, id string) error {
 // Only standard 5-field cron is supported ("minute hour dom month dow").
 // Returns an error if the expression is invalid.
 func nextCronTime(expr, tz string) (time.Time, error) {
+	return nextCronTimeAfter(expr, tz, time.Now())
+}
+
+func nextCronTimeAfter(expr, tz string, after time.Time) (time.Time, error) {
 	// Lightweight 5-field cron parser.  Supports */N, ranges, and lists.
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		loc = time.UTC
+		return time.Time{}, fmt.Errorf("invalid cron expression: unsupported timezone %q: %w", tz, err)
 	}
 	interval, cadenceUnit, cronExpr, err := parseCadenceExpr(expr)
 	if err != nil {
@@ -85,7 +90,7 @@ func nextCronTime(expr, tz string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("cron expression must have 5 fields (minute hour dom month dow)")
 	}
 	// Use a simple tick-forward: start from now + 1 minute, advance up to 1 year.
-	now := time.Now().In(loc)
+	now := after.In(loc)
 	t := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), 0, 0, loc).Add(time.Minute)
 	for i := 0; i < 5*525600; i++ { // cover long month cadences up to roughly four years
 		if matchCron(t, fields) && matchCadence(t, interval, cadenceUnit) {
@@ -99,7 +104,7 @@ func nextCronTime(expr, tz string) (time.Time, error) {
 func previousCronTime(expr, tz string, before time.Time) (time.Time, error) {
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		loc = time.UTC
+		return time.Time{}, fmt.Errorf("invalid cron expression: unsupported timezone %q: %w", tz, err)
 	}
 	interval, cadenceUnit, cronExpr, err := parseCadenceExpr(expr)
 	if err != nil {
@@ -230,6 +235,7 @@ func truncateRunes(s string, maxRunes int, suffix string) string {
 // so no periodic reconciler is needed here.
 func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) {
 	go func() {
+		repairFutureScheduleNextRunsAt(ctx, db, time.Now().UTC())
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -242,6 +248,35 @@ func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) {
 			}
 		}
 	}()
+}
+
+// repairFutureScheduleNextRunsAt corrects future timestamps produced when a
+// packaged runtime could not load a schedule's IANA timezone and fell back to
+// UTC. Overdue timestamps are preserved so the regular scheduler can catch up.
+func repairFutureScheduleNextRunsAt(ctx context.Context, db *gorm.DB, now time.Time) {
+	var schedules []orm.UserSchedule
+	if err := db.WithContext(ctx).
+		Where("enabled = true AND next_run_at > ?", now.UTC()).
+		Find(&schedules).Error; err != nil {
+		fmt.Printf("[Scheduler] repair next run query failed: %v\n", err)
+		return
+	}
+	for _, schedule := range schedules {
+		next, err := nextCronTimeAfter(schedule.CronExpr, schedule.Timezone, now)
+		if err != nil {
+			fmt.Printf("[Scheduler] repair next run skipped schedule %s: %v\n", schedule.ID, err)
+			continue
+		}
+		next = next.UTC()
+		if schedule.NextRunAt.Equal(next) {
+			continue
+		}
+		if err := db.WithContext(ctx).Model(&orm.UserSchedule{}).
+			Where("id = ? AND next_run_at = ?", schedule.ID, schedule.NextRunAt).
+			Update("next_run_at", next).Error; err != nil {
+			fmt.Printf("[Scheduler] repair next run failed for schedule %s: %v\n", schedule.ID, err)
+		}
+	}
 }
 
 // maxConcurrentFires is the maximum number of schedules fired concurrently in one tick.
