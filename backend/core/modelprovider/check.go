@@ -620,7 +620,12 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if apiKey == "" {
-		apiKey = strings.TrimSpace(group.APIKey)
+		storedAPIKey, err := apiKeyForGroup(db.WithContext(r.Context()), &group)
+		if err != nil {
+			common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
+			return
+		}
+		apiKey = strings.TrimSpace(storedAPIKey)
 	}
 	apiKeyRequired := isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, urlStr)
 	if apiKey == "" && apiKeyRequired {

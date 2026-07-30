@@ -102,8 +102,11 @@ func defaultConfig() Config {
 		},
 		Timeouts: TimeoutConfig{
 			Connect: 10 * time.Second,
-			Read:    30 * time.Second,
-			Write:   30 * time.Second,
+			// Read maps to upstream ResponseHeaderTimeout. Bundled FFmpeg install
+			// downloads hundreds of MB before writing any response body, so keep this
+			// aligned with the frontend install request timeout (30 minutes).
+			Read:  30 * time.Minute,
+			Write: 30 * time.Minute,
 		},
 		Log: LogConfig{
 			Level: "info",

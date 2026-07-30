@@ -201,6 +201,70 @@ func runRepositorySQLiteMigrations(t *testing.T, dsn string) {
 
 }
 
+func TestRepositorySQLiteAddsAcceptedUserAgreementColumnOnUpgrade(t *testing.T) {
+	dsn := t.TempDir() + "/agreement-upgrade.db"
+	runRepositorySQLiteMigrations(t, dsn)
+
+	raw := openRawSQLite(t, dsn)
+	if _, err := raw.Exec(`ALTER TABLE user_ui_preferences DROP COLUMN accepted_user_agreement_version`); err != nil {
+		t.Fatalf("strip agreement column to simulate legacy aggregate schema: %v", err)
+	}
+	if _, err := raw.Exec(`
+DELETE FROM schema_migration_history
+WHERE name = 'v0_2/add_accepted_user_agreement_version'
+   OR CAST(version AS TEXT) LIKE '%114817%'`); err != nil {
+		t.Fatalf("remove agreement migration history: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close legacy preferences database: %v", err)
+	}
+
+	runRepositorySQLiteMigrations(t, dsn)
+	db := openRepositorySQLite(t, dsn)
+	if !db.Migrator().HasColumn(&orm.UserUIPreferences{}, "accepted_user_agreement_version") {
+		t.Fatal("SQLite upgrade did not add accepted_user_agreement_version")
+	}
+}
+
+func TestRepositorySQLiteFreshInstallAppliesPostAggregateAgreementMigration(t *testing.T) {
+	dir := t.TempDir()
+	writeMigrationPair(t, versionModeDir(t, dir, "v0_2"), "20260723183515_baseline", `
+-- +migrate Dialect sqlite
+CREATE TABLE user_ui_preferences (
+  user_id varchar(255) PRIMARY KEY,
+  chat_preference_notice_dismissed numeric NOT NULL DEFAULT false,
+  developer_mode_active numeric NOT NULL DEFAULT false,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL
+);
+`, "DROP TABLE user_ui_preferences;")
+	writeMigrationPair(t, devModeDir(t, dir, "v0_2"), "20260728114817_add_accepted_user_agreement_version", `
+-- +migrate Dialect postgres
+ALTER TABLE user_ui_preferences
+    ADD COLUMN IF NOT EXISTS accepted_user_agreement_version VARCHAR(64) NOT NULL DEFAULT '';
+-- +migrate Dialect sqlite
+ALTER TABLE user_ui_preferences ADD COLUMN accepted_user_agreement_version varchar(64) NOT NULL DEFAULT '';
+`, "ALTER TABLE user_ui_preferences DROP COLUMN accepted_user_agreement_version;")
+
+	dsn := t.TempDir() + "/fresh-agreement.db"
+	runner, err := NewRunner("sqlite", dsn, dir)
+	if err != nil {
+		t.Fatalf("create SQLite runner: %v", err)
+	}
+	defer runner.Close()
+	if err := runner.Up(0); err != nil {
+		t.Fatalf("fresh SQLite Up: %v", err)
+	}
+
+	var column string
+	if err := runner.db.QueryRow(`
+SELECT name FROM pragma_table_info('user_ui_preferences')
+WHERE name = 'accepted_user_agreement_version'
+`).Scan(&column); err != nil {
+		t.Fatalf("fresh install did not apply post-aggregate agreement column: %v", err)
+	}
+}
+
 func TestRepositorySQLiteRunsLaterVersionedMigrations(t *testing.T) {
 	dir := t.TempDir()
 	writeMigrationPair(t, versionModeDir(t, dir, "v0_2"), "20260723183515_baseline",

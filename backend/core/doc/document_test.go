@@ -907,3 +907,28 @@ func assertFolderHasZeroSize(t *testing.T, db *orm.DB, datasetID, folderID strin
 		t.Fatalf("expected folder document_size 0 after deleting child, got %d", got)
 	}
 }
+
+func TestRewriteCanonicalUploadPathMapsDockerMarker(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+
+	dockerPath := "/var/lib/lazymind/uploads/tmp/users/u1/files/upload_a/dog.jpg"
+	got := rewriteCanonicalUploadPath(dockerPath)
+	want := filepath.Join(root, "tmp", "users", "u1", "files", "upload_a", "dog.jpg")
+	if got != want {
+		t.Fatalf("rewriteCanonicalUploadPath = %q, want %q", got, want)
+	}
+
+	rel := fileRelativePath(dockerPath)
+	if rel != "tmp/users/u1/files/upload_a/dog.jpg" {
+		t.Fatalf("fileRelativePath = %q, want tmp/users/u1/files/upload_a/dog.jpg", rel)
+	}
+}
+
+func TestRewriteCanonicalUploadPathKeepsDockerRootUnchanged(t *testing.T) {
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", "/var/lib/lazymind/uploads")
+	dockerPath := "/var/lib/lazymind/uploads/tmp/dog.jpg"
+	if got := rewriteCanonicalUploadPath(dockerPath); got != dockerPath {
+		t.Fatalf("rewriteCanonicalUploadPath = %q, want unchanged %q", got, dockerPath)
+	}
+}

@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -64,5 +65,19 @@ func TestMigrationSQLWithoutDialectIsPortable(t *testing.T) {
 		if err != nil || got != body {
 			t.Fatalf("driver=%s SQL=%q err=%v", driver, got, err)
 		}
+	}
+}
+
+func TestBenignSQLiteColumnChangeError(t *testing.T) {
+	addSQL := "-- comment\nALTER TABLE user_ui_preferences ADD COLUMN accepted_user_agreement_version varchar(64) NOT NULL DEFAULT '';"
+	dropSQL := "ALTER TABLE user_ui_preferences DROP COLUMN accepted_user_agreement_version;"
+	if !isBenignSQLiteColumnChangeError(addSQL, errors.New("duplicate column name: accepted_user_agreement_version")) {
+		t.Fatal("expected duplicate ADD COLUMN error to be benign")
+	}
+	if !isBenignSQLiteColumnChangeError(dropSQL, errors.New("no such column: accepted_user_agreement_version")) {
+		t.Fatal("expected missing DROP COLUMN error to be benign")
+	}
+	if isBenignSQLiteColumnChangeError(addSQL, errors.New("no such table: user_ui_preferences")) {
+		t.Fatal("table missing errors must not be ignored")
 	}
 }

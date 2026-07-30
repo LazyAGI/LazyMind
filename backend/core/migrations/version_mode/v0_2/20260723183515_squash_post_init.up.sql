@@ -1581,6 +1581,7 @@ CREATE TABLE public.user_ui_preferences (
     user_id character varying(255) NOT NULL,
     chat_preference_notice_dismissed boolean DEFAULT false NOT NULL,
     developer_mode_active boolean DEFAULT false NOT NULL,
+    accepted_user_agreement_version character varying(64) DEFAULT ''::character varying NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -3541,7 +3542,7 @@ CREATE TABLE IF NOT EXISTS `user_selected_models` (`id` integer PRIMARY KEY AUTO
 
 CREATE TABLE IF NOT EXISTS `user_selected_providers` (`id` integer PRIMARY KEY AUTOINCREMENT,`user_id` varchar(255) NOT NULL,`user_name` varchar(255) NOT NULL DEFAULT "",`category` varchar(64) NOT NULL,`user_model_provider_group_id` varchar(64) NOT NULL,`share` boolean NOT NULL DEFAULT false,`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL);
 
-CREATE TABLE IF NOT EXISTS `user_ui_preferences` (`user_id` varchar(255),`chat_preference_notice_dismissed` numeric NOT NULL DEFAULT false,`developer_mode_active` numeric NOT NULL DEFAULT false,`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,PRIMARY KEY (`user_id`));
+CREATE TABLE IF NOT EXISTS `user_ui_preferences` (`user_id` varchar(255),`chat_preference_notice_dismissed` numeric NOT NULL DEFAULT false,`developer_mode_active` numeric NOT NULL DEFAULT false,`accepted_user_agreement_version` varchar(64) NOT NULL DEFAULT "",`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,PRIMARY KEY (`user_id`));
 
 CREATE TABLE IF NOT EXISTS `word_group_conflicts` (`id` varchar(64),`reason` text NOT NULL DEFAULT "",`word` text NOT NULL DEFAULT "",`description` text NOT NULL DEFAULT "",`group_ids` text NOT NULL DEFAULT "[]",`create_user_id` varchar(255) NOT NULL,`message_ids` text NOT NULL DEFAULT "[]",`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,`deleted_at` datetime,PRIMARY KEY (`id`));
 

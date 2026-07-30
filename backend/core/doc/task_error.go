@@ -18,6 +18,7 @@ const (
 	parseTaskErrCodeReparseFailed      = "2000728"
 	parseTaskErrCodeServiceUnavailable = "2000729"
 	parseTaskErrCodeTimeout            = "2000730"
+	parseTaskErrCodeFFmpegMissing      = "2000731"
 )
 
 const defaultParseTaskErrCode = parseTaskErrCodeSubmitFailed
@@ -39,6 +40,9 @@ var parseTaskErrorRules = []parseTaskErrorRule{
 	{keyword: "execute reparse task failed", code: parseTaskErrCodeReparseFailed},
 	{keyword: "connection refused", code: parseTaskErrCodeServiceUnavailable},
 	{keyword: "timeout", code: parseTaskErrCodeTimeout},
+	{keyword: "ffmpeg not found", code: parseTaskErrCodeFFmpegMissing},
+	{keyword: "ffprobe not found", code: parseTaskErrCodeFFmpegMissing},
+	{keyword: "no such file or directory: 'ffmpeg'", code: parseTaskErrCodeFFmpegMissing},
 }
 
 // legacyParseTaskErrText maps previously persisted Chinese messages to error codes.

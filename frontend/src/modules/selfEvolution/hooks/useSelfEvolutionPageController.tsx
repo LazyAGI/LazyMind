@@ -855,11 +855,14 @@ export function SelfEvolutionPageController({
 
   useEffect(() => {
     const { current, total } = streamingEvalProgress;
-    if (!total || current < total) {
+    const judgedCount = streamingEvalRows.filter((row) => row.judgeStatus === "done").length;
+    const effectiveTotal = total || streamingEvalRows.length;
+    const effectiveCurrent = Math.max(current, judgedCount);
+    if (!effectiveTotal || effectiveCurrent < effectiveTotal) {
       return;
     }
     const allJudged =
-      streamingEvalRows.length >= total &&
+      streamingEvalRows.length >= effectiveTotal &&
       streamingEvalRows.every((row) => row.judgeStatus === "done");
     if (!allJudged) {
       return;
@@ -874,11 +877,14 @@ export function SelfEvolutionPageController({
 
   useEffect(() => {
     const { current, total } = streamingAbtestProgress;
-    if (!total || current < total) {
+    const judgedCount = streamingAbtestRows.filter((row) => row.judgeStatus === "done").length;
+    const effectiveTotal = total || streamingAbtestRows.length;
+    const effectiveCurrent = Math.max(current, judgedCount);
+    if (!effectiveTotal || effectiveCurrent < effectiveTotal) {
       return;
     }
     const allJudged =
-      streamingAbtestRows.length >= total &&
+      streamingAbtestRows.length >= effectiveTotal &&
       streamingAbtestRows.every((row) => row.judgeStatus === "done");
     if (!allJudged) {
       return;

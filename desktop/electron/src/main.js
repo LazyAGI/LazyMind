@@ -1125,6 +1125,15 @@ ipcMain.handle("lazymind:selectFolder", async () => {
   const result = await dialog.showOpenDialog(activeWindow(), { properties: ["openDirectory"] });
   return result.canceled ? null : result.filePaths[0];
 });
+ipcMain.handle("lazymind:selectExecutable", async () => {
+  const result = await dialog.showOpenDialog(activeWindow(), {
+    properties: ["openFile"],
+    filters: process.platform === "win32"
+      ? [{ name: "FFmpeg", extensions: ["exe"] }]
+      : [{ name: "Executable", extensions: ["*"] }],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
 ipcMain.handle("lazymind:startupDiagnostics", () => startupDiagnosticsSnapshot());
 ipcMain.handle("lazymind:copyStartupLogs", () => {
   const text = startupLogEntries

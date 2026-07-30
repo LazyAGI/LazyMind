@@ -21,6 +21,7 @@ import (
 	"lazymind/core/scheduler"
 	skillv2handler "lazymind/core/skillv2/handler"
 	"lazymind/core/subagent"
+	"lazymind/core/systemdeps"
 	"lazymind/core/taskcenter"
 	"lazymind/core/userprefs"
 	"lazymind/core/wordgroup"
@@ -57,6 +58,10 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/datasets/{dataset}:unsetDefault", []string{"document.write"}, doc.UnsetDefault)
 	handleAPI(r, "GET", "/data-sources/local-fs-chat-setting", []string{"document.read"}, datasource.GetLocalFSChatSetting)
 	handleAPI(r, "PUT", "/data-sources/local-fs-chat-setting", []string{"document.write"}, datasource.SetLocalFSChatSetting)
+	handleAPI(r, "GET", "/system-dependencies/ffmpeg", []string{"document.read"}, systemdeps.GetFFmpegDependency)
+	handleAPI(r, "PUT", "/system-dependencies/ffmpeg", []string{"document.write"}, systemdeps.UpdateFFmpegDependency)
+	handleAPI(r, "POST", "/system-dependencies/ffmpeg:check", []string{"document.read"}, systemdeps.CheckFFmpegDependency)
+	handleAPI(r, "POST", "/system-dependencies/ffmpeg:install", []string{"document.write"}, systemdeps.InstallFFmpegDependency)
 	handleAPI(r, "GET", "/data-sources/database-connections", []string{"document.read"}, datasource.ListDatabaseConnections)
 	handleAPI(r, "POST", "/data-sources/database-connections", []string{"document.write"}, datasource.CreateDatabaseConnection)
 	handleAPI(r, "POST", "/data-sources/database-connections/{connection}:check", []string{"document.write"}, datasource.CheckDatabaseConnection)

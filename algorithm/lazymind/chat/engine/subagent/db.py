@@ -22,11 +22,25 @@ def _new_id(prefix: str) -> str:
     return f'{prefix}{uuid.uuid4().hex}'
 
 
+def _decode_json_value(raw: Any, default: Any = None) -> Any:
+    """Decode JSON that SQLite may return as TEXT or BLOB bytes."""
+    if raw is None:
+        return default
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode('utf-8')
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return default if default is not None else {}
+    return raw
+
+
 def _intent_text(raw: Any) -> Optional[str]:
     if raw is None:
         return None
     try:
-        data = json.loads(raw) if isinstance(raw, str) else raw
+        data = _decode_json_value(raw, default=raw)
     except (TypeError, ValueError):
         return str(raw).strip() or None
     if not isinstance(data, dict):
@@ -36,6 +50,52 @@ def _intent_text(raw: Any) -> Optional[str]:
         return legacy
     visible = {k: v for k, v in data.items() if k not in {'version', 'revision'} and v}
     return json.dumps(visible, ensure_ascii=False, separators=(',', ':')) if visible else None
+
+
+_SELECTED_SLOT_REVISIONS_SQL = (
+    'SELECT '
+    '  psr.slot, '
+    '  psr.list_index, '
+    '  psr.artifact_seq, '
+    '  psr.human_artifact_id, '
+    '  psr.content_snapshot, '
+    '  psr.change_source, '
+    '  psr.revision, '
+    '  pss.task_id '
+    'FROM plugin_slot_revisions psr '
+    'LEFT JOIN plugin_session_steps pss '
+    '  ON pss.session_id = psr.session_id '
+    '  AND pss.step_id   = psr.step_id '
+    '  AND pss.attempt   = psr.attempt '
+    'WHERE psr.session_id = :session_id '
+    '  AND psr.selected = TRUE '
+    'ORDER BY psr.slot ASC, COALESCE(psr.list_index, -1) ASC'
+)
+
+
+def _attach_sort_order(
+    rows: List[Dict[str, Any]],
+    order_lists: Dict[str, List[int]],
+) -> List[Dict[str, Any]]:
+    """Attach 1-based sort_order from plugin_slot_order lists (works on SQLite and Postgres)."""
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        slot = str(item.get('slot') or '')
+        list_index = item.get('list_index')
+        order_list = order_lists.get(slot) or []
+        if order_list and list_index is not None:
+            try:
+                item['sort_order'] = order_list.index(int(list_index)) + 1
+            except ValueError:
+                item['sort_order'] = int(list_index) + 1
+        elif list_index is not None:
+            item['sort_order'] = int(list_index) + 1
+        else:
+            item['sort_order'] = 1
+        out.append(item)
+    out.sort(key=lambda r: (str(r.get('slot') or ''), int(r.get('sort_order') or 1)))
+    return out
 
 
 class SubAgentDB:
@@ -234,6 +294,9 @@ class SubAgentDB:
         sort_order is the 1-based position in the order_list JSON array for the slot.
         Falls back to list_index + 1 when no order row exists for the slot.
 
+        Uses plain SQL + Python ordering so the same path works on SQLite and Postgres
+        (avoids jsonb_array_elements_text / WITH ORDINALITY).
+
         Returns a list of dicts with keys:
           slot, list_index, artifact_seq, human_artifact_id,
           content_snapshot, change_source, task_id, sort_order
@@ -242,39 +305,16 @@ class SubAgentDB:
         try:
             with self._conn() as conn:
                 rows = conn.execute(
-                    text(
-                        'SELECT '
-                        '  psr.slot, '
-                        '  psr.list_index, '
-                        '  psr.artifact_seq, '
-                        '  psr.human_artifact_id, '
-                        '  psr.content_snapshot, '
-                        '  psr.change_source, '
-                        '  psr.revision, '
-                        '  pss.task_id, '
-                        '  COALESCE(pos.sort_order, psr.list_index + 1) AS sort_order '
-                        'FROM plugin_slot_revisions psr '
-                        'LEFT JOIN plugin_session_steps pss '
-                        '  ON pss.session_id = psr.session_id '
-                        '  AND pss.step_id   = psr.step_id '
-                        '  AND pss.attempt   = psr.attempt '
-                        'LEFT JOIN ( '
-                        '  SELECT slot_id, val::int AS list_index, '
-                        '         (ord - 1 + 1) AS sort_order '
-                        '  FROM plugin_slot_order, '
-                        '       jsonb_array_elements_text(order_list) '
-                        '       WITH ORDINALITY AS t(val, ord) '
-                        '  WHERE session_id = :session_id '
-                        ') pos ON pos.slot_id = psr.slot_id '
-                        '      AND pos.list_index = psr.list_index '
-                        'WHERE psr.session_id = :session_id '
-                        '  AND psr.selected = TRUE '
-                        'ORDER BY psr.slot ASC, '
-                        '         COALESCE(pos.sort_order, psr.list_index + 1) ASC'
-                    ),
+                    text(_SELECTED_SLOT_REVISIONS_SQL),
                     {'session_id': session_id},
                 ).mappings().all()
-            return [dict(r) for r in rows]
+            base = [dict(r) for r in rows]
+            slots = {str(r.get('slot') or '') for r in base if r.get('slot')}
+            order_lists = {
+                slot: self.load_slot_order_list(session_id, slot)
+                for slot in slots
+            }
+            return _attach_sort_order(base, order_lists)
         except Exception:
             return []
 
@@ -288,6 +328,14 @@ class SubAgentDB:
         Returns None when not found or on any error.
         """
         try:
+            order_list = self.load_slot_order_list(session_id, slot)
+            list_index: Optional[int] = None
+            if order_list and 1 <= sort_order <= len(order_list):
+                list_index = order_list[sort_order - 1]
+            elif sort_order >= 1:
+                list_index = sort_order - 1
+            if list_index is None:
+                return None
             with self._conn() as conn:
                 row = conn.execute(
                     text(
@@ -304,25 +352,17 @@ class SubAgentDB:
                         '  ON pss.session_id = psr.session_id '
                         '  AND pss.step_id   = psr.step_id '
                         '  AND pss.attempt   = psr.attempt '
-                        'INNER JOIN ( '
-                        '  SELECT slot_id, val::int AS list_index '
-                        '  FROM plugin_slot_order, '
-                        '       jsonb_array_elements_text(order_list) '
-                        '       WITH ORDINALITY AS t(val, ord) '
-                        '  WHERE session_id = :session_id '
-                        '    AND (ord - 1 + 1) = :sort_order '
-                        ') pos ON pos.slot_id = psr.slot_id '
-                        '      AND pos.list_index = psr.list_index '
                         'WHERE psr.session_id = :session_id '
                         '  AND psr.slot = :slot '
                         '  AND psr.selected = TRUE '
+                        '  AND psr.list_index = :list_index '
                         'ORDER BY psr.list_index ASC '
                         'LIMIT 1'
                     ),
                     {
                         'session_id': session_id,
                         'slot': slot,
-                        'sort_order': sort_order,
+                        'list_index': list_index,
                     },
                 ).mappings().first()
             return dict(row) if row else None
@@ -386,9 +426,9 @@ class SubAgentDB:
                 ).mappings().first()
             if not row or not row.get('order_list'):
                 return []
-            order_list = row['order_list']
-            if isinstance(order_list, str):
-                order_list = json.loads(order_list)
+            order_list = _decode_json_value(row['order_list'], default=[])
+            if not isinstance(order_list, list):
+                return []
             return [int(x) for x in order_list]
         except Exception:
             return []
@@ -419,9 +459,8 @@ class SubAgentDB:
                         {'id': human_artifact_id},
                     ).mappings().first()
                 if ha is not None:
-                    raw = ha['value']
                     content_type = ha['content_type']
-                    value = json.loads(raw) if isinstance(raw, str) else (raw or {})
+                    value = _decode_json_value(ha['value'], default={})
             elif artifact_seq is not None and task_id:
                 with self._conn() as conn:
                     ar = conn.execute(
@@ -432,17 +471,10 @@ class SubAgentDB:
                         {'tid': task_id, 'key': row.get('slot', ''), 'seq': artifact_seq},
                     ).mappings().first()
                 if ar is not None:
-                    raw = ar['value']
                     content_type = ar['content_type']
-                    value = json.loads(raw) if isinstance(raw, str) else (raw or {})
+                    value = _decode_json_value(ar['value'], default={})
             elif content_snapshot is not None:
-                if isinstance(content_snapshot, str):
-                    try:
-                        value = json.loads(content_snapshot)
-                    except ValueError:
-                        value = {}
-                else:
-                    value = content_snapshot or {}
+                value = _decode_json_value(content_snapshot, default={})
         except Exception:
             pass
 
@@ -535,15 +567,8 @@ class SubAgentDB:
                             {'id': human_artifact_id},
                         ).mappings().first()
                     if ha_row is not None:
-                        raw = ha_row['value']
                         content_type = ha_row['content_type']
-                        if isinstance(raw, str):
-                            try:
-                                value = json.loads(raw)
-                            except ValueError:
-                                value = {}
-                        else:
-                            value = raw or {}
+                        value = _decode_json_value(ha_row['value'], default={})
                 elif artifact_seq is not None and task_id:
                     # AI revision: load from sub_agent_artifacts by exact seq.
                     with self._conn() as conn2:
@@ -555,27 +580,14 @@ class SubAgentDB:
                             {'tid': task_id, 'key': r['slot'], 'seq': artifact_seq},
                         ).mappings().first()
                     if art_row is not None:
-                        raw = art_row['value']
                         content_type = art_row['content_type']
-                        if isinstance(raw, str):
-                            try:
-                                value = json.loads(raw)
-                            except ValueError:
-                                value = {}
-                        else:
-                            value = raw or {}
+                        value = _decode_json_value(art_row['value'], default={})
                 else:
                     # Legacy fallback: content_snapshot for pre-migration rows.
                     snapshot = r['content_snapshot']
                     if snapshot is None:
                         continue
-                    if isinstance(snapshot, str):
-                        try:
-                            value = json.loads(snapshot)
-                        except ValueError:
-                            value = {}
-                    else:
-                        value = snapshot or {}
+                    value = _decode_json_value(snapshot, default={})
 
                 if value is None:
                     continue
@@ -900,39 +912,31 @@ class TaskQueryDB:
         """
         try:
             with self._conn() as conn:
-                rows = conn.execute(
-                    text(
-                        'SELECT '
-                        '  psr.slot, '
-                        '  psr.list_index, '
-                        '  psr.artifact_seq, '
-                        '  psr.human_artifact_id, '
-                        '  psr.content_snapshot, '
-                        '  psr.change_source, '
-                        '  psr.revision, '
-                        '  pss.task_id, '
-                        '  COALESCE(pos.sort_order, psr.list_index + 1) AS sort_order '
-                        'FROM plugin_slot_revisions psr '
-                        'LEFT JOIN plugin_session_steps pss '
-                        '  ON pss.session_id = psr.session_id '
-                        '  AND pss.step_id   = psr.step_id '
-                        '  AND pss.attempt   = psr.attempt '
-                        'LEFT JOIN ( '
-                        '  SELECT slot_id, val::int AS list_index, '
-                        '         (ord - 1 + 1) AS sort_order '
-                        '  FROM plugin_slot_order, '
-                        '       jsonb_array_elements_text(order_list) '
-                        '       WITH ORDINALITY AS t(val, ord) '
-                        '  WHERE session_id = :session_id '
-                        ') pos ON pos.slot_id = psr.slot_id '
-                        '      AND pos.list_index = psr.list_index '
-                        'WHERE psr.session_id = :session_id '
-                        '  AND psr.selected = TRUE '
-                        'ORDER BY psr.slot ASC, '
-                        '         COALESCE(pos.sort_order, psr.list_index + 1) ASC'
-                    ),
+                raw_rows = conn.execute(
+                    text(_SELECTED_SLOT_REVISIONS_SQL),
                     {'session_id': session_id},
                 ).mappings().all()
+            base = [dict(r) for r in raw_rows]
+            order_lists: Dict[str, List[int]] = {}
+            for item in base:
+                slot = str(item.get('slot') or '')
+                if not slot or slot in order_lists:
+                    continue
+                with self._conn() as conn2:
+                    order_row = conn2.execute(
+                        text(
+                            'SELECT order_list FROM plugin_slot_order '
+                            'WHERE session_id = :session_id AND slot_id = :slot'
+                        ),
+                        {'session_id': session_id, 'slot': slot},
+                    ).mappings().first()
+                decoded = _decode_json_value(
+                    (order_row or {}).get('order_list'), default=[]
+                )
+                order_lists[slot] = (
+                    [int(x) for x in decoded] if isinstance(decoded, list) else []
+                )
+            rows = _attach_sort_order(base, order_lists)
         except Exception:
             return []
 
@@ -959,9 +963,8 @@ class TaskQueryDB:
                             {'id': human_artifact_id},
                         ).mappings().first()
                     if ha is not None:
-                        raw = ha['value']
                         content_type = ha['content_type']
-                        value = json.loads(raw) if isinstance(raw, str) else (raw or {})
+                        value = _decode_json_value(ha['value'], default={})
                 elif artifact_seq is not None and task_id:
                     with self._conn() as conn2:
                         ar = conn2.execute(
@@ -972,12 +975,10 @@ class TaskQueryDB:
                             {'tid': task_id, 'key': artifact_key, 'seq': artifact_seq},
                         ).mappings().first()
                     if ar is not None:
-                        raw = ar['value']
                         content_type = ar['content_type']
-                        value = json.loads(raw) if isinstance(raw, str) else (raw or {})
+                        value = _decode_json_value(ar['value'], default={})
                 elif r.get('content_snapshot') is not None:
-                    snap = r['content_snapshot']
-                    value = json.loads(snap) if isinstance(snap, str) else (snap or {})
+                    value = _decode_json_value(r['content_snapshot'], default={})
             except Exception:
                 pass
 
