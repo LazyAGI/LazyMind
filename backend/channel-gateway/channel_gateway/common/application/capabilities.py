@@ -4,17 +4,22 @@ import datetime as dt
 import re
 from typing import Any, Sequence
 
-from channel_gateway.common.commands import (
+from channel_gateway.common.domain.commands import (
     CommandEnvelope,
     ResourceChange,
     SelectionContinuation,
 )
-from channel_gateway.common.database import GatewayStore
-from channel_gateway.common.lazymind import ChatOptions, LazyMindClient
+from channel_gateway.common.domain.chat import (
+    ChannelFeatureProfile,
+    ChatOptions,
+)
+from channel_gateway.common.ports.core import CapabilityClient
+from channel_gateway.common.ports.repository import NavigationRepository
 
 
 _LIST_LIMIT = 10
 _SNAPSHOT_TTL = dt.timedelta(minutes=10)
+_RESOLVED_RESOURCES_KEY = '_channel_gateway_resolved_resources'
 _CAPABILITY_LABELS = {
     'knowledge_base': '知识库',
     'skill': 'Skill',
@@ -32,7 +37,12 @@ class ActionMessage(RuntimeError):
 class CapabilityActions:
     """Resolves capability changes and applies their chat or persistent effects."""
 
-    def __init__(self, *, store: GatewayStore, client: LazyMindClient):
+    def __init__(
+        self,
+        *,
+        store: NavigationRepository,
+        client: CapabilityClient,
+    ):
         self._store = store
         self._client = client
 
@@ -43,6 +53,7 @@ class CapabilityActions:
         catalog: dict[str, Any],
         account_id: str,
         external_address_hash: str,
+        features: ChannelFeatureProfile,
     ) -> str:
         kinds = list(dict.fromkeys(kinds))
         self._store.clear_selection_snapshot(account_id, external_address_hash)
@@ -79,9 +90,19 @@ class CapabilityActions:
             (
                 '',
                 '你可以直接说“这轮使用哪个知识库”或“以后关闭哪个工具”。',
-                '当前渠道不提供 Plugin、SubAgent、后台 Task 和结构化 Ask。',
             )
         )
+        enabled_features = features.enabled_feature_labels
+        if not enabled_features:
+            lines.append(
+                '当前渠道不提供 Plugin、SubAgent、后台 Task 和结构化 Ask。'
+            )
+        else:
+            lines.append(
+                '当前渠道已开放 Core 能力：'
+                f'{"、".join(enabled_features)}。'
+                '实际可用项取决于你的账号与会话配置。'
+            )
         return '\n'.join(lines)
 
     def configure_capabilities(
@@ -96,6 +117,7 @@ class CapabilityActions:
         external_address_hash: str,
         owner_user_id: str,
         request_id: str,
+        conversation_id_override: str | None = None,
     ) -> str:
         if not changes and resolved_changes is None:
             return '请说明要使用或关闭哪个知识库、Skill、工具或个人习惯。'
@@ -111,7 +133,11 @@ class CapabilityActions:
                 source_messages=source_messages,
             )
         )
-        conversation_id = self._store.get_route(account_id, external_address_hash)
+        conversation_id = (
+            conversation_id_override
+            if conversation_id_override is not None
+            else self._store.get_route(account_id, external_address_hash)
+        )
         state = self._store.get_navigation_state(account_id, external_address_hash) or {}
         persistent = [
             pair for pair in resolved if pair[0].scope in ('conversation', 'global')
@@ -221,9 +247,33 @@ class CapabilityActions:
         external_address_hash: str,
         source_command: CommandEnvelope | None = None,
         source_messages: Sequence[str] = (),
+        continuation_catalog: dict[str, Any] | None = None,
     ) -> ResolvedChanges:
         resolved: ResolvedChanges = []
+        saved_resolved = catalog.get(_RESOLVED_RESOURCES_KEY)
+        saved_by_position = (
+            saved_resolved
+            if isinstance(saved_resolved, dict)
+            else {}
+        )
         for position, change in enumerate(changes):
+            saved = saved_by_position.get(str(position))
+            if (
+                isinstance(saved, dict)
+                and saved.get('resource_type') == change.resource_type
+                and isinstance(saved.get('items'), list)
+            ):
+                resolved.append(
+                    (
+                        change,
+                        [
+                            item
+                            for item in saved['items']
+                            if isinstance(item, dict)
+                        ],
+                    )
+                )
+                continue
             if change.resource_type == 'skill' and change.operation != 'use':
                 raise ActionMessage(
                     '当前渠道只支持本轮指定 Skill，不支持在渠道中关闭 Skill。'
@@ -283,6 +333,10 @@ class CapabilityActions:
                             command=source_command.model_dump(mode='json'),
                             grounding_messages=list(source_messages),
                             resource_change_index=position,
+                            prepared_catalog=self._continuation_catalog(
+                                continuation_catalog or catalog,
+                                resolved,
+                            ),
                         ).model_dump(mode='json')
                         if source_command is not None and source_messages
                         else None
@@ -304,6 +358,27 @@ class CapabilityActions:
                 )
             resolved.append((change, selected))
         return resolved
+
+    @staticmethod
+    def _continuation_catalog(
+        catalog: dict[str, Any],
+        resolved: ResolvedChanges,
+    ) -> dict[str, Any]:
+        prepared = dict(catalog)
+        saved_value = prepared.get(_RESOLVED_RESOURCES_KEY)
+        saved = (
+            dict(saved_value)
+            if isinstance(saved_value, dict)
+            else {}
+        )
+        for position, (change, items) in enumerate(resolved):
+            saved[str(position)] = {
+                'resource_type': change.resource_type,
+                'items': [dict(item) for item in items],
+            }
+        if saved:
+            prepared[_RESOLVED_RESOURCES_KEY] = saved
+        return prepared
 
     def apply_persistent_changes(
         self,

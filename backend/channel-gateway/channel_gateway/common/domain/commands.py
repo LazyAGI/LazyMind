@@ -21,6 +21,7 @@ class ActionKind(str, Enum):
     SELECTION_CHOOSE = 'selection.choose'
     CAPABILITY_LIST = 'capability.list'
     CAPABILITY_CONFIGURE = 'capability.configure'
+    WORKFLOW_INVOKE = 'workflow.invoke'
     CLARIFY = 'clarify'
 
 
@@ -301,6 +302,32 @@ class CapabilityConfigureParameters(_StrictModel):
     )
 
 
+class WorkflowInvokeParameters(_StrictModel):
+    workflow_ref: str = Field(
+        min_length=1,
+        max_length=512,
+        description=(
+            'Exact workflow ref from state.available_workflows. Never invent or '
+            'rewrite a workflow ref.'
+        ),
+    )
+    message: str = Field(
+        min_length=1,
+        max_length=4000,
+        description=(
+            'The complete verbatim user task to execute with the selected workflow.'
+        ),
+    )
+    evidence: list[Evidence] = Field(
+        min_length=1,
+        max_length=8,
+        description=(
+            'Verbatim substrings showing that the selected workflow directly '
+            'matches the user request.'
+        ),
+    )
+
+
 class ClarifyParameters(_StrictModel):
     clarification_question: str = Field(
         min_length=1,
@@ -346,6 +373,13 @@ _CAPABILITY_CONFIGURE_DESCRIPTION = (
     'supported turn, conversation, or global scope. Return the complete command for a new '
     'request, including a numeric selector from a displayed list. Use selection.choose only '
     'for a pure answer to state.latest_selection.has_continuation.'
+)
+_WORKFLOW_INVOKE_DESCRIPTION = (
+    'Invoke one available workflow when it directly matches the primary requested '
+    'deliverable. Select workflow_ref exactly from state.available_workflows and '
+    'preserve the complete user task verbatim. Do not use for an incidental sub-step, '
+    'for a workflow absent from the supplied catalog, or when the user explicitly '
+    'rejects that workflow.'
 )
 _CLARIFY_DESCRIPTION = (
     'Ask one clarification question when no command and required parameters can be selected '
@@ -422,6 +456,15 @@ class CapabilityConfigureCommand(_CommandBase):
     parameters: CapabilityConfigureParameters
 
 
+class WorkflowInvokeCommand(_CommandBase):
+    name: ClassVar[ActionKind] = ActionKind.WORKFLOW_INVOKE
+    description: ClassVar[str] = _WORKFLOW_INVOKE_DESCRIPTION
+    command: Literal[ActionKind.WORKFLOW_INVOKE] = Field(
+        description=_WORKFLOW_INVOKE_DESCRIPTION
+    )
+    parameters: WorkflowInvokeParameters
+
+
 class ClarifyCommand(_CommandBase):
     name: ClassVar[ActionKind] = ActionKind.CLARIFY
     description: ClassVar[str] = _CLARIFY_DESCRIPTION
@@ -439,6 +482,7 @@ COMMAND_TYPES = (
     SelectionChooseCommand,
     CapabilityListCommand,
     CapabilityConfigureCommand,
+    WorkflowInvokeCommand,
     ClarifyCommand,
 )
 _CommandUnion = reduce(or_, COMMAND_TYPES)
@@ -456,6 +500,8 @@ COMMAND_SELECTION_RULES = (
     'questions about information stored inside a resource are chat.',
     'Use selection.choose only for a pure numbered answer when '
     'state.latest_selection.has_continuation is true.',
+    'Use workflow.invoke only with an exact ref from state.available_workflows and '
+    'only when that workflow directly serves the primary requested deliverable.',
 )
 
 
@@ -467,6 +513,7 @@ class SelectionContinuation(_StrictModel):
     command: dict[str, Any]
     grounding_messages: list[GroundingMessage] = Field(min_length=1, max_length=10)
     resource_change_index: int | None = Field(default=None, ge=0, le=7)
+    prepared_catalog: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode='after')
     def validate_command_shape(self) -> 'SelectionContinuation':
@@ -486,15 +533,37 @@ class SelectionContinuation(_StrictModel):
         return self
 
 
-def command_registry() -> dict[str, Any]:
+def command_registry(
+    allowed_commands: set[ActionKind] | None = None,
+) -> dict[str, Any]:
+    command_types = tuple(
+        command_type
+        for command_type in COMMAND_TYPES
+        if (
+            allowed_commands is None
+            or command_type.name in allowed_commands
+        )
+    )
+    if not command_types:
+        raise ValueError('command registry must contain at least one command')
+    adapter = (
+        COMMAND_ADAPTER
+        if command_types == COMMAND_TYPES
+        else TypeAdapter(
+            Annotated[
+                reduce(or_, command_types),
+                Field(discriminator='command'),
+            ]
+        )
+    )
     return {
         'schema_version': SCHEMA_VERSION,
         'commands': [
             {'name': command_type.name.value, 'description': command_type.description}
-            for command_type in COMMAND_TYPES
+            for command_type in command_types
         ],
         'selection_rules': list(COMMAND_SELECTION_RULES),
-        'output_schema': COMMAND_ADAPTER.json_schema(),
+        'output_schema': adapter.json_schema(),
     }
 
 

@@ -2,25 +2,28 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from dataclasses import dataclass
 from typing import Any, Sequence
 
-from channel_gateway.common.capability_actions import (
+from channel_gateway.common.application.capabilities import (
     ActionMessage,
     CapabilityActions,
     ResolvedChanges,
 )
-from channel_gateway.common.commands import (
+from channel_gateway.common.domain.commands import (
     CommandEnvelope,
     ConversationSwitchCommand,
     ResourceChange,
     SelectionContinuation,
 )
-from channel_gateway.common.database import GatewayStore
-from channel_gateway.common.lazymind import (
-    LazyMindClient,
-    LazyMindError,
-    LazyMindHTTPError,
+from channel_gateway.common.errors import LazyMindError, LazyMindHTTPError
+from channel_gateway.common.domain.chat import (
+    ChannelFeatureProfile,
+    CoreTurnResult,
 )
+from channel_gateway.common.domain.channel import sanitize_channel_text
+from channel_gateway.common.ports.core import ConversationClient
+from channel_gateway.common.ports.repository import NavigationRepository
 
 
 _LIST_LIMIT = 10
@@ -30,6 +33,14 @@ _HISTORY_PAGE_SIZE = 3
 _QUERY_PREVIEW_LIMIT = 120
 _ANSWER_PREVIEW_LIMIT = 300
 _CHINA_TIMEZONE = dt.timezone(dt.timedelta(hours=8))
+_SWITCH_TARGET_KEY = '_channel_gateway_switch_target'
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationResult:
+    text: str
+    turn: CoreTurnResult
+    suppress_text_when_presented: bool = False
 
 
 class ConversationActions:
@@ -38,8 +49,8 @@ class ConversationActions:
     def __init__(
         self,
         *,
-        store: GatewayStore,
-        client: LazyMindClient,
+        store: NavigationRepository,
+        client: ConversationClient,
         capabilities: CapabilityActions,
     ):
         self._store = store
@@ -59,8 +70,20 @@ class ConversationActions:
         source_command: CommandEnvelope | None = None,
         source_messages: Sequence[str] = (),
         catalog: dict[str, Any],
-    ) -> str:
-        conversation_id = self._store.get_route(account_id, external_address_hash)
+        features: ChannelFeatureProfile,
+        conversation_id_override: str | None = None,
+        ask_answers_structured: dict[str, Any] | None = None,
+        mentions: Sequence[dict[str, str]] = (),
+        plugin_mode: str | None = None,
+    ) -> ConversationResult:
+        conversation_id = (
+            conversation_id_override
+            if conversation_id_override is not None
+            else self._store.get_route(
+                account_id,
+                external_address_hash,
+            )
+        )
         state = self._store.get_navigation_state(account_id, external_address_hash) or {}
         explicit_new = state.get('mode') == 'new_pending'
         resolved = (
@@ -145,7 +168,18 @@ class ConversationActions:
             )
 
         try:
-            resolved_id, answer = self._client.chat(
+            if ask_answers_structured is not None:
+                self._validate_pending_ask(
+                    owner_user_id=owner_user_id,
+                    conversation_id=conversation_id,
+                    request_id=request_id,
+                    structured=ask_answers_structured,
+                )
+            options.features = features
+            options.ask_answers_structured = ask_answers_structured
+            options.mentions.extend(dict(item) for item in mentions)
+            options.plugin_mode = plugin_mode
+            turn = self._client.chat(
                 owner_user_id=owner_user_id,
                 text=message,
                 conversation_id=conversation_id,
@@ -165,16 +199,66 @@ class ConversationActions:
         self._store.activate_conversation(
             account_id,
             external_address_hash,
-            resolved_id,
+            turn.conversation_id,
             consume_pending_turn=True,
         )
-        if explicit_new:
-            return (
-                '── 已创建并切换到新会话 ──\n'
-                f'首条消息：{self._truncate(message, _QUERY_PREVIEW_LIMIT)}\n\n'
-                f'{answer}'
+        suppress_text_when_presented = (
+            not turn.answer
+            and any(
+                event.type in {'ask_pending', 'task_created'}
+                for event in turn.events
             )
-        return answer
+        )
+        answer = turn.answer or self._event_fallback(turn)
+        if explicit_new:
+            return ConversationResult(
+                text=(
+                    '── 已创建并切换到新会话 ──\n'
+                    f'首条消息：'
+                    f'{self._truncate(message, _QUERY_PREVIEW_LIMIT)}\n\n'
+                    f'{answer}'
+                ),
+                turn=turn,
+            )
+        return ConversationResult(
+            text=answer,
+            turn=turn,
+            suppress_text_when_presented=(
+                suppress_text_when_presented
+            ),
+        )
+
+    def _validate_pending_ask(
+        self,
+        *,
+        owner_user_id: str,
+        conversation_id: str,
+        request_id: str,
+        structured: dict[str, Any],
+    ) -> None:
+        ask_id = str(structured.get('ask_id') or '')
+        if not conversation_id or not ask_id:
+            raise ActionMessage('这张问题卡已经失效，请在当前会话中重新回答。')
+        history = self._client.get_conversation_history(
+            owner_user_id=owner_user_id,
+            conversation_id=conversation_id,
+            request_id=f'{request_id}_ask_check',
+            page_size=10,
+        )
+        items = history.get('history')
+        pending_ask_id = ''
+        for item in items if isinstance(items, list) else []:
+            if not isinstance(item, dict) or item.get('ask_answered'):
+                continue
+            pending = item.get('ask_pending')
+            if isinstance(pending, dict):
+                pending_ask_id = str(pending.get('ask_id') or '')
+                if pending_ask_id:
+                    break
+        if pending_ask_id != ask_id:
+            raise ActionMessage(
+                '这张问题卡已过期，没有提交答案。请回答当前最新的问题。'
+            )
 
     def new(
         self,
@@ -188,7 +272,8 @@ class ConversationActions:
         source_command: CommandEnvelope,
         source_messages: Sequence[str],
         catalog: dict[str, Any],
-    ) -> str:
+        features: ChannelFeatureProfile,
+    ) -> str | ConversationResult:
         resolved = self._capabilities.resolve_changes(
             changes,
             catalog,
@@ -229,6 +314,7 @@ class ConversationActions:
                 source_command=source_command,
                 source_messages=source_messages,
                 catalog=catalog,
+                features=features,
             )
         lines = ['── 已进入新会话 ──']
         if current_id:
@@ -249,7 +335,7 @@ class ConversationActions:
         external_address_hash: str,
         owner_user_id: str,
         request_id: str,
-    ) -> str:
+    ) -> str | ConversationResult:
         items = self._all_conversations(owner_user_id, request_id)[:_LIST_LIMIT]
         snapshot = [
             {
@@ -288,71 +374,39 @@ class ConversationActions:
         source_messages: Sequence[str],
         account_id: str,
         external_address_hash: str,
+        selection_external_address_hash: str,
         owner_user_id: str,
         request_id: str,
         catalog: dict[str, Any],
+        features: ChannelFeatureProfile,
     ) -> str:
         parameters = command.parameters
-        if parameters.target.kind == 'index':
-            snapshot = self._store.get_selection_snapshot(
-                account_id,
-                external_address_hash,
-                expected_kind='conversation',
+        prepared = catalog.get(_SWITCH_TARGET_KEY)
+        if isinstance(prepared, dict) and prepared.get('target_id'):
+            target_id = str(prepared['target_id'])
+            raw_display_index = prepared.get('display_index')
+            display_index = (
+                int(raw_display_index)
+                if isinstance(raw_display_index, int)
+                else None
             )
-            if snapshot is None:
-                raise ActionMessage(
-                    '上一次会话列表不存在或已超过 10 分钟，当前会话没有改变。'
-                    '请先说“查看历史会话”。'
-                )
-            try:
-                index = int(parameters.target.value)
-            except ValueError as exc:
-                raise ActionMessage('会话编号无效，当前会话没有改变。') from exc
-            if index < 1 or index > len(snapshot):
-                raise ActionMessage(
-                    f'当前列表只有 1～{len(snapshot)}，当前会话没有改变。'
-                )
-            target_id = str(snapshot[index - 1].get('conversation_id') or '')
-            display_index: int | None = index
+            detail = prepared.get('detail')
+            history = prepared.get('history')
+            prepared_detail = detail if isinstance(detail, dict) else None
+            prepared_history = history if isinstance(history, dict) else None
         else:
-            matches = self._match_conversations(
-                self._all_conversations(owner_user_id, request_id),
-                parameters.target.value,
+            target_id, display_index = self._resolve_switch_target(
+                command=command,
+                source_messages=source_messages,
+                account_id=account_id,
+                selection_external_address_hash=(
+                    selection_external_address_hash
+                ),
+                owner_user_id=owner_user_id,
+                request_id=request_id,
             )
-            if len(matches) > 1:
-                snapshot = [
-                    {
-                        'conversation_id': str(item.get('conversation_id') or ''),
-                        'display_name': self._display_name(item),
-                        'update_time': str(item.get('update_time') or ''),
-                    }
-                    for item in matches[:_LIST_LIMIT]
-                ]
-                self._store.save_selection_snapshot(
-                    account_id,
-                    external_address_hash,
-                    'conversation',
-                    snapshot,
-                    dt.datetime.now(dt.timezone.utc) + _SNAPSHOT_TTL,
-                    continuation=SelectionContinuation(
-                        selection_field='conversation_target',
-                        command=command.model_dump(mode='json'),
-                        grounding_messages=list(source_messages),
-                    ).model_dump(mode='json'),
-                )
-                lines = ['找到多个同名或相近会话，请再选一个：']
-                lines.extend(
-                    f'{index}. {item["display_name"]}'
-                    for index, item in enumerate(snapshot, start=1)
-                )
-                lines.extend(('', '当前会话没有改变。'))
-                raise ActionMessage('\n'.join(lines))
-            if not matches:
-                raise ActionMessage(
-                    '没有找到这个会话，当前会话没有改变。请先说“查看历史会话”。'
-                )
-            target_id = str(matches[0].get('conversation_id') or '')
-            display_index = None
+            prepared_detail = None
+            prepared_history = None
         resolved_changes: ResolvedChanges | None = None
         if parameters.resource_changes:
             resolved_changes = self._capabilities.resolve_changes(
@@ -371,6 +425,13 @@ class ConversationActions:
             request_id=request_id,
             target_id=target_id,
             display_index=display_index,
+            activate=(
+                not parameters.message
+                and not parameters.resource_changes
+            ),
+            prepared_detail=prepared_detail,
+            prepared_history=prepared_history,
+            features=features,
         )
         if not parameters.message:
             if parameters.resource_changes:
@@ -384,6 +445,12 @@ class ConversationActions:
                     external_address_hash=external_address_hash,
                     owner_user_id=owner_user_id,
                     request_id=f'{request_id}_configure',
+                    conversation_id_override=target_id,
+                )
+                self._store.activate_conversation(
+                    account_id,
+                    external_address_hash,
+                    target_id,
                 )
                 return f'{marker}\n\n{configured}'
             return marker
@@ -398,8 +465,171 @@ class ConversationActions:
             source_command=command,
             source_messages=source_messages,
             catalog=catalog,
+            features=features,
+            conversation_id_override=target_id,
         )
-        return f'{marker}\n\n── 新任务回复 ──\n{answer}'
+        return ConversationResult(
+            text=f'{marker}\n\n── 新任务回复 ──\n{answer.text}',
+            turn=answer.turn,
+        )
+
+    def preflight_switch(
+        self,
+        *,
+        command: ConversationSwitchCommand,
+        source_messages: Sequence[str],
+        account_id: str,
+        external_address_hash: str,
+        owner_user_id: str,
+        request_id: str,
+        catalog: dict[str, Any],
+    ) -> None:
+        prepared = catalog.get(_SWITCH_TARGET_KEY)
+        if isinstance(prepared, dict) and prepared.get('target_id'):
+            if isinstance(prepared.get('detail'), dict) and isinstance(
+                prepared.get('history'),
+                dict,
+            ):
+                return
+            target_id = str(prepared['target_id'])
+        else:
+            target_id, display_index = self._resolve_switch_target(
+                command=command,
+                source_messages=source_messages,
+                account_id=account_id,
+                selection_external_address_hash=external_address_hash,
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+            )
+            catalog[_SWITCH_TARGET_KEY] = {
+                'target_id': target_id,
+                'display_index': display_index,
+            }
+        if command.parameters.resource_changes:
+            resolved = self._capabilities.resolve_changes(
+                command.parameters.resource_changes,
+                catalog,
+                account_id=account_id,
+                external_address_hash=external_address_hash,
+                source_command=command,
+                source_messages=source_messages,
+                continuation_catalog=catalog,
+            )
+            self._capabilities.validate_resolved_changes(resolved)
+        detail, history = self._load_switch_target(
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            target_id=target_id,
+        )
+        catalog[_SWITCH_TARGET_KEY].update(
+            {
+                'detail': detail,
+                'history': history,
+            }
+        )
+
+    def _resolve_switch_target(
+        self,
+        *,
+        command: ConversationSwitchCommand,
+        source_messages: Sequence[str],
+        account_id: str,
+        selection_external_address_hash: str,
+        owner_user_id: str,
+        request_id: str,
+    ) -> tuple[str, int | None]:
+        parameters = command.parameters
+        if parameters.target.kind == 'index':
+            snapshot = self._store.get_selection_snapshot(
+                account_id,
+                selection_external_address_hash,
+                expected_kind='conversation',
+            )
+            if snapshot is None:
+                raise ActionMessage(
+                    '上一次会话列表不存在或已超过 10 分钟，当前会话没有改变。'
+                    '请先说“查看历史会话”。'
+                )
+            try:
+                index = int(parameters.target.value)
+            except ValueError as exc:
+                raise ActionMessage(
+                    '会话编号无效，当前会话没有改变。'
+                ) from exc
+            if index < 1 or index > len(snapshot):
+                raise ActionMessage(
+                    f'当前列表只有 1～{len(snapshot)}，当前会话没有改变。'
+                )
+            return (
+                str(snapshot[index - 1].get('conversation_id') or ''),
+                index,
+            )
+        matches = self._match_conversations(
+            self._all_conversations(owner_user_id, request_id),
+            parameters.target.value,
+        )
+        if len(matches) > 1:
+            snapshot = [
+                {
+                    'conversation_id': str(
+                        item.get('conversation_id') or ''
+                    ),
+                    'display_name': self._display_name(item),
+                    'update_time': str(item.get('update_time') or ''),
+                }
+                for item in matches[:_LIST_LIMIT]
+            ]
+            self._store.save_selection_snapshot(
+                account_id,
+                selection_external_address_hash,
+                'conversation',
+                snapshot,
+                dt.datetime.now(dt.timezone.utc) + _SNAPSHOT_TTL,
+                continuation=SelectionContinuation(
+                    selection_field='conversation_target',
+                    command=command.model_dump(mode='json'),
+                    grounding_messages=list(source_messages),
+                ).model_dump(mode='json'),
+            )
+            lines = ['找到多个同名或相近会话，请再选一个：']
+            lines.extend(
+                f'{index}. {item["display_name"]}'
+                for index, item in enumerate(snapshot, start=1)
+            )
+            lines.extend(('', '当前会话没有改变。'))
+            raise ActionMessage('\n'.join(lines))
+        if not matches:
+            raise ActionMessage(
+                '没有找到这个会话，当前会话没有改变。请先说“查看历史会话”。'
+            )
+        return str(matches[0].get('conversation_id') or ''), None
+
+    def _load_switch_target(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        target_id: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        try:
+            detail = self._client.get_conversation_detail(
+                owner_user_id=owner_user_id,
+                conversation_id=target_id,
+                request_id=f'{request_id}_target',
+            )
+            history = self._client.get_conversation_history(
+                owner_user_id=owner_user_id,
+                conversation_id=target_id,
+                request_id=f'{request_id}_history',
+                page_size=_HISTORY_PAGE_SIZE,
+            )
+        except LazyMindHTTPError as exc:
+            if exc.status_code == 404:
+                raise ActionMessage(
+                    '目标会话已经不存在，当前会话没有改变，请重新查看历史会话。'
+                ) from exc
+            raise
+        return detail, history
 
     def current(
         self,
@@ -408,6 +638,7 @@ class ConversationActions:
         external_address_hash: str,
         owner_user_id: str,
         request_id: str,
+        features: ChannelFeatureProfile,
     ) -> str:
         conversation_id = self._store.get_route(account_id, external_address_hash)
         if not conversation_id:
@@ -432,7 +663,40 @@ class ConversationActions:
         return (
             f'当前会话：{self._display_name(detail)}\n'
             f'最后更新：{self._format_time(str(detail.get("update_time") or ""))}\n'
-            '当前渠道在这个会话中只执行基础聊天。'
+            + self._feature_summary(features)
+        )
+
+    def recover_transition(
+        self,
+        *,
+        account_id: str,
+        external_address_hash: str,
+        owner_user_id: str,
+        request_id: str,
+    ) -> str:
+        conversation_id = self._store.get_route(
+            account_id,
+            external_address_hash,
+        )
+        if not conversation_id:
+            raise ActionMessage('原生会话尚未完成绑定，请稍后重试。')
+        detail = self._client.get_conversation_detail(
+            owner_user_id=owner_user_id,
+            conversation_id=conversation_id,
+            request_id=f'{request_id}_recovery_detail',
+        )
+        history = self._client.get_conversation_history(
+            owner_user_id=owner_user_id,
+            conversation_id=conversation_id,
+            request_id=f'{request_id}_recovery_history',
+            page_size=_HISTORY_PAGE_SIZE,
+        )
+        heading = (
+            '── 已恢复会话结果 · '
+            f'{self._display_name(detail)} ──'
+        )
+        return '\n'.join(
+            self._format_history(history, heading=heading)
         )
 
     def more_history(
@@ -497,25 +761,19 @@ class ConversationActions:
         request_id: str,
         target_id: str,
         display_index: int | None,
+        activate: bool = True,
+        prepared_detail: dict[str, Any] | None = None,
+        prepared_history: dict[str, Any] | None = None,
+        features: ChannelFeatureProfile,
     ) -> str:
-        try:
-            detail = self._client.get_conversation_detail(
+        if prepared_detail is not None and prepared_history is not None:
+            detail, history = prepared_detail, prepared_history
+        else:
+            detail, history = self._load_switch_target(
                 owner_user_id=owner_user_id,
-                conversation_id=target_id,
-                request_id=f'{request_id}_target',
+                request_id=request_id,
+                target_id=target_id,
             )
-            history = self._client.get_conversation_history(
-                owner_user_id=owner_user_id,
-                conversation_id=target_id,
-                request_id=f'{request_id}_history',
-                page_size=_HISTORY_PAGE_SIZE,
-            )
-        except LazyMindHTTPError as exc:
-            if exc.status_code == 404:
-                raise ActionMessage(
-                    '目标会话已经不存在，当前会话没有改变，请重新查看历史会话。'
-                ) from exc
-            raise
         previous_id = self._store.get_route(account_id, external_address_hash)
         previous_title = (
             self._safe_title(
@@ -526,12 +784,15 @@ class ConversationActions:
             if previous_id and previous_id != target_id
             else ''
         )
-        self._store.activate_conversation(
-            account_id,
-            external_address_hash,
-            target_id,
-            history_next_page_token=str(history.get('next_page_token') or ''),
-        )
+        if activate:
+            self._store.activate_conversation(
+                account_id,
+                external_address_hash,
+                target_id,
+                history_next_page_token=str(
+                    history.get('next_page_token') or ''
+                ),
+            )
         title = self._display_name(detail)
         label = f'{display_index}. {title}' if display_index else title
         lines = ['── 已切换会话 ──']
@@ -541,7 +802,7 @@ class ConversationActions:
             (
                 f'当前会话：{label}',
                 f'最后更新：{self._format_time(str(detail.get("update_time") or ""))}',
-                '当前渠道只执行基础聊天，不会推进原有 Plugin、Task、SubAgent 或 Ask 流程。',
+                self._feature_summary(features),
                 '',
             )
         )
@@ -554,6 +815,19 @@ class ConversationActions:
             )
         )
         return '\n'.join(lines)
+
+    @staticmethod
+    def _feature_summary(features: ChannelFeatureProfile) -> str:
+        enabled = features.enabled_feature_labels
+        if not enabled:
+            return (
+                '当前渠道只执行基础聊天，不会推进原有 '
+                'Plugin、Task、SubAgent 或 Ask 流程。'
+            )
+        return (
+            f'当前渠道已开放：{"、".join(enabled)}。'
+            '实际能否调用取决于你的账号与会话配置。'
+        )
 
     def _all_conversations(
         self,
@@ -657,7 +931,10 @@ class ConversationActions:
                 str(item.get('query') or '').strip()
                 or '[非文本内容，请在网页端查看]'
             )
-            answer = str(item.get('result') or '').strip() or '[暂无文字回答]'
+            answer = (
+                sanitize_channel_text(str(item.get('result') or ''))
+                or '[暂无文字回答]'
+            )
             lines.extend(
                 (
                     f'[用户] {cls._truncate(query, _QUERY_PREVIEW_LIMIT)}',
@@ -675,3 +952,16 @@ class ConversationActions:
         if len(normalized) <= limit:
             return normalized
         return normalized[:limit].rstrip() + '……'
+
+    @staticmethod
+    def _event_fallback(turn: CoreTurnResult) -> str:
+        event_types = {event.type for event in turn.events}
+        if 'ask_pending' in event_types:
+            return 'LazyMind 正在等待补充信息。'
+        if 'task_created' in event_types:
+            return 'LazyMind 已创建后台任务。'
+        if 'artifact_created' in event_types:
+            return 'LazyMind 已生成新的结果文件。'
+        if 'tool_limit_pending' in event_types:
+            return 'LazyMind 已达到工具轮次上限，并自动请求汇总当前结果。'
+        return 'LazyMind 已处理这条消息。'
