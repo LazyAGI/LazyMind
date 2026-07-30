@@ -168,6 +168,7 @@ func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	  "paths": {
 	    "pythonRuntime": "python/runtime",
 	    "authServiceVenv": "python/auth-service",
+	    "channelGatewayVenv": "python/channel-gateway",
 	    "algorithmVenv": "python/algorithm",
 	    "localProxyConfig": "app/local/local-proxy/configs/cloud-replace-kong.yaml"
 	  }
@@ -205,6 +206,9 @@ func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	}
 	if paths.AlgorithmPython != venvExecutable(filepath.Join(resources, "python", "algorithm"), "python") {
 		t.Fatalf("algorithm python = %q", paths.AlgorithmPython)
+	}
+	if paths.ChannelGatewayVenvDir != filepath.Join(resources, "python", "channel-gateway") {
+		t.Fatalf("channel gateway venv = %q", paths.ChannelGatewayVenvDir)
 	}
 	if paths.FileWatcherBaseRoot != filepath.Join(runtimeRoot, "data", "stores", "scan", "file-watcher") {
 		t.Fatalf("file watcher base root = %q", paths.FileWatcherBaseRoot)
@@ -508,7 +512,7 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 			t.Fatalf("generated config contains %q:\n%s", forbidden, out.String())
 		}
 	}
-	for _, name := range []string{localProxyProcessName, authServiceProcessName, coreProcessName, scanControlPlaneProcessName, fileWatcherProcessName, frontendProcessName, milvusLiteProcessName, docServerProcessName, processorServerProcessName, processorWorkerProcessName, algoProcessName, chatProcessName} {
+	for _, name := range []string{localProxyProcessName, authServiceProcessName, channelGatewayProcessName, coreProcessName, scanControlPlaneProcessName, fileWatcherProcessName, frontendProcessName, milvusLiteProcessName, docServerProcessName, processorServerProcessName, processorWorkerProcessName, algoProcessName, chatProcessName} {
 		proc, ok := parsed.Processes[name]
 		if !ok {
 			t.Fatalf("missing process %s", name)
@@ -551,6 +555,7 @@ func TestInstallerWarmupGeneratesReducedProcessGraph(t *testing.T) {
 	for _, name := range []string{
 		localProxyProcessName,
 		authServiceProcessName,
+		channelGatewayProcessName,
 		coreProcessName,
 		frontendProcessName,
 		milvusLiteProcessName,
@@ -1009,7 +1014,7 @@ func TestDerivedToolInstallPathsUseLocalBuildRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
-	for _, path := range []string{paths.BinDir, paths.DepsDir, paths.AuthServiceVenvDir, paths.AlgorithmVenv, paths.FrontendNodeModules, paths.PythonRuntimeDir, paths.NodeRuntimeDir} {
+	for _, path := range []string{paths.BinDir, paths.DepsDir, paths.AuthServiceVenvDir, paths.ChannelGatewayVenvDir, paths.AlgorithmVenv, paths.FrontendNodeModules, paths.PythonRuntimeDir, paths.NodeRuntimeDir} {
 		if !strings.HasPrefix(path, paths.BuildRoot+string(os.PathSeparator)) {
 			t.Fatalf("%s is outside build root %s", path, paths.BuildRoot)
 		}
@@ -1021,6 +1026,9 @@ func TestDerivedToolInstallPathsUseLocalBuildRoot(t *testing.T) {
 	}
 	if paths.AuthServiceVenvDir != filepath.Join(paths.BuildRoot, "deps", "python", "auth-service") {
 		t.Fatalf("auth-service venv = %q", paths.AuthServiceVenvDir)
+	}
+	if paths.ChannelGatewayVenvDir != filepath.Join(paths.BuildRoot, "deps", "python", "channel-gateway") {
+		t.Fatalf("channel gateway venv = %q", paths.ChannelGatewayVenvDir)
 	}
 	if paths.AlgorithmVenv != filepath.Join(paths.BuildRoot, "deps", "python", "algorithm") {
 		t.Fatalf("algorithm venv = %q", paths.AlgorithmVenv)

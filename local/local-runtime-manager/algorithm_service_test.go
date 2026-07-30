@@ -120,6 +120,57 @@ func TestAlgorithmServiceEnvPinsLocalRouterHost(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_ROUTER_HOST=127.0.0.1")
 }
 
+func TestDesktopAlgorithmRegisterPolicyForInstallVersion(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig("desktop", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "")
+	t.Setenv(desktopAppVersionEnvVar, "1.2.3")
+
+	if got := algorithmRegisterPolicy(cfg, paths); got != "force" {
+		t.Fatalf("first registration policy = %q, want force", got)
+	}
+	if err := markAlgorithmRegistrationVersion(cfg, paths); err != nil {
+		t.Fatalf("mark registration version: %v", err)
+	}
+	if got := algorithmRegisterPolicy(cfg, paths); got != "update" {
+		t.Fatalf("ordinary restart policy = %q, want update", got)
+	}
+
+	t.Setenv(desktopAppVersionEnvVar, "1.2.4")
+	if got := algorithmRegisterPolicy(cfg, paths); got != "force" {
+		t.Fatalf("upgraded registration policy = %q, want force", got)
+	}
+}
+
+func TestDesktopAlgorithmRegisterPolicyHonorsExplicitOverride(t *testing.T) {
+	cfg := RuntimeConfig{Profile: "desktop"}
+	paths := RuntimePaths{StateDir: t.TempDir()}
+	t.Setenv(desktopAppVersionEnvVar, "1.2.3")
+	t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "none")
+
+	if got := algorithmRegisterPolicy(cfg, paths); got != "none" {
+		t.Fatalf("explicit registration policy = %q, want none", got)
+	}
+}
+
+func TestDesktopAlgorithmRegisterPolicyWithoutVersionDefaultsToUpdate(t *testing.T) {
+	cfg := RuntimeConfig{Profile: "desktop"}
+	paths := RuntimePaths{StateDir: t.TempDir()}
+	t.Setenv(desktopAppVersionEnvVar, "")
+	t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "")
+
+	if got := algorithmRegisterPolicy(cfg, paths); got != "update" {
+		t.Fatalf("versionless desktop registration policy = %q, want update", got)
+	}
+}
+
 func TestAlgorithmServiceEnvDisablesRouter(t *testing.T) {
 	for _, profile := range []string{"local", "desktop"} {
 		t.Run(profile, func(t *testing.T) {
