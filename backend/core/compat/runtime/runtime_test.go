@@ -48,6 +48,12 @@ func (stubKnowledgeDocumentPort) ListDocumentChunks(context.Context, contract.Ca
 	return knowledge.ListDocumentChunksResult{}, nil
 }
 
+type stubKnowledgeSearchPort struct{}
+
+func (stubKnowledgeSearchPort) Search(context.Context, contract.CallContext, knowledge.SearchInput) (knowledge.SearchResult, error) {
+	return knowledge.SearchResult{Answer: "answer", ConversationID: "conv-1", MessageID: "msg-1"}, nil
+}
+
 func TestNewCreatesSkillFacadeWhenPortProvided(t *testing.T) {
 	rt, err := New(Dependencies{SkillPort: stubSkillPort{}})
 	if err != nil {
@@ -108,6 +114,40 @@ func TestRuntimeCatalogOnlyGetDocumentUnsupported(t *testing.T) {
 	}
 }
 
+func TestNewCreatesKnowledgeFacadeWhenSearchProvided(t *testing.T) {
+	rt, err := New(Dependencies{KnowledgeSearch: stubKnowledgeSearchPort{}})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	if rt.Knowledge == nil {
+		t.Fatalf("Knowledge facade is nil")
+	}
+	got, err := rt.Knowledge.Search(context.Background(), contract.CallContext{UserID: "user"}, knowledge.SearchInput{
+		Query:        "q",
+		KnowledgeIDs: []string{"ds-1"},
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if got.Answer != "answer" || got.ConversationID != "conv-1" || got.MessageID != "msg-1" {
+		t.Fatalf("Search = %#v", got)
+	}
+}
+
+func TestRuntimeCatalogOnlySearchUnsupported(t *testing.T) {
+	rt, err := New(Dependencies{KnowledgeCatalog: stubKnowledgeCatalogPort{}})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	_, err = rt.Knowledge.Search(context.Background(), contract.CallContext{UserID: "user"}, knowledge.SearchInput{
+		Query:        "q",
+		KnowledgeIDs: []string{"ds-1"},
+	})
+	if code, ok := contract.CodeOf(err); !ok || code != contract.Unsupported {
+		t.Fatalf("code = %v, %v; want UNSUPPORTED", code, ok)
+	}
+}
+
 func TestNewAllowsNilSkillPort(t *testing.T) {
 	rt, err := New(Dependencies{})
 	if err != nil {
@@ -143,5 +183,38 @@ func TestNewKeepsSkillWiringWithKnowledgeDocument(t *testing.T) {
 	}
 	if rt.Skill == nil || rt.Knowledge == nil {
 		t.Fatalf("Skill=%#v Knowledge=%#v, want both wired", rt.Skill, rt.Knowledge)
+	}
+}
+
+func TestNewKeepsSkillWiringWithKnowledgeSearch(t *testing.T) {
+	rt, err := New(Dependencies{SkillPort: stubSkillPort{}, KnowledgeSearch: stubKnowledgeSearchPort{}})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	if rt.Skill == nil || rt.Knowledge == nil {
+		t.Fatalf("Skill=%#v Knowledge=%#v, want both wired", rt.Skill, rt.Knowledge)
+	}
+}
+
+func TestNewWiresAllKnowledgePorts(t *testing.T) {
+	rt, err := New(Dependencies{
+		KnowledgeCatalog:  stubKnowledgeCatalogPort{},
+		KnowledgeDocument: stubKnowledgeDocumentPort{},
+		KnowledgeSearch:   stubKnowledgeSearchPort{},
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	if rt.Knowledge == nil {
+		t.Fatalf("Knowledge facade is nil")
+	}
+	if _, err := rt.Knowledge.List(context.Background(), contract.CallContext{UserID: "user"}, knowledge.ListInput{}); err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if _, err := rt.Knowledge.GetDocument(context.Background(), contract.CallContext{UserID: "user"}, knowledge.GetDocumentInput{KnowledgeID: "ds-1", DocumentID: "doc-1"}); err != nil {
+		t.Fatalf("GetDocument returned error: %v", err)
+	}
+	if _, err := rt.Knowledge.Search(context.Background(), contract.CallContext{UserID: "user"}, knowledge.SearchInput{Query: "q", KnowledgeIDs: []string{"ds-1"}}); err != nil {
+		t.Fatalf("Search returned error: %v", err)
 	}
 }

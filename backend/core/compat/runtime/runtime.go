@@ -14,6 +14,7 @@ type Dependencies struct {
 	SkillPort         skill.Port
 	KnowledgeCatalog  knowledge.CatalogPort
 	KnowledgeDocument knowledge.DocumentPort
+	KnowledgeSearch   knowledge.SearchPort
 }
 
 func New(deps Dependencies) (*Runtime, error) {
@@ -25,10 +26,11 @@ func New(deps Dependencies) (*Runtime, error) {
 		}
 		rt.Skill = facade
 	}
-	if deps.KnowledgeCatalog != nil || deps.KnowledgeDocument != nil {
+	if deps.KnowledgeCatalog != nil || deps.KnowledgeDocument != nil || deps.KnowledgeSearch != nil {
 		facade, err := knowledge.NewFacadeWithDeps(knowledge.FacadeDeps{
 			Catalog:  deps.KnowledgeCatalog,
 			Document: deps.KnowledgeDocument,
+			Search:   deps.KnowledgeSearch,
 		})
 		if err != nil {
 			return nil, err
