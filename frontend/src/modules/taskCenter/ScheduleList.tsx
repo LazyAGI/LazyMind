@@ -697,7 +697,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   return (
     <div className='schedule-plans'>
       <div className='schedule-toolbar'>
-        <Segmented value={workspaceView} onChange={(value) => { const next = value as 'tasks' | 'groups'; setWorkspaceView(next); setViewMode(next === 'groups' ? 'large' : 'compact'); if (next === 'groups') setGroupFilter(undefined); }} options={[{ value: 'groups', label: '分组展示' }, { value: 'tasks', label: '逐条展示' }]} />
+        <Segmented className='schedule-workspace-toggle' value={workspaceView} onChange={(value) => { const next = value as 'tasks' | 'groups'; setWorkspaceView(next); setViewMode(next === 'groups' ? 'large' : 'compact'); if (next === 'groups') setGroupFilter(undefined); }} options={[{ value: 'groups', label: '分组展示' }, { value: 'tasks', label: '逐条展示' }]} />
         <Input
           prefix={<SearchOutlined style={{ color: '#bbb' }} />}
           placeholder={t('taskCenter.scheduleSearchPlaceholder')}
@@ -718,7 +718,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           ))}
         </Space.Compact>
         <div className='schedule-toolbar-spacer' />
-        <Segmented value={viewMode} onChange={(value) => setViewMode(value as 'large' | 'compact')} options={[
+        <Segmented className='schedule-view-toggle' value={viewMode} onChange={(value) => setViewMode(value as 'large' | 'compact')} options={[
           { value: 'large', label: t('taskCenter.largeCards'), icon: <AppstoreOutlined /> },
           { value: 'compact', label: t('taskCenter.smallCards'), icon: <UnorderedListOutlined /> },
         ]} />
@@ -740,7 +740,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
               </div> : null}
               {ungroupedSchedules.length ? <section className='ungrouped-schedule-section' onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const scheduleID = event.dataTransfer.getData('text/schedule-id'); if (scheduleID) void moveSchedule(scheduleID, undefined, ungroupedSchedules.length).then(fetchSchedules); }}>
                 <header><div><h3>其他任务</h3><p>尚未加入任务组的定时任务</p></div><span>{ungroupedSchedules.length} 个任务</span></header>
-                <div className='schedule-grid compact'>{ungroupedSchedules.map(renderScheduleCard)}</div>
+                <div className={`schedule-grid ${viewMode}`}>{ungroupedSchedules.map(renderScheduleCard)}</div>
               </section> : null}
               {!groups.length && !ungroupedSchedules.length ? <Empty className='schedule-empty' description={t('taskCenter.empty')} /> : null}
             </div>
