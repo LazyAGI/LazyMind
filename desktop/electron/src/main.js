@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray } = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
@@ -84,6 +84,9 @@ const startupMetricsRecorder = createStartupMetricsRecorder({
 
 let mainWindow;
 let startupWindow;
+let windowCreationPromise;
+let frontendOpeningAllowed = false;
+let tray;
 let rendererReadyWait;
 let runtimeProcess;
 let runtimeProcessExit = null;
@@ -736,6 +739,40 @@ function beginFastQuit(reason = "quit") {
   app.quit();
 }
 
+function enterBackgroundMode(reason, { discoverable }) {
+  if (isInstallerWarmup || isQuitting) {
+    return;
+  }
+  windowHiddenByUser = true;
+  finishStartupMetrics("cancelled", "frontend-closed-to-background");
+  rendererReadyWait?.cancel();
+  rendererReadyWait = undefined;
+  const windows = [mainWindow, startupWindow];
+  mainWindow = undefined;
+  startupWindow = undefined;
+  for (const window of windows) {
+    if (window && !window.isDestroyed()) {
+      window.removeAllListeners("close");
+      window.destroy();
+    }
+  }
+  if (discoverable) {
+    ensureWindowsTray();
+  } else {
+    if (isMac) {
+      app.hide();
+      if (app.dock) {
+        app.dock.hide();
+      }
+    }
+    destroyWindowsTray();
+  }
+  appendStartupLog(
+    "desktop",
+    `frontend closed (${reason}); Electron and runtime continue in ${discoverable ? "discoverable" : "hidden"} background mode`,
+  );
+}
+
 function sameRuntimePath(left, right) {
   if (!left || !right) {
     return false;
@@ -1094,9 +1131,7 @@ function browserWindowOptions(show = true) {
     show,
     backgroundColor: "#f7f8fa",
     title: "LazyMind",
-    icon: isWindows
-      ? (isPackaged ? path.join(process.resourcesPath, "LazyMind.ico") : process.env.LAZYMIND_DESKTOP_WINDOWS_ICON)
-      : undefined,
+    icon: windowsDesktopIconPath(),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -1106,19 +1141,66 @@ function browserWindowOptions(show = true) {
   };
 }
 
+function windowsDesktopIconPath() {
+  if (!isWindows) {
+    return undefined;
+  }
+  return isPackaged
+    ? path.join(process.resourcesPath, "LazyMind.ico")
+    : process.env.LAZYMIND_DESKTOP_WINDOWS_ICON;
+}
+
+function destroyWindowsTray() {
+  if (!tray) {
+    return;
+  }
+  tray.destroy();
+  tray = undefined;
+}
+
+function ensureWindowsTray() {
+  if (!isWindows || tray) {
+    return;
+  }
+  const iconPath = windowsDesktopIconPath();
+  if (!iconPath) {
+    appendStartupLog("desktop", "Windows tray icon is unavailable");
+    return;
+  }
+  try {
+    tray = new Tray(iconPath);
+    tray.setToolTip("LazyMind");
+    tray.on("click", () => {
+      void showActiveWindow();
+    });
+    tray.setContextMenu(Menu.buildFromTemplate([
+      {
+        label: "Open LazyMind",
+        click: () => {
+          void showActiveWindow();
+        },
+      },
+      { type: "separator" },
+      {
+        label: "Exit",
+        click: () => {
+          enterBackgroundMode("tray exit", { discoverable: false });
+        },
+      },
+    ]));
+  } catch (error) {
+    tray = undefined;
+    appendStartupLog("desktop", `could not create Windows tray icon: ${serializeError(error)}`);
+  }
+}
+
 function attachManagedClose(window) {
   window.on("close", (event) => {
     if (allowWindowClose) {
       return;
     }
     event.preventDefault();
-    if (isMac) {
-      windowHiddenByUser = true;
-      window.hide();
-      appendStartupLog("desktop", "window hidden; runtime continues in background");
-      return;
-    }
-    beginFastQuit("window close");
+    enterBackgroundMode("window close", { discoverable: true });
   });
 }
 
@@ -1129,23 +1211,59 @@ function activeWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     return mainWindow;
   }
-  return startupWindow;
+  return undefined;
 }
 
 function showActiveWindow() {
-  const window = activeWindow();
-  if (!window || window.isDestroyed()) {
-    return;
-  }
   windowHiddenByUser = false;
-  if (window.isMinimized()) {
-    window.restore();
+  if (isMac) {
+    app.show();
+    if (app.dock) {
+      void app.dock.show();
+    }
   }
-  window.show();
-  window.focus();
-  if (window === mainWindow) {
-    startupMetricsRecorder.mark("mainWindowVisible");
+  if (!frontendOpeningAllowed) {
+    return Promise.resolve();
   }
+  const window = activeWindow();
+  if (window && !window.isDestroyed()) {
+    if (window.isMinimized()) {
+      window.restore();
+    }
+    window.show();
+    window.focus();
+    if (window === mainWindow) {
+      startupMetricsRecorder.mark("mainWindowVisible");
+    }
+    return Promise.resolve();
+  }
+
+  if (windowCreationPromise) {
+    return windowCreationPromise;
+  }
+  appendStartupLog(
+    "desktop",
+    runtimeProcess
+      ? "opening frontend window from resident runtime"
+      : "opening frontend window and starting runtime",
+  );
+  const creation = createWindow();
+  windowCreationPromise = creation;
+  void creation
+    .catch((error) => {
+      if (!windowHiddenByUser && !isQuitting) {
+        setStartupFailure(error);
+      }
+    })
+    .finally(() => {
+      if (windowCreationPromise === creation) {
+        windowCreationPromise = undefined;
+      }
+      if (!windowHiddenByUser && !isQuitting && !activeWindow()) {
+        void showActiveWindow();
+      }
+    });
+  return creation;
 }
 
 function createRendererReadyWait(window) {
@@ -1180,46 +1298,61 @@ function createRendererReadyWait(window) {
 }
 
 async function createWindow() {
-  startupWindow = new BrowserWindow(browserWindowOptions(true));
+  const nextStartupWindow = new BrowserWindow(browserWindowOptions(true));
+  let nextMainWindow;
+  let nextRendererReadyWait;
+  startupWindow = nextStartupWindow;
+  nextStartupWindow.once("closed", () => {
+    if (startupWindow === nextStartupWindow) {
+      startupWindow = undefined;
+    }
+  });
   startupMetricsRecorder.mark("startupWindowCreated");
-  if (startupWindow.isVisible()) {
+  if (nextStartupWindow.isVisible()) {
     startupMetricsRecorder.mark("windowVisible");
   } else {
-    startupWindow.once("show", () => startupMetricsRecorder.mark("windowVisible"));
+    nextStartupWindow.once("show", () => startupMetricsRecorder.mark("windowVisible"));
   }
-  attachManagedClose(startupWindow);
+  attachManagedClose(nextStartupWindow);
   startRuntime();
-  await startupWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHTML())}`);
+  await nextStartupWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHTML())}`);
   startupMetricsRecorder.mark("startupPageLoaded");
   broadcastStartupDiagnostics();
   try {
     const status = await waitForDesktopHomeReady();
-    if (isQuitting) {
+    if (isQuitting || windowHiddenByUser || nextStartupWindow.isDestroyed()) {
       return;
     }
-    mainWindow = new BrowserWindow(browserWindowOptions(false));
+    nextMainWindow = new BrowserWindow(browserWindowOptions(false));
+    mainWindow = nextMainWindow;
+    nextMainWindow.once("closed", () => {
+      if (mainWindow === nextMainWindow) {
+        mainWindow = undefined;
+      }
+    });
     startupMetricsRecorder.mark("mainWindowCreated");
-    attachManagedClose(mainWindow);
-    rendererReadyWait = createRendererReadyWait(mainWindow);
+    attachManagedClose(nextMainWindow);
+    nextRendererReadyWait = createRendererReadyWait(nextMainWindow);
+    rendererReadyWait = nextRendererReadyWait;
     startupMetricsRecorder.mark("frontendLoadStarted");
     await Promise.all([
-      mainWindow.loadURL(`http://127.0.0.1:${status.config.frontendPort}/agent/chat/home`),
-      rendererReadyWait.promise,
+      nextMainWindow.loadURL(`http://127.0.0.1:${status.config.frontendPort}/agent/chat/home`),
+      nextRendererReadyWait.promise,
     ]);
-    rendererReadyWait.cancel();
-    rendererReadyWait = undefined;
-    if (isQuitting) {
+    nextRendererReadyWait.cancel();
+    if (rendererReadyWait === nextRendererReadyWait) {
+      rendererReadyWait = undefined;
+    }
+    if (isQuitting || windowHiddenByUser || nextMainWindow.isDestroyed()) {
       return;
     }
-    startupWindow.removeAllListeners("close");
-    startupWindow.hide();
-    if (!windowHiddenByUser) {
-      mainWindow.show();
-      startupMetricsRecorder.mark("mainWindowVisible");
-      mainWindow.focus();
-    }
-    startupWindow.destroy();
-    startupWindow = undefined;
+    nextStartupWindow.removeAllListeners("close");
+    nextStartupWindow.hide();
+    nextMainWindow.show();
+    startupMetricsRecorder.mark("mainWindowVisible");
+    nextMainWindow.focus();
+    appendStartupLog("desktop", "frontend window ready");
+    nextStartupWindow.destroy();
     void waitForRuntimeReady().then(
       () => finishStartupMetrics("success"),
       (error) => {
@@ -1229,13 +1362,20 @@ async function createWindow() {
       },
     );
   } catch (error) {
-    rendererReadyWait?.cancel();
-    rendererReadyWait = undefined;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.removeAllListeners("close");
-      mainWindow.destroy();
+    nextRendererReadyWait?.cancel();
+    if (rendererReadyWait === nextRendererReadyWait) {
+      rendererReadyWait = undefined;
     }
-    mainWindow = undefined;
+    if (nextMainWindow && !nextMainWindow.isDestroyed()) {
+      nextMainWindow.removeAllListeners("close");
+      nextMainWindow.destroy();
+    }
+    if (mainWindow === nextMainWindow) {
+      mainWindow = undefined;
+    }
+    if (windowHiddenByUser && !isQuitting) {
+      return;
+    }
     setStartupFailure(error);
   }
 }
@@ -1330,9 +1470,11 @@ if (!hasSingleInstanceLock) {
   }
 } else {
   app.on("second-instance", () => {
-    showActiveWindow();
+    void showActiveWindow();
   });
-  app.on("activate", showActiveWindow);
+  app.on("activate", () => {
+    void showActiveWindow();
+  });
   app.whenReady().then(() => {
     startupMetricsRecorder.mark("electronReady");
     if (isWindows) {
@@ -1354,7 +1496,13 @@ if (!hasSingleInstanceLock) {
       );
     }
     return runMacInstallationWarmupIfNeeded().then(
-      () => createWindow(),
+      () => {
+        frontendOpeningAllowed = true;
+        if (windowHiddenByUser) {
+          return undefined;
+        }
+        return showActiveWindow();
+      },
       (error) => {
         finishStartupMetrics("failed", "mac-installation-warmup");
         console.error("LazyMind macOS installation warmup failed:", error);
@@ -1367,10 +1515,8 @@ if (!hasSingleInstanceLock) {
     );
   });
   app.on("window-all-closed", () => {
-    if (isInstallerWarmup) {
-      return;
-    }
-    app.quit();
+    // Normal Desktop sessions stay resident without renderer processes.
+    // Installer warmup owns its explicit app.exit lifecycle.
   });
   app.on("before-quit", (event) => {
     if (isInstallerWarmup) {
@@ -1378,7 +1524,7 @@ if (!hasSingleInstanceLock) {
     }
     if (!isQuitting) {
       event.preventDefault();
-      beginFastQuit("app quit");
+      enterBackgroundMode("app quit", { discoverable: false });
     }
   });
 }

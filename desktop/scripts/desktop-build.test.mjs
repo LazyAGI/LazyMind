@@ -217,7 +217,7 @@ test("packaged macOS app runs installation warmup once before its normal window"
   const source = readFileSync(electronMainScript, "utf8");
   assert.match(
     source,
-    /runMacInstallationWarmupIfNeeded\(\)\.then\(\s*\(\) => createWindow\(\)/,
+    /runMacInstallationWarmupIfNeeded\(\)\.then\(\s*\(\) => \{\s*frontendOpeningAllowed = true;\s*if \(windowHiddenByUser\) \{\s*return undefined;\s*\}\s*return showActiveWindow\(\)/,
   );
   assert.match(
     source,
@@ -226,7 +226,7 @@ test("packaged macOS app runs installation warmup once before its normal window"
   );
 });
 
-test("Desktop does not create the Chat window after shutdown begins", () => {
+test("Desktop does not create the Chat window after quitting or moving to background", () => {
   const source = readFileSync(electronMainScript, "utf8");
   const start = source.indexOf("async function createWindow()");
   const end = source.indexOf('ipcMain.on("lazymind:renderer-ready"', start);
@@ -235,8 +235,8 @@ test("Desktop does not create the Chat window after shutdown begins", () => {
 
   assert.match(
     createWindow,
-    /startRuntime\(\);[\s\S]*const status = await waitForDesktopHomeReady\(\);\s*if \(isQuitting\) \{\s*return;\s*\}\s*mainWindow = new BrowserWindow/,
-    "shutdown must be rechecked before creating the hidden Chat window",
+    /const status = await waitForDesktopHomeReady\(\);\s*if \(isQuitting \|\| windowHiddenByUser \|\| nextStartupWindow\.isDestroyed\(\)\) \{\s*return;\s*\}\s*nextMainWindow = new BrowserWindow/,
+    "quit and background state must be rechecked before creating the hidden Chat window",
   );
 });
 
@@ -253,25 +253,57 @@ test("Desktop opens the home page from the sidecar readiness event with status p
   );
 });
 
-test("macOS window close hides the app while explicit quit still shuts it down", () => {
+test("Desktop close and quit destroy renderers while keeping the runtime resident", () => {
   const source = readFileSync(electronMainScript, "utf8");
+  const backgroundStart = source.indexOf("function enterBackgroundMode");
+  const backgroundEnd = source.indexOf("function sameRuntimePath", backgroundStart);
+  const backgroundMode = source.slice(backgroundStart, backgroundEnd);
+  const windowsClosedStart = source.indexOf('app.on("window-all-closed"');
+  const windowsClosedEnd = source.indexOf('app.on("before-quit"', windowsClosedStart);
+  const windowsClosedHandler = source.slice(windowsClosedStart, windowsClosedEnd);
 
   assert.match(
     source,
-    /function attachManagedClose\(window\)[\s\S]*event\.preventDefault\(\);[\s\S]*if \(isMac\) \{[\s\S]*windowHiddenByUser = true;[\s\S]*window\.hide\(\);[\s\S]*return;[\s\S]*beginFastQuit\("window close"\)/,
-    "the macOS close button must hide the window without starting runtime shutdown",
+    /function attachManagedClose\(window\)[\s\S]*event\.preventDefault\(\);\s*enterBackgroundMode\("window close", \{ discoverable: true \}\)/,
+    "window close must preserve a visible background entry on macOS and Windows",
   );
   assert.match(
-    source,
-    /if \(!windowHiddenByUser\) \{[\s\S]*mainWindow\.show\(\);[\s\S]*mainWindow\.focus\(\);[\s\S]*\}/,
-    "a window hidden during startup must not reappear when Chat finishes loading",
+    backgroundMode,
+    /rendererReadyWait\?\.cancel\(\);[\s\S]*window\.removeAllListeners\("close"\);[\s\S]*window\.destroy\(\)/,
+    "both background modes must destroy renderer windows",
   );
-  assert.match(source, /app\.on\("activate", showActiveWindow\)/);
+  assert.match(backgroundMode, /if \(discoverable\) \{\s*ensureWindowsTray\(\)/);
+  assert.match(backgroundMode, /app\.hide\(\);[\s\S]*app\.dock\.hide\(\);[\s\S]*destroyWindowsTray\(\)/);
+  assert.doesNotMatch(backgroundMode, /beginFastQuit|detachRuntimeMonitor|runSidecar\("down"/);
   assert.match(
     source,
-    /app\.on\("before-quit",[\s\S]*beginFastQuit\("app quit"\)/,
-    "Dock, menu, and keyboard quit actions must retain the explicit shutdown path",
+    /function showActiveWindow\(\)[\s\S]*app\.show\(\);[\s\S]*app\.dock\.show\(\)[\s\S]*const creation = createWindow\(\)/,
+    "opening the resident app must restore the Dock icon and recreate its frontend",
   );
+  assert.match(source, /app\.on\("second-instance"[\s\S]*showActiveWindow\(\)/);
+  assert.match(source, /app\.on\("activate"[\s\S]*showActiveWindow\(\)/);
+  assert.match(
+    source,
+    /app\.on\("before-quit",[\s\S]*event\.preventDefault\(\);\s*enterBackgroundMode\("app quit", \{ discoverable: false \}\)/,
+    "Dock, menu, and keyboard quit actions must enter hidden background mode",
+  );
+  assert.doesNotMatch(windowsClosedHandler, /app\.quit\(\)/);
+});
+
+test("Windows tray reopens the frontend and Exit removes the visible background entry", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const trayStart = source.indexOf("function ensureWindowsTray()");
+  const trayEnd = source.indexOf("function attachManagedClose", trayStart);
+  const traySource = source.slice(trayStart, trayEnd);
+
+  assert.match(traySource, /tray = new Tray\(iconPath\)/);
+  assert.match(traySource, /tray\.on\("click",[\s\S]*showActiveWindow\(\)/);
+  assert.match(traySource, /label: "Open LazyMind"[\s\S]*showActiveWindow\(\)/);
+  assert.match(
+    traySource,
+    /label: "Exit"[\s\S]*enterBackgroundMode\("tray exit", \{ discoverable: false \}\)/,
+  );
+  assert.match(source, /function destroyWindowsTray\(\)[\s\S]*tray\.destroy\(\);\s*tray = undefined/);
 });
 
 test("Windows installer path policy matches the maintenance helper trust boundary", () => {

@@ -77,6 +77,24 @@ func TestRuntimeConfigUsesPlatformUserPathsByDefault(t *testing.T) {
 	}
 }
 
+func TestWaitForAuthServiceHealthyToleratesStalePIDDuringRestart(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "auth-service.pid")
+	if err := os.WriteFile(pidFile, []byte("2147483647\n"), 0o600); err != nil {
+		t.Fatalf("write stale auth-service pid: %v", err)
+	}
+
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+	probeCount := 0
+	manager.probeAuth = func(_ int, _ time.Duration) bool {
+		probeCount++
+		return probeCount >= 2
+	}
+
+	if err := manager.waitForAuthServiceHealthy(context.Background(), 18000, 2*time.Second, pidFile); err != nil {
+		t.Fatalf("wait for restarted auth-service: %v", err)
+	}
+}
+
 func TestRuntimePathLayoutForSupportedPlatforms(t *testing.T) {
 	home := filepath.Join("Users", "me")
 	tests := []struct {

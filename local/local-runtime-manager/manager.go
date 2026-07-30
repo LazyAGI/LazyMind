@@ -421,11 +421,13 @@ func (m *RuntimeManager) waitForDesktopRuntimeStop(ctx context.Context, paths Ru
 }
 
 func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int, timeout time.Duration, pidFile string) error {
+	const exitConfirmationChecks = 3
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	sawPIDFile := false
+	exitedChecks := 0
 	url := fmt.Sprintf("http://127.0.0.1:%d/health", port)
 	nextReport := m.now().Add(startupProgressInterval)
 	m.progressf("waiting for auth-service health: %s", url)
@@ -437,10 +439,15 @@ func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int
 		alive, err := upLockProcessAlive(pidFile)
 		if err == nil {
 			sawPIDFile = true
-			if !alive {
-				return fmt.Errorf("auth-service process exited before becoming healthy")
+			if alive {
+				exitedChecks = 0
+			} else {
+				exitedChecks++
 			}
 		} else if sawPIDFile && os.IsNotExist(err) {
+			exitedChecks++
+		}
+		if exitedChecks >= exitConfirmationChecks {
 			return fmt.Errorf("auth-service process exited before becoming healthy")
 		}
 		if !m.now().Before(nextReport) {
