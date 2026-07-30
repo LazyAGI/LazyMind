@@ -18,7 +18,9 @@ import (
 )
 
 const (
-	algorithmHealthTimeout = 15 * time.Minute
+	algorithmHealthTimeout   = 15 * time.Minute
+	defaultLazyLLMVersion    = "1.2.0a2"
+	defaultLazyLLMReleaseURL = "https://github.com/LazyAGI/LazyLLM/releases/download/v1.2.0a2/lazyllm-1.2.0a2.tar.gz"
 )
 
 type AlgorithmServiceSpec struct {
@@ -266,7 +268,7 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 	}
 	installSteps := []Command{
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "setuptools<81"), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
-		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "lazyllm"), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
+		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "lazyllm@"+envText("LAZYMIND_LAZYLLM_RELEASE_URL", defaultLazyLLMReleaseURL)), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 		{Name: lazyllm, Args: []string{"install", "rag"}, Dir: paths.RepoRoot, Env: pythonDependencyCacheEnv(paths)},
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements-local.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
@@ -285,6 +287,8 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 
 func algorithmReadyStamp(paths RuntimePaths, includeEvo bool) (string, error) {
 	hash := sha256.New()
+	_, _ = hash.Write([]byte("lazyllm@" + envText("LAZYMIND_LAZYLLM_RELEASE_URL", defaultLazyLLMReleaseURL)))
+	_, _ = hash.Write([]byte{0})
 	files := []string{
 		filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt"),
 		filepath.Join(paths.RepoRoot, "algorithm", "requirements-local.txt"),
@@ -447,22 +451,23 @@ func ensureLazyLLMSubmodule(ctx context.Context, runner CommandRunner, repoRoot 
 }
 
 func ensureLazyLLMSource(ctx context.Context, runner CommandRunner, repoRoot string, profile string) error {
+	if profile == "desktop" {
+		return nil
+	}
 	required := filepath.Join(repoRoot, "algorithm", "lazyllm", "lazyllm")
 	if info, err := os.Stat(required); err == nil && info.IsDir() {
 		return nil
-	}
-	if profile == "desktop" {
-		return fmt.Errorf("desktop runtime is missing bundled algorithm/lazyllm source; rebuild the app with algorithm/lazyllm submodule initialized")
 	}
 	return ensureLazyLLMSubmodule(ctx, runner, repoRoot)
 }
 
 func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) []string {
-	pythonPath := strings.Join([]string{
-		filepath.Join(paths.RepoRoot, "algorithm", "lazyllm"),
-		filepath.Join(paths.RepoRoot, "algorithm"),
-		paths.RepoRoot,
-	}, string(os.PathListSeparator))
+	pythonPaths := []string{filepath.Join(paths.RepoRoot, "algorithm"), paths.RepoRoot}
+	lazyLLMSource := filepath.Join(paths.RepoRoot, "algorithm", "lazyllm")
+	if info, err := os.Stat(filepath.Join(lazyLLMSource, "lazyllm")); err == nil && info.IsDir() {
+		pythonPaths = append([]string{lazyLLMSource}, pythonPaths...)
+	}
+	pythonPath := strings.Join(pythonPaths, string(os.PathListSeparator))
 	lazyLLMDBURL := sqliteURL(paths.LazyLLMDBPath)
 	coreDBURL := sqliteURL(paths.CoreDBPath)
 	noProxy := envText("no_proxy", "127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")
@@ -519,7 +524,12 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYLLM_MINERU_BACKEND=" + envText("LAZYLLM_MINERU_BACKEND", envText("LAZYMIND_MINERU_BACKEND", "pipeline")),
 		"LAZYLLM_MINERU_API_KEY=" + envText("LAZYLLM_MINERU_API_KEY", ""),
 		"LAZYLLM_PADDLE_API_KEY=" + envText("LAZYLLM_PADDLE_API_KEY", ""),
-		"LAZYLLM_INIT_DOC=True",
+		"LAZYLLM_INIT_DOC=" + envText("LAZYLLM_INIT_DOC", func() string {
+			if strings.HasPrefix(pythonPath, lazyLLMSource) {
+				return "True"
+			}
+			return "False"
+		}()),
 		"LAZYLLM_EXPECTED_LOG_MODULES=all",
 		"LAZYMIND_MODEL_CONFIG_PATH=" + envText("LAZYMIND_MODEL_CONFIG_PATH", "dynamic"),
 		"LAZYMIND_DOCUMENT_PROCESSOR_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.Algorithm.ProcessorPort),
