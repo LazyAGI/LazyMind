@@ -149,12 +149,18 @@ test("macOS distribution build signs the final DMG and submits one asynchronous 
   assert.match(packageJson.scripts["dist:mac:arm64"], /--publish never$/);
   assert.match(builderSource, /afterPack:\s*signAndStageEmbeddedRuntime/);
   assert.match(builderSource, /afterSign:\s*restoreRuntimeAndFinalizeSignature/);
+  assert.match(builderSource, /macSigningMode === "developer-id" \? undefined : null/);
   assert.match(builderSource, /fs\.renameSync\(runtimeRoot, stagedRuntime\)/);
   assert.match(builderSource, /fs\.renameSync\(staged\.stagedRuntime, staged\.runtimeRoot\)/);
   assert.doesNotMatch(builderSource, /notarytool[\s\S]*submit/);
   assert.match(builderSource, /notarize:\s*false/);
   assert.match(builderSource, /sign:\s*macSigningMode === "developer-id"/);
   assert.doesNotMatch(builderSource, /signIgnore:/);
+  assert.match(
+    source,
+    /SIGNING_MODE}" == "adhoc"[\s\S]*codesign --force --deep --sign - "\$\{APP_PATH\}"/,
+    "local macOS builds must apply an explicit ad-hoc bundle signature",
+  );
   assert.doesNotMatch(source, /notarytool submit[\s\S]*--wait/);
   assert.doesNotMatch(source, /stapler staple/);
   for (const privatePath of ["/.env", "/.lazymind-local", "/data", "/volumes", "/local/config.env"]) {
@@ -224,7 +230,7 @@ test("packaged macOS app runs installation warmup once before its normal window"
   const source = readFileSync(electronMainScript, "utf8");
   assert.match(
     source,
-    /runMacInstallationWarmupIfNeeded\(\)\.then\(\s*\(\) => createWindow\(\)/,
+    /runMacInstallationWarmupIfNeeded\(\)\.then\(\s*\(\) => \{\s*frontendOpeningAllowed = true;\s*if \(windowHiddenByUser\) \{\s*return undefined;\s*\}\s*return showActiveWindow\(\)/,
   );
   assert.match(
     source,
@@ -233,7 +239,7 @@ test("packaged macOS app runs installation warmup once before its normal window"
   );
 });
 
-test("Desktop does not create the Chat window after shutdown begins", () => {
+test("Desktop does not create the Chat window after quitting or moving to background", () => {
   const source = readFileSync(electronMainScript, "utf8");
   const start = source.indexOf("async function createWindow()");
   const end = source.indexOf('ipcMain.on("lazymind:renderer-ready"', start);
@@ -242,9 +248,75 @@ test("Desktop does not create the Chat window after shutdown begins", () => {
 
   assert.match(
     createWindow,
-    /const status = await waitForRuntimeReady\(\);\s*if \(isQuitting\) \{\s*return;\s*\}\s*mainWindow = new BrowserWindow/,
-    "shutdown must be rechecked before creating the hidden Chat window",
+    /const status = await waitForDesktopHomeReady\(\);\s*if \(isQuitting \|\| windowHiddenByUser \|\| nextStartupWindow\.isDestroyed\(\)\) \{\s*return;\s*\}\s*nextMainWindow = new BrowserWindow/,
+    "quit and background state must be rechecked before creating the hidden Chat window",
   );
+});
+
+test("Desktop opens the home page from the sidecar readiness event with status polling as fallback", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+
+  assert.match(
+    source,
+    /event\?\.event === "capability\.ready" && event\?\.capability === "home"[\s\S]*publishHomeReady\(Number\(event\.frontendPort\)\)/,
+  );
+  assert.match(
+    source,
+    /function waitForDesktopHomeReady\(\) \{[\s\S]*Promise\.race\(\[[\s\S]*waitForHomeReadySignal\(\),[\s\S]*waitForRuntimeReady\(\{ capability: "home" \}\)/,
+  );
+});
+
+test("Desktop close and quit destroy renderers while keeping the runtime resident", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const backgroundStart = source.indexOf("function enterBackgroundMode");
+  const backgroundEnd = source.indexOf("function sameRuntimePath", backgroundStart);
+  const backgroundMode = source.slice(backgroundStart, backgroundEnd);
+  const windowsClosedStart = source.indexOf('app.on("window-all-closed"');
+  const windowsClosedEnd = source.indexOf('app.on("before-quit"', windowsClosedStart);
+  const windowsClosedHandler = source.slice(windowsClosedStart, windowsClosedEnd);
+
+  assert.match(
+    source,
+    /function attachManagedClose\(window\)[\s\S]*event\.preventDefault\(\);\s*enterBackgroundMode\("window close", \{ discoverable: true \}\)/,
+    "window close must preserve a visible background entry on macOS and Windows",
+  );
+  assert.match(
+    backgroundMode,
+    /rendererReadyWait\?\.cancel\(\);[\s\S]*window\.removeAllListeners\("close"\);[\s\S]*window\.destroy\(\)/,
+    "both background modes must destroy renderer windows",
+  );
+  assert.match(backgroundMode, /if \(discoverable\) \{\s*ensureWindowsTray\(\)/);
+  assert.match(backgroundMode, /app\.hide\(\);[\s\S]*app\.dock\.hide\(\);[\s\S]*destroyWindowsTray\(\)/);
+  assert.doesNotMatch(backgroundMode, /beginFastQuit|detachRuntimeMonitor|runSidecar\("down"/);
+  assert.match(
+    source,
+    /function showActiveWindow\(\)[\s\S]*app\.show\(\);[\s\S]*app\.dock\.show\(\)[\s\S]*const creation = createWindow\(\)/,
+    "opening the resident app must restore the Dock icon and recreate its frontend",
+  );
+  assert.match(source, /app\.on\("second-instance"[\s\S]*showActiveWindow\(\)/);
+  assert.match(source, /app\.on\("activate"[\s\S]*showActiveWindow\(\)/);
+  assert.match(
+    source,
+    /app\.on\("before-quit",[\s\S]*event\.preventDefault\(\);\s*enterBackgroundMode\("app quit", \{ discoverable: false \}\)/,
+    "Dock, menu, and keyboard quit actions must enter hidden background mode",
+  );
+  assert.doesNotMatch(windowsClosedHandler, /app\.quit\(\)/);
+});
+
+test("Windows tray reopens the frontend and Exit removes the visible background entry", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const trayStart = source.indexOf("function ensureWindowsTray()");
+  const trayEnd = source.indexOf("function attachManagedClose", trayStart);
+  const traySource = source.slice(trayStart, trayEnd);
+
+  assert.match(traySource, /tray = new Tray\(iconPath\)/);
+  assert.match(traySource, /tray\.on\("click",[\s\S]*showActiveWindow\(\)/);
+  assert.match(traySource, /label: "Open LazyMind"[\s\S]*showActiveWindow\(\)/);
+  assert.match(
+    traySource,
+    /label: "Exit"[\s\S]*enterBackgroundMode\("tray exit", \{ discoverable: false \}\)/,
+  );
+  assert.match(source, /function destroyWindowsTray\(\)[\s\S]*tray\.destroy\(\);\s*tray = undefined/);
 });
 
 test("Windows installer path policy matches the maintenance helper trust boundary", () => {

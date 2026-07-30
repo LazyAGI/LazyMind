@@ -55,6 +55,7 @@ from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
     render_intent_section,
 )
+from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
 from lazymind.chat.service.utils import (
     SensitiveFilter,
     SensitiveMatch,
@@ -661,8 +662,9 @@ async def _handle_chat_impl(
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
     ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
     artifact_tools = _build_chat_artifact_tools()
+    skill_listing_tools = [build_list_skills_tool(agent.available_skills)]
     all_tools = ([intentwriter] + agent_tools + artifact_tools + subagent_tools + attachment_tools
-                 + ask_user_tools + plugin_tools + mcp_tools)
+                 + skill_listing_tools + ask_user_tools + plugin_tools + mcp_tools)
     skill_config = agent.available_skills
     selected_skills = agent.available_skills
     if task_profile is not None:

@@ -91,6 +91,24 @@ func TestRuntimeConfigUsesPlatformUserPathsByDefault(t *testing.T) {
 	}
 }
 
+func TestWaitForAuthServiceHealthyToleratesStalePIDDuringRestart(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "auth-service.pid")
+	if err := os.WriteFile(pidFile, []byte("2147483647\n"), 0o600); err != nil {
+		t.Fatalf("write stale auth-service pid: %v", err)
+	}
+
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+	probeCount := 0
+	manager.probeAuth = func(_ int, _ time.Duration) bool {
+		probeCount++
+		return probeCount >= 2
+	}
+
+	if err := manager.waitForAuthServiceHealthy(context.Background(), 18000, 2*time.Second, pidFile); err != nil {
+		t.Fatalf("wait for restarted auth-service: %v", err)
+	}
+}
+
 func TestRuntimePathLayoutForSupportedPlatforms(t *testing.T) {
 	home := filepath.Join("Users", "me")
 	tests := []struct {
@@ -962,6 +980,30 @@ func TestRuntimeManagerUpRejectsForeignOwnerBeforePythonRelocation(t *testing.T)
 	}
 	if !strings.Contains(output.String(), `"event":"startup.failed"`) || !strings.Contains(output.String(), "another application instance") {
 		t.Fatalf("startup output did not preserve ownership failure: %s", output.String())
+	}
+}
+
+func TestStartupCapabilityReadyIncludesFrontendPort(t *testing.T) {
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+
+	manager.startupCapabilityReady("home", 8090)
+
+	const marker = "[startup-event] "
+	line := strings.TrimSpace(output.String())
+	if !strings.HasPrefix(line, marker) {
+		t.Fatalf("startup capability output = %q, want %q prefix", line, marker)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, marker)), &payload); err != nil {
+		t.Fatalf("unmarshal startup capability event: %v", err)
+	}
+	if payload["event"] != "capability.ready" || payload["capability"] != "home" {
+		t.Fatalf("unexpected startup capability event: %#v", payload)
+	}
+	if payload["frontendPort"] != float64(8090) {
+		t.Fatalf("frontendPort = %#v, want 8090", payload["frontendPort"])
 	}
 }
 

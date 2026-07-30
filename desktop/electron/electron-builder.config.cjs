@@ -289,7 +289,8 @@ module.exports = {
     category: "public.app-category.productivity",
     icon: "assets/LazyMind.icns",
     target: ["dir"],
-    // electron-builder 24 does not treat "-" as ad-hoc; ad-hoc signing is done in afterPack.
+    // electron-builder 24 treats "-" as a keychain identity instead of ad-hoc.
+    // Ad-hoc local signing runs explicitly in afterPack.
     identity: macSigningMode === "developer-id" ? undefined : null,
     hardenedRuntime: macSigningMode === "developer-id",
     entitlements: "assets/entitlements.mac.plist",

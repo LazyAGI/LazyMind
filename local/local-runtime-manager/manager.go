@@ -119,6 +119,18 @@ func (m *RuntimeManager) startupEvent(event, phase string, startedAt time.Time, 
 	}
 }
 
+func (m *RuntimeManager) startupCapabilityReady(capability string, frontendPort int) {
+	payload := map[string]any{
+		"event":        "capability.ready",
+		"capability":   capability,
+		"frontendPort": frontendPort,
+		"timestamp":    m.now().UTC().Format(time.RFC3339Nano),
+	}
+	if raw, err := json.Marshal(payload); err == nil {
+		m.progressf("[startup-event] %s", raw)
+	}
+}
+
 func randomHexToken() (string, error) {
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
@@ -296,6 +308,14 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 			return err
 		}
 	}
+	if cfg.Profile == "desktop" && plan.includes(frontendProcessName) {
+		if err := m.waitForFrontendHealthy(ctx, cfg.FrontendPort, m.upTimeout); err != nil {
+			state = newStateWithServiceStatus(state, cfg, "failed")
+			state.OverallStatus = "failed"
+			_ = writeRuntimeState(paths.StateFile, state)
+			return err
+		}
+	}
 	if plan.includes(authServiceProcessName) {
 		if err := m.waitForAuthServiceHealthy(ctx, cfg.AuthService.Port, m.upTimeout, paths.AuthServicePIDFile); err != nil {
 			state = newStateWithServiceStatus(state, cfg, "failed")
@@ -303,6 +323,9 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 			_ = writeRuntimeState(paths.StateFile, state)
 			return err
 		}
+	}
+	if cfg.Profile == "desktop" && plan.includes(frontendProcessName) && plan.includes(authServiceProcessName) {
+		m.startupCapabilityReady("home", cfg.FrontendPort)
 	}
 	if plan.includes(channelGatewayProcessName) {
 		if err := m.waitForChannelGatewayHealthy(ctx, cfg.ChannelGateway.Port, m.upTimeout); err != nil {
@@ -418,11 +441,13 @@ func (m *RuntimeManager) waitForDesktopRuntimeStop(ctx context.Context, paths Ru
 }
 
 func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int, timeout time.Duration, pidFile string) error {
+	const exitConfirmationChecks = 3
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	sawPIDFile := false
+	exitedChecks := 0
 	url := fmt.Sprintf("http://127.0.0.1:%d/health", port)
 	nextReport := m.now().Add(startupProgressInterval)
 	m.progressf("waiting for auth-service health: %s", url)
@@ -434,10 +459,15 @@ func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int
 		alive, err := upLockProcessAlive(pidFile)
 		if err == nil {
 			sawPIDFile = true
-			if !alive {
-				return fmt.Errorf("auth-service process exited before becoming healthy")
+			if alive {
+				exitedChecks = 0
+			} else {
+				exitedChecks++
 			}
 		} else if sawPIDFile && os.IsNotExist(err) {
+			exitedChecks++
+		}
+		if exitedChecks >= exitConfirmationChecks {
 			return fmt.Errorf("auth-service process exited before becoming healthy")
 		}
 		if !m.now().Before(nextReport) {

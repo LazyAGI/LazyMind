@@ -270,6 +270,10 @@ if [[ ! -d "${APP_PATH}" ]]; then
   fi
 fi
 if [[ -d "${APP_PATH}" ]]; then
+  if [[ "${SIGNING_MODE}" == "adhoc" ]]; then
+    echo "==> Applying local ad-hoc signature"
+    codesign --force --deep --sign - "${APP_PATH}"
+  fi
   if [[ "${SIGNING_MODE}" != "none" ]]; then
     codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
   fi
