@@ -10,11 +10,13 @@ import (
 type Facade struct {
 	catalog  CatalogPort
 	document DocumentPort
+	search   SearchPort
 }
 
 type FacadeDeps struct {
 	Catalog  CatalogPort
 	Document DocumentPort
+	Search   SearchPort
 }
 
 func NewFacade(port CatalogPort) (*Facade, error) {
@@ -25,10 +27,10 @@ func NewFacade(port CatalogPort) (*Facade, error) {
 }
 
 func NewFacadeWithDeps(deps FacadeDeps) (*Facade, error) {
-	if deps.Catalog == nil && deps.Document == nil {
-		return nil, contract.NewError(contract.Internal, "knowledge.facade.new", "catalog or document port is required", false, nil)
+	if deps.Catalog == nil && deps.Document == nil && deps.Search == nil {
+		return nil, contract.NewError(contract.Internal, "knowledge.facade.new", "knowledge port is required", false, nil)
 	}
-	return &Facade{catalog: deps.Catalog, document: deps.Document}, nil
+	return &Facade{catalog: deps.Catalog, document: deps.Document, search: deps.Search}, nil
 }
 
 func (f *Facade) List(ctx context.Context, callCtx contract.CallContext, input ListInput) (ListResult, error) {
@@ -107,4 +109,41 @@ func (f *Facade) GetDocument(ctx context.Context, callCtx contract.CallContext, 
 		detail.ChunksPage = &chunks.Page
 	}
 	return GetDocumentResult{Document: detail}, nil
+}
+
+func (f *Facade) Search(ctx context.Context, callCtx contract.CallContext, input SearchInput) (SearchResult, error) {
+	callCtx.UserID = strings.TrimSpace(callCtx.UserID)
+	if callCtx.UserID == "" {
+		return SearchResult{}, contract.InvalidArgumentError("knowledge.search", "user_id is required")
+	}
+	input.Query = strings.TrimSpace(input.Query)
+	if input.Query == "" {
+		return SearchResult{}, contract.InvalidArgumentError("knowledge.search", "query is required")
+	}
+	input.KnowledgeIDs = normalizeKnowledgeIDs(input.KnowledgeIDs)
+	if len(input.KnowledgeIDs) == 0 {
+		return SearchResult{}, contract.InvalidArgumentError("knowledge.search", "knowledge_ids is required")
+	}
+	input.ConversationID = strings.TrimSpace(input.ConversationID)
+	if f.search == nil {
+		return SearchResult{}, contract.NewError(contract.Unsupported, "knowledge.search", "knowledge search is not configured", false, nil)
+	}
+	return f.search.Search(ctx, callCtx, input)
+}
+
+func normalizeKnowledgeIDs(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }

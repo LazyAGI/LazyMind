@@ -38,6 +38,24 @@ type fakeDocumentPort struct {
 	chunksErr       error
 }
 
+type fakeSearchPort struct {
+	callCtx contract.CallContext
+	input   SearchInput
+	result  SearchResult
+	err     error
+	calls   int
+}
+
+func (p *fakeSearchPort) Search(ctx context.Context, callCtx contract.CallContext, input SearchInput) (SearchResult, error) {
+	p.calls++
+	p.callCtx = callCtx
+	p.input = input
+	if p.err != nil {
+		return SearchResult{}, p.err
+	}
+	return p.result, nil
+}
+
 func (p *fakeDocumentPort) GetDocumentMetadata(ctx context.Context, callCtx contract.CallContext, input GetDocumentMetadataInput) (DocumentDetail, error) {
 	p.metadataCalls++
 	p.metadataCallCtx = callCtx
@@ -313,6 +331,69 @@ func TestFacadeCatalogListGetUnchangedWithDocumentPort(t *testing.T) {
 	}
 	if catalog.listInput.Page.PageSize != contract.DefaultPageSize || catalog.getInput.KnowledgeID != "ds-1" {
 		t.Fatalf("catalog calls changed: list=%#v get=%#v", catalog.listInput, catalog.getInput)
+	}
+}
+
+func TestFacadeSearchValidationAndUnsupported(t *testing.T) {
+	facade := mustKnowledgeFacade(t, &fakeCatalogPort{})
+	cases := []struct {
+		name    string
+		callCtx contract.CallContext
+		input   SearchInput
+		code    contract.ErrorCode
+	}{
+		{name: "user", callCtx: contract.CallContext{UserID: " "}, input: SearchInput{Query: "q", KnowledgeIDs: []string{"ds-1"}}, code: contract.InvalidArgument},
+		{name: "query", callCtx: contract.CallContext{UserID: "user"}, input: SearchInput{Query: " ", KnowledgeIDs: []string{"ds-1"}}, code: contract.InvalidArgument},
+		{name: "knowledge ids", callCtx: contract.CallContext{UserID: "user"}, input: SearchInput{Query: "q", KnowledgeIDs: []string{" "}}, code: contract.InvalidArgument},
+		{name: "unsupported", callCtx: contract.CallContext{UserID: "user"}, input: SearchInput{Query: "q", KnowledgeIDs: []string{"ds-1"}}, code: contract.Unsupported},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := facade.Search(context.Background(), tt.callCtx, tt.input)
+			if code, ok := contract.CodeOf(err); !ok || code != tt.code {
+				t.Fatalf("error code = %v, %v; want %s", code, ok, tt.code)
+			}
+		})
+	}
+}
+
+func TestFacadeSearchNormalizesInputAndReturnsResult(t *testing.T) {
+	port := &fakeSearchPort{result: SearchResult{
+		Answer:         "answer",
+		ConversationID: "conv-1",
+		MessageID:      "msg-1",
+		Sources:        []SearchSource{{KnowledgeID: "ds-1", Text: "source"}},
+	}}
+	facade := mustKnowledgeFacadeWithDeps(t, FacadeDeps{Search: port})
+	result, err := facade.Search(context.Background(), contract.CallContext{UserID: " user "}, SearchInput{
+		Query:          "  hello  ",
+		KnowledgeIDs:   []string{" ds-1 ", "", "ds-2", "ds-1"},
+		ConversationID: " conv-1 ",
+	})
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if result.Answer != "answer" || result.ConversationID != "conv-1" || len(result.Sources) != 1 {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if port.calls != 1 || port.callCtx.UserID != "user" {
+		t.Fatalf("unexpected search calls=%d callCtx=%#v", port.calls, port.callCtx)
+	}
+	if port.input.Query != "hello" || port.input.ConversationID != "conv-1" {
+		t.Fatalf("input not normalized: %#v", port.input)
+	}
+	if len(port.input.KnowledgeIDs) != 2 || port.input.KnowledgeIDs[0] != "ds-1" || port.input.KnowledgeIDs[1] != "ds-2" {
+		t.Fatalf("knowledge ids not normalized: %#v", port.input.KnowledgeIDs)
+	}
+}
+
+func TestFacadeSearchPropagatesPortTypedError(t *testing.T) {
+	want := contract.NewError(contract.BackendUnavailable, "search", "down", true, errors.New("cause"))
+	port := &fakeSearchPort{err: want}
+	facade := mustKnowledgeFacadeWithDeps(t, FacadeDeps{Search: port})
+	_, err := facade.Search(context.Background(), contract.CallContext{UserID: "user"}, SearchInput{Query: "q", KnowledgeIDs: []string{"ds-1"}})
+	if !errors.Is(err, want) {
+		t.Fatalf("err = %v, want %v", err, want)
 	}
 }
 

@@ -81,3 +81,25 @@ type DocumentChunk struct {
 	Text   string
 	Number int32
 }
+
+type SearchInput struct {
+	Query          string
+	KnowledgeIDs   []string
+	ConversationID string
+}
+
+type SearchResult struct {
+	Answer         string
+	Sources        []SearchSource
+	ConversationID string
+	MessageID      string
+}
+
+type SearchSource struct {
+	KnowledgeID string
+	DocumentID  string
+	ChunkID     string
+	Title       string
+	Text        string
+	Number      int
+}
