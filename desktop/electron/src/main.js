@@ -128,6 +128,7 @@ function sidecarEnv() {
     ...process.env,
     LAZYMIND_RUNTIME_PROFILE: "desktop",
     LAZYMIND_RUNTIME_OWNER_TOKEN: ownerToken,
+    LAZYMIND_DESKTOP_APP_VERSION: app.getVersion(),
     LAZYMIND_DESKTOP_OWNER_PID: String(process.pid),
     LAZYMIND_RUNTIME_RESOURCES_ROOT: runtimeResourcesRoot,
     LAZYMIND_LOCAL_NETWORK_PROFILE: "localhost",

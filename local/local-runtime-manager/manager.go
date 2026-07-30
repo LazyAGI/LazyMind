@@ -330,6 +330,14 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		_ = writeRuntimeState(paths.StateFile, state)
 		return waitErr
 	}
+	if plan.includes(algoProcessName) {
+		if err := markAlgorithmRegistrationVersion(cfg, paths); err != nil {
+			state = newStateWithServiceStatus(state, cfg, "failed")
+			state.OverallStatus = "failed"
+			_ = writeRuntimeState(paths.StateFile, state)
+			return fmt.Errorf("record algorithm registration version: %w", err)
+		}
+	}
 	if plan.includes(frontendProcessName) {
 		if err := m.waitForFrontendHealthy(ctx, cfg.FrontendPort, m.upTimeout); err != nil {
 			state = newStateWithServiceStatus(state, cfg, "failed")
