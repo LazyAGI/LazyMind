@@ -389,12 +389,6 @@ func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg R
 	case docServerProcessName:
 		return waitForHTTPOnly(ctx, cfg.Algorithm.ProcessorPort, "/health", "processor-server", 3*time.Minute)
 	case chatProcessName:
-		if err := waitForHTTPOnly(ctx, cfg.Algorithm.AlgoPort, "/docs", "lazyllm-algo", 5*time.Minute); err != nil {
-			return err
-		}
-		if err := waitForAlgorithmRegistration(ctx, cfg.Algorithm.ProcessorPort, 5*time.Minute); err != nil {
-			return err
-		}
 		return waitForHTTPOnly(ctx, cfg.LocalProxy.CoreHostPort, "/health", "core", 5*time.Minute)
 	case evoProcessName:
 		return waitForHTTPOnly(ctx, cfg.Algorithm.ChatPort, "/health", "chat", 5*time.Minute)
