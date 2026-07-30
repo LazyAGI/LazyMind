@@ -24,6 +24,7 @@ type RuntimeManager struct {
 	probeLocalProxy           func(port int, timeout time.Duration) bool
 	probeFrontend             func(port int, timeout time.Duration) bool
 	probeAuth                 func(port int, timeout time.Duration) bool
+	probeChannelGateway       func(port int, timeout time.Duration) bool
 	probeCore                 func(port int, timeout time.Duration) bool
 	probeScan                 func(port int, timeout time.Duration) bool
 	probeFileWatch            func(port int, timeout time.Duration) bool
@@ -38,6 +39,7 @@ type RuntimeManager struct {
 	processCompose            *ProcessComposeManager
 	localProxy                *LocalProxyManager
 	authService               *AuthServiceManager
+	channelGateway            *ChannelGatewayManager
 	coreService               *CoreServiceManager
 	scanControl               *ScanControlPlaneManager
 	fileWatcher               *FileWatcherManager
@@ -60,6 +62,7 @@ func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 		probeLocalProxy:           localProxyHealthAlive,
 		probeFrontend:             frontendHealthAlive,
 		probeAuth:                 authServiceHealthAlive,
+		probeChannelGateway:       channelGatewayHealthAlive,
 		probeCore:                 coreServiceHealthAlive,
 		probeScan:                 scanControlPlaneHealthAlive,
 		probeFileWatch:            fileWatcherHealthAlive,
@@ -74,6 +77,7 @@ func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 		processCompose:            processCompose,
 		localProxy:                NewLocalProxyManager(r),
 		authService:               NewAuthServiceManager(r),
+		channelGateway:            NewChannelGatewayManager(r),
 		coreService:               NewCoreServiceManager(r),
 		scanControl:               NewScanControlPlaneManager(r),
 		fileWatcher:               NewFileWatcherManager(r),
@@ -300,6 +304,14 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 			return err
 		}
 	}
+	if plan.includes(channelGatewayProcessName) {
+		if err := m.waitForChannelGatewayHealthy(ctx, cfg.ChannelGateway.Port, m.upTimeout); err != nil {
+			state = newStateWithServiceStatus(state, cfg, "failed")
+			state.OverallStatus = "failed"
+			_ = writeRuntimeState(paths.StateFile, state)
+			return err
+		}
+	}
 	if plan.includes(coreProcessName) {
 		if err := m.waitForCoreHealthy(ctx, cfg.LocalProxy.CoreHostPort, m.upTimeout); err != nil {
 			state = newStateWithServiceStatus(state, cfg, "failed")
@@ -442,6 +454,10 @@ func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int
 	}
 }
 
+func (m *RuntimeManager) waitForChannelGatewayHealthy(ctx context.Context, port int, timeout time.Duration) error {
+	return m.waitForServiceProbeReady(ctx, m.probeChannelGateway, port, channelGatewayProcessName, "/readyz", timeout)
+}
+
 func (m *RuntimeManager) waitForLocalProxyHealthy(ctx context.Context, port int, timeout time.Duration) error {
 	return m.waitForServiceProbeReady(ctx, m.probeLocalProxy, port, localProxyProcessName, "/_local/healthz", timeout)
 }
@@ -562,6 +578,10 @@ func frontendHealthAlive(port int, timeout time.Duration) bool {
 	return httpOK(context.Background(), fmt.Sprintf("http://127.0.0.1:%d/", port), timeout)
 }
 
+func channelGatewayHealthAlive(port int, timeout time.Duration) bool {
+	return httpOK(context.Background(), fmt.Sprintf("http://127.0.0.1:%d/readyz", port), timeout)
+}
+
 func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
 	if err := validateRequestedRuntimeOwner(cfg); err != nil {
 		return err
@@ -672,6 +692,12 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 		if plan.includes(authServiceProcessName) {
 			m.progressf("stopping auth-service on 127.0.0.1:%d", cfg.AuthService.Port)
 			if err := m.authService.Down(ctx, cfg, paths); err != nil && fallbackErr == nil {
+				fallbackErr = err
+			}
+		}
+		if plan.includes(channelGatewayProcessName) {
+			m.progressf("stopping channel-gateway on 127.0.0.1:%d", cfg.ChannelGateway.Port)
+			if err := m.channelGateway.Down(ctx, paths); err != nil && fallbackErr == nil {
 				fallbackErr = err
 			}
 		}
@@ -889,6 +915,8 @@ func (m *RuntimeManager) plannedServiceHealthy(ctx context.Context, cfg RuntimeC
 		return m.probeLocalProxy(cfg.LocalProxy.Port, 500*time.Millisecond)
 	case authServiceProcessName:
 		return m.probeAuth(cfg.AuthService.Port, 500*time.Millisecond)
+	case channelGatewayProcessName:
+		return m.probeChannelGateway(cfg.ChannelGateway.Port, 500*time.Millisecond)
 	case frontendProcessName:
 		return m.probeFrontend(cfg.FrontendPort, 500*time.Millisecond)
 	case coreProcessName:
@@ -1057,6 +1085,7 @@ func resolvedLocalPorts(cfg RuntimeConfig) []localPortItem {
 		{name: "frontend", port: cfg.FrontendPort, address: frontendAddress},
 		{name: "local-proxy", port: cfg.LocalProxy.Port, address: "127.0.0.1"},
 		{name: "auth-service", port: cfg.AuthService.Port, address: "127.0.0.1"},
+		{name: channelGatewayProcessName, port: cfg.ChannelGateway.Port, address: "127.0.0.1"},
 		{name: "core", port: cfg.LocalProxy.CoreHostPort, address: "127.0.0.1"},
 		{name: "scan-control-plane", port: cfg.LocalProxy.ScanHostPort, address: "127.0.0.1"},
 		{name: "file-watcher", port: cfg.FileWatcher.Port, address: "127.0.0.1"},

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+)
 
 func TestServiceRuntimeEnvDisablesPythonBytecodeWrites(t *testing.T) {
 	repo := t.TempDir()
@@ -12,6 +15,16 @@ func TestServiceRuntimeEnvDisablesPythonBytecodeWrites(t *testing.T) {
 
 	assertEnvContains(t, serviceRuntimeEnv(paths), "PYTHONDONTWRITEBYTECODE=1")
 	assertEnvContains(t, runtimeCommandEnv(paths, cfg), "PYTHONDONTWRITEBYTECODE=1")
+	assertEnvContains(
+		t,
+		localRuntimeEnv(cfg),
+		localProxyChannelHostPortEnvVar+"="+strconv.Itoa(cfg.ChannelGateway.Port),
+	)
+	assertEnvContains(
+		t,
+		runtimeCommandEnv(paths, cfg),
+		localProxyChannelHostPortEnvVar+"="+strconv.Itoa(cfg.ChannelGateway.Port),
+	)
 }
 
 func TestRuntimeEnvCarriesLocalAutoLoginLANFlag(t *testing.T) {

@@ -1,7 +1,13 @@
 import datetime as dt
 import json
+import os
+import re
+import sqlite3
+import threading
 import uuid
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 import psycopg
 from psycopg.rows import dict_row
@@ -15,15 +21,116 @@ ACTIVE_SESSION_STATUSES = (
     'confirming',
 )
 
+_SQLITE_BOOLEAN_COLUMNS = {'error_retryable', 'welcome_pending'}
+_SQLITE_PLACEHOLDER_RE = re.compile(r'%s')
+_SQLITE_FOR_UPDATE_RE = re.compile(r'\s+FOR\s+UPDATE\b', re.IGNORECASE)
+
+
+def _sqlite_timestamp(raw: bytes) -> dt.datetime:
+    value = dt.datetime.fromisoformat(raw.decode('utf-8').replace('Z', '+00:00'))
+    return value if value.tzinfo else value.replace(tzinfo=dt.timezone.utc)
+
+
+sqlite3.register_converter('TIMESTAMPTZ', _sqlite_timestamp)
+
+
+def _sqlite_row(cursor, row):
+    result = {description[0]: row[index] for index, description in enumerate(cursor.description)}
+    for key in _SQLITE_BOOLEAN_COLUMNS:
+        if result.get(key) is not None:
+            result[key] = bool(result[key])
+    return result
+
+
+def _sqlite_path(dsn: str) -> str:
+    parsed = urlparse(dsn)
+    path = unquote(parsed.path)
+    if parsed.netloc:
+        path = f'//{parsed.netloc}{path}'
+    if os.name == 'nt' and re.match(r'^/[A-Za-z]:/', path):
+        path = path[1:]
+    return os.path.normpath(path)
+
+
+def _snapshot_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
+class _SQLiteConnection:
+    def __init__(self, path: str):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self._connection = sqlite3.connect(
+            path,
+            timeout=30,
+            detect_types=sqlite3.PARSE_DECLTYPES,
+        )
+        self._connection.row_factory = _sqlite_row
+        self._connection.execute('PRAGMA foreign_keys = ON')
+        self._connection.execute('PRAGMA busy_timeout = 30000')
+        self._connection.execute('PRAGMA journal_mode = WAL')
+
+    def __enter__(self):
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return self._connection.__exit__(exc_type, exc_value, traceback)
+        finally:
+            self._connection.close()
+
+    def execute(self, statement: str, parameters=()):
+        sql = _SQLITE_PLACEHOLDER_RE.sub('?', statement)
+        sql = _SQLITE_FOR_UPDATE_RE.sub('', sql)
+        return self._connection.execute(sql, parameters)
+
+    def close(self) -> None:
+        self._connection.close()
+
+
+class _SQLiteLease:
+    def __init__(self, store: 'GatewayStore', account_id: str):
+        self._store = store
+        self._account_id = account_id
+
+    def execute(self, statement: str, parameters=()):
+        store = self._store
+        if store is None:
+            raise RuntimeError('runtime lease is closed')
+        with store._connect() as connection:
+            return connection.execute(statement, parameters).fetchone()
+
+    def close(self) -> None:
+        store = self._store
+        if store is None:
+            return
+        self._store = None
+        with store._runtime_lease_lock:
+            store._runtime_leases.discard(self._account_id)
+
 
 class GatewayStore:
     def __init__(self, dsn: str):
         self._dsn = dsn
+        self._sqlite = dsn.startswith('sqlite:')
+        self._sqlite_path = _sqlite_path(dsn) if self._sqlite else ''
+        self._runtime_lease_lock = threading.Lock()
+        self._runtime_leases: set[str] = set()
 
     def _connect(self):
+        if self._sqlite:
+            return _SQLiteConnection(self._sqlite_path)
         return psycopg.connect(self._dsn, row_factory=dict_row)
 
     def initialize(self) -> None:
+        if self._sqlite:
+            self._initialize_sqlite()
+            return
         statements = (
             """
             CREATE TABLE IF NOT EXISTS channel_accounts (
@@ -189,6 +296,122 @@ class GatewayStore:
             for statement in statements:
                 connection.execute(statement)
 
+    def _initialize_sqlite(self) -> None:
+        statements = (
+            """
+            CREATE TABLE IF NOT EXISTS channel_accounts (
+                id TEXT PRIMARY KEY,
+                owner_user_id TEXT NOT NULL,
+                provider VARCHAR(32) NOT NULL,
+                external_id_hash VARCHAR(64) NOT NULL,
+                label TEXT NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                runtime_status VARCHAR(32) NOT NULL DEFAULT 'stopped',
+                last_poll_at TIMESTAMPTZ,
+                last_message_at TIMESTAMPTZ,
+                last_error TEXT,
+                credentials_ciphertext TEXT NOT NULL,
+                welcome_pending BOOLEAN NOT NULL DEFAULT FALSE,
+                connected_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (owner_user_id, provider, external_id_hash)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS channel_connection_sessions (
+                id TEXT PRIMARY KEY,
+                owner_user_id TEXT NOT NULL,
+                provider VARCHAR(32) NOT NULL,
+                account_id TEXT REFERENCES channel_accounts(id),
+                idempotency_key TEXT,
+                status VARCHAR(32) NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 1,
+                qr_version INTEGER NOT NULL DEFAULT 1,
+                message TEXT NOT NULL,
+                provider_state_ciphertext TEXT,
+                expires_at TIMESTAMPTZ NOT NULL,
+                error_code TEXT,
+                error_message TEXT,
+                error_retryable BOOLEAN,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS channel_connection_sessions_idempotency_idx
+            ON channel_connection_sessions(owner_user_id, provider, idempotency_key)
+            WHERE idempotency_key IS NOT NULL
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS channel_connection_sessions_owner_idx
+            ON channel_connection_sessions(owner_user_id, provider, updated_at DESC)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS channel_accounts_owner_idx
+            ON channel_accounts(owner_user_id, provider, updated_at DESC)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS channel_checkpoints (
+                account_id TEXT PRIMARY KEY REFERENCES channel_accounts(id) ON DELETE CASCADE,
+                cursor TEXT NOT NULL DEFAULT '',
+                longpoll_timeout_ms INTEGER NOT NULL DEFAULT 35000,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS channel_routes (
+                account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+                external_address_hash VARCHAR(64) NOT NULL,
+                conversation_id TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (account_id, external_address_hash)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS channel_navigation_states (
+                account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+                external_address_hash VARCHAR(64) NOT NULL,
+                mode VARCHAR(32) NOT NULL DEFAULT 'active',
+                snapshot_json TEXT NOT NULL DEFAULT '{}',
+                snapshot_expires_at TIMESTAMPTZ,
+                history_conversation_id TEXT,
+                history_next_page_token TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (account_id, external_address_hash),
+                CHECK (mode IN ('active', 'new_pending'))
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS channel_processed_messages (
+                account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+                message_key VARCHAR(64) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                response_text TEXT,
+                response_media_ciphertext TEXT,
+                intent_kind VARCHAR(32),
+                response_to_user_id TEXT,
+                response_context_token TEXT,
+                claim_owner TEXT,
+                reply_attempt_count INTEGER NOT NULL DEFAULT 0,
+                reply_last_error TEXT,
+                reply_next_attempt_at TIMESTAMPTZ,
+                processed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (account_id, message_key)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS channel_processed_messages_time_idx
+            ON channel_processed_messages(processed_at)
+            """,
+        )
+        with self._connect() as connection:
+            for statement in statements:
+                connection.execute(statement)
+
     def ping(self) -> None:
         with self._connect() as connection:
             connection.execute('SELECT 1').fetchone()
@@ -203,10 +426,13 @@ class GatewayStore:
         expires_at: dt.datetime,
     ) -> tuple[dict[str, Any], bool]:
         with self._connect() as connection:
-            connection.execute(
-                'SELECT pg_advisory_xact_lock(hashtext(%s))',
-                (f'{owner_user_id}:{provider}',),
-            )
+            if self._sqlite:
+                connection.execute('BEGIN IMMEDIATE')
+            else:
+                connection.execute(
+                    'SELECT pg_advisory_xact_lock(hashtext(%s))',
+                    (f'{owner_user_id}:{provider}',),
+                )
             if idempotency_key:
                 existing = connection.execute(
                     """
@@ -608,6 +834,12 @@ class GatewayStore:
             )
 
     def acquire_runtime_lease(self, account_id: str):
+        if self._sqlite:
+            with self._runtime_lease_lock:
+                if account_id in self._runtime_leases:
+                    return None
+                self._runtime_leases.add(account_id)
+            return _SQLiteLease(self, account_id)
         connection = psycopg.connect(self._dsn, row_factory=dict_row, autocommit=True)
         row = connection.execute(
             'SELECT pg_try_advisory_lock(hashtext(%s), hashtext(%s)) AS acquired',
@@ -832,6 +1064,50 @@ class GatewayStore:
         *,
         max_attempts: int = 5,
     ) -> None:
+        if self._sqlite:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT reply_attempt_count
+                    FROM channel_processed_messages
+                    WHERE account_id = %s
+                      AND message_key = %s
+                      AND status = 'reply_pending'
+                    """,
+                    (account_id, message_key),
+                ).fetchone()
+                if not row:
+                    return
+                attempts = int(row['reply_attempt_count'] or 0) + 1
+                next_attempt = None
+                status = 'reply_dead_letter'
+                if attempts < max_attempts:
+                    status = 'reply_pending'
+                    next_attempt = dt.datetime.now(dt.timezone.utc) + dt.timedelta(
+                        seconds=min(300, 2 ** attempts),
+                    )
+                connection.execute(
+                    """
+                    UPDATE channel_processed_messages
+                    SET reply_attempt_count = %s,
+                        reply_last_error = %s,
+                        reply_next_attempt_at = %s,
+                        status = %s,
+                        processed_at = CURRENT_TIMESTAMP
+                    WHERE account_id = %s
+                      AND message_key = %s
+                      AND status = 'reply_pending'
+                    """,
+                    (
+                        attempts,
+                        error[:500],
+                        next_attempt,
+                        status,
+                        account_id,
+                        message_key,
+                    ),
+                )
+            return
         with self._connect() as connection:
             connection.execute(
                 """
@@ -963,6 +1239,49 @@ class GatewayStore:
         external_address_hash: str,
         draft: dict[str, Any] | None = None,
     ) -> None:
+        if self._sqlite:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT snapshot_json FROM channel_navigation_states
+                    WHERE account_id = %s AND external_address_hash = %s
+                    """,
+                    (account_id, external_address_hash),
+                ).fetchone()
+                existing = _snapshot_dict(row.get('snapshot_json')) if row else {}
+                snapshot = {'new_conversation': draft or {}}
+                if isinstance(existing.get('pending_turn'), dict):
+                    snapshot['pending_turn'] = existing['pending_turn']
+                connection.execute(
+                    """
+                    DELETE FROM channel_routes
+                    WHERE account_id = %s AND external_address_hash = %s
+                    """,
+                    (account_id, external_address_hash),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO channel_navigation_states(
+                        account_id, external_address_hash, mode,
+                        snapshot_json, snapshot_expires_at,
+                        history_conversation_id, history_next_page_token
+                    )
+                    VALUES(%s, %s, 'new_pending', %s, NULL, NULL, NULL)
+                    ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                        mode = 'new_pending',
+                        snapshot_json = EXCLUDED.snapshot_json,
+                        snapshot_expires_at = NULL,
+                        history_conversation_id = NULL,
+                        history_next_page_token = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        account_id,
+                        external_address_hash,
+                        json.dumps(snapshot, ensure_ascii=False, separators=(',', ':')),
+                    ),
+                )
+            return
         draft_json = json.dumps(
             draft or {},
             ensure_ascii=False,
@@ -1030,6 +1349,54 @@ class GatewayStore:
             else None
         )
         history_token = history_next_page_token or None
+        if self._sqlite:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT snapshot_json FROM channel_navigation_states
+                    WHERE account_id = %s AND external_address_hash = %s
+                    """,
+                    (account_id, external_address_hash),
+                ).fetchone()
+                snapshot = _snapshot_dict(row.get('snapshot_json')) if row else {}
+                snapshot.pop('selection', None)
+                snapshot.pop('new_conversation', None)
+                if consume_pending_turn:
+                    snapshot.pop('pending_turn', None)
+                connection.execute(
+                    """
+                    INSERT INTO channel_routes(account_id, external_address_hash, conversation_id)
+                    VALUES(%s, %s, %s)
+                    ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                        conversation_id = EXCLUDED.conversation_id,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (account_id, external_address_hash, conversation_id),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO channel_navigation_states(
+                        account_id, external_address_hash, mode, snapshot_json,
+                        history_conversation_id, history_next_page_token
+                    )
+                    VALUES(%s, %s, 'active', %s, %s, %s)
+                    ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                        mode = 'active',
+                        snapshot_json = EXCLUDED.snapshot_json,
+                        snapshot_expires_at = NULL,
+                        history_conversation_id = EXCLUDED.history_conversation_id,
+                        history_next_page_token = EXCLUDED.history_next_page_token,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        account_id,
+                        external_address_hash,
+                        json.dumps(snapshot, ensure_ascii=False, separators=(',', ':')),
+                        history_conversation_id,
+                        history_token,
+                    ),
+                )
+            return
         with self._connect() as connection:
             connection.execute(
                 """
@@ -1094,6 +1461,51 @@ class GatewayStore:
             ensure_ascii=False,
             separators=(',', ':'),
         )
+        if self._sqlite:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT snapshot_json FROM channel_navigation_states
+                    WHERE account_id = %s AND external_address_hash = %s
+                    """,
+                    (account_id, external_address_hash),
+                ).fetchone()
+                raw_snapshot = row.get('snapshot_json') if row else None
+                if isinstance(raw_snapshot, str):
+                    try:
+                        raw_snapshot = json.loads(raw_snapshot)
+                    except json.JSONDecodeError:
+                        raw_snapshot = {}
+                if isinstance(raw_snapshot, list):
+                    snapshot = {
+                        'selection': {
+                            'kind': 'conversation',
+                            'items': raw_snapshot,
+                        },
+                    }
+                else:
+                    snapshot = dict(raw_snapshot) if isinstance(raw_snapshot, dict) else {}
+                snapshot['selection'] = selection
+                connection.execute(
+                    """
+                    INSERT INTO channel_navigation_states(
+                        account_id, external_address_hash, mode,
+                        snapshot_json, snapshot_expires_at
+                    )
+                    VALUES(%s, %s, 'active', %s, %s)
+                    ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                        snapshot_json = EXCLUDED.snapshot_json,
+                        snapshot_expires_at = EXCLUDED.snapshot_expires_at,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        account_id,
+                        external_address_hash,
+                        json.dumps(snapshot, ensure_ascii=False, separators=(',', ':')),
+                        expires_at,
+                    ),
+                )
+            return
         with self._connect() as connection:
             connection.execute(
                 """
@@ -1186,6 +1598,32 @@ class GatewayStore:
         account_id: str,
         external_address_hash: str,
     ) -> None:
+        if self._sqlite:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT snapshot_json FROM channel_navigation_states
+                    WHERE account_id = %s AND external_address_hash = %s
+                    """,
+                    (account_id, external_address_hash),
+                ).fetchone()
+                snapshot = _snapshot_dict(row.get('snapshot_json')) if row else {}
+                snapshot.pop('selection', None)
+                connection.execute(
+                    """
+                    UPDATE channel_navigation_states
+                    SET snapshot_json = %s,
+                        snapshot_expires_at = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE account_id = %s AND external_address_hash = %s
+                    """,
+                    (
+                        json.dumps(snapshot, ensure_ascii=False, separators=(',', ':')),
+                        account_id,
+                        external_address_hash,
+                    ),
+                )
+            return
         with self._connect() as connection:
             connection.execute(
                 """
@@ -1213,6 +1651,48 @@ class GatewayStore:
             ensure_ascii=False,
             separators=(',', ':'),
         )
+        if self._sqlite:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT snapshot_json FROM channel_navigation_states
+                    WHERE account_id = %s AND external_address_hash = %s
+                    """,
+                    (account_id, external_address_hash),
+                ).fetchone()
+                raw_snapshot = row.get('snapshot_json') if row else None
+                if isinstance(raw_snapshot, str):
+                    try:
+                        raw_snapshot = json.loads(raw_snapshot)
+                    except json.JSONDecodeError:
+                        raw_snapshot = {}
+                if isinstance(raw_snapshot, list):
+                    snapshot = {
+                        'selection': {
+                            'kind': 'conversation',
+                            'items': raw_snapshot,
+                        },
+                    }
+                else:
+                    snapshot = dict(raw_snapshot) if isinstance(raw_snapshot, dict) else {}
+                snapshot['pending_turn'] = options
+                connection.execute(
+                    """
+                    INSERT INTO channel_navigation_states(
+                        account_id, external_address_hash, mode, snapshot_json
+                    )
+                    VALUES(%s, %s, 'active', %s)
+                    ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                        snapshot_json = EXCLUDED.snapshot_json,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        account_id,
+                        external_address_hash,
+                        json.dumps(snapshot, ensure_ascii=False, separators=(',', ':')),
+                    ),
+                )
+            return
         with self._connect() as connection:
             connection.execute(
                 """

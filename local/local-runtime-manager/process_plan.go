@@ -12,6 +12,7 @@ func buildRuntimeProcessPlan(cfg RuntimeConfig) runtimeProcessPlan {
 		HostProcesses: []string{
 			localProxyProcessName,
 			authServiceProcessName,
+			channelGatewayProcessName,
 			coreProcessName,
 			frontendProcessName,
 		},

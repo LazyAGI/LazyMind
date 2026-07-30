@@ -907,6 +907,7 @@ function loadingHTML() {
       ["process-supervisor", "Process supervisor"],
       ["local-proxy", "Local gateway"],
       ["auth-service", "Auth service"],
+      ["channel-gateway", "Channel gateway"],
       ["core", "Core"],
       ["scan-control-plane", "Scan control"],
       ["file-watcher", "File watcher"],
