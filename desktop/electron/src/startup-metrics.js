@@ -5,7 +5,7 @@ const readyStatuses = new Set(["ready", "running"]);
 const defaultCapabilities = {
   home: ["process-supervisor", "local-proxy", "auth-service", "frontend"],
   ui: ["process-supervisor", "local-proxy", "auth-service", "core", "frontend"],
-  chat: ["process-supervisor", "local-proxy", "auth-service", "core", "frontend", "lazyllm-algo", "chat"],
+  chat: ["process-supervisor", "local-proxy", "auth-service", "core", "frontend", "chat"],
   parser: [
     "process-supervisor",
     "core",

@@ -16,14 +16,7 @@ export const RUNTIME_CAPABILITY_SERVICES: Record<
   readonly string[]
 > = {
   configuration: ["local-proxy", "auth-service", "core", "frontend"],
-  chat: [
-    "local-proxy",
-    "auth-service",
-    "core",
-    "frontend",
-    "lazyllm-algo",
-    "chat",
-  ],
+  chat: ["local-proxy", "auth-service", "core", "frontend", "chat"],
   parser: [
     "core",
     "lazyllm-doc-server",
@@ -65,7 +58,6 @@ export function resolveRuntimeCapabilityState(
   const services = status.services || {};
 
   if (
-    status.overallStatus === "failed" ||
     requiredServices.some((name) =>
       FAILED_SERVICE_STATES.has(services[name]?.status || ""),
     )

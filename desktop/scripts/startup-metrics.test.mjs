@@ -51,7 +51,7 @@ test("records first service and capability readiness without changing later time
   now = 500;
   recorder.observeStatus(serviceStatus(uiServices));
   now = 900;
-  recorder.observeStatus(serviceStatus([...uiServices, "lazyllm-algo", "chat"]));
+  recorder.observeStatus(serviceStatus([...uiServices, "chat"]));
 
   const metrics = recorder.finish("success");
   assert.equal(metrics.capabilities.homeReadyMs, 300);
@@ -68,7 +68,7 @@ test("checks runtime capabilities independently", () => {
   const preAuthStatus = serviceStatus(preAuthServices);
   const homeStatus = serviceStatus(homeServices);
   const uiStatus = serviceStatus(uiServices);
-  const chatStatus = serviceStatus([...uiServices, "lazyllm-algo", "chat"]);
+  const chatStatus = serviceStatus([...uiServices, "chat"]);
 
   assert.equal(runtimeCapabilityReady(preAuthStatus, "home"), false);
   assert.equal(runtimeCapabilityReady(homeStatus, "home"), true);

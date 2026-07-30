@@ -50,21 +50,31 @@ describe("desktop runtime readiness", () => {
   it("tracks chat and parser independently", () => {
     expect(
       resolveRuntimeCapabilityState(
-        status([...uiServices, "lazyllm-algo", "chat"]),
+        status([...uiServices, "chat"]),
         "chat",
       ),
     ).toBe("ready");
     expect(
       resolveRuntimeCapabilityState(
-        status([...uiServices, "lazyllm-algo", "chat"]),
+        status([...uiServices, "chat"]),
         "parser",
       ),
     ).toBe("starting");
   });
 
+  it("keeps base chat available when the knowledge algorithm fails", () => {
+    const runtimeStatus = status([...uiServices, "chat"], "failed");
+    runtimeStatus.services["lazyllm-algo"].status = "failed";
+
+    expect(resolveRuntimeCapabilityState(runtimeStatus, "chat")).toBe("ready");
+    expect(resolveRuntimeCapabilityState(runtimeStatus, "parser")).toBe(
+      "failed",
+    );
+  });
+
   it("does not block functional capabilities on stale supervisor metadata", () => {
     const runtimeStatus = status(
-      [...uiServices, "lazyllm-algo", "chat"],
+      [...uiServices, "chat"],
       "stale",
     );
     runtimeStatus.services["process-supervisor"].status = "stale";
@@ -74,13 +84,13 @@ describe("desktop runtime readiness", () => {
 
   it("keeps polling when a required service is temporarily stale", async () => {
     const staleStatus = status(uiServices);
-    staleStatus.services["lazyllm-algo"].status = "stale";
+    staleStatus.services.chat.status = "stale";
     const readStatus = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, data: staleStatus })
       .mockResolvedValueOnce({
         ok: true,
-        data: status([...uiServices, "lazyllm-algo", "chat"]),
+        data: status([...uiServices, "chat"]),
       });
 
     await waitForCapability("chat", readStatus, {
@@ -93,13 +103,13 @@ describe("desktop runtime readiness", () => {
 
   it("allows a temporarily failed service to recover before timing out", async () => {
     const failedStatus = status(uiServices);
-    failedStatus.services["lazyllm-algo"].status = "failed";
+    failedStatus.services.chat.status = "failed";
     const readStatus = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, data: failedStatus })
       .mockResolvedValueOnce({
         ok: true,
-        data: status([...uiServices, "lazyllm-algo", "chat"]),
+        data: status([...uiServices, "chat"]),
       });
 
     await waitForCapability("chat", readStatus, {
@@ -117,7 +127,7 @@ describe("desktop runtime readiness", () => {
       .mockResolvedValueOnce({ ok: true, data: status(uiServices) })
       .mockResolvedValueOnce({
         ok: true,
-        data: status([...uiServices, "lazyllm-algo", "chat"]),
+        data: status([...uiServices, "chat"]),
       });
 
     await waitForCapability("chat", readStatus, {
@@ -132,7 +142,7 @@ describe("desktop runtime readiness", () => {
 
   it("fails immediately when a required service reports failure", async () => {
     const failedStatus = status(uiServices);
-    failedStatus.services["lazyllm-algo"].status = "failed";
+    failedStatus.services.chat.status = "failed";
 
     await expect(
       waitForCapability(
