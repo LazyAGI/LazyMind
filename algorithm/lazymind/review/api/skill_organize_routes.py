@@ -10,13 +10,6 @@ from lazyllm import ThreadPoolExecutor
 
 from lazymind.review.skill_organize.config import DEFAULT_BACKGROUND_WORKERS
 from lazymind.review.skill_organize.schemas import SkillOrganizeRequest
-from lazymind.review.service.skill_organize import (
-    build_skill_organize_taskid,
-    record_skill_organize_failed,
-    record_skill_organize_pending,
-    run_skill_organize,
-)
-
 router = APIRouter()
 background_executor = ThreadPoolExecutor(max_workers=DEFAULT_BACKGROUND_WORKERS)
 
@@ -28,6 +21,13 @@ def shutdown_background_executor() -> None:
 
 @router.post('/api/chat/skill_organize', summary='Organize existing skills and write an organize review record')
 async def skill_organize(payload: SkillOrganizeRequest):
+    from lazymind.review.service.skill_organize import (
+        build_skill_organize_taskid,
+        record_skill_organize_failed,
+        record_skill_organize_pending,
+        run_skill_organize,
+    )
+
     loop = asyncio.get_running_loop()
     taskid = build_skill_organize_taskid(payload.requestid)
     try:

@@ -5,6 +5,7 @@ import json
 import re
 import threading
 import time
+import sys
 from typing import Any, Dict, List, Optional, Union
 import lazyllm
 from lazyllm import LOG, set_trace_context
@@ -66,7 +67,6 @@ from lazymind.chat.service.utils import (
 )
 from lazyllm.tools.fs.client import FS
 from lazymind.model_config import inject_model_config, summarize_model_config_for_log
-from lazyllm.tools.rag import inject_reader_config
 from lazyllm.tools.tool_config_inject import inject_tool_config
 from lazyllm import AutoModel
 from lazyllm.tools.mcp.client import MCPClient
@@ -91,6 +91,13 @@ _TASK_PROFILE_ROUTER_TIMEOUT_SECONDS = 20
 _SENSITIVE_MATCH_UNSET = object()
 _mcp_tool_cache: dict[str, tuple[float, list[Any]]] = {}
 _mcp_tool_cache_lock = threading.Lock()
+
+
+def _inject_reader_config(ocr_config: Dict[str, Any]) -> None:
+    if not ocr_config and 'lazyllm.tools.rag' not in sys.modules:
+        return
+    from lazyllm.tools.rag import inject_reader_config
+    inject_reader_config(ocr_config=ocr_config)
 
 
 def _normalize_cite_message_query_for_agent(query: str) -> tuple[str, str]:
@@ -520,7 +527,7 @@ async def _handle_chat_impl(
     lazyllm.locals._init_sid(sid=conversation.session_id)
     inject_model_config(runtime.llm_config)
     inject_tool_config(runtime.tool_config)
-    inject_reader_config(ocr_config=runtime.ocr_config)
+    _inject_reader_config(runtime.ocr_config)
     lazyllm.globals['agentic_config'] = agentic_config
 
     thinking_depth = (

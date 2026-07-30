@@ -73,7 +73,7 @@ x-upload-paths: &upload-paths
 # per-OS default; ECS_01 should override this to /tmp/test_watch.
 x-file-watcher-watch-host-dir: &file-watcher-watch-host-dir ${LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR:-${HOME}}
 
-# Local lazyllm source -> /opt/lazyllm (edit on host, docker compose restart; no image rebuild).
+# Development compose overrides the installed package with the LazyLLM submodule.
 x-lazyllm-src-mount: &lazyllm-src-mount ./algorithm/lazyllm:/opt/lazyllm
 x-algorithm-src-mount: &algorithm-src-mount ./algorithm:/app/algorithm:ro
 
@@ -651,8 +651,6 @@ services:
         condition: service_healthy
       db-bootstrap:
         condition: service_completed_successfully
-      lazyllm-parse-server:
-        condition: service_healthy
     networks:
       default:
         aliases:
@@ -700,8 +698,6 @@ services:
     command: ["python", "-m", "lazymind.parsing.app"]
     depends_on:
       lazyllm-parse-server:
-        condition: service_healthy
-      lazyllm-parse-worker:
         condition: service_healthy
     networks:
       default:
@@ -764,7 +760,7 @@ services:
       LAZYMIND_REVIEW_MAX_RETRIES: "5"
       LAZYMIND_SKILL_REVIEW_DEBUG: "false"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
-      LAZYLLM_INIT_DOC: 1
+      LAZYLLM_INIT_DOC: "False"
       # Chat uses the shared model config selector. Default dynamic mode enables
       # per-user model/API-key selection from core; set LAZYMIND_MODEL_CONFIG_PATH=online
       # or inner only when forcing a static config.
@@ -814,7 +810,7 @@ services:
       LAZYMIND_OPENSEARCH_USER: ${LAZYMIND_OPENSEARCH_USER:-admin}
       LAZYMIND_OPENSEARCH_PASSWORD: ${LAZYMIND_OPENSEARCH_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
-      LAZYLLM_INIT_DOC: 1
+      LAZYLLM_INIT_DOC: "False"
       PYTHONPATH: /opt/lazyllm:/app/algorithm
       <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *upload-paths, *ocr-env, *llm-api-keys]
     volumes:

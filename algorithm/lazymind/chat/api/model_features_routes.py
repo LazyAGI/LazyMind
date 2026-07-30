@@ -3,7 +3,8 @@ from fastapi import APIRouter, HTTPException
 
 from lazymind.model_config import get_dynamic_role_slot_map, load_model_config
 from lazymind.config import EMBED_IMAGE, config as _cfg
-from lazyllm.tools.rag.store import LAZY_IMAGE_GROUP
+
+LAZY_IMAGE_GROUP = 'image'
 
 router = APIRouter()
 

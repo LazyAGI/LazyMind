@@ -148,6 +148,8 @@ class AgentExecutor:
     """Create and drive ReactAgent instances from a fully assembled run plan."""
 
     def create_agent(self, llm: Any, plan: AgentRunPlan) -> Any:
+        from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+
         options = plan.execution_options
         kwargs = {
             'stream': True,
@@ -169,9 +171,11 @@ class AgentExecutor:
             'extra_stop_condition': options.extra_stop_condition,
         }
         kwargs.update({key: value for key, value in optional.items() if value is not None})
+        tools = _deduplicate_tools(plan.tools)
+        ensure_lazyllm_tool_docs(tools)
         agent = _agent_mod.ReactAgent(
             llm=llm,
-            tools=_deduplicate_tools(plan.tools),
+            tools=tools,
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )

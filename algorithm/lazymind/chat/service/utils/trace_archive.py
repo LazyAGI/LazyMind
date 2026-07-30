@@ -29,6 +29,10 @@ def _run_once():
 def start_local_trace_maintenance(interval: int = _MAINTAIN_LOCAL_TRACES_INTERVAL):
     global _thread
 
+    # Registers the tracing config keys without importing LazyLLM's runtime
+    # documentation bundle.  The maintenance job consumes trace_backend
+    # directly, so this is a real runtime dependency.
+    import lazyllm.tracing.collect.configs  # noqa: F401
     from lazyllm.configs import config
     if config['trace_backend'] != 'local':
         return

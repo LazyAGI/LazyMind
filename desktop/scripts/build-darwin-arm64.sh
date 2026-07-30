@@ -9,6 +9,8 @@ APP_ICON="${ROOT}/desktop/electron/assets/LazyMind.icns"
 PACKAGE_KIND="${LAZYMIND_DESKTOP_PACKAGE_KIND:-zip}"
 SIGNING_MODE="${LAZYMIND_DESKTOP_SIGNING_MODE:-adhoc}"
 NOTARIZE="${LAZYMIND_DESKTOP_NOTARIZE:-false}"
+LAZYLLM_VERSION="${LAZYMIND_LAZYLLM_VERSION:-1.2.0a2}"
+RELEASE_BUILD="${LAZYMIND_RELEASE_BUILD:-false}"
 
 GO_BIN="${GO:-go}"
 PNPM_BIN="${PNPM:-pnpm}"
@@ -100,8 +102,8 @@ assert_desktop_runtime_app() {
     echo "desktop frontend dist is required: ${frontend_dist}" >&2
     exit 1
   fi
-  if [[ ! -d "${lazyllm_source}" ]]; then
-    echo "bundled LazyLLM source is required: ${lazyllm_source}" >&2
+  if [[ "${RELEASE_BUILD}" != "true" && ! -d "${lazyllm_source}" ]]; then
+    echo "bundled LazyLLM source is required for local builds: ${lazyllm_source}" >&2
     exit 1
   fi
 }
@@ -140,7 +142,11 @@ prune_runtime_app() {
   # Developer-local virtualenvs must not ship inside the app bundle; absolute
   # interpreter symlinks break macOS sealed-resource verification.
   find "${app_root}" -type d \( -name ".venv" -o -name ".venv-test" \) -prune -exec rm -rf {} +
-  remove_generated_path "${app_root}/algorithm/lazyllm/docs"
+  if [[ "${RELEASE_BUILD}" == "true" ]]; then
+    remove_generated_path "${app_root}/algorithm/lazyllm"
+  else
+    remove_generated_path "${app_root}/algorithm/lazyllm/docs"
+  fi
   remove_generated_path "${app_root}/backend/core/core"
 }
 
@@ -167,13 +173,9 @@ echo "==> Building frontend desktop dist"
 (cd "${ROOT}/frontend" && CI=true VITE_LAZYMIND_MODE=desktop "${PNPM_BIN}" install --frozen-lockfile --prefer-offline)
 (cd "${ROOT}/frontend" && VITE_LAZYMIND_MODE=desktop "${PNPM_BIN}" build)
 
-echo "==> Ensuring LazyLLM submodule source"
-if [[ ! -d "${ROOT}/algorithm/lazyllm/lazyllm" ]]; then
+if [[ "${RELEASE_BUILD}" != "true" && ! -d "${ROOT}/algorithm/lazyllm/lazyllm" ]]; then
+  echo "==> Ensuring LazyLLM submodule source"
   git -C "${ROOT}" submodule update --init algorithm/lazyllm
-fi
-if [[ ! -d "${ROOT}/algorithm/lazyllm/lazyllm" ]]; then
-  echo "algorithm/lazyllm submodule is required for desktop packaging" >&2
-  exit 1
 fi
 
 echo "==> Preparing Python runtime and venvs"
@@ -185,7 +187,8 @@ rm -rf "${RUNTIME_ROOT}/deps/python/auth-service"
 "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/auth-service/bin/python" --link-mode copy --strict -r "${ROOT}/backend/auth-service/requirements.txt"
 rm -rf "${RUNTIME_ROOT}/deps/python/algorithm"
 "${UV_BIN}" venv --managed-python --no-python-downloads --relocatable --seed --link-mode copy --python "${PYTHON}" "${RUNTIME_ROOT}/deps/python/algorithm"
-"${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict 'setuptools<81' lazyllm
+"${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict 'setuptools<81' "lazyllm==${LAZYLLM_VERSION}"
+"${RUNTIME_ROOT}/deps/python/algorithm/bin/python" -c "import importlib.metadata as m; assert m.version('lazyllm') == '${LAZYLLM_VERSION}'"
 "${RUNTIME_ROOT}/deps/python/algorithm/bin/lazyllm" install rag
 "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements.txt"
 "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements-local.txt"
@@ -225,7 +228,6 @@ rsync -a --delete \
   --exclude "/frontend/src" \
   --exclude "/frontend/public" \
   --exclude "/frontend/scripts" \
-  --exclude "/algorithm/lazyllm/docs" \
   --exclude "/backend/core/core" \
   "${ROOT}/" "${RUNTIME_ROOT}/app/"
 
