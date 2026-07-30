@@ -239,6 +239,9 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 		routerPortPoolEndEnvVar+"="+strconv.Itoa(routerPoolEnd),
 		routerPortsPerInstanceEnvVar+"="+strconv.Itoa(defaultRouterPortsPerInstance),
 	)
+	if binDir := loadFFmpegBinDirForRuntime(paths); binDir != "" {
+		env = prependPathEnv(env, binDir)
+	}
 	return env
 }
 

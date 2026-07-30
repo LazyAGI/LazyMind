@@ -422,6 +422,31 @@ const enUS = {
       parsingCategoryTitle: "Document Parsing",
       parsingCategoryDesc: "Manage document parsing services such as MinerU and PaddleOCR for converting files into indexable text.",
       parsingSearchPlaceholder: "Search parsing services",
+      dependencyCategoryTitle: "Dependency Installation",
+      dependencyCategoryDesc: "Manage local runtime dependencies. Video-to-GIF and MP4 parsing require FFmpeg.",
+      dependencyFfmpegTitle: "FFmpeg",
+      dependencyFfmpegSummary: "Required for video-to-GIF and knowledge-base MP4 frame extraction.",
+      dependencyFfmpegModalTitle: "Configure FFmpeg",
+      dependencyFfmpegImpact: "Without FFmpeg, video_to_gif and MP4 document parsing will fail.",
+      dependencyInstallBundledTitle: "Install into LazyMind directory",
+      dependencyInstallBundledDesc: "Download FFmpeg into the local LazyMind runtime folder (deps/ffmpeg/bin) without changing the system install.",
+      dependencyInstallAction: "Download and install",
+      dependencyInstalledAction: "Installed",
+      dependencyCustomPathTitle: "Use an existing local FFmpeg",
+      dependencyCustomPathDesc: "Enter an ffmpeg executable path, or a directory that contains ffmpeg and ffprobe.",
+      dependencyCustomPathPlaceholder: "e.g. /opt/homebrew/bin/ffmpeg or /opt/homebrew/bin",
+      dependencyBrowseAction: "Browse",
+      dependencySavePathAction: "Save path",
+      dependencyRecheckAction: "Re-check",
+      dependencyDetected: "Detected ffmpeg={{ffmpeg}}, ffprobe={{ffprobe}}",
+      dependencyLoadFailed: "Failed to load dependency status",
+      dependencySaveFailed: "Failed to save dependency settings",
+      dependencyInstallFailed: "Failed to install FFmpeg",
+      dependencyInstallSuccess: "FFmpeg installed. New video tasks can use it immediately.",
+      dependencySaved: "Dependency settings saved. New video tasks can use it immediately.",
+      dependencyCustomPathRequired: "Enter or choose an ffmpeg path first",
+      dependencyCheckReady: "FFmpeg is ready",
+      dependencyCheckMissing: "FFmpeg is still missing",
       toolsModuleTitle: "Tools",
       toolsModuleDesc: "Manage document parsing, search engines, academic retrieval, built-in system tools, and MCP services.",
       toolsCategoryTitle: "Search Engines",
@@ -434,6 +459,10 @@ const enUS = {
       googleDriveConfigTitle: "Configure Google Drive OAuth",
       googleDriveAuthorize: "Save and Authorize",
       googleDriveConfigHint: "Enable the Drive API in Google Cloud Console and add this exact address to the OAuth Web client's authorized redirect URIs: {{callbackUrl}}",
+      googleDriveRedirectReadyTitle: "OAuth callback URL is ready",
+      googleDriveInvalidRedirectTitle: "The current address cannot be used for Google OAuth",
+      googleDriveInvalidRedirectHint:
+        "Google will reject {{callbackUrl}}. HTTP is allowed only for localhost, 127.0.0.1, or ::1. Other environments require HTTPS on a public domain and cannot use a raw IP address. Reopen LazyMind through a local loopback URL or an HTTPS domain/tunnel.",
       googleDriveSetupGuideAction: "Setup Guide",
       googleDriveClientIdRequired: "Enter the OAuth Client ID",
       googleDriveClientSecretRequired: "Enter the OAuth Client Secret",
@@ -624,6 +653,21 @@ const enUS = {
     language: "Language",
     expandMenu: "Expand Menu",
     collapseMenu: "Collapse Menu",
+  },
+
+  legal: {
+    consentTitle: "User Agreement & Privacy Policy",
+    welcomeTitle: "Welcome to LazyMind",
+    welcomeDescription:
+      "Before you begin, learn how we handle local data, third-party services, and AI/Agent-related risks.",
+    readAndAgreePrefix: "I have read and agree to ",
+    agreementLink: "LazyMind User Agreement, Privacy Policy, and Safety Terms",
+    consentAgreeAndContinue: "Agree and continue",
+    detailsBack: "Back",
+    detailsReadAndReturn: "I have read this and return",
+    consentVersion: "Agreement version {{version}}",
+    consentChecking: "Syncing user agreement status...",
+    consentPersistFailed: "Failed to save agreement. Please try again.",
   },
 
   channelGateway: {
@@ -1199,6 +1243,9 @@ const enUS = {
     toolLimitAutoContinued: "No response received; summarizing the current results",
     toolLimitSummarizing: "Tool use stopped; summarizing current results",
     toolLimitDecisionFailed: "The decision was not applied; it may have timed out and started summarizing",
+    ffmpegGifRequiredTitle: "Animated sticker failed because FFmpeg is missing",
+    ffmpegGifRequiredDesc: "The video was generated, but converting it to an animated GIF requires FFmpeg. Configure or install FFmpeg; this task can still return the video.",
+    configureFfmpeg: "Configure or download FFmpeg",
     askCardInputPlaceholder: "Enter your reply…",
     askCardOtherPlaceholder: "Please specify…",
     askCardOtherOption: "Other",
@@ -1777,7 +1824,7 @@ const enUS = {
     createFromCloudDocuments: "From cloud docs",
     createFromCloudDocumentsTitle: "Create from cloud documents",
     createFromCloudDocumentsIntro:
-      "Select Feishu, Notion, or a local path (admin), configure the sync scope, and a knowledge base will be created automatically. Feishu requires valid authorization; you will be redirected to cloud document settings if not authorized.",
+      "Select Feishu, Notion, or a local path (admin), configure the sync scope, and a knowledge base will be created automatically. Google Drive currently supports online search and can be authorized from Cloud Documents.",
     createFromCloudDocumentsSuccess: "Knowledge base created",
     editKnowledgeBase: "Edit Knowledge Base",
     selectTag: "Select knowledge base tag",
@@ -1881,6 +1928,9 @@ const enUS = {
     importSuccessTitle: "Import Succeeded",
     importFailedTitle: "Import Failed",
     parseTaskError: "Failure reason",
+    ffmpegRequiredTitle: "Video parsing failed because FFmpeg is missing",
+    ffmpegRequiredDesc: "FFmpeg was not detected. Configure an existing FFmpeg path or download it into the LazyMind directory, then retry the import.",
+    configureFfmpeg: "Configure or download FFmpeg",
     taskSuspendSuccess: "Task suspended successfully",
     taskRetrySuccess: "Task retried successfully",
     taskDeleteSuccess: "Task deleted successfully",
@@ -2110,7 +2160,7 @@ const enUS = {
     dataSourceTypeFeishuDesc: "Set App ID / App Secret first, then connect via OAuth",
     dataSourceTypeNotion: "Notion",
     dataSourceTypeNotionDesc:
-      "Connect Notion pages or databases, sync by authorization scope and serve chat.",
+      "Connect Notion pages or databases; configure the OAuth Redirect URI with the HTTPS setup guide.",
     dataSourceTypeGoogleDrive: "Google Drive",
     dataSourceGoogleDriveSetupHint:
       "Authorize a Google Drive account for online chat search. Files are not imported into a knowledge base.",
@@ -2123,6 +2173,10 @@ const enUS = {
     dataSourceGoogleDriveCallbackLabel: "Current OAuth callback URL",
     dataSourceGoogleDriveHttpsHint:
       "Register the exact URL above in the Google OAuth Web client. Use HTTPS in production; localhost or 127.0.0.1 may use HTTP under Google's local development rules.",
+    dataSourceGoogleDriveInvalidCallbackTitle:
+      "Google will reject the current address",
+    dataSourceGoogleDriveInvalidCallbackHint:
+      "Google OAuth Web clients do not accept HTTP private-network addresses or raw-IP redirects. For same-machine testing, open LazyMind through http://localhost or http://127.0.0.1. For LAN, remote, or production access, configure a public HTTPS domain or HTTPS tunnel and reopen this page from that address.",
     dataSourceTypeDatabase: "External Database",
     dataSourceTypeDatabaseDesc:
       "Connect MySQL or PostgreSQL with a read-only account for direct chat queries.",
@@ -2161,7 +2215,7 @@ const enUS = {
     dataSourceNotionCredentialModalTitle: "Configure Notion OAuth App",
     dataSourceNotionCredentialSaveAndSelect: "Save and Authorize Notion",
     dataSourceNotionCredentialHint:
-      "Go to Notion Developers to create a Public Integration, get OAuth Client ID and Client Secret; the Redirect URI must be set to /oauth/notion/data-source/callback.",
+      "View the Notion setup guide first. Create a Public Integration in Notion Developers, get the OAuth Client ID and Client Secret, and register the complete HTTPS Redirect URI shown in the guide.",
     dataSourceNotionCredentialSaved: "Notion OAuth credentials saved",
     dataSourceNotionCredentialReset: "Notion OAuth credentials disconnected",
     dataSourceNotionResetCredentialAction: "Reset credentials",
@@ -2190,7 +2244,7 @@ const enUS = {
     dataSourceNotionTargetTypeDatabase: "Database",
     dataSourceNotionTargetLabel: "Notion page or database",
     dataSourceNotionSetupGuideHint:
-      ": View detailed Notion OAuth setup steps, required credentials, and Redirect URI instructions.",
+      ": View detailed Notion OAuth setup steps, required credentials, and HTTPS Redirect URI instructions.",
     dataSourceDatabaseTitle: "External Database",
     dataSourceDatabaseSubtitle:
       "Configure MySQL and PostgreSQL database connections for read-only chat queries.",
@@ -2390,19 +2444,33 @@ const enUS = {
       openDriveApi: "Open Google Drive API",
       openCredentials: "Open Credentials",
       openAudience: "Open Google Auth Platform Audience",
+      openRedirectRules: "View Google's Redirect URI rules",
       callbackUrl: "Authorized redirect URI: {{uri}}",
+      unsupportedCallbackUrl: "The current address cannot be registered as a Google OAuth callback: {{uri}}",
       steps: {
         openConsoleTitle: "Create or select a Google Cloud project",
         openConsoleDesc:
-          "Sign in to Google Cloud Console and create a new project or select an existing project that will hold the LazyMind OAuth configuration.",
+          "Sign in to Google Cloud Console and create a new project or select an existing project that will hold the LazyMind OAuth configuration. If you do not have a project, open the project selector and click New Project.",
+        openConsoleProjectName:
+          "Use a project name such as LazyMind OAuth. Keep Organization and Location at their defaults when there is no special requirement.",
+        openConsoleProjectId:
+          "The project ID can stay as Google's generated value. After creation, verify that the project selector at the top still points to this project.",
         enableApiTitle: "Enable Google Drive API",
         enableApiDesc:
           "In APIs and services, enable Google Drive API for the selected project. LazyMind calls the official Google Drive API for search, find, and read operations.",
+        enableApiSearch:
+          "If the Drive API page does not open directly, go to APIs & Services > Library, search for Google Drive API, open it, and click Enable.",
+        enableApiConfirmProject:
+          "Before enabling the API, verify again that the selected project is the project you just created or selected.",
         consentTitle: "Configure OAuth consent screen",
         consentDesc:
           "Open Audience in Google Auth Platform, verify that the selected project owns the OAuth client, then configure the app audience and test users.",
         consentUserType:
           "Choose External for personal Google accounts, or Internal if your Google Workspace organization restricts the app to members.",
+        consentAppInfo:
+          "Use LazyMind as the app name and select your current email as the user support email. Logo, homepage, privacy policy, and terms can be skipped or left empty during testing when the page allows it.",
+        consentContact:
+          "Use your current email as the developer contact email. Keep Publishing status as Testing; Google verification is not required for listed test users.",
         consentTestUsers:
           "If the app is in Testing status, click Add users under Test users, add the email that will sign in to Google Drive, save, and wait about one minute before authorizing again.",
         consentRetry:
@@ -2416,6 +2484,8 @@ const enUS = {
           "Application type must be Web application.",
         credentialsName:
           "Use a clear name such as LazyMind Google Drive so it is easy to identify later.",
+        credentialsJavaScriptOrigins:
+          "Authorized JavaScript origins can be left empty. LazyMind only needs Authorized redirect URIs.",
         redirectTitle: "Add the LazyMind callback URL",
         redirectDesc:
           "In Authorized redirect URIs, add the exact callback URL used by the frontend address you open in the browser.",
@@ -2423,9 +2493,17 @@ const enUS = {
           "If you open LazyMind with 127.0.0.1 or a deployment domain instead of localhost, replace the origin in the callback URL with that same browser origin.",
         redirectHttpsHint:
           "Use HTTPS for production domains. Local development may use an exactly registered http://localhost or http://127.0.0.1 URL in a Google Web OAuth client. Scheme, host, port, and path must all match.",
+        redirectUnsupportedHint:
+          "Google permits HTTP only for localhost, 127.0.0.1, or ::1. Other callbacks must use HTTPS with a public top-level domain, and cannot use 10.x, 172.16-31.x, 192.168.x, or any other raw IP address.",
+        redirectRecoveryHint:
+          "If the browser and LazyMind run on the same machine, reopen the system through http://localhost or http://127.0.0.1. For LAN or remote access, configure a public HTTPS domain or an HTTPS tunnel such as Cloudflare Tunnel or ngrok, then open LazyMind from the new address. This page will generate the matching callback URI automatically.",
+        redirectQuickTunnelHint:
+          "When using Cloudflare Quick Tunnel, run cloudflared tunnel --url http://localhost:8090 first, open LazyMind from the generated https://*.trycloudflare.com URL, then register the callback shown here, for example https://*.trycloudflare.com/oauth/googledrive/data-source/callback.",
         copyCredentialsTitle: "Copy Client ID and Client Secret",
         copyCredentialsDesc:
           "After the Web client is created, copy the OAuth Client ID and Client Secret. Keep the secret private.",
+        copyPopup:
+          "After clicking Create, Google shows a result popup. Copy both Client ID and Client Secret before closing it. You can also reopen the Web client later from Credentials.",
         copyClientId:
           "Client ID maps to the OAuth Client ID field in LazyMind.",
         copyClientSecret:
@@ -2450,11 +2528,11 @@ const enUS = {
       backManagement: "Back to Data Source Management",
       title: "Data Source Management - New Data Source - Notion",
       subtitle:
-        "Create a Public Integration in Notion Developers, get OAuth credentials, configure the Redirect URI, then complete Notion data source authorization in LazyMind.",
+        "Create a Public Integration in Notion Developers, get OAuth credentials, configure the HTTPS Redirect URI, then complete Notion data source authorization in LazyMind.",
       summaryAria: "Notion setup process overview",
       summaryTitle: "Setup Flow",
       openDevelopers: "Open Notion Developers",
-      callbackUrl: "Callback URL: {{uri}}",
+      callbackUrl: "Callback URL generated from the current page: {{uri}}",
       steps: {
         openDevelopersTitle: "Open Notion Developers",
         openDevelopersDesc:
@@ -2478,9 +2556,9 @@ const enUS = {
           "Client Secret: the integration secret. Keep it private; it can only be fully viewed when created.",
         redirectTitle: "Configure Redirect URI",
         redirectDesc:
-          "In the Redirect URIs section of integration settings, add LazyMind's OAuth callback URL. It must match the callback URL used by the system, otherwise authorization fails after redirect.",
+          "Notion requires Redirect URIs to use HTTPS. Access LazyMind from an HTTPS domain or HTTPS tunnel, then add the complete callback URL shown on this page in the Redirect URIs section of the integration settings.",
         redirectProductionHint:
-          "Use the current deployment domain over HTTPS in production. For local development, use the localhost or 127.0.0.1 URL shown on this page. The Redirect URI must exactly match the browser origin and the callback used by the system.",
+          "If the current URL starts with http://localhost or http://127.0.0.1, it is only useful for local page preview and should not be registered in Notion. First access LazyMind through a public HTTPS domain or HTTPS tunnel, then copy the new https://.../oauth/notion/data-source/callback URL. The Redirect URI must exactly match the browser origin and the callback used by the system.",
         capabilitiesTitle: "Configure Integration Capabilities",
         capabilitiesDesc:
           "In integration settings, select the required capabilities such as Read content and Read comments. LazyMind needs at least Read content to read Notion content.",
@@ -3266,6 +3344,7 @@ const enUS = {
     memoryVersionEmpty: "No version history yet",
     memoryVersionSelectEmpty: "Select a version record to view details",
     memoryVersionDiffEmpty: "No diff content",
+    memoryVersionDiffDirectoryHint: "Directory {{status}}; no file content to compare",
     memoryVersionRange: "Version Change",
     memoryVersionChangedAt: "Changed At",
     memoryVersionChangeSource: "Change Source",

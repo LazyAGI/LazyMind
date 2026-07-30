@@ -1,0 +1,34 @@
+.legal-language-toggle {
+  min-width: 96px;
+
+  .ant-select-selector {
+    height: 28px !important;
+    padding-inline: 10px !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    border-radius: 999px !important;
+    background: rgba(255, 255, 255, 0.72) !important;
+    box-shadow: none !important;
+    backdrop-filter: blur(8px);
+  }
+
+  .ant-select-selection-item {
+    color: rgba(0, 0, 0, 0.65);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 26px !important;
+  }
+
+  .ant-select-arrow {
+    color: rgba(0, 0, 0, 0.35);
+    font-size: 10px;
+  }
+
+  &:hover .ant-select-selector {
+    border-color: rgba(82, 101, 223, 0.35) !important;
+  }
+
+  &.ant-select-focused .ant-select-selector {
+    border-color: rgba(82, 101, 223, 0.55) !important;
+    box-shadow: 0 0 0 2px rgba(82, 101, 223, 0.12) !important;
+  }
+}

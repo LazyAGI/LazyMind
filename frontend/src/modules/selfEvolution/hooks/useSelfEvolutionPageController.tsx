@@ -352,6 +352,11 @@ export function SelfEvolutionPageController({
   );
   const workflowResultsRef = useRef(workflowResults);
   workflowResultsRef.current = workflowResults;
+  const resetWorkflowResultsState = useCallback(() => {
+    const initialState = createInitialWorkflowResultsState();
+    workflowResultsRef.current = initialState;
+    setWorkflowResults(initialState);
+  }, []);
   const [evalReportBadCases, setEvalReportBadCases] =
     useState<EvalReportBadCasesState>({
       loading: false,
@@ -375,6 +380,23 @@ export function SelfEvolutionPageController({
   const [threadFlowStatus, setThreadFlowStatus] = useState<string>();
   const threadStepListRef = useRef(threadStepList);
   threadStepListRef.current = threadStepList;
+  const activeThreadIdRef = useRef<string>();
+  const threadStepListOwnerRef = useRef<string>();
+  const isCurrentThread = useCallback(
+    (threadId: string) => activeThreadIdRef.current === threadId,
+    [],
+  );
+  const ownsThreadStepList = useCallback(
+    (threadId: string) =>
+      isCurrentThread(threadId) && threadStepListOwnerRef.current === threadId,
+    [isCurrentThread],
+  );
+  const resetThreadStepListState = useCallback(() => {
+    const initialState: ThreadStepListState = { steps: [] };
+    threadStepListOwnerRef.current = undefined;
+    threadStepListRef.current = initialState;
+    setThreadStepList(initialState);
+  }, []);
   const [selectedViewStage, setSelectedViewStage] = useState<string>();
   const [selectedThreadStepId, setSelectedThreadStepId] = useState<string>();
   const [loadingThreadStepId, setLoadingThreadStepId] = useState<string>();
@@ -833,11 +855,14 @@ export function SelfEvolutionPageController({
 
   useEffect(() => {
     const { current, total } = streamingEvalProgress;
-    if (!total || current < total) {
+    const judgedCount = streamingEvalRows.filter((row) => row.judgeStatus === "done").length;
+    const effectiveTotal = total || streamingEvalRows.length;
+    const effectiveCurrent = Math.max(current, judgedCount);
+    if (!effectiveTotal || effectiveCurrent < effectiveTotal) {
       return;
     }
     const allJudged =
-      streamingEvalRows.length >= total &&
+      streamingEvalRows.length >= effectiveTotal &&
       streamingEvalRows.every((row) => row.judgeStatus === "done");
     if (!allJudged) {
       return;
@@ -852,11 +877,14 @@ export function SelfEvolutionPageController({
 
   useEffect(() => {
     const { current, total } = streamingAbtestProgress;
-    if (!total || current < total) {
+    const judgedCount = streamingAbtestRows.filter((row) => row.judgeStatus === "done").length;
+    const effectiveTotal = total || streamingAbtestRows.length;
+    const effectiveCurrent = Math.max(current, judgedCount);
+    if (!effectiveTotal || effectiveCurrent < effectiveTotal) {
       return;
     }
     const allJudged =
-      streamingAbtestRows.length >= total &&
+      streamingAbtestRows.length >= effectiveTotal &&
       streamingAbtestRows.every((row) => row.judgeStatus === "done");
     if (!allJudged) {
       return;
@@ -1313,7 +1341,8 @@ export function SelfEvolutionPageController({
   const activeSession =
     chatSessions.find((item) => item.id === activeSessionId) || chatSessions[0];
   const activeMessages = activeSession?.messages ?? [];
-  const activeThreadId = activeSession?.threadId || routeThreadId;
+  const activeThreadId = routeThreadId || activeSession?.threadId;
+  activeThreadIdRef.current = activeThreadId;
   const activeRemoteThreadTitle = useMemo(
     () =>
       remoteThreadHistory.find((item) => item.threadId === activeThreadId)
@@ -1585,7 +1614,8 @@ export function SelfEvolutionPageController({
   const fetchEvalReportBadCases = useCallback(
     async (resultData: unknown, options?: { force?: boolean }) => {
       const reportId = getEvalReportId(resultData);
-      if (!activeThreadId || !reportId) {
+      const requestedThreadId = activeThreadId;
+      if (!requestedThreadId || !reportId) {
         setEvalReportBadCases({ loading: false, loaded: false });
         return undefined;
       }
@@ -1610,9 +1640,12 @@ export function SelfEvolutionPageController({
 
       try {
         const { data, totalSize } = await fetchAllEvalReportBadCases(
-          activeThreadId,
+          requestedThreadId,
           reportId,
         );
+        if (!isCurrentThread(requestedThreadId)) {
+          return undefined;
+        }
 
         setEvalReportBadCases({
           reportId,
@@ -1623,6 +1656,9 @@ export function SelfEvolutionPageController({
         });
         return data;
       } catch (error) {
+        if (!isCurrentThread(requestedThreadId)) {
+          return undefined;
+        }
         setEvalReportBadCases((prev) => ({
           ...prev,
           reportId,
@@ -1639,12 +1675,14 @@ export function SelfEvolutionPageController({
       evalReportBadCases.loaded,
       evalReportBadCases.loading,
       evalReportBadCases.reportId,
+      isCurrentThread,
       t,
     ],
   );
   const fetchWorkflowResult = useCallback(
     async (kind: WorkflowResultKind, options?: { force?: boolean }) => {
-      if (!activeThreadId) {
+      const requestedThreadId = activeThreadId;
+      if (!requestedThreadId) {
         message.warning(t("selfEvolutionRun.noAvailableThreadId"), 2);
         return undefined;
       }
@@ -1663,7 +1701,10 @@ export function SelfEvolutionPageController({
       }));
 
       try {
-        const data = await fetchThreadGateContent(activeThreadId, kind);
+        const data = await fetchThreadGateContent(requestedThreadId, kind);
+        if (!isCurrentThread(requestedThreadId)) {
+          return undefined;
+        }
         setWorkflowResults((prev) => ({
           ...prev,
           [kind]: {
@@ -1679,6 +1720,9 @@ export function SelfEvolutionPageController({
         }
         return data;
       } catch (error) {
+        if (!isCurrentThread(requestedThreadId)) {
+          return undefined;
+        }
         const status = (error as AxiosError)?.response?.status;
         if (status === 404) {
           setWorkflowResults((prev) => ({
@@ -1705,7 +1749,7 @@ export function SelfEvolutionPageController({
         return undefined;
       }
     },
-    [activeThreadId, fetchEvalReportBadCases],
+    [activeThreadId, fetchEvalReportBadCases, isCurrentThread],
   );
   useEffect(() => {
     setHasAttemptedFinalResultLoad(false);
@@ -1957,12 +2001,12 @@ export function SelfEvolutionPageController({
   ]);
 
   useEffect(() => {
-    setWorkflowResults(createInitialWorkflowResultsState());
+    resetWorkflowResultsState();
     setEvalReportBadCases({ loading: false, loaded: false });
     setActiveArtifactKind(undefined);
     setIsArtifactPanelOpen(false);
     setCaseArtifact(undefined);
-  }, [activeThreadId]);
+  }, [activeThreadId, resetWorkflowResultsState]);
 
   useEffect(() => {
     if (!activeThreadId || !selectedViewStage) {
@@ -2554,7 +2598,7 @@ export function SelfEvolutionPageController({
         });
         streamingStageCompletedRef.current[completedStage] = true;
       }
-      const threadId = activeSession?.threadId || routeThreadId;
+      const threadId = routeThreadId || activeSession?.threadId;
       if (threadId) {
         void refreshThreadStepList(threadId).catch(() => undefined);
       }
@@ -2816,12 +2860,20 @@ export function SelfEvolutionPageController({
     return response;
   };
 
-  const syncThreadStepListState = (stepList: ThreadStepListState) => {
+  const syncThreadStepListState = (
+    threadId: string,
+    stepList: ThreadStepListState,
+  ) => {
+    if (!isCurrentThread(threadId)) {
+      return false;
+    }
+    threadStepListOwnerRef.current = threadId;
     threadStepListRef.current = stepList;
     setThreadStepList(stepList);
     setWorkflowRuntimeState((prev) =>
       applyThreadStepListToWorkflowRuntimeState(prev, stepList),
     );
+    return true;
   };
 
   const fetchThreadStepList = async (
@@ -2843,8 +2895,10 @@ export function SelfEvolutionPageController({
     signal?: AbortSignal,
   ) => {
     const stepList = await fetchThreadStepList(threadId, signal);
-    if (!signal?.aborted) {
-      syncThreadStepListState(stepList);
+    if (
+      !signal?.aborted &&
+      syncThreadStepListState(threadId, stepList)
+    ) {
       const nextStepRunId = resolveNextStepRunIdFromStepList(stepList);
       if (nextStepRunId) {
         pendingNextStepRunIdRef.current = nextStepRunId;
@@ -2858,13 +2912,20 @@ export function SelfEvolutionPageController({
     completedStepId: string,
     sessionId: string,
   ) {
-    if (!isAutoMode || isAdvancingToNextStepRef.current) {
+    if (
+      !isAutoMode ||
+      isAdvancingToNextStepRef.current ||
+      !ownsThreadStepList(threadId)
+    ) {
       return false;
     }
 
     isAdvancingToNextStepRef.current = true;
     try {
       const stepList = await refreshThreadStepList(threadId);
+      if (!ownsThreadStepList(threadId)) {
+        return false;
+      }
       const completedStep = stepList.steps.find(
         (step) => step.stepId === completedStepId,
       );
@@ -2924,8 +2985,15 @@ export function SelfEvolutionPageController({
     step: ThreadStepSummary,
     workflowStepId?: WorkflowStep["id"],
   ) => {
-    const activeThreadId = activeSession?.threadId || routeThreadId;
-    if (!activeThreadId || !step.stepId) {
+    const activeThreadId = routeThreadId || activeSession?.threadId;
+    if (
+      !activeThreadId ||
+      !step.stepId ||
+      !ownsThreadStepList(activeThreadId) ||
+      !threadStepListRef.current.steps.some(
+        (currentStep) => currentStep.stepId === step.stepId,
+      )
+    ) {
       return;
     }
     if (step.stepId === selectedThreadStepId) {
@@ -2985,13 +3053,18 @@ export function SelfEvolutionPageController({
     preloadedStepList?: ThreadStepListState,
     shouldSubscribeInitialStepIfEmpty = false,
   ) => {
+    if (!isCurrentThread(threadId)) {
+      return;
+    }
     let stepList =
       preloadedStepList || (await refreshThreadStepList(threadId, signal));
-    if (signal?.aborted) {
+    if (signal?.aborted || !isCurrentThread(threadId)) {
       return;
     }
     if (preloadedStepList) {
-      syncThreadStepListState(preloadedStepList);
+      if (!syncThreadStepListState(threadId, preloadedStepList)) {
+        return;
+      }
     }
     const checkpointWaitingStep = getCheckpointWaitingStep(stepList);
     let subscribeStepId =
@@ -3018,12 +3091,14 @@ export function SelfEvolutionPageController({
         () => refreshThreadStepList(threadId, signal),
         { signal },
       );
-      if (signal?.aborted) {
+      if (signal?.aborted || !isCurrentThread(threadId)) {
         return;
       }
       if (waitedStepList) {
         stepList = waitedStepList;
-        syncThreadStepListState(waitedStepList);
+        if (!syncThreadStepListState(threadId, waitedStepList)) {
+          return;
+        }
         subscribeStepId = resolveSubscribeThreadStepId(
           waitedStepList,
           threadId,
@@ -3066,7 +3141,7 @@ export function SelfEvolutionPageController({
         onStreamConnected: settleResolve,
         autoAdvanceOnComplete: options?.autoAdvanceOnComplete,
         appendChat: options?.appendChat,
-      }).catch(settleReject);
+      }).then(settleResolve, settleReject);
     });
 
   const subscribeThreadEvents = async (
@@ -3079,6 +3154,9 @@ export function SelfEvolutionPageController({
       appendChat?: boolean;
     },
   ) => {
+    if (!ownsThreadStepList(threadId)) {
+      return;
+    }
     const activeSubscription = threadEventsAbortRef.current;
     if (
       activeSubscription?.threadId === threadId &&
@@ -3114,6 +3192,10 @@ export function SelfEvolutionPageController({
         stepId,
         controller.signal,
       );
+      if (!isCurrentThread(threadId)) {
+        controller.abort();
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(localizeErrorCode("2000509"));
@@ -3134,7 +3216,14 @@ export function SelfEvolutionPageController({
 
       while (true) {
         const { value, done } = await reader.read();
-        if (done || controller.signal.aborted) {
+        if (
+          done ||
+          controller.signal.aborted ||
+          !isCurrentThread(threadId)
+        ) {
+          if (!isCurrentThread(threadId)) {
+            await disconnectStream();
+          }
           break;
         }
 
@@ -3179,7 +3268,11 @@ export function SelfEvolutionPageController({
       }
 
       const trailingText = buffer.trim();
-      if (!controller.signal.aborted && trailingText) {
+      if (
+        !controller.signal.aborted &&
+        isCurrentThread(threadId) &&
+        trailingText
+      ) {
         const frame = parseSSEFrame(trailingText);
         if (frame) {
           if (isDoneSSEFrame(frame)) {
@@ -3205,7 +3298,10 @@ export function SelfEvolutionPageController({
         }
       }
     } catch (error) {
-      if (controller.signal.aborted) {
+      if (
+        controller.signal.aborted ||
+        !isCurrentThread(threadId)
+      ) {
         return;
       }
       message.error(getCatalogApiErrorMessage(error), 2);
@@ -3272,7 +3368,9 @@ export function SelfEvolutionPageController({
     setIsWorkbenchVisible(true);
     setWorkflowRuntimeState(createThreadRestoreWorkflowRuntimeState());
     replaceThreadEvents([]);
-    setThreadStepList({ steps: [] });
+    resetThreadStepListState();
+    resetWorkflowResultsState();
+    setEvalReportBadCases({ loading: false, loaded: false });
     resetThreadStepViewSelection();
     processedWorkflowEventKeysRef.current = new Set();
     pendingNextStepRunIdRef.current = undefined;
@@ -3316,7 +3414,9 @@ export function SelfEvolutionPageController({
       if (signal?.aborted || restoreRequestIdRef.current !== requestId) {
         return;
       }
-      syncThreadStepListState(restoredStepList);
+      if (!syncThreadStepListState(threadId, restoredStepList)) {
+        return;
+      }
       const restoredNextStepRunId =
         resolveNextStepRunIdFromStepList(restoredStepList);
       if (restoredNextStepRunId) {
@@ -3488,7 +3588,7 @@ export function SelfEvolutionPageController({
       const isThreadNotFound = responseStatus === 404;
       if (isThreadNotFound) {
         setWorkflowRuntimeState(createThreadRestoreWorkflowRuntimeState());
-        setWorkflowResults(createInitialWorkflowResultsState());
+        resetWorkflowResultsState();
         setCaseArtifact(undefined);
       }
       const errorText = errorTextRaw;
@@ -3578,7 +3678,7 @@ export function SelfEvolutionPageController({
     ) {
       return;
     }
-    const threadId = activeSession?.threadId || routeThreadId;
+    const threadId = routeThreadId || activeSession?.threadId;
     if (!threadId) {
       return;
     }
@@ -3609,7 +3709,7 @@ export function SelfEvolutionPageController({
 
   const onSend = async (command?: string) => {
     const trimmedPrompt = (command ?? prompt).trim();
-    const activeThreadId = activeSession?.threadId || routeThreadId;
+    const activeThreadId = routeThreadId || activeSession?.threadId;
     if (isKnowledgeBaseRequired && !activeThreadId) {
       setHasLaunchValidationTriggered(true);
       message.warning(
@@ -3726,7 +3826,7 @@ export function SelfEvolutionPageController({
   };
 
   const continueThreadExecution = async () => {
-    const activeThreadId = activeSession?.threadId || routeThreadId;
+    const activeThreadId = routeThreadId || activeSession?.threadId;
     if (!activeThreadId) {
       appendSystemMessage(
         t("selfEvolutionRun.startFlowBeforeMessage"),
@@ -3805,7 +3905,7 @@ export function SelfEvolutionPageController({
       checkpointWaitingStep &&
       normalizeThreadStepStatus(checkpointWaitingStep.status) === "done"
     ) {
-      const activeThreadId = activeSession?.threadId || routeThreadId;
+      const activeThreadId = routeThreadId || activeSession?.threadId;
       if (activeThreadId) {
         void advanceAutoExecutionAfterStepStream(
           activeThreadId,
@@ -3887,9 +3987,12 @@ export function SelfEvolutionPageController({
     setIsStartingSession(true);
     try {
       const { threadId } = await createAndStartThread();
+      activeThreadIdRef.current = threadId;
       setWorkflowRuntimeState(createWorkflowRuntimeStateForMode(mode));
       replaceThreadEvents([]);
-      setThreadStepList({ steps: [] });
+      resetThreadStepListState();
+      resetWorkflowResultsState();
+      setEvalReportBadCases({ loading: false, loaded: false });
       resetThreadStepViewSelection();
       processedWorkflowEventKeysRef.current = new Set();
       pendingNextStepRunIdRef.current = undefined;
@@ -4023,6 +4126,7 @@ export function SelfEvolutionPageController({
         selectedKnowledgeBase: nextKnowledgeBaseLabel,
         selectedEvalSet: nextEvalSet,
       });
+      activeThreadIdRef.current = threadId;
       const newSession: ChatSession = {
         id: newSessionId,
         title: t("selfEvolutionRun.newSessionLabel", { index: nextIndex }),
@@ -4050,7 +4154,9 @@ export function SelfEvolutionPageController({
       setHasLaunchValidationTriggered(false);
       setWorkflowRuntimeState(createWorkflowRuntimeStateForMode(nextMode));
       replaceThreadEvents([]);
-      setThreadStepList({ steps: [] });
+      resetThreadStepListState();
+      resetWorkflowResultsState();
+      setEvalReportBadCases({ loading: false, loaded: false });
       resetThreadStepViewSelection();
       processedWorkflowEventKeysRef.current = new Set();
       pendingNextStepRunIdRef.current = undefined;
@@ -4144,6 +4250,17 @@ export function SelfEvolutionPageController({
       }
       setIsHistorySessionModalOpen(false);
       if (entry.threadId !== routeThreadId) {
+        activeThreadIdRef.current = entry.threadId;
+        threadEventsAbortRef.current?.controller.abort();
+        threadEventsAbortRef.current = null;
+        setWorkflowRuntimeState(createThreadRestoreWorkflowRuntimeState());
+        replaceThreadEvents([]);
+        resetThreadStepListState();
+        resetWorkflowResultsState();
+        setEvalReportBadCases({ loading: false, loaded: false });
+        resetThreadStepViewSelection();
+        pendingNextStepRunIdRef.current = undefined;
+        setLiveCheckpointWaitPrompt(undefined);
         navigate(
           `/self-evolution/detail/${encodeURIComponent(entry.threadId)}`,
         );
@@ -4175,6 +4292,7 @@ export function SelfEvolutionPageController({
   const resetToEmptySession = () => {
     const nowLabel = getTimeLabel();
     const nextSessionId = `session-${Date.now()}`;
+    activeThreadIdRef.current = undefined;
     setChatSessions([
       {
         id: nextSessionId,
@@ -4186,10 +4304,10 @@ export function SelfEvolutionPageController({
     setActiveSessionId(nextSessionId);
     setIsWorkbenchVisible(false);
     setWorkflowRuntimeState(createInitialWorkflowRuntimeState());
-    setWorkflowResults(createInitialWorkflowResultsState());
+    resetWorkflowResultsState();
     setCaseArtifact(undefined);
     replaceThreadEvents([]);
-    setThreadStepList({ steps: [] });
+    resetThreadStepListState();
     resetThreadStepViewSelection();
     processedWorkflowEventKeysRef.current = new Set();
     pendingNextStepRunIdRef.current = undefined;

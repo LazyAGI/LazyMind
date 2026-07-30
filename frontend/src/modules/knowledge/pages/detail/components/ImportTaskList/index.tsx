@@ -1,7 +1,8 @@
-import { message, Modal, Radio, Table, Tooltip } from "antd";
+import { Button, message, Modal, Radio, Table, Tooltip } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import moment from "moment";
 
 import ElapsedTime from "../ElapsedTime";
@@ -12,6 +13,7 @@ import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_per
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import { localizeErrorCode } from "@/components/request";
 import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
+import { isFFmpegDependencyError } from "@/modules/knowledge/utils/taskError";
 
 interface IProps {
   datasetId: string;
@@ -40,6 +42,7 @@ export const TaskTabInfo = [
 
 const ImportTaskList = (props: IProps) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [total, setTotal] = useState(0);
@@ -85,10 +88,13 @@ const ImportTaskList = (props: IProps) => {
       setDataSource(
         tasks.map((task) => ({
           ...task,
-          localized_error: localizeErrorCode(
-            task.err_msg,
-            localizeErrorCode("2000509"),
-          ),
+          ffmpeg_missing: isFFmpegDependencyError(task.err_msg),
+          localized_error: isFFmpegDependencyError(task.err_msg)
+            ? t("knowledge.ffmpegRequiredDesc")
+            : localizeErrorCode(
+                task.err_msg,
+                localizeErrorCode("2000509"),
+              ),
         })) as any,
       );
 
@@ -265,7 +271,23 @@ const ImportTaskList = (props: IProps) => {
             title: t("knowledge.parseTaskError"),
             dataIndex: "localized_error",
             width: 200,
-            render: (display: string) => {
+            render: (display: string, record: any) => {
+              if (record.ffmpeg_missing) {
+                return (
+                  <div>
+                    <Tooltip title={display}>
+                      <div className="ellipsis-text">{display}</div>
+                    </Tooltip>
+                    <Button
+                      onClick={() => navigate("/model-providers/tools#ffmpeg-dependency")}
+                      size="small"
+                      type="link"
+                    >
+                      {t("knowledge.configureFfmpeg")}
+                    </Button>
+                  </div>
+                );
+              }
               return (
                 <Tooltip title={display}>
                   <div className="ellipsis-text">{display}</div>

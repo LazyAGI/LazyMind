@@ -435,6 +435,11 @@ func TestChatConversationsMergesPersistedDisabledTools(t *testing.T) {
 
 	var upstreamBody map[string]any
 	baseURL := startChatToolsTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/scan/sources" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}, "total": 0})
+			return
+		}
 		if r.URL.Path != "/api/chat" {
 			http.NotFound(w, r)
 			return
@@ -454,6 +459,7 @@ func TestChatConversationsMergesPersistedDisabledTools(t *testing.T) {
 	}))
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", baseURL)
 	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", baseURL)
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", baseURL)
 
 	req := httptest.NewRequest(
 		http.MethodPost,

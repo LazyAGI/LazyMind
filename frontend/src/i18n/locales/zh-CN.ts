@@ -391,6 +391,31 @@ const zhCN = {
       parsingCategoryTitle: "文档解析",
       parsingCategoryDesc: "集中管理 MinerU、PaddleOCR 等文档解析服务，用于把文件转换为可索引文本。",
       parsingSearchPlaceholder: "搜索文档解析服务",
+      dependencyCategoryTitle: "依赖安装",
+      dependencyCategoryDesc: "管理本地运行环境依赖。安装或指定路径后，视频转 GIF 与 MP4 解析等功能才会可用。",
+      dependencyFfmpegTitle: "FFmpeg",
+      dependencyFfmpegSummary: "用于视频转 GIF 动图，以及知识库 MP4 抽帧解析。",
+      dependencyFfmpegModalTitle: "配置 FFmpeg",
+      dependencyFfmpegImpact: "缺少 FFmpeg 时，动态表情包（video_to_gif）和知识库 MP4 解析会失败。",
+      dependencyInstallBundledTitle: "安装到 LazyMind 目录",
+      dependencyInstallBundledDesc: "下载 FFmpeg 到本地 LazyMind 运行目录（deps/ffmpeg/bin），不修改系统全局安装。",
+      dependencyInstallAction: "下载并安装",
+      dependencyInstalledAction: "已安装",
+      dependencyCustomPathTitle: "使用本机已有 FFmpeg",
+      dependencyCustomPathDesc: "填写 ffmpeg 可执行文件路径，或包含 ffmpeg/ffprobe 的目录；ffprobe 需与 ffmpeg 同目录。",
+      dependencyCustomPathPlaceholder: "例如 /opt/homebrew/bin/ffmpeg 或 /opt/homebrew/bin",
+      dependencyBrowseAction: "选择文件",
+      dependencySavePathAction: "保存路径",
+      dependencyRecheckAction: "重新检测",
+      dependencyDetected: "已检测到 ffmpeg={{ffmpeg}}，ffprobe={{ffprobe}}",
+      dependencyLoadFailed: "加载依赖状态失败",
+      dependencySaveFailed: "保存依赖配置失败",
+      dependencyInstallFailed: "安装 FFmpeg 失败",
+      dependencyInstallSuccess: "FFmpeg 已安装，新的视频任务可立即使用",
+      dependencySaved: "依赖配置已保存，新的视频任务可立即使用",
+      dependencyCustomPathRequired: "请先填写或选择 ffmpeg 路径",
+      dependencyCheckReady: "FFmpeg 已就绪",
+      dependencyCheckMissing: "仍未检测到可用的 FFmpeg",
       toolsModuleTitle: "工具",
       toolsModuleDesc: "集中管理文档解析、搜索引擎、学术检索、内置系统工具和 MCP 服务。",
       toolsCategoryTitle: "搜索引擎",
@@ -403,6 +428,10 @@ const zhCN = {
       googleDriveConfigTitle: "配置 Google Drive OAuth",
       googleDriveAuthorize: "保存并授权",
       googleDriveConfigHint: "在 Google Cloud Console 启用 Drive API，并将以下地址完整加入 OAuth Web 客户端的授权重定向 URI：{{callbackUrl}}",
+      googleDriveRedirectReadyTitle: "OAuth 回调地址可用",
+      googleDriveInvalidRedirectTitle: "当前访问地址不能用于 Google OAuth",
+      googleDriveInvalidRedirectHint:
+        "Google 不接受 {{callbackUrl}}。HTTP 仅允许 localhost、127.0.0.1 或 ::1；其他环境必须使用带公共域名的 HTTPS，且不能使用原始 IP 地址。请通过本机回环地址或 HTTPS 域名/隧道重新打开 LazyMind。",
       googleDriveSetupGuideAction: "接入教程",
       googleDriveClientIdRequired: "请输入 OAuth Client ID",
       googleDriveClientSecretRequired: "请输入 OAuth Client Secret",
@@ -592,6 +621,21 @@ const zhCN = {
     newTask: "新任务",
     expandMenu: "展开菜单",
     collapseMenu: "收起菜单",
+  },
+
+  legal: {
+    consentTitle: "用户协议与隐私政策",
+    welcomeTitle: "欢迎使用 LazyMind",
+    welcomeDescription:
+      "在开始使用前，请了解我们如何处理本地数据、第三方服务以及 AI/Agent 相关风险。",
+    readAndAgreePrefix: "我已阅读并同意",
+    agreementLink: "《LazyMind 用户协议、隐私政策与安全使用条款》",
+    consentAgreeAndContinue: "同意并继续",
+    detailsBack: "返回",
+    detailsReadAndReturn: "我已阅读并返回",
+    consentVersion: "协议版本 {{version}}",
+    consentChecking: "正在同步用户协议状态...",
+    consentPersistFailed: "保存同意状态失败，请稍后重试",
   },
 
   channelGateway: {
@@ -1157,6 +1201,9 @@ const zhCN = {
     toolLimitAutoContinued: "等待超时，系统正在总结当前成果",
     toolLimitSummarizing: "已停止工具调用，正在整理当前成果",
     toolLimitDecisionFailed: "操作未生效，可能已超时并开始总结，请留意后续输出",
+    ffmpegGifRequiredTitle: "缺少 FFmpeg，动态表情包生成失败",
+    ffmpegGifRequiredDesc: "视频已经生成，但转换 GIF 动态表情包需要 FFmpeg。请配置已有路径或下载安装；当前任务仍可返回视频结果。",
+    configureFfmpeg: "配置或下载 FFmpeg",
     askCardInputPlaceholder: "输入回复…",
     askCardOtherPlaceholder: "请输入其他内容…",
     askCardOtherOption: "其他",
@@ -1742,7 +1789,7 @@ const zhCN = {
     createFromCloudDocuments: "从云文档创建",
     createFromCloudDocumentsTitle: "从云文档创建知识库",
     createFromCloudDocumentsIntro:
-      "选择飞书、Notion 或本地路径（管理员），配置同步范围后将自动创建知识库。飞书需先完成有效授权；未授权时将跳转到云文档配置。",
+      "选择飞书、Notion 或本地路径（管理员），配置同步范围后将自动创建知识库。Google Drive 当前用于在线检索，可前往云文档完成授权配置。",
     createFromCloudDocumentsSuccess: "知识库已创建",
     editKnowledgeBase: "编辑知识库",
     selectTag: "请选择知识库标签",
@@ -1846,6 +1893,9 @@ const zhCN = {
     importSuccessTitle: "导入成功",
     importFailedTitle: "导入失败",
     parseTaskError: "失败原因",
+    ffmpegRequiredTitle: "缺少 FFmpeg，视频解析失败",
+    ffmpegRequiredDesc: "当前环境未检测到 FFmpeg。请先配置已有的 FFmpeg 路径，或下载并安装到 LazyMind 目录，然后重试入库。",
+    configureFfmpeg: "配置或下载 FFmpeg",
     taskSuspendSuccess: "中止任务成功",
     taskRetrySuccess: "重试任务成功",
     taskDeleteSuccess: "删除任务成功",
@@ -2066,7 +2116,8 @@ const zhCN = {
     dataSourceTypeLocalDesc: "支持选择多个本地路径并进行连接测试",
     dataSourceTypeFeishuDesc: "需先设置 App ID / App Secret，再通过 OAuth 连接",
     dataSourceTypeNotion: "Notion",
-    dataSourceTypeNotionDesc: "连接 Notion 页面或数据库，按授权范围同步并供 Chat 读取。",
+    dataSourceTypeNotionDesc:
+      "连接 Notion 页面或数据库；需按 HTTPS 回调教程配置 OAuth Redirect URI。",
     dataSourceTypeGoogleDrive: "Google Drive",
     dataSourceGoogleDriveSetupHint:
       "授权 Google Drive 账号，用于 Chat 在线搜索，不会导入知识库。",
@@ -2079,6 +2130,10 @@ const zhCN = {
     dataSourceGoogleDriveCallbackLabel: "当前 OAuth 回调地址",
     dataSourceGoogleDriveHttpsHint:
       "请将上方地址完整登记到 Google OAuth Web 客户端。生产部署使用 HTTPS；本地 localhost 或 127.0.0.1 可按 Google 本地开发规则使用 HTTP。",
+    dataSourceGoogleDriveInvalidCallbackTitle:
+      "当前地址会被 Google 拒绝",
+    dataSourceGoogleDriveInvalidCallbackHint:
+      "Google OAuth Web 客户端不允许 HTTP 内网地址或原始 IP 回调。本机测试请通过 http://localhost 或 http://127.0.0.1 打开 LazyMind；局域网、远程或生产部署请先配置 HTTPS 公共域名或 HTTPS 隧道，再从该地址重新打开本页。",
     dataSourceTypeDatabase: "外部数据库",
     dataSourceTypeDatabaseDesc: "通过只读账号连接 MySQL 或 PostgreSQL，供聊天直接查询。",
     dataSourceTypeStepIntro: "当前支持本地文件 / 本地目录、飞书、Notion、Google Drive 和外部数据库接入，请选择后进入连接配置。",
@@ -2112,7 +2167,7 @@ const zhCN = {
     dataSourceNotionCredentialModalTitle: "配置 Notion OAuth 应用",
     dataSourceNotionCredentialSaveAndSelect: "保存并授权 Notion",
     dataSourceNotionCredentialHint:
-      "请前往 Notion Developers 创建 Public Integration，获取 OAuth Client ID 和 Client Secret；Redirect URI 需配置为 /oauth/notion/data-source/callback。",
+      "请先查看 Notion 接入教程，在 Notion Developers 创建 Public Integration，获取 OAuth Client ID 和 Client Secret，并将教程页展示的完整 HTTPS Redirect URI 配置到 Notion。",
     dataSourceNotionCredentialSaved: "Notion OAuth 凭证已保存",
     dataSourceNotionCredentialReset: "Notion OAuth 凭证已重置",
     dataSourceNotionResetCredentialAction: "重设凭据",
@@ -2140,7 +2195,7 @@ const zhCN = {
     dataSourceNotionTargetTypeDatabase: "数据库",
     dataSourceNotionTargetLabel: "Notion 页面或数据库",
     dataSourceNotionSetupGuideHint:
-      "：查看详细的 Notion OAuth 配置步骤、所需凭证和 Redirect URI 说明。",
+      "：查看详细的 Notion OAuth 配置步骤、所需凭证和 HTTPS Redirect URI 配置说明。",
     dataSourceDatabaseTitle: "外部数据库",
     dataSourceDatabaseSubtitle: "配置用于聊天只读查询的 MySQL 和 PostgreSQL 数据库连接。",
     dataSourceDatabaseSectionTitle: "数据库",
@@ -2323,19 +2378,33 @@ const zhCN = {
       openDriveApi: "打开 Google Drive API",
       openCredentials: "打开凭据页面",
       openAudience: "打开 Google Auth Platform Audience",
+      openRedirectRules: "查看 Google Redirect URI 规则",
       callbackUrl: "授权重定向 URI：{{uri}}",
+      unsupportedCallbackUrl: "当前地址不能登记为 Google OAuth 回调：{{uri}}",
       steps: {
         openConsoleTitle: "创建或选择 Google Cloud 项目",
         openConsoleDesc:
-          "登录 Google Cloud Console，创建一个新项目，或选择已有项目来保存 LazyMind 使用的 OAuth 配置。",
+          "登录 Google Cloud Console，创建一个新项目，或选择已有项目来保存 LazyMind 使用的 OAuth 配置。没有现成项目时，点击项目下拉框，再点击“新建项目”。",
+        openConsoleProjectName:
+          "项目名称可填写 LazyMind OAuth；组织/位置没有要求时保持默认即可。",
+        openConsoleProjectId:
+          "项目 ID 可保持 Google 自动生成；创建后确认页面顶部项目选择器仍选中这个项目。",
         enableApiTitle: "启用 Google Drive API",
         enableApiDesc:
           "在 API 和服务中，为当前项目启用 Google Drive API。LazyMind 会调用 Google Drive 官方 API 完成 search、find 和 read。",
+        enableApiSearch:
+          "如果没有直接打开到 Drive API 页面，进入“API 和服务 > 库”，搜索 Google Drive API，打开后点击“启用”。",
+        enableApiConfirmProject:
+          "启用前再次确认右上角/顶部项目是刚才创建或选择的项目，避免把 API 开到别的项目里。",
         consentTitle: "配置 OAuth 同意屏幕",
         consentDesc:
           "进入 Google Auth Platform 的 Audience，确认当前项目和 OAuth 客户端所属项目一致，再配置应用受众和测试用户。",
         consentUserType:
           "个人 Google 账号请选择 External；如果是 Google Workspace 且只允许组织内成员使用，可以选择 Internal。",
+        consentAppInfo:
+          "应用名称可填写 LazyMind；用户支持邮箱选择当前登录邮箱；Logo、主页、隐私政策、服务条款在测试阶段可先留空或按页面要求跳过。",
+        consentContact:
+          "开发者联系邮箱填写当前登录邮箱。发布状态保持 Testing，不需要提交 Google 验证即可让测试用户授权。",
         consentTestUsers:
           "如果应用处于 Testing 状态，在 Test users 中点击 Add users，添加实际登录 Google Drive 的邮箱并保存；等待约一分钟后再授权，否则 Google 会返回 access_denied。",
         consentRetry:
@@ -2349,6 +2418,8 @@ const zhCN = {
           "Application type 必须选择 Web application。",
         credentialsName:
           "建议命名为 LazyMind Google Drive，方便后续在 Google Cloud 和 LazyMind 中识别。",
+        credentialsJavaScriptOrigins:
+          "Authorized JavaScript origins 可以留空；LazyMind 只需要配置 Authorized redirect URIs。",
         redirectTitle: "添加 LazyMind 回调地址",
         redirectDesc:
           "在 Authorized redirect URIs 中添加 LazyMind 前端实际使用的 OAuth 回调地址，必须和浏览器打开的系统地址一致。",
@@ -2356,9 +2427,17 @@ const zhCN = {
           "如果你用 127.0.0.1 或部署域名打开 LazyMind，而不是 localhost，请把回调地址中的 origin 替换成同一个浏览器 origin。",
         redirectHttpsHint:
           "生产域名应使用 HTTPS；本地开发可使用 Google Web OAuth 客户端中精确登记的 http://localhost 或 http://127.0.0.1 地址。协议、主机、端口和路径必须完全一致。",
+        redirectUnsupportedHint:
+          "Google 仅允许 localhost、127.0.0.1 或 ::1 使用 HTTP；其他回调必须使用带公共顶级域名的 HTTPS，并且不能使用 10.x、172.16-31.x、192.168.x 或其他原始 IP 地址。",
+        redirectRecoveryHint:
+          "如果浏览器和 LazyMind 在同一台机器上，请改用 http://localhost 或 http://127.0.0.1 打开系统；如果通过局域网或远程访问，请配置 HTTPS 公共域名或 Cloudflare Tunnel/ngrok 等 HTTPS 隧道，再从新地址打开系统。页面会自动生成对应的回调 URI。",
+        redirectQuickTunnelHint:
+          "使用 Cloudflare Quick Tunnel 时，先运行 cloudflared tunnel --url http://localhost:8090，然后从生成的 https://*.trycloudflare.com 打开 LazyMind，并把本页展示的 https://*.trycloudflare.com/oauth/googledrive/data-source/callback 填到 Authorized redirect URIs。",
         copyCredentialsTitle: "复制 Client ID 和 Client Secret",
         copyCredentialsDesc:
           "Web 客户端创建完成后，复制 OAuth Client ID 和 Client Secret。Client Secret 需要保密。",
+        copyPopup:
+          "点击 Create 后，Google 会弹出创建结果；先复制 Client ID 和 Client Secret，再关闭弹窗。关闭后也可以在 Credentials 页面重新打开这个 Web client 查看。",
         copyClientId:
           "Client ID 对应 LazyMind 弹窗中的 OAuth Client ID 字段。",
         copyClientSecret:
@@ -2383,11 +2462,11 @@ const zhCN = {
       backManagement: "返回数据源管理",
       title: "数据源管理-新建数据源-Notion",
       subtitle:
-        "在 Notion Developers 创建 Public Integration，获取 OAuth 凭证并配置 Redirect URI，然后在 LazyMind 中完成 Notion 数据源授权。",
+        "在 Notion Developers 创建 Public Integration，获取 OAuth 凭证并配置 HTTPS Redirect URI，然后在 LazyMind 中完成 Notion 数据源授权。",
       summaryAria: "Notion 接入流程概览",
       summaryTitle: "准备流程",
       openDevelopers: "打开 Notion Developers",
-      callbackUrl: "回调地址：{{uri}}",
+      callbackUrl: "当前页面生成的回调地址：{{uri}}",
       steps: {
         openDevelopersTitle: "进入 Notion 开发者网站",
         openDevelopersDesc:
@@ -2410,9 +2489,9 @@ const zhCN = {
           "Client Secret：Integration 的密钥，需要保密，仅在创建时可完整查看。",
         redirectTitle: "配置 Redirect URI",
         redirectDesc:
-          "在 Integration 设置的「Redirect URIs」区域，添加 LazyMind 的 OAuth 回调地址。这个地址必须是系统实际使用的回调 URL，否则授权完成后会报错。",
+          "Notion 要求 Redirect URI 使用 HTTPS。请从 HTTPS 域名或 HTTPS 隧道访问 LazyMind，然后在 Integration 设置的「Redirect URIs」区域添加本页展示的完整回调地址。",
         redirectProductionHint:
-          "生产环境请使用当前部署域名的 HTTPS 回调地址；本地开发使用页面上显示的 localhost 或 127.0.0.1 地址。Redirect URI 必须与当前浏览器 origin 及系统实际回调完全一致。",
+          "如果当前地址以 http://localhost 或 http://127.0.0.1 开头，仅可用于本地页面预览，不能直接登记到 Notion。请先通过 HTTPS 公网域名或 HTTPS 隧道访问 LazyMind，再复制新的 https://.../oauth/notion/data-source/callback。Redirect URI 必须与当前浏览器 origin 及系统实际回调完全一致。",
         capabilitiesTitle: "配置 Integration 权限 (Capabilities)",
         capabilitiesDesc:
           "在 Integration 设置中，根据需要勾选以下能力：Read content（读取页面/数据库内容）、Read comments（读取评论）等。LazyMind 至少需要 Read content 权限才能读取 Notion 内容。",
@@ -3135,6 +3214,7 @@ const zhCN = {
     memoryVersionEmpty: "暂无历史版本",
     memoryVersionSelectEmpty: "请选择一条版本记录查看详情",
     memoryVersionDiffEmpty: "暂无差异内容",
+    memoryVersionDiffDirectoryHint: "目录{{status}}，无文件内容可对比",
     memoryVersionRange: "版本变化",
     memoryVersionChangedAt: "修改时间",
     memoryVersionChangeSource: "修改来源",

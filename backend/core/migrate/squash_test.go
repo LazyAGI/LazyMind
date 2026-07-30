@@ -16,8 +16,7 @@ const (
 	testSquashVersion   = uint64(20260704000000)
 )
 
-func TestRunnerFakesSquashMigrationAndContinuesWithLaterMigration(t *testing.T) {
-	t.Setenv(fakeVersionsEnv, "20260704000000")
+func TestRunnerCanonicalizesSquashMigrationAndContinuesWithLaterMigration(t *testing.T) {
 	dir := t.TempDir()
 	writeMigrationPair(t, dir, "20260701000000_previous_release", `
 CREATE TABLE previous_release (id integer PRIMARY KEY);
@@ -57,10 +56,10 @@ CREATE TABLE source_beta (id integer PRIMARY KEY);
 	runner := openSquashTestRunner(t, dbPath, dir)
 	defer runner.Close()
 	if err := runner.Up(0); err != nil {
-		t.Fatalf("fake squash migration: %v", err)
+		t.Fatalf("canonicalize squash migration: %v", err)
 	}
 	if err := runner.Up(0); err != nil {
-		t.Fatalf("fake squash migration should be idempotent: %v", err)
+		t.Fatalf("canonicalized squash migration should be idempotent: %v", err)
 	}
 
 	assertHistoryVersionCount(t, db, testPreviousVersion, 1)
@@ -72,8 +71,7 @@ CREATE TABLE source_beta (id integer PRIMARY KEY);
 	assertMigrationState(t, db, 20260705000000)
 }
 
-func TestRunnerExecutesSquashMigrationNormallyWithoutFakeConfiguration(t *testing.T) {
-	t.Setenv(fakeVersionsEnv, "")
+func TestRunnerExecutesSquashMigrationOnNewDatabase(t *testing.T) {
 	dir := t.TempDir()
 	writeSquashMigrationPair(t, dir, `
 CREATE TABLE source_alpha (id integer PRIMARY KEY);
@@ -100,33 +98,7 @@ DROP TABLE source_alpha;
 	assertMigrationState(t, db, testSquashVersion)
 }
 
-func TestRunnerRejectsFakeSquashOnEmptyDatabase(t *testing.T) {
-	t.Setenv(fakeVersionsEnv, "20260704000000")
-	dir := t.TempDir()
-	writeSquashMigrationPair(t, dir, `
-CREATE TABLE source_alpha (id integer PRIMARY KEY);
-CREATE TABLE source_beta (id integer PRIMARY KEY);
-`, `
-DROP TABLE source_beta;
-DROP TABLE source_alpha;
-`)
-
-	dbPath := filepath.Join(t.TempDir(), "acl.db")
-	runner := openSquashTestRunner(t, dbPath, dir)
-	defer runner.Close()
-	err := runner.Up(0)
-	if err == nil || !strings.Contains(err.Error(), "none of its superseded migrations are applied") {
-		t.Fatalf("expected empty database fake error, got %v", err)
-	}
-
-	db := openSquashTestDB(t, dbPath)
-	defer db.Close()
-	assertHistoryVersionCount(t, db, testSquashVersion, 0)
-	assertTableExists(t, db, "source_alpha", false)
-}
-
 func TestRunnerRejectsPartiallyAppliedSquashMigration(t *testing.T) {
-	t.Setenv(fakeVersionsEnv, "20260704000000")
 	dir := t.TempDir()
 	writeSquashMigrationPair(t, dir, `
 CREATE TABLE source_alpha (id integer PRIMARY KEY);
@@ -155,38 +127,7 @@ DROP TABLE source_alpha;
 	assertMigrationState(t, db, testSourceVersionA)
 }
 
-func TestRunnerRequiresFakeConfigurationWhenSourcesAreApplied(t *testing.T) {
-	t.Setenv(fakeVersionsEnv, "")
-	dir := t.TempDir()
-	writeSquashMigrationPair(t, dir, `
-CREATE TABLE source_alpha (id integer PRIMARY KEY);
-CREATE TABLE source_beta (id integer PRIMARY KEY);
-`, `
-DROP TABLE source_beta;
-DROP TABLE source_alpha;
-`)
-
-	dbPath := filepath.Join(t.TempDir(), "acl.db")
-	db := openSquashTestDB(t, dbPath)
-	defer db.Close()
-	seedHistory(t, db, []historyRecord{
-		{Version: testSourceVersionA, Name: "source_alpha"},
-		{Version: testSourceVersionB, Name: "source_beta"},
-	})
-
-	runner := openSquashTestRunner(t, dbPath, dir)
-	defer runner.Close()
-	err := runner.Up(0)
-	if err == nil || !strings.Contains(err.Error(), "set MIGRATION_FAKE_VERSIONS=20260704000000") {
-		t.Fatalf("expected fake configuration error, got %v", err)
-	}
-	assertHistoryVersionCount(t, db, testSourceVersionA, 1)
-	assertHistoryVersionCount(t, db, testSourceVersionB, 1)
-	assertHistoryVersionCount(t, db, testSquashVersion, 0)
-}
-
 func TestRunnerRejectsUnexpectedAppliedMigrationWithoutFile(t *testing.T) {
-	t.Setenv(fakeVersionsEnv, "20260704000000")
 	dir := t.TempDir()
 	writeSquashMigrationPair(t, dir, `
 CREATE TABLE source_alpha (id integer PRIMARY KEY);
@@ -208,7 +149,7 @@ DROP TABLE source_alpha;
 	runner := openSquashTestRunner(t, dbPath, dir)
 	defer runner.Close()
 	err := runner.Up(0)
-	if err == nil || !strings.Contains(err.Error(), "is not declared by a configured squash migration") {
+	if err == nil || !strings.Contains(err.Error(), "has no migration file or release directory") {
 		t.Fatalf("expected unexpected orphan error, got %v", err)
 	}
 	assertHistoryVersionCount(t, db, testSourceVersionA, 1)
@@ -216,30 +157,7 @@ DROP TABLE source_alpha;
 	assertHistoryVersionCount(t, db, testSquashVersion, 0)
 }
 
-func TestRunnerRejectsConfiguredFakeVersionWithoutSupersedesDirective(t *testing.T) {
-	t.Setenv(fakeVersionsEnv, "20260704000000")
-	dir := t.TempDir()
-	writeMigrationPair(t, dir, "20260704000000_release_v1_2_0", `
-CREATE TABLE should_not_exist (id integer PRIMARY KEY);
-`, `
-DROP TABLE should_not_exist;
-`)
-
-	dbPath := filepath.Join(t.TempDir(), "acl.db")
-	runner := openSquashTestRunner(t, dbPath, dir)
-	defer runner.Close()
-	err := runner.Up(0)
-	if err == nil || !strings.Contains(err.Error(), "without a Supersedes directive") {
-		t.Fatalf("expected missing Supersedes error, got %v", err)
-	}
-
-	db := openSquashTestDB(t, dbPath)
-	defer db.Close()
-	assertTableExists(t, db, "should_not_exist", false)
-}
-
 func TestRunnerRejectsSquashWhileSupersededFilesRemain(t *testing.T) {
-	t.Setenv(fakeVersionsEnv, "")
 	dir := t.TempDir()
 	writeMigrationPair(t, dir, "20260702000000_source_alpha", `
 CREATE TABLE source_alpha (id integer PRIMARY KEY);
@@ -272,8 +190,7 @@ DROP TABLE source_alpha;
 	assertTableExists(t, db, "source_alpha", false)
 }
 
-func TestRunnerDownAfterFakeSquashUsesAggregateDownMigration(t *testing.T) {
-	t.Setenv(fakeVersionsEnv, "20260704000000")
+func TestRunnerDownAfterCanonicalizedSquashUsesAggregateDownMigration(t *testing.T) {
 	dir := t.TempDir()
 	writeMigrationPair(t, dir, "20260701000000_previous_release", `
 CREATE TABLE previous_release (id integer PRIMARY KEY);
@@ -307,10 +224,10 @@ CREATE TABLE source_beta (id integer PRIMARY KEY);
 	runner := openSquashTestRunner(t, dbPath, dir)
 	defer runner.Close()
 	if err := runner.Up(0); err != nil {
-		t.Fatalf("fake squash migration: %v", err)
+		t.Fatalf("canonicalize squash migration: %v", err)
 	}
 	if err := runner.Down(1); err != nil {
-		t.Fatalf("down fake squash migration: %v", err)
+		t.Fatalf("down canonicalized squash migration: %v", err)
 	}
 
 	assertTableExists(t, db, "source_alpha", false)

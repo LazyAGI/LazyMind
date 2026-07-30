@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("lazymindDesktop", {
   restartRuntime: () => ipcRenderer.invoke("lazymind:restartRuntime"),
   resetRuntime: (scope) => ipcRenderer.invoke("lazymind:resetRuntime", scope),
   selectFolder: () => ipcRenderer.invoke("lazymind:selectFolder"),
+  selectExecutable: () => ipcRenderer.invoke("lazymind:selectExecutable"),
   exportDiagnostics: () => ipcRenderer.invoke("lazymind:exportDiagnostics"),
   notifyAppReady: () => ipcRenderer.send("lazymind:renderer-ready"),
   startupDiagnostics: () => ipcRenderer.invoke("lazymind:startupDiagnostics"),

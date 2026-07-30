@@ -9,6 +9,11 @@ from lazymind.config import config as _cfg
 
 
 def _upload_root() -> str:
+    # Prefer process env so local-runtime LAZYMIND_UPLOAD_ROOT wins even when
+    # config was initialized with the Docker default marker path.
+    env = (os.environ.get('LAZYMIND_UPLOAD_ROOT') or os.environ.get('LAZYMIND_SHARED_UPLOAD_DIR') or '').strip()
+    if env:
+        return str(Path(env).resolve())
     for key in ('shared_upload_dir', 'upload_dir'):
         try:
             value = (_cfg[key] or '').strip()
@@ -16,9 +21,6 @@ def _upload_root() -> str:
             value = ''
         if value:
             return str(Path(value).resolve())
-    env = (os.environ.get('LAZYMIND_UPLOAD_ROOT') or os.environ.get('LAZYMIND_SHARED_UPLOAD_DIR') or '').strip()
-    if env:
-        return str(Path(env).resolve())
     return '/var/lib/lazymind/uploads'
 
 

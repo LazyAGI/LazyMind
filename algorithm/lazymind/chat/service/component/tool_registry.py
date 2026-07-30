@@ -22,7 +22,6 @@ from lazyllm.tools.tools.search import (
 )
 
 from lazymind.chat.engine.tools import (
-    KBToolkit,
     ExternalDatabaseToolkit,
     LocalFileToolkit,
     WriterCreateToolkit,
@@ -30,7 +29,6 @@ from lazymind.chat.engine.tools import (
     calculator,
     image_editor,
     image_generator,
-    kb_tmp_search,
     memory_editor,
     read_memory,
     SkillManagementToolkit,
@@ -42,6 +40,7 @@ from lazymind.chat.engine.tools import (
     vision_extractor,
     vocab_learn,
 )
+from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
 from lazymind.model_config import is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
 from lazymind.chat.engine.subagent.tools import (

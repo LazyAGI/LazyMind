@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { message } from "antd";
+import { message, Modal } from "antd";
+import { useNavigate } from "react-router-dom";
 import {
   ChatConversationsRequestActionEnum,
   ChatConversationsResponseFinishReasonEnum,
@@ -9,6 +10,7 @@ import type { ChatFileList, ChatInputImperativeProps, SendMessageParams } from "
 import { RoleTypes } from "@/modules/chat/constants/common";
 import {
   CHAT_AUTO_ADVANCE_EVENT,
+  CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
   CHAT_RESUME_CONVERSATION_KEY,
   type ChatAutoAdvanceDetail,
 } from "@/modules/chat/constants/chat";
@@ -66,6 +68,7 @@ export function useChatConversation({
   getUserEdit,
   t,
 }: UseChatConversationOptions) {
+  const navigate = useNavigate();
   const sseRef = useRef<any>(null);
   const activeStreamRef = useRef(false);
   const fileRef = useRef<any>(null);
@@ -73,6 +76,8 @@ export function useChatConversation({
   const messageListRef = useRef<any[]>([]);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const conversationMessagesCache = useRef<Map<string, any[]>>(new Map());
+  const ffmpegErrorBufferRef = useRef("");
+  const ffmpegPromptOpenRef = useRef(false);
 
   const [messageList, setMessageList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -86,8 +91,34 @@ export function useChatConversation({
     thinkingCollapseMap,
   });
 
+  function showFFmpegDependencyPrompt() {
+    if (ffmpegPromptOpenRef.current) {
+      return;
+    }
+    ffmpegPromptOpenRef.current = true;
+    ffmpegErrorBufferRef.current = "";
+    Modal.confirm({
+      title: t("chat.ffmpegGifRequiredTitle"),
+      content: t("chat.ffmpegGifRequiredDesc"),
+      okText: t("chat.configureFfmpeg"),
+      cancelText: t("common.close"),
+      onOk: () => navigate("/model-providers/tools#ffmpeg-dependency"),
+      afterClose: () => {
+        ffmpegPromptOpenRef.current = false;
+      },
+    });
+  }
+
   useEffect(() => {
+    window.addEventListener(
+      CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
+      showFFmpegDependencyPrompt,
+    );
     return () => {
+      window.removeEventListener(
+        CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
+        showFFmpegDependencyPrompt,
+      );
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         const currentId = currentConversationIdRef.current;
@@ -226,6 +257,16 @@ export function useChatConversation({
     const result = UIUtils.jsonParser(e.data)?.result;
     if (!result) {
       return;
+    }
+
+    ffmpegErrorBufferRef.current = (
+      ffmpegErrorBufferRef.current + JSON.stringify(result)
+    ).slice(-8192);
+    if (
+      !ffmpegPromptOpenRef.current &&
+      ffmpegErrorBufferRef.current.includes("FFMPEG_DEPENDENCY_MISSING")
+    ) {
+      showFFmpegDependencyPrompt();
     }
 
     if (result.task_created && result.task_created.task_id) {

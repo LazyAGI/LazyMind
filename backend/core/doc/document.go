@@ -140,13 +140,46 @@ func subagentWorkspaceRoot() string {
 	return "/data/subagent"
 }
 
+const dockerUploadRootMarker = "/var/lib/lazymind/uploads"
+
+// rewriteCanonicalUploadPath maps Docker-style /var/lib/lazymind/uploads/...
+// paths onto the configured LAZYMIND_UPLOAD_ROOT used by local runtime.
+func rewriteCanonicalUploadPath(fullPath string) string {
+	p := filepath.ToSlash(strings.TrimSpace(fullPath))
+	if p == "" {
+		return fullPath
+	}
+	root := strings.TrimRight(strings.TrimSpace(uploadRoot()), "/")
+	if root == "" || root == dockerUploadRootMarker {
+		return fullPath
+	}
+	marker := dockerUploadRootMarker + "/"
+	if p == dockerUploadRootMarker {
+		return root
+	}
+	if strings.HasPrefix(p, marker) {
+		rel := strings.TrimPrefix(p, marker)
+		return filepath.Join(root, filepath.FromSlash(rel))
+	}
+	return fullPath
+}
+
 func fileRelativePath(fullPath string) string {
-	p := strings.TrimSpace(fullPath)
+	p := strings.TrimSpace(rewriteCanonicalUploadPath(fullPath))
 	if p == "" {
 		return ""
 	}
 	cleanPath := filepath.Clean(p)
 	subRoot := filepath.Clean(subagentWorkspaceRoot())
+	// macOS temporary directories commonly cross the /var -> /private/var
+	// symlink. Resolve both sides before the containment check so a validated
+	// workspace file can still be signed.
+	resolvedPath, pathErr := filepath.EvalSymlinks(cleanPath)
+	resolvedSubRoot, rootErr := filepath.EvalSymlinks(subRoot)
+	if pathErr == nil && rootErr == nil {
+		cleanPath = resolvedPath
+		subRoot = resolvedSubRoot
+	}
 	if rel, err := filepath.Rel(subRoot, cleanPath); err == nil &&
 		rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "subagent/" + filepath.ToSlash(rel)
@@ -156,6 +189,12 @@ func fileRelativePath(fullPath string) string {
 		return ""
 	}
 	cleanRoot := filepath.Clean(root)
+	resolvedPath, pathErr = filepath.EvalSymlinks(cleanPath)
+	resolvedRoot, uploadRootErr := filepath.EvalSymlinks(cleanRoot)
+	if pathErr == nil && uploadRootErr == nil {
+		cleanPath = resolvedPath
+		cleanRoot = resolvedRoot
+	}
 	rel, err := filepath.Rel(cleanRoot, cleanPath)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return ""

@@ -204,9 +204,13 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
+          build-args: |
+            LAZYLLM_BUNDLE_SOURCE=0
           push: true
           provenance: false
           platforms: linux/amd64
+          cache-from: type=gha,scope=docker-release-${{ matrix.service }}-amd64
+          cache-to: type=gha,mode=max,scope=docker-release-${{ matrix.service }}-amd64
           tags: |
             ${{ env.REGISTRY_DOCKERHUB }}/${{ env.REGISTRY_DOCKERHUB_NAMESPACE }}/${{ matrix.image }}:${{ steps.tag.outputs.value }}-amd64
             ${{ env.REGISTRY_DOCKERHUB }}/${{ env.REGISTRY_DOCKERHUB_NAMESPACE }}/${{ matrix.image }}:latest-amd64
@@ -220,9 +224,13 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
+          build-args: |
+            LAZYLLM_BUNDLE_SOURCE=0
           push: true
           provenance: false
           platforms: linux/arm64
+          cache-from: type=gha,scope=docker-release-${{ matrix.service }}-arm64
+          cache-to: type=gha,mode=max,scope=docker-release-${{ matrix.service }}-arm64
           tags: |
             ${{ env.REGISTRY_DOCKERHUB }}/${{ env.REGISTRY_DOCKERHUB_NAMESPACE }}/${{ matrix.image }}:${{ steps.tag.outputs.value }}-arm64
             ${{ env.REGISTRY_DOCKERHUB }}/${{ env.REGISTRY_DOCKERHUB_NAMESPACE }}/${{ matrix.image }}:latest-arm64

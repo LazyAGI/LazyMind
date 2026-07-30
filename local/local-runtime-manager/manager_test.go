@@ -860,32 +860,15 @@ func TestKillStaleRuntimeProcessesStopsScannerOrphan(t *testing.T) {
 	}
 }
 
-func TestRuntimeManagerUpRequiresBundledLazyLLMSourceInDesktopProfile(t *testing.T) {
+func TestDesktopProfileDoesNotRequireBundledLazyLLMSource(t *testing.T) {
 	repo := t.TempDir()
-	writeComposeFixture(t, repo)
-	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
-		Profile:       "desktop",
-		OwnerToken:    "desktop-test-owner",
-		RepoRoot:      repo,
-		RuntimeRoot:   filepath.Join(t.TempDir(), "runtime"),
-		ResourcesRoot: filepath.Join(t.TempDir(), "resources"),
-	})
-	if err != nil {
-		t.Fatalf("runtime config: %v", err)
-	}
 	runner := &fakeRunner{t: t}
 	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
-		if cmd.Name == "git" {
-			t.Fatalf("desktop startup must not initialize git submodules: %v", cmd.Args)
-		}
-		t.Fatalf("desktop startup should fail before running commands when bundled lazyllm source is missing: %s %v", cmd.Name, cmd.Args)
+		t.Fatalf("desktop startup must not initialize LazyLLM source: %s %v", cmd.Name, cmd.Args)
 		return CommandResult{}, nil
 	})
-	manager := NewRuntimeManager(runner, filepath.Join(paths.BinDir, "local-runtime-manager"))
-
-	err = manager.Up(context.Background(), cfg, paths)
-	if err == nil || !strings.Contains(err.Error(), "missing bundled algorithm/lazyllm source") {
-		t.Fatalf("runtime manager up error = %v, want missing bundled lazyllm source", err)
+	if err := ensureLazyLLMSource(context.Background(), runner, repo, "desktop"); err != nil {
+		t.Fatalf("desktop source check: %v", err)
 	}
 	runner.assertCommandCount(0)
 }
