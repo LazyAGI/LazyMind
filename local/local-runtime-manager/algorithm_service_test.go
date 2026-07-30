@@ -138,6 +138,28 @@ func TestAlgorithmServiceEnvDisablesRouterForChat(t *testing.T) {
 	}
 }
 
+func TestAlgorithmServiceEnvAlwaysDisablesLazyLLMRuntimeDocs(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	t.Setenv("LAZYLLM_INIT_DOC", "True")
+
+	env := algorithmServiceEnv(cfg, paths, chatProcessName)
+
+	assertEnvContains(t, env, "LAZYLLM_INIT_DOC=False")
+}
+
+func TestProcessorWorkerDoesNotWaitForProcessorServer(t *testing.T) {
+	manager := NewAlgorithmServiceManager(&fakeRunner{t: t})
+
+	if err := manager.waitForDependencies(context.Background(), RuntimeConfig{}, processorWorkerProcessName); err != nil {
+		t.Fatalf("processor worker dependencies: %v", err)
+	}
+}
+
 func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

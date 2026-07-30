@@ -122,11 +122,13 @@ ensure_chat_runtime()
 print(json.dumps({
     "elapsed": time.perf_counter() - started,
     "rag_loaded": "lazyllm.tools.rag" in sys.modules,
+    "runtime_docs_loaded": any(name.startswith("lazyllm.docs.tools") for name in sys.modules),
 }))
 ''')
 
     assert result['elapsed'] < 2.0
     assert result['rag_loaded'] is False
+    assert result['runtime_docs_loaded'] is False
 
 
 def test_background_warmup_loads_rag_within_thirty_seconds_without_request():

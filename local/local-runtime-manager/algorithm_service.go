@@ -371,7 +371,7 @@ func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg R
 	case processorServerProcessName:
 		return nil
 	case processorWorkerProcessName:
-		return waitForHTTPOnly(ctx, cfg.Algorithm.ProcessorPort, "/health", "processor-server", 3*time.Minute)
+		return nil
 	case algoProcessName:
 		if err := waitForHTTPOnly(ctx, cfg.Algorithm.ProcessorPort, "/health", "processor-server", 3*time.Minute); err != nil {
 			return err
@@ -524,12 +524,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYLLM_MINERU_BACKEND=" + envText("LAZYLLM_MINERU_BACKEND", envText("LAZYMIND_MINERU_BACKEND", "pipeline")),
 		"LAZYLLM_MINERU_API_KEY=" + envText("LAZYLLM_MINERU_API_KEY", ""),
 		"LAZYLLM_PADDLE_API_KEY=" + envText("LAZYLLM_PADDLE_API_KEY", ""),
-		"LAZYLLM_INIT_DOC=" + envText("LAZYLLM_INIT_DOC", func() string {
-			if strings.HasPrefix(pythonPath, lazyLLMSource) {
-				return "True"
-			}
-			return "False"
-		}()),
+		"LAZYLLM_INIT_DOC=False",
 		"LAZYLLM_EXPECTED_LOG_MODULES=all",
 		"LAZYMIND_MODEL_CONFIG_PATH=" + envText("LAZYMIND_MODEL_CONFIG_PATH", "dynamic"),
 		"LAZYMIND_DOCUMENT_PROCESSOR_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.Algorithm.ProcessorPort),
