@@ -10,7 +10,7 @@ import (
 )
 
 func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
-	t.Setenv("UV", "uv")
+	installFakeUVOnPath(t)
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	if err := os.MkdirAll(filepath.Join(repo, "algorithm", "lazyllm", "lazyllm"), 0o755); err != nil {
@@ -171,6 +171,16 @@ func TestDesktopAlgorithmRegisterPolicyWithoutVersionDefaultsToUpdate(t *testing
 	}
 }
 
+func TestLocalAlgorithmRegisterPolicyDefaultsToUpdate(t *testing.T) {
+	cfg := RuntimeConfig{Profile: "local"}
+	paths := RuntimePaths{StateDir: t.TempDir()}
+	t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "")
+
+	if got := algorithmRegisterPolicy(cfg, paths); got != "update" {
+		t.Fatalf("local registration policy = %q, want update", got)
+	}
+}
+
 func TestAlgorithmServiceEnvDisablesRouter(t *testing.T) {
 	for _, profile := range []string{"local", "desktop"} {
 		t.Run(profile, func(t *testing.T) {
@@ -203,11 +213,18 @@ func TestAlgorithmServiceEnvAlwaysDisablesLazyLLMRuntimeDocs(t *testing.T) {
 	assertEnvContains(t, env, "LAZYLLM_INIT_DOC=False")
 }
 
-func TestProcessorWorkerDoesNotWaitForProcessorServer(t *testing.T) {
+func TestRAGServicesDoNotWaitBeforeStarting(t *testing.T) {
 	manager := NewAlgorithmServiceManager(&fakeRunner{t: t})
 
-	if err := manager.waitForDependencies(context.Background(), RuntimeConfig{}, processorWorkerProcessName); err != nil {
-		t.Fatalf("processor worker dependencies: %v", err)
+	for _, service := range []string{
+		processorServerProcessName,
+		processorWorkerProcessName,
+		algoProcessName,
+		docServerProcessName,
+	} {
+		if err := manager.waitForDependencies(context.Background(), RuntimeConfig{}, service); err != nil {
+			t.Fatalf("%s dependencies: %v", service, err)
+		}
 	}
 }
 

@@ -39,10 +39,10 @@ func NewAlgorithmServiceManager(r CommandRunner) *AlgorithmServiceManager {
 
 func algorithmProcessSpecs(cfg AlgorithmConfig) []AlgorithmServiceSpec {
 	specs := []AlgorithmServiceSpec{
-		{Name: processorServerProcessName, Module: []string{"-m", "lazymind.processor.service.server"}, Port: cfg.ProcessorPort, HealthPath: "/health"},
-		{Name: processorWorkerProcessName, Module: []string{"-m", "lazymind.processor.service.worker"}, Port: cfg.WorkerPort, HealthPath: "/health"},
+		{Name: processorServerProcessName, Module: []string{"-m", "lazymind.processor.service.server"}, Port: cfg.ProcessorPort, HealthPath: "/ready"},
+		{Name: processorWorkerProcessName, Module: []string{"-m", "lazymind.processor.service.worker"}, Port: cfg.WorkerPort, HealthPath: "/ready"},
 		{Name: algoProcessName, Module: []string{"-m", "lazymind.parsing.app"}, Port: cfg.AlgoPort, HealthPath: "/docs"},
-		{Name: docServerProcessName, Module: []string{filepath.Join("backend", "core", "doc", "doc_server.py"), "--port", strconv.Itoa(cfg.DocPort), "--parser-url", fmt.Sprintf("http://127.0.0.1:%d", cfg.ProcessorPort)}, Port: cfg.DocPort, HealthPath: "/v1/health"},
+		{Name: docServerProcessName, Module: []string{filepath.Join("backend", "core", "doc", "doc_server.py"), "--port", strconv.Itoa(cfg.DocPort), "--parser-url", fmt.Sprintf("http://127.0.0.1:%d", cfg.ProcessorPort)}, Port: cfg.DocPort, HealthPath: "/v1/ready"},
 		{Name: chatProcessName, Module: []string{"-m", "lazymind.chat.app", "--host", "0.0.0.0", "--port", strconv.Itoa(cfg.ChatPort)}, Port: cfg.ChatPort, HealthPath: "/health"},
 	}
 	if cfg.EnableEvo {
@@ -370,27 +370,43 @@ func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg R
 	case processorWorkerProcessName:
 		return nil
 	case algoProcessName:
-		if err := waitForHTTPOnly(ctx, cfg.Algorithm.ProcessorPort, "/health", "processor-server", 3*time.Minute); err != nil {
+		return nil
+	case docServerProcessName:
+		return nil
+	case chatProcessName:
+		if err := waitForHTTPOnly(ctx, cfg.LocalProxy.CoreHostPort, "/health", "core", 5*time.Minute); err != nil {
 			return err
 		}
-		if cfg.ModeProfile.VectorStore.ManagedProcess {
-			if err := waitForTCP(ctx, "127.0.0.1", cfg.ModeProfile.VectorStore.Port, "Milvus", 5*time.Minute); err != nil {
-				return err
-			}
-		}
-		if localSegmentStoreUsesBuiltInOpenSearch() {
-			if err := waitForTCP(ctx, "127.0.0.1", cfg.Algorithm.OpenSearchPort, "OpenSearch", 5*time.Minute); err != nil {
-				return err
-			}
-		}
-	case docServerProcessName:
-		return waitForHTTPOnly(ctx, cfg.Algorithm.ProcessorPort, "/health", "processor-server", 3*time.Minute)
-	case chatProcessName:
-		return waitForHTTPOnly(ctx, cfg.LocalProxy.CoreHostPort, "/health", "core", 5*time.Minute)
+		return waitForRAGReadiness(ctx, cfg, 15*time.Minute)
 	case evoProcessName:
 		return waitForHTTPOnly(ctx, cfg.Algorithm.ChatPort, "/health", "chat", 5*time.Minute)
 	}
 	return nil
+}
+
+func waitForRAGReadiness(ctx context.Context, cfg RuntimeConfig, timeout time.Duration) error {
+	checks := []struct {
+		port  int
+		path  string
+		label string
+	}{
+		{cfg.Algorithm.ProcessorPort, "/ready", "processor-server"},
+		{cfg.Algorithm.DocPort, "/v1/ready", "doc-server"},
+		{cfg.Algorithm.AlgoPort, "/docs", "algo"},
+	}
+	if cfg.MaintenanceMode != installerWarmupMaintenanceMode {
+		checks = append(checks, struct {
+			port  int
+			path  string
+			label string
+		}{cfg.Algorithm.WorkerPort, "/ready", "processor-worker"})
+	}
+	for _, check := range checks {
+		if err := waitForHTTPOnly(ctx, check.port, check.path, check.label, timeout); err != nil {
+			return err
+		}
+	}
+	return waitForAlgorithmRegistration(ctx, cfg.Algorithm.ProcessorPort, timeout)
 }
 
 func localSegmentStorePath(paths RuntimePaths) string {
@@ -593,7 +609,7 @@ func algorithmRegisterPolicy(cfg RuntimeConfig, paths RuntimePaths) string {
 		return policy
 	}
 	if cfg.Profile != "desktop" {
-		return "force"
+		return "update"
 	}
 
 	appVersion := strings.TrimSpace(os.Getenv(desktopAppVersionEnvVar))
