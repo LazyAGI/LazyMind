@@ -867,7 +867,6 @@ export default function SkillManagementSection() {
         organizeMode={organizeMode}
         organizeDisabled={
           skillLoading ||
-          manualSkillReviewButtonBusy ||
           organizeSubmitting ||
           skillListTotal <= 0
         }
@@ -876,14 +875,8 @@ export default function SkillManagementSection() {
           setOrganizeMode(true);
         }}
         manualSkillReviewCount={manualSkillReviewCount}
-        manualSkillReviewDisabled={
-          manualSkillReviewButtonDisabled || organizeSubmitting
-        }
-        manualSkillReviewDisabledReason={
-          organizeSubmitting
-            ? t("admin.memorySkillOrganizeTaskRunning")
-            : manualSkillReviewDisabledReason
-        }
+        manualSkillReviewDisabled={manualSkillReviewButtonDisabled}
+        manualSkillReviewDisabledReason={manualSkillReviewDisabledReason}
         onSkillReviewClick={handleSkillReviewClick}
         messageCenterCount={messageCenterCount}
         onMessageCenterClick={handleSkillMessageCenter}

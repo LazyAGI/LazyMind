@@ -1018,6 +1018,7 @@ export default function MemoryManagement() {
       if (
         (error as { response?: { status?: number } })?.response?.status === 409
       ) {
+        setManualSkillReviewRunning(false);
         await refreshManualSkillReviewSummary({ silent: true });
         return;
       }
