@@ -43,7 +43,7 @@ func algorithmProcessSpecs(cfg AlgorithmConfig) []AlgorithmServiceSpec {
 		{Name: processorWorkerProcessName, Module: []string{"-m", "lazymind.processor.service.worker"}, Port: cfg.WorkerPort, HealthPath: "/health"},
 		{Name: algoProcessName, Module: []string{"-m", "lazymind.parsing.app"}, Port: cfg.AlgoPort, HealthPath: "/docs"},
 		{Name: docServerProcessName, Module: []string{filepath.Join("backend", "core", "doc", "doc_server.py"), "--port", strconv.Itoa(cfg.DocPort), "--parser-url", fmt.Sprintf("http://127.0.0.1:%d", cfg.ProcessorPort)}, Port: cfg.DocPort, HealthPath: "/v1/health"},
-		{Name: chatProcessName, Module: []string{"-m", "lazymind.router.app", "--host", "0.0.0.0", "--port", strconv.Itoa(cfg.ChatPort)}, Port: cfg.ChatPort, HealthPath: "/health"},
+		{Name: chatProcessName, Module: []string{"-m", "lazymind.chat.app", "--host", "0.0.0.0", "--port", strconv.Itoa(cfg.ChatPort)}, Port: cfg.ChatPort, HealthPath: "/health"},
 	}
 	if cfg.EnableEvo {
 		specs = append(specs, AlgorithmServiceSpec{
@@ -158,9 +158,6 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 
 func algorithmServiceCommandArgs(cfg RuntimeConfig, spec AlgorithmServiceSpec) []string {
 	args := append([]string(nil), spec.Module...)
-	if spec.Name == chatProcessName {
-		args = []string{"-m", "lazymind.chat.app", "--host", "0.0.0.0", "--port", strconv.Itoa(spec.Port)}
-	}
 	if runtime.GOOS != "windows" || cfg.Profile != "desktop" {
 		return args
 	}
@@ -469,10 +466,6 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 	noProxy := envText("no_proxy", "127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")
 	noProxyUpper := envText("NO_PROXY", noProxy)
 	routerPoolStart, routerPoolEnd := localRouterPortPool(cfg)
-	enableRouter := envText("LAZYMIND_ENABLE_ROUTER", "true")
-	if service == chatProcessName {
-		enableRouter = "false"
-	}
 	env := []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"PYTHONPATH=" + pythonPath,
@@ -566,7 +559,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_SKILL_REVIEW_DEBUG=" + envText("LAZYMIND_SKILL_REVIEW_DEBUG", "false"),
 		"LAZYMIND_MAX_CONCURRENCY=" + envText("LAZYMIND_MAX_CONCURRENCY", "10"),
 		"LAZYMIND_LLM_PRIORITY=" + envText("LAZYMIND_LLM_PRIORITY", "0"),
-		"LAZYMIND_ENABLE_ROUTER=" + enableRouter,
+		"LAZYMIND_ENABLE_ROUTER=false",
 		"LAZYMIND_ROUTER_HOST=" + envText("LAZYMIND_ROUTER_HOST", "127.0.0.1"),
 		routerPortPoolStartEnvVar + "=" + strconv.Itoa(routerPoolStart),
 		routerPortPoolEndEnvVar + "=" + strconv.Itoa(routerPoolEnd),

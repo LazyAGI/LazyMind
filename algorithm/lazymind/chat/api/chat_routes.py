@@ -59,7 +59,6 @@ async def list_chat_tools(
     from lazymind.model_config import inject_model_config
     from lazyllm.tools.tool_config_inject import inject_tool_config
 
-    await asyncio.to_thread(ensure_chat_runtime)
     inject_model_config(llm_config)
     inject_tool_config(tool_config)
     locale = normalize_tool_locale(accept_language)

@@ -120,7 +120,7 @@ func TestAlgorithmServiceEnvPinsLocalRouterHost(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_ROUTER_HOST=127.0.0.1")
 }
 
-func TestAlgorithmServiceEnvDisablesRouterForChat(t *testing.T) {
+func TestAlgorithmServiceEnvDisablesRouter(t *testing.T) {
 	for _, profile := range []string{"local", "desktop"} {
 		t.Run(profile, func(t *testing.T) {
 			repo := t.TempDir()
@@ -131,7 +131,7 @@ func TestAlgorithmServiceEnvDisablesRouterForChat(t *testing.T) {
 			}
 			t.Setenv("LAZYMIND_ENABLE_ROUTER", "true")
 
-			env := algorithmServiceEnv(cfg, paths, chatProcessName)
+			env := algorithmServiceEnv(cfg, paths, algoProcessName)
 
 			assertEnvContains(t, env, "LAZYMIND_ENABLE_ROUTER=false")
 		})
@@ -205,13 +205,13 @@ func TestAlgorithmServiceEnvUsesFileBackedRelayArgumentsOnWindowsDesktop(t *test
 	assertEnvContains(t, env, "LAZYLLM_PASS_ARGS_BY_FILE=1")
 }
 
-func TestAlgorithmServiceCommandArgsUsesDirectChat(t *testing.T) {
+func TestAlgorithmServiceCommandArgsUsesWindowsDesktopBootstrap(t *testing.T) {
 	for _, profile := range []string{"local", "desktop"} {
 		t.Run(profile, func(t *testing.T) {
 			cfg := RuntimeConfig{Profile: profile}
 			spec := AlgorithmServiceSpec{
 				Name:   chatProcessName,
-				Module: []string{"-m", "lazymind.router.app", "--host", "0.0.0.0", "--port", "8092"},
+				Module: []string{"-m", "lazymind.chat.app", "--host", "0.0.0.0", "--port", "8092"},
 				Port:   8092,
 			}
 

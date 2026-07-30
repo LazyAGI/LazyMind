@@ -14,8 +14,6 @@ _EXPORTS = {
     'image_generator': ('.multimodal', 'image_generator'),
     'video_generator': ('.multimodal', 'video_generator'),
     'video_to_gif': ('.multimodal', 'video_to_gif'),
-    'KBToolkit': ('.kb', 'KBToolkit'),
-    'kb_tmp_search': ('.kb', 'kb_tmp_search'),
     'LocalFileToolkit': ('.local_fs', 'LocalFileToolkit'),
     'memory_editor': ('.memory_editor', 'memory_editor'),
     'read_memory': ('.memory_reader', 'read_memory'),

@@ -8,7 +8,7 @@ def _toolkit():
     return ensure_rag_runtime().KBToolkit()
 
 
-class LazyKBToolkit:
+class KBToolkit:
     """Knowledge-base discovery, inspection, search, and navigation tools."""
 
     __public_apis__ = [
@@ -102,7 +102,7 @@ class LazyKBToolkit:
         )
 
 
-def lazy_kb_tmp_search(
+def kb_tmp_search(
     query: str,
     retriever_topk: Optional[int] = None,
     rerank_topk: Optional[int] = None,
@@ -114,9 +114,3 @@ def lazy_kb_tmp_search(
     return ensure_rag_runtime().kb_tmp_search(
         query, retriever_topk, rerank_topk, k_max, files,
     )
-
-
-lazy_kb_tmp_search.__name__ = 'kb_tmp_search'
-lazy_kb_tmp_search.__qualname__ = 'kb_tmp_search'
-LazyKBToolkit.__name__ = 'KBToolkit'
-LazyKBToolkit.__qualname__ = 'KBToolkit'

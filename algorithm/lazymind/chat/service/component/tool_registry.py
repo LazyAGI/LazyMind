@@ -40,7 +40,7 @@ from lazymind.chat.engine.tools import (
     vision_extractor,
     vocab_learn,
 )
-from lazymind.chat.engine.tools.lazy_kb import LazyKBToolkit, lazy_kb_tmp_search
+from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
 from lazymind.model_config import is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
 from lazymind.chat.engine.subagent.tools import (
@@ -389,7 +389,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         name='kb',
         label='知识库',
         description='发现知识库、查询文档与统计，并进行语义、关键词和上下文检索',
-        tool=LazyKBToolkit(), module='retrieval',
+        tool=KBToolkit(), module='retrieval',
         label_en='Knowledge Base',
         description_en='Discover knowledge bases, inspect documents and statistics, and retrieve their content.',
         capability_id='knowledge_base_search',
@@ -400,7 +400,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         name='temp_kb',
         label='临时文件检索',
         description='从用户上传的临时文件中搜索相关内容',
-        tool=(lazy_kb_tmp_search, _temp_kb_key_source), module='retrieval',
+        tool=(kb_tmp_search, _temp_kb_key_source), module='retrieval',
         label_en='Temporary File Search',
         description_en='Search relevant content in temporary files uploaded by the user.',
         appendix_system_prompt={

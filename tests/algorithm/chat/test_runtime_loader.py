@@ -21,6 +21,7 @@ def _subprocess_env():
             str(_REPO_ROOT / 'algorithm'),
         )),
         'PYTHONDONTWRITEBYTECODE': '1',
+        'LAZYLLM_INIT_DOC': 'False',
         'LAZYMIND_ENABLE_ROUTER': 'false',
         'LAZYMIND_BACKGROUND_JOBS_ENABLED': 'false',
         'LAZYMIND_PLUGINS_DIR': str(_REPO_ROOT / 'plugins'),
@@ -131,6 +132,23 @@ print(json.dumps({
     assert result['runtime_docs_loaded'] is False
 
 
+def test_trace_maintenance_registers_its_config_without_runtime_docs():
+    result = _run_probe('''
+import json
+import sys
+from lazymind.chat.service.utils.trace_archive import start_local_trace_maintenance
+start_local_trace_maintenance()
+from lazyllm.configs import config
+print(json.dumps({
+    "trace_backend": config["trace_backend"],
+    "runtime_docs_loaded": any(name.startswith("lazyllm.docs.tools") for name in sys.modules),
+}))
+''')
+
+    assert result['trace_backend']
+    assert result['runtime_docs_loaded'] is False
+
+
 def test_background_warmup_loads_rag_within_thirty_seconds_without_request():
     result = _run_probe('''
 import json
@@ -160,7 +178,7 @@ import json
 import threading
 import time
 import lazymind.chat.runtime_loader as loader
-from lazymind.chat.engine.tools.lazy_kb import LazyKBToolkit
+from lazymind.chat.engine.tools.lazy_kb import KBToolkit
 dependency_gate = threading.Event()
 loader._wait_for_kb_runtime = lambda: dependency_gate.wait(30)
 loader.start_background_chat_runtime_warmup()
@@ -171,7 +189,7 @@ def load_then_stop():
 loader.ensure_rag_runtime = load_then_stop
 started = time.perf_counter()
 try:
-    LazyKBToolkit().kb_search("trigger warmup")
+    KBToolkit().kb_search("trigger warmup")
 except RuntimeError as exc:
     assert str(exc) == "stop after loading"
 print(json.dumps({
@@ -193,7 +211,7 @@ import json
 import threading
 import time
 import lazymind.chat.runtime_loader as loader
-from lazymind.chat.engine.tools.lazy_kb import lazy_kb_tmp_search
+from lazymind.chat.engine.tools.lazy_kb import kb_tmp_search
 dependency_gate = threading.Event()
 loader._wait_for_kb_runtime = lambda: dependency_gate.wait(30)
 loader.start_background_chat_runtime_warmup()
@@ -204,7 +222,7 @@ def load_then_stop():
 loader.ensure_rag_runtime = load_then_stop
 started = time.perf_counter()
 try:
-    lazy_kb_tmp_search("search attachment", files=["report.pdf"])
+    kb_tmp_search("search attachment", files=["report.pdf"])
 except RuntimeError as exc:
     assert str(exc) == "stop after loading"
 print(json.dumps({

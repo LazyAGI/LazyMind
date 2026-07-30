@@ -310,7 +310,7 @@ class PluginSpec:
 
 
 def load_all() -> None:
-    """Discover and load all plugins from the plugins directory. Called at startup."""
+    """Discover and load all plugins from the plugins directory on demand."""
     global _registry, _loaded
     with _load_lock:
         _registry = {}
