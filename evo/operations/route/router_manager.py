@@ -82,6 +82,7 @@ class RouterManager:
         timeout_s: float,
         restart_unhealthy: bool = True,
         allow_existing: bool = True,
+        allow_in_ab: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         detail = self.get_algorithm(spec.id)
         if detail is None:
@@ -109,7 +110,12 @@ class RouterManager:
         if not restart_unhealthy:
             raise RouterManagerError('algorithm_unhealthy', f'algorithm {spec.id} exists but is not healthy', 409)
         if detail.get('status') == 'active':
-            self.restart_algorithm(spec.id, timeout_s=timeout_s, instance_count=spec.instance_count)
+            self.restart_algorithm(
+                spec.id,
+                timeout_s=timeout_s,
+                instance_count=spec.instance_count,
+                allow_in_ab=allow_in_ab,
+            )
             return {'reused': True, 'restarted': True}, self.get_algorithm(spec.id) or {}
         try:
             registered = self.register_algorithm(spec, timeout_s=timeout_s)
@@ -157,6 +163,7 @@ class RouterManager:
         *,
         timeout_s: float,
         instance_count: int,
+        allow_in_ab: bool = False,
     ) -> dict[str, Any]:
         detail = self.get_algorithm(algorithm_id)
         if detail is None:
@@ -167,7 +174,7 @@ class RouterManager:
                 f'algorithm {algorithm_id} is not active in Router',
                 409,
             )
-        if self.in_ab_strategy(algorithm_id):
+        if not allow_in_ab and self.in_ab_strategy(algorithm_id):
             raise RouterManagerError(
                 'algorithm_in_ab_strategy',
                 f'algorithm {algorithm_id} is referenced by active AB strategy',
@@ -178,6 +185,29 @@ class RouterManager:
             item for item in status.get('local_child_processes') or []
             if isinstance(item, Mapping) and item.get('algorithm_id') == algorithm_id
         ]
+        if not children:
+            spec = RouterAlgorithmSpec(
+                id=algorithm_id,
+                name=str(detail.get('name') or algorithm_id),
+                code_path=str(detail.get('code_path') or ''),
+                instance_count=instance_count,
+                config=dict(detail.get('config') or {}),
+            )
+            if not spec.code_path:
+                raise RouterManagerError(
+                    'algorithm_restart_conflict',
+                    f'algorithm {algorithm_id} has no stored code path',
+                    409,
+                )
+            try:
+                self.register_algorithm(spec, timeout_s=timeout_s)
+                return self.wait_ready(
+                    algorithm_id,
+                    timeout_s=timeout_s,
+                    instance_count=instance_count,
+                )
+            except RouterManagerError as exc:
+                raise RouterManagerError('algorithm_restart_failed', str(exc), exc.status_code) from exc
         if len(children) != instance_count:
             raise RouterManagerError(
                 'algorithm_restart_conflict',

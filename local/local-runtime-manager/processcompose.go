@@ -239,6 +239,9 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 		routerPortPoolEndEnvVar+"="+strconv.Itoa(routerPoolEnd),
 		routerPortsPerInstanceEnvVar+"="+strconv.Itoa(defaultRouterPortsPerInstance),
 	)
+	if binDir := loadFFmpegBinDirForRuntime(paths); binDir != "" {
+		env = prependPathEnv(env, binDir)
+	}
 	return env
 }
 
@@ -253,7 +256,6 @@ func runtimeProcessEnvironment(base []string, cfg RuntimeConfig, plan runtimePro
 			"HF_HUB_OFFLINE=1",
 			"TRANSFORMERS_OFFLINE=1",
 			"PIP_NO_INDEX=1",
-			"PYTHONDONTWRITEBYTECODE=0",
 		)
 	}
 	switch processName {

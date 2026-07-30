@@ -103,7 +103,10 @@ def test_tool_output_contract_keeps_detailed_image_and_citation_guards() -> None
 
     assert 'NEVER invent hosts or prefixes' in prompt
     assert 'Do not paste bare filesystem paths' in prompt
-    assert 'Do not invent, rewrite, or fabricate citation markers' in prompt
+    assert 'you MUST cite that evidence in the user-visible final answer' in prompt
+    assert 'MUST contain at least one such marker' in prompt
+    assert 'builds the references panel automatically' in prompt
+    assert 'do not invent' in prompt
 
 
 def test_system_prompt_ignores_tool_appendices_when_no_tools_are_registered() -> None:

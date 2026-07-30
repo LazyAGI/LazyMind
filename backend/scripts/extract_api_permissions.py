@@ -254,7 +254,12 @@ def main() -> None:
         out_path = args.sources[-1]
     else:
         base = Path(__file__).resolve().parent.parent
-        source_dirs = [base / 'core', base / 'auth-service', base / 'scan-control-plane']
+        source_dirs = [
+            base / 'core',
+            base / 'auth-service',
+            base / 'scan-control-plane',
+            base / 'channel-gateway',
+        ]
         out_path = base / 'auth-service' / 'api_permissions.json'
         exclude = exclude or {'scripts', 'core', 'vendor'}
 

@@ -2,60 +2,74 @@ import {
   createElement,
   Fragment,
   useCallback,
+  useContext,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  countWriterBlocks,
-  deleteWriterBlock,
-  findWriterBlock,
   getWriterSpanStyles,
-  insertWriterParagraphAfter,
-  moveWriterBlock,
-  updateWriterBlockContent,
-  updateWriterDocumentTitle,
+  normalizeWriterCodeLanguage,
+  repairWriterCodeToolbarPollution,
+  sameWriterDocument,
+  sameWriterDocumentForSync,
   type WriterBlock,
   type WriterDocument,
   type WriterSpan,
 } from './writerIR';
+import { WriterIRDocumentEditor } from './WriterIRDocumentEditor';
+import { highlightCode } from '../MarkdownViewer/syntaxHighlight';
+import { SlotEditingContext } from './slotEditingContext';
 import './WriterIRControl.scss';
+
+/** Idle debounce after the latest edit before draft autosave. */
+const WRITER_IR_AUTOSAVE_IDLE_MS = 3_000;
+/** Max time a dirty draft can wait before a draft save is forced. */
+const WRITER_IR_AUTOSAVE_MAX_WAIT_MS = 15_000;
+/** Coalesce follow-up saves after an in-flight request finishes. */
+const WRITER_IR_SAVE_FOLLOWUP_MS = 400;
+
+type WriterIRSaveRunResult = 'noop' | 'saved' | 'error' | 'busy';
+export type WriterIRSaveMode = 'draft' | 'checkpoint';
 
 export interface WriterIRControlProps {
   document: WriterDocument;
   sourceRevision?: string | number;
   readOnly?: boolean;
-  onSave?: (document: WriterDocument) => Promise<void>;
+  /** Stable key used to register flush-before-retry with PluginPanel. */
+  editingKey?: string;
+  onSave?: (
+    sourceDocument: WriterDocument,
+    revisedDocument: WriterDocument,
+    sourceRevision?: string | number,
+    mode?: WriterIRSaveMode,
+  ) => Promise<WriterIRSaveResult | void>;
   onEditingChange?: (editing: boolean) => void;
 }
 
-interface BlockRenderProps {
-  blocks: WriterBlock[];
-  mode: 'view' | 'edit';
-  selectedNodeId?: string;
-  documentReadOnly: boolean;
-  onSelect: (nodeId: string) => void;
-  onContentChange: (block: WriterBlock, content: string) => void;
-  onTextFocus: () => void;
-  onTextBlur: () => void;
-  onInsertAfter: (nodeId: string) => void;
-  onDelete: (block: WriterBlock) => void;
-  onMove: (nodeId: string, direction: 'up' | 'down') => void;
+export interface WriterIRSaveResult {
+  document: WriterDocument;
+  sourceRevision?: string | number;
 }
 
-function asHeadingLevel(block: WriterBlock): 2 | 3 | 4 | 5 | 6 {
+function asHeadingLevel(block: WriterBlock): 1 | 2 | 3 | 4 | 5 | 6 {
   const raw = Number(block.numbering?.level ?? 2);
   if (!Number.isFinite(raw)) return 2;
-  return Math.min(6, Math.max(2, Math.trunc(raw))) as 2 | 3 | 4 | 5 | 6;
+  return Math.min(6, Math.max(1, Math.trunc(raw))) as 1 | 2 | 3 | 4 | 5 | 6;
+}
+
+function hasEditableWriterBlock(blocks: WriterBlock[]): boolean {
+  return blocks.some(
+    (block) => block.editable !== false || hasEditableWriterBlock(block.children ?? []),
+  );
 }
 
 function renderMarkedText(text: string, styles: string[], key: string) {
   let content = <Fragment>{text}</Fragment>;
   if (styles.includes('code')) content = <code>{content}</code>;
-  if (styles.includes('bold')) content = <strong>{content}</strong>;
+  if (styles.includes('strong') || styles.includes('bold')) content = <strong>{content}</strong>;
   if (styles.includes('italic')) content = <em>{content}</em>;
   if (styles.includes('underline')) content = <u>{content}</u>;
   if (styles.includes('strike') || styles.includes('strikethrough')) content = <s>{content}</s>;
@@ -76,74 +90,6 @@ function SpanContent({ block }: { block: WriterBlock }) {
   );
 }
 
-function textRows(content: string, type: string): number {
-  if (type === 'code') return Math.min(18, Math.max(5, content.split('\n').length));
-  return Math.min(10, Math.max(1, content.split('\n').length));
-}
-
-function BlockActions({
-  block,
-  onInsertAfter,
-  onDelete,
-  onMove,
-}: {
-  block: WriterBlock;
-  onInsertAfter: (nodeId: string) => void;
-  onDelete: (block: WriterBlock) => void;
-  onMove: (nodeId: string, direction: 'up' | 'down') => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div
-      className='writer-ir__block-actions'
-      role='toolbar'
-      aria-label={t('chat.writerIR.blockActions', { type: block.type })}
-    >
-      <button type='button' onClick={() => onInsertAfter(block.node_id)}>
-        {t('chat.writerIR.addParagraph')}
-      </button>
-      <button type='button' onClick={() => onMove(block.node_id, 'up')}>
-        {t('chat.writerIR.moveUp')}
-      </button>
-      <button type='button' onClick={() => onMove(block.node_id, 'down')}>
-        {t('chat.writerIR.moveDown')}
-      </button>
-      <button
-        type='button'
-        className='writer-ir__delete-action'
-        onClick={() => onDelete(block)}
-      >
-        {t('common.delete')}
-      </button>
-    </div>
-  );
-}
-
-function EditableText({
-  block,
-  onContentChange,
-  onTextFocus,
-  onTextBlur,
-}: {
-  block: WriterBlock;
-  onContentChange: (block: WriterBlock, content: string) => void;
-  onTextFocus: () => void;
-  onTextBlur: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <textarea
-      className={`writer-ir__text-editor${block.type === 'heading' ? ' writer-ir__text-editor--heading' : ''}${block.type === 'code' ? ' writer-ir__text-editor--code' : ''}`}
-      value={block.content ?? ''}
-      rows={textRows(block.content ?? '', block.type)}
-      aria-label={t('chat.writerIR.editBlock', { type: block.type })}
-      onFocus={onTextFocus}
-      onBlur={onTextBlur}
-      onChange={(event) => onContentChange(block, event.target.value)}
-    />
-  );
-}
-
 function PreviewBlockContent({ block }: { block: WriterBlock }) {
   if (block.type === 'heading') {
     return createElement(
@@ -153,8 +99,22 @@ function PreviewBlockContent({ block }: { block: WriterBlock }) {
     );
   }
   if (block.type === 'code') {
+    const language = normalizeWriterCodeLanguage(block.language);
+    const highlighted = highlightCode(block.content ?? '', language);
     return (
-      <pre className='writer-ir__code'><code><SpanContent block={block} /></code></pre>
+      <div className='writer-ir__code-shell'>
+        <div className='writer-ir__code-header'>{language}</div>
+        <pre className='writer-ir__code'>
+          {highlighted ? (
+            <code
+              className={`language-${language}`}
+              dangerouslySetInnerHTML={{ __html: highlighted }}
+            />
+          ) : (
+            <code><SpanContent block={block} /></code>
+          )}
+        </pre>
+      </div>
     );
   }
   if (block.type === 'paragraph') {
@@ -173,77 +133,33 @@ function PreviewBlockContent({ block }: { block: WriterBlock }) {
 
 function BlockShell({
   block,
-  mode,
-  selectedNodeId,
-  documentReadOnly,
-  onSelect,
-  onContentChange,
-  onTextFocus,
-  onTextBlur,
-  onInsertAfter,
-  onDelete,
-  onMove,
   children,
-}: Omit<BlockRenderProps, 'blocks'> & { block: WriterBlock; children?: ReactNode }) {
-  const { t } = useTranslation();
-  const selected = selectedNodeId === block.node_id;
-  const editable = mode === 'edit' && !documentReadOnly && block.editable !== false && block.type !== 'document';
-
+}: { block: WriterBlock; children?: ReactNode }) {
   return (
     <div
-      className={`writer-ir__block${selected ? ' writer-ir__block--selected' : ''}${editable ? ' writer-ir__block--editable' : ''}`}
+      className='writer-ir__block'
       data-node-id={block.node_id}
       data-node-type={block.type}
     >
-      {editable ? (
-        <EditableText
-          block={block}
-          onContentChange={onContentChange}
-          onTextFocus={() => {
-            onSelect(block.node_id);
-            onTextFocus();
-          }}
-          onTextBlur={onTextBlur}
-        />
-      ) : (
-        <PreviewBlockContent block={block} />
-      )}
+      <PreviewBlockContent block={block} />
       {children}
-      {selected && editable && (
-        <BlockActions
-          block={block}
-          onInsertAfter={onInsertAfter}
-          onDelete={onDelete}
-          onMove={onMove}
-        />
-      )}
-      {mode === 'edit' && block.editable === false && (
-        <span className='writer-ir__readonly-label'>{t('chat.writerIR.readOnlyBlock')}</span>
-      )}
     </div>
   );
 }
 
-function ListItemBlock({
-  block,
-  renderProps,
-}: {
-  block: WriterBlock;
-  renderProps: Omit<BlockRenderProps, 'blocks'>;
-}) {
+function ListItemBlock({ block }: { block: WriterBlock }) {
   return (
     <li className='writer-ir__list-item'>
-      <BlockShell block={block} {...renderProps}>
+      <BlockShell block={block}>
         {(block.children?.length ?? 0) > 0 && (
-          <BlockSequence blocks={block.children ?? []} {...renderProps} />
+          <BlockSequence blocks={block.children ?? []} />
         )}
       </BlockShell>
     </li>
   );
 }
 
-function BlockSequence(props: BlockRenderProps) {
-  const { blocks, ...renderProps } = props;
+function BlockSequence({ blocks }: { blocks: WriterBlock[] }) {
   const rendered: ReactNode[] = [];
 
   for (let index = 0; index < blocks.length;) {
@@ -263,7 +179,10 @@ function BlockSequence(props: BlockRenderProps) {
       rendered.push(
         <ListTag className='writer-ir__list' key={`list-${group[0].node_id}`}>
           {group.map((item) => (
-            <ListItemBlock key={item.node_id} block={item} renderProps={renderProps} />
+            <ListItemBlock
+              key={item.node_id}
+              block={item}
+            />
           ))}
         </ListTag>,
       );
@@ -274,16 +193,19 @@ function BlockSequence(props: BlockRenderProps) {
     if (block.type === 'document') {
       rendered.push(
         <section className='writer-ir__document-root' key={block.node_id}>
-          <BlockSequence blocks={block.children ?? []} {...renderProps} />
+          <BlockSequence blocks={block.children ?? []} />
         </section>,
       );
       continue;
     }
     rendered.push(
-      <BlockShell block={block} key={block.node_id} {...renderProps}>
+      <BlockShell
+        block={block}
+        key={block.node_id}
+      >
         {(block.children?.length ?? 0) > 0 && (
           <div className='writer-ir__children'>
-            <BlockSequence blocks={block.children ?? []} {...renderProps} />
+            <BlockSequence blocks={block.children ?? []} />
           </div>
         )}
       </BlockShell>,
@@ -296,20 +218,19 @@ export function WriterIRControl({
   document,
   sourceRevision,
   readOnly = false,
+  editingKey,
   onSave,
   onEditingChange,
 }: WriterIRControlProps) {
   const { t } = useTranslation();
+  const { registerFlush } = useContext(SlotEditingContext);
   const [baseDocument, setBaseDocument] = useState(document);
   const [baseSourceRevision, setBaseSourceRevision] = useState(sourceRevision);
-  const [draft, setDraft] = useState(document);
+  const [draft, setDraft] = useState(() => repairWriterCodeToolbarPollution(document));
   const [history, setHistory] = useState<WriterDocument[]>([]);
   const [future, setFuture] = useState<WriterDocument[]>([]);
-  const [mode, setMode] = useState<'view' | 'edit'>('view');
-  const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string>();
-  const [discardPrompt, setDiscardPrompt] = useState(false);
   const [externalUpdate, setExternalUpdate] = useState(false);
   const textEditStartRef = useRef<WriterDocument | null>(null);
   const pendingExternalDocumentRef = useRef<{
@@ -317,37 +238,66 @@ export function WriterIRControl({
     sourceRevision?: string | number;
   } | null>(null);
   const rootRef = useRef<HTMLElement>(null);
-  const toolbarRef = useRef<HTMLElement>(null);
-  const documentElementRef = useRef<HTMLElement>(null);
+  const autoSaveIdleTimerRef = useRef<number | undefined>(undefined);
+  const autoSaveMaxTimerRef = useRef<number | undefined>(undefined);
+  const saveFollowupTimerRef = useRef<number | undefined>(undefined);
+  const dirtyStartedAtRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
+  const draftRef = useRef(draft);
+  const baseDocumentRef = useRef(baseDocument);
+  const baseSourceRevisionRef = useRef(sourceRevision);
+  const lastSavedDocumentRef = useRef<WriterDocument | undefined>(undefined);
+  /** Content last captured as a versioned revision (Save button / conversation flush). */
+  const lastCheckpointDocumentRef = useRef<WriterDocument>(document);
+  const saveInFlightRef = useRef(false);
+  const saveQueuedRef = useRef(false);
+  /** Highest pending save mode; checkpoint wins over draft until consumed. */
+  const pendingSaveModeRef = useRef<WriterIRSaveMode>('draft');
+  const saveRunnerRef = useRef<() => Promise<WriterIRSaveRunResult>>(async () => 'noop');
+  const onSaveRef = useRef(onSave);
+  const historyRef = useRef(history);
+  const futureRef = useRef(future);
+
+  const clearAutoSaveTimers = useCallback(() => {
+    if (autoSaveIdleTimerRef.current !== undefined) {
+      window.clearTimeout(autoSaveIdleTimerRef.current);
+      autoSaveIdleTimerRef.current = undefined;
+    }
+    if (autoSaveMaxTimerRef.current !== undefined) {
+      window.clearTimeout(autoSaveMaxTimerRef.current);
+      autoSaveMaxTimerRef.current = undefined;
+    }
+    if (saveFollowupTimerRef.current !== undefined) {
+      window.clearTimeout(saveFollowupTimerRef.current);
+      saveFollowupTimerRef.current = undefined;
+    }
+  }, []);
+
+  const escalateSaveMode = useCallback((mode: WriterIRSaveMode) => {
+    if (mode === 'checkpoint' || pendingSaveModeRef.current !== 'checkpoint') {
+      pendingSaveModeRef.current = mode;
+    }
+  }, []);
+
+  const scheduleFollowupSave = useCallback(() => {
+    if (saveFollowupTimerRef.current !== undefined) {
+      window.clearTimeout(saveFollowupTimerRef.current);
+    }
+    saveFollowupTimerRef.current = window.setTimeout(() => {
+      saveFollowupTimerRef.current = undefined;
+      void saveRunnerRef.current();
+    }, WRITER_IR_SAVE_FOLLOWUP_MS);
+  }, []);
 
   const dirty = draft !== baseDocument;
-  const documentRoot = useMemo(
-    () => draft.blocks.find((block) => block.type === 'document'),
-    [draft.blocks],
-  );
-  const documentReadOnly = readOnly || documentRoot?.editable === false || !onSave;
-  const editorLocked = documentReadOnly || saving;
-  const blockCount = useMemo(() => countWriterBlocks(draft.blocks), [draft.blocks]);
-  const stageLabel = t(`chat.writerIR.stages.${draft.stage}`, {
-    defaultValue: draft.stage,
-  });
+  const documentReadOnly = readOnly || !hasEditableWriterBlock(draft.blocks) || !onSave;
 
-  const focusToolbar = useCallback(() => {
-    window.requestAnimationFrame(() => {
-      toolbarRef.current
-        ?.querySelector<HTMLButtonElement>('button:not(:disabled)')
-        ?.focus();
-    });
-  }, []);
-
-  const focusBlockEditor = useCallback((nodeId: string) => {
-    window.requestAnimationFrame(() => {
-      const block = Array.from(
-        documentElementRef.current?.querySelectorAll<HTMLElement>('[data-node-id]') ?? [],
-      ).find((element) => element.dataset.nodeId === nodeId);
-      block?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
-    });
-  }, []);
+  draftRef.current = draft;
+  baseDocumentRef.current = baseDocument;
+  baseSourceRevisionRef.current = baseSourceRevision;
+  onSaveRef.current = onSave;
+  historyRef.current = history;
+  futureRef.current = future;
 
   useEffect(() => {
     const sourceMatchesBase = sourceRevision !== undefined || baseSourceRevision !== undefined
@@ -360,11 +310,38 @@ export function WriterIRControl({
       }
       return;
     }
+    const savedDocument = lastSavedDocumentRef.current;
+    if (
+      sameWriterDocument(document, baseDocument)
+      || sameWriterDocumentForSync(document, baseDocument)
+      || (savedDocument && (
+        sameWriterDocument(document, savedDocument)
+        || sameWriterDocumentForSync(document, savedDocument)
+      ))
+      // Parent echoed the live draft (common right after save); only advance revision.
+      || document === draftRef.current
+      || sameWriterDocumentForSync(document, draftRef.current)
+    ) {
+      setBaseSourceRevision(sourceRevision);
+      baseSourceRevisionRef.current = sourceRevision;
+      if (
+        document === draftRef.current
+        || sameWriterDocumentForSync(document, draftRef.current)
+      ) {
+        baseDocumentRef.current = draftRef.current;
+        setBaseDocument(draftRef.current);
+      }
+      return;
+    }
     if (draft === baseDocument) {
       pendingExternalDocumentRef.current = null;
       setBaseDocument(document);
+      baseDocumentRef.current = document;
       setBaseSourceRevision(sourceRevision);
+      baseSourceRevisionRef.current = sourceRevision;
+      lastCheckpointDocumentRef.current = document;
       setDraft(document);
+      draftRef.current = document;
       setHistory([]);
       setFuture([]);
       setExternalUpdate(false);
@@ -383,6 +360,7 @@ export function WriterIRControl({
     pendingExternalDocumentRef.current = null;
     setBaseDocument(pending.document);
     setBaseSourceRevision(pending.sourceRevision);
+    baseSourceRevisionRef.current = pending.sourceRevision;
     setDraft(pending.document);
     setHistory([]);
     setFuture([]);
@@ -390,9 +368,9 @@ export function WriterIRControl({
   }, [dirty]);
 
   useEffect(() => {
-    const editing = mode === 'edit' || dirty;
-    onEditingChange?.(editing);
-  }, [dirty, mode, onEditingChange]);
+    // Only surface local dirty state. In-flight saves must not lock parent UI.
+    onEditingChange?.(dirty);
+  }, [dirty, onEditingChange]);
 
   useEffect(
     () => () => onEditingChange?.(false),
@@ -409,14 +387,21 @@ export function WriterIRControl({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [dirty]);
 
-  const commit = useCallback((next: WriterDocument, nextSelectedId?: string) => {
-    if (next === draft) return;
-    setHistory((current) => [...current, draft]);
-    setFuture([]);
-    setDraft(next);
-    if (nextSelectedId !== undefined) setSelectedNodeId(nextSelectedId);
-    setSaveError(undefined);
-  }, [draft]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearAutoSaveTimers();
+    };
+  }, [clearAutoSaveTimers]);
+
+  useEffect(() => {
+    const current = draftRef.current;
+    const repaired = repairWriterCodeToolbarPollution(current);
+    if (repaired === current) return;
+    draftRef.current = repaired;
+    setDraft(repaired);
+  }, []);
 
   const beginTextEdit = useCallback(() => {
     if (!textEditStartRef.current) textEditStartRef.current = draft;
@@ -426,59 +411,253 @@ export function WriterIRControl({
     const start = textEditStartRef.current;
     textEditStartRef.current = null;
     if (start && start !== draft) {
-      setHistory((current) => [...current, start]);
+      const nextHistory = [...historyRef.current, start];
+      historyRef.current = nextHistory;
+      futureRef.current = [];
+      setHistory(nextHistory);
       setFuture([]);
     }
   }, [draft]);
 
   const handleUndo = useCallback(() => {
-    if (saving) return;
     if (textEditStartRef.current) {
-      setFuture((current) => [draft, ...current]);
+      const nextFuture = [draft, ...futureRef.current];
+      futureRef.current = nextFuture;
+      setFuture(nextFuture);
       setDraft(textEditStartRef.current);
       textEditStartRef.current = null;
       setSaveError(undefined);
       return;
     }
-    const previous = history[history.length - 1];
+    const currentHistory = historyRef.current;
+    const previous = currentHistory[currentHistory.length - 1];
     if (!previous) return;
-    setHistory(history.slice(0, -1));
-    setFuture((current) => [draft, ...current]);
+    const nextHistory = currentHistory.slice(0, -1);
+    const nextFuture = [draft, ...futureRef.current];
+    historyRef.current = nextHistory;
+    futureRef.current = nextFuture;
+    setHistory(nextHistory);
+    setFuture(nextFuture);
     setDraft(previous);
     setSaveError(undefined);
-  }, [draft, history, saving]);
+  }, [draft]);
 
   const handleRedo = useCallback(() => {
-    if (saving) return;
-    const next = future[0];
+    const currentFuture = futureRef.current;
+    const next = currentFuture[0];
     if (!next) return;
-    setFuture(future.slice(1));
-    setHistory((current) => [...current, draft]);
+    const nextFuture = currentFuture.slice(1);
+    const nextHistory = [...historyRef.current, draft];
+    futureRef.current = nextFuture;
+    historyRef.current = nextHistory;
+    setFuture(nextFuture);
+    setHistory(nextHistory);
     setDraft(next);
     setSaveError(undefined);
-  }, [draft, future, saving]);
+  }, [draft]);
 
-  const handleSave = useCallback(async () => {
-    if (!onSave || !dirty || saving || documentReadOnly) return;
-    finishTextEdit();
-    setSaving(true);
-    setSaveError(undefined);
-    try {
-      await onSave(draft);
-      pendingExternalDocumentRef.current = null;
-      setBaseDocument(draft);
-      setHistory([]);
-      setFuture([]);
-      setExternalUpdate(false);
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : t('chat.writerIR.saveFailed'));
-    } finally {
-      setSaving(false);
+  const runSave = useCallback(async (): Promise<WriterIRSaveRunResult> => {
+    const saveDocument = onSaveRef.current;
+    if (!saveDocument || documentReadOnly) return 'noop';
+    if (saveInFlightRef.current) {
+      // Keep editing; coalesce into one follow-up with the latest draft.
+      saveQueuedRef.current = true;
+      return 'busy';
     }
-  }, [dirty, documentReadOnly, draft, finishTextEdit, onSave, saving, t]);
+
+    const snapshot = draftRef.current;
+    const saveMode = pendingSaveModeRef.current;
+    const sameAsBase = snapshot === baseDocumentRef.current
+      || sameWriterDocumentForSync(snapshot, baseDocumentRef.current);
+    const sameAsCheckpoint = sameWriterDocumentForSync(
+      snapshot,
+      lastCheckpointDocumentRef.current,
+    );
+    // Draft only when dirty. Checkpoint (Save / conversation flush) may still
+    // run after draft autosave when content is not yet versioned.
+    if (sameAsCheckpoint || (sameAsBase && saveMode !== 'checkpoint')) {
+      pendingSaveModeRef.current = 'draft';
+      return 'noop';
+    }
+    pendingSaveModeRef.current = 'draft';
+    clearAutoSaveTimers();
+    saveInFlightRef.current = true;
+    saveQueuedRef.current = false;
+    const previousRevision = baseSourceRevisionRef.current;
+    // Mark the in-flight snapshot so parent prop echoes during save do not look
+    // like external updates.
+    const previousSavedDocument = lastSavedDocumentRef.current;
+    lastSavedDocumentRef.current = snapshot;
+    if (mountedRef.current) {
+      setSaving(true);
+      setSaveError(undefined);
+    }
+    let saved = false;
+    let hasNewerDraft = false;
+    try {
+      const result = await saveDocument(
+        baseDocumentRef.current,
+        snapshot,
+        baseSourceRevisionRef.current,
+        saveMode,
+      );
+      if (!mountedRef.current) return 'saved';
+      saved = true;
+      // If the user edited while this request was pending, keep their draft
+      // and only advance the persisted base / revision.
+      hasNewerDraft = draftRef.current !== snapshot;
+      const savedDocument = result?.document ?? snapshot;
+      const savedSourceRevision = result?.sourceRevision ?? baseSourceRevisionRef.current;
+      lastSavedDocumentRef.current = savedDocument;
+      baseSourceRevisionRef.current = savedSourceRevision;
+      pendingExternalDocumentRef.current = null;
+      setBaseSourceRevision(savedSourceRevision);
+      // Versioned save becomes the checkpoint baseline.
+      if (
+        saveMode === 'checkpoint'
+        || savedSourceRevision !== previousRevision
+      ) {
+        lastCheckpointDocumentRef.current = sameWriterDocumentForSync(snapshot, savedDocument)
+          ? snapshot
+          : savedDocument;
+      }
+      if (hasNewerDraft) {
+        // Keep the live draft; only advance the persisted base/revision.
+        baseDocumentRef.current = savedDocument;
+        setBaseDocument(savedDocument);
+        dirtyStartedAtRef.current = Date.now();
+      } else if (sameWriterDocumentForSync(snapshot, savedDocument)) {
+        // Semantically unchanged: keep the current draft reference so the
+        // contentEditable DOM is not rewritten after save.
+        baseDocumentRef.current = snapshot;
+        setBaseDocument(snapshot);
+        lastSavedDocumentRef.current = snapshot;
+        dirtyStartedAtRef.current = null;
+      } else {
+        // Server normalized the document; adopt it and let the editor sync.
+        baseDocumentRef.current = savedDocument;
+        draftRef.current = savedDocument;
+        setBaseDocument(savedDocument);
+        setDraft(savedDocument);
+        dirtyStartedAtRef.current = null;
+      }
+      setExternalUpdate(false);
+      return 'saved';
+    } catch (error) {
+      lastSavedDocumentRef.current = previousSavedDocument;
+      if (mountedRef.current) {
+        setSaveError(error instanceof Error ? error.message : t('chat.writerIR.saveFailed'));
+      }
+      return 'error';
+    } finally {
+      saveInFlightRef.current = false;
+      if (mountedRef.current) setSaving(false);
+      if (saved && (saveQueuedRef.current || hasNewerDraft)) {
+        saveQueuedRef.current = false;
+        scheduleFollowupSave();
+      }
+    }
+  }, [clearAutoSaveTimers, documentReadOnly, scheduleFollowupSave, t]);
+
+  saveRunnerRef.current = runSave;
+
+  /** Ctrl/Cmd+S and error retry: persist draft only (no new version). */
+  const requestDraftSave = useCallback(() => {
+    escalateSaveMode('draft');
+    clearAutoSaveTimers();
+    void saveRunnerRef.current();
+  }, [clearAutoSaveTimers, escalateSaveMode]);
+
+  /** Explicit Save button: create a versioned checkpoint. */
+  const requestCheckpointSave = useCallback(() => {
+    escalateSaveMode('checkpoint');
+    clearAutoSaveTimers();
+    void saveRunnerRef.current();
+  }, [clearAutoSaveTimers, escalateSaveMode]);
+
+  /** Flush before conversation actions (continue/retry → chat): version the draft. */
+  const flushPendingSave = useCallback(async (): Promise<boolean> => {
+    if (documentReadOnly || !onSaveRef.current) return true;
+    escalateSaveMode('checkpoint');
+    clearAutoSaveTimers();
+    if (saveFollowupTimerRef.current !== undefined) {
+      window.clearTimeout(saveFollowupTimerRef.current);
+      saveFollowupTimerRef.current = undefined;
+    }
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      while (saveInFlightRef.current) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 40);
+        });
+      }
+      if (saveFollowupTimerRef.current !== undefined) {
+        window.clearTimeout(saveFollowupTimerRef.current);
+        saveFollowupTimerRef.current = undefined;
+      }
+      // Skip only when this content is already a versioned checkpoint.
+      if (sameWriterDocumentForSync(draftRef.current, lastCheckpointDocumentRef.current)) {
+        return true;
+      }
+
+      escalateSaveMode('checkpoint');
+      const result = await runSave();
+      if (result === 'error') return false;
+      if (result === 'noop') return true;
+    }
+    return sameWriterDocumentForSync(draftRef.current, lastCheckpointDocumentRef.current);
+  }, [clearAutoSaveTimers, documentReadOnly, escalateSaveMode, runSave]);
 
   useEffect(() => {
-    if (mode !== 'edit') return undefined;
+    if (!editingKey) return undefined;
+    return registerFlush(editingKey, flushPendingSave);
+  }, [editingKey, flushPendingSave, registerFlush]);
+
+  useEffect(() => {
+    if (autoSaveIdleTimerRef.current !== undefined) {
+      window.clearTimeout(autoSaveIdleTimerRef.current);
+      autoSaveIdleTimerRef.current = undefined;
+    }
+    if (!dirty || documentReadOnly || saveError || externalUpdate || saving) {
+      if (!dirty) {
+        dirtyStartedAtRef.current = null;
+        if (autoSaveMaxTimerRef.current !== undefined) {
+          window.clearTimeout(autoSaveMaxTimerRef.current);
+          autoSaveMaxTimerRef.current = undefined;
+        }
+      }
+      return undefined;
+    }
+
+    if (dirtyStartedAtRef.current === null) {
+      dirtyStartedAtRef.current = Date.now();
+    }
+
+    autoSaveIdleTimerRef.current = window.setTimeout(() => {
+      autoSaveIdleTimerRef.current = undefined;
+      escalateSaveMode('draft');
+      void saveRunnerRef.current();
+    }, WRITER_IR_AUTOSAVE_IDLE_MS);
+
+    if (autoSaveMaxTimerRef.current === undefined) {
+      const elapsed = Date.now() - (dirtyStartedAtRef.current ?? Date.now());
+      const remaining = Math.max(0, WRITER_IR_AUTOSAVE_MAX_WAIT_MS - elapsed);
+      autoSaveMaxTimerRef.current = window.setTimeout(() => {
+        autoSaveMaxTimerRef.current = undefined;
+        escalateSaveMode('draft');
+        void saveRunnerRef.current();
+      }, remaining);
+    }
+
+    return () => {
+      if (autoSaveIdleTimerRef.current !== undefined) {
+        window.clearTimeout(autoSaveIdleTimerRef.current);
+        autoSaveIdleTimerRef.current = undefined;
+      }
+    };
+  }, [dirty, documentReadOnly, draft, escalateSaveMode, externalUpdate, saveError, saving]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
         !(event.target instanceof Node)
@@ -488,7 +667,7 @@ export function WriterIRControl({
       const key = event.key.toLowerCase();
       if (key === 's') {
         event.preventDefault();
-        void handleSave();
+        requestDraftSave();
       } else if (key === 'z' && event.shiftKey) {
         event.preventDefault();
         handleRedo();
@@ -499,83 +678,57 @@ export function WriterIRControl({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleRedo, handleSave, handleUndo, mode]);
+  }, [handleRedo, handleUndo, requestDraftSave]);
 
-  const handleDelete = useCallback((block: WriterBlock) => {
-    if ((block.children?.length ?? 0) > 0 && !window.confirm(t('chat.writerIR.deleteSubtree'))) return;
-    const next = deleteWriterBlock(draft, block.node_id);
-    commit(next);
-    if (next !== draft) {
-      setSelectedNodeId(undefined);
-      focusToolbar();
-    }
-  }, [commit, draft, focusToolbar, t]);
+  // Blur only closes the text-edit history group; autosave idle/max timers persist.
+  const handleTextBlur = useCallback(() => {
+    finishTextEdit();
+  }, [finishTextEdit]);
 
-  const renderProps: Omit<BlockRenderProps, 'blocks'> = {
-    mode,
-    selectedNodeId,
-    documentReadOnly: editorLocked,
-    onSelect: setSelectedNodeId,
-    onContentChange: (block, content) => {
-      if (block.editable === false || editorLocked) return;
-      setDraft((current) => {
-        if (!textEditStartRef.current) textEditStartRef.current = current;
-        return updateWriterBlockContent(current, block.node_id, content);
-      });
-      setFuture([]);
-      setSaveError(undefined);
-    },
-    onTextFocus: beginTextEdit,
-    onTextBlur: finishTextEdit,
-    onInsertAfter: (nodeId) => {
-      const result = insertWriterParagraphAfter(draft, nodeId);
-      commit(result.document, result.insertedNodeId);
-      if (result.insertedNodeId) focusBlockEditor(result.insertedNodeId);
-    },
-    onDelete: handleDelete,
-    onMove: (nodeId, direction) => commit(moveWriterBlock(draft, nodeId, direction), nodeId),
-  };
-
-  const enterViewMode = () => {
-    if (dirty) {
-      setDiscardPrompt(true);
-      return;
-    }
-    setMode('view');
-    setSelectedNodeId(undefined);
-    focusToolbar();
-  };
-
-  const enterEditMode = () => {
-    setMode('edit');
-    window.requestAnimationFrame(() => {
-      documentElementRef.current
-        ?.querySelector<HTMLInputElement>('.writer-ir__title-editor')
-        ?.focus();
+  const handleDocumentChange = useCallback((nextDocument: WriterDocument) => {
+    draftRef.current = nextDocument;
+    setDraft((current) => {
+      if (!textEditStartRef.current) textEditStartRef.current = current;
+      return nextDocument;
     });
-  };
+    futureRef.current = [];
+    setFuture([]);
+    setSaveError(undefined);
+  }, []);
 
   const discardChanges = () => {
     const pending = pendingExternalDocumentRef.current;
     const nextDocument = pending?.document ?? baseDocument;
     pendingExternalDocumentRef.current = null;
     textEditStartRef.current = null;
+    baseDocumentRef.current = nextDocument;
+    draftRef.current = nextDocument;
+    lastCheckpointDocumentRef.current = nextDocument;
     setBaseDocument(nextDocument);
-    if (pending) setBaseSourceRevision(pending.sourceRevision);
+    if (pending) {
+      baseSourceRevisionRef.current = pending.sourceRevision;
+      setBaseSourceRevision(pending.sourceRevision);
+    }
     setDraft(nextDocument);
     setHistory([]);
     setFuture([]);
-    setSelectedNodeId(undefined);
-    setDiscardPrompt(false);
     setSaveError(undefined);
     setExternalUpdate(false);
-    setMode('view');
-    focusToolbar();
   };
 
-  const selectedBlock = selectedNodeId
-    ? findWriterBlock(draft.blocks, selectedNodeId)
-    : undefined;
+  const saveLocalVersion = () => {
+    const pending = pendingExternalDocumentRef.current;
+    pendingExternalDocumentRef.current = null;
+    if (pending) {
+      baseDocumentRef.current = pending.document;
+      baseSourceRevisionRef.current = pending.sourceRevision;
+      setBaseDocument(pending.document);
+      setBaseSourceRevision(pending.sourceRevision);
+    }
+    setExternalUpdate(false);
+    setSaveError(undefined);
+    requestCheckpointSave();
+  };
 
   return (
     <section
@@ -583,117 +736,44 @@ export function WriterIRControl({
       aria-label={t('chat.writerIR.documentRegion')}
       ref={rootRef}
     >
-      <header className='writer-ir__toolbar' ref={toolbarRef}>
-        <div className='writer-ir__document-meta'>
-          <span>{t('chat.writerIR.stage', { stage: stageLabel })}</span>
-          <span>{t('chat.writerIR.blockCount', { count: blockCount })}</span>
-          {dirty && <strong>{t('chat.writerIR.unsaved')}</strong>}
-        </div>
-        <div className='writer-ir__toolbar-actions'>
-          {mode === 'view' ? (
-            !documentReadOnly && (
-              <button type='button' onClick={enterEditMode}>
-                {t('common.edit')}
-              </button>
-            )
-          ) : (
-            <>
-              <button
-                type='button'
-                onClick={handleUndo}
-                disabled={saving || (!history.length && !textEditStartRef.current)}
-              >
-                {t('chat.writerIR.undo')}
-              </button>
-              <button type='button' onClick={handleRedo} disabled={saving || !future.length}>
-                {t('chat.writerIR.redo')}
-              </button>
-              <button type='button' onClick={enterViewMode} disabled={saving}>
-                {t('common.cancel')}
-              </button>
-              <button
-                type='button'
-                onClick={() => void handleSave()}
-                disabled={!dirty || saving || documentReadOnly}
-              >
-                {saving ? t('chat.writerIR.saving') : t('common.save')}
-              </button>
-            </>
-          )}
-        </div>
-      </header>
-
-      {discardPrompt && (
+      {externalUpdate && (
         <div className='writer-ir__notice writer-ir__notice--warning' role='alert'>
-          <span>{t('chat.writerIR.discardPrompt')}</span>
+          <span>{t('chat.writerIR.externalUpdate')}</span>
           <div>
-            <button
-              type='button'
-              onClick={() => {
-                setDiscardPrompt(false);
-                focusToolbar();
-              }}
-            >
-              {t('chat.writerIR.keepEditing')}
-            </button>
+            <button type='button' onClick={saveLocalVersion}>{t('common.save')}</button>
             <button type='button' onClick={discardChanges}>{t('chat.writerIR.discard')}</button>
           </div>
         </div>
       )}
-      {externalUpdate && (
-        <div className='writer-ir__notice writer-ir__notice--warning' role='status'>
-          {t('chat.writerIR.externalUpdate')}
-        </div>
-      )}
       {saveError && (
         <div className='writer-ir__notice writer-ir__notice--error' role='alert'>
-          {t('chat.writerIR.saveError', { error: saveError })}
+          <span>{t('chat.writerIR.saveError', { error: saveError })}</span>
+          <div>
+            <button type='button' onClick={requestDraftSave}>{t('common.retry')}</button>
+            <button type='button' onClick={discardChanges}>{t('chat.writerIR.discard')}</button>
+          </div>
         </div>
       )}
 
-      <div className='writer-ir__save-status' aria-live='polite' aria-atomic='true'>
-        {saving
-          ? t('chat.writerIR.saving')
-          : dirty
-            ? t('chat.writerIR.unsaved')
-            : t('chat.writerIR.saved')}
-      </div>
-
-      <article className='writer-ir__document' ref={documentElementRef}>
-        {mode === 'edit' && !editorLocked ? (
-          <input
-            className='writer-ir__title-editor'
-            value={draft.title}
-            aria-label={t('chat.writerIR.editTitle')}
-            onFocus={beginTextEdit}
-            onBlur={finishTextEdit}
-            onChange={(event) => {
-              const title = event.target.value;
-              setDraft((current) => {
-                if (!textEditStartRef.current) textEditStartRef.current = current;
-                return updateWriterDocumentTitle(current, title);
-              });
-              setFuture([]);
-              setSaveError(undefined);
-            }}
-          />
-        ) : (
+      {documentReadOnly ? (
+        <article className='writer-ir__document'>
           <h1 className='writer-ir__title'>{draft.title}</h1>
-        )}
-
-        {draft.blocks.length > 0 ? (
-          <BlockSequence blocks={draft.blocks} {...renderProps} />
-        ) : (
-          <div className='writer-ir__empty' role='status'>
-            {t('chat.writerIR.emptyDocument')}
-          </div>
-        )}
-      </article>
-
-      {mode === 'edit' && selectedBlock && (
-        <div className='writer-ir__selection-status' aria-live='polite'>
-          {t('chat.writerIR.selectedBlock', { type: selectedBlock.type })}
-        </div>
+          {draft.blocks.length > 0 ? (
+            <BlockSequence blocks={draft.blocks} />
+          ) : (
+            <div className='writer-ir__empty' role='status'>
+              {t('chat.writerIR.emptyDocument')}
+            </div>
+          )}
+        </article>
+      ) : (
+        <WriterIRDocumentEditor
+          document={draft}
+          ariaLabel={t('chat.writerIR.documentRegion')}
+          onChange={handleDocumentChange}
+          onFocus={beginTextEdit}
+          onBlur={handleTextBlur}
+        />
       )}
     </section>
   );

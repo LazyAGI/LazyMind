@@ -16,4 +16,5 @@ networkx>=3.0
 scikit-learn>=1.5
 rapidfuzz>=3.0
 apted>=1.0,<2
+psutil>=6,<7
 psycopg[binary]>=3.1

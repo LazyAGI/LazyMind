@@ -3,6 +3,7 @@ package doc
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -135,6 +136,9 @@ func scanSourceAccessHeadersForCaller(caller DatasetCatalogCaller) map[string]st
 	add("X-User-ID", caller.UserID)
 	add("X-Tenant-ID", caller.TenantID)
 	add("X-User-Role", caller.UserRole)
+	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
+		headers["X-LazyMind-Internal-Token"] = token
+	}
 	return headers
 }
 

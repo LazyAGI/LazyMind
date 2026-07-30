@@ -356,7 +356,14 @@ interface PluginStore {
   fetchDismissedSessions: (conversationId: string) => Promise<void>;
   // Phase 3: slot item management.
   deleteSlotItem: (sessionId: string, slotId: string, listIndex: number, orderVersion?: number) => Promise<void>;
-  patchSlotItemValue: (sessionId: string, slotId: string, listIndex: number, value: any, contentType?: string) => Promise<void>;
+  patchSlotItemValue: (
+    sessionId: string,
+    slotId: string,
+    listIndex: number,
+    value: any,
+    contentType?: string,
+    mode?: 'draft' | 'checkpoint',
+  ) => Promise<number | undefined>;
   reorderSlotItems: (sessionId: string, slotId: string, newSortOrderSeq: number[], version: number) => Promise<void>;
   getSlotVersions: (sessionId: string, slotId: string, listIndex: number) => Promise<SlotVersionEntry[]>;
   rollbackSlotItem: (sessionId: string, slotId: string, listIndex: number, revision: number) => Promise<void>;
@@ -563,8 +570,12 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     await PluginSessionApi().deleteSlotItem(sessionId, slotId, listIndex, orderVersion);
   },
 
-  patchSlotItemValue: async (sessionId, slotId, listIndex, value, contentType) => {
-    await PluginSessionApi().patchSlotItem(sessionId, slotId, listIndex, value, contentType);
+  patchSlotItemValue: async (sessionId, slotId, listIndex, value, contentType, mode) => {
+    const res = await PluginSessionApi().patchSlotItem(
+      sessionId, slotId, listIndex, value, contentType, mode,
+    );
+    const revision = res?.data?.data?.revision;
+    return typeof revision === 'number' ? revision : undefined;
   },
 
   reorderSlotItems: async (sessionId, slotId, newSortOrderSeq, version) => {

@@ -44,7 +44,19 @@ func backgroundJobsEnabled() bool {
 	return raw != "0" && raw != "false" && raw != "no" && raw != "off"
 }
 
+func openAPIArtifactExportEnabled() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED")))
+	if raw == "" {
+		return true
+	}
+	return raw != "0" && raw != "false" && raw != "no" && raw != "off"
+}
+
 func exportOpenAPIArtifacts(openAPIJSON []byte) {
+	if !openAPIArtifactExportEnabled() {
+		return
+	}
+
 	wd, err := os.Getwd()
 	if err != nil {
 		log.Logger.Warn().Err(err).Msg("get working directory failed; skip exporting OpenAPI artifacts")
@@ -150,13 +162,11 @@ func main() {
 		log.Logger.Fatal().Msg("ACL_DB_DRIVER set but ACL_DB_DSN is empty")
 	}
 	db := orm.MustConnect(driver, dsn)
-	if driver == orm.DriverSQLite {
-		if err := db.AutoMigrate(orm.AllModelsForDDL()...); err != nil {
-			log.Logger.Fatal().Err(err).Msg("run SQLite AutoMigrate failed")
-		}
-		log.Logger.Info().Msg("SQLite schema initialized")
-	} else if err := migrate.RunUp(); err != nil {
+	if err := migrate.RunUp(); err != nil {
 		log.Logger.Fatal().Err(err).Msg("run SQL migrations failed")
+	}
+	if err := modelprovider.MigrateLegacyAPIKeys(db.DB); err != nil {
+		log.Logger.Fatal().Err(err).Msg("migrate model provider credentials failed")
 	}
 	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
 	modelprovider.MustSeedModelCatalog(context.Background(), db.DB, catalogPath)

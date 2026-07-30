@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 from lazyllm import LOG, AutoModel
 
+from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
@@ -109,7 +110,7 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
 
     When explicit is None/empty, fall back to all DEFAULT_TOOLS.
 
-    Note: save_artifact, get_artifact, and list_artifacts are always available regardless
+    Note: save_artifacts, get_artifact, and list_artifacts are always available regardless
     of this list — they are injected as mandatory base tools in _build_subagent_tools.
     Names of base tools in the explicit list are silently ignored (already present).
     """
@@ -151,12 +152,13 @@ def _build_subagent_tools(
 ) -> List[Any]:
     """Combine mandatory SubAgent infra tools with optional domain tools.
 
-    Artifact and knowledge tools are always included. Attachment tools are included
-    as one group when the parent task carries attachment context, so the runtime tool
-    list and its system prompt stay consistent.
+    Artifact and knowledge tools are always included regardless of the explicit
+    tools list. Attachment tools are included as one group when the parent task
+    carries attachment context, so the runtime tool list and its system prompt stay
+    consistent.
     """
     base = [
-        subagent_tools.save_artifact,
+        subagent_tools.save_artifacts,
         subagent_tools.get_artifact,
         subagent_tools.list_artifacts,
         subagent_tools.list_knowledge_bases,
@@ -200,7 +202,7 @@ def _build_partial_sort_order_hints(
                 so_str = ', '.join(str(s) for s in sort_orders)
                 hints.append(
                     f'For slot "{slot}": overwrite the item(s) at '
-                    f'sort_order={so_str} — pass sort_order=N when calling save_artifact '
+                    f'sort_order={so_str} in the corresponding save_artifacts entry '
                     f'so that only those position(s) are replaced.'
                 )
         if not hints:
@@ -300,6 +302,9 @@ def _build_agentic_config(
         ).strip(),
         'is_subagent': True,
         'agent_type': effective_agent_type,
+        'thinking_depth': str(
+            params.get('_thinking_depth') or agentic_config.get('thinking_depth') or 'medium'
+        ),
     })
     if effective_agent_type == 'plugin_step':
         agentic_config.update({
@@ -307,6 +312,11 @@ def _build_agentic_config(
             'plugin_session_id': params.get('session_id', ''),
             'plugin_step': params.get('step_id', ''),
         })
+    # Prefer the launched plugin session id whenever present so artifact tools work
+    # even if parent_agentic_config carried a stale empty plugin_session_id.
+    launched_session_id = str(params.get('session_id') or '').strip()
+    if launched_session_id:
+        agentic_config['plugin_session_id'] = launched_session_id
     return agentic_config
 
 
@@ -416,7 +426,8 @@ def _build_subagent_plan(
         output_lines.append(
             'Required output artifacts: '
             + ', '.join(required_keys)
-            + '. Call save_artifact for each required key before finishing.'
+            + '. Save every required key before finishing. When there are multiple outputs, '
+            'use one save_artifacts call containing every output entry.'
         )
     else:
         output_lines.append(
@@ -430,7 +441,7 @@ def _build_subagent_plan(
         )
     output_lines.append(
         '## Overwrite vs. Append for list slots\n'
-        'save_artifact has an optional sort_order parameter (1-based):\n'
+        'Each save_artifacts entry has an optional sort_order parameter (1-based):\n'
         '- Omit sort_order → append a new item at the end of the list.\n'
         '- Pass sort_order=N → overwrite the item currently at display position N.\n'
         'If the objective says the user wants to replace a specific item '
@@ -467,6 +478,11 @@ def _build_subagent_plan(
         force_summarize_context=ctx.objective,
         execution_options=AgentExecutionOptions(
             extra_stop_condition=_make_cancel_stop_condition(),
+            max_retries=(
+                max(1, int(_cfg['agentic_expanded_max_rounds']) - 1)
+                if str((lazyllm.globals.get('agentic_config') or {}).get('thinking_depth') or '').lower() == 'max'
+                else None
+            ),
         ),
     )
 
@@ -614,6 +630,12 @@ async def run_subagent_stream(
         sid = task_id
         lazyllm.globals._init_sid(sid=sid)
         lazyllm.locals._init_sid(sid=sid)
+        lazyllm.set_trace_context({
+            'session_id': params.get('session_id') or params.get('chat_session_id') or None,
+            'sampled': True,
+            'module_trace': {'default': True},
+            'request_tags': ['subagent'],
+        })
         inject_model_config(model_config)
         inject_tool_config(tool_config)
         set_context(ctx)
@@ -627,9 +649,15 @@ async def run_subagent_stream(
 
         llm = AutoModel(model='llm')
         runtime_tools = _resolve_runtime_tools(tools, plugin_id=params.get('plugin_id') or None)
+        # Plugin steps often need find_user_attachment even when the current synthetic
+        # chat turn has no files; keep the tools available and let the tool report empty.
         attachment_configs = (
             [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
-            if agentic_config.get('files') or agentic_config.get('history_files_per_turn')
+            if (
+                agentic_config.get('files')
+                or agentic_config.get('history_files_per_turn')
+                or effective_agent_type == 'plugin_step'
+            )
             else []
         )
         subagent_tools_all = _build_subagent_tools(runtime_tools, attachment_configs)
@@ -854,7 +882,7 @@ def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:
     """Commit any pending draft files as new artifact revisions before the step ends.
 
     This is a safety net: if the model called patch_artifact but forgot to call
-    save_artifact, the edits are not lost — they are committed here at step boundary.
+    save_artifacts, the edits are not lost — they are committed here at step boundary.
     Only drafts for required keys or keys already saved in this run are flushed.
     """
     from . import tools as subagent_tools
@@ -878,7 +906,7 @@ def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:
             continue
         try:
             sort_order = (list_index + 1) if list_index is not None else None
-            subagent_tools.save_artifact(
+            subagent_tools._save_artifact(
                 base_key, content, content_type=original_type, sort_order=sort_order,
             )
             ctx.delete_draft(base_key, list_index)
@@ -890,6 +918,8 @@ def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:
 def _coerce_str_list(value: Any) -> List[str]:
     if isinstance(value, list):
         return [str(v) for v in value if str(v).strip()]
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode('utf-8')
     if isinstance(value, str):
         try:
             parsed = json.loads(value)
@@ -903,6 +933,8 @@ def _coerce_str_list(value: Any) -> List[str]:
 def _coerce_dict(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return value
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode('utf-8')
     if isinstance(value, str):
         try:
             parsed = json.loads(value)
@@ -956,7 +988,7 @@ def _evaluate_completion(
 
     If the LLM judges YES and ctx is provided, the final output is auto-saved as a
     text artifact for each missing key so the task is not penalised for a missing
-    save_artifact call when the content is clearly present in the final output.
+    save_artifacts call when the content is clearly present in the final output.
     """
     trace = _steps_to_trace(steps)
     force_text = str(force_result or '').strip()
@@ -965,7 +997,7 @@ def _evaluate_completion(
 
     prompt_lines = [
         'You are reviewing the execution of an autonomous SubAgent that stopped without '
-        'calling save_artifact for all required output keys.',
+        'calling save_artifacts for all required output keys.',
         '',
         f'Original objective: {objective}',
         f'Required artifact keys: {missing_str or saved_str}',
@@ -981,7 +1013,7 @@ def _evaluate_completion(
         '',
         'Evaluation rules:',
         '- Answer YES if the agent gathered and delivered the information needed to satisfy '
-        'the objective, even if it forgot to call save_artifact. The final output text counts '
+        'the objective, even if it forgot to call save_artifacts. The final output text counts '
         'as evidence of completion.',
         '- Answer NO only if the agent clearly failed to obtain the required information '
         '(e.g. all tool calls errored out, or the output is empty / irrelevant).',
@@ -1008,7 +1040,7 @@ def _evaluate_completion(
 
         # Auto-save final output as text artifacts for each missing key when the
         # LLM judges the task as succeeded. This recovers from models that forget
-        # to call save_artifact but include the results in their final reply.
+        # to call save_artifacts but include the results in their final reply.
         if is_succeeded and ctx is not None and force_text and missing_keys:
             content = summary if summary else force_text
             _image_keys = frozenset({

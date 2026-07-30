@@ -1,6 +1,5 @@
 import {
   Configuration as CoreConfiguration,
-  DefaultApiFactory,
   SkillDiffApiFactory,
   SkillDraftsApiFactory,
   SkillFsApiFactory,
@@ -36,7 +35,6 @@ import type { DiffLine } from "./shared";
 
 const coreConfig = new CoreConfiguration({ basePath: BASE_URL });
 const skillsApi = SkillsApiFactory(coreConfig, BASE_URL, axiosInstance);
-const defaultCoreApi = DefaultApiFactory(coreConfig, BASE_URL, axiosInstance);
 const skillDraftsApi = SkillDraftsApiFactory(coreConfig, BASE_URL, axiosInstance);
 const skillFsApi = SkillFsApiFactory(coreConfig, BASE_URL, axiosInstance);
 const skillRevisionsApi = SkillRevisionsApiFactory(coreConfig, BASE_URL, axiosInstance);
@@ -146,6 +144,10 @@ export interface SkillOrganizeRunRecord {
 export type SkillOrganizeTaskStatus =
   | "pending"
   | "running"
+  | "organize_plan"
+  | "organize_draft"
+  | "organize_apply"
+  | "completed"
   | "done"
   | "failed"
   | "skipped";
@@ -240,10 +242,23 @@ export interface SkillReviewRunRecord {
   requestId: string;
 }
 
+export type SkillReviewTaskStatus =
+  | "pending"
+  | "running"
+  | "review_draft"
+  | "review_cluster"
+  | "review_miner"
+  | "review_solution"
+  | "review_apply"
+  | "completed"
+  | "done"
+  | "failed"
+  | "skipped";
+
 export interface SkillReviewTaskStatusRecord {
   task: ResourceUpdateTaskRecord | null;
   requestId: string;
-  status: string;
+  status: SkillReviewTaskStatus;
   runStatus: string;
   resultCount: number;
 }
@@ -786,7 +801,7 @@ const normalizeSkillReviewTaskStatus = (
   return {
     task,
     requestId,
-    status,
+    status: status as SkillReviewTaskStatus,
     runStatus: toStringValue(raw?.run_status, ""),
     resultCount: toNumberValue(raw?.result_count, 0),
   };
@@ -937,6 +952,7 @@ export async function getSkillOrganizeTask(
 }
 
 const skillOrganizeTerminalStatuses = new Set<SkillOrganizeTaskStatus>([
+  "completed",
   "done",
   "failed",
   "skipped",
@@ -1157,20 +1173,18 @@ export async function removeSkillAsset(skillId: string) {
 }
 
 export async function trashSkillAsset(skillId: string) {
-  return defaultCoreApi.apiCoreSkillsSkillIdTrashPost({ skillId });
+  return removeSkillAsset(skillId);
 }
 
 export async function listTrashedSkillAssetsPage(
   options: ListSkillOptions = {},
 ): Promise<SkillAssetListResult> {
-  const response = await defaultCoreApi.apiCoreSkillsTrashGet({
-    params: {
-      keyword: options.keyword?.trim() || undefined,
-      category: options.category?.trim() || undefined,
-      tags: (options.tags ?? []).map((item) => item.trim()).filter(Boolean),
-      page: options.page ?? 1,
-      page_size: options.pageSize ?? 200,
-    },
+  const response = await skillsApi.apiCoreSkillsTrashGet({
+    keyword: options.keyword?.trim() || undefined,
+    category: options.category?.trim() || undefined,
+    tags: (options.tags ?? []).map((item) => item.trim()).filter(Boolean),
+    page: options.page ?? 1,
+    pageSize: options.pageSize ?? 200,
   });
   const payload = unwrapEnvelope<{
     items?: SkillListItemOpenAPIResponse[];
@@ -1190,19 +1204,19 @@ export async function listTrashedSkillAssetsPage(
 }
 
 export async function restoreSkillAsset(skillId: string): Promise<boolean> {
-  const response = await defaultCoreApi.apiCoreSkillsSkillIdRestorePost({ skillId });
+  const response = await skillsApi.apiCoreSkillsSkillIdRestorePost({ skillId });
   const payload = unwrapEnvelope<{ restored?: boolean }>(response.data);
   return Boolean(payload.restored);
 }
 
 export async function purgeSkillAsset(skillId: string): Promise<boolean> {
-  const response = await defaultCoreApi.apiCoreSkillsSkillIdPurgeDelete({ skillId });
+  const response = await skillsApi.apiCoreSkillsSkillIdPurgeDelete({ skillId });
   const payload = unwrapEnvelope<{ purged?: boolean }>(response.data);
   return Boolean(payload.purged);
 }
 
 export async function emptySkillTrash(): Promise<number> {
-  const response = await defaultCoreApi.apiCoreSkillsTrashDelete();
+  const response = await skillsApi.apiCoreSkillsTrashDelete();
   const payload = unwrapEnvelope<{ purged?: number }>(response.data);
   return payload.purged ?? 0;
 }

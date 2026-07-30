@@ -1,13 +1,19 @@
 const { app, BrowserWindow, ipcMain, shell, dialog, clipboard } = require("electron");
 const { spawn, execFile } = require("node:child_process");
-const { randomUUID } = require("node:crypto");
+const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
 const { desktopRuntimeReady, runtimeExitFailureMessage, statusFailureMessage } = require("./runtime-status");
-const { runInstallerWarmupLifecycle } = require("./installer-warmup");
+const {
+  macWarmupCompleted,
+  macWarmupMarkerPath,
+  markMacWarmupCompleted,
+  runInstallerWarmupLifecycle,
+} = require("./installer-warmup");
 
 const isWindows = process.platform === "win32";
+const isMac = process.platform === "darwin";
 const isInstallerWarmup = isWindows && process.argv.includes("--installer-warmup");
 const windowsDesktopPaths = isWindows
   ? resolveWindowsDesktopPaths(process.env, app.getPath("home"))
@@ -37,6 +43,7 @@ const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
   (isPackaged ? path.join(runtimeResourcesRoot, "app") : path.resolve(__dirname, "..", "..", ".."));
 const explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
 const desktopLogsDir = app.getPath("logs");
+const desktopCredentialIdentityPath = path.join(app.getPath("userData"), "credential-device.json");
 const startupLogPath = path.join(desktopLogsDir, "desktop-startup.log");
 const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
   path.join(runtimeResourcesRoot, "bin", `local-runtime-manager${isWindows ? ".exe" : ""}`);
@@ -45,6 +52,7 @@ const maxSidecarFailureBytes = 32 * 1024;
 const desktopShutdownTimeout = process.env.LAZYMIND_DESKTOP_SHUTDOWN_TIMEOUT || "20s";
 const forceExitDelayMs = 1500;
 const rendererReadyTimeoutMs = 30 * 1000;
+const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 
 let mainWindow;
 let startupWindow;
@@ -72,6 +80,35 @@ let startupState = {
   updatedAt: new Date().toISOString(),
 };
 
+function loadOrCreateDesktopCredentialIdentity() {
+  fs.mkdirSync(path.dirname(desktopCredentialIdentityPath), { recursive: true });
+  try {
+    const parsed = JSON.parse(fs.readFileSync(desktopCredentialIdentityPath, "utf8"));
+    if (parsed?.version === 1 && parsed?.deviceId && parsed?.deviceSecret) {
+      return parsed;
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw new Error(`Failed to read desktop credential identity: ${error.message}`);
+    }
+  }
+  const identity = {
+    version: 1,
+    deviceId: randomUUID(),
+    deviceSecret: randomBytes(32).toString("base64url"),
+  };
+  fs.writeFileSync(desktopCredentialIdentityPath, `${JSON.stringify(identity)}\n`, { mode: 0o600, flag: "wx" });
+  return identity;
+}
+
+function deriveDesktopCredentialKey(identity, purpose) {
+  return createHmac("sha256", Buffer.from(identity.deviceSecret, "base64url"))
+    .update(`lazymind/desktop/${identity.deviceId}/${purpose}/v1`)
+    .digest("base64url");
+}
+
+const desktopCredentialIdentity = loadOrCreateDesktopCredentialIdentity();
+
 function sidecarArgs(command, extra = []) {
   const args = [
     command,
@@ -96,9 +133,13 @@ function sidecarEnv() {
     LAZYMIND_LOCAL_NETWORK_PROFILE: "localhost",
     LAZYMIND_LOCAL_PROXY_ADDRESS: "127.0.0.1",
     LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN: "false",
+    LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED: "false",
     VITE_LAZYMIND_MODE: "desktop",
     PYTHONDONTWRITEBYTECODE: "1",
   };
+  env.LAZYMIND_MODEL_PROVIDER_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "model-provider");
+  env.LAZYMIND_MCP_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "mcp");
+  env.LAZYMIND_AUTH_CLOUD_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "cloud-oauth");
   if (explicitRuntimeRoot) {
     env.LAZYMIND_RUNTIME_ROOT = explicitRuntimeRoot;
   } else {
@@ -350,6 +391,15 @@ async function runInstallerWarmup() {
     log,
     formatError: serializeError,
   });
+}
+
+async function runMacInstallationWarmupIfNeeded() {
+  const version = app.getVersion();
+  if (!isMac || !isPackaged || macWarmupCompleted(macInstallationWarmupMarker, version)) {
+    return;
+  }
+  await runInstallerWarmup();
+  markMacWarmupCompleted(macInstallationWarmupMarker, version);
 }
 
 function startGuard() {
@@ -1075,6 +1125,15 @@ ipcMain.handle("lazymind:selectFolder", async () => {
   const result = await dialog.showOpenDialog(activeWindow(), { properties: ["openDirectory"] });
   return result.canceled ? null : result.filePaths[0];
 });
+ipcMain.handle("lazymind:selectExecutable", async () => {
+  const result = await dialog.showOpenDialog(activeWindow(), {
+    properties: ["openFile"],
+    filters: process.platform === "win32"
+      ? [{ name: "FFmpeg", extensions: ["exe"] }]
+      : [{ name: "Executable", extensions: ["*"] }],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
 ipcMain.handle("lazymind:startupDiagnostics", () => startupDiagnosticsSnapshot());
 ipcMain.handle("lazymind:copyStartupLogs", () => {
   const text = startupLogEntries
@@ -1133,7 +1192,17 @@ if (!hasSingleInstanceLock) {
         },
       );
     }
-    return createWindow();
+    return runMacInstallationWarmupIfNeeded().then(
+      () => createWindow(),
+      (error) => {
+        console.error("LazyMind macOS installation warmup failed:", error);
+        dialog.showErrorBox(
+          "LazyMind installation warmup failed",
+          `LazyMind could not prepare its local runtime. Reopen the app to retry.\n\n${serializeError(error)}`,
+        );
+        app.exit(1);
+      },
+    );
   });
   app.on("window-all-closed", () => {
     if (isInstallerWarmup) {

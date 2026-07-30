@@ -225,6 +225,9 @@ func EvaluateSkillOperation(ctx context.Context, db *gorm.DB, stateStore state.S
 }
 
 func findRunningSkillMaintenanceTask(ctx context.Context, db *gorm.DB, userID string) (*RunningSkillTask, error) {
+	if !db.Migrator().HasTable(&orm.SkillReviewStats{}) {
+		return findCoreSkillMaintenanceReservation(ctx, db, userID)
+	}
 	var row struct {
 		ID        string `gorm:"column:id"`
 		RequestID string `gorm:"column:requestid"`

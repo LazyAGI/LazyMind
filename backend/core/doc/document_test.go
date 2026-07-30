@@ -179,6 +179,112 @@ func newDocumentTestDB(t *testing.T) *orm.DB {
 	return db
 }
 
+func TestCreateDocumentStoresExplicitFolderTypeForDottedName(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedDocumentListDataset(t, db, "dataset-1", "user-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets/dataset-1/documents?document_id=doc-folder", strings.NewReader(`{"display_name":"init.sql","type":"FOLDER"}`))
+	req.Header.Set("X-User-Id", "user-1")
+	req.Header.Set("X-User-Name", "Alice")
+	req = mux.SetURLVars(req, map[string]string{"dataset": "dataset-1"})
+	rec := httptest.NewRecorder()
+
+	CreateDocument(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var created Doc
+	decodeRecorderJSON(t, rec, &created)
+	if created.Type != "FOLDER" {
+		t.Fatalf("expected response type FOLDER, got %q", created.Type)
+	}
+
+	var stored orm.Document
+	if err := db.Where("id = ?", "doc-folder").Take(&stored).Error; err != nil {
+		t.Fatalf("query created document: %v", err)
+	}
+	if stored.DocumentType != "FOLDER" {
+		t.Fatalf("expected stored type FOLDER, got %q", stored.DocumentType)
+	}
+	loaded, err := loadDocumentByID(context.Background(), "dataset-1", "doc-folder")
+	if err != nil {
+		t.Fatalf("load created document: %v", err)
+	}
+	if loaded.Type != "FOLDER" {
+		t.Fatalf("expected stored type to override dotted-name inference, got %q", loaded.Type)
+	}
+}
+
+func TestUpdateDocumentAcceptsArbitraryStoredType(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedDocumentListDataset(t, db, "dataset-1", "user-1")
+	seedDocumentListDoc(t, db, "dataset-1", "doc-1", "special.bin", time.Now().UTC(), "user-1", nil)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/core/datasets/dataset-1/documents/doc-1", strings.NewReader(`{"type":"SPECIAL_INTERNAL_FILE"}`))
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{"dataset": "dataset-1", "document": "doc-1"})
+	rec := httptest.NewRecorder()
+
+	UpdateDocument(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var stored orm.Document
+	if err := db.Where("id = ?", "doc-1").Take(&stored).Error; err != nil {
+		t.Fatalf("query updated document: %v", err)
+	}
+	if stored.DocumentType != "SPECIAL_INTERNAL_FILE" {
+		t.Fatalf("expected arbitrary stored type, got %q", stored.DocumentType)
+	}
+	var updated Doc
+	decodeRecorderJSON(t, rec, &updated)
+	if updated.Type != "SPECIAL_INTERNAL_FILE" {
+		t.Fatalf("expected arbitrary response type, got %q", updated.Type)
+	}
+}
+
+func TestDocumentTypeResolutionKeepsLegacyFallback(t *testing.T) {
+	tests := []struct {
+		name       string
+		storedType string
+		filename   string
+		want       string
+	}{
+		{name: "stored type wins", storedType: "SPECIAL_INTERNAL_FILE", filename: "item.bin", want: "SPECIAL_INTERNAL_FILE"},
+		{name: "legacy folder", filename: "legacy-folder", want: "FOLDER"},
+		{name: "legacy known file", filename: "notes.md", want: "MARKDOWN"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveDocumentType(tt.storedType, tt.filename); got != tt.want {
+				t.Fatalf("resolveDocumentType(%q, %q) = %q, want %q", tt.storedType, tt.filename, got, tt.want)
+			}
+		})
+	}
+	if got := fileDocumentTypeFromName("README"); got != "DOCUMENT_TYPE_UNSPECIFIED" {
+		t.Fatalf("extensionless uploaded file must not be stored as a folder, got %q", got)
+	}
+}
+
+func TestLoadDocumentFallsBackWhenStoredTypeIsNull(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedDocumentListDataset(t, db, "dataset-1", "user-1")
+	seedDocumentListDoc(t, db, "dataset-1", "legacy-folder", "legacy-folder", time.Now().UTC(), "user-1", nil)
+	if err := db.Exec("UPDATE documents SET document_type = NULL WHERE id = ?", "legacy-folder").Error; err != nil {
+		t.Fatalf("set legacy document type to NULL: %v", err)
+	}
+
+	loaded, err := loadDocumentByID(context.Background(), "dataset-1", "legacy-folder")
+	if err != nil {
+		t.Fatalf("load legacy document: %v", err)
+	}
+	if loaded.Type != "FOLDER" {
+		t.Fatalf("expected legacy NULL type to use filename fallback, got %q", loaded.Type)
+	}
+}
+
 func TestLoadMergedDocumentsUsesCoreUpdatedAtWhenNewerThanReadonlyBase(t *testing.T) {
 	db := newDocumentTestDB(t)
 	ctx := context.Background()
@@ -603,6 +709,30 @@ func TestDeleteFolderDeletesChildrenAndUpdatesDatasetStats(t *testing.T) {
 	assertDatasetStats(t, "dataset-1", 0, 0)
 }
 
+func TestDeleteDottedFolderUsesStoredDocumentType(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedFolderWithSizedDoc(t, db, "dataset-1", "folder-1", "doc-1", 31744)
+	if err := db.Model(&orm.Document{}).Where("id = ?", "folder-1").Updates(map[string]any{
+		"display_name":  "init.sql",
+		"document_type": "FOLDER",
+	}).Error; err != nil {
+		t.Fatalf("mark dotted document as folder: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/core/datasets/dataset-1/documents/folder-1", nil)
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{"dataset": "dataset-1", "document": "folder-1"})
+	rec := httptest.NewRecorder()
+
+	DeleteDocument(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertDocumentSoftDeleted(t, db, "dataset-1", "folder-1")
+	assertDocumentSoftDeleted(t, db, "dataset-1", "doc-1")
+}
+
 func TestBatchDeleteFolderDeletesChildrenAndUpdatesDatasetStats(t *testing.T) {
 	db := newDocumentTestDB(t)
 	seedFolderWithSizedDoc(t, db, "dataset-1", "folder-1", "doc-1", 31744)
@@ -775,5 +905,30 @@ func assertFolderHasZeroSize(t *testing.T, db *orm.DB, datasetID, folderID strin
 	}
 	if got := docFromRow(row).DocumentSize; got != 0 {
 		t.Fatalf("expected folder document_size 0 after deleting child, got %d", got)
+	}
+}
+
+func TestRewriteCanonicalUploadPathMapsDockerMarker(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+
+	dockerPath := "/var/lib/lazymind/uploads/tmp/users/u1/files/upload_a/dog.jpg"
+	got := rewriteCanonicalUploadPath(dockerPath)
+	want := filepath.Join(root, "tmp", "users", "u1", "files", "upload_a", "dog.jpg")
+	if got != want {
+		t.Fatalf("rewriteCanonicalUploadPath = %q, want %q", got, want)
+	}
+
+	rel := fileRelativePath(dockerPath)
+	if rel != "tmp/users/u1/files/upload_a/dog.jpg" {
+		t.Fatalf("fileRelativePath = %q, want tmp/users/u1/files/upload_a/dog.jpg", rel)
+	}
+}
+
+func TestRewriteCanonicalUploadPathKeepsDockerRootUnchanged(t *testing.T) {
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", "/var/lib/lazymind/uploads")
+	dockerPath := "/var/lib/lazymind/uploads/tmp/dog.jpg"
+	if got := rewriteCanonicalUploadPath(dockerPath); got != dockerPath {
+		t.Fatalf("rewriteCanonicalUploadPath = %q, want unchanged %q", got, dockerPath)
 	}
 }

@@ -11,7 +11,7 @@ Tool types registered dynamically per-conversation:
 - get_step_result           : Read-only artifact summary for a step (ChatAgent only).
 - get_failed_steps          : Read-only failed steps with error info (ChatAgent only).
 
-Framework tools (save_artifact / get_artifact / list_artifacts) are always merged into
+Framework tools (save_artifacts / get_artifact / list_artifacts) are always merged into
 the step's tool list regardless of what the plugin's state.yml declares.  This ensures
 every SubAgent can persist and retrieve artifacts without plugin authors having to
 remember to list them explicitly.
@@ -494,7 +494,7 @@ def _trigger_plugin_step(
     # focused_sort_order is NOT injected — it is the UI scroll position,
     # not the user's intended operation target. The SubAgent reads the
     # runtime_instruction directly and decides which sort_order to pass
-    # to save_artifact based on the user's stated intent.
+    # to save_artifacts based on the user's stated intent.
     focused_tab = cfg.get('focused_tab')
     enriched_instruction = runtime_instruction or ''
     if focused_tab:
@@ -1077,6 +1077,17 @@ def build_cold_start_tools(
                     }, ensure_ascii=False)
 
                 static_advancement = plugin_mode == 'auto'
+                first_step_default_approval = (
+                    'required'
+                    if plugin_loader.get_step_mode(
+                        resolved_plugin_id, result['first_step_id']
+                    ) == 'human'
+                    else 'not_required'
+                )
+                inline_auto_step = (
+                    plugin_mode == 'dynamic'
+                    and first_step_default_approval == 'not_required'
+                )
                 launch_plan: Dict[str, Any] = {
                     'first_step_id': result['first_step_id'],
                     'normalized_request': result['normalized_request'],
@@ -1086,20 +1097,20 @@ def build_cold_start_tools(
                         'hand_off': True,
                         'advance_tool': 'advance_step_and_hand_off',
                     })
+                elif inline_auto_step:
+                    launch_plan.update({
+                        'hand_off': False,
+                        'advance_tool': 'advance_step',
+                    })
                 step_name_index = _build_step_name_index(resolved_plugin_id)
-                first_step_default_approval = (
-                    'required'
-                    if plugin_loader.get_step_mode(
-                        resolved_plugin_id, result['first_step_id']
-                    ) == 'human'
-                    else 'not_required'
-                )
                 prepared = {
                     **snapshot,
                     'must_advance': True,
                     'advance_committed': False,
-                    'requires_hand_off_choice': not static_advancement,
-                    'fallback_hand_off': True,
+                    'requires_hand_off_choice': not (
+                        static_advancement or inline_auto_step
+                    ),
+                    'fallback_hand_off': not inline_auto_step,
                     'step_name_index': step_name_index,
                     'launch_plan': launch_plan,
                     'scenario': resolved_spec.scenario_md,
@@ -1107,7 +1118,7 @@ def build_cold_start_tools(
                 cfg['prepared_plugin'] = prepared
                 cfg.update(runtime_meta)
                 visible_launch_plan = dict(launch_plan)
-                if static_advancement:
+                if static_advancement or inline_auto_step:
                     visible_launch_plan.pop('hand_off', None)
                     instruction = (
                         'You MUST now call the advancement tool named by launch_plan in this '
@@ -1635,7 +1646,8 @@ def build_advance_step_tool(
 
     advance_step.__doc__ = (
         'Start one or more Ready workflow steps synchronously and return their results.\n\n'
-        'Use only when the user explicitly requests multiple workflow steps, for example\n'
+        'Use when the selected step has default approval `not_required`, or when the user\n'
+        'explicitly requests multiple workflow steps, for example\n'
         '"帮我执行 N 步", "连续执行到 X", "一次性执行完", "run N steps",\n'
         '"continue through X", or "run all steps". A complete-deliverable request alone\n'
         'does not authorize this synchronous tool.\n'
@@ -1936,21 +1948,31 @@ def _build_cold_execution_policy(plugin_mode: str) -> str:
     return (
         '## Current Workflow Launch Policy [AUTHORITATIVE]\n'
         'After a trigger returns ready, it provides a compact index of every workflow step, '
-        'the valid first step, and that first step\'s default approval. You must still infer '
-        'the execution scope from the user\'s words; approval metadata does not choose the tool. '
+        'the valid first step, that first step\'s default approval, and a launch_plan. '
+        'When launch_plan names an advancement tool, call that tool exactly. Otherwise infer '
+        'the execution scope from the user\'s words. '
         'Match any user-named '
         'target boundary against the full id/name index. The index contains names only and '
         'does not imply order or reachability.\n'
-        '- DEFAULT: use `advance_step_and_hand_off` for the first step.\n'
-        '- Use `advance_step` only when the user explicitly requests more than one workflow '
-        'step, such as "帮我执行 N 步", "连续执行到 X", "一次性执行完", '
+        '- If the selected Ready step has default approval `not_required`, use `advance_step`.\n'
+        '- If the completed step explicitly directs automatic continuation based on its result, '
+        'use `advance_step_and_hand_off` for the directed Ready step and stop.\n'
+        '- Otherwise, use `advance_step_and_hand_off` for the first step by default.\n'
+        '- For any other step whose default approval is required, use `advance_step` only when the user '
+        'explicitly requests more than one workflow step, such as "帮我执行 N 步", "连续执行到 X", "一次性执行完", '
         '"run N steps", "continue through X", or "run the whole workflow without stopping".\n'
         '- Asking for a complete article, image, report, or other final deliverable does NOT '
         'by itself request multi-step or uninterrupted execution.\n'
         'Always start only the first_step_id returned by the trigger. After each synchronous '
         '`advance_step` result, use only the newly returned reachable-step details and repeat '
-        'the decision. Continue synchronously through prerequisites; when the named boundary '
-        'itself becomes a valid target, start it with `advance_step_and_hand_off` and stop.'
+        'the decision. Continue automatically through `not_required` steps. When the completed '
+        'step explicitly directs automatic continuation based on its result, such as a preparation '
+        'step confirming that no source file exists, start the directed Ready step with '
+        '`advance_step_and_hand_off` and stop. '
+        'Otherwise, when the next Ready step requires approval and the user did not explicitly '
+        'request continuous execution, stop and present the completed result without starting '
+        'that step. When the user named a boundary, start that boundary with '
+        '`advance_step_and_hand_off` and stop.'
     )
 
 
@@ -2331,13 +2353,16 @@ def _build_mode_guidance(
         'with a separate user_input/runtime_instruction for every step. Do not issue repeated\n'
         'single-step calls for the same frontier. Never include a Blocked node or a downstream\n'
         'node that needs another batch item\'s future output. Running an attempted step again remains single-step.\n\n'
-        '### Rule 3 — Dynamic mode defaults to hand-off\n'
-        'DEFAULT: call `advance_step_and_hand_off` and stop after starting the selected Ready step(s).\n'
-        'Use `advance_step` only when the latest query or persisted session intent explicitly asks\n'
+        '### Rule 3 — Dynamic mode honors step approval\n'
+        'If the selected Ready step has `[default approval: not_required]`, call `advance_step`\n'
+        'and continue from its result without asking the user for confirmation.\n'
+        'Otherwise, call `advance_step_and_hand_off` and stop after starting the selected Ready step(s).\n'
+        'For steps whose default approval is required, use `advance_step` only when the latest\n'
+        'query or persisted session intent explicitly asks\n'
         'to execute multiple workflow steps, for example "帮我执行 N 步", "连续执行到 X",\n'
         '"一次性执行完", "run N steps", "continue through X", or "run all steps".\n'
         'A request for a complete deliverable or a named workflow is NOT a request for continuous\n'
-        'execution. Step approval annotations are context only and never override this dynamic-mode default.\n'
+        'execution by itself; the not_required approval exception above still applies.\n'
         'When several independent Ready steps form the same frontier, pass them in one call to the\n'
         'chosen tool; the number of parallel Ready nodes does not itself imply continuous execution.\n\n'
         'If the user clearly asks to proceed with the existing workflow and\n'

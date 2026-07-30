@@ -4,7 +4,7 @@ from __future__ import annotations
 import inspect
 import re
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 import docstring_parser
 import lazyllm
@@ -52,6 +52,8 @@ from lazymind.chat.engine.subagent.tools import (
 
 SystemPromptAppendix = dict[str, str | tuple[str, ...]]
 SystemPromptAppendixProvider = Callable[[], SystemPromptAppendix | None]
+QueryAppendixProvider = Callable[[], str | None]
+QueryAppendixPosition = Literal['before', 'after']
 SYSTEM_PROMPT_APPENDIX_SECTIONS = ('tool_policy', 'safety', 'output_contract', 'response_policy')
 
 IMAGE_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
@@ -78,10 +80,15 @@ VIDEO_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
 }
 KNOWLEDGE_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
     'output_contract': (
-        '# Knowledge evidence citation rules\n'
-        'When answering with evidence retrieved from a knowledge base or uploaded '
-        'document index, cite using the original `[[document.chunk]]` markers present '
-        'in the retrieved evidence. Do not invent, rewrite, or fabricate citation markers.',
+        '# Knowledge evidence citation rules (mandatory)\n'
+        'When you use evidence retrieved from a knowledge base or uploaded document index, '
+        'you MUST cite that evidence in the user-visible final answer. Place the original '
+        '`[[document.chunk]]` marker immediately after each claim or paragraph it supports. '
+        'Every answer that relies on retrieved knowledge MUST contain at least one such marker. '
+        'Copy markers exactly from the corresponding retrieved evidence; do not invent, '
+        'renumber, rewrite, or fabricate citation markers. Do not replace these markers with '
+        'a manually written references list: the application converts valid markers into '
+        'inline citations and builds the references panel automatically.',
     ),
 }
 ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -92,7 +99,7 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         '`vision_extractor`, or `save_plugin_artifact`. Prefer this for images when the task is '
         'visual (edit, generate, workflow) or you only need the file location.\n'
         '- `read_user_attachment(filename, turn=N)`: extract TEXT — direct read for plain-text files, '
-        'OCR for pdf/doc/docx/pptx, or a '
+        'local structured extraction for docx (with OCR fallback), OCR for pdf/doc/pptx, or a '
         'text description via vision for images. Use only when you need document text or a textual '
         'answer about image content (e.g. "what does this document say", "describe this diagram").\n'
         'Supported uploads: images, pdf/doc/docx/pptx, and common plain-text/code/config files.\n'
@@ -117,24 +124,21 @@ ATTACHMENT_EDIT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
 }
 ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
-        '# User clarification and confirmation rules (mandatory)\n'
-        'Whenever you need the user to answer a question before you can continue—including '
-        'clarification, confirmation, approval, choosing among options, or supplying missing '
-        'information—you MUST call `ask_user`. Never ask a question that requires a user response '
-        'as plain assistant text, in a status update, or in the final answer. If you can proceed '
-        'safely with a reasonable assumption and do not actually need a response, do not ask. '
-        'Treat all of these as requiring `ask_user`: asking the user to choose A or B; asking what '
-        'they want to do next; collecting goals, preferences, constraints, or missing details; '
-        'requesting confirmation, approval, or permission; giving a quiz, exercise, interview, or '
-        'knowledge check; and ending with an invitation that expects a reply. Examples include '
-        '"Do you want the answer now or time to think?", "Are you asking for A or B?", '
-        '"Which option should we use?", "Would you like me to continue?", and "Please tell me your '
-        'specific intent." A question mark is not required: imperatives such as "Choose one", '
-        '"Tell me your preference", and "Confirm before I continue" also require `ask_user`. '
-        'Rhetorical questions that expect no answer do not require it. '
-        'Calling `ask_user` ends the current turn; continue only after the user answers.',
+        '# User-response channel contract (mandatory)\n'
+        'When `ask_user` is available, every user-facing question or request for a reply MUST be an '
+        'actual `ask_user` function-tool call. Never put such a question or request in assistant prose. '
+        'If the user explicitly asks you to question or interview them, follow that instruction by '
+        'calling `ask_user`. This contract controls only the response channel; decide what and how much '
+        'to ask from the user’s request and the conversation.',
     ),
 }
+ASK_USER_QUERY_APPENDIX = (
+    'ATTENTION — `ask_user` is registered for this turn. If you ask the user any question, request '
+    'their opinion, or invite any reply, you MUST make an actual `ask_user` function-tool call; NEVER '
+    'write that request as assistant prose. This rule applies to every kind of user-facing question or '
+    'reply request, including clarification, confirmation, opinion, open-ended questions, and optional '
+    'follow-ups.'
+)
 KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         "# Selected Knowledge Base Rules (CRITICAL — follow strictly)\n"
@@ -233,11 +237,18 @@ class ToolConfig:
     output_schema: dict[str, Any] | None = None
     required_config: list[str] | None = None
     appendix_system_prompt: SystemPromptAppendix | SystemPromptAppendixProvider | None = None
+    appendix_query: str | QueryAppendixProvider | None = None
+    appendix_query_position: QueryAppendixPosition = 'after'
 
     def __post_init__(self) -> None:
-        if callable(self.appendix_system_prompt):
-            return
-        self._validate_appendix(self.appendix_system_prompt)
+        if not callable(self.appendix_system_prompt):
+            self._validate_appendix(self.appendix_system_prompt)
+        if self.appendix_query is not None and not (
+            isinstance(self.appendix_query, str) or callable(self.appendix_query)
+        ):
+            raise TypeError('appendix_query must be a string, callable, or None')
+        if self.appendix_query_position not in ('before', 'after'):
+            raise ValueError('appendix_query_position must be "before" or "after"')
 
     @staticmethod
     def _validate_appendix(appendix: SystemPromptAppendix | None) -> None:
@@ -340,6 +351,7 @@ ASK_USER_TOOL_CONFIG = ToolConfig(
     tool=ask_user,
     module='interaction',
     appendix_system_prompt=ASK_USER_TOOL_POLICY_APPENDIX,
+    appendix_query=ASK_USER_QUERY_APPENDIX,
 )
 
 USER_ATTACHMENT_TOOL_CONFIGS = (
@@ -415,14 +427,14 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ),
     ToolConfig(
         name='writer_create', label='AI 写作',
-        description='从资料画像和大纲构建章节草稿与最终成稿',
+        description='基于统一 Writer IR 从资料画像和大纲构建章节草稿与最终成稿',
         tool=WriterCreateToolkit(), module='content', label_en='AI Writing',
-        description_en='Create structured long-form writing from source material.',
+        description_en='Create structured long-form writing with the unified Writer IR.',
     ),
     ToolConfig(
-        name='writer_revision', label='AI 修订', description='结构化定位、规划和修改已有草稿',
+        name='writer_revision', label='AI 修订', description='基于 Writer IR 结构化定位、规划和修改已有文档',
         tool=WriterRevisionToolkit(), module='content', label_en='AI Revision',
-        description_en='Revise existing drafts through a validated patch workflow.',
+        description_en='Revise WriterDocument artifacts through a validated patch workflow.',
     ),
     ToolConfig(
         name='calculator',
@@ -819,4 +831,27 @@ def collect_system_prompt_appendices(
                     continue
                 section_seen.add(dedupe_key)
                 collected.setdefault(section, []).append(original)
+    return collected
+
+
+def collect_query_appendices(
+    configs: list[ToolConfig],
+    position: QueryAppendixPosition = 'after',
+) -> list[str]:
+    """Collect current-turn tool instructions without adding them to chat history."""
+    collected = []
+    seen = set()
+    for cfg in configs:
+        if cfg.appendix_query_position != position:
+            continue
+        provider = cfg.appendix_query
+        content = provider() if callable(provider) else provider
+        original = str(content or '').strip()
+        if not original:
+            continue
+        dedupe_key = ' '.join(original.split())
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        collected.append(original)
     return collected

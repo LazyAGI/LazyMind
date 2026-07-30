@@ -8,6 +8,29 @@ import (
 	"github.com/gorilla/mux"
 )
 
+func TestWriterDocumentSyncRouteParsesSingleSlotIndex(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/plugin-sessions/ps-1/slots/synced_snapshot/items/idx/-1:sync-writer-document",
+		nil,
+	)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatal("expected WriterDocument sync route to match")
+	}
+	if got := match.Vars["list_index"]; got != "-1" {
+		t.Fatalf("expected list_index -1, got %q", got)
+	}
+	want := "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document"
+	if got, err := match.Route.GetPathTemplate(); err != nil || got != want {
+		t.Fatalf("expected route template %q, got %q (err=%v)", want, got, err)
+	}
+}
+
 func TestAgentThreadEventsRouteWinsOverGenericThreadRoute(t *testing.T) {
 	r := mux.NewRouter()
 	r.UseEncodedPath()
@@ -165,7 +188,6 @@ func TestAgentThreadGateDetailRoutesRegistered(t *testing.T) {
 		path   string
 		want   string
 	}{
-		{http.MethodGet, "/agent/threads/thr-1/gates/eval/versions/2/bad-cases", "/agent/threads/{thread_id}/gates/eval/versions/{version}/bad-cases"},
 		{http.MethodGet, "/agent/threads/thr-1/gates/abtest/versions/3/case-details", "/agent/threads/{thread_id}/gates/abtest/versions/{version}/case-details"},
 		{http.MethodGet, "/agent/threads/thr-1/results/traces:compare", "/agent/threads/{thread_id}/results/traces:compare"},
 		{http.MethodGet, "/agent/threads/thr-1/results/traces/trace-1", "/agent/threads/{thread_id}/results/traces/{trace_id}"},

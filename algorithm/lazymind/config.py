@@ -41,11 +41,25 @@ config.add('runtime_mode', str, 'cloud', 'RUNTIME_MODE',
 # ---------------------------------------------------------------------------
 config.add('mount_base_dir', str, '/data', 'MOUNT_BASE_DIR', description='Base directory for mounted files.')
 config.add(
-    'sensitive_words_path',
+    'sensitive_red_words_path',
     str,
-    os.path.join(_LAZYMIND_ROOT, 'chat', 'resources', 'sensitive_words.txt'),
-    'SENSITIVE_WORDS_PATH',
-    description='Path to sensitive words file.',
+    os.path.join(_LAZYMIND_ROOT, 'chat', 'resources', 'sensitive_red.txt'),
+    'SENSITIVE_RED_WORDS_PATH',
+    description='Path to sensitive red words file.',
+)
+config.add(
+    'sensitive_gray_words_path',
+    str,
+    os.path.join(_LAZYMIND_ROOT, 'chat', 'resources', 'sensitive_gray.txt'),
+    'SENSITIVE_GRAY_WORDS_PATH',
+    description='Path to sensitive gray words file.',
+)
+config.add(
+    'sensitive_whitelist_path',
+    str,
+    os.path.join(_LAZYMIND_ROOT, 'chat', 'resources', 'sensitive_whitelist.txt'),
+    'SENSITIVE_WHITELIST_PATH',
+    description='Path to sensitive whitelist file.',
 )
 config.add('llm_priority', int, 0, 'LLM_PRIORITY', description='LLM priority level.')
 config.add('max_concurrency', int, 10, 'MAX_CONCURRENCY', description='Max concurrent requests.')
@@ -127,6 +141,10 @@ config.add('agentic_max_rounds_medium', int, 20, 'AGENTIC_MAX_ROUNDS_MEDIUM',
            description='Maximum ChatAgent ReAct rounds in medium thinking-depth mode.')
 config.add('agentic_max_rounds_high', int, 60, 'AGENTIC_MAX_ROUNDS_HIGH',
            description='Maximum ChatAgent ReAct rounds in high thinking-depth mode.')
+config.add('agentic_tool_limit_wait_timeout', float, 120, 'AGENTIC_TOOL_LIMIT_WAIT_TIMEOUT',
+           description='Seconds ChatAgent waits for a user decision after reaching its initial round limit.')
+config.add('agentic_expanded_max_rounds', int, 200, 'AGENTIC_EXPANDED_MAX_ROUNDS',
+           description='Maximum ReAct rounds for one ChatAgent invocation after the user continues.')
 config.add('agentic_workspace', str, './workspace', 'AGENTIC_WORKSPACE',
            description='Workspace directory for agentic tools.')
 config.add('agentic_keep_full_turns', int, 3, 'AGENTIC_KEEP_FULL_TURNS',

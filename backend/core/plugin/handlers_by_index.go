@@ -93,7 +93,10 @@ func DeleteSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // PatchSlotItemByIndex handles PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}.
-// Body: {"value": <json>, "content_type": "text"|"json"|"image"|"file"}
+// Body: {"value": <json>, "content_type": "text"|"json"|"image"|"file", "mode": "draft"|"checkpoint"}
+//
+// mode=draft updates the selected human artifact in place when possible (no new revision).
+// mode=checkpoint (default) always creates a new human revision.
 func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 	sessionID := common.PathVar(r, "session_id")
 	slotID := common.PathVar(r, "slot_id")
@@ -106,6 +109,7 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		Value       json.RawMessage `json:"value"`
 		ContentType string          `json:"content_type"`
 		Caption     *string         `json:"caption"`
+		Mode        string          `json:"mode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Value) == 0 {
 		common.ReplyErr(w, "invalid body: value required", http.StatusBadRequest)
@@ -113,6 +117,14 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.ContentType == "" {
 		body.ContentType = "text"
+	}
+	mode := body.Mode
+	if mode == "" {
+		mode = "checkpoint"
+	}
+	if mode != "draft" && mode != "checkpoint" {
+		common.ReplyErr(w, "invalid mode: must be draft or checkpoint", http.StatusBadRequest)
+		return
 	}
 	db := store.DB()
 	if db == nil {
@@ -125,6 +137,31 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		li := listIndex
 		liPtr = &li
 	}
+	cleaned := resolveValuePaths(body.Value)
+
+	if mode == "draft" {
+		updated, updatedInPlace, err := UpdateSelectedHumanArtifactValue(
+			ctx, db, sessionID, slotID, liPtr, body.ContentType, cleaned, body.Caption,
+		)
+		if err != nil {
+			common.ReplyErr(w, "patch item failed", http.StatusInternalServerError)
+			return
+		}
+		if updatedInPlace {
+			NotifyPluginArtifactUpdated(ctx, db, sessionID, updated.StepID, updated.SlotID, updated.Slot, updated.Revision, updated.ListIndex, "human")
+			common.ReplyOK(w, map[string]any{
+				"type":       "slot_item_patched",
+				"session_id": sessionID,
+				"slot_id":    slotID,
+				"list_index": listIndex,
+				"revision":   updated.Revision,
+				"mode":       "draft",
+			})
+			return
+		}
+		// Selected revision is not an updatable human artifact; fall through to create one.
+	}
+
 	// listIndex == -1 means single slot (list_index IS NULL)
 	var existing orm.PluginSlotRevision
 	q := db.WithContext(ctx).Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
@@ -145,18 +182,20 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		sessionID, slotID, existing.Slot, existing.StepID, existing.Attempt,
 		slotType,
 		liPtr,
-		body.ContentType, resolveValuePaths(body.Value), body.Caption,
+		body.ContentType, cleaned, body.Caption,
 	)
 	if err != nil {
 		common.ReplyErr(w, "patch item failed", http.StatusInternalServerError)
 		return
 	}
+	NotifyPluginArtifactUpdated(ctx, db, sessionID, newRev.StepID, newRev.SlotID, newRev.Slot, newRev.Revision, newRev.ListIndex, "human")
 	common.ReplyOK(w, map[string]any{
 		"type":       "slot_item_patched",
 		"session_id": sessionID,
 		"slot_id":    slotID,
 		"list_index": listIndex,
 		"revision":   newRev.Revision,
+		"mode":       mode,
 	})
 }
 
@@ -339,6 +378,7 @@ func RollbackSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "rollback failed", http.StatusInternalServerError)
 		return
 	}
+	NotifyPluginArtifactUpdated(ctx, db, sessionID, newRev.StepID, newRev.SlotID, newRev.Slot, newRev.Revision, newRev.ListIndex, "rollback")
 	common.ReplyOK(w, map[string]any{
 		"type":       "slot_item_rolled_back",
 		"session_id": sessionID,

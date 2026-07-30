@@ -44,6 +44,7 @@ def test_create_subagent_snapshots_parent_attachment_context(monkeypatch):
         'user_id': 'user-1',
         'conversation_id': 'conversation-1',
     }
+    assert emitted[0][1]['params']['_thinking_depth'] == 'medium'
 
 
 def test_runner_restores_attachment_context_for_ordinary_subagent():
@@ -70,6 +71,25 @@ def test_runner_restores_attachment_context_for_ordinary_subagent():
     assert config['user_id'] == 'user-1'
     assert config['conversation_id'] == 'conversation-1'
     assert config['is_subagent'] is True
+
+
+def test_coerce_dict_accepts_sqlite_blob_params():
+    # Local SQLite stores JSON columns as BLOB; the runner must decode bytes.
+    raw = (
+        b'{"history_files_per_turn":{"1":["/uploads/dog.jpg"]},'
+        b'"session_id":"ps_1","user_id":"user-1"}'
+    )
+    params = runner._coerce_dict(raw)
+    assert params['history_files_per_turn'] == {'1': ['/uploads/dog.jpg']}
+    assert runner._coerce_str_list(b'["a","b"]') == ['a', 'b']
+
+    config = runner._build_agentic_config(
+        {'conversation_id': 'conversation-1', 'objective': 'use dog.jpg'},
+        params,
+        'plugin_step',
+    )
+    assert config['history_files_per_turn'] == {'1': ['/uploads/dog.jpg']}
+    assert config['files'] == ['/uploads/dog.jpg']
 
 
 def test_subagent_plan_renders_inherited_attachments_without_exposing_internal_params(tmp_path):
@@ -148,7 +168,7 @@ def test_subagent_attachment_edit_publishes_through_task_artifact(monkeypatch, t
         )
         return {'success': True, 'result': {'status': 'ok'}}
 
-    monkeypatch.setattr(attachment_tools, 'save_artifact', fake_save)
+    monkeypatch.setattr(attachment_tools, '_save_artifact', fake_save)
 
     result = attachment_tools._publish_attachment_edit(draft)
 

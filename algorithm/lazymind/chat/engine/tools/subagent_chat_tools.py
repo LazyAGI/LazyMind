@@ -142,6 +142,7 @@ def create_subagent(
     """
     mode = _mode()
     params = dict(params or {})
+    params['_thinking_depth'] = str(_agentic_config().get('thinking_depth') or 'medium')
     attachment_context = _current_attachment_context()
     if attachment_context:
         params[SUBAGENT_ATTACHMENT_CONTEXT_KEY] = attachment_context

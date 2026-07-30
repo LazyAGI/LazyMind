@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -114,32 +114,114 @@ func TestListSkillsKeywordFallbackWithoutSearchIndexTable(t *testing.T) {
 	}
 }
 
-func TestListSkillsKeywordTreatsLikeCharactersLiterally(t *testing.T) {
-	db := newSkillV2TestDB(t)
-	ensureSkillSearchIndexTable(t, db)
-	fixtures := map[string]string{
-		"skill-hit":        `literal 100%_path\value`,
-		"skill-percent":    `literal 100ABC_path\value`,
-		"skill-underscore": `literal 100%Xpath\value`,
-		"skill-slash":      `literal 100%_pathvalue`,
-	}
-	for skillID, content := range fixtures {
-		revisionID := "rev-" + strings.TrimPrefix(skillID, "skill-")
-		seedSkillWithHeadRevision(t, db, skillID, revisionID)
-		setSkillMetadata(t, db, skillID, "Planner "+skillID, "writing", "daily notes", `["team"]`)
-		setHeadContent(t, db, revisionID, content)
-		seedSearchIndex(t, db, skillID, revisionID, content)
-	}
+func TestListSkillsKeywordTreatsSpecialCharactersLiterally(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		keyword  string
+		similar  string
+		expected []string
+	}{
+		{name: "underscore", keyword: "a_b", similar: "axb"},
+		{name: "percent", keyword: "a%b", similar: "axxb"},
+		{name: "single backslash", keyword: `a\b`, similar: "ab"},
+		{name: "double backslash", keyword: `a\\b`, similar: `a\b`},
+		{name: "escape marker", keyword: "a!b", similar: "aXb"},
+		{name: "unicode and english", keyword: "普通Keyword", similar: "普通Other"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newSkillV2TestDB(t)
+			ensureSkillSearchIndexTable(t, db)
+			for _, fixture := range []struct {
+				skillID    string
+				revisionID string
+				name       string
+				tags       []string
+				content    string
+				indexRev   string
+				indexText  string
+			}{
+				{skillID: "skill-meta", revisionID: "rev-meta", name: "metadata " + tc.keyword, tags: []string{"plain"}, content: "plain head", indexRev: "rev-meta", indexText: "plain index"},
+				{skillID: "skill-tag", revisionID: "rev-tag", name: "tag hit", tags: []string{tc.keyword}, content: "plain head", indexRev: "rev-tag", indexText: "plain index"},
+				{skillID: "skill-index", revisionID: "rev-index", name: "index hit", tags: []string{"plain"}, content: "plain head", indexRev: "rev-index", indexText: "fresh " + tc.keyword},
+				{skillID: "skill-missing", revisionID: "rev-missing", name: "missing fallback", tags: []string{"plain"}, content: "missing " + tc.keyword},
+				{skillID: "skill-stale", revisionID: "rev-stale", name: "stale fallback", tags: []string{"plain"}, content: "stale " + tc.keyword, indexRev: "old-rev-stale", indexText: "stale " + tc.similar},
+				{skillID: "skill-similar", revisionID: "rev-similar", name: "similar " + tc.similar, tags: []string{tc.similar}, content: "similar " + tc.similar, indexRev: "rev-similar", indexText: "similar " + tc.similar},
+			} {
+				seedSkillWithHeadRevision(t, db, fixture.skillID, fixture.revisionID)
+				setSkillMetadata(t, db, fixture.skillID, fixture.name, "writing", "daily notes", jsonTags(t, fixture.tags...))
+				setHeadContent(t, db, fixture.revisionID, fixture.content)
+				if fixture.indexRev != "" {
+					seedSearchIndex(t, db, fixture.skillID, fixture.indexRev, fixture.indexText)
+				}
+			}
 
-	got, err := newListSkillService(t, db).ListSkills(context.Background(), ListSkillsRequest{
-		UserID:  "user_001",
-		Keyword: `100%_path\value`,
-	})
-	if err != nil {
-		t.Fatalf("ListSkills returned error: %v", err)
+			got, err := newListSkillService(t, db).ListSkills(context.Background(), ListSkillsRequest{
+				UserID:  "user_001",
+				Keyword: tc.keyword,
+				Limit:   2,
+			})
+			if err != nil {
+				t.Fatalf("ListSkills returned error: %v", err)
+			}
+			if got.Total != 5 {
+				t.Fatalf("Total = %d, want 5", got.Total)
+			}
+			if len(got.Items) != 2 {
+				t.Fatalf("Items len = %d, want paginated 2", len(got.Items))
+			}
+			if len(got.Items) >= int(got.Total) {
+				t.Fatalf("pagination did not reduce returned items: %#v", got)
+			}
+
+			all, err := newListSkillService(t, db).ListSkills(context.Background(), ListSkillsRequest{
+				UserID:  "user_001",
+				Keyword: tc.keyword,
+				Limit:   10,
+			})
+			if err != nil {
+				t.Fatalf("ListSkills all returned error: %v", err)
+			}
+			gotIDs := itemIDs(all.Items)
+			wantIDs := []string{"skill-tag", "skill-stale", "skill-missing", "skill-meta", "skill-index"}
+			if fmt.Sprint(gotIDs) != fmt.Sprint(wantIDs) {
+				t.Fatalf("item IDs = %v, want literal matches %v", gotIDs, wantIDs)
+			}
+		})
 	}
-	if got.Total != 1 || len(got.Items) != 1 || got.Items[0].ID != "skill-hit" {
-		t.Fatalf("result = %#v, want only literal LIKE character match", got)
+}
+
+func TestListSkillsTagsTreatSpecialCharactersLiterally(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		tag     string
+		similar string
+	}{
+		{name: "underscore", tag: "a_b", similar: "axb"},
+		{name: "percent", tag: "a%b", similar: "axxb"},
+		{name: "single backslash", tag: `a\b`, similar: "ab"},
+		{name: "double backslash", tag: `a\\b`, similar: `a\b`},
+		{name: "escape marker", tag: "a!b", similar: "aXb"},
+		{name: "unicode and english", tag: "普通Keyword", similar: "普通Other"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newSkillV2TestDB(t)
+			seedSkillWithHeadRevision(t, db, "skill-hit", "rev-hit")
+			setSkillMetadata(t, db, "skill-hit", "Planner", "writing", "daily notes", jsonTags(t, tc.tag))
+			seedSkillWithHeadRevision(t, db, "skill-similar", "rev-similar")
+			setSkillMetadata(t, db, "skill-similar", "Planner similar", "writing", "daily notes", jsonTags(t, tc.similar))
+
+			got, err := newListSkillService(t, db).ListSkills(context.Background(), ListSkillsRequest{
+				UserID: "user_001",
+				Tags:   []string{tc.tag},
+				Limit:  10,
+			})
+			if err != nil {
+				t.Fatalf("ListSkills returned error: %v", err)
+			}
+			if got.Total != 1 || len(got.Items) != 1 || got.Items[0].ID != "skill-hit" {
+				t.Fatalf("result = %#v, want only literal tag match", got)
+			}
+		})
 	}
 }
 
@@ -170,6 +252,36 @@ func TestListSkillsKeywordTotalPagingAndStableSort(t *testing.T) {
 	wantIDs := []string{"skill-003", "skill-002"}
 	if fmt.Sprint(gotIDs) != fmt.Sprint(wantIDs) {
 		t.Fatalf("item IDs = %v, want %v", gotIDs, wantIDs)
+	}
+}
+
+func TestListSkillsStableSortUsesExplicitSkillID(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	ensureSkillSearchIndexTable(t, db)
+	for _, item := range []struct {
+		skillID    string
+		revisionID string
+	}{
+		{skillID: "skill-m", revisionID: "rev-m"},
+		{skillID: "skill-z", revisionID: "rev-z"},
+		{skillID: "skill-a", revisionID: "rev-a"},
+	} {
+		seedSkillWithHeadRevision(t, db, item.skillID, item.revisionID)
+		setSkillMetadata(t, db, item.skillID, "Planner "+item.skillID, "writing", "daily notes", `["team"]`)
+		seedSearchIndex(t, db, item.skillID, item.revisionID, "needle")
+	}
+
+	got, err := newListSkillService(t, db).ListSkills(context.Background(), ListSkillsRequest{
+		UserID:  "user_001",
+		Keyword: "needle",
+	})
+	if err != nil {
+		t.Fatalf("ListSkills returned error: %v", err)
+	}
+	gotIDs := itemIDs(got.Items)
+	wantIDs := []string{"skill-z", "skill-m", "skill-a"}
+	if fmt.Sprint(gotIDs) != fmt.Sprint(wantIDs) {
+		t.Fatalf("item IDs = %v, want explicit skills.id DESC order %v", gotIDs, wantIDs)
 	}
 }
 
@@ -283,6 +395,15 @@ func setSkillMetadata(t *testing.T, db *gorm.DB, skillID, name, category, descri
 	}).Error; err != nil {
 		t.Fatalf("update skill metadata: %v", err)
 	}
+}
+
+func jsonTags(t *testing.T, tags ...string) string {
+	t.Helper()
+	raw, err := json.Marshal(tags)
+	if err != nil {
+		t.Fatalf("marshal tags: %v", err)
+	}
+	return string(raw)
 }
 
 func setHeadContent(t *testing.T, db *gorm.DB, revisionID, content string) {

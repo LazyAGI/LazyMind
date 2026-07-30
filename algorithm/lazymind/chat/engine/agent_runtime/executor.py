@@ -8,7 +8,8 @@ import lazyllm.module.stream_helper as _sh
 import lazyllm.tools.agent as _agent_mod
 from lazymind.config import config as _cfg
 
-from .models import AgentRunPlan
+from .models import AgentRole, AgentRunPlan
+from .tool_limit_control import tool_limit_decision_coordinator
 
 
 class ToolCallGuard:
@@ -154,6 +155,10 @@ class AgentExecutor:
             'enable_builtin_tools': False,
             'force_summarize': True,
             'force_summarize_context': plan.force_summarize_context,
+            'on_max_retries': (
+                tool_limit_decision_coordinator.on_max_retries
+                if plan.role == AgentRole.CHAT else None
+            ),
         }
         optional = {
             'skills': options.skills,

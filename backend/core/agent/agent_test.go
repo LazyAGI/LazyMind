@@ -16,6 +16,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 )
@@ -221,6 +222,13 @@ func TestCreateThreadRequiresConfiguredThreadLLMs(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "llm") || !strings.Contains(rec.Body.String(), "evo_llm") {
 		t.Fatalf("expected response to mention llm and evo_llm, body=%s", rec.Body.String())
 	}
+	var response map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if int(response["code"].(float64)) != threadModelNotConfiguredCode {
+		t.Fatalf("expected model configuration code, body=%s", rec.Body.String())
+	}
 	var activeCount int64
 	if err := db.DB.Model(&orm.AgentUserActiveThread{}).Count(&activeCount).Error; err != nil {
 		t.Fatalf("count active threads: %v", err)
@@ -234,12 +242,13 @@ func TestAttachThreadModelConfigProvidesRequiredThreadLLMs(t *testing.T) {
 	db := newAgentTestDB(t)
 	seedAgentRuntimeModelConfig(t, db, "user-1", "llm")
 	seedAgentRuntimeModelConfig(t, db, "user-1", "evo_llm")
+	seedAgentRuntimeModelConfig(t, db, "user-1", "embed_main")
 
 	payload := map[string]any{}
 	if err := attachThreadModelConfig(context.Background(), db.DB, "user-1", payload); err != nil {
 		t.Fatalf("attach thread model config: %v", err)
 	}
-	if !hasThreadRequiredLLMConfig(payload) {
+	if issues := threadModelConfigIssues(payload); len(issues) != 0 {
 		t.Fatalf("expected attached payload to satisfy thread llm requirement: %#v", payload)
 	}
 	llmConfig, ok := payload["llm_config"].(map[string]any)
@@ -253,6 +262,84 @@ func TestAttachThreadModelConfigProvidesRequiredThreadLLMs(t *testing.T) {
 	chatConfig, ok := llmConfig["llm"].(map[string]any)
 	if !ok || chatConfig["model"] != "gpt-llm" {
 		t.Fatalf("expected llm config, got %#v", llmConfig["llm"])
+	}
+}
+
+func TestThreadModelConfigRejectsMissingFields(t *testing.T) {
+	payload := map[string]any{
+		"llm_config": map[string]any{
+			"llm":        map[string]any{"source": "Qwen", "model": "qwen-plus", "base_url": "url", "api_key": "key"},
+			"evo_llm":    map[string]any{"source": "Qwen"},
+			"embed_main": map[string]any{"source": "Qwen", "model": "embed", "base_url": "url", "api_key": "key"},
+		},
+	}
+	issues := threadModelConfigIssues(payload)
+	if len(issues) != 1 || issues[0].ModelRole != "evo_llm" || issues[0].Status != "incomplete" {
+		t.Fatalf("expected incomplete evo_llm issue, got %#v", issues)
+	}
+	if len(issues[0].MissingFields) != 3 {
+		t.Fatalf("expected model/base_url/api_key to be missing, got %#v", issues[0].MissingFields)
+	}
+}
+
+func TestEvoCreateModelErrorIsPreserved(t *testing.T) {
+	err := &common.HTTPError{
+		StatusCode: http.StatusUnprocessableEntity,
+		Message:    `{"detail":{"code":2001301,"message":"当前配置的自进化模型不支持自进化","data":{"reason":"evo_llm_not_allowed"}}}`,
+	}
+	appErr, ok := evoCreateModelAppError(err)
+	if !ok || appErr.Code != evoModelNotAllowedCode || appErr.HTTPStatus != http.StatusUnprocessableEntity {
+		t.Fatalf("expected structured evo model error, got %#v ok=%v", appErr, ok)
+	}
+}
+
+func TestCreateThreadPreservesEvoModelErrorAndReleasesReservation(t *testing.T) {
+	db := newAgentTestDB(t)
+	if err := db.DB.AutoMigrate(&orm.Dataset{}); err != nil {
+		t.Fatalf("auto migrate dataset: %v", err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	for _, role := range []string{"llm", "evo_llm", "embed_main"} {
+		seedAgentRuntimeModelConfig(t, db, "user-1", role)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"detail":{"code":2001301,"message":"当前 evo_llm 不支持 repair","data":{"reason":"evo_llm_not_allowed"}}}`))
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/agent/threads", strings.NewReader(
+		`{"mode":"interactive","title":"model gate","inputs":{"kb_id":"kb-1"}}`,
+	))
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	CreateThread(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if int(response["code"].(float64)) != evoModelNotAllowedCode {
+		t.Fatalf("expected preserved model code, body=%s", rec.Body.String())
+	}
+	data, ok := response["data"].(map[string]any)
+	detail, detailOK := data["detail"].(map[string]any)
+	if !ok || !detailOK || detail["reason"] != "evo_llm_not_allowed" {
+		t.Fatalf("expected preserved model detail, body=%s", rec.Body.String())
+	}
+	var activeCount int64
+	if err := db.DB.Model(&orm.AgentUserActiveThread{}).Count(&activeCount).Error; err != nil {
+		t.Fatalf("count active thread reservations: %v", err)
+	}
+	if activeCount != 0 {
+		t.Fatalf("expected failed create to release reservation, got %d rows", activeCount)
 	}
 }
 
@@ -331,6 +418,61 @@ func TestPostThreadActionForwardsOnlyCommandFields(t *testing.T) {
 	}
 	if len(got) != 2 || got["command_id"] != "cmd_1" || got["until_step"] != "eval" {
 		t.Fatalf("unexpected upstream command body: %#v", got)
+	}
+}
+
+func TestPostThreadRetryForwardsStageInsteadOfUntilStep(t *testing.T) {
+	db := newAgentTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now().UTC()
+	if err := db.DB.Create(&orm.AgentThread{
+		ThreadID:     "thr_1",
+		Status:       "failed",
+		CreateUserID: "u1",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}).Error; err != nil {
+		t.Fatalf("seed thread: %v", err)
+	}
+
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/threads/thr_1" {
+			_ = json.NewEncoder(w).Encode(evoThread{
+				ThreadID: "thr_1", Status: "running", CurrentStep: "analysis",
+			})
+			return
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/threads/thr_1/retry" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode upstream body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "accepted"})
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	body := `{"command_id":"cmd_retry","until_step":"analysis","extra":true}`
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/core/agent/threads/thr_1/retry",
+		strings.NewReader(body),
+	)
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"thread_id": "thr_1"})
+	rec := httptest.NewRecorder()
+
+	postThreadAction(rec, req, "retry")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected ok, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(got) != 2 || got["command_id"] != "cmd_retry" || got["stage"] != "analysis" {
+		t.Fatalf("unexpected upstream retry body: %#v", got)
 	}
 }
 
@@ -423,53 +565,6 @@ func TestStreamThreadMessagesProxiesEvoResponse(t *testing.T) {
 
 	if got["message_id"] != "m1" || got["content"] != "继续" || got["extra"] != true {
 		t.Fatalf("unexpected upstream message body: %#v", got)
-	}
-}
-
-func TestGetThreadEvalGateBadCasesProxiesEvoResponse(t *testing.T) {
-	db := newAgentTestDB(t)
-	store.Init(db.DB, nil, nil)
-	t.Cleanup(func() { store.Init(nil, nil, nil) })
-
-	now := time.Now().UTC()
-	if err := db.DB.Create(&orm.AgentThread{
-		ThreadID:     "thr_1",
-		Status:       "created",
-		CreateUserID: "u1",
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}).Error; err != nil {
-		t.Fatalf("seed thread: %v", err)
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/threads/thr_1/gates/eval/versions/2/bad-cases" {
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-		if got := r.URL.Query().Get("page_size"); got != "10" {
-			t.Fatalf("expected page_size to proxy, got %q", got)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{{"case_id": "case_1"}}})
-	}))
-	defer server.Close()
-	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
-
-	req := httptest.NewRequest(
-		http.MethodGet,
-		"/api/core/agent/threads/thr_1/gates/eval/versions/2/bad-cases?page_size=10",
-		nil,
-	)
-	req.Header.Set("X-User-Id", "u1")
-	req = mux.SetURLVars(req, map[string]string{"thread_id": "thr_1", "version": "2"})
-	rec := httptest.NewRecorder()
-
-	GetThreadEvalGateBadCases(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected ok, status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "case_1") {
-		t.Fatalf("expected proxied bad case body, got %s", rec.Body.String())
 	}
 }
 

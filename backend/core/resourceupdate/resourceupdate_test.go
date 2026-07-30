@@ -21,6 +21,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/preferencefile"
+	skillservice "lazymind/core/skillv2/service"
 	"lazymind/core/skillv2/taskguard"
 	"lazymind/core/state"
 	"lazymind/core/store"
@@ -153,6 +154,110 @@ func TestAutoEvoDraftWaitsForEditorThenCommits(t *testing.T) {
 	}
 }
 
+func TestEnablingAutoEvoPublishesPendingReviewDraft(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	createSkillReviewResultsTable(t, db)
+	createMemoryReviewTable(t, db)
+	now := time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC)
+	insertSkillResource(t, db, orm.SkillResource{
+		ID: "skill-pending-review", OwnerUserID: "user-1", Category: "system", SkillName: "pending-review",
+		Content: skillContent("pending-review", "old"), Version: 1, AutoEvo: false, IsEnabled: true,
+		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour), CreateUserID: "user-1",
+	})
+	newContent := skillContent("pending-review", "new")
+	newHash := evolution.HashContent(newContent)
+	if err := db.Create(&orm.SkillV2Blob{
+		Hash: newHash, Size: int64(len(newContent)), Mime: "text/markdown; charset=utf-8", FileType: "markdown",
+		StorageBackend: "postgres", Content: []byte(newContent), CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("insert draft blob: %v", err)
+	}
+	if err := db.Model(&orm.SkillV2Draft{}).Where("skill_id = ?", "skill-pending-review").Updates(map[string]any{
+		"version": 2, "draft_updated_at": now, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatalf("update pending review draft: %v", err)
+	}
+	if err := db.Create(&orm.SkillV2DraftEntry{
+		SkillID: "skill-pending-review", Path: "SKILL.md", Op: "upsert", EntryType: "file", BlobHash: &newHash,
+		Size: int64(len(newContent)), Mime: "text/markdown; charset=utf-8", FileType: "markdown", Mode: 0o644, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("insert draft entry: %v", err)
+	}
+	userID := "user-1"
+	if err := db.Create(&orm.SkillDraftReviewSession{
+		ID: "draft-review-session", SkillID: "skill-pending-review",
+		BaseRevisionID: "skill-pending-review-rev", DraftVersionAtStart: 2, DraftSnapshotHash: "snapshot",
+		Status: "active", Version: 1, UndoLimit: 20, CreatedBy: &userID, UpdatedBy: &userID,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("insert active draft review: %v", err)
+	}
+
+	svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+		DB:        db,
+		BlobStore: skillservice.NewBlobStore(db, skillservice.NewLocalObjectStore(t.TempDir())),
+	})
+	enabled := true
+	if _, err := svc.PatchSkill(context.Background(), skillservice.PatchSkillRequest{
+		SkillID: "skill-pending-review",
+		UserID:  userID,
+		AutoEvo: &enabled,
+	}); err != nil {
+		t.Fatalf("enable auto evo: %v", err)
+	}
+
+	var promoted orm.SkillV2Draft
+	if err := db.Take(&promoted, "skill_id = ?", "skill-pending-review").Error; err != nil {
+		t.Fatalf("load promoted draft: %v", err)
+	}
+	if promoted.DraftStatus != "auto_pending" || !strings.HasPrefix(promoted.TaskID, "review_auto_evo_") {
+		t.Fatalf("promoted draft = %#v, want auto_pending review task", promoted)
+	}
+	detail, err := svc.GetSkill(context.Background(), skillservice.GetSkillRequest{SkillID: "skill-pending-review", UserID: userID})
+	if err != nil {
+		t.Fatalf("load promoted skill: %v", err)
+	}
+	if detail.Draft.HasUncommittedDraft {
+		t.Fatalf("auto pending draft still exposed as pending confirmation: %#v", detail.Draft)
+	}
+
+	// Simulate a legacy row that was already auto-enabled before this fix was deployed.
+	if err := db.Model(&orm.SkillV2Draft{}).Where("skill_id = ?", "skill-pending-review").Updates(map[string]any{
+		"draft_status": "", "task_id": "", "version": 2,
+	}).Error; err != nil {
+		t.Fatalf("restore legacy pending review state: %v", err)
+	}
+	scanner := NewScanner(db, Config{}, "auto-evo-toggle-scanner")
+	scanner.clock = func() time.Time { return now }
+	scanResult, err := scanner.RunOnce(context.Background())
+	if err != nil || scanResult.SkillDraftTasksCreated != 1 {
+		t.Fatalf("scan promoted draft: result=%#v err=%v", scanResult, err)
+	}
+	worker := NewWorker(db, Config{WorkerBatchSize: 1, WorkerLockTTL: time.Minute, MaxAttempts: 1}, "auto-evo-toggle-worker")
+	worker.clock = func() time.Time { return now }
+	runResult, err := worker.RunOnce(context.Background())
+	if err != nil || runResult.Done != 1 {
+		t.Fatalf("publish promoted draft: result=%#v err=%v", runResult, err)
+	}
+	if got := readSkillV2HeadContent(t, db, "skill-pending-review"); got != newContent {
+		t.Fatalf("published content = %q, want %q", got, newContent)
+	}
+	var draftEntryCount int64
+	if err := db.Model(&orm.SkillV2DraftEntry{}).Where("skill_id = ?", "skill-pending-review").Count(&draftEntryCount).Error; err != nil {
+		t.Fatalf("count published draft entries: %v", err)
+	}
+	if draftEntryCount != 0 {
+		t.Fatalf("draft entry count = %d, want 0 after publish", draftEntryCount)
+	}
+	var committedReview orm.SkillDraftReviewSession
+	if err := db.Take(&committedReview, "id = ?", "draft-review-session").Error; err != nil {
+		t.Fatalf("load committed review: %v", err)
+	}
+	if committedReview.Status != "committed" {
+		t.Fatalf("review status = %q, want committed", committedReview.Status)
+	}
+}
+
 func TestAutoEvoCreateDraftCommitsInitialRevisionAfterEditorIdle(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	createSkillReviewResultsTable(t, db)
@@ -259,6 +364,91 @@ func TestAutoEvoCreateDraftCommitsInitialRevisionAfterEditorIdle(t *testing.T) {
 	}
 }
 
+func TestAutoEvoPersonalDraftScannerCommitsConversationDraft(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	createSkillReviewResultsTable(t, db)
+	createMemoryReviewTable(t, db)
+	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+	insertPersonalResource(t, db, "memory-auto-draft", "user-1", orm.ResourceUpdateResourceTypeMemory, "old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
+	insertPersonalResource(t, db, "memory-review-draft", "user-2", orm.ResourceUpdateResourceTypeMemory, "review old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
+	insertPersonalResource(t, db, "memory-manual-draft", "user-3", orm.ResourceUpdateResourceTypeMemory, "manual old", 1, false, 0, now.Add(-time.Hour), now.Add(-time.Hour))
+	insertPersonalResource(t, db, "memory-stuck-auto-draft", "user-4", orm.ResourceUpdateResourceTypeMemory, "stuck old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
+	insertPersonalResource(t, db, "memory-empty-manual-draft", "user-5", orm.ResourceUpdateResourceTypeMemory, "empty manual old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
+
+	setPersonalDraft := func(resourceID, content, taskID, status string) {
+		t.Helper()
+		hash := evolution.HashContent(content)
+		if err := db.Create(&orm.PersonalResourceBlob{
+			Hash: hash, Size: int64(len(content)), Mime: "text/markdown; charset=utf-8", FileType: "markdown",
+			StorageBackend: "postgres", Content: []byte(content), CreatedAt: now,
+		}).Error; err != nil {
+			t.Fatalf("insert personal draft blob: %v", err)
+		}
+		if err := db.Model(&orm.PersonalResourceDraft{}).Where("resource_id = ?", resourceID).Updates(map[string]any{
+			"blob_hash": hash, "content_hash": hash, "size": int64(len(content)), "task_id": taskID,
+			"draft_status": status, "draft_updated_at": now, "version": 2, "updated_at": now,
+		}).Error; err != nil {
+			t.Fatalf("update personal draft: %v", err)
+		}
+	}
+	setPersonalDraft("memory-auto-draft", "new", "session-1", "pending_confirm")
+	setPersonalDraft("memory-review-draft", "review new", "memory_review_1", "pending_confirm")
+	setPersonalDraft("memory-manual-draft", "manual new", "session-3", "pending_confirm")
+	setPersonalDraft("memory-stuck-auto-draft", "stuck new", "", "auto_pending")
+	setPersonalDraft("memory-empty-manual-draft", "empty manual new", "", "pending_confirm")
+
+	scanner := NewScanner(db, Config{}, "personal-draft-scanner")
+	scanner.clock = func() time.Time { return now }
+	scanResult, err := scanner.RunOnce(context.Background())
+	if err != nil || scanResult.PersonalDraftTasksCreated != 2 {
+		t.Fatalf("scan personal drafts: result=%#v err=%v", scanResult, err)
+	}
+	var recoveredDraft orm.PersonalResourceDraft
+	if err := db.Take(&recoveredDraft, "resource_id = ?", "memory-stuck-auto-draft").Error; err != nil {
+		t.Fatalf("read recovered draft: %v", err)
+	}
+	if !strings.HasPrefix(recoveredDraft.TaskID, "personal_auto_evo_") || recoveredDraft.Version != 3 {
+		t.Fatalf("recovered draft = %#v, want generated task and version 3", recoveredDraft)
+	}
+	repeatScan, err := scanner.RunOnce(context.Background())
+	if err != nil || repeatScan.PersonalDraftTasksCreated != 0 {
+		t.Fatalf("repeat scan duplicated personal draft task: result=%#v err=%v", repeatScan, err)
+	}
+
+	worker := NewWorker(db, Config{WorkerBatchSize: 2, WorkerLockTTL: time.Minute}, "personal-draft-worker")
+	worker.clock = func() time.Time { return now }
+	result, err := worker.RunOnce(context.Background())
+	if err != nil || result.Done != 2 {
+		var tasks []orm.ResourceUpdateTask
+		if queryErr := db.Where("task_type = ?", orm.ResourceUpdateTaskTypeAutoCommitPersonalDraft).Order("created_at ASC").Find(&tasks).Error; queryErr != nil {
+			t.Fatalf("commit personal draft: result=%#v err=%v; query tasks: %v", result, err, queryErr)
+		}
+		t.Fatalf("commit personal draft: result=%#v err=%v tasks=%#v", result, err, tasks)
+	}
+	if content, _ := readPersonalResourceHeadContent(t, db, "memory-auto-draft"); content != "new" {
+		t.Fatalf("committed content = %q, want new", content)
+	}
+	var committedDraft orm.PersonalResourceDraft
+	if err := db.Take(&committedDraft, "resource_id = ?", "memory-auto-draft").Error; err != nil {
+		t.Fatalf("read committed draft: %v", err)
+	}
+	if committedDraft.DraftStatus != "" || committedDraft.TaskID != "" || committedDraft.DraftUpdatedAt != nil {
+		t.Fatalf("committed draft was not reset: %#v", committedDraft)
+	}
+	if content, _ := readPersonalResourceHeadContent(t, db, "memory-review-draft"); content != "review old" {
+		t.Fatalf("memory review draft was committed: %q", content)
+	}
+	if content, _ := readPersonalResourceHeadContent(t, db, "memory-manual-draft"); content != "manual old" {
+		t.Fatalf("manual draft was committed: %q", content)
+	}
+	if content, _ := readPersonalResourceHeadContent(t, db, "memory-stuck-auto-draft"); content != "stuck new" {
+		t.Fatalf("recovered auto draft was not committed: %q", content)
+	}
+	if content, _ := readPersonalResourceHeadContent(t, db, "memory-empty-manual-draft"); content != "empty manual old" {
+		t.Fatalf("empty manual draft was committed: %q", content)
+	}
+}
+
 func TestAutoEvoDraftDefersWhenEditorStatusIsUnavailable(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	now := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
@@ -349,6 +539,9 @@ func TestCountSkillReviewHistoryStatsCountsTrajectoryToolCalls(t *testing.T) {
 	if stats.UserTurnCount != 3 || stats.ToolCallCount != 8 || stats.QualifiedSessionCount != 1 {
 		t.Fatalf("expected trajectory-style 3/8/1, got %#v", stats)
 	}
+	if len(stats.QualifiedSessionIDs) != 1 || stats.QualifiedSessionIDs[0] != "conv-u1" {
+		t.Fatalf("expected qualified conversation ID, got %#v", stats.QualifiedSessionIDs)
+	}
 }
 
 func TestCountSkillReviewHistoryStatsExcludesPluginConversations(t *testing.T) {
@@ -377,6 +570,40 @@ func TestCountSkillReviewHistoryStatsExcludesPluginConversations(t *testing.T) {
 	}
 	if stats.UserTurnCount != 2 || stats.ToolCallCount != 2 || stats.QualifiedSessionCount != 1 {
 		t.Fatalf("expected only regular conversation to count, got %#v", stats)
+	}
+	if len(stats.QualifiedSessionIDs) != 1 || stats.QualifiedSessionIDs[0] != "conv-regular" {
+		t.Fatalf("plugin conversation must not be selected, got %#v", stats.QualifiedSessionIDs)
+	}
+}
+
+func TestValidateSkillReviewSessionsRejectsOtherUsersAndPluginConversations(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	insertConversation(t, db, "conv-owned", "user-1", now)
+	insertConversation(t, db, "conv-other", "user-2", now)
+	insertConversation(t, db, "conv-plugin", "user-1", now)
+	if err := db.Create(&orm.PluginSession{
+		ID:             "plugin-session-validation",
+		ConversationID: "conv-plugin",
+		PluginID:       "image-plugin",
+		Status:         "completed",
+		CreateUserID:   "user-1",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}).Error; err != nil {
+		t.Fatalf("insert plugin session: %v", err)
+	}
+
+	ids, err := validateSkillReviewSessions(ctx, db, "user-1", []string{"conv-owned"})
+	if err != nil || len(ids) != 1 || ids[0] != "conv-owned" {
+		t.Fatalf("validate owned conversation: ids=%#v err=%v", ids, err)
+	}
+	if _, err := validateSkillReviewSessions(ctx, db, "user-1", []string{"conv-owned", "conv-other"}); err == nil {
+		t.Fatal("expected another user's conversation to be rejected")
+	}
+	if _, err := validateSkillReviewSessions(ctx, db, "user-1", []string{"conv-owned", "conv-plugin"}); err == nil {
+		t.Fatal("expected plugin conversation to be rejected")
 	}
 }
 
@@ -507,6 +734,7 @@ func TestCreateManualSkillReviewTaskFreezesWindowAndBlocksDuplicate(t *testing.T
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	start := now.Add(-2 * time.Hour)
 	insertSkillReviewConversation(t, db, "conv-qualified", "user-1", start.Add(10*time.Minute), 3, 8)
+	insertSkillReviewConversation(t, db, "conv-other-user", "user-2", start.Add(20*time.Minute), 3, 8)
 	insertSchedulerState(t, db, orm.SkillReviewSchedulerState{
 		UserID:        "user-1",
 		LastWindowEnd: start,
@@ -537,6 +765,8 @@ func TestCreateManualSkillReviewTaskFreezesWindowAndBlocksDuplicate(t *testing.T
 		frozen.TriggerReason != "manual" ||
 		frozen.QuantityThreshold != 1 ||
 		frozen.QualifiedSessionCount != 1 ||
+		len(frozen.SessionIDs) != 1 ||
+		frozen.SessionIDs[0] != "conv-qualified" ||
 		frozen.RequestID != summary.RunningRequestID ||
 		frozen.StartTime != formatTaskTime(start) ||
 		frozen.EndTime != formatTaskTime(now) {
@@ -728,10 +958,18 @@ func TestSkillReviewTaskListDropsCompletedRunFromRunningFilter(t *testing.T) {
 		t.Fatalf("build all task list: %v", err)
 	}
 	if all.Total != 1 || len(all.Items) != 1 ||
-		all.Items[0].Status != orm.ResourceUpdateTaskStatusDone ||
+		all.Items[0].Status != orm.SkillReviewStatsStatusCompleted ||
 		all.Items[0].RunStatus != "completed" ||
 		all.Items[0].ResultCount != 1 {
 		t.Fatalf("unexpected completed task status: %#v", all)
+	}
+
+	done, err := buildSkillReviewTaskList(ctx, db, "user-1", orm.ResourceUpdateTaskStatusDone, "req-1", 1, 1000)
+	if err != nil {
+		t.Fatalf("build done task list: %v", err)
+	}
+	if done.Total != 1 || done.Items[0].Status != orm.SkillReviewStatsStatusCompleted {
+		t.Fatalf("expected done filter to return raw completed status, got %#v", done)
 	}
 }
 
@@ -779,7 +1017,7 @@ func TestSkillReviewTaskListUsesCompletedAlgorithmRunForLegacyFailedCoreTask(t *
 	if err != nil {
 		t.Fatalf("build task list: %v", err)
 	}
-	if len(resp.Items) != 1 || resp.Items[0].Status != orm.ResourceUpdateTaskStatusDone ||
+	if len(resp.Items) != 1 || resp.Items[0].Status != orm.SkillReviewStatsStatusCompleted ||
 		resp.Items[0].RunStatus != "completed" || resp.Items[0].ResultCount != 1 ||
 		resp.Items[0].Task.Status != orm.ResourceUpdateTaskStatusFailed {
 		t.Fatalf("unexpected reconciled task status: %#v", resp)
@@ -818,7 +1056,7 @@ func TestSkillReviewTaskListUsesBoundAlgorithmTaskID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build task list: %v", err)
 	}
-	if len(resp.Items) != 1 || resp.Items[0].Status != orm.ResourceUpdateTaskStatusRunning || resp.Items[0].RunStatus != "review_miner" {
+	if len(resp.Items) != 1 || resp.Items[0].Status != orm.SkillReviewStatsStatusReviewMiner || resp.Items[0].RunStatus != "review_miner" {
 		t.Fatalf("unexpected bound task status: %#v", resp)
 	}
 }
@@ -891,9 +1129,9 @@ func TestSkillOrganizeTaskListUsesAlgorithmRunStatus(t *testing.T) {
 	for _, item := range all.Items {
 		statuses[item.RequestID] = item
 	}
-	if statuses["request-running"].Status != orm.ResourceUpdateTaskStatusRunning ||
+	if statuses["request-running"].Status != orm.SkillReviewStatsStatusOrganizeDraft ||
 		statuses["request-running"].RunStatus != "organize_draft" ||
-		statuses["request-completed"].Status != orm.ResourceUpdateTaskStatusDone ||
+		statuses["request-completed"].Status != orm.SkillReviewStatsStatusCompleted ||
 		statuses["request-completed"].RunStatus != "completed" ||
 		statuses["request-failed"].Status != orm.ResourceUpdateTaskStatusFailed ||
 		statuses["request-failed"].RunStatus != "failed" {
@@ -906,6 +1144,14 @@ func TestSkillOrganizeTaskListUsesAlgorithmRunStatus(t *testing.T) {
 	}
 	if running.Total != 1 || running.Items[0].RequestID != "request-running" {
 		t.Fatalf("unexpected running organize tasks: %#v", running)
+	}
+
+	drafting, err := buildSkillOrganizeTaskList(ctx, db, "user-1", orm.SkillReviewStatsStatusOrganizeDraft, "", 1, 1000)
+	if err != nil {
+		t.Fatalf("filter organize draft tasks: %v", err)
+	}
+	if drafting.Total != 1 || drafting.Items[0].RequestID != "request-running" {
+		t.Fatalf("unexpected organize draft tasks: %#v", drafting)
 	}
 
 	failed, err := buildSkillOrganizeTaskList(ctx, db, "user-1", "", "request-failed", 1, 1000)
@@ -1001,7 +1247,7 @@ func TestSkillPreflightFreezesRequestAndSkipsWhenBelowThreshold(t *testing.T) {
 	assertRequestJSONHasNoSensitiveFields(t, got.RequestJSON)
 }
 
-func TestSkillWorkerCallsReviewWithoutPendingSkillResults(t *testing.T) {
+func TestSkillWorkerDoesNotSendPendingSkillIDs(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	createSkillReviewResultsTable(t, db)
 	ctx := context.Background()
@@ -1069,7 +1315,7 @@ func TestSkillWorkerCallsReviewWithoutPendingSkillResults(t *testing.T) {
 	if result.Done != 1 {
 		t.Fatalf("expected one done task, got %#v", result)
 	}
-	if captured.UserID != "user-1" {
+	if captured.UserID != "user-1" || len(captured.SessionIDs) != 1 || captured.SessionIDs[0] != "conv-u1" {
 		t.Fatalf("unexpected skill review request: %#v", captured)
 	}
 	capturedBody, err := json.Marshal(captured)
@@ -1079,8 +1325,14 @@ func TestSkillWorkerCallsReviewWithoutPendingSkillResults(t *testing.T) {
 	if strings.Contains(string(capturedBody), "user_turn_count") || strings.Contains(string(capturedBody), "tool_call_count") {
 		t.Fatalf("skill review request must not expose internal threshold counts: %s", string(capturedBody))
 	}
-	if captured.MinUserTurns != 2 || captured.MinToolTurns != 2 {
-		t.Fatalf("skill review request should use backend thresholds, got %#v", captured)
+	if strings.Contains(string(capturedBody), "start_time") || strings.Contains(string(capturedBody), "end_time") {
+		t.Fatalf("skill review request must not expose internal time window: %s", string(capturedBody))
+	}
+	if strings.Contains(string(capturedBody), "pending_skill_ids") {
+		t.Fatalf("skill review request must not include removed pending_skill_ids: %s", string(capturedBody))
+	}
+	if strings.Contains(string(capturedBody), "min_user_turns") || strings.Contains(string(capturedBody), "min_tool_turns") {
+		t.Fatalf("skill review request must not include optional thresholds: %s", string(capturedBody))
 	}
 	if !strings.HasPrefix(captured.RequestID, skillReviewRequestIDPrefix) {
 		t.Fatalf("skill review requestid should use review task mode, got %#v", captured.RequestID)
@@ -1114,12 +1366,13 @@ func TestSkillWorkerCallsReviewWithoutPendingSkillResults(t *testing.T) {
 	}
 }
 
-func TestSkillWorkerPassesManualThresholds(t *testing.T) {
+func TestSkillWorkerUsesFrozenManualSessions(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	createSkillReviewResultsTable(t, db)
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	start := now.Add(-time.Hour)
+	insertSkillReviewConversation(t, db, "conv-manual", "user-1", start.Add(10*time.Minute), 3, 8)
 	insertTask(t, db, orm.ResourceUpdateTask{
 		ID:           "manual-skill-task",
 		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
@@ -1169,7 +1422,7 @@ func TestSkillWorkerPassesManualThresholds(t *testing.T) {
 	if result.Done != 1 {
 		t.Fatalf("expected one done task, got %#v", result)
 	}
-	if captured.RequestID != "review_manual-request" || captured.MinUserTurns != 3 || captured.MinToolTurns != 8 {
+	if captured.RequestID != "review_manual-request" || len(captured.SessionIDs) != 1 || captured.SessionIDs[0] != "conv-manual" {
 		t.Fatalf("unexpected manual skill review request: %#v", captured)
 	}
 }

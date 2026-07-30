@@ -109,6 +109,7 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		Content:              generated,
 		ExpectedDraftVersion: status.DraftVersion,
 		UserID:               userID,
+		DraftStatus:          "pending_confirm",
 	}); err != nil {
 		replyServiceError(w, err)
 		return

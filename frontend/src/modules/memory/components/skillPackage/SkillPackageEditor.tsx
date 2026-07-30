@@ -245,12 +245,14 @@ export default function SkillPackageEditor({
 
       const files = flattenSkillTree(tree);
       const defaultPath = pickDefaultFilePath(files);
-      if (defaultPath) {
-        setSelectedPath((previous) => previous || defaultPath);
-      }
+      setSelectedPath((previous) =>
+        files.some((file) => file.path === previous) ? previous : defaultPath,
+      );
 
       if (agentReview && nextDiffFiles.length) {
-        const firstChanged = collectChangedFilePaths(nextDiffFiles)[0];
+        const firstChanged = collectChangedFilePaths(nextDiffFiles).find((path) =>
+          files.some((file) => file.path === path),
+        );
         if (firstChanged) {
           setSelectedPath(firstChanged);
         }
@@ -351,11 +353,11 @@ export default function SkillPackageEditor({
   );
 
   useEffect(() => {
-    if (!selectedPath || loading) {
+    if (!selectedPath || !selectedFile || loading) {
       return;
     }
     void loadFileView(selectedPath);
-  }, [loadFileView, loading, selectedPath]);
+  }, [loadFileView, loading, selectedFile, selectedPath]);
 
   const treeData = useMemo<DataNode[]>(() => {
     if (!treeRoot) {
@@ -405,6 +407,8 @@ export default function SkillPackageEditor({
       });
       setIsEditing(false);
 
+      const tree = await getSkillTree(skillId);
+      setTreeRoot(tree);
       const treeDiff = await compareSkillTreeDiff(skillId);
       setDiffFiles(treeDiff.files);
       message.success(t("common.saveSuccess"));
@@ -436,10 +440,16 @@ export default function SkillPackageEditor({
     if (!selectedPath) {
       return;
     }
+    const tree = await getSkillTree(skillId);
+    const files = flattenSkillTree(tree);
+    const nextSelectedPath = files.some((file) => file.path === selectedPath)
+      ? selectedPath
+      : pickDefaultFilePath(files);
+    setTreeRoot(tree);
+    setSelectedPath(nextSelectedPath);
     const treeDiff = await compareSkillTreeDiff(skillId);
     setDiffFiles(treeDiff.files);
-    await loadFileView(selectedPath);
-  }, [loadFileView, selectedPath, skillId]);
+  }, [selectedPath, skillId]);
 
   const handleHunkDecision = async (
     hunkId: string,
@@ -510,9 +520,6 @@ export default function SkillPackageEditor({
       setFileHunkSummaries({});
       setReviewedPaths(new Set());
       await refreshPackage();
-      if (selectedPath) {
-        await loadFileView(selectedPath);
-      }
     } catch (error) {
       console.error("Undo skill draft review failed:", error);
     } finally {

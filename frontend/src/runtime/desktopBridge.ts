@@ -19,6 +19,7 @@ interface LazyMindDesktopBridge {
   restartRuntime?: () => Promise<unknown> | unknown;
   resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
   selectFolder?: () => Promise<string | null> | string | null;
+  selectExecutable?: () => Promise<string | null> | string | null;
   exportDiagnostics?: () => Promise<string> | string;
 }
 
@@ -82,6 +83,14 @@ export function selectFolder(): Promise<string | null> {
     return Promise.resolve(null);
   }
   return Promise.resolve(bridge.selectFolder());
+}
+
+export function selectExecutable(): Promise<string | null> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.selectExecutable) {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(bridge.selectExecutable());
 }
 
 export function exportDiagnostics(): Promise<string | null> {

@@ -498,11 +498,14 @@ Before producing the result, verify that:
 
 # Output Schema
 
-Return ONLY valid JSON:
+Return ONLY one valid JSON object with exactly two fields: `name` and `content`.
+`name` must exactly equal the Skill Outline's `skill_name`.
+`content` must be the complete `SKILL.md` file with frontmatter.
+
+Use this exact structural pattern (with JSON-escaped newlines):
 {{
-  "skill_name": "...",
-  "applicable_scenario": "...",
-  "content": "..."
+  "name": "<skill_name from SKILL_OUTLINE>",
+  "content": "---\nname: <same name>\ndescription: <single concise routing sentence>\n---\n\n<complete procedure>"
 }}
 
 # Input Data

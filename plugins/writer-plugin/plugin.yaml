@@ -1,265 +1,245 @@
 id: writer-plugin
 name: AI Writer
 description: >
-  Compose structured long-form writing, including articles, reports, technical
-  documents, creative stories, fiction, short stories, and novel-style drafts.
-  The workflow parses the writing intent and scope, generates
-  an outline, plan per-chapter writing instructions, draft the full text, revise
-  the draft on user request, review the draft and surface revision feedback,
-  then produces the final document. Revision decisions are represented by
-  material-based choice routes; retry and rewind are runtime commands.
+  Read source documents and knowledge, create or reuse an outline, draft a
+  structured document, revise either the outline or full text, and deliver it
+  as Markdown or publish it to Feishu through one WriterDocument-based workflow.
 
 when_to_use: >
-  Use this plugin only when the user explicitly requests it, or when the user
-  requests a complete, complex writing deliverable that depends materially on
-  existing knowledge or source materials and requires a multi-stage workflow
-  such as context building, outlining, section planning, drafting, and review.
-  Do not invoke it for everyday conversation, simple document generation,
-  short-form writing, rewriting, summarization, translation, brainstorming,
-  outlining alone, or tasks that can be answered directly. This is a fallback
-  writing plugin: if a more specific skill or plugin matches the task, such as
-  proposal, academic, or product-document writing, use that instead.
+  Use this plugin for compound writing work that benefits from persisted
+  artifacts: creating long-form content, continuing from a supplied outline,
+  revising an existing Feishu document, combining knowledge-base evidence with
+  writing, or publishing a generated document to Feishu. Do not require the
+  user to choose between creation and revision workflows; select the applicable
+  reachable step from the user's request and the available artifacts. When
+  triggering after clarification or a cloud-file read, request_context must
+  preserve every user-supplied source and destination URL verbatim, including
+  URLs supplied through ask_user; a document-content summary never replaces
+  its locator.
 
 tool_scripts:
   - path: scripts/tools.py
     functions:
       - writer_build_writing_task
+      - writer_load_document
       - writer_profile_resources
       - writer_create_writing_context
+      - writer_prepare_outline
       - writer_generate_outline
       - writer_generate_section_instructions
-      - writer_generate_draft_section
-      - writer_assemble_draft_document
+      - writer_generate_draft_blocks
+      - writer_generate_draft_document
       - writer_update_writing_context
-      - writer_check_consistency
-      - writer_generate_writing_output
-      - writer_build_revise_task
+      - writer_generate_final_document
+      - writer_export_markdown
+      - writer_build_revision_task
+      - writer_locate_revision_target
+      - writer_generate_modify_plan
       - writer_generate_patch_set
-      - writer_validate_patch_set
-      - writer_apply_patch
+      - writer_apply_revision
+      - writer_create_document
+      - writer_publish_revision
+      - writer_replace_document
+      - writer_append_document
 
 steps:
-  - id: build_context
-  - id: generate_outline
-  - id: plan_sections
-  - id: generate_draft
-  - id: decide_draft_action
-  - id: generate_patch
-  - id: decide_patch_action
-  - id: apply_patch
-  - id: review_document
-  - id: finalize_report
+  - id: prepare
+  - id: outline
+  - id: write_document
+  - id: publish
 
 slots:
   - id: writing_task
     label: Writing Task
-    type: text
+    type: file
     cardinality: single
   - id: resource_profiles
     label: Resource Profiles
-    type: text
+    type: file
     cardinality: single
   - id: writing_context
     label: Writing Context
-    type: text
+    type: file
     cardinality: single
-    summary_max_chars: 600
+  - id: context_ir
+    label: Context Result
+    type: file
+    cardinality: single
+  - id: source_ir
+    label: Source Document
+    type: file
+    cardinality: single
+  - id: target_document
+    label: Cloud Document Target
+    type: file
+    cardinality: single
+
+  - id: outline_ir
+    label: Outline
+    type: file
+    cardinality: single
   - id: writing_context_after_outline
     label: Writing Context After Outline
-    type: text
+    type: file
     cardinality: single
-    summary_max_chars: 600
-  - id: writing_context_after_draft
-    label: Writing Context After Draft
-    type: text
+
+  - id: outline_revision_task
+    label: Outline Revision Task
+    type: file
     cardinality: single
-    summary_max_chars: 600
-  - id: outline
-    label: Outline
-    type: text
+  - id: outline_locate_result
+    label: Outline Located Blocks
+    type: file
     cardinality: single
+  - id: outline_modify_plan
+    label: Outline Modification Plan
+    type: file
+    cardinality: single
+  - id: outline_patch_set
+    label: Outline Patch Set
+    type: file
+    cardinality: single
+  - id: outline_patch_result
+    label: Outline Patch Result
+    type: file
+    cardinality: single
+  - id: outline_write_result
+    label: Outline Cloud Sync Result
+    type: file
+    cardinality: single
+
   - id: section_instructions
     label: Section Instructions
-    type: text
+    type: file
     cardinality: single
-  - id: draft_sections
-    label: Draft Sections
-    type: text
+  - id: section_plan_ir
+    label: Section Plan Result
+    type: file
+    cardinality: single
+  - id: draft_blocks
+    label: Draft Blocks
+    type: file
     cardinality: list
     ordered: true
   - id: draft_document
     label: Full Draft
-    type: text
-    cardinality: single
-  - id: revise_task
-    label: Revise Task
-    type: text
-    cardinality: single
-  - id: doc_ir
-    label: Doc IR
-    type: text
-    cardinality: single
-  - id: patch_set
-    label: Patch Set
-    type: text
-    cardinality: single
-  - id: patch_set_review
-    label: Patch Set Review
-    type: text
-    cardinality: single
-  - id: patch_set_review_summary
-    label: Patch Set Review Summary
-    type: text
-    cardinality: single
-  - id: patch_result
-    label: Patch Result
-    type: text
-    cardinality: single
-  - id: revision_requested
-    label: Revision Requested
-    type: text
-    cardinality: single
-  - id: patch_accepted
-    label: Patch Accepted
-    type: text
-    cardinality: single
-  - id: revised_draft_document
-    label: Revised Draft
-    type: text
-    cardinality: single
-  - id: writing_context_after_revision
-    label: Writing Context After Revision
-    type: text
-    cardinality: single
-  - id: review_report
-    label: Review Report
-    type: text
-    cardinality: single
-  - id: review_summary
-    label: Review Summary
-    type: text
-    cardinality: single
-  - id: writing_output
-    label: Final Report
-    type: text
-    cardinality: single
-  - id: writing_output_md
-    label: Final Report (Markdown)
     type: file
+    cardinality: single
+  - id: writing_context_after_draft
+    label: Writing Context After Draft
+    type: file
+    cardinality: single
+  - id: final_document
+    label: Final Document
+    type: file
+    cardinality: single
+  - id: final_document_md
+    label: Final Document Markdown
+    type: file
+    cardinality: single
+
+  - id: document_revision_task
+    label: Document Revision Task
+    type: file
+    cardinality: single
+  - id: document_locate_result
+    label: Document Located Blocks
+    type: file
+    cardinality: single
+  - id: document_modify_plan
+    label: Document Modification Plan
+    type: file
+    cardinality: single
+  - id: document_patch_set
+    label: Document Patch Set
+    type: file
+    cardinality: single
+  - id: document_patch_result
+    label: Document Patch Result
+    type: file
+    cardinality: single
+  - id: delivered_markdown
+    label: Delivered Markdown
+    type: file
+    cardinality: single
+  - id: publish_result
+    label: Publish Result
+    type: file
+    cardinality: single
+  - id: publish_target_document
+    label: Created Publish Target
+    type: file
+    cardinality: single
+  - id: published_document
+    label: Published Document
+    type: file
+    cardinality: single
+  - id: published_link
+    label: Published Document Link
+    type: text
     cardinality: single
 
 ui:
   tabs:
-    - id: context
-      step_id: build_context
-      label: Context
+    - id: prepare
+      step_id: prepare
+      label: Preparation
       layout: list
       slots:
-        - id: writing_task
-        - id: resource_profiles
-        - id: writing_context
+        - id: source_ir
 
     - id: outline
-      step_id: generate_outline
+      step_id: outline
       label: Outline
       layout: list
       slots:
-        - id: outline
-        - id: writing_context_after_outline
-
-    - id: plan_sections
-      step_id: plan_sections
-      label: Plan Sections
-      layout: list
-      slots:
-        - id: section_instructions
-
-    - id: draft
-      step_id: generate_draft
-      label: Draft
-      layout: list
-      slots:
-        - id: draft_sections
-        - id: draft_document
-        - id: writing_context_after_draft
-
-    - id: generate_patch
-      step_id: generate_patch
-      label: Generate Patch
-      layout: list
-      slots:
-        - id: revise_task
-        - id: patch_set
-        - id: patch_set_review
-        - id: patch_set_review_summary
-
-    - id: apply_patch
-      step_id: apply_patch
-      label: Apply Patch
-      layout: list
-      slots:
-        - id: patch_result
-        - id: revised_draft_document
-        - id: writing_context_after_revision
-
-    - id: review
-      step_id: review_document
-      label: Review
-      layout: list
-      slots:
-        - id: review_report
-        - id: review_summary
+        - id: outline_ir
 
     - id: result
-      step_id: finalize_report
-      label: Final Report
+      step_id: write_document
+      label: Final Document
       layout: list
       slots:
-        - id: writing_output
-        - id: writing_output_md
+        - id: final_document
+
+    - id: publish
+      step_id: publish
+      label: 交付文稿
+      layout: list
+      slots:
+        - id: delivered_markdown
+        - id: published_link
+        - id: published_document
 
 i18n:
   zh-CN:
     name: AI 写作
     steps:
-      build_context: {label: 意图解析}
-      generate_outline: {label: 生成大纲}
-      plan_sections: {label: 规划章节}
-      generate_draft: {label: 撰写初稿}
-      decide_draft_action: {label: 决定是否修订}
-      generate_patch: {label: 生成补丁}
-      decide_patch_action: {label: 决定是否应用补丁}
-      apply_patch: {label: 应用补丁}
-      review_document: {label: 审阅初稿}
-      finalize_report: {label: 最终成稿}
+      prepare: {label: 写作准备}
+      outline: {label: 大纲}
+      write_document: {label: 成稿}
+      publish: {label: 交付文稿}
     tabs:
-      context: {label: 构造上下文}
-      outline: {label: 生成大纲}
-      plan_sections: {label: 规划章节}
-      draft: {label: 生成初稿}
-      generate_patch: {label: 生成补丁}
-      apply_patch: {label: 应用补丁}
-      review: {label: 审阅初稿}
-      result: {label: 最终成稿}
+      prepare: {label: 写作准备}
+      outline: {label: 大纲}
+      result: {label: 成稿}
+      publish: {label: 交付文稿}
     slots:
       writing_task: {label: 写作任务}
       resource_profiles: {label: 资源画像}
       writing_context: {label: 写作上下文}
-      outline: {label: 大纲}
+      context_ir: {label: 上下文构造结果}
+      source_ir: {label: 资源文档}
+      target_document: {label: 云文档目标}
+      outline_ir: {label: 大纲}
       section_instructions: {label: 章节规划}
-      draft_sections: {label: 章节草稿}
+      section_plan_ir: {label: 章节规划结果}
+      draft_blocks: {label: 章节草稿}
       draft_document: {label: 完整初稿}
-      revise_task: {label: 修订任务}
-      doc_ir: {label: 文档 IR}
-      patch_set: {label: 补丁集}
-      patch_set_review: {label: 补丁校验}
-      patch_set_review_summary: {label: 补丁校验摘要}
-      patch_result: {label: 补丁应用}
-      revision_requested: {label: 请求修订}
-      patch_accepted: {label: 接受补丁}
-      revised_draft_document: {label: 修订后初稿}
-      writing_context_after_revision: {label: 修订后写作上下文}
-      review_report: {label: 审阅报告}
-      review_summary: {label: 审阅摘要}
-      writing_output: {label: 最终成稿}
-      writing_output_md: {label: 最终成稿（Markdown）}
+      final_document: {label: 最终正文}
+      final_document_md: {label: 最终正文 Markdown}
+      delivered_markdown: {label: Markdown 文稿}
+      publish_result: {label: 发布结果}
+      publish_target_document: {label: 新建发布目标}
+      published_document: {label: 已发布飞书文档}
+      published_link: {label: 飞书文档链接}

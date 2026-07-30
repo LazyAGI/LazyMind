@@ -24,6 +24,7 @@ func NewTestDB(t *testing.T) *TestDB {
 	}
 	if err := db.AutoMigrate(
 		&orm.ResourceUpdateTask{},
+		&orm.SkillReviewStats{},
 		&SkillRow{},
 		&SkillBlobRow{},
 		&SkillRevisionRow{},
@@ -47,18 +48,20 @@ func NewTestDB(t *testing.T) *TestDB {
 		  AND status IN ('pending', 'running')`).Error; err != nil {
 		t.Fatalf("create active skill maintenance admission index: %v", err)
 	}
-	if err := db.Exec(`CREATE TABLE IF NOT EXISTS skill_review_stats (
-		id TEXT NOT NULL PRIMARY KEY,
-		requestid TEXT NOT NULL,
-		userid TEXT NOT NULL,
-		status TEXT NOT NULL,
-		started_at TEXT NOT NULL,
-		duration_ms INTEGER NOT NULL DEFAULT 0,
-		summary TEXT NOT NULL DEFAULT '{}'
-	)`).Error; err != nil {
-		t.Fatalf("create skill review stats table: %v", err)
-	}
 	return &TestDB{DB: db}
+}
+
+func RelaxSQLiteFixtureSkillUniqueIndexes(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	if db == nil || db.Dialector.Name() != "sqlite" {
+		return
+	}
+	if err := db.Exec("DROP INDEX IF EXISTS uk_skills_owner_identity").Error; err != nil {
+		t.Fatalf("drop sqlite fixture skill identity index: %v", err)
+	}
+	if err := db.Exec("DROP INDEX IF EXISTS uk_skills_owner_relative_root").Error; err != nil {
+		t.Fatalf("drop sqlite fixture skill relative root index: %v", err)
+	}
 }
 
 func ResetSkillTables(t *testing.T, db *TestDB) {

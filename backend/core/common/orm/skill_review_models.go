@@ -34,6 +34,30 @@ var skillReviewStatsActiveStatuses = []string{
 	SkillReviewStatsStatusOrganizeApply,
 }
 
+// SkillReviewStats is written by the algorithm review service and read by Core.
+// PostgreSQL creates this table through SQL migrations; local SQLite uses this
+// model through AllModelsForDDL.
+type SkillReviewStats struct {
+	ID         string `gorm:"column:id;type:text;primaryKey"`
+	RequestID  string `gorm:"column:requestid;type:text;not null;index:idx_skill_review_stats_user_request_status,priority:2"`
+	UserID     string `gorm:"column:userid;type:text;not null;index:idx_skill_review_stats_user_status_started,priority:1;index:idx_skill_review_stats_user_request_status,priority:1"`
+	Status     string `gorm:"column:status;type:text;not null;index:idx_skill_review_stats_user_status_started,priority:2;index:idx_skill_review_stats_user_request_status,priority:3"`
+	StartedAt  string `gorm:"column:started_at;type:text;not null;index:idx_skill_review_stats_user_status_started,priority:3"`
+	DurationMS int64  `gorm:"column:duration_ms;not null;default:0"`
+	Summary    string `gorm:"column:summary;type:text;not null;default:'{}'"`
+}
+
+func (SkillReviewStats) TableName() string { return "skill_review_stats" }
+
+func IsSkillReviewStatsActiveStatus(status string) bool {
+	for _, activeStatus := range skillReviewStatsActiveStatuses {
+		if status == activeStatus {
+			return true
+		}
+	}
+	return false
+}
+
 // SkillReviewStatsActiveScope selects known algorithm execution stages. A
 // successful terminal row closes the logical request even if an older Core
 // version retried the same requestid and left a later stage row behind.

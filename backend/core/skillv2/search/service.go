@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -50,8 +51,10 @@ func (s *Service) Contains(ctx context.Context, skillID, keyword string) (bool, 
 		return false, err
 	}
 	var count int64
+	pattern := "%" + escapeLike(keyword) + "%"
+	tagPattern := "%" + escapeLike(jsonStringContent(keyword)) + "%"
 	err := s.db.WithContext(ctx).Model(&indexRow{}).
-		Where("skill_id = ? AND LOWER(content) LIKE ? ESCAPE '\\'", skillID, "%"+escapeLike(keyword)+"%").
+		Where("skill_id = ? AND (LOWER(content) LIKE ? ESCAPE '!' OR LOWER(content) LIKE ? ESCAPE '!')", skillID, pattern, tagPattern).
 		Count(&count).Error
 	if isMissingIndexTable(err) {
 		return containsHeadText(ctx, s.db, skillID, keyword)
@@ -70,10 +73,11 @@ func (s *Service) KeywordScope(keyword string) func(*gorm.DB) *gorm.DB {
 	}
 	hasIndexTable := s != nil && s.db != nil && s.db.Migrator().HasTable(&indexRow{})
 	pattern := "%" + escapeLike(keyword) + "%"
+	tagPattern := "%" + escapeLike(jsonStringContent(keyword)) + "%"
 	contentExpr := blobContentTextExpr(s.db)
 	tagsExpr := tagsTextExpr(s.db)
 
-	metadataPredicate := "(LOWER(skills.skill_name) LIKE ? ESCAPE '\\' OR LOWER(skills.category) LIKE ? ESCAPE '\\' OR LOWER(skills.description) LIKE ? ESCAPE '\\' OR LOWER(" + tagsExpr + ") LIKE ? ESCAPE '\\')"
+	metadataPredicate := "(LOWER(skills.skill_name) LIKE ? ESCAPE '!' OR LOWER(skills.category) LIKE ? ESCAPE '!' OR LOWER(skills.description) LIKE ? ESCAPE '!' OR LOWER(" + tagsExpr + ") LIKE ? ESCAPE '!')"
 	headPredicate := `EXISTS (
 		SELECT 1
 		FROM skill_revision_entries AS e
@@ -81,13 +85,13 @@ func (s *Service) KeywordScope(keyword string) func(*gorm.DB) *gorm.DB {
 		WHERE e.revision_id = skills.head_revision_id
 		  AND e.entry_type = ?
 		  AND b."binary" = ?
-		  AND (LOWER(e.path) LIKE ? ESCAPE '\' OR LOWER(` + contentExpr + `) LIKE ? ESCAPE '\')
+		  AND (LOWER(e.path) LIKE ? ESCAPE '!' OR LOWER(` + contentExpr + `) LIKE ? ESCAPE '!')
 	)`
 	headArgs := []any{"file", false, pattern, pattern}
 
 	if !hasIndexTable {
 		return func(db *gorm.DB) *gorm.DB {
-			args := []any{pattern, pattern, pattern, pattern}
+			args := []any{pattern, pattern, pattern, tagPattern}
 			args = append(args, headArgs...)
 			return db.Where("("+metadataPredicate+" OR "+headPredicate+")", args...)
 		}
@@ -98,7 +102,7 @@ func (s *Service) KeywordScope(keyword string) func(*gorm.DB) *gorm.DB {
 		FROM skill_search_indexes AS idx
 		WHERE idx.skill_id = skills.id
 		  AND idx.head_revision_id = skills.head_revision_id
-		  AND LOWER(idx.content) LIKE ? ESCAPE '\'
+		  AND (LOWER(idx.content) LIKE ? ESCAPE '!' OR LOWER(idx.content) LIKE ? ESCAPE '!')
 	)`
 	fallbackPredicate := `NOT EXISTS (
 		SELECT 1
@@ -108,7 +112,7 @@ func (s *Service) KeywordScope(keyword string) func(*gorm.DB) *gorm.DB {
 	) AND ` + headPredicate
 
 	return func(db *gorm.DB) *gorm.DB {
-		args := []any{pattern, pattern, pattern, pattern, pattern}
+		args := []any{pattern, pattern, pattern, tagPattern, pattern, tagPattern}
 		args = append(args, headArgs...)
 		return db.Where("("+metadataPredicate+" OR "+indexPredicate+" OR ("+fallbackPredicate+"))", args...)
 	}
@@ -180,7 +184,8 @@ func containsHeadText(ctx context.Context, db *gorm.DB, skillID, keyword string)
 	if err != nil {
 		return false, err
 	}
-	return strings.Contains(strings.ToLower(content), keyword), nil
+	lowered := strings.ToLower(content)
+	return strings.Contains(lowered, keyword) || strings.Contains(lowered, jsonStringContent(keyword)), nil
 }
 
 func isMissingIndexTable(err error) bool {
@@ -214,10 +219,15 @@ func searchContentForRevision(ctx context.Context, tx *gorm.DB, skill skillRow, 
 }
 
 func escapeLike(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `%`, `\%`)
-	value = strings.ReplaceAll(value, `_`, `\_`)
+	value = strings.ReplaceAll(value, `!`, `!!`)
+	value = strings.ReplaceAll(value, `%`, `!%`)
+	value = strings.ReplaceAll(value, `_`, `!_`)
 	return value
+}
+
+func jsonStringContent(value string) string {
+	raw, _ := json.Marshal(value)
+	return strings.TrimSuffix(strings.TrimPrefix(string(raw), `"`), `"`)
 }
 
 func tagsTextExpr(db *gorm.DB) string {

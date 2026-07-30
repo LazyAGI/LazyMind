@@ -19,6 +19,7 @@
     .plugin-panel__body {
       flex: 1;
       min-height: 0;
+      max-height: none;
       overflow: auto;
     }
   }
@@ -26,6 +27,7 @@
   &--active  { border-color: #d0e4ff; }
   &--completed { border-color: #d0f0e0; }
   &--waiting { border-color: #ffe8c0; }
+  &--failed { border-color: #fecaca; }
 
   &--loading {
     min-height: 48px;
@@ -86,6 +88,7 @@
     &--active    { background: #e6f0ff; color: #2563eb; }
     &--completed { background: #e6f7ee; color: #16a34a; }
     &--waiting   { background: #fff4e0; color: #d97706; }
+    &--failed    { background: #fef2f2; color: #dc2626; }
   }
 
   // Intent button + popover
@@ -508,6 +511,23 @@
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+  }
+
+  &__slot-heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  &__slot-toolbar {
+    display: none;
+    flex: 1;
+    min-width: 0;
+
+    &:not(:empty) {
+      display: block;
+    }
   }
 
   &__slot-items {

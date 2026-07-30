@@ -124,8 +124,9 @@ const (
 	maxDatasetTags             = 10
 	maxDatasetTagRunes         = 20
 	maxDatasetDisplayNameRunes = 100
-	datasetDisplayNameRule     = "dataset name supports Chinese/English, numbers, -, _, ., up to 100 characters"
 )
+
+var errInvalidDatasetDisplayName = errors.New("dataset name supports Chinese/English, numbers, -, _, ., up to 100 characters")
 
 func validateDatasetDisplayName(name string) error {
 	trimmed := strings.TrimSpace(name)
@@ -133,7 +134,7 @@ func validateDatasetDisplayName(name string) error {
 		return fmt.Errorf("dataset name is required")
 	}
 	if trimmed != name || utf8.RuneCountInString(trimmed) > maxDatasetDisplayNameRunes {
-		return fmt.Errorf(datasetDisplayNameRule)
+		return errInvalidDatasetDisplayName
 	}
 	for _, r := range trimmed {
 		if r >= '\u4e00' && r <= '\u9fa5' {
@@ -151,7 +152,7 @@ func validateDatasetDisplayName(name string) error {
 		if r == '_' || r == '.' || r == '-' {
 			continue
 		}
-		return fmt.Errorf(datasetDisplayNameRule)
+		return errInvalidDatasetDisplayName
 	}
 	return nil
 }
@@ -471,6 +472,43 @@ func AllDatasetTags(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(tags)
 	common.ReplyJSON(w, AllDatasetTagsResponse{Tags: tags})
 }
+
+// filterAndCountCandidates applies source-level filtering to a batch of
+// ACL/keyword/tags-qualified candidates, collects items for the current page,
+// and increments the total counter. It returns the updated total and page slice.
+//
+// When collectPage is false, candidates that would have been collected for the
+// page are skipped but total is still incremented — this is used by Phase 2 to
+// finish counting the accurate total without building unnecessary page data.
+func filterAndCountCandidates(
+	candidates []orm.Dataset,
+	sourceFilter string,
+	sourceMap map[string]bool,
+	offset int,
+	pageSize int,
+	total int,
+	page []orm.Dataset,
+	pageSourceMap map[string]bool,
+	collectPage bool,
+) (int, []orm.Dataset) {
+	for _, c := range candidates {
+		// Apply source filter.
+		if sourceFilter == "cloud" && !sourceMap[c.ID] {
+			continue
+		}
+		if sourceFilter == "manual" && sourceMap[c.ID] {
+			continue
+		}
+		// Collect into page only during Phase 1.
+		if collectPage && total >= offset && len(page) < pageSize {
+			page = append(page, c)
+			pageSourceMap[c.ID] = sourceMap[c.ID]
+		}
+		total++
+	}
+	return total, page
+}
+
 func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	userID := corestore.UserID(r)
 	if userID == "" {

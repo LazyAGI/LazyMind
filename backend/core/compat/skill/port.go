@@ -8,6 +8,6 @@ import (
 
 type Port interface {
 	List(ctx context.Context, callCtx contract.CallContext, input ListInput) (ListResult, error)
-	Get(ctx context.Context, callCtx contract.CallContext, skillID string) (GetResult, error)
-	ReadContent(ctx context.Context, callCtx contract.CallContext, skillID string) (Content, error)
+	GetMetadata(ctx context.Context, callCtx contract.CallContext, skillID string) (Summary, error)
+	ReadContent(ctx context.Context, callCtx contract.CallContext, skillID, revisionID string) (Content, error)
 }

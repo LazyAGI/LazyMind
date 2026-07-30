@@ -111,6 +111,9 @@ func (p PluginStepParams) asMap() map[string]any {
 	if len(p.HistoryFilesPerTurn) > 0 {
 		m["history_files_per_turn"] = p.HistoryFilesPerTurn
 	}
+	if len(p.ParentAgenticConfig) > 0 {
+		m["parent_agentic_config"] = p.ParentAgenticConfig
+	}
 	if len(p.Filters) > 0 {
 		m["filters"] = p.Filters
 	}
@@ -481,6 +484,14 @@ func launchPluginAttempt(
 	}
 
 	// Create sub_agent_tasks record.
+	// Python SubAgent reads params from the DB row (not the HTTP RunRequest body),
+	// so attachment context and parent agentic_config must be persisted here.
+	if len(params.HistoryFilesPerTurn) == 0 {
+		params.HistoryFilesPerTurn = historyFilesFromConversation(db, convID)
+	}
+	if len(params.HistoryFilesPerTurn) == 0 {
+		params.HistoryFilesPerTurn = historyFilesFromParentAgentic(params.ParentAgenticConfig)
+	}
 	rawParamsMap := map[string]any{
 		"plugin_id":     pluginID,
 		"step_id":       stepID,
@@ -514,11 +525,20 @@ func launchPluginAttempt(
 	if len(params.HistoryFilesPerTurn) > 0 {
 		rawParamsMap["history_files_per_turn"] = params.HistoryFilesPerTurn
 	}
+	if len(params.ParentAgenticConfig) > 0 {
+		rawParamsMap["parent_agentic_config"] = params.ParentAgenticConfig
+	}
 	filters := params.Filters
 	if len(filters) == 0 {
 		filters = filtersFromConversation(db, convID)
 		if len(filters) > 0 {
 			params.Filters = filters
+		}
+	}
+	if len(filters) == 0 && len(params.ParentAgenticConfig) > 0 {
+		if parentFilters, ok := params.ParentAgenticConfig["filters"].(map[string]any); ok && len(parentFilters) > 0 {
+			filters = parentFilters
+			params.Filters = parentFilters
 		}
 	}
 	if len(filters) > 0 {
@@ -1024,7 +1044,7 @@ func checkAndFallbackIfStuck(
 // Caption embedded in the artifact value is written to sub_agent_artifacts.caption.
 //
 // For list-cardinality slots, the artifact value may carry a "list_index" field
-// (written by save_artifact) that enables partial retry: only the revision at that
+// (written by save_artifacts) that enables partial retry: only the revision at that
 // index is replaced; other indices remain untouched.
 // When "list_index" is absent the item is appended at the next available index.
 func OnArtifactEvent(
@@ -1032,13 +1052,13 @@ func OnArtifactEvent(
 	db *gorm.DB,
 	taskID, slot string,
 	pctx *PluginChatContext,
-) {
+) *orm.PluginSlotRevision {
 	if pctx == nil {
-		return
+		return nil
 	}
 	slotID, cardinality := resolveSlotBinding(pctx.PluginID, slot)
 	if slotID == "" {
-		return
+		return nil
 	}
 	attempt := 1
 	step, _ := GetLatestStep(ctx, db, pctx.SessionID, pctx.StepID)
@@ -1071,21 +1091,22 @@ func OnArtifactEvent(
 		pctx.SessionID, slotID, slot, pctx.StepID, attempt, cardinality, listIndex)
 	if err != nil {
 		fmt.Printf("[Plugin] WriteSlotRevision failed: %v\n", err)
-		return
+		return nil
 	}
 
 	// Back-fill list_index into sub_agent_artifacts.value so that HideSlotItem
 	// can match the artifact row by list_index when the user deletes an item.
 	// This is needed for append-mode artifacts where Python does not yet know
-	// the list_index assigned by Go (sort_order was not passed to save_artifact).
+	// the list_index assigned by Go (sort_order was not passed to save_artifacts).
 	if cardinality == "list" && rev != nil && rev.ListIndex != nil {
 		backfillArtifactListIndex(ctx, db, taskID, slot, *rev.ListIndex)
 	}
+	return rev
 }
 
 // OnSubAgentDoneSnapshot back-fills artifact_seq on any AI slot revision that was
 // written before the artifact row existed (i.e. artifact_seq is still NULL).
-// This covers the race where WriteSlotRevision ran before save_artifact committed.
+// This covers the race where WriteSlotRevision ran before save_artifacts committed.
 // Human revisions (change_source='human') are never touched.
 func OnSubAgentDoneSnapshot(
 	ctx context.Context,

@@ -38,16 +38,23 @@ func (f *Facade) Get(ctx context.Context, callCtx contract.CallContext, input Ge
 	if skillID == "" {
 		return GetResult{}, contract.InvalidArgumentError("skill.get", "skill_id is required")
 	}
-	result, err := f.port.Get(ctx, callCtx, skillID)
+	metadata, err := f.port.GetMetadata(ctx, callCtx, skillID)
 	if err != nil {
 		return GetResult{}, err
 	}
+	result := GetResult{Skill: metadata}
 	if !input.IncludeContent {
 		return result, nil
 	}
-	content, err := f.port.ReadContent(ctx, callCtx, skillID)
+	if strings.TrimSpace(metadata.HeadRevisionID) == "" {
+		return GetResult{}, contract.NewError(contract.NotFound, "skill.get", "skill content is not available", false, nil)
+	}
+	content, err := f.port.ReadContent(ctx, callCtx, skillID, metadata.HeadRevisionID)
 	if err != nil {
 		return GetResult{}, err
+	}
+	if content.RevisionID != metadata.HeadRevisionID {
+		return GetResult{}, contract.NewError(contract.Internal, "skill.get", "skill content revision mismatch", false, nil)
 	}
 	result.Content = &content
 	return result, nil

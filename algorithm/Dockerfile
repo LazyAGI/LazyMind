@@ -122,7 +122,7 @@ CMD ["python", "backend/core/doc/doc_server.py"]
 # This stage only depends on OPENCODE_VERSION and GITHUB_PROXY, so the binary
 # is cached independently of any LazyMind / LazyLLM source changes.
 FROM ${DOCKER_MIRROR}python:3.11-slim AS opencode_download
-ARG GITHUB_PROXY
+ARG GITHUB_PROXY=""
 ARG OPENCODE_VERSION=1.14.28
 RUN set -eu; \
     apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
@@ -177,10 +177,8 @@ RUN pip install --no-cache-dir -r /tmp/evo-requirements.txt python-dotenv
 
 COPY evo/ /app/evo/
 
-RUN chmod +x /app/evo/service/entrypoint.sh
-
 EXPOSE 8047
-ENTRYPOINT ["/app/evo/service/entrypoint.sh"]
+ENTRYPOINT ["python", "-m", "evo.app"]
 
 
 # Stage: mineru - base_env (full env, no code) + torch/mineru extras + code.

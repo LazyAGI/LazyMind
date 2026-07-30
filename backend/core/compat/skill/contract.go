@@ -38,8 +38,9 @@ type GetInput struct {
 }
 
 type Content struct {
-	Path string // Content path.
-	Text string // Text content.
+	Path       string // Content path.
+	RevisionID string // Revision that the content was read from.
+	Text       string // Text content.
 }
 
 type GetResult struct {

@@ -236,6 +236,17 @@ const isResourceUpdateTaskRunning = (status?: string) => {
     .toLowerCase();
   return normalized === "pending" || normalized === "running";
 };
+const isSkillReviewTaskTerminal = (status?: string) => {
+  const normalized = String(status || "")
+    .trim()
+    .toLowerCase();
+  return (
+    normalized === "completed" ||
+    normalized === "done" ||
+    normalized === "failed" ||
+    normalized === "skipped"
+  );
+};
 const MANUAL_SKILL_REVIEW_RESULT_ATTEMPTS = 5;
 const MANUAL_SKILL_REVIEW_SKILL_READY_ATTEMPTS = 8;
 const MANUAL_SKILL_REVIEW_RETRY_DELAY_MS = 1200;
@@ -1036,7 +1047,7 @@ export default function MemoryManagement() {
             return;
           }
           const task = tasks.records[0];
-          if (task && isResourceUpdateTaskRunning(task.status)) {
+          if (task && !isSkillReviewTaskTerminal(task.status)) {
             manualSkillReviewPollTimerRef.current = window.setTimeout(
               tick,
               2000,

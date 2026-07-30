@@ -279,7 +279,7 @@ export async function repairPluginDraft(
   return resp.data.data;
 }
 export interface RepairPreview { target:string;mode:string;draft_version:number;diagnostics:Array<{code:string;path:string;message:string;severity:string}>;planned_files:string[] }
-export interface PluginRepairRun { repair_id:string;status:string;target:string;diagnostics_after:Array<{code:string;path:string;message:string;severity:string}> }
+export interface PluginRepairRun { repair_id:string;status:'queued'|'repairing'|'succeeded'|'failed'|'stale'|string;target:string;diagnostics_after:Array<{code:string;path:string;message:string;severity:string}> }
 export async function getPluginRepairRun(draftId:string,repairId:string):Promise<PluginRepairRun>{const r=await axiosInstance.get<CoreResponse<PluginRepairRun>>(`${coreBasePath}/plugin-drafts/${draftId}/repair-runs/${repairId}`);return r.data.data}
 export async function previewPluginRepair(id:string,payload:{target:string;mode:string}):Promise<RepairPreview>{
   const r=await axiosInstance.post<CoreResponse<RepairPreview>>(`${coreBasePath}/plugin-drafts/${id}:repair-preview`,payload);
