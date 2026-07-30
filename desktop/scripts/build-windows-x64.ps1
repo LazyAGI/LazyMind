@@ -309,8 +309,7 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     Invoke-Native 'uv.exe' @('venv', '--managed-python', '--no-python-downloads', '--relocatable', '--seed', '--link-mode', 'copy', '--python', $python, $algorithmVenv)
     $algorithmPython = Join-Path $algorithmVenv 'Scripts\python.exe'
     $lazyLLMVersion = if ($env:LAZYMIND_LAZYLLM_VERSION) { $env:LAZYMIND_LAZYLLM_VERSION } else { '1.2.0a2' }
-    $lazyLLMReleaseURL = if ($env:LAZYMIND_LAZYLLM_RELEASE_URL) { $env:LAZYMIND_LAZYLLM_RELEASE_URL } else { 'https://github.com/LazyAGI/LazyLLM/releases/download/v1.2.0a2/lazyllm-1.2.0a2.tar.gz' }
-    Invoke-Native 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', 'setuptools<81', "lazyllm@$lazyLLMReleaseURL")
+    Invoke-Native 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', 'setuptools<81', "lazyllm==$lazyLLMVersion")
     Invoke-Native $algorithmPython @('-c', "import importlib.metadata as m; assert m.version('lazyllm') == '$lazyLLMVersion'")
     Invoke-Native (Join-Path $algorithmVenv 'Scripts\lazyllm.exe') @('install', 'rag')
     Invoke-Native 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'algorithm\requirements.txt'))

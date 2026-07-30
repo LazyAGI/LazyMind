@@ -5,7 +5,6 @@ ARG DOCKER_MIRROR=docker.m.daocloud.io/library/
 ARG BASE_LAZYLLM_IMAGE=base_env
 ARG BASE_LAZYMIND_IMAGE=base_code
 ARG LAZYLLM_VERSION=1.2.0a2
-ARG LAZYLLM_RELEASE_URL=https://github.com/LazyAGI/LazyLLM/releases/download/v1.2.0a2/lazyllm-1.2.0a2.tar.gz
 ARG LAZYLLM_BUNDLE_SOURCE=1
 
 # Stage: base_env - pure environment, NO business code copied.
@@ -13,7 +12,6 @@ ARG LAZYLLM_BUNDLE_SOURCE=1
 FROM ${DOCKER_MIRROR}python:3.11-slim AS base_env
 WORKDIR /app
 ARG LAZYLLM_VERSION
-ARG LAZYLLM_RELEASE_URL
 
 ARG APT_MIRROR=http://mirrors.aliyun.com/debian
 ARG APT_SECURITY_MIRROR=http://mirrors.aliyun.com/debian-security
@@ -34,7 +32,7 @@ RUN set -eu; \
         "$f"; \
     done; \
     apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl ffmpeg build-essential gcc \
+        ca-certificates curl git ffmpeg build-essential gcc \
         libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libxcb1 \
         python3-dev ripgrep \
     && update-ca-certificates \
@@ -42,7 +40,7 @@ RUN set -eu; \
 
 # Release images always use the pinned PyPI package. Keeping LazyLLM out of
 # PYTHONPATH avoids scanning its source checkout and docs during each import.
-RUN pip install --no-cache-dir "lazyllm@${LAZYLLM_RELEASE_URL}" \
+RUN pip install --no-cache-dir "lazyllm==${LAZYLLM_VERSION}" \
     && python -c "import importlib.metadata as m; assert m.version('lazyllm') == '${LAZYLLM_VERSION}'" \
     && lazyllm install rag
 

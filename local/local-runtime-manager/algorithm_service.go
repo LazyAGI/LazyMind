@@ -18,9 +18,8 @@ import (
 )
 
 const (
-	algorithmHealthTimeout   = 15 * time.Minute
-	defaultLazyLLMVersion    = "1.2.0a2"
-	defaultLazyLLMReleaseURL = "https://github.com/LazyAGI/LazyLLM/releases/download/v1.2.0a2/lazyllm-1.2.0a2.tar.gz"
+	algorithmHealthTimeout = 15 * time.Minute
+	defaultLazyLLMVersion  = "1.2.0a2"
 )
 
 type AlgorithmServiceSpec struct {
@@ -268,7 +267,7 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 	}
 	installSteps := []Command{
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "setuptools<81"), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
-		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "lazyllm@"+envText("LAZYMIND_LAZYLLM_RELEASE_URL", defaultLazyLLMReleaseURL)), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
+		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "lazyllm=="+envText("LAZYMIND_LAZYLLM_VERSION", defaultLazyLLMVersion)), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 		{Name: lazyllm, Args: []string{"install", "rag"}, Dir: paths.RepoRoot, Env: pythonDependencyCacheEnv(paths)},
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements-local.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
@@ -287,7 +286,7 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 
 func algorithmReadyStamp(paths RuntimePaths, includeEvo bool) (string, error) {
 	hash := sha256.New()
-	_, _ = hash.Write([]byte("lazyllm@" + envText("LAZYMIND_LAZYLLM_RELEASE_URL", defaultLazyLLMReleaseURL)))
+	_, _ = hash.Write([]byte("lazyllm==" + envText("LAZYMIND_LAZYLLM_VERSION", defaultLazyLLMVersion)))
 	_, _ = hash.Write([]byte{0})
 	files := []string{
 		filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt"),
