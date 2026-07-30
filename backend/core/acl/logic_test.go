@@ -64,16 +64,16 @@ func TestEvalSetWriteAllowsRead(t *testing.T) {
 // permissions normalize correctly to their canonical forms.
 func TestKBPermissionNormalization(t *testing.T) {
 	tests := map[string]string{
-		PermRead:               PermissionKBRead,
-		PermWrite:              PermissionKBWrite,
-		PermissionKBRead:       PermissionKBRead,
-		PermissionKBWrite:      PermissionKBWrite,
-		PermissionKBCreateDoc:  PermissionKBCreateDoc,
-		PermissionKBDeleteDoc:  PermissionKBDeleteDoc,
-		PermissionKBDelete:     PermissionKBDelete,
-		"":                     PermNone,
-		PermNone:               PermNone,
-		"unknown_perm":         "",
+		PermRead:              PermissionKBRead,
+		PermWrite:             PermissionKBWrite,
+		PermissionKBRead:      PermissionKBRead,
+		PermissionKBWrite:     PermissionKBWrite,
+		PermissionKBCreateDoc: PermissionKBCreateDoc,
+		PermissionKBDeleteDoc: PermissionKBDeleteDoc,
+		PermissionKBDelete:    PermissionKBDelete,
+		"":                    PermNone,
+		PermNone:              PermNone,
+		"unknown_perm":        "",
 	}
 	for input, want := range tests {
 		got := normalizePermission(ResourceTypeKB, input)
@@ -95,13 +95,13 @@ func TestKBPermissionNormalization(t *testing.T) {
 // permissions normalize correctly.
 func TestDatasetPermissionNormalization(t *testing.T) {
 	tests := map[string]string{
-		PermRead:                  PermissionDatasetRead,
-		PermWrite:                 PermissionDatasetWrite,
-		PermUpload:                PermissionDatasetUpload,
-		PermissionDatasetRead:     PermissionDatasetRead,
-		PermissionDatasetWrite:    PermissionDatasetWrite,
-		PermissionDatasetUpload:   PermissionDatasetUpload,
-		"":                        PermNone,
+		PermRead:                PermissionDatasetRead,
+		PermWrite:               PermissionDatasetWrite,
+		PermUpload:              PermissionDatasetUpload,
+		PermissionDatasetRead:   PermissionDatasetRead,
+		PermissionDatasetWrite:  PermissionDatasetWrite,
+		PermissionDatasetUpload: PermissionDatasetUpload,
+		"":                      PermNone,
 	}
 	for input, want := range tests {
 		got := normalizePermission(ResourceTypeDB, input)
@@ -140,9 +140,9 @@ func TestHasPermission(t *testing.T) {
 // TestActionToPermission_KB maps read/write/create_doc/delete_doc/delete_kb actions.
 func TestActionToPermission_KB(t *testing.T) {
 	tests := map[string]string{
-		PermRead:    PermissionKBRead,
-		PermWrite:   PermissionKBWrite,
-		"unknown":    "",
+		PermRead:  PermissionKBRead,
+		PermWrite: PermissionKBWrite,
+		"unknown": "",
 	}
 	for action, want := range tests {
 		got := actionToPermission(ResourceTypeKB, action)

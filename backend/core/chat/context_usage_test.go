@@ -53,8 +53,8 @@ func TestMentionedBuiltinPluginReplacesDefaultCatalog(t *testing.T) {
 // TestParseMaxInputTokens_EdgeCases covers more input variants.
 func TestParseMaxInputTokens_EdgeCases(t *testing.T) {
 	tests := []struct {
-		input    string
-		want     *int64
+		input string
+		want  *int64
 	}{
 		{"0.5K", int64Ptr(500)},
 		{"1.5M", int64Ptr(1500000)},

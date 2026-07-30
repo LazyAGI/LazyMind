@@ -8,8 +8,8 @@ import (
 
 	"gorm.io/gorm"
 
-	skilltestutil "lazymind/core/skillv2/testutil"
 	sqliteDriver "gorm.io/driver/sqlite"
+	skilltestutil "lazymind/core/skillv2/testutil"
 )
 
 // newSearchTestDB creates a SQLite DB with skill tables for search tests.

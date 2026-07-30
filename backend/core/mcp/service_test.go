@@ -478,7 +478,6 @@ func TestDiscoverReplacesToolsAndSoftDeletesMissing(t *testing.T) {
 	}
 }
 
-
 // TestNewServerID generates IDs with the msp_ prefix.
 func TestNewServerID(t *testing.T) {
 	id := newServerID()
@@ -729,16 +728,16 @@ func TestNormalizeListServersRequest(t *testing.T) {
 // TestServerResponse maps ORM server row to response DTO.
 func TestServerResponse(t *testing.T) {
 	row := orm.MCPServer{
-		ID:              "srv-1",
-		Name:            "test-server",
-		Transport:       "sse",
-		URL:             "http://localhost:8080",
-		HeadersJSON:     nil,
+		ID:               "srv-1",
+		Name:             "test-server",
+		Transport:        "sse",
+		URL:              "http://localhost:8080",
+		HeadersJSON:      nil,
 		AllowedToolsJSON: nil,
-		Enabled:         true,
-		IsVerified:      true,
-		Share:           false,
-		Timeout:         10,
+		Enabled:          true,
+		IsVerified:       true,
+		Share:            false,
+		Timeout:          10,
 	}
 	tools := []ToolResponse{
 		{ID: "t1", ToolName: "search", Description: "search docs"},
@@ -765,9 +764,9 @@ func TestServerResponse(t *testing.T) {
 func TestToolResponse(t *testing.T) {
 	// With input schema
 	row := orm.MCPServerTool{
-		ID:             "tool-1",
-		ToolName:       "search",
-		Description:    "search docs",
+		ID:              "tool-1",
+		ToolName:        "search",
+		Description:     "search docs",
 		InputSchemaJSON: json.RawMessage(`{"type":"object"}`),
 	}
 	resp := toolResponse(row)

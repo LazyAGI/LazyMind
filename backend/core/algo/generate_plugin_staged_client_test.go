@@ -55,9 +55,9 @@ func TestExtractScripts(t *testing.T) {
 	// Top-level scripts
 	raw := map[string]any{
 		"scripts": map[string]any{
-			"main.js":    "console.log(1)",
-			"helper.js":  "export const x = 1",
-			"nonstring":  42,
+			"main.js":   "console.log(1)",
+			"helper.js": "export const x = 1",
+			"nonstring": 42,
 		},
 	}
 	scripts := extractScripts(raw)

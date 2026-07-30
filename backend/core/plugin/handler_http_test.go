@@ -47,7 +47,7 @@ func seedPluginDraft(t *testing.T, db *orm.DB, draftID, userID string) {
 		StateYAMLContent:  "transitions:\n  __start__: [{to: __end__}]",
 		ScenarioContent:   "",
 		ScriptsContent:    "{}",
-		CreatedAt: now, UpdatedAt: now,
+		CreatedAt:         now, UpdatedAt: now,
 	})
 }
 

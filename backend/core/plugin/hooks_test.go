@@ -42,10 +42,10 @@ func TestLoadPluginChatContextFromDB_ValidTask(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 	params := PluginStepParams{
-		PluginID:     "test-plugin",
-		SessionID:    "sess-1",
-		StepID:       "step_a",
-		PluginMode:   "auto",
+		PluginID:      "test-plugin",
+		SessionID:     "sess-1",
+		StepID:        "step_a",
+		PluginMode:    "auto",
 		ChatSessionID: "chat-sess-1",
 	}
 	paramsBytes, _ := json.Marshal(params)
@@ -53,7 +53,7 @@ func TestLoadPluginChatContextFromDB_ValidTask(t *testing.T) {
 		ID: "t2", ConversationID: "c2", AgentType: "plugin_step", Title: "Plugin",
 		Objective: "run", Mode: "auto", Status: "running",
 		CreateUserID: "u1", TriggerHistoryID: "hist-1",
-		Params: json.RawMessage(paramsBytes),
+		Params:    json.RawMessage(paramsBytes),
 		CreatedAt: now, UpdatedAt: now, LastHeartbeat: now,
 		InputSlots: json.RawMessage("[]"), OutputSlots: json.RawMessage("[]"),
 	})

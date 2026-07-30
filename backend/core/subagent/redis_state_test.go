@@ -12,8 +12,8 @@ import (
 // mockStateStore implements state.Store for testing Redis-backed functions.
 type mockStateStore struct {
 	// HSet
-	hsetCalls  []hsetCall
-	hsetErr    error
+	hsetCalls []hsetCall
+	hsetErr   error
 	// HGetAll
 	hgetallResult map[string]string
 	hgetallErr    error
@@ -45,12 +45,16 @@ func (m *mockStateStore) HSet(_ context.Context, key string, fields map[string]a
 func (m *mockStateStore) HGetAll(_ context.Context, key string) (map[string]string, error) {
 	return m.hgetallResult, m.hgetallErr
 }
-func (m *mockStateStore) HGet(_ context.Context, key, field string) ([]byte, error) { return nil, nil }
+func (m *mockStateStore) HGet(_ context.Context, key, field string) ([]byte, error)  { return nil, nil }
 func (m *mockStateStore) HDel(_ context.Context, key string, fields ...string) error { return nil }
-func (m *mockStateStore) Set(_ context.Context, key string, value []byte, ttl time.Duration) error { return nil }
-func (m *mockStateStore) Get(_ context.Context, key string) ([]byte, error)             { return nil, nil }
-func (m *mockStateStore) Del(_ context.Context, keys ...string) error                  { return nil }
-func (m *mockStateStore) Exists(_ context.Context, key string) (bool, error)           { return m.existsResult, m.existsErr }
+func (m *mockStateStore) Set(_ context.Context, key string, value []byte, ttl time.Duration) error {
+	return nil
+}
+func (m *mockStateStore) Get(_ context.Context, key string) ([]byte, error) { return nil, nil }
+func (m *mockStateStore) Del(_ context.Context, keys ...string) error       { return nil }
+func (m *mockStateStore) Exists(_ context.Context, key string) (bool, error) {
+	return m.existsResult, m.existsErr
+}
 func (m *mockStateStore) SetNX(_ context.Context, key string, value []byte, ttl time.Duration) (bool, error) {
 	return false, nil
 }
@@ -58,7 +62,9 @@ func (m *mockStateStore) RPush(_ context.Context, key string, value []byte, _ ti
 	m.rpushCalls = append(m.rpushCalls, rpushCall{key: key, value: value})
 	return m.rpushErr
 }
-func (m *mockStateStore) LPush(_ context.Context, key string, value []byte, ttl time.Duration) error { return nil }
+func (m *mockStateStore) LPush(_ context.Context, key string, value []byte, ttl time.Duration) error {
+	return nil
+}
 func (m *mockStateStore) LRange(_ context.Context, key string, start, stop int64) ([]string, error) {
 	return m.lrangeResult, m.lrangeErr
 }
@@ -69,9 +75,11 @@ func (m *mockStateStore) BLPop(_ context.Context, key string, timeout time.Durat
 func (m *mockStateStore) ZAdd(_ context.Context, key, member string, score float64, ttl time.Duration) error {
 	return nil
 }
-func (m *mockStateStore) ZRemRangeByScore(_ context.Context, key string, min, max float64) error { return nil }
-func (m *mockStateStore) ZCard(_ context.Context, key string) (int64, error)                     { return 0, nil }
-func (m *mockStateStore) Close() error                                                           { return nil }
+func (m *mockStateStore) ZRemRangeByScore(_ context.Context, key string, min, max float64) error {
+	return nil
+}
+func (m *mockStateStore) ZCard(_ context.Context, key string) (int64, error) { return 0, nil }
+func (m *mockStateStore) Close() error                                       { return nil }
 
 // Compile-time check: mockStateStore implements state.Store.
 var _ state.Store = (*mockStateStore)(nil)

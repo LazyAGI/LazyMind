@@ -41,9 +41,9 @@ func TestFirstNonEmptyScalar(t *testing.T) {
 // TestFirstPositiveInt returns first positive integer from varied types.
 func TestFirstPositiveInt(t *testing.T) {
 	tests := []struct {
-		name  string
-		args  []any
-		want  int
+		name string
+		args []any
+		want int
 	}{
 		{"int", []any{int(5), 3}, 5},
 		{"int64", []any{int64(10)}, 10},
@@ -327,7 +327,10 @@ type mockResponseWriter struct {
 	body       []byte
 }
 
-func (w *mockResponseWriter) Header() http.Header         { return w.header }
-func (w *mockResponseWriter) Write(b []byte) (int, error) { w.body = append(w.body, b...); return len(b), nil }
-func (w *mockResponseWriter) WriteHeader(code int)         { w.statusCode = code }
-func (w *mockResponseWriter) Flush()                       {}
+func (w *mockResponseWriter) Header() http.Header { return w.header }
+func (w *mockResponseWriter) Write(b []byte) (int, error) {
+	w.body = append(w.body, b...)
+	return len(b), nil
+}
+func (w *mockResponseWriter) WriteHeader(code int) { w.statusCode = code }
+func (w *mockResponseWriter) Flush()               {}

@@ -114,9 +114,9 @@ func TestApplyHeaders(t *testing.T) {
 func TestApplyHeadersSkipsEmptyValues(t *testing.T) {
 	h := http.Header{}
 	applyHeaders(h, map[string]any{
-		"X-Empty":  "",
-		"X-Space":  "  ",
-		"X-Valid":  "hello",
+		"X-Empty": "",
+		"X-Space": "  ",
+		"X-Valid": "hello",
 	})
 	if h.Get("X-Empty") != "" {
 		t.Fatal("empty string should be skipped")

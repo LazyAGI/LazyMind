@@ -210,7 +210,6 @@ func TestFormatHunkHeader(t *testing.T) {
 	}
 }
 
-
 // TestInjectedContextText extracts a slice of lines from text.
 func TestInjectedContextText(t *testing.T) {
 	text := "line1\nline2\nline3\nline4\nline5"

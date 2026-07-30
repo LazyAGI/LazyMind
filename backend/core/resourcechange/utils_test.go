@@ -37,19 +37,19 @@ func TestParsePositiveQueryInt(t *testing.T) {
 func TestVersionToResponse(t *testing.T) {
 	now := time.Now().UTC()
 	row := orm.ResourceVersion{
-		ID:             "v1",
-		ResourceType:   "memory",
-		ResourceID:     "res-1",
-		UserID:         "user-1",
-		ChangeSource:   ChangeSourceDirectSave,
-		FromVersion:    1,
-		ToVersion:      2,
-		SourceRefType:  SourceRefTypeSkillReviewResult,
-		SourceRefID:    "ref-1",
-		BeforeContent:  "before",
-		AfterContent:   "after",
-		Diff:           "+after",
-		CreatedAt:      now,
+		ID:            "v1",
+		ResourceType:  "memory",
+		ResourceID:    "res-1",
+		UserID:        "user-1",
+		ChangeSource:  ChangeSourceDirectSave,
+		FromVersion:   1,
+		ToVersion:     2,
+		SourceRefType: SourceRefTypeSkillReviewResult,
+		SourceRefID:   "ref-1",
+		BeforeContent: "before",
+		AfterContent:  "after",
+		Diff:          "+after",
+		CreatedAt:     now,
 	}
 	resp := versionToResponse(row)
 	if resp.ID != "v1" || resp.ResourceType != "memory" {
@@ -69,9 +69,9 @@ func TestVersionToResponse(t *testing.T) {
 // TestCompactStrings deduplicates and trims strings.
 func TestCompactStrings(t *testing.T) {
 	tests := []struct {
-		name   string
-		input  []string
-		want   []string
+		name  string
+		input []string
+		want  []string
 	}{
 		{"no_dups", []string{"a", "b", "c"}, []string{"a", "b", "c"}},
 		{"with_dups", []string{"a", "b", "a", "c"}, []string{"a", "b", "c"}},

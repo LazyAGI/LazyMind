@@ -115,7 +115,6 @@ func TestCollectEvalSetDatasetIDs(t *testing.T) {
 	}
 }
 
-
 // TestFilterRowsByDatasetIDs filters rows that contain any matching dataset ID.
 func TestFilterRowsByDatasetIDs(t *testing.T) {
 	rows := []orm.EvalSet{

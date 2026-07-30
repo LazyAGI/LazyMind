@@ -363,7 +363,6 @@ func TestDeleteModelNoRowsAffected(t *testing.T) {
 	}
 }
 
-
 // seedResourceVersion inserts a ResourceVersion row for testing Update/Delete.
 func seedResourceVersion(t *testing.T, db *gorm.DB, resourceID, content, userID string) orm.ResourceVersion {
 	t.Helper()

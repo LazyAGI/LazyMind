@@ -40,8 +40,8 @@ func TestCleanedCSVHeader(t *testing.T) {
 // TestRowFromValuesWithoutBool maps string values without parsing is_deleted.
 func TestRowFromValuesWithoutBool(t *testing.T) {
 	values := map[string]string{
-		"question":     "what?",
-		"ground_truth": "answer",
+		"question":      "what?",
+		"ground_truth":  "answer",
 		"question_type": "qa",
 	}
 	row := rowFromValuesWithoutBool(values)
