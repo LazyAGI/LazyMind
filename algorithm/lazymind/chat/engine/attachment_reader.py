@@ -9,7 +9,6 @@ from typing import List, Optional
 import lazyllm
 from lazyllm import AutoModel, LOG
 from lazyllm.components.formatter import encode_query_with_filepaths
-from lazyllm.tools.rag.readers.ocrReader import DynamicPDFReader
 
 from lazymind.chat.config import CHAT_DOCUMENT_EXTENSIONS, CHAT_TEXT_EXTENSIONS, IMAGE_EXTENSIONS
 from lazymind.chat.engine.prompts import VISION_EXTRACT_DEFAULT_INSTRUCTION
@@ -31,7 +30,11 @@ def _sanitize_for_prompt_template(text: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def _get_document_reader() -> DynamicPDFReader:
+def _get_document_reader():
+    from lazymind.chat.runtime_loader import ensure_rag_runtime
+    ensure_rag_runtime()
+    from lazyllm.tools.rag.readers.ocrReader import DynamicPDFReader
+
     return DynamicPDFReader(
         image_cache_dir=_cfg['ocr_cache_dir'],
         timeout=3600,

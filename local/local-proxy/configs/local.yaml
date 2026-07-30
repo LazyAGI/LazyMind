@@ -31,6 +31,13 @@ routes:
     enabled: true
     optional: false
     healthPath: "/health"
+  - name: "channel-gateway-route"
+    prefix: "/api/channel-gateway"
+    upstream: "http://127.0.0.1:8085"
+    stripPath: false
+    enabled: true
+    optional: false
+    healthPath: "/readyz"
   - name: "chat-route"
     prefix: "/api/chat"
     upstream: "http://127.0.0.1:8046"

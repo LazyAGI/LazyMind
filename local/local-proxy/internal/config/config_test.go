@@ -35,8 +35,8 @@ func TestLoadUsesDefaults(t *testing.T) {
 		t.Fatalf("allowedOrigins = %#v, want %#v", cfg.CORS.AllowedOrigins, wantOrigins)
 	}
 
-	if len(cfg.Routes) != 5 {
-		t.Fatalf("routes = %d, want 5", len(cfg.Routes))
+	if len(cfg.Routes) != 6 {
+		t.Fatalf("routes = %d, want 6", len(cfg.Routes))
 	}
 
 	routesByName := map[string]RouteConfig{}
@@ -70,6 +70,7 @@ func TestLoadUsesDefaults(t *testing.T) {
 	}
 
 	wantRoute("authservice-route", "/api/authservice", "http://127.0.0.1:8000", "/health", false, false)
+	wantRoute("channel-gateway-route", "/api/channel-gateway", "http://127.0.0.1:8085", "/readyz", false, false)
 	wantRoute("chat-route", "/api/chat", "http://127.0.0.1:8046", "/health", false, false)
 	wantRoute("scan-route", "/api/scan", "http://127.0.0.1:18080", "/health", false, true)
 	wantRoute("core-route", "/api/core", "http://127.0.0.1:8001", "/health", true, false)
@@ -195,6 +196,7 @@ func TestLoadCloudReplaceKongConfigFile(t *testing.T) {
 	t.Setenv("LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT", "18001")
 	t.Setenv("LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT", "18046")
 	t.Setenv("LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT", "18080")
+	t.Setenv("LAZYMIND_LOCAL_PROXY_CHANNEL_GATEWAY_HOST_PORT", "18085")
 	t.Setenv("LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT", "18047")
 	t.Setenv("LAZYMIND_FRONTEND_PORT", "8090")
 
@@ -254,6 +256,7 @@ func TestLoadCloudReplaceKongConfigFile(t *testing.T) {
 	}
 
 	wantRoute("authservice-route", "/api/authservice", "http://127.0.0.1:18000", "/api/authservice/auth/health", false, false)
+	wantRoute("channel-gateway-route", "/api/channel-gateway", "http://127.0.0.1:18085", "/readyz", false, false)
 	wantRoute("chat-route", "/api/chat", "http://127.0.0.1:18046", "/health", false, false)
 	wantRoute("scan-route", "/api/scan", "http://127.0.0.1:18080", "/healthz", false, true)
 	wantRoute("core-route", "/api/core", "http://127.0.0.1:18001", "/health", true, false)
@@ -266,6 +269,7 @@ func TestLoadCloudReplaceKongConfigFileIncludesLANOriginWhenSet(t *testing.T) {
 	t.Setenv("LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT", "18001")
 	t.Setenv("LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT", "18046")
 	t.Setenv("LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT", "18080")
+	t.Setenv("LAZYMIND_LOCAL_PROXY_CHANNEL_GATEWAY_HOST_PORT", "18085")
 	t.Setenv("LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT", "18047")
 	t.Setenv("LAZYMIND_FRONTEND_PORT", "8090")
 	t.Setenv("LAZYMIND_FRONTEND_LAN_ORIGIN", "http://10.0.0.2:8090")

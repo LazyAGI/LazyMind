@@ -127,6 +127,15 @@ func defaultRoutes() []RouteConfig {
 			HealthPath: "/health",
 		},
 		{
+			Name:       "channel-gateway-route",
+			Prefix:     "/api/channel-gateway",
+			Upstream:   "http://127.0.0.1:8085",
+			StripPath:  false,
+			Enabled:    true,
+			Optional:   false,
+			HealthPath: "/readyz",
+		},
+		{
 			Name:       "chat-route",
 			Prefix:     "/api/chat",
 			Upstream:   "http://127.0.0.1:8046",

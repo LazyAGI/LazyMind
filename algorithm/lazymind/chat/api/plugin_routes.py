@@ -22,7 +22,6 @@ from lazyllm.tools.writer.tools.revision_tools import apply_patch_to_ir
 from lazyllm.tools.writer.utils import load_artifact_json
 
 from lazymind.chat.plugin import plugin_loader
-from lazymind.chat.plugin.driver_agent import DriverEvaluationError, evaluate_step
 
 router = APIRouter()
 
@@ -127,6 +126,8 @@ async def plugin_driver(req: DriverRequest) -> DriverResponse:
     the ChatAgent as a synthetic user turn.  The ChatAgent then decides autonomously
     whether to advance, retry, rewind, or complete the plugin.
     """
+    from lazymind.chat.plugin.driver_agent import DriverEvaluationError, evaluate_step
+
     try:
         result = evaluate_step(
             plugin_id=req.plugin_id,
@@ -208,6 +209,7 @@ async def list_plugins(
 ) -> Dict[str, Any]:
     """Return summary information for all loaded plugins with i18n labels if Accept-Language is set."""
     lang = _parse_best_lang(accept_language)
+    plugin_loader.ensure_loaded()
     if lang:
         return {'plugins': [plugin_loader.get_plugin_with_i18n(pid, lang) for pid in plugin_loader._registry]}
     return {'plugins': plugin_loader.list_plugins()}

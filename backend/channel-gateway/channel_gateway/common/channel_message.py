@@ -8,12 +8,15 @@ from channel_gateway.common.channel_actions import (
     ChannelReply,
 )
 from channel_gateway.common.commands import (
+    SCHEMA_VERSION,
     CapabilityListCommand,
     ChatCommand,
+    ChatParameters,
     CommandEnvelope,
     ConversationNewCommand,
     SelectionContinuation,
 )
+from channel_gateway.common.database import GatewayStore
 from channel_gateway.common.intent_router import (
     ChannelIntentClassifier,
     ExactShortcutParser,
@@ -21,7 +24,7 @@ from channel_gateway.common.intent_router import (
     resolve_pending_selection,
     validate_command,
 )
-from channel_gateway.common.database import GatewayStore
+from channel_gateway.common.lazymind import LazyMindError
 
 
 _logger = logging.getLogger(__name__)
@@ -60,15 +63,28 @@ class ChannelMessageService:
         )
         routing_source = 'shortcut'
         if shortcut is None:
-            command = self._classifier.classify(
-                provider=provider,
-                owner_user_id=owner_user_id,
-                message=text,
-                request_id=f'{request_id}_intent',
-                state=self._classifier_state(account_id, external_address_hash),
-            )
+            try:
+                command = self._classifier.classify(
+                    provider=provider,
+                    owner_user_id=owner_user_id,
+                    message=text,
+                    request_id=f'{request_id}_intent',
+                    state=self._classifier_state(account_id, external_address_hash),
+                )
+                routing_source = 'llm'
+            except LazyMindError as exc:
+                _logger.warning(
+                    'channel_intent_fallback_chat request_id=%s error_type=%s',
+                    request_id,
+                    type(exc).__name__,
+                )
+                command = ChatCommand(
+                    schema_version=SCHEMA_VERSION,
+                    command='chat',
+                    parameters=ChatParameters(message=text),
+                )
+                routing_source = 'fallback'
             grounding_messages = (text,)
-            routing_source = 'llm'
         else:
             command = shortcut.command
             grounding_messages = shortcut.grounding_messages

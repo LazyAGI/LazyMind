@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from lazyllm import LOG
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-from lazymind.review.service.memory_review import MemoryReviewResult, review_memory
 
 router = APIRouter()
 
@@ -48,12 +46,21 @@ class MemoryReviewPayload(BaseModel):
         return self
 
 
+class MemoryReviewResult(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    status: Literal['success', 'failed']
+    task_id: str
+
+
 @router.post(
     '/api/chat/memory_review',
     summary='Review backend-provided history for memory or user_preference edits',
     response_model=MemoryReviewResult,
 )
 async def memory_review(payload: MemoryReviewPayload):
+    from lazymind.review.service.memory_review import review_memory
+
     try:
         result = review_memory(
             task_id=payload.task_id,

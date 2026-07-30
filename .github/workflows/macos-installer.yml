@@ -139,6 +139,7 @@ jobs:
           cache-dependency-glob: |
             algorithm/requirements*.txt
             backend/auth-service/requirements.txt
+            backend/channel-gateway/requirements.txt
 
       - name: Cache pnpm and Electron downloads
         uses: actions/cache@v4
@@ -221,6 +222,7 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           LAZYMIND_DESKTOP_NOTARIZE: ${{ steps.release.outputs.is_tag }}
+          LAZYMIND_RELEASE_BUILD: "true"
         run: |
           set -euo pipefail
 
