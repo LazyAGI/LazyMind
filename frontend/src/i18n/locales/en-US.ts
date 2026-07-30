@@ -655,6 +655,21 @@ const enUS = {
     collapseMenu: "Collapse Menu",
   },
 
+  legal: {
+    consentTitle: "User Agreement & Privacy Policy",
+    welcomeTitle: "Welcome to LazyMind",
+    welcomeDescription:
+      "Before you begin, learn how we handle local data, third-party services, and AI/Agent-related risks.",
+    readAndAgreePrefix: "I have read and agree to ",
+    agreementLink: "LazyMind User Agreement, Privacy Policy, and Safety Terms",
+    consentAgreeAndContinue: "Agree and continue",
+    detailsBack: "Back",
+    detailsReadAndReturn: "I have read this and return",
+    consentVersion: "Agreement version {{version}}",
+    consentChecking: "Syncing user agreement status...",
+    consentPersistFailed: "Failed to save agreement. Please try again.",
+  },
+
   channelGateway: {
     wechat: {
       title: "WeChat Channel",

@@ -51,6 +51,9 @@ import {
 import { runtimeFeatures } from "@/runtime/features";
 import { shouldHideLocalUserControls } from "@/runtime/localSession";
 import { useLocalSessionGate } from "@/runtime/useLocalSessionGate";
+import UserAgreementConsentModal, {
+  useUserAgreementConsentGate,
+} from "@/components/UserAgreementConsentModal";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
@@ -220,6 +223,8 @@ export default function MainLayout() {
     }
   }, []);
   const localSessionGate = useLocalSessionGate(refreshLayoutUser);
+  const { needsConsent, markAccepted, loading: agreementLoading } =
+    useUserAgreementConsentGate(isLoggedIn);
 
   useEffect(() => {
     if (!localSessionGate.enabled) {
@@ -682,6 +687,20 @@ export default function MainLayout() {
     return <Navigate to="/login" replace />;
   }
 
+  if (agreementLoading) {
+    return (
+      <div className="local-session-gate">
+        <div className="local-session-panel">
+          <Spin />
+          <div className="local-session-title">LazyMind</div>
+          <div className="local-session-message">
+            {t("legal.consentChecking")}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Layout hasSider className="main-layout">
       <Sider
@@ -1095,6 +1114,10 @@ export default function MainLayout() {
           </Form.Item>
         </Form>
       </Modal>
+      <UserAgreementConsentModal
+        open={needsConsent}
+        onAccepted={markAccepted}
+      />
     </Layout>
   );
 }

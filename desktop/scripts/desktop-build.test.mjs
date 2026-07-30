@@ -178,7 +178,7 @@ test("macOS CI fails fast on missing credentials and raises the open-file limit"
   assert.match(source, /actual_open_files < 8192/);
 });
 
-test("macOS CI stores pending artifacts and finalizes the same submission manually", () => {
+test("macOS CI normally finalizes notarization and preserves a manual fallback", () => {
   const buildWorkflow = readFileSync(macosWorkflow, "utf8");
   const finalizeWorkflow = readFileSync(macosFinalizeWorkflow, "utf8");
 
@@ -197,10 +197,23 @@ test("macOS CI stores pending artifacts and finalizes the same submission manual
     buildWorkflow,
     /if:\s*steps\.release\.outputs\.is_tag == 'true'[\s\S]*name:\s*LazyMind-macos-notarization-submission/,
   );
-  assert.doesNotMatch(buildWorkflow, /stapler validate/);
+  assert.match(buildWorkflow, /replace\(\/\^v\//);
+  assert.match(buildWorkflow, /prereleaseNames = \{ a: "alpha", b: "beta", rc: "rc" \}/);
+  assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for Apple notarization/);
+  assert.match(buildWorkflow, /deadline="\$\(\( started_at \+ 1800 \)\)"/);
+  assert.match(buildWorkflow, /sleep 30/);
+  assert.match(buildWorkflow, /::warning::Apple notarization is still in progress/);
+  assert.match(buildWorkflow, /stapler staple "\$\{final_path\}"/);
+  assert.match(buildWorkflow, /stapler validate "\$\{final_path\}"/);
+  assert.match(buildWorkflow, /\| Wait for Apple \|/);
+  assert.match(buildWorkflow, /name:\s*Report step timings/);
+  assert.match(buildWorkflow, /actions\/runs\/\$\{process\.env\.RUN_ID\}\/jobs\?filter=latest/);
 
   assert.match(finalizeWorkflow, /source_run_id:/);
   assert.match(finalizeWorkflow, /run-id:\s*\$\{\{\s*inputs\.source_run_id\s*\}\}/);
+  assert.match(finalizeWorkflow, /pattern:\s*"\*\.pending\.dmg"/);
+  assert.match(finalizeWorkflow, /pattern:\s*"\*\.notarization\.json"/);
+  assert.match(finalizeWorkflow, /merge-multiple:\s*true/);
   assert.match(finalizeWorkflow, /notarytool info "\$\{submission_id\}"/);
   assert.match(finalizeWorkflow, /notarytool log "\$\{SUBMISSION_ID\}"/);
   assert.match(finalizeWorkflow, /stapler staple "\$\{final_path\}"/);

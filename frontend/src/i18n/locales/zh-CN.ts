@@ -623,6 +623,21 @@ const zhCN = {
     collapseMenu: "收起菜单",
   },
 
+  legal: {
+    consentTitle: "用户协议与隐私政策",
+    welcomeTitle: "欢迎使用 LazyMind",
+    welcomeDescription:
+      "在开始使用前，请了解我们如何处理本地数据、第三方服务以及 AI/Agent 相关风险。",
+    readAndAgreePrefix: "我已阅读并同意",
+    agreementLink: "《LazyMind 用户协议、隐私政策与安全使用条款》",
+    consentAgreeAndContinue: "同意并继续",
+    detailsBack: "返回",
+    detailsReadAndReturn: "我已阅读并返回",
+    consentVersion: "协议版本 {{version}}",
+    consentChecking: "正在同步用户协议状态...",
+    consentPersistFailed: "保存同意状态失败，请稍后重试",
+  },
+
   channelGateway: {
     wechat: {
       title: "微信渠道连接",
