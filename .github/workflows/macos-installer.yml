@@ -139,6 +139,7 @@ jobs:
           cache-dependency-glob: |
             algorithm/requirements*.txt
             backend/auth-service/requirements.txt
+            backend/channel-gateway/requirements.txt
 
       - name: Cache pnpm and Electron downloads
         uses: actions/cache@v4

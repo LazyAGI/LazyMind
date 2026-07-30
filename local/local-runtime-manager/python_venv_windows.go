@@ -23,7 +23,7 @@ func relocateDesktopPythonVenvs(cfg RuntimeConfig, paths RuntimePaths) error {
 	if cfg.Profile != "desktop" {
 		return nil
 	}
-	for _, venv := range []string{paths.AuthServiceVenvDir, paths.AlgorithmVenv} {
+	for _, venv := range []string{paths.AuthServiceVenvDir, paths.ChannelGatewayVenvDir, paths.AlgorithmVenv} {
 		configPath := filepath.Join(venv, "pyvenv.cfg")
 		raw, err := os.ReadFile(configPath)
 		if os.IsNotExist(err) {

@@ -102,6 +102,7 @@ func localRuntimeEnv(cfg RuntimeConfig) []string {
 		localProxyCoreHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		localProxyChatHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.ChatHostPort),
 		localProxyScanHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.ScanHostPort),
+		localProxyChannelHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.ChannelHostPort),
 		localProxyEvoHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.EvoHostPort),
 	}
 }
