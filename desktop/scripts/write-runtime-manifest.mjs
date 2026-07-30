@@ -71,12 +71,14 @@ const manifest = {
     frontendDist: "app/frontend/dist",
     pythonRuntime: "runtimes/python",
     authServiceVenv: "deps/python/auth-service",
+    channelGatewayVenv: "deps/python/channel-gateway",
     algorithmVenv: "deps/python/algorithm",
     localProxyConfig: "app/local/local-proxy/configs/cloud-replace-kong.yaml"
   },
   services: {
     "local-proxy": { healthPath: "/_local/healthz" },
     "auth-service": { healthPath: "/api/authservice/auth/health" },
+    "channel-gateway": { healthPath: "/readyz" },
     "core": { healthPath: "/health" },
     "scan-control-plane": { healthPath: "/healthz" },
     "file-watcher": { healthPath: "/healthz" },

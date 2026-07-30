@@ -228,6 +228,7 @@ func (m *AuthServiceManager) generateAPIPermissions(ctx context.Context, paths R
 	sources := []string{
 		filepath.Join(paths.RepoRoot, "backend", "core"),
 		filepath.Join(paths.RepoRoot, "backend", "auth-service"),
+		filepath.Join(paths.RepoRoot, "backend", "channel-gateway"),
 		filepath.Join(paths.RepoRoot, "backend", "scan-control-plane"),
 	}
 	args := []string{

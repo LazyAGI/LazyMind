@@ -302,10 +302,14 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     if ($LASTEXITCODE -ne 0) { throw "uv python find exited with code $LASTEXITCODE" }
     if (-not $python) { throw 'uv python find returned an empty path' }
     $authVenv = Join-Path $runtimeRoot 'deps\python\auth-service'
+    $channelGatewayVenv = Join-Path $runtimeRoot 'deps\python\channel-gateway'
     $algorithmVenv = Join-Path $runtimeRoot 'deps\python\algorithm'
     Invoke-Native 'uv.exe' @('venv', '--managed-python', '--no-python-downloads', '--relocatable', '--seed', '--link-mode', 'copy', '--python', $python, $authVenv)
     $authPython = Join-Path $authVenv 'Scripts\python.exe'
     Invoke-Native 'uv.exe' @('pip', 'install', '--python', $authPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'backend\auth-service\requirements.txt'))
+    Invoke-Native 'uv.exe' @('venv', '--managed-python', '--no-python-downloads', '--relocatable', '--seed', '--link-mode', 'copy', '--python', $python, $channelGatewayVenv)
+    $channelGatewayPython = Join-Path $channelGatewayVenv 'Scripts\python.exe'
+    Invoke-Native 'uv.exe' @('pip', 'install', '--python', $channelGatewayPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'backend\channel-gateway\requirements.txt'))
     Invoke-Native 'uv.exe' @('venv', '--managed-python', '--no-python-downloads', '--relocatable', '--seed', '--link-mode', 'copy', '--python', $python, $algorithmVenv)
     $algorithmPython = Join-Path $algorithmVenv 'Scripts\python.exe'
     $lazyLLMVersion = if ($env:LAZYMIND_LAZYLLM_VERSION) { $env:LAZYMIND_LAZYLLM_VERSION } else { '1.2.0a2' }

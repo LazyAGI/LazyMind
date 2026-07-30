@@ -138,6 +138,7 @@ func TestAuthServiceGenerateAPIPermissionsUsesRuntimeOutput(t *testing.T) {
 			"--exclude", "scripts,core,vendor",
 			filepath.Join(repo, "backend", "core"),
 			filepath.Join(repo, "backend", "auth-service"),
+			filepath.Join(repo, "backend", "channel-gateway"),
 			filepath.Join(repo, "backend", "scan-control-plane"),
 		)
 		if err := os.WriteFile(output, []byte("[]\n"), 0o600); err != nil {

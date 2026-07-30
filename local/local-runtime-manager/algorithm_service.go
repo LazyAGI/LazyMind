@@ -531,7 +531,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_DOCUMENT_WORKER_POLL_MODE=" + envText("LAZYMIND_DOCUMENT_WORKER_POLL_MODE", "direct"),
 		"LAZYMIND_DOCUMENT_SERVICE_PORT=" + strconv.Itoa(cfg.Algorithm.DocPort),
 		"LAZYMIND_ALGO_SERVER_PORT=" + strconv.Itoa(cfg.Algorithm.AlgoPort),
-		"LAZYLLM_ALGO_REGISTER_POLICY=" + envText("LAZYLLM_ALGO_REGISTER_POLICY", "force"),
+		"LAZYLLM_ALGO_REGISTER_POLICY=" + algorithmRegisterPolicy(cfg, paths),
 		"LAZYMIND_USE_INNER_MODEL=true",
 		"LAZYMIND_RESET_ALGO_ON_STARTUP=" + envText("LAZYMIND_RESET_ALGO_ON_STARTUP", "false"),
 		"LAZYMIND_RESET_ALL_ON_STARTUP=" + envText("LAZYMIND_RESET_ALL_ON_STARTUP", "false"),
@@ -586,6 +586,42 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		env = append(env, "LAZYMIND_DOCUMENT_SERVICE_CALLBACK_URL=http://127.0.0.1:"+strconv.Itoa(cfg.Algorithm.DocPort)+"/v1/internal/callbacks/tasks")
 	}
 	return env
+}
+
+func algorithmRegisterPolicy(cfg RuntimeConfig, paths RuntimePaths) string {
+	if policy := strings.TrimSpace(os.Getenv("LAZYLLM_ALGO_REGISTER_POLICY")); policy != "" {
+		return policy
+	}
+	if cfg.Profile != "desktop" {
+		return "force"
+	}
+
+	appVersion := strings.TrimSpace(os.Getenv(desktopAppVersionEnvVar))
+	if appVersion == "" {
+		// Development and legacy launchers do not provide an install version. Avoid
+		// treating every ordinary restart as an upgrade in that case.
+		return "update"
+	}
+	registeredVersion, err := os.ReadFile(filepath.Join(paths.StateDir, algoRegistrationVersionFileName))
+	if err == nil && strings.TrimSpace(string(registeredVersion)) == appVersion {
+		return "update"
+	}
+	return "force"
+}
+
+func markAlgorithmRegistrationVersion(cfg RuntimeConfig, paths RuntimePaths) error {
+	if cfg.Profile != "desktop" {
+		return nil
+	}
+	appVersion := strings.TrimSpace(os.Getenv(desktopAppVersionEnvVar))
+	if appVersion == "" {
+		return nil
+	}
+	return os.WriteFile(
+		filepath.Join(paths.StateDir, algoRegistrationVersionFileName),
+		[]byte(appVersion+"\n"),
+		0o644,
+	)
 }
 
 func localRouterPortPool(cfg RuntimeConfig) (int, int) {

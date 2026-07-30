@@ -2,6 +2,7 @@ const requiredDesktopServices = [
   "process-supervisor",
   "local-proxy",
   "auth-service",
+  "channel-gateway",
   "core",
   "scan-control-plane",
   "file-watcher",
