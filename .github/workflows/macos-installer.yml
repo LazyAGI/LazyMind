@@ -221,6 +221,7 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           LAZYMIND_DESKTOP_NOTARIZE: ${{ steps.release.outputs.is_tag }}
+          LAZYMIND_RELEASE_BUILD: "true"
         run: |
           set -euo pipefail
 

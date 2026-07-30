@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI
 
 from lazymind.config import config
@@ -16,6 +18,7 @@ from lazymind.chat.api import (
     subagent_routes,
 )
 from lazymind.chat.service.utils.trace_archive import start_local_trace_maintenance
+from lazymind.chat.runtime_loader import start_background_chat_runtime_warmup
 from lazymind.rewrite.api import rewrite_routes
 from lazymind.review.api import memory_review_routes, skill_organize_routes, skill_review_routes
 
@@ -56,6 +59,8 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+if os.getenv('LAZYMIND_RUNTIME_MODE', '').strip().lower() == 'local':
+    start_background_chat_runtime_warmup()
 if config['background_jobs_enabled']:
     start_local_trace_maintenance()
 

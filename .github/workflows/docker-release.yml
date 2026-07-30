@@ -204,6 +204,8 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
+          build-args: |
+            LAZYLLM_BUNDLE_SOURCE=0
           push: true
           provenance: false
           platforms: linux/amd64
@@ -222,6 +224,8 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
+          build-args: |
+            LAZYLLM_BUNDLE_SOURCE=0
           push: true
           provenance: false
           platforms: linux/arm64

@@ -130,6 +130,8 @@ jobs:
             doctor
 
       - name: Build Windows installer
+        env:
+          LAZYMIND_RELEASE_BUILD: "true"
         shell: pwsh
         run: |
           pwsh `
