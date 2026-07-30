@@ -45,6 +45,16 @@ const enUS = {
     copyFailedManual: "Copy failed. Please copy manually.",
   },
 
+  runtime: {
+    aiServiceInitializingMessage:
+      "AI services are initializing. You can send messages when they are ready.",
+    aiServiceInitializingDocument:
+      "AI services are initializing. The document will be parsed automatically when they are ready.",
+    aiServiceInitializingWorkflow:
+      "AI services are initializing. The task will run automatically when they are ready.",
+    initializationFailed: "AI services failed to initialize. Please try again later.",
+  },
+
   // Auth
   auth: {
     welcomeLogin: "Welcome",

@@ -55,7 +55,7 @@ interface IChatLayoutProps {
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   chatDisabledReason?: string;
-  chatDisabledDescription?: string;
+  chatDisabledDescription?: ReactNode;
   chatDisabledAction?: ReactNode;
   /** Plugin settings selected on the welcome screen before the first message is sent. */
   initPendingPluginSettings?: ConversationPluginSettings | null;
@@ -291,7 +291,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   }, [initchatConfig]);
 
   useEffect(() => {
-    if (pendingMessage) {
+    if (pendingMessage && chatEnabled) {
       const timer = setTimeout(() => {
         chatRef.current?.sendMessage(pendingMessage);
         clearPendingMessage();
@@ -300,7 +300,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       return () => clearTimeout(timer);
     }
     return undefined;
-  }, [pendingMessage, clearPendingMessage]);
+  }, [pendingMessage, chatEnabled, clearPendingMessage]);
 
   useEffect(() => {
     const conversationId = sessionStorage.getItem(CHAT_RESUME_CONVERSATION_KEY);

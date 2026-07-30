@@ -149,12 +149,18 @@ test("macOS distribution build signs the final DMG and submits one asynchronous 
   assert.match(packageJson.scripts["dist:mac:arm64"], /--publish never$/);
   assert.match(builderSource, /afterPack:\s*signAndStageEmbeddedRuntime/);
   assert.match(builderSource, /afterSign:\s*restoreRuntimeAndFinalizeSignature/);
+  assert.match(builderSource, /macSigningMode === "developer-id" \? undefined : null/);
   assert.match(builderSource, /fs\.renameSync\(runtimeRoot, stagedRuntime\)/);
   assert.match(builderSource, /fs\.renameSync\(staged\.stagedRuntime, staged\.runtimeRoot\)/);
   assert.doesNotMatch(builderSource, /notarytool[\s\S]*submit/);
   assert.match(builderSource, /notarize:\s*false/);
   assert.match(builderSource, /sign:\s*macSigningMode === "developer-id"/);
   assert.doesNotMatch(builderSource, /signIgnore:/);
+  assert.match(
+    source,
+    /SIGNING_MODE}" == "adhoc"[\s\S]*codesign --force --deep --sign - "\$\{APP_PATH\}"/,
+    "local macOS builds must apply an explicit ad-hoc bundle signature",
+  );
   assert.doesNotMatch(source, /notarytool submit[\s\S]*--wait/);
   assert.doesNotMatch(source, /stapler staple/);
   for (const privatePath of ["/.env", "/.lazymind-local", "/data", "/volumes", "/local/config.env"]) {
@@ -229,8 +235,42 @@ test("Desktop does not create the Chat window after shutdown begins", () => {
 
   assert.match(
     createWindow,
-    /const status = await waitForRuntimeReady\(\);\s*if \(isQuitting\) \{\s*return;\s*\}\s*mainWindow = new BrowserWindow/,
+    /startRuntime\(\);[\s\S]*const status = await waitForDesktopHomeReady\(\);\s*if \(isQuitting\) \{\s*return;\s*\}\s*mainWindow = new BrowserWindow/,
     "shutdown must be rechecked before creating the hidden Chat window",
+  );
+});
+
+test("Desktop opens the home page from the sidecar readiness event with status polling as fallback", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+
+  assert.match(
+    source,
+    /event\?\.event === "capability\.ready" && event\?\.capability === "home"[\s\S]*publishHomeReady\(Number\(event\.frontendPort\)\)/,
+  );
+  assert.match(
+    source,
+    /function waitForDesktopHomeReady\(\) \{[\s\S]*Promise\.race\(\[[\s\S]*waitForHomeReadySignal\(\),[\s\S]*waitForRuntimeReady\(\{ capability: "home" \}\)/,
+  );
+});
+
+test("macOS window close hides the app while explicit quit still shuts it down", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+
+  assert.match(
+    source,
+    /function attachManagedClose\(window\)[\s\S]*event\.preventDefault\(\);[\s\S]*if \(isMac\) \{[\s\S]*windowHiddenByUser = true;[\s\S]*window\.hide\(\);[\s\S]*return;[\s\S]*beginFastQuit\("window close"\)/,
+    "the macOS close button must hide the window without starting runtime shutdown",
+  );
+  assert.match(
+    source,
+    /if \(!windowHiddenByUser\) \{[\s\S]*mainWindow\.show\(\);[\s\S]*mainWindow\.focus\(\);[\s\S]*\}/,
+    "a window hidden during startup must not reappear when Chat finishes loading",
+  );
+  assert.match(source, /app\.on\("activate", showActiveWindow\)/);
+  assert.match(
+    source,
+    /app\.on\("before-quit",[\s\S]*beginFastQuit\("app quit"\)/,
+    "Dock, menu, and keyboard quit actions must retain the explicit shutdown path",
   );
 });
 

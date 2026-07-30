@@ -44,6 +44,16 @@ const zhCN = {
     copyFailedManual: "复制失败，请手动复制",
   },
 
+  runtime: {
+    aiServiceInitializingMessage:
+      "AI 服务正在初始化，服务就绪后即可发送消息",
+    aiServiceInitializingDocument:
+      "AI 服务正在初始化，文档将在就绪后自动解析",
+    aiServiceInitializingWorkflow:
+      "AI 服务正在初始化，任务将在就绪后自动执行",
+    initializationFailed: "AI 服务初始化失败，请稍后重试",
+  },
+
   auth: {
     welcomeLogin: "欢迎登录",
     newUserRegister: "新用户注册",

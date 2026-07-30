@@ -934,6 +934,30 @@ func TestRuntimeManagerUpRejectsForeignOwnerBeforePythonRelocation(t *testing.T)
 	}
 }
 
+func TestStartupCapabilityReadyIncludesFrontendPort(t *testing.T) {
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+
+	manager.startupCapabilityReady("home", 8090)
+
+	const marker = "[startup-event] "
+	line := strings.TrimSpace(output.String())
+	if !strings.HasPrefix(line, marker) {
+		t.Fatalf("startup capability output = %q, want %q prefix", line, marker)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, marker)), &payload); err != nil {
+		t.Fatalf("unmarshal startup capability event: %v", err)
+	}
+	if payload["event"] != "capability.ready" || payload["capability"] != "home" {
+		t.Fatalf("unexpected startup capability event: %#v", payload)
+	}
+	if payload["frontendPort"] != float64(8090) {
+		t.Fatalf("frontendPort = %#v, want 8090", payload["frontendPort"])
+	}
+}
+
 func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

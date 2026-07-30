@@ -228,9 +228,9 @@ module.exports = {
     category: "public.app-category.productivity",
     icon: "assets/LazyMind.icns",
     target: ["dir"],
-    identity: macSigningMode === "developer-id"
-      ? undefined
-      : (macSigningMode === "adhoc" ? "-" : null),
+    // electron-builder 24 treats "-" as a keychain identity name instead of
+    // an ad-hoc identity. Local builds are signed explicitly after packaging.
+    identity: macSigningMode === "developer-id" ? undefined : null,
     hardenedRuntime: macSigningMode === "developer-id",
     entitlements: "assets/entitlements.mac.plist",
     entitlementsInherit: "assets/entitlements.mac.plist",
