@@ -120,6 +120,24 @@ func TestAlgorithmServiceEnvPinsLocalRouterHost(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_ROUTER_HOST=127.0.0.1")
 }
 
+func TestAlgorithmServiceEnvDisablesRouterForChat(t *testing.T) {
+	for _, profile := range []string{"local", "desktop"} {
+		t.Run(profile, func(t *testing.T) {
+			repo := t.TempDir()
+			writeComposeFixture(t, repo)
+			cfg, paths, err := NewRuntimeConfig(profile, repo)
+			if err != nil {
+				t.Fatalf("runtime config: %v", err)
+			}
+			t.Setenv("LAZYMIND_ENABLE_ROUTER", "true")
+
+			env := algorithmServiceEnv(cfg, paths, chatProcessName)
+
+			assertEnvContains(t, env, "LAZYMIND_ENABLE_ROUTER=false")
+		})
+	}
+}
+
 func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
@@ -165,17 +183,25 @@ func TestAlgorithmServiceEnvUsesFileBackedRelayArgumentsOnWindowsDesktop(t *test
 	assertEnvContains(t, env, "LAZYLLM_PASS_ARGS_BY_FILE=1")
 }
 
-func TestAlgorithmServiceCommandArgsUsesWindowsDesktopBootstrap(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows-specific Desktop process policy")
-	}
-	cfg := RuntimeConfig{Profile: "desktop"}
-	spec := AlgorithmServiceSpec{Module: []string{"-m", "lazymind.router.app", "--port", "8092"}}
+func TestAlgorithmServiceCommandArgsUsesDirectChat(t *testing.T) {
+	for _, profile := range []string{"local", "desktop"} {
+		t.Run(profile, func(t *testing.T) {
+			cfg := RuntimeConfig{Profile: profile}
+			spec := AlgorithmServiceSpec{
+				Name:   chatProcessName,
+				Module: []string{"-m", "lazymind.router.app", "--host", "0.0.0.0", "--port", "8092"},
+				Port:   8092,
+			}
 
-	args := algorithmServiceCommandArgs(cfg, spec)
+			args := algorithmServiceCommandArgs(cfg, spec)
 
-	want := []string{"-m", "lazymind.windows_runtime", "--", "-m", "lazymind.router.app", "--port", "8092"}
-	if !reflect.DeepEqual(args, want) {
-		t.Fatalf("algorithm service args = %#v, want %#v", args, want)
+			want := []string{"-m", "lazymind.chat.app", "--host", "0.0.0.0", "--port", "8092"}
+			if runtime.GOOS == "windows" && profile == "desktop" {
+				want = append([]string{"-m", "lazymind.windows_runtime", "--"}, want...)
+			}
+			if !reflect.DeepEqual(args, want) {
+				t.Fatalf("algorithm service args = %#v, want %#v", args, want)
+			}
+		})
 	}
 }

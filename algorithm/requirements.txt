@@ -9,7 +9,6 @@ setuptools<81
 
 
 beautifulsoup4
-ragas
 openpyxl==3.1.5
 python-docx
 pillow
