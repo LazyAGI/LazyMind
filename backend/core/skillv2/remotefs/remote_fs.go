@@ -66,7 +66,6 @@ type Handler struct {
 }
 
 func NewHandler(deps HandlerDeps) *Handler {
-	relaxSQLiteFixtureIndexes(deps.DB)
 	return &Handler{db: deps.DB, blobStore: deps.BlobStore, stateStore: deps.StateStore, clock: systemClock{}}
 }
 
@@ -84,7 +83,6 @@ type CommitDraftRequest = revision.CommitDraftRequest
 type CommitDraftResponse = revision.CommitDraftResponse
 
 func NewCommitter(deps CommitterDeps) *Committer {
-	relaxSQLiteFixtureIndexes(deps.DB)
 	return &Committer{
 		db:      deps.DB,
 		service: revision.NewService(revision.ServiceDeps{DB: deps.DB, BlobStore: deps.BlobStore.revision}),
@@ -1069,14 +1067,6 @@ func (h *Handler) blobData(blob skillBlobRow) ([]byte, error) {
 		return nil, fmt.Errorf("unsupported storage url: %s", rawURL)
 	}
 	return os.ReadFile(u.Path)
-}
-
-func relaxSQLiteFixtureIndexes(db *gorm.DB) {
-	if db == nil || db.Dialector.Name() != "sqlite" {
-		return
-	}
-	_ = db.Exec("DROP INDEX IF EXISTS uk_skills_owner_identity").Error
-	_ = db.Exec("DROP INDEX IF EXISTS uk_skills_owner_relative_root").Error
 }
 
 type pathLevel int
