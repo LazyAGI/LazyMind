@@ -1,0 +1,155 @@
+.user-agreement-page {
+  min-height: 100vh;
+  background: #f5f6f8;
+}
+
+.user-agreement-page-header {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  min-height: 58px;
+  padding: 0 24px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+
+  .ant-btn {
+    justify-self: start;
+  }
+
+  img {
+    width: 46px;
+    height: 36px;
+    object-fit: contain;
+  }
+}
+
+.user-agreement-page-language {
+  justify-self: end;
+}
+
+.user-agreement-page-main {
+  width: min(920px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 42px 0 110px;
+}
+
+.user-agreement-page-title {
+  margin-bottom: 24px;
+  text-align: center;
+
+  h1 {
+    margin: 0 0 8px;
+    color: rgba(0, 0, 0, 0.88);
+    font-size: 28px;
+    line-height: 1.4;
+  }
+
+  p {
+    margin: 0;
+    color: rgba(0, 0, 0, 0.45);
+    font-size: 13px;
+  }
+}
+
+.user-agreement-page-content {
+  padding: 36px 44px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 6px 24px rgba(20, 27, 48, 0.05);
+  color: rgba(0, 0, 0, 0.78);
+  font-size: 14px;
+  line-height: 1.85;
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    color: rgba(0, 0, 0, 0.88);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  h1 {
+    margin: 2em 0 1em;
+    font-size: 22px;
+
+    &:first-child {
+      margin-top: 0;
+    }
+  }
+
+  h2 {
+    margin: 1.8em 0 0.8em;
+    font-size: 18px;
+  }
+
+  h3,
+  h4 {
+    margin: 1.5em 0 0.7em;
+    font-size: 15px;
+  }
+
+  p,
+  ul,
+  ol {
+    margin: 0 0 1em;
+  }
+
+  ul,
+  ol {
+    padding-left: 1.6em;
+  }
+
+  li {
+    margin-bottom: 0.45em;
+  }
+
+  hr {
+    margin: 2em 0;
+    border: 0;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+  }
+}
+
+.user-agreement-page-footer {
+  position: fixed;
+  z-index: 10;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  justify-content: center;
+  padding: 14px 24px;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+
+  .ant-btn {
+    min-width: 180px;
+    border-radius: 9px;
+  }
+}
+
+@media (max-width: 640px) {
+  .user-agreement-page-header {
+    padding: 0 12px;
+  }
+
+  .user-agreement-page-main {
+    width: calc(100% - 24px);
+    padding-top: 28px;
+  }
+
+  .user-agreement-page-title h1 {
+    font-size: 23px;
+  }
+
+  .user-agreement-page-content {
+    padding: 24px 20px;
+  }
+}

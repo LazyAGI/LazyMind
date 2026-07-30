@@ -52,6 +52,7 @@ import {
 import { getAntdLocale } from "@/i18n/antdLocale";
 import { runtimeFeatures } from "@/runtime/features";
 import { isLocalSessionEnabled } from "@/runtime/localSession";
+import UserAgreementPage from "@/pages/UserAgreementPage";
 
 const PluginDetailPage = lazy(() => import("@/modules/plugin/pages/detail"));
 const BuiltinPluginDetailPage = lazy(() => import("@/modules/plugin/pages/builtin-detail"));
@@ -65,6 +66,10 @@ export default function AppRouter() {
       locale={getAntdLocale(i18n.resolvedLanguage || i18n.language)}
     >
       <Routes>
+        <Route
+          path="/legal/user-agreement"
+          element={<UserAgreementPage />}
+        />
         {localSessionEnabled ? (
           <Route path="/login" element={<Navigate to="/agent/chat" replace />} />
         ) : (

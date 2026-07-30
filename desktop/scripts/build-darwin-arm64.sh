@@ -137,6 +137,9 @@ prune_runtime_app() {
   if [[ -d "${app_root}/frontend" ]]; then
     find "${app_root}/frontend" -mindepth 1 -maxdepth 1 ! -name "dist" -exec rm -rf {} +
   fi
+  # Developer-local virtualenvs must not ship inside the app bundle; absolute
+  # interpreter symlinks break macOS sealed-resource verification.
+  find "${app_root}" -type d \( -name ".venv" -o -name ".venv-test" \) -prune -exec rm -rf {} +
   remove_generated_path "${app_root}/algorithm/lazyllm/docs"
   remove_generated_path "${app_root}/backend/core/core"
 }
@@ -196,8 +199,8 @@ rsync -a --delete \
   --exclude ".git" \
   --exclude "/.env" \
   --exclude "/.lazymind-local" \
-  --exclude "/.venv" \
-  --exclude "/.venv-test" \
+  --exclude ".venv" \
+  --exclude ".venv-test" \
   --exclude "/.conda" \
   --exclude "/.codex" \
   --exclude "/.claude" \

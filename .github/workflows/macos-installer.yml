@@ -86,6 +86,33 @@ jobs:
           node-version: "20"
           package-manager-cache: false
 
+      - name: Set desktop version from release tag
+        if: steps.release.outputs.is_tag == 'true'
+        id: version
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("fs");
+          const packagePath = "desktop/electron/package.json";
+          const tag = process.env.RELEASE_TAG.replace(/^v/, "");
+          const pythonPrerelease = tag.match(/^(\d+\.\d+\.\d+)(a|b|rc)(\d+)$/);
+          const prereleaseNames = { a: "alpha", b: "beta", rc: "rc" };
+          const version = pythonPrerelease
+            ? `${pythonPrerelease[1]}-${prereleaseNames[pythonPrerelease[2]]}.${pythonPrerelease[3]}`
+            : tag;
+          if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
+            throw new Error(`Release tag ${process.env.RELEASE_TAG} cannot be converted to a valid desktop SemVer`);
+          }
+          const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+          packageJson.version = version;
+          fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `package_version=${version}\n`);
+          console.log(`Desktop package version: ${version} (release tag: ${process.env.RELEASE_TAG})`);
+          NODE
+
       - name: Enable pnpm
         run: |
           corepack enable
@@ -186,6 +213,7 @@ jobs:
             desktop/scripts/runtime-status.test.mjs
 
       - name: Build and sign DMG
+        id: build
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
@@ -195,6 +223,8 @@ jobs:
           LAZYMIND_DESKTOP_NOTARIZE: ${{ steps.release.outputs.is_tag }}
         run: |
           set -euo pipefail
+
+          started_at="$(date +%s)"
 
           target_open_files=65536
           hard_open_files="$(ulimit -Hn)"
@@ -211,6 +241,8 @@ jobs:
           fi
 
           make desktop-darwin-arm64-dmg
+          duration_seconds="$(( $(date +%s) - started_at ))"
+          echo "duration_seconds=${duration_seconds}" >> "${GITHUB_OUTPUT}"
 
       - name: Validate and stage installer
         id: package
@@ -219,6 +251,8 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
+
+          started_at="$(date +%s)"
 
           source_dmg="${GITHUB_WORKSPACE}/desktop/dist/LazyMind-macos-arm64.dmg"
           source_submission="${GITHUB_WORKSPACE}/desktop/dist/notarization-submission.json"
@@ -267,6 +301,8 @@ jobs:
           sha256="$(shasum -a 256 "${output_path}" | awk '{print $1}')"
           echo "installer_path=${output_path}" >> "${GITHUB_OUTPUT}"
           echo "artifact_name=${artifact_name}" >> "${GITHUB_OUTPUT}"
+          duration_seconds="$(( $(date +%s) - started_at ))"
+          echo "duration_seconds=${duration_seconds}" >> "${GITHUB_OUTPUT}"
 
           {
             echo "## macOS installer"
@@ -309,19 +345,163 @@ jobs:
           retention-days: 30
           archive: false
 
+      - name: Wait up to 30 minutes for Apple notarization
+        if: steps.release.outputs.is_tag == 'true'
+        id: notarization
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SUBMISSION_ID: ${{ steps.package.outputs.submission_id }}
+        run: |
+          set -euo pipefail
+
+          started_at="$(date +%s)"
+          deadline="$(( started_at + 1800 ))"
+          status="In Progress"
+          while (( $(date +%s) < deadline )); do
+            xcrun notarytool info "${SUBMISSION_ID}" \
+              --apple-id "${APPLE_ID}" \
+              --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+              --team-id "${APPLE_TEAM_ID}" \
+              --output-format json > notarization-status.json
+            status="$(
+              node -e '
+                const fs = require("fs");
+                const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+                if (!value.status) process.exit(1);
+                process.stdout.write(value.status);
+              ' notarization-status.json
+            )"
+            echo "Apple notarization status: ${status}"
+            if [[ "${status}" != "In Progress" ]]; then
+              break
+            fi
+            sleep 30
+          done
+
+          duration_seconds="$(( $(date +%s) - started_at ))"
+          echo "status=${status}" >> "${GITHUB_OUTPUT}"
+          echo "duration_seconds=${duration_seconds}" >> "${GITHUB_OUTPUT}"
+          if [[ "${status}" == "In Progress" ]]; then
+            echo "::warning::Apple notarization is still in progress after ${duration_seconds}s. The pending artifacts are available; run Finalize macOS Notarization later with source run ID ${GITHUB_RUN_ID}."
+          fi
+
+      - name: Download Apple rejection log
+        if: steps.release.outputs.is_tag == 'true' && steps.notarization.outputs.status == 'Invalid'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SUBMISSION_ID: ${{ steps.package.outputs.submission_id }}
+        run: |
+          xcrun notarytool log "${SUBMISSION_ID}" \
+            --apple-id "${APPLE_ID}" \
+            --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            notarization-log.json
+
+      - name: Upload Apple rejection diagnostics
+        if: steps.release.outputs.is_tag == 'true' && steps.notarization.outputs.status == 'Invalid'
+        uses: actions/upload-artifact@v7
+        with:
+          name: LazyMind-macos-notarization-diagnostics
+          path: |
+            notarization-status.json
+            notarization-log.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Staple and validate accepted installer
+        if: steps.release.outputs.is_tag == 'true' && steps.notarization.outputs.status == 'Accepted'
+        id: final_package
+        env:
+          PENDING_DMG: ${{ steps.package.outputs.installer_path }}
+        run: |
+          set -euo pipefail
+
+          started_at="$(date +%s)"
+          final_dir="${GITHUB_WORKSPACE}/desktop/dist/final"
+          pending_name="$(basename "${PENDING_DMG}")"
+          final_name="${pending_name/.pending.dmg/.dmg}"
+          final_path="${final_dir}/${final_name}"
+          mount_dir="$(mktemp -d "${RUNNER_TEMP}/lazymind-final-dmg.XXXXXX")"
+
+          mkdir -p "${final_dir}"
+          cp "${PENDING_DMG}" "${final_path}"
+          codesign --verify --strict --verbose=2 "${final_path}"
+          xcrun stapler staple "${final_path}"
+          xcrun stapler validate "${final_path}"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "${final_path}"
+
+          hdiutil attach "${final_path}" -readonly -nobrowse -mountpoint "${mount_dir}"
+          trap 'hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true' EXIT
+          codesign --verify --deep --strict --verbose=2 "${mount_dir}/LazyMind.app"
+          spctl --assess --type execute --verbose=4 "${mount_dir}/LazyMind.app"
+          hdiutil detach "${mount_dir}"
+          trap - EXIT
+
+          sha256="$(shasum -a 256 "${final_path}" | awk '{print $1}')"
+          duration_seconds="$(( $(date +%s) - started_at ))"
+          echo "installer_path=${final_path}" >> "${GITHUB_OUTPUT}"
+          echo "installer_name=${final_name}" >> "${GITHUB_OUTPUT}"
+          echo "sha256=${sha256}" >> "${GITHUB_OUTPUT}"
+          echo "duration_seconds=${duration_seconds}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload final notarized installer
+        if: steps.release.outputs.is_tag == 'true' && steps.notarization.outputs.status == 'Accepted'
+        id: upload_final
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.final_package.outputs.installer_path }}
+          if-no-files-found: error
+          retention-days: 30
+          archive: false
+
+      - name: Fail rejected notarization
+        if: steps.release.outputs.is_tag == 'true' && steps.notarization.outputs.status == 'Invalid'
+        run: |
+          echo "::error::Apple rejected notarization submission ${{ steps.package.outputs.submission_id }}. Review the uploaded diagnostics."
+          exit 1
+
       - name: Add release artifact links to summary
         if: steps.release.outputs.is_tag == 'true'
         env:
           PENDING_ARTIFACT_URL: ${{ steps.upload_installer.outputs.artifact-url }}
           SUBMISSION_ARTIFACT_URL: ${{ steps.upload_submission.outputs.artifact-url }}
+          FINAL_ARTIFACT_URL: ${{ steps.upload_final.outputs.artifact-url }}
+          NOTARIZATION_STATUS: ${{ steps.notarization.outputs.status }}
         run: |
           {
-            echo "## Pending artifacts"
+            echo "## macOS release result"
+            echo
+            echo "- Release tag: \`${{ steps.release.outputs.tag }}\`"
+            echo "- Desktop version: \`${{ steps.version.outputs.package_version }}\`"
+            echo "- Apple notarization: **${NOTARIZATION_STATUS}**"
+            if [[ "${NOTARIZATION_STATUS}" == "Accepted" ]]; then
+              echo "- [Download the notarized and stapled installer](${FINAL_ARTIFACT_URL})"
+            else
+              echo "- Apple is still processing the submission. This workflow completed successfully with pending artifacts."
+              echo "- Run **Finalize macOS Notarization** later with source run ID \`${GITHUB_RUN_ID}\`."
+            fi
+            echo
+            echo "### Pending artifacts"
             echo
             echo "- [Pending DMG](${PENDING_ARTIFACT_URL})"
             echo "- [Notarization submission record](${SUBMISSION_ARTIFACT_URL})"
             echo
-            echo "Do not distribute the pending DMG. The finalizer publishes the accepted and stapled installer."
+            echo "Do not distribute the pending DMG. Use it only as input to the finalizer."
+            echo
+            echo "### Timings"
+            echo
+            echo "| Phase | Duration |"
+            echo "| --- | ---: |"
+            echo "| Build, sign, and submit | ${{ steps.build.outputs.duration_seconds }}s |"
+            echo "| Validate and stage | ${{ steps.package.outputs.duration_seconds }}s |"
+            echo "| Wait for Apple | ${{ steps.notarization.outputs.duration_seconds }}s |"
+            if [[ "${NOTARIZATION_STATUS}" == "Accepted" ]]; then
+              echo "| Staple and validate | ${{ steps.final_package.outputs.duration_seconds }}s |"
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Add development artifact link to summary
@@ -338,3 +518,58 @@ jobs:
       - name: Show final disk usage
         if: always()
         run: df -h /
+
+  report-timings:
+    name: Report step timings
+    needs: build-macos-installer
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Add step timings to summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+
+          const response = await fetch(
+            `https://api.github.com/repos/${process.env.REPOSITORY}/actions/runs/${process.env.RUN_ID}/jobs?filter=latest`,
+            {
+              headers: {
+                Accept: "application/vnd.github+json",
+                Authorization: `Bearer ${process.env.GH_TOKEN}`,
+                "X-GitHub-Api-Version": "2022-11-28",
+              },
+            },
+          );
+          if (!response.ok) {
+            throw new Error(`Unable to load job timings: ${response.status} ${await response.text()}`);
+          }
+          const payload = await response.json();
+          const job = payload.jobs.find((candidate) => candidate.name === "Build macOS arm64 DMG");
+          if (!job) {
+            throw new Error("Build macOS arm64 DMG job was not found in the current workflow run");
+          }
+
+          const lines = [
+            "## Step timings",
+            "",
+            `Build result: **${job.conclusion || job.status}**`,
+            "",
+            "| Step | Result | Duration |",
+            "| --- | --- | ---: |",
+          ];
+          for (const step of job.steps) {
+            const started = Date.parse(step.started_at);
+            const completed = Date.parse(step.completed_at);
+            const duration = Number.isFinite(started) && Number.isFinite(completed)
+              ? `${Math.max(0, Math.round((completed - started) / 1000))}s`
+              : "n/a";
+            lines.push(`| ${step.name.replaceAll("|", "\\|")} | ${step.conclusion || step.status} | ${duration} |`);
+          }
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`);
+          NODE
