@@ -1,6 +1,11 @@
 package chat
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+
+	"lazymind/core/common/orm"
+)
 
 func TestParseMaxInputTokens(t *testing.T) {
 	tests := map[string]int64{
@@ -35,9 +40,16 @@ func TestPreviewQueryReadsTextInput(t *testing.T) {
 }
 
 func TestMentionedBuiltinPluginReplacesDefaultCatalog(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "plugin-settings.db"))
+	if err != nil {
+		t.Fatalf("connect SQLite database: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.UserPluginSetting{}); err != nil {
+		t.Fatalf("migrate plugin settings: %v", err)
+	}
 	catalog := []map[string]any{{"plugin_ref": "plugin:default", "plugin_id": "default"}}
 	selected, builtins, err := mergeMentionedPlugins(
-		t.Context(), nil, "user-1", []string{"builtin:image-plugin"}, catalog,
+		t.Context(), db.DB, "user-1", []string{"builtin:image-plugin"}, catalog,
 	)
 	if err != nil {
 		t.Fatal(err)

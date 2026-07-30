@@ -422,6 +422,32 @@ func applyMentionedTools(disabled []string, enabled []string) []string {
 	return out
 }
 
+func applyPluginContextCallMode(db *gorm.DB, userID string, reqBody map[string]any) error {
+	pluginContext, ok := reqBody["plugin_context"].(map[string]any)
+	if !ok || pluginContext == nil {
+		return nil
+	}
+	pluginRef := strings.TrimSpace(fmt.Sprint(pluginContext["plugin_ref"]))
+	if pluginRef == "" {
+		return nil
+	}
+	callMode, err := plugin.UserPluginCallMode(db, userID, pluginRef)
+	if err != nil {
+		return fmt.Errorf("load active workflow call mode: %w", err)
+	}
+	if callMode != plugin.PluginCallModeDisabled {
+		return nil
+	}
+	for _, key := range []string{
+		"session_id", "plugin_id", "current_step", "plugin_ref",
+		"revision_id", "revision_no", "tree_hash", "remote_root",
+	} {
+		delete(pluginContext, key)
+	}
+	reqBody["plugin_context"] = pluginContext
+	return nil
+}
+
 func mergeMentionedPlugins(ctx context.Context, db *gorm.DB, userID string, refs []string, catalog []map[string]any) ([]map[string]any, []string, error) {
 	if len(refs) == 0 {
 		return catalog, nil, nil
@@ -433,6 +459,13 @@ func mergeMentionedPlugins(ctx context.Context, db *gorm.DB, userID string, refs
 	selected := make([]map[string]any, 0, len(refs))
 	var forcedBuiltins []string
 	for _, ref := range refs {
+		callMode, err := plugin.UserPluginCallMode(db, userID, ref)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load plugin call mode: %w", err)
+		}
+		if callMode == plugin.PluginCallModeDisabled {
+			return nil, nil, fmt.Errorf("workflow is paused: %s", ref)
+		}
 		if strings.HasPrefix(ref, "builtin:") {
 			forcedBuiltins = append(forcedBuiltins, strings.TrimPrefix(ref, "builtin:"))
 			continue
@@ -481,6 +514,14 @@ func applyPluginSelection(
 	if err != nil {
 		return fmt.Errorf("load plugin catalog: %w", err)
 	}
+	disabledBuiltins, err := plugin.DisabledBuiltinPluginIDs(db, userID)
+	if err != nil {
+		return fmt.Errorf("load builtin plugin settings: %w", err)
+	}
+	manualBuiltins, err := plugin.ManualBuiltinPluginIDs(db, userID)
+	if err != nil {
+		return fmt.Errorf("load builtin plugin call modes: %w", err)
+	}
 	excluded := map[string]bool{}
 	for _, ref := range excludedRefs {
 		excluded[ref] = true
@@ -498,10 +539,6 @@ func applyPluginSelection(
 	if err != nil {
 		return err
 	}
-	disabledBuiltins, err := plugin.DisabledBuiltinPluginIDs(db, userID)
-	if err != nil {
-		return fmt.Errorf("load builtin plugin settings: %w", err)
-	}
 	for _, ref := range excludedRefs {
 		if strings.HasPrefix(ref, "builtin:") {
 			disabledBuiltins = append(disabledBuiltins, strings.TrimPrefix(ref, "builtin:"))
@@ -516,5 +553,6 @@ func applyPluginSelection(
 	reqBody["disabled_builtin_plugins"] = applyMentionedTools(
 		disabledBuiltins, forcedBuiltins,
 	)
+	reqBody["manual_builtin_plugins"] = manualBuiltins
 	return nil
 }
