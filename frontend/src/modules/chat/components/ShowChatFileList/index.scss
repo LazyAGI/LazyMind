@@ -31,6 +31,10 @@
     text-align: center;
     border-radius: 4px;
 
+    &.is-clickable {
+      cursor: pointer;
+    }
+
     .chat-files-name {
       display: flex;
       flex: 1;
@@ -86,6 +90,7 @@
     align-items: center;
     justify-content: center;
     margin-top: 8px;
+    cursor: pointer;
 
     img {
       object-fit: contain;
