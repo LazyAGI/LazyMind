@@ -178,7 +178,10 @@ describe("desktop runtime readiness", () => {
     const configurationWaitIndex = guardSource.indexOf(
       'waitForRuntimeCapability("configuration"',
     );
-    const modelRequestIndex = guardSource.indexOf("fetchCurrentUser()");
+    const modelRequestIndex = guardSource.indexOf(
+      "fetchCurrentUser,",
+      configurationWaitIndex,
+    );
 
     expect(configurationWaitIndex).toBeGreaterThan(-1);
     expect(configurationWaitIndex).toBeLessThan(modelRequestIndex);
