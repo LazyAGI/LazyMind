@@ -175,7 +175,7 @@ func execMigrationFileForDriver(t *testing.T, db *sql.DB, path, driver string) {
 	if err != nil {
 		t.Fatalf("begin migration %s: %v", path, err)
 	}
-	if _, err := tx.Exec(sqlBody); err != nil {
+	if err := execMigrationSQL(tx, driver, sqlBody); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("execute migration %s: %v", path, err)
 	}

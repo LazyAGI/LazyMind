@@ -63,6 +63,7 @@ func TestRepositorySQLiteFreshAndUpgradePaths(t *testing.T) {
 		runRepositorySQLiteMigrations(t, dsn)
 		db := openRepositorySQLite(t, dsn)
 		assertGORMModelsMatchDatabase(t, db)
+		assertSQLiteRepairIndexes(t, db)
 		assertSQLiteCredentialColumns(t, db)
 	})
 
@@ -111,6 +112,7 @@ INSERT INTO user_model_provider_groups (
 		}
 
 		assertGORMModelsMatchDatabase(t, db)
+		assertSQLiteRepairIndexes(t, db)
 		assertSQLiteCredentialColumns(t, db)
 		var row orm.UserModelProviderGroup
 		if err := db.Where("id = ?", "legacy-group").Take(&row).Error; err != nil {
@@ -199,6 +201,70 @@ func runRepositorySQLiteMigrations(t *testing.T, dsn string) {
 
 }
 
+func TestRepositorySQLiteAddsAcceptedUserAgreementColumnOnUpgrade(t *testing.T) {
+	dsn := t.TempDir() + "/agreement-upgrade.db"
+	runRepositorySQLiteMigrations(t, dsn)
+
+	raw := openRawSQLite(t, dsn)
+	if _, err := raw.Exec(`ALTER TABLE user_ui_preferences DROP COLUMN accepted_user_agreement_version`); err != nil {
+		t.Fatalf("strip agreement column to simulate legacy aggregate schema: %v", err)
+	}
+	if _, err := raw.Exec(`
+DELETE FROM schema_migration_history
+WHERE name = 'v0_2/add_accepted_user_agreement_version'
+   OR CAST(version AS TEXT) LIKE '%114817%'`); err != nil {
+		t.Fatalf("remove agreement migration history: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close legacy preferences database: %v", err)
+	}
+
+	runRepositorySQLiteMigrations(t, dsn)
+	db := openRepositorySQLite(t, dsn)
+	if !db.Migrator().HasColumn(&orm.UserUIPreferences{}, "accepted_user_agreement_version") {
+		t.Fatal("SQLite upgrade did not add accepted_user_agreement_version")
+	}
+}
+
+func TestRepositorySQLiteFreshInstallAppliesPostAggregateAgreementMigration(t *testing.T) {
+	dir := t.TempDir()
+	writeMigrationPair(t, versionModeDir(t, dir, "v0_2"), "20260723183515_baseline", `
+-- +migrate Dialect sqlite
+CREATE TABLE user_ui_preferences (
+  user_id varchar(255) PRIMARY KEY,
+  chat_preference_notice_dismissed numeric NOT NULL DEFAULT false,
+  developer_mode_active numeric NOT NULL DEFAULT false,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL
+);
+`, "DROP TABLE user_ui_preferences;")
+	writeMigrationPair(t, devModeDir(t, dir, "v0_2"), "20260728114817_add_accepted_user_agreement_version", `
+-- +migrate Dialect postgres
+ALTER TABLE user_ui_preferences
+    ADD COLUMN IF NOT EXISTS accepted_user_agreement_version VARCHAR(64) NOT NULL DEFAULT '';
+-- +migrate Dialect sqlite
+ALTER TABLE user_ui_preferences ADD COLUMN accepted_user_agreement_version varchar(64) NOT NULL DEFAULT '';
+`, "ALTER TABLE user_ui_preferences DROP COLUMN accepted_user_agreement_version;")
+
+	dsn := t.TempDir() + "/fresh-agreement.db"
+	runner, err := NewRunner("sqlite", dsn, dir)
+	if err != nil {
+		t.Fatalf("create SQLite runner: %v", err)
+	}
+	defer runner.Close()
+	if err := runner.Up(0); err != nil {
+		t.Fatalf("fresh SQLite Up: %v", err)
+	}
+
+	var column string
+	if err := runner.db.QueryRow(`
+SELECT name FROM pragma_table_info('user_ui_preferences')
+WHERE name = 'accepted_user_agreement_version'
+`).Scan(&column); err != nil {
+		t.Fatalf("fresh install did not apply post-aggregate agreement column: %v", err)
+	}
+}
+
 func TestRepositorySQLiteRunsLaterVersionedMigrations(t *testing.T) {
 	dir := t.TempDir()
 	writeMigrationPair(t, versionModeDir(t, dir, "v0_2"), "20260723183515_baseline",
@@ -245,6 +311,23 @@ func assertSQLiteCredentialColumns(t *testing.T, db *gorm.DB) {
 	for _, column := range []string{"api_key", "api_key_ciphertext", "credential_version"} {
 		if !db.Migrator().HasColumn(&orm.UserModelProviderGroup{}, column) {
 			t.Fatalf("SQLite user_model_provider_groups is missing column %s", column)
+		}
+	}
+}
+
+func assertSQLiteRepairIndexes(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, check := range []struct {
+		model any
+		index string
+	}{
+		{&orm.SkillMarketInstall{}, "idx_skill_market_installs_user"},
+		{&orm.SkillMarketInstall{}, "idx_skill_market_installs_skill"},
+		{&orm.PluginGenerationAnalysis{}, "idx_plugin_generation_analyses_draft"},
+		{&orm.PluginRepairRun{}, "idx_plugin_repair_runs_draft"},
+	} {
+		if !db.Migrator().HasIndex(check.model, check.index) {
+			t.Fatalf("SQLite migration is missing index %s", check.index)
 		}
 	}
 }

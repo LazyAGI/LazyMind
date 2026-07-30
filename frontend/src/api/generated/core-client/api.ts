@@ -2469,12 +2469,14 @@ export interface UserModelProviderOpenAPIItem {
     'name': string;
 }
 export interface UserUIPreferencesOpenAPIResponse {
+    'accepted_user_agreement_version': string;
     'chat_preference_notice_dismissed': boolean;
     'developer_mode_active': boolean;
     'updated_at': string;
     'user_preference_configured': boolean;
 }
 export interface UserUIPreferencesPatchOpenAPIRequest {
+    'accepted_user_agreement_version'?: string;
     'chat_preference_notice_dismissed'?: boolean;
     'developer_mode_active'?: boolean;
 }

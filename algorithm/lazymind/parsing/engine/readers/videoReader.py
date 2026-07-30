@@ -1,5 +1,4 @@
 import os
-import shutil
 import subprocess
 import hashlib
 import tempfile
@@ -11,6 +10,7 @@ from lazyllm.thirdparty import fsspec
 from lazyllm.tools.rag.doc_node import DocNode, ImageDocNode
 from lazyllm.tools.rag.readers.readerBase import LazyLLMReaderBase, get_default_fs, is_default_fs
 
+from lazymind.common.ffmpeg_deps import resolve_ffmpeg_binaries
 from lazymind.config import config as _cfg
 from lazymind.parsing.engine.readers.imageEmbReader import ImageEmbReader
 
@@ -247,7 +247,7 @@ class VideoReader(LazyLLMReaderBase):
         return f'{video_name}_frame_{timestamp}.jpg'
 
     def _get_video_duration(self, video_path: str) -> float:
-        ffprobe_path = shutil.which('ffprobe')
+        _ffmpeg_path, ffprobe_path = resolve_ffmpeg_binaries()
         if not ffprobe_path:
             raise RuntimeError('`ffprobe` not found in PATH.')
 
@@ -269,7 +269,7 @@ class VideoReader(LazyLLMReaderBase):
         return float(result.stdout.strip())
 
     def _extract_frames(self, video_path: str) -> List[str]:
-        ffmpeg_path = shutil.which('ffmpeg')
+        ffmpeg_path, _ffprobe_path = resolve_ffmpeg_binaries()
         if not ffmpeg_path:
             raise RuntimeError('`ffmpeg` not found in PATH.')
 
