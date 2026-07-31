@@ -75,7 +75,7 @@ jobs:
       - name: Initialize development submodules
         if: steps.release.outputs.is_tag != 'true'
         shell: pwsh
-        run: git submodule update --init --recursive
+        run: git submodule update --init algorithm/lazyllm
 
       - name: Normalize Electron pnpm workspace
         shell: pwsh
