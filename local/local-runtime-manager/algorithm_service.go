@@ -19,7 +19,7 @@ import (
 
 const (
 	algorithmHealthTimeout = 15 * time.Minute
-	defaultLazyLLMVersion  = "1.2.0a3"
+	defaultLazyLLMVersion  = "1.2.0a4"
 )
 
 type AlgorithmServiceSpec struct {
