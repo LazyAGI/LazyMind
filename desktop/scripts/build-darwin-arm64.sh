@@ -8,7 +8,6 @@ DIST_ROOT="${ROOT}/desktop/dist"
 APP_ICON="${ROOT}/desktop/electron/assets/LazyMind.icns"
 PACKAGE_KIND="${LAZYMIND_DESKTOP_PACKAGE_KIND:-zip}"
 SIGNING_MODE="${LAZYMIND_DESKTOP_SIGNING_MODE:-adhoc}"
-NOTARIZE="${LAZYMIND_DESKTOP_NOTARIZE:-false}"
 LAZYLLM_VERSION="${LAZYMIND_LAZYLLM_VERSION:-1.2.0a3}"
 RELEASE_BUILD="${LAZYMIND_RELEASE_BUILD:-false}"
 
@@ -38,18 +37,6 @@ case "${SIGNING_MODE}" in
     exit 2
     ;;
 esac
-if [[ "${NOTARIZE}" == "true" && "${SIGNING_MODE}" != "developer-id" ]]; then
-  echo "LAZYMIND_DESKTOP_NOTARIZE=true requires LAZYMIND_DESKTOP_SIGNING_MODE=developer-id" >&2
-  exit 2
-fi
-if [[ "${NOTARIZE}" == "true" ]]; then
-  for variable in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-    if [[ -z "${!variable:-}" ]]; then
-      echo "${variable} is required when LAZYMIND_DESKTOP_NOTARIZE=true" >&2
-      exit 2
-    fi
-  done
-fi
 if [[ "${PACKAGE_KIND}" == "dmg" && "${SIGNING_MODE}" == "none" ]]; then
   echo "Refusing to create an unsigned distribution DMG" >&2
   exit 2
@@ -253,7 +240,6 @@ export LAZYMIND_DESKTOP_RUNTIME_STAGE="${RUNTIME_ROOT}"
 export LAZYMIND_DESKTOP_OUTPUT_DIR="${DIST_ROOT}"
 export LAZYMIND_DESKTOP_PACKAGE_KIND
 export LAZYMIND_DESKTOP_SIGNING_MODE
-export LAZYMIND_DESKTOP_NOTARIZE
 if [[ "${PACKAGE_KIND}" == "dmg" ]]; then
   (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run dist:mac:arm64)
 else
@@ -263,7 +249,6 @@ fi
 APP_PATH="${DIST_ROOT}/mac-arm64/LazyMind.app"
 ZIP_PATH="${DIST_ROOT}/LazyMind-darwin-arm64.zip"
 DMG_PATH="${DIST_ROOT}/LazyMind-macos-arm64.dmg"
-NOTARIZATION_SUBMISSION_PATH="${DIST_ROOT}/notarization-submission.json"
 if [[ ! -d "${APP_PATH}" ]]; then
   if [[ -d "${DIST_ROOT}/mac-arm64" ]]; then
     APP_PATH="$(find "${DIST_ROOT}/mac-arm64" -maxdepth 3 -type d -name "LazyMind.app" -print -quit)"
@@ -293,29 +278,7 @@ if [[ -d "${APP_PATH}" ]]; then
       echo "Expected DMG not found: ${DMG_PATH}" >&2
       exit 1
     fi
-    if [[ "${NOTARIZE}" == "true" ]]; then
-      dmg_size="$(du -h "${DMG_PATH}" | awk '{print $1}')"
-      submission_tmp="${NOTARIZATION_SUBMISSION_PATH}.tmp"
-      rm -f "${submission_tmp}" "${NOTARIZATION_SUBMISSION_PATH}"
-      codesign --verify --strict --verbose=2 "${DMG_PATH}"
-      echo "==> $(date -u +%Y-%m-%dT%H:%M:%SZ) asynchronously submitting ${dmg_size} distribution DMG for notarization"
-      xcrun notarytool submit "${DMG_PATH}" \
-        --apple-id "${APPLE_ID}" \
-        --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
-        --team-id "${APPLE_TEAM_ID}" \
-        --output-format json > "${submission_tmp}"
-      submission_id="$(
-        node -e '
-          const fs = require("fs");
-          const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-          if (!value.id) process.exit(1);
-          process.stdout.write(value.id);
-        ' "${submission_tmp}"
-      )"
-      mv "${submission_tmp}" "${NOTARIZATION_SUBMISSION_PATH}"
-      echo "==> DMG notarization submitted: ${submission_id}"
-      echo "Notarization submission: ${NOTARIZATION_SUBMISSION_PATH}"
-    fi
+    codesign --verify --strict --verbose=2 "${DMG_PATH}"
   fi
   echo "LazyMind.app: ${APP_PATH}"
   if [[ "${PACKAGE_KIND}" == "dmg" ]]; then

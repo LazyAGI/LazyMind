@@ -18,14 +18,6 @@ const macSigningMode = process.env.LAZYMIND_DESKTOP_SIGNING_MODE || "adhoc";
 if (!["adhoc", "developer-id", "none"].includes(macSigningMode)) {
   throw new Error(`Unsupported LAZYMIND_DESKTOP_SIGNING_MODE: ${macSigningMode}`);
 }
-const notarizeMac = process.env.LAZYMIND_DESKTOP_NOTARIZE === "true";
-if (notarizeMac && macSigningMode !== "developer-id") {
-  throw new Error("LAZYMIND_DESKTOP_NOTARIZE=true requires LAZYMIND_DESKTOP_SIGNING_MODE=developer-id");
-}
-if (notarizeMac && !process.env.APPLE_TEAM_ID) {
-  throw new Error("APPLE_TEAM_ID is required for notarytool notarization");
-}
-
 const extraResources = [
   {
     from: runtimeStage,
@@ -185,7 +177,7 @@ async function adhocSignAppBundle(appPath) {
 }
 
 async function signAndStageEmbeddedRuntime(context) {
-  if (macSigningMode === "none") {
+  if (context.electronPlatformName !== "darwin" || macSigningMode === "none") {
     return;
   }
 
@@ -237,7 +229,7 @@ async function signAndStageEmbeddedRuntime(context) {
 }
 
 async function restoreRuntimeAndFinalizeSignature(context) {
-  if (macSigningMode !== "developer-id") {
+  if (context.electronPlatformName !== "darwin" || macSigningMode !== "developer-id") {
     return;
   }
 

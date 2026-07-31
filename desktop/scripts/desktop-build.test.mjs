@@ -132,16 +132,13 @@ test("Windows installer verifies and force-cleans processes left by warmup", () 
   assert.match(install, /\$4 == 1[\s\S]*StrCpy \$3 4[\s\S]*\$3 != 0/);
 });
 
-test("macOS distribution build signs the final DMG and submits one asynchronous notarization", () => {
+test("macOS distribution build signs packages while CI owns notarization sequencing", () => {
   const source = readFileSync(darwinBuildScript, "utf8");
   const builderSource = readFileSync(electronBuilderConfig, "utf8");
   const packageJson = JSON.parse(readFileSync(electronPackage, "utf8"));
   assert.match(source, /PACKAGE_KIND=.*zip/);
   assert.match(source, /SIGNING_MODE=.*adhoc/);
-  assert.match(
-    source,
-    /notarytool submit "\$\{DMG_PATH\}"[\s\S]*--team-id "\$\{APPLE_TEAM_ID\}"[\s\S]*--output-format json/,
-  );
+  assert.doesNotMatch(source, /notarytool submit/);
   assert.match(source, /Authority=Developer ID Application:/);
   assert.match(source, /signature_info="\$\(codesign -dv --verbose=4/);
   assert.doesNotMatch(source, /codesign -dv[^\n]*\|\s*grep -q/);
@@ -149,6 +146,14 @@ test("macOS distribution build signs the final DMG and submits one asynchronous 
   assert.match(packageJson.scripts["dist:mac:arm64"], /--publish never$/);
   assert.match(builderSource, /afterPack:\s*signAndStageEmbeddedRuntime/);
   assert.match(builderSource, /afterSign:\s*restoreRuntimeAndFinalizeSignature/);
+  assert.match(
+    builderSource,
+    /context\.electronPlatformName !== "darwin" \|\| macSigningMode === "none"/,
+  );
+  assert.match(
+    builderSource,
+    /context\.electronPlatformName !== "darwin" \|\| macSigningMode !== "developer-id"/,
+  );
   assert.match(builderSource, /macSigningMode === "developer-id" \? undefined : null/);
   assert.match(builderSource, /fs\.renameSync\(runtimeRoot, stagedRuntime\)/);
   assert.match(builderSource, /fs\.renameSync\(staged\.stagedRuntime, staged\.runtimeRoot\)/);
@@ -184,41 +189,38 @@ test("macOS CI fails fast on missing credentials and raises the open-file limit"
   assert.match(source, /actual_open_files < 8192/);
 });
 
-test("macOS CI normally finalizes notarization and preserves a manual fallback", () => {
+test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallback", () => {
   const buildWorkflow = readFileSync(macosWorkflow, "utf8");
   const finalizeWorkflow = readFileSync(macosFinalizeWorkflow, "utf8");
 
-  assert.match(buildWorkflow, /artifact_name="LazyMind-macos-arm64-pending"/);
-  assert.match(buildWorkflow, /name="LazyMind-macos-arm64-development"/);
+  assert.match(buildWorkflow, /name:\s*Submit app ZIP for notarization/);
+  assert.match(buildWorkflow, /notarytool submit "\$\{zip_path\}"/);
+  assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for app ZIP notarization/);
+  assert.match(buildWorkflow, /continuing directly to DMG packaging/);
+  assert.match(buildWorkflow, /name:\s*Staple accepted app ticket/);
+  assert.match(buildWorkflow, /dist:mac:arm64:prepackaged/);
+  assert.match(buildWorkflow, /name:\s*Submit DMG for notarization/);
+  assert.match(buildWorkflow, /notarytool submit "\$\{PENDING_DMG\}"/);
   assert.match(buildWorkflow, /name:\s*LazyMind-macos-notarization-submission/);
   assert.match(buildWorkflow, /\.pending\.dmg/);
   assert.match(buildWorkflow, /\.unnotarized\.dmg/);
   assert.match(buildWorkflow, /git show-ref --verify --quiet "refs\/tags\/\$\{REQUESTED_REF\}"/);
   assert.match(buildWorkflow, /tag_commit=.*git rev-parse "refs\/tags\/\$\{tag_candidate\}\^\{commit\}"/);
-  assert.match(
-    buildWorkflow,
-    /LAZYMIND_DESKTOP_NOTARIZE:\s*\$\{\{\s*steps\.release\.outputs\.is_tag\s*\}\}/,
-  );
-  assert.match(
-    buildWorkflow,
-    /if:\s*steps\.release\.outputs\.is_tag == 'true'[\s\S]*name:\s*LazyMind-macos-notarization-submission/,
-  );
+  assert.doesNotMatch(buildWorkflow, /path:[^\n]*LazyMind-darwin-arm64\.zip/);
   assert.match(buildWorkflow, /replace\(\/\^v\//);
   assert.match(buildWorkflow, /prereleaseNames = \{ a: "alpha", b: "beta", rc: "rc" \}/);
-  assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for Apple notarization/);
+  assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for DMG notarization/);
   assert.match(buildWorkflow, /deadline="\$\(\( started_at \+ 1800 \)\)"/);
   assert.match(buildWorkflow, /sleep 30/);
-  assert.match(buildWorkflow, /::warning::Apple notarization is still in progress/);
+  assert.match(buildWorkflow, /DMG notarization timed out/);
   assert.match(buildWorkflow, /stapler staple "\$\{final_path\}"/);
   assert.match(buildWorkflow, /stapler validate "\$\{final_path\}"/);
-  assert.match(buildWorkflow, /\| Wait for Apple \|/);
-  assert.match(buildWorkflow, /name:\s*Report step timings/);
-  assert.match(buildWorkflow, /actions\/runs\/\$\{process\.env\.RUN_ID\}\/jobs\?filter=latest/);
+  assert.doesNotMatch(buildWorkflow, /name:\s*Report step timings/);
 
   assert.match(finalizeWorkflow, /source_run_id:/);
   assert.match(finalizeWorkflow, /run-id:\s*\$\{\{\s*inputs\.source_run_id\s*\}\}/);
-  assert.match(finalizeWorkflow, /pattern:\s*"\*\.pending\.dmg"/);
-  assert.match(finalizeWorkflow, /pattern:\s*"\*\.notarization\.json"/);
+  assert.match(finalizeWorkflow, /pattern:\s*"LazyMind-macos-arm64-pending"/);
+  assert.match(finalizeWorkflow, /pattern:\s*"LazyMind-macos-notarization-submission"/);
   assert.match(finalizeWorkflow, /merge-multiple:\s*true/);
   assert.match(finalizeWorkflow, /notarytool info "\$\{submission_id\}"/);
   assert.match(finalizeWorkflow, /notarytool log "\$\{SUBMISSION_ID\}"/);
