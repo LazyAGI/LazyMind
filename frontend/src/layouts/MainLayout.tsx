@@ -831,10 +831,6 @@ export default function MainLayout() {
             </div>
           )}
           <div className="sider-bar-bottom">
-            <div className="bottom-item language-item">
-              <GlobalOutlined className="bottom-icon" />
-              {shouldRenderMenuContent && <LanguageSwitcher />}
-            </div>
             {showSettingsTrigger && (
               <Popover
                 content={
@@ -850,9 +846,15 @@ export default function MainLayout() {
                           onClick={() => handleSettingsNavigate(item.key)}
                         >
                           {item.icon}
-                          <span>{item.label}</span>
+                          <span className="settings-popover-label">{item.label}</span>
                           {item.key === "developer-toggle" && developerActive && (
                             <span className="settings-active-badge">{t("admin.developerActiveTag")}</span>
+                          )}
+                          {[
+                            "/model-providers/default-services",
+                            "/admin",
+                          ].includes(item.key) && (
+                            <RightOutlined className="settings-popover-accessory" />
                           )}
                         </Button>
                       );
@@ -873,6 +875,10 @@ export default function MainLayout() {
                       }
                       return btn;
                     })}
+                    <div className="settings-popover-language">
+                      <GlobalOutlined className="settings-popover-icon" />
+                      <LanguageSwitcher />
+                    </div>
                     {!hideLocalUserControls && (
                       isLoggedIn ? (
                         <Button
@@ -895,6 +901,7 @@ export default function MainLayout() {
                   </div>
                 }
                 arrow={false}
+                overlayClassName="settings-popover-overlay"
                 placement="top"
                 trigger="click"
                 open={settingsOpen}
