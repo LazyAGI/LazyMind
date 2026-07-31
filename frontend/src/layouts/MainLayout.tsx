@@ -932,7 +932,31 @@ export default function MainLayout() {
             >
               <WechatOutlined className="bottom-icon" />
               {shouldRenderMenuContent && (
-                <span className="bottom-text">{t("layout.channelConnection")}</span>
+                <span className="bottom-text">{t("layout.wechatConnection")}</span>
+              )}
+            </div>
+            <div
+              className={`bottom-item feishu-entry${
+                pathname.startsWith("/channels/feishu") ? " is-active" : ""
+              }`}
+              role="button"
+              tabIndex={0}
+              onClick={() => handleModuleNavigate("/channels/feishu")}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  handleModuleNavigate("/channels/feishu");
+                }
+              }}
+            >
+              <img
+                className="bottom-icon feishu-official-icon"
+                src="/feishu-official.svg"
+                alt=""
+                aria-hidden="true"
+              />
+              {shouldRenderMenuContent && (
+                <span className="bottom-text">{t("layout.feishuConnection")}</span>
               )}
             </div>
             {userName && !hideLocalUserControls && (

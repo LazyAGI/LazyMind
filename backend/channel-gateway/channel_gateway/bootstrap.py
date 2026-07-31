@@ -12,7 +12,6 @@ from channel_gateway.common.application.intents import (
 )
 from channel_gateway.common.application.messages import (
     ChannelMessageService,
-    NativeConversationCoordinator,
 )
 from channel_gateway.common.application.routing import ChannelCommandRouter
 from channel_gateway.common.application.workers import (
@@ -32,21 +31,21 @@ from channel_gateway.common.ports.providers import AccountAdapter
 from channel_gateway.common.ports.providers import (
     InteractiveConnectionAdapter,
 )
-from channel_gateway.common.ports.messaging import DeliveryProvider
-from channel_gateway.common.ports.messaging import NativeConversationSurface
+from channel_gateway.common.ports.messaging import (
+    DeliveryProvider,
+    ReplyStreamProvider,
+)
 from channel_gateway.feishu.connection import FeishuConnectionService
 from channel_gateway.feishu.domain import FeishuAddressFactory
 from channel_gateway.feishu.delivery import FeishuDeliveryProvider
 from channel_gateway.feishu.receiver import LarkChannelFactory
 from channel_gateway.feishu.registration import LarkAppRegistrar
-from channel_gateway.feishu.storage import (
+from channel_gateway.feishu.accounts import (
     FeishuCredentialStore,
-    FeishuWorkspaceStore,
 )
 from channel_gateway.feishu.runtime import FeishuRuntime
-from channel_gateway.feishu.service import FeishuAccountService
-from channel_gateway.feishu.workspace import FeishuWorkspaceService
-from channel_gateway.feishu.workspace import FeishuConversationSurface
+from channel_gateway.feishu.accounts import FeishuAccountService
+from channel_gateway.feishu.task_monitor import FeishuTaskCardMonitor
 from channel_gateway.wechat.client import WeChatClient
 from channel_gateway.wechat.domain import (
     WeChatAddressFactory,
@@ -81,7 +80,7 @@ class ProviderComponents:
     accounts: AccountAdapter
     delivery: DeliveryProvider
     features: ChannelFeatureProfile = BASIC_CHAT_FEATURES
-    surface: NativeConversationSurface | None = None
+    streaming: ReplyStreamProvider | None = None
 
 
 class ProviderRegistry:
@@ -117,16 +116,13 @@ class ProviderRegistry:
         provider = self._provider(name)
         return provider.delivery if provider else None
 
-    def surface(
-        self,
-        provider: str,
-    ) -> NativeConversationSurface | None:
-        resolved = self._provider(provider)
-        return resolved.surface if resolved else None
-
     def features(self, name: str) -> ChannelFeatureProfile:
         provider = self._provider(name)
         return provider.features if provider else BASIC_CHAT_FEATURES
+
+    def streaming(self, name: str) -> ReplyStreamProvider | None:
+        provider = self._provider(name)
+        return provider.streaming if provider else None
 
     def _provider(self, name: str) -> ProviderComponents | None:
         return self._providers.get(name.strip().lower())
@@ -137,7 +133,6 @@ class GatewayComponents:
     """Runtime object graph. Only this composition root knows concrete adapters."""
 
     store: GatewayStore
-    feishu_workspaces: FeishuWorkspaceStore
     connections: ConnectionApplicationService
     accounts: AccountApplicationService
     message_worker: MessageWorker
@@ -146,7 +141,6 @@ class GatewayComponents:
 
     def start(self) -> None:
         self.store.initialize()
-        self.feishu_workspaces.initialize()
         self.message_worker.start()
         self.delivery_worker.start()
         for supervisor in self.runtime_supervisors:
@@ -173,9 +167,6 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         text_chunk_size=resolved_settings.wechat_text_chunk_size,
     )
     store = GatewayStore(resolved_settings.database_dsn)
-    feishu_workspace_store = FeishuWorkspaceStore(
-        resolved_settings.database_dsn
-    )
     cipher = JsonCipher(resolved_settings.credential_key_path)
     lazymind = LazyMindClient(
         resolved_settings.core_base_url,
@@ -207,18 +198,11 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
     )
     feishu_channels = LarkChannelFactory()
     feishu_addresses = FeishuAddressFactory()
-    feishu_workspaces = FeishuWorkspaceService(
-        store=feishu_workspace_store,
-        leases=store,
-        admin=feishu_channels,
-    )
     feishu_runtime = FeishuRuntime(
         store=store,
         credentials=feishu_credentials,
         channels=feishu_channels,
         addresses=feishu_addresses,
-        workspaces=feishu_workspaces,
-        topics=store,
     )
     feishu_accounts = FeishuAccountService(
         store=store,
@@ -231,20 +215,13 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         cipher=cipher,
         registrar=LarkAppRegistrar(),
         accounts=feishu_accounts,
-        workspaces=feishu_workspaces,
+        channels=feishu_channels,
     )
     wechat_delivery = WeChatDeliveryProvider(
         client=wechat_client,
         credentials=wechat_credentials,
         renderer=OutboundRenderer(wechat_config.text_chunk_size),
         lazymind=lazymind,
-    )
-    feishu_surface = FeishuConversationSurface(
-        credentials=feishu_credentials,
-        workspaces=feishu_workspaces,
-        channels=feishu_channels,
-        addresses=feishu_addresses,
-        topics=store,
     )
     feishu_delivery = FeishuDeliveryProvider(
         credentials=feishu_credentials,
@@ -253,6 +230,13 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
             resolved_settings.feishu_text_chunk_size
         ),
         lazymind=lazymind,
+    )
+    feishu_task_monitor = FeishuTaskCardMonitor(
+        store=store,
+        credentials=feishu_credentials,
+        channels=feishu_channels,
+        tasks=lazymind,
+        assets=lazymind,
     )
     providers = ProviderRegistry()
     providers.register(
@@ -270,7 +254,7 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
             connection=feishu_connections,
             accounts=feishu_accounts,
             delivery=feishu_delivery,
-            surface=feishu_surface,
+            streaming=feishu_delivery,
             features=ChannelFeatureProfile(
                 enable_ask=True,
                 enable_plugin=True,
@@ -292,16 +276,12 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
             classifier=ChannelIntentClassifier(lazymind),
             feature_resolver=providers.features,
         ),
-        native_conversations=NativeConversationCoordinator(
-            store=store,
-            surfaces=providers,
-            executor=executor,
-        ),
         executor=executor,
     )
     message_worker = MessageWorker(
         store=store,
         messages=messages,
+        streams=providers,
     )
     delivery_worker = DeliveryWorker(
         store=store,
@@ -319,7 +299,6 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
     )
     return GatewayComponents(
         store=store,
-        feishu_workspaces=feishu_workspace_store,
         connections=ConnectionApplicationService(
             store=store,
             providers=providers,
@@ -337,5 +316,6 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
             ),
             feishu_accounts_runtime,
             feishu_connections,
+            feishu_task_monitor,
         ),
     )

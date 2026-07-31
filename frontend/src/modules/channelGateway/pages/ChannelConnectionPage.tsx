@@ -26,9 +26,13 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
-import type { ChannelAccount, ConnectionSession } from '../api';
-import { useWechatConnection } from '../hooks/useWechatConnection';
-import './wechatConnectionPage.scss';
+import type {
+  ChannelAccount,
+  ChannelProvider,
+  ConnectionSession,
+} from '../api';
+import { useChannelConnection } from '../hooks/useChannelConnection';
+import './channelConnectionPage.scss';
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -114,8 +118,26 @@ function renderSessionVisual(
   );
 }
 
-export default function WechatConnectionPage() {
+interface ChannelConnectionPageProps {
+  provider: ChannelProvider;
+}
+
+export default function ChannelConnectionPage({
+  provider,
+}: ChannelConnectionPageProps) {
   const [accountsPanelOpen, setAccountsPanelOpen] = useState(false);
+  const translationKey = `channelGateway.${provider}`;
+  const copy = (name: string) => `${translationKey}.${name}`;
+  const channelIcon = provider === 'wechat'
+    ? <WechatOutlined />
+    : (
+      <img
+        className="feishu-official-icon"
+        src="/feishu-official.svg"
+        alt=""
+        aria-hidden="true"
+      />
+    );
   const {
     t,
     accounts,
@@ -133,11 +155,15 @@ export default function WechatConnectionPage() {
     refreshQr,
     submitChallenge,
     closeSessionPanel,
-  } = useWechatConnection();
+  } = useChannelConnection(provider);
 
   const step = currentStep(session);
   const hasAccounts = accounts.length > 0;
   const activeScan = isActiveScan(session);
+  const accountsPanelId = `${provider}-accounts-panel`;
+  const accountsTitleId = `${provider}-accounts-title`;
+  const connectWorkspaceId = `${provider}-connect-workspace`;
+  const connectTitleId = `${provider}-connect-title`;
 
   const beginScan = () => {
     void startScan();
@@ -145,56 +171,60 @@ export default function WechatConnectionPage() {
 
   const columns: ColumnsType<ChannelAccount> = [
     {
-      title: t('channelGateway.wechat.accountLabel'),
+      title: t(copy('accountLabel')),
       dataIndex: 'label',
       key: 'label',
+      width: 240,
       render: (value: string) => (
         <div className="wechat-account-name">
-          <span><WechatOutlined /></span>
-          <strong>{value || '-'}</strong>
+          <span>{channelIcon}</span>
+          <Tooltip title={value || '-'}>
+            <strong>{value || '-'}</strong>
+          </Tooltip>
         </div>
       ),
     },
     {
-      title: t('channelGateway.wechat.accountStatus'),
+      title: t(copy('accountStatus')),
       dataIndex: 'status',
       key: 'status',
       width: 140,
       render: (value: string) => (
         <Tag color={statusColor(value)}>
-          {t(`channelGateway.wechat.accountStatusMap.${value}`, { defaultValue: value })}
+          {t(copy(`accountStatusMap.${value}`), { defaultValue: value })}
         </Tag>
       ),
     },
     {
-      title: t('channelGateway.wechat.runtimeStatus'),
+      title: t(copy('runtimeStatus')),
       dataIndex: 'runtime_status',
       key: 'runtime_status',
       width: 140,
       render: (value: string) => (
         <Tag color={statusColor(value)}>
-          {t(`channelGateway.wechat.runtimeStatusMap.${value}`, { defaultValue: value })}
+          {t(copy(`runtimeStatusMap.${value}`), { defaultValue: value })}
         </Tag>
       ),
     },
     {
-      title: t('channelGateway.wechat.connectedAt'),
+      title: t(copy('connectedAt')),
       dataIndex: 'connected_at',
       key: 'connected_at',
       width: 180,
       render: formatTime,
     },
     {
-      title: t('channelGateway.wechat.lastMessageAt'),
+      title: t(copy('lastMessageAt')),
       dataIndex: 'last_message_at',
       key: 'last_message_at',
       width: 180,
       render: formatTime,
     },
     {
-      title: t('channelGateway.wechat.lastError'),
+      title: t(copy('lastError')),
       dataIndex: 'last_error',
       key: 'last_error',
+      width: 200,
       ellipsis: true,
       render: (value: string | null) =>
         value ? (
@@ -204,7 +234,7 @@ export default function WechatConnectionPage() {
         ) : '-',
     },
     {
-      title: t('channelGateway.wechat.actions'),
+      title: t(copy('actions')),
       key: 'actions',
       fixed: 'right',
       width: 110,
@@ -215,18 +245,18 @@ export default function WechatConnectionPage() {
           loading={disconnectingAccountId === account.id}
           onClick={() => {
             Modal.confirm({
-              title: t('channelGateway.wechat.disconnectConfirmTitle'),
-              content: t('channelGateway.wechat.disconnectConfirmContent', {
+              title: t(copy('disconnectConfirmTitle')),
+              content: t(copy('disconnectConfirmContent'), {
                 account: account.label,
               }),
-              okText: t('channelGateway.wechat.disconnectConfirmOk'),
+              okText: t(copy('disconnectConfirmOk')),
               cancelText: t('common.cancel'),
               okButtonProps: { danger: true },
               onOk: () => disconnectAccount(account.id),
             });
           }}
         >
-          {t('channelGateway.wechat.disconnectAccount')}
+          {t(copy('disconnectAccount'))}
         </Button>
       ),
     },
@@ -234,19 +264,19 @@ export default function WechatConnectionPage() {
 
   const accountsSection = (
     <section
-      id="wechat-accounts-panel"
+      id={accountsPanelId}
       className="wechat-connection-accounts"
-      aria-labelledby="wechat-accounts-title"
+      aria-labelledby={accountsTitleId}
     >
       <div className="wechat-connection-accounts-head">
         <div>
           <div className="wechat-accounts-title-row">
-            <Title id="wechat-accounts-title" level={4}>
-              {t('channelGateway.wechat.accountsTitle')}
+            <Title id={accountsTitleId} level={4}>
+              {t(copy('accountsTitle'))}
             </Title>
             {!accountsLoading ? <span>{accounts.length}</span> : null}
           </div>
-          <Text type="secondary">{t('channelGateway.wechat.accountsHint')}</Text>
+          <Text type="secondary">{t(copy('accountsHint'))}</Text>
         </div>
         <Space wrap className="wechat-accounts-actions">
           <Button
@@ -254,7 +284,7 @@ export default function WechatConnectionPage() {
             loading={accountsLoading}
             onClick={() => void loadAccounts()}
           >
-            {t('channelGateway.wechat.refreshAccounts')}
+            {t(copy('refreshAccounts'))}
           </Button>
         </Space>
       </div>
@@ -265,12 +295,12 @@ export default function WechatConnectionPage() {
         columns={columns}
         dataSource={accounts}
         pagination={false}
-        scroll={{ x: 940 }}
+        scroll={{ x: 1190 }}
         locale={{
           emptyText: (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={t('channelGateway.wechat.accountsEmpty')}
+              description={t(copy('accountsEmpty'))}
             />
           ),
         }}
@@ -280,22 +310,22 @@ export default function WechatConnectionPage() {
 
   const connectWorkspace = (
     <section
-      id="wechat-connect-workspace"
+      id={connectWorkspaceId}
       className="wechat-connect-workspace"
-      aria-labelledby="wechat-connect-title"
+      aria-labelledby={connectTitleId}
     >
       <div className="wechat-connect-workspace-head">
         <div>
-          <Text className="wechat-section-kicker">{t('channelGateway.wechat.quickConnect')}</Text>
-          <Title id="wechat-connect-title" level={3}>
+          <Text className="wechat-section-kicker">{t(copy('quickConnect'))}</Text>
+          <Title id={connectTitleId} level={3}>
             {hasAccounts
-              ? t('channelGateway.wechat.newConnectionTitle')
-              : t('channelGateway.wechat.guideTitle')}
+              ? t(copy('newConnectionTitle'))
+              : t(copy('guideTitle'))}
           </Title>
           <Paragraph>
             {hasAccounts
-              ? t('channelGateway.wechat.newConnectionHint')
-              : t('channelGateway.wechat.guideHint')}
+              ? t(copy('newConnectionHint'))
+              : t(copy('guideHint'))}
           </Paragraph>
         </div>
       </div>
@@ -307,31 +337,31 @@ export default function WechatConnectionPage() {
               <span className="wechat-step-index">1</span>
               <span className="wechat-step-icon"><MobileOutlined /></span>
               <div>
-                <strong>{t('channelGateway.wechat.stepOpenTitle')}</strong>
-                <p>{t('channelGateway.wechat.stepOpenHint')}</p>
+                <strong>{t(copy('stepOpenTitle'))}</strong>
+                <p>{t(copy('stepOpenHint'))}</p>
               </div>
             </li>
             <li className={step >= 2 ? 'is-active' : ''}>
               <span className="wechat-step-index">2</span>
               <span className="wechat-step-icon"><QrcodeOutlined /></span>
               <div>
-                <strong>{t('channelGateway.wechat.stepScanTitle')}</strong>
-                <p>{t('channelGateway.wechat.stepScanHint')}</p>
+                <strong>{t(copy('stepScanTitle'))}</strong>
+                <p>{t(copy('stepScanHint'))}</p>
               </div>
             </li>
             <li className={step >= 3 ? 'is-active' : ''}>
               <span className="wechat-step-index">3</span>
               <span className="wechat-step-icon"><SafetyCertificateOutlined /></span>
               <div>
-                <strong>{t('channelGateway.wechat.stepConfirmTitle')}</strong>
-                <p>{t('channelGateway.wechat.stepConfirmHint')}</p>
+                <strong>{t(copy('stepConfirmTitle'))}</strong>
+                <p>{t(copy('stepConfirmHint'))}</p>
               </div>
             </li>
           </ol>
 
           <div className="wechat-security-note">
             <LockOutlined />
-            <span>{t('channelGateway.wechat.securityHint')}</span>
+            <span>{t(copy('securityHint'))}</span>
           </div>
         </div>
 
@@ -349,7 +379,7 @@ export default function WechatConnectionPage() {
                 />
                 <div>
                   <Text strong>
-                    {t(`channelGateway.wechat.sessionStatusMap.${session.status}`, {
+                    {t(copy(`sessionStatusMap.${session.status}`), {
                       defaultValue: session.status,
                     })}
                   </Text>
@@ -360,13 +390,13 @@ export default function WechatConnectionPage() {
 
               <div className="wechat-connection-qr-wrap">
                 {renderSessionVisual(session, {
-                  preparing: t('channelGateway.wechat.preparingQr'),
-                  connected: t('channelGateway.wechat.connectSuccessVisual'),
-                  failed: t('channelGateway.wechat.connectFailedVisual'),
+                  preparing: t(copy('preparingQr')),
+                  connected: t(copy('connectSuccessVisual')),
+                  failed: t(copy('connectFailedVisual')),
                 })}
                 {session.qr?.expires_at && activeScan ? (
                   <Text type="secondary">
-                    {t('channelGateway.wechat.qrExpiresAt', { time: formatTime(session.qr.expires_at) })}
+                    {t(copy('qrExpiresAt'), { time: formatTime(session.qr.expires_at) })}
                   </Text>
                 ) : null}
               </div>
@@ -374,15 +404,15 @@ export default function WechatConnectionPage() {
               {session.status === 'verification_required' || canAct(session, 'submit_challenge') ? (
                 <div className="wechat-connection-challenge">
                   <Text strong>
-                    {session.challenge?.prompt || t('channelGateway.wechat.challengePrompt')}
+                    {session.challenge?.prompt || t(copy('challengePrompt'))}
                   </Text>
                   <Space.Compact className="wechat-challenge-input">
                     <Input
                       value={challengeValue}
                       maxLength={12}
                       inputMode="numeric"
-                      aria-label={t('channelGateway.wechat.challengePrompt')}
-                      placeholder={t('channelGateway.wechat.challengePlaceholder')}
+                      aria-label={t(copy('challengePrompt'))}
+                      placeholder={t(copy('challengePlaceholder'))}
                       onChange={(event: ChangeEvent<HTMLInputElement>) => setChallengeValue(event.target.value)}
                       onPressEnter={() => void submitChallenge()}
                     />
@@ -391,7 +421,7 @@ export default function WechatConnectionPage() {
                       loading={actionLoading}
                       onClick={() => void submitChallenge()}
                     >
-                      {t('channelGateway.wechat.submitChallenge')}
+                      {t(copy('submitChallenge'))}
                     </Button>
                   </Space.Compact>
                 </div>
@@ -400,29 +430,29 @@ export default function WechatConnectionPage() {
               <Space wrap className="wechat-connection-scan-actions">
                 {canAct(session, 'refresh') ? (
                   <Button icon={<ReloadOutlined />} loading={actionLoading} onClick={() => void refreshQr()}>
-                    {t('channelGateway.wechat.refreshQr')}
+                    {t(copy('refreshQr'))}
                   </Button>
                 ) : null}
                 {canAct(session, 'cancel') ? (
                   <Button loading={actionLoading} onClick={() => void cancelScan()}>
-                    {t('channelGateway.wechat.cancelScan')}
+                    {t(copy('cancelScan'))}
                   </Button>
                 ) : null}
                 {!activeScan ? (
                   <Button onClick={closeSessionPanel}>
                     {session.status === 'connected'
-                      ? t('channelGateway.wechat.addAnotherAccount')
-                      : t('channelGateway.wechat.closePanel')}
+                      ? t(copy('addAnotherAccount'))
+                      : t(copy('closePanel'))}
                   </Button>
                 ) : null}
               </Space>
             </>
           ) : (
             <div className="wechat-scan-empty">
-              <span className="wechat-scan-empty-icon" aria-hidden="true"><WechatOutlined /></span>
+              <span className="wechat-scan-empty-icon" aria-hidden="true">{channelIcon}</span>
               <div>
-                <Title level={4}>{t('channelGateway.wechat.readyTitle')}</Title>
-                <Paragraph>{t('channelGateway.wechat.readyHint')}</Paragraph>
+                <Title level={4}>{t(copy('readyTitle'))}</Title>
+                <Paragraph>{t(copy('readyHint'))}</Paragraph>
               </div>
               <Button
                 type="primary"
@@ -431,9 +461,9 @@ export default function WechatConnectionPage() {
                 loading={sessionStarting}
                 onClick={beginScan}
               >
-                {t('channelGateway.wechat.startScan')}
+                {t(copy('startScan'))}
               </Button>
-              <Text type="secondary">{t('channelGateway.wechat.estimatedTime')}</Text>
+              <Text type="secondary">{t(copy('estimatedTime'))}</Text>
             </div>
           )}
         </div>
@@ -442,22 +472,22 @@ export default function WechatConnectionPage() {
   );
 
   return (
-    <div className="wechat-connection-page">
+    <div className={`wechat-connection-page is-${provider}`}>
       <header className="wechat-connection-header">
         <div className="wechat-connection-heading">
-          <span aria-hidden="true"><WechatOutlined /></span>
+          <span aria-hidden="true">{channelIcon}</span>
           <div>
-            <Title level={2}>{t('channelGateway.wechat.title')}</Title>
-            <Paragraph>{t('channelGateway.wechat.subtitle')}</Paragraph>
+            <Title level={2}>{t(copy('title'))}</Title>
+            <Paragraph>{t(copy('subtitle'))}</Paragraph>
           </div>
         </div>
         <Button
-          aria-controls="wechat-accounts-panel"
+          aria-controls={accountsPanelId}
           aria-haspopup="dialog"
           icon={<UnorderedListOutlined />}
           onClick={() => setAccountsPanelOpen(true)}
         >
-          {t('channelGateway.wechat.viewAccounts', { count: accounts.length })}
+          {t(copy('viewAccounts'), { count: accounts.length })}
         </Button>
       </header>
 
@@ -468,7 +498,7 @@ export default function WechatConnectionPage() {
       <Modal
         className="wechat-accounts-modal"
         open={accountsPanelOpen}
-        width={1120}
+        width={1200}
         footer={null}
         destroyOnClose
         centered
@@ -478,4 +508,12 @@ export default function WechatConnectionPage() {
       </Modal>
     </div>
   );
+}
+
+export function WechatConnectionPage() {
+  return <ChannelConnectionPage provider="wechat" />;
+}
+
+export function FeishuConnectionPage() {
+  return <ChannelConnectionPage provider="feishu" />;
 }

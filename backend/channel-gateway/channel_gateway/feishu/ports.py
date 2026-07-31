@@ -3,14 +3,17 @@ import threading
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from channel_gateway.common.domain.channel import RuntimeFence
+from channel_gateway.common.domain.channel import (
+    ClaimedOutbound,
+    RuntimeFence,
+)
+from channel_gateway.common.ports.messaging import ReplyStream
 from channel_gateway.common.ports.providers import RuntimeLease
 from channel_gateway.feishu.domain import (
     FeishuAppCredentials,
     FeishuAppRegistration,
     FeishuInboundAction,
     FeishuInboundMessage,
-    FeishuWorkspace,
 )
 
 
@@ -227,6 +230,9 @@ class FeishuConnectionRepository(Protocol):
     ) -> dict[str, Any] | None:
         ...
 
+    def claim_welcome(self, account_id: str) -> bool:
+        ...
+
 
 class FeishuReceiverClient(Protocol):
     def start(self) -> None:
@@ -251,8 +257,15 @@ class FeishuOutboundClient(Protocol):
         *,
         chat_id: str,
         text: str,
-        reply_to: str | None,
-        reply_in_thread: bool,
+        idempotency_key: str,
+    ) -> str:
+        ...
+
+    def send_markdown_to_user(
+        self,
+        *,
+        open_id: str,
+        text: str,
         idempotency_key: str,
     ) -> str:
         ...
@@ -263,8 +276,6 @@ class FeishuOutboundClient(Protocol):
         chat_id: str,
         content: bytes,
         caption: str,
-        reply_to: str | None,
-        reply_in_thread: bool,
         idempotency_key: str,
     ) -> None:
         ...
@@ -274,10 +285,16 @@ class FeishuOutboundClient(Protocol):
         *,
         chat_id: str,
         card: dict[str, Any],
-        reply_to: str | None,
-        reply_in_thread: bool,
         idempotency_key: str,
     ) -> str:
+        ...
+
+    def update_card(
+        self,
+        *,
+        message_id: str,
+        card: dict[str, Any],
+    ) -> None:
         ...
 
     def send_file(
@@ -286,10 +303,16 @@ class FeishuOutboundClient(Protocol):
         chat_id: str,
         content: bytes,
         filename: str,
-        reply_to: str | None,
-        reply_in_thread: bool,
         idempotency_key: str,
     ) -> None:
+        ...
+
+    def start_card_stream(
+        self,
+        *,
+        chat_id: str,
+        initial_card: dict[str, Any],
+    ) -> ReplyStream:
         ...
 
 
@@ -311,53 +334,20 @@ class FeishuOutboundFactory(Protocol):
         ...
 
 
-class FeishuWorkspaceRepository(Protocol):
-    def initialize(self) -> None:
-        ...
-
-    def get_by_account(
-        self,
-        account_id: str,
-    ) -> FeishuWorkspace | None:
-        ...
-
-    def save_ready(
+class FeishuTaskOutboxRepository(Protocol):
+    def list_sent_task_outbounds(
         self,
         *,
-        account_id: str,
-        chat_id: str,
-        owner_open_id: str,
-    ) -> FeishuWorkspace:
+        provider: str,
+        limit: int,
+    ) -> list[ClaimedOutbound]:
         ...
 
-    def mark_failed(
+    def save_sent_outbound_part_state(
         self,
         *,
-        account_id: str,
-        owner_open_id: str,
-        error: str,
-    ) -> None:
-        ...
-
-    def delete(self, account_id: str) -> None:
-        ...
-
-
-class FeishuWorkspaceLeaseRepository(Protocol):
-    def acquire_runtime_lease(
-        self,
-        lease_key: str,
-    ) -> RuntimeLease | None:
-        ...
-
-
-class FeishuWorkspaceAdmin(Protocol):
-    def create_workspace(
-        self,
-        *,
-        credentials: FeishuAppCredentials,
-        account_id: str,
-        owner_open_id: str,
-        owner_name: str,
-    ) -> str:
+        outbox_id: str,
+        part_index: int,
+        state: dict[str, Any],
+    ) -> bool:
         ...

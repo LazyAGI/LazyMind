@@ -81,6 +81,15 @@ class CoreEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class CoreStreamUpdate:
+    """Provider-neutral, user-visible snapshot of one streamed answer."""
+
+    thinking: str = ''
+    answer: str = ''
+    thinking_seconds: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CoreTurnResult:
     conversation_id: str
     history_id: str

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import concurrent.futures
 import datetime as dt
 import json
 import logging
+import re
+import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -13,6 +17,7 @@ import httpx
 from channel_gateway.common.domain.chat import (
     ChatOptions,
     CoreEvent,
+    CoreStreamUpdate,
     CoreTurnResult,
 )
 from channel_gateway.common.domain.channel import sanitize_channel_text
@@ -24,6 +29,12 @@ from channel_gateway.common.errors import (
 
 
 _logger = logging.getLogger(__name__)
+_CHAT_SEMANTIC_IDLE_SECONDS = 180
+_CHAT_STOP_TIMEOUT_SECONDS = 5.0
+_LATEST_ANSWER_TIMEOUT_SECONDS = 3.0
+_TASK_SNAPSHOT_TIMEOUT_SECONDS = 3.0
+_TURN_ENRICHMENT_TIMEOUT_SECONDS = 10.0
+_AUXILIARY_WORKER_COUNT = 2
 _SYSTEM_TOOL_NAMES = {
     'ask_user',
     'schedule',
@@ -42,6 +53,23 @@ _CHAT_EVENT_FIELDS = (
     'tool_limit_pending',
     'intent_updated',
 )
+_TP_CLOSE_TAG = '</tp>'
+_TRP_CLOSE_TAG = '</trp>'
+_TOOL_PAYLOAD_PAIR_RE = re.compile(
+    r'(?s)<(tool_call|tool_result)>.*?</\1>'
+)
+_UNFINISHED_TOOL_PAYLOAD_RE = re.compile(
+    r'(?s)<(?:tool_call|tool_result)>.*$'
+)
+_ORPHAN_TOOL_PAYLOAD_TAG_RE = re.compile(
+    r'</?(?:tool_call|tool_result)>'
+)
+_THINKING_BLOCK_BREAK_RE = re.compile(
+    r'</(?:tp|trp)>\s*<(?:tp|trp)\b[^>]*>'
+)
+_TP_PAIR_RE = re.compile(r'(?s)<tp\b[^>]*>(.*?)</tp>')
+_TRP_PAIR_RE = re.compile(r'(?s)<trp\b[^>]*>(.*?)</trp>')
+_ORPHAN_PREVIEW_TAG_RE = re.compile(r'</?(?:tp|trp)\b[^>]*>')
 
 
 @dataclass
@@ -54,6 +82,46 @@ class _ChatStreamState:
     finish_reason: str = ''
     sources: list[Any] = field(default_factory=list)
     events: list[CoreEvent] = field(default_factory=list)
+    last_stream_update: CoreStreamUpdate | None = None
+
+
+def _strip_tool_payloads(value: str) -> str:
+    cleaned = _TOOL_PAYLOAD_PAIR_RE.sub('', value)
+    cleaned = _UNFINISHED_TOOL_PAYLOAD_RE.sub('', cleaned)
+    return _ORPHAN_TOOL_PAYLOAD_TAG_RE.sub('', cleaned)
+
+
+def _last_thinking_boundary(value: str) -> int:
+    last_trp = value.rfind(_TRP_CLOSE_TAG)
+    if last_trp >= 0:
+        return last_trp + len(_TRP_CLOSE_TAG)
+    last_tp = value.rfind(_TP_CLOSE_TAG)
+    return last_tp + len(_TP_CLOSE_TAG) if last_tp >= 0 else -1
+
+
+def _format_thinking(value: str) -> str:
+    if not value:
+        return ''
+    cleaned = _strip_tool_payloads(value)
+    cleaned = _THINKING_BLOCK_BREAK_RE.sub('\n\n', cleaned)
+    cleaned = _TP_PAIR_RE.sub(
+        lambda match: match.group(1).strip(),
+        cleaned,
+    )
+    cleaned = _TRP_PAIR_RE.sub(
+        lambda match: match.group(1).strip(),
+        cleaned,
+    )
+    cleaned = _ORPHAN_PREVIEW_TAG_RE.sub('\n\n', cleaned)
+    return re.sub(r'\n{3,}', '\n\n', cleaned).strip()
+
+
+def _optional_seconds(value: Any) -> int | None:
+    try:
+        seconds = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return max(0, seconds)
 
 
 class LazyMindClient:
@@ -64,6 +132,10 @@ class LazyMindClient:
             read=float(chat_timeout_seconds),
             write=30.0,
             pool=20.0,
+        )
+        self._auxiliary = concurrent.futures.ThreadPoolExecutor(
+            max_workers=_AUXILIARY_WORKER_COUNT,
+            thread_name_prefix='channel-core-aux',
         )
 
     @staticmethod
@@ -90,9 +162,10 @@ class LazyMindClient:
         conversation_id: str,
         request_id: str,
         options: ChatOptions | None = None,
+        on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> CoreTurnResult:
         options = options or ChatOptions()
-        tracked_task_ids = self._tracked_task_ids(
+        tracked_task_ids, task_snapshot = self._start_task_snapshot(
             owner_user_id=owner_user_id,
             conversation_id=conversation_id,
             request_id=request_id,
@@ -107,7 +180,13 @@ class LazyMindClient:
                 options=options,
             ),
             conversation_id=conversation_id,
+            on_stream=on_stream,
         )
+        if task_snapshot is not None:
+            tracked_task_ids = self._finished_task_snapshot(
+                task_snapshot,
+                conversation_id,
+            )
         return self._complete_chat_turn(
             owner_user_id=owner_user_id,
             request_id=request_id,
@@ -115,32 +194,51 @@ class LazyMindClient:
             tracked_task_ids=tracked_task_ids,
         )
 
-    def _tracked_task_ids(
+    def _start_task_snapshot(
         self,
         *,
         owner_user_id: str,
         conversation_id: str,
         request_id: str,
         options: ChatOptions,
-    ) -> set[str] | None:
+    ) -> tuple[
+        set[str] | None,
+        concurrent.futures.Future[list[dict[str, Any]]] | None,
+    ]:
         if not (
             options.features.enable_plugin
             or options.features.enable_subagent
             or options.features.enable_tasks
         ):
-            return None
+            return None, None
         if not conversation_id:
-            return set()
+            return set(), None
+        return None, self._auxiliary.submit(
+            self._conversation_tasks,
+            owner_user_id=owner_user_id,
+            conversation_id=conversation_id,
+            request_id=f'{request_id}_tasks_before',
+        )
+
+    @staticmethod
+    def _finished_task_snapshot(
+        snapshot: concurrent.futures.Future[list[dict[str, Any]]],
+        conversation_id: str,
+    ) -> set[str] | None:
         try:
             return {
                 str(task.get('task_id') or '')
-                for task in self._conversation_tasks(
-                    owner_user_id=owner_user_id,
-                    conversation_id=conversation_id,
-                    request_id=f'{request_id}_tasks_before',
-                )
+                for task in snapshot.result(timeout=0)
                 if task.get('task_id')
             }
+        except concurrent.futures.TimeoutError:
+            snapshot.cancel()
+            _logger.warning(
+                'channel_turn_task_snapshot_skipped '
+                'conversation_id=%s reason=still_running',
+                conversation_id,
+            )
+            return None
         except LazyMindError as exc:
             _logger.warning(
                 'channel_turn_task_snapshot_failed '
@@ -199,9 +297,12 @@ class LazyMindClient:
         request_id: str,
         payload: dict[str, Any],
         conversation_id: str,
+        on_stream: Callable[[CoreStreamUpdate], None] | None,
     ) -> _ChatStreamState:
         state = _ChatStreamState(conversation_id=conversation_id)
         endpoint = f'{self._base_url}/conversations:chat'
+        semantic_progress_at = time.monotonic()
+        completed = False
         try:
             with httpx.stream(
                 'POST',
@@ -224,7 +325,8 @@ class LazyMindClient:
                         continue
                     if data == '[DONE]':
                         state.saw_done = True
-                        continue
+                        completed = True
+                        break
                     try:
                         frame = json.loads(data)
                     except json.JSONDecodeError as exc:
@@ -232,6 +334,7 @@ class LazyMindClient:
                     result = frame.get('result', frame)
                     if not isinstance(result, dict):
                         continue
+                    semantic_progress = False
                     current_id = result.get('conversation_id')
                     if current_id:
                         state.conversation_id = str(current_id)
@@ -241,9 +344,11 @@ class LazyMindClient:
                     current_sources = result.get('sources')
                     if isinstance(current_sources, list) and current_sources:
                         state.sources = list(current_sources)
+                        semantic_progress = True
                     for event_type in _CHAT_EVENT_FIELDS:
                         event_payload = result.get(event_type)
                         if event_payload:
+                            semantic_progress = True
                             state.events.append(
                                 CoreEvent(
                                     source='chat',
@@ -270,19 +375,105 @@ class LazyMindClient:
                         raise LazyMindError('LazyMind chat generation failed')
                     if finish_reason and finish_reason != 'FINISH_REASON_UNSPECIFIED':
                         state.finish_reason = finish_reason
+                        semantic_progress = True
                     delta = result.get('delta')
                     if isinstance(delta, str) and delta:
                         state.deltas.append(delta)
+                        semantic_progress = True
                     message = result.get('message')
                     if isinstance(message, str) and message:
-                        state.last_message = message
+                        if message != state.last_message:
+                            state.last_message = message
+                            semantic_progress = True
+                    if semantic_progress:
+                        semantic_progress_at = time.monotonic()
+                    elif (
+                        time.monotonic() - semantic_progress_at
+                        > _CHAT_SEMANTIC_IDLE_SECONDS
+                    ):
+                        raise LazyMindError(
+                            'LazyMind chat made no progress for 180 seconds'
+                        )
+                    if on_stream is not None:
+                        update = self._stream_update(
+                            ''.join(state.deltas)
+                            or state.last_message,
+                            result.get('thinking_duration_s'),
+                        )
+                        if update != state.last_stream_update:
+                            on_stream(update)
+                            state.last_stream_update = update
+                    if state.finish_reason:
+                        completed = True
+                        break
         except LazyMindError:
             raise
         except httpx.HTTPError as exc:
             raise LazyMindError(
                 f'Cannot reach LazyMind Core: {exc.__class__.__name__}'
             ) from exc
+        finally:
+            if not completed and state.conversation_id:
+                self._stop_chat_generation(
+                    owner_user_id=owner_user_id,
+                    request_id=request_id,
+                    conversation_id=state.conversation_id,
+                    history_id=state.history_id,
+                )
         return state
+
+    def _stop_chat_generation(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        conversation_id: str,
+        history_id: str,
+    ) -> None:
+        try:
+            self._request_json(
+                'POST',
+                (
+                    f'{self._base_url}/conversations/'
+                    f'{quote(conversation_id, safe="")}:stop'
+                ),
+                owner_user_id=owner_user_id,
+                request_id=f'{request_id}_stop',
+                json_body={
+                    'conversation_id': conversation_id,
+                    'history_id': history_id,
+                },
+                error_label='chat stop',
+                timeout_seconds=_CHAT_STOP_TIMEOUT_SECONDS,
+            )
+        except LazyMindError as exc:
+            _logger.warning(
+                'channel_chat_stop_failed conversation_id=%s error=%s',
+                conversation_id,
+                exc.__class__.__name__,
+            )
+
+    @staticmethod
+    def _stream_update(
+        raw_text: str,
+        raw_thinking_seconds: Any,
+    ) -> CoreStreamUpdate:
+        text = _strip_tool_payloads(raw_text)
+        boundary = _last_thinking_boundary(text)
+        if boundary >= 0:
+            thinking_raw = text[:boundary]
+            answer_raw = text[boundary:]
+        elif '<tp' in text or '<trp' in text:
+            thinking_raw = text
+            answer_raw = ''
+        else:
+            thinking_raw = ''
+            answer_raw = text
+        return CoreStreamUpdate(
+            thinking=_format_thinking(thinking_raw),
+            answer=sanitize_channel_text(answer_raw),
+            thinking_seconds=_optional_seconds(raw_thinking_seconds),
+        )
 
     def _complete_chat_turn(
         self,
@@ -315,13 +506,13 @@ class LazyMindClient:
             except LazyMindError:
                 pass
         answer = sanitize_channel_text(answer)
-        if not answer and not state.events:
-            raise LazyMindError('LazyMind returned no answer')
         self._append_turn_artifacts(
             owner_user_id=owner_user_id,
             request_id=request_id,
             state=state,
         )
+        if not answer and not state.events:
+            raise LazyMindError('LazyMind returned no answer')
         if tracked_task_ids is not None:
             self._append_new_tasks(
                 owner_user_id=owner_user_id,
@@ -353,11 +544,15 @@ class LazyMindClient:
                 for event in state.events
                 if event.type == 'artifact_created'
             }
-            for artifact in self._turn_artifacts(
-                owner_user_id=owner_user_id,
-                conversation_id=state.conversation_id,
-                history_id=state.history_id,
-                request_id=request_id,
+            for artifact in self._auxiliary_result(
+                lambda: self._turn_artifacts(
+                    owner_user_id=owner_user_id,
+                    conversation_id=state.conversation_id,
+                    history_id=state.history_id,
+                    request_id=request_id,
+                ),
+                timeout_seconds=_TURN_ENRICHMENT_TIMEOUT_SECONDS,
+                error_label='turn artifacts',
             ):
                 if (
                     str(artifact.get('artifact_id') or '')
@@ -394,10 +589,14 @@ class LazyMindClient:
                 if event.type == 'task_created'
                 and event.payload.get('task_id')
             }
-            for task in self._conversation_tasks(
-                owner_user_id=owner_user_id,
-                conversation_id=state.conversation_id,
-                request_id=f'{request_id}_tasks_after',
+            for task in self._auxiliary_result(
+                lambda: self._conversation_tasks(
+                    owner_user_id=owner_user_id,
+                    conversation_id=state.conversation_id,
+                    request_id=f'{request_id}_tasks_after',
+                ),
+                timeout_seconds=_TASK_SNAPSHOT_TIMEOUT_SECONDS,
+                error_label='conversation tasks',
             ):
                 task_id = str(task.get('task_id') or '')
                 if not task_id or task_id in tracked_task_ids:
@@ -427,6 +626,22 @@ class LazyMindClient:
                 exc.__class__.__name__,
             )
 
+    def _auxiliary_result(
+        self,
+        operation: Callable[[], list[dict[str, Any]]],
+        *,
+        timeout_seconds: float,
+        error_label: str,
+    ) -> list[dict[str, Any]]:
+        future = self._auxiliary.submit(operation)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except concurrent.futures.TimeoutError as exc:
+            future.cancel()
+            raise LazyMindError(
+                f'LazyMind {error_label} timed out'
+            ) from exc
+
     def _conversation_tasks(
         self,
         *,
@@ -443,6 +658,7 @@ class LazyMindClient:
             owner_user_id=owner_user_id,
             request_id=request_id,
             error_label='conversation tasks',
+            timeout_seconds=_TASK_SNAPSHOT_TIMEOUT_SECONDS,
         )
         data = payload.get('data')
         raw_tasks = (
@@ -459,6 +675,19 @@ class LazyMindClient:
             )
             if isinstance(task, dict)
         ]
+
+    def list_conversation_tasks(
+        self,
+        *,
+        owner_user_id: str,
+        conversation_id: str,
+        request_id: str,
+    ) -> list[dict[str, Any]]:
+        return self._conversation_tasks(
+            owner_user_id=owner_user_id,
+            conversation_id=conversation_id,
+            request_id=request_id,
+        )
 
     def _turn_artifacts(
         self,
@@ -477,6 +706,7 @@ class LazyMindClient:
             owner_user_id=owner_user_id,
             request_id=f'{request_id}_artifacts',
             error_label='conversation artifacts',
+            timeout_seconds=_TURN_ENRICHMENT_TIMEOUT_SECONDS,
         )
         data = payload.get('data')
         raw_artifacts = (
@@ -895,6 +1125,7 @@ class LazyMindClient:
         error_label: str,
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         try:
             response = httpx.request(
@@ -903,7 +1134,11 @@ class LazyMindClient:
                 params=params,
                 json=json_body,
                 headers=self._headers(owner_user_id, request_id),
-                timeout=self._timeout,
+                timeout=(
+                    timeout_seconds
+                    if timeout_seconds is not None
+                    else self._timeout
+                ),
             )
         except httpx.HTTPError as exc:
             raise LazyMindError(f'Cannot load LazyMind {error_label}') from exc
@@ -935,11 +1170,17 @@ class LazyMindClient:
         conversation_id: str,
         request_id: str,
     ) -> tuple[str, str]:
-        payload = self.get_conversation_history(
+        payload = self._request_json(
+            'GET',
+            (
+                f'{self._base_url}/conversations/'
+                f'{quote(conversation_id, safe="")}:history'
+            ),
             owner_user_id=owner_user_id,
-            conversation_id=conversation_id,
             request_id=request_id,
-            page_size=1,
+            params={'page_size': 1},
+            error_label='latest conversation answer',
+            timeout_seconds=_LATEST_ANSWER_TIMEOUT_SECONDS,
         )
         history = payload.get('history')
         if not isinstance(history, list) or not history:

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from lark_channel import new_card
 
-from channel_gateway.common.domain.channel import ClaimedOutbound
+from channel_gateway.common.domain.channel import (
+    ClaimedOutbound,
+    sanitize_channel_text,
+)
 from channel_gateway.common.domain.outbound import OutboundRenderer
 
 
@@ -27,6 +31,287 @@ _MAX_ASK_CHOICE_CHARS = 80
 _MAX_ASK_ACTION_BYTES = 16 * 1024
 _MAX_MERGED_REFERENCE_CHARS = 6000
 _ASK_OTHER_OPTION = '其他'
+_STREAM_ONLY_PREFLIGHT_MARKERS = (
+    'preflight_failed',
+    'only supports stream mode',
+    'enable the stream parameter',
+)
+_MARKDOWN_IMAGE = re.compile(r'!\[[^\]]*\]\(([^)\s]+)\)')
+_CAPABILITY_RESOURCE_TYPES = (
+    'knowledge_base',
+    'skill',
+    'tool',
+    'personalization',
+)
+_WORKSPACE_ACTIONS = (
+    (
+        '＋ 新建会话',
+        '新建会话',
+        {
+            'schema_version': '1',
+            'command': 'conversation.new',
+            'parameters': {
+                'message': '',
+                'resource_changes': [],
+                'evidence': ['新建会话'],
+            },
+        },
+        'primary',
+    ),
+    (
+        '⇄ 切换会话',
+        '切换会话',
+        {
+            'schema_version': '1',
+            'command': 'conversation.list',
+            'parameters': {'evidence': ['切换会话']},
+        },
+        'default',
+    ),
+    (
+        '⚙ 配置能力',
+        '配置能力',
+        {
+            'schema_version': '1',
+            'command': 'capability.list',
+            'parameters': {
+                'capabilities': list(_CAPABILITY_RESOURCE_TYPES),
+                'evidence': ['配置能力'],
+            },
+        },
+        'default',
+    ),
+    (
+        '📖 会话历史',
+        '查看更多历史',
+        {
+            'schema_version': '1',
+            'command': 'history.more',
+            'parameters': {
+                'evidence': ['查看更多历史'],
+            },
+        },
+        'default',
+    ),
+)
+
+
+def presentable_feishu_text(value: str) -> str:
+    """Keep provider cards readable when Core returns an internal error."""
+    cleaned = sanitize_channel_text(value)
+    normalized = cleaned.casefold()
+    if all(
+        marker in normalized
+        for marker in _STREAM_ONLY_PREFLIGHT_MARKERS
+    ):
+        return (
+            '当前工作流无法启动：所选模型与工作流的启动检查方式'
+            '不兼容。请在 LazyMind 网页端更换兼容模型后重试。'
+        )
+    return cleaned
+
+
+def streamable_feishu_text(value: str) -> str:
+    """Keep media references out of CardKit text-stream updates."""
+    cleaned = presentable_feishu_text(value)
+    image_count = len(_MARKDOWN_IMAGE.findall(cleaned))
+    if not image_count:
+        return cleaned
+    text = _MARKDOWN_IMAGE.sub('', cleaned).strip()
+    notice = (
+        f'🖼️ 已生成 {image_count} 张图片，'
+        '正在作为飞书原图发送…'
+    )
+    return f'{text}\n\n{notice}' if text else notice
+
+
+def parse_ask_form_submission(
+    value: dict[str, Any],
+    form_value: Any,
+) -> tuple[str, dict[str, Any] | None]:
+    raw_questions = value.get('ask_form_questions')
+    if not isinstance(raw_questions, list) or not isinstance(
+        form_value,
+        dict,
+    ):
+        return '', None
+    answered: list[dict[str, Any]] = []
+    lines: list[str] = []
+    for raw_question in raw_questions:
+        if not isinstance(raw_question, dict):
+            return '', None
+        name = str(raw_question.get('name') or '')
+        text = str(raw_question.get('text') or '')
+        question_type = str(raw_question.get('type') or '')
+        choices = [
+            str(choice)
+            for choice in (
+                raw_question.get('choices')
+                if isinstance(raw_question.get('choices'), list)
+                else []
+            )
+        ]
+        answer = _ask_form_answer(
+            question_type,
+            form_value.get(name),
+            str(
+                form_value.get(
+                    str(raw_question.get('other_name') or ''),
+                    '',
+                )
+                or ''
+            ).strip(),
+        )
+        if not name or not text or answer is None:
+            return '', None
+        answered.append(
+            {
+                'text': text,
+                'type': question_type,
+                'choices': choices,
+                'custom_choices': choices,
+                'answer': answer,
+            }
+        )
+        lines.append(f'{text}: {_ask_answer_text(answer)}')
+    if not answered:
+        return '', None
+    return (
+        '\n'.join(lines),
+        {
+            'ask_id': str(value.get('ask_id') or ''),
+            'questions': answered,
+        },
+    )
+
+
+def _ask_form_answer(
+    question_type: str,
+    raw: Any,
+    other_text: str,
+) -> dict[str, Any] | None:
+    if question_type == 'multiple':
+        values = [
+            str(item).strip()
+            for item in (raw if isinstance(raw, list) else [])
+            if str(item).strip()
+        ]
+        if not values:
+            return None
+        return {
+            'type': 'multiple',
+            'value': values,
+            'otherText': other_text,
+        }
+    value = str(raw or '').strip()
+    if not value:
+        return None
+    if question_type == 'boolean':
+        return {'type': 'boolean', 'value': value}
+    if question_type == 'single':
+        return {
+            'type': 'single',
+            'value': value,
+            'otherText': other_text,
+        }
+    if question_type == 'text':
+        return {'type': 'text', 'value': value}
+    return None
+
+
+def _ask_answer_text(answer: dict[str, Any]) -> str:
+    value = answer.get('value')
+    if isinstance(value, list):
+        rendered = '、'.join(str(item) for item in value)
+    else:
+        rendered = str(value or '')
+    other_text = str(answer.get('otherText') or '').strip()
+    if other_text and (
+        value == '其他'
+        or isinstance(value, list) and '其他' in value
+    ):
+        return rendered.replace('其他', other_text)
+    return rendered
+
+
+def streaming_reply_card(
+    provider_context: dict[str, Any],
+) -> dict[str, Any]:
+    elements: list[dict[str, Any]] = [
+        {
+            'tag': 'markdown',
+            'element_id': 'lazymind_status',
+            'content': '⏳ **正在理解你的问题**',
+        },
+        {
+            'tag': 'collapsible_panel',
+            'expanded': False,
+            'background_color': 'grey',
+            'header': {
+                'title': {
+                    'tag': 'plain_text',
+                    'content': '处理过程',
+                },
+            },
+            'elements': [
+                {
+                    'tag': 'markdown',
+                    'element_id': 'lazymind_thinking',
+                    'content': '正在分析问题…',
+                },
+            ],
+        },
+        {
+            'tag': 'markdown',
+            'element_id': 'lazymind_answer',
+            'content': '<font color="grey">正在准备回答…</font>',
+        },
+    ]
+    actions = _workspace_action_rows(provider_context)
+    if actions:
+        elements.extend(
+            [
+                {'tag': 'hr'},
+                {
+                    'tag': 'markdown',
+                    'content': '**快捷操作**',
+                },
+                *actions,
+            ]
+        )
+    return {
+        'schema': '2.0',
+        'config': {
+            'wide_screen_mode': True,
+            'streaming_mode': True,
+            'streaming_config': {
+                'print_frequency_ms': {
+                    'default': 20,
+                    'android': 20,
+                    'ios': 20,
+                    'pc': 20,
+                },
+                'print_step': {
+                    'default': 4,
+                    'android': 4,
+                    'ios': 4,
+                    'pc': 4,
+                },
+                'print_strategy': 'fast',
+            },
+            'summary': {
+                'content': 'LazyMind 正在回答',
+            },
+        },
+        'header': {
+            'title': {
+                'tag': 'plain_text',
+                'content': 'LazyMind',
+            },
+            'template': 'blue',
+        },
+        'body': {'elements': elements},
+    }
 
 
 class FeishuPresentationRenderer:
@@ -38,6 +323,12 @@ class FeishuPresentationRenderer:
     def render(self, message: ClaimedOutbound) -> list[dict[str, Any]]:
         presentations = self._presentations(message)
         parts = _merge_reference_parts(self._base.render(message))
+        if message.metadata.get('streamed_text') is True:
+            parts = [
+                part
+                for part in parts
+                if part.get('kind') != 'text'
+            ]
         if message.metadata.get('suppress_text_when_presented') is True:
             parts = [
                 part
@@ -55,6 +346,7 @@ class FeishuPresentationRenderer:
                 *self._presentation_cards(
                     message,
                     presentations,
+                    include_selection=True,
                 ),
             ]
         last_text_index = text_indexes[-1]
@@ -75,7 +367,11 @@ class FeishuPresentationRenderer:
                 }
             )
         rendered.extend(
-            self._presentation_cards(message, presentations)
+            self._presentation_cards(
+                message,
+                presentations,
+                include_selection=False,
+            )
         )
         return rendered
 
@@ -98,7 +394,9 @@ class FeishuPresentationRenderer:
             .config(wide_screen_mode=True)
             .header(title, template=template)
         )
-        answer, references = _split_reference_section(text)
+        answer, references = _split_reference_section(
+            presentable_feishu_text(text)
+        )
         if answer:
             builder.markdown(answer)
         if references:
@@ -117,6 +415,14 @@ class FeishuPresentationRenderer:
             self._add_selection(
                 builder,
                 selection,
+                message.provider_context,
+            )
+        if include_actions and (
+            message.purpose == 'welcome'
+            or selection is not None
+        ):
+            _add_workspace_actions(
+                builder,
                 message.provider_context,
             )
         card = builder.build().data
@@ -160,9 +466,6 @@ class FeishuPresentationRenderer:
             'selection_id': str(
                 presentation.get('selection_id') or ''
             ),
-            'root_message_id': str(
-                provider_context.get('root_message_id') or ''
-            ),
             'intended_chat_id': str(
                 provider_context.get('chat_id') or ''
             ),
@@ -194,11 +497,56 @@ class FeishuPresentationRenderer:
         self,
         message: ClaimedOutbound,
         presentations: list[dict[str, Any]],
+        *,
+        include_selection: bool,
     ) -> list[dict[str, Any]]:
         cards: list[dict[str, Any]] = []
+        capability = next(
+            (
+                presentation
+                for presentation in presentations
+                if presentation.get('kind') == 'capability'
+            ),
+            None,
+        )
+        selection = next(
+            (
+                presentation
+                for presentation in presentations
+                if presentation.get('kind') == 'selection'
+            ),
+            None,
+        )
         for presentation in presentations:
             kind = str(presentation.get('kind') or '')
-            if kind == 'ask':
+            if (
+                kind == 'selection'
+                and include_selection
+                and capability is None
+            ):
+                cards.append(
+                    {
+                        'kind': 'card',
+                        'card': self._card(
+                            message,
+                            '',
+                            presentations,
+                            include_actions=True,
+                        ),
+                    }
+                )
+            elif kind == 'capability':
+                cards.append(
+                    {
+                        'kind': 'card',
+                        'card': self._capability_card(
+                            presentation,
+                            selection,
+                            message.provider_context,
+                        ),
+                    }
+                )
+            elif kind == 'ask':
                 cards.append(
                     {
                         'kind': 'card',
@@ -213,9 +561,243 @@ class FeishuPresentationRenderer:
                     {
                         'kind': 'card',
                         'card': self._task_card(presentation),
+                        'task_id': str(
+                            presentation.get('task_id') or ''
+                        ),
+                        'conversation_id': str(
+                            presentation.get('conversation_id') or ''
+                        ),
+                    }
+                )
+            elif kind == 'conversation':
+                cards.append(
+                    {
+                        'kind': 'card',
+                        'card': self._conversation_card(
+                            presentation,
+                            message.provider_context,
+                        ),
                     }
                 )
         return cards
+
+    @staticmethod
+    def _capability_card(
+        payload: dict[str, Any],
+        selection: dict[str, Any] | None,
+        provider_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        groups = [
+            dict(group)
+            for group in (
+                payload.get('groups')
+                if isinstance(payload.get('groups'), list)
+                else []
+            )
+            if isinstance(group, dict)
+            and group.get('resource_type')
+            and group.get('label')
+        ]
+        single_group = len(groups) == 1
+        title = (
+            f'⚙️ {str(groups[0].get("label") or "")}配置'
+            if single_group
+            else '⚙️ 配置能力'
+        )
+        builder = (
+            new_card()
+            .config(wide_screen_mode=True)
+            .header(
+                title,
+                subtitle=(
+                    '点击选项即可应用'
+                    if single_group
+                    else '选择一类能力开始配置'
+                ),
+                template='purple',
+            )
+        )
+        if not groups:
+            builder.markdown('当前没有可配置的能力。')
+            return builder.build().data
+        if not single_group:
+            builder.markdown(
+                '不同能力会沿用 LazyMind 网页端的账号和会话配置。'
+            )
+            actions = [
+                {
+                    'label': (
+                        f'{str(group.get("label") or "")}'
+                        f' · {max(0, int(group.get("total") or 0))} 项'
+                    ),
+                    'style': (
+                        'primary'
+                        if index == 0
+                        else 'default'
+                    ),
+                    'action': _capability_action(
+                        str(group.get('resource_type') or ''),
+                        str(group.get('label') or ''),
+                        provider_context,
+                    ),
+                }
+                for index, group in enumerate(groups)
+            ]
+            for start in range(0, len(actions), 2):
+                _add_button_grid_row(
+                    builder,
+                    actions[start:start + 2],
+                )
+            enabled_features = [
+                str(label)
+                for label in (
+                    payload.get('enabled_features')
+                    if isinstance(
+                        payload.get('enabled_features'),
+                        list,
+                    )
+                    else []
+                )
+                if str(label)
+            ]
+            if enabled_features:
+                builder.footer(
+                    '当前会话还可调用：'
+                    + '、'.join(enabled_features)
+                )
+            else:
+                builder.footer('点击分类后，可直接选择具体能力。')
+            return builder.build().data
+
+        group = groups[0]
+        items = [
+            dict(item)
+            for item in (
+                group.get('items')
+                if isinstance(group.get('items'), list)
+                else []
+            )
+            if isinstance(item, dict) and item.get('name')
+        ]
+        if items:
+            builder.markdown(
+                '\n'.join(
+                    f'**{index}. {str(item.get("name") or "")}**'
+                    f'　<font color="grey">'
+                    f'{str(item.get("status") or "")}</font>'
+                    for index, item in enumerate(items, start=1)
+                )
+            )
+            if selection is not None:
+                FeishuPresentationRenderer._add_selection(
+                    builder,
+                    selection,
+                    provider_context,
+                )
+        else:
+            builder.markdown(
+                f'当前没有可用的{str(group.get("label") or "能力")}。'
+            )
+        _add_button_grid_row(
+            builder,
+            [
+                {
+                    'label': '← 返回能力总览',
+                    'style': 'default',
+                    'action': _capability_action(
+                        '',
+                        '配置能力',
+                        provider_context
+                    ),
+                }
+            ],
+        )
+        builder.footer(
+            '按钮配置会直接作用于当前飞书会话，不经过模型判断。'
+        )
+        card = builder.build().data
+        _add_header_tags(
+            card,
+            [(f'{len(items)} 个可用项', 'purple')],
+        )
+        return card
+
+    @staticmethod
+    def _conversation_card(
+        payload: dict[str, Any],
+        provider_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        state = str(payload.get('state') or 'current')
+        header = {
+            'new': ('✨ 新会话', 'green'),
+            'current': ('📍 当前会话', 'blue'),
+            'switched': ('✅ 会话已切换', 'green'),
+            'history': ('📖 会话历史', 'blue'),
+        }.get(state, ('LazyMind 会话', 'blue'))
+        title = str(payload.get('title') or '未命名会话')
+        builder = (
+            new_card()
+            .config(wide_screen_mode=True)
+            .header(header[0], template=header[1])
+            .markdown(f'**{title}**')
+        )
+        metadata: list[str] = []
+        previous_title = str(payload.get('previous_title') or '')
+        if previous_title:
+            metadata.append(f'已离开：{previous_title}')
+        updated_at = str(payload.get('updated_at') or '')
+        if updated_at:
+            metadata.append(f'更新于 {updated_at}')
+        if metadata:
+            builder.markdown(
+                f'<font color="grey">{" · ".join(metadata)}</font>'
+            )
+        turns = [
+            dict(turn)
+            for turn in (
+                payload.get('turns')
+                if isinstance(payload.get('turns'), list)
+                else []
+            )
+            if isinstance(turn, dict)
+        ]
+        history_label = str(payload.get('history_label') or '')
+        if history_label:
+            builder.divider().markdown(f'**{history_label}**')
+            if turns:
+                for turn in turns:
+                    query = str(turn.get('query') or '')
+                    answer = str(turn.get('answer') or '')
+                    builder.markdown(
+                        f'**{query}**\n'
+                        f'<font color="grey">{answer}</font>'
+                    )
+            else:
+                builder.markdown(
+                    '<font color="grey">这个会话还没有历史记录。</font>'
+                )
+        footer = str(payload.get('footer') or '')
+        if footer:
+            builder.divider().markdown(
+                f'<font color="grey">{footer}</font>'
+            )
+        _add_workspace_actions(builder, provider_context)
+        card = builder.build().data
+        feature_labels = [
+            str(label)
+            for label in (
+                payload.get('feature_labels')
+                if isinstance(payload.get('feature_labels'), list)
+                else []
+            )
+            if str(label)
+        ]
+        if feature_labels:
+            _add_header_tags(
+                card,
+                [(label, 'purple') for label in feature_labels[:5]],
+            )
+        return card
 
     @staticmethod
     def _task_card(payload: dict[str, Any]) -> dict[str, Any]:
@@ -224,6 +806,16 @@ class FeishuPresentationRenderer:
         status = str(payload.get('status') or 'pending')
         status_label, template = _task_status(status)
         agent_type = str(payload.get('agent_type') or '')
+        if agent_type.lower() == 'plugin_step':
+            return FeishuPresentationRenderer.task_workflow_card(
+                [
+                    {
+                        **payload,
+                        'progress_pct': payload.get('progress'),
+                    }
+                ],
+                waiting_for_next_step=False,
+            )
         agent_label = _task_agent_label(agent_type)
         builder = (
             new_card()
@@ -241,8 +833,12 @@ class FeishuPresentationRenderer:
                 template=template,
             )
         )
-        phase = str(payload.get('current_phase') or '')
-        summary = str(payload.get('summary') or '')
+        phase = presentable_feishu_text(
+            str(payload.get('current_phase') or '')
+        )
+        summary = presentable_feishu_text(
+            str(payload.get('summary') or '')
+        )
         progress = _optional_percent(payload.get('progress'))
         estimated_sec = _optional_non_negative_int(
             payload.get('estimated_sec')
@@ -276,10 +872,105 @@ class FeishuPresentationRenderer:
             )
         else:
             builder.footer(
-                '可在当前话题中继续询问任务进度；'
-                '当前不会主动推送异步完成通知。'
+                '状态会在这张卡片中自动更新。'
             )
         card = builder.build().data
+        tags = [(status_label, template)]
+        if progress is not None:
+            tags.append((f'{progress}%', 'blue'))
+        _add_header_tags(card, tags)
+        return card
+
+    @staticmethod
+    def task_workflow_card(
+        tasks: list[dict[str, Any]],
+        *,
+        waiting_for_next_step: bool,
+    ) -> dict[str, Any]:
+        ordered = sorted(
+            tasks,
+            key=lambda task: int(
+                task.get('seq_in_conversation') or 0
+            ),
+        )
+        current = ordered[-1] if ordered else {}
+        status = str(current.get('status') or 'pending')
+        status_label, template = _task_status(status)
+        waiting_for_retry = (
+            waiting_for_next_step
+            and status.lower() in {
+                'failed',
+                'cancelled',
+                'canceled',
+                'stopped',
+                'interrupted',
+            }
+        )
+        if waiting_for_retry:
+            status_label, template = '等待自动重试', 'orange'
+        elif waiting_for_next_step:
+            status_label, template = '准备下一步', 'blue'
+        title = _workflow_title(
+            str(current.get('title') or '插件工作流')
+        )
+        builder = (
+            new_card()
+            .config(wide_screen_mode=True)
+            .header(
+                title,
+                subtitle='LazyMind 插件工作流',
+                template=template,
+            )
+        )
+        if ordered:
+            attempts: dict[str, int] = {}
+            lines: list[str] = []
+            for index, task in enumerate(ordered, start=1):
+                step_key = _workflow_step_key(task)
+                attempts[step_key] = attempts.get(step_key, 0) + 1
+                lines.append(
+                    _workflow_step_line(
+                        index,
+                        task,
+                        attempt=attempts[step_key],
+                    )
+                )
+            builder.markdown(
+                '\n'.join(lines)
+            )
+        phase = presentable_feishu_text(
+            str(current.get('current_phase') or '')
+        )
+        summary = _presentable_task_summary(
+            str(current.get('summary') or '')
+        )
+        if phase and phase not in {'执行中...', '执行中…'}:
+            builder.divider().markdown(
+                f'**当前阶段**\n{phase[:500]}'
+            )
+        if summary and _task_terminal(status):
+            builder.divider().markdown(
+                f'**结果摘要**\n{summary[:1800]}'
+                + ('…' if len(summary) > 1800 else '')
+            )
+        if waiting_for_retry:
+            builder.footer(
+                '本次尝试失败，Auto 模式正在等待并检测自动重试；'
+                '后续步骤会继续更新在这张卡片中。'
+            )
+        elif waiting_for_next_step:
+            builder.footer(
+                '当前步骤已完成，正在等待插件进入下一步。'
+            )
+        elif _task_terminal(status):
+            builder.footer(
+                '插件工作流已经结束；最终图片或文件会继续以'
+                '飞书原生消息发送。'
+            )
+        else:
+            builder.footer('状态会在这张卡片中自动更新。')
+        card = builder.build().data
+        progress = _workflow_progress(ordered)
         tags = [(status_label, template)]
         if progress is not None:
             tags.append((f'{progress}%', 'blue'))
@@ -381,17 +1072,17 @@ class FeishuPresentationRenderer:
             if len(questions) > 10:
                 builder.markdown(
                     f'另有 {len(questions) - 10} 个问题，'
-                    '请在话题中逐项补充。'
+                    '请在对话中逐项补充。'
                 )
             for row in button_rows:
                 _add_button_grid_row(builder, row)
         if form is not None:
-            footer = '请填写后提交，LazyMind 会在当前话题继续。'
+            footer = '请填写后提交，LazyMind 会在当前对话继续。'
         elif button_rows:
-            footer = '请选择一个选项，LazyMind 会在当前话题继续。'
+            footer = '请选择一个选项，LazyMind 会在当前对话继续。'
         else:
             footer = (
-                '请在当前话题逐项说明，系统会把它作为'
+                '请在当前对话逐项说明，系统会把它作为'
                 '继续任务的补充。'
             )
         builder.footer(footer)
@@ -470,12 +1161,6 @@ class FeishuPresentationRenderer:
                                 f'{choice}'
                             ),
                             'ask_answers_structured': structured,
-                            'root_message_id': str(
-                                provider_context.get(
-                                    'root_message_id'
-                                )
-                                or ''
-                            ),
                             'intended_chat_id': str(
                                 provider_context.get('chat_id')
                                 or ''
@@ -555,6 +1240,74 @@ def _add_button_grid_row(
     )
 
 
+def _capability_action(
+    resource_type: str,
+    label: str,
+    provider_context: dict[str, Any],
+) -> dict[str, Any]:
+    resource_types = (
+        [resource_type]
+        if resource_type
+        else list(_CAPABILITY_RESOURCE_TYPES)
+    )
+    text = f'查看{label}' if resource_type else label
+    return {
+        'lazymind_action': 'command',
+        'text': text,
+        'intended_chat_id': str(
+            provider_context.get('chat_id') or ''
+        ),
+        'command_action': {
+            'schema_version': '1',
+            'command': 'capability.list',
+            'parameters': {
+                'capabilities': resource_types,
+                'evidence': [label],
+            },
+        },
+    }
+
+
+def _add_workspace_actions(
+    builder,
+    provider_context: dict[str, Any],
+) -> None:
+    rows = _workspace_action_rows(provider_context)
+    if not rows:
+        return
+    builder.divider().markdown('**快捷操作**')
+    for row in rows:
+        builder.raw(row)
+
+
+def _workspace_action_rows(
+    provider_context: dict[str, Any],
+) -> list[dict[str, Any]]:
+    chat_id = str(provider_context.get('chat_id') or '')
+    if not chat_id:
+        return []
+    builder = new_card()
+    for start in range(0, len(_WORKSPACE_ACTIONS), 2):
+        _add_button_grid_row(
+            builder,
+            [
+                {
+                    'label': label,
+                    'style': style,
+                    'action': {
+                        'lazymind_action': 'command',
+                        'text': text,
+                        'intended_chat_id': chat_id,
+                        'command_action': command,
+                    },
+                }
+                for label, text, command, style
+                in _WORKSPACE_ACTIONS[start:start + 2]
+            ],
+        )
+    return list(builder.build().data['body']['elements'])
+
+
 def _ask_form(
     payload: dict[str, Any],
     questions: list[dict[str, Any]],
@@ -571,14 +1324,21 @@ def _ask_form(
         question_type = str(question.get('type') or 'text')
         choices = _ask_choices(question)
         field = _ask_form_field(
-            index,
             field_name,
-            question_text,
             question_type,
             choices,
         )
         if field is None:
             return None
+        fields.append(
+            {
+                'tag': 'markdown',
+                'content': (
+                    f'**{index}. '
+                    f'{question_text[:_MAX_ASK_QUESTION_CHARS]}**'
+                ),
+            }
+        )
         fields.append(field)
         other_name = ''
         if (
@@ -588,6 +1348,15 @@ def _ask_form(
             other_name = f'{field_name}_other'
             fields.append(
                 {
+                    'tag': 'markdown',
+                    'content': (
+                        '<font color="grey">'
+                        '选择“其他”时请补充说明</font>'
+                    ),
+                }
+            )
+            fields.append(
+                {
                     'tag': 'input',
                     'element_id': f'ask_other_{index}',
                     'name': other_name,
@@ -595,10 +1364,6 @@ def _ask_form(
                     'input_type': 'text',
                     'width': 'fill',
                     'max_length': 1000,
-                    'label': {
-                        'tag': 'plain_text',
-                        'content': '其他说明（选择“其他”时填写）',
-                    },
                     'placeholder': {
                         'tag': 'plain_text',
                         'content': '请输入补充内容',
@@ -618,9 +1383,6 @@ def _ask_form(
         'lazymind_action': 'ask',
         'ask_id': str(payload.get('ask_id') or ''),
         'ask_form_questions': schema,
-        'root_message_id': str(
-            provider_context.get('root_message_id') or ''
-        ),
         'intended_chat_id': str(
             provider_context.get('chat_id') or ''
         ),
@@ -656,7 +1418,7 @@ def _ask_form(
                             },
                             'type': 'primary',
                             'width': 'fill',
-                            'action_type': 'form_submit',
+                            'form_action_type': 'submit',
                             'value': action,
                         }
                     ],
@@ -672,22 +1434,15 @@ def _ask_form(
 
 
 def _ask_form_field(
-    index: int,
     field_name: str,
-    question_text: str,
     question_type: str,
     choices: list[str],
 ) -> dict[str, Any] | None:
-    label = f'{index}. {question_text}'
     common = {
-        'element_id': f'ask_field_{index}',
+        'element_id': f'{field_name}_field',
         'name': field_name,
         'required': True,
         'width': 'fill',
-        'label': {
-            'tag': 'plain_text',
-            'content': label[:500],
-        },
     }
     if question_type == 'text':
         return {
@@ -851,6 +1606,7 @@ def _task_terminal(status: str) -> bool:
         'cancelled',
         'canceled',
         'stopped',
+        'interrupted',
     }
 
 
@@ -867,6 +1623,7 @@ def _task_status(status: str) -> tuple[str, str]:
         'cancelled': ('已取消', 'grey'),
         'canceled': ('已取消', 'grey'),
         'stopped': ('已停止', 'grey'),
+        'interrupted': ('已中断', 'grey'),
     }.get(normalized, (status or '已创建', 'blue'))
 
 
@@ -876,3 +1633,90 @@ def _task_agent_label(agent_type: str) -> str:
         'subagent': '智能任务',
         'task': '后台任务',
     }.get(agent_type.lower(), agent_type)
+
+
+def _workflow_title(task_title: str) -> str:
+    plugin = task_title.split(':', 1)[0].strip().lower()
+    return {
+        'writer-plugin': 'AI Writer 写作工作流',
+        'image-plugin': 'AI 绘图工作流',
+        'ppt-plugin': 'AI PPT 工作流',
+    }.get(
+        plugin,
+        (
+            f'{plugin.removesuffix("-plugin")} 工作流'
+            if plugin
+            else '插件工作流'
+        ),
+    )
+
+
+def _workflow_step_line(
+    index: int,
+    task: dict[str, Any],
+    *,
+    attempt: int,
+) -> str:
+    status = str(task.get('status') or 'pending').lower()
+    icon = {
+        'completed': '✅',
+        'succeeded': '✅',
+        'success': '✅',
+        'failed': '❌',
+        'cancelled': '⏹️',
+        'canceled': '⏹️',
+        'stopped': '⏹️',
+        'interrupted': '⏸️',
+        'running': '🔄',
+    }.get(status, '⏳')
+    step = _workflow_step_key(task)
+    label = {
+        'prepare': '准备素材与上下文',
+        'outline': '生成大纲',
+        'write_document': '撰写正文',
+        'write-document': '撰写正文',
+        'deliver': '交付结果',
+        'generate': '生成内容',
+        'analyze_subject': '分析主题',
+        'collect_materials': '收集素材',
+        'optimize_prompt': '优化提示词',
+        'generate_image': '生成图片',
+        'enhance_image': '编辑图片',
+        'video_to_gif': '转换为动图',
+    }.get(step.lower(), step.replace('_', ' ') or f'步骤 {index}')
+    if attempt > 1:
+        label = f'{label}（重试 {attempt - 1}）'
+    status_label, _template = _task_status(status)
+    return f'{icon} **{index}. {label}**　{status_label}'
+
+
+def _workflow_step_key(task: dict[str, Any]) -> str:
+    raw_title = str(task.get('title') or '')
+    return raw_title.split(':', 1)[-1].strip().lower()
+
+
+def _workflow_progress(
+    tasks: list[dict[str, Any]],
+) -> int | None:
+    if not tasks:
+        return None
+    return _optional_percent(
+        tasks[-1].get(
+            'progress_pct',
+            tasks[-1].get('progress'),
+        )
+    )
+
+
+def _presentable_task_summary(value: str) -> str:
+    summary = presentable_feishu_text(value)
+    for marker in (
+        '\n执行路径：',
+        '\n执行路径:',
+        '\n[assistant]',
+        '\n[tool:',
+    ):
+        summary = summary.split(marker, 1)[0]
+    if len(summary) > 800:
+        return f'{summary[:800].rstrip()}…'
+    return summary

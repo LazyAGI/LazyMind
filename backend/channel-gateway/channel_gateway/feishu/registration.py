@@ -15,9 +15,8 @@ from channel_gateway.feishu.domain import (
 _ADDONS = {
     'scopes': {
         'tenant': [
-            'im:chat:create',
-            'im:message',
-            'im:message.group_msg',
+            'im:message:send_as_bot',
+            'im:message.p2p_msg:readonly',
             'im:resource',
             'cardkit:card:write',
         ],
@@ -73,7 +72,7 @@ class LarkAppRegistrar:
                 source='lazymind-channel-gateway',
                 app_preset={
                     'name': '{user} 的 LazyMind 助手',
-                    'desc': '在飞书话题中继续 LazyMind 会话',
+                    'desc': '在飞书对话中继续 LazyMind 会话',
                 },
                 addons=_ADDONS,
                 create_only=True,

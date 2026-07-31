@@ -4,15 +4,16 @@ import datetime as dt
 import re
 from typing import Any, Sequence
 
+from channel_gateway.common.domain.chat import (
+    ChannelFeatureProfile,
+    ChatOptions,
+)
 from channel_gateway.common.domain.commands import (
     CommandEnvelope,
     ResourceChange,
     SelectionContinuation,
 )
-from channel_gateway.common.domain.chat import (
-    ChannelFeatureProfile,
-    ChatOptions,
-)
+from channel_gateway.common.domain.outbound import CapabilityPresentation
 from channel_gateway.common.ports.core import CapabilityClient
 from channel_gateway.common.ports.repository import NavigationRepository
 
@@ -54,10 +55,11 @@ class CapabilityActions:
         account_id: str,
         external_address_hash: str,
         features: ChannelFeatureProfile,
-    ) -> str:
+    ) -> tuple[str, CapabilityPresentation]:
         kinds = list(dict.fromkeys(kinds))
         self._store.clear_selection_snapshot(account_id, external_address_hash)
         lines = ['当前渠道可用能力：']
+        groups: list[dict[str, Any]] = []
         for kind in kinds:
             items = catalog.get(kind)
             values = (
@@ -65,20 +67,44 @@ class CapabilityActions:
                 if isinstance(items, list)
                 else []
             )
+            presented_items: list[dict[str, str]] = []
             lines.append(f'\n【{_CAPABILITY_LABELS[kind]}】')
             if not values:
                 if kind == 'skill':
                     lines.append('暂无已安装且已发布的 Skill。')
                 else:
                     lines.append('暂无可用项。')
-                continue
-            for index, item in enumerate(values[:_LIST_LIMIT], start=1):
-                if kind == 'knowledge_base':
-                    status = '默认' if bool(item.get('default', False)) else '可用'
-                else:
-                    status = '已启用' if bool(item.get('enabled', True)) else '已关闭'
-                lines.append(f'{index}. {item.get("name") or "未命名"}（{status}）')
-            if len(kinds) == 1:
+            else:
+                for index, item in enumerate(
+                    values[:_LIST_LIMIT],
+                    start=1,
+                ):
+                    if kind == 'knowledge_base':
+                        status = (
+                            '默认'
+                            if bool(item.get('default', False))
+                            else '可用'
+                        )
+                    else:
+                        status = (
+                            '已启用'
+                            if bool(item.get('enabled', True))
+                            else '已关闭'
+                        )
+                    name = str(item.get('name') or '未命名')
+                    lines.append(f'{index}. {name}（{status}）')
+                    presented_items.append(
+                        {'name': name, 'status': status}
+                    )
+            groups.append(
+                {
+                    'resource_type': kind,
+                    'label': _CAPABILITY_LABELS[kind],
+                    'items': presented_items,
+                    'total': len(values),
+                }
+            )
+            if len(kinds) == 1 and values:
                 self._store.save_selection_snapshot(
                     account_id,
                     external_address_hash,
@@ -103,7 +129,14 @@ class CapabilityActions:
                 f'{"、".join(enabled_features)}。'
                 '实际可用项取决于你的账号与会话配置。'
             )
-        return '\n'.join(lines)
+        return (
+            '\n'.join(lines),
+            CapabilityPresentation(
+                kind='capability',
+                groups=tuple(groups),
+                enabled_features=features.enabled_feature_labels,
+            ),
+        )
 
     def configure_capabilities(
         self,

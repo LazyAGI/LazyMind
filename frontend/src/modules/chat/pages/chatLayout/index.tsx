@@ -45,6 +45,25 @@ import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 // selector on every render, which (with useSyncExternalStore) would trigger an
 // infinite re-render loop (React error #185).
 const EMPTY_TASKS: SubAgentTask[] = [];
+const CONVERSATION_HISTORY_RETRY_DELAYS_MS = [0, 500, 1500];
+
+async function loadConversationHistory(conversationId: string) {
+  let lastError: unknown;
+  for (const delayMs of CONVERSATION_HISTORY_RETRY_DELAYS_MS) {
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    try {
+      return await ChatServiceApi()
+        .conversationServiceGetConversationHistory({
+          name: conversationId,
+        });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
 
 interface IChatLayoutProps {
   setIsChatContent: (isChatContent: boolean) => void;
@@ -342,16 +361,12 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             conversation: resolvedId,
           })
           .then((detailRes) =>
-            ChatServiceApi()
-              .conversationServiceGetConversationHistory({
-                name: resolvedId,
-              })
-              .then((historyRes) => ({
-                detailRes,
-                historyRes,
-                resolvedId,
-                isGenerating,
-              })),
+            loadConversationHistory(resolvedId).then((historyRes) => ({
+              detailRes,
+              historyRes,
+              resolvedId,
+              isGenerating,
+            })),
           );
       })
       .then(({ detailRes, historyRes, resolvedId, isGenerating }) => {
@@ -382,8 +397,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setIsRestoringConversation(false);
       })
       .catch(() => {
-        sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
         setIsRestoringConversation(false);
+        setIsChatContent(false);
+        message.error(localizeErrorCode("2000509"));
       });
   }, []);
 
@@ -543,16 +559,12 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             conversation: resolvedId,
           })
           .then((detailRes) =>
-            ChatServiceApi()
-              .conversationServiceGetConversationHistory({
-                name: resolvedId,
-              })
-              .then((historyRes) => ({
-                detailRes,
-                historyRes,
-                resolvedId,
-                isGenerating,
-              })),
+            loadConversationHistory(resolvedId).then((historyRes) => ({
+              detailRes,
+              historyRes,
+              resolvedId,
+              isGenerating,
+            })),
           ),
       )
       .then(({ detailRes, historyRes, resolvedId, isGenerating }) => {
@@ -585,10 +597,14 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           chatRef.current?.openResumeSSE?.(resolvedId);
         }
       })
+      .catch(() => {
+        setIsChatContent(false);
+        message.error(localizeErrorCode("2000509"));
+      })
       .finally(() => {
         setIsRestoringConversation(false);
       });
-  }, [setConversationId, setChatConfigFn]);
+  }, [setConversationId, setChatConfigFn, setIsChatContent]);
 
   useEffect(() => {
     const handleConversationSelect = (event: Event) => {

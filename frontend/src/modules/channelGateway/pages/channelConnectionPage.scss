@@ -8,6 +8,27 @@
   overflow-y: auto;
   background: #f6f7f9;
   color: var(--ink);
+
+  .feishu-official-icon {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+  }
+
+  &.is-feishu {
+    --wechat: #3370ff;
+    --wechat-dark: #245bdb;
+
+    .wechat-connection-heading > span,
+    .wechat-scan-empty .wechat-scan-empty-icon,
+    .wechat-account-name > span {
+      background: #eef3ff;
+    }
+
+    .wechat-status-dot.status-success {
+      box-shadow: 0 0 0 4px #e8efff;
+    }
+  }
 }
 
 .wechat-connection-header {
@@ -260,6 +281,11 @@
     background: #eafaf1;
     color: var(--wechat);
     font-size: 42px;
+
+    .feishu-official-icon {
+      width: 48px;
+      height: 48px;
+    }
   }
 
   h4.ant-typography {
@@ -446,6 +472,7 @@
 
 .wechat-account-name {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 10px;
 
@@ -453,11 +480,24 @@
     display: inline-flex;
     width: 30px;
     height: 30px;
+    flex: 0 0 30px;
     align-items: center;
     justify-content: center;
     border-radius: 8px;
     background: #eafaf1;
     color: var(--wechat);
+
+    .feishu-official-icon {
+      width: 20px;
+      height: 20px;
+    }
+  }
+
+  > strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

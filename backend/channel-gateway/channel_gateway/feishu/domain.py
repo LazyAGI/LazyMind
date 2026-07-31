@@ -12,13 +12,8 @@ class FeishuRuntimeError(RuntimeError):
 class FeishuInboundMessage:
     message_id: str
     chat_id: str
-    chat_type: str
-    message_type: str
     sender_id: str
     sender_is_bot: bool
-    root_id: str
-    parent_id: str
-    thread_id: str
     text: str
 
 
@@ -31,9 +26,9 @@ class FeishuInboundAction:
     text: str
     selection: str
     selection_id: str
-    root_message_id: str
     intended_chat_id: str
     ask_answers_structured: dict[str, Any] | None
+    command_action: dict[str, Any] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,15 +49,6 @@ class FeishuAppCredentials:
     display_name: str
 
 
-@dataclass(frozen=True, slots=True)
-class FeishuWorkspace:
-    account_id: str
-    chat_id: str
-    owner_open_id: str
-    status: str
-    last_error: str
-
-
 class FeishuAddressFactory:
     @staticmethod
     def direct(
@@ -76,21 +62,4 @@ class FeishuAddressFactory:
         return ChannelAddress(
             canonical_key=canonical,
             actor_key=canonical,
-        )
-
-    @staticmethod
-    def workspace_thread(
-        account_id: str,
-        chat_id: str,
-        root_message_id: str,
-        sender_id: str,
-    ) -> ChannelAddress:
-        return ChannelAddress(
-            canonical_key=(
-                f'feishu:{account_id}:workspace:{chat_id}:'
-                f'topic:{root_message_id}'
-            ),
-            actor_key=(
-                f'feishu:{account_id}:actor:{sender_id}'
-            ),
         )

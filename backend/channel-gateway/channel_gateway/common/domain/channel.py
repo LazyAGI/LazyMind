@@ -15,6 +15,17 @@ ACTIVE_CONNECTION_SESSION_STATUSES = (
     'confirming',
 )
 
+WELCOME_MESSAGE = """我是 LazyMind，你的个人 AI 助手。这里与 LazyMind 网页端使用同一账号、普通会话和历史记录。
+
+你可以直接用自然语言：
+1. “帮我创建一个新会话，并整理今天的周报”
+2. “列出我的历史会话”或“切到第 2 个会话”
+3. “这轮使用 AI学习资料 知识库”
+4. “查看当前可用的知识库、Skill 和工具”
+5. “总结当前会话的进展并给出下一步”
+
+直接发送消息即可继续。"""
+
 _HIDDEN_PROTOCOL_TAGS = re.compile(
     r'(?s)<(?:think|tool_call|tool_result|tp|trp)\b[^>]*>'
     r'.*?</(?:think|tool_call|tool_result|tp|trp)>'
@@ -131,22 +142,3 @@ class ClaimedOutbound:
     next_part_index: int
     provider_state: dict[str, Any]
     attempt_count: int
-
-
-@dataclass(frozen=True, slots=True)
-class NativeConversationTarget:
-    external_address_hash: str
-    recipient_id: str
-    provider_context: dict[str, Any]
-    operation_id: str = ''
-    operation_kind: str = ''
-    reused: bool = False
-    cached_result: dict[str, Any] | None = None
-
-
-class NativeTargetError(RuntimeError):
-    """A message failed after the provider created its visible target."""
-
-    def __init__(self, target: NativeConversationTarget):
-        super().__init__('Native conversation target operation failed')
-        self.target = target

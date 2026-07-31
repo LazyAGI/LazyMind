@@ -1,7 +1,11 @@
 from dataclasses import replace
 from typing import Any
 
-from channel_gateway.common.domain.channel import ClaimedOutbound
+from channel_gateway.common.domain.channel import (
+    ClaimedInbound,
+    ClaimedOutbound,
+)
+from channel_gateway.common.domain.chat import CoreStreamUpdate
 from channel_gateway.common.domain.outbound import (
     OutboundRenderer,
     inline_artifact_bytes,
@@ -9,17 +13,40 @@ from channel_gateway.common.domain.outbound import (
 from channel_gateway.common.errors import InvalidStaticAssetError
 from channel_gateway.common.ports.core import StaticAssetClient
 from channel_gateway.common.ports.providers import RuntimeCredentialStore
+from channel_gateway.common.ports.messaging import ReplyStream
 from channel_gateway.feishu.domain import FeishuRuntimeError
 from channel_gateway.feishu.ports import (
     FeishuOutboundFactory,
 )
 from channel_gateway.feishu.presentation import (
     FeishuPresentationRenderer,
+    streaming_reply_card,
 )
 
 
 _MAX_FEISHU_IMAGE_BYTES = 10 * 1024 * 1024
 _MAX_FEISHU_FILE_BYTES = 30 * 1024 * 1024
+
+
+class _ManagedReplyStream:
+    def __init__(self, stream: ReplyStream, sender):
+        self._stream = stream
+        self._sender = sender
+
+    def update(self, snapshot: CoreStreamUpdate) -> None:
+        self._stream.update(snapshot)
+
+    def finish(self, final_text: str) -> bool:
+        try:
+            return self._stream.finish(final_text)
+        finally:
+            self._sender.close()
+
+    def abort(self) -> None:
+        try:
+            self._stream.abort()
+        finally:
+            self._sender.close()
 
 
 class FeishuDeliveryProvider:
@@ -35,6 +62,37 @@ class FeishuDeliveryProvider:
         self._channels = channels
         self._renderer = FeishuPresentationRenderer(renderer)
         self._lazymind = lazymind
+
+    def open_stream(
+        self,
+        message: ClaimedInbound,
+    ) -> ReplyStream | None:
+        chat_id = str(
+            message.provider_context.get('chat_id')
+            or message.recipient_id
+        )
+        if not chat_id:
+            return None
+        account = self._credentials.load_runtime_account(
+            message.account_id
+        )
+        sender = self._channels.create_sender(
+            account['credentials']
+        )
+        try:
+            stream = sender.start_card_stream(
+                chat_id=chat_id,
+                initial_card=streaming_reply_card(
+                    {
+                        **message.provider_context,
+                        'chat_id': chat_id,
+                    }
+                ),
+            )
+        except Exception:
+            sender.close()
+            raise
+        return _ManagedReplyStream(stream, sender)
 
     def render(
         self,
@@ -91,7 +149,7 @@ class FeishuDeliveryProvider:
         part_index: int,
         idempotency_key: str,
         saved_state: dict[str, Any],
-    ) -> None:
+    ) -> dict[str, Any] | None:
         chat_id = str(
             message.provider_context.get('chat_id')
             or message.recipient_id
@@ -100,13 +158,6 @@ class FeishuDeliveryProvider:
             raise FeishuRuntimeError(
                 'Feishu destination chat is missing'
             )
-        reply_to = str(
-            message.provider_context.get('message_id')
-            or ''
-        )
-        reply_in_thread = (
-            message.provider_context.get('reply_in_thread') is True
-        )
         kind = str(part.get('kind') or '')
         account = self._credentials.load_runtime_account(
             message.account_id
@@ -119,25 +170,26 @@ class FeishuDeliveryProvider:
                 sender.send_markdown(
                     chat_id=chat_id,
                     text=str(part.get('text') or ''),
-                    reply_to=reply_to or None,
-                    reply_in_thread=reply_in_thread,
                     idempotency_key=idempotency_key,
                 )
                 return
             if kind == 'card':
+                if saved_state.get('message_id'):
+                    return saved_state
                 card = part.get('card')
                 if not isinstance(card, dict):
                     raise FeishuRuntimeError(
                         'Feishu card payload is invalid'
                     )
-                sender.send_card(
+                message_id = sender.send_card(
                     chat_id=chat_id,
                     card=card,
-                    reply_to=reply_to or None,
-                    reply_in_thread=reply_in_thread,
                     idempotency_key=idempotency_key,
                 )
-                return
+                return {
+                    **saved_state,
+                    'message_id': message_id,
+                }
             source = str(part.get('source') or '')
             if kind == 'image':
                 try:
@@ -149,8 +201,6 @@ class FeishuDeliveryProvider:
                     self._send_asset_failure(
                         sender=sender,
                         chat_id=chat_id,
-                        reply_to=reply_to,
-                        reply_in_thread=reply_in_thread,
                         idempotency_key=idempotency_key,
                         kind='图片',
                     )
@@ -163,8 +213,6 @@ class FeishuDeliveryProvider:
                     chat_id=chat_id,
                     content=content,
                     caption='',
-                    reply_to=reply_to or None,
-                    reply_in_thread=reply_in_thread,
                     idempotency_key=idempotency_key,
                 )
                 return
@@ -191,8 +239,6 @@ class FeishuDeliveryProvider:
                         self._send_asset_failure(
                             sender=sender,
                             chat_id=chat_id,
-                            reply_to=reply_to,
-                            reply_in_thread=reply_in_thread,
                             idempotency_key=idempotency_key,
                             kind='文件',
                         )
@@ -208,8 +254,6 @@ class FeishuDeliveryProvider:
                         part.get('filename')
                         or 'lazymind-output'
                     ),
-                    reply_to=reply_to or None,
-                    reply_in_thread=reply_in_thread,
                     idempotency_key=idempotency_key,
                 )
                 return
@@ -224,8 +268,6 @@ class FeishuDeliveryProvider:
         *,
         sender,
         chat_id: str,
-        reply_to: str,
-        reply_in_thread: bool,
         idempotency_key: str,
         kind: str,
     ) -> None:
@@ -235,7 +277,5 @@ class FeishuDeliveryProvider:
                 f'⚠️ LazyMind 没有返回可读取的{kind}文件。'
                 '它可能未实际生成，或临时链接已经失效；请重新生成。'
             ),
-            reply_to=reply_to or None,
-            reply_in_thread=reply_in_thread,
             idempotency_key=idempotency_key,
         )

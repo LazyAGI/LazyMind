@@ -1,5 +1,6 @@
 import datetime as dt
 import json
+import re
 import uuid
 from typing import Any
 
@@ -15,6 +16,9 @@ from channel_gateway.common.domain.channel import (
     ReceiverCheckpoint,
     RuntimeFence,
 )
+
+
+_JSON_NUL_ESCAPE = re.compile(r'(?<!\\)((?:\\\\)*)\\u0000')
 
 
 class PostgresRuntimeLease:
@@ -175,87 +179,6 @@ class GatewayStore:
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (account_id, external_address_hash)
             )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS channel_native_threads (
-                account_id TEXT NOT NULL
-                    REFERENCES channel_accounts(id) ON DELETE CASCADE,
-                provider VARCHAR(32) NOT NULL,
-                container_id TEXT NOT NULL,
-                root_message_id TEXT NOT NULL,
-                thread_id TEXT NOT NULL DEFAULT '',
-                external_address_hash VARCHAR(64) NOT NULL,
-                conversation_id TEXT,
-                created_at TIMESTAMPTZ NOT NULL
-                    DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMPTZ NOT NULL
-                    DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY(
-                    account_id,
-                    provider,
-                    container_id,
-                    root_message_id
-                ),
-                UNIQUE(account_id, provider, external_address_hash)
-            )
-            """,
-            """
-            ALTER TABLE channel_native_threads
-            ADD COLUMN IF NOT EXISTS conversation_id TEXT
-            """,
-            """
-            ALTER TABLE channel_native_threads
-            ADD COLUMN IF NOT EXISTS operation_id TEXT NOT NULL DEFAULT ''
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS channel_native_operations (
-                account_id TEXT NOT NULL
-                    REFERENCES channel_accounts(id) ON DELETE CASCADE,
-                provider VARCHAR(32) NOT NULL,
-                operation_id TEXT NOT NULL,
-                operation_kind VARCHAR(32) NOT NULL,
-                container_id TEXT NOT NULL,
-                source_external_address_hash VARCHAR(64) NOT NULL,
-                root_message_id TEXT,
-                external_address_hash VARCHAR(64),
-                conversation_id TEXT,
-                status VARCHAR(32) NOT NULL,
-                command_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-                grounding_messages_json JSONB NOT NULL DEFAULT '[]'::jsonb,
-                catalog_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-                result_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-                last_error TEXT,
-                created_at TIMESTAMPTZ NOT NULL
-                    DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMPTZ NOT NULL
-                    DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY(account_id, provider, operation_id)
-            )
-            """,
-            """
-            ALTER TABLE channel_native_operations
-            ADD COLUMN IF NOT EXISTS command_json JSONB NOT NULL DEFAULT '{}'::jsonb
-            """,
-            """
-            ALTER TABLE channel_native_operations
-            ADD COLUMN IF NOT EXISTS grounding_messages_json JSONB
-                NOT NULL DEFAULT '[]'::jsonb
-            """,
-            """
-            ALTER TABLE channel_native_operations
-            ADD COLUMN IF NOT EXISTS catalog_json JSONB NOT NULL DEFAULT '{}'::jsonb
-            """,
-            """
-            CREATE INDEX IF NOT EXISTS
-                idx_channel_native_operations_gate
-            ON channel_native_operations(
-                account_id,
-                provider,
-                status,
-                container_id,
-                external_address_hash
-            )
-            WHERE status IN ('preparing', 'opening')
             """,
             """
             CREATE TABLE IF NOT EXISTS channel_navigation_states (
@@ -1639,6 +1562,21 @@ class GatewayStore:
             ).fetchone()
             return bool(row and row['welcome_pending'])
 
+    def claim_welcome(self, account_id: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                UPDATE channel_accounts
+                SET welcome_pending = FALSE,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                  AND welcome_pending = TRUE
+                RETURNING id
+                """,
+                (account_id,),
+            ).fetchone()
+            return row is not None
+
     def claim_next_inbound(
         self,
         claim_owner: str,
@@ -1665,34 +1603,6 @@ class GatewayStore:
                         )
                     )
                     AND account.status = 'connected'
-                    AND NOT EXISTS (
-                        SELECT 1
-                        FROM channel_native_operations AS native_op
-                        WHERE native_op.account_id = inbox.account_id
-                          AND native_op.provider = inbox.provider
-                          AND native_op.status IN (
-                              'preparing', 'opening'
-                          )
-                          AND (
-                              (
-                                  native_op.status = 'preparing'
-                                  AND native_op.container_id
-                                      = inbox.recipient_id
-                                  AND native_op.source_external_address_hash
-                                      <> inbox.external_address_hash
-                              )
-                              OR (
-                                  native_op.status = 'opening'
-                                  AND native_op.external_address_hash
-                                      = inbox.external_address_hash
-                                  AND native_op.operation_id
-                                      <> (
-                                          'channel_'
-                                          || LEFT(inbox.message_key, 24)
-                                      )
-                              )
-                          )
-                    )
                     AND NOT EXISTS (
                         SELECT 1
                         FROM channel_inbox AS earlier
@@ -1755,7 +1665,6 @@ class GatewayStore:
         inbox_id: str,
         claim_owner: str,
         outbound: list[OutboundMessage],
-        native_operation: dict | None = None,
     ) -> bool:
         with self._connect() as connection:
             owned = connection.execute(
@@ -1773,11 +1682,6 @@ class GatewayStore:
             if not owned:
                 return False
             self._insert_outbound(connection, inbox_id, outbound)
-            if native_operation:
-                self._complete_native_operation_tx(
-                    connection,
-                    native_operation,
-                )
             connection.execute(
                 """
                 UPDATE channel_inbox
@@ -1809,7 +1713,6 @@ class GatewayStore:
         error: str,
         fallback: OutboundMessage,
         max_attempts: int,
-        native_operation: dict | None = None,
     ) -> bool:
         with self._connect() as connection:
             row = connection.execute(
@@ -1829,24 +1732,6 @@ class GatewayStore:
             terminal = int(row['attempt_count']) >= max_attempts
             if terminal:
                 self._insert_outbound(connection, inbox_id, [fallback])
-                if native_operation:
-                    connection.execute(
-                        """
-                        UPDATE channel_native_operations
-                        SET status = 'failed',
-                            last_error = %s,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE account_id = %s
-                          AND provider = %s
-                          AND operation_id = %s
-                        """,
-                        (
-                            error[:500],
-                            native_operation['account_id'],
-                            native_operation['provider'],
-                            native_operation['operation_id'],
-                        ),
-                    )
                 status = 'dead'
                 next_attempt_at = None
             else:
@@ -1872,35 +1757,6 @@ class GatewayStore:
                 (status, next_attempt_at, error[:500], inbox_id),
             )
             return terminal
-
-    def _complete_native_operation_tx(
-        self,
-        connection,
-        operation: dict,
-    ) -> None:
-        row = connection.execute(
-            """
-            UPDATE channel_native_operations
-            SET status = 'ready',
-                result_json = %s::jsonb,
-                last_error = NULL,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE account_id = %s
-              AND provider = %s
-              AND operation_id = %s
-            RETURNING operation_id
-            """,
-            (
-                self._json(operation.get('result') or {}),
-                operation['account_id'],
-                operation['provider'],
-                operation['operation_id'],
-            ),
-        ).fetchone()
-        if row is None:
-            raise RuntimeError(
-                'Native conversation operation disappeared'
-            )
 
     def claim_next_outbound(
         self,
@@ -2036,6 +1892,71 @@ class GatewayStore:
             ).fetchone()
             return row is not None
 
+    def list_sent_task_outbounds(
+        self,
+        *,
+        provider: str,
+        limit: int,
+    ) -> list[ClaimedOutbound]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM channel_outbox
+                WHERE provider = %s
+                  AND status = 'sent'
+                  AND created_at >= CURRENT_TIMESTAMP - INTERVAL '1 day'
+                  AND metadata @> %s::jsonb
+                ORDER BY created_sequence DESC
+                LIMIT %s
+                """,
+                (
+                    provider,
+                    self._json(
+                        {'presentations': [{'kind': 'task'}]}
+                    ),
+                    max(1, limit),
+                ),
+            ).fetchall()
+        return [
+            outbound
+            for outbound in (
+                self._claimed_outbound(row)
+                for row in rows
+            )
+            if outbound is not None
+        ]
+
+    def save_sent_outbound_part_state(
+        self,
+        *,
+        outbox_id: str,
+        part_index: int,
+        state: dict[str, Any],
+    ) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                UPDATE channel_outbox
+                SET provider_state = jsonb_set(
+                        provider_state,
+                        ARRAY[%s],
+                        %s::jsonb,
+                        TRUE
+                    ),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                  AND status = 'sent'
+                RETURNING id
+                """,
+                (
+                    str(part_index),
+                    self._json(state),
+                    outbox_id,
+                ),
+            ).fetchone()
+            return row is not None
+
     def advance_outbound(
         self,
         outbox_id: str,
@@ -2149,11 +2070,12 @@ class GatewayStore:
 
     @staticmethod
     def _json(value: Any) -> str:
-        return json.dumps(
+        encoded = json.dumps(
             value,
             ensure_ascii=False,
             separators=(',', ':'),
         )
+        return _JSON_NUL_ESCAPE.sub(r'\1', encoded)
 
     def _insert_outbound(
         self,
@@ -2191,7 +2113,7 @@ class GatewayStore:
                     sequence,
                     message.recipient_id,
                     self._json(message.provider_context),
-                    message.text,
+                    message.text.replace('\x00', ''),
                     message.intent_kind,
                     message.purpose,
                     self._json(message.metadata),
@@ -2295,278 +2217,6 @@ class GatewayStore:
             ).fetchone()
             return str(row['conversation_id']) if row else ''
 
-    def record_native_thread(
-        self,
-        *,
-        account_id: str,
-        provider: str,
-        container_id: str,
-        root_message_id: str,
-        thread_id: str,
-        external_address_hash: str,
-        operation_id: str = '',
-    ) -> None:
-        with self._connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO channel_native_threads(
-                    account_id,
-                    provider,
-                    container_id,
-                    root_message_id,
-                    thread_id,
-                    external_address_hash,
-                    operation_id
-                )
-                VALUES(%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT(
-                    account_id,
-                    provider,
-                    container_id,
-                    root_message_id
-                )
-                DO UPDATE SET
-                    thread_id = CASE
-                        WHEN EXCLUDED.thread_id <> ''
-                        THEN EXCLUDED.thread_id
-                        ELSE channel_native_threads.thread_id
-                    END,
-                    external_address_hash =
-                        EXCLUDED.external_address_hash,
-                    operation_id = CASE
-                        WHEN EXCLUDED.operation_id <> ''
-                        THEN EXCLUDED.operation_id
-                        ELSE channel_native_threads.operation_id
-                    END,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (
-                    account_id,
-                    provider,
-                    container_id,
-                    root_message_id,
-                    thread_id,
-                    external_address_hash,
-                    operation_id,
-                ),
-            )
-
-    def reserve_native_operation(
-        self,
-        *,
-        account_id: str,
-        provider: str,
-        operation_id: str,
-        operation_kind: str,
-        container_id: str,
-        source_external_address_hash: str,
-        prepared_command: dict,
-        grounding_messages: list[str],
-        prepared_catalog: dict,
-    ) -> dict[str, Any]:
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                INSERT INTO channel_native_operations(
-                    account_id,
-                    provider,
-                    operation_id,
-                    operation_kind,
-                    container_id,
-                    source_external_address_hash,
-                    command_json,
-                    grounding_messages_json,
-                    catalog_json,
-                    status
-                )
-                VALUES(
-                    %s, %s, %s, %s, %s, %s,
-                    %s::jsonb, %s::jsonb, %s::jsonb,
-                    'preparing'
-                )
-                ON CONFLICT(account_id, provider, operation_id)
-                DO UPDATE SET
-                    container_id = CASE
-                        WHEN EXCLUDED.container_id <> ''
-                             AND channel_native_operations.status
-                                 IN ('preparing', 'opening', 'failed')
-                        THEN EXCLUDED.container_id
-                        ELSE channel_native_operations.container_id
-                    END,
-                    status = CASE
-                        WHEN channel_native_operations.status = 'failed'
-                             AND channel_native_operations.root_message_id <> ''
-                             AND channel_native_operations.external_address_hash <> ''
-                        THEN 'opening'
-                        WHEN channel_native_operations.status = 'failed'
-                        THEN 'preparing'
-                        ELSE channel_native_operations.status
-                    END,
-                    last_error = CASE
-                        WHEN channel_native_operations.status = 'failed'
-                        THEN NULL
-                        ELSE channel_native_operations.last_error
-                    END,
-                    command_json = CASE
-                        WHEN channel_native_operations.command_json = '{}'::jsonb
-                        THEN EXCLUDED.command_json
-                        ELSE channel_native_operations.command_json
-                    END,
-                    grounding_messages_json = CASE
-                        WHEN channel_native_operations.grounding_messages_json
-                             = '[]'::jsonb
-                        THEN EXCLUDED.grounding_messages_json
-                        ELSE channel_native_operations.grounding_messages_json
-                    END,
-                    catalog_json = CASE
-                        WHEN COALESCE(
-                            channel_native_operations.root_message_id,
-                            ''
-                        ) = ''
-                             AND channel_native_operations.status
-                                 IN ('preparing', 'failed')
-                        THEN EXCLUDED.catalog_json
-                        ELSE channel_native_operations.catalog_json
-                    END,
-                    updated_at = CURRENT_TIMESTAMP
-                RETURNING *
-                """,
-                (
-                    account_id,
-                    provider,
-                    operation_id,
-                    operation_kind,
-                    container_id,
-                    source_external_address_hash,
-                    self._json(prepared_command),
-                    self._json(grounding_messages),
-                    self._json(prepared_catalog),
-                ),
-            ).fetchone()
-            return dict(row)
-
-    def get_native_operation(
-        self,
-        *,
-        account_id: str,
-        provider: str,
-        operation_id: str,
-    ) -> dict[str, Any] | None:
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT *
-                FROM channel_native_operations
-                WHERE account_id = %s
-                  AND provider = %s
-                  AND operation_id = %s
-                """,
-                (account_id, provider, operation_id),
-            ).fetchone()
-            return dict(row) if row else None
-
-    def attach_native_operation_target(
-        self,
-        *,
-        account_id: str,
-        provider: str,
-        operation_id: str,
-        root_message_id: str,
-        external_address_hash: str,
-    ) -> dict[str, Any]:
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                UPDATE channel_native_operations
-                SET root_message_id = CASE
-                        WHEN COALESCE(root_message_id, '') = ''
-                        THEN %s
-                        ELSE root_message_id
-                    END,
-                    external_address_hash = CASE
-                        WHEN COALESCE(external_address_hash, '') = ''
-                        THEN %s
-                        ELSE external_address_hash
-                    END,
-                    status = CASE
-                        WHEN status = 'ready' THEN status
-                        ELSE 'opening'
-                    END,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE account_id = %s
-                  AND provider = %s
-                  AND operation_id = %s
-                RETURNING *
-                """,
-                (
-                    root_message_id,
-                    external_address_hash,
-                    account_id,
-                    provider,
-                    operation_id,
-                ),
-            ).fetchone()
-            if row is None:
-                raise RuntimeError(
-                    'Native conversation operation disappeared'
-                )
-            return dict(row)
-
-    def fail_native_operation(
-        self,
-        *,
-        account_id: str,
-        provider: str,
-        operation_id: str,
-        error: str,
-    ) -> None:
-        with self._connect() as connection:
-            connection.execute(
-                """
-                UPDATE channel_native_operations
-                SET status = 'failed',
-                    last_error = %s,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE account_id = %s
-                  AND provider = %s
-                  AND operation_id = %s
-                  AND status IN ('preparing', 'opening')
-                """,
-                (
-                    error[:500],
-                    account_id,
-                    provider,
-                    operation_id,
-                ),
-            )
-
-    def defer_native_operation(
-        self,
-        *,
-        account_id: str,
-        provider: str,
-        operation_id: str,
-        error: str,
-    ) -> None:
-        with self._connect() as connection:
-            connection.execute(
-                """
-                UPDATE channel_native_operations
-                SET last_error = %s,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE account_id = %s
-                  AND provider = %s
-                  AND operation_id = %s
-                  AND status IN ('preparing', 'opening')
-                """,
-                (
-                    error[:500],
-                    account_id,
-                    provider,
-                    operation_id,
-                ),
-            )
-
     def get_navigation_state(
         self,
         account_id: str,
@@ -2639,33 +2289,6 @@ class GatewayStore:
                     draft_json,
                 ),
             )
-            connection.execute(
-                """
-                UPDATE channel_native_threads
-                SET conversation_id = NULL,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE account_id = %s
-                  AND external_address_hash = %s
-                """,
-                (
-                    account_id,
-                    external_address_hash,
-                ),
-            )
-            connection.execute(
-                """
-                UPDATE channel_native_operations
-                SET conversation_id = NULL,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE account_id = %s
-                  AND external_address_hash = %s
-                  AND status IN ('preparing', 'opening')
-                """,
-                (
-                    account_id,
-                    external_address_hash,
-                ),
-            )
 
     def activate_conversation(
         self,
@@ -2726,35 +2349,6 @@ class GatewayStore:
                     history_conversation_id,
                     history_token,
                     consume_pending_turn,
-                ),
-            )
-            connection.execute(
-                """
-                UPDATE channel_native_threads
-                SET conversation_id = %s,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE account_id = %s
-                  AND external_address_hash = %s
-                """,
-                (
-                    conversation_id,
-                    account_id,
-                    external_address_hash,
-                ),
-            )
-            connection.execute(
-                """
-                UPDATE channel_native_operations
-                SET conversation_id = %s,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE account_id = %s
-                  AND external_address_hash = %s
-                  AND status IN ('preparing', 'opening')
-                """,
-                (
-                    conversation_id,
-                    account_id,
-                    external_address_hash,
                 ),
             )
 

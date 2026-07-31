@@ -7,7 +7,6 @@ import threading
 from dataclasses import dataclass, field
 
 from channel_gateway.common.domain.channel import InboundEnvelope
-from channel_gateway.common.ports.messaging import NativeThreadRepository
 from channel_gateway.common.ports.providers import (
     ReceiverRepository,
     RuntimeCredentialStore,
@@ -24,9 +23,6 @@ from channel_gateway.feishu.ports import (
     FeishuReceiverClient,
     FeishuReceiverFactory,
 )
-from channel_gateway.feishu.workspace import FeishuWorkspaceService
-
-
 _logger = logging.getLogger(__name__)
 
 
@@ -36,7 +32,6 @@ class _AccountRoute:
     owner_user_id: str
     app_id: str
     sender_id: str
-    workspace_chat_id: str
     revision: int
 
 
@@ -61,21 +56,16 @@ class FeishuRuntime:
         credentials: RuntimeCredentialStore,
         channels: FeishuReceiverFactory,
         addresses: FeishuAddressFactory,
-        workspaces: FeishuWorkspaceService,
-        topics: NativeThreadRepository,
     ):
         self._store = store
         self._credentials = credentials
         self._channels = channels
         self._addresses = addresses
-        self._workspaces = workspaces
-        self._topics = topics
         self._shutdown = threading.Event()
         self._lock = threading.Lock()
         self._workers: dict[str, _AppWorker] = {}
         self._accounts: dict[str, _AccountRoute] = {}
         self._owner_routes: dict[tuple[str, str], str] = {}
-        self._workspace_routes: dict[tuple[str, str], str] = {}
 
     def reconcile_accounts(
         self,
@@ -133,16 +123,11 @@ class FeishuRuntime:
     ) -> None:
         account = self._credentials.load_runtime_account(account_id)
         credentials = account['credentials']
-        workspace = self._workspaces.ensure(
-            account_id=account_id,
-            credentials=credentials,
-        )
         route = _AccountRoute(
             account_id=account_id,
             owner_user_id=str(account['owner_user_id']),
             app_id=credentials.app_id,
             sender_id=credentials.provider_account_id,
-            workspace_chat_id=workspace.chat_id,
             revision=revision or int(account['credential_revision']),
         )
         workers_to_stop: list[_AppWorker] = []
@@ -165,9 +150,6 @@ class FeishuRuntime:
                 return
             self._accounts[account_id] = route
             self._owner_routes[route_key] = account_id
-            self._workspace_routes[
-                (route.app_id, route.workspace_chat_id)
-            ] = account_id
             worker = self._workers.get(route.app_id)
             if worker is None:
                 worker = _AppWorker(
@@ -208,10 +190,6 @@ class FeishuRuntime:
         self._accounts.pop(route.account_id, None)
         self._owner_routes.pop(
             (route.app_id, route.sender_id),
-            None,
-        )
-        self._workspace_routes.pop(
-            (route.app_id, route.workspace_chat_id),
             None,
         )
         worker = self._workers.get(route.app_id)
@@ -381,19 +359,9 @@ class FeishuRuntime:
             or not message.text
         ):
             return
-        is_direct = message.chat_type == 'p2p'
-        is_workspace = message.chat_type == 'group'
-        if not is_direct and not is_workspace:
-            return
         with self._lock:
-            account_id = (
-                self._owner_routes.get(
-                    (worker.app_id, message.sender_id)
-                )
-                if is_direct
-                else self._workspace_routes.get(
-                    (worker.app_id, message.chat_id)
-                )
+            account_id = self._owner_routes.get(
+                (worker.app_id, message.sender_id)
             )
             route = (
                 self._accounts.get(account_id)
@@ -401,7 +369,7 @@ class FeishuRuntime:
                 else None
             )
             lease = worker.lease
-        if route is None and is_direct:
+        if route is None:
             route = self._load_route_for_message(
                 worker,
                 message.sender_id,
@@ -411,43 +379,18 @@ class FeishuRuntime:
         if (
             route is None
             or route.sender_id != message.sender_id
-            or (
-                is_workspace
-                and route.workspace_chat_id != message.chat_id
-            )
         ):
             return
         if lease is None:
             raise FeishuRuntimeError(
                 'Feishu runtime lease is unavailable'
             )
-        root_message_id = (
-            message.root_id or message.message_id
-        )
-        address = (
-            self._addresses.direct(
-                route.account_id,
-                message.chat_id,
-                message.sender_id,
-            )
-            if is_direct
-            else self._addresses.workspace_thread(
-                route.account_id,
-                message.chat_id,
-                root_message_id,
-                message.sender_id,
-            )
+        address = self._addresses.direct(
+            route.account_id,
+            message.chat_id,
+            message.sender_id,
         )
         address_hash = address.route_hash
-        if is_workspace:
-            self._topics.record_native_thread(
-                account_id=route.account_id,
-                provider='feishu',
-                container_id=message.chat_id,
-                root_message_id=root_message_id,
-                thread_id=message.thread_id,
-                external_address_hash=address_hash,
-            )
         message_key = hashlib.sha256(
             message.message_id.encode('utf-8')
         ).hexdigest()
@@ -464,19 +407,7 @@ class FeishuRuntime:
                     recipient_id=message.chat_id,
                     text=message.text,
                     provider_context={
-                        'message_id': message.message_id,
                         'chat_id': message.chat_id,
-                        'sender_id': message.sender_id,
-                        'surface': (
-                            'direct'
-                            if is_direct
-                            else 'native_thread'
-                        ),
-                        'root_message_id': root_message_id,
-                        'root_id': message.root_id,
-                        'parent_id': message.parent_id,
-                        'thread_id': message.thread_id,
-                        'reply_in_thread': is_workspace,
                     },
                 )
             ],
@@ -490,7 +421,7 @@ class FeishuRuntime:
         action: FeishuInboundAction,
     ) -> None:
         if (
-            action.action not in {'select', 'ask'}
+            action.action not in {'select', 'ask', 'command'}
             or not action.message_id
             or not action.chat_id
             or not action.sender_id
@@ -499,47 +430,24 @@ class FeishuRuntime:
         ):
             return
         with self._lock:
-            workspace_account_id = self._workspace_routes.get(
-                (worker.app_id, action.chat_id)
-            )
-            account_id = (
-                workspace_account_id
-                or self._owner_routes.get(
-                    (worker.app_id, action.sender_id)
-                )
+            account_id = self._owner_routes.get(
+                (worker.app_id, action.sender_id)
             )
             route = self._accounts.get(account_id) if account_id else None
             lease = worker.lease
-        is_direct = workspace_account_id is None
         if (
             route is None
             or route.sender_id != action.sender_id
-            or (
-                not is_direct
-                and (
-                    route.workspace_chat_id != action.chat_id
-                    or not action.root_message_id
-                )
-            )
         ):
             return
         if lease is None:
             raise FeishuRuntimeError(
                 'Feishu runtime lease is unavailable'
             )
-        address = (
-            self._addresses.direct(
-                route.account_id,
-                action.chat_id,
-                action.sender_id,
-            )
-            if is_direct
-            else self._addresses.workspace_thread(
-                route.account_id,
-                action.chat_id,
-                action.root_message_id,
-                action.sender_id,
-            )
+        address = self._addresses.direct(
+            route.account_id,
+            action.chat_id,
+            action.sender_id,
         )
         message_key = hashlib.sha256(
             json.dumps(
@@ -553,6 +461,7 @@ class FeishuRuntime:
                     'ask_answers_structured': (
                         action.ask_answers_structured
                     ),
+                    'command_action': action.command_action,
                 },
                 ensure_ascii=False,
                 sort_keys=True,
@@ -572,19 +481,7 @@ class FeishuRuntime:
                     recipient_id=action.chat_id,
                     text=action.text,
                     provider_context={
-                        'message_id': action.message_id,
                         'chat_id': action.chat_id,
-                        'sender_id': action.sender_id,
-                        'surface': (
-                            'direct'
-                            if is_direct
-                            else 'native_thread'
-                        ),
-                        'root_message_id': action.root_message_id,
-                        'root_id': action.root_message_id,
-                        'parent_id': action.message_id,
-                        'thread_id': '',
-                        'reply_in_thread': not is_direct,
                         'ask_answers_structured': (
                             action.ask_answers_structured
                         ),
@@ -594,6 +491,11 @@ class FeishuRuntime:
                                 'index': action.selection,
                             }
                             if action.action == 'select'
+                            else None
+                        ),
+                        'command_action': (
+                            action.command_action
+                            if action.action == 'command'
                             else None
                         ),
                     },
@@ -622,7 +524,6 @@ class FeishuRuntime:
             owner_user_id=str(account['owner_user_id']),
             app_id=worker.app_id,
             sender_id=sender_id,
-            workspace_chat_id='',
             revision=int(account['credential_revision']),
         )
         with self._lock:

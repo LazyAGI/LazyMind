@@ -8,7 +8,6 @@ from channel_gateway.common.application.capabilities import (
     CapabilityActions,
 )
 from channel_gateway.common.domain.commands import (
-    ActionKind,
     CapabilityConfigureCommand,
     CapabilityListCommand,
     ChatCommand,
@@ -21,7 +20,6 @@ from channel_gateway.common.domain.commands import (
     HistoryMoreCommand,
     SelectionChooseCommand,
     WorkflowInvokeCommand,
-    command_kind,
 )
 from channel_gateway.common.application.conversations import (
     ConversationActions,
@@ -35,7 +33,9 @@ from channel_gateway.common.ports.repository import NavigationRepository
 from channel_gateway.common.domain.chat import (
     BASIC_CHAT_FEATURES,
     ChannelFeatureProfile,
+    CoreStreamUpdate,
 )
+from channel_gateway.common.domain.outbound import ReplyPresentation
 
 
 class ChannelActionExecutor:
@@ -64,55 +64,6 @@ class ChannelActionExecutor:
             or (lambda _provider: BASIC_CHAT_FEATURES)
         )
 
-    def recover_native_transition(
-        self,
-        *,
-        intent_kind: ActionKind,
-        account_id: str,
-        external_address_hash: str,
-        owner_user_id: str,
-        request_id: str,
-    ) -> ChannelReply:
-        return ChannelReply(
-            intent_kind=intent_kind,
-            text=self._conversations.recover_transition(
-                account_id=account_id,
-                external_address_hash=external_address_hash,
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-            ),
-        )
-
-    def prepare_native_transition(
-        self,
-        *,
-        command: CommandEnvelope,
-        account_id: str,
-        external_address_hash: str,
-        owner_user_id: str,
-        request_id: str,
-        grounding_messages: Sequence[str],
-        catalog: dict[str, Any],
-    ) -> ChannelReply | None:
-        if not isinstance(command, ConversationSwitchCommand):
-            return None
-        try:
-            self._conversations.preflight_switch(
-                command=command,
-                source_messages=grounding_messages,
-                account_id=account_id,
-                external_address_hash=external_address_hash,
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                catalog=catalog,
-            )
-        except ActionMessage as exc:
-            return ChannelReply(
-                intent_kind=command_kind(command),
-                text=str(exc),
-            )
-        return None
-
     def execute(
         self,
         *,
@@ -123,10 +74,9 @@ class ChannelActionExecutor:
         request_id: str,
         grounding_messages: Sequence[str],
         catalog: dict[str, Any],
-        surface: str = 'direct',
-        source_external_address_hash: str | None = None,
         provider: str = '',
         provider_context: dict[str, Any] | None = None,
+        on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> ChannelReply:
         features = self._feature_resolver(provider)
         context = {
@@ -135,31 +85,8 @@ class ChannelActionExecutor:
             'owner_user_id': owner_user_id,
             'request_id': request_id,
         }
+        presentations: tuple[ReplyPresentation, ...] = ()
         try:
-            if (
-                surface == 'native_thread'
-                and isinstance(command, ConversationNewCommand)
-                and self._store.get_route(
-                    account_id,
-                    external_address_hash,
-                )
-            ):
-                raise ActionMessage(
-                    '当前话题已经固定对应一个 LazyMind 会话，'
-                    '不会被切换或覆盖。请新建话题开始新会话。'
-                )
-            if (
-                surface == 'native_thread'
-                and isinstance(command, ConversationSwitchCommand)
-                and self._store.get_route(
-                    account_id,
-                    external_address_hash,
-                )
-            ):
-                raise ActionMessage(
-                    '每个话题固定对应一个 LazyMind 会话，'
-                    '当前话题不会改绑。请在新的话题中选择目标会话。'
-                )
             if isinstance(command, ChatCommand):
                 parameters = command.parameters
                 text = self._conversations.chat(
@@ -172,6 +99,7 @@ class ChannelActionExecutor:
                     ask_answers_structured=(
                         self._ask_answers(provider_context)
                     ),
+                    on_stream=on_stream,
                     **context,
                 )
             elif isinstance(command, ConversationNewCommand):
@@ -183,26 +111,19 @@ class ChannelActionExecutor:
                     source_messages=grounding_messages,
                     catalog=catalog,
                     features=features,
+                    on_stream=on_stream,
                     **context,
                 )
             elif isinstance(command, ConversationListCommand):
                 text = self._conversations.list_conversations(**context)
-                if surface == 'native_thread':
-                    text = (
-                        f'{text}\n\n'
-                        '提示：原生话题与会话固定绑定，'
-                        '选择编号时会在新话题中打开目标会话。'
-                    )
             elif isinstance(command, ConversationSwitchCommand):
                 text = self._conversations.switch(
                     command=command,
                     source_messages=grounding_messages,
-                    selection_external_address_hash=(
-                        source_external_address_hash
-                        or external_address_hash
-                    ),
+                    selection_external_address_hash=external_address_hash,
                     catalog=catalog,
                     features=features,
+                    on_stream=on_stream,
                     **context,
                 )
             elif isinstance(command, ConversationCurrentCommand):
@@ -213,13 +134,16 @@ class ChannelActionExecutor:
             elif isinstance(command, HistoryMoreCommand):
                 text = self._conversations.more_history(**context)
             elif isinstance(command, CapabilityListCommand):
-                text = self._capabilities.list_capabilities(
-                    kinds=command.parameters.capabilities,
-                    catalog=catalog,
-                    account_id=account_id,
-                    external_address_hash=external_address_hash,
-                    features=features,
+                text, capability_presentation = (
+                    self._capabilities.list_capabilities(
+                        kinds=command.parameters.capabilities,
+                        catalog=catalog,
+                        account_id=account_id,
+                        external_address_hash=external_address_hash,
+                        features=features,
+                    )
                 )
+                presentations = (capability_presentation,)
             elif isinstance(command, CapabilityConfigureCommand):
                 text = self._capabilities.configure_capabilities(
                     changes=command.parameters.resource_changes,
@@ -249,6 +173,7 @@ class ChannelActionExecutor:
                         self._client.mention('plugin', workflow),
                     ),
                     plugin_mode='auto',
+                    on_stream=on_stream,
                     **context,
                 )
             elif isinstance(command, ClarifyCommand):
@@ -268,6 +193,7 @@ class ChannelActionExecutor:
             result=text,
             account_id=account_id,
             external_address_hash=external_address_hash,
+            extra_presentations=presentations,
         )
 
     @staticmethod

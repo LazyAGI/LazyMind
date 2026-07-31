@@ -7,9 +7,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from channel_gateway.common.domain.channel import account_view
 from channel_gateway.common.domain.channel import (
     ACTIVE_CONNECTION_SESSION_STATUSES,
+    WELCOME_MESSAGE,
+    account_view,
 )
 from channel_gateway.common.errors import (
     GatewayError,
@@ -21,10 +22,10 @@ from channel_gateway.feishu.domain import FeishuRuntimeError
 from channel_gateway.feishu.ports import (
     FeishuAppRegistrar,
     FeishuConnectionRepository,
+    FeishuOutboundFactory,
 )
 from channel_gateway.feishu.domain import FeishuAppCredentials
-from channel_gateway.feishu.service import FeishuAccountService
-from channel_gateway.feishu.workspace import FeishuWorkspaceService
+from channel_gateway.feishu.accounts import FeishuAccountService
 
 
 _logger = logging.getLogger(__name__)
@@ -44,8 +45,7 @@ def _iso(value: dt.datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
-def _registration_lease_key(session_id: str, qr_version: int) -> str:
-    del qr_version
+def _registration_lease_key(session_id: str) -> str:
     return f'feishu-registration:{session_id}'
 
 
@@ -100,13 +100,13 @@ class FeishuConnectionService:
         cipher: PayloadCipher,
         registrar: FeishuAppRegistrar,
         accounts: FeishuAccountService,
-        workspaces: FeishuWorkspaceService,
+        channels: FeishuOutboundFactory,
     ):
         self._store = store
         self._cipher = cipher
         self._registrar = registrar
         self._accounts = accounts
-        self._workspaces = workspaces
+        self._channels = channels
         self._shutdown = threading.Event()
         self._lock = threading.Lock()
         self._workers: dict[
@@ -164,7 +164,6 @@ class FeishuConnectionService:
                 lease = self._store.acquire_runtime_lease(
                     _registration_lease_key(
                         str(row['id']),
-                        int(row['qr_version']),
                     )
                 )
                 if lease is None:
@@ -269,7 +268,6 @@ class FeishuConnectionService:
         lease = self._store.acquire_runtime_lease(
             _registration_lease_key(
                 session_id,
-                int(row['qr_version']),
             )
         )
         if lease is None:
@@ -368,7 +366,7 @@ class FeishuConnectionService:
                 and not worker.cancel_event.is_set()
             ):
                 lease = self._store.acquire_runtime_lease(
-                    _registration_lease_key(session_id, qr_version)
+                    _registration_lease_key(session_id)
                 )
                 if lease is not None:
                     break
@@ -609,20 +607,25 @@ class FeishuConnectionService:
             )
         try:
             keeper.ensure_owned()
-            self._workspaces.ensure(
-                account_id=account_id,
-                credentials=credentials,
-            )
+            if not self._store.claim_welcome(account_id):
+                raise FeishuRuntimeError(
+                    'Feishu welcome state is unavailable'
+                )
             keeper.ensure_owned()
             self._accounts.start_account_runtime(account_id)
             self._wait_for_runtime(owner_user_id, account_id)
+            keeper.ensure_owned()
+            self._open_direct_chat(
+                credentials=credentials,
+                account_id=account_id,
+            )
             keeper.ensure_owned()
             updated = self._store.complete_provisioned_connection(
                 session_id=str(row['id']),
                 qr_version=int(row['qr_version']),
                 owner_user_id=owner_user_id,
                 account_id=account_id,
-                message='飞书连接成功，个人话题工作台已创建',
+                message='飞书连接成功，LazyMind 单聊已创建',
                 runtime_fence=runtime_fence,
             )
             if not updated:
@@ -639,6 +642,24 @@ class FeishuConnectionService:
                 runtime_fence=runtime_fence,
             )
             raise
+
+    def _open_direct_chat(
+        self,
+        *,
+        credentials: FeishuAppCredentials,
+        account_id: str,
+    ) -> None:
+        sender = self._channels.create_sender(credentials)
+        try:
+            sender.send_markdown_to_user(
+                open_id=credentials.provider_account_id,
+                text=f'**👋 欢迎使用 LazyMind**\n\n{WELCOME_MESSAGE}',
+                idempotency_key=(
+                    f'feishu-welcome:{account_id}'
+                ),
+            )
+        finally:
+            sender.close()
 
     def _cleanup_interrupted_session(
         self,
@@ -665,7 +686,6 @@ class FeishuConnectionService:
             lease = self._store.acquire_runtime_lease(
                 _registration_lease_key(
                     str(row['id']),
-                    int(row['qr_version']),
                 )
             )
         if lease is None:

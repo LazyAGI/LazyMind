@@ -1,6 +1,11 @@
+from collections.abc import Callable
 from typing import Any, Protocol
 
-from channel_gateway.common.domain.chat import ChatOptions, CoreTurnResult
+from channel_gateway.common.domain.chat import (
+    ChatOptions,
+    CoreStreamUpdate,
+    CoreTurnResult,
+)
 
 
 class IntentClient(Protocol):
@@ -35,6 +40,7 @@ class ConversationClient(Protocol):
         conversation_id: str,
         request_id: str,
         options: ChatOptions | None = None,
+        on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> CoreTurnResult:
         ...
 
@@ -66,6 +72,17 @@ class ConversationClient(Protocol):
         page_size: int = 3,
         page_token: str = '',
     ) -> dict[str, Any]:
+        ...
+
+
+class TaskClient(Protocol):
+    def list_conversation_tasks(
+        self,
+        *,
+        owner_user_id: str,
+        conversation_id: str,
+        request_id: str,
+    ) -> list[dict[str, Any]]:
         ...
 
 

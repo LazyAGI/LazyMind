@@ -290,21 +290,3 @@ class LarkChannelFactory:
         credentials: FeishuAppCredentials,
     ) -> LarkChannelClient:
         return LarkChannelClient(credentials)
-
-    def create_workspace(
-        self,
-        *,
-        credentials: FeishuAppCredentials,
-        account_id: str,
-        owner_open_id: str,
-        owner_name: str,
-    ) -> str:
-        client = LarkChannelClient(credentials)
-        try:
-            return client.create_workspace(
-                account_id=account_id,
-                owner_open_id=owner_open_id,
-                owner_name=owner_name,
-            )
-        finally:
-            client.close()

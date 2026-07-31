@@ -6,11 +6,11 @@ from channel_gateway.common.domain.channel import (
     ClaimedInbound,
     ClaimedOutbound,
     InboundEnvelope,
-    NativeConversationTarget,
     OutboundMessage,
     ReceiverCheckpoint,
     RuntimeFence,
 )
+from channel_gateway.common.domain.chat import CoreStreamUpdate
 
 
 class WelcomeRepository(Protocol):
@@ -52,7 +52,6 @@ class InboxWorkRepository(Protocol):
         inbox_id: str,
         claim_owner: str,
         outbound: list[OutboundMessage],
-        native_operation: dict | None = None,
     ) -> bool:
         ...
 
@@ -64,7 +63,6 @@ class InboxWorkRepository(Protocol):
         error: str,
         fallback: OutboundMessage,
         max_attempts: int,
-        native_operation: dict | None = None,
     ) -> bool:
         """Return True when the message reached its terminal fallback."""
         ...
@@ -161,7 +159,7 @@ class DeliveryProvider(Protocol):
         part_index: int,
         idempotency_key: str,
         saved_state: dict[str, Any],
-    ) -> None:
+    ) -> dict[str, Any] | None:
         ...
 
 
@@ -170,89 +168,28 @@ class DeliveryProviderRegistry(Protocol):
         ...
 
 
-class NativeConversationSurface(Protocol):
-    def open_conversation(
-        self,
-        *,
-        account_id: str,
-        owner_user_id: str,
-        current_external_address_hash: str,
-        current_provider_context: dict,
-        has_current_conversation: bool,
-        operation_kind: str,
-        request_id: str,
-        request_text: str,
-        prepared_command: dict,
-        grounding_messages: list[str],
-        prepared_catalog: dict,
-    ) -> NativeConversationTarget | None:
+class ReplyStream(Protocol):
+    def update(self, snapshot: CoreStreamUpdate) -> None:
+        ...
+
+    def finish(self, final_text: str) -> bool:
+        ...
+
+    def abort(self) -> None:
         ...
 
 
-class NativeConversationSurfaceRegistry(Protocol):
-    def surface(
+class ReplyStreamProvider(Protocol):
+    def open_stream(
         self,
-        provider: str,
-    ) -> NativeConversationSurface | None:
+        message: ClaimedInbound,
+    ) -> ReplyStream | None:
         ...
 
 
-class NativeThreadRepository(Protocol):
-    def reserve_native_operation(
+class ReplyStreamProviderRegistry(Protocol):
+    def streaming(
         self,
-        *,
-        account_id: str,
         provider: str,
-        operation_id: str,
-        operation_kind: str,
-        container_id: str,
-        source_external_address_hash: str,
-        prepared_command: dict,
-        grounding_messages: list[str],
-        prepared_catalog: dict,
-    ) -> dict:
-        ...
-
-    def attach_native_operation_target(
-        self,
-        *,
-        account_id: str,
-        provider: str,
-        operation_id: str,
-        root_message_id: str,
-        external_address_hash: str,
-    ) -> dict:
-        ...
-
-    def fail_native_operation(
-        self,
-        *,
-        account_id: str,
-        provider: str,
-        operation_id: str,
-        error: str,
-    ) -> None:
-        ...
-
-    def defer_native_operation(
-        self,
-        *,
-        account_id: str,
-        provider: str,
-        operation_id: str,
-        error: str,
-    ) -> None:
-        ...
-
-    def record_native_thread(
-        self,
-        *,
-        account_id: str,
-        provider: str,
-        container_id: str,
-        root_message_id: str,
-        thread_id: str,
-        external_address_hash: str,
-        operation_id: str = '',
-    ) -> None:
+    ) -> ReplyStreamProvider | None:
         ...

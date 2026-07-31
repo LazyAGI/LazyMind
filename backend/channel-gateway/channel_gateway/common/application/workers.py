@@ -9,14 +9,15 @@ from typing import Callable
 from channel_gateway.common.application.messages import ChannelMessageService
 from channel_gateway.common.domain.channel import (
     ClaimedInbound,
-    NativeTargetError,
     OutboundMessage,
+    WELCOME_MESSAGE,
 )
 from channel_gateway.common.errors import RetryableProviderSideEffectError
 from channel_gateway.common.ports.messaging import MessageWorkerRepository
 from channel_gateway.common.ports.messaging import (
     DeliveryProviderRegistry,
     OutboxWorkRepository,
+    ReplyStreamProviderRegistry,
 )
 
 
@@ -29,16 +30,6 @@ _OUTBOUND_LEASE_SECONDS = 120
 _MAX_INBOUND_ATTEMPTS = 1
 _MAX_PROVIDER_SIDE_EFFECT_ATTEMPTS = 5
 _MAX_OUTBOUND_ATTEMPTS = 5
-_WELCOME_MESSAGE = """我是 LazyMind，你的个人 AI 助手。这里与 LazyMind 网页端使用同一账号、普通会话和历史记录。
-
-你可以直接用自然语言：
-1. “帮我创建一个新会话，并整理今天的周报”
-2. “列出我的历史会话”或“切到第 2 个会话”
-3. “这轮使用 AI学习资料 知识库”
-4. “查看当前可用的知识库、Skill 和工具”
-5. “总结当前会话的进展并给出下一步”
-
-直接发送消息即可继续。"""
 
 
 class LeaseLostError(RuntimeError):
@@ -93,10 +84,12 @@ class MessageWorker:
         *,
         store: MessageWorkerRepository,
         messages: ChannelMessageService,
+        streams: ReplyStreamProviderRegistry,
         worker_count: int = 2,
     ):
         self._store = store
         self._messages = messages
+        self._streams = streams
         self._worker_count = max(1, worker_count)
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
@@ -145,6 +138,7 @@ class MessageWorker:
             text='LazyMind 暂时无法处理这条消息，请稍后重试。',
             intent_kind='failed',
         )
+        stream = None
         try:
             with _LeaseHeartbeat(
                 lambda: self._store.renew_inbound_lease(
@@ -155,6 +149,14 @@ class MessageWorker:
                 name='channel-inbound-lease',
             ) as lease:
                 lease.ensure_owned()
+                stream_provider = self._streams.streaming(
+                    inbound.provider
+                )
+                stream = (
+                    stream_provider.open_stream(inbound)
+                    if stream_provider is not None
+                    else None
+                )
                 result = self._messages.process(
                     provider=inbound.provider,
                     account_id=inbound.account_id,
@@ -167,26 +169,22 @@ class MessageWorker:
                         or 'direct'
                     ),
                     provider_context=inbound.provider_context,
+                    on_stream=(
+                        stream.update
+                        if stream is not None
+                        else None
+                    ),
                 )
+                streamed_text = (
+                    stream.finish(result.text)
+                    if stream is not None
+                    else False
+                )
+                stream = None
                 lease.ensure_owned()
                 outbound = [
                     replace(
                         fallback,
-                        order_key=(
-                            result.target.external_address_hash
-                            if result.target
-                            else fallback.order_key
-                        ),
-                        recipient_id=(
-                            result.target.recipient_id
-                            if result.target
-                            else fallback.recipient_id
-                        ),
-                        provider_context=(
-                            result.target.provider_context
-                            if result.target
-                            else fallback.provider_context
-                        ),
                         text=result.text,
                         intent_kind=result.intent_kind.value,
                         metadata={
@@ -200,6 +198,7 @@ class MessageWorker:
                             'suppress_text_when_presented': (
                                 result.suppress_text_when_presented
                             ),
+                            'streamed_text': streamed_text,
                         },
                     )
                 ]
@@ -207,7 +206,7 @@ class MessageWorker:
                     outbound.append(
                         replace(
                             outbound[0],
-                            text=_WELCOME_MESSAGE,
+                            text=WELCOME_MESSAGE,
                             intent_kind='welcome',
                             purpose='welcome',
                             metadata={},
@@ -217,12 +216,6 @@ class MessageWorker:
                     inbound.inbox_id,
                     claim_owner,
                     outbound,
-                    native_operation=(
-                        self._native_operation(
-                            inbound,
-                            result,
-                        )
-                    ),
                 ):
                     _logger.warning(
                         'channel_inbound_completion_fenced inbox_id=%s',
@@ -235,36 +228,15 @@ class MessageWorker:
                 result.intent_kind.value,
             )
         except LeaseLostError:
+            if stream is not None:
+                stream.abort()
             _logger.warning(
                 'channel_inbound_lease_lost inbox_id=%s',
                 inbound.inbox_id,
             )
-        except NativeTargetError as exc:
-            target = exc.target
-            targeted_fallback = replace(
-                fallback,
-                order_key=target.external_address_hash,
-                recipient_id=target.recipient_id,
-                provider_context=target.provider_context,
-            )
-            _logger.exception(
-                'channel_inbound_processing_failed_after_target '
-                'inbox_id=%s',
-                inbound.inbox_id,
-            )
-            self._store.record_inbound_failure(
-                inbound.inbox_id,
-                claim_owner,
-                error=exc.__class__.__name__,
-                fallback=targeted_fallback,
-                max_attempts=_MAX_INBOUND_ATTEMPTS,
-                native_operation={
-                    'account_id': inbound.account_id,
-                    'provider': inbound.provider,
-                    'operation_id': target.operation_id,
-                },
-            )
         except RetryableProviderSideEffectError as exc:
+            if stream is not None:
+                stream.abort()
             _logger.warning(
                 'channel_provider_side_effect_uncertain '
                 'inbox_id=%s attempt=%s',
@@ -277,15 +249,10 @@ class MessageWorker:
                 error=exc.__class__.__name__,
                 fallback=fallback,
                 max_attempts=_MAX_PROVIDER_SIDE_EFFECT_ATTEMPTS,
-                native_operation={
-                    'account_id': inbound.account_id,
-                    'provider': inbound.provider,
-                    'operation_id': (
-                        f'channel_{inbound.message_key[:24]}'
-                    ),
-                },
             )
         except Exception as exc:
+            if stream is not None:
+                stream.abort()
             _logger.exception(
                 'channel_inbound_processing_failed inbox_id=%s attempt=%s',
                 inbound.inbox_id,
@@ -297,41 +264,7 @@ class MessageWorker:
                 error=exc.__class__.__name__,
                 fallback=fallback,
                 max_attempts=_MAX_INBOUND_ATTEMPTS,
-                native_operation={
-                    'account_id': inbound.account_id,
-                    'provider': inbound.provider,
-                    'operation_id': (
-                        f'channel_{inbound.message_key[:24]}'
-                    ),
-                },
             )
-
-    @staticmethod
-    def _native_operation(
-        inbound: ClaimedInbound,
-        result,
-    ) -> dict | None:
-        target = result.target
-        if target is None or not target.operation_id:
-            return None
-        return {
-            'account_id': inbound.account_id,
-            'provider': inbound.provider,
-            'operation_id': target.operation_id,
-            'result': {
-                'text': result.text,
-                'intent_kind': result.intent_kind.value,
-                'core_events': list(result.core_events),
-                'sources': list(result.sources),
-                'presentations': [
-                    presentation.to_dict()
-                    for presentation in result.presentations
-                ],
-                'suppress_text_when_presented': (
-                    result.suppress_text_when_presented
-                ),
-            },
-        }
 
 
 class DeliveryWorker:
@@ -474,7 +407,7 @@ class DeliveryWorker:
                 ):
                     raise RuntimeError('Cannot persist provider delivery state')
             lease.ensure_owned()
-            provider.send_part(
+            delivered_state = provider.send_part(
                 outbound,
                 part,
                 part_index=part_index,
@@ -486,6 +419,19 @@ class DeliveryWorker:
                 ),
                 saved_state=prepared_state,
             )
+            if (
+                delivered_state is not None
+                and delivered_state != prepared_state
+            ):
+                if not self._store.save_outbound_part_state(
+                    outbound.outbox_id,
+                    claim_owner,
+                    part_index,
+                    delivered_state,
+                ):
+                    raise RuntimeError(
+                        'Cannot persist provider delivery result'
+                    )
             lease.ensure_owned()
             if not self._store.advance_outbound(
                 outbound.outbox_id,

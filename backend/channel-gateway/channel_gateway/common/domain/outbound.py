@@ -38,6 +38,20 @@ class SelectionPresentation:
 
 
 @dataclass(frozen=True, slots=True)
+class CapabilityPresentation:
+    kind: Literal['capability']
+    groups: tuple[dict[str, Any], ...]
+    enabled_features: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'kind': self.kind,
+            'groups': [dict(group) for group in self.groups],
+            'enabled_features': list(self.enabled_features),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class AskQuestionPresentation:
     text: str
     type: str
@@ -76,6 +90,7 @@ class AskPresentation:
 class TaskPresentation:
     kind: Literal['task']
     task_id: str
+    conversation_id: str
     title: str
     mode: str
     status: str
@@ -89,6 +104,7 @@ class TaskPresentation:
         return {
             'kind': self.kind,
             'task_id': self.task_id,
+            'conversation_id': self.conversation_id,
             'title': self.title,
             'mode': self.mode,
             'status': self.status,
@@ -100,89 +116,50 @@ class TaskPresentation:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class ConversationTurnPresentation:
+    query: str
+    answer: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {'query': self.query, 'answer': self.answer}
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationPresentation:
+    kind: Literal['conversation']
+    state: Literal['new', 'current', 'switched', 'history']
+    title: str
+    previous_title: str = ''
+    updated_at: str = ''
+    feature_labels: tuple[str, ...] = ()
+    history_label: str = ''
+    turns: tuple[ConversationTurnPresentation, ...] = ()
+    footer: str = ''
+    reached_start: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'kind': self.kind,
+            'state': self.state,
+            'title': self.title,
+            'previous_title': self.previous_title,
+            'updated_at': self.updated_at,
+            'feature_labels': list(self.feature_labels),
+            'history_label': self.history_label,
+            'turns': [turn.to_dict() for turn in self.turns],
+            'footer': self.footer,
+            'reached_start': self.reached_start,
+        }
+
+
 ReplyPresentation: TypeAlias = (
     SelectionPresentation
+    | CapabilityPresentation
     | AskPresentation
     | TaskPresentation
+    | ConversationPresentation
 )
-
-
-def presentation_from_dict(
-    value: dict[str, Any],
-) -> ReplyPresentation | None:
-    kind = str(value.get('kind') or '')
-    if kind == 'selection':
-        options = tuple(
-            SelectionOption(
-                label=str(item.get('label') or ''),
-                value=str(item.get('value') or ''),
-            )
-            for item in _dict_items(value.get('options'))
-            if item.get('label') and item.get('value')
-        )
-        if not options:
-            return None
-        return SelectionPresentation(
-            kind='selection',
-            selection_id=str(value.get('selection_id') or ''),
-            title=str(value.get('title') or '请选择'),
-            options=options,
-        )
-    if kind == 'ask':
-        questions = tuple(
-            AskQuestionPresentation(
-                text=str(item.get('text') or ''),
-                type=str(item.get('type') or 'text'),
-                choices=tuple(
-                    str(choice)
-                    for choice in (
-                        item.get('choices')
-                        if isinstance(item.get('choices'), list)
-                        else []
-                    )
-                    if str(choice)
-                ),
-            )
-            for item in _dict_items(value.get('questions'))
-            if item.get('text')
-        )
-        ask_id = str(value.get('ask_id') or '')
-        if not ask_id or not questions:
-            return None
-        return AskPresentation(
-            kind='ask',
-            ask_id=ask_id,
-            title=str(value.get('title') or ''),
-            description=str(value.get('description') or ''),
-            questions=questions,
-        )
-    if kind == 'task':
-        task_id = str(value.get('task_id') or '')
-        if not task_id:
-            return None
-        return TaskPresentation(
-            kind='task',
-            task_id=task_id,
-            title=str(value.get('title') or '后台任务'),
-            mode=str(value.get('mode') or ''),
-            status=str(value.get('status') or '已创建'),
-            agent_type=str(value.get('agent_type') or ''),
-            progress=optional_int(value.get('progress')),
-            current_phase=str(value.get('current_phase') or ''),
-            estimated_sec=optional_int(value.get('estimated_sec')),
-            summary=str(value.get('summary') or ''),
-        )
-    return None
-
-
-def _dict_items(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    return [
-        dict(item)
-        for item in value
-        if isinstance(item, dict)
-    ]
 
 
 def optional_int(value: Any) -> int | None:

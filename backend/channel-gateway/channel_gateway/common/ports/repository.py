@@ -11,45 +11,8 @@ class IntentRepository(Protocol):
         ...
 
 
-class NativeOperationRecoveryRepository(Protocol):
-    def reserve_native_operation(
-        self,
-        *,
-        account_id: str,
-        provider: str,
-        operation_id: str,
-        operation_kind: str,
-        container_id: str,
-        source_external_address_hash: str,
-        prepared_command: dict,
-        grounding_messages: list[str],
-        prepared_catalog: dict,
-    ) -> dict[str, Any]:
-        ...
-
-    def get_native_operation(
-        self,
-        *,
-        account_id: str,
-        provider: str,
-        operation_id: str,
-    ) -> dict[str, Any] | None:
-        ...
-
-    def fail_native_operation(
-        self,
-        *,
-        account_id: str,
-        provider: str,
-        operation_id: str,
-        error: str,
-    ) -> None:
-        ...
-
-
 class NavigationRepository(
     IntentRepository,
-    NativeOperationRecoveryRepository,
     Protocol,
 ):
     def get_route(self, account_id: str, external_address_hash: str) -> str:

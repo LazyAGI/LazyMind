@@ -17,7 +17,6 @@ from channel_gateway.common.domain.outbound import (
     TaskPresentation,
     optional_int,
 )
-from channel_gateway.common.domain.channel import NativeConversationTarget
 from channel_gateway.common.ports.repository import NavigationRepository
 
 
@@ -79,6 +78,7 @@ def _task(payload: dict) -> TaskPresentation | None:
     return TaskPresentation(
         kind='task',
         task_id=task_id,
+        conversation_id=str(payload.get('conversation_id') or ''),
         title=str(payload.get('title') or '后台任务'),
         mode=str(payload.get('mode') or ''),
         status=str(payload.get('status') or '已创建'),
@@ -98,7 +98,6 @@ class ChannelReply:
     text: str
     core_events: tuple[dict[str, Any], ...] = ()
     sources: tuple[Any, ...] = ()
-    target: NativeConversationTarget | None = None
     presentations: tuple[ReplyPresentation, ...] = ()
     suppress_text_when_presented: bool = False
 
@@ -116,14 +115,22 @@ class ChannelReplyBuilder:
         result: str | ConversationResult,
         account_id: str,
         external_address_hash: str,
+        extra_presentations: tuple[ReplyPresentation, ...] = (),
     ) -> ChannelReply:
         selection = self._selection(
             account_id,
             external_address_hash,
         )
         if isinstance(result, ConversationResult):
-            presentations = project_core_presentations(
+            core_presentations = project_core_presentations(
                 result.turn.events
+                if result.turn is not None
+                else ()
+            )
+            presentations = (
+                *extra_presentations,
+                *result.presentations,
+                *core_presentations,
             )
             if selection is not None:
                 presentations = (*presentations, selection)
@@ -132,18 +139,34 @@ class ChannelReplyBuilder:
                 text=result.text,
                 core_events=tuple(
                     event.to_dict()
-                    for event in result.turn.events
+                    for event in (
+                        result.turn.events
+                        if result.turn is not None
+                        else ()
+                    )
                 ),
-                sources=result.turn.sources,
+                sources=(
+                    result.turn.sources
+                    if result.turn is not None
+                    else ()
+                ),
                 presentations=presentations,
                 suppress_text_when_presented=(
                     result.suppress_text_when_presented
                 ),
             )
+        intent_kind = command_kind(command)
+        presentations = extra_presentations
+        if selection is not None:
+            presentations = (*presentations, selection)
         return ChannelReply(
-            intent_kind=command_kind(command),
+            intent_kind=intent_kind,
             text=result,
-            presentations=(selection,) if selection is not None else (),
+            presentations=presentations,
+            suppress_text_when_presented=(
+                bool(presentations)
+                and intent_kind is ActionKind.CAPABILITY_LIST
+            ),
         )
 
     def _selection(

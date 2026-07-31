@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any, Sequence
 
 from channel_gateway.common.application.capabilities import (
@@ -19,9 +20,15 @@ from channel_gateway.common.domain.commands import (
 from channel_gateway.common.errors import LazyMindError, LazyMindHTTPError
 from channel_gateway.common.domain.chat import (
     ChannelFeatureProfile,
+    CoreStreamUpdate,
     CoreTurnResult,
 )
 from channel_gateway.common.domain.channel import sanitize_channel_text
+from channel_gateway.common.domain.outbound import (
+    ConversationPresentation,
+    ConversationTurnPresentation,
+    ReplyPresentation,
+)
 from channel_gateway.common.ports.core import ConversationClient
 from channel_gateway.common.ports.repository import NavigationRepository
 
@@ -39,7 +46,8 @@ _SWITCH_TARGET_KEY = '_channel_gateway_switch_target'
 @dataclass(frozen=True, slots=True)
 class ConversationResult:
     text: str
-    turn: CoreTurnResult
+    turn: CoreTurnResult | None = None
+    presentations: tuple[ReplyPresentation, ...] = ()
     suppress_text_when_presented: bool = False
 
 
@@ -75,6 +83,7 @@ class ConversationActions:
         ask_answers_structured: dict[str, Any] | None = None,
         mentions: Sequence[dict[str, str]] = (),
         plugin_mode: str | None = None,
+        on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> ConversationResult:
         conversation_id = (
             conversation_id_override
@@ -185,6 +194,7 @@ class ConversationActions:
                 conversation_id=conversation_id,
                 request_id=request_id,
                 options=options,
+                on_stream=on_stream,
             )
         except LazyMindHTTPError as exc:
             if conversation_id and exc.status_code == 404:
@@ -219,6 +229,15 @@ class ConversationActions:
                     f'{answer}'
                 ),
                 turn=turn,
+                presentations=(
+                    ConversationPresentation(
+                        kind='conversation',
+                        state='new',
+                        title='新会话',
+                        feature_labels=features.enabled_feature_labels,
+                        footer='后续消息会继续这个新会话。',
+                    ),
+                ),
             )
         return ConversationResult(
             text=answer,
@@ -273,6 +292,7 @@ class ConversationActions:
         source_messages: Sequence[str],
         catalog: dict[str, Any],
         features: ChannelFeatureProfile,
+        on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> str | ConversationResult:
         resolved = self._capabilities.resolve_changes(
             changes,
@@ -315,6 +335,7 @@ class ConversationActions:
                 source_messages=source_messages,
                 catalog=catalog,
                 features=features,
+                on_stream=on_stream,
             )
         lines = ['── 已进入新会话 ──']
         if current_id:
@@ -326,7 +347,20 @@ class ConversationActions:
             )
             lines.append(f'默认知识库：{"、".join(names) if names else "无"}')
         lines.append('请发送新会话的第一条消息。')
-        return '\n'.join(lines)
+        return ConversationResult(
+            text='\n'.join(lines),
+            presentations=(
+                ConversationPresentation(
+                    kind='conversation',
+                    state='new',
+                    title='等待第一条消息',
+                    previous_title=previous_title if current_id else '',
+                    feature_labels=features.enabled_feature_labels,
+                    footer='发送下一条消息后，LazyMind 会正式创建会话。',
+                ),
+            ),
+            suppress_text_when_presented=True,
+        )
 
     def list_conversations(
         self,
@@ -365,7 +399,10 @@ class ConversationActions:
                 f'{self._format_time(item["update_time"])}'
             )
         lines.extend(('', '直接说“切到第几个会话”即可。'))
-        return '\n'.join(lines)
+        return ConversationResult(
+            text='\n'.join(lines),
+            suppress_text_when_presented=True,
+        )
 
     def switch(
         self,
@@ -379,7 +416,8 @@ class ConversationActions:
         request_id: str,
         catalog: dict[str, Any],
         features: ChannelFeatureProfile,
-    ) -> str:
+        on_stream: Callable[[CoreStreamUpdate], None] | None = None,
+    ) -> str | ConversationResult:
         parameters = command.parameters
         prepared = catalog.get(_SWITCH_TARGET_KEY)
         if isinstance(prepared, dict) and prepared.get('target_id'):
@@ -418,7 +456,7 @@ class ConversationActions:
                 source_messages=source_messages,
             )
             self._capabilities.validate_resolved_changes(resolved_changes)
-        marker = self._switch_to(
+        transition = self._switch_to(
             account_id=account_id,
             external_address_hash=external_address_hash,
             owner_user_id=owner_user_id,
@@ -452,8 +490,12 @@ class ConversationActions:
                     external_address_hash,
                     target_id,
                 )
-                return f'{marker}\n\n{configured}'
-            return marker
+                return ConversationResult(
+                    text=f'{transition.text}\n\n{configured}',
+                    presentations=transition.presentations,
+                    suppress_text_when_presented=True,
+                )
+            return transition
         answer = self.chat(
             account_id=account_id,
             external_address_hash=external_address_hash,
@@ -467,65 +509,15 @@ class ConversationActions:
             catalog=catalog,
             features=features,
             conversation_id_override=target_id,
+            on_stream=on_stream,
         )
         return ConversationResult(
-            text=f'{marker}\n\n── 新任务回复 ──\n{answer.text}',
+            text=(
+                f'{transition.text}\n\n'
+                f'── 新任务回复 ──\n{answer.text}'
+            ),
             turn=answer.turn,
-        )
-
-    def preflight_switch(
-        self,
-        *,
-        command: ConversationSwitchCommand,
-        source_messages: Sequence[str],
-        account_id: str,
-        external_address_hash: str,
-        owner_user_id: str,
-        request_id: str,
-        catalog: dict[str, Any],
-    ) -> None:
-        prepared = catalog.get(_SWITCH_TARGET_KEY)
-        if isinstance(prepared, dict) and prepared.get('target_id'):
-            if isinstance(prepared.get('detail'), dict) and isinstance(
-                prepared.get('history'),
-                dict,
-            ):
-                return
-            target_id = str(prepared['target_id'])
-        else:
-            target_id, display_index = self._resolve_switch_target(
-                command=command,
-                source_messages=source_messages,
-                account_id=account_id,
-                selection_external_address_hash=external_address_hash,
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-            )
-            catalog[_SWITCH_TARGET_KEY] = {
-                'target_id': target_id,
-                'display_index': display_index,
-            }
-        if command.parameters.resource_changes:
-            resolved = self._capabilities.resolve_changes(
-                command.parameters.resource_changes,
-                catalog,
-                account_id=account_id,
-                external_address_hash=external_address_hash,
-                source_command=command,
-                source_messages=source_messages,
-                continuation_catalog=catalog,
-            )
-            self._capabilities.validate_resolved_changes(resolved)
-        detail, history = self._load_switch_target(
-            owner_user_id=owner_user_id,
-            request_id=request_id,
-            target_id=target_id,
-        )
-        catalog[_SWITCH_TARGET_KEY].update(
-            {
-                'detail': detail,
-                'history': history,
-            }
+            presentations=transition.presentations,
         )
 
     def _resolve_switch_target(
@@ -639,7 +631,7 @@ class ConversationActions:
         owner_user_id: str,
         request_id: str,
         features: ChannelFeatureProfile,
-    ) -> str:
+    ) -> str | ConversationResult:
         conversation_id = self._store.get_route(account_id, external_address_hash)
         if not conversation_id:
             state = self._store.get_navigation_state(
@@ -660,43 +652,27 @@ class ConversationActions:
                 raise
             self._store.begin_new_conversation(account_id, external_address_hash)
             return '当前会话已经不存在，已进入新会话状态。'
-        return (
-            f'当前会话：{self._display_name(detail)}\n'
-            f'最后更新：{self._format_time(str(detail.get("update_time") or ""))}\n'
-            + self._feature_summary(features)
+        title = self._display_name(detail)
+        updated_at = self._format_time(
+            str(detail.get('update_time') or '')
         )
-
-    def recover_transition(
-        self,
-        *,
-        account_id: str,
-        external_address_hash: str,
-        owner_user_id: str,
-        request_id: str,
-    ) -> str:
-        conversation_id = self._store.get_route(
-            account_id,
-            external_address_hash,
-        )
-        if not conversation_id:
-            raise ActionMessage('原生会话尚未完成绑定，请稍后重试。')
-        detail = self._client.get_conversation_detail(
-            owner_user_id=owner_user_id,
-            conversation_id=conversation_id,
-            request_id=f'{request_id}_recovery_detail',
-        )
-        history = self._client.get_conversation_history(
-            owner_user_id=owner_user_id,
-            conversation_id=conversation_id,
-            request_id=f'{request_id}_recovery_history',
-            page_size=_HISTORY_PAGE_SIZE,
-        )
-        heading = (
-            '── 已恢复会话结果 · '
-            f'{self._display_name(detail)} ──'
-        )
-        return '\n'.join(
-            self._format_history(history, heading=heading)
+        return ConversationResult(
+            text=(
+                f'当前会话：{title}\n'
+                f'最后更新：{updated_at}\n'
+                + self._feature_summary(features)
+            ),
+            presentations=(
+                ConversationPresentation(
+                    kind='conversation',
+                    state='current',
+                    title=title,
+                    updated_at=updated_at,
+                    feature_labels=features.enabled_feature_labels,
+                    footer='后续消息会继续当前会话。',
+                ),
+            ),
+            suppress_text_when_presented=True,
         )
 
     def more_history(
@@ -706,7 +682,7 @@ class ConversationActions:
         external_address_hash: str,
         owner_user_id: str,
         request_id: str,
-    ) -> str:
+    ) -> str | ConversationResult:
         conversation_id = self._store.get_route(account_id, external_address_hash)
         if not conversation_id:
             return '当前还没有可读取历史的会话，请先发送任务或切换会话。'
@@ -750,7 +726,32 @@ class ConversationActions:
         lines = self._format_history(history, heading=heading)
         if not next_token:
             lines.extend(('', '已经到最早一条记录。'))
-        return '\n'.join(lines)
+        return ConversationResult(
+            text='\n'.join(lines),
+            presentations=(
+                ConversationPresentation(
+                    kind='conversation',
+                    state='history',
+                    title=self._display_name(detail),
+                    updated_at=self._format_time(
+                        str(detail.get('update_time') or '')
+                    ),
+                    history_label=(
+                        '更早的对话'
+                        if initialized
+                        else '最近对话'
+                    ),
+                    turns=self._history_turns(history),
+                    footer=(
+                        '已经到最早一条记录。'
+                        if not next_token
+                        else '还可以继续查看更多历史。'
+                    ),
+                    reached_start=not next_token,
+                ),
+            ),
+            suppress_text_when_presented=True,
+        )
 
     def _switch_to(
         self,
@@ -765,7 +766,7 @@ class ConversationActions:
         prepared_detail: dict[str, Any] | None = None,
         prepared_history: dict[str, Any] | None = None,
         features: ChannelFeatureProfile,
-    ) -> str:
+    ) -> ConversationResult:
         if prepared_detail is not None and prepared_history is not None:
             detail, history = prepared_detail, prepared_history
         else:
@@ -814,7 +815,25 @@ class ConversationActions:
                 '可以直接发送下一条消息，或说“查看更多历史”。',
             )
         )
-        return '\n'.join(lines)
+        return ConversationResult(
+            text='\n'.join(lines),
+            presentations=(
+                ConversationPresentation(
+                    kind='conversation',
+                    state='switched',
+                    title=title,
+                    previous_title=previous_title,
+                    updated_at=self._format_time(
+                        str(detail.get('update_time') or '')
+                    ),
+                    feature_labels=features.enabled_feature_labels,
+                    history_label='最近对话',
+                    turns=self._history_turns(history),
+                    footer='后续消息会继续当前会话。',
+                ),
+            ),
+            suppress_text_when_presented=True,
+        )
 
     @staticmethod
     def _feature_summary(features: ChannelFeatureProfile) -> str:
@@ -915,30 +934,58 @@ class ConversationActions:
             return '时间未知'
 
     @classmethod
+    def _history_turns(
+        cls,
+        payload: dict[str, Any],
+    ) -> tuple[ConversationTurnPresentation, ...]:
+        raw_history = payload.get('history')
+        if not isinstance(raw_history, list):
+            return ()
+        turns: list[ConversationTurnPresentation] = []
+        history = [
+            item
+            for item in raw_history
+            if isinstance(item, dict)
+        ]
+        for item in reversed(history):
+            query = (
+                str(item.get('query') or '').strip()
+                or '非文本内容，请在网页端查看'
+            )
+            answer = (
+                sanitize_channel_text(str(item.get('result') or ''))
+                or '该轮没有文字结果'
+            )
+            turns.append(
+                ConversationTurnPresentation(
+                    query=cls._truncate(
+                        query,
+                        _QUERY_PREVIEW_LIMIT,
+                    ),
+                    answer=cls._truncate(
+                        answer,
+                        _ANSWER_PREVIEW_LIMIT,
+                    ),
+                )
+            )
+        return tuple(turns)
+
+    @classmethod
     def _format_history(
         cls,
         payload: dict[str, Any],
         *,
         heading: str,
     ) -> list[str]:
-        raw_history = payload.get('history')
-        if not isinstance(raw_history, list) or not raw_history:
+        turns = cls._history_turns(payload)
+        if not turns:
             return [heading, '暂无历史记录。']
         lines = [heading]
-        history = [item for item in raw_history if isinstance(item, dict)]
-        for item in reversed(history):
-            query = (
-                str(item.get('query') or '').strip()
-                or '[非文本内容，请在网页端查看]'
-            )
-            answer = (
-                sanitize_channel_text(str(item.get('result') or ''))
-                or '[暂无文字回答]'
-            )
+        for turn in turns:
             lines.extend(
                 (
-                    f'[用户] {cls._truncate(query, _QUERY_PREVIEW_LIMIT)}',
-                    f'[LazyMind] {cls._truncate(answer, _ANSWER_PREVIEW_LIMIT)}',
+                    f'[用户] {turn.query}',
+                    f'[LazyMind] {turn.answer}',
                     '',
                 )
             )

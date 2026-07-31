@@ -70,18 +70,15 @@ class ChannelCommandRouter:
         surface: str,
         provider_context: dict[str, Any],
     ) -> RoutedCommand | str:
-        prepared = self._prepared_command(
-            provider=provider,
-            account_id=account_id,
-            request_id=request_id,
-        )
-        if prepared is not None:
-            return prepared
-
         continuation_catalog: dict[str, Any] = {}
+        command_action = provider_context.get('command_action')
         selection_action = provider_context.get('selection_action')
         structured_ask = provider_context.get('ask_answers_structured')
-        if isinstance(selection_action, dict):
+        if isinstance(command_action, dict):
+            command = COMMAND_ADAPTER.validate_python(command_action)
+            grounding_messages = (text,)
+            routing_source = 'provider_action'
+        elif isinstance(selection_action, dict):
             shortcut = self._provider_selection(
                 account_id=account_id,
                 external_address_hash=external_address_hash,
@@ -156,60 +153,6 @@ class ChannelCommandRouter:
             grounding_messages=grounding_messages,
             catalog=continuation_catalog,
             source=routing_source,
-        )
-
-    def _prepared_command(
-        self,
-        *,
-        provider: str,
-        account_id: str,
-        request_id: str,
-    ) -> RoutedCommand | None:
-        operation = self._store.get_native_operation(
-            account_id=account_id,
-            provider=provider,
-            operation_id=request_id,
-        )
-        if operation is None:
-            return None
-        prepared = operation.get('command_json')
-        if not isinstance(prepared, dict) or not prepared:
-            self._store.fail_native_operation(
-                account_id=account_id,
-                provider=provider,
-                operation_id=request_id,
-                error='legacy_operation_missing_prepared_command',
-            )
-            raise RuntimeError(
-                'Native operation predates durable prepared commands'
-            )
-        try:
-            command = COMMAND_ADAPTER.validate_python(prepared)
-            raw_grounding = operation.get('grounding_messages_json')
-            grounding_messages = (
-                tuple(
-                    str(item)
-                    for item in raw_grounding
-                    if isinstance(item, str) and item
-                )
-                if isinstance(raw_grounding, list)
-                else ()
-            )
-            command = validate_command(command, grounding_messages)
-        except Exception as exc:
-            self._store.fail_native_operation(
-                account_id=account_id,
-                provider=provider,
-                operation_id=request_id,
-                error='invalid_prepared_command',
-            )
-            raise RuntimeError('Stored native command is invalid') from exc
-        catalog = operation.get('catalog_json')
-        return RoutedCommand(
-            command=command,
-            grounding_messages=grounding_messages,
-            catalog=dict(catalog) if isinstance(catalog, dict) else {},
-            source='native_replay',
         )
 
     def _provider_selection(

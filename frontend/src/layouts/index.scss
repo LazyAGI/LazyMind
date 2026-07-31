@@ -684,6 +684,12 @@
     color: inherit;
   }
 
+  .feishu-official-icon {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+  }
+
   .language-item {
     .language-switcher {
       flex: 1;
