@@ -136,6 +136,7 @@ func pidFileRecords(paths RuntimePaths, cfg RuntimeConfig) []LocalProcessRecord 
 	}{
 		{processComposeServiceName, paths.ProcessComposePIDFile, []int{cfg.ProcessComposePort}},
 		{authServiceProcessName, paths.AuthServicePIDFile, []int{cfg.AuthService.Port}},
+		{channelGatewayProcessName, paths.ChannelGatewayPIDFile, []int{cfg.ChannelGateway.Port}},
 		{coreProcessName, paths.CorePIDFile, []int{cfg.LocalProxy.CoreHostPort}},
 		{scanControlPlaneProcessName, paths.ScanControlPlanePIDFile, []int{cfg.LocalProxy.ScanHostPort}},
 		{fileWatcherProcessName, paths.FileWatcherPIDFile, []int{cfg.FileWatcher.Port}},

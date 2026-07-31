@@ -21,8 +21,10 @@ function unwrapUiPreferencesData<T>(payload: unknown): T {
   return payload as T;
 }
 
-export async function fetchUserUiPreferences(): Promise<UserUIPreferencesOpenAPIResponse> {
-  const response = await userApi.apiCoreUserUiPreferencesGet();
+export async function fetchUserUiPreferences(
+  options?: Parameters<typeof userApi.apiCoreUserUiPreferencesGet>[0],
+): Promise<UserUIPreferencesOpenAPIResponse> {
+  const response = await userApi.apiCoreUserUiPreferencesGet(options);
   return unwrapUiPreferencesData<UserUIPreferencesOpenAPIResponse>(response.data);
 }
 

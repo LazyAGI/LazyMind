@@ -2,6 +2,7 @@ const requiredDesktopServices = [
   "process-supervisor",
   "local-proxy",
   "auth-service",
+  "channel-gateway",
   "core",
   "scan-control-plane",
   "file-watcher",
@@ -40,6 +41,11 @@ function statusFailureMessage(status) {
   return failedServices.length ? `${summary}; services: ${failedServices.join(", ")}` : summary;
 }
 
+function isRuntimeOwnershipConflict(runtimeProcessExit) {
+  const detail = String(runtimeProcessExit?.detail || runtimeProcessExit?.error || "");
+  return detail.includes("active desktop runtime belongs to another application instance");
+}
+
 function runtimeExitFailureMessage(status, belongsToDesktop, runtimeProcessExit) {
   if (!runtimeProcessExit) {
     return "";
@@ -60,4 +66,10 @@ function runtimeExitFailureMessage(status, belongsToDesktop, runtimeProcessExit)
   return "";
 }
 
-module.exports = { desktopRuntimeReady, requiredDesktopServices, runtimeExitFailureMessage, statusFailureMessage };
+module.exports = {
+  desktopRuntimeReady,
+  isRuntimeOwnershipConflict,
+  requiredDesktopServices,
+  runtimeExitFailureMessage,
+  statusFailureMessage,
+};

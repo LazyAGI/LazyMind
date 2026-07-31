@@ -30,6 +30,13 @@ func TestMatchRoute_DefaultRoutes(t *testing.T) {
 			stripPath:  false,
 		},
 		{
+			name:       "channel gateway no strip",
+			path:       "/api/channel-gateway/v1/channel-accounts",
+			upstream:   "http://127.0.0.1:8085",
+			targetPath: "/api/channel-gateway/v1/channel-accounts",
+			stripPath:  false,
+		},
+		{
 			name:       "chat no strip",
 			path:       "/api/chat/messages",
 			upstream:   "http://127.0.0.1:8046",
