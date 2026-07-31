@@ -12,6 +12,19 @@ from .models import AgentRole, AgentRunPlan
 from .tool_limit_control import tool_limit_decision_coordinator
 
 
+_EXPANDED_BUDGET_TOOLS = {
+    'advance_step',
+    'advance_step_and_hand_off',
+    'create_plugin_draft',
+    'create_subagent',
+}
+
+
+def _requires_expanded_budget(tool_name: str) -> bool:
+    """Return whether invoking this tool starts plugin or SubAgent work."""
+    return tool_name in _EXPANDED_BUDGET_TOOLS or tool_name.startswith('trigger_')
+
+
 class ToolCallGuard:
     """Stop selected tools from looping after failures without limiting successful work."""
 
@@ -20,6 +33,11 @@ class ToolCallGuard:
         self._failure_limits = dict(failure_limits or {})
         self._failed_signatures: set[str] = set()
         self._consecutive_failures: dict[str, int] = {}
+        self._expanded_budget_triggered = False
+
+    @property
+    def expanded_budget_triggered(self) -> bool:
+        return self._expanded_budget_triggered
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
@@ -77,6 +95,8 @@ class ToolCallGuard:
         for index, tool_call in enumerate(tool_calls):
             function = tool_call.get('function') or {}
             name = str(function.get('name') or '')
+            if _requires_expanded_budget(name):
+                self._expanded_budget_triggered = True
             signature = self._signature(tool_call)
             guarded = name in self._failure_limits
             if guarded and signature in self._failed_signatures:
@@ -151,6 +171,16 @@ class AgentExecutor:
         from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
 
         options = plan.execution_options
+        tool_guard: ToolCallGuard | None = None
+
+        def _on_max_retries(output: Any, used_rounds: int, current_limit: int) -> int | None:
+            return tool_limit_decision_coordinator.on_max_retries(
+                output,
+                used_rounds,
+                current_limit,
+                auto_expand=bool(tool_guard and tool_guard.expanded_budget_triggered),
+            )
+
         kwargs = {
             'stream': True,
             'max_retries': options.max_retries or _cfg['max_retries'],
@@ -158,7 +188,7 @@ class AgentExecutor:
             'force_summarize': True,
             'force_summarize_context': plan.force_summarize_context,
             'on_max_retries': (
-                tool_limit_decision_coordinator.on_max_retries
+                _on_max_retries
                 if plan.role == AgentRole.CHAT else None
             ),
         }
@@ -179,9 +209,10 @@ class AgentExecutor:
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
-        agent._tools_manager = ToolCallGuard(
+        tool_guard = ToolCallGuard(
             agent._tools_manager, options.tool_failure_limits,
         )
+        agent._tools_manager = tool_guard
         # Restore lazy Toolkit activation before the streaming helper takes over.
         # Relying only on ReactAgent._pre_process makes restoration dependent on
         # llm_chat_history surviving the helper/framework call path.

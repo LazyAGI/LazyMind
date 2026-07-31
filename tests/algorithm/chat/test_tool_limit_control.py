@@ -64,3 +64,19 @@ def test_tool_limit_coordinator_continues_same_invocation() -> None:
     assert not thread.is_alive()
     assert result['limit'] == 200
     assert coordinator.submit(sid, decision_id, 'continue') is False
+
+
+def test_tool_limit_coordinator_auto_expands_plugin_or_subagent_work() -> None:
+    coordinator = ToolLimitDecisionCoordinator()
+    lazyllm.globals._init_sid(f'tool-limit-auto-expand-{time.time_ns()}')
+    _read_events()
+
+    with config.temp('agentic_expanded_max_rounds', 200):
+        assert coordinator.on_max_retries(
+            None, 21, 21, auto_expand=True,
+        ) == 200
+
+    assert not [
+        item for item in _read_events()
+        if item['tag'] == 'tool_limit_pending'
+    ]

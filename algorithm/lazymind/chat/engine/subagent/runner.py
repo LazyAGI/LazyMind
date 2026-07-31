@@ -478,11 +478,7 @@ def _build_subagent_plan(
         force_summarize_context=ctx.objective,
         execution_options=AgentExecutionOptions(
             extra_stop_condition=_make_cancel_stop_condition(),
-            max_retries=(
-                max(1, int(_cfg['agentic_expanded_max_rounds']) - 1)
-                if str((lazyllm.globals.get('agentic_config') or {}).get('thinking_depth') or '').lower() == 'max'
-                else None
-            ),
+            max_retries=max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
         ),
     )
 

@@ -56,6 +56,23 @@ def test_executor_does_not_pause_subagent_on_round_limit(monkeypatch) -> None:
     assert constructor.call_args.kwargs['on_max_retries'] is None
 
 
+def test_executor_auto_expands_after_plugin_or_subagent_tool(monkeypatch) -> None:
+    agent = MagicMock()
+    agent._tools_manager = MagicMock(return_value=[{'ok': True}])
+    constructor = MagicMock(return_value=agent)
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+
+    created = AgentExecutor().create_agent('llm', _plan(max_retries=20))
+    created._tools_manager([{
+        'function': {'name': 'create_subagent', 'arguments': '{}'},
+    }])
+
+    with executor_mod._cfg.temp('agentic_expanded_max_rounds', 200):
+        assert constructor.call_args.kwargs['on_max_retries'](
+            None, 21, 21,
+        ) == 200
+
+
 def test_executor_restores_toolkit_activation_from_history(monkeypatch) -> None:
     agent = MagicMock()
     constructor = MagicMock(return_value=agent)

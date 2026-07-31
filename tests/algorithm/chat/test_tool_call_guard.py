@@ -90,3 +90,26 @@ def test_unconfigured_stateful_tool_is_not_deduplicated():
     guard([_call('get_task_status', {'task_id': 'task-1'})])
 
     assert len(manager.calls) == 2
+
+
+def test_plugin_and_subagent_tools_enable_expanded_budget():
+    for tool_name in (
+        'trigger_writer',
+        'advance_step',
+        'advance_step_and_hand_off',
+        'create_plugin_draft',
+        'create_subagent',
+    ):
+        guard = ToolCallGuard(_RecordingToolManager())
+
+        guard([_call(tool_name, {})])
+
+        assert guard.expanded_budget_triggered is True
+
+
+def test_ordinary_tools_do_not_enable_expanded_budget():
+    guard = ToolCallGuard(_RecordingToolManager())
+
+    guard([_call('url_fetch', {'url': 'https://example.com'})])
+
+    assert guard.expanded_budget_triggered is False

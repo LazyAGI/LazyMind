@@ -65,10 +65,23 @@ class ToolLimitDecisionCoordinator:
             time.sleep(min(0.2, max(0.01, deadline - time.monotonic())))
         return 'summarize'
 
-    def on_max_retries(self, output: Any, used_rounds: int, current_limit: int) -> Optional[int]:
+    def on_max_retries(
+        self,
+        output: Any,
+        used_rounds: int,
+        current_limit: int,
+        *,
+        auto_expand: bool = False,
+    ) -> Optional[int]:
         expanded_max_rounds = max(2, int(config['agentic_expanded_max_rounds']))
         if used_rounds >= expanded_max_rounds:
             return None
+        if auto_expand:
+            lazyllm.LOG.info(
+                f'ChatAgent used a plugin or SubAgent tool; automatically expanding '
+                f'tool round limit from {current_limit} to {expanded_max_rounds}.'
+            )
+            return expanded_max_rounds
         timeout = max(0, float(config['agentic_tool_limit_wait_timeout']))
         sid = lazyllm.globals._sid
         decision_id = uuid.uuid4().hex
