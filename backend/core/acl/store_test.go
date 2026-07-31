@@ -1,7 +1,6 @@
 package acl
 
 import (
-	"path/filepath"
 	"testing"
 
 	"lazymind/core/common/orm"
@@ -10,13 +9,7 @@ import (
 // newTestStore creates a SQLite-backed Store for testing, auto-migrating ACL tables.
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "acl-store.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.ACLModel{}, &orm.UserGroupModel{}, &orm.KBModel{}, &orm.VisibilityModel{}, &orm.ACLGroupModel{}); err != nil {
-		t.Fatalf("auto migrate acl tables: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.ACLModel{}, &orm.UserGroupModel{}, &orm.KBModel{}, &orm.VisibilityModel{}, &orm.ACLGroupModel{})
 
 	previousStore := defaultStore
 	t.Cleanup(func() { defaultStore = previousStore })

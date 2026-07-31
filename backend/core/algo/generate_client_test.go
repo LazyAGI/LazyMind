@@ -9,7 +9,6 @@ import (
 	"lazymind/core/common"
 	"net"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -29,10 +28,7 @@ func TestGenerateURLUsesChatServiceEndpoint(t *testing.T) {
 }
 
 func TestGenerateFallsBackToRouterChildWhenRewriteIsNotProxied(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
+	db := orm.OpenTestDB(t)
 	corestore.Init(db.DB, nil, nil)
 	t.Cleanup(func() { corestore.Init(nil, nil, nil) })
 
@@ -43,7 +39,7 @@ CREATE TABLE router_child_processes (
   host TEXT NOT NULL,
   port INTEGER NOT NULL,
   status TEXT NOT NULL,
-  updated_at DATETIME
+  updated_at TIMESTAMP
 )`).Error; err != nil {
 		t.Fatalf("create router table: %v", err)
 	}

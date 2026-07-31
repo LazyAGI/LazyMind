@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -246,14 +245,7 @@ func TestEnqueueIdempotencyKeyReturnsExistingJob(t *testing.T) {
 func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "asyncjob.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.AsyncJob{}); err != nil {
-		t.Fatalf("auto migrate async job: %v", err)
-	}
-	return db.DB
+	return orm.MigrateTestDB(t, &orm.AsyncJob{}).DB
 }
 
 func newTestRunner(db *gorm.DB) *Runner {

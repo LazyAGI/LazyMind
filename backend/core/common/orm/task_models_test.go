@@ -1,22 +1,12 @@
 package orm
 
 import (
-	"path/filepath"
 	"testing"
 )
 
-// TestTaskSchedulerModelsAutoMigrate verifies that task center, schedule, and automation tables are created.
 func TestTaskSchedulerModelsAutoMigrate(t *testing.T) {
-	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "task-scheduler.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
+	db := MigrateTestDB(t, &TaskCenterTask{}, &UserSchedule{}, &AutomationGroup{})
 
-	if err := db.AutoMigrate(&TaskCenterTask{}, &UserSchedule{}, &AutomationGroup{}); err != nil {
-		t.Fatalf("auto migrate task scheduler models: %v", err)
-	}
-
-	// Verify tables exist.
 	for _, model := range []any{
 		&TaskCenterTask{},
 		&UserSchedule{},
@@ -27,7 +17,6 @@ func TestTaskSchedulerModelsAutoMigrate(t *testing.T) {
 		}
 	}
 
-	// Verify TaskCenterTask columns.
 	if !db.Migrator().HasColumn(&TaskCenterTask{}, "id") {
 		t.Fatal("expected task_center_tasks.id column")
 	}
@@ -38,7 +27,6 @@ func TestTaskSchedulerModelsAutoMigrate(t *testing.T) {
 		t.Fatal("expected task_center_tasks.status column")
 	}
 
-	// Verify UserSchedule columns.
 	if !db.Migrator().HasColumn(&UserSchedule{}, "user_id") {
 		t.Fatal("expected user_schedules.user_id column")
 	}
@@ -46,7 +34,6 @@ func TestTaskSchedulerModelsAutoMigrate(t *testing.T) {
 		t.Fatal("expected user_schedules.cron_expr column")
 	}
 
-	// Verify AutomationGroup columns.
 	if !db.Migrator().HasColumn(&AutomationGroup{}, "id") {
 		t.Fatal("expected automation_groups.id column")
 	}
@@ -55,18 +42,9 @@ func TestTaskSchedulerModelsAutoMigrate(t *testing.T) {
 	}
 }
 
-// TestPromptModelsAutoMigrate verifies that prompt-related tables are created correctly.
 func TestPromptModelsAutoMigrate(t *testing.T) {
-	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "prompt.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
+	db := MigrateTestDB(t, &Prompt{}, &PromptCategory{}, &PromptUserState{})
 
-	if err := db.AutoMigrate(&Prompt{}, &PromptCategory{}, &PromptUserState{}); err != nil {
-		t.Fatalf("auto migrate prompt models: %v", err)
-	}
-
-	// Verify tables exist.
 	for _, model := range []any{
 		&Prompt{},
 		&PromptCategory{},
@@ -77,7 +55,6 @@ func TestPromptModelsAutoMigrate(t *testing.T) {
 		}
 	}
 
-	// Verify Prompt columns.
 	if !db.Migrator().HasColumn(&Prompt{}, "id") {
 		t.Fatal("expected prompts.id column")
 	}
@@ -91,24 +68,14 @@ func TestPromptModelsAutoMigrate(t *testing.T) {
 		t.Fatal("expected prompts.category column")
 	}
 
-	// Verify PromptCategory columns.
 	if !db.Migrator().HasColumn(&PromptCategory{}, "name") {
 		t.Fatal("expected prompt_categories.name column")
 	}
 }
 
-// TestDatasetModelsAutoMigrate verifies that dataset-related tables are created correctly.
 func TestDatasetModelsAutoMigrate(t *testing.T) {
-	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "dataset.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
+	db := MigrateTestDB(t, &Dataset{}, &DefaultDataset{})
 
-	if err := db.AutoMigrate(&Dataset{}, &DefaultDataset{}); err != nil {
-		t.Fatalf("auto migrate dataset models: %v", err)
-	}
-
-	// Verify tables exist.
 	for _, model := range []any{
 		&Dataset{},
 		&DefaultDataset{},
@@ -118,7 +85,6 @@ func TestDatasetModelsAutoMigrate(t *testing.T) {
 		}
 	}
 
-	// Verify Dataset columns.
 	if !db.Migrator().HasColumn(&Dataset{}, "id") {
 		t.Fatal("expected datasets.id column")
 	}

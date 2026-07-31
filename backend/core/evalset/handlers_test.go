@@ -3,7 +3,6 @@ package evalset
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -23,11 +22,7 @@ func newEvalSetTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 
 	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", "http://%")
-	dsn := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"), time.Now().UnixNano())
-	db, err := orm.Connect(orm.DriverSQLite, dsn)
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
+	db := orm.OpenTestDB(t)
 	if err := db.AutoMigrate(orm.AllModelsForDDL()...); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}

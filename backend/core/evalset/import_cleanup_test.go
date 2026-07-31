@@ -2,7 +2,6 @@ package evalset
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,14 +14,7 @@ import (
 // newImportCleanupTestDB creates a SQLite test database with AsyncJob table.
 func newImportCleanupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "import_cleanup.db"))
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.AsyncJob{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db.DB
+	return orm.MigrateTestDB(t, &orm.AsyncJob{}).DB
 }
 
 // seedImportJob inserts a test async job with the given status and finished time.

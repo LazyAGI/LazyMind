@@ -2,7 +2,6 @@ package resourcefs
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,20 +12,13 @@ import (
 // newVersionStoreTestDB creates a SQLite DB and automigrates schemas needed by versionStore.
 func newVersionStoreTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "versionfs.db"))
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(
+	return orm.MigrateTestDB(t,
 		&orm.PersonalResource{},
 		&orm.PersonalResourceBlob{},
 		&orm.PersonalResourceRevision{},
 		&orm.PersonalResourceDraft{},
 		&orm.PersonalResourceReviewSession{},
-	); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	)
 }
 
 // TestEntryFromDraft converts ORM draft to versionfs Entry.

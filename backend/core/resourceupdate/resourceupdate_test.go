@@ -2413,11 +2413,7 @@ func TestAcceptUserPreferenceReviewResultParsesFrontmatter(t *testing.T) {
 
 func newResourceUpdateTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "resource-update.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(
+	db := orm.MigrateTestDB(t,
 		&orm.Conversation{},
 		&orm.ChatHistory{},
 		&orm.PluginSession{},
@@ -2440,9 +2436,7 @@ func newResourceUpdateTestDB(t *testing.T) *gorm.DB {
 		&orm.SkillDraftReviewActionBatch{},
 		&orm.SkillDraftReviewActionItem{},
 		&orm.SkillSearchIndex{},
-	); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	)
 	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_skill_maintenance_admission
 		ON resource_update_tasks(user_id)
 		WHERE resource_type = 'skill'
@@ -2609,7 +2603,7 @@ func createSkillReviewResultsTable(t *testing.T, db *gorm.DB) {
 	skill_content text NOT NULL,
 	summary text,
 	review_status varchar(32) NOT NULL,
-	time datetime NOT NULL
+	time timestamp NOT NULL
 )`).Error; err != nil {
 		t.Fatalf("create skill_review_results: %v", err)
 	}
@@ -2644,7 +2638,7 @@ CREATE TABLE memory_review (
 	operations json,
 	state varchar(32) NOT NULL DEFAULT '',
 	review_status varchar(32) NOT NULL,
-	time datetime NOT NULL
+	time timestamp NOT NULL
 )`).Error; err != nil {
 		t.Fatalf("create memory_review: %v", err)
 	}

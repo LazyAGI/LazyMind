@@ -63,13 +63,7 @@ func (r *testSSERecorder) String() string {
 
 func newAgentTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-
-	dsn := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"), time.Now().UnixNano())
-	db, err := orm.Connect(orm.DriverSQLite, dsn)
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(
+	return orm.MigrateTestDB(t,
 		&orm.AgentThread{},
 		&orm.AgentUserActiveThread{},
 		&orm.AgentThreadRecord{},
@@ -78,10 +72,7 @@ func newAgentTestDB(t *testing.T) *orm.DB {
 		&orm.UserSelectedModel{},
 		&orm.UserModelProviderGroupModel{},
 		&orm.UserModelProviderGroup{},
-	); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	)
 }
 
 func seedAgentRuntimeModelConfig(t *testing.T, db *orm.DB, userID, role string) {

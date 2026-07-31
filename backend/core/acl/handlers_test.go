@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -168,16 +167,10 @@ func TestReplyErr_Forbidden(t *testing.T) {
 // setupACLHandlerTest initializes a SQLite-backed ACL store for handler tests.
 func setupACLHandlerTest(t *testing.T) {
 	t.Helper()
-	ormDB, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "acl-handler-test.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := ormDB.AutoMigrate(
+	ormDB := orm.MigrateTestDB(t,
 		&orm.ACLModel{}, &orm.UserGroupModel{}, &orm.KBModel{},
 		&orm.VisibilityModel{}, &orm.ACLGroupModel{},
-	); err != nil {
-		t.Fatalf("auto migrate acl tables: %v", err)
-	}
+	)
 	previousStore := defaultStore
 	t.Cleanup(func() { defaultStore = previousStore })
 	InitStore(ormDB)

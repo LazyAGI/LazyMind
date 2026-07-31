@@ -10,10 +10,7 @@ import (
 )
 
 func TestSkillReviewStatsActiveScope(t *testing.T) {
-	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "skill-review-stats.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
+	db := OpenTestDB(t)
 	if err := db.Exec(`CREATE TABLE skill_review_stats (id TEXT PRIMARY KEY, requestid TEXT NOT NULL, userid TEXT NOT NULL, status TEXT NOT NULL)`).Error; err != nil {
 		t.Fatalf("create skill_review_stats: %v", err)
 	}
@@ -58,13 +55,7 @@ func TestSkillReviewStatsRegisteredForLocalDDL(t *testing.T) {
 		t.Fatal("expected skill_review_stats in TableNamesForDDL")
 	}
 
-	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "skill-review-schema.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(AllModelsForDDL()...); err != nil {
-		t.Fatalf("auto migrate production model list: %v", err)
-	}
+	db := MigrateAllModelsForTest(t)
 	if !db.Migrator().HasTable(&SkillReviewStats{}) {
 		t.Fatal("expected skill_review_stats table")
 	}

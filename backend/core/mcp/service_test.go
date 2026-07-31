@@ -16,13 +16,7 @@ import (
 
 func newTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/mcp.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.MCPServer{}, &orm.MCPServerTool{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.MCPServer{}, &orm.MCPServerTool{})
 	return db
 }
 
