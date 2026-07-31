@@ -44,7 +44,11 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
     async def drive():
         response = await chat_service.handle_chat(ChatRequest(
             message={'query': 'hello', 'history': []},
-            conversation={'session_id': 'sid-1'},
+            conversation={
+                'session_id': 'sid-1',
+                'conversation_id': 'conversation-1',
+                'user_id': 'user-1',
+            },
             retrieval={'filters': {}},
             runtime={'llm_config': {}},
             personalization={'use_memory': True},
@@ -78,6 +82,11 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
     assert agent_calls[0]['tools']
     assert agent_calls[0]['kwargs']['skills'] is False
     assert agent_calls[0]['kwargs']['stream'] is True
+    tool_names = {getattr(tool, '__name__', '') for tool in agent_calls[0]['tools']}
+    assert {'read_file', 'write_file', 'list_dir'} <= tool_names
+    workspace = chat_service.chat_agent_workspace('user-1', 'conversation-1')
+    assert agent_calls[0]['kwargs']['workspace'] == workspace
+    assert f'Use `{workspace}` as the single working directory' in agent_calls[0]['kwargs']['prompt']
     assert '## Attached Files' not in agent_calls[0]['kwargs']['prompt']
     assert '### User Instruction\n\nhello\n\nATTENTION — `ask_user`' in agent_queries[0]
     assert 'answer:### Runtime Context' in body
