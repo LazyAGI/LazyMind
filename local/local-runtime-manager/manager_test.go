@@ -21,6 +21,20 @@ func defaultProfileValue() string {
 	return ""
 }
 
+func installFakeUVOnPath(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	name := "uv"
+	if runtime.GOOS == "windows" {
+		name = "uv.exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("fake uv"), 0o755); err != nil {
+		t.Fatalf("write fake uv: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("UV", "uv")
+}
+
 func TestMain(m *testing.M) {
 	home, err := os.MkdirTemp("", "lazymind-runtime-manager-home-*")
 	if err != nil {
@@ -74,6 +88,24 @@ func TestRuntimeConfigUsesPlatformUserPathsByDefault(t *testing.T) {
 	}
 	if !strings.HasPrefix(paths.BuildRoot, repo+string(os.PathSeparator)) {
 		t.Fatalf("default build root must be under repo: %q", paths.BuildRoot)
+	}
+}
+
+func TestWaitForAuthServiceHealthyToleratesStalePIDDuringRestart(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "auth-service.pid")
+	if err := os.WriteFile(pidFile, []byte("2147483647\n"), 0o600); err != nil {
+		t.Fatalf("write stale auth-service pid: %v", err)
+	}
+
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+	probeCount := 0
+	manager.probeAuth = func(_ int, _ time.Duration) bool {
+		probeCount++
+		return probeCount >= 2
+	}
+
+	if err := manager.waitForAuthServiceHealthy(context.Background(), 18000, 2*time.Second, pidFile); err != nil {
+		t.Fatalf("wait for restarted auth-service: %v", err)
 	}
 }
 
@@ -827,10 +859,34 @@ func TestRuntimeConfigMovesRouterPortPoolWhenDefaultRangeUnavailable(t *testing.
 	}
 }
 
+func TestRuntimeConfigMovesFrontendPortWhenPreferredPortIsServing(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	listeners := occupyPortsOn(t, "127.0.0.1", defaultFrontendPort)
+	defer func() {
+		for _, ln := range listeners {
+			_ = ln.Close()
+		}
+	}()
+	t.Setenv(frontendPortEnvVar, strconv.Itoa(defaultFrontendPort))
+	t.Setenv(localPortsPinnedEnvVar, "false")
+
+	cfg, _, err := NewRuntimeConfig("", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if cfg.FrontendPort == defaultFrontendPort {
+		t.Fatalf("frontend port did not move from occupied preferred port %d", defaultFrontendPort)
+	}
+}
+
 func TestKillStaleRuntimeProcessesStopsScannerOrphan(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
-	cfg, paths, err := NewRuntimeConfig("", repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		RepoRoot:    repo,
+		RuntimeRoot: filepath.Join(t.TempDir(), "runtime"),
+	})
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
@@ -841,11 +897,16 @@ func TestKillStaleRuntimeProcessesStopsScannerOrphan(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Skipf("sleep command unavailable: %v", err)
 	}
+	waitDone := make(chan struct{})
+	go func() {
+		_, _ = cmd.Process.Wait()
+		close(waitDone)
+	}()
 	defer func() {
 		if processAlive(cmd.Process.Pid) {
 			_ = cmd.Process.Kill()
 		}
-		_, _ = cmd.Process.Wait()
+		<-waitDone
 	}()
 	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
 	manager.processScanner = func(paths RuntimePaths) ([]LocalProcessRecord, error) {
@@ -859,7 +920,7 @@ func TestKillStaleRuntimeProcessesStopsScannerOrphan(t *testing.T) {
 	if err := manager.killStaleRuntimeProcesses(context.Background(), cfg, paths); err != nil {
 		t.Fatalf("kill stale: %v", err)
 	}
-	_, _ = cmd.Process.Wait()
+	<-waitDone
 	if processAlive(cmd.Process.Pid) {
 		t.Fatalf("expected orphan process %d to stop", cmd.Process.Pid)
 	}
@@ -919,6 +980,30 @@ func TestRuntimeManagerUpRejectsForeignOwnerBeforePythonRelocation(t *testing.T)
 	}
 	if !strings.Contains(output.String(), `"event":"startup.failed"`) || !strings.Contains(output.String(), "another application instance") {
 		t.Fatalf("startup output did not preserve ownership failure: %s", output.String())
+	}
+}
+
+func TestStartupCapabilityReadyIncludesFrontendPort(t *testing.T) {
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+
+	manager.startupCapabilityReady("home", 8090)
+
+	const marker = "[startup-event] "
+	line := strings.TrimSpace(output.String())
+	if !strings.HasPrefix(line, marker) {
+		t.Fatalf("startup capability output = %q, want %q prefix", line, marker)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, marker)), &payload); err != nil {
+		t.Fatalf("unmarshal startup capability event: %v", err)
+	}
+	if payload["event"] != "capability.ready" || payload["capability"] != "home" {
+		t.Fatalf("unexpected startup capability event: %#v", payload)
+	}
+	if payload["frontendPort"] != float64(8090) {
+		t.Fatalf("frontendPort = %#v, want 8090", payload["frontendPort"])
 	}
 }
 

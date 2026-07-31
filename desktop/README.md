@@ -35,25 +35,24 @@ desktop/dist/LazyMind-windows-x64-installer-<version>-yyyyMMdd-HHmmss-<commit>.e
 
 ## macOS signed DMG
 
-The distribution build requires a `Developer ID Application` identity in the
-login keychain and Apple notarization credentials:
+The local distribution build requires a `Developer ID Application` identity in
+the login keychain:
 
 ```bash
-export APPLE_ID="developer@example.com"
-export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
-export APPLE_TEAM_ID="ABCDE12345"
 make desktop-darwin-arm64-dmg
 ```
 
 `electron-builder` discovers the local Developer ID identity automatically.
-The build signs the app with Hardened Runtime, submits the app and final DMG to
-Apple's `notarytool` service, staples the tickets to both, and verifies both
-Gatekeeper assessments before returning.
+The local target signs the app and DMG but does not submit them to Apple.
 
-For CI, provide the same notarization variables plus `CSC_LINK` and
-`CSC_KEY_PASSWORD`. `.github/workflows/macos-installer.yml` maps those values
-from `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`,
+For CI, provide `CSC_LINK`, `CSC_KEY_PASSWORD`, and the Apple notarization
+credentials. `.github/workflows/macos-installer.yml` maps those values from
+`MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`,
 `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` repository secrets.
+Release builds submit a ZIP first, staple the accepted app ticket when
+available, then package and submit the DMG. A ZIP timeout falls through to DMG
+packaging; a DMG timeout uploads the pending DMG and submission record for the
+manual finalizer.
 
 A DMG drag-install cannot run a post-install script. To provide the same cache
 and runtime preparation as the Windows NSIS installer, the packaged macOS app

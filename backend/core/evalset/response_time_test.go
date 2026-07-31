@@ -32,3 +32,30 @@ func TestEvalSetItemResponseMarshalsTimesInBeijing(t *testing.T) {
 		t.Fatalf("unexpected updated_at: %v; raw=%s", got, string(raw))
 	}
 }
+
+// TestFormatResponseTime converts UTC to Asia/Shanghai timezone.
+func TestFormatResponseTime(t *testing.T) {
+	utcTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	got := formatResponseTime(utcTime)
+	if !strings.Contains(got, "+08:00") {
+		t.Fatalf("got %q, want +08:00 timezone", got)
+	}
+}
+
+// TestFormatOptionalResponseTime returns nil for nil, formatted string for non-nil.
+func TestFormatOptionalResponseTime(t *testing.T) {
+	// Nil
+	if got := formatOptionalResponseTime(nil); got != nil {
+		t.Fatalf("nil got %v, want nil", got)
+	}
+
+	// Non-nil
+	utcTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	got := formatOptionalResponseTime(&utcTime)
+	if got == nil {
+		t.Fatal("non-nil should return non-nil")
+	}
+	if !strings.Contains(*got, "+08:00") {
+		t.Fatalf("got %q, want +08:00 timezone", *got)
+	}
+}

@@ -4,7 +4,7 @@
 ARG DOCKER_MIRROR=docker.m.daocloud.io/library/
 ARG BASE_LAZYLLM_IMAGE=base_env
 ARG BASE_LAZYMIND_IMAGE=base_code
-ARG LAZYLLM_VERSION=1.2.0a2
+ARG LAZYLLM_VERSION=1.2.0a3
 ARG LAZYLLM_BUNDLE_SOURCE=1
 
 # Stage: base_env - pure environment, NO business code copied.
@@ -76,10 +76,13 @@ LABEL io.lazymind.lazymind_git_sha="${LAZYMIND_GIT_SHA}"
 LABEL io.lazymind.lazyllm_git_sha="${LAZYLLM_GIT_SHA}"
 
 ARG LAZYLLM_BUNDLE_SOURCE
-COPY algorithm/lazyllm /opt/lazyllm
 COPY algorithm/ /app/algorithm/
-RUN rm -rf /app/algorithm/lazyllm; \
-    if [ "${LAZYLLM_BUNDLE_SOURCE}" = "0" ]; then rm -rf /opt/lazyllm; fi
+RUN if [ "${LAZYLLM_BUNDLE_SOURCE}" = "1" ]; then \
+      test -d /app/algorithm/lazyllm/lazyllm; \
+      mv /app/algorithm/lazyllm /opt/lazyllm; \
+    else \
+      rm -rf /app/algorithm/lazyllm; \
+    fi
 
 
 # Stage: algorithm - env + code + runtime config. Used by most services.
@@ -210,10 +213,13 @@ RUN if [ -n "$MINERU_NUMPY_VERSION" ]; then \
         pip install --no-cache-dir "numpy==${MINERU_NUMPY_VERSION}"; \
     fi
 ARG LAZYLLM_BUNDLE_SOURCE
-COPY algorithm/lazyllm /opt/lazyllm
 COPY algorithm/ /app/algorithm/
-RUN rm -rf /app/algorithm/lazyllm; \
-    if [ "${LAZYLLM_BUNDLE_SOURCE}" = "0" ]; then rm -rf /opt/lazyllm; fi
+RUN if [ "${LAZYLLM_BUNDLE_SOURCE}" = "1" ]; then \
+      test -d /app/algorithm/lazyllm/lazyllm; \
+      mv /app/algorithm/lazyllm /opt/lazyllm; \
+    else \
+      rm -rf /app/algorithm/lazyllm; \
+    fi
 ENV PYTHONPATH=/opt/lazyllm:/app/algorithm
 WORKDIR /app/algorithm
 CMD ["python", "parsing/mineru.py"]

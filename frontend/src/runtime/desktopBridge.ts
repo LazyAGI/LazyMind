@@ -6,10 +6,22 @@ export type DesktopBridgeResult =
   | { ok: true }
   | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
 
+export interface DesktopRuntimeServiceStatus {
+  status?: string;
+}
+
+export interface DesktopRuntimeStatus {
+  overallStatus?: string;
+  services?: Record<string, DesktopRuntimeServiceStatus>;
+}
+
+export type DesktopRuntimeStatusResult =
+  | { ok: true; data: DesktopRuntimeStatus }
+  | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
+
 type DesktopBridgeCommand =
   | "openLogsDir"
   | "openDataDir"
-  | "runtimeStatus"
   | "restartRuntime";
 
 interface LazyMindDesktopBridge {
@@ -58,8 +70,23 @@ export function openDataDir(): Promise<DesktopBridgeResult> {
   return callDesktopBridge("openDataDir");
 }
 
-export function runtimeStatus(): Promise<DesktopBridgeResult> {
-  return callDesktopBridge("runtimeStatus");
+export function runtimeStatus(): Promise<DesktopRuntimeStatusResult> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.runtimeStatus) {
+    return Promise.resolve({ ok: false, reason: "unavailable" });
+  }
+
+  return Promise.resolve()
+    .then(() => bridge.runtimeStatus?.())
+    .then((data) => ({
+      ok: true as const,
+      data: (data || {}) as DesktopRuntimeStatus,
+    }))
+    .catch((error) => ({
+      ok: false as const,
+      reason: "failed" as const,
+      error,
+    }));
 }
 
 export function restartRuntime(): Promise<DesktopBridgeResult> {
