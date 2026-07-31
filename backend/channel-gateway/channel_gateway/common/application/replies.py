@@ -165,7 +165,12 @@ class ChannelReplyBuilder:
             presentations=presentations,
             suppress_text_when_presented=(
                 bool(presentations)
-                and intent_kind is ActionKind.CAPABILITY_LIST
+                and intent_kind
+                in {
+                    ActionKind.CAPABILITY_LIST,
+                    ActionKind.CONVERSATION_SETTINGS,
+                    ActionKind.CONVERSATION_SETTINGS_UPDATE,
+                }
             ),
         )
 

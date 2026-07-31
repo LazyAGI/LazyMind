@@ -24,6 +24,8 @@ from channel_gateway.common.domain.commands import (
     ChatParameters,
     CommandEnvelope,
     ConversationNewCommand,
+    ConversationSettingsCommand,
+    ConversationSettingsUpdateCommand,
     SelectionContinuation,
 )
 from channel_gateway.common.ports.repository import NavigationRepository
@@ -266,6 +268,28 @@ class ChannelCommandRouter:
         }
         if isinstance(command, CapabilityListCommand):
             kinds.update(parameters.capabilities)
+        if isinstance(command, ConversationSettingsCommand):
+            settings_kinds = {
+                'knowledge_base',
+                'skill',
+                'tool',
+                'personalization',
+                'workflow',
+            }
+            if parameters.section == 'overview':
+                kinds.update(settings_kinds)
+            elif parameters.section in settings_kinds:
+                kinds.add(parameters.section)
+        if isinstance(command, ConversationSettingsUpdateCommand):
+            setting = parameters.change.setting
+            if setting in {
+                'knowledge_base',
+                'skill',
+                'tool',
+                'personalization',
+                'workflow',
+            }:
+                kinds.add(setting)
         if isinstance(command, ConversationNewCommand) or (
             isinstance(command, ChatCommand)
             and not self._store.get_route(account_id, external_address_hash)

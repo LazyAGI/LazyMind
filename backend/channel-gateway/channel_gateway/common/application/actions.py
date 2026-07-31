@@ -16,6 +16,8 @@ from channel_gateway.common.domain.commands import (
     ConversationCurrentCommand,
     ConversationListCommand,
     ConversationNewCommand,
+    ConversationSettingsCommand,
+    ConversationSettingsUpdateCommand,
     ConversationSwitchCommand,
     HistoryMoreCommand,
     SelectionChooseCommand,
@@ -152,6 +154,35 @@ class ChannelActionExecutor:
                     catalog=catalog,
                     **context,
                 )
+            elif isinstance(command, ConversationSettingsCommand):
+                text, settings_presentation = (
+                    self._capabilities.conversation_settings(
+                        section=command.parameters.section,
+                        catalog=catalog,
+                        features=features,
+                        account_id=account_id,
+                        external_address_hash=external_address_hash,
+                        owner_user_id=owner_user_id,
+                        request_id=request_id,
+                    )
+                )
+                presentations = (settings_presentation,)
+            elif isinstance(
+                command,
+                ConversationSettingsUpdateCommand,
+            ):
+                text, settings_presentation = (
+                    self._capabilities.update_conversation_setting(
+                        change=command.parameters.change,
+                        catalog=catalog,
+                        features=features,
+                        account_id=account_id,
+                        external_address_hash=external_address_hash,
+                        owner_user_id=owner_user_id,
+                        request_id=request_id,
+                    )
+                )
+                presentations = (settings_presentation,)
             elif isinstance(command, WorkflowInvokeCommand):
                 if not features.enable_plugin:
                     raise ActionMessage(
@@ -162,6 +193,16 @@ class ChannelActionExecutor:
                     parameters.workflow_ref,
                     catalog,
                 )
+                conversation_id = self._store.get_route(
+                    account_id,
+                    external_address_hash,
+                )
+                if conversation_id:
+                    self._client.dismiss_terminal_plugin_session(
+                        owner_user_id=owner_user_id,
+                        conversation_id=conversation_id,
+                        request_id=request_id,
+                    )
                 text = self._conversations.chat(
                     message=parameters.message,
                     changes=[],

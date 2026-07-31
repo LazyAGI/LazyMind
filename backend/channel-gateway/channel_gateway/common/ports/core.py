@@ -74,6 +74,15 @@ class ConversationClient(Protocol):
     ) -> dict[str, Any]:
         ...
 
+    def dismiss_terminal_plugin_session(
+        self,
+        *,
+        owner_user_id: str,
+        conversation_id: str,
+        request_id: str,
+    ) -> bool:
+        ...
+
 
 class TaskClient(Protocol):
     def list_conversation_tasks(
@@ -97,6 +106,16 @@ class CapabilityClient(Protocol):
     ) -> dict[str, Any]:
         ...
 
+    def update_conversation_agent_settings(
+        self,
+        *,
+        owner_user_id: str,
+        conversation_id: str,
+        request_id: str,
+        settings: dict[str, Any],
+    ) -> None:
+        ...
+
     def set_default_dataset(
         self,
         *,
@@ -114,6 +133,26 @@ class CapabilityClient(Protocol):
         owner_user_id: str,
         request_id: str,
         tool_name: str,
+        enabled: bool,
+    ) -> None:
+        ...
+
+    def set_skill_enabled(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        skill_id: str,
+        enabled: bool,
+    ) -> None:
+        ...
+
+    def set_workflow_enabled(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        workflow_ref: str,
         enabled: bool,
     ) -> None:
         ...

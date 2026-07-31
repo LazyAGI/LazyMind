@@ -8,6 +8,7 @@ import threading
 import time
 import uuid
 from typing import Any
+from urllib.parse import urlsplit
 
 from channel_gateway.common.domain.channel import ClaimedOutbound
 from channel_gateway.common.ports.core import (
@@ -94,7 +95,14 @@ class FeishuTaskCardMonitor:
                 for outbound in outbounds:
                     if self._stop.is_set():
                         return
-                    self._refresh_outbound(outbound)
+                    try:
+                        self._refresh_outbound(outbound)
+                    except Exception:
+                        _logger.exception(
+                            'feishu_task_card_refresh_failed '
+                            'outbox_id=%s',
+                            outbound.outbox_id,
+                        )
             except Exception:
                 _logger.exception('feishu_task_card_monitor_failed')
             self._stop.wait(_POLL_SECONDS)
@@ -238,28 +246,36 @@ class FeishuTaskCardMonitor:
         sender = self._channels.create_sender(account['credentials'])
         try:
             for artifact_key, source, caption in pending:
-                content = self._assets.download_static_image(
-                    source=source,
-                    owner_user_id=owner_user_id,
-                )
-                if len(content) > _MAX_FEISHU_IMAGE_BYTES:
-                    raise RuntimeError('飞书图片不能超过 10 MB')
-                sender.send_image(
-                    chat_id=chat_id,
-                    content=content,
-                    caption=caption,
-                    idempotency_key=str(
-                        uuid.uuid5(
-                            uuid.NAMESPACE_URL,
-                            (
-                                f'lazymind:{outbound.outbox_id}:'
-                                f'task-artifact:{part_index}:'
-                                f'{artifact_key}'
-                            ),
-                        )
-                    ),
-                )
-                delivered_keys.add(artifact_key)
+                try:
+                    content = self._assets.download_static_image(
+                        source=source,
+                        owner_user_id=owner_user_id,
+                    )
+                    if len(content) > _MAX_FEISHU_IMAGE_BYTES:
+                        raise RuntimeError('飞书图片不能超过 10 MB')
+                    sender.send_image(
+                        chat_id=chat_id,
+                        content=content,
+                        caption=caption,
+                        idempotency_key=str(
+                            uuid.uuid5(
+                                uuid.NAMESPACE_URL,
+                                (
+                                    f'lazymind:{outbound.outbox_id}:'
+                                    f'task-artifact:{part_index}:'
+                                    f'{artifact_key}'
+                                ),
+                            )
+                        ),
+                    )
+                    delivered_keys.add(artifact_key)
+                except Exception:
+                    _logger.exception(
+                        'feishu_task_image_delivery_failed '
+                        'outbox_id=%s artifact_key=%s',
+                        outbound.outbox_id,
+                        artifact_key,
+                    )
         finally:
             sender.close()
         return delivered_keys
@@ -408,7 +424,7 @@ def _task_images(
         if not isinstance(value, dict):
             continue
         source = str(value.get('url') or '').strip()
-        if not source:
+        if not _is_lazymind_static_file(source):
             continue
         slot = str(artifact.get('slot') or 'image')
         sequence = str(artifact.get('seq') or 0)
@@ -420,6 +436,10 @@ def _task_images(
             )
         )
     return images
+
+
+def _is_lazymind_static_file(source: str) -> bool:
+    return urlsplit(source).path.startswith('/static-files/')
 
 
 def _workflow_tasks(
@@ -518,6 +538,17 @@ def _workflow_state(
     if status in _NON_RETRYABLE_TERMINAL_STATUSES:
         return False, True, now
     if str(latest.get('agent_type') or '') != 'plugin_step':
+        return False, True, now
+    if (
+        status in {'completed', 'succeeded', 'success'}
+        and str(latest.get('title') or '')
+        .split(':', 1)[-1]
+        .strip()
+        .lower() in {
+            'generate_image',
+            'enhance_image',
+        }
+    ):
         return False, True, now
     previous_ids = previous.get('task_ids')
     current_ids = [

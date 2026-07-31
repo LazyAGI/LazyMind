@@ -291,6 +291,7 @@ class ChannelIntentClassifier:
     @staticmethod
     def _allowed_commands(state: dict[str, Any]) -> set[ActionKind]:
         allowed = set(ActionKind)
+        allowed.discard(ActionKind.CONVERSATION_SETTINGS_UPDATE)
         latest_selection = state.get('latest_selection')
         if (
             not isinstance(latest_selection, dict)

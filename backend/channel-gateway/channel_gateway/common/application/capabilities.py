@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 from channel_gateway.common.domain.chat import (
     ChannelFeatureProfile,
@@ -10,10 +10,14 @@ from channel_gateway.common.domain.chat import (
 )
 from channel_gateway.common.domain.commands import (
     CommandEnvelope,
+    ConversationSettingChange,
     ResourceChange,
     SelectionContinuation,
 )
-from channel_gateway.common.domain.outbound import CapabilityPresentation
+from channel_gateway.common.domain.outbound import (
+    CapabilityPresentation,
+    ConversationSettingsPresentation,
+)
 from channel_gateway.common.ports.core import CapabilityClient
 from channel_gateway.common.ports.repository import NavigationRepository
 
@@ -26,9 +30,20 @@ _CAPABILITY_LABELS = {
     'skill': 'Skill',
     'tool': '工具',
     'personalization': '个人习惯',
+    'workflow': '工作流',
 }
 
 ResolvedChanges = list[tuple[ResourceChange, list[dict[str, Any]]]]
+SettingsSection = Literal[
+    'overview',
+    'knowledge_base',
+    'plugin',
+    'subagent',
+    'skill',
+    'tool',
+    'personalization',
+    'workflow',
+]
 
 
 class ActionMessage(RuntimeError):
@@ -46,6 +61,360 @@ class CapabilityActions:
     ):
         self._store = store
         self._client = client
+
+    def conversation_settings(
+        self,
+        *,
+        section: SettingsSection,
+        catalog: dict[str, Any],
+        features: ChannelFeatureProfile,
+        account_id: str,
+        external_address_hash: str,
+        owner_user_id: str,
+        request_id: str,
+        updated: bool = False,
+    ) -> tuple[str, ConversationSettingsPresentation]:
+        conversation_id = self._store.get_route(
+            account_id,
+            external_address_hash,
+        )
+        if not conversation_id:
+            raise ActionMessage(
+                '当前还没有可设置的会话，请先新建或切换到一个会话。'
+            )
+        detail = self._client.get_conversation_detail(
+            owner_user_id=owner_user_id,
+            conversation_id=conversation_id,
+            request_id=f'{request_id}_conversation_settings',
+        )
+        selected_dataset_ids = set(
+            self._dataset_ids_from_detail(detail)
+        )
+        raw_datasets = catalog.get('knowledge_base')
+        datasets = [
+            {
+                'id': str(item.get('id') or ''),
+                'name': str(item.get('name') or '未命名知识库'),
+                'enabled': str(item.get('id') or '')
+                in selected_dataset_ids,
+            }
+            for item in (
+                raw_datasets
+                if isinstance(raw_datasets, list)
+                else []
+            )
+            if isinstance(item, dict) and item.get('id')
+        ]
+        skills = self._settings_items(
+            catalog,
+            'skill',
+            id_key='id',
+        )
+        tools = self._settings_items(
+            catalog,
+            'tool',
+            id_key='id',
+        )
+        workflows = self._settings_items(
+            catalog,
+            'workflow',
+            id_key='id',
+        )
+        personalization = self._settings_items(
+            catalog,
+            'personalization',
+            id_key='id',
+        )
+        plugin_enabled = bool(
+            detail.get('enable_plugin')
+            if detail.get('enable_plugin') is not None
+            else True
+        )
+        raw_plugin_mode = str(
+            detail.get('plugin_mode') or 'dynamic'
+        )
+        plugin_mode: Literal['auto', 'dynamic'] = (
+            'auto' if raw_plugin_mode == 'auto' else 'dynamic'
+        )
+        subagent_enabled = bool(
+            detail.get('enable_subagent')
+            if detail.get('enable_subagent') is not None
+            else True
+        )
+        title = str(detail.get('display_name') or '未命名会话')
+        text = (
+            f'当前会话“{title}”的设置已保存。'
+            if updated
+            else f'当前会话“{title}”的设置：'
+        )
+        return (
+            text,
+            ConversationSettingsPresentation(
+                kind='conversation_settings',
+                conversation_id=conversation_id,
+                section=section,
+                knowledge_bases=tuple(datasets),
+                plugin_enabled=plugin_enabled,
+                plugin_mode=plugin_mode,
+                subagent_enabled=subagent_enabled,
+                skills=tuple(skills),
+                tools=tuple(tools),
+                personalization_enabled=bool(
+                    personalization[0].get('enabled', True)
+                    if personalization
+                    else True
+                ),
+                workflows=tuple(workflows),
+                channel_features=tuple(
+                    features.enabled_feature_labels
+                ),
+                updated=updated,
+            ),
+        )
+
+    def update_conversation_setting(
+        self,
+        *,
+        change: ConversationSettingChange,
+        catalog: dict[str, Any],
+        features: ChannelFeatureProfile,
+        account_id: str,
+        external_address_hash: str,
+        owner_user_id: str,
+        request_id: str,
+    ) -> tuple[str, ConversationSettingsPresentation]:
+        conversation_id = self._store.get_route(
+            account_id,
+            external_address_hash,
+        )
+        if not conversation_id:
+            raise ActionMessage(
+                '当前还没有可设置的会话，请先新建或切换到一个会话。'
+            )
+        if change.setting == 'knowledge_base':
+            datasets = [
+                item
+                for item in (
+                    catalog.get('knowledge_base')
+                    if isinstance(
+                        catalog.get('knowledge_base'),
+                        list,
+                    )
+                    else []
+                )
+                if isinstance(item, dict)
+                and str(item.get('id') or '') == change.dataset_id
+            ]
+            if not datasets:
+                raise ActionMessage(
+                    '这个知识库已不可用，请重新打开会话设置。'
+                )
+            dataset_ids = self.conversation_dataset_ids(
+                owner_user_id=owner_user_id,
+                conversation_id=conversation_id,
+                request_id=f'{request_id}_existing_kb',
+            )
+            if change.enabled:
+                dataset_ids = list(
+                    dict.fromkeys([*dataset_ids, change.dataset_id])
+                )
+            else:
+                dataset_ids = [
+                    value
+                    for value in dataset_ids
+                    if value != change.dataset_id
+                ]
+            self._client.update_conversation_search_config(
+                owner_user_id=owner_user_id,
+                conversation_id=conversation_id,
+                request_id=f'{request_id}_save_kb',
+                dataset_ids=dataset_ids,
+            )
+            section: SettingsSection = 'knowledge_base'
+        elif change.setting in ('plugin', 'plugin_mode', 'subagent'):
+            if change.setting == 'plugin':
+                settings = {'enable_plugin': change.enabled}
+                section = 'plugin'
+            elif change.setting == 'plugin_mode':
+                settings = {
+                    'enable_plugin': True,
+                    'plugin_mode': change.mode,
+                }
+                section = 'plugin'
+            else:
+                settings = {'enable_subagent': change.enabled}
+                section = 'subagent'
+            self._client.update_conversation_agent_settings(
+                owner_user_id=owner_user_id,
+                conversation_id=conversation_id,
+                request_id=f'{request_id}_save_agent',
+                settings=settings,
+            )
+        elif change.setting == 'skill':
+            self._require_setting_item(
+                catalog,
+                'skill',
+                change.skill_id,
+            )
+            self._client.set_skill_enabled(
+                owner_user_id=owner_user_id,
+                skill_id=change.skill_id,
+                enabled=change.enabled,
+                request_id=f'{request_id}_save_skill',
+            )
+            self._mark_setting_enabled(
+                catalog,
+                'skill',
+                change.skill_id,
+                change.enabled,
+            )
+            section = 'skill'
+        elif change.setting == 'tool':
+            tool = self._require_setting_item(
+                catalog,
+                'tool',
+                change.tool_name,
+            )
+            if (
+                not change.enabled
+                and not bool(tool.get('can_disable', True))
+            ):
+                raise ActionMessage('这个系统必需工具不能关闭。')
+            self._client.set_tool_enabled(
+                owner_user_id=owner_user_id,
+                tool_name=change.tool_name,
+                enabled=change.enabled,
+                request_id=f'{request_id}_save_tool',
+            )
+            self._mark_setting_enabled(
+                catalog,
+                'tool',
+                change.tool_name,
+                change.enabled,
+            )
+            section = 'tool'
+        elif change.setting == 'personalization':
+            self._client.set_personalization_enabled(
+                owner_user_id=owner_user_id,
+                enabled=change.enabled,
+                request_id=f'{request_id}_save_personalization',
+            )
+            self._mark_setting_enabled(
+                catalog,
+                'personalization',
+                'personalization',
+                change.enabled,
+            )
+            section = 'personalization'
+        else:
+            self._require_setting_item(
+                catalog,
+                'workflow',
+                change.workflow_ref,
+            )
+            self._client.set_workflow_enabled(
+                owner_user_id=owner_user_id,
+                workflow_ref=change.workflow_ref,
+                enabled=change.enabled,
+                request_id=f'{request_id}_save_workflow',
+            )
+            self._mark_setting_enabled(
+                catalog,
+                'workflow',
+                change.workflow_ref,
+                change.enabled,
+            )
+            section = 'workflow'
+        self._store.clear_selection_snapshot(
+            account_id,
+            external_address_hash,
+        )
+        return self.conversation_settings(
+            section=section,
+            catalog=catalog,
+            features=features,
+            account_id=account_id,
+            external_address_hash=external_address_hash,
+            owner_user_id=owner_user_id,
+            request_id=f'{request_id}_verify',
+            updated=True,
+        )
+
+    @staticmethod
+    def _settings_items(
+        catalog: dict[str, Any],
+        kind: str,
+        *,
+        id_key: str,
+    ) -> list[dict[str, Any]]:
+        values = catalog.get(kind)
+        return [
+            {
+                **item,
+                'id': str(item.get(id_key) or ''),
+                'name': str(
+                    item.get('name')
+                    or item.get('display_name')
+                    or item.get(id_key)
+                    or '未命名能力'
+                ),
+                'enabled': bool(item.get('enabled', True)),
+            }
+            for item in (
+                values if isinstance(values, list) else []
+            )
+            if isinstance(item, dict) and item.get(id_key)
+        ]
+
+    @staticmethod
+    def _require_setting_item(
+        catalog: dict[str, Any],
+        kind: str,
+        item_id: str,
+    ) -> dict[str, Any]:
+        values = catalog.get(kind)
+        for item in (
+            values if isinstance(values, list) else []
+        ):
+            if (
+                isinstance(item, dict)
+                and str(item.get('id') or '') == item_id
+            ):
+                return item
+        raise ActionMessage('这个能力已不可用，请重新打开设置中心。')
+
+    @staticmethod
+    def _mark_setting_enabled(
+        catalog: dict[str, Any],
+        kind: str,
+        item_id: str,
+        enabled: bool,
+    ) -> None:
+        values = catalog.get(kind)
+        for item in (
+            values if isinstance(values, list) else []
+        ):
+            if (
+                isinstance(item, dict)
+                and str(item.get('id') or '') == item_id
+            ):
+                item['enabled'] = enabled
+
+    @staticmethod
+    def _dataset_ids_from_detail(
+        detail: dict[str, Any],
+    ) -> list[str]:
+        search = detail.get('search_config')
+        if not isinstance(search, dict):
+            return []
+        values = search.get('dataset_list')
+        if not isinstance(values, list):
+            return []
+        return [
+            str(item.get('id') or '')
+            for item in values
+            if isinstance(item, dict) and item.get('id')
+        ]
 
     def list_capabilities(
         self,

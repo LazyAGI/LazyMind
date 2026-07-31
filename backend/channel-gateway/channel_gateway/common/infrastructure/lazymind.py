@@ -689,6 +689,47 @@ class LazyMindClient:
             request_id=request_id,
         )
 
+    def dismiss_terminal_plugin_session(
+        self,
+        *,
+        owner_user_id: str,
+        conversation_id: str,
+        request_id: str,
+    ) -> bool:
+        payload = self._request_json(
+            'GET',
+            (
+                f'{self._base_url}/conversations/'
+                f'{quote(conversation_id, safe="")}/plugin-sessions:latest'
+            ),
+            owner_user_id=owner_user_id,
+            request_id=f'{request_id}_latest_plugin',
+            error_label='latest plugin session',
+        )
+        data = payload.get('data')
+        session = (
+            data.get('session')
+            if isinstance(data, dict)
+            else None
+        )
+        if not isinstance(session, dict):
+            return False
+        status = str(session.get('status') or '').lower()
+        session_id = str(session.get('session_id') or '')
+        if status not in {'completed', 'failed'} or not session_id:
+            return False
+        self._request_json(
+            'POST',
+            (
+                f'{self._base_url}/plugin-sessions/'
+                f'{quote(session_id, safe="")}:dismiss'
+            ),
+            owner_user_id=owner_user_id,
+            request_id=f'{request_id}_dismiss_plugin',
+            error_label='plugin session dismissal',
+        )
+        return True
+
     def _turn_artifacts(
         self,
         *,
@@ -941,6 +982,24 @@ class LazyMindClient:
             raise LazyMindError('LazyMind conversation configuration response is invalid')
         return data
 
+    def update_conversation_agent_settings(
+        self,
+        *,
+        owner_user_id: str,
+        conversation_id: str,
+        request_id: str,
+        settings: dict[str, Any],
+    ) -> None:
+        self._request_json(
+            'PATCH',
+            f'{self._base_url}/conversations/'
+            f'{quote(conversation_id, safe="")}/plugin-settings',
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            json_body=settings,
+            error_label='conversation agent configuration',
+        )
+
     def get_capability_catalog(
         self,
         *,
@@ -1059,7 +1118,6 @@ class LazyMindClient:
                 if isinstance(item, dict)
                 and item.get('plugin_ref')
                 and str(item.get('name') or '').strip()
-                and bool(item.get('enabled', False))
             ],
         }
 
@@ -1097,6 +1155,42 @@ class LazyMindClient:
             owner_user_id=owner_user_id,
             request_id=request_id,
             error_label='tool setting',
+        )
+
+    def set_skill_enabled(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        skill_id: str,
+        enabled: bool,
+    ) -> None:
+        self._request_json(
+            'PATCH',
+            f'{self._base_url}/skills/'
+            f'{quote(skill_id, safe="")}',
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            json_body={'is_enabled': enabled},
+            error_label='Skill setting',
+        )
+
+    def set_workflow_enabled(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        workflow_ref: str,
+        enabled: bool,
+    ) -> None:
+        self._request_json(
+            'PATCH',
+            f'{self._base_url}/chat/settings/plugins/'
+            f'{quote(workflow_ref, safe="")}',
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            json_body={'enabled': enabled},
+            error_label='workflow setting',
         )
 
     def set_personalization_enabled(

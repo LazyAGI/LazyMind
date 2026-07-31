@@ -205,6 +205,14 @@ class ConversationActions:
                 raise ActionMessage(
                     '当前会话已经不存在，已进入新会话状态；刚才的任务没有发送，请再发一次。'
                 ) from exc
+            if (
+                exc.status_code == 409
+                and '2001310' in exc.message
+            ):
+                raise ActionMessage(
+                    '当前插件仍在运行或等待操作，暂时不能启动另一个插件。'
+                    '请等待当前任务结束后直接发送新任务，无需新建会话。'
+                ) from exc
             raise
         self._store.activate_conversation(
             account_id,

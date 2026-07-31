@@ -52,6 +52,55 @@ class CapabilityPresentation:
 
 
 @dataclass(frozen=True, slots=True)
+class ConversationSettingsPresentation:
+    kind: Literal['conversation_settings']
+    conversation_id: str
+    section: Literal[
+        'overview',
+        'knowledge_base',
+        'plugin',
+        'subagent',
+        'skill',
+        'tool',
+        'personalization',
+        'workflow',
+    ]
+    knowledge_bases: tuple[dict[str, Any], ...]
+    plugin_enabled: bool
+    plugin_mode: Literal['auto', 'dynamic']
+    subagent_enabled: bool
+    skills: tuple[dict[str, Any], ...] = ()
+    tools: tuple[dict[str, Any], ...] = ()
+    personalization_enabled: bool = True
+    workflows: tuple[dict[str, Any], ...] = ()
+    channel_features: tuple[str, ...] = ()
+    updated: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'kind': self.kind,
+            'conversation_id': self.conversation_id,
+            'section': self.section,
+            'knowledge_bases': [
+                dict(item) for item in self.knowledge_bases
+            ],
+            'plugin_enabled': self.plugin_enabled,
+            'plugin_mode': self.plugin_mode,
+            'subagent_enabled': self.subagent_enabled,
+            'skills': [dict(item) for item in self.skills],
+            'tools': [dict(item) for item in self.tools],
+            'personalization_enabled': (
+                self.personalization_enabled
+            ),
+            'workflows': [
+                dict(item) for item in self.workflows
+            ],
+            'channel_features': list(self.channel_features),
+            'updated': self.updated,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class AskQuestionPresentation:
     text: str
     type: str
@@ -156,6 +205,7 @@ class ConversationPresentation:
 ReplyPresentation: TypeAlias = (
     SelectionPresentation
     | CapabilityPresentation
+    | ConversationSettingsPresentation
     | AskPresentation
     | TaskPresentation
     | ConversationPresentation

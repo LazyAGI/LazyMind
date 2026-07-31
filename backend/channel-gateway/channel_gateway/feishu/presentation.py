@@ -21,6 +21,8 @@ _CARD_HEADERS = {
     'history.more': ('📖 会话历史', 'blue'),
     'capability.list': ('🧰 LazyMind 能力', 'purple'),
     'capability.configure': ('✅ 能力已更新', 'green'),
+    'conversation.settings': ('⚙️ 会话设置', 'purple'),
+    'conversation.settings.update': ('✅ 会话设置已保存', 'green'),
     'clarify': ('💬 需要确认', 'orange'),
     'failed': ('⚠️ 暂时无法处理', 'red'),
     'welcome': ('👋 欢迎使用 LazyMind', 'turquoise'),
@@ -69,14 +71,14 @@ _WORKSPACE_ACTIONS = (
         'default',
     ),
     (
-        '⚙ 配置能力',
-        '配置能力',
+        '⚙ 会话设置',
+        '会话设置',
         {
             'schema_version': '1',
-            'command': 'capability.list',
+            'command': 'conversation.settings',
             'parameters': {
-                'capabilities': list(_CAPABILITY_RESOURCE_TYPES),
-                'evidence': ['配置能力'],
+                'section': 'overview',
+                'evidence': ['会话设置'],
             },
         },
         'default',
@@ -546,6 +548,16 @@ class FeishuPresentationRenderer:
                         ),
                     }
                 )
+            elif kind == 'conversation_settings':
+                cards.append(
+                    {
+                        'kind': 'card',
+                        'card': self._conversation_settings_card(
+                            presentation,
+                            message.provider_context,
+                        ),
+                    }
+                )
             elif kind == 'ask':
                 cards.append(
                     {
@@ -580,6 +592,410 @@ class FeishuPresentationRenderer:
                     }
                 )
         return cards
+
+    @staticmethod
+    def _conversation_settings_card(
+        payload: dict[str, Any],
+        provider_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        section = str(payload.get('section') or 'overview')
+        updated = bool(payload.get('updated', False))
+        account_sections = {
+            'skill',
+            'tool',
+            'personalization',
+            'workflow',
+        }
+        section_title = {
+            'overview': '⚙️ 会话设置',
+            'knowledge_base': '📚 会话知识库',
+            'plugin': '🧩 Plugin 执行策略',
+            'subagent': '🧠 SubAgent',
+            'skill': '🪄 Skill',
+            'tool': '🧰 工具',
+            'personalization': '🧭 个人习惯',
+            'workflow': '🧩 可用 Plugin',
+        }.get(section, '⚙️ 会话设置')
+        title = (
+            '✅ 会话设置已保存'
+            if updated
+            else section_title
+        )
+        subtitle = (
+            '管理当前会话可使用的能力'
+            if section == 'overview'
+            else (
+                '修改后当前会话立即生效'
+                if section in account_sections
+                else '仅作用于当前会话'
+            )
+        )
+        builder = (
+            new_card()
+            .config(wide_screen_mode=True)
+            .header(
+                title,
+                subtitle=subtitle,
+                template='green' if updated else 'purple',
+            )
+        )
+        knowledge_bases = [
+            dict(item)
+            for item in (
+                payload.get('knowledge_bases')
+                if isinstance(payload.get('knowledge_bases'), list)
+                else []
+            )
+            if isinstance(item, dict)
+            and item.get('id')
+            and item.get('name')
+        ]
+        skills = _settings_card_items(payload, 'skills')
+        tools = _settings_card_items(payload, 'tools')
+        workflows = _settings_card_items(payload, 'workflows')
+        channel_features = [
+            str(label)
+            for label in (
+                payload.get('channel_features')
+                if isinstance(
+                    payload.get('channel_features'),
+                    list,
+                )
+                else []
+            )
+            if str(label)
+        ]
+        plugin_enabled = bool(
+            payload.get('plugin_enabled', True)
+        )
+        plugin_mode = str(
+            payload.get('plugin_mode') or 'dynamic'
+        )
+        subagent_enabled = bool(
+            payload.get('subagent_enabled', True)
+        )
+        personalization_enabled = bool(
+            payload.get('personalization_enabled', True)
+        )
+        if section == 'overview':
+            enabled_kb_count = sum(
+                bool(item.get('enabled'))
+                for item in knowledge_bases
+            )
+            plugin_status = (
+                '自动执行'
+                if plugin_enabled and plugin_mode == 'auto'
+                else (
+                    '执行前确认'
+                    if plugin_enabled
+                    else '已关闭'
+                )
+            )
+            builder.markdown(
+                '**当前配置**\n'
+                f'知识库：{enabled_kb_count} / '
+                f'{len(knowledge_bases)} 个已启用\n'
+                f'Plugin 执行策略：{plugin_status}\n'
+                f'SubAgent：'
+                f'{"已启用" if subagent_enabled else "已关闭"}\n'
+                f'Skill：{_enabled_count(skills)} / {len(skills)} 个启用\n'
+                f'工具：{_enabled_count(tools)} / {len(tools)} 个启用\n'
+                f'可用 Plugin：{_enabled_count(workflows)} / '
+                f'{len(workflows)} 个启用\n'
+                f'个人习惯：'
+                f'{"已启用" if personalization_enabled else "已关闭"}'
+            )
+            actions = (
+                ('📚 知识库', 'knowledge_base'),
+                ('🧩 Plugin 策略', 'plugin'),
+                ('🧠 SubAgent', 'subagent'),
+                ('🪄 Skill', 'skill'),
+                ('🧰 工具', 'tool'),
+                ('🧩 可用 Plugin', 'workflow'),
+                ('🧭 个人习惯', 'personalization'),
+            )
+            for start in range(0, len(actions), 2):
+                _add_button_grid_row(
+                    builder,
+                    [
+                        {
+                            'label': label,
+                            'style': (
+                                'primary'
+                                if start == 0 and offset == 0
+                                else 'default'
+                            ),
+                            'action': _conversation_settings_action(
+                                target,
+                                provider_context,
+                            ),
+                        }
+                        for offset, (label, target) in enumerate(
+                            actions[start:start + 2]
+                        )
+                    ],
+                )
+            readonly_features = [
+                label
+                for label in channel_features
+                if label in ('Ask', 'Task')
+            ]
+            if readonly_features:
+                builder.divider()
+                builder.markdown(
+                    '**渠道内置能力**\n'
+                    + '、'.join(readonly_features)
+                    + '\n\n这些能力由渠道开放状态决定，无需单独配置。'
+                )
+        elif section == 'knowledge_base':
+            if not knowledge_bases:
+                builder.markdown('当前账号没有可用知识库。')
+            else:
+                builder.markdown(
+                    '选择后会持续作用于当前会话；再次点击可关闭。'
+                )
+                for start in range(0, len(knowledge_bases), 2):
+                    _add_button_grid_row(
+                        builder,
+                        [
+                            {
+                                'label': (
+                                    f'{"✓" if bool(item.get("enabled")) else "＋"} '
+                                    f'{str(item.get("name") or "")}'
+                                ),
+                                'style': (
+                                    'primary'
+                                    if bool(item.get('enabled'))
+                                    else 'default'
+                                ),
+                                'action': (
+                                    _conversation_setting_update_action(
+                                        {
+                                            'setting': 'knowledge_base',
+                                            'dataset_id': str(
+                                                item.get('id') or ''
+                                            ),
+                                            'enabled': not bool(
+                                                item.get('enabled')
+                                            ),
+                                        },
+                                        (
+                                            '关闭知识库'
+                                            if bool(item.get('enabled'))
+                                            else '启用知识库'
+                                        )
+                                        + str(item.get('name') or ''),
+                                        provider_context,
+                                    )
+                                ),
+                            }
+                            for item in knowledge_bases[start:start + 2]
+                        ],
+                    )
+        elif section == 'plugin':
+            builder.markdown(
+                '设置当前会话调用 Plugin 时的执行方式。'
+            )
+            options = (
+                (
+                    '自动执行',
+                    plugin_enabled and plugin_mode == 'auto',
+                    {
+                        'setting': 'plugin_mode',
+                        'mode': 'auto',
+                    },
+                ),
+                (
+                    '执行前确认',
+                    plugin_enabled and plugin_mode == 'dynamic',
+                    {
+                        'setting': 'plugin_mode',
+                        'mode': 'dynamic',
+                    },
+                ),
+                (
+                    '关闭',
+                    not plugin_enabled,
+                    {
+                        'setting': 'plugin',
+                        'enabled': False,
+                    },
+                ),
+            )
+            for start in range(0, len(options), 2):
+                _add_button_grid_row(
+                    builder,
+                    [
+                        {
+                            'label': (
+                                f'{"✓ " if selected else ""}{label}'
+                            ),
+                            'style': (
+                                'primary'
+                                if selected
+                                else 'default'
+                            ),
+                            'action': (
+                                _conversation_setting_update_action(
+                                    change,
+                                    f'Plugin {label}',
+                                    provider_context,
+                                )
+                            ),
+                        }
+                        for label, selected, change
+                        in options[start:start + 2]
+                    ],
+                )
+        elif section == 'subagent':
+            builder.markdown(
+                '设置当前会话是否允许 SubAgent 拆分并行任务。'
+            )
+            options = (
+                ('启用', True),
+                ('关闭', False),
+            )
+            _add_button_grid_row(
+                builder,
+                [
+                    {
+                        'label': (
+                            f'{"✓ " if subagent_enabled == enabled else ""}'
+                            f'{label}'
+                        ),
+                        'style': (
+                            'primary'
+                            if subagent_enabled == enabled
+                            else 'default'
+                        ),
+                        'action': _conversation_setting_update_action(
+                            {
+                                'setting': 'subagent',
+                                'enabled': enabled,
+                            },
+                            f'SubAgent {label}',
+                            provider_context,
+                        ),
+                    }
+                    for label, enabled in options
+                ],
+            )
+        elif section == 'skill':
+            builder.markdown(
+                '选择当前会话可使用的 Skill；设置会同步到其他终端。'
+            )
+            _add_account_setting_buttons(
+                builder,
+                items=skills,
+                setting='skill',
+                id_field='skill_id',
+                empty_text='当前账号没有已安装且已发布的 Skill。',
+                provider_context=provider_context,
+            )
+        elif section == 'tool':
+            builder.markdown(
+                '选择当前会话可使用的工具；系统必需工具只能查看。'
+            )
+            _add_account_setting_buttons(
+                builder,
+                items=tools,
+                setting='tool',
+                id_field='tool_name',
+                empty_text='当前账号没有可配置工具。',
+                provider_context=provider_context,
+                respect_can_disable=True,
+            )
+        elif section == 'workflow':
+            builder.markdown(
+                '选择当前会话可使用的 Plugin；执行时仍受 '
+                'Plugin 执行策略控制。'
+            )
+            _add_account_setting_buttons(
+                builder,
+                items=workflows,
+                setting='workflow',
+                id_field='workflow_ref',
+                empty_text='当前账号没有可配置 Plugin。',
+                provider_context=provider_context,
+            )
+        elif section == 'personalization':
+            builder.markdown(
+                '控制当前会话是否使用个人习惯；'
+                '设置会同步到其他会话和终端。'
+            )
+            _add_button_grid_row(
+                builder,
+                [
+                    {
+                        'label': (
+                            f'{"✓ " if personalization_enabled else ""}'
+                            '启用'
+                        ),
+                        'style': (
+                            'primary'
+                            if personalization_enabled
+                            else 'default'
+                        ),
+                        'action': _conversation_setting_update_action(
+                            {
+                                'setting': 'personalization',
+                                'enabled': True,
+                            },
+                            '启用个人习惯',
+                            provider_context,
+                        ),
+                    },
+                    {
+                        'label': (
+                            f'{"✓ " if not personalization_enabled else ""}'
+                            '关闭'
+                        ),
+                        'style': (
+                            'primary'
+                            if not personalization_enabled
+                            else 'default'
+                        ),
+                        'action': _conversation_setting_update_action(
+                            {
+                                'setting': 'personalization',
+                                'enabled': False,
+                            },
+                            '关闭个人习惯',
+                            provider_context,
+                        ),
+                    },
+                ],
+            )
+        if section != 'overview':
+            _add_button_grid_row(
+                builder,
+                [
+                    {
+                        'label': '← 返回会话设置',
+                        'style': 'default',
+                        'action': _conversation_settings_action(
+                            'overview',
+                            provider_context,
+                        ),
+                    }
+                ],
+            )
+        if section in account_sections:
+            builder.footer(
+                '此项由 LazyMind 账号统一保存；当前会话立即生效，'
+                '并同步到其他会话和终端。'
+            )
+        elif section == 'overview':
+            builder.footer(
+                '这里集中管理当前会话可使用的能力；'
+                '具体页面会注明设置是否同步到其他会话。'
+            )
+        else:
+            builder.footer(
+                '设置保存在 LazyMind 当前会话中，'
+                '飞书与网页端会使用同一份配置。'
+            )
+        return builder.build().data
 
     @staticmethod
     def _capability_card(
@@ -1188,31 +1604,102 @@ class FeishuPresentationRenderer:
         return rows
 
 
+def _settings_card_items(
+    payload: dict[str, Any],
+    key: str,
+) -> list[dict[str, Any]]:
+    return [
+        dict(item)
+        for item in (
+            payload.get(key)
+            if isinstance(payload.get(key), list)
+            else []
+        )
+        if isinstance(item, dict)
+        and item.get('id')
+        and item.get('name')
+    ]
+
+
+def _enabled_count(items: list[dict[str, Any]]) -> int:
+    return sum(bool(item.get('enabled')) for item in items)
+
+
+def _add_account_setting_buttons(
+    builder,
+    *,
+    items: list[dict[str, Any]],
+    setting: str,
+    id_field: str,
+    empty_text: str,
+    provider_context: dict[str, Any],
+    respect_can_disable: bool = False,
+) -> None:
+    if not items:
+        builder.markdown(empty_text)
+        return
+    buttons: list[dict[str, Any]] = []
+    for item in items:
+        enabled = bool(item.get('enabled'))
+        locked = (
+            respect_can_disable
+            and enabled
+            and not bool(item.get('can_disable', True))
+        )
+        name = str(item.get('name') or '')[:40]
+        label = f'{"✓" if enabled else "＋"} {name}'
+        if locked:
+            label += ' · 系统必需'
+        buttons.append(
+            {
+                'label': label,
+                'style': 'primary' if enabled else 'default',
+                'disabled': locked,
+                'action': _conversation_setting_update_action(
+                    {
+                        'setting': setting,
+                        id_field: str(item.get('id') or ''),
+                        'enabled': not enabled,
+                    },
+                    (
+                        ('关闭' if enabled else '启用')
+                        + name
+                    ),
+                    provider_context,
+                ),
+            }
+        )
+    for start in range(0, len(buttons), 2):
+        _add_button_grid_row(builder, buttons[start:start + 2])
+
+
 def _add_button_grid_row(
     builder,
     items: list[dict[str, Any]],
 ) -> None:
-    columns = [
-        {
-            'tag': 'column',
-            'width': 'weighted',
-            'weight': 1,
-            'vertical_align': 'center',
-            'elements': [
-                {
-                    'tag': 'button',
-                    'text': {
-                        'tag': 'plain_text',
-                        'content': str(item.get('label') or ''),
-                    },
-                    'type': str(item.get('style') or 'default'),
-                    'width': 'fill',
-                    'value': dict(item.get('action') or {}),
-                }
-            ],
+    columns: list[dict[str, Any]] = []
+    for item in items:
+        button = {
+            'tag': 'button',
+            'text': {
+                'tag': 'plain_text',
+                'content': str(item.get('label') or ''),
+            },
+            'type': str(item.get('style') or 'default'),
+            'width': 'fill',
+            'value': dict(item.get('action') or {}),
         }
-        for item in items
-    ]
+        if bool(item.get('disabled')):
+            button['disabled'] = True
+        columns.append(
+            {
+                'tag': 'column',
+                'width': 'weighted',
+                'weight': 1,
+                'vertical_align': 'center',
+                'elements': [button],
+            }
+        )
     if len(columns) == 1:
         columns.append(
             {
@@ -1262,6 +1749,59 @@ def _capability_action(
             'command': 'capability.list',
             'parameters': {
                 'capabilities': resource_types,
+                'evidence': [label],
+            },
+        },
+    }
+
+
+def _conversation_settings_action(
+    section: str,
+    provider_context: dict[str, Any],
+) -> dict[str, Any]:
+    label = {
+        'overview': '会话设置',
+        'knowledge_base': '会话知识库',
+        'plugin': 'Plugin 执行方式',
+        'subagent': 'SubAgent 设置',
+        'skill': 'Skill 设置',
+        'tool': '工具设置',
+        'personalization': '个人习惯设置',
+        'workflow': '可用 Plugin 设置',
+    }.get(section, '会话设置')
+    return {
+        'lazymind_action': 'command',
+        'text': label,
+        'intended_chat_id': str(
+            provider_context.get('chat_id') or ''
+        ),
+        'command_action': {
+            'schema_version': '1',
+            'command': 'conversation.settings',
+            'parameters': {
+                'section': section,
+                'evidence': [label],
+            },
+        },
+    }
+
+
+def _conversation_setting_update_action(
+    change: dict[str, Any],
+    label: str,
+    provider_context: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        'lazymind_action': 'command',
+        'text': label,
+        'intended_chat_id': str(
+            provider_context.get('chat_id') or ''
+        ),
+        'command_action': {
+            'schema_version': '1',
+            'command': 'conversation.settings.update',
+            'parameters': {
+                'change': dict(change),
                 'evidence': [label],
             },
         },
@@ -1710,6 +2250,14 @@ def _workflow_progress(
 
 def _presentable_task_summary(value: str) -> str:
     summary = presentable_feishu_text(value)
+    image_count = len(_MARKDOWN_IMAGE.findall(summary))
+    summary = _MARKDOWN_IMAGE.sub('', summary).strip()
+    if image_count:
+        summary = (
+            f'{summary}\n\n'
+            f'🖼️ 已生成 {image_count} 张图片，'
+            '将以飞书原图发送。'
+        ).strip()
     for marker in (
         '\n执行路径：',
         '\n执行路径:',
