@@ -25,18 +25,19 @@ import {
 import {
   Configuration as CoreConfiguration,
   DefaultApiFactory as CoreDefaultApiFactory,
+  PromptsApiFactory as CorePromptsApiFactory,
   type ConversationHistoryListResponse,
   type DefaultApiApiCoreConversationsNameHistoryGetRequest,
-  type DefaultApiApiCorePromptsPolishPostRequest,
   type PromptItem,
   type PromptCategory,
   type PromptCategoryListResponse,
   type PromptCategoryRequest,
   type PromptListResponse,
+  type PromptPolishOpenAPIResponse,
   type PromptPatchRequest,
-  type PromptPolishResponse,
   type PromptRequest,
   type PromptStateResponse,
+  type PromptsApiApiCorePromptsPolishPostRequest,
 } from "@/api/generated/core-client";
 import {
   type AllDocumentCreatorsResponse,
@@ -56,6 +57,11 @@ axiosInstance.defaults.timeout = 60 * 1000; // 10 seconds
 const Config = new Configuration();
 const CoreConfig = new CoreConfiguration({ basePath: BASE_URL });
 const coreDefaultClient = CoreDefaultApiFactory(
+  CoreConfig,
+  BASE_URL,
+  axiosInstance,
+);
+const corePromptsClient = CorePromptsApiFactory(
   CoreConfig,
   BASE_URL,
   axiosInstance,
@@ -643,13 +649,13 @@ export function PromptServiceApi() {
       );
     },
     promptServicePolishPrompt(
-      requestParameters: DefaultApiApiCorePromptsPolishPostRequest,
+      requestParameters: PromptsApiApiCorePromptsPolishPostRequest,
       options?: RawAxiosRequestConfig,
     ) {
-      return coreDefaultClient.apiCorePromptsPolishPost(
+      return corePromptsClient.apiCorePromptsPolishPost(
         requestParameters,
         options,
-      ) as Promise<AxiosResponse<PromptPolishResponse>>;
+      ) as Promise<AxiosResponse<PromptPolishOpenAPIResponse>>;
     },
   };
 }

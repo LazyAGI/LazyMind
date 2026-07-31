@@ -81,7 +81,7 @@ jobs:
 
       - name: Initialize development submodules
         if: steps.release.outputs.is_tag != 'true'
-        run: git submodule update --init --recursive
+        run: git submodule update --init algorithm/lazyllm
 
       - name: Set up Node.js
         uses: actions/setup-node@v6

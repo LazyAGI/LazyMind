@@ -317,7 +317,8 @@ const NewChatPage = () => {
               <div className="chat-content">
                 <div className="greeting-section">
                   <h1 className="greeting-text">
-                    {getGreeting()}{t("chat.greetingSuffix")}
+                    {getGreeting()}
+                    {t(runInBackground ? "chat.taskGreetingSuffix" : "chat.greetingSuffix")}
                   </h1>
                 </div>
 
@@ -399,6 +400,11 @@ const NewChatPage = () => {
                     disabledReason={inputDisabledReason}
                     disabledDescription={inputDisabledDescription}
                     disabledAction={inputDisabledAction}
+                    placeholder={
+                      runInBackground
+                        ? t("chat.taskInputPlaceholder")
+                        : undefined
+                    }
                     onPluginSettingsChange={(settings) => {
                       setPendingPluginSettings(settings);
                     }}

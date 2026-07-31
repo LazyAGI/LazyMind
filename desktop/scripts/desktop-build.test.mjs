@@ -147,6 +147,8 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
   assert.match(source, /EXPLICIT_REF -and -not \$env:REQUESTED_REF\.StartsWith\('refs\/'\)/);
   assert.match(source, /is_tag=\$\(\$isTag\.ToString\(\)\.ToLowerInvariant\(\)\)/);
   assert.match(source, /exit 0/);
+  assert.match(source, /git submodule update --init algorithm\/lazyllm/);
+  assert.doesNotMatch(source, /git submodule update --init --recursive/);
 });
 
 test("macOS distribution build signs packages while CI owns notarization sequencing", () => {
@@ -204,6 +206,8 @@ test("macOS CI fails fast on missing credentials and raises the open-file limit"
   }
   assert.match(source, /ulimit -n "\$\{target_open_files\}"/);
   assert.match(source, /actual_open_files < 8192/);
+  assert.match(source, /git submodule update --init algorithm\/lazyllm/);
+  assert.doesNotMatch(source, /git submodule update --init --recursive/);
 });
 
 test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallback", () => {

@@ -15,6 +15,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
 import { useModelFeatures } from "@/hooks/useModelFeatures";
+import { runtimeFeatures } from "@/runtime/features";
 import {
   modelProvidersApi,
   modelProvidersDefaultApi,
@@ -1233,7 +1234,7 @@ export default function DefaultModelConfigPanel() {
                     </span>
                   </Tooltip>
                 ) : null}
-                {isAdmin ? (
+                {isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
                   <Tooltip
                     title={
                       shareStatus[module.key]
@@ -1383,7 +1384,7 @@ export default function DefaultModelConfigPanel() {
                     <QuestionCircleOutlined />
                   </button>
                 </Tooltip>
-                {isAdmin ? (
+                {isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
                   <Tooltip
                     title={
                       cloudServiceShareStatus[service.key]

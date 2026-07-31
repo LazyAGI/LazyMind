@@ -2276,7 +2276,7 @@ export const ScanApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async retryCompensation(operationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CompensationResponse>> {
+        async retryCompensation(operationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Compensation>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.retryCompensation(operationId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ScanApi.retryCompensation']?.[localVarOperationServerIndex]?.url;
@@ -2600,7 +2600,7 @@ export const ScanApiFactory = function (configuration?: Configuration, basePath?
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retryCompensation(requestParameters: ScanApiRetryCompensationRequest, options?: RawAxiosRequestConfig): AxiosPromise<CompensationResponse> {
+        retryCompensation(requestParameters: ScanApiRetryCompensationRequest, options?: RawAxiosRequestConfig): AxiosPromise<Compensation> {
             return localVarFp.retryCompensation(requestParameters.operationId, options).then((request) => request(axios, basePath));
         },
         /**
