@@ -61,6 +61,8 @@ def test_executor_auto_expands_after_plugin_or_subagent_tool(monkeypatch) -> Non
     agent._tools_manager = MagicMock(return_value=[{'ok': True}])
     constructor = MagicMock(return_value=agent)
     monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+    workspace = {}
+    monkeypatch.setitem(executor_mod.lazyllm.locals, '_lazyllm_agent', {'workspace': workspace})
 
     created = AgentExecutor().create_agent('llm', _plan(max_retries=20))
     created._tools_manager([{
@@ -68,6 +70,7 @@ def test_executor_auto_expands_after_plugin_or_subagent_tool(monkeypatch) -> Non
     }])
 
     with executor_mod._cfg.temp('agentic_expanded_max_rounds', 200):
+        assert workspace['_react_round_limit'] == 200
         assert constructor.call_args.kwargs['on_max_retries'](
             None, 21, 21,
         ) == 200

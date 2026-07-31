@@ -1,3 +1,5 @@
+import lazyllm
+
 from lazymind.chat.engine.agent_runtime.executor import ToolCallGuard
 
 
@@ -92,24 +94,35 @@ def test_unconfigured_stateful_tool_is_not_deduplicated():
     assert len(manager.calls) == 2
 
 
-def test_plugin_and_subagent_tools_enable_expanded_budget():
-    for tool_name in (
-        'trigger_writer',
-        'advance_step',
-        'advance_step_and_hand_off',
-        'create_plugin_draft',
-        'create_subagent',
-    ):
-        guard = ToolCallGuard(_RecordingToolManager())
+def test_plugin_or_subagent_tool_immediately_updates_runtime_round_limit():
+    previous = lazyllm.locals.get('_lazyllm_agent')
+    workspace = {}
+    lazyllm.locals['_lazyllm_agent'] = {'workspace': workspace}
+    try:
+        guard = ToolCallGuard(_RecordingToolManager(), expanded_round_limit=200)
 
-        guard([_call(tool_name, {})])
+        guard([_call('trigger_writer', {})])
 
-        assert guard.expanded_budget_triggered is True
+        assert workspace['_react_round_limit'] == 200
+    finally:
+        if previous is None:
+            lazyllm.locals.pop('_lazyllm_agent', None)
+        else:
+            lazyllm.locals['_lazyllm_agent'] = previous
 
 
 def test_ordinary_tools_do_not_enable_expanded_budget():
-    guard = ToolCallGuard(_RecordingToolManager())
+    previous = lazyllm.locals.get('_lazyllm_agent')
+    workspace = {}
+    lazyllm.locals['_lazyllm_agent'] = {'workspace': workspace}
+    try:
+        guard = ToolCallGuard(_RecordingToolManager(), expanded_round_limit=200)
 
-    guard([_call('url_fetch', {'url': 'https://example.com'})])
+        guard([_call('url_fetch', {'url': 'https://example.com'})])
 
-    assert guard.expanded_budget_triggered is False
+        assert '_react_round_limit' not in workspace
+    finally:
+        if previous is None:
+            lazyllm.locals.pop('_lazyllm_agent', None)
+        else:
+            lazyllm.locals['_lazyllm_agent'] = previous
