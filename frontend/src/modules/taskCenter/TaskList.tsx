@@ -119,10 +119,10 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
       return;
     }
     setSelected(null);
-    message.success(t('taskCenter.taskRemoveSuccess'));
-    if (tasks.length === 1 && page > 1) {
+      message.success(t('taskCenter.taskRemoveSuccess'));
+      if (tasks.length === 1 && page > 1) {
       onPageChange(page - 1);
-      return;
+        return;
     }
     await load();
   };

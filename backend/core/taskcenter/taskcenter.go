@@ -106,47 +106,6 @@ func progressWithFailureReason(progress orm.RawJSON, reason string) orm.RawJSON 
 	return orm.RawJSON(encoded)
 }
 
-// UpdateTaskFailure persists a terminal task failure together with a user-facing reason.
-func UpdateTaskFailure(ctx context.Context, db *gorm.DB, id, reason string) error {
-	var task orm.TaskCenterTask
-	if err := db.WithContext(ctx).
-		Select("id", "status", "progress_json").
-		Where("id = ?", id).
-		First(&task).Error; err != nil {
-		return err
-	}
-	if isTerminal(task.Status) && task.Status != "failed" {
-		return nil
-	}
-	now := time.Now().UTC()
-	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("id = ? AND status NOT IN ('succeeded','skipped','canceled')", id).
-		Updates(map[string]any{
-			"status":        "failed",
-			"progress_json": progressWithFailureReason(task.ProgressJSON, reason),
-			"finished_at":   now,
-			"updated_at":    now,
-		}).Error
-}
-
-func progressWithFailureReason(progress orm.RawJSON, reason string) orm.RawJSON {
-	payload := map[string]any{}
-	if strings.TrimSpace(string(progress)) != "" {
-		if err := json.Unmarshal(progress, &payload); err != nil || payload == nil {
-			payload = map[string]any{}
-		}
-	}
-	if existing, ok := payload["failure_reason"].(string); ok && strings.TrimSpace(existing) != "" {
-		return progress
-	}
-	if existing, ok := payload["error_message"].(string); ok && strings.TrimSpace(existing) != "" {
-		return progress
-	}
-	payload["failure_reason"] = reason
-	encoded, _ := json.Marshal(payload)
-	return orm.RawJSON(encoded)
-}
-
 // UpdateTaskStatusBySession updates the TaskCenter record whose plugin_session_id matches.
 // Used by the plugin EventLoop to sync task status when a session completes or fails.
 func UpdateTaskStatusBySession(ctx context.Context, db *gorm.DB, sessionID, status string) error {
