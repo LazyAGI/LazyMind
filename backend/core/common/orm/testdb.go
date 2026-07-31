@@ -54,6 +54,13 @@ func openTestSQLite(t testing.TB) *DB {
 	if err != nil {
 		t.Fatalf("connect sqlite: %v", err)
 	}
+	sqlDB, err := db.DB.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+	// Close the pool before t.TempDir cleanup runs, so no sqlite WAL/shm
+	// activity can race with RemoveAll (flaky "directory not empty" on CI).
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	return db
 }
 
