@@ -394,13 +394,11 @@ func waitForRAGReadiness(ctx context.Context, cfg RuntimeConfig, timeout time.Du
 		{cfg.Algorithm.DocPort, "/v1/ready", "doc-server"},
 		{cfg.Algorithm.AlgoPort, "/docs", "algo"},
 	}
-	if cfg.MaintenanceMode != installerWarmupMaintenanceMode {
-		checks = append(checks, struct {
-			port  int
-			path  string
-			label string
-		}{cfg.Algorithm.WorkerPort, "/ready", "processor-worker"})
-	}
+	checks = append(checks, struct {
+		port  int
+		path  string
+		label string
+	}{cfg.Algorithm.WorkerPort, "/ready", "processor-worker"})
 	for _, check := range checks {
 		if err := waitForHTTPOnly(ctx, check.port, check.path, check.label, timeout); err != nil {
 			return err
