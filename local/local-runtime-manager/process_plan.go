@@ -12,20 +12,17 @@ func buildRuntimeProcessPlan(cfg RuntimeConfig) runtimeProcessPlan {
 		HostProcesses: []string{
 			localProxyProcessName,
 			authServiceProcessName,
+			channelGatewayProcessName,
 			coreProcessName,
 			frontendProcessName,
+			scanControlPlaneProcessName,
+			fileWatcherProcessName,
 		},
-	}
-	if cfg.MaintenanceMode != installerWarmupMaintenanceMode {
-		plan.HostProcesses = append(plan.HostProcesses, scanControlPlaneProcessName, fileWatcherProcessName)
 	}
 	if cfg.ModeProfile.VectorStore.ManagedProcess {
 		plan.HostProcesses = append(plan.HostProcesses, milvusLiteProcessName)
 	}
 	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
-		if cfg.MaintenanceMode == installerWarmupMaintenanceMode && spec.Name == processorWorkerProcessName {
-			continue
-		}
 		plan.AlgorithmServices = append(plan.AlgorithmServices, spec)
 	}
 	return plan

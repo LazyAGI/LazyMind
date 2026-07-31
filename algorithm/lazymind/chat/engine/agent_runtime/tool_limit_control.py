@@ -69,6 +69,17 @@ class ToolLimitDecisionCoordinator:
         expanded_max_rounds = max(2, int(config['agentic_expanded_max_rounds']))
         if used_rounds >= expanded_max_rounds:
             return None
+        workspace = lazyllm.locals.get('_lazyllm_agent', {}).get('workspace')
+        runtime_round_limit = (
+            workspace.get('_react_round_limit')
+            if isinstance(workspace, dict) else None
+        )
+        if isinstance(runtime_round_limit, int) and runtime_round_limit > current_limit:
+            lazyllm.LOG.info(
+                f'ChatAgent reached its previous tool round boundary={current_limit}; '
+                f'continuing with expanded limit={runtime_round_limit}.'
+            )
+            return runtime_round_limit
         timeout = max(0, float(config['agentic_tool_limit_wait_timeout']))
         sid = lazyllm.globals._sid
         decision_id = uuid.uuid4().hex

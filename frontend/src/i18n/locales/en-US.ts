@@ -45,6 +45,16 @@ const enUS = {
     copyFailedManual: "Copy failed. Please copy manually.",
   },
 
+  runtime: {
+    aiServiceInitializingMessage:
+      "AI services are initializing. You can send messages when they are ready.",
+    aiServiceInitializingDocument:
+      "AI services are initializing. The document will be parsed automatically when they are ready.",
+    aiServiceInitializingWorkflow:
+      "AI services are initializing. The task will run automatically when they are ready.",
+    initializationFailed: "AI services failed to initialize. Please try again later.",
+  },
+
   // Auth
   auth: {
     welcomeLogin: "Welcome",
@@ -649,7 +659,7 @@ const enUS = {
     logout: "Logout",
     goLogin: "Go to Login",
     taskCenter: "Task Center",
-    newChat: "New chat",
+    newChat: "Quick Q&A",
     newTask: "New task",
     language: "Language",
     expandMenu: "Expand Menu",
@@ -1178,6 +1188,7 @@ const enUS = {
     taskModeNotice: "Task mode is on. Complex requests will run as background tasks; view progress and results in Task Center.",
     taskModeNoticeAction: "Open Task Center to view task progress and results",
     inputPlaceholder: "Ask a question, supports multi-turn conversation and image understanding",
+    taskInputPlaceholder: "What would you like to accomplish, and what deliverable format do you expect?",
     mentionKnowledgeBase: "Knowledge bases",
     mentionSkill: "Skills",
     mentionPlugin: "Workflows",
@@ -1437,6 +1448,7 @@ const enUS = {
     greetingMorning: "Good morning",
     greetingAfternoon: "Good afternoon",
     greetingSuffix: ", how can I help you?",
+    taskGreetingSuffix: ", what task would you like to run?",
     // Drag upload
     dragToUpload: "Drop files here to upload",
     dragSupportedFormats: "Supported formats: PDF, Word (DOC, DOCX), PPTX, Images (PNG, JPG)",

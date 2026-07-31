@@ -197,11 +197,12 @@ function Copy-RuntimeApp {
         (Join-Path $repoRoot 'frontend\src'),
         (Join-Path $repoRoot 'frontend\public'),
         (Join-Path $repoRoot 'frontend\scripts'),
-        (Join-Path $repoRoot 'algorithm\lazyllm\docs'),
         (Join-Path $repoRoot '.codex-gocache'),
         (Join-Path $repoRoot '.codex-gomodcache'),
         (Join-Path $repoRoot '.pnpm-store')
     )
+    $releaseBuild = $env:LAZYMIND_RELEASE_BUILD -eq 'true'
+    if ($releaseBuild) { $excludedDirs += (Join-Path $repoRoot 'algorithm\lazyllm') }
     & robocopy.exe $repoRoot $appRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD @excludedDirs /XF '*.pyc' '*.pyo' '.DS_Store' '.env' 'config.env' 'config.win.env'
     if ($LASTEXITCODE -gt 7) { throw "robocopy runtime app staging failed with code $LASTEXITCODE" }
     $coreDevBinary = Join-Path $appRoot 'backend\core\core.exe'
@@ -209,8 +210,8 @@ function Copy-RuntimeApp {
     if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'frontend\dist\index.html') -PathType Leaf)) {
         throw 'Desktop frontend dist is missing from staged runtime app.'
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
-        throw 'Bundled LazyLLM source is missing from staged runtime app.'
+    if (-not $releaseBuild -and -not (Test-Path -LiteralPath (Join-Path $appRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
+        throw 'Bundled LazyLLM source is missing from local desktop runtime app.'
     }
 }
 
@@ -290,8 +291,8 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     Invoke-Native 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') (Join-Path $repoRoot 'frontend')
     Invoke-Native 'pnpm.cmd' @('build') (Join-Path $repoRoot 'frontend')
 
-    Write-Host '==> Ensuring LazyLLM submodule source'
-    if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
+    if ($env:LAZYMIND_RELEASE_BUILD -ne 'true' -and -not (Test-Path -LiteralPath (Join-Path $repoRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
+        Write-Host '==> Ensuring LazyLLM submodule source'
         Invoke-Native 'git.exe' @('submodule', 'update', '--init', 'algorithm/lazyllm')
     }
 
@@ -301,13 +302,19 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     if ($LASTEXITCODE -ne 0) { throw "uv python find exited with code $LASTEXITCODE" }
     if (-not $python) { throw 'uv python find returned an empty path' }
     $authVenv = Join-Path $runtimeRoot 'deps\python\auth-service'
+    $channelGatewayVenv = Join-Path $runtimeRoot 'deps\python\channel-gateway'
     $algorithmVenv = Join-Path $runtimeRoot 'deps\python\algorithm'
     Invoke-Native 'uv.exe' @('venv', '--managed-python', '--no-python-downloads', '--relocatable', '--seed', '--link-mode', 'copy', '--python', $python, $authVenv)
     $authPython = Join-Path $authVenv 'Scripts\python.exe'
     Invoke-Native 'uv.exe' @('pip', 'install', '--python', $authPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'backend\auth-service\requirements.txt'))
+    Invoke-Native 'uv.exe' @('venv', '--managed-python', '--no-python-downloads', '--relocatable', '--seed', '--link-mode', 'copy', '--python', $python, $channelGatewayVenv)
+    $channelGatewayPython = Join-Path $channelGatewayVenv 'Scripts\python.exe'
+    Invoke-Native 'uv.exe' @('pip', 'install', '--python', $channelGatewayPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'backend\channel-gateway\requirements.txt'))
     Invoke-Native 'uv.exe' @('venv', '--managed-python', '--no-python-downloads', '--relocatable', '--seed', '--link-mode', 'copy', '--python', $python, $algorithmVenv)
     $algorithmPython = Join-Path $algorithmVenv 'Scripts\python.exe'
-    Invoke-Native 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', 'setuptools<81', 'lazyllm')
+    $lazyLLMVersion = if ($env:LAZYMIND_LAZYLLM_VERSION) { $env:LAZYMIND_LAZYLLM_VERSION } else { '1.2.0a3' }
+    Invoke-Native 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', 'setuptools<81', "lazyllm==$lazyLLMVersion")
+    Invoke-Native $algorithmPython @('-c', "import importlib.metadata as m; assert m.version('lazyllm') == '$lazyLLMVersion'")
     Invoke-Native (Join-Path $algorithmVenv 'Scripts\lazyllm.exe') @('install', 'rag')
     Invoke-Native 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'algorithm\requirements.txt'))
     Invoke-Native 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'algorithm\requirements-local.txt'))

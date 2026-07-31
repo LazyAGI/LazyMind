@@ -143,6 +143,11 @@ def test_main_waits_starts_docs_and_exits_on_keyboard_interrupt(monkeypatch):
     monkeypatch.setattr(parsing_runtime, 'get_algo_server_port', lambda: 18000)
     monkeypatch.setattr(
         parsing_runtime,
+        '_wait_for_stores',
+        lambda timeout, interval: calls.append(('stores', timeout, interval)),
+    )
+    monkeypatch.setattr(
+        parsing_runtime,
         '_wait_for_http_ok',
         lambda url, label, timeout, interval: calls.append(('http', url, label, timeout, interval)),
     )
@@ -162,7 +167,8 @@ def test_main_waits_starts_docs_and_exits_on_keyboard_interrupt(monkeypatch):
     parsing_runtime.main()
 
     assert calls == [
-        ('http', 'http://processor.test/health', 'DocumentProcessor', 3.0, 0.5),
+        ('http', 'http://processor.test/ready', 'DocumentProcessor', 3.0, 0.5),
+        ('stores', 3.0, 0.5),
         ('docs.start',),
         ('http', 'http://127.0.0.1:18000/docs', 'lazyllm-algo local service', 3.0, 0.5),
         ('registration', 'http://processor.test', 'general_algo', 3.0, 0.5),

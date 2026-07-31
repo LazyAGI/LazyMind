@@ -1,11 +1,22 @@
-import { Ref, forwardRef, useImperativeHandle, useState } from "react";
-import { Modal, Form, message, TreeSelect, Select, Popover } from "antd";
+import {
+  Ref,
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
+import { Alert, Modal, Form, message, TreeSelect, Select, Popover } from "antd";
 import { QuestionCircleOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "./index.scss";
 import type { ParserConfig } from "@/api/generated/knowledge-client";
 import { TaskServiceApi } from "@/modules/knowledge/utils/request";
 import { localizeErrorCode } from "@/components/request";
+import {
+  RuntimeReadinessError,
+  waitForRuntimeCapability,
+} from "@/runtime/readiness";
 
 export const DOC_SUMMARY_GROUP = "doc-summary";
 
@@ -42,8 +53,14 @@ const RestartKnowledgeModal = (
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [runtimeWaiting, setRuntimeWaiting] = useState(false);
   const [modalInfo, setModalInfo] = useState<IData>();
+  const runtimeWaitAbortRef = useRef<AbortController | null>(null);
   const [form] = Form.useForm();
+
+  useEffect(() => {
+    return () => runtimeWaitAbortRef.current?.abort();
+  }, []);
 
   useImperativeHandle(ref, () => ({
     onOpen,
@@ -59,7 +76,10 @@ const RestartKnowledgeModal = (
   };
 
   const onCancel = () => {
+    runtimeWaitAbortRef.current?.abort();
+    runtimeWaitAbortRef.current = null;
     setVisible(false);
+    setRuntimeWaiting(false);
     form.resetFields();
   };
 
@@ -90,6 +110,14 @@ const RestartKnowledgeModal = (
         message.error(t("knowledge.selectReparseTarget"));
         return;
       }
+
+      const controller = new AbortController();
+      runtimeWaitAbortRef.current = controller;
+      await waitForRuntimeCapability("parser", {
+        signal: controller.signal,
+        onWaiting: () => setRuntimeWaiting(true),
+      });
+      setRuntimeWaiting(false);
 
       const docNames = (modalInfo.names || []).filter(Boolean);
       const displayName =
@@ -134,8 +162,16 @@ const RestartKnowledgeModal = (
       onFinish?.();
       onCancel();
     } catch (error) {
+      if ((error as Error)?.name === "AbortError") {
+        return;
+      }
       console.error(error);
+      if (error instanceof RuntimeReadinessError) {
+        message.error(t("runtime.initializationFailed"));
+      }
     } finally {
+      runtimeWaitAbortRef.current = null;
+      setRuntimeWaiting(false);
       setLoading(false);
     }
   };
@@ -193,6 +229,14 @@ const RestartKnowledgeModal = (
       width={459}
       okButtonProps={{ disabled: loading }}
     >
+      {runtimeWaiting && (
+        <Alert
+          message={t("runtime.aiServiceInitializingDocument")}
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+      )}
       <Form form={form} layout="vertical">
         <Form.Item
           name="reparse_groups"

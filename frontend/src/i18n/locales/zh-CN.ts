@@ -44,6 +44,16 @@ const zhCN = {
     copyFailedManual: "复制失败，请手动复制",
   },
 
+  runtime: {
+    aiServiceInitializingMessage:
+      "AI 服务正在初始化，服务就绪后即可发送消息",
+    aiServiceInitializingDocument:
+      "AI 服务正在初始化，文档将在就绪后自动解析",
+    aiServiceInitializingWorkflow:
+      "AI 服务正在初始化，任务将在就绪后自动执行",
+    initializationFailed: "AI 服务初始化失败，请稍后重试",
+  },
+
   auth: {
     welcomeLogin: "欢迎登录",
     newUserRegister: "新用户注册",
@@ -618,8 +628,8 @@ const zhCN = {
     logout: "退出登录",
     goLogin: "前往登录",
     language: "语言",
-    newChat: "新对话",
-    newTask: "新任务",
+    newChat: "快速问答",
+    newTask: "新建任务",
     expandMenu: "展开菜单",
     collapseMenu: "收起菜单",
   },
@@ -1131,6 +1141,7 @@ const zhCN = {
     taskModeNotice: "任务模式已开启，复杂请求将以后台任务方式执行，可在任务中心查看进度与结果",
     taskModeNoticeAction: "前往任务中心查看任务进度与结果",
     inputPlaceholder: "请输入您的问题，支持多轮对话、图文理解等",
+    taskInputPlaceholder: "你希望完成什么？期望交付物的形式是什么？",
     mentionKnowledgeBase: "知识库",
     mentionSkill: "技能",
     mentionPlugin: "工作流",
@@ -1405,6 +1416,7 @@ const zhCN = {
     greetingMorning: "上午好",
     greetingAfternoon: "下午好",
     greetingSuffix: "，有什么我能帮你的吗？",
+    taskGreetingSuffix: "，你想执行什么任务呢？",
     dragToUpload: "文件拖动到此处即可上传",
     dragSupportedFormats: "支持的文件格式：PDF、Word文档（DOC、DOCX）、PPTX、图片（PNG、JPG）",
     unsupportedFileTypeDrag: "不支持上传该类型文件",

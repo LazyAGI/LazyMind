@@ -24,6 +24,14 @@ const macosFinalizeWorkflow = path.join(
   "workflows",
   "macos-notarization-finalize.yml",
 );
+const windowsWorkflow = path.join(
+  scriptsDir,
+  "..",
+  "..",
+  ".github",
+  "workflows",
+  "windows-installer.yml",
+);
 
 function nsisMacro(source, name) {
   const match = source.match(new RegExp(`!macro ${name}\\b([\\s\\S]*?)!macroend`));
@@ -132,16 +140,24 @@ test("Windows installer verifies and force-cleans processes left by warmup", () 
   assert.match(install, /\$4 == 1[\s\S]*StrCpy \$3 4[\s\S]*\$3 != 0/);
 });
 
-test("macOS distribution build signs the final DMG and submits one asynchronous notarization", () => {
+test("Windows CI treats branches as non-tags without leaking git probe failures", () => {
+  const source = readFileSync(windowsWorkflow, "utf8");
+
+  assert.match(source, /REQUESTED_REF\.StartsWith\('refs\/tags\/'\)/);
+  assert.match(source, /EXPLICIT_REF -and -not \$env:REQUESTED_REF\.StartsWith\('refs\/'\)/);
+  assert.match(source, /is_tag=\$\(\$isTag\.ToString\(\)\.ToLowerInvariant\(\)\)/);
+  assert.match(source, /exit 0/);
+  assert.match(source, /git submodule update --init algorithm\/lazyllm/);
+  assert.doesNotMatch(source, /git submodule update --init --recursive/);
+});
+
+test("macOS distribution build signs packages while CI owns notarization sequencing", () => {
   const source = readFileSync(darwinBuildScript, "utf8");
   const builderSource = readFileSync(electronBuilderConfig, "utf8");
   const packageJson = JSON.parse(readFileSync(electronPackage, "utf8"));
   assert.match(source, /PACKAGE_KIND=.*zip/);
   assert.match(source, /SIGNING_MODE=.*adhoc/);
-  assert.match(
-    source,
-    /notarytool submit "\$\{DMG_PATH\}"[\s\S]*--team-id "\$\{APPLE_TEAM_ID\}"[\s\S]*--output-format json/,
-  );
+  assert.doesNotMatch(source, /notarytool submit/);
   assert.match(source, /Authority=Developer ID Application:/);
   assert.match(source, /signature_info="\$\(codesign -dv --verbose=4/);
   assert.doesNotMatch(source, /codesign -dv[^\n]*\|\s*grep -q/);
@@ -149,12 +165,26 @@ test("macOS distribution build signs the final DMG and submits one asynchronous 
   assert.match(packageJson.scripts["dist:mac:arm64"], /--publish never$/);
   assert.match(builderSource, /afterPack:\s*signAndStageEmbeddedRuntime/);
   assert.match(builderSource, /afterSign:\s*restoreRuntimeAndFinalizeSignature/);
+  assert.match(
+    builderSource,
+    /context\.electronPlatformName !== "darwin" \|\| macSigningMode === "none"/,
+  );
+  assert.match(
+    builderSource,
+    /context\.electronPlatformName !== "darwin" \|\| macSigningMode !== "developer-id"/,
+  );
+  assert.match(builderSource, /macSigningMode === "developer-id" \? undefined : null/);
   assert.match(builderSource, /fs\.renameSync\(runtimeRoot, stagedRuntime\)/);
   assert.match(builderSource, /fs\.renameSync\(staged\.stagedRuntime, staged\.runtimeRoot\)/);
   assert.doesNotMatch(builderSource, /notarytool[\s\S]*submit/);
   assert.match(builderSource, /notarize:\s*false/);
   assert.match(builderSource, /sign:\s*macSigningMode === "developer-id"/);
   assert.doesNotMatch(builderSource, /signIgnore:/);
+  assert.match(
+    source,
+    /SIGNING_MODE}" == "adhoc"[\s\S]*codesign --force --deep --sign - "\$\{APP_PATH\}"/,
+    "local macOS builds must apply an explicit ad-hoc bundle signature",
+  );
   assert.doesNotMatch(source, /notarytool submit[\s\S]*--wait/);
   assert.doesNotMatch(source, /stapler staple/);
   for (const privatePath of ["/.env", "/.lazymind-local", "/data", "/volumes", "/local/config.env"]) {
@@ -176,43 +206,42 @@ test("macOS CI fails fast on missing credentials and raises the open-file limit"
   }
   assert.match(source, /ulimit -n "\$\{target_open_files\}"/);
   assert.match(source, /actual_open_files < 8192/);
+  assert.match(source, /git submodule update --init algorithm\/lazyllm/);
+  assert.doesNotMatch(source, /git submodule update --init --recursive/);
 });
 
-test("macOS CI normally finalizes notarization and preserves a manual fallback", () => {
+test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallback", () => {
   const buildWorkflow = readFileSync(macosWorkflow, "utf8");
   const finalizeWorkflow = readFileSync(macosFinalizeWorkflow, "utf8");
 
-  assert.match(buildWorkflow, /artifact_name="LazyMind-macos-arm64-pending"/);
-  assert.match(buildWorkflow, /name="LazyMind-macos-arm64-development"/);
+  assert.match(buildWorkflow, /name:\s*Submit app ZIP for notarization/);
+  assert.match(buildWorkflow, /notarytool submit "\$\{zip_path\}"/);
+  assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for app ZIP notarization/);
+  assert.match(buildWorkflow, /continuing directly to DMG packaging/);
+  assert.match(buildWorkflow, /name:\s*Staple accepted app ticket/);
+  assert.match(buildWorkflow, /dist:mac:arm64:prepackaged/);
+  assert.match(buildWorkflow, /name:\s*Submit DMG for notarization/);
+  assert.match(buildWorkflow, /notarytool submit "\$\{PENDING_DMG\}"/);
   assert.match(buildWorkflow, /name:\s*LazyMind-macos-notarization-submission/);
   assert.match(buildWorkflow, /\.pending\.dmg/);
   assert.match(buildWorkflow, /\.unnotarized\.dmg/);
   assert.match(buildWorkflow, /git show-ref --verify --quiet "refs\/tags\/\$\{REQUESTED_REF\}"/);
   assert.match(buildWorkflow, /tag_commit=.*git rev-parse "refs\/tags\/\$\{tag_candidate\}\^\{commit\}"/);
-  assert.match(
-    buildWorkflow,
-    /LAZYMIND_DESKTOP_NOTARIZE:\s*\$\{\{\s*steps\.release\.outputs\.is_tag\s*\}\}/,
-  );
-  assert.match(
-    buildWorkflow,
-    /if:\s*steps\.release\.outputs\.is_tag == 'true'[\s\S]*name:\s*LazyMind-macos-notarization-submission/,
-  );
+  assert.doesNotMatch(buildWorkflow, /path:[^\n]*LazyMind-darwin-arm64\.zip/);
   assert.match(buildWorkflow, /replace\(\/\^v\//);
   assert.match(buildWorkflow, /prereleaseNames = \{ a: "alpha", b: "beta", rc: "rc" \}/);
-  assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for Apple notarization/);
+  assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for DMG notarization/);
   assert.match(buildWorkflow, /deadline="\$\(\( started_at \+ 1800 \)\)"/);
   assert.match(buildWorkflow, /sleep 30/);
-  assert.match(buildWorkflow, /::warning::Apple notarization is still in progress/);
+  assert.match(buildWorkflow, /DMG notarization timed out/);
   assert.match(buildWorkflow, /stapler staple "\$\{final_path\}"/);
   assert.match(buildWorkflow, /stapler validate "\$\{final_path\}"/);
-  assert.match(buildWorkflow, /\| Wait for Apple \|/);
-  assert.match(buildWorkflow, /name:\s*Report step timings/);
-  assert.match(buildWorkflow, /actions\/runs\/\$\{process\.env\.RUN_ID\}\/jobs\?filter=latest/);
+  assert.doesNotMatch(buildWorkflow, /name:\s*Report step timings/);
 
   assert.match(finalizeWorkflow, /source_run_id:/);
   assert.match(finalizeWorkflow, /run-id:\s*\$\{\{\s*inputs\.source_run_id\s*\}\}/);
-  assert.match(finalizeWorkflow, /pattern:\s*"\*\.pending\.dmg"/);
-  assert.match(finalizeWorkflow, /pattern:\s*"\*\.notarization\.json"/);
+  assert.match(finalizeWorkflow, /pattern:\s*"LazyMind-macos-arm64-pending"/);
+  assert.match(finalizeWorkflow, /pattern:\s*"LazyMind-macos-notarization-submission"/);
   assert.match(finalizeWorkflow, /merge-multiple:\s*true/);
   assert.match(finalizeWorkflow, /notarytool info "\$\{submission_id\}"/);
   assert.match(finalizeWorkflow, /notarytool log "\$\{SUBMISSION_ID\}"/);
@@ -224,7 +253,7 @@ test("packaged macOS app runs installation warmup once before its normal window"
   const source = readFileSync(electronMainScript, "utf8");
   assert.match(
     source,
-    /runMacInstallationWarmupIfNeeded\(\)\.then\(\s*\(\) => createWindow\(\)/,
+    /runMacInstallationWarmupIfNeeded\(\)\.then\(\s*\(\) => \{\s*frontendOpeningAllowed = true;\s*if \(windowHiddenByUser\) \{\s*return undefined;\s*\}\s*return showActiveWindow\(\)/,
   );
   assert.match(
     source,
@@ -233,7 +262,7 @@ test("packaged macOS app runs installation warmup once before its normal window"
   );
 });
 
-test("Desktop does not create the Chat window after shutdown begins", () => {
+test("Desktop does not create the Chat window after quitting or moving to background", () => {
   const source = readFileSync(electronMainScript, "utf8");
   const start = source.indexOf("async function createWindow()");
   const end = source.indexOf('ipcMain.on("lazymind:renderer-ready"', start);
@@ -242,9 +271,75 @@ test("Desktop does not create the Chat window after shutdown begins", () => {
 
   assert.match(
     createWindow,
-    /const status = await waitForRuntimeReady\(\);\s*if \(isQuitting\) \{\s*return;\s*\}\s*mainWindow = new BrowserWindow/,
-    "shutdown must be rechecked before creating the hidden Chat window",
+    /const status = await waitForDesktopHomeReady\(\);\s*if \(isQuitting \|\| windowHiddenByUser \|\| nextStartupWindow\.isDestroyed\(\)\) \{\s*return;\s*\}\s*nextMainWindow = new BrowserWindow/,
+    "quit and background state must be rechecked before creating the hidden Chat window",
   );
+});
+
+test("Desktop opens the home page from the sidecar readiness event with status polling as fallback", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+
+  assert.match(
+    source,
+    /event\?\.event === "capability\.ready" && event\?\.capability === "home"[\s\S]*publishHomeReady\(Number\(event\.frontendPort\)\)/,
+  );
+  assert.match(
+    source,
+    /function waitForDesktopHomeReady\(\) \{[\s\S]*Promise\.race\(\[[\s\S]*waitForHomeReadySignal\(\),[\s\S]*waitForRuntimeReady\(\{ capability: "home" \}\)/,
+  );
+});
+
+test("Desktop close and quit destroy renderers while keeping the runtime resident", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const backgroundStart = source.indexOf("function enterBackgroundMode");
+  const backgroundEnd = source.indexOf("function sameRuntimePath", backgroundStart);
+  const backgroundMode = source.slice(backgroundStart, backgroundEnd);
+  const windowsClosedStart = source.indexOf('app.on("window-all-closed"');
+  const windowsClosedEnd = source.indexOf('app.on("before-quit"', windowsClosedStart);
+  const windowsClosedHandler = source.slice(windowsClosedStart, windowsClosedEnd);
+
+  assert.match(
+    source,
+    /function attachManagedClose\(window\)[\s\S]*event\.preventDefault\(\);\s*enterBackgroundMode\("window close", \{ discoverable: true \}\)/,
+    "window close must preserve a visible background entry on macOS and Windows",
+  );
+  assert.match(
+    backgroundMode,
+    /rendererReadyWait\?\.cancel\(\);[\s\S]*window\.removeAllListeners\("close"\);[\s\S]*window\.destroy\(\)/,
+    "both background modes must destroy renderer windows",
+  );
+  assert.match(backgroundMode, /if \(discoverable\) \{\s*ensureWindowsTray\(\)/);
+  assert.match(backgroundMode, /app\.hide\(\);[\s\S]*app\.dock\.hide\(\);[\s\S]*destroyWindowsTray\(\)/);
+  assert.doesNotMatch(backgroundMode, /beginFastQuit|detachRuntimeMonitor|runSidecar\("down"/);
+  assert.match(
+    source,
+    /function showActiveWindow\(\)[\s\S]*app\.show\(\);[\s\S]*app\.dock\.show\(\)[\s\S]*const creation = createWindow\(\)/,
+    "opening the resident app must restore the Dock icon and recreate its frontend",
+  );
+  assert.match(source, /app\.on\("second-instance"[\s\S]*showActiveWindow\(\)/);
+  assert.match(source, /app\.on\("activate"[\s\S]*showActiveWindow\(\)/);
+  assert.match(
+    source,
+    /app\.on\("before-quit",[\s\S]*event\.preventDefault\(\);\s*enterBackgroundMode\("app quit", \{ discoverable: false \}\)/,
+    "Dock, menu, and keyboard quit actions must enter hidden background mode",
+  );
+  assert.doesNotMatch(windowsClosedHandler, /app\.quit\(\)/);
+});
+
+test("Windows tray reopens the frontend and Exit removes the visible background entry", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const trayStart = source.indexOf("function ensureWindowsTray()");
+  const trayEnd = source.indexOf("function attachManagedClose", trayStart);
+  const traySource = source.slice(trayStart, trayEnd);
+
+  assert.match(traySource, /tray = new Tray\(iconPath\)/);
+  assert.match(traySource, /tray\.on\("click",[\s\S]*showActiveWindow\(\)/);
+  assert.match(traySource, /label: "Open LazyMind"[\s\S]*showActiveWindow\(\)/);
+  assert.match(
+    traySource,
+    /label: "Exit"[\s\S]*enterBackgroundMode\("tray exit", \{ discoverable: false \}\)/,
+  );
+  assert.match(source, /function destroyWindowsTray\(\)[\s\S]*tray\.destroy\(\);\s*tray = undefined/);
 });
 
 test("Windows installer path policy matches the maintenance helper trust boundary", () => {

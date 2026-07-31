@@ -34,8 +34,10 @@ import { getFileUrls } from "../utils/fileInputs";
 import type { ChatContainerProps } from "../types";
 import type { useUserMessageEdit } from "./useUserMessageEdit";
 import { useChatScroll } from "./useChatScroll";
+import { waitForRuntimeCapability } from "@/runtime/readiness";
 
 type UserEditApi = ReturnType<typeof useUserMessageEdit>;
+type RuntimeWaitingOperation = "chat" | "workflow";
 
 interface UseChatConversationOptions {
   canChat: boolean;
@@ -78,12 +80,17 @@ export function useChatConversation({
   const conversationMessagesCache = useRef<Map<string, any[]>>(new Map());
   const ffmpegErrorBufferRef = useRef("");
   const ffmpegPromptOpenRef = useRef(false);
+  const runtimeWaitAbortRef = useRef<AbortController | null>(null);
+  const runtimeWaitInProgressRef = useRef(false);
 
   const [messageList, setMessageList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [content, setContent] = useState("");
   const [fileList, setFileList] = useState<ChatFileList[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [runtimeWaiting, setRuntimeWaiting] = useState(false);
+  const [runtimeWaitingOperation, setRuntimeWaitingOperation] =
+    useState<RuntimeWaitingOperation>("chat");
 
   const scroll = useChatScroll({
     chatInputRef,
@@ -115,6 +122,7 @@ export function useChatConversation({
       showFFmpegDependencyPrompt,
     );
     return () => {
+      runtimeWaitAbortRef.current?.abort();
       window.removeEventListener(
         CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
         showFFmpegDependencyPrompt,
@@ -140,6 +148,40 @@ export function useChatConversation({
       }
     };
   }, []);
+
+  async function waitForChatRuntime(
+    operation: RuntimeWaitingOperation = "chat",
+  ) {
+    if (runtimeWaitInProgressRef.current) {
+      return false;
+    }
+
+    runtimeWaitInProgressRef.current = true;
+    const controller = new AbortController();
+    runtimeWaitAbortRef.current = controller;
+
+    try {
+      await waitForRuntimeCapability("chat", {
+        signal: controller.signal,
+        onWaiting: () => {
+          setRuntimeWaitingOperation(operation);
+          setRuntimeWaiting(true);
+        },
+      });
+      return true;
+    } catch (error) {
+      if ((error as Error)?.name !== "AbortError") {
+        message.error(t("runtime.initializationFailed"));
+      }
+      return false;
+    } finally {
+      if (runtimeWaitAbortRef.current === controller) {
+        runtimeWaitAbortRef.current = null;
+      }
+      runtimeWaitInProgressRef.current = false;
+      setRuntimeWaiting(false);
+    }
+  }
 
   function clearMultiData() {
     setFileList([]);
@@ -516,6 +558,12 @@ export function useChatConversation({
     action: ChatConversationsRequestActionEnum,
     extras?: Record<string, unknown>,
   ) => {
+    const operation =
+      extras?.run_in_background === true ? "workflow" : "chat";
+    if (!(await waitForChatRuntime(operation))) {
+      return false;
+    }
+
     activeStreamRef.current = true;
     setLoading(true);
     setIsStreaming(true);
@@ -565,6 +613,7 @@ export function useChatConversation({
           .catch(() => { });
       }, 400);
     }
+    return true;
   };
 
   async function syncGeneratingHistory(conversationId: string) {
@@ -604,8 +653,11 @@ export function useChatConversation({
     }
   }
 
-  function openResumeSSE(conversationId: string) {
+  async function openResumeSSE(conversationId: string) {
     if (!onOpenResumeSSE) {
+      return;
+    }
+    if (!(await waitForChatRuntime())) {
       return;
     }
     if (streamManager.hasActiveStream(conversationId)) {
@@ -690,7 +742,7 @@ export function useChatConversation({
 
   function appendAutoAdvanceTurn(conversationId: string, driverMessage: string) {
     ensureAutoAdvanceUserTurn(conversationId, driverMessage);
-    openResumeSSE(conversationId);
+    void openResumeSSE(conversationId);
   }
 
   useEffect(() => {
@@ -709,7 +761,7 @@ export function useChatConversation({
           return;
         }
         void syncGeneratingHistory(detail.conversationId).finally(() => {
-          openResumeSSE(detail.conversationId);
+          void openResumeSSE(detail.conversationId);
         });
       }
     };
@@ -734,7 +786,12 @@ export function useChatConversation({
       }
       return;
     }
-    if (activeStreamRef.current || loading || !normalizedText) {
+    if (
+      activeStreamRef.current ||
+      runtimeWaitInProgressRef.current ||
+      loading ||
+      !normalizedText
+    ) {
       return;
     }
     const normalizedCiteMessages =
@@ -822,7 +879,7 @@ export function useChatConversation({
 
     scroll.isMouseScrollingRef.current = true;
     scroll.scrollToEnd();
-    openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, {
+    await openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, {
       ...(params.run_in_background ? { run_in_background: true } : {}),
       ...(params.thinking_depth
         ? { thinking_depth: params.thinking_depth }
@@ -990,7 +1047,7 @@ export function useChatConversation({
       }
       return;
     }
-    if (loading) {
+    if (loading || runtimeWaitInProgressRef.current) {
       return;
     }
     const userMessage = messageListRef.current.findLast(
@@ -1033,7 +1090,7 @@ export function useChatConversation({
     }
 
     scroll.isMouseScrollingRef.current = true;
-    openSSE(
+    void openSSE(
       regenerationInputs,
       ChatConversationsRequestActionEnum.ChatActionRegeneration,
     );
@@ -1044,6 +1101,8 @@ export function useChatConversation({
     setMessageList,
     loading,
     isStreaming,
+    runtimeWaiting,
+    runtimeWaitingOperation,
     content,
     setContent,
     activeStreamRef,

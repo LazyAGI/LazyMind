@@ -59,12 +59,6 @@ export interface PreferenceAssetRecord {
   autoEvoError?: string;
 }
 
-export interface PreferenceSuggestionPayload {
-  title: string;
-  content: string;
-  reason?: string;
-}
-
 export interface PreferenceDraftPreviewRecord {
   acceptedCount?: number;
   canUndo?: boolean;
@@ -120,12 +114,6 @@ export interface ManagedPreferenceDraftReviewMutationRecord {
   draftVersion: number;
   reviewId: string;
   reviewVersion: number;
-}
-
-export interface PreferenceSuggestionRecord {
-  id: string;
-  status: string;
-  invalidReason?: string;
 }
 
 export interface EvolutionSuggestionRecord {
@@ -186,23 +174,6 @@ interface PreferenceFrontMatter {
 
 const normalizeResourceType = (resourceType?: string) =>
   (resourceType || "").trim().toLowerCase();
-
-const buildEvolutionId = (resourceType?: string, resourceId?: string) => {
-  const normalizedResourceType = (resourceType || "").trim();
-  const normalizedResourceId = (resourceId || "").trim();
-  if (!normalizedResourceType || !normalizedResourceId) {
-    return "";
-  }
-
-  return `${normalizedResourceType}:${normalizedResourceId}`;
-};
-
-const resolveEvolutionId = (options: EvolutionSuggestionListOptions) =>
-  options.evolutionId ||
-  buildEvolutionId(options.resourceType, options.resourceId) ||
-  buildEvolutionId("skill", options.skillId) ||
-  buildEvolutionId("memory", options.memoryId) ||
-  buildEvolutionId(options.resourceType || "user-preference", options.preferenceId);
 
 const unwrapEnvelope = <T>(payload: unknown): T => {
   if (!payload || typeof payload !== "object") {
@@ -272,72 +243,6 @@ const toNumberValue = (value: unknown, fallback = 0): number => {
   }
 
   return fallback;
-};
-
-const normalizeEvolutionSuggestion = (
-  item: RawObject,
-): EvolutionSuggestionRecord | null => {
-  const id = toStringValue(item.id, "");
-  if (!id) {
-    return null;
-  }
-
-  return {
-    id,
-    action: toStringValue(item.action, ""),
-    category: toStringValue(item.category, ""),
-    content: toStringValue(item.content, ""),
-    createdAt: toStringValue(item.created_at, ""),
-    fileExt: toStringValue(item.file_ext, ""),
-    fullContent: toStringValue(item.full_content, ""),
-    invalidReason: item.invalid_reason
-      ? localizeErrorCode("2000509")
-      : "",
-    outdated: toBoolean(item.outdated, false),
-    parentSkillName: toStringValue(item.parent_skill_name, ""),
-    reason: toStringValue(item.reason, ""),
-    relativePath: toStringValue(item.relative_path, ""),
-    resourceKey: toStringValue(item.resource_key, ""),
-    resourceType: toStringValue(item.resource_type, ""),
-    reviewedAt: toStringValue(item.reviewed_at, ""),
-    reviewerId: toStringValue(item.reviewer_id, ""),
-    reviewerName: toStringValue(item.reviewer_name, ""),
-    sessionId: toStringValue(item.session_id, ""),
-    skillName: toStringValue(item.skill_name, ""),
-    status: toStringValue(item.status, ""),
-    title: toStringValue(item.title, ""),
-    updatedAt: toStringValue(item.updated_at, ""),
-    userId: toStringValue(item.user_id, ""),
-  };
-};
-
-const extractEvolutionSuggestionList = (
-  payload: unknown,
-  options: EvolutionSuggestionListOptions = {},
-): EvolutionSuggestionListResult => {
-  const unwrapped = unwrapEnvelope<unknown>(payload);
-  const rawPayload = toRawObject(unwrapped);
-  const rawItems = Array.isArray(rawPayload?.items)
-    ? rawPayload.items
-    : Array.isArray(unwrapped)
-      ? unwrapped
-      : [];
-  const items = rawItems
-    .map((item) => toRawObject(item))
-    .filter((item): item is RawObject => Boolean(item))
-    .map((item) => normalizeEvolutionSuggestion(item))
-    .filter((item): item is EvolutionSuggestionRecord => Boolean(item));
-  const page = Math.max(1, toNumberValue(rawPayload?.page, options.page || 1));
-  const pageSize = Math.max(1, toNumberValue(rawPayload?.page_size, options.pageSize || 20));
-  const total = Math.max(items.length, toNumberValue(rawPayload?.total, items.length));
-
-  return {
-    items,
-    page,
-    pageSize,
-    total,
-    hasMore: page * pageSize < total,
-  };
 };
 
 const sanitizeInlineValue = (value: string) => value.replace(/\r?\n/g, " ").trim();
@@ -470,7 +375,7 @@ const getManagedPreferenceDraftEndpoint = (
   action: "generate" | "preview" | "commit" | "discard",
 ) => {
   if (action === "generate") {
-    return `${coreBasePath}/${kind}:generate`;
+    return `${coreBasePath}/personal-resource/${getPersonalResourceType(kind)}:generate`;
   }
 
   return `${coreBasePath}/personal-resource/${getPersonalResourceType(kind)}:${
@@ -631,76 +536,38 @@ export async function checkUserPreferenceConfigured(): Promise<boolean> {
 export async function listEvolutionSuggestions(
   options: EvolutionSuggestionListOptions = {},
 ): Promise<EvolutionSuggestionListResult> {
-  const params = new URLSearchParams();
-  params.set("page", String(options.page || 1));
-  params.set("page_size", String(options.pageSize || 20));
-
-  const evolutionId = resolveEvolutionId(options);
-  if (evolutionId) {
-    params.set("evolution_id", evolutionId);
-  }
-  if (options.resourceType) {
-    params.set("resource_type", options.resourceType);
-  }
-  if (options.resourceKey) {
-    params.set("resource_key", options.resourceKey);
-  }
-  if (options.keyword) {
-    params.set("keyword", options.keyword);
-  }
-  if (options.statuses?.length) {
-    options.statuses
-      .map((status) => status.trim())
-      .filter(Boolean)
-      .forEach((status) => params.append("status", status));
-  }
-
-  const response = await axiosInstance.get(
-    `${coreBasePath}/evolution/suggestions?${params.toString()}`,
-  );
-  return extractEvolutionSuggestionList(response.data, options);
+  // Legacy resource suggestions were removed with the Plan2 resource-update
+  // contract. Current review flows use personal-resource draft endpoints.
+  return {
+    items: [],
+    page: Math.max(1, options.page || 1),
+    pageSize: Math.max(1, options.pageSize || 20),
+    total: 0,
+    hasMore: false,
+  };
 }
 
 export async function getEvolutionSuggestion(
   suggestionId: string,
 ): Promise<EvolutionSuggestionRecord | null> {
-  const response = await axiosInstance.get(
-    `${coreBasePath}/evolution/suggestions/${encodeURIComponent(suggestionId)}`,
-  );
-  const payload = unwrapEnvelope<unknown>(response.data);
-  const raw = toRawObject(payload);
-  return raw ? normalizeEvolutionSuggestion(raw) : null;
+  void suggestionId;
+  return null;
 }
 
 export async function approveEvolutionSuggestion(
   suggestionId: string,
 ): Promise<EvolutionSuggestionRecord | null> {
-  const response = await axiosInstance.post(
-    `${coreBasePath}/evolution/suggestions/${encodeURIComponent(suggestionId)}:approve`,
-  );
-  const payload = unwrapEnvelope<unknown>(response.data);
-  const raw = toRawObject(payload);
-  return raw ? normalizeEvolutionSuggestion(raw) : null;
+  void suggestionId;
+  return null;
 }
 
 const submitEvolutionSuggestionBatchDecision = async (
   action: "batchApprove" | "batchReject",
   suggestionIds: string[],
 ): Promise<EvolutionSuggestionRecord[]> => {
-  const ids = suggestionIds
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .filter((item, index, array) => array.indexOf(item) === index);
-
-  if (!ids.length) {
-    return [];
-  }
-
-  const response = await axiosInstance.post(
-    `${coreBasePath}/evolution/suggestions:${action}`,
-    { ids },
-  );
-  return extractEvolutionSuggestionList(response.data).items;
+  void action;
+  void suggestionIds;
+  return [];
 };
 
 export async function batchApproveEvolutionSuggestions(
@@ -718,12 +585,8 @@ export async function batchRejectEvolutionSuggestions(
 export async function rejectEvolutionSuggestion(
   suggestionId: string,
 ): Promise<EvolutionSuggestionRecord | null> {
-  const response = await axiosInstance.post(
-    `${coreBasePath}/evolution/suggestions/${encodeURIComponent(suggestionId)}:reject`,
-  );
-  const payload = unwrapEnvelope<unknown>(response.data);
-  const raw = toRawObject(payload);
-  return raw ? normalizeEvolutionSuggestion(raw) : null;
+  void suggestionId;
+  return null;
 }
 
 export async function getPersonalizationSetting(): Promise<boolean> {
@@ -779,34 +642,6 @@ export async function patchPersonalResourceMetadata(
     `${coreBasePath}/personal-resource/${resourceType}`,
     requestPayload,
   );
-}
-
-export async function createPreferenceSuggestions(input: {
-  sessionId: string;
-  suggestions: PreferenceSuggestionPayload[];
-}): Promise<PreferenceSuggestionRecord[]> {
-  const response = await axiosInstance.post(`${coreBasePath}/user_preference/suggestion`, {
-    session_id: input.sessionId,
-    suggestions: input.suggestions.map((item) => ({
-      title: item.title,
-      content: item.content,
-      reason: item.reason || "",
-    })),
-  });
-  const payload = unwrapEnvelope<{ items?: Array<RawObject | null> }>(response.data);
-  const items = Array.isArray(payload?.items) ? payload.items : [];
-
-  return items
-    .map((item) => toRawObject(item))
-    .filter((item): item is RawObject => Boolean(item))
-    .map((item) => ({
-      id: toStringValue(item.id, ""),
-      status: toStringValue(item.status, ""),
-      invalidReason: item.invalid_reason
-        ? localizeErrorCode("2000509")
-        : "",
-    }))
-    .filter((item) => Boolean(item.id));
 }
 
 export async function generatePreferenceDraft(

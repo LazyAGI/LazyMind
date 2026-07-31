@@ -280,7 +280,9 @@ def test_memory_review_route_returns_task_id(monkeypatch):
         }
         return memory_review_routes.MemoryReviewResult(status='success', task_id=kwargs['task_id'])
 
-    monkeypatch.setattr(memory_review_routes, 'review_memory', fake_review_memory)
+    fake_service = ModuleType('lazymind.review.service.memory_review')
+    fake_service.review_memory = fake_review_memory
+    monkeypatch.setitem(sys.modules, 'lazymind.review.service.memory_review', fake_service)
     payload = memory_review_routes.MemoryReviewPayload(
         task_id='memory_review_core-task-123',
         user_id='user-1',
