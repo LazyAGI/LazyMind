@@ -24,6 +24,14 @@ const macosFinalizeWorkflow = path.join(
   "workflows",
   "macos-notarization-finalize.yml",
 );
+const windowsWorkflow = path.join(
+  scriptsDir,
+  "..",
+  "..",
+  ".github",
+  "workflows",
+  "windows-installer.yml",
+);
 
 function nsisMacro(source, name) {
   const match = source.match(new RegExp(`!macro ${name}\\b([\\s\\S]*?)!macroend`));
@@ -130,6 +138,15 @@ test("Windows installer verifies and force-cleans processes left by warmup", () 
     /\$0 == 10[\s\S]*force-stop --install-dir "\$INSTDIR"[\s\S]*Goto LMWarmupCheckStopped/,
   );
   assert.match(install, /\$4 == 1[\s\S]*StrCpy \$3 4[\s\S]*\$3 != 0/);
+});
+
+test("Windows CI treats branches as non-tags without leaking git probe failures", () => {
+  const source = readFileSync(windowsWorkflow, "utf8");
+
+  assert.match(source, /REQUESTED_REF\.StartsWith\('refs\/tags\/'\)/);
+  assert.match(source, /EXPLICIT_REF -and -not \$env:REQUESTED_REF\.StartsWith\('refs\/'\)/);
+  assert.match(source, /is_tag=\$\(\$isTag\.ToString\(\)\.ToLowerInvariant\(\)\)/);
+  assert.match(source, /exit 0/);
 });
 
 test("macOS distribution build signs packages while CI owns notarization sequencing", () => {

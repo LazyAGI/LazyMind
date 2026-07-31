@@ -45,13 +45,32 @@ jobs:
           EXPLICIT_REF: ${{ inputs.git_ref }}
           REQUESTED_REF: ${{ inputs.git_ref || github.ref }}
         run: |
-          $tag = if ($env:REQUESTED_REF.StartsWith('refs/tags/')) { $env:REQUESTED_REF.Substring(10) } else { $env:REQUESTED_REF }
+          $ErrorActionPreference = "Stop"
+
+          $tag = $null
+          if ($env:REQUESTED_REF.StartsWith('refs/tags/')) {
+            $tag = $env:REQUESTED_REF.Substring(10)
+          } elseif ($env:EXPLICIT_REF -and -not $env:REQUESTED_REF.StartsWith('refs/')) {
+            git show-ref --verify --quiet "refs/tags/$($env:REQUESTED_REF)"
+            if ($LASTEXITCODE -eq 0) {
+              $tag = $env:REQUESTED_REF
+            }
+          }
+
           $isTag = $false
           if ($tag) {
-            git show-ref --verify --quiet "refs/tags/$tag"
-            $isTag = $LASTEXITCODE -eq 0 -and (git rev-parse "refs/tags/$tag^{commit}").Trim() -eq (git rev-parse HEAD).Trim()
+            $tagCommit = (git rev-parse "refs/tags/$tag^{commit}").Trim()
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not resolve release tag $tag"
+            }
+            $headCommit = (git rev-parse HEAD).Trim()
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not resolve the checked-out commit"
+            }
+            $isTag = $tagCommit -eq $headCommit
           }
           "is_tag=$($isTag.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          exit 0
 
       - name: Initialize development submodules
         if: steps.release.outputs.is_tag != 'true'
