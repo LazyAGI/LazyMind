@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import {
   Button,
   Drawer,
+  Dropdown,
   Empty,
   Form,
   Input,
@@ -23,7 +24,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadFile } from 'antd/es/upload/interface';
-import { AppstoreOutlined, CalendarOutlined, CheckCircleFilled, EllipsisOutlined, FileTextOutlined, PlayCircleOutlined, PlusOutlined, SearchOutlined, UnorderedListOutlined, UploadOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, CalendarOutlined, CheckCircleFilled, DeleteOutlined, EllipsisOutlined, FileTextOutlined, PlayCircleOutlined, PlusOutlined, SearchOutlined, UnorderedListOutlined, UploadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -31,7 +32,7 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 dayjs.extend(utc);
 dayjs.extend(timezone);
-import { batchCreateAutomationGroup, cancelSchedule, createSchedule, enableSchedule, listAutomationGroups, listSchedules, listScheduleTasks, moveSchedule, runScheduleNow, updateSchedule } from './api';
+import { batchCreateAutomationGroup, cancelSchedule, createSchedule, deleteAutomationGroup, deleteSchedule, enableSchedule, listAutomationGroups, listSchedules, listScheduleTasks, moveSchedule, runScheduleNow, updateSchedule } from './api';
 import type { AutomationGroup, BatchScheduleDraft, Schedule, Task, TaskListResponse } from './api';
 import { KnowledgeBaseServiceApi } from '@/modules/chat/utils/request';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
@@ -455,6 +456,10 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   const [keyword, setKeyword] = useState('');
   // Edit modal state
   const [editTarget, setEditTarget] = useState<Schedule | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Schedule | null>(null);
+  const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
+  const [deleteGroupTarget, setDeleteGroupTarget] = useState<AutomationGroup | null>(null);
+  const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
   // Incremented each time the modal opens to give VisualScheduler a fresh key,
   // forcing it to re-initialise its internal useState from the new value prop.
   const [modalKey, setModalKey] = useState(0);
@@ -534,6 +539,40 @@ export default function ScheduleList({ active }: ScheduleListProps) {
       message.success(t('taskCenter.scheduleRunNowSuccess'));
       void fetchSchedules();
     } catch {}
+  };
+
+  const handleDeleteSchedule = async () => {
+    if (!deleteTarget || deletingScheduleId) return;
+    const schedule = deleteTarget;
+    setDeletingScheduleId(schedule.id);
+    try {
+      await deleteSchedule(schedule.id);
+      setDeleteTarget(null);
+      if (selectedSchedule?.id === schedule.id) setSelectedSchedule(null);
+      message.success(t('taskCenter.scheduleDeleteSuccess'));
+      await fetchSchedules();
+    } catch {
+      message.error(t('taskCenter.scheduleDeleteFailed'));
+    } finally {
+      setDeletingScheduleId(null);
+    }
+  };
+
+  const handleDeleteGroup = async () => {
+    if (!deleteGroupTarget || deletingGroupId) return;
+    const group = deleteGroupTarget;
+    setDeletingGroupId(group.id);
+    try {
+      await deleteAutomationGroup(group.id);
+      setDeleteGroupTarget(null);
+      if (groupFilter === group.id) setGroupFilter(undefined);
+      message.success(t('taskCenter.groupDeleteSuccess'));
+      await fetchSchedules();
+    } catch {
+      message.error(t('taskCenter.groupDeleteFailed'));
+    } finally {
+      setDeletingGroupId(null);
+    }
   };
 
   const handleOpenEdit = (record: Schedule) => {
@@ -653,7 +692,19 @@ export default function ScheduleList({ active }: ScheduleListProps) {
       <div className='schedule-card-actions' onClick={(event) => event.stopPropagation()}>
         <label><Switch size='small' checked={schedule.enabled} onChange={(checked) => void (checked ? handleEnable(schedule.id) : handleDisable(schedule.id))} /> {schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</label>
         <span>{t('taskCenter.scheduleRunTotal', { total: schedule.run_count ?? 0 })}</span>
-        <div><Button className='schedule-run-button' icon={<PlayCircleOutlined />} onClick={() => void handleRunNow(schedule.id)}>{viewMode === 'large' ? t('taskCenter.scheduleRunNow') : null}</Button><Button icon={<EllipsisOutlined />} aria-label={t('taskCenter.scheduleEdit')} onClick={() => handleOpenEdit(schedule)} /></div>
+        <div>
+          <Button className='schedule-run-button' icon={<PlayCircleOutlined />} onClick={() => void handleRunNow(schedule.id)}>{viewMode === 'large' ? t('taskCenter.scheduleRunNow') : null}</Button>
+          <Dropdown
+            trigger={['click']}
+            menu={{ items: [
+              { key: 'edit', label: t('taskCenter.scheduleEdit'), onClick: () => handleOpenEdit(schedule) },
+              { type: 'divider' },
+              { key: 'delete', label: t('taskCenter.scheduleDelete'), danger: true, onClick: () => setDeleteTarget(schedule) },
+            ] }}
+          >
+            <Button icon={<EllipsisOutlined />} aria-label={t('taskCenter.scheduleActions')} />
+          </Dropdown>
+        </div>
       </div>
     </article>
   );
@@ -664,7 +715,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
     setViewMode('compact');
   };
 
-  const renderGroupCard = (group: { id: string; name: string; remark?: string }) => {
+  const renderGroupCard = (group: AutomationGroup) => {
     const items = schedules.filter((schedule) => (schedule.group_id || '') === group.id);
     const visibleItems = items.filter((schedule) => statusFilter === 'all' || (statusFilter === 'enabled' ? schedule.enabled : !schedule.enabled));
     if (keyword && !group.name.toLowerCase().includes(keyword.toLowerCase()) && !visibleItems.some((schedule) => `${schedule.name} ${schedule.prompt_template}`.toLowerCase().includes(keyword.toLowerCase()))) return null;
@@ -693,7 +744,12 @@ export default function ScheduleList({ active }: ScheduleListProps) {
             ) : null}
           </> : <span>-</span>}
         </div>
-        <Button className='schedule-group-tasks-button' onClick={() => openGroupTasks(group.id)}>查看组内任务</Button>
+        <Space size={8}>
+          <Button className='schedule-group-tasks-button' onClick={() => openGroupTasks(group.id)}>查看组内任务</Button>
+          <Button className='schedule-group-delete-button' danger type='default' icon={<DeleteOutlined />} aria-label={t('taskCenter.groupDelete')} onClick={() => setDeleteGroupTarget(group)}>
+            {t('taskCenter.groupDelete')}
+          </Button>
+        </Space>
       </footer>
     </article>;
   };
@@ -778,6 +834,30 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           <section><h3>{t('taskCenter.scheduleTaskCount')}</h3><ExpandedScheduleTasks scheduleId={selectedSchedule.id} /></section>
         </div>}
       </Drawer>
+      <Modal
+        title={t('taskCenter.scheduleDeleteConfirmTitle')}
+        open={Boolean(deleteTarget)}
+        onCancel={() => { if (!deletingScheduleId) setDeleteTarget(null); }}
+        onOk={() => void handleDeleteSchedule()}
+        okText={t('taskCenter.scheduleDeleteOk')}
+        cancelText={t('taskCenter.scheduleDeleteCancel')}
+        okButtonProps={{ danger: true }}
+        confirmLoading={Boolean(deletingScheduleId)}
+      >
+        <p>{t('taskCenter.scheduleDeleteConfirmContent')}</p>
+      </Modal>
+      <Modal
+        title={t('taskCenter.groupDeleteConfirmTitle')}
+        open={Boolean(deleteGroupTarget)}
+        onCancel={() => { if (!deletingGroupId) setDeleteGroupTarget(null); }}
+        onOk={() => void handleDeleteGroup()}
+        okText={t('taskCenter.groupDeleteOk')}
+        cancelText={t('taskCenter.groupDeleteCancel')}
+        okButtonProps={{ danger: true }}
+        confirmLoading={Boolean(deletingGroupId)}
+      >
+        <p>{t('taskCenter.groupDeleteConfirmContent')}</p>
+      </Modal>
       <Modal
         title={editTarget ? (
           <Input

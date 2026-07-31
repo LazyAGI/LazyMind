@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Input, Progress, Segmented, Select, Table, Tooltip } from 'antd';
+import { Button, Input, message, Progress, Segmented, Select, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { AppstoreOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, EllipsisOutlined, HourglassOutlined, ReloadOutlined, SearchOutlined, StopOutlined, SyncOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -111,6 +111,22 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
     navigate('/agent/chat/home');
   };
 
+  const handleDelete = async (task: Task) => {
+    try {
+      await removeTask(task.id);
+    } catch {
+      message.error(t('taskCenter.taskRemoveFailed'));
+      return;
+    }
+    setSelected(null);
+    message.success(t('taskCenter.taskRemoveSuccess'));
+    if (tasks.length === 1 && page > 1) {
+      onPageChange(page - 1);
+      return;
+    }
+    await load();
+  };
+
   return (
     <div className='all-tasks'>
       <div className='all-tasks-toolbar'>
@@ -127,7 +143,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
         </div>
       </div>
       <Table rowKey='id' className='task-table' tableLayout='fixed' loading={loading} columns={columns} dataSource={tasks} onRow={(task: Task) => ({ onClick: () => setSelected(task) })} rowClassName={(task: Task) => `task-table-row status-${task.status}`} pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: onPageChange, showSizeChanger: false, showTotal: (value: number) => t('taskCenter.taskTotalItems', { total: value }) }} />
-      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} onDelete={async (task) => { await removeTask(task.id); setSelected(null); await load(); }} />
+      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} onDelete={handleDelete} />
       {graphTask?.plugin_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.plugin_session_id} pluginId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
     </div>
   );

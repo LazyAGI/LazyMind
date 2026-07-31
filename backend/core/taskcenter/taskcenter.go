@@ -60,7 +60,9 @@ func UpdateTaskStatus(ctx context.Context, db *gorm.DB, id, status string) error
 		now := time.Now().UTC()
 		updates["finished_at"] = now
 	}
-	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).Where("id = ?", id).Updates(updates).Error
+	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
+		Where("id = ? AND archived_at IS NULL AND status NOT IN ('canceled')", id).
+		Updates(updates).Error
 }
 
 // UpdateTaskFailure persists a terminal task failure together with a user-facing reason.
@@ -77,7 +79,7 @@ func UpdateTaskFailure(ctx context.Context, db *gorm.DB, id, reason string) erro
 	}
 	now := time.Now().UTC()
 	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("id = ? AND status NOT IN ('succeeded','skipped','canceled')", id).
+		Where("id = ? AND archived_at IS NULL AND status NOT IN ('succeeded','skipped','canceled')", id).
 		Updates(map[string]any{
 			"status":        "failed",
 			"progress_json": progressWithFailureReason(task.ProgressJSON, reason),
@@ -116,7 +118,7 @@ func UpdateTaskStatusBySession(ctx context.Context, db *gorm.DB, sessionID, stat
 		updates["finished_at"] = now
 	}
 	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("plugin_session_id = ? AND status NOT IN ('succeeded','failed','canceled')", sessionID).
+		Where("plugin_session_id = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", sessionID).
 		Updates(updates).Error
 }
 
@@ -595,12 +597,17 @@ func CancelTaskByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // RemoveTaskHandler handles POST /task-center/tasks/{task_id}:remove.
-// It archives the run and soft-deletes its task conversation as one operation.
+// It archives the run and, for scheduler-owned task conversations, soft-deletes
+// the conversation as one operation.
 func RemoveTaskHandler(w http.ResponseWriter, r *http.Request) {
-	userID := store.UserID(r)
+	userID := strings.TrimSpace(store.UserID(r))
 	path := strings.TrimPrefix(r.URL.Path, "/task-center/tasks/")
 	id := strings.TrimSuffix(path, ":remove")
 	id = strings.Split(id, ":")[0]
+	if userID == "" {
+		common.ReplyErr(w, "user not found", http.StatusUnauthorized)
+		return
+	}
 
 	db := store.DB()
 	if db == nil {
@@ -637,12 +644,18 @@ func archiveTaskRun(ctx context.Context, db *gorm.DB, userID, id string) (orm.Ta
 			updates["dependency_status"] = "canceled"
 			updates["finished_at"] = now
 		}
-		if err := tx.Model(&orm.TaskCenterTask{}).Where("id = ? AND user_id = ?", id, userID).Updates(updates).Error; err != nil {
-			return err
+		result := tx.Model(&orm.TaskCenterTask{}).
+			Where("id = ? AND user_id = ? AND archived_at IS NULL", id, userID).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
 		}
-		if existing.ConversationID != "" {
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		if existing.TaskType == "scheduled" && existing.ConversationID != "" {
 			if err := tx.Model(&orm.Conversation{}).
-				Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", existing.ConversationID, userID).
+				Where("id = ? AND create_user_id = ? AND is_task_conv = ? AND deleted_at IS NULL", existing.ConversationID, userID, true).
 				Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
 				return err
 			}

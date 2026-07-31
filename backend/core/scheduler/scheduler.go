@@ -70,6 +70,30 @@ func CancelSchedule(ctx context.Context, db *gorm.DB, userID, id string) error {
 		Updates(map[string]any{"enabled": false}).Error
 }
 
+// DeleteSchedule permanently removes a schedule rule and its dependency edges.
+// Historical task-center runs are intentionally kept; they are independent
+// execution records and can still be removed from the task center separately.
+func DeleteSchedule(ctx context.Context, db *gorm.DB, userID, id string) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var schedule orm.UserSchedule
+		if err := tx.Where("id = ? AND user_id = ?", id, userID).First(&schedule).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ? AND (source_schedule_id = ? OR target_schedule_id = ?)", userID, id, id).
+			Delete(&orm.ScheduleDependency{}).Error; err != nil {
+			return err
+		}
+		result := tx.Where("id = ? AND user_id = ?", id, userID).Delete(&orm.UserSchedule{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+}
+
 // nextCronTime parses a cron expression and returns the next fire time.
 // Only standard 5-field cron is supported ("minute hour dom month dow").
 // Returns an error if the expression is invalid.
@@ -653,6 +677,31 @@ func CancelScheduleHandler(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	if err := CancelSchedule(r.Context(), db, userID, id); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, nil)
+}
+
+// DeleteScheduleHandler handles DELETE /schedules/{schedule_id}.
+func DeleteScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "user not found", http.StatusUnauthorized)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/schedules/")
+	if id == "" {
+		common.ReplyErr(w, "schedule_id required", http.StatusBadRequest)
+		return
+	}
+
+	err := DeleteSchedule(r.Context(), store.DB(), userID, id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		common.ReplyErr(w, "schedule not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

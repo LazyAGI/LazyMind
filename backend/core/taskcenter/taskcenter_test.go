@@ -130,6 +130,55 @@ func TestArchiveTaskRunHidesRunAndSoftDeletesConversation(t *testing.T) {
 	}
 }
 
+func TestArchiveTaskRunPreservesNonTaskConversationAndStopsLateUpdates(t *testing.T) {
+	db := newTestTaskDB(t)
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.TaskRunInput{}); err != nil {
+		t.Fatalf("auto migrate related models: %v", err)
+	}
+	now := time.Now().UTC()
+	conversation := orm.Conversation{ID: "conv-keep", DisplayName: "用户会话", ChannelID: "default", IsTaskConv: false, BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "user-1", CreatedAt: now, UpdatedAt: now}}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	sessionID := "session-remove"
+	task := orm.TaskCenterTask{ID: "plugin-remove", UserID: "user-1", ConversationID: conversation.ID, PluginSessionID: &sessionID, TaskType: "plugin_run", Status: "running", CreatedAt: now, UpdatedAt: now}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := archiveTaskRun(context.Background(), db.DB, "user-1", task.ID); err != nil {
+		t.Fatalf("archive task run: %v", err)
+	}
+
+	var archived orm.TaskCenterTask
+	if err := db.First(&archived, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if archived.ArchivedAt == nil || archived.Status != "canceled" || archived.FinishedAt == nil {
+		t.Fatalf("expected canceled archived task, got %#v", archived)
+	}
+	var kept orm.Conversation
+	if err := db.First(&kept, "id = ?", conversation.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if kept.DeletedAt != nil {
+		t.Fatal("ordinary conversation must not be soft-deleted with its task-center record")
+	}
+
+	if err := UpdateTaskStatus(context.Background(), db.DB, task.ID, "succeeded"); err != nil {
+		t.Fatalf("late status update: %v", err)
+	}
+	if err := UpdateTaskStatusBySession(context.Background(), db.DB, sessionID, "succeeded"); err != nil {
+		t.Fatalf("late session status update: %v", err)
+	}
+	if err := db.First(&archived, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if archived.Status != "canceled" {
+		t.Fatalf("late completion must not revive archived task, got status=%q", archived.Status)
+	}
+}
+
 func TestResolveTaskStatusDoesNotTreatStreamingHistoryAsComplete(t *testing.T) {
 	db := newTestTaskDB(t)
 	if err := db.AutoMigrate(&orm.ChatHistory{}); err != nil {

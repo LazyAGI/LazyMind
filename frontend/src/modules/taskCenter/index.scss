@@ -572,6 +572,28 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   > footer .schedule-group-task-tag.ant-tag { min-width: 0; max-width: 100%; margin-inline-end: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   > footer .schedule-group-task-count.ant-tag { margin-inline-end: 0; flex: 0 0 auto; }
   > footer .schedule-group-tasks-button.ant-btn { flex: 0 0 auto; white-space: nowrap; }
+  > footer .schedule-group-delete-button.ant-btn {
+    flex: 0 0 auto;
+    height: auto;
+    padding: 4px 10px;
+    border: 1px solid $red !important;
+    border-color: $red !important;
+    border-radius: 8px;
+    box-shadow: none !important;
+    background: #fff !important;
+    color: $red;
+    white-space: nowrap;
+  }
+  > footer .schedule-group-delete-button.ant-btn:hover,
+  > footer .schedule-group-delete-button.ant-btn:active {
+    border-color: $red !important;
+    background: rgb(220 76 76 / 6%) !important;
+    color: $red;
+  }
+  > footer .schedule-group-delete-button.ant-btn:focus-visible {
+    outline: 2px solid rgb(220 76 76 / 35%);
+    outline-offset: 2px;
+  }
 }
 
 .schedule-group-task-tooltip { white-space: normal; }

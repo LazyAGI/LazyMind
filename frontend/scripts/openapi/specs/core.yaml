@@ -11917,6 +11917,17 @@ paths:
                     description: OK
             summary: POST /schedules
     /api/core/schedules/{schedule_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /schedules/{schedule_id}
         put:
             parameters:
                 - in: path

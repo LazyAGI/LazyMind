@@ -161,6 +161,10 @@ export async function updateSchedule(id: string, req: Partial<CreateScheduleRequ
   return resp.data;
 }
 
+export async function deleteSchedule(id: string): Promise<void> {
+  await axiosInstance.delete(`${CORE}/schedules/${id}`);
+}
+
 export async function listScheduleTasks(
   scheduleId: string,
   page: number,
