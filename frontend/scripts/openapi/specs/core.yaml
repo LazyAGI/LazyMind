@@ -3739,6 +3739,69 @@ components:
                 - installed
                 - name
             type: object
+        channelCommandOpenAPI:
+            properties:
+                description:
+                    type: string
+                name:
+                    type: string
+            required:
+                - description
+                - name
+            type: object
+        channelCommandRegistryOpenAPI:
+            properties:
+                commands:
+                    items:
+                        $ref: '#/components/schemas/channelCommandOpenAPI'
+                    type: array
+                output_schema:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                schema_version:
+                    type: string
+                selection_rules:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - schema_version
+            type: object
+        channelIntentOpenAPIRequest:
+            properties:
+                command_registry:
+                    $ref: '#/components/schemas/channelCommandRegistryOpenAPI'
+                message:
+                    type: string
+                provider:
+                    type: string
+                state:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+            required:
+                - command_registry
+                - message
+                - provider
+            type: object
+        channelIntentOpenAPIResponse:
+            properties:
+                command:
+                    type: string
+                parameters:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                schema_version:
+                    type: string
+            required:
+                - command
+                - schema_version
+            type: object
         checkModelProviderOpenAPIRequest:
             properties:
                 api_key:
@@ -3754,6 +3817,25 @@ components:
                 - base_url
                 - dry_run
                 - provider_name
+            type: object
+        conversationSearchConfigOpenAPIRequest:
+            properties:
+                dataset_ids:
+                    items:
+                        type: string
+                    type: array
+            type: object
+        conversationSearchConfigOpenAPIResponse:
+            properties:
+                conversation_id:
+                    type: string
+                search_config:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+            required:
+                - conversation_id
             type: object
         createModelProviderGroupOpenAPIRequest:
             properties:
@@ -3953,7 +4035,7 @@ components:
                 is_default:
                     type: boolean
                 max_input_tokens:
-                    description: Maximum catalog LLM or VLM input context window, for example 128K or 1M; null for other, custom, or unknown models
+                    description: Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
                     nullable: true
                     type: string
                 model_type:
@@ -4094,6 +4176,19 @@ components:
                 - review_status
                 - title
                 - version
+            type: object
+        marketDeleteOpenAPIResponse:
+            properties:
+                deleted:
+                    type: boolean
+                market_item_id:
+                    type: string
+                source_skill_id:
+                    type: string
+            required:
+                - deleted
+                - market_item_id
+                - source_skill_id
             type: object
         marketEditOpenAPIRequest:
             properties:
@@ -4661,7 +4756,7 @@ components:
                 group_name:
                     type: string
                 max_input_tokens:
-                    description: Maximum selected catalog LLM or VLM input context window, for example 128K or 1M; null for other, custom, or unknown models
+                    description: Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
                     nullable: true
                     type: string
                 model_id:
@@ -5850,6 +5945,23 @@ components:
             required:
                 - ready
             type: object
+        writerDocumentSyncOpenAPIRequest:
+            properties:
+                base_revision:
+                    type: integer
+                revised_document:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                source_document:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+            required:
+                - base_revision
+            type: object
 info:
     description: LazyMind Go backend core API - proxies to algorithm services. text Kong text /api/core。
     title: Backend Core API
@@ -5887,6 +5999,23 @@ paths:
             tags:
                 - skill-market
     /api/core/admin/skill-market/{market_item_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: market_item_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/marketDeleteOpenAPIResponse'
+                    description: Deleted market skill
+            summary: Permanently delete market skill item
+            tags:
+                - skill-market
         patch:
             parameters:
                 - in: path
@@ -6538,51 +6667,6 @@ paths:
             summary: List AB test case details for a gate version
             tags:
                 - agent
-    /api/core/agent/threads/{thread_id}/gates/eval/versions/{version}/bad-cases:
-        get:
-            description: Proxies Evo GET /threads/{thread_id}/gates/eval/versions/{version}/bad-cases.
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: version
-                  required: true
-                  schema:
-                    type: integer
-                - in: query
-                  name: page_size
-                  required: false
-                  schema:
-                    type: integer
-                - in: query
-                  name: page_token
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: keyword
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: failure_type
-                  required: false
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Evo eval bad case page
-            summary: List eval bad cases for a gate version
-            tags:
-                - agent
     /api/core/agent/threads/{thread_id}/messages:
         get:
             description: Proxies Evo GET /threads/{thread_id}/messages.
@@ -6794,6 +6878,35 @@ paths:
             summary: List agent thread steps
             tags:
                 - agent
+    /api/core/automation-groups:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /automation-groups
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /automation-groups
+    /api/core/automation-groups/{group_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /automation-groups/{group_id}
+    /api/core/automation-groups:batch-create:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /automation-groups:batch-create
     /api/core/builtin-skills:
         get:
             description: Lists immutable built-in templates and their installation state for the current user.
@@ -6825,6 +6938,25 @@ paths:
             summary: Enable builtin directory skill
             tags:
                 - skills
+    /api/core/channel-intents:classify:
+        post:
+            description: Classifies an external-channel message against the caller-provided command registry and parameter schemas.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/channelIntentOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/channelIntentOpenAPIResponse'
+                    description: Classified channel command
+            summary: Classify a channel message
+            tags:
+                - channels
     /api/core/chat:
         post:
             responses:
@@ -7061,6 +7193,22 @@ paths:
                 "200":
                     description: OK
             summary: POST /conversations/{conversation_id}:stop
+    /api/core/conversations/{conversation_id}:toolLimitDecision:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Decision forwarded
+            summary: Choose whether to continue after the tool-round limit
     /api/core/conversations/{name}:
         delete:
             parameters:
@@ -7149,6 +7297,31 @@ paths:
                                 $ref: '#/components/schemas/ConversationHistoryListResponse'
                     description: Chat history page ordered by seq descending; may include in-flight turns from Redis
             summary: List conversation history (paginated)
+    /api/core/conversations/{name}:search-config:
+        patch:
+            description: Replaces the knowledge bases on an existing conversation while preserving its other search settings.
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/conversationSearchConfigOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/conversationSearchConfigOpenAPIResponse'
+                    description: Updated conversation search config
+            summary: Update conversation knowledge bases
+            tags:
+                - conversations
     /api/core/conversations:batchDelete:
         post:
             requestBody:
@@ -7171,6 +7344,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /conversations:chat
+    /api/core/conversations:estimateContextUsage:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /conversations:estimateContextUsage
+    /api/core/conversations:exportContextPrompt:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /conversations:exportContextPrompt
     /api/core/conversations:feedBackChatHistory:
         post:
             requestBody:
@@ -7448,6 +7633,15 @@ paths:
                     items:
                         type: string
                     type: array
+                - description: Filter datasets by creation source.
+                  in: query
+                  name: source
+                  required: false
+                  schema:
+                    enum:
+                        - manual
+                        - cloud
+                    type: string
             responses:
                 "200":
                     content:
@@ -9787,7 +9981,7 @@ paths:
             summary: POST /model_providers/{model_provider_id}/groups/{group_id}/keys
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models:
         get:
-            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog LLM or VLM model's maximum input context window expressed as a string such as 128K or 1M. Other, custom, or unknown models return null.
+            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -9912,7 +10106,7 @@ paths:
                 - model_providers
     /api/core/model_providers/models:
         get:
-            description: Requires query model_type (e.g. llm or vlm). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog LLM or VLM model's maximum input context window expressed as a string such as 128K or 1M; other, custom, or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
+            description: Requires query model_type (e.g. llm, vlm, or embed). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
             parameters:
                 - in: query
                   name: model_type
@@ -9956,7 +10150,7 @@ paths:
                 - model_providers
     /api/core/model_providers/selected_models:
         get:
-            description: Returns the current user's selected model for each model_type. Each selection includes nullable max_input_tokens, the selected catalog LLM or VLM model's maximum input context window expressed as a string such as 128K or 1M; other, custom, or unknown models return null.
+            description: Returns the current user's selected model for each model_type. Each selection includes nullable max_input_tokens, the selected catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null.
             responses:
                 "200":
                     content:
@@ -10811,6 +11005,42 @@ paths:
                 "200":
                     description: OK
             summary: GET /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: integer
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/writerDocumentSyncOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: WriterDocument sync result
+            summary: Sync an edited WriterDocument to Feishu
+            tags:
+                - plugin
+                - writer
     /api/core/plugin-sessions/{session_id}/slots/{slot_id}/order:
         get:
             parameters:
@@ -11722,6 +11952,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /schedules/{schedule_id}:enable
+    /api/core/schedules/{schedule_id}:move:
+        post:
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /schedules/{schedule_id}:move
     /api/core/schedules/{schedule_id}:run-now:
         post:
             parameters:
@@ -11865,6 +12107,23 @@ paths:
             tags:
                 - skill-market
     /api/core/skill-market/admin/items/{market_item_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: market_item_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/marketDeleteOpenAPIResponse'
+                    description: Deleted market skill
+            summary: Permanently delete market skill item
+            tags:
+                - skill-market
         patch:
             parameters:
                 - in: path
@@ -13102,6 +13361,29 @@ paths:
                 "200":
                     description: OK
             summary: POST /static-files:sign
+    /api/core/system-dependencies/ffmpeg:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /system-dependencies/ffmpeg
+        put:
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /system-dependencies/ffmpeg
+    /api/core/system-dependencies/ffmpeg:check:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /system-dependencies/ffmpeg:check
+    /api/core/system-dependencies/ffmpeg:install:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /system-dependencies/ffmpeg:install
     /api/core/system-query/documents:aggregate:
         post:
             requestBody:
@@ -13138,11 +13420,6 @@ paths:
                 "200":
                     description: OK
             summary: GET /task-center/tasks
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /task-center/tasks
     /api/core/task-center/tasks/{task_id}:
         get:
             parameters:
