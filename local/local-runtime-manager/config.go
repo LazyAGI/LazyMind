@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -491,7 +492,16 @@ func localPortAvailable(port int) bool {
 }
 
 func localPortAvailableOn(address string, port int) bool {
-	ln, err := net.Listen("tcp", net.JoinHostPort(address, strconv.Itoa(port)))
+	target := net.JoinHostPort(address, strconv.Itoa(port))
+	// On macOS a listener created with socket reuse options (for example a
+	// Colima SSH port forward) can make a second net.Listen probe appear to
+	// succeed.  A successful connect is definitive evidence that the port is
+	// already serving another process, so check it before attempting to bind.
+	if conn, err := net.DialTimeout("tcp", target, 100*time.Millisecond); err == nil {
+		_ = conn.Close()
+		return false
+	}
+	ln, err := net.Listen("tcp", target)
 	if err != nil {
 		return false
 	}

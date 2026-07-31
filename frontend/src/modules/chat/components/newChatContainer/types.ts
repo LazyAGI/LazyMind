@@ -50,7 +50,7 @@ export interface ChatContainerProps {
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   disabledReason?: string;
-  disabledDescription?: string;
+  disabledDescription?: ReactNode;
   disabledAction?: ReactNode;
   onPluginSettingsChange?: (
     settings: import("@/modules/chat/utils/request").ConversationPluginSettings,

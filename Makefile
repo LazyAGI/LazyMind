@@ -193,7 +193,7 @@ help:
 	@echo "  make local-up - Build/start local LazyMind without containers"
 	@echo "  make local-up-lan - Build/start local LazyMind for LAN access with local admin auto-login enabled"
 	@echo "  make desktop-darwin-arm64 - Build Darwin arm64 Desktop app"
-	@echo "  make desktop-darwin-arm64-dmg - Build signed/notarized Darwin arm64 DMG"
+	@echo "  make desktop-darwin-arm64-dmg - Build a Developer ID-signed Darwin arm64 DMG"
 	@echo "  make desktop-darwin-arm64-clean - Remove Darwin arm64 Desktop build outputs"
 	@echo "  make desktop-windows-x64 - Build Windows x64 Desktop portable ZIP"
 	@echo "  make desktop-windows-x64-installer - Build Windows x64 per-user installer"
@@ -445,7 +445,6 @@ desktop-darwin-arm64:
 desktop-darwin-arm64-dmg:
 	@LAZYMIND_DESKTOP_PACKAGE_KIND=dmg \
 		LAZYMIND_DESKTOP_SIGNING_MODE=developer-id \
-		LAZYMIND_DESKTOP_NOTARIZE="$${LAZYMIND_DESKTOP_NOTARIZE:-true}" \
 		bash desktop/scripts/build-darwin-arm64.sh
 
 desktop-darwin-arm64-clean:
