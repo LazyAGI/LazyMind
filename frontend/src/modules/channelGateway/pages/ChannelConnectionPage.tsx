@@ -1,8 +1,9 @@
-import { useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
 import {
   Button,
   Empty,
   Input,
+  message,
   Modal,
   QRCode,
   Space,
@@ -16,6 +17,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   CheckCircleFilled,
   CloseCircleFilled,
+  LinkOutlined,
   LockOutlined,
   MobileOutlined,
   QrcodeOutlined,
@@ -25,16 +27,35 @@ import {
   WechatOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 
 import type {
   ChannelAccount,
   ChannelProvider,
   ConnectionSession,
 } from '../api';
+import {
+  disconnectChannelAccount,
+  listChannelAccounts,
+} from '../api';
 import { useChannelConnection } from '../hooks/useChannelConnection';
 import './channelConnectionPage.scss';
 
 const { Paragraph, Text, Title } = Typography;
+
+function ChannelIcon({ provider }: { provider: ChannelProvider }) {
+  return provider === 'wechat'
+    ? <WechatOutlined />
+    : (
+      <img
+        className="feishu-official-icon"
+        src="/feishu-official.svg"
+        alt=""
+        aria-hidden="true"
+      />
+    );
+}
 
 function formatTime(value: string | null | undefined): string {
   if (!value) {
@@ -122,36 +143,20 @@ interface ChannelConnectionPageProps {
   provider: ChannelProvider;
 }
 
-export default function ChannelConnectionPage({
-  provider,
-}: ChannelConnectionPageProps) {
-  const [accountsPanelOpen, setAccountsPanelOpen] = useState(false);
+function ChannelConnectionPage({ provider }: ChannelConnectionPageProps) {
   const translationKey = `channelGateway.${provider}`;
   const copy = (name: string) => `${translationKey}.${name}`;
-  const channelIcon = provider === 'wechat'
-    ? <WechatOutlined />
-    : (
-      <img
-        className="feishu-official-icon"
-        src="/feishu-official.svg"
-        alt=""
-        aria-hidden="true"
-      />
-    );
+  const channelIcon = <ChannelIcon provider={provider} />;
   const {
     t,
     accounts,
-    accountsLoading,
     session,
     sessionStarting,
     actionLoading,
-    disconnectingAccountId,
     challengeValue,
     setChallengeValue,
-    loadAccounts,
     startScan,
     cancelScan,
-    disconnectAccount,
     refreshQr,
     submitChallenge,
     closeSessionPanel,
@@ -160,153 +165,12 @@ export default function ChannelConnectionPage({
   const step = currentStep(session);
   const hasAccounts = accounts.length > 0;
   const activeScan = isActiveScan(session);
-  const accountsPanelId = `${provider}-accounts-panel`;
-  const accountsTitleId = `${provider}-accounts-title`;
   const connectWorkspaceId = `${provider}-connect-workspace`;
   const connectTitleId = `${provider}-connect-title`;
 
   const beginScan = () => {
     void startScan();
   };
-
-  const columns: ColumnsType<ChannelAccount> = [
-    {
-      title: t(copy('accountLabel')),
-      dataIndex: 'label',
-      key: 'label',
-      width: 240,
-      render: (value: string) => (
-        <div className="wechat-account-name">
-          <span>{channelIcon}</span>
-          <Tooltip title={value || '-'}>
-            <strong>{value || '-'}</strong>
-          </Tooltip>
-        </div>
-      ),
-    },
-    {
-      title: t(copy('accountStatus')),
-      dataIndex: 'status',
-      key: 'status',
-      width: 140,
-      render: (value: string) => (
-        <Tag color={statusColor(value)}>
-          {t(copy(`accountStatusMap.${value}`), { defaultValue: value })}
-        </Tag>
-      ),
-    },
-    {
-      title: t(copy('runtimeStatus')),
-      dataIndex: 'runtime_status',
-      key: 'runtime_status',
-      width: 140,
-      render: (value: string) => (
-        <Tag color={statusColor(value)}>
-          {t(copy(`runtimeStatusMap.${value}`), { defaultValue: value })}
-        </Tag>
-      ),
-    },
-    {
-      title: t(copy('connectedAt')),
-      dataIndex: 'connected_at',
-      key: 'connected_at',
-      width: 180,
-      render: formatTime,
-    },
-    {
-      title: t(copy('lastMessageAt')),
-      dataIndex: 'last_message_at',
-      key: 'last_message_at',
-      width: 180,
-      render: formatTime,
-    },
-    {
-      title: t(copy('lastError')),
-      dataIndex: 'last_error',
-      key: 'last_error',
-      width: 200,
-      ellipsis: true,
-      render: (value: string | null) =>
-        value ? (
-          <Tooltip title={value} placement="top" overlayStyle={{ maxWidth: 360 }}>
-            <span className="wechat-error-cell">{value}</span>
-          </Tooltip>
-        ) : '-',
-    },
-    {
-      title: t(copy('actions')),
-      key: 'actions',
-      fixed: 'right',
-      width: 110,
-      render: (_value, account) => (
-        <Button
-          danger
-          type="link"
-          loading={disconnectingAccountId === account.id}
-          onClick={() => {
-            Modal.confirm({
-              title: t(copy('disconnectConfirmTitle')),
-              content: t(copy('disconnectConfirmContent'), {
-                account: account.label,
-              }),
-              okText: t(copy('disconnectConfirmOk')),
-              cancelText: t('common.cancel'),
-              okButtonProps: { danger: true },
-              onOk: () => disconnectAccount(account.id),
-            });
-          }}
-        >
-          {t(copy('disconnectAccount'))}
-        </Button>
-      ),
-    },
-  ];
-
-  const accountsSection = (
-    <section
-      id={accountsPanelId}
-      className="wechat-connection-accounts"
-      aria-labelledby={accountsTitleId}
-    >
-      <div className="wechat-connection-accounts-head">
-        <div>
-          <div className="wechat-accounts-title-row">
-            <Title id={accountsTitleId} level={4}>
-              {t(copy('accountsTitle'))}
-            </Title>
-            {!accountsLoading ? <span>{accounts.length}</span> : null}
-          </div>
-          <Text type="secondary">{t(copy('accountsHint'))}</Text>
-        </div>
-        <Space wrap className="wechat-accounts-actions">
-          <Button
-            icon={<ReloadOutlined />}
-            loading={accountsLoading}
-            onClick={() => void loadAccounts()}
-          >
-            {t(copy('refreshAccounts'))}
-          </Button>
-        </Space>
-      </div>
-
-      <Table<ChannelAccount>
-        rowKey="id"
-        loading={accountsLoading}
-        columns={columns}
-        dataSource={accounts}
-        pagination={false}
-        scroll={{ x: 1190 }}
-        locale={{
-          emptyText: (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={t(copy('accountsEmpty'))}
-            />
-          ),
-        }}
-      />
-    </section>
-  );
 
   const connectWorkspace = (
     <section
@@ -472,27 +336,248 @@ export default function ChannelConnectionPage({
   );
 
   return (
-    <div className={`wechat-connection-page is-${provider}`}>
-      <header className="wechat-connection-header">
-        <div className="wechat-connection-heading">
-          <span aria-hidden="true">{channelIcon}</span>
-          <div>
-            <Title level={2}>{t(copy('title'))}</Title>
-            <Paragraph>{t(copy('subtitle'))}</Paragraph>
+    <div className={`wechat-connection-page is-${provider} is-embedded`}>
+      <main className="wechat-connection-content">
+        {connectWorkspace}
+      </main>
+    </div>
+  );
+}
+
+function accountProvider(account: ChannelAccount): ChannelProvider {
+  return account.provider === 'feishu' ? 'feishu' : 'wechat';
+}
+
+export function TerminalConnectionPage() {
+  const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [accountsPanelOpen, setAccountsPanelOpen] = useState(false);
+  const [accounts, setAccounts] = useState<ChannelAccount[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(true);
+  const [disconnectingAccountId, setDisconnectingAccountId] = useState<string | null>(null);
+  const provider: ChannelProvider = (
+    searchParams.get('provider') === 'feishu' ? 'feishu' : 'wechat'
+  );
+
+  const loadAccounts = useCallback(async () => {
+    setAccountsLoading(true);
+    try {
+      const [wechatAccounts, feishuAccounts] = await Promise.all([
+        listChannelAccounts('wechat'),
+        listChannelAccounts('feishu'),
+      ]);
+      setAccounts(
+        [...wechatAccounts.items, ...feishuAccounts.items]
+          .sort((left, right) => (
+            dayjs(right.updated_at).valueOf() - dayjs(left.updated_at).valueOf()
+          )),
+      );
+    } catch {
+      message.error(t('channelGateway.terminal.loadAccountsFailed'));
+    } finally {
+      setAccountsLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    void loadAccounts();
+  }, [loadAccounts]);
+
+  const selectProvider = (nextProvider: ChannelProvider) => {
+    setSearchParams({ provider: nextProvider }, { replace: true });
+  };
+
+  const openAccountsPanel = () => {
+    setAccountsPanelOpen(true);
+    void loadAccounts();
+  };
+
+  const disconnectAccount = async (account: ChannelAccount) => {
+    setDisconnectingAccountId(account.id);
+    try {
+      await disconnectChannelAccount(account.id);
+      message.success(t('channelGateway.terminal.disconnectSuccess'));
+      await loadAccounts();
+    } catch {
+      message.error(t('channelGateway.terminal.disconnectFailed'));
+    } finally {
+      setDisconnectingAccountId(null);
+    }
+  };
+
+  const columns: ColumnsType<ChannelAccount> = [
+    {
+      title: t('channelGateway.terminal.provider'),
+      dataIndex: 'provider',
+      key: 'provider',
+      width: 140,
+      render: (_value: string, account) => {
+        const rowProvider = accountProvider(account);
+        return (
+          <div className="terminal-account-provider">
+            <span className={`terminal-provider-icon is-${rowProvider}`} aria-hidden="true">
+              <ChannelIcon provider={rowProvider} />
+            </span>
+            <strong>{t(`channelGateway.terminal.${rowProvider}Title`)}</strong>
           </div>
+        );
+      },
+    },
+    {
+      title: t('channelGateway.terminal.accountLabel'),
+      dataIndex: 'label',
+      key: 'label',
+      width: 240,
+      render: (value: string, account) => {
+        const rowProvider = accountProvider(account);
+        return (
+          <div className={`wechat-account-name is-${rowProvider}`}>
+            <span aria-hidden="true"><ChannelIcon provider={rowProvider} /></span>
+            <Tooltip title={value || '-'}>
+              <strong>{value || '-'}</strong>
+            </Tooltip>
+          </div>
+        );
+      },
+    },
+    {
+      title: t('channelGateway.terminal.accountStatus'),
+      dataIndex: 'status',
+      key: 'status',
+      width: 140,
+      render: (value: string, account) => {
+        const rowProvider = accountProvider(account);
+        return (
+          <Tag color={statusColor(value)}>
+            {t(`channelGateway.${rowProvider}.accountStatusMap.${value}`, {
+              defaultValue: value,
+            })}
+          </Tag>
+        );
+      },
+    },
+    {
+      title: t('channelGateway.terminal.runtimeStatus'),
+      dataIndex: 'runtime_status',
+      key: 'runtime_status',
+      width: 140,
+      render: (value: string, account) => {
+        const rowProvider = accountProvider(account);
+        return (
+          <Tag color={statusColor(value)}>
+            {t(`channelGateway.${rowProvider}.runtimeStatusMap.${value}`, {
+              defaultValue: value,
+            })}
+          </Tag>
+        );
+      },
+    },
+    {
+      title: t('channelGateway.terminal.connectedAt'),
+      dataIndex: 'connected_at',
+      key: 'connected_at',
+      width: 180,
+      render: formatTime,
+    },
+    {
+      title: t('channelGateway.terminal.lastMessageAt'),
+      dataIndex: 'last_message_at',
+      key: 'last_message_at',
+      width: 180,
+      render: formatTime,
+    },
+    {
+      title: t('channelGateway.terminal.lastError'),
+      dataIndex: 'last_error',
+      key: 'last_error',
+      width: 220,
+      ellipsis: true,
+      render: (value: string | null) =>
+        value ? (
+          <Tooltip title={value} placement="top" overlayStyle={{ maxWidth: 360 }}>
+            <span className="wechat-error-cell">{value}</span>
+          </Tooltip>
+        ) : '-',
+    },
+    {
+      title: t('channelGateway.terminal.actions'),
+      key: 'actions',
+      fixed: 'right',
+      width: 110,
+      render: (_value, account) => (
+        <Button
+          danger
+          type="link"
+          loading={disconnectingAccountId === account.id}
+          onClick={() => {
+            Modal.confirm({
+              title: t('channelGateway.terminal.disconnectConfirmTitle'),
+              content: t('channelGateway.terminal.disconnectConfirmContent', {
+                account: account.label,
+              }),
+              okText: t('channelGateway.terminal.disconnectConfirmOk'),
+              cancelText: t('common.cancel'),
+              okButtonProps: { danger: true },
+              onOk: () => disconnectAccount(account),
+            });
+          }}
+        >
+          {t('channelGateway.terminal.disconnectAccount')}
+        </Button>
+      ),
+    },
+  ];
+
+  return (
+    <div className="terminal-connection-page">
+      <header className="terminal-connection-header">
+        <span className="terminal-connection-icon" aria-hidden="true">
+          <LinkOutlined />
+        </span>
+        <div>
+          <Title level={2}>{t('channelGateway.terminal.title')}</Title>
+          <Paragraph>{t('channelGateway.terminal.subtitle')}</Paragraph>
         </div>
         <Button
-          aria-controls={accountsPanelId}
+          className="terminal-accounts-trigger"
+          aria-controls="terminal-accounts-panel"
           aria-haspopup="dialog"
           icon={<UnorderedListOutlined />}
-          onClick={() => setAccountsPanelOpen(true)}
+          loading={accountsLoading && accounts.length === 0}
+          onClick={openAccountsPanel}
         >
-          {t(copy('viewAccounts'), { count: accounts.length })}
+          {t('channelGateway.terminal.viewAccounts', { count: accounts.length })}
         </Button>
       </header>
 
-      <main className="wechat-connection-content">
-        {connectWorkspace}
+      <main className="terminal-connection-content">
+        <nav
+          className="terminal-provider-switch"
+          aria-label={t('channelGateway.terminal.providerLabel')}
+        >
+          {(['wechat', 'feishu'] as ChannelProvider[]).map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={item === provider ? 'is-active' : ''}
+              aria-pressed={item === provider}
+              onClick={() => selectProvider(item)}
+            >
+              <span className={`terminal-provider-icon is-${item}`} aria-hidden="true">
+                <ChannelIcon provider={item} />
+              </span>
+              <span>
+                <strong>{t(`channelGateway.terminal.${item}Title`)}</strong>
+                <small>{t(`channelGateway.terminal.${item}Hint`)}</small>
+              </span>
+            </button>
+          ))}
+        </nav>
+
+        <ChannelConnectionPage
+          key={provider}
+          provider={provider}
+        />
       </main>
 
       <Modal
@@ -504,16 +589,50 @@ export default function ChannelConnectionPage({
         centered
         onCancel={() => setAccountsPanelOpen(false)}
       >
-        {accountsSection}
+        <section
+          id="terminal-accounts-panel"
+          className="wechat-connection-accounts"
+          aria-labelledby="terminal-accounts-title"
+        >
+          <div className="wechat-connection-accounts-head">
+            <div>
+              <div className="wechat-accounts-title-row">
+                <Title id="terminal-accounts-title" level={4}>
+                  {t('channelGateway.terminal.accountsTitle')}
+                </Title>
+                {!accountsLoading ? <span>{accounts.length}</span> : null}
+              </div>
+              <Text type="secondary">{t('channelGateway.terminal.accountsHint')}</Text>
+            </div>
+            <Space wrap className="wechat-accounts-actions">
+              <Button
+                icon={<ReloadOutlined />}
+                loading={accountsLoading}
+                onClick={() => void loadAccounts()}
+              >
+                {t('channelGateway.terminal.refreshAccounts')}
+              </Button>
+            </Space>
+          </div>
+
+          <Table<ChannelAccount>
+            rowKey="id"
+            loading={accountsLoading}
+            columns={columns}
+            dataSource={accounts}
+            pagination={false}
+            scroll={{ x: 1330 }}
+            locale={{
+              emptyText: (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={t('channelGateway.terminal.accountsEmpty')}
+                />
+              ),
+            }}
+          />
+        </section>
       </Modal>
     </div>
   );
-}
-
-export function WechatConnectionPage() {
-  return <ChannelConnectionPage provider="wechat" />;
-}
-
-export function FeishuConnectionPage() {
-  return <ChannelConnectionPage provider="feishu" />;
 }

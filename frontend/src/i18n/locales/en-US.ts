@@ -648,8 +648,7 @@ const enUS = {
     dataSourceManagement: "Data Sources",
     datasetManagement: "Datasets",
     cloudDocuments: "Cloud Documents",
-    wechatConnection: "WeChat Connection",
-    feishuConnection: "Feishu Connection",
+    terminalConnection: "Channel Connections",
     database: "Databases",
     modelProviderManagement: "Models & Services",
     memoryManagement: "Wisdom Accumulation",
@@ -682,6 +681,39 @@ const enUS = {
   },
 
   channelGateway: {
+    terminal: {
+      title: "Channel Connections",
+      subtitle:
+        "Connect LazyMind to your messaging apps and continue conversations and tasks from the same account.",
+      providerLabel: "Choose a messaging channel",
+      wechatTitle: "WeChat",
+      wechatHint: "Connect a WeChat account by QR code",
+      feishuTitle: "Feishu",
+      feishuHint: "Create a dedicated assistant by QR code",
+      viewAccounts: "View Connected Channels ({{count}})",
+      accountsTitle: "Connected Channel Accounts",
+      accountsHint:
+        "Shows WeChat and Feishu accounts connected to the current LazyMind account.",
+      accountsEmpty:
+        "No channel accounts are connected yet. Choose WeChat or Feishu to connect one.",
+      refreshAccounts: "Refresh List",
+      loadAccountsFailed: "Failed to load connected channel accounts. Please try again.",
+      provider: "Channel",
+      accountLabel: "Account",
+      accountStatus: "Connection Status",
+      runtimeStatus: "Runtime Status",
+      connectedAt: "Connected At",
+      lastMessageAt: "Last Message",
+      lastError: "Latest Error",
+      actions: "Actions",
+      disconnectAccount: "Disconnect",
+      disconnectConfirmTitle: "Disconnect this channel account?",
+      disconnectConfirmContent:
+        "Disconnect “{{account}}”? This channel will stop receiving and replying to messages.",
+      disconnectConfirmOk: "Disconnect",
+      disconnectSuccess: "Channel account disconnected",
+      disconnectFailed: "Failed to disconnect the channel account. Please try again.",
+    },
     wechat: {
       title: "WeChat Channel",
       subtitle:

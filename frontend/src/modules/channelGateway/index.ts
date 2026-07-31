@@ -1,4 +1,3 @@
 export {
-  FeishuConnectionPage,
-  WechatConnectionPage,
+  TerminalConnectionPage,
 } from './pages/ChannelConnectionPage';
