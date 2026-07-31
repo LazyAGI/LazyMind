@@ -16,6 +16,7 @@ import {
   Table,
   Tag,
   TimePicker,
+  Tooltip,
   Typography,
   Upload,
   message,
@@ -660,6 +661,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   const openGroupTasks = (groupID: string) => {
     setGroupFilter(groupID);
     setWorkspaceView('tasks');
+    setViewMode('compact');
   };
 
   const renderGroupCard = (group: { id: string; name: string; remark?: string }) => {
@@ -669,10 +671,30 @@ export default function ScheduleList({ active }: ScheduleListProps) {
     if (statusFilter !== 'all' && visibleItems.length === 0) return null;
     const nextSchedule = items.filter((schedule) => schedule.enabled && schedule.next_run_at).sort((a, b) => dayjs(a.next_run_at).valueOf() - dayjs(b.next_run_at).valueOf())[0];
     const recentSchedule = items.filter((schedule) => schedule.last_run_at).sort((a, b) => dayjs(b.last_run_at).valueOf() - dayjs(a.last_run_at).valueOf())[0];
+    const taskNames = items.map((schedule) => schedule.name || schedule.prompt_template);
+    const taskNamesTooltip = (
+      <div className='schedule-group-task-tooltip'>
+        {taskNames.map((name, index) => <div key={items[index].id}>{name}</div>)}
+      </div>
+    );
     return <article className='schedule-group-card' key={group.id || 'ungrouped'} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const scheduleID = event.dataTransfer.getData('text/schedule-id'); if (scheduleID) void moveSchedule(scheduleID, group.id || undefined, items.length).then(fetchSchedules); }}>
       <header><span className='schedule-group-icon'><AppstoreOutlined /></span><div><h3>{group.name}</h3><p>{group.remark || (group.id ? '集中管理组内的定时任务' : '尚未加入任务组的定时任务')}</p></div><span className={`schedule-status-chip ${items.some((schedule) => schedule.enabled) ? 'enabled' : 'disabled'}`}>{items.some((schedule) => schedule.enabled) ? '启用中' : '已停用'}</span></header>
       <div className='schedule-group-meta'><span>包含 {items.length} 个任务</span><span>最近执行：{recentSchedule?.last_run_at ? dayjs(recentSchedule.last_run_at).format('MM/DD HH:mm') : '—'}</span><span>下次执行：{nextSchedule?.next_run_at ? dayjs(nextSchedule.next_run_at).format('MM/DD HH:mm') : '—'}</span></div>
-      <footer><div>{items.slice(0, 3).map((schedule) => <Tag key={schedule.id}>{schedule.name || schedule.prompt_template.slice(0, 12)}</Tag>)}{items.length > 3 ? <Tag>+{items.length - 3}</Tag> : null}</div><Button onClick={() => openGroupTasks(group.id)}>查看组内任务</Button></footer>
+      <footer>
+        <div className='schedule-group-task-tags'>
+          {items.length > 0 ? <>
+            <Tooltip title={taskNamesTooltip} placement='topLeft'>
+              <Tag className='schedule-group-task-tag' tabIndex={0} aria-label={taskNames.join(', ')}>{taskNames[0]}</Tag>
+            </Tooltip>
+            {items.length > 1 ? (
+              <Tooltip title={taskNamesTooltip} placement='topLeft'>
+                <Tag className='schedule-group-task-count' tabIndex={0} aria-label={taskNames.join(', ')}>+{items.length - 1}</Tag>
+              </Tooltip>
+            ) : null}
+          </> : <span>-</span>}
+        </div>
+        <Button className='schedule-group-tasks-button' onClick={() => openGroupTasks(group.id)}>查看组内任务</Button>
+      </footer>
     </article>;
   };
 

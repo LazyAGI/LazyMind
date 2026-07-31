@@ -28134,7 +28134,7 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
         /**
          *
          * @summary Permanently delete market skill item
-         * @param {string} marketItemId
+         * @param {string} marketItemId 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -28166,7 +28166,7 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
             };
         },
         /**
-         *
+         * 
          * @summary Unpublish market skill item
          * @param {string} marketItemId
          * @param {*} [options] Override http request option.
@@ -28276,7 +28276,7 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
         /**
          *
          * @summary Permanently delete market skill item
-         * @param {string} marketItemId
+         * @param {string} marketItemId 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -28308,7 +28308,7 @@ export const SkillMarketApiAxiosParamCreator = function (configuration?: Configu
             };
         },
         /**
-         *
+         * 
          * @summary Edit market skill item
          * @param {string} marketItemId
          * @param {MarketEditOpenAPIRequest} marketEditOpenAPIRequest
@@ -28615,7 +28615,7 @@ export const SkillMarketApiFp = function(configuration?: Configuration) {
         /**
          *
          * @summary Permanently delete market skill item
-         * @param {string} marketItemId
+         * @param {string} marketItemId 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -28626,7 +28626,7 @@ export const SkillMarketApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
+         * 
          * @summary Unpublish market skill item
          * @param {string} marketItemId
          * @param {*} [options] Override http request option.
@@ -28668,7 +28668,7 @@ export const SkillMarketApiFp = function(configuration?: Configuration) {
         /**
          *
          * @summary Permanently delete market skill item
-         * @param {string} marketItemId
+         * @param {string} marketItemId 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -28679,7 +28679,7 @@ export const SkillMarketApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         *
+         * 
          * @summary Edit market skill item
          * @param {string} marketItemId
          * @param {MarketEditOpenAPIRequest} marketEditOpenAPIRequest
@@ -28806,7 +28806,7 @@ export const SkillMarketApiFactory = function (configuration?: Configuration, ba
             return localVarFp.apiCoreAdminSkillMarketMarketItemIdDelete(requestParameters.marketItemId, options).then((request) => request(axios, basePath));
         },
         /**
-         *
+         * 
          * @summary Unpublish market skill item
          * @param {SkillMarketApiApiCoreAdminSkillMarketMarketItemIdOfflinePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -28846,7 +28846,7 @@ export const SkillMarketApiFactory = function (configuration?: Configuration, ba
             return localVarFp.apiCoreSkillMarketAdminItemsMarketItemIdDelete(requestParameters.marketItemId, options).then((request) => request(axios, basePath));
         },
         /**
-         *
+         * 
          * @summary Edit market skill item
          * @param {SkillMarketApiApiCoreSkillMarketAdminItemsMarketItemIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -29039,7 +29039,7 @@ export class SkillMarketApi extends BaseAPI {
     }
 
     /**
-     *
+     * 
      * @summary Unpublish market skill item
      * @param {SkillMarketApiApiCoreAdminSkillMarketMarketItemIdOfflinePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -29083,7 +29083,7 @@ export class SkillMarketApi extends BaseAPI {
     }
 
     /**
-     *
+     * 
      * @summary Edit market skill item
      * @param {SkillMarketApiApiCoreSkillMarketAdminItemsMarketItemIdPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
