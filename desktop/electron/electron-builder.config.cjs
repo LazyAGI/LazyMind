@@ -310,7 +310,6 @@ module.exports = {
     include: path.join(__dirname, "..", "installer", "installer.nsh"),
     artifactName: "LazyMind-windows-x64-installer.${ext}",
     differentialPackage: false,
-    useZip: true,
     runAfterFinish: true,
   },
   afterPack: signAndStageEmbeddedRuntime,

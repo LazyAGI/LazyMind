@@ -1,6 +1,9 @@
 name: Windows Desktop Installer
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       git_ref:
@@ -28,6 +31,9 @@ jobs:
     name: Build Windows x64 installer
     runs-on: windows-2025
     timeout-minutes: 120
+    outputs:
+      package_version: ${{ steps.version.outputs.package_version }}
+      installer_sha256: ${{ steps.package.outputs.installer_sha256 }}
 
     steps:
       - name: Checkout
@@ -70,6 +76,7 @@ jobs:
             $isTag = $tagCommit -eq $headCommit
           }
           "is_tag=$($isTag.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "release_tag=$(if ($isTag) { $tag } else { '' })" >> $env:GITHUB_OUTPUT
           exit 0
 
       - name: Initialize development submodules
@@ -99,6 +106,26 @@ jobs:
         with:
           node-version: "20"
           package-manager-cache: false
+
+      - name: Inject release version from tag
+        id: version
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $packagePath = Join-Path $env:GITHUB_WORKSPACE "desktop\electron\package.json"
+          if ($env:RELEASE_TAG) {
+            node desktop/scripts/resolve-release-version.mjs `
+              --tag $env:RELEASE_TAG `
+              --package $packagePath `
+              --github-output $env:GITHUB_OUTPUT
+          } else {
+            $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+            "release_tag=" >> $env:GITHUB_OUTPUT
+            "package_version=$($package.version)" >> $env:GITHUB_OUTPUT
+            "artifact_version=$($package.version)" >> $env:GITHUB_OUTPUT
+          }
 
       - name: Enable pnpm
         shell: pwsh
@@ -199,13 +226,11 @@ jobs:
           }
 
           $sourceInstaller = $installers[0]
-          $packagePath = Join-Path $env:GITHUB_WORKSPACE "desktop\electron\package.json"
-          $package = Get-Content $packagePath -Raw | ConvertFrom-Json
           $shortSha = (& git rev-parse --short=8 HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $shortSha -notmatch '^[0-9a-fA-F]{7,}$') {
             throw "Could not resolve the checked out commit"
           }
-          $outputName = "LazyMind-windows-x64-installer-$($package.version)-$shortSha.exe"
+          $outputName = "LazyMind-windows-x64-installer-${{ steps.version.outputs.artifact_version }}-$shortSha.exe"
 
           New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
 
@@ -220,6 +245,7 @@ jobs:
           $hash = Get-FileHash -LiteralPath $outputPath -Algorithm SHA256
           $signature = Get-AuthenticodeSignature -LiteralPath $outputPath
           "installer_path=$outputPath" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+          "installer_sha256=$($hash.Hash.ToLowerInvariant())" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
 
           @"
           ## Windows installer
@@ -236,6 +262,7 @@ jobs:
         id: upload
         uses: actions/upload-artifact@v7
         with:
+          name: lazymind-windows-x64-installer
           path: ${{ steps.package.outputs.installer_path }}
           if-no-files-found: error
           retention-days: 14
@@ -261,3 +288,78 @@ jobs:
               @{Name="UsedGB"; Expression={[math]::Round($_.Used / 1GB, 2)}},
               @{Name="FreeGB"; Expression={[math]::Round($_.Free / 1GB, 2)}} |
             Format-Table
+
+  test-windows-installer:
+    name: Install, verify, and uninstall (${{ matrix.os }})
+    needs: build-windows-installer
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-2022
+          - windows-2025
+
+    steps:
+      - name: Download the exact installer built above
+        uses: actions/download-artifact@v8
+        with:
+          name: lazymind-windows-x64-installer
+          path: installer-under-test
+
+      - name: Install, verify, and uninstall
+        shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ needs.build-windows-installer.outputs.package_version }}
+          EXPECTED_SHA256: ${{ needs.build-windows-installer.outputs.installer_sha256 }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = @(Get-ChildItem -LiteralPath installer-under-test -File -Filter "*.exe")
+          if ($installer.Count -ne 1) {
+            throw "Expected exactly one downloaded installer; found $($installer.Count)"
+          }
+
+          $actualHash = (Get-FileHash -LiteralPath $installer[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $env:EXPECTED_SHA256) {
+            throw "Downloaded installer hash mismatch: expected $env:EXPECTED_SHA256, got $actualHash"
+          }
+
+          $install = Start-Process -FilePath $installer[0].FullName -ArgumentList "/S" -Wait -PassThru
+          if ($install.ExitCode -ne 0) {
+            throw "Installer exited with code $($install.ExitCode)"
+          }
+
+          $installDir = Join-Path $env:LOCALAPPDATA "Programs\LazyMind"
+          $app = Join-Path $installDir "LazyMind.exe"
+          $uninstaller = Join-Path $installDir "Uninstall LazyMind.exe"
+          foreach ($requiredFile in @($app, $uninstaller)) {
+            if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
+              throw "Installed file is missing: $requiredFile"
+            }
+          }
+
+          $uninstallEntries = @(
+            Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" |
+              ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath } |
+              Where-Object { $_.DisplayName -eq "LazyMind" }
+          )
+          if ($uninstallEntries.Count -ne 1) {
+            throw "Expected one LazyMind uninstall registry entry; found $($uninstallEntries.Count)"
+          }
+          if ([string]$uninstallEntries[0].DisplayVersion -ne $env:EXPECTED_VERSION) {
+            throw "Registry version mismatch: expected $env:EXPECTED_VERSION, got $($uninstallEntries[0].DisplayVersion)"
+          }
+
+          $productVersion = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion
+          if (-not $productVersion.StartsWith($env:EXPECTED_VERSION, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Executable ProductVersion mismatch: expected prefix $env:EXPECTED_VERSION, got $productVersion"
+          }
+
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) {
+            throw "Uninstaller exited with code $($uninstall.ExitCode)"
+          }
+          if (Test-Path -LiteralPath $app) {
+            throw "LazyMind.exe remains after uninstall: $app"
+          }

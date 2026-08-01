@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const manifestScript = path.join(scriptsDir, "write-runtime-manifest.mjs");
 const iconScript = path.join(scriptsDir, "generate-windows-icon.mjs");
+const releaseVersionScript = path.join(scriptsDir, "resolve-release-version.mjs");
 const icnsSource = path.join(scriptsDir, "..", "electron", "assets", "LazyMind.icns");
 const electronMainScript = path.join(scriptsDir, "..", "electron", "src", "main.js");
 const electronBuilderConfig = path.join(scriptsDir, "..", "electron", "electron-builder.config.cjs");
@@ -87,6 +88,19 @@ test("generates a multi-resolution Windows ICO from the macOS icon", () => {
   }
 });
 
+test("normalizes compact Windows release tags to standard SemVer", async () => {
+  const { normalizeReleaseTag } = await import(releaseVersionScript);
+  assert.deepEqual(normalizeReleaseTag("v1.2.3a2"), {
+    releaseTag: "v1.2.3a2",
+    packageVersion: "1.2.3-alpha.2",
+    artifactVersion: "1.2.3-alpha.2",
+  });
+  assert.equal(normalizeReleaseTag("1.2.3b4").packageVersion, "1.2.3-beta.4");
+  assert.equal(normalizeReleaseTag("v1.2.3rc1").packageVersion, "1.2.3-rc.1");
+  assert.equal(normalizeReleaseTag("v1.2.3").packageVersion, "1.2.3");
+  assert.throws(() => normalizeReleaseTag("release-1.2"), /Unsupported release tag/);
+});
+
 test("Windows installer force-stops LazyMind before invoking an old uninstaller", () => {
   const source = readFileSync(installerScript, "utf8");
   const check = nsisMacro(source, "customCheckAppRunning");
@@ -125,10 +139,15 @@ test("Windows installer replaces legacy uninstallers with the fixed embedded uni
   assert.match(check, /LMUpgradeRepairFailed[\s\S]*SetErrorLevel 8/);
 });
 
-test("Windows installer verifies and force-cleans processes left by warmup", () => {
+test("Windows installer diagnoses paths and does not roll back when warmup fails", () => {
   const source = readFileSync(installerScript, "utf8");
+  const init = nsisMacro(source, "customInit");
   const install = nsisMacro(source, "customInstall");
 
+  assert.match(
+    init,
+    /preflight --install-dir "\$INSTDIR" --temp-dir "\$TEMP" --minimum-free-space-mb \$\{LAZYMIND_MIN_FREE_SPACE_MB\} --maximum-relative-path-length \$\{LAZYMIND_MAX_RELATIVE_PATH_LENGTH\}/,
+  );
   assert.match(
     install,
     /ExecWait[^\n]+--installer-warmup[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
@@ -138,6 +157,8 @@ test("Windows installer verifies and force-cleans processes left by warmup", () 
     /\$0 == 10[\s\S]*force-stop --install-dir "\$INSTDIR"[\s\S]*Goto LMWarmupCheckStopped/,
   );
   assert.match(install, /\$4 == 1[\s\S]*StrCpy \$3 4[\s\S]*\$3 != 0/);
+  assert.doesNotMatch(install, /MB_ABORTRETRYIGNORE|SetErrorLevel 4/);
+  assert.match(install, /installation will continue/);
 });
 
 test("Windows CI treats branches as non-tags without leaking git probe failures", () => {
@@ -149,6 +170,16 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
   assert.match(source, /exit 0/);
   assert.match(source, /git submodule update --init algorithm\/lazyllm/);
   assert.doesNotMatch(source, /git submodule update --init --recursive/);
+  assert.match(source, /resolve-release-version\.mjs/);
+  assert.match(source, /windows-2022[\s\S]*windows-2025/);
+  assert.match(source, /Start-Process -FilePath \$installer\[0\]\.FullName -ArgumentList "\/S" -Wait/);
+  assert.match(source, /DisplayVersion -ne \$env:EXPECTED_VERSION/);
+  assert.match(source, /Start-Process -FilePath \$uninstaller -ArgumentList "\/S" -Wait/);
+});
+
+test("Windows NSIS installer uses electron-builder's default LZMA payload", () => {
+  const source = readFileSync(electronBuilderConfig, "utf8");
+  assert.doesNotMatch(source, /useZip\s*:/);
 });
 
 test("macOS distribution build signs packages while CI owns notarization sequencing", () => {
