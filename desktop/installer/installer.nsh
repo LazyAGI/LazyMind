@@ -265,7 +265,17 @@
     ${EndIf}
   ${EndIf}
 
+    CreateDirectory "$LOCALAPPDATA\LazyMind\logs"
+    StrCpy $5 "$LOCALAPPDATA\LazyMind\logs\installer-nsis.log"
+    FileOpen $6 "$5" a
+    FileWrite $6 "Starting Electron installer warmup (timeout=900s).$\r$\n"
+    FileClose $6
+    DetailPrint "Starting Electron installer warmup; log: $LOCALAPPDATA\LazyMind\logs\installer-warmup.log"
     ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --installer-warmup --timeout-seconds 900' $3
+    FileOpen $6 "$5" a
+    FileWrite $6 "Electron installer warmup returned exit code $3.$\r$\n"
+    FileClose $6
+    DetailPrint "Electron installer warmup returned exit code $3."
     StrCpy $2 0
     StrCpy $4 0
 
@@ -273,6 +283,9 @@
     nsExec::ExecToStack '"$InstallerHelper" check-stopped --install-dir "$INSTDIR"'
     Pop $0
     Pop $1
+    FileOpen $6 "$5" a
+    FileWrite $6 "Warmup process check returned exit code $0: $1$\r$\n"
+    FileClose $6
     ${If} $0 == 10
       StrCpy $4 1
       IntOp $2 $2 + 1

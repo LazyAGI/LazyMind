@@ -152,6 +152,8 @@ test("Windows installer diagnoses paths and does not roll back when warmup fails
     install,
     /ExecWait[^\n]+--installer-warmup[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
   );
+  assert.match(install, /installer-nsis\.log[\s\S]*Starting Electron installer warmup/);
+  assert.match(install, /Electron installer warmup returned exit code \$3/);
   assert.match(
     install,
     /\$0 == 10[\s\S]*force-stop --install-dir "\$INSTDIR"[\s\S]*Goto LMWarmupCheckStopped/,
@@ -178,9 +180,11 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
     source,
     /name:\s*\$\{\{ needs\.build-windows-installer\.outputs\.artifact_name \}\}/,
   );
-  assert.match(source, /Start-Process -FilePath \$installer\[0\]\.FullName -ArgumentList "\/S" -Wait/);
+  assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList "\/S" -Wait/);
   assert.match(source, /DisplayVersion -ne \$env:EXPECTED_VERSION/);
   assert.match(source, /Start-Process -FilePath \$uninstaller -ArgumentList "\/S" -Wait/);
+  assert.match(source, /RegistryView\]::Registry64[\s\S]*RegistryView\]::Registry32/);
+  assert.match(source, /name: Upload installer diagnostics[\s\S]*if: always\(\)/);
 });
 
 test("Windows NSIS installer uses electron-builder's default LZMA payload", () => {
