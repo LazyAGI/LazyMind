@@ -210,11 +210,7 @@ jobs:
 
       - name: Run Desktop tests
         run: |
-          node --test \
-            desktop/scripts/desktop-build.test.mjs \
-            desktop/scripts/desktop-paths.test.mjs \
-            desktop/scripts/installer-warmup.test.mjs \
-            desktop/scripts/runtime-status.test.mjs
+          node --test desktop/scripts/*.test.mjs
 
       - name: Build and sign app ZIP
         id: build

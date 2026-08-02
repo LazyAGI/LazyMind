@@ -212,11 +212,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
 
-          node --test `
-            desktop/scripts/desktop-build.test.mjs `
-            desktop/scripts/desktop-paths.test.mjs `
-            desktop/scripts/installer-warmup.test.mjs `
-            desktop/scripts/runtime-status.test.mjs
+          node --test desktop/scripts/*.test.mjs
 
       - name: Check Windows build prerequisites
         shell: pwsh
