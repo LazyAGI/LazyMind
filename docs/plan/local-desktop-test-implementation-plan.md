@@ -34,13 +34,13 @@ Status: in progress
 
 ## Batch 5: packaged application smoke tests
 
-- [ ] Add reusable post-install/post-package application smoke tooling.
-- [ ] Wire Windows installer verification to launch and verify the runtime.
-- [ ] Wire macOS packaged application verification into the installer workflow.
-- [ ] Run all locally runnable macOS tests and `make lint`.
-- [ ] Commit batch 5.
+- [x] Add reusable post-install/post-package application smoke tooling.
+- [x] Wire Windows installer verification to launch and verify the runtime.
+- [x] Wire macOS packaged application verification into the installer workflow.
+- [x] Run all locally runnable macOS tests and `make lint`.
+- [x] Commit batch 5.
 
 ## Completion
 
-- [ ] All five commits exist and the worktree contains no uncommitted task changes.
-- [ ] Final macOS test and lint results are recorded.
+- [x] All five commits exist and the worktree contains no uncommitted task changes.
+- [x] Final macOS test and lint results are recorded.

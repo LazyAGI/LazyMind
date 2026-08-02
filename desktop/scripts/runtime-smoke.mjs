@@ -15,7 +15,7 @@ export function runtimeArgs(options, command) {
 }
 
 export function localGatewayURL(status) {
-  const port = Number(status?.config?.localProxy?.port || 0);
+  const port = Number(status?.config?.localProxy?.port || status?.config?.localProxy?.Port || 0);
   if (!Number.isInteger(port) || port <= 0) {
     throw new Error("runtime status does not contain a valid Local Proxy port");
   }
@@ -52,6 +52,32 @@ export function commandRunner(executable) {
     });
 }
 
+export function commandStarter(executable) {
+  return (args) => spawn(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
+}
+
+export async function waitForReadyRuntime(options, run, runtimeProcess) {
+  const deadline = Date.now() + (options.timeoutMs ?? 180_000);
+  let lastError;
+  let processExit;
+  runtimeProcess?.once?.("error", (error) => { processExit = error; });
+  runtimeProcess?.once?.("exit", (code, signal) => {
+    processExit = new Error(`runtime supervisor exited before readiness (code=${code}, signal=${signal || "none"})`);
+  });
+  while (Date.now() <= deadline) {
+    if (processExit) throw processExit;
+    try {
+      const status = JSON.parse(await run([...runtimeArgs(options, "status"), "--json"]));
+      assertReadyStatus(status, options.profile);
+      return status;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, options.pollIntervalMs ?? 1_000));
+  }
+  throw new Error(`runtime did not become ready: ${lastError?.message || "timeout"}`);
+}
+
 export function isPortClosed(port, host = "127.0.0.1") {
   return new Promise((resolve) => {
     const socket = net.createConnection({ port, host });
@@ -72,17 +98,19 @@ export async function runRuntimeSmoke(options, dependencies = {}) {
   }
 
   const run = dependencies.run || commandRunner(options.manager);
+  const start = dependencies.start || (dependencies.run
+    ? (args) => { void dependencies.run(args); return null; }
+    : commandStarter(options.manager));
   const request = dependencies.fetch || globalThis.fetch;
   const portClosed = dependencies.isPortClosed || isPortClosed;
   let gatewayPort = 0;
   let started = false;
+  let runtimeProcess;
 
   try {
-    await run(runtimeArgs(options, "up"));
+    runtimeProcess = start(runtimeArgs(options, "up"));
     started = true;
-    const statusText = await run([...runtimeArgs(options, "status"), "--json"]);
-    const status = JSON.parse(statusText);
-    assertReadyStatus(status, options.profile);
+    const status = await waitForReadyRuntime(options, run, runtimeProcess);
     const gateway = localGatewayURL(status);
     gatewayPort = Number(new URL(gateway).port);
 
@@ -99,6 +127,7 @@ export async function runRuntimeSmoke(options, dependencies = {}) {
     return { profile: options.profile, gateway, status };
   } finally {
     if (started) await run(runtimeArgs(options, "down"));
+    runtimeProcess?.kill?.();
     if (gatewayPort && !(await portClosed(gatewayPort))) {
       throw new Error(`Local Proxy port ${gatewayPort} remains open after shutdown`);
     }

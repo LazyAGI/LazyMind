@@ -38,6 +38,10 @@ test("validates the shared minimum service graph", () => {
   const broken = readyStatus("local");
   broken.services.core.status = "failed";
   assert.throws(() => assertReadyStatus(broken, "local"), /core is not ready/);
+  assert.equal(
+    localGatewayURL({ config: { localProxy: { Port: 18091 } } }),
+    "http://127.0.0.1:18091",
+  );
 });
 
 for (const profile of ["local", "desktop"]) {
@@ -59,7 +63,7 @@ for (const profile of ["local", "desktop"]) {
       profile,
       runtimeRoot: "/tmp/runtime",
       ownerToken: profile === "desktop" ? "owner" : undefined,
-    }, { run, fetch, isPortClosed: async () => true });
+    }, { start: (args) => { calls.push(args[0]); return null; }, run, fetch, isPortClosed: async () => true });
 
     assert.equal(result.profile, profile);
     assert.deepEqual(calls.filter((call) => typeof call === "string"), ["up", "status", "down"]);
@@ -77,6 +81,7 @@ test("always stops a started runtime when an API assertion fails", async () => {
     runRuntimeSmoke(
       { manager: "manager", profile: "local", runtimeRoot: "/tmp/runtime" },
       {
+        start: (args) => { commands.push(args[0]); return null; },
         run,
         fetch: async () => ({ ok: false, status: 500 }),
         isPortClosed: async () => true,

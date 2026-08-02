@@ -243,6 +243,16 @@ jobs:
           duration_seconds="$(( $(date +%s) - started_at ))"
           echo "duration_seconds=${duration_seconds}" >> "${GITHUB_OUTPUT}"
 
+      - name: Launch and verify packaged application
+        run: |
+          set -euo pipefail
+          smoke_root="${RUNNER_TEMP}/lazymind-packaged-smoke"
+          LAZYMIND_DESKTOP_RUNTIME_ROOT="${smoke_root}" node desktop/scripts/packaged-app-smoke.mjs \
+            --app "${GITHUB_WORKSPACE}/desktop/dist/mac-arm64/LazyMind.app" \
+            --runtime-root "${smoke_root}" \
+            --platform darwin \
+            --timeout-ms 300000
+
       - name: Submit app ZIP for notarization
         if: steps.release.outputs.is_tag == 'true'
         id: zip_submission

@@ -385,6 +385,12 @@ jobs:
             throw "Executable ProductVersion mismatch: expected prefix $env:EXPECTED_VERSION, got $productVersion"
           }
 
+          node desktop/scripts/packaged-app-smoke.mjs `
+            --app $app `
+            --runtime-root (Join-Path $env:LOCALAPPDATA "LazyMind") `
+            --platform win32 `
+            --timeout-ms 300000
+
           $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) {
             throw "Uninstaller exited with code $($uninstall.ExitCode)"

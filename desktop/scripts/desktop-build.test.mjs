@@ -299,6 +299,19 @@ test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallbac
   assert.match(finalizeWorkflow, /name:\s*LazyMind-macos-arm64-notarized/);
 });
 
+test("installer workflows launch the packaged application before publishing", () => {
+  const macosSource = readFileSync(macosWorkflow, "utf8");
+  const windowsSource = readFileSync(windowsWorkflow, "utf8");
+  for (const source of [macosSource, windowsSource]) {
+    assert.match(source, /packaged-app-smoke\.mjs/);
+    assert.match(source, /--timeout-ms 300000/);
+  }
+  assert.match(macosSource, /LAZYMIND_DESKTOP_RUNTIME_ROOT=/);
+  assert.ok(
+    windowsSource.indexOf("packaged-app-smoke.mjs") < windowsSource.indexOf("$uninstall = Start-Process"),
+  );
+});
+
 test("packaged macOS app runs installation warmup once before its normal window", () => {
   const source = readFileSync(electronMainScript, "utf8");
   assert.match(
