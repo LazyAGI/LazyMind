@@ -63,7 +63,7 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
-			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "lazyllm==1.2.1")
+			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "lazyllm==1.2.2")
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
