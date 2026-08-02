@@ -18,11 +18,11 @@ Status: in progress
 
 ## Batch 3: runtime smoke harness
 
-- [ ] Add reusable Local/Desktop runtime smoke scenarios.
-- [ ] Cover start, readiness, session/API access, stop, and cleanup.
-- [ ] Cover shared-data and ownership conflict behavior where practical.
-- [ ] Run the batch on macOS and run `make lint`.
-- [ ] Commit batch 3.
+- [x] Add reusable Local/Desktop runtime smoke scenarios.
+- [x] Cover start, readiness, session/API access, stop, and cleanup.
+- [x] Cover shared-data and ownership conflict behavior where practical.
+- [x] Run the batch on macOS and run `make lint`.
+- [x] Commit batch 3.
 
 ## Batch 4: Electron behavior tests
 
