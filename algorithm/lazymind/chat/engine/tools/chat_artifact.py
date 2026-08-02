@@ -52,7 +52,9 @@ def _current_artifact_scope() -> tuple[str, str]:
 
 
 def _scope_hash(value: str) -> str:
-    return hashlib.sha256(value.encode('utf-8')).hexdigest()
+    # 128 bits is ample for workspace isolation and keeps generated paths below
+    # the legacy Windows MAX_PATH limit in packaged desktop installations.
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()[:32]
 
 
 def chat_agent_workspace(user_id: str, conversation_id: str) -> str:
@@ -167,7 +169,7 @@ def save_chat_file(
     artifact_id = artifact_id or str(uuid.uuid4())
     destination_dir = _published_file_directory(user_id, conversation_id, artifact_id)
     destination = os.path.join(destination_dir, filename)
-    temporary = destination + f'.{uuid.uuid4().hex}.tmp'
+    temporary = os.path.join(destination_dir, f'.{uuid.uuid4().hex[:8]}.tmp')
     created_directory = False
 
     try:
@@ -223,7 +225,7 @@ def write_file(
         mode: "overwrite" or "append".
         encoding: Text encoding.
         create_parents: Create parent directories when needed.
-        allow_unsafe: Allow overwriting an existing file.
+        allow_unsafe: Allow overwriting an existing file. Append mode does not require it.
     """
     user_id, conversation_id = _current_artifact_scope()
     workspace, target = _resolve_workspace_path(path, user_id, conversation_id)

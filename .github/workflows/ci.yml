@@ -256,8 +256,13 @@ jobs:
 
   test-algorithm:
     needs: [lint, doc_check]
-    runs-on: ubuntu-latest
+    name: Test algorithm (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-2025]
     permissions:
       contents: read
     steps:
@@ -271,11 +276,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps + coverage tools
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: '3.5'
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq cmake
           pip install scikit-build-core pybind11 coverage diff-cover
-          CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install --no-cache-dir algorithm/lazyllm
-          cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
+          pip install --no-cache-dir algorithm/lazyllm
+          python -c "import lazyllm, pathlib, shutil; shutil.copy2('algorithm/lazyllm/pyproject.toml', pathlib.Path(lazyllm.__path__[0]) / 'pyproject.toml')"
           pip install -r algorithm/requirements.txt
           pip install -r tests/algorithm/requirements-test.txt
 
@@ -296,7 +302,7 @@ jobs:
       - name: Upload HTML report
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-algorithm
+          name: coverage-algorithm-${{ matrix.os }}
           path: htmlcov-algorithm
 
       - name: Check total coverage ≥10%
