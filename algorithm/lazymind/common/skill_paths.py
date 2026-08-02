@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import posixpath
+import re
 
 
 def normalize_skill_package_path(path: str | None) -> str:
@@ -28,6 +29,7 @@ def relative_to_package(package_dir: str, path: str) -> str:
 
 def _normalized_parts(path: str) -> list[str]:
     raw = str(path or '').strip().replace('\\', '/').rstrip('/')
-    if '://' in raw:
+    is_windows_drive = bool(re.match(r'^[A-Za-z]:/{1,2}', raw))
+    if '://' in raw and not is_windows_drive:
         raw = raw.split('://', 1)[1]
     return [part for part in raw.split('/') if part]
