@@ -133,6 +133,7 @@ jobs:
         with:
           node-version: '20'
       - name: Test Desktop shell
+        shell: bash
         run: node --test desktop/scripts/*.test.mjs
 
   test-auth-service:

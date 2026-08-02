@@ -207,11 +207,8 @@ jobs:
             Format-Table
 
       - name: Run Desktop tests
-        shell: pwsh
+        shell: bash
         run: |
-          $ErrorActionPreference = "Stop"
-          $PSNativeCommandUseErrorActionPreference = $true
-
           node --test desktop/scripts/*.test.mjs
 
       - name: Check Windows build prerequisites
