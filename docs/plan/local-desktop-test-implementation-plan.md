@@ -11,10 +11,10 @@ Status: in progress
 
 ## Batch 2: shared runtime-mode contract
 
-- [ ] Parameterize shared Local/Desktop frontend behavior tests.
-- [ ] Cover auto-login, feature visibility, API routing, and readiness differences.
-- [ ] Run the batch on macOS and run `make lint`.
-- [ ] Commit batch 2.
+- [x] Parameterize shared Local/Desktop frontend behavior tests.
+- [x] Cover auto-login, feature visibility, API routing, and readiness differences.
+- [x] Run the batch on macOS and run `make lint`.
+- [x] Commit batch 2.
 
 ## Batch 3: runtime smoke harness
 

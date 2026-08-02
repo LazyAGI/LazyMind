@@ -30,6 +30,10 @@ export function getRuntimeMode(): RuntimeMode {
   return resolveRuntimeMode();
 }
 
+export function isLocalLikeRuntimeMode(mode: RuntimeMode): boolean {
+  return mode === "local" || mode === "desktop";
+}
+
 export function isLocalRuntime(): boolean {
   return getRuntimeMode() === "local";
 }
