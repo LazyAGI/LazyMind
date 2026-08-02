@@ -326,6 +326,13 @@ test("Desktop does not create the Chat window after quitting or moving to backgr
   );
 });
 
+test("Desktop renderer keeps Node disabled behind an isolated preload bridge", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(source, /contextIsolation:\s*true/);
+  assert.match(source, /nodeIntegration:\s*false/);
+  assert.match(source, /preload:\s*path\.join\(__dirname, "preload\.js"\)/);
+});
+
 test("Desktop opens the home page from the sidecar readiness event with status polling as fallback", () => {
   const source = readFileSync(electronMainScript, "utf8");
 

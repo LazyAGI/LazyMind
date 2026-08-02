@@ -26,11 +26,11 @@ Status: in progress
 
 ## Batch 4: Electron behavior tests
 
-- [ ] Add behavior-level preload/IPC contract tests.
-- [ ] Cover bridge success, failure, arguments, and listener cleanup.
-- [ ] Cover Desktop startup/readiness and shell-only behavior.
-- [ ] Run the batch on macOS and run `make lint`.
-- [ ] Commit batch 4.
+- [x] Add behavior-level preload/IPC contract tests.
+- [x] Cover bridge success, failure, arguments, and listener cleanup.
+- [x] Cover Desktop startup/readiness and shell-only behavior.
+- [x] Run the batch on macOS and run `make lint`.
+- [x] Commit batch 4.
 
 ## Batch 5: packaged application smoke tests
 
