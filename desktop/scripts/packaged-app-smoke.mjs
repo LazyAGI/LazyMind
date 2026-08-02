@@ -9,7 +9,7 @@ import { commandRunner, isPortClosed, localGatewayURL } from "./runtime-smoke.mj
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 export function packagedRuntimePaths(appPath, platform = process.platform) {
-  const platformPath = platform === "win32" ? path.win32 : path;
+  const platformPath = platform === "win32" ? path.win32 : path.posix;
   const resourcesRoot = platform === "darwin"
     ? platformPath.join(appPath, "Contents", "Resources", "runtime")
     : platformPath.join(platformPath.dirname(appPath), "resources", "runtime");
@@ -21,7 +21,7 @@ export function packagedRuntimePaths(appPath, platform = process.platform) {
 }
 
 export function packagedExecutable(appPath, platform = process.platform) {
-  return platform === "darwin" ? path.join(appPath, "Contents", "MacOS", "LazyMind") : appPath;
+  return platform === "darwin" ? path.posix.join(appPath, "Contents", "MacOS", "LazyMind") : appPath;
 }
 
 export async function waitForPackagedRuntime(runtimeRoot, options = {}) {
