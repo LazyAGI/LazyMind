@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -76,7 +77,15 @@ class JsonCipher:
                 os.write(descriptor, os.urandom(32))
             finally:
                 os.close(descriptor)
-        key = path.read_bytes()
+        # A concurrent gateway may observe the exclusively-created file before
+        # its creator has finished the 32-byte write. This can occur while
+        # recovering from an interrupted installer warmup.
+        key = b''
+        for attempt in range(20):
+            key = path.read_bytes()
+            if len(key) == 32 or attempt == 19:
+                break
+            time.sleep(0.05)
         if len(key) != 32:
             raise RuntimeError('channel gateway credential master key is invalid')
         return key

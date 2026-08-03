@@ -7,6 +7,61 @@ import { spawn } from "node:child_process";
 import { commandRunner, isPortClosed, localGatewayURL } from "./runtime-smoke.mjs";
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const ACTIVE_RUNTIME_STATES = new Set(["ready", "running", "starting", "stale"]);
+
+function waitForChildExit(child, timeoutMs) {
+  if (!child?.once || child.exitCode != null || child.signalCode != null) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (exited) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener?.("exit", onExit);
+      child.removeListener?.("close", onExit);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    child.once("exit", onExit);
+    child.once("close", onExit);
+  });
+}
+
+export async function terminatePackagedApp(child, options = {}) {
+  if (!child?.kill) return;
+  if (!child.once) {
+    child.kill();
+    return;
+  }
+  if (child.exitCode != null || child.signalCode != null) return;
+
+  const gracefulExit = waitForChildExit(child, options.gracefulTimeoutMs ?? 2_000);
+  child.kill("SIGTERM");
+  if (await gracefulExit) return;
+
+  const forcedExit = waitForChildExit(child, options.forceTimeoutMs ?? 5_000);
+  child.kill("SIGKILL");
+  if (!(await forcedExit)) {
+    throw new Error("Packaged Desktop did not exit after SIGKILL");
+  }
+}
+
+function ownedRuntimeArgs(command, state, options, runtimePaths) {
+  return [
+    command, "--profile", "desktop", "--owner-token", state.ownerToken,
+    "--runtime-root", options.runtimeRoot, "--resources-root", runtimePaths.resourcesRoot,
+    "--repo-root", runtimePaths.repoRoot,
+  ];
+}
+
+function runtimeStatusStopped(status) {
+  if (!status || ACTIVE_RUNTIME_STATES.has(status.overallStatus)) return false;
+  return Object.values(status.services || {})
+    .every((service) => !ACTIVE_RUNTIME_STATES.has(service?.status));
+}
 
 export function packagedRuntimePaths(appPath, platform = process.platform) {
   const platformPath = platform === "win32" ? path.win32 : path.posix;
@@ -60,9 +115,13 @@ export async function verifyPackagedAPI(state, request = globalThis.fetch) {
 
 export async function runPackagedAppSmoke(options, dependencies = {}) {
   const runtimePaths = packagedRuntimePaths(options.app, options.platform);
-  const launch = dependencies.launch || ((app) => spawn(app, [], { detached: false, stdio: "ignore" }));
+  const launch = dependencies.launch || ((app) => spawn(app, [], {
+    detached: Boolean(options.leaveRunning),
+    stdio: "ignore",
+  }));
   const child = launch(packagedExecutable(options.app, options.platform));
   let state;
+  let verified = false;
   try {
     const readiness = waitForPackagedRuntime(options.runtimeRoot, {
       readState: dependencies.readState,
@@ -79,20 +138,79 @@ export async function runPackagedAppSmoke(options, dependencies = {}) {
       : new Promise(() => {});
     state = await Promise.race([readiness, earlyExit]);
     const gateway = await verifyPackagedAPI(state, dependencies.fetch);
+    verified = true;
+    if (options.leaveRunning) child?.unref?.();
     return { gateway, state, runtimePaths };
   } finally {
-    if (state?.ownerToken) {
-      const run = dependencies.runManager || commandRunner(runtimePaths.manager);
-      await run([
-        "down", "--profile", "desktop", "--owner-token", state.ownerToken,
-        "--runtime-root", options.runtimeRoot, "--resources-root", runtimePaths.resourcesRoot,
-        "--repo-root", runtimePaths.repoRoot,
-      ]);
+    let gracefulShutdownError;
+    try {
+      if (state?.ownerToken && !(options.leaveRunning && verified)) {
+        const run = dependencies.runManager || commandRunner(runtimePaths.manager, {
+          env: {
+            ...process.env,
+            LAZYMIND_LOCAL_DOWN_TIMEOUT: "180s",
+            LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT: "150s",
+          },
+          timeout: 190_000,
+        });
+        try {
+          await run(ownedRuntimeArgs("down", state, options, runtimePaths));
+        } catch (error) {
+          gracefulShutdownError = error;
+        }
+      }
+    } finally {
+      if (!(options.leaveRunning && verified && state?.ownerToken)) {
+        const terminate = dependencies.terminateApp || terminatePackagedApp;
+        await terminate(child);
+      }
+    }
+
+    if (state?.ownerToken && !(options.leaveRunning && verified) && gracefulShutdownError) {
+      const cleanupRun = dependencies.runCleanupManager || commandRunner(runtimePaths.manager, {
+        env: {
+          ...process.env,
+          LAZYMIND_LOCAL_DOWN_TIMEOUT: "60s",
+          LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT: "45s",
+        },
+        timeout: 70_000,
+      });
+      let cleanupError;
+      try {
+        await (dependencies.cleanupDelay || delay)(1_000);
+        await cleanupRun(ownedRuntimeArgs("down", state, options, runtimePaths));
+      } catch (error) {
+        cleanupError = error;
+      }
+
+      let stoppedStatus;
+      let statusError;
+      try {
+        stoppedStatus = JSON.parse(await cleanupRun([
+          ...ownedRuntimeArgs("status", state, options, runtimePaths), "--json",
+        ]));
+      } catch (error) {
+        statusError = error;
+      }
+      const port = Number(state?.config?.localProxy?.port || state?.config?.localProxy?.Port || 0);
+      const portClosed = dependencies.isPortClosed || isPortClosed;
+      const gatewayStopped = !port || await portClosed(port);
+      if (!gatewayStopped || !runtimeStatusStopped(stoppedStatus)) {
+        const details = [
+          `graceful shutdown: ${gracefulShutdownError.message}`,
+          cleanupError ? `bounded cleanup: ${cleanupError.message}` : "bounded cleanup completed",
+          statusError ? `status check: ${statusError.message}` : `runtime status: ${stoppedStatus?.overallStatus || "unknown"}`,
+          `gateway port ${port || "unknown"}: ${gatewayStopped ? "closed" : "open"}`,
+        ];
+        throw new Error(`Packaged runtime cleanup could not be verified; ${details.join("; ")}`);
+      }
+      const warn = dependencies.warn || console.warn;
+      warn(`::warning::Graceful packaged runtime shutdown failed, but bounded cleanup was verified: ${gracefulShutdownError.message}`);
+    } else if (state?.ownerToken && !(options.leaveRunning && verified)) {
       const port = Number(state?.config?.localProxy?.port || state?.config?.localProxy?.Port || 0);
       const portClosed = dependencies.isPortClosed || isPortClosed;
       if (port && !(await portClosed(port))) throw new Error(`Local Proxy port ${port} remains open`);
     }
-    child?.kill?.();
   }
 }
 
@@ -104,6 +222,7 @@ function parseOptions(argv) {
     runtimeRoot: values["runtime-root"],
     platform: values.platform,
     timeoutMs: values["timeout-ms"] ? Number(values["timeout-ms"]) : undefined,
+    leaveRunning: values["leave-running"] === "true",
   };
 }
 

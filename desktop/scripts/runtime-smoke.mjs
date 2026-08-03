@@ -36,19 +36,41 @@ export function assertReadyStatus(status, profile) {
   }
 }
 
-export function commandRunner(executable) {
+export function commandRunner(executable, spawnOptions = {}, spawnProcess = spawn) {
   return (args) =>
     new Promise((resolve, reject) => {
-      const child = spawn(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
+      const { timeout, ...childOptions } = spawnOptions;
+      const child = spawnProcess(executable, args, {
+        ...childOptions,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
       let stdout = "";
       let stderr = "";
+      let settled = false;
+      let timeoutTimer;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        callback(value);
+      };
       child.stdout.on("data", (chunk) => { stdout += chunk; });
       child.stderr.on("data", (chunk) => { stderr += chunk; });
-      child.once("error", reject);
-      child.once("close", (code) => {
-        if (code === 0) resolve(stdout);
-        else reject(new Error(`${executable} ${args[0]} failed (${code}): ${stderr || stdout}`));
+      child.once("error", (error) => finish(reject, error));
+      child.once("close", (code, signal) => {
+        if (code === 0) finish(resolve, stdout);
+        else finish(reject, new Error(`${executable} ${args[0]} failed (code=${code}, signal=${signal || "none"}): ${stderr || stdout}`));
       });
+      if (Number.isFinite(timeout) && timeout > 0) {
+        timeoutTimer = setTimeout(() => {
+          if (settled) return;
+          child.kill?.("SIGKILL");
+          child.stdout?.destroy?.();
+          child.stderr?.destroy?.();
+          child.unref?.();
+          finish(reject, new Error(`${executable} ${args[0]} timed out after ${timeout}ms: ${stderr || stdout}`));
+        }, timeout);
+      }
     });
 }
 
