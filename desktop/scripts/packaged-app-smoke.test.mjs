@@ -75,6 +75,65 @@ test("kills the packaged app when startup times out", async () => {
   assert.equal(killed, true);
 });
 
+test("kills the packaged app when owned runtime shutdown fails", async () => {
+  let killed = false;
+  const state = { profile: "desktop", overallStatus: "ready", ownerToken: "owner-token", config: { localProxy: { port: 18090 } } };
+  await assert.rejects(
+    runPackagedAppSmoke({
+      app: "/Applications/LazyMind.app", runtimeRoot: "/runtime", platform: "darwin",
+    }, {
+      launch: () => ({ kill: () => { killed = true; } }),
+      readState: async () => state,
+      pollIntervalMs: 0,
+      fetch: async (url) => url.endsWith("admin-session")
+        ? { ok: true, json: async () => ({ token: "token" }) }
+        : { ok: true },
+      runManager: async () => { throw new Error("shutdown timed out"); },
+      runCleanupManager: async (args) => {
+        if (args[0] === "status") {
+          return JSON.stringify({ overallStatus: "failed", services: { "local-proxy": { status: "running" } } });
+        }
+        throw new Error("forced cleanup failed");
+      },
+      cleanupDelay: async () => {},
+      isPortClosed: async () => false,
+    }),
+    /cleanup could not be verified/,
+  );
+  assert.equal(killed, true);
+});
+
+test("warns and succeeds when bounded cleanup verifies a failed graceful shutdown", async () => {
+  let killed = false;
+  const warnings = [];
+  const cleanupCalls = [];
+  const state = { profile: "desktop", overallStatus: "ready", ownerToken: "owner-token", config: { localProxy: { port: 18090 } } };
+  const result = await runPackagedAppSmoke({
+    app: "/Applications/LazyMind.app", runtimeRoot: "/runtime", platform: "darwin",
+  }, {
+    launch: () => ({ kill: () => { killed = true; } }),
+    readState: async () => state,
+    pollIntervalMs: 0,
+    fetch: async (url) => url.endsWith("admin-session")
+      ? { ok: true, json: async () => ({ token: "token" }) }
+      : { ok: true },
+    runManager: async () => { throw new Error("shutdown timed out"); },
+    runCleanupManager: async (args) => {
+      cleanupCalls.push(args[0]);
+      return args[0] === "status"
+        ? JSON.stringify({ overallStatus: "stopped", services: { "local-proxy": { status: "stopped" } } })
+        : "";
+    },
+    cleanupDelay: async () => {},
+    isPortClosed: async () => true,
+    warn: (message) => warnings.push(message),
+  });
+  assert.equal(result.gateway, "http://127.0.0.1:18090");
+  assert.equal(killed, true);
+  assert.deepEqual(cleanupCalls, ["down", "status"]);
+  assert.match(warnings[0], /^::warning::/);
+});
+
 test("fails immediately when the packaged application exits before readiness", async () => {
   const child = new EventEmitter();
   child.kill = () => {};

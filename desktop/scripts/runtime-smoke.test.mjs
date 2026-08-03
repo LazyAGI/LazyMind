@@ -1,11 +1,30 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 import {
   assertReadyStatus,
+  commandRunner,
   localGatewayURL,
   runRuntimeSmoke,
   runtimeArgs,
 } from "./runtime-smoke.mjs";
+
+test("command runner enforces a hard timeout without waiting for close", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdout.destroy = () => { child.stdout.destroyed = true; };
+  child.stderr.destroy = () => { child.stderr.destroyed = true; };
+  child.kill = (signal) => { child.killedWith = signal; };
+  child.unref = () => { child.unrefed = true; };
+  const run = commandRunner("manager", { timeout: 1 }, () => child);
+
+  await assert.rejects(run(["down"]), /timed out after 1ms/);
+  assert.equal(child.killedWith, "SIGKILL");
+  assert.equal(child.stdout.destroyed, true);
+  assert.equal(child.stderr.destroyed, true);
+  assert.equal(child.unrefed, true);
+});
 
 function readyStatus(profile) {
   return {

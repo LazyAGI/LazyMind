@@ -7,6 +7,21 @@ import { spawn } from "node:child_process";
 import { commandRunner, isPortClosed, localGatewayURL } from "./runtime-smoke.mjs";
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const ACTIVE_RUNTIME_STATES = new Set(["ready", "running", "starting", "stale"]);
+
+function ownedRuntimeArgs(command, state, options, runtimePaths) {
+  return [
+    command, "--profile", "desktop", "--owner-token", state.ownerToken,
+    "--runtime-root", options.runtimeRoot, "--resources-root", runtimePaths.resourcesRoot,
+    "--repo-root", runtimePaths.repoRoot,
+  ];
+}
+
+function runtimeStatusStopped(status) {
+  if (!status || ACTIVE_RUNTIME_STATES.has(status.overallStatus)) return false;
+  return Object.values(status.services || {})
+    .every((service) => !ACTIVE_RUNTIME_STATES.has(service?.status));
+}
 
 export function packagedRuntimePaths(appPath, platform = process.platform) {
   const platformPath = platform === "win32" ? path.win32 : path.posix;
@@ -81,18 +96,72 @@ export async function runPackagedAppSmoke(options, dependencies = {}) {
     const gateway = await verifyPackagedAPI(state, dependencies.fetch);
     return { gateway, state, runtimePaths };
   } finally {
-    if (state?.ownerToken) {
-      const run = dependencies.runManager || commandRunner(runtimePaths.manager);
-      await run([
-        "down", "--profile", "desktop", "--owner-token", state.ownerToken,
-        "--runtime-root", options.runtimeRoot, "--resources-root", runtimePaths.resourcesRoot,
-        "--repo-root", runtimePaths.repoRoot,
-      ]);
+    let gracefulShutdownError;
+    try {
+      if (state?.ownerToken) {
+        const run = dependencies.runManager || commandRunner(runtimePaths.manager, {
+          env: {
+            ...process.env,
+            LAZYMIND_LOCAL_DOWN_TIMEOUT: "180s",
+            LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT: "150s",
+          },
+          timeout: 190_000,
+        });
+        try {
+          await run(ownedRuntimeArgs("down", state, options, runtimePaths));
+        } catch (error) {
+          gracefulShutdownError = error;
+        }
+      }
+    } finally {
+      child?.kill?.();
+    }
+
+    if (state?.ownerToken && gracefulShutdownError) {
+      const cleanupRun = dependencies.runCleanupManager || commandRunner(runtimePaths.manager, {
+        env: {
+          ...process.env,
+          LAZYMIND_LOCAL_DOWN_TIMEOUT: "60s",
+          LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT: "45s",
+        },
+        timeout: 70_000,
+      });
+      let cleanupError;
+      try {
+        await (dependencies.cleanupDelay || delay)(1_000);
+        await cleanupRun(ownedRuntimeArgs("down", state, options, runtimePaths));
+      } catch (error) {
+        cleanupError = error;
+      }
+
+      let stoppedStatus;
+      let statusError;
+      try {
+        stoppedStatus = JSON.parse(await cleanupRun([
+          ...ownedRuntimeArgs("status", state, options, runtimePaths), "--json",
+        ]));
+      } catch (error) {
+        statusError = error;
+      }
+      const port = Number(state?.config?.localProxy?.port || state?.config?.localProxy?.Port || 0);
+      const portClosed = dependencies.isPortClosed || isPortClosed;
+      const gatewayStopped = !port || await portClosed(port);
+      if (!gatewayStopped || !runtimeStatusStopped(stoppedStatus)) {
+        const details = [
+          `graceful shutdown: ${gracefulShutdownError.message}`,
+          cleanupError ? `bounded cleanup: ${cleanupError.message}` : "bounded cleanup completed",
+          statusError ? `status check: ${statusError.message}` : `runtime status: ${stoppedStatus?.overallStatus || "unknown"}`,
+          `gateway port ${port || "unknown"}: ${gatewayStopped ? "closed" : "open"}`,
+        ];
+        throw new Error(`Packaged runtime cleanup could not be verified; ${details.join("; ")}`);
+      }
+      const warn = dependencies.warn || console.warn;
+      warn(`::warning::Graceful packaged runtime shutdown failed, but bounded cleanup was verified: ${gracefulShutdownError.message}`);
+    } else if (state?.ownerToken) {
       const port = Number(state?.config?.localProxy?.port || state?.config?.localProxy?.Port || 0);
       const portClosed = dependencies.isPortClosed || isPortClosed;
       if (port && !(await portClosed(port))) throw new Error(`Local Proxy port ${port} remains open`);
     }
-    child?.kill?.();
   }
 }
 

@@ -1,6 +1,9 @@
 name: macOS Desktop Installer
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       git_ref:
@@ -89,32 +92,17 @@ jobs:
           node-version: "20"
           package-manager-cache: false
 
-      - name: Set desktop version from release tag
+      - name: Validate tag and set desktop version
         if: steps.release.outputs.is_tag == 'true'
         id: version
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-
-          node <<'NODE'
-          const fs = require("fs");
-          const packagePath = "desktop/electron/package.json";
-          const tag = process.env.RELEASE_TAG.replace(/^v/, "");
-          const pythonPrerelease = tag.match(/^(\d+\.\d+\.\d+)(a|b|rc)(\d+)$/);
-          const prereleaseNames = { a: "alpha", b: "beta", rc: "rc" };
-          const version = pythonPrerelease
-            ? `${pythonPrerelease[1]}-${prereleaseNames[pythonPrerelease[2]]}.${pythonPrerelease[3]}`
-            : tag;
-          if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
-            throw new Error(`Release tag ${process.env.RELEASE_TAG} cannot be converted to a valid desktop SemVer`);
-          }
-          const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
-          packageJson.version = version;
-          fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `package_version=${version}\n`);
-          console.log(`Desktop package version: ${version} (release tag: ${process.env.RELEASE_TAG})`);
-          NODE
+          node desktop/scripts/resolve-release-version.mjs \
+            --tag "${RELEASE_TAG}" \
+            --package desktop/electron/package.json \
+            --github-output "${GITHUB_OUTPUT}"
 
       - name: Enable pnpm
         run: |
