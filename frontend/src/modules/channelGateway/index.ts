@@ -1,1 +1,3 @@
-export { default as WechatConnectionPage } from './pages/WechatConnectionPage';
+export {
+  TerminalConnectionPage,
+} from './pages/ChannelConnectionPage';

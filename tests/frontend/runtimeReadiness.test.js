@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
   resolveRuntimeCapabilityState,
+  shouldWaitForRuntimeCapability,
   waitForCapability,
 } from "../../frontend/src/runtime/readiness.ts";
 
@@ -38,6 +39,14 @@ const uiServices = [
 ];
 
 describe("desktop runtime readiness", () => {
+  it.each([
+    ["cloud", false],
+    ["local", false],
+    ["desktop", true],
+  ])("waits for the sidecar only in %s mode", (mode, expected) => {
+    expect(shouldWaitForRuntimeCapability(mode)).toBe(expected);
+  });
+
   it("makes configuration available before chat services finish starting", () => {
     expect(
       resolveRuntimeCapabilityState(status(uiServices), "configuration"),

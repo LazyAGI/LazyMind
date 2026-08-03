@@ -4,7 +4,7 @@
 ARG DOCKER_MIRROR=docker.m.daocloud.io/library/
 ARG BASE_LAZYLLM_IMAGE=base_env
 ARG BASE_LAZYMIND_IMAGE=base_code
-ARG LAZYLLM_VERSION=1.2.0a3
+ARG LAZYLLM_VERSION=1.2.2
 ARG LAZYLLM_BUNDLE_SOURCE=1
 
 # Stage: base_env - pure environment, NO business code copied.
