@@ -193,6 +193,7 @@ test("Windows NSIS installer uses electron-builder's default LZMA payload", () =
   const buildScript = readFileSync(path.join(scriptsDir, "build-windows-x64.ps1"), "utf8");
   const workflow = readFileSync(windowsWorkflow, "utf8");
   assert.doesNotMatch(source, /useZip\s*:/);
+  assert.match(source, /uninstallDisplayName:\s*"LazyMind"/);
   assert.match(packageJson.scripts["pack:win:x64"], /--publish never$/);
   assert.match(packageJson.scripts["pack:win:x64:installer"], /--publish never$/);
   assert.match(buildScript, /function Invoke-WindowsPackagingWithRetry/);

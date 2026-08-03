@@ -304,6 +304,7 @@ module.exports = {
     oneClick: false,
     perMachine: false,
     allowElevation: false,
+    uninstallDisplayName: "LazyMind",
     allowToChangeInstallationDirectory: false,
     installerLanguages: ["en_US", "zh_CN"],
     displayLanguageSelector: false,
