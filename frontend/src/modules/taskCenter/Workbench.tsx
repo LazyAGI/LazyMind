@@ -14,9 +14,10 @@ const ATTENTION_LIMIT = 3;
 
 interface WorkbenchProps {
   active: boolean;
+  onViewAllStatus: (status: 'failed' | 'canceled') => void;
 }
 
-export default function Workbench({ active }: WorkbenchProps) {
+export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -28,8 +29,6 @@ export default function Workbench({ active }: WorkbenchProps) {
   const [graphTask, setGraphTask] = useState<Task | null>(null);
   const [attentionExpanded, setAttentionExpanded] = useState(false);
   const [runningExpanded, setRunningExpanded] = useState(false);
-  const [failedExpanded, setFailedExpanded] = useState(false);
-  const [canceledExpanded, setCanceledExpanded] = useState(false);
   const [recentExpanded, setRecentExpanded] = useState(false);
 
   const load = useCallback(async () => {
@@ -86,8 +85,8 @@ export default function Workbench({ active }: WorkbenchProps) {
       <Spin spinning={loading}>
         <AttentionSection tasks={waiting} expanded={attentionExpanded} onToggle={() => setAttentionExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
         <RunningSection tasks={running} expanded={runningExpanded} onToggle={() => setRunningExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
-        <StatusCardSection status='failed' tasks={failed} expanded={failedExpanded} onToggle={() => setFailedExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
-        <StatusCardSection status='canceled' tasks={canceled} expanded={canceledExpanded} onToggle={() => setCanceledExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
+        <StatusCardSection status='failed' tasks={failed} totalCount={statusCounts.failed} onViewAll={() => onViewAllStatus('failed')} onSelect={setSelected} onOpenGraph={setGraphTask} />
+        <StatusCardSection status='canceled' tasks={canceled} totalCount={statusCounts.canceled} onViewAll={() => onViewAllStatus('canceled')} onSelect={setSelected} onOpenGraph={setGraphTask} />
         <RecentSection tasks={recent} expanded={recentExpanded} onToggle={() => setRecentExpanded((value) => !value)} onSelect={setSelected} />
       </Spin>
       <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} onDelete={async (task) => { await removeTask(task.id); setSelected(null); await load(); }} />
@@ -154,7 +153,7 @@ function RunningSection({ tasks, expanded, onToggle, onSelect, onOpenGraph }: { 
   </section>;
 }
 
-function StatusCardSection({ status, tasks, expanded, onToggle, onSelect, onOpenGraph }: { status: 'failed' | 'canceled'; tasks: Task[]; expanded: boolean; onToggle: () => void; onSelect: (task: Task) => void; onOpenGraph: (task: Task) => void }) {
+function StatusCardSection({ status, tasks, totalCount, onViewAll, onSelect, onOpenGraph }: { status: 'failed' | 'canceled'; tasks: Task[]; totalCount: number; onViewAll: () => void; onSelect: (task: Task) => void; onOpenGraph: (task: Task) => void }) {
   const { t } = useTranslation();
   const failed = status === 'failed';
   return <section className={`workbench-section ${status}`}>
@@ -163,12 +162,12 @@ function StatusCardSection({ status, tasks, expanded, onToggle, onSelect, onOpen
       tone={status}
       title={t(failed ? 'taskCenter.statusFailed' : 'taskCenter.statusCanceled')}
       description={t(failed ? 'taskCenter.failedDescription' : 'taskCenter.canceledDescription')}
-      count={tasks.length}
-      expanded={expanded}
-      canExpand={tasks.length > ATTENTION_LIMIT}
-      onToggle={onToggle}
+      count={totalCount}
+      expanded={false}
+      canExpand={totalCount > Math.min(tasks.length, ATTENTION_LIMIT)}
+      onToggle={onViewAll}
     />
-    {tasks.length ? <div className='attention-task-grid'>{tasks.slice(0, expanded ? undefined : ATTENTION_LIMIT).map((task) => (
+    {tasks.length ? <div className='attention-task-grid'>{tasks.slice(0, ATTENTION_LIMIT).map((task) => (
       <article className='attention-task-card' key={task.id}>
         <div className='attention-task-card-top'>
           <span className={`task-type-icon task-type-${task.task_type}`}>{failed ? <CloseCircleOutlined /> : <StopOutlined />}</span>

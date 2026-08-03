@@ -11,6 +11,14 @@ type TaskCenterTab = 'workbench' | 'tasks' | 'schedules';
 export default function TaskCenterPage() {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<TaskCenterTab>('workbench');
+  const [taskStatus, setTaskStatus] = useState('');
+  const [taskPage, setTaskPage] = useState(1);
+
+  const showTasksByStatus = (status: 'failed' | 'canceled') => {
+    setTaskStatus(status);
+    setTaskPage(1);
+    setActiveTab('tasks');
+  };
 
   return (
     <div className='task-center-page'>
@@ -23,8 +31,8 @@ export default function TaskCenterPage() {
         </div>
       </header>
       <Tabs className='task-center-tabs' activeKey={activeTab} onChange={(key: string) => setActiveTab(key as TaskCenterTab)} items={[
-        { key: 'workbench', label: t('taskCenter.workbench'), children: <Workbench active={activeTab === 'workbench'} /> },
-        { key: 'tasks', label: t('taskCenter.allTasks'), children: <TaskList active={activeTab === 'tasks'} /> },
+        { key: 'workbench', label: t('taskCenter.workbench'), children: <Workbench active={activeTab === 'workbench'} onViewAllStatus={showTasksByStatus} /> },
+        { key: 'tasks', label: t('taskCenter.allTasks'), children: <TaskList active={activeTab === 'tasks'} status={taskStatus} onStatusChange={setTaskStatus} page={taskPage} onPageChange={setTaskPage} /> },
         { key: 'schedules', label: t('taskCenter.schedulePlans'), children: <ScheduleList active={activeTab === 'schedules'} /> },
       ]} />
     </div>
