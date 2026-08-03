@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray, session } = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
@@ -21,6 +21,7 @@ const {
   markMacWarmupCompleted,
   runInstallerWarmupLifecycle,
 } = require("./installer-warmup");
+const { clearFrontendCaches } = require("./frontend-cache");
 
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
@@ -1477,8 +1478,13 @@ if (!hasSingleInstanceLock) {
   app.on("activate", () => {
     void showActiveWindow();
   });
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     startupMetricsRecorder.mark("electronReady");
+    try {
+      await clearFrontendCaches(session.defaultSession, (message) => appendStartupLog("desktop", message));
+    } catch (error) {
+      appendStartupLog("error", `failed to clear frontend caches: ${serializeError(error)}`);
+    }
     if (isWindows) {
       app.setAppUserModelId("ai.lazymind.desktop");
     }

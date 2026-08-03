@@ -447,24 +447,29 @@ jobs:
             throw "Executable ProductVersion mismatch: expected $expectedProductVersion, got $productVersion"
           }
 
-      - name: Run explicit Electron warmup
-        id: warmup
+      - name: Verify installer warmup result
+        id: installer_warmup
         if: steps.verify.outcome == 'success'
         continue-on-error: true
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $app = Join-Path $env:LOCALAPPDATA "Programs\LazyMind\LazyMind.exe"
-          $warmup = Start-Process -FilePath $app -ArgumentList "--installer-warmup", "--timeout-seconds", "300" -Wait -PassThru
-          "Explicit warmup exit code: $($warmup.ExitCode)"
-          if ($warmup.ExitCode -ne 0) {
-            $unsignedExitCode = [uint32]$warmup.ExitCode
-            throw "Explicit warmup exited with code $($warmup.ExitCode) (0x$($unsignedExitCode.ToString('X8')))"
+          $metricsPath = Join-Path $env:LOCALAPPDATA "LazyMind\Logs\desktop\startup-metrics-latest.json"
+          if (-not (Test-Path -LiteralPath $metricsPath -PathType Leaf)) {
+            throw "Installer warmup metrics are missing: $metricsPath"
           }
+          $metrics = Get-Content -LiteralPath $metricsPath -Raw | ConvertFrom-Json
+          if ($metrics.launchKind -ne "installer-warmup") {
+            throw "Unexpected installer warmup launch kind: $($metrics.launchKind)"
+          }
+          if ($metrics.outcome -ne "success") {
+            throw "Installer warmup failed: outcome=$($metrics.outcome), failureCode=$($metrics.failureCode)"
+          }
+          "Installer warmup completed successfully in $($metrics.completedMs)ms"
 
       - name: Run packaged application smoke
         id: smoke
-        if: steps.verify.outcome == 'success'
+        if: steps.installer_warmup.outcome == 'success'
         continue-on-error: true
         shell: pwsh
         run: |
@@ -536,14 +541,14 @@ jobs:
         env:
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
-          WARMUP_OUTCOME: ${{ steps.warmup.outcome }}
+          INSTALLER_WARMUP_OUTCOME: ${{ steps.installer_warmup.outcome }}
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
           UNINSTALL_OUTCOME: ${{ steps.uninstall.outcome }}
         run: |
           $outcomes = [ordered]@{
             install = $env:INSTALL_OUTCOME
             verify = $env:VERIFY_OUTCOME
-            warmup = $env:WARMUP_OUTCOME
+            installer_warmup = $env:INSTALLER_WARMUP_OUTCOME
             smoke = $env:SMOKE_OUTCOME
             uninstall = $env:UNINSTALL_OUTCOME
           }

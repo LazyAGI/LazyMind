@@ -5,6 +5,7 @@ import {
   packagedExecutable,
   packagedRuntimePaths,
   runPackagedAppSmoke,
+  terminatePackagedApp,
   waitForPackagedRuntime,
 } from "./packaged-app-smoke.mjs";
 
@@ -38,6 +39,36 @@ test("waits through missing and starting state until Desktop is ready", async ()
   assert.equal(state.overallStatus, "ready");
 });
 
+test("force kills a packaged app that stays resident after SIGTERM", async () => {
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.signalCode = null;
+  const signals = [];
+  child.kill = (signal) => {
+    signals.push(signal);
+    if (signal === "SIGKILL") {
+      child.signalCode = signal;
+      queueMicrotask(() => child.emit("exit", null, signal));
+    }
+    return true;
+  };
+
+  await terminatePackagedApp(child, { gracefulTimeoutMs: 1, forceTimeoutMs: 100 });
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("fails when a packaged app remains alive after SIGKILL", async () => {
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.signalCode = null;
+  child.kill = () => true;
+
+  await assert.rejects(
+    terminatePackagedApp(child, { gracefulTimeoutMs: 1, forceTimeoutMs: 1 }),
+    /did not exit after SIGKILL/,
+  );
+});
+
 test("launches a packaged app, verifies APIs, and performs owned shutdown", async () => {
   const calls = [];
   const state = { profile: "desktop", overallStatus: "ready", ownerToken: "owner-token", config: { localProxy: { port: 18090 } } };
@@ -60,6 +91,26 @@ test("launches a packaged app, verifies APIs, and performs owned shutdown", asyn
   assert.equal(calls[0], "launch");
   assert.ok(calls.some((call) => Array.isArray(call) && call[0] === "down"));
   assert.equal(calls.at(-1), "kill");
+});
+
+test("leaves a verified packaged app running for asynchronous workflow cleanup", async () => {
+  const calls = [];
+  const child = { unref: () => calls.push("unref"), kill: () => calls.push("kill") };
+  const state = { profile: "desktop", overallStatus: "ready", ownerToken: "owner-token", config: { localProxy: { port: 18090 } } };
+  const result = await runPackagedAppSmoke({
+    app: "/Applications/LazyMind.app", runtimeRoot: "/runtime", platform: "darwin", leaveRunning: true,
+  }, {
+    launch: () => child,
+    readState: async () => state,
+    pollIntervalMs: 0,
+    fetch: async (url) => url.endsWith("admin-session")
+      ? { ok: true, json: async () => ({ token: "token" }) }
+      : { ok: true },
+    runManager: async () => calls.push("down"),
+  });
+
+  assert.equal(result.gateway, "http://127.0.0.1:18090");
+  assert.deepEqual(calls, ["unref"]);
 });
 
 test("kills the packaged app when startup times out", async () => {
@@ -136,6 +187,8 @@ test("warns and succeeds when bounded cleanup verifies a failed graceful shutdow
 
 test("fails immediately when the packaged application exits before readiness", async () => {
   const child = new EventEmitter();
+  child.exitCode = null;
+  child.signalCode = null;
   child.kill = () => {};
   const result = runPackagedAppSmoke({
     app: "/Applications/LazyMind.app", runtimeRoot: "/runtime", platform: "darwin", timeoutMs: 100,
@@ -144,6 +197,7 @@ test("fails immediately when the packaged application exits before readiness", a
     readState: async () => { throw new Error("missing"); },
     pollIntervalMs: 10,
   });
+  child.exitCode = 0;
   child.emit("exit", 0, null);
   await assert.rejects(result, /exited before readiness/);
 });

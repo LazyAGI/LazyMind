@@ -243,6 +243,7 @@ func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_UPLOAD_ROOT="+paths.UploadRoot)
 	assertEnvContains(t, env, "LAZYMIND_HOME="+paths.AlgorithmHome)
 	assertEnvContains(t, env, "LAZYLLM_HOME="+paths.LazyLLMHome)
+	assertEnvContains(t, env, "TIKTOKEN_CACHE_DIR="+filepath.Join(paths.LazyLLMHome, "tiktoken"))
 	assertEnvContains(t, env, "LAZYMIND_DOCUMENT_SERVICE_STORAGE_DIR="+paths.UploadRoot)
 	assertEnvContains(t, env, "LAZYLLM_TEMP_DIR="+paths.LazyLLMTempDir)
 	assertEnvContains(t, env, "LAZYMIND_OCR_CACHE_DIR="+paths.OCRCacheDir)
@@ -254,6 +255,40 @@ func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "traces"))
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "subagent"))
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "evo"))
+}
+
+func TestEnsureTiktokenCacheWarmsOnceAndWritesMarker(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	runner := &fakeRunner{t: t}
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		assertCommand(t, cmd, paths.AlgorithmPython, "-c", "import tiktoken; tiktoken.get_encoding('gpt2')")
+		assertEnvContains(t, cmd.Env, "TIKTOKEN_CACHE_DIR="+filepath.Join(paths.LazyLLMHome, "tiktoken"))
+		cacheFile := filepath.Join(paths.LazyLLMHome, "tiktoken", "gpt2-cache")
+		if err := os.WriteFile(cacheFile, []byte("cached"), 0o644); err != nil {
+			t.Fatalf("write fake tiktoken cache: %v", err)
+		}
+		return CommandResult{}, nil
+	})
+	manager := NewAlgorithmServiceManager(runner)
+
+	if err := manager.ensureTiktokenCache(context.Background(), paths); err != nil {
+		t.Fatalf("first tiktoken warmup: %v", err)
+	}
+	if err := manager.ensureTiktokenCache(context.Background(), paths); err != nil {
+		t.Fatalf("second tiktoken warmup: %v", err)
+	}
+	runner.assertCommandCount(1)
+	if _, err := os.Stat(filepath.Join(paths.PythonStateDir, tiktokenReadyFileName)); err != nil {
+		t.Fatalf("tiktoken ready marker: %v", err)
+	}
 }
 
 func TestAlgorithmServiceEnvUsesFileBackedRelayArgumentsOnWindowsDesktop(t *testing.T) {

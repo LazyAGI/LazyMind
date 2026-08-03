@@ -9,6 +9,46 @@ import { commandRunner, isPortClosed, localGatewayURL } from "./runtime-smoke.mj
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const ACTIVE_RUNTIME_STATES = new Set(["ready", "running", "starting", "stale"]);
 
+function waitForChildExit(child, timeoutMs) {
+  if (!child?.once || child.exitCode != null || child.signalCode != null) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (exited) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener?.("exit", onExit);
+      child.removeListener?.("close", onExit);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    child.once("exit", onExit);
+    child.once("close", onExit);
+  });
+}
+
+export async function terminatePackagedApp(child, options = {}) {
+  if (!child?.kill) return;
+  if (!child.once) {
+    child.kill();
+    return;
+  }
+  if (child.exitCode != null || child.signalCode != null) return;
+
+  const gracefulExit = waitForChildExit(child, options.gracefulTimeoutMs ?? 2_000);
+  child.kill("SIGTERM");
+  if (await gracefulExit) return;
+
+  const forcedExit = waitForChildExit(child, options.forceTimeoutMs ?? 5_000);
+  child.kill("SIGKILL");
+  if (!(await forcedExit)) {
+    throw new Error("Packaged Desktop did not exit after SIGKILL");
+  }
+}
+
 function ownedRuntimeArgs(command, state, options, runtimePaths) {
   return [
     command, "--profile", "desktop", "--owner-token", state.ownerToken,
@@ -75,9 +115,13 @@ export async function verifyPackagedAPI(state, request = globalThis.fetch) {
 
 export async function runPackagedAppSmoke(options, dependencies = {}) {
   const runtimePaths = packagedRuntimePaths(options.app, options.platform);
-  const launch = dependencies.launch || ((app) => spawn(app, [], { detached: false, stdio: "ignore" }));
+  const launch = dependencies.launch || ((app) => spawn(app, [], {
+    detached: Boolean(options.leaveRunning),
+    stdio: "ignore",
+  }));
   const child = launch(packagedExecutable(options.app, options.platform));
   let state;
+  let verified = false;
   try {
     const readiness = waitForPackagedRuntime(options.runtimeRoot, {
       readState: dependencies.readState,
@@ -94,11 +138,13 @@ export async function runPackagedAppSmoke(options, dependencies = {}) {
       : new Promise(() => {});
     state = await Promise.race([readiness, earlyExit]);
     const gateway = await verifyPackagedAPI(state, dependencies.fetch);
+    verified = true;
+    if (options.leaveRunning) child?.unref?.();
     return { gateway, state, runtimePaths };
   } finally {
     let gracefulShutdownError;
     try {
-      if (state?.ownerToken) {
+      if (state?.ownerToken && !(options.leaveRunning && verified)) {
         const run = dependencies.runManager || commandRunner(runtimePaths.manager, {
           env: {
             ...process.env,
@@ -114,10 +160,13 @@ export async function runPackagedAppSmoke(options, dependencies = {}) {
         }
       }
     } finally {
-      child?.kill?.();
+      if (!(options.leaveRunning && verified && state?.ownerToken)) {
+        const terminate = dependencies.terminateApp || terminatePackagedApp;
+        await terminate(child);
+      }
     }
 
-    if (state?.ownerToken && gracefulShutdownError) {
+    if (state?.ownerToken && !(options.leaveRunning && verified) && gracefulShutdownError) {
       const cleanupRun = dependencies.runCleanupManager || commandRunner(runtimePaths.manager, {
         env: {
           ...process.env,
@@ -157,7 +206,7 @@ export async function runPackagedAppSmoke(options, dependencies = {}) {
       }
       const warn = dependencies.warn || console.warn;
       warn(`::warning::Graceful packaged runtime shutdown failed, but bounded cleanup was verified: ${gracefulShutdownError.message}`);
-    } else if (state?.ownerToken) {
+    } else if (state?.ownerToken && !(options.leaveRunning && verified)) {
       const port = Number(state?.config?.localProxy?.port || state?.config?.localProxy?.Port || 0);
       const portClosed = dependencies.isPortClosed || isPortClosed;
       if (port && !(await portClosed(port))) throw new Error(`Local Proxy port ${port} remains open`);
@@ -173,6 +222,7 @@ function parseOptions(argv) {
     runtimeRoot: values["runtime-root"],
     platform: values.platform,
     timeoutMs: values["timeout-ms"] ? Number(values["timeout-ms"]) : undefined,
+    leaveRunning: values["leave-running"] === "true",
   };
 }
 

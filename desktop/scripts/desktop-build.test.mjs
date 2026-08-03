@@ -192,6 +192,9 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
   assert.match(source, /Start-Process -FilePath \$uninstaller -ArgumentList "\/S" -Wait/);
   assert.match(source, /RegistryView\]::Registry64[\s\S]*RegistryView\]::Registry32/);
   assert.match(source, /name: Upload installer diagnostics[\s\S]*if: always\(\)/);
+  assert.doesNotMatch(source, /name: Run explicit Electron warmup/);
+  assert.doesNotMatch(source, /steps\.warmup\.outcome/);
+  assert.match(source, /name: Verify installer warmup result[\s\S]*startup-metrics-latest\.json/);
 });
 
 test("Windows NSIS installer uses electron-builder's default LZMA payload", () => {
@@ -284,6 +287,12 @@ test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallbac
 
   assert.match(buildWorkflow, /name:\s*Submit app ZIP for notarization/);
   assert.match(buildWorkflow, /notarytool submit "\$\{zip_path\}"/);
+  assert.match(buildWorkflow, /--leave-running true/);
+  assert.match(buildWorkflow, /name:\s*Start asynchronous packaged runtime cleanup[\s\S]*pkill -9 -f "\$\{app_executable\}"[\s\S]*nohup env/);
+  assert.ok(
+    buildWorkflow.indexOf("name: Submit app ZIP for notarization") <
+      buildWorkflow.indexOf("name: Start asynchronous packaged runtime cleanup"),
+  );
   assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for app ZIP notarization/);
   assert.match(buildWorkflow, /continuing directly to DMG packaging/);
   assert.match(buildWorkflow, /name:\s*Staple accepted app ticket/);
@@ -303,6 +312,12 @@ test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallbac
   assert.match(buildWorkflow, /DMG notarization timed out/);
   assert.match(buildWorkflow, /stapler staple "\$\{final_path\}"/);
   assert.match(buildWorkflow, /stapler validate "\$\{final_path\}"/);
+  assert.match(buildWorkflow, /name:\s*Verify packaged runtime cleanup after artifact upload/);
+  assert.match(buildWorkflow, /LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT=1s/);
+  assert.ok(
+    buildWorkflow.indexOf("name: Upload final notarized installer") <
+      buildWorkflow.indexOf("name: Verify packaged runtime cleanup after artifact upload"),
+  );
   assert.doesNotMatch(buildWorkflow, /name:\s*Report step timings/);
 
   assert.match(finalizeWorkflow, /source_run_id:/);
@@ -361,6 +376,15 @@ test("Desktop renderer keeps Node disabled behind an isolated preload bridge", (
   assert.match(source, /contextIsolation:\s*true/);
   assert.match(source, /nodeIntegration:\s*false/);
   assert.match(source, /preload:\s*path\.join\(__dirname, "preload\.js"\)/);
+});
+
+test("Desktop clears stale frontend caches before opening a renderer", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(source, /await clearFrontendCaches\(session\.defaultSession/);
+  assert.ok(
+    source.indexOf("await clearFrontendCaches(session.defaultSession") < source.indexOf("return runMacInstallationWarmupIfNeeded()"),
+    "frontend caches must be cleared before installation warmup or the main window loads",
+  );
 });
 
 test("Desktop opens the home page from the sidecar readiness event with status polling as fallback", () => {
