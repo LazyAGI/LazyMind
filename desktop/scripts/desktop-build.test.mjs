@@ -4,11 +4,12 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const manifestScript = path.join(scriptsDir, "write-runtime-manifest.mjs");
 const iconScript = path.join(scriptsDir, "generate-windows-icon.mjs");
+const releaseVersionScript = path.join(scriptsDir, "resolve-release-version.mjs");
 const icnsSource = path.join(scriptsDir, "..", "electron", "assets", "LazyMind.icns");
 const electronMainScript = path.join(scriptsDir, "..", "electron", "src", "main.js");
 const electronBuilderConfig = path.join(scriptsDir, "..", "electron", "electron-builder.config.cjs");
@@ -87,6 +88,20 @@ test("generates a multi-resolution Windows ICO from the macOS icon", () => {
   }
 });
 
+test("normalizes shared desktop release tags to standard SemVer", async () => {
+  const { normalizeReleaseTag } = await import(pathToFileURL(releaseVersionScript).href);
+  assert.deepEqual(normalizeReleaseTag("v1.2.3a2"), {
+    releaseTag: "v1.2.3a2",
+    packageVersion: "1.2.3-alpha.2",
+    artifactVersion: "1.2.3-alpha.2",
+  });
+  assert.equal(normalizeReleaseTag("1.2.3b4").packageVersion, "1.2.3-beta.4");
+  assert.equal(normalizeReleaseTag("v1.2.3rc1").packageVersion, "1.2.3-rc.1");
+  assert.equal(normalizeReleaseTag("v1.2.3-alpha.2").packageVersion, "1.2.3-alpha.2");
+  assert.equal(normalizeReleaseTag("v1.2.3").packageVersion, "1.2.3");
+  assert.throws(() => normalizeReleaseTag("release-1.2"), /Unsupported release tag/);
+});
+
 test("Windows installer force-stops LazyMind before invoking an old uninstaller", () => {
   const source = readFileSync(installerScript, "utf8");
   const check = nsisMacro(source, "customCheckAppRunning");
@@ -125,19 +140,29 @@ test("Windows installer replaces legacy uninstallers with the fixed embedded uni
   assert.match(check, /LMUpgradeRepairFailed[\s\S]*SetErrorLevel 8/);
 });
 
-test("Windows installer verifies and force-cleans processes left by warmup", () => {
+test("Windows installer diagnoses paths and does not roll back when warmup fails", () => {
   const source = readFileSync(installerScript, "utf8");
+  const init = nsisMacro(source, "customInit");
   const install = nsisMacro(source, "customInstall");
 
   assert.match(
-    install,
-    /ExecWait[^\n]+--installer-warmup[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
+    init,
+    /preflight --install-dir "\$INSTDIR" --temp-dir "\$TEMP" --minimum-free-space-mb \$\{LAZYMIND_MIN_FREE_SPACE_MB\} --maximum-relative-path-length \$\{LAZYMIND_MAX_RELATIVE_PATH_LENGTH\}/,
   );
+  assert.match(
+    install,
+    /ExecWait[^\n]+--installer-warmup --timeout-seconds 240[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
+  );
+  assert.match(install, /Starting Electron installer warmup \(timeout=240s\)/);
+  assert.match(install, /installer-nsis\.log[\s\S]*Starting Electron installer warmup/);
+  assert.match(install, /Electron installer warmup returned exit code \$3/);
   assert.match(
     install,
     /\$0 == 10[\s\S]*force-stop --install-dir "\$INSTDIR"[\s\S]*Goto LMWarmupCheckStopped/,
   );
   assert.match(install, /\$4 == 1[\s\S]*StrCpy \$3 4[\s\S]*\$3 != 0/);
+  assert.doesNotMatch(install, /MB_ABORTRETRYIGNORE|SetErrorLevel 4/);
+  assert.match(install, /installation will continue/);
 });
 
 test("Windows CI treats branches as non-tags without leaking git probe failures", () => {
@@ -149,12 +174,55 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
   assert.match(source, /exit 0/);
   assert.match(source, /git submodule update --init algorithm\/lazyllm/);
   assert.doesNotMatch(source, /git submodule update --init --recursive/);
+  assert.match(source, /resolve-release-version\.mjs/);
+  assert.match(source, /windows-2022[\s\S]*windows-2025/);
+  assert.match(source, /artifact_name:\s*\$\{\{ steps\.package\.outputs\.artifact_name \}\}/);
+  assert.match(source, /"artifact_name=\$outputName"/);
+  assert.match(
+    source,
+    /name:\s*\$\{\{ needs\.build-windows-installer\.outputs\.artifact_name \}\}/,
+  );
+  assert.match(
+    source,
+    /test-windows-installer:[\s\S]*name: Checkout smoke test scripts[\s\S]*ref: \$\{\{ inputs\.git_ref \|\| github\.ref \}\}[\s\S]*name: Download the exact installer built above/,
+  );
+  assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList "\/S" -Wait/);
+  assert.match(source, /DisplayVersion -ne \$env:EXPECTED_VERSION/);
+  assert.match(source, /expectedProductVersion = "\$\(\$Matches\[1\]\)\.\$\(\$Matches\[2\]\)\.\$\(\$Matches\[3\]\)\.0"/);
+  assert.match(source, /Start-Process -FilePath \$uninstaller -ArgumentList "\/S" -Wait/);
+  assert.match(source, /RegistryView\]::Registry64[\s\S]*RegistryView\]::Registry32/);
+  assert.match(source, /name: Upload installer diagnostics[\s\S]*if: always\(\)/);
+});
+
+test("Windows NSIS installer uses electron-builder's default LZMA payload", () => {
+  const source = readFileSync(electronBuilderConfig, "utf8");
+  const packageJson = JSON.parse(readFileSync(electronPackage, "utf8"));
+  const buildScript = readFileSync(path.join(scriptsDir, "build-windows-x64.ps1"), "utf8");
+  const workflow = readFileSync(windowsWorkflow, "utf8");
+  assert.doesNotMatch(source, /useZip\s*:/);
+  assert.doesNotMatch(source, /signAndEditExecutable\s*:/);
+  assert.match(source, /uninstallDisplayName:\s*"LazyMind"/);
+  assert.match(packageJson.scripts["pack:win:x64"], /--publish never$/);
+  assert.match(packageJson.scripts["pack:win:x64:installer"], /--publish never$/);
+  assert.match(buildScript, /function Invoke-WindowsPackagingWithRetry/);
+  assert.match(buildScript, /function Invoke-NativeWithRetry/);
+  assert.match(buildScript, /maximumAttempts = 3/);
+  assert.match(buildScript, /ELECTRON_CACHE/);
+  assert.match(buildScript, /ELECTRON_BUILDER_CACHE/);
+  assert.match(workflow, /Cache Electron and electron-builder downloads/);
+  assert.match(workflow, /Submodule checkout attempt \$attempt\/3 failed/);
+  assert.match(workflow, /pnpm activation attempt \$attempt\/3 failed/);
 });
 
 test("macOS distribution build signs packages while CI owns notarization sequencing", () => {
   const source = readFileSync(darwinBuildScript, "utf8");
   const builderSource = readFileSync(electronBuilderConfig, "utf8");
   const packageJson = JSON.parse(readFileSync(electronPackage, "utf8"));
+  const workflow = readFileSync(macosWorkflow, "utf8");
+  assert.match(workflow, /on:\s*\n\s*push:\s*\n\s*tags:\s*\n\s*- "v\*"\s*\n\s*workflow_dispatch:/);
+  assert.doesNotMatch(workflow.match(/on:[\s\S]*?permissions:/)?.[0] || "", /branches:/);
+  assert.match(workflow, /name: Validate tag and set desktop version[\s\S]*resolve-release-version\.mjs/);
+  assert.doesNotMatch(workflow, /pythonPrerelease|prereleaseNames/);
   assert.match(source, /PACKAGE_KIND=.*zip/);
   assert.match(source, /SIGNING_MODE=.*adhoc/);
   assert.doesNotMatch(source, /notarytool submit/);
@@ -228,8 +296,7 @@ test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallbac
   assert.match(buildWorkflow, /git show-ref --verify --quiet "refs\/tags\/\$\{REQUESTED_REF\}"/);
   assert.match(buildWorkflow, /tag_commit=.*git rev-parse "refs\/tags\/\$\{tag_candidate\}\^\{commit\}"/);
   assert.doesNotMatch(buildWorkflow, /path:[^\n]*LazyMind-darwin-arm64\.zip/);
-  assert.match(buildWorkflow, /replace\(\/\^v\//);
-  assert.match(buildWorkflow, /prereleaseNames = \{ a: "alpha", b: "beta", rc: "rc" \}/);
+  assert.match(buildWorkflow, /resolve-release-version\.mjs/);
   assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for DMG notarization/);
   assert.match(buildWorkflow, /deadline="\$\(\( started_at \+ 1800 \)\)"/);
   assert.match(buildWorkflow, /sleep 30/);
@@ -247,6 +314,19 @@ test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallbac
   assert.match(finalizeWorkflow, /notarytool log "\$\{SUBMISSION_ID\}"/);
   assert.match(finalizeWorkflow, /stapler staple "\$\{final_path\}"/);
   assert.match(finalizeWorkflow, /name:\s*LazyMind-macos-arm64-notarized/);
+});
+
+test("installer workflows launch the packaged application before publishing", () => {
+  const macosSource = readFileSync(macosWorkflow, "utf8");
+  const windowsSource = readFileSync(windowsWorkflow, "utf8");
+  for (const source of [macosSource, windowsSource]) {
+    assert.match(source, /packaged-app-smoke\.mjs/);
+    assert.match(source, /--timeout-ms 300000/);
+  }
+  assert.match(macosSource, /LAZYMIND_DESKTOP_RUNTIME_ROOT=/);
+  assert.ok(
+    windowsSource.indexOf("packaged-app-smoke.mjs") < windowsSource.indexOf("$uninstall = Start-Process"),
+  );
 });
 
 test("packaged macOS app runs installation warmup once before its normal window", () => {
@@ -274,6 +354,13 @@ test("Desktop does not create the Chat window after quitting or moving to backgr
     /const status = await waitForDesktopHomeReady\(\);\s*if \(isQuitting \|\| windowHiddenByUser \|\| nextStartupWindow\.isDestroyed\(\)\) \{\s*return;\s*\}\s*nextMainWindow = new BrowserWindow/,
     "quit and background state must be rechecked before creating the hidden Chat window",
   );
+});
+
+test("Desktop renderer keeps Node disabled behind an isolated preload bridge", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(source, /contextIsolation:\s*true/);
+  assert.match(source, /nodeIntegration:\s*false/);
+  assert.match(source, /preload:\s*path\.join\(__dirname, "preload\.js"\)/);
 });
 
 test("Desktop opens the home page from the sidecar readiness event with status polling as fallback", () => {

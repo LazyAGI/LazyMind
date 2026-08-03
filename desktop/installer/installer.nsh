@@ -5,6 +5,7 @@
 !insertmacro VersionCompare
 !insertmacro GetParameters
 !insertmacro GetOptions
+!include "${BUILD_RESOURCES_DIR}\lazymind-installer-metadata.nsh"
 
 !macro customHeader
   Var InstallerHelper
@@ -44,8 +45,10 @@
   LangString LMUpgradeRepairFailed ${LANG_SIMPCHINESE} "无法更新旧版 LazyMind 卸载程序以安全升级，安装程序无法继续。"
   LangString LMPurgeFailed ${LANG_ENGLISH} "Local AppData could not be safely removed. No path outside LocalAppData\LazyMind was touched."
   LangString LMPurgeFailed ${LANG_SIMPCHINESE} "无法安全清除 Local AppData。未操作 LocalAppData\LazyMind 之外的任何路径。"
-  LangString LMWarmupFailed ${LANG_ENGLISH} "LazyMind warmup failed or timed out. Retry retries warmup, Ignore skips it, and Abort cancels setup."
-  LangString LMWarmupFailed ${LANG_SIMPCHINESE} "LazyMind 预热失败或超时。选择“重试”会重新预热，“忽略”会跳过预热，“中止”会取消安装。"
+  LangString LMWarmupFailed ${LANG_ENGLISH} "LazyMind warmup failed or timed out. Installation will finish normally; the first launch may take longer."
+  LangString LMWarmupFailed ${LANG_SIMPCHINESE} "LazyMind 预热失败或超时。安装将正常完成；首次启动可能需要更长时间。"
+  LangString LMPreflightFailed ${LANG_ENGLISH} "LazyMind cannot be installed safely with the current temporary or installation path. Check that TEMP is on a writable local disk, at least ${LAZYMIND_MIN_FREE_SPACE_MB} MB is free, and the path is not too long."
+  LangString LMPreflightFailed ${LANG_SIMPCHINESE} "当前临时目录或安装目录无法可靠安装 LazyMind。请确认 TEMP 位于可写的本地磁盘、至少有 ${LAZYMIND_MIN_FREE_SPACE_MB} MB 可用空间，并且路径不过长。"
   LangString LMDowngradeBlocked ${LANG_ENGLISH} "A newer LazyMind version is already installed. Downgrade is blocked to protect local data."
   LangString LMDowngradeBlocked ${LANG_SIMPCHINESE} "已安装更高版本的 LazyMind。为保护本地数据，禁止降级安装。"
   LangString LMUpgradePurgeBlocked ${LANG_ENGLISH} "Upgrades always keep Local AppData. Remove --purge-lazymind-local-data and retry."
@@ -121,6 +124,16 @@
   File /oname=$PLUGINSDIR\lazymind-installer-maintenance.exe "${BUILD_RESOURCES_DIR}\lazymind-installer-maintenance.exe"
   StrCpy $UpgradeUninstaller "$PLUGINSDIR\lazymind-upgrade-uninstaller.exe"
   File /oname=$PLUGINSDIR\lazymind-upgrade-uninstaller.exe "${UNINSTALLER_OUT_FILE}"
+
+  nsExec::ExecToStack '"$InstallerHelper" preflight --install-dir "$INSTDIR" --temp-dir "$TEMP" --minimum-free-space-mb ${LAZYMIND_MIN_FREE_SPACE_MB} --maximum-relative-path-length ${LAZYMIND_MAX_RELATIVE_PATH_LENGTH}'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    DetailPrint "LazyMind installer preflight failed: $1"
+    MessageBox MB_OK|MB_ICONSTOP "$(LMPreflightFailed)$\r$\n$1" /SD IDOK
+    SetErrorLevel 9
+    Quit
+  ${EndIf}
 
   ReadRegStr $InstalledVersion HKCU "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
   ReadRegStr $LegacyUninstallString HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
@@ -252,8 +265,17 @@
     ${EndIf}
   ${EndIf}
 
-  LMWarmupRetry:
-    ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --installer-warmup --timeout-seconds 900' $3
+    CreateDirectory "$LOCALAPPDATA\LazyMind\logs"
+    StrCpy $5 "$LOCALAPPDATA\LazyMind\logs\installer-nsis.log"
+    FileOpen $6 "$5" a
+    FileWrite $6 "Starting Electron installer warmup (timeout=240s).$\r$\n"
+    FileClose $6
+    DetailPrint "Starting Electron installer warmup; log: $LOCALAPPDATA\LazyMind\logs\installer-warmup.log"
+    ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --installer-warmup --timeout-seconds 240' $3
+    FileOpen $6 "$5" a
+    FileWrite $6 "Electron installer warmup returned exit code $3.$\r$\n"
+    FileClose $6
+    DetailPrint "Electron installer warmup returned exit code $3."
     StrCpy $2 0
     StrCpy $4 0
 
@@ -261,29 +283,31 @@
     nsExec::ExecToStack '"$InstallerHelper" check-stopped --install-dir "$INSTDIR"'
     Pop $0
     Pop $1
+    FileOpen $6 "$5" a
+    FileWrite $6 "Warmup process check returned exit code $0: $1$\r$\n"
+    FileClose $6
     ${If} $0 == 10
       StrCpy $4 1
       IntOp $2 $2 + 1
       DetailPrint "Warmup left running LazyMind processes: $1"
       ${If} $2 > 3
-        MessageBox MB_OK|MB_ICONSTOP "$(LMForceStopFailed)$\r$\n$1" /SD IDOK
-        SetErrorLevel 7
-        Quit
+        DetailPrint "Warmup process cleanup did not converge; installation will continue."
+        StrCpy $3 4
+        Goto LMWarmupFinished
       ${EndIf}
       DetailPrint "Force-closing processes left by installer warmup..."
       nsExec::ExecToStack '"$InstallerHelper" force-stop --install-dir "$INSTDIR"'
       Pop $0
       Pop $1
       ${If} $0 != 0
-        MessageBox MB_OK|MB_ICONSTOP "$(LMForceStopFailed)$\r$\n$1" /SD IDOK
-        SetErrorLevel 7
-        Quit
+        DetailPrint "Warmup process cleanup failed; installation will continue: $1"
+        StrCpy $3 4
+        Goto LMWarmupFinished
       ${EndIf}
       Goto LMWarmupCheckStopped
     ${ElseIf} $0 != 0
-      MessageBox MB_OK|MB_ICONSTOP "$(LMProcessScanFailed)$\r$\n$1" /SD IDOK
-      SetErrorLevel 6
-      Quit
+      DetailPrint "Warmup process detection failed; installation will continue: $1"
+      StrCpy $3 4
     ${EndIf}
 
     ; Returning success while leaving processes behind is itself a warmup
@@ -292,15 +316,12 @@
       StrCpy $3 4
     ${EndIf}
     ${If} $3 != 0
-      ${If} ${Silent}
-        SetErrorLevel 4
-        Quit
+      DetailPrint "$(LMWarmupFailed)"
+      ${IfNot} ${Silent}
+        MessageBox MB_OK|MB_ICONEXCLAMATION "$(LMWarmupFailed)" /SD IDOK
       ${EndIf}
-      MessageBox MB_ABORTRETRYIGNORE|MB_ICONEXCLAMATION "$(LMWarmupFailed)" IDRETRY LMWarmupRetry IDIGNORE LMWarmupSkipped
-      SetErrorLevel 4
-      Quit
     ${EndIf}
-  LMWarmupSkipped:
+  LMWarmupFinished:
 !macroend
 
 !macro customUnInit
