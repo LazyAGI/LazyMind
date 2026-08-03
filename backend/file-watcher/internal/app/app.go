@@ -89,15 +89,26 @@ func (a *App) Run(ctx context.Context) error {
 		zap.String("log_dir", a.cfg.LogDir),
 	)
 
-	// Register the Agent with control-plane.
-	if err := a.cpClient.RegisterAgent(ctx, internal.RegisterAgentRequest{
+	// Start the HTTP server before registration so recovery reconciliation can
+	// reach the local filesystem as soon as control-plane accepts the Agent.
+	serverErr := make(chan error, 1)
+	go func() {
+		a.log.Info("http server listening", zap.String("addr", a.cfg.ListenAddr))
+		if err := a.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			serverErr <- err
+		}
+	}()
+
+	registerRequest := internal.RegisterAgentRequest{
 		AgentID:    a.cfg.AgentID,
 		TenantID:   a.cfg.TenantID,
 		Hostname:   hostname,
 		Version:    "0.1.0",
 		ListenAddr: advertiseAddr,
-	}); err != nil {
-		a.log.Warn("register agent failed, will retry via heartbeat", zap.Error(err))
+	}
+	if err := a.cpClient.RegisterAgent(ctx, registerRequest); err != nil {
+		a.log.Warn("register agent failed, will retry registration", zap.Error(err))
+		go a.retryRegistration(ctx, registerRequest)
 	} else {
 		a.setStatus(internal.AgentStatusOnline)
 	}
@@ -106,15 +117,6 @@ func (a *App) Run(ctx context.Context) error {
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	defer cancelHeartbeat()
 	go a.heartbeat.Run(heartbeatCtx)
-
-	// Start the HTTP server.
-	serverErr := make(chan error, 1)
-	go func() {
-		a.log.Info("http server listening", zap.String("addr", a.cfg.ListenAddr))
-		if err := a.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			serverErr <- err
-		}
-	}()
 
 	// Start the health check loop.
 	go a.healthLoop(ctx)
@@ -132,6 +134,32 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	return a.shutdown()
+}
+
+func (a *App) retryRegistration(ctx context.Context, req internal.RegisterAgentRequest) {
+	backoff := time.Second
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if err := a.cpClient.RegisterAgent(ctx, req); err != nil {
+			a.log.Warn("register agent retry failed", zap.Duration("next_retry", backoff), zap.Error(err))
+			backoff = minDuration(backoff*2, time.Minute)
+			continue
+		}
+		a.setStatus(internal.AgentStatusOnline)
+		a.log.Info("agent registration recovered")
+		return
+	}
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (a *App) shutdown() error {
@@ -173,15 +201,10 @@ func (a *App) runHealthCheck(ctx context.Context) {
 		}
 	}
 
-	// 2. Check control-plane reachability by reusing the heartbeat endpoint.
+	// 2. Check control-plane reachability without mutating Agent state.
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := a.cpClient.ReportHeartbeat(probeCtx, internal.HeartbeatPayload{
-		AgentID:         a.cfg.AgentID,
-		TenantID:        a.cfg.TenantID,
-		Status:          a.getStatus(),
-		LastHeartbeatAt: time.Now(),
-	}); err != nil {
+	if err := a.cpClient.CheckHealth(probeCtx); err != nil {
 		failures = append(failures, "control_plane_unreachable: "+err.Error())
 	}
 

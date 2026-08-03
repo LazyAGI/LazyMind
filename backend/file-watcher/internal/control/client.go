@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 type ControlPlaneClient interface {
 	RegisterAgent(ctx context.Context, req internal.RegisterAgentRequest) error
 	ReportHeartbeat(ctx context.Context, req internal.HeartbeatPayload) error
+	CheckHealth(ctx context.Context) error
 	ReportEvents(ctx context.Context, req internal.ReportEventsRequest) error
 	PullCommands(ctx context.Context, req internal.PullCommandsRequest) (internal.PullCommandsResponse, error)
 	AckCommand(ctx context.Context, req internal.AckCommandRequest) error
@@ -44,6 +46,25 @@ func (c *httpClient) RegisterAgent(ctx context.Context, req internal.RegisterAge
 
 func (c *httpClient) ReportHeartbeat(ctx context.Context, req internal.HeartbeatPayload) error {
 	return c.post(ctx, "/api/v1/agents/heartbeat", req, nil)
+}
+
+func (c *httpClient) CheckHealth(ctx context.Context) error {
+	start := time.Now()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/healthz", nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("%s: %w", internal.ErrControlPlaneDown, err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	c.log.Debug("control plane health check finished", zap.Int("status", resp.StatusCode), zap.Duration("cost", time.Since(start)))
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("control plane returned %d for /healthz", resp.StatusCode)
+	}
+	return nil
 }
 
 func (c *httpClient) ReportEvents(ctx context.Context, req internal.ReportEventsRequest) error {

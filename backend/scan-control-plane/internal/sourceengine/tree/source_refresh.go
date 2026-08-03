@@ -91,7 +91,8 @@ func (r *DBSourceReadRefresher) RefreshSourceRead(ctx context.Context, req Sourc
 }
 
 func (r *DBSourceReadRefresher) refreshBinding(ctx context.Context, binding store.Binding) error {
-	if strings.TrimSpace(binding.ConnectorType) != "feishu" {
+	connectorType := strings.TrimSpace(binding.ConnectorType)
+	if connectorType != "feishu" && connectorType != "local_fs" {
 		return r.refreshCachedBindingState(ctx, binding)
 	}
 	if binding.Status != "" && binding.Status != crawl.BindingStatusActive {

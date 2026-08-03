@@ -40,7 +40,7 @@ type ormBinding struct {
 	NextSyncAt             *time.Time
 	IncludeExtensions      JSON       `gorm:"column:include_extensions_json;type:jsonb"`
 	ExcludeExtensions      JSON       `gorm:"column:exclude_extensions_json;type:jsonb"`
-	ChatEnabled            bool   `gorm:"column:chat_enabled"`
+	ChatEnabled            bool       `gorm:"column:chat_enabled"`
 	Status                 string     `gorm:"column:status"`
 	LastError              JSON       `gorm:"column:last_error;type:jsonb"`
 	DeletedAt              *time.Time `gorm:"column:deleted_at"`
@@ -227,18 +227,19 @@ type ormAgent struct {
 func (ormAgent) TableName() string { return "agents" }
 
 type ormAgentCommand struct {
-	CommandID    string `gorm:"column:command_id;primaryKey"`
-	AgentID      string `gorm:"column:agent_id"`
-	CommandType  string `gorm:"column:command_type"`
-	Payload      JSON   `gorm:"column:payload_json;type:jsonb"`
-	Status       string `gorm:"column:status"`
-	AttemptCount int64  `gorm:"column:attempt_count"`
-	NextRetryAt  *time.Time
-	AckedAt      *time.Time
-	LastError    JSON `gorm:"column:last_error;type:jsonb"`
-	Result       JSON `gorm:"column:result_json;type:jsonb"`
-	CreatedAt    time.Time
-	DispatchedAt *time.Time
+	CommandID       string `gorm:"column:command_id;primaryKey"`
+	AgentID         string `gorm:"column:agent_id"`
+	QueueGeneration int64  `gorm:"column:queue_generation;not null;default:1"`
+	CommandType     string `gorm:"column:command_type"`
+	Payload         JSON   `gorm:"column:payload_json;type:jsonb"`
+	Status          string `gorm:"column:status"`
+	AttemptCount    int64  `gorm:"column:attempt_count"`
+	NextRetryAt     *time.Time
+	AckedAt         *time.Time
+	LastError       JSON `gorm:"column:last_error;type:jsonb"`
+	Result          JSON `gorm:"column:result_json;type:jsonb"`
+	CreatedAt       time.Time
+	DispatchedAt    *time.Time
 }
 
 func (ormAgentCommand) TableName() string { return "agent_commands" }
