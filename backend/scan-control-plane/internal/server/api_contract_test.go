@@ -253,6 +253,17 @@ func TestHandlersExposeConnectorsTargetTreeAndSourceTree(t *testing.T) {
 		t.Fatalf("target tree handler did not pass actor to connector provider options: %+v", targetTree.lastChildren.ProviderOptions)
 	}
 
+	recommendReq := httptest.NewRequest(http.MethodPost, "/api/scan/binding-targets/tree/recommendations", strings.NewReader(`{"agent_id":"agent-1"}`))
+	setAPIContractActor(recommendReq)
+	recommendResp := httptest.NewRecorder()
+	handler.ServeHTTP(recommendResp, recommendReq)
+	if recommendResp.Code != http.StatusOK || targetTree.recommendCalls != 1 || targetTree.lastRecommendation.AgentID != "agent-1" {
+		t.Fatalf("target recommendation handler did not call engine: code=%d calls=%d req=%+v body=%s", recommendResp.Code, targetTree.recommendCalls, targetTree.lastRecommendation, recommendResp.Body.String())
+	}
+	if targetTree.lastRecommendation.ProviderOptions["user_id"] != "user-1" || targetTree.lastRecommendation.ProviderOptions["tenant_id"] != "tenant-1" {
+		t.Fatalf("target recommendation handler did not pass actor to connector provider options: %+v", targetTree.lastRecommendation.ProviderOptions)
+	}
+
 	sourceReq := httptest.NewRequest(http.MethodPost, "/api/scan/sources/source-1/tree/children", strings.NewReader(`{"binding_id":"binding-1","use_cache":true}`))
 	setAPIContractActor(sourceReq)
 	sourceResp := httptest.NewRecorder()
@@ -732,6 +743,7 @@ func TestOpenAPIContractCoversScanAPIAndDoesNotExposeLegacyPaths(t *testing.T) {
 		"GET /api/scan/connectors":                                                 "listConnectors",
 		"POST /api/scan/binding-targets/tree/children":                             "listBindingTargetChildren",
 		"POST /api/scan/binding-targets/tree/search":                               "searchBindingTargets",
+		"POST /api/scan/binding-targets/tree/recommendations":                      "recommendBindingTargets",
 		"POST /api/scan/binding-targets/validate":                                  "validateBindingTarget",
 		"POST /api/scan/sources":                                                   "createSource",
 		"GET /api/scan/sources":                                                    "listSources",
@@ -1039,11 +1051,17 @@ func (s *serverSourceEngineStub) BatchGetSourcesByDatasetIDs(_ context.Context, 
 	return result, nil
 }
 
+func (s *serverSourceEngineStub) IsBindingPathAccessible(context.Context, string, string) bool {
+	return true
+}
+
 type serverTargetTreeStub struct {
-	childrenCalls int
-	lastChildren  tree.TargetTreeChildrenRequest
-	searchCalls   int
-	lastSearch    tree.TargetTreeSearchRequest
+	childrenCalls      int
+	lastChildren       tree.TargetTreeChildrenRequest
+	searchCalls        int
+	lastSearch         tree.TargetTreeSearchRequest
+	recommendCalls     int
+	lastRecommendation tree.TargetTreeRecommendationRequest
 }
 
 type serverTaskPlannerStub struct {
@@ -1076,6 +1094,12 @@ func (s *serverTargetTreeStub) ListChildren(_ context.Context, req tree.TargetTr
 func (s *serverTargetTreeStub) Search(_ context.Context, req tree.TargetTreeSearchRequest) (tree.TreeNodePage, error) {
 	s.searchCalls++
 	s.lastSearch = req
+	return tree.TreeNodePage{}, nil
+}
+
+func (s *serverTargetTreeStub) Recommend(_ context.Context, req tree.TargetTreeRecommendationRequest) (tree.TreeNodePage, error) {
+	s.recommendCalls++
+	s.lastRecommendation = req
 	return tree.TreeNodePage{}, nil
 }
 
