@@ -30,7 +30,9 @@ import FeishuSetupGuide from "@/modules/modelProvider/pages/FeishuSetupGuide";
 import NotionSetupGuide from "@/modules/modelProvider/pages/NotionSetupGuide";
 import DatasetListPage from "@/modules/datasetManagement/pages/list";
 import DatasetDetailPage from "@/modules/datasetManagement/pages/detail";
-import { WechatConnectionPage } from "@/modules/channelGateway";
+import {
+  TerminalConnectionPage,
+} from "@/modules/channelGateway";
 import MemoryManagement from "@/modules/memory";
 import MemoryManagementListPage from "@/modules/memory/pages/list";
 import MemoryReviewPage from "@/modules/memory/pages/review";
@@ -151,7 +153,15 @@ export default function AppRouter() {
             element={<DatasetDetailPage />}
           />
           <Route path="databases" element={<DatabaseConnectionsPage />} />
-          <Route path="channels/wechat" element={<WechatConnectionPage />} />
+          <Route path="channels" element={<TerminalConnectionPage />} />
+          <Route
+            path="channels/wechat"
+            element={<Navigate to="/channels?provider=wechat" replace />}
+          />
+          <Route
+            path="channels/feishu"
+            element={<Navigate to="/channels?provider=feishu" replace />}
+          />
           <Route path="cloud-documents" element={<CloudDocumentsLayout />}>
             <Route index element={<CloudDocumentsPage />} />
             <Route path="local" element={<LocalDataSourcePage />} />

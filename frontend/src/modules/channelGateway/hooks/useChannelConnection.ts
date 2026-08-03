@@ -12,6 +12,7 @@ import {
   refreshConnectionSession,
   submitConnectionChallenge,
   type ChannelAccount,
+  type ChannelProvider,
   type ConnectionSession,
 } from '../api';
 
@@ -55,8 +56,9 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-export function useWechatConnection() {
+export function useChannelConnection(provider: ChannelProvider) {
   const { t } = useTranslation();
+  const translationKey = `channelGateway.${provider}`;
   const [accounts, setAccounts] = useState<ChannelAccount[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(true);
   const [session, setSession] = useState<ConnectionSession | null>(null);
@@ -78,14 +80,14 @@ export function useWechatConnection() {
   const loadAccounts = useCallback(async () => {
     setAccountsLoading(true);
     try {
-      const result = await listChannelAccounts('wechat');
+      const result = await listChannelAccounts(provider);
       if (mountedRef.current) {
         setAccounts(result.items || []);
       }
     } catch (error) {
       if (mountedRef.current) {
         message.error(
-          getErrorMessage(error, t('channelGateway.wechat.loadAccountsFailed')),
+          getErrorMessage(error, t(`${translationKey}.loadAccountsFailed`)),
         );
       }
     } finally {
@@ -93,7 +95,7 @@ export function useWechatConnection() {
         setAccountsLoading(false);
       }
     }
-  }, [t]);
+  }, [provider, t, translationKey]);
 
   const applySession = useCallback(
     (next: ConnectionSession | null) => {
@@ -123,7 +125,7 @@ export function useWechatConnection() {
           }
           applySession(next);
           if (next.status === 'connected') {
-            message.success(t('channelGateway.wechat.connectSuccess'));
+            message.success(t(`${translationKey}.connectSuccess`));
             await loadAccounts();
             return;
           }
@@ -135,13 +137,13 @@ export function useWechatConnection() {
             return;
           }
           message.error(
-            getErrorMessage(error, t('channelGateway.wechat.pollFailed')),
+            getErrorMessage(error, t(`${translationKey}.pollFailed`)),
           );
           schedulePoll(sessionId, 2000);
         }
       }, delayMs);
     },
-    [applySession, clearPollTimer, loadAccounts, t],
+    [applySession, clearPollTimer, loadAccounts, t, translationKey],
   );
 
   const startScan = useCallback(async () => {
@@ -158,12 +160,12 @@ export function useWechatConnection() {
           // ignore cancel failures when starting a new session
         }
       }
-      const next = await createConnectionSession('wechat', {
+      const next = await createConnectionSession(provider, {
         idempotencyKey: uuidv4(),
       });
       applySession(next);
       if (next.status === 'connected') {
-        message.success(t('channelGateway.wechat.connectSuccess'));
+        message.success(t(`${translationKey}.connectSuccess`));
         await loadAccounts();
         return;
       }
@@ -172,7 +174,7 @@ export function useWechatConnection() {
       }
     } catch (error) {
       message.error(
-        getErrorMessage(error, t('channelGateway.wechat.startFailed')),
+        getErrorMessage(error, t(`${translationKey}.startFailed`)),
       );
     } finally {
       if (mountedRef.current) {
@@ -183,9 +185,11 @@ export function useWechatConnection() {
     applySession,
     clearPollTimer,
     loadAccounts,
+    provider,
     schedulePoll,
     sessionStarting,
     t,
+    translationKey,
   ]);
 
   const cancelScan = useCallback(async () => {
@@ -198,17 +202,17 @@ export function useWechatConnection() {
     try {
       await cancelConnectionSession(sessionId);
       applySession(null);
-      message.success(t('channelGateway.wechat.cancelSuccess'));
+      message.success(t(`${translationKey}.cancelSuccess`));
     } catch (error) {
       message.error(
-        getErrorMessage(error, t('channelGateway.wechat.cancelFailed')),
+        getErrorMessage(error, t(`${translationKey}.cancelFailed`)),
       );
     } finally {
       if (mountedRef.current) {
         setActionLoading(false);
       }
     }
-  }, [actionLoading, applySession, clearPollTimer, t]);
+  }, [actionLoading, applySession, clearPollTimer, t, translationKey]);
 
   const disconnectAccount = useCallback(async (accountId: string) => {
     if (disconnectingAccountId) {
@@ -217,18 +221,18 @@ export function useWechatConnection() {
     setDisconnectingAccountId(accountId);
     try {
       await disconnectChannelAccount(accountId);
-      message.success(t('channelGateway.wechat.disconnectSuccess'));
+      message.success(t(`${translationKey}.disconnectSuccess`));
       await loadAccounts();
     } catch (error) {
       message.error(
-        getErrorMessage(error, t('channelGateway.wechat.disconnectFailed')),
+        getErrorMessage(error, t(`${translationKey}.disconnectFailed`)),
       );
     } finally {
       if (mountedRef.current) {
         setDisconnectingAccountId(null);
       }
     }
-  }, [disconnectingAccountId, loadAccounts, t]);
+  }, [disconnectingAccountId, loadAccounts, t, translationKey]);
 
   const refreshQr = useCallback(async () => {
     const sessionId = sessionIdRef.current;
@@ -245,14 +249,14 @@ export function useWechatConnection() {
       }
     } catch (error) {
       message.error(
-        getErrorMessage(error, t('channelGateway.wechat.refreshFailed')),
+        getErrorMessage(error, t(`${translationKey}.refreshFailed`)),
       );
     } finally {
       if (mountedRef.current) {
         setActionLoading(false);
       }
     }
-  }, [actionLoading, applySession, clearPollTimer, schedulePoll, t]);
+  }, [actionLoading, applySession, clearPollTimer, schedulePoll, t, translationKey]);
 
   const submitChallenge = useCallback(async () => {
     const sessionId = sessionIdRef.current;
@@ -261,7 +265,7 @@ export function useWechatConnection() {
       return;
     }
     if (!/^\d+$/.test(value)) {
-      message.warning(t('channelGateway.wechat.challengeDigitsOnly'));
+      message.warning(t(`${translationKey}.challengeDigitsOnly`));
       return;
     }
     setActionLoading(true);
@@ -270,7 +274,7 @@ export function useWechatConnection() {
       const next = await submitConnectionChallenge(sessionId, value);
       applySession(next);
       if (next.status === 'connected') {
-        message.success(t('channelGateway.wechat.connectSuccess'));
+        message.success(t(`${translationKey}.connectSuccess`));
         await loadAccounts();
         return;
       }
@@ -279,7 +283,7 @@ export function useWechatConnection() {
       }
     } catch (error) {
       message.error(
-        getErrorMessage(error, t('channelGateway.wechat.challengeFailed')),
+        getErrorMessage(error, t(`${translationKey}.challengeFailed`)),
       );
       if (sessionIdRef.current) {
         schedulePoll(sessionIdRef.current, 1000);
@@ -297,6 +301,7 @@ export function useWechatConnection() {
     loadAccounts,
     schedulePoll,
     t,
+    translationKey,
   ]);
 
   const closeSessionPanel = useCallback(() => {

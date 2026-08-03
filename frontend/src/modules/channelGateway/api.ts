@@ -2,7 +2,7 @@ import { axiosInstance, BASE_URL } from '@/components/request';
 
 const CHANNEL_GATEWAY_V1 = `${BASE_URL}/api/channel-gateway/v1`;
 
-export type ChannelProvider = 'wechat';
+export type ChannelProvider = 'wechat' | 'feishu';
 
 export type ConnectionSessionStatus =
   | 'preparing'

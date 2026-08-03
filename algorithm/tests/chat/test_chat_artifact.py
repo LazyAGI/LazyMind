@@ -76,10 +76,27 @@ def test_save_chat_artifact_file_rejects_source_outside_agent_workspace(
         chat_artifact, '_current_artifact_scope', lambda: ('user-1', 'conversation-1'),
     )
 
-    with pytest.raises(ValueError, match='inside the main Agent workspace'):
+    with pytest.raises(ValueError, match='inside the current main-Agent workspace'):
         chat_artifact.save_chat_artifact(
             'outside.zip', str(outside), content_type='file',
         )
+
+
+def test_workspace_file_tools_share_chat_agent_workspace(tmp_path, monkeypatch):
+    monkeypatch.setitem(chat_artifact._cfg, 'agentic_workspace', str(tmp_path))
+    monkeypatch.setattr(
+        chat_artifact, '_current_artifact_scope', lambda: ('user-1', 'conversation-1'),
+    )
+
+    written = chat_artifact.write_file('bid_output/outline.json', '{"chapters": []}')
+    loaded = chat_artifact.read_file('bid_output/outline.json')
+    listing = chat_artifact.list_dir('bid_output')
+
+    workspace = Path(chat_artifact.chat_agent_workspace('user-1', 'conversation-1'))
+    assert written['status'] == 'ok'
+    assert Path(written['path']) == workspace / 'bid_output' / 'outline.json'
+    assert loaded['content'] == '{"chapters": []}'
+    assert listing['entries'] == ['outline.json']
 
 
 def test_artifact_event_translator_preserves_structured_payload():

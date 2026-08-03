@@ -1,41 +1,35 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 from pydantic import ValidationError
 
-from channel_gateway.common.commands import (
+from channel_gateway.common.domain.commands import (
     COMMAND_ADAPTER,
     RESOURCE_CHANGE_ADAPTER,
     SCHEMA_VERSION,
+    ActionKind,
     CapabilityConfigureCommand,
     CapabilityConfigureParameters,
     ChatCommand,
     CommandEnvelope,
-    ConversationCurrentCommand,
-    ConversationCurrentParameters,
-    ConversationListCommand,
-    ConversationListParameters,
-    ConversationNewCommand,
-    ConversationNewParameters,
     ConversationSwitchCommand,
     ConversationSwitchParameters,
-    HistoryMoreCommand,
-    HistoryMoreParameters,
     IndexTarget,
     ResourceChange,
     ResourceIndexSelector,
     SelectionContinuation,
     SelectionChooseCommand,
+    WorkflowInvokeCommand,
     command_registry,
 )
-from channel_gateway.common.database import GatewayStore
-from channel_gateway.common.lazymind import LazyMindClient, LazyMindError
+from channel_gateway.common.errors import LazyMindError
+from channel_gateway.common.ports.core import IntentClient
+from channel_gateway.common.ports.repository import IntentRepository
 
 
-_INDEX_COMMAND = re.compile(r'^/switch(?:\s+|_)(\d+)$', re.I)
 _PLAIN_INDEX = re.compile(r'^\s*(\d{1,2})\s*$')
 _CHINESE_INDEXES = {
     '1': '一',
@@ -55,12 +49,13 @@ _CHINESE_INDEXES = {
 class ShortcutMatch:
     command: CommandEnvelope
     grounding_messages: tuple[str, ...]
+    prepared_catalog: dict[str, Any] = field(default_factory=dict)
 
 
 class ExactShortcutParser:
-    """Parses only exact compatibility syntax; natural language always goes to the LLM."""
+    """Resolves only a pure numeric answer to an active selection."""
 
-    def __init__(self, store: GatewayStore):
+    def __init__(self, store: IntentRepository):
         self._store = store
 
     def parse(
@@ -71,47 +66,6 @@ class ExactShortcutParser:
         text: str,
     ) -> ShortcutMatch | None:
         value = text.strip()
-        command = value.lower()
-        if command == '/sessions':
-            return self._match(
-                ConversationListCommand(
-                    schema_version=SCHEMA_VERSION,
-                    command='conversation.list',
-                    parameters=ConversationListParameters(evidence=[value]),
-                ),
-                value,
-            )
-        if command == '/new_session':
-            return self._match(
-                ConversationNewCommand(
-                    schema_version=SCHEMA_VERSION,
-                    command='conversation.new',
-                    parameters=ConversationNewParameters(evidence=[value]),
-                ),
-                value,
-            )
-        if command == '/current':
-            return self._match(
-                ConversationCurrentCommand(
-                    schema_version=SCHEMA_VERSION,
-                    command='conversation.current',
-                    parameters=ConversationCurrentParameters(evidence=[value]),
-                ),
-                value,
-            )
-        if command in ('/history', '/history_more'):
-            return self._match(
-                HistoryMoreCommand(
-                    schema_version=SCHEMA_VERSION,
-                    command='history.more',
-                    parameters=HistoryMoreParameters(evidence=[value]),
-                ),
-                value,
-            )
-        match = _INDEX_COMMAND.fullmatch(value)
-        if match:
-            return self._switch(match.group(1), value)
-
         match = _PLAIN_INDEX.fullmatch(value)
         if not match:
             return None
@@ -267,6 +221,7 @@ def _resume_continuation(
     return ShortcutMatch(
         command=resumed,
         grounding_messages=tuple(grounding_messages),
+        prepared_catalog=dict(continuation.prepared_catalog),
     )
 
 
@@ -306,7 +261,7 @@ def resolve_pending_selection(
 class ChannelIntentClassifier:
     """Calls the stateless classifier with the Gateway-owned command registry."""
 
-    def __init__(self, client: LazyMindClient):
+    def __init__(self, client: IntentClient):
         self._client = client
 
     def classify(
@@ -324,12 +279,29 @@ class ChannelIntentClassifier:
             provider=provider,
             message=message,
             state=state,
-            command_registry=command_registry(),
+            command_registry=command_registry(
+                self._allowed_commands(state)
+            ),
         )
         try:
             return COMMAND_ADAPTER.validate_python(payload)
         except ValidationError as exc:
             raise LazyMindError('Core returned an invalid channel command') from exc
+
+    @staticmethod
+    def _allowed_commands(state: dict[str, Any]) -> set[ActionKind]:
+        allowed = set(ActionKind)
+        allowed.discard(ActionKind.CONVERSATION_SETTINGS_UPDATE)
+        latest_selection = state.get('latest_selection')
+        if (
+            not isinstance(latest_selection, dict)
+            or not latest_selection.get('has_continuation')
+        ):
+            allowed.discard(ActionKind.SELECTION_CHOOSE)
+        workflows = state.get('available_workflows')
+        if not isinstance(workflows, list) or not workflows:
+            allowed.discard(ActionKind.WORKFLOW_INVOKE)
+        return allowed
 
     def catalog(
         self,
@@ -351,6 +323,11 @@ def canonicalize_command(
 ) -> CommandEnvelope:
     """Apply parameter identities declared by the command contract."""
 
+    if isinstance(command, WorkflowInvokeCommand):
+        parameters = command.parameters.model_copy(
+            update={'message': current_message}
+        )
+        return command.model_copy(update={'parameters': parameters})
     if isinstance(command, ChatCommand) and not command.parameters.resource_changes:
         parameters = command.parameters.model_copy(
             update={'message': current_message}
@@ -389,6 +366,11 @@ def validate_command(
         and task != grounding_messages[-1]
     ):
         raise LazyMindError('Plain chat must preserve the complete user message')
+    if (
+        isinstance(command, WorkflowInvokeCommand)
+        and task != grounding_messages[-1]
+    ):
+        raise LazyMindError('Workflow task must preserve the complete user message')
     if isinstance(command, ConversationSwitchCommand):
         target = parameters.target
         if target.kind == 'index':
@@ -405,6 +387,25 @@ def validate_command(
         capabilities = list(parameters.capabilities)
         if len(set(capabilities)) != len(capabilities):
             raise LazyMindError('Capability categories contain duplicates')
+    return command
+
+
+def validate_workflow_catalog(
+    command: CommandEnvelope,
+    catalog: dict[str, Any],
+) -> CommandEnvelope:
+    if not isinstance(command, WorkflowInvokeCommand):
+        return command
+    workflows = catalog.get('workflow')
+    if not isinstance(workflows, list):
+        raise LazyMindError('No workflow catalog is available for this channel')
+    available_refs = {
+        str(item.get('id') or '')
+        for item in workflows
+        if isinstance(item, dict) and bool(item.get('enabled', False))
+    }
+    if command.parameters.workflow_ref not in available_refs:
+        raise LazyMindError('The selected workflow is not available to this user')
     return command
 
 
