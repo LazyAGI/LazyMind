@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run all unit tests (frontend, auth-service, backend/core, algorithm).
+# Run all unit tests.
 # Execute from project root: ./tests/run-all.sh
 set -e
 
@@ -37,6 +37,22 @@ if command -v go &>/dev/null; then
   (cd local/local-proxy && GOCACHE=/tmp/local-proxy-gocache go test ./... -v 2>&1) || FAILED=1
 else
   echo "Skip (go not found)"
+fi
+
+echo ""
+echo "=== local/local-runtime-manager ==="
+if command -v go &>/dev/null; then
+  (cd local/local-runtime-manager && GOCACHE=/tmp/local-runtime-manager-gocache go test ./... -v 2>&1) || FAILED=1
+else
+  echo "Skip (go not found)"
+fi
+
+echo ""
+echo "=== desktop shell ==="
+if command -v node &>/dev/null; then
+  node --test desktop/scripts/*.test.mjs 2>&1 || FAILED=1
+else
+  echo "Skip (node not found)"
 fi
 
 echo ""

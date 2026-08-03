@@ -19,7 +19,8 @@ import (
 
 const (
 	algorithmHealthTimeout = 15 * time.Minute
-	defaultLazyLLMVersion  = "1.2.0a3"
+	defaultLazyLLMVersion  = "1.2.2"
+	tiktokenReadyFileName  = "tiktoken-gpt2.ready"
 )
 
 type AlgorithmServiceSpec struct {
@@ -96,6 +97,9 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 		return err
 	}
 	if err := m.preparePython(ctx, cfg, paths, cfg.Algorithm.EnableEvo); err != nil {
+		return err
+	}
+	if err := m.ensureTiktokenCache(ctx, paths); err != nil {
 		return err
 	}
 	if err := m.waitForDependencies(ctx, cfg, spec.Name); err != nil {
@@ -259,6 +263,75 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, cfg Runtime
 	return os.WriteFile(stamp, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644)
 }
 
+func tiktokenCacheDir(paths RuntimePaths) string {
+	return filepath.Join(paths.LazyLLMHome, "tiktoken")
+}
+
+func tiktokenCacheHasFile(paths RuntimePaths) bool {
+	entries, err := os.ReadDir(tiktokenCacheDir(paths))
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if info, err := entry.Info(); err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func tiktokenCacheReady(paths RuntimePaths) bool {
+	if _, err := os.Stat(filepath.Join(paths.PythonStateDir, tiktokenReadyFileName)); err != nil {
+		return false
+	}
+	return tiktokenCacheHasFile(paths)
+}
+
+func (m *AlgorithmServiceManager) ensureTiktokenCache(ctx context.Context, paths RuntimePaths) error {
+	readyFile := filepath.Join(paths.PythonStateDir, tiktokenReadyFileName)
+	if tiktokenCacheReady(paths) {
+		return nil
+	}
+
+	release, err := acquireAlgorithmPythonLock(ctx, paths)
+	if err != nil {
+		return fmt.Errorf("acquire tiktoken cache lock: %w", err)
+	}
+	defer release()
+	if tiktokenCacheReady(paths) {
+		return nil
+	}
+
+	cacheDir := tiktokenCacheDir(paths)
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return fmt.Errorf("create tiktoken cache directory: %w", err)
+	}
+	command := Command{
+		Name: paths.AlgorithmPython,
+		Args: []string{"-c", "import tiktoken; tiktoken.get_encoding('gpt2')"},
+		Dir:  paths.RepoRoot,
+		Env:  []string{"TIKTOKEN_CACHE_DIR=" + cacheDir},
+	}
+	result, err := m.runner.Run(ctx, command)
+	if err != nil {
+		detail := strings.TrimSpace(result.Stderr)
+		if detail == "" {
+			detail = strings.TrimSpace(result.Stdout)
+		}
+		return fmt.Errorf("pre-warm tiktoken gpt2 cache failed: %w (%s)", err, detail)
+	}
+	if !tiktokenCacheHasFile(paths) {
+		return fmt.Errorf("pre-warm tiktoken gpt2 cache produced no cache file in %s", cacheDir)
+	}
+	if err := os.MkdirAll(paths.PythonStateDir, 0o755); err != nil {
+		return fmt.Errorf("create Python state directory: %w", err)
+	}
+	if err := os.WriteFile(readyFile, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644); err != nil {
+		return fmt.Errorf("write tiktoken cache ready marker: %w", err)
+	}
+	return nil
+}
+
 func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context, paths RuntimePaths, includeEvo bool) error {
 	lazyllm := venvExecutable(paths.AlgorithmVenv, "lazyllm")
 	uv, ok := uvCommand()
@@ -394,13 +467,11 @@ func waitForRAGReadiness(ctx context.Context, cfg RuntimeConfig, timeout time.Du
 		{cfg.Algorithm.DocPort, "/v1/ready", "doc-server"},
 		{cfg.Algorithm.AlgoPort, "/docs", "algo"},
 	}
-	if cfg.MaintenanceMode != installerWarmupMaintenanceMode {
-		checks = append(checks, struct {
-			port  int
-			path  string
-			label string
-		}{cfg.Algorithm.WorkerPort, "/ready", "processor-worker"})
-	}
+	checks = append(checks, struct {
+		port  int
+		path  string
+		label string
+	}{cfg.Algorithm.WorkerPort, "/ready", "processor-worker"})
 	for _, check := range checks {
 		if err := waitForHTTPOnly(ctx, check.port, check.path, check.label, timeout); err != nil {
 			return err
@@ -428,6 +499,7 @@ func ensureAlgorithmDataDirs(paths RuntimePaths) error {
 		paths.TracesDir,
 		paths.SubagentDataDir,
 		paths.LazyLLMHome,
+		tiktokenCacheDir(paths),
 		paths.EvoDataDir,
 		filepath.Join(paths.AlgorithmHome, "agent_workspace"),
 		filepath.Join(paths.AlgorithmHome, "sqlite"),
@@ -487,6 +559,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"PYTHONPATH=" + pythonPath,
 		"LAZYMIND_HOME=" + paths.AlgorithmHome,
 		"LAZYLLM_HOME=" + paths.LazyLLMHome,
+		"TIKTOKEN_CACHE_DIR=" + tiktokenCacheDir(paths),
 		"LAZYMIND_DATABASE_URL=" + lazyLLMDBURL,
 		"LAZYMIND_CORE_DATABASE_URL=" + coreDBURL,
 		"LAZYMIND_ACL_DB_DSN=" + coreDBURL,

@@ -3,7 +3,7 @@ import {
   type DesktopRuntimeStatus,
   type DesktopRuntimeStatusResult,
 } from "./desktopBridge";
-import { isDesktopRuntime } from "./mode";
+import { getRuntimeMode, type RuntimeMode } from "./mode";
 
 export type RuntimeCapability = "configuration" | "chat" | "parser";
 export type RuntimeCapabilityState = "starting" | "ready" | "failed";
@@ -154,8 +154,12 @@ export function waitForRuntimeCapability(
   capability: RuntimeCapability,
   options: WaitForCapabilityOptions = {},
 ) {
-  if (!isDesktopRuntime()) {
+  if (!shouldWaitForRuntimeCapability(getRuntimeMode())) {
     return Promise.resolve();
   }
   return waitForCapability(capability, runtimeStatus, options);
+}
+
+export function shouldWaitForRuntimeCapability(mode: RuntimeMode): boolean {
+  return mode === "desktop";
 }

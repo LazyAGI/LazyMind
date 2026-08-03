@@ -1,4 +1,8 @@
-import { resolveRuntimeMode, type RuntimeEnv, type RuntimeMode } from "./mode";
+import {
+  isLocalLikeRuntimeMode,
+  resolveRuntimeMode,
+  type RuntimeEnv,
+} from "./mode";
 
 export interface RuntimeFeatureEnv extends RuntimeEnv {
   VITE_HIDE_EVO?: string;
@@ -38,15 +42,11 @@ function parseBooleanFlag(value?: string): boolean | undefined {
   return undefined;
 }
 
-function isLocalLikeMode(mode: RuntimeMode): boolean {
-  return mode === "local" || mode === "desktop";
-}
-
 export function resolveRuntimeFeatures(
   env: RuntimeFeatureEnv = readRuntimeFeatureEnv(),
 ): RuntimeFeatures {
   const mode = resolveRuntimeMode(env);
-  const isLocalLike = isLocalLikeMode(mode);
+  const isLocalLike = isLocalLikeRuntimeMode(mode);
   const isDesktop = mode === "desktop";
   const explicitHideEvo = parseBooleanFlag(env.VITE_HIDE_EVO);
 

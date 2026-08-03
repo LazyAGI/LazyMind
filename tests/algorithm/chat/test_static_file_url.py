@@ -76,6 +76,17 @@ def test_basename_from_path_handles_urls_and_paths():
     assert basename_from_path('https://example.test/assets/chart.png?token=1') == 'chart.png'
     assert basename_from_path('/tmp/chart.png') == 'chart.png'
     assert basename_from_path('./nested/chart.png') == 'chart.png'
+    assert basename_from_path(r'C:\Users\test\chart.png') == 'chart.png'
     assert basename_from_path('/static-files/%E6%88%AA%E5%B1%8F%202026-06-25%2010.18.13.png?token=1') == (
         '截屏 2026-06-25 10.18.13.png'
     )
+
+
+def test_static_file_url_rejects_decoded_path_traversal(tmp_path, monkeypatch):
+    upload_root = tmp_path / 'uploads'
+    upload_root.mkdir()
+    _mock_upload_root(monkeypatch, upload_root)
+
+    assert local_path_from_static_file_url('/static-files/../secret.txt') == ''
+    assert local_path_from_static_file_url('/static-files/%2e%2e/secret.txt') == ''
+    assert local_path_from_static_file_url(r'/static-files/..\secret.txt') == ''

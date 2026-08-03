@@ -79,8 +79,20 @@ def static_file_url_from_full_path(full_path: str) -> str:
 
 def basename_from_path(path: str) -> str:
     without_query = (path or '').split('?')[0]
-    parts = without_query.split('/')
+    parts = without_query.replace('\\', '/').split('/')
     return unquote(parts[-1] if parts else without_query)
+
+
+def _resolve_upload_relative_path(root: Path, rel: str) -> str:
+    normalized = unquote(rel).replace('\\', '/')
+    if any(part in ('', '.', '..') for part in normalized.split('/')):
+        return ''
+    candidate = (root / normalized).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return ''
+    return str(candidate)
 
 
 def local_path_from_static_file_url(path_or_url: str) -> str:
@@ -93,12 +105,11 @@ def local_path_from_static_file_url(path_or_url: str) -> str:
         rel_encoded = path_only[len('/static-files/'):].lstrip('/')
         if not rel_encoded:
             return ''
-        rel = '/'.join(unquote(part) for part in rel_encoded.split('/'))
-        return str((root / rel).resolve())
+        return _resolve_upload_relative_path(root, rel_encoded)
     marker = '/var/lib/lazymind/uploads/'
     if raw.startswith(marker):
         rel = raw.split('?', 1)[0][len(marker):].lstrip('/')
-        return str((root / rel).resolve())
+        return _resolve_upload_relative_path(root, rel)
     try:
         resolved_root = str(root)
         if raw.startswith(resolved_root):
@@ -109,7 +120,7 @@ def local_path_from_static_file_url(path_or_url: str) -> str:
         idx = raw.find(marker)
         if idx >= 0:
             rel = raw[idx:].split('?', 1)[0][len(marker):].lstrip('/')
-            return str((root / rel).resolve())
+            return _resolve_upload_relative_path(root, rel)
         idx = raw.find(str(root))
         if idx >= 0:
             return str(Path(raw[idx:].split('?', 1)[0]).resolve())

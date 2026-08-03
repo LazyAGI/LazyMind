@@ -64,3 +64,25 @@ def test_tool_limit_coordinator_continues_same_invocation() -> None:
     assert not thread.is_alive()
     assert result['limit'] == 200
     assert coordinator.submit(sid, decision_id, 'continue') is False
+
+
+def test_tool_limit_coordinator_uses_runtime_expanded_limit() -> None:
+    coordinator = ToolLimitDecisionCoordinator()
+    lazyllm.globals._init_sid(f'tool-limit-auto-expand-{time.time_ns()}')
+    _read_events()
+    previous = lazyllm.locals.get('_lazyllm_agent')
+    lazyllm.locals['_lazyllm_agent'] = {'workspace': {'_react_round_limit': 200}}
+
+    try:
+        with config.temp('agentic_expanded_max_rounds', 200):
+            assert coordinator.on_max_retries(None, 21, 21) == 200
+    finally:
+        if previous is None:
+            lazyllm.locals.pop('_lazyllm_agent', None)
+        else:
+            lazyllm.locals['_lazyllm_agent'] = previous
+
+    assert not [
+        item for item in _read_events()
+        if item['tag'] == 'tool_limit_pending'
+    ]
