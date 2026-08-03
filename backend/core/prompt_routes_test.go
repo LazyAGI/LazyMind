@@ -3,7 +3,6 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"lazymind/core/common/orm"
@@ -13,13 +12,7 @@ import (
 )
 
 func TestPromptActionRoutesAcceptPost(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "prompt-routes.db"))
-	if err != nil {
-		t.Fatalf("connect prompt route database: %v", err)
-	}
-	if err := db.AutoMigrate(orm.AllModelsForDDL()...); err != nil {
-		t.Fatalf("migrate prompt route database: %v", err)
-	}
+	db := orm.MigrateAllModelsForTest(t)
 	corestore.Init(db.DB, nil, nil)
 	t.Cleanup(func() { corestore.Init(nil, nil, nil) })
 

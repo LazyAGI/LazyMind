@@ -1,7 +1,7 @@
 package orm
 
 import (
-	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -42,15 +42,8 @@ func TestPluginModelsRegisteredForLocalDDL(t *testing.T) {
 	}
 }
 
-func TestProductionModelListCreatesPluginSchemaOnSQLite(t *testing.T) {
-	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "plugin-schema.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-
-	if err := db.AutoMigrate(AllModelsForDDL()...); err != nil {
-		t.Fatalf("auto migrate production model list: %v", err)
-	}
+func TestProductionModelListCreatesPluginSchema(t *testing.T) {
+	db := MigrateAllModelsForTest(t)
 
 	for _, model := range []any{
 		&PluginDraft{},
@@ -73,8 +66,10 @@ func TestProductionModelListCreatesPluginSchemaOnSQLite(t *testing.T) {
 	for _, columnType := range columnTypes {
 		if columnType.Name() == "content" {
 			foundContent = true
-			if columnType.DatabaseTypeName() != "blob" {
-				t.Fatalf("expected plugin blob content to use SQLite blob type, got %s", columnType.DatabaseTypeName())
+			typeName := strings.ToLower(columnType.DatabaseTypeName())
+			// SQLite uses "blob", PostgreSQL uses "bytea".
+			if typeName != "blob" && typeName != "bytea" {
+				t.Fatalf("expected plugin blob content to use blob/bytea type, got %s", typeName)
 			}
 		}
 	}

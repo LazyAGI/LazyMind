@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,14 +10,7 @@ import (
 
 func newTestSchedulerDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "sched.db"))
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.UserSchedule{}, &orm.TaskCenterTask{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	return orm.MigrateTestDB(t, &orm.UserSchedule{}, &orm.TaskCenterTask{})
 }
 
 // ──────────────────────────────────────────────

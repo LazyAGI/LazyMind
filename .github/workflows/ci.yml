@@ -209,7 +209,13 @@ jobs:
           MIGRATION_TEST_POSTGRES_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
         run: cd backend/core && go test ./migrate -v
 
-      - name: Test backend core
+      - name: Test backend core (SQLite)
+        run: cd backend/core && go test ./... -v
+
+      - name: Test backend core (PostgreSQL)
+        env:
+          TEST_DB_DRIVER: postgres
+          TEST_DB_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
         run: cd backend/core && go test ./... -v
 
       - name: Test backend core integration module

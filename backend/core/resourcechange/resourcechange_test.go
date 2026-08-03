@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -110,14 +109,7 @@ func TestListAndGetVersionsAreUserScoped(t *testing.T) {
 
 func newResourceChangeTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "resourcechange.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.ResourceVersion{}); err != nil {
-		t.Fatalf("auto migrate resource versions: %v", err)
-	}
-	return db.DB
+	return orm.MigrateTestDB(t, &orm.ResourceVersion{}).DB
 }
 
 func testContentChange(resourceID, beforeContent, afterContent string, changedAt time.Time) ContentChange {

@@ -1,22 +1,12 @@
 package orm
 
 import (
-	"path/filepath"
 	"testing"
 )
 
-// TestPersonalResourceModelsAutoMigrate verifies that personal resource tables are created correctly.
 func TestPersonalResourceModelsAutoMigrate(t *testing.T) {
-	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "personal-resource.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
+	db := MigrateTestDB(t, &PersonalResource{}, &PersonalResourceBlob{}, &PersonalResourceRevision{}, &PersonalResourceDraft{})
 
-	if err := db.AutoMigrate(&PersonalResource{}, &PersonalResourceBlob{}, &PersonalResourceRevision{}, &PersonalResourceDraft{}); err != nil {
-		t.Fatalf("auto migrate personal resource models: %v", err)
-	}
-
-	// Verify all tables exist.
 	for _, model := range []any{
 		&PersonalResource{},
 		&PersonalResourceBlob{},
@@ -28,7 +18,6 @@ func TestPersonalResourceModelsAutoMigrate(t *testing.T) {
 		}
 	}
 
-	// Verify PersonalResource key columns.
 	if !db.Migrator().HasColumn(&PersonalResource{}, "id") {
 		t.Fatal("expected personal_resources.id column")
 	}
@@ -39,7 +28,6 @@ func TestPersonalResourceModelsAutoMigrate(t *testing.T) {
 		t.Fatal("expected personal_resources.resource_type column")
 	}
 
-	// Verify PersonalResourceBlob hash primary key.
 	if !db.Migrator().HasColumn(&PersonalResourceBlob{}, "hash") {
 		t.Fatal("expected personal_resource_blobs.hash column")
 	}
@@ -47,7 +35,6 @@ func TestPersonalResourceModelsAutoMigrate(t *testing.T) {
 		t.Fatal("expected personal_resource_blobs.size column")
 	}
 
-	// Verify PersonalResourceRevision columns.
 	if !db.Migrator().HasColumn(&PersonalResourceRevision{}, "resource_id") {
 		t.Fatal("expected personal_resource_revisions.resource_id column")
 	}

@@ -1,7 +1,6 @@
 package acl
 
 import (
-	"path/filepath"
 	"testing"
 
 	"lazymind/core/common/orm"
@@ -37,13 +36,7 @@ func TestEvalSetPermissionNormalization(t *testing.T) {
 func TestEvalSetWriteAllowsRead(t *testing.T) {
 	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", "http://%")
 
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "acl.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.ACLModel{}, &orm.UserGroupModel{}); err != nil {
-		t.Fatalf("auto migrate acl models: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.ACLModel{}, &orm.UserGroupModel{})
 
 	previousStore := defaultStore
 	t.Cleanup(func() { defaultStore = previousStore })

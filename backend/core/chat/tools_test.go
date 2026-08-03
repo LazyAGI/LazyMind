@@ -21,10 +21,7 @@ import (
 
 func newToolsTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/tools.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
+	db := orm.OpenTestDB(t)
 	models := append(orm.AllModelsForDDL(), &orm.UserSelectedProvider{})
 	if err := db.AutoMigrate(models...); err != nil {
 		t.Fatalf("auto migrate: %v", err)

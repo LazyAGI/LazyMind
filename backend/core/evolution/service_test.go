@@ -13,15 +13,7 @@ import (
 func newTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db, err := orm.Connect(orm.DriverSQLite, dbPath)
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(orm.AllModelsForDDL()...); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	return orm.MigrateAllModelsForTest(t)
 }
 
 func createPublishedV2Skill(t *testing.T, db *orm.DB, id, userID, userName, category, skillName, content string) {

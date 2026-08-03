@@ -3,7 +3,6 @@ package remotefs
 import (
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,11 +12,7 @@ import (
 
 func newRemoteFSTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "remotefs.db"))
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(
+	return orm.MigrateTestDB(t,
 		&orm.PersonalResource{},
 		&orm.PersonalResourceBlob{},
 		&orm.PersonalResourceRevision{},
@@ -29,10 +24,7 @@ func newRemoteFSTestDB(t *testing.T) *orm.DB {
 		&orm.PluginBlob{},
 		&orm.PluginRevision{},
 		&orm.PluginRevisionEntry{},
-	); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	)
 }
 
 func TestPluginRevisionViewReadsPinnedContent(t *testing.T) {

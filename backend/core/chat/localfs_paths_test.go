@@ -12,13 +12,7 @@ import (
 )
 
 func TestApplyLocalFSPathsForChatAddsActiveLocalBindings(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/localfs-chat.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.LocalFSChatSetting{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.LocalFSChatSetting{})
 	now := time.Now()
 	if err := db.Create(&orm.LocalFSChatSetting{
 		CreateUserID:   "u1",
@@ -90,13 +84,7 @@ func TestApplyLocalFSPathsForChatAddsActiveLocalBindings(t *testing.T) {
 }
 
 func TestApplyLocalFSPathsForChatFiltersByBindingChatEnabled(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/localfs-chat-filter.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.LocalFSChatSetting{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.LocalFSChatSetting{})
 	now := time.Now()
 	if err := db.Create(&orm.LocalFSChatSetting{
 		CreateUserID:   "u1",

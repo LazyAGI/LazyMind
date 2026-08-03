@@ -1,22 +1,12 @@
 package orm
 
 import (
-	"path/filepath"
 	"testing"
 )
 
-// TestAgentModelsAutoMigrate verifies that agent thread tables are created correctly.
 func TestAgentModelsAutoMigrate(t *testing.T) {
-	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "agent.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
+	db := MigrateTestDB(t, &AgentThread{}, &AgentUserActiveThread{}, &AgentThreadRecord{}, &AgentThreadStep{}, &AgentThreadRound{})
 
-	if err := db.AutoMigrate(&AgentThread{}, &AgentUserActiveThread{}, &AgentThreadRecord{}, &AgentThreadStep{}, &AgentThreadRound{}); err != nil {
-		t.Fatalf("auto migrate agent models: %v", err)
-	}
-
-	// Verify all tables exist.
 	for _, model := range []any{
 		&AgentThread{},
 		&AgentUserActiveThread{},
@@ -29,7 +19,6 @@ func TestAgentModelsAutoMigrate(t *testing.T) {
 		}
 	}
 
-	// Verify AgentThread columns.
 	if !db.Migrator().HasColumn(&AgentThread{}, "thread_id") {
 		t.Fatal("expected agent_threads.thread_id column")
 	}
@@ -37,17 +26,14 @@ func TestAgentModelsAutoMigrate(t *testing.T) {
 		t.Fatal("expected agent_threads.status column")
 	}
 
-	// Verify AgentUserActiveThread composite index.
 	if !db.Migrator().HasIndex(&AgentUserActiveThread{}, "idx_agent_user_active_threads_status_lease") {
 		t.Fatal("expected idx_agent_user_active_threads_status_lease index")
 	}
 
-	// Verify AgentThreadRecord unique index.
 	if !db.Migrator().HasIndex(&AgentThreadRecord{}, "uk_agent_thread_records_record_key") {
 		t.Fatal("expected uk_agent_thread_records_record_key unique index")
 	}
 
-	// Verify AgentThreadStep columns and indexes.
 	if !db.Migrator().HasColumn(&AgentThreadStep{}, "thread_id") {
 		t.Fatal("expected agent_thread_steps.thread_id column")
 	}
@@ -61,7 +47,6 @@ func TestAgentModelsAutoMigrate(t *testing.T) {
 		t.Fatal("expected idx_agent_thread_steps_thread_active index")
 	}
 
-	// Verify AgentThreadRound columns.
 	if !db.Migrator().HasColumn(&AgentThreadRound{}, "thread_id") {
 		t.Fatal("expected agent_thread_rounds.thread_id column")
 	}

@@ -157,12 +157,8 @@ func TestAggregateDocumentsFiltersUnreadableDatasets(t *testing.T) {
 func newDocumentTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 
-	t.Setenv("LAZYMIND_READONLY_SCHEMA", "main")
-	dsn := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"), time.Now().UnixNano())
-	db, err := orm.Connect(orm.DriverSQLite, dsn)
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
+	t.Setenv("LAZYMIND_READONLY_SCHEMA", "")
+	db := orm.OpenTestDB(t)
 	if err := db.AutoMigrate(
 		&orm.Dataset{},
 		&orm.Document{},

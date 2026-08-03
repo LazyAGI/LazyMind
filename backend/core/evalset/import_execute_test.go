@@ -437,6 +437,13 @@ func registerFailEvalSetItemCreateCallback(t *testing.T, db *orm.DB) {
 
 func assertImportTempRemoved(t *testing.T, token string) {
 	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(tempPathForImportToken(token)); os.IsNotExist(err) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if _, err := os.Stat(tempPathForImportToken(token)); !os.IsNotExist(err) {
 		t.Fatalf("expected temp file removed for %s, stat err=%v", token, err)
 	}
