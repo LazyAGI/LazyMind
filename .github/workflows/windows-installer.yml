@@ -432,8 +432,12 @@ jobs:
           }
 
           $productVersion = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion
-          if (-not $productVersion.StartsWith($env:EXPECTED_VERSION, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Executable ProductVersion mismatch: expected prefix $env:EXPECTED_VERSION, got $productVersion"
+          if ($env:EXPECTED_VERSION -notmatch '^(\d+)\.(\d+)\.(\d+)') {
+            throw "Cannot derive Windows ProductVersion from release version: $env:EXPECTED_VERSION"
+          }
+          $expectedProductVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).0"
+          if ($productVersion -ne $expectedProductVersion) {
+            throw "Executable ProductVersion mismatch: expected $expectedProductVersion, got $productVersion"
           }
 
       - name: Run explicit Electron warmup

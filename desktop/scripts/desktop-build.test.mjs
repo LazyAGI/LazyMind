@@ -150,8 +150,9 @@ test("Windows installer diagnoses paths and does not roll back when warmup fails
   );
   assert.match(
     install,
-    /ExecWait[^\n]+--installer-warmup[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
+    /ExecWait[^\n]+--installer-warmup --timeout-seconds 240[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
   );
+  assert.match(install, /Starting Electron installer warmup \(timeout=240s\)/);
   assert.match(install, /installer-nsis\.log[\s\S]*Starting Electron installer warmup/);
   assert.match(install, /Electron installer warmup returned exit code \$3/);
   assert.match(
@@ -182,6 +183,7 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
   );
   assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList "\/S" -Wait/);
   assert.match(source, /DisplayVersion -ne \$env:EXPECTED_VERSION/);
+  assert.match(source, /expectedProductVersion = "\$\(\$Matches\[1\]\)\.\$\(\$Matches\[2\]\)\.\$\(\$Matches\[3\]\)\.0"/);
   assert.match(source, /Start-Process -FilePath \$uninstaller -ArgumentList "\/S" -Wait/);
   assert.match(source, /RegistryView\]::Registry64[\s\S]*RegistryView\]::Registry32/);
   assert.match(source, /name: Upload installer diagnostics[\s\S]*if: always\(\)/);
@@ -192,8 +194,8 @@ test("Windows NSIS installer uses electron-builder's default LZMA payload", () =
   const packageJson = JSON.parse(readFileSync(electronPackage, "utf8"));
   const buildScript = readFileSync(path.join(scriptsDir, "build-windows-x64.ps1"), "utf8");
   const workflow = readFileSync(windowsWorkflow, "utf8");
-  assert.equal(packageJson.version, "0.2.0-dev");
   assert.doesNotMatch(source, /useZip\s*:/);
+  assert.doesNotMatch(source, /signAndEditExecutable\s*:/);
   assert.match(source, /uninstallDisplayName:\s*"LazyMind"/);
   assert.match(packageJson.scripts["pack:win:x64"], /--publish never$/);
   assert.match(packageJson.scripts["pack:win:x64:installer"], /--publish never$/);

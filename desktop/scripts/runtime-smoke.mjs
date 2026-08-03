@@ -36,18 +36,21 @@ export function assertReadyStatus(status, profile) {
   }
 }
 
-export function commandRunner(executable) {
+export function commandRunner(executable, spawnOptions = {}) {
   return (args) =>
     new Promise((resolve, reject) => {
-      const child = spawn(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(executable, args, {
+        ...spawnOptions,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
       let stdout = "";
       let stderr = "";
       child.stdout.on("data", (chunk) => { stdout += chunk; });
       child.stderr.on("data", (chunk) => { stderr += chunk; });
       child.once("error", reject);
-      child.once("close", (code) => {
+      child.once("close", (code, signal) => {
         if (code === 0) resolve(stdout);
-        else reject(new Error(`${executable} ${args[0]} failed (${code}): ${stderr || stdout}`));
+        else reject(new Error(`${executable} ${args[0]} failed (code=${code}, signal=${signal || "none"}): ${stderr || stdout}`));
       });
     });
 }
