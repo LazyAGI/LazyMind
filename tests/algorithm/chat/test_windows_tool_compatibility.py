@@ -57,7 +57,7 @@ def test_published_artifact_path_fits_legacy_windows_limit():
 
 
 def test_chat_workspace_reuses_legacy_hash_until_current_exists(tmp_path, monkeypatch):
-    monkeypatch.setitem(chat_artifact._cfg, 'agentic_workspace', str(tmp_path))
+    monkeypatch.setitem(chat_artifact._cfg._impl, 'agentic_workspace', str(tmp_path))
     legacy = (
         tmp_path
         / 'chat-artifacts'
