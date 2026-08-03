@@ -51,6 +51,7 @@ func newGORMLogger(out io.Writer) gormlogger.Interface {
 		SlowThreshold:             200 * time.Millisecond,
 		LogLevel:                  gormlogger.Warn,
 		IgnoreRecordNotFoundError: true,
+		ParameterizedQueries:      true,
 		Colorful:                  true,
 	})
 }

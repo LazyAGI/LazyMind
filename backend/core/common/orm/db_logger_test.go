@@ -30,3 +30,21 @@ func TestGORMLoggerSuppressesRecordNotFoundOnly(t *testing.T) {
 		t.Fatalf("real database error was not logged: %q", got)
 	}
 }
+
+func TestGORMLoggerDoesNotExpandQueryParameters(t *testing.T) {
+	logger := newGORMLogger(&bytes.Buffer{})
+	filter, ok := logger.(interface {
+		ParamsFilter(context.Context, string, ...interface{}) (string, []interface{})
+	})
+	if !ok {
+		t.Fatal("GORM logger does not expose parameter filtering")
+	}
+
+	query, params := filter.ParamsFilter(context.Background(), "UPDATE chat_histories SET result = ?", "large private transcript")
+	if query != "UPDATE chat_histories SET result = ?" {
+		t.Fatalf("query template changed unexpectedly: %q", query)
+	}
+	if len(params) != 0 {
+		t.Fatalf("query parameters should be omitted from logs, got %v", params)
+	}
+}
