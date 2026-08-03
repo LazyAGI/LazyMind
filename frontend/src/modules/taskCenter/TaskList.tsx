@@ -15,16 +15,18 @@ const POLL_INTERVAL_MS = 5_000;
 
 interface TaskListProps {
   active: boolean;
+  status: string;
+  onStatusChange: (status: string) => void;
+  page: number;
+  onPageChange: (page: number) => void;
 }
 
-export default function TaskList({ active }: TaskListProps) {
+export default function TaskList({ active, status, onStatusChange, page, onPageChange }: TaskListProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [total, setTotal] = useState(0);
   const [statusCounts, setStatusCounts] = useState({ all: 0, pending: 0, waiting: 0, waiting_inputs: 0, running: 0, succeeded: 0, failed: 0, canceled: 0 });
-  const [page, setPage] = useState(1);
-  const [status, setStatus] = useState('');
   const [type, setType] = useState('');
   const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -110,10 +112,10 @@ export default function TaskList({ active }: TaskListProps) {
   return (
     <div className='all-tasks'>
       <div className='all-tasks-toolbar'>
-        <Segmented className='task-status-segmented' value={status} onChange={(value: string | number) => { setStatus(String(value)); setPage(1); }} options={statusOptions} />
+        <Segmented className='task-status-segmented' value={status} onChange={(value: string | number) => { onStatusChange(String(value)); onPageChange(1); }} options={statusOptions} />
         <div className='all-tasks-filters'>
-          <Input prefix={<SearchOutlined />} allowClear placeholder={t('taskCenter.searchPlaceholder')} value={keyword} onChange={(event: React.ChangeEvent<HTMLInputElement>) => { setKeyword(event.target.value); setPage(1); }} />
-          <Select value={type} onChange={(value: string) => { setType(value); setPage(1); }} options={[
+          <Input prefix={<SearchOutlined />} allowClear placeholder={t('taskCenter.searchPlaceholder')} value={keyword} onChange={(event: React.ChangeEvent<HTMLInputElement>) => { setKeyword(event.target.value); onPageChange(1); }} />
+          <Select value={type} onChange={(value: string) => { setType(value); onPageChange(1); }} options={[
             { value: '', label: t('taskCenter.triggerAll') },
             { value: 'plugin_run', label: t('taskCenter.typePluginRun') },
             { value: 'background_chat', label: t('taskCenter.typeBackgroundChat') },
@@ -122,7 +124,7 @@ export default function TaskList({ active }: TaskListProps) {
           <Button icon={<ReloadOutlined />} onClick={() => void load()} aria-label={t('taskCenter.refresh')} />
         </div>
       </div>
-      <Table rowKey='id' className='task-table' loading={loading} columns={columns} dataSource={tasks} onRow={(task: Task) => ({ onClick: () => setSelected(task) })} rowClassName={(task: Task) => `task-table-row status-${task.status}`} pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: setPage, showSizeChanger: false, showTotal: (value: number) => t('taskCenter.taskTotalItems', { total: value }) }} />
+      <Table rowKey='id' className='task-table' loading={loading} columns={columns} dataSource={tasks} onRow={(task: Task) => ({ onClick: () => setSelected(task) })} rowClassName={(task: Task) => `task-table-row status-${task.status}`} pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: onPageChange, showSizeChanger: false, showTotal: (value: number) => t('taskCenter.taskTotalItems', { total: value }) }} />
       <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} onDelete={async (task) => { await removeTask(task.id); setSelected(null); await load(); }} />
       {graphTask?.plugin_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.plugin_session_id} pluginId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
     </div>

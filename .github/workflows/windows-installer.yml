@@ -328,6 +328,13 @@ jobs:
           - windows-2025
 
     steps:
+      - name: Checkout smoke test scripts
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git_ref || github.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Download the exact installer built above
         uses: actions/download-artifact@v8
         with:
@@ -432,28 +439,37 @@ jobs:
           }
 
           $productVersion = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion
-          if (-not $productVersion.StartsWith($env:EXPECTED_VERSION, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Executable ProductVersion mismatch: expected prefix $env:EXPECTED_VERSION, got $productVersion"
+          if ($env:EXPECTED_VERSION -notmatch '^(\d+)\.(\d+)\.(\d+)') {
+            throw "Cannot derive Windows ProductVersion from release version: $env:EXPECTED_VERSION"
+          }
+          $expectedProductVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).0"
+          if ($productVersion -ne $expectedProductVersion) {
+            throw "Executable ProductVersion mismatch: expected $expectedProductVersion, got $productVersion"
           }
 
-      - name: Run explicit Electron warmup
-        id: warmup
+      - name: Verify installer warmup result
+        id: installer_warmup
         if: steps.verify.outcome == 'success'
         continue-on-error: true
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $app = Join-Path $env:LOCALAPPDATA "Programs\LazyMind\LazyMind.exe"
-          $warmup = Start-Process -FilePath $app -ArgumentList "--installer-warmup", "--timeout-seconds", "300" -Wait -PassThru
-          "Explicit warmup exit code: $($warmup.ExitCode)"
-          if ($warmup.ExitCode -ne 0) {
-            $unsignedExitCode = [uint32]$warmup.ExitCode
-            throw "Explicit warmup exited with code $($warmup.ExitCode) (0x$($unsignedExitCode.ToString('X8')))"
+          $metricsPath = Join-Path $env:LOCALAPPDATA "LazyMind\Logs\desktop\startup-metrics-latest.json"
+          if (-not (Test-Path -LiteralPath $metricsPath -PathType Leaf)) {
+            throw "Installer warmup metrics are missing: $metricsPath"
           }
+          $metrics = Get-Content -LiteralPath $metricsPath -Raw | ConvertFrom-Json
+          if ($metrics.launchKind -ne "installer-warmup") {
+            throw "Unexpected installer warmup launch kind: $($metrics.launchKind)"
+          }
+          if ($metrics.outcome -ne "success") {
+            throw "Installer warmup failed: outcome=$($metrics.outcome), failureCode=$($metrics.failureCode)"
+          }
+          "Installer warmup completed successfully in $($metrics.completedMs)ms"
 
       - name: Run packaged application smoke
         id: smoke
-        if: steps.verify.outcome == 'success'
+        if: steps.installer_warmup.outcome == 'success'
         continue-on-error: true
         shell: pwsh
         run: |
@@ -525,14 +541,14 @@ jobs:
         env:
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
-          WARMUP_OUTCOME: ${{ steps.warmup.outcome }}
+          INSTALLER_WARMUP_OUTCOME: ${{ steps.installer_warmup.outcome }}
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
           UNINSTALL_OUTCOME: ${{ steps.uninstall.outcome }}
         run: |
           $outcomes = [ordered]@{
             install = $env:INSTALL_OUTCOME
             verify = $env:VERIFY_OUTCOME
-            warmup = $env:WARMUP_OUTCOME
+            installer_warmup = $env:INSTALLER_WARMUP_OUTCOME
             smoke = $env:SMOKE_OUTCOME
             uninstall = $env:UNINSTALL_OUTCOME
           }

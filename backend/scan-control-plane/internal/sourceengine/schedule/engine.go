@@ -243,7 +243,7 @@ func (e *CheckpointScheduleEngine) EnqueueDueSyncRuns(ctx context.Context, limit
 		scopeType := connector.ScopeTypeFull
 		if binding.Status == "DELETING" {
 			scopeType = connector.ScopeTypeCleanup
-		} else if binding.SyncMode == SyncModeWatch {
+		} else if binding.SyncMode == SyncModeWatch || manualLocalFSBinding(binding) {
 			trigger = TriggerTypeReconcile
 		}
 		intent, err := e.enqueueBindingRun(ctx, binding, trigger, scopeType, nil, "", now, scheduledFireAt(trigger, checkpoint.NextSyncAt))
@@ -307,6 +307,9 @@ func shouldGeneratePendingTasks(run store.SyncRun, binding store.Binding) bool {
 	if run.TriggerType == TriggerTypeWatch && run.ScopeType == string(connector.ScopeTypeWatchEvent) {
 		return binding.SyncMode == SyncModeWatch
 	}
+	if run.TriggerType == TriggerTypeReconcile && binding.SyncMode == SyncModeManual {
+		return false
+	}
 	return true
 }
 
@@ -353,10 +356,18 @@ func (e *CheckpointScheduleEngine) buildFinish(binding store.Binding, checkpoint
 	if run.ScopeType == string(connector.ScopeTypeCleanup) {
 		next = nil
 	} else if status == store.SyncRunStatusSucceeded && next == nil {
-		var err error
-		next, err = nextSyncAt(binding, now)
-		if err != nil {
-			return store.SyncRunFinish{}, err
+		if manualLocalFSBinding(binding) {
+			reconcileAt := now.Add(watchReconcileInterval)
+			if run.TriggerType != TriggerTypeReconcile && checkpoint.NextSyncAt != nil && checkpoint.NextSyncAt.After(now) {
+				reconcileAt = checkpoint.NextSyncAt.UTC()
+			}
+			next = &reconcileAt
+		} else {
+			var err error
+			next, err = nextSyncAt(binding, now)
+			if err != nil {
+				return store.SyncRunFinish{}, err
+			}
 		}
 	}
 	if run.ScopeType != string(connector.ScopeTypeCleanup) && status != store.SyncRunStatusSucceeded && next == nil {
@@ -377,6 +388,10 @@ func (e *CheckpointScheduleEngine) buildFinish(binding store.Binding, checkpoint
 		ErrorMessage:   req.ErrorMessage,
 		FinishedAt:     now,
 	}, nil
+}
+
+func manualLocalFSBinding(binding store.Binding) bool {
+	return binding.SyncMode == SyncModeManual && binding.ConnectorType == "local_fs"
 }
 
 func nextSyncAt(binding store.Binding, now time.Time) (*time.Time, error) {

@@ -9,6 +9,13 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const (
+	agentCommandLeaseTTL    = 2 * time.Minute
+	agentCommandMaxAttempts = 10
+)
+
+var agentLifecycleCommandTypes = []string{"start_source", "reload_source", "stop_source"}
+
 func (r *SQLRepository) GetAgent(ctx context.Context, agentID string) (Agent, error) {
 	db := r.ormDB(ctx)
 	if db == nil {
@@ -90,6 +97,55 @@ func (r *SQLRepository) ListLocalWatcherBindingsForAgent(ctx context.Context, ag
 	return bindings, nil
 }
 
+func (r *SQLRepository) RecoverLocalWatchers(ctx context.Context, now time.Time) (int, error) {
+	db := r.ormDB(ctx)
+	if db == nil {
+		return 0, NewStoreError(ErrCodeInternal, "orm repository is not initialized")
+	}
+	var rows []ormBinding
+	if err := db.Where("connector_type = ? AND target_type = ? AND sync_mode IN ? AND status = ? AND agent_id <> ? AND target_ref <> ?",
+		"local_fs", "local_path", []string{"manual", "scheduled", "watch"}, "ACTIVE", "", "",
+	).Order("agent_id, source_id, binding_id").Find(&rows).Error; err != nil {
+		return 0, mapSQLConstraint(err)
+	}
+	recovered := 0
+	for _, row := range rows {
+		binding := bindingFromORM(row)
+		source, err := r.GetSource(ctx, binding.SourceID)
+		if err != nil {
+			return recovered, err
+		}
+		if err := r.CreateAgentCommand(ctx, AgentCommand{
+			CommandID:       WatcherCommandID(binding.AgentID, binding, "start_source"),
+			AgentID:         binding.AgentID,
+			QueueGeneration: AgentCommandQueueGeneration,
+			CommandType:     "start_source",
+			Payload: JSON{
+				"type":              "start_source",
+				"tenant_id":         source.TenantID,
+				"source_id":         binding.SourceID,
+				"binding_id":        binding.BindingID,
+				"root" + "_path":    binding.TargetRef,
+				"skip_initial_scan": true,
+			},
+			Status:    "PENDING",
+			LastError: JSON{},
+			Result:    JSON{},
+			CreatedAt: now,
+		}); err != nil {
+			return recovered, err
+		}
+		if _, err := r.EnqueueBindingReconcile(ctx, ReconcileRequest{
+			SourceID: binding.SourceID, BindingID: binding.BindingID,
+			RequestID: WatcherRecoveryRequestID(binding, now), RunAt: now.Add(30 * time.Second),
+		}); err != nil {
+			return recovered, err
+		}
+		recovered++
+	}
+	return recovered, nil
+}
+
 func (r *SQLRepository) CreateAgentCommand(ctx context.Context, command AgentCommand) error {
 	db := r.ormDB(ctx)
 	if db == nil {
@@ -97,6 +153,9 @@ func (r *SQLRepository) CreateAgentCommand(ctx context.Context, command AgentCom
 	}
 	if command.Status == "" {
 		command.Status = "PENDING"
+	}
+	if command.QueueGeneration == 0 {
+		command.QueueGeneration = AgentCommandQueueGeneration
 	}
 	if command.Payload == nil {
 		command.Payload = JSON{}
@@ -107,7 +166,24 @@ func (r *SQLRepository) CreateAgentCommand(ctx context.Context, command AgentCom
 	if command.Result == nil {
 		command.Result = JSON{}
 	}
-	return mapSQLConstraint(db.Create(agentCommandToORM(command)).Error)
+	model := agentCommandToORM(command)
+	return mapSQLConstraint(db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "command_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"agent_id":         model.AgentID,
+			"queue_generation": model.QueueGeneration,
+			"command_type":     model.CommandType,
+			"payload_json":     model.Payload,
+			"status":           model.Status,
+			"attempt_count":    int64(0),
+			"next_retry_at":    nil,
+			"acked_at":         nil,
+			"last_error":       model.LastError,
+			"result_json":      model.Result,
+			"created_at":       model.CreatedAt,
+			"dispatched_at":    nil,
+		}),
+	}).Create(model).Error)
 }
 
 func (r *SQLRepository) ListPendingAgentCommands(ctx context.Context, agentID string, now time.Time, limit int) ([]AgentCommand, error) {
@@ -117,9 +193,12 @@ func (r *SQLRepository) ListPendingAgentCommands(ctx context.Context, agentID st
 	var commands []AgentCommand
 	err := r.withORMTx(ctx, func(tx *gorm.DB) error {
 		var rows []ormAgentCommand
+		leaseExpiredAt := now.Add(-agentCommandLeaseTTL)
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("agent_id = ? AND status = ?", agentID, "PENDING").
-			Where("next_retry_at IS NULL OR next_retry_at <= ?", now).
+			Where("agent_id = ? AND (queue_generation = ? OR (queue_generation < ? AND command_type NOT IN ?)) AND attempt_count < ?",
+				agentID, AgentCommandQueueGeneration, AgentCommandQueueGeneration, agentLifecycleCommandTypes, agentCommandMaxAttempts).
+			Where("(status = ? AND (next_retry_at IS NULL OR next_retry_at <= ?)) OR (status = ? AND command_type IN ? AND dispatched_at <= ?)",
+				"PENDING", now, "DISPATCHED", agentLifecycleCommandTypes, leaseExpiredAt).
 			Order("created_at, command_id").
 			Limit(limit).
 			Find(&rows).Error; err != nil {
@@ -129,11 +208,13 @@ func (r *SQLRepository) ListPendingAgentCommands(ctx context.Context, agentID st
 		for _, row := range rows {
 			command := agentCommandFromORM(row)
 			commands = append(commands, command)
+			previousStatus := row.Status
+			previousAttemptCount := row.AttemptCount
 			row.Status = "DISPATCHED"
 			row.AttemptCount++
 			row.DispatchedAt = &now
 			if err := tx.Model(&ormAgentCommand{}).
-				Where("command_id = ? AND status = ?", row.CommandID, "PENDING").
+				Where("command_id = ? AND status = ? AND attempt_count = ?", row.CommandID, previousStatus, previousAttemptCount).
 				Updates(map[string]any{
 					"status":        row.Status,
 					"attempt_count": row.AttemptCount,
@@ -145,6 +226,32 @@ func (r *SQLRepository) ListPendingAgentCommands(ctx context.Context, agentID st
 		return nil
 	})
 	return commands, err
+}
+
+func (r *SQLRepository) MaintainAgentCommands(ctx context.Context, now time.Time, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 5000
+	}
+	db := r.ormDB(ctx)
+	if db == nil {
+		return 0, NewStoreError(ErrCodeInternal, "orm repository is not initialized")
+	}
+	if err := db.Model(&ormAgentCommand{}).
+		Where("queue_generation = ? AND status = ? AND attempt_count >= ? AND dispatched_at <= ?", AgentCommandQueueGeneration, "DISPATCHED", agentCommandMaxAttempts, now.Add(-agentCommandLeaseTTL)).
+		Updates(map[string]any{"status": "FAILED", "acked_at": now, "last_error": JSON{"error": "command acknowledgement retry limit exceeded"}}).Error; err != nil {
+		return 0, mapSQLConstraint(err)
+	}
+	result := db.Exec(`DELETE FROM agent_commands WHERE command_id IN (
+		SELECT command_id FROM agent_commands
+			WHERE (queue_generation < ? AND command_type IN ?)
+				OR (status = 'ACKED' AND acked_at < ?)
+				OR (status = 'FAILED' AND acked_at < ?)
+			LIMIT ?
+	)`, AgentCommandQueueGeneration, agentLifecycleCommandTypes, now.Add(-7*24*time.Hour), now.Add(-30*24*time.Hour), limit)
+	if result.Error != nil {
+		return 0, mapSQLConstraint(result.Error)
+	}
+	return result.RowsAffected, nil
 }
 
 func (r *SQLRepository) AckAgentCommand(ctx context.Context, ack AgentCommandAck) error {
@@ -208,34 +315,36 @@ func agentToORM(agent Agent) ormAgent {
 
 func agentCommandFromORM(row ormAgentCommand) AgentCommand {
 	return AgentCommand{
-		CommandID:    row.CommandID,
-		AgentID:      row.AgentID,
-		CommandType:  row.CommandType,
-		Payload:      CloneJSON(row.Payload),
-		Status:       row.Status,
-		AttemptCount: row.AttemptCount,
-		NextRetryAt:  row.NextRetryAt,
-		AckedAt:      row.AckedAt,
-		LastError:    CloneJSON(row.LastError),
-		Result:       CloneJSON(row.Result),
-		CreatedAt:    row.CreatedAt,
-		DispatchedAt: row.DispatchedAt,
+		CommandID:       row.CommandID,
+		AgentID:         row.AgentID,
+		QueueGeneration: row.QueueGeneration,
+		CommandType:     row.CommandType,
+		Payload:         CloneJSON(row.Payload),
+		Status:          row.Status,
+		AttemptCount:    row.AttemptCount,
+		NextRetryAt:     row.NextRetryAt,
+		AckedAt:         row.AckedAt,
+		LastError:       CloneJSON(row.LastError),
+		Result:          CloneJSON(row.Result),
+		CreatedAt:       row.CreatedAt,
+		DispatchedAt:    row.DispatchedAt,
 	}
 }
 
 func agentCommandToORM(command AgentCommand) ormAgentCommand {
 	return ormAgentCommand{
-		CommandID:    command.CommandID,
-		AgentID:      command.AgentID,
-		CommandType:  command.CommandType,
-		Payload:      CloneJSON(command.Payload),
-		Status:       command.Status,
-		AttemptCount: command.AttemptCount,
-		NextRetryAt:  command.NextRetryAt,
-		AckedAt:      command.AckedAt,
-		LastError:    CloneJSON(command.LastError),
-		Result:       CloneJSON(command.Result),
-		CreatedAt:    command.CreatedAt,
-		DispatchedAt: command.DispatchedAt,
+		CommandID:       command.CommandID,
+		AgentID:         command.AgentID,
+		QueueGeneration: command.QueueGeneration,
+		CommandType:     command.CommandType,
+		Payload:         CloneJSON(command.Payload),
+		Status:          command.Status,
+		AttemptCount:    command.AttemptCount,
+		NextRetryAt:     command.NextRetryAt,
+		AckedAt:         command.AckedAt,
+		LastError:       CloneJSON(command.LastError),
+		Result:          CloneJSON(command.Result),
+		CreatedAt:       command.CreatedAt,
+		DispatchedAt:    command.DispatchedAt,
 	}
 }

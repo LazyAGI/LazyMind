@@ -88,7 +88,7 @@ test("generates a multi-resolution Windows ICO from the macOS icon", () => {
   }
 });
 
-test("normalizes compact Windows release tags to standard SemVer", async () => {
+test("normalizes shared desktop release tags to standard SemVer", async () => {
   const { normalizeReleaseTag } = await import(pathToFileURL(releaseVersionScript).href);
   assert.deepEqual(normalizeReleaseTag("v1.2.3a2"), {
     releaseTag: "v1.2.3a2",
@@ -97,6 +97,7 @@ test("normalizes compact Windows release tags to standard SemVer", async () => {
   });
   assert.equal(normalizeReleaseTag("1.2.3b4").packageVersion, "1.2.3-beta.4");
   assert.equal(normalizeReleaseTag("v1.2.3rc1").packageVersion, "1.2.3-rc.1");
+  assert.equal(normalizeReleaseTag("v1.2.3-alpha.2").packageVersion, "1.2.3-alpha.2");
   assert.equal(normalizeReleaseTag("v1.2.3").packageVersion, "1.2.3");
   assert.throws(() => normalizeReleaseTag("release-1.2"), /Unsupported release tag/);
 });
@@ -150,8 +151,9 @@ test("Windows installer diagnoses paths and does not roll back when warmup fails
   );
   assert.match(
     install,
-    /ExecWait[^\n]+--installer-warmup[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
+    /ExecWait[^\n]+--installer-warmup --timeout-seconds 240[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
   );
+  assert.match(install, /Starting Electron installer warmup \(timeout=240s\)/);
   assert.match(install, /installer-nsis\.log[\s\S]*Starting Electron installer warmup/);
   assert.match(install, /Electron installer warmup returned exit code \$3/);
   assert.match(
@@ -180,11 +182,19 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
     source,
     /name:\s*\$\{\{ needs\.build-windows-installer\.outputs\.artifact_name \}\}/,
   );
+  assert.match(
+    source,
+    /test-windows-installer:[\s\S]*name: Checkout smoke test scripts[\s\S]*ref: \$\{\{ inputs\.git_ref \|\| github\.ref \}\}[\s\S]*name: Download the exact installer built above/,
+  );
   assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList "\/S" -Wait/);
   assert.match(source, /DisplayVersion -ne \$env:EXPECTED_VERSION/);
+  assert.match(source, /expectedProductVersion = "\$\(\$Matches\[1\]\)\.\$\(\$Matches\[2\]\)\.\$\(\$Matches\[3\]\)\.0"/);
   assert.match(source, /Start-Process -FilePath \$uninstaller -ArgumentList "\/S" -Wait/);
   assert.match(source, /RegistryView\]::Registry64[\s\S]*RegistryView\]::Registry32/);
   assert.match(source, /name: Upload installer diagnostics[\s\S]*if: always\(\)/);
+  assert.doesNotMatch(source, /name: Run explicit Electron warmup/);
+  assert.doesNotMatch(source, /steps\.warmup\.outcome/);
+  assert.match(source, /name: Verify installer warmup result[\s\S]*startup-metrics-latest\.json/);
 });
 
 test("Windows NSIS installer uses electron-builder's default LZMA payload", () => {
@@ -211,6 +221,11 @@ test("macOS distribution build signs packages while CI owns notarization sequenc
   const source = readFileSync(darwinBuildScript, "utf8");
   const builderSource = readFileSync(electronBuilderConfig, "utf8");
   const packageJson = JSON.parse(readFileSync(electronPackage, "utf8"));
+  const workflow = readFileSync(macosWorkflow, "utf8");
+  assert.match(workflow, /on:\s*\n\s*push:\s*\n\s*tags:\s*\n\s*- "v\*"\s*\n\s*workflow_dispatch:/);
+  assert.doesNotMatch(workflow.match(/on:[\s\S]*?permissions:/)?.[0] || "", /branches:/);
+  assert.match(workflow, /name: Validate tag and set desktop version[\s\S]*resolve-release-version\.mjs/);
+  assert.doesNotMatch(workflow, /pythonPrerelease|prereleaseNames/);
   assert.match(source, /PACKAGE_KIND=.*zip/);
   assert.match(source, /SIGNING_MODE=.*adhoc/);
   assert.doesNotMatch(source, /notarytool submit/);
@@ -272,6 +287,12 @@ test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallbac
 
   assert.match(buildWorkflow, /name:\s*Submit app ZIP for notarization/);
   assert.match(buildWorkflow, /notarytool submit "\$\{zip_path\}"/);
+  assert.match(buildWorkflow, /--leave-running true/);
+  assert.match(buildWorkflow, /name:\s*Start asynchronous packaged runtime cleanup[\s\S]*pkill -9 -f "\$\{app_executable\}"[\s\S]*nohup env/);
+  assert.ok(
+    buildWorkflow.indexOf("name: Submit app ZIP for notarization") <
+      buildWorkflow.indexOf("name: Start asynchronous packaged runtime cleanup"),
+  );
   assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for app ZIP notarization/);
   assert.match(buildWorkflow, /continuing directly to DMG packaging/);
   assert.match(buildWorkflow, /name:\s*Staple accepted app ticket/);
@@ -284,14 +305,19 @@ test("macOS CI notarizes ZIP then DMG and preserves only the DMG timeout fallbac
   assert.match(buildWorkflow, /git show-ref --verify --quiet "refs\/tags\/\$\{REQUESTED_REF\}"/);
   assert.match(buildWorkflow, /tag_commit=.*git rev-parse "refs\/tags\/\$\{tag_candidate\}\^\{commit\}"/);
   assert.doesNotMatch(buildWorkflow, /path:[^\n]*LazyMind-darwin-arm64\.zip/);
-  assert.match(buildWorkflow, /replace\(\/\^v\//);
-  assert.match(buildWorkflow, /prereleaseNames = \{ a: "alpha", b: "beta", rc: "rc" \}/);
+  assert.match(buildWorkflow, /resolve-release-version\.mjs/);
   assert.match(buildWorkflow, /name:\s*Wait up to 30 minutes for DMG notarization/);
   assert.match(buildWorkflow, /deadline="\$\(\( started_at \+ 1800 \)\)"/);
   assert.match(buildWorkflow, /sleep 30/);
   assert.match(buildWorkflow, /DMG notarization timed out/);
   assert.match(buildWorkflow, /stapler staple "\$\{final_path\}"/);
   assert.match(buildWorkflow, /stapler validate "\$\{final_path\}"/);
+  assert.match(buildWorkflow, /name:\s*Verify packaged runtime cleanup after artifact upload/);
+  assert.match(buildWorkflow, /LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT=1s/);
+  assert.ok(
+    buildWorkflow.indexOf("name: Upload final notarized installer") <
+      buildWorkflow.indexOf("name: Verify packaged runtime cleanup after artifact upload"),
+  );
   assert.doesNotMatch(buildWorkflow, /name:\s*Report step timings/);
 
   assert.match(finalizeWorkflow, /source_run_id:/);
@@ -350,6 +376,15 @@ test("Desktop renderer keeps Node disabled behind an isolated preload bridge", (
   assert.match(source, /contextIsolation:\s*true/);
   assert.match(source, /nodeIntegration:\s*false/);
   assert.match(source, /preload:\s*path\.join\(__dirname, "preload\.js"\)/);
+});
+
+test("Desktop clears stale frontend caches before opening a renderer", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(source, /await clearFrontendCaches\(session\.defaultSession/);
+  assert.ok(
+    source.indexOf("await clearFrontendCaches(session.defaultSession") < source.indexOf("return runMacInstallationWarmupIfNeeded()"),
+    "frontend caches must be cleared before installation warmup or the main window loads",
+  );
 });
 
 test("Desktop opens the home page from the sidecar readiness event with status polling as fallback", () => {

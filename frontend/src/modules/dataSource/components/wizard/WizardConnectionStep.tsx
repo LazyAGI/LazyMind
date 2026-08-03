@@ -79,6 +79,11 @@ export default function WizardConnectionStep({
   onLoadFeishuTargetChildren,
 }: WizardConnectionStepProps) {
   const [localPathSearchValue, setLocalPathSearchValue] = useState("");
+  const [localPathExpandedKeys, setLocalPathExpandedKeys] = useState<
+    Array<string | number>
+  >([]);
+  const [localPathBrowseExpandedKeys, setLocalPathBrowseExpandedKeys] =
+    useState<Array<string | number>>([]);
   const [feishuTargetSearchValue, setFeishuTargetSearchValue] = useState("");
   const [feishuTargetExpandedKeys, setFeishuTargetExpandedKeys] = useState<
     Array<string | number>
@@ -93,7 +98,26 @@ export default function WizardConnectionStep({
     () => new Map<string, string>(),
   );
 
+  const isLocalPathSearching = Boolean(localPathSearchValue.trim());
   const isFeishuTargetSearching = Boolean(feishuTargetSearchValue.trim());
+
+  useEffect(() => {
+    if (!isLocalPathSearching) {
+      setLocalPathExpandedKeys(localPathBrowseExpandedKeys);
+      return;
+    }
+    if (localPathLoading) {
+      return;
+    }
+    setLocalPathExpandedKeys(
+      collectTreeExpandableKeys(localPathOptions as CollapsibleTreeNode[]),
+    );
+  }, [
+    localPathOptions,
+    localPathLoading,
+    isLocalPathSearching,
+    localPathBrowseExpandedKeys,
+  ]);
 
   useEffect(() => {
     if (!isFeishuTargetSearching) {
@@ -339,6 +363,7 @@ export default function WizardConnectionStep({
               treeCheckable
               treeData={localPathOptions}
               treeDefaultExpandAll={false}
+              treeExpandedKeys={localPathExpandedKeys}
               treeLine
               showCheckedStrategy={TreeSelect.SHOW_PARENT}
               styles={{
@@ -347,6 +372,8 @@ export default function WizardConnectionStep({
               onOpenChange={(open) => {
                 if (!open) {
                   setLocalPathSearchValue("");
+                  setLocalPathExpandedKeys([]);
+                  setLocalPathBrowseExpandedKeys([]);
                   setLocalPathBrowseKey((key) => key + 1);
                   onResetLocalPathBrowseOptions?.();
                   return;
@@ -360,6 +387,12 @@ export default function WizardConnectionStep({
               onSearch={(value) => {
                 setLocalPathSearchValue(value);
                 onSearchLocalPathOptions?.(value);
+              }}
+              onTreeExpand={(keys) => {
+                setLocalPathExpandedKeys(keys);
+                if (!isLocalPathSearching) {
+                  setLocalPathBrowseExpandedKeys(keys);
+                }
               }}
             />
           </Form.Item>

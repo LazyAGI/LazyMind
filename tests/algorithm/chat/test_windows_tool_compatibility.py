@@ -56,6 +56,29 @@ def test_published_artifact_path_fits_legacy_windows_limit():
     assert len(generated) < 260
 
 
+def test_chat_workspace_reuses_legacy_hash_until_current_exists(tmp_path, monkeypatch):
+    monkeypatch.setitem(chat_artifact._cfg._impl, 'agentic_workspace', str(tmp_path))
+    legacy = (
+        tmp_path
+        / 'chat-artifacts'
+        / chat_artifact._legacy_scope_hash('user-1')
+        / chat_artifact._legacy_scope_hash('conversation-1')
+    )
+    legacy.mkdir(parents=True)
+
+    assert Path(chat_artifact.chat_agent_workspace('user-1', 'conversation-1')) == legacy
+
+    current = (
+        tmp_path
+        / 'chat-artifacts'
+        / chat_artifact._scope_hash('user-1')
+        / chat_artifact._scope_hash('conversation-1')
+    )
+    current.mkdir(parents=True)
+
+    assert Path(chat_artifact.chat_agent_workspace('user-1', 'conversation-1')) == current
+
+
 def test_chat_write_file_append_does_not_require_overwrite_approval(tmp_path, monkeypatch):
     monkeypatch.setattr(chat_artifact, 'chat_agent_workspace', lambda *_args: str(tmp_path))
     monkeypatch.setattr(
