@@ -227,6 +227,14 @@ func TestPersistConversationFileArtifactValidatesSharedWorkspace(t *testing.T) {
 	}
 }
 
+func TestArtifactScopeHashMatchesAlgorithmContract(t *testing.T) {
+	got := artifactScopeHash("user-1")
+	const want = "c6c289e49e9c05b2145860387b73bcb1"
+	if got != want {
+		t.Fatalf("artifact scope hash mismatch: got %q, want %q", got, want)
+	}
+}
+
 func TestPersistConversationFileArtifactRejectsForeignPath(t *testing.T) {
 	db := newArtifactTestDB(t)
 	workspace := t.TempDir()

@@ -60,7 +60,11 @@ func validArtifactFilename(name string) bool {
 }
 
 func artifactScopeHash(value string) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(value)))
+	sum := sha256.Sum256([]byte(value))
+	// Keep this in lockstep with algorithm/lazymind/chat/engine/tools/chat_artifact.py.
+	// The algorithm publishes files below the first 128 bits of the SHA-256 digest
+	// to keep packaged Windows paths comfortably below MAX_PATH.
+	return fmt.Sprintf("%x", sum[:16])
 }
 
 func conversationArtifactFileRoot(userID, conversationID, artifactID string) string {
