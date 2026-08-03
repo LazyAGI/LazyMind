@@ -145,7 +145,14 @@ export function useLocalPathTree({
         return;
       }
 
-      const nodes = mapLocalPathNodes(response.data.items || []);
+      const mappedNodes = mapLocalPathNodes(response.data.items || []);
+      const nodes = normalizedPath
+        ? mappedNodes.flatMap((node) =>
+            node.targetRef === "/" && node.children?.length
+              ? node.children
+              : [node],
+          )
+        : mappedNodes;
       const nextNodes =
         nodes.length > 0
           ? nodes
