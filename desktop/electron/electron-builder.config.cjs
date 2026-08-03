@@ -298,7 +298,6 @@ module.exports = {
     icon: process.env.LAZYMIND_DESKTOP_WINDOWS_ICON || "assets/LazyMind.ico",
     target: ["zip"],
     requestedExecutionLevel: "asInvoker",
-    signAndEditExecutable: Boolean(process.env.CSC_LINK),
   },
   nsis: {
     oneClick: false,
