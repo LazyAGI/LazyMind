@@ -673,6 +673,23 @@ export interface ConversationSwitchStatusRequest {
 export interface ConversationSwitchStatusResponse {
     'status'?: number;
 }
+export interface ConversationTrailItem {
+    'create_time'?: string;
+    'depth'?: number;
+    'history_id'?: string;
+    'parent_history_id'?: string;
+    'question'?: string;
+    'seq'?: number;
+    'source'?: string;
+    'summary'?: string;
+}
+export interface ConversationTrailListResponse {
+    'conversation_id'?: string;
+    'items'?: Array<ConversationTrailItem>;
+    'name'?: string;
+    'next_page_token'?: string;
+    'total_size'?: number;
+}
 export interface CreateEvalSetByImportRequest {
     'dataset_ids'?: Array<string>;
     'description': string;
@@ -7830,6 +7847,50 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
+         *
+         * @summary List conversation trail metadata (paginated)
+         * @param {string} name
+         * @param {number} [pageSize]
+         * @param {string} [pageToken]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsNameTrailGet: async (name: string, pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'name' is not null or undefined
+            assertParamExists('apiCoreConversationsNameTrailGet', 'name', name)
+            const localVarPath = `/api/core/conversations/{name}:trail`
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (pageToken !== undefined) {
+                localVarQueryParameter['page_token'] = pageToken;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * 
          * @summary Resume conversation stream
          * @param {ConversationResumeRequest} conversationResumeRequest 
@@ -12407,6 +12468,21 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         *
+         * @summary List conversation trail metadata (paginated)
+         * @param {string} name
+         * @param {number} [pageSize]
+         * @param {string} [pageToken]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsNameTrailGet(name: string, pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationTrailListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsNameTrailGet(name, pageSize, pageToken, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsNameTrailGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * 
          * @summary Resume conversation stream
          * @param {ConversationResumeRequest} conversationResumeRequest 
@@ -14323,6 +14399,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
+         * @summary List conversation trail metadata (paginated)
+         * @param {DefaultApiApiCoreConversationsNameTrailGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsNameTrailGet(requestParameters: DefaultApiApiCoreConversationsNameTrailGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationTrailListResponse> {
+            return localVarFp.apiCoreConversationsNameTrailGet(requestParameters.name, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Resume conversation stream
          * @param {DefaultApiApiCoreConversationsResumeChatPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -15656,6 +15742,17 @@ export interface DefaultApiApiCoreConversationsNameHistoryGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreConversationsNameTrailGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsNameTrailGetRequest {
+    readonly name: string
+
+    readonly pageSize?: number
+
+    readonly pageToken?: string
+}
+
+/**
  * Request parameters for apiCoreConversationsResumeChatPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsResumeChatPostRequest {
@@ -16752,6 +16849,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      * 
+     * @summary List conversation trail metadata (paginated)
+     * @param {DefaultApiApiCoreConversationsNameTrailGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsNameTrailGet(requestParameters: DefaultApiApiCoreConversationsNameTrailGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsNameTrailGet(requestParameters.name, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Resume conversation stream
      * @param {DefaultApiApiCoreConversationsResumeChatPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.

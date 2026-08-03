@@ -662,6 +662,41 @@ components:
                     format: int64
                     type: integer
             type: object
+        ConversationTrailItem:
+            properties:
+                create_time:
+                    type: string
+                depth:
+                    type: integer
+                history_id:
+                    type: string
+                parent_history_id:
+                    type: string
+                question:
+                    type: string
+                seq:
+                    type: integer
+                source:
+                    type: string
+                summary:
+                    type: string
+            type: object
+        ConversationTrailListResponse:
+            properties:
+                conversation_id:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/ConversationTrailItem'
+                    type: array
+                name:
+                    type: string
+                next_page_token:
+                    type: string
+                total_size:
+                    format: int64
+                    type: integer
+            type: object
         ConversationItem:
             properties:
                 chat_times:
@@ -7305,6 +7340,35 @@ paths:
                                 $ref: '#/components/schemas/ConversationHistoryListResponse'
                     description: Chat history page ordered by seq descending; may include in-flight turns from Redis
             summary: List conversation history (paginated)
+    /api/core/conversations/{name}:trail:
+        get:
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    description: Conversation ID or resource name (e.g. conv-1 or conversations/conv-1; :trail suffix is stripped)
+                    type: string
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    description: Page size (default 20, max 100)
+                    type: integer
+                - in: query
+                  name: page_token
+                  required: false
+                  schema:
+                    description: Pagination offset token from a previous response next_page_token
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationTrailListResponse'
+                    description: Conversation navigation metadata ordered by seq ascending
+            summary: List conversation trail metadata (paginated)
     /api/core/conversations/{name}:search-config:
         patch:
             description: Replaces the knowledge bases on an existing conversation while preserving its other search settings.

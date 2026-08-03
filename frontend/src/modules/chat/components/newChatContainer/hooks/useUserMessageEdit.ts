@@ -28,6 +28,7 @@ interface UseUserMessageEditOptions {
   openSSE: (
     input: any[],
     action: ChatConversationsRequestActionEnum,
+    extras?: Record<string, unknown>,
   ) => void;
   scrollToEnd: () => void;
 }
@@ -218,6 +219,13 @@ export function useUserMessageEdit({
       display_delta: normalizedText,
       cite_message: editingUserMessageCites.join("\n\n"),
       cite_messages: editingUserMessageCites,
+      cite_history_ids:
+        Array.isArray(oldUserMessage.cite_history_ids) &&
+        oldUserMessage.cite_history_ids.length > 0
+          ? oldUserMessage.cite_history_ids
+          : oldUserMessage.trail_parent_history_id
+            ? [oldUserMessage.trail_parent_history_id]
+            : undefined,
       inputs: rebuiltInputs,
     };
 
@@ -246,7 +254,12 @@ export function useUserMessageEdit({
     }
 
     scrollToEnd();
-    openSSE(rebuiltInputs, ChatConversationsRequestActionEnum.ChatActionRegeneration);
+    const citeHistoryIds = newUserMessage.cite_history_ids;
+    openSSE(
+      rebuiltInputs,
+      ChatConversationsRequestActionEnum.ChatActionRegeneration,
+      citeHistoryIds?.length ? { cite_history_ids: citeHistoryIds } : undefined,
+    );
 
     if (currentId && !currentId.startsWith("temp_")) {
       emitConversationActivity({ conversationId: currentId });

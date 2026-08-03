@@ -113,7 +113,7 @@ interface MessageListProps {
   onCancelEditUserMessage?: () => void;
   onResendEditedUserMessage?: (index: number, value: string) => void;
   onCopyUserMessage?: (item: any) => void;
-  onCiteMessage?: (text: string) => void;
+  onCiteMessage?: (text: string, historyId?: string) => void;
   footer?: React.ReactNode;
 }
 
@@ -460,8 +460,13 @@ const MessageList: React.FC<MessageListProps> = ({
     >
       {messageList.length > 0 &&
         messageList.map((item, index) => {
+          const historyId = item.history_id || item.id;
           return (
-            <div className="chat-item" key={`chat-${index}`}>
+            <div
+              className="chat-item"
+              key={`chat-${index}`}
+              data-chat-history-id={historyId || undefined}
+            >
               {item.role === RoleTypes.USER && renderUser(item, index)}
               {item.role === RoleTypes.ASSISTANT && (
                 <AssistantMessage
@@ -477,7 +482,9 @@ const MessageList: React.FC<MessageListProps> = ({
                   }
                   sessionId={sessionId}
                   onPreferenceSelect={onPreferenceSelect}
-                  onCiteMessage={onCiteMessage}
+                  onCiteMessage={(text: string) =>
+                    onCiteMessage?.(text, item.history_id || item.id)
+                  }
                   isLatestDualAnswer={
                     index === messageList.length - 1 &&
                     !!(

@@ -295,6 +295,10 @@ func manualSchemas() map[string]any {
 		),
 		"ConversationDetailResponse":      obj(prop("conversation", refSchema("ConversationItem"))),
 		"ConversationHistoryListResponse": obj(prop("conversation_id", strSchema()), prop("name", strSchema()), prop("history", array(refSchema("ConversationHistoryItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),
+		"ConversationTrailItem": obj(
+			prop("history_id", strSchema()), prop("seq", intSchema()), prop("summary", strSchema()), prop("question", strSchema()), prop("depth", intSchema()), prop("parent_history_id", strSchema()), prop("source", strSchema()), prop("create_time", strSchema()),
+		),
+		"ConversationTrailListResponse": obj(prop("conversation_id", strSchema()), prop("name", strSchema()), prop("items", array(refSchema("ConversationTrailItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),
 		"ConversationListResponse":        obj(prop("conversations", array(refSchema("ConversationItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),
 		"SetChatHistoryResponse":          obj(prop("history_id", strSchema())),
 		"ChatChunkResponse":               obj(prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("finish_reason", strSchema()), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema())),
@@ -434,6 +438,12 @@ func manualPaths() map[string]any {
 			nil,
 			response(200, "Chat history page ordered by seq descending; may include in-flight turns from Redis", refSchema("ConversationHistoryListResponse")),
 		)},
+		"/conversations/{name}:trail": map[string]any{"get": op(
+			"List conversation trail metadata (paginated)",
+			conversationTrailListParams(),
+			nil,
+			response(200, "Conversation navigation metadata ordered by seq ascending", refSchema("ConversationTrailListResponse")),
+		)},
 		"/conversations":                     map[string]any{"get": op("Conversation list", queryParams(param("query", "keyword", false, strSchema()), param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema())), nil, response(200, "Conversation list", refSchema("ConversationListResponse")))},
 		"/conversations:setChatHistory":      map[string]any{"post": op("Set conversation history", nil, jsonBody(refSchema("ConversationSetHistoryRequest"), true), response(200, "Set result", refSchema("SetChatHistoryResponse")))},
 		"/conversations:batchDelete":         map[string]any{"post": op("Batch delete conversations", nil, jsonBody(refSchema("ConversationBatchDeleteRequest"), true), response(200, "Batch deleted conversations", refSchema("ConversationBatchDeleteResponse")))},
@@ -523,6 +533,23 @@ func conversationHistoryListParams() []map[string]any {
 		param("path", "name", true, map[string]any{
 			"type":        "string",
 			"description": "Conversation ID or resource name (e.g. conv-1 or conversations/conv-1; :history suffix is stripped)",
+		}),
+		param("query", "page_size", false, map[string]any{
+			"type":        "integer",
+			"description": "Page size (default 20, max 100)",
+		}),
+		param("query", "page_token", false, map[string]any{
+			"type":        "string",
+			"description": "Pagination offset token from a previous response next_page_token",
+		}),
+	}
+}
+
+func conversationTrailListParams() []map[string]any {
+	return []map[string]any{
+		param("path", "name", true, map[string]any{
+			"type":        "string",
+			"description": "Conversation ID or resource name (e.g. conv-1 or conversations/conv-1; :trail suffix is stripped)",
 		}),
 		param("query", "page_size", false, map[string]any{
 			"type":        "integer",

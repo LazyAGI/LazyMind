@@ -338,6 +338,7 @@ export interface SendMessageParams {
   mentions?: ChatMention[];
   citeMessage?: string;
   citeMessages?: string[];
+  citeHistoryIds?: (string | undefined)[];
   clearInput?: boolean;
   fileList?: ChatFileList[];
   fileListRef?: React.RefObject<ImageUploadImperativeProps | null>;
@@ -387,6 +388,7 @@ interface ChatInputProps {
   disabledAction?: ReactNode;
   citeMessage?: string;
   citeMessages?: string[];
+  citeHistoryIds?: (string | undefined)[];
   onRemoveCiteMessage?: (index: number) => void;
   onClearCiteMessage?: () => void;
   skillDepositStats?: SkillDepositStats;
@@ -489,6 +491,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       disabledAction,
       citeMessage,
       citeMessages,
+      citeHistoryIds,
       onRemoveCiteMessage,
       onClearCiteMessage,
       skillDepositStats,
@@ -830,6 +833,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         mentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
         citeMessages: normalizedCiteMessages,
+        citeHistoryIds: citeHistoryIds?.filter(
+          (historyId): historyId is string => Boolean(historyId?.trim()),
+        ),
         fileList,
         fileListRef,
         files: fileListRef.current?.getFiles(),

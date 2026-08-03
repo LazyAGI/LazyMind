@@ -27,7 +27,9 @@ import {
   DefaultApiFactory as CoreDefaultApiFactory,
   PromptsApiFactory as CorePromptsApiFactory,
   type ConversationHistoryListResponse,
+  type ConversationTrailListResponse,
   type DefaultApiApiCoreConversationsNameHistoryGetRequest,
+  type DefaultApiApiCoreConversationsNameTrailGetRequest,
   type PromptItem,
   type PromptCategory,
   type PromptCategoryListResponse,
@@ -511,6 +513,15 @@ export function ChatServiceApi() {
         requestParameters,
         options,
       ) as Promise<AxiosResponse<ConversationHistoryListResponse>>;
+    },
+    conversationServiceGetConversationTrail(
+      requestParameters: DefaultApiApiCoreConversationsNameTrailGetRequest,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return coreDefaultClient.apiCoreConversationsNameTrailGet(
+        requestParameters,
+        options,
+      ) as Promise<AxiosResponse<ConversationTrailListResponse>>;
     },
     conversationServiceBatchChat(
       requestParameters: ConversationServiceApiConversationServiceBatchChatRequest,
