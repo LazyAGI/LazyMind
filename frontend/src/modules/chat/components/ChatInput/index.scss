@@ -461,7 +461,7 @@
       white-space: pre-wrap;
       word-break: break-word;
 
-      &:empty::before {
+      &[data-empty="true"]::before {
         color: #b8c3d6;
         content: attr(data-placeholder);
         pointer-events: none;

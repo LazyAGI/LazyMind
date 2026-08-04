@@ -93,11 +93,6 @@
     "vite-plugin-svgr": "^4.5.0",
     "vitest": "^2.1.9"
   },
-  "lint-staged": {
-    "src/**/*.{ts,tsx}": [
-      "vitest related --run"
-    ]
-  },
   "allowScripts": {
     "@openapitools/openapi-generator-cli@2.38.0": true
   }

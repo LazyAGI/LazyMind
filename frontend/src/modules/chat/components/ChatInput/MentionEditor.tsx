@@ -391,6 +391,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         role="textbox"
         aria-multiline="true"
         data-placeholder={placeholder}
+        data-empty={value === "" ? "true" : "false"}
         onInput={() => { emit(); refreshQuery(); }}
         onClick={refreshQuery}
         onKeyUp={(event) => { if (!["ArrowUp", "ArrowDown", "Enter"].includes(event.key)) refreshQuery(); }}

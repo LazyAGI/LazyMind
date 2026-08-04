@@ -294,6 +294,7 @@ const MarkdownViewer = memo((props: any) => {
     components: customComponents,
     sources = [],
     IS_STREAMING,
+    ...markdownProps
   } = props;
   const normalizedChildren =
     typeof children === "string"
@@ -332,7 +333,7 @@ const MarkdownViewer = memo((props: any) => {
     >
       <MarkdownRenderContext.Provider value={renderContextValue}>
         <Markdown
-          {...props}
+          {...markdownProps}
           remarkPlugins={markdownRemarkPlugins}
           rehypePlugins={markdownRehypePlugins}
           components={markdownComponents}

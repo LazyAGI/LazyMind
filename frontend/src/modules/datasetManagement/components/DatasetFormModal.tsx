@@ -84,8 +84,12 @@ export default function DatasetFormModal({
   }, [form, initialValues, open]);
 
   const handleSubmit = async () => {
-    const values = await form.validateFields();
-    onSubmit(values);
+    try {
+      const values = await form.validateFields();
+      onSubmit(values);
+    } catch {
+      // Validation errors are already rendered inline by antd Form.
+    }
   };
 
   const kbRules = isEdit
