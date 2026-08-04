@@ -160,8 +160,10 @@ def check_sensitive_content(query: str) -> Optional[SensitiveMatch]:
     return sensitive_filter.evaluate(query)
 
 
-def _should_skip_sensitive_filter(query: str, workflow_context: Dict[str, Any]) -> bool:
+def _should_skip_sensitive_filter(query: str, workflow_context: Optional[Dict[str, Any]]) -> bool:
     """Bypass user-input filtering only for trusted Workflow synthetic turns."""
+    if not isinstance(workflow_context, dict):
+        return False
     if not workflow_context.get('workflow_id') or not workflow_context.get('session_id'):
         return False
     if workflow_context.get('synthetic_source') == 'driver':

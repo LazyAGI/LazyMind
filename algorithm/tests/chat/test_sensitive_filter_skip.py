@@ -35,3 +35,7 @@ def test_no_skip_synthetic_marker_without_workflow_identity():
         'Step analyze_subject completed. Please proceed.',
         {'synthetic_source': 'driver'},
     )
+
+
+def test_no_skip_without_workflow_context():
+    assert not _should_skip_sensitive_filter('普通用户消息', None)
