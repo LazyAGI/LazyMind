@@ -13,6 +13,7 @@ import (
 	"lazymind/core/mcp"
 	"lazymind/core/modelprovider"
 	"lazymind/core/resourcefs"
+	"lazymind/core/showcase"
 	"lazymind/core/wordgroup"
 )
 
@@ -550,6 +551,15 @@ type promptListQueryParams struct {
 	Scope     string `query:"scope"`
 	Sort      string `query:"sort"`
 	Locale    string `query:"locale"`
+}
+
+type showcaseCasePathParams struct {
+	CaseID string `path:"case_id"`
+}
+
+type showcaseListQueryParams struct {
+	Keyword  string `query:"keyword"`
+	Category string `query:"category"`
 }
 
 type promptGetQueryParams struct {
@@ -3700,6 +3710,24 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:       []string{"prompts"},
 			PathParams: promptPathParams{},
 			Responses:  map[int]openAPIResponse{200: resp("Usage recorded", promptStateOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/showcase/cases",
+			Summary:     "Showcase case list",
+			Tags:        []string{"showcase"},
+			QueryParams: showcaseListQueryParams{},
+			Headers:     localizedCatalogHeaders{},
+			Responses:   map[int]openAPIResponse{200: resp("Showcase case list", showcase.ShowcaseCaseListResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/showcase/cases/{case_id}",
+			Summary:    "Showcase case details",
+			Tags:       []string{"showcase"},
+			PathParams: showcaseCasePathParams{},
+			Headers:    localizedCatalogHeaders{},
+			Responses:  map[int]openAPIResponse{200: resp("Showcase case details", showcase.ShowcaseCase{})},
 		},
 		{
 			Method:      "GET",

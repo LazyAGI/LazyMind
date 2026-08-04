@@ -12,6 +12,7 @@ import {
 import { RcFile } from "antd/es/upload";
 import { Button, message, Select, Spin, Tooltip } from "antd";
 import {
+  AppstoreOutlined,
   BookOutlined,
   BulbOutlined,
   CloseOutlined,
@@ -380,6 +381,8 @@ interface ChatInputProps {
   initialPluginSettings?: ConversationPluginSettings;
   /** When true, the allow-plugin toggle in config is locked (plugin session is active). */
   hasPluginSession?: boolean;
+  /** Optional case-driven category selectors shown in the welcome composer. */
+  showcaseSelection?: ShowcaseSelection;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   disabled?: boolean;
@@ -396,6 +399,23 @@ interface ChatInputProps {
   onSkillDeposit?: () => void;
   /** Send the next message as a background task. Used by the new-task entry point. */
   runInBackground?: boolean;
+}
+
+export interface ShowcaseSelectionOption {
+  value: string;
+  label: string;
+  description?: string;
+  prompt?: string;
+}
+
+export interface ShowcaseSelection {
+  primaryValue: string;
+  primaryLabel: string;
+  primaryAriaLabel: string;
+  secondaryValue?: string;
+  secondaryOptions?: ShowcaseSelectionOption[];
+  secondaryAriaLabel: string;
+  onSecondaryChange?: (value: string) => void;
 }
 
 export interface ChatFileList {
@@ -500,6 +520,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onPluginSettingsChange,
       initialPluginSettings,
       hasPluginSession,
+      showcaseSelection,
       runInBackground = false,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
@@ -1214,6 +1235,52 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       />
                     </div>
                   </div>
+                  {showcaseSelection ? (
+                    <div className="chat-showcase-selection" data-testid="showcase-selection">
+                      <span className="chat-showcase-control chat-showcase-primary-control">
+                        <AppstoreOutlined
+                          className="chat-showcase-control-icon"
+                          aria-hidden="true"
+                        />
+                        <Select
+                          aria-label={showcaseSelection.primaryAriaLabel}
+                          className="chat-showcase-category-select"
+                          size="small"
+                          value={showcaseSelection.primaryValue}
+                          disabled={disabled || isStreaming}
+                          options={[
+                            {
+                              value: showcaseSelection.primaryValue,
+                              label: showcaseSelection.primaryLabel,
+                            },
+                          ]}
+                        />
+                      </span>
+                      {showcaseSelection.secondaryOptions?.length ? (
+                        <span className="chat-showcase-control chat-showcase-scene-control">
+                          <span className="chat-showcase-scene-icon" aria-hidden="true">
+                            <i />
+                            <i />
+                            <i />
+                            <i />
+                          </span>
+                          <Select
+                            aria-label={showcaseSelection.secondaryAriaLabel}
+                            className="chat-showcase-category-select chat-showcase-subcategory-select"
+                            size="small"
+                            value={showcaseSelection.secondaryValue}
+                            disabled={disabled || isStreaming}
+                            onChange={showcaseSelection.onSecondaryChange}
+                            options={showcaseSelection.secondaryOptions.map((option) => ({
+                              value: option.value,
+                              label: option.label,
+                              title: option.description,
+                            }))}
+                          />
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <Select
                     aria-label={t("chat.thinkingDepth")}
                     className="chat-thinking-depth-select"

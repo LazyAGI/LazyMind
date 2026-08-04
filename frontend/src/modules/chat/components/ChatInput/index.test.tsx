@@ -1,6 +1,6 @@
 import { createRef, forwardRef } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { renderWithProviders, screen, fireEvent } from "@/test/testUtils";
+import { renderWithProviders, screen, fireEvent, within } from "@/test/testUtils";
 import ChatInput, { type ChatInputImperativeProps } from "./index";
 
 vi.mock("../ImageUpload", async () => {
@@ -114,6 +114,49 @@ describe("ChatInput", () => {
     expect(screen.getByText("quoted text")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("chat.clearCitation"));
     expect(onClearCiteMessage).toHaveBeenCalled();
+  });
+
+  it("shows the secondary case category only when options are configured", () => {
+    const onSecondaryChange = vi.fn();
+    const selection = {
+      primaryValue: "product-design",
+      primaryLabel: "产品设计与PRD生成",
+      primaryAriaLabel: "一级分类",
+      secondaryValue: "full",
+      secondaryAriaLabel: "二级分类",
+      secondaryOptions: [
+        { value: "full", label: "完整功能" },
+        { value: "outline", label: "快速生成" },
+      ],
+      onSecondaryChange,
+    };
+
+    const { rerender } = renderWithProviders(
+      <ChatInput {...baseProps({ showcaseSelection: selection })} />,
+    );
+    const showcaseSelection = screen.getByTestId("showcase-selection");
+    expect(within(showcaseSelection).getAllByRole("combobox")).toHaveLength(2);
+    expect(showcaseSelection).toHaveTextContent("完整功能");
+    expect(
+      showcaseSelection.querySelector(".chat-showcase-primary-control"),
+    ).toBeInTheDocument();
+    expect(
+      showcaseSelection.querySelector(".chat-showcase-scene-control"),
+    ).toBeInTheDocument();
+
+    rerender(
+      <ChatInput
+        {...baseProps({
+          showcaseSelection: { ...selection, secondaryOptions: [] },
+        })}
+      />,
+    );
+    expect(within(screen.getByTestId("showcase-selection")).getAllByRole("combobox")).toHaveLength(1);
+    expect(
+      screen
+        .getByTestId("showcase-selection")
+        .querySelector(".chat-showcase-scene-control"),
+    ).not.toBeInTheDocument();
   });
 
   it("exposes focus via the imperative ref", () => {
