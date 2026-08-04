@@ -9,7 +9,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
 
@@ -235,3 +235,43 @@ class WorkflowClient:
         ).result
         preparation_id = str(prepared.get('id') or prepared.get('preparation_id') or command_id)
         return self.start_workflow(preparation_id, session_id, command_id=command_id)
+
+    def get_skill_conversion_context(self, skill_id: str,
+                                     revision_id: str = '') -> WorkflowResponse:
+        query = {'skill_id': skill_id}
+        if revision_id:
+            query['revision_id'] = revision_id
+        return self._read('/workflow-authoring/v1/skill-context?' + urlencode(query))
+
+    def create_workflow_draft(self, name: str, skill_id: str, revision_id: str,
+                              tree_hash: str, files: Dict[str, str]) -> WorkflowResponse:
+        return self._decode(self.transport.post(
+            self.base_url + '/workflow-authoring/v1/drafts',
+            json={'name': name, 'skill_id': skill_id, 'revision_id': revision_id,
+                  'tree_hash': tree_hash, 'files': files},
+            headers=self._headers(), timeout=self.timeout,
+        ))
+
+    def update_workflow_draft_file(self, draft_id: str, path: str, content: str,
+                                   expected_version: int) -> WorkflowResponse:
+        return self._decode(self.transport.put(
+            f'{self.base_url}/workflow-authoring/v1/drafts/{quote(draft_id, safe="")}/files',
+            json={'path': path, 'content': content, 'expected_version': expected_version},
+            headers=self._headers(), timeout=self.timeout,
+        ))
+
+    def validate_workflow_draft(self, draft_id: str) -> WorkflowResponse:
+        return self._decode(self.transport.post(
+            f'{self.base_url}/workflow-drafts/{quote(draft_id, safe="")}:validate',
+            json={}, headers=self._headers(), timeout=self.timeout,
+        ))
+
+    def get_workflow_diagnostics(self, draft_id: str) -> WorkflowResponse:
+        return self._read(
+            f'/workflow-authoring/v1/drafts/{quote(draft_id, safe="")}/diagnostics')
+
+    def publish_workflow(self, draft_id: str) -> WorkflowResponse:
+        return self._decode(self.transport.post(
+            f'{self.base_url}/workflow-authoring/v1/drafts/{quote(draft_id, safe="")}:publish',
+            json={}, headers=self._headers(), timeout=self.timeout,
+        ))

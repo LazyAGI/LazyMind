@@ -1,7 +1,13 @@
 # Workflow MCP tool contracts v1
 
-Every mutating call is idempotent. Preserve its `command_id` when reconciling an
-unknown result. Never reuse that id for different arguments.
+Lifecycle transitions use idempotent `command_id`; preserve it when reconciling an
+unknown result and never reuse it for different arguments. Draft file updates use
+`expected_version` optimistic locking. Do not retry publish after an unknown result
+until the draft or published revision has been reread.
+
+All tools below are deterministic and model-free except that `advance_step` may,
+after an accepted transition, cause the framework Supervisor to execute the target
+step with a SubAgent. See `model-execution-boundary.md`.
 
 ## Connection and discovery
 
@@ -73,6 +79,42 @@ MCP tool failures return `isError: true` with structured `code`, `message`,
 - `IDEMPOTENCY_CONFLICT`: generate a new id only for a genuinely new command.
 - `PERMISSION_DENIED`: stop and obtain the correct identity/authority.
 - `LAZYMIND_NOT_FOUND`: follow `installation-and-connection.md`.
+
+## Deterministic Skill-to-Workflow authoring
+
+### `get_skill_conversion_context(skill_id, revision_id?)`
+
+Returns an immutable Skill snapshot with revision id, tree hash, files/references,
+and available Workflow tools. It performs storage reads only and never summarizes,
+classifies, or generates with a model.
+
+### `create_workflow_draft(name, skill_id, revision_id, tree_hash, files)`
+
+`files` maps allowed relative package paths to exact Agent-authored text. The tool
+checks the pinned snapshot and stores that text unchanged. Required initial paths
+are documented in `workflow-format.md`.
+
+### `update_workflow_draft_file(draft_id, path, content, expected_version)`
+
+Stores one exact Agent-authored file using optimistic version checking. Use the
+returned draft version for the next edit. It never generates a patch.
+
+### `validate_workflow_draft(draft_id)`
+
+Runs the deterministic Go graph compiler. It returns validity, graph/hash, and
+path-addressed diagnostics; it does not repair content.
+
+### `get_workflow_diagnostics(draft_id)`
+
+Runs strict deterministic checks for pinned snapshot, package completeness, graph
+validity, framework-tool availability, and script audit. It does not ask a model
+to judge quality.
+
+### `publish_workflow(draft_id)`
+
+Re-runs strict diagnostics and publishes an immutable revision only when valid.
+The response contains Workflow ref and revision metadata. The main Agent must not
+call it until diagnostics are clean. The tool does not generate or revise files.
 
 ## Capability boundary
 

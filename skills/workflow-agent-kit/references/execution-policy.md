@@ -11,3 +11,8 @@ the Runtime returns `resolved_operation` as execute, retry, or rewind.
 
 The model never manages claim, fencing, heartbeat, progress, or terminal writes.
 Those are deterministic Executor Supervisor responsibilities.
+
+After Runtime accepts `advance_step`, the Supervisor may create a SubAgent through
+the Host framework to execute the fixed step. That SubAgent is the only permitted
+nested model call. Runtime route selection, operation resolution, lifecycle, and
+Artifact commits remain deterministic before, during, and after SubAgent execution.

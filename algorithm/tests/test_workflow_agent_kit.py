@@ -10,12 +10,14 @@ def test_skill_references_exist_and_cover_required_lifecycle():
     skill = (KIT / 'SKILL.md').read_text()
     for reference in (
         'references/installation-and-connection.md',
+        'references/model-execution-boundary.md',
         'references/lifecycle.md',
         'references/decision-policy.md',
         'references/execution-policy.md',
         'references/artifact-policy.md',
         'references/recovery-policy.md',
         'references/skill-to-workflow.md',
+        'references/workflow-format.md',
         'references/tool-contracts.md',
         'references/source-to-policy-mapping.md',
     ):
@@ -57,7 +59,13 @@ def test_skill_to_workflow_covers_complete_authoring_tool_chain():
         'get_workflow_diagnostics',
         'publish_workflow',
     ):
-        assert f'`{tool}`' in policy
+        assert tool in policy
+    boundary = (KIT / 'references' / 'model-execution-boundary.md').read_text()
+    assert 'Only execution of a Workflow step may invoke another model' in boundary
+    assert 'No other tool may hide' in boundary
+    format_policy = (KIT / 'references' / 'workflow-format.md').read_text()
+    for path in ('plugin.yaml', 'scenario/state.yml', 'scenario/scenario.md'):
+        assert path in format_policy
 
 
 def test_host_adapters_keep_runtime_rules_out_of_host_capabilities():

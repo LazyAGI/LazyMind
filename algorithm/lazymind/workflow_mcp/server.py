@@ -41,6 +41,21 @@ TOOL_SCHEMAS = {
         }, ['step_id'])},
         'command_id': {'type': 'string'},
     }, ['session_id', 'expected_state_version', 'steps']),
+    'get_skill_conversion_context': _object({
+        'skill_id': {'type': 'string'}, 'revision_id': {'type': 'string'},
+    }, ['skill_id']),
+    'create_workflow_draft': _object({
+        'name': {'type': 'string'}, 'skill_id': {'type': 'string'},
+        'revision_id': {'type': 'string'}, 'tree_hash': {'type': 'string'},
+        'files': {'type': 'object', 'additionalProperties': {'type': 'string'}},
+    }, ['name', 'skill_id', 'revision_id', 'tree_hash', 'files']),
+    'update_workflow_draft_file': _object({
+        'draft_id': {'type': 'string'}, 'path': {'type': 'string'},
+        'content': {'type': 'string'}, 'expected_version': {'type': 'integer', 'minimum': 1},
+    }, ['draft_id', 'path', 'content', 'expected_version']),
+    'validate_workflow_draft': _object({'draft_id': {'type': 'string'}}, ['draft_id']),
+    'get_workflow_diagnostics': _object({'draft_id': {'type': 'string'}}, ['draft_id']),
+    'publish_workflow': _object({'draft_id': {'type': 'string'}}, ['draft_id']),
 }
 
 TOOL_DESCRIPTIONS = {
@@ -52,6 +67,12 @@ TOOL_DESCRIPTIONS = {
     'get_workflow_state': 'Read the authoritative Workflow projection and state_version.',
     'get_ready_steps': 'Read only the current Ready frontier from the authoritative projection.',
     'advance_step': 'Synchronously request one or more Ready targets; Runtime resolves execute/retry/rewind.',
+    'get_skill_conversion_context': 'Read a complete, immutable Skill revision snapshot; never invokes a model.',
+    'create_workflow_draft': 'Store Agent-authored Workflow package files against a pinned Skill snapshot.',
+    'update_workflow_draft_file': 'Deterministically update one draft file with optimistic version checking.',
+    'validate_workflow_draft': 'Compile the draft with the deterministic Workflow graph validator.',
+    'get_workflow_diagnostics': 'Read deterministic package, graph, tool, and script diagnostics.',
+    'publish_workflow': 'Publish only a draft that passes deterministic publish diagnostics.',
 }
 
 
@@ -87,13 +108,30 @@ class WorkflowMCPServer:
             result = client.get_state(arguments['session_id'])
         elif name == 'get_ready_steps':
             result = client.get_ready_steps(arguments['session_id'])
-        else:
+        elif name == 'advance_step':
             steps = [StepCommand(**step) for step in arguments['steps']]
             result = client.advance(AdvanceRequest(
                 session_id=arguments['session_id'],
                 expected_state_version=arguments['expected_state_version'], steps=steps,
                 command_id=arguments.get('command_id') or str(uuid.uuid4()),
             )).result
+        elif name == 'get_skill_conversion_context':
+            result = client.get_skill_conversion_context(
+                arguments['skill_id'], arguments.get('revision_id', '')).result
+        elif name == 'create_workflow_draft':
+            result = client.create_workflow_draft(
+                arguments['name'], arguments['skill_id'], arguments['revision_id'],
+                arguments['tree_hash'], arguments['files']).result
+        elif name == 'update_workflow_draft_file':
+            result = client.update_workflow_draft_file(
+                arguments['draft_id'], arguments['path'], arguments['content'],
+                arguments['expected_version']).result
+        elif name == 'validate_workflow_draft':
+            result = client.validate_workflow_draft(arguments['draft_id']).result
+        elif name == 'get_workflow_diagnostics':
+            result = client.get_workflow_diagnostics(arguments['draft_id']).result
+        else:
+            result = client.publish_workflow(arguments['draft_id']).result
         return {'content': [{'type': 'text', 'text': json.dumps(result, ensure_ascii=False)}],
                 'structuredContent': result, 'isError': False}
 

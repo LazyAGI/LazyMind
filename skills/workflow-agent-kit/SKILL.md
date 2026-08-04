@@ -14,11 +14,13 @@ version: workflow.v1
 3. Load exactly one file from `profiles/`; absent Host metadata means `default`.
 4. Read `references/lifecycle.md`, `references/decision-policy.md`, and
    `references/execution-policy.md` before changing Workflow state.
-5. Read `references/artifact-policy.md` and `references/recovery-policy.md`
+5. Read and enforce `references/model-execution-boundary.md` for every tool call.
+6. Read `references/artifact-policy.md` and `references/recovery-policy.md`
    before reviewing output or recovering an Attempt.
-6. Read `references/skill-to-workflow.md` before converting a Skill package.
-7. Use `references/tool-contracts.md` for exact arguments and responses.
-8. Treat the latest Runtime projection and its `state_version` as authoritative.
+7. Read `references/skill-to-workflow.md` and `references/workflow-format.md`
+   completely before converting a Skill package.
+8. Use `references/tool-contracts.md` for exact arguments and responses.
+9. Treat the latest Runtime projection and its `state_version` as authoritative.
 
 ## ChatAgent operating procedure
 

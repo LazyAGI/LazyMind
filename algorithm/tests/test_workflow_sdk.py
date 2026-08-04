@@ -34,6 +34,11 @@ def test_mcp_lists_only_real_public_tools():
             'get_workflow_state', 'get_ready_steps', 'advance_step'} <= names
     assert 'stop_workflow' not in names
     assert 'patch_artifact' not in names
+    assert {
+        'get_skill_conversion_context', 'create_workflow_draft',
+        'update_workflow_draft_file', 'validate_workflow_draft',
+        'get_workflow_diagnostics', 'publish_workflow',
+    } <= names
 
 
 def test_mcp_uses_shared_sdk_client():
@@ -53,3 +58,38 @@ def test_mcp_initialize_and_tools_list_protocol():
     assert initialized['result']['capabilities']['tools'] == {'listChanged': False}
     listed = server.handle({'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'})
     assert {tool['name'] for tool in listed['result']['tools']} == set(TOOL_SCHEMAS)
+
+
+def test_mcp_authoring_submits_agent_text_to_deterministic_sdk():
+    client = MagicMock()
+    client.create_workflow_draft.return_value = MagicMock(result={
+        'draft': {'id': 'd1', 'version': 1},
+    })
+    server = WorkflowMCPServer(lambda: client)
+    files = {
+        'plugin.yaml': 'id: report\n',
+        'scenario/state.yml': 'initial: __start__\n',
+        'scenario/scenario.md': '# Report\n',
+    }
+    result = server.call_tool('create_workflow_draft', {
+        'name': 'Report', 'skill_id': 's1', 'revision_id': 'r1',
+        'tree_hash': 'sha256:tree', 'files': files,
+    })
+    assert result['structuredContent']['draft']['id'] == 'd1'
+    client.create_workflow_draft.assert_called_once_with(
+        'Report', 's1', 'r1', 'sha256:tree', files,
+    )
+
+
+def test_sdk_authoring_routes_do_not_use_generation_endpoints():
+    transport = MagicMock()
+    transport.get.return_value = MagicMock(
+        status_code=200, json=lambda: {'ok': True, 'data': {'valid': True}},
+    )
+    from lazymind.workflow_sdk import WorkflowClient
+
+    client = WorkflowClient('http://core/api/core', 'u1', transport=transport)
+    client.get_workflow_diagnostics('d1')
+    path = transport.get.call_args.args[0]
+    assert path.endswith('/workflow-authoring/v1/drafts/d1/diagnostics')
+    assert 'ai-' not in path

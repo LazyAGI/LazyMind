@@ -1,6 +1,6 @@
 version: workflow.v1
 profile: lazymind
-workflow_tools: [workflow_connection_status, list_workflows, get_workflow, prepare_workflow, start_workflow, get_workflow_state, get_ready_steps, advance_step, advance_step_and_hand_off]
+workflow_tools: [workflow_connection_status, list_workflows, get_workflow, prepare_workflow, start_workflow, get_workflow_state, get_ready_steps, advance_step, advance_step_and_hand_off, get_skill_conversion_context, create_workflow_draft, update_workflow_draft_file, validate_workflow_draft, get_workflow_diagnostics, publish_workflow]
 advance_tools: [advance_step, advance_step_and_hand_off]
 parallel_ready_steps: true
 approval: ask_user
