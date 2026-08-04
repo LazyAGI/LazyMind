@@ -2,7 +2,8 @@
 
 ## Scope
 
-Use one artifact-backed WriterDocument workflow for compound creation and revision:
+Use one artifact-backed writing workflow for compound creation and revision. The same
+steps operate on either Markdown or WriterDocument IR:
 
 - read Feishu/Lark documents, uploaded files, and selected knowledge bases;
 - generate an outline or use a supplied outline;
@@ -30,16 +31,17 @@ writing flow; require the missing URL.
 
 ### outline
 
-`outline` owns the single user-visible `outline_ir` slot.
+`outline` owns the single user-visible `outline_document` slot.
 
-- First run with a supplied outline → prepare it as outline IR.
+- First run with a supplied outline → preserve its Markdown or IR representation.
 - First run without a supplied outline → generate it.
 - User asks “change section X of the outline” → rerun `outline` and internally apply a
-  PatchSet to the latest selected `outline_ir`.
+  PatchSet for IR or StringReplaceSet for Markdown to the latest selected outline.
 - User edits in the frontend → the frontend saves a human revision of the same
-  `outline_ir` slot.
+  `outline_document` slot.
 
-Every result has stage="outline" and ui_editable=true. If the IR is bound to a cloud
+IR results have stage="outline" and ui_editable=true; Markdown results remain `.md`.
+If the IR is bound to a cloud
 document, AI or frontend revision synchronizes that document and stores the
 provider-confirmed IR as the next artifact revision.
 
@@ -49,17 +51,17 @@ provider-confirmed IR as the next artifact revision.
 
 Generation/rewrite mode:
 
-1. read the latest selected `outline_ir`;
+1. read the latest selected `outline_document`;
 2. regenerate section instructions;
-3. draft all sections as Markdown;
-4. assemble the complete Markdown draft and convert it once to WriterDocument IR;
+3. draft sections in the outline's representation;
+4. assemble the complete draft without changing representation;
 5. save `final_document`.
 
 Targeted revision mode:
 
-1. use the latest selected `final_document`, or `source_ir` for direct revision;
+1. use the latest selected `final_document`, or `source_document` for direct revision;
 2. locate the requested content;
-3. generate and apply a PatchSet;
+3. generate and apply a PatchSet for IR or StringReplaceSet for Markdown;
 4. save the result as the next revision of `final_document`.
 
 Do not run section planning for a targeted body revision. Do run it again whenever the
@@ -80,9 +82,10 @@ Feishu delivery only when the request explicitly asks to update/write back the s
 publish to Feishu, create/save as a Feishu document, append to a target, or supplies an
 explicit destination.
 
-- Markdown delivery regenerates the `.md` file from the latest WriterDocument, so it
+- Markdown delivery exports the latest selected document as `.md`, so it
   includes revisions made after initial drafting.
-- A targeted revision of the original body applies its saved PatchSet.
+- A targeted revision of the original IR body applies its saved PatchSet.
+- Markdown is converted to IR only when an explicit Feishu write is requested.
 - A generated or rewritten body written back to its source replaces the source content.
 - Append is used only when the user explicitly requests append or continue-at-end.
 - “新建飞书文档” and “另存为” explicitly authorize creating a new target. Supplying
@@ -114,13 +117,13 @@ a hidden current-document pointer.
 
 ## Artifact contract
 
-- All structured outline and body results use the same WriterDocument schema and
-  `.lmd` file suffix. Markdown draft sections remain internal `.md` artifacts.
-- `outline_ir`, `final_document`, and `published_document` have ui_editable=true.
+- From-scratch and Markdown inputs remain Markdown. Feishu and `.lmd` inputs remain IR.
+- `outline_document` and `final_document` preserve that representation across steps.
+- IR outline/final/published documents have ui_editable=true when user-visible.
 - `delivered_markdown` is the Markdown file regenerated from the latest selected
   WriterDocument for local delivery.
 - `published_link` is the provider-confirmed Feishu/Lark browser URL.
-- Internal locate results, modify plans, PatchSets, section plans, and draft blocks are
+- Internal locate results, modify plans, revision sets, section plans, and draft blocks are
   persisted but are not exposed as separate product cards.
 - Workflow tools pass artifact paths and do not copy complete documents into ChatAgent
   responses.

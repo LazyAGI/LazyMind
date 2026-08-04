@@ -181,7 +181,7 @@ _SIGNALS: tuple[tuple[Outcome, re.Pattern[str]], ...] = (
         r'\bcommit\b|\bpush\b|\bmerge\b|\brevert\b|\brename\b|\bupload\b', re.I,
     )),
     ('create', re.compile(
-        r'创建|生成|编写|撰写|写一份|写个|帮我写|制作一份|做一个|设计一个|画一个|'
+        r'创建|生成|编写|撰写|写一份|写一篇|写篇|写个|帮我写|制作一份|做一个|设计一个|画一个|'
         r'起草|拟一份|想几个|给.{0,4}个点子|搭一个原型|实现一个|补一个测试|'
         r'产出|create|generate|draft|design|compose|implement|brainstorm|mock\s+up|\bwrite\b', re.I,
     )),

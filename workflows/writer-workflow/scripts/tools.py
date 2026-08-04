@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from lazyllm.tools.writer.data_models import WriterDocument
-from lazyllm.tools.writer.utils import save_artifact_json
+from lazyllm.tools.writer.utils import parse_document_markdown, save_artifact_json
 
 from lazymind.chat.engine.subagent.context import require_context
 from lazymind.chat.engine.tools.writer import (
@@ -40,7 +40,7 @@ def _run_root(name: str) -> Path:
 
 
 def _read_json_file(path: str) -> Any:
-    if Path(path).suffix.lower() in {'.md', '.markdown'}:
+    if Path(path).suffix.lower() in {'.md', '.markdown', '.txt'}:
         return Path(path).read_text(encoding='utf-8')
     with open(path, 'r', encoding='utf-8') as fh:
         raw = json.load(fh)
@@ -169,10 +169,35 @@ def _save_publish_payload(payload: dict, root: Path) -> dict:
     }
 
 
-def writer_build_writing_task(query: str) -> str:
+def writer_build_writing_task(query: str, representation: str = 'markdown') -> str:
     """Build a WritingTask artifact from the user's complete request."""
-    content = WriterCreateToolkit().build_writing_task(query=query)
+    if representation not in {'ir', 'markdown'}:
+        raise ValueError("representation must be 'ir' or 'markdown'.")
+    task = _json_loads(WriterCreateToolkit().build_writing_task(query=query), {})
+    task['output'] = {**(task.get('output') or {}), 'representation': representation}
+    content = json.dumps(task, ensure_ascii=False)
     return _save_json_artifact('writing_task', content, writer_schema('task.WritingTask'))
+
+
+def writer_load_local_document(filename: str = '') -> str:
+    """Load one supplied Markdown, text, or Writer IR file as the working document."""
+    files_by_turn = require_context().params.get('history_files_per_turn') or {}
+    candidates = [
+        Path(path)
+        for paths in files_by_turn.values()
+        for path in paths
+        if Path(path).suffix.lower() in {'.md', '.markdown', '.txt', '.lmd'}
+    ]
+    if filename:
+        candidates = [path for path in candidates if path.name == filename]
+    if len(candidates) != 1:
+        raise ValueError('Exactly one matching Markdown, text, or .lmd source file is required.')
+    source = candidates[0]
+    return _save_writer_document(
+        'source_document',
+        _read_json_file(str(source)),
+        directory=_run_root('load-local-document'),
+    )
 
 
 def writer_load_document(user_input: str, stage: str = 'final') -> dict:
@@ -183,8 +208,8 @@ def writer_load_document(user_input: str, stage: str = 'final') -> dict:
         {},
     )
     return {
-        'source_ir': _save_writer_document(
-            'source_ir',
+        'source_document': _save_writer_document(
+            'source_document',
             payload.get('source_document') or {},
             expected_stage=stage,
             directory=root,
@@ -201,7 +226,7 @@ def writer_load_document(user_input: str, stage: str = 'final') -> dict:
 def writer_profile_resources(
     writing_task_path: str,
     user_input: str,
-    source_ir_path: str = '',
+    source_document_path: str = '',
     knowledge_text: str = '',
 ) -> str:
     """Profile attachments, a loaded source document, and retrieved KB evidence."""
@@ -211,7 +236,7 @@ def writer_profile_resources(
     resources = toolkit.build_resources(
         file_paths_json=json.dumps(file_paths, ensure_ascii=False),
         source_document_json=(
-            _read_json_string(source_ir_path) if source_ir_path else ''
+            _read_json_string(source_document_path) if source_document_path else ''
         ),
         knowledge_text=knowledge_text,
     )
@@ -228,35 +253,28 @@ def writer_profile_resources(
 def writer_create_writing_context(
     writing_task_path: str,
     resource_profiles_path: str,
-    source_ir_path: str = '',
-) -> dict[str, str]:
+    source_document_path: str = '',
+) -> str:
     """Create WritingContext, optionally incorporating an existing WriterDocument."""
     content = WriterCreateToolkit().create_writing_context(
         writing_task_json=_read_json_string(writing_task_path),
         resource_profiles_json=_read_json_string(resource_profiles_path),
-        writer_document_json=_read_json_string(source_ir_path) if source_ir_path else '',
+        writer_document_json=(
+            _read_json_string(source_document_path) if source_document_path else ''
+        ),
     )
-    return {
-        'writing_context': _save_json_artifact(
-            'writing_context', content, writer_schema('context.WritingContext'),
-        ),
-        'context_ir': _save_json_artifact(
-            'context_ir',
-            build_writer_status_ir(
-                'context_ready', '已成功构造写作上下文', source='writer-workflow',
-            ),
-            WriterToolkitBase.WRITER_IR_SCHEMA,
-        ),
-    }
+    return _save_json_artifact(
+        'writing_context', content, writer_schema('context.WritingContext'),
+    )
 
 
-def writer_prepare_outline(source_ir_path: str) -> str:
+def writer_prepare_outline(source_document_path: str) -> str:
     """Normalize a loaded outline document without regenerating its content."""
     content = WriterCreateToolkit().prepare_outline(
-        source_document_json=_read_json_string(source_ir_path),
+        source_document_json=_read_json_string(source_document_path),
     )
     return _save_writer_document(
-        'outline_ir', content, expected_stage='outline', editable=True,
+        'outline_document', content, expected_stage='outline', editable=True,
     )
 
 
@@ -267,7 +285,7 @@ def writer_generate_outline(writing_task_path: str, writing_context_path: str) -
         writing_context_json=_read_json_string(writing_context_path),
     )
     return _save_writer_document(
-        'outline_ir', generated, expected_stage='outline', editable=True,
+        'outline_document', generated, expected_stage='outline', editable=True,
     )
 
 
@@ -460,11 +478,11 @@ def writer_export_markdown(content_path: str) -> str:
     return str(output_path)
 
 
-def writer_build_revision_task(query: str, base_ir_path: str) -> str:
+def writer_build_revision_task(query: str, base_document_path: str) -> str:
     """Build a revision task for either an outline or a full document."""
     content = WriterRevisionToolkit().build_revision_task(
         query=query,
-        writer_document_json=_read_json_string(base_ir_path),
+        writer_document_json=_read_json_string(base_document_path),
         allow_outline=require_context().params.get('step_id') != 'write_document',
     )
     return _save_json_artifact(
@@ -474,14 +492,14 @@ def writer_build_revision_task(query: str, base_ir_path: str) -> str:
 
 
 def writer_locate_revision_target(
-    base_ir_path: str,
+    base_document_path: str,
     writing_context_path: str,
     revision_task_path: str,
 ) -> str:
     """Locate the WriterDocument blocks affected by a revision task."""
     content = WriterRevisionToolkit().locate_revision_target(
         writing_task_json=_read_json_string(revision_task_path),
-        writer_document_json=_read_json_string(base_ir_path),
+        writer_document_json=_read_json_string(base_document_path),
         writing_context_json=_read_json_string(writing_context_path),
     )
     return _save_json_artifact(
@@ -491,7 +509,7 @@ def writer_locate_revision_target(
 
 
 def writer_generate_modify_plan(
-    base_ir_path: str,
+    base_document_path: str,
     writing_context_path: str,
     revision_task_path: str,
     locate_result_path: str,
@@ -499,7 +517,7 @@ def writer_generate_modify_plan(
     """Build a ModifyPlan for the located revision targets."""
     content = WriterRevisionToolkit().generate_modify_plan(
         writing_task_json=_read_json_string(revision_task_path),
-        writer_document_json=_read_json_string(base_ir_path),
+        writer_document_json=_read_json_string(base_document_path),
         locate_result_json=_read_json_string(locate_result_path),
         writing_context_json=_read_json_string(writing_context_path),
     )
@@ -509,49 +527,75 @@ def writer_generate_modify_plan(
     )
 
 
-def writer_generate_patch_set(
-    base_ir_path: str,
+def writer_generate_revision_set(
+    base_document_path: str,
     writing_context_path: str,
     modify_plan_path: str,
 ) -> str:
-    """Generate a PatchSet directly from a ModifyPlan."""
-    content = WriterRevisionToolkit().generate_patch_set(
-        writer_document_json=_read_json_string(base_ir_path),
-        modify_plan_json=_read_json_string(modify_plan_path),
-        writing_context_json=_read_json_string(writing_context_path),
-    )
+    """Generate an IR PatchSet or Markdown StringReplaceSet from a ModifyPlan."""
+    document = _read_json_string(base_document_path)
+    toolkit = WriterRevisionToolkit()
+    is_markdown = Path(base_document_path).suffix.lower() in {'.md', '.markdown', '.txt'}
+    if is_markdown:
+        content = toolkit.generate_string_replace_set(
+            markdown_document=document,
+            modify_plan_json=_read_json_string(modify_plan_path),
+            writing_context_json=_read_json_string(writing_context_path),
+        )
+        schema_name = writer_schema('revision.StringReplaceSet')
+    else:
+        content = toolkit.generate_patch_set(
+            writer_document_json=document,
+            modify_plan_json=_read_json_string(modify_plan_path),
+            writing_context_json=_read_json_string(writing_context_path),
+        )
+        schema_name = writer_schema('revision.PatchSet')
     return _save_json_artifact(
-        'patch_set', content, writer_schema('revision.PatchSet'),
+        'revision_set', content, schema_name,
         directory=_run_root('revision-patch'),
     )
 
 
 def writer_apply_revision(
-    base_ir_path: str,
+    base_document_path: str,
     writing_context_path: str,
-    patch_set_path: str,
+    revision_set_path: str,
 ) -> dict:
-    """Apply one revision locally; body revisions are published in the publish step."""
+    """Apply an IR patch or Markdown string replacements locally."""
     root = _run_root('apply-revision')
     is_body_step = require_context().params.get('step_id') == 'write_document'
-    payload = _json_loads(WriterRevisionToolkit().apply_revision(
-        writer_document_json=_read_json_string(base_ir_path),
-        patch_set_json=_read_json_string(patch_set_path),
-        writing_context_json=_read_json_string(writing_context_path),
-        sync_provider=not is_body_step,
-        allow_outline=not is_body_step,
-    ), {})
+    is_markdown = Path(base_document_path).suffix.lower() in {'.md', '.markdown', '.txt'}
+    toolkit = WriterRevisionToolkit()
+    if is_markdown:
+        payload = _json_loads(toolkit.apply_string_replace(
+            markdown_document=_read_json_string(base_document_path),
+            string_replace_set_json=_read_json_string(revision_set_path),
+            writing_context_json=_read_json_string(writing_context_path),
+        ), {})
+        result_schema = writer_schema('revision.StringReplaceResult')
+    else:
+        payload = _json_loads(toolkit.apply_revision(
+            writer_document_json=_read_json_string(base_document_path),
+            patch_set_json=_read_json_string(revision_set_path),
+            writing_context_json=_read_json_string(writing_context_path),
+            sync_provider=not is_body_step,
+            allow_outline=not is_body_step,
+        ), {})
+        result_schema = writer_schema('revision.PatchResult')
     result = {
-        'patch_result': _save_json_artifact(
-            'patch_result',
-            json.dumps(payload.get('patch_result') or {}, ensure_ascii=False),
-            writer_schema('revision.PatchResult'),
+        'revision_result': _save_json_artifact(
+            'revision_result',
+            json.dumps(
+                payload.get('string_replace_result') or payload.get('patch_result') or {},
+                ensure_ascii=False,
+            ),
+            result_schema,
             directory=root,
         ),
-        'revised_ir': _save_writer_document(
-            'revised_ir',
+        'revised_document': _save_writer_document(
+            'revised_document',
             payload.get('revised_document') or {},
-            expected_stage='final' if is_body_step else 'outline',
+            expected_stage=(None if is_markdown else 'final' if is_body_step else 'outline'),
             editable=True,
             directory=root,
         ),
@@ -567,22 +611,38 @@ def writer_apply_revision(
     return result
 
 
+def writer_convert_markdown_to_ir(content_path: str, stage: str = 'final') -> str:
+    """Convert the supported Markdown subset to Writer IR for provider delivery."""
+    markdown = _read_json_string(content_path)
+    document = parse_document_markdown(
+        markdown,
+        document_id=f'writer-document-{uuid.uuid4()}',
+        stage=stage,
+    )
+    return _save_writer_document(
+        'delivery_document',
+        document.model_dump(exclude_defaults=True),
+        expected_stage=stage,
+        directory=_run_root('markdown-to-ir'),
+    )
+
+
 def writer_publish_revision(
-    source_ir_path: str,
-    patch_set_path: str,
+    source_document_path: str,
+    revision_set_path: str,
 ) -> dict:
     """Apply a prepared local revision to its bound source document."""
     root = _run_root('publish-revision')
     payload = _json_loads(WriterResourceToolkit().publish_revision(
-        source_document_json=_read_json_string(source_ir_path),
-        patch_set_json=_read_json_string(patch_set_path),
+        source_document_json=_read_json_string(source_document_path),
+        patch_set_json=_read_json_string(revision_set_path),
     ), {})
     return _save_publish_payload(payload, root)
 
 
 def writer_replace_document(
     content_path: str,
-    source_ir_path: str,
+    source_document_path: str,
     target_document_path: str = '',
     target_uri: str = '',
 ) -> dict:
@@ -590,7 +650,7 @@ def writer_replace_document(
     root = _run_root('replace-document')
     payload = _json_loads(WriterResourceToolkit().replace_document(
         content_json=_read_json_string(content_path),
-        source_document_json=_read_json_string(source_ir_path),
+        source_document_json=_read_json_string(source_document_path),
         target_document_json=(
             _read_json_string(target_document_path) if target_document_path else ''
         ),

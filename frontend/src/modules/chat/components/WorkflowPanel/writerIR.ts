@@ -190,7 +190,14 @@ function validateBlock(
       valid = false;
     } else {
       value.spans.forEach((span, index) => {
-        if (!isRecord(span) || typeof span.text !== 'string') {
+        if (!isRecord(span)) {
+          issues.push(`${path}.spans[${index}].text must be a string`);
+          valid = false;
+          return;
+        }
+        if (span.text === undefined) {
+          span.text = '';
+        } else if (typeof span.text !== 'string') {
           issues.push(`${path}.spans[${index}].text must be a string`);
           valid = false;
           return;

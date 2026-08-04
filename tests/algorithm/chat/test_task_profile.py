@@ -781,6 +781,7 @@ def test_platform_capability_questions_stay_on_fast_rule_path(query: str) -> Non
 
 
 @pytest.mark.parametrize(('query', 'expected'), [
+    ('写一篇克苏鲁小说', 'create'),
     ('帮我写一封邮件', 'create'),
     ('做一个登录页', 'create'),
     ('想几个产品名字', 'create'),

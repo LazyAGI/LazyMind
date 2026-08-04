@@ -8,30 +8,30 @@ value is merely a local path string does not satisfy an output and must be RETRY
 ## prepare
 
 - PASS when writing_task, resource_profiles, and writing_context exist.
-- If the request required a Feishu/Lark source, source_ir and target_document must exist.
-- References to "this/my/original Feishu document" require source_ir and target_document;
+- If the request required a Feishu/Lark source, source_document and target_document must exist.
+- References to "this/my/original Feishu document" require source_document and target_document;
   a prose summary of its content is not a source artifact.
 - Missing required artifacts → RETRY; two consecutive non-recoverable failures → FAIL.
 
 ## outline
 
-- PASS when outline_ir and writing_context_after_outline exist.
-- outline_ir must be a WriterDocument with stage="outline" and ui_editable=true.
+- PASS when outline_document and writing_context_after_outline exist.
+- outline_document must be Markdown, or WriterDocument IR with stage="outline" and ui_editable=true.
 - For generate/prepare mode, revision internals are not required.
 - For AI revision mode, outline_revision_task, outline_locate_result,
-  outline_modify_plan, outline_patch_set, and outline_patch_result must exist.
+  outline_modify_plan, outline_revision_set, and outline_revision_result must exist.
 - For a cloud-bound AI revision, outline_write_result must report success.
 - Missing mode-specific outputs → RETRY.
 
 ## write_document
 
 - PASS when final_document and writing_context_after_draft exist.
-- final_document must have stage="final" and ui_editable=true.
+- final_document must be Markdown, or WriterDocument IR with stage="final" and ui_editable=true.
 - An outline-stage artifact saved under final_document is invalid and must be RETRY.
-- For generation/rewrite mode, section_instructions, Markdown draft_blocks,
-  draft_document_md, draft_document, and final_document_md must exist.
+- For generation/rewrite mode, section_instructions, draft_blocks, and draft_document
+  must exist in the selected representation.
 - For targeted revision mode, document_revision_task, document_locate_result,
-  document_modify_plan, document_patch_set, and document_patch_result must exist.
+  document_modify_plan, document_revision_set, and document_revision_result must exist.
 - A cloud-bound body revision must remain local in this step; provider confirmation is
   required only after the publish step.
 - Missing mode-specific outputs → RETRY.
@@ -47,7 +47,9 @@ value is merely a local path string does not satisfy an output and must be RETRY
   published_document are tool-produced file artifacts, publish_result reports success,
   published_document has ui_editable=true, and published_link is a valid Feishu/Lark
   document URL.
-- When final_document exists, publishing outline_ir instead is invalid and must be FAIL.
+- If the selected content was Markdown, Feishu delivery also requires delivery_ir from
+  writer_convert_markdown_to_ir.
+- When final_document exists, publishing outline_document instead is invalid and must be FAIL.
 - Text summaries such as "manual publishing required" do not satisfy any publish output.
   If document creation, writing, or provider read-back failed, the publish step must not
   be marked complete.

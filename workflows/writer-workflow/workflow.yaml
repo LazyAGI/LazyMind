@@ -3,7 +3,7 @@ name: AI Writer
 description: >
   Read source documents and knowledge, create or reuse an outline, draft a
   structured document, revise either the outline or full text, and deliver it
-  as Markdown or publish it to Feishu through one WriterDocument-based workflow.
+  as Markdown or publish it to Feishu through one Markdown/WriterDocument workflow.
 
 when_to_use: >
   Always use this workflow when the user's primary request is to create a complete
@@ -24,6 +24,7 @@ tool_scripts:
   - path: scripts/tools.py
     functions:
       - writer_build_writing_task
+      - writer_load_local_document
       - writer_load_document
       - writer_profile_resources
       - writer_create_writing_context
@@ -40,8 +41,9 @@ tool_scripts:
       - writer_build_revision_task
       - writer_locate_revision_target
       - writer_generate_modify_plan
-      - writer_generate_patch_set
+      - writer_generate_revision_set
       - writer_apply_revision
+      - writer_convert_markdown_to_ir
       - writer_create_document
       - writer_publish_revision
       - writer_replace_document
@@ -66,7 +68,7 @@ slots:
     label: Writing Context
     type: file
     cardinality: single
-  - id: source_ir
+  - id: source_document
     label: Source Document
     type: file
     cardinality: single
@@ -75,7 +77,7 @@ slots:
     type: file
     cardinality: single
 
-  - id: outline_ir
+  - id: outline_document
     label: Outline
     type: file
     cardinality: single
@@ -96,12 +98,12 @@ slots:
     label: Outline Modification Plan
     type: file
     cardinality: single
-  - id: outline_patch_set
-    label: Outline Patch Set
+  - id: outline_revision_set
+    label: Outline Revision Set
     type: file
     cardinality: single
-  - id: outline_patch_result
-    label: Outline Patch Result
+  - id: outline_revision_result
+    label: Outline Revision Result
     type: file
     cardinality: single
   - id: outline_write_result
@@ -142,6 +144,10 @@ slots:
     label: Final Document Markdown
     type: file
     cardinality: single
+  - id: delivery_ir
+    label: Delivery IR
+    type: file
+    cardinality: single
 
   - id: document_revision_task
     label: Document Revision Task
@@ -155,12 +161,12 @@ slots:
     label: Document Modification Plan
     type: file
     cardinality: single
-  - id: document_patch_set
-    label: Document Patch Set
+  - id: document_revision_set
+    label: Document Revision Set
     type: file
     cardinality: single
-  - id: document_patch_result
-    label: Document Patch Result
+  - id: document_revision_result
+    label: Document Revision Result
     type: file
     cardinality: single
   - id: delivered_markdown
@@ -191,14 +197,14 @@ ui:
       label: Preparation
       layout: list
       slots:
-        - id: source_ir
+        - id: source_document
 
     - id: outline
       step_id: outline
       label: Outline
       layout: list
       slots:
-        - id: outline_ir
+        - id: outline_document
 
     - id: result
       step_id: write_document
@@ -233,9 +239,9 @@ i18n:
       writing_task: {label: 写作任务}
       resource_profiles: {label: 资源画像}
       writing_context: {label: 写作上下文}
-      source_ir: {label: 资源文档}
+      source_document: {label: 资源文档}
       target_document: {label: 云文档目标}
-      outline_ir: {label: 大纲}
+      outline_document: {label: 大纲}
       section_instructions: {label: 章节规划}
       section_plan_ir: {label: 章节规划结果}
       draft_blocks: {label: 章节草稿}
@@ -243,6 +249,7 @@ i18n:
       draft_document_md: {label: 完整初稿 Markdown}
       final_document: {label: 最终正文}
       final_document_md: {label: 最终正文 Markdown}
+      delivery_ir: {label: 交付 IR}
       delivered_markdown: {label: Markdown 文稿}
       publish_result: {label: 发布结果}
       publish_target_document: {label: 新建发布目标}
