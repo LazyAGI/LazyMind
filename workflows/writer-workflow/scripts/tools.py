@@ -21,7 +21,6 @@ from lazymind.chat.engine.tools.writer import (
     WriterResourceToolkit,
     WriterRevisionToolkit,
     WriterToolkitBase,
-    build_writer_status_ir,
     writer_schema,
 )
 
@@ -292,26 +291,17 @@ def writer_generate_outline(writing_task_path: str, writing_context_path: str) -
 def writer_generate_section_instructions(
     outline_path: str,
     writing_context_path: str,
-) -> dict:
+) -> str:
     """Generate internal section instructions from the selected outline IR."""
     content = WriterCreateToolkit().generate_section_instructions(
         outline_json=_read_json_string(outline_path),
         writing_context_json=_read_json_string(writing_context_path),
     )
-    return {
-        'section_instructions': _save_json_artifact(
-            'section_instructions',
-            content,
-            writer_schema('planning.SectionInstructionList'),
-        ),
-        'section_plan_ir': _save_json_artifact(
-            'section_plan_ir',
-            build_writer_status_ir(
-                'sections_planned', '已成功规划写作章节', source='writer-workflow',
-            ),
-            WriterToolkitBase.WRITER_IR_SCHEMA,
-        ),
-    }
+    return _save_json_artifact(
+        'section_instructions',
+        content,
+        writer_schema('planning.SectionInstructionList'),
+    )
 
 
 def writer_generate_draft_blocks(

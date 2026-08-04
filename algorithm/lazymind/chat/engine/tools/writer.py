@@ -41,24 +41,6 @@ def writer_schema(name: str) -> str:
     return f'{WRITER_DATA_MODEL_SCHEMA_PREFIX}.{name}'
 
 
-def build_writer_status_ir(status: str, content: str, *, source: str) -> str:
-    """Build a non-editable WriterDocument for a UI-visible workflow status."""
-    document = WriterDocument(
-        document_id=f'{source}-status-{status}',
-        stage='final',
-        blocks=[WriterBlock(
-            node_id=f'{source}-status-{status}-message',
-            type='paragraph',
-            content=content,
-            stage='final',
-            editable=False,
-        )],
-        metadata={'source': source, 'kind': 'step_status', 'status': status},
-        ui_editable=False,
-    )
-    return document.model_dump_json(exclude_defaults=True)
-
-
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2)
 

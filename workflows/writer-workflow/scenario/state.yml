@@ -232,7 +232,7 @@ steps:
          does not change the mode selected in this step.
 
          1. Call writer_generate_section_instructions using the latest outline_document and
-            writing_context_after_outline. Save section_instructions and section_plan_ir.
+            writing_context_after_outline. Save section_instructions.
          2. Route from the outline file format without changing representation:
             - Markdown outline: call writer_generate_draft_blocks_markdown, then
               writer_generate_draft_document_markdown.
@@ -305,8 +305,6 @@ steps:
       - material: final_document
       - material: writing_context_after_draft
       - material: section_instructions
-        required: false
-      - material: section_plan_ir
         required: false
       - material: draft_blocks
         required: false

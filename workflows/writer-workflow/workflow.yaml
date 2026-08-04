@@ -115,10 +115,6 @@ slots:
     label: Section Instructions
     type: file
     cardinality: single
-  - id: section_plan_ir
-    label: Section Plan Result
-    type: file
-    cardinality: single
   - id: draft_blocks
     label: Draft Blocks
     type: file
@@ -243,7 +239,6 @@ i18n:
       target_document: {label: 云文档目标}
       outline_document: {label: 大纲}
       section_instructions: {label: 章节规划}
-      section_plan_ir: {label: 章节规划结果}
       draft_blocks: {label: 章节草稿}
       draft_document: {label: 完整初稿}
       draft_document_md: {label: 完整初稿 Markdown}
