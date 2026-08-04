@@ -291,21 +291,25 @@ func TestEnsureTiktokenCacheWarmsOnceAndWritesMarker(t *testing.T) {
 	}
 }
 
-func TestAlgorithmServiceEnvUsesFileBackedRelayArgumentsOnWindowsDesktop(t *testing.T) {
+func TestAlgorithmServiceEnvUsesFileBackedRelayArgumentsOnWindows(t *testing.T) {
 	if runtime.GOOS != "windows" {
-		t.Skip("Windows-specific Desktop process policy")
+		t.Skip("Windows-specific process policy")
 	}
-	repo := t.TempDir()
-	writeComposeFixture(t, repo)
-	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
-	if err != nil {
-		t.Fatalf("runtime config: %v", err)
+	for _, profile := range []string{"local", "desktop"} {
+		t.Run(profile, func(t *testing.T) {
+			repo := t.TempDir()
+			writeComposeFixture(t, repo)
+			cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+			if err != nil {
+				t.Fatalf("runtime config: %v", err)
+			}
+			cfg.Profile = profile
+
+			env := algorithmServiceEnv(cfg, paths, chatProcessName)
+
+			assertEnvContains(t, env, "LAZYLLM_PASS_ARGS_BY_FILE=1")
+		})
 	}
-	cfg.Profile = "desktop"
-
-	env := algorithmServiceEnv(cfg, paths, chatProcessName)
-
-	assertEnvContains(t, env, "LAZYLLM_PASS_ARGS_BY_FILE=1")
 }
 
 func TestAlgorithmServiceCommandArgsUsesWindowsDesktopBootstrap(t *testing.T) {

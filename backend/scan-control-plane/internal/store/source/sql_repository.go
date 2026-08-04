@@ -4,12 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
+	stdlog "log"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 type SQLRepository struct {
@@ -32,11 +36,24 @@ func NewSQLRepositoryWithDriver(driver string, db *sql.DB) *SQLRepository {
 	default:
 		dialector = postgres.New(postgres.Config{Conn: db})
 	}
-	orm, err := gorm.Open(dialector, &gorm.Config{DisableAutomaticPing: true})
+	orm, err := gorm.Open(dialector, &gorm.Config{
+		DisableAutomaticPing: true,
+		Logger:               newGORMLogger(os.Stdout),
+	})
 	if err != nil {
 		return &SQLRepository{db: db}
 	}
 	return &SQLRepository{db: db, orm: orm}
+}
+
+func newGORMLogger(out io.Writer) gormlogger.Interface {
+	return gormlogger.New(stdlog.New(out, "\r\n", stdlog.LstdFlags), gormlogger.Config{
+		SlowThreshold:             200 * time.Millisecond,
+		LogLevel:                  gormlogger.Warn,
+		IgnoreRecordNotFoundError: true,
+		ParameterizedQueries:      true,
+		Colorful:                  true,
+	})
 }
 
 func (r *SQLRepository) AutoMigrate() error {
