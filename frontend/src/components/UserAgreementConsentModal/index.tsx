@@ -112,20 +112,30 @@ export default function UserAgreementConsentModal({
 export function useUserAgreementConsentGate(enabled: boolean) {
   const [loading, setLoading] = useState(enabled);
   const [accepted, setAccepted] = useState(false);
+  const [checkFailed, setCheckFailed] = useState(false);
+  const [checkAttempt, setCheckAttempt] = useState(0);
 
   useEffect(() => {
     if (!enabled) {
       setLoading(false);
       setAccepted(true);
+      setCheckFailed(false);
       return;
     }
 
     let cancelled = false;
     setLoading(true);
+    setCheckFailed(false);
     void syncUserAgreementFromServer()
       .then((ok) => {
         if (!cancelled) {
           setAccepted(ok);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to sync user agreement from server:', error);
+        if (!cancelled) {
+          setCheckFailed(true);
         }
       })
       .finally(() => {
@@ -137,11 +147,16 @@ export function useUserAgreementConsentGate(enabled: boolean) {
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [enabled, checkAttempt]);
 
   return {
     loading,
-    needsConsent: enabled && !loading && !accepted,
-    markAccepted: () => setAccepted(true),
+    checkFailed,
+    needsConsent: enabled && !loading && !checkFailed && !accepted,
+    retryCheck: () => setCheckAttempt((attempt) => attempt + 1),
+    markAccepted: () => {
+      setAccepted(true);
+      setCheckFailed(false);
+    },
   };
 }

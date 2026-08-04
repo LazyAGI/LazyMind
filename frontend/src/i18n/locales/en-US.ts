@@ -677,6 +677,7 @@ const enUS = {
     detailsReadAndReturn: "I have read this and return",
     consentVersion: "Agreement version {{version}}",
     consentChecking: "Syncing user agreement status...",
+    consentCheckFailed: "Failed to confirm the user agreement status. Please retry.",
     consentPersistFailed: "Failed to save agreement. Please try again.",
   },
 

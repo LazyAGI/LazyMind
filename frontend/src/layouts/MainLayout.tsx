@@ -223,8 +223,13 @@ export default function MainLayout() {
     }
   }, []);
   const localSessionGate = useLocalSessionGate(refreshLayoutUser);
-  const { needsConsent, markAccepted, loading: agreementLoading } =
-    useUserAgreementConsentGate(isLoggedIn);
+  const {
+    needsConsent,
+    markAccepted,
+    loading: agreementLoading,
+    checkFailed: agreementCheckFailed,
+    retryCheck: retryAgreementCheck,
+  } = useUserAgreementConsentGate(isLoggedIn);
 
   useEffect(() => {
     if (!localSessionGate.enabled) {
@@ -687,15 +692,22 @@ export default function MainLayout() {
     return <Navigate to="/login" replace />;
   }
 
-  if (agreementLoading) {
+  if (agreementLoading || agreementCheckFailed) {
     return (
       <div className="local-session-gate">
         <div className="local-session-panel">
-          <Spin />
+          {agreementLoading ? <Spin /> : null}
           <div className="local-session-title">LazyMind</div>
           <div className="local-session-message">
-            {t("legal.consentChecking")}
+            {agreementCheckFailed
+              ? t("legal.consentCheckFailed")
+              : t("legal.consentChecking")}
           </div>
+          {agreementCheckFailed ? (
+            <Button type="primary" onClick={retryAgreementCheck}>
+              {t("common.retry", "Retry")}
+            </Button>
+          ) : null}
         </div>
       </div>
     );
