@@ -160,6 +160,63 @@ def test_authorize_keeps_allow_all_behavior_for_invalid_optional_token(monkeypat
     ) == {'allowed': True}
 
 
+def test_authorize_requires_valid_token_for_login_only_route(monkeypatch):
+    monkeypatch.setattr(
+        authorization_api,
+        'API_PERMISSIONS_MAP',
+        {('GET', '/api/core/user/ui-preferences'): []},
+    )
+
+    with pytest.raises(AppException) as missing_token:
+        authorization_api.authorize(
+            AuthorizeBody(method='GET', path='/api/core/user/ui-preferences'),
+            _request(),
+        )
+    assert missing_token.value.code == 1000301
+
+    def reject_token(token, *, load_permissions):
+        raise AppException(http_code=401, code=1000301, message='Unauthorized')
+
+    monkeypatch.setattr(authorization_api, '_user_from_token', reject_token)
+    with pytest.raises(AppException) as invalid_token:
+        authorization_api.authorize(
+            AuthorizeBody(method='GET', path='/api/core/user/ui-preferences'),
+            _request({'authorization': 'Bearer expired-token'}),
+        )
+    assert invalid_token.value.code == 1000301
+
+
+def test_authorize_returns_identity_for_login_only_route(monkeypatch):
+    user_id = uuid.uuid4()
+    user = SimpleNamespace(
+        id=user_id,
+        username='member',
+        tenant_id='root',
+        role=SimpleNamespace(name='member'),
+    )
+    monkeypatch.setattr(
+        authorization_api,
+        'API_PERMISSIONS_MAP',
+        {('GET', '/api/core/user/ui-preferences'): []},
+    )
+    monkeypatch.setattr(
+        authorization_api,
+        '_user_from_token',
+        lambda token, *, load_permissions: user,
+    )
+
+    assert authorization_api.authorize(
+        AuthorizeBody(method='GET', path='/api/core/user/ui-preferences'),
+        _request({'authorization': 'Bearer valid-token'}),
+    ) == {
+        'allowed': True,
+        'user_id': str(user_id),
+        'username': 'member',
+        'tenant_id': 'root',
+        'role': 'member',
+    }
+
+
 def test_authorize_checks_bearer_token_and_effective_permissions(monkeypatch):
     user_id = uuid.uuid4()
     user = SimpleNamespace(

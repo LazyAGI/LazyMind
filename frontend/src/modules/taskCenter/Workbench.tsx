@@ -21,6 +21,8 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [failedTasks, setFailedTasks] = useState<Task[]>([]);
+  const [canceledTasks, setCanceledTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [type, setType] = useState('');
@@ -34,8 +36,15 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await listTasks({ keyword: keyword || undefined, task_type: type || undefined, page: 1, page_size: 60 });
+      const filters = { keyword: keyword || undefined, task_type: type || undefined, page: 1 };
+      const [response, failedResponse, canceledResponse] = await Promise.all([
+        listTasks({ ...filters, page_size: 60 }),
+        listTasks({ ...filters, status: 'failed', page_size: ATTENTION_LIMIT }),
+        listTasks({ ...filters, status: 'canceled', page_size: ATTENTION_LIMIT }),
+      ]);
       setTasks(response.items ?? []);
+      setFailedTasks(failedResponse.items ?? []);
+      setCanceledTasks(canceledResponse.items ?? []);
       if (response.status_counts) setStatusCounts(response.status_counts);
     } catch {
       // API errors are reported by the shared request interceptor.
@@ -50,8 +59,6 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
 
   const waiting = tasks.filter((task) => ['waiting', 'interrupted', 'pending'].includes(task.status));
   const running = tasks.filter((task) => task.status === 'running');
-  const failed = tasks.filter((task) => task.status === 'failed');
-  const canceled = tasks.filter((task) => task.status === 'canceled');
   const completed = tasks.filter((task) => ['completed', 'succeeded'].includes(task.status));
   const completedToday = completed.filter(isTaskFinishedToday);
   const recent = completed.filter((task) => isTaskFinishedWithinDays(task, 7));
@@ -85,8 +92,8 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
       <Spin spinning={loading}>
         <AttentionSection tasks={waiting} expanded={attentionExpanded} onToggle={() => setAttentionExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
         <RunningSection tasks={running} expanded={runningExpanded} onToggle={() => setRunningExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
-        <StatusCardSection status='failed' tasks={failed} totalCount={statusCounts.failed} onViewAll={() => onViewAllStatus('failed')} onSelect={setSelected} onOpenGraph={setGraphTask} />
-        <StatusCardSection status='canceled' tasks={canceled} totalCount={statusCounts.canceled} onViewAll={() => onViewAllStatus('canceled')} onSelect={setSelected} onOpenGraph={setGraphTask} />
+        <StatusCardSection status='failed' tasks={failedTasks} totalCount={statusCounts.failed} onViewAll={() => onViewAllStatus('failed')} onSelect={setSelected} onOpenGraph={setGraphTask} />
+        <StatusCardSection status='canceled' tasks={canceledTasks} totalCount={statusCounts.canceled} onViewAll={() => onViewAllStatus('canceled')} onSelect={setSelected} onOpenGraph={setGraphTask} />
         <RecentSection tasks={recent} expanded={recentExpanded} onToggle={() => setRecentExpanded((value) => !value)} onSelect={setSelected} />
       </Spin>
       <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} onDelete={async (task) => { await removeTask(task.id); setSelected(null); await load(); }} />
