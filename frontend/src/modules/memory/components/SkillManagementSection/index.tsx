@@ -94,8 +94,6 @@ export default function SkillManagementSection() {
     genericColumns,
     skillView,
     setSkillView,
-    installedSkillSource,
-    setInstalledSkillSource,
     marketSkillSource,
     setMarketSkillSource,
     marketCategory,
@@ -413,7 +411,6 @@ export default function SkillManagementSection() {
     : { x: 1070 };
 
   const handleInstalledReset = () => {
-    setInstalledSkillSource("all");
     resetFilters();
   };
 
@@ -833,8 +830,6 @@ export default function SkillManagementSection() {
           onCategoryChange={setCategory}
           categories={availableCategories}
           categoriesLoading={skillCategoriesLoading}
-          source={installedSkillSource}
-          onSourceChange={setInstalledSkillSource}
           onReset={handleInstalledReset}
           organizeMode={organizeMode}
           organizeLoading={organizeSubmitting}
