@@ -9,6 +9,7 @@ KIT = Path(__file__).parents[2] / 'skills/workflow-agent-kit'
 def test_skill_references_exist_and_cover_required_lifecycle():
     skill = (KIT / 'SKILL.md').read_text()
     for reference in (
+        'references/installation-and-connection.md',
         'references/lifecycle.md',
         'references/decision-policy.md',
         'references/execution-policy.md',
@@ -33,6 +34,7 @@ def test_host_profiles_cover_contract_capabilities():
     required = {
         'version', 'profile', 'advance_tools', 'parallel_ready_steps', 'approval',
         'handoff', 'driver', 'synthetic_turn', 'shadow_authority', 'write_tools',
+        'workflow_tools',
     }
     for name, profile in profiles.items():
         assert required <= set(profile), name
@@ -40,6 +42,8 @@ def test_host_profiles_cover_contract_capabilities():
     assert 'advance_step_and_hand_off' in profiles['lazymind']['advance_tools']
     assert profiles['codex']['advance_tools'] == ['advance_step']
     assert profiles['codex']['handoff'] is False
+    assert 'workflow_connection_status' in profiles['codex']['workflow_tools']
+    assert 'advance_step_and_hand_off' not in profiles['codex']['workflow_tools']
     assert all(profile['shadow_authority'] == 'shared' for profile in profiles.values())
 
 

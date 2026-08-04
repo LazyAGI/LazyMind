@@ -8,14 +8,39 @@ version: workflow.v1
 
 ## Required reading
 
-1. Load exactly one file from `profiles/`; absent Host metadata means `default`.
-2. Read `references/lifecycle.md`, `references/decision-policy.md`, and
+1. If Workflow tools are absent, read `references/installation-and-connection.md`
+   and help the user connect LazyMind before promising execution.
+2. Call `workflow_connection_status` when available. Never guess a port.
+3. Load exactly one file from `profiles/`; absent Host metadata means `default`.
+4. Read `references/lifecycle.md`, `references/decision-policy.md`, and
    `references/execution-policy.md` before changing Workflow state.
-3. Read `references/artifact-policy.md` and `references/recovery-policy.md`
+5. Read `references/artifact-policy.md` and `references/recovery-policy.md`
    before reviewing output or recovering an Attempt.
-4. Read `references/skill-to-workflow.md` before converting a Skill package.
-5. Use `references/tool-contracts.md` as the public tool boundary.
-6. Treat the latest Runtime projection and its `state_version` as authoritative.
+6. Read `references/skill-to-workflow.md` before converting a Skill package.
+7. Use `references/tool-contracts.md` for exact arguments and responses.
+8. Treat the latest Runtime projection and its `state_version` as authoritative.
+
+## ChatAgent operating procedure
+
+For a new request, call `list_workflows`, choose by capability rather than name
+similarity alone, then call `get_workflow`. Explain the chosen Workflow when the
+match is ambiguous or the run has material external effects. Do not start merely
+because discovery returned one result.
+
+Call `prepare_workflow` with explicit durable input bindings. If it reports
+missing inputs, obtain or import those inputs and prepare again. When status is
+ready, create a stable Session id and call `start_workflow` with the returned
+preparation id. Preparation and start are separate operations.
+
+After start and after every transition, read the latest projection. Select only
+from `ready_steps`; obey conditions, approval requirements, user scope, and the
+active Host profile. Call `advance_step` with the exact `state_version`. Review
+the returned Attempt and required Artifacts before advancing again. Continue until
+the projection is terminal, waiting when Attempts are active and asking the user
+only when required information or authority cannot be obtained safely.
+
+If a tool returns an error, follow `references/recovery-policy.md`. Never convert
+an error into success, invent state, or write Runtime persistence directly.
 
 ## Discover and prepare
 
@@ -60,6 +85,14 @@ For authoring, follow `references/skill-to-workflow.md`: analyze a pinned
 Skill revision, generate a draft outside Runtime, submit it to deterministic
 diagnostics, repair reported diagnostics, and publish only a validated revision.
 Authoring tools never invoke a model.
+
+## Capability honesty
+
+Tool availability is authoritative. The bundled MCP adapter currently exposes the
+implemented discovery, prepare/start, projection/Ready, and synchronous advance
+facades. Do not claim stop/resume or Artifact patch support unless those tools are
+actually present in the Host tool list. Explain the unavailable capability and
+preserve the Session state instead of substituting an internal or product API.
 
 The source audit for migrated LazyMind rules is in
 `references/source-to-policy-mapping.md`.

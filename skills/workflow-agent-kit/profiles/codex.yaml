@@ -1,5 +1,6 @@
 version: workflow.v1
 profile: codex
+workflow_tools: [workflow_connection_status, list_workflows, get_workflow, prepare_workflow, start_workflow, get_workflow_state, get_ready_steps, advance_step]
 advance_tools: [advance_step]
 parallel_ready_steps: true
 approval: platform
