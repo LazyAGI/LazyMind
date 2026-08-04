@@ -40,6 +40,8 @@ def _run_root(name: str) -> Path:
 
 
 def _read_json_file(path: str) -> Any:
+    if Path(path).suffix.lower() in {'.md', '.markdown'}:
+        return Path(path).read_text(encoding='utf-8')
     with open(path, 'r', encoding='utf-8') as fh:
         raw = json.load(fh)
     if isinstance(raw, dict) and 'data' in raw:
@@ -48,7 +50,8 @@ def _read_json_file(path: str) -> Any:
 
 
 def _read_json_string(path: str) -> str:
-    return json.dumps(_read_json_file(path), ensure_ascii=False)
+    content = _read_json_file(path)
+    return content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
 
 
 def _json_loads(value: str, default: Any = None) -> Any:
@@ -67,8 +70,16 @@ def _writer_document_json(
     expected_stage: str | None = None,
     editable: bool = False,
 ) -> str:
-    """Validate and normalize a WriterDocument before it leaves the writer plugin."""
-    payload = _json_loads(value, {}) if isinstance(value, str) else dict(value or {})
+    """Normalize IR while leaving Markdown content unchanged."""
+    if isinstance(value, str):
+        try:
+            payload = _json_loads(value, {})
+        except json.JSONDecodeError:
+            return value
+    else:
+        payload = dict(value or {})
+    if isinstance(payload, str):
+        return payload
     document = WriterDocument.model_validate(payload)
     if expected_stage is not None and document.stage != expected_stage:
         raise ValueError(
@@ -116,16 +127,22 @@ def _save_writer_document(
     editable: bool = False,
     directory: Path | None = None,
 ) -> str:
-    """Persist a schema-valid WriterDocument as a .lmd artifact."""
+    """Persist a document as .lmd or .md according to its representation."""
+    content = _writer_document_json(
+        value,
+        expected_stage=expected_stage,
+        editable=editable,
+    )
+    try:
+        _json_loads(content, {})
+    except json.JSONDecodeError:
+        root = directory or _workspace_root()
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / f'{name}.md'
+        path.write_text(content, encoding='utf-8')
+        return str(path)
     return _save_json_artifact(
-        name,
-        _writer_document_json(
-            value,
-            expected_stage=expected_stage,
-            editable=editable,
-        ),
-        WriterToolkitBase.WRITER_IR_SCHEMA,
-        directory=directory,
+        name, content, WriterToolkitBase.WRITER_IR_SCHEMA, directory=directory,
     )
 
 
@@ -358,7 +375,7 @@ def writer_generate_draft_document_markdown(
     writing_context_path: str,
     outline_path: str = '',
 ) -> dict:
-    """Assemble Markdown sections, then convert the complete draft once to IR."""
+    """Assemble Markdown sections and preserve the Markdown document."""
     anchor = (
         Path(draft_sections_anchor_path)
         if draft_sections_anchor_path else _workspace_root() / 'draft_sections'
@@ -383,7 +400,7 @@ def writer_generate_draft_document_markdown(
     markdown_path.write_text(str(payload.get('draft_document_md') or ''), encoding='utf-8')
     return {
         'draft_document': _save_writer_document(
-            'draft_document_ir',
+            'draft_document',
             payload.get('draft_document') or {},
             expected_stage='draft',
             editable=True,
@@ -411,14 +428,14 @@ def writer_generate_final_document(
     draft_path: str,
     writing_context_path: str,
 ) -> dict:
-    """Generate final artifacts from a draft WriterDocument IR (.lmd), not Markdown."""
+    """Generate final artifacts without changing the draft representation."""
     content = WriterCreateToolkit().generate_final_document(
         draft_document_json=_read_json_string(draft_path),
         writing_context_json=_read_json_string(writing_context_path),
     )
     payload = _json_loads(content, {})
     final_document_path = _save_writer_document(
-        'final_document_ir',
+        'final_document',
         payload.get('final_document') or {},
         expected_stage='final',
         editable=True,
