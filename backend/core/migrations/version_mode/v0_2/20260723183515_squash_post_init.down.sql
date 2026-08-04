@@ -4,6 +4,24 @@
 DROP TABLE IF EXISTS public.workflow_events CASCADE;
 DROP TABLE IF EXISTS public.workflow_commands CASCADE;
 DROP TABLE IF EXISTS public.workflow_preparations CASCADE;
+DROP TABLE IF EXISTS public.workflow_input_bindings CASCADE;
+DROP TABLE IF EXISTS public.workflow_input_resources CASCADE;
+DROP TABLE IF EXISTS public.workflow_outbox CASCADE;
+ALTER TABLE public.plugin_attempt_input_bindings DROP COLUMN IF EXISTS content_hash;
+ALTER TABLE public.plugin_attempt_input_bindings DROP COLUMN IF EXISTS source_revision;
+ALTER TABLE public.plugin_attempt_input_bindings DROP COLUMN IF EXISTS source_id;
+ALTER TABLE public.plugin_attempt_input_bindings DROP COLUMN IF EXISTS source_type;
+ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS result_json;
+ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS terminal_code;
+ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS progress_json;
+ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS heartbeat_at;
+ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS lease_expires_at;
+ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS fencing_generation;
+ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS lease_token;
+ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS lease_owner;
+ALTER TABLE public.plugin_sessions DROP COLUMN IF EXISTS controller_host;
+ALTER TABLE public.plugin_sessions DROP COLUMN IF EXISTS origin_ref;
+ALTER TABLE public.plugin_sessions DROP COLUMN IF EXISTS origin_host;
 
 -- Reverse the flattened net migration back to the unchanged init schema.
 -- Data from tables intentionally dropped by the historical migrations cannot be restored.

@@ -3245,7 +3245,7 @@ INSERT INTO public.eval_set_shards (
     5368709120, 0, 0, now(), now()
 ) ON CONFLICT (id) DO NOTHING;
 
-CREATE TABLE public.workflow_preparations (id varchar(36) PRIMARY KEY, idempotency_key varchar(255) NOT NULL, owner_user_id varchar(255) NOT NULL, workflow_id varchar(255) NOT NULL, contract_version varchar(32) NOT NULL, request_json jsonb NOT NULL, response_json jsonb NOT NULL, consumed_at timestamp NULL, session_id varchar(36) NOT NULL DEFAULT '', created_at timestamp NOT NULL, updated_at timestamp NOT NULL, UNIQUE(owner_user_id, idempotency_key));
+CREATE TABLE public.workflow_preparations (id varchar(36) PRIMARY KEY, idempotency_key varchar(255) NOT NULL, owner_user_id varchar(255) NOT NULL, workflow_id varchar(255) NOT NULL, contract_version varchar(32) NOT NULL, request_json jsonb NOT NULL, response_json jsonb NOT NULL, consumed_at timestamp NULL, session_id varchar(36) NOT NULL DEFAULT '', created_at timestamp NOT NULL, updated_at timestamp NOT NULL, CONSTRAINT uk_workflow_preparation_owner_key UNIQUE(owner_user_id, idempotency_key));
 CREATE INDEX idx_workflow_preparations_owner ON public.workflow_preparations(owner_user_id);
 CREATE TABLE public.workflow_commands (command_id varchar(255) PRIMARY KEY, owner_user_id varchar(255) NOT NULL, session_id varchar(36) NOT NULL, contract_version varchar(32) NOT NULL, request_hash varchar(64) NOT NULL, http_status integer NOT NULL, response_json jsonb NOT NULL, created_at timestamp NOT NULL);
 CREATE INDEX idx_workflow_commands_owner ON public.workflow_commands(owner_user_id);
@@ -3254,6 +3254,56 @@ CREATE TABLE public.workflow_events (id bigserial PRIMARY KEY, session_id varcha
 CREATE INDEX idx_workflow_events_session_cursor ON public.workflow_events(session_id, id);
 CREATE INDEX idx_workflow_events_owner ON public.workflow_events(owner_user_id);
 CREATE INDEX idx_workflow_events_command ON public.workflow_events(command_id);
+
+ALTER TABLE public.plugin_sessions ADD COLUMN origin_host varchar(32) NOT NULL DEFAULT 'lazymind';
+ALTER TABLE public.plugin_sessions ADD COLUMN origin_ref varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE public.plugin_sessions ADD COLUMN controller_host varchar(32) NOT NULL DEFAULT 'lazymind';
+CREATE INDEX idx_plugin_sessions_origin ON public.plugin_sessions(origin_host, origin_ref);
+
+ALTER TABLE public.plugin_session_steps ADD COLUMN lease_owner varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE public.plugin_session_steps ADD COLUMN lease_token varchar(255) NOT NULL DEFAULT '';
+ALTER TABLE public.plugin_session_steps ADD COLUMN fencing_generation bigint NOT NULL DEFAULT 0;
+ALTER TABLE public.plugin_session_steps ADD COLUMN lease_expires_at timestamp NULL;
+ALTER TABLE public.plugin_session_steps ADD COLUMN heartbeat_at timestamp NULL;
+ALTER TABLE public.plugin_session_steps ADD COLUMN progress_json jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE public.plugin_session_steps ADD COLUMN terminal_code varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE public.plugin_session_steps ADD COLUMN result_json jsonb NOT NULL DEFAULT '{}';
+CREATE INDEX idx_plugin_session_steps_claim ON public.plugin_session_steps(status, lease_expires_at, id);
+
+CREATE TABLE public.workflow_outbox (
+    id varchar(36) PRIMARY KEY,
+    attempt_id varchar(36) NOT NULL UNIQUE,
+    session_id varchar(36) NOT NULL,
+    payload_json jsonb NOT NULL,
+    status varchar(16) NOT NULL DEFAULT 'pending',
+    created_at timestamp NOT NULL,
+    updated_at timestamp NOT NULL
+);
+CREATE INDEX idx_workflow_outbox_status ON public.workflow_outbox(status, created_at);
+CREATE INDEX idx_workflow_outbox_session ON public.workflow_outbox(session_id);
+
+CREATE TABLE public.workflow_input_resources (
+    id varchar(36) PRIMARY KEY, owner_user_id varchar(255) NOT NULL,
+    name varchar(255) NOT NULL, mime_type varchar(255) NOT NULL,
+    size bigint NOT NULL, content_hash varchar(80) NOT NULL,
+    revision bigint NOT NULL DEFAULT 1, content bytea NOT NULL,
+    created_at timestamp NOT NULL
+);
+CREATE INDEX idx_workflow_input_resources_owner_hash ON public.workflow_input_resources(owner_user_id, content_hash);
+CREATE TABLE public.workflow_input_bindings (
+    id varchar(36) PRIMARY KEY, workflow_session_id varchar(36) NOT NULL,
+    material_id varchar(64) NOT NULL, resource_type varchar(32) NOT NULL,
+    resource_id varchar(36) NOT NULL, resource_revision bigint NOT NULL,
+    content_hash varchar(80) NOT NULL, validity varchar(16) NOT NULL DEFAULT 'effective',
+    created_by_command_id varchar(64) NOT NULL, created_at timestamp NOT NULL
+);
+CREATE INDEX idx_workflow_input_bindings_session ON public.workflow_input_bindings(workflow_session_id);
+CREATE INDEX idx_workflow_input_bindings_resource ON public.workflow_input_bindings(resource_id);
+
+ALTER TABLE public.plugin_attempt_input_bindings ADD COLUMN source_type varchar(32) NOT NULL DEFAULT 'artifact';
+ALTER TABLE public.plugin_attempt_input_bindings ADD COLUMN source_id varchar(128) NOT NULL DEFAULT '';
+ALTER TABLE public.plugin_attempt_input_bindings ADD COLUMN source_revision varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE public.plugin_attempt_input_bindings ADD COLUMN content_hash varchar(80) NOT NULL DEFAULT '';
 
 -- +migrate Dialect sqlite
 PRAGMA defer_foreign_keys = ON;
