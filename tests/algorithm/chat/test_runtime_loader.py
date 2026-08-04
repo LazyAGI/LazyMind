@@ -61,8 +61,8 @@ def test_chat_runtime_loader_is_single_flight(monkeypatch):
         return sentinel
 
     monkeypatch.setattr(loader.importlib, 'import_module', fake_import)
-    from lazymind.chat.plugin import plugin_loader
-    monkeypatch.setattr(plugin_loader, 'ensure_loaded', lambda: None)
+    from lazymind.chat.workflow import workflow_loader
+    monkeypatch.setattr(workflow_loader, 'ensure_loaded', lambda: None)
 
     results = []
     threads = [threading.Thread(target=lambda: results.append(loader.ensure_chat_runtime())) for _ in range(5)]

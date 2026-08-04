@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from lazymind.chat.api import generate_plugin_staged_routes as staged
+from lazymind.chat.api import generate_workflow_staged_routes as staged
 
 
 def test_skeleton_response_prefers_structured_plugin_object():
@@ -16,7 +16,7 @@ def test_skeleton_response_prefers_structured_plugin_object():
         'ui': {'tabs': []},
     }
 
-    assert staged._plugin_dict_from_skeleton_response({'plugin': plugin}, 'system') == plugin
+    assert staged._workflow_dict_from_skeleton_response({'workflow': plugin}, 'system') == plugin
 
 
 def test_skeleton_response_repairs_invalid_legacy_yaml(monkeypatch):
@@ -27,11 +27,11 @@ def test_skeleton_response_repairs_invalid_legacy_yaml(monkeypatch):
     monkeypatch.setattr(
         staged,
         '_call_llm',
-        lambda _prompt: json.dumps({'plugin': repaired_plugin}),
+        lambda _prompt: json.dumps({'workflow': repaired_plugin}),
     )
 
-    result = staged._plugin_dict_from_skeleton_response(
-        {'plugin_yaml': invalid_yaml},
+    result = staged._workflow_dict_from_skeleton_response(
+        {'workflow_yaml': invalid_yaml},
         'system',
     )
 
