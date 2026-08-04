@@ -4,12 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
+	stdlog "log"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 type SQLRepository struct {
@@ -32,11 +36,24 @@ func NewSQLRepositoryWithDriver(driver string, db *sql.DB) *SQLRepository {
 	default:
 		dialector = postgres.New(postgres.Config{Conn: db})
 	}
-	orm, err := gorm.Open(dialector, &gorm.Config{DisableAutomaticPing: true})
+	orm, err := gorm.Open(dialector, &gorm.Config{
+		DisableAutomaticPing: true,
+		Logger:               newGORMLogger(os.Stdout),
+	})
 	if err != nil {
 		return &SQLRepository{db: db}
 	}
 	return &SQLRepository{db: db, orm: orm}
+}
+
+func newGORMLogger(out io.Writer) gormlogger.Interface {
+	return gormlogger.New(stdlog.New(out, "\r\n", stdlog.LstdFlags), gormlogger.Config{
+		SlowThreshold:             200 * time.Millisecond,
+		LogLevel:                  gormlogger.Warn,
+		IgnoreRecordNotFoundError: true,
+		ParameterizedQueries:      true,
+		Colorful:                  true,
+	})
 }
 
 func (r *SQLRepository) AutoMigrate() error {
@@ -60,7 +77,10 @@ func (r *SQLRepository) AutoMigrate() error {
 		return err
 	}
 	if r.orm.Dialector.Name() == "sqlite" {
-		return r.repairSQLiteSchema()
+		if err := r.repairSQLiteSchema(); err != nil {
+			return err
+		}
+		return r.orm.Exec("CREATE INDEX IF NOT EXISTS idx_agent_commands_current_pending ON agent_commands (queue_generation, agent_id, status, next_retry_at, created_at)").Error
 	}
 	return nil
 }
@@ -361,6 +381,8 @@ func (r *SQLRepository) Migrate(ctx context.Context) error {
 	}
 	for _, statement := range []string{
 		"ALTER TABLE source_bindings ADD COLUMN IF NOT EXISTS chat_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+		"ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS queue_generation BIGINT NOT NULL DEFAULT 1",
+		"CREATE INDEX IF NOT EXISTS idx_agent_commands_current_pending ON agent_commands (queue_generation, agent_id, status, next_retry_at, created_at)",
 		"ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_binding_id_fkey",
 		"ALTER TABLE parse_tasks DROP CONSTRAINT IF EXISTS parse_tasks_binding_id_fkey",
 		"ALTER TABLE source_sync_runs DROP CONSTRAINT IF EXISTS source_sync_runs_binding_id_fkey",

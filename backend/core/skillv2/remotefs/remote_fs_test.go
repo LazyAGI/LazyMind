@@ -2,6 +2,7 @@ package remotefs
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -77,6 +78,25 @@ func TestRemoteFSWriteBinary_SupportsRawAndBase64Read(t *testing.T) {
 	handler.Content(base64Rec, httptest.NewRequest(http.MethodGet, remoteContentURL("skills/research/论文精读/assets/logo.png", "user_001", "task1", "base64"), nil))
 	if base64Rec.Code != http.StatusOK || !strings.Contains(base64Rec.Body.String(), base64.StdEncoding.EncodeToString(data)) {
 		t.Fatalf("base64 read status=%d body=%s", base64Rec.Code, base64Rec.Body.String())
+	}
+}
+
+func TestBlobDataReadsLocalObjectFileURI(t *testing.T) {
+	objects := NewLocalObjectStore(t.TempDir())
+	blobs := NewBlobStore(nil, objects)
+	handler := NewHandler(HandlerDeps{BlobStore: blobs})
+	key := "skillv2/ab/blob"
+	want := []byte("binary skill resource")
+	if err := objects.service.Put(context.Background(), key, want); err != nil {
+		t.Fatalf("put local object: %v", err)
+	}
+
+	got, err := handler.blobData(skillBlobRow{Binary: true, StorageKey: &key})
+	if err != nil {
+		t.Fatalf("read local object: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("read local object = %q, want %q", got, want)
 	}
 }
 

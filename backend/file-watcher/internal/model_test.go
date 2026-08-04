@@ -51,3 +51,34 @@ func TestReportEventsRequestJSONUsesSnakeCase(t *testing.T) {
 		t.Fatalf("expected no PascalCase event fields, got %s", s)
 	}
 }
+
+func TestCommandAndAckPreserveExactStringID(t *testing.T) {
+	t.Parallel()
+
+	var command Command
+	if err := json.Unmarshal([]byte(`{"id":9007199254740993,"command_id":"9007199254740993","type":"start_source"}`), &command); err != nil {
+		t.Fatalf("decode command: %v", err)
+	}
+	if command.ID != 9007199254740993 || command.CommandID != "9007199254740993" {
+		t.Fatalf("command id was not preserved: %+v", command)
+	}
+	body, err := json.Marshal(AckCommandRequest{AgentID: "agent-1", CommandID: command.CommandID, LegacyCommandID: command.ID, Success: true})
+	if err != nil {
+		t.Fatalf("marshal string ack: %v", err)
+	}
+	if !strings.Contains(string(body), `"command_id":"9007199254740993"`) {
+		t.Fatalf("new command ack should use canonical string id: %s", body)
+	}
+}
+
+func TestAckFallsBackToLegacyNumericID(t *testing.T) {
+	t.Parallel()
+
+	body, err := json.Marshal(AckCommandRequest{AgentID: "agent-1", LegacyCommandID: 42, Success: true})
+	if err != nil {
+		t.Fatalf("marshal numeric ack: %v", err)
+	}
+	if !strings.Contains(string(body), `"command_id":42`) {
+		t.Fatalf("old control-plane compatibility requires numeric ack: %s", body)
+	}
+}

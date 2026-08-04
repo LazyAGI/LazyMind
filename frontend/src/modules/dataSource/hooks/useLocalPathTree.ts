@@ -55,15 +55,19 @@ export function useLocalPathTree({
         const value =
           getScanTreeNodePath(node) || `${node.key || node.node_ref || node.display_name}`;
         const title = node.display_name || node.object_key || value;
+        const children = node.children?.length
+          ? mapLocalPathNodes(node.children)
+          : undefined;
         return {
           key: value,
           value,
           title,
-          isLeaf: !node.has_children,
+          isLeaf: children?.length ? false : !node.has_children,
           selectable: node.selectable !== false,
           disabled: node.selectable === false,
           nodeRef: node.node_ref,
           targetRef: node.target_ref || value,
+          children,
         };
       })
       .filter((node) => Boolean(node.value));
@@ -141,7 +145,14 @@ export function useLocalPathTree({
         return;
       }
 
-      const nodes = mapLocalPathNodes(response.data.items || []);
+      const mappedNodes = mapLocalPathNodes(response.data.items || []);
+      const nodes = normalizedPath
+        ? mappedNodes.flatMap((node) =>
+            node.targetRef === "/" && node.children?.length
+              ? node.children
+              : [node],
+          )
+        : mappedNodes;
       const nextNodes =
         nodes.length > 0
           ? nodes

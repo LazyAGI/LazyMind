@@ -48,6 +48,13 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func sameDirectory(t *testing.T, left, right string) bool {
+	t.Helper()
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
+}
+
 func TestRuntimeConfigUsesPlatformUserPathsByDefault(t *testing.T) {
 	repo := t.TempDir()
 	home := filepath.Join(t.TempDir(), "home")
@@ -245,12 +252,9 @@ func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	if paths.FileWatcherBaseRoot != filepath.Join(runtimeRoot, "data", "stores", "scan", "file-watcher") {
 		t.Fatalf("file watcher base root = %q", paths.FileWatcherBaseRoot)
 	}
-	wantLogSuffix := filepath.Join("LazyMind")
-	if runtime.GOOS == "windows" {
-		wantLogSuffix = filepath.Join("LazyMind", "Logs")
-	}
-	if !strings.HasSuffix(paths.LogsDir, wantLogSuffix) {
-		t.Fatalf("desktop logs dir should use platform log root, got %q", paths.LogsDir)
+	wantLogsDir := defaultRuntimePathLayout().LogsRoot
+	if paths.LogsDir != wantLogsDir {
+		t.Fatalf("desktop logs dir = %q, want platform log root %q", paths.LogsDir, wantLogsDir)
 	}
 	if strings.HasPrefix(paths.FileWatcherBaseRoot, repo+string(os.PathSeparator)) {
 		t.Fatalf("desktop file watcher base root must not be under bundled repo root: %q", paths.FileWatcherBaseRoot)
@@ -1186,7 +1190,7 @@ func TestPrepareFrontendNodeModulesLinksSourceTreeToRuntimeRoot(t *testing.T) {
 	if !ok {
 		t.Fatalf("node_modules should be a symlink into runtime root")
 	}
-	if target != frontendRuntimeNodeModules(paths) {
+	if !sameDirectory(t, target, frontendRuntimeNodeModules(paths)) {
 		t.Fatalf("node_modules symlink = %q, want %q", target, frontendRuntimeNodeModules(paths))
 	}
 }
@@ -1228,7 +1232,7 @@ func TestPrepareFrontendNodeModulesKeepsRuntimeRootSymlink(t *testing.T) {
 		t.Fatalf("prepare frontend node_modules: %v", err)
 	}
 	target, ok := directoryLinkTarget(nodeModules)
-	if !ok || target != runtimeNodeModules {
+	if !ok || !sameDirectory(t, target, runtimeNodeModules) {
 		t.Fatalf("node_modules symlink = %q ok=%v, want %q", target, ok, runtimeNodeModules)
 	}
 	if ready, reason, err := frontendNodeModulesReady(paths, frontendDir); err != nil || !ready {

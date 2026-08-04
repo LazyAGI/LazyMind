@@ -1,6 +1,9 @@
 package internal
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Agent status enum.
 
@@ -164,6 +167,7 @@ type PullCommandsRequest struct {
 
 type Command struct {
 	ID              int64       `json:"id"`
+	CommandID       string      `json:"command_id,omitempty"`
 	Type            CommandType `json:"type"`
 	TenantID        string      `json:"tenant_id,omitempty"`
 	SourceID        string      `json:"source_id,omitempty"`
@@ -178,11 +182,33 @@ type Command struct {
 }
 
 type AckCommandRequest struct {
-	AgentID    string `json:"agent_id"`
-	CommandID  int64  `json:"command_id"`
-	Success    bool   `json:"success"`
-	Error      string `json:"error,omitempty"`
-	ResultJSON string `json:"result_json,omitempty"`
+	AgentID         string `json:"agent_id"`
+	CommandID       string `json:"-"`
+	LegacyCommandID int64  `json:"-"`
+	Success         bool   `json:"success"`
+	Error           string `json:"error,omitempty"`
+	ResultJSON      string `json:"result_json,omitempty"`
+}
+
+func (r AckCommandRequest) MarshalJSON() ([]byte, error) {
+	type ackBody struct {
+		AgentID    string `json:"agent_id"`
+		CommandID  any    `json:"command_id"`
+		Success    bool   `json:"success"`
+		Error      string `json:"error,omitempty"`
+		ResultJSON string `json:"result_json,omitempty"`
+	}
+	commandID := any(r.LegacyCommandID)
+	if r.CommandID != "" {
+		commandID = r.CommandID
+	}
+	return json.Marshal(ackBody{
+		AgentID:    r.AgentID,
+		CommandID:  commandID,
+		Success:    r.Success,
+		Error:      r.Error,
+		ResultJSON: r.ResultJSON,
+	})
 }
 
 type PullCommandsResponse struct {

@@ -142,6 +142,24 @@ func TestCheckpointScheduleEngineEnqueuesWatchDueRunsAsReconcile(t *testing.T) {
 	}
 }
 
+func TestCheckpointScheduleEngineEnqueuesManualLocalFSDueRunsAsReconcile(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := scheduleTestTime()
+	due := now.Add(-time.Minute)
+	repo := newScheduleStore(store.Binding{SyncMode: SyncModeManual, ConnectorType: "local_fs"}, &due, now)
+	engine := NewCheckpointScheduleEngine(repo, repo, WithClock(func() time.Time { return now }), WithIDGenerator(scheduleIDs()))
+
+	intents, err := engine.EnqueueDueSyncRuns(ctx, 10)
+	if err != nil {
+		t.Fatalf("enqueue manual local filesystem reconcile: %v", err)
+	}
+	if len(intents) != 1 || intents[0].Run.TriggerType != TriggerTypeReconcile {
+		t.Fatalf("manual local filesystem checkpoint should run metadata reconcile: %+v", intents)
+	}
+}
+
 func TestCheckpointScheduleEngineEnqueuesWatchEventRun(t *testing.T) {
 	t.Parallel()
 
@@ -182,7 +200,7 @@ func TestCheckpointScheduleEngineEnqueuesManualBindingFileEventRun(t *testing.T)
 	ctx := context.Background()
 	now := scheduleTestTime()
 	occurredAt := now.Add(-2 * time.Minute)
-	repo := newScheduleStore(store.Binding{SyncMode: SyncModeManual}, nil, now)
+	repo := newScheduleStore(store.Binding{SyncMode: SyncModeManual, ConnectorType: "local_fs"}, nil, now)
 	engine := NewCheckpointScheduleEngine(repo, repo, WithClock(func() time.Time { return now }), WithIDGenerator(scheduleIDs()))
 
 	intent, err := engine.EnqueueWatchEventSync(ctx, WatchEventSyncRequest{
@@ -430,7 +448,8 @@ func TestCheckpointScheduleEngineFinishManualFileEventSkipsPendingParseTasks(t *
 
 	ctx := context.Background()
 	now := scheduleTestTime()
-	repo := newScheduleStore(store.Binding{SyncMode: SyncModeManual}, nil, now)
+	nextReconcile := now.Add(5 * time.Minute)
+	repo := newScheduleStore(store.Binding{SyncMode: SyncModeManual, ConnectorType: "local_fs"}, &nextReconcile, now)
 	planner := &pendingTaskPlannerStub{}
 	engine := NewCheckpointScheduleEngine(
 		repo,
@@ -463,6 +482,43 @@ func TestCheckpointScheduleEngineFinishManualFileEventSkipsPendingParseTasks(t *
 	}
 	if len(planner.calls) != 0 {
 		t.Fatalf("manual file event detection should not generate parse tasks: %+v", planner.calls)
+	}
+	checkpoint, err := repo.GetSyncCheckpoint(ctx, repo.binding.BindingID)
+	if err != nil || checkpoint.NextSyncAt == nil || !checkpoint.NextSyncAt.Equal(nextReconcile) {
+		t.Fatalf("manual file event should preserve periodic metadata reconcile: checkpoint=%+v err=%v", checkpoint, err)
+	}
+}
+
+func TestCheckpointScheduleEngineFinishManualRecoveryReconcileSkipsPendingParseTasks(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := scheduleTestTime()
+	repo := newScheduleStore(store.Binding{SyncMode: SyncModeManual, ConnectorType: "local_fs"}, nil, now)
+	planner := &pendingTaskPlannerStub{}
+	engine := NewCheckpointScheduleEngine(repo, repo, WithClock(func() time.Time { return now }), WithTaskPlanner(planner))
+	run := store.SyncRun{
+		RunID: "recovery-1", SourceID: repo.binding.SourceID, BindingID: repo.binding.BindingID,
+		BindingGeneration: repo.binding.BindingGeneration, TriggerType: TriggerTypeReconcile,
+		ScopeType: string(connector.ScopeTypeFull), Status: store.SyncRunStatusPending, StartedAt: now,
+	}
+	if _, _, err := repo.EnqueueSyncRun(ctx, run); err != nil {
+		t.Fatalf("enqueue recovery reconcile: %v", err)
+	}
+	claimed := repo.claimRun(t, run.RunID, "worker-a")
+	_, ok, err := engine.FinishRun(ctx, FinishRunRequest{
+		RunID: claimed.RunID, WorkerID: "worker-a", SeenCount: 1, ModifiedCount: 1,
+		Coverage: store.JSON{"complete": true, "covered_target_root": true},
+	})
+	if err != nil || !ok {
+		t.Fatalf("finish manual recovery reconcile ok=%v err=%v", ok, err)
+	}
+	if len(planner.calls) != 0 {
+		t.Fatalf("manual recovery should update state without auto parsing: %+v", planner.calls)
+	}
+	checkpoint, err := repo.GetSyncCheckpoint(ctx, repo.binding.BindingID)
+	if err != nil || checkpoint.NextSyncAt == nil || !checkpoint.NextSyncAt.Equal(now.Add(watchReconcileInterval)) {
+		t.Fatalf("manual local filesystem recovery should schedule the next safety reconcile: checkpoint=%+v err=%v", checkpoint, err)
 	}
 }
 

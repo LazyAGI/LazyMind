@@ -743,6 +743,8 @@ func (a *App) Run(ctx context.Context) error {
 type Runtime struct {
 	workerID             string
 	scheduler            dueSyncRunEnqueuer
+	watcherRecovery      agentWatcherRecoverer
+	commandMaintenance   agentCommandMaintainer
 	parseRunner          *worker.Runner
 	crawlWorker          *crawl.RunOnceWorker
 	reconcilerRunner     *worker.ReconcilerRunner
@@ -759,12 +761,26 @@ type dueSyncRunEnqueuer interface {
 	EnqueueDueSyncRuns(ctx context.Context, limit int) ([]schedule.SyncRunIntent, error)
 }
 
-const runtimeDueSyncRunLimit = 50
+type agentCommandMaintainer interface {
+	MaintainAgentCommands(ctx context.Context, now time.Time, limit int) (int64, error)
+}
+
+type agentWatcherRecoverer interface {
+	RecoverLocalWatchers(ctx context.Context, now time.Time) (int, error)
+}
+
+const (
+	runtimeDueSyncRunLimit          = 50
+	agentCommandMaintenanceInterval = time.Minute
+	agentCommandMaintenanceBatch    = 5000
+)
 
 func NewRuntime(built Components, cfg config.Config) *Runtime {
 	return &Runtime{
 		workerID:             defaultWorkerID(),
 		scheduler:            built.Scheduler,
+		watcherRecovery:      built.Repository,
+		commandMaintenance:   built.Repository,
 		parseRunner:          built.ParseWorkerRunner,
 		crawlWorker:          built.CrawlWorker,
 		reconcilerRunner:     built.CoreResultRunner,
@@ -783,6 +799,9 @@ func (r *Runtime) Start(ctx context.Context) {
 		return
 	}
 	var wg sync.WaitGroup
+	if r.watcherRecovery != nil {
+		r.startWatcherRecovery(ctx, &wg)
+	}
 	r.startLoop(ctx, &wg, r.workerPollInterval, func(ctx context.Context) {
 		if r.scheduler != nil {
 			_, _ = r.scheduler.EnqueueDueSyncRuns(ctx, runtimeDueSyncRunLimit)
@@ -805,6 +824,11 @@ func (r *Runtime) Start(ctx context.Context) {
 			_ = r.tempCleanupRunner.RunOnce(ctx)
 		})
 	}
+	if r.commandMaintenance != nil {
+		r.startLoop(ctx, &wg, agentCommandMaintenanceInterval, func(ctx context.Context) {
+			_, _ = r.commandMaintenance.MaintainAgentCommands(ctx, time.Now().UTC(), agentCommandMaintenanceBatch)
+		})
+	}
 	if r.targetCachePrewarmer != nil {
 		r.startLoop(ctx, &wg, r.targetCacheInterval, func(ctx context.Context) {
 			startedAt := time.Now()
@@ -818,6 +842,23 @@ func (r *Runtime) Start(ctx context.Context) {
 	go func() {
 		<-ctx.Done()
 		wg.Wait()
+	}()
+}
+
+func (r *Runtime) startWatcherRecovery(ctx context.Context, wg *sync.WaitGroup) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			if _, err := r.watcherRecovery.RecoverLocalWatchers(ctx, time.Now().UTC()); err == nil {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+			}
+		}
 	}()
 }
 

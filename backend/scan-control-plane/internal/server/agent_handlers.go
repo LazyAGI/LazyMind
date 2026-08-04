@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"net/http"
 	"strconv"
 	"strings"
@@ -63,6 +62,7 @@ type agentPullCommandsRequest struct {
 
 type agentCommandResponse struct {
 	ID              int64  `json:"id"`
+	CommandID       string `json:"command_id"`
 	Type            string `json:"type"`
 	TenantID        string `json:"tenant_id,omitempty"`
 	SourceID        string `json:"source_id,omitempty"`
@@ -81,11 +81,11 @@ type agentPullCommandsResponse struct {
 }
 
 type agentAckCommandRequest struct {
-	AgentID   string `json:"agent_id"`
-	CommandID int64  `json:"command_id"`
-	Success   bool   `json:"success"`
-	Error     string `json:"error,omitempty"`
-	Result    string `json:"result_json,omitempty"`
+	AgentID   string          `json:"agent_id"`
+	CommandID json.RawMessage `json:"command_id"`
+	Success   bool            `json:"success"`
+	Error     string          `json:"error,omitempty"`
+	Result    string          `json:"result_json,omitempty"`
 }
 
 type agentAcceptedResponse struct {
@@ -146,12 +146,6 @@ func (h *Handler) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if req.SourceCount == 0 && req.ActiveWatchCount == 0 {
-		if err := h.queueLocalWatcherStartsForAgent(r, agent.AgentID, agent.TenantID); err != nil {
-			writeError(w, err)
-			return
-		}
-	}
 	writeJSON(w, http.StatusOK, agentAcceptedResponse{Accepted: true})
 }
 
@@ -161,15 +155,16 @@ func (h *Handler) queueLocalWatcherStartsForAgent(r *http.Request, agentID, tena
 		return err
 	}
 	now := h.clock().UTC()
-	for index, binding := range bindings {
+	for _, binding := range bindings {
 		command := store.AgentCommand{
-			CommandID:   agentCommandID(agentID, binding, now, index),
-			AgentID:     agentID,
-			CommandType: "start_source",
-			Status:      "PENDING",
-			LastError:   store.JSON{},
-			Result:      store.JSON{},
-			CreatedAt:   now.Add(time.Duration(index) * time.Nanosecond),
+			CommandID:       store.WatcherCommandID(agentID, binding, "start_source"),
+			AgentID:         agentID,
+			QueueGeneration: store.AgentCommandQueueGeneration,
+			CommandType:     "start_source",
+			Status:          "PENDING",
+			LastError:       store.JSON{},
+			Result:          store.JSON{},
+			CreatedAt:       now,
 			Payload: store.JSON{
 				"type":                "start_source",
 				"tenant_id":           tenantID,
@@ -182,19 +177,17 @@ func (h *Handler) queueLocalWatcherStartsForAgent(r *http.Request, agentID, tena
 		if err := h.agents.CreateAgentCommand(r.Context(), command); err != nil {
 			return err
 		}
+		_, err := h.agents.EnqueueBindingReconcile(r.Context(), store.ReconcileRequest{
+			SourceID:  binding.SourceID,
+			BindingID: binding.BindingID,
+			RequestID: store.WatcherRecoveryRequestID(binding, now),
+			RunAt:     now.Add(30 * time.Second),
+		})
+		if err != nil {
+			return err
+		}
 	}
 	return nil
-}
-
-func agentCommandID(agentID string, binding store.Binding, now time.Time, index int) string {
-	seed := fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d\x00%d", agentID, binding.SourceID, binding.BindingID, binding.BindingGeneration, now.UnixNano(), index)
-	hash := fnv.New64a()
-	_, _ = hash.Write([]byte(seed))
-	value := hash.Sum64() & ((uint64(1) << 63) - 1)
-	if value == 0 {
-		value = 1
-	}
-	return strconv.FormatUint(value, 10)
 }
 
 func (h *Handler) agentReportEvents(w http.ResponseWriter, r *http.Request) {
@@ -266,6 +259,11 @@ func (h *Handler) agentAckCommand(w http.ResponseWriter, r *http.Request) {
 		writeError(w, invalidJSON(err))
 		return
 	}
+	commandID, err := decodeAgentCommandID(req.CommandID)
+	if err != nil {
+		writeError(w, sourceengine.FieldError("command_id", err.Error()))
+		return
+	}
 	result, err := decodeAgentResult(req.Result)
 	if err != nil {
 		writeError(w, sourceengine.FieldError("result_json", err.Error()))
@@ -273,7 +271,7 @@ func (h *Handler) agentAckCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.agents.AckAgentCommand(r.Context(), store.AgentCommandAck{
 		AgentID:   strings.TrimSpace(req.AgentID),
-		CommandID: strconv.FormatInt(req.CommandID, 10),
+		CommandID: commandID,
 		Success:   req.Success,
 		Error:     req.Error,
 		Result:    result,
@@ -398,6 +396,7 @@ func agentCommandToResponse(command store.AgentCommand) agentCommandResponse {
 	payload := command.Payload
 	return agentCommandResponse{
 		ID:              id,
+		CommandID:       command.CommandID,
 		Type:            stringValue(payload, "type", command.CommandType),
 		TenantID:        stringValue(payload, "tenant_id", ""),
 		SourceID:        stringValue(payload, "source_id", ""),
@@ -414,7 +413,7 @@ func agentCommandToResponse(command store.AgentCommand) agentCommandResponse {
 
 func (r agentCommandResponse) MarshalJSON() ([]byte, error) {
 	type commandAlias agentCommandResponse
-	payload := make(map[string]any)
+	payload := make(map[string]json.RawMessage)
 	body, err := json.Marshal(commandAlias(r))
 	if err != nil {
 		return nil, err
@@ -423,10 +422,37 @@ func (r agentCommandResponse) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	if strings.TrimSpace(r.RootPath) != "" {
-		payload[agentCommandRootKey()] = r.RootPath
+		rootPath, err := json.Marshal(r.RootPath)
+		if err != nil {
+			return nil, err
+		}
+		payload[agentCommandRootKey()] = rootPath
 	}
 	return json.Marshal(payload)
 }
+
+func decodeAgentCommandID(raw json.RawMessage) (string, error) {
+	value := strings.TrimSpace(string(raw))
+	if value == "" || value == "null" {
+		return "", agentCommandIDError("required")
+	}
+	if strings.HasPrefix(value, `"`) {
+		var decoded string
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return "", agentCommandIDError("must be a numeric string or integer")
+		}
+		value = strings.TrimSpace(decoded)
+	}
+	id, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || id <= 0 {
+		return "", agentCommandIDError("must be a positive 64-bit integer")
+	}
+	return strconv.FormatInt(id, 10), nil
+}
+
+type agentCommandIDError string
+
+func (e agentCommandIDError) Error() string { return string(e) }
 
 func agentCommandRootKey() string {
 	return agentCommandRootKeyPrefix + agentCommandRootKeySuffix
