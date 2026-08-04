@@ -15,7 +15,7 @@ resolve rewind and stale propagation.
 1. Pin the source Skill package and revision before analysis.
 2. Decide whether its procedure is representable as a deterministic Workflow.
 3. Generate the draft in the Host; Authoring Tools do not call a model.
-4. Submit files with `create_workflow_draft` or `update_workflow_draft`.
+4. Submit files with `create_workflow_draft` or `update_workflow_draft_file`.
 5. Run deterministic diagnostics and repair every error against the same draft
    revision. Do not silently weaken graph, tool, safety, or Artifact constraints.
 6. Publish only a validated draft using an idempotent command and expected draft

@@ -6,5 +6,5 @@ approval: platform
 handoff: false
 driver: false
 synthetic_turn: false
-shadow_authority: legacy
+shadow_authority: shared
 write_tools: false

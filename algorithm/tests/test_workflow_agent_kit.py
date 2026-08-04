@@ -9,8 +9,13 @@ KIT = Path(__file__).parents[2] / 'skills/workflow-agent-kit'
 def test_skill_references_exist_and_cover_required_lifecycle():
     skill = (KIT / 'SKILL.md').read_text()
     for reference in (
+        'references/lifecycle.md',
         'references/decision-policy.md',
-        'references/artifact-and-authoring.md',
+        'references/execution-policy.md',
+        'references/artifact-policy.md',
+        'references/recovery-policy.md',
+        'references/skill-to-workflow.md',
+        'references/tool-contracts.md',
         'references/source-to-policy-mapping.md',
     ):
         assert reference in skill
@@ -35,6 +40,28 @@ def test_host_profiles_cover_contract_capabilities():
     assert 'advance_step_and_hand_off' in profiles['lazymind']['advance_tools']
     assert profiles['codex']['advance_tools'] == ['advance_step']
     assert profiles['codex']['handoff'] is False
+    assert all(profile['shadow_authority'] == 'shared' for profile in profiles.values())
+
+
+def test_skill_to_workflow_covers_complete_authoring_tool_chain():
+    policy = (KIT / 'references' / 'skill-to-workflow.md').read_text()
+    for tool in (
+        'get_skill_conversion_context',
+        'create_workflow_draft',
+        'update_workflow_draft_file',
+        'validate_workflow_draft',
+        'get_workflow_diagnostics',
+        'publish_workflow',
+    ):
+        assert f'`{tool}`' in policy
+
+
+def test_host_adapters_keep_runtime_rules_out_of_host_capabilities():
+    for host in ('lazymind', 'codex'):
+        adapter = KIT / 'adapters' / f'{host}.md'
+        assert adapter.is_file()
+        content = adapter.read_text()
+        assert 'Supervisor' in content
 
 
 def test_mapping_ledger_points_to_current_workflow_sources():

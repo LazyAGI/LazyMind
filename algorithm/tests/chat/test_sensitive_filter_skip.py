@@ -28,3 +28,10 @@ def test_no_skip_normal_workflow_user_message():
         'session_id': 'ps-1',
     }
     assert not _should_skip_sensitive_filter('继续', ctx)
+
+
+def test_no_skip_synthetic_marker_without_workflow_identity():
+    assert not _should_skip_sensitive_filter(
+        'Step analyze_subject completed. Please proceed.',
+        {'synthetic_source': 'driver'},
+    )

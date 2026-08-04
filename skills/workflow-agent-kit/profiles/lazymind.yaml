@@ -8,7 +8,7 @@ handoff_requires_durable_supervisor: true
 driver: true
 stop_tool: true
 synthetic_turn: true
-shadow_authority: legacy
+shadow_authority: shared
 write_tools: true
 executor: lazymind
 advance_mode: profile_policy

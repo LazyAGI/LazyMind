@@ -1,11 +1,11 @@
-# LazyMind legacy source → shared policy ledger
+# LazyMind source → shared policy ledger
 
-This ledger is the audit boundary for PR3. It maps existing behavior; it does not
-make the shared evaluator authoritative.
+This ledger records where the migrated behavior came from. The shared policy is
+now authoritative by default; the former Host policy is a bounded rollback path.
 
-| Legacy source | Existing rule | Shared policy clause | Shadow input/evidence |
+| Original source | Existing rule | Shared policy clause | Shadow input/evidence |
 |---|---|---|---|
-| `chat/workflow/workflow_manager.py::_COLD_START_PLUGIN_PROMPT` | Trigger only for direct intent; explicit named Workflow must trigger | Discover/prepare before start | Cold-start prompt tests remain authoritative; the constant name is a tracked legacy prompt alias |
+| `chat/workflow/workflow_manager.py::_COLD_START_PLUGIN_PROMPT` | Trigger only for direct intent; explicit named Workflow must trigger | Discover/prepare before start | Cold-start prompt tests remain authoritative; the constant is pending internal cleanup and is not public vocabulary |
 | `build_cold_start_tools` preflight | `need_information` blocks start; `ready` produces one valid first step | Missing-input and preparation gates | Existing preflight tests |
 | `_build_cold_execution_policy` | Auto hands off; dynamic waits only for explicit multi-step/no-approval cases | Rules 7–9 | Golden launch cases |
 | `_build_step_status_section` | Go Ready projection is the execution frontier; conditions disambiguate choices | Rules 3 and 6 | `ready_steps`, active edges |
@@ -20,11 +20,10 @@ make the shared evaluator authoritative.
 | `engine/subagent/runner.py::_build_subagent_plan` | Attempt objective, inputs, artifacts and output contract are isolated | Execute/review contract | SubAgent prompt-plan tests |
 | `engine/subagent/runner.py` terminal handling | Artifacts and terminal outcome are reported after execution | Required-Artifact terminal rule | SubAgent artifact tests |
 
-## Migration gate
+## Rollback and observation gate
 
-The production flag is `LAZYMIND_WORKFLOW_POLICY_SHADOW` (default off). When on,
-the active-session prompt path records `workflow.shadow-trace.v1` entries and
-counters (`evaluated`, `equivalent`, `mismatch`) in request agentic configuration
-and structured logs. Legacy remains authoritative. The PR3 golden suite requires
-100% equivalence; default-on/canary and deletion of legacy prompt rules belong to
-later migration PRs.
+`LAZYMIND_WORKFLOW_POLICY_V1` is default-on. Setting it to false explicitly selects
+the bounded former Host policy and increments the rollback counter. Optional
+`workflow.shadow-trace.v1` entries are observational only and record `authority`
+from the path that actually made the decision; they never invoke tools or mutate
+Runtime state.
