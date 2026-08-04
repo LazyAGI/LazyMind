@@ -47,12 +47,9 @@ def _advance_tool(profile: Mapping[str, Any], *, wait: bool) -> str:
     tools = tuple(profile.get('advance_tools') or ('advance_step',))
     if wait or not profile.get('handoff'):
         return 'advance_step' if 'advance_step' in tools else str(tools[0])
-    if 'advance_step_and_handoff' in tools:
-        return 'advance_step_and_handoff'
-    # LazyMind's current public spelling is retained as a host capability alias.
     if 'advance_step_and_hand_off' in tools:
         return 'advance_step_and_hand_off'
-    return 'advance_step_and_handoff'
+    return 'advance_step_and_hand_off'
 
 
 def decide(

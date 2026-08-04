@@ -58,7 +58,7 @@ Old path deletion gate
 
 入口：当前生产行为可运行。
 
-必须交付：版本化 Tool/Event/Attempt Context schema fixture、`advance_step` 与 `advance_step_and_handoff` 的共同 transition/不同等待语义、错误码表、串行/并行/choice/retry/rewind/partial retry/stop/resume golden fixtures，以及旧行为清单。
+必须交付：版本化 Tool/Event/Attempt Context schema fixture、`advance_step` 与 `advance_step_and_hand_off` 的共同 transition/不同等待语义、错误码表、串行/并行/choice/retry/rewind/partial retry/stop/resume golden fixtures，以及旧行为清单。
 
 退出：Go、Python 可读取同一 fixture；fixture 能描述当前 projection、Attempt、Artifact revision 和事件序列。不得改生产链路。
 
@@ -106,7 +106,7 @@ Old path deletion gate
 
 入口：Attempt 协议稳定。
 
-必须交付：确定性 Executor Supervisor、claim loop、系统 heartbeat、执行器 progress callback、Attempt Context 到现有 AgentRunPlan 的 adapter、结构化 Artifact/终态提交、同步 `advance_step` 与可靠 `advance_step_and_handoff`、canary flag。
+必须交付：确定性 Executor Supervisor、claim loop、系统 heartbeat、执行器 progress callback、Attempt Context 到现有 AgentRunPlan 的 adapter、结构化 Artifact/终态提交、同步 `advance_step` 与可靠 `advance_step_and_hand_off`、canary flag。
 
 退出：即使模型不调用任何 lifecycle/progress 工具，Supervisor 仍能产生 running、heartbeat 和唯一合法终态；handoff 只有在 durable ownership 成功后发生；canary Workflow 与旧执行器的 golden projection、Artifact lineage 和用户可见事件等价；失败可安全退回旧执行路径。
 
@@ -156,7 +156,7 @@ Old path deletion gate
 
 必须交付：Codex 身份与既有 origin/controller/executor refs 的绑定、prepare/start、只选择同步 `advance_step` 的阶段性 Codex Profile、Codex Executor Supervisor、程序化 SubAgent claim/execute/cancel、系统 heartbeat/progress callback、Input Resource 读取、结构化 Artifact save、终态处理和 Status View 实时状态更新；本 PR 暂不启用 `patch_artifact`，所有新写入受 schema capability 与 canary flag 控制。
 
-退出：关闭 LazyMind 算法服务仍可完成串行 golden Workflow；测试 Agent 即使遗漏所有进度/终态调用，Supervisor 仍可靠完成或失败 Attempt；Codex 工具选择 trace 中不出现 `advance_step_and_handoff`；Codex Session 使用兼容 `conversation_id=''` 且不被旧对话查询误关联；关闭 Codex feature 后旧 LazyMind 路径继续运行且不回滚 schema；Runtime 不出现 Codex 模型私有配置。
+退出：关闭 LazyMind 算法服务仍可完成串行 golden Workflow；测试 Agent 即使遗漏所有进度/终态调用，Supervisor 仍可靠完成或失败 Attempt；Codex 工具选择 trace 中不出现 `advance_step_and_hand_off`；Codex Session 使用兼容 `conversation_id=''` 且不被旧对话查询误关联；关闭 Codex feature 后旧 LazyMind 路径继续运行且不回滚 schema；Runtime 不出现 Codex 模型私有配置。
 
 ### PR 14：Codex 并行、恢复与模型 Artifact 修订
 

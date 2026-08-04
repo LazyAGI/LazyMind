@@ -108,7 +108,7 @@ queued → claimed → running → succeeded
 
 Attempt 生命周期调用属于 Executor Supervisor，不属于模型决策。Supervisor 必须以系统 timer 发送 heartbeat，以执行器 callback/事件桥报告 progress，并用 `defer/finally` 保证正常返回、错误、取消和 panic 均尝试写入一个合法终态。进程硬崩溃时由独立 lease reaper 使 Attempt 进入 interrupted/recoverable；不得依赖模型在下一轮对话中修复 running 状态。
 
-公共 Tool Protocol 提供两种等待策略，但不得改变上述事实：`advance_step` 同步等待终态；`advance_step_and_handoff` 在 durable dispatch/Supervisor ownership 成功后返回 acknowledgement。两者必须复用同一 Runtime transition，不得形成两套状态机。LazyMind Profile 可选择 handoff，Codex v1 Profile 只选择同步执行。
+公共 Tool Protocol 提供两种等待策略，但不得改变上述事实：`advance_step` 同步等待终态；`advance_step_and_hand_off` 在 durable dispatch/Supervisor ownership 成功后返回 acknowledgement。两者必须复用同一 Runtime transition，不得形成两套状态机。LazyMind Profile 可选择 handoff，Codex v1 Profile 只选择同步执行。
 
 ## 7. Artifact、lineage 与 stale
 

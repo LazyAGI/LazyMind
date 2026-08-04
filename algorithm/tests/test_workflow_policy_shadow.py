@@ -36,7 +36,7 @@ for module_name, previous in saved_modules.items():
 
 LAZYMIND_PROFILE = {
     'profile': 'lazymind',
-    'advance_tools': ['advance_step', 'advance_step_and_handoff'],
+    'advance_tools': ['advance_step', 'advance_step_and_hand_off'],
     'parallel_ready_steps': True,
     'handoff': True,
 }

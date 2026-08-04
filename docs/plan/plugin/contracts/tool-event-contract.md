@@ -26,12 +26,12 @@ resume_workflow
 ```text
 get_ready_steps
 advance_step
-advance_step_and_handoff
+advance_step_and_hand_off
 ```
 
 不得公开 `retry_step` 或 `rewind_step`；其内部语义见 Runtime Contract。
 
-`advance_step_and_handoff` 属于共享 Workflow Tool Protocol，但是否选择由 Host Profile 决定。它必须复用 `advance_step` 的 Runtime command handler、状态校验和 Executor Supervisor，不得形成第二套 transition。LazyMind Profile 在审批、Driver 和异步推进场景选择它；Codex Profile 明确只选择 `advance_step`。Adapter 可以按 Profile 缩减实际注册给模型的工具集合，但不能改变协议语义。
+`advance_step_and_hand_off` 属于共享 Workflow Tool Protocol，但是否选择由 Host Profile 决定。它必须复用 `advance_step` 的 Runtime command handler、状态校验和 Executor Supervisor，不得形成第二套 transition。LazyMind Profile 在审批、Driver 和异步推进场景选择它；Codex Profile 明确只选择 `advance_step`。Adapter 可以按 Profile 缩减实际注册给模型的工具集合，但不能改变协议语义。
 
 ### Attempt execution（Executor-only）
 
@@ -161,7 +161,7 @@ Runtime transition handler 的内部成功结果必须包含：
 
 ### Handoff 语义
 
-`advance_step_and_handoff` 接收与 `advance_step` 相同的业务目标，但 `execution_mode` 固定为 `handoff`。它只有在以下事实均成立后才能返回 handoff acknowledgement：
+`advance_step_and_hand_off` 接收与 `advance_step` 相同的业务目标，但 `execution_mode` 固定为 `handoff`。它只有在以下事实均成立后才能返回 handoff acknowledgement：
 
 1. transition 已持久化并产生 Outbox；
 2. Attempt 已创建；

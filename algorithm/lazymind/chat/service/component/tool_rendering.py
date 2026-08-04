@@ -828,24 +828,6 @@ _TOOL_EXECUTION_ERROR_RE = re.compile(
 )
 
 
-# Canonical Workflow v1 spelling. Keep the historical key only as an input
-# compatibility alias while every emitted/registered tool uses ``handoff``.
-for _workflow_template_map in (
-    _REPRESENTATIVE_TOOL_ARGUMENTS,
-    _REPRESENTATIVE_TOOL_RESULTS,
-    _TOOL_CALL_PREVIEW_TEMPLATES,
-    _ZH_TOOL_CALL_PREVIEW_TEMPLATES,
-    _TOOL_RESULT_PREVIEW_TEMPLATES,
-    _ZH_TOOL_RESULT_PREVIEW_TEMPLATES,
-    _TOOL_RESULT_FAILURE_TEMPLATES,
-    _ZH_TOOL_RESULT_FAILURE_TEMPLATES,
-):
-    if 'advance_step_and_hand_off' in _workflow_template_map:
-        _workflow_template_map['advance_step_and_handoff'] = (
-            _workflow_template_map['advance_step_and_hand_off']
-        )
-
-
 def _tool_name_suffixes(tool_name: str) -> list[str]:
     if not tool_name:
         return []

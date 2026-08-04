@@ -3,7 +3,7 @@
 Tool types registered dynamically per-conversation:
 
 - trigger_<workflow_id>       : Cold-start tool. Injected when no active workflow session exists.
-- advance_step_and_handoff : Asynchronous stop-tool accepting one or more step commands.
+- advance_step_and_hand_off : Asynchronous stop-tool accepting one or more step commands.
 - advance_step              : Synchronous tool accepting one or more step commands; dynamic mode only.
 - ask_user                  : Ask the user a question (stop-tool). ChatAgent only; absent in auto mode.
 - intentwrite               : Extended with workflow-session and workflow-step scopes when active.
@@ -1201,7 +1201,7 @@ def build_cold_start_tools(
                 if static_advancement:
                     launch_plan.update({
                         'hand_off': True,
-                        'advance_tool': 'advance_step_and_handoff',
+                        'advance_tool': 'advance_step_and_hand_off',
                     })
                 elif inline_auto_step:
                     launch_plan.update({
@@ -1234,7 +1234,7 @@ def build_cold_start_tools(
                     instruction = (
                         'Infer whether the user explicitly requested multiple workflow steps. '
                         'If yes, choose `advance_step`; otherwise choose the default '
-                        '`advance_step_and_handoff`. Do not answer with prose first.'
+                        '`advance_step_and_hand_off`. Do not answer with prose first.'
                     )
                 return json.dumps({
                     'status': 'ready',
@@ -1292,7 +1292,7 @@ def _commit_prepared_workflow(
         raise ValueError(f'First step must be {expected_step!r}, got {step_id!r}.')
     expected_hand_off = bool(plan.get('hand_off', True))
     if isinstance(plan.get('hand_off'), bool) and hand_off != expected_hand_off:
-        expected_tool = 'advance_step_and_handoff' if expected_hand_off else 'advance_step'
+        expected_tool = 'advance_step_and_hand_off' if expected_hand_off else 'advance_step'
         raise ValueError(f'Launch plan requires {expected_tool}.')
     workflow_id = str(prepared.get('workflow_id') or '')
     normalised_request = str(plan.get('normalized_request') or '').strip()
@@ -1371,7 +1371,7 @@ def build_cold_advance_tools(workflow_mode: str = 'dynamic') -> List[Any]:
             )
         return _commit_prepared_workflow(step_id, hand_off=False)
 
-    def advance_step_and_handoff(step_id: str) -> str:
+    def advance_step_and_hand_off(step_id: str) -> str:
         """Start the prepared workflow and hand control off immediately.
 
         Use after a ready trigger when current request policy calls for an asynchronous boundary.
@@ -1386,7 +1386,7 @@ def build_cold_advance_tools(workflow_mode: str = 'dynamic') -> List[Any]:
         if cfg.get('workflow_session_id') and cfg.get('workflow_id'):
             prepared = cfg.get('prepared_workflow') or {}
             plan = prepared.get('launch_plan') or {}
-            return build_advance_step_and_handoff_tool(
+            return build_advance_step_and_hand_off_tool(
                 str(cfg['workflow_id']), str(cfg.get('workflow_step') or '')
             )(
                 steps=[{
@@ -1397,8 +1397,8 @@ def build_cold_advance_tools(workflow_mode: str = 'dynamic') -> List[Any]:
         return _commit_prepared_workflow(step_id, hand_off=True)
 
     if workflow_mode == 'auto':
-        return [advance_step_and_handoff]
-    return [advance_step_and_handoff, advance_step]
+        return [advance_step_and_hand_off]
+    return [advance_step_and_hand_off, advance_step]
 
 
 def commit_prepared_workflow_fallback() -> str:
@@ -1483,7 +1483,7 @@ async def _enforce_prepared_workflow_advance(
             'The workflow trigger already returned ready. Do not answer, explain, confirm, '
             'or ask another question. Immediately start first_step_id. Infer whether the user '
             'explicitly requested multiple workflow steps. Use `advance_step` only if they did; '
-            'otherwise use the default `advance_step_and_handoff`. Launch plan:\n'
+            'otherwise use the default `advance_step_and_hand_off`. Launch plan:\n'
             + json.dumps(visible_launch_plan, ensure_ascii=False)
             + '\n'
             + str(prepared.get('step_name_index') or '')
@@ -1614,7 +1614,7 @@ def _live_reachability_snapshot(
     )
 
 
-def build_advance_step_and_handoff_tool(
+def build_advance_step_and_hand_off_tool(
     workflow_id: str,
     current_step: str,
     rewind_steps: Optional[List[str]] = None,
@@ -1636,7 +1636,7 @@ def build_advance_step_and_handoff_tool(
         include_default_approval=include_approval_guidance,
     )
 
-    def advance_step_and_handoff(steps: List[Dict[str, Any]]) -> str:
+    def advance_step_and_hand_off(steps: List[Dict[str, Any]]) -> str:
         """Start one or more Ready steps and end the current ReAct turn."""
         if not isinstance(steps, list) or not steps:
             raise ValueError('steps must contain at least one step command.')
@@ -1670,7 +1670,7 @@ def build_advance_step_and_handoff_tool(
         if include_approval_guidance
         else 'Use this tool to start the selected next step.\n'
     )
-    advance_step_and_handoff.__doc__ = (
+    advance_step_and_hand_off.__doc__ = (
         'Start one or more Ready workflow steps asynchronously and end the current turn.\n\n'
         + selection_guidance
         + 'Pass one command for one step. Pass multiple commands only for independent Ready\n'
@@ -1681,14 +1681,7 @@ def build_advance_step_and_handoff_tool(
         '    steps: One or more objects containing step_id and user_input; each may also\n'
         '        contain runtime_instruction and partial_indices.'
     )
-    return advance_step_and_handoff
-
-
-def build_advance_step_and_hand_off_tool(*args: Any, **kwargs: Any) -> Any:
-    """Metered compatibility alias for the pre-v1 public spelling."""
-    from lazymind.chat.workflow.decision_policy import record_handoff_alias_call
-    record_handoff_alias_call()
-    return build_advance_step_and_handoff_tool(*args, **kwargs)
+    return advance_step_and_hand_off
 
 
 def build_advance_step_tool(
@@ -1779,10 +1772,10 @@ def build_advance_step_tool(
         'does not authorize this synchronous tool.\n'
         'In continuous mode with an explicit target boundary, use `advance_step` only\n'
         'for prerequisite steps before that boundary, then execute the boundary step\n'
-        'with `advance_step_and_handoff` and stop. If the user did not set a boundary,\n'
+        'with `advance_step_and_hand_off` and stop. If the user did not set a boundary,\n'
         'run prerequisite remaining steps with this tool, then execute the terminal step\n'
-        'with `advance_step_and_handoff` and stop.\n\n'
-        'For every other request, use `advance_step_and_handoff` instead.\n\n'
+        'with `advance_step_and_hand_off` and stop.\n\n'
+        'For every other request, use `advance_step_and_hand_off` instead.\n\n'
         + choices_doc + '\n\n'
         'Pass one command for one step, or multiple independent Ready step commands for one\n'
         'atomic batch. Each command contains step_id and user_input and may contain\n'
@@ -1822,7 +1815,7 @@ def _append_step_transition_hint(
         '- If the latest user request says to run only up to a specific milestone/step '
         '(for example "执行到 X", "到 X 为止", "until X", "up to X"), match X against '
         'the available step ids, labels, and transition descriptions. Execute that '
-        'target boundary step with `advance_step_and_handoff`, then stop. Do not '
+        'target boundary step with `advance_step_and_hand_off`, then stop. Do not '
         'advance to downstream steps or submit a completion command after the boundary hand-off.'
     )
 
@@ -2195,9 +2188,9 @@ def resolve_workflow_injection(
                 }
                 observe(shadow_projection, {
                     'profile': 'lazymind',
-                    # The Host adapter still registers the historical hand_off
-                    # alias; shadow policy evaluates the canonical v1 protocol.
-                    'advance_tools': ['advance_step', 'advance_step_and_handoff'],
+                    # The Host adapter and shared policy use the established
+                    # public hand_off spelling.
+                    'advance_tools': ['advance_step', 'advance_step_and_hand_off'],
                     'parallel_ready_steps': True,
                     'handoff': True,
                 }, cfg, source='active_session_prompt')
@@ -2208,14 +2201,14 @@ def resolve_workflow_injection(
             # Canonical handoff is always registered (stop-tool).
             # advance_step (sync) is only registered in dynamic mode.
             workflow_tools = [
-                build_advance_step_and_handoff_tool(
+                build_advance_step_and_hand_off_tool(
                     p_workflow_id, p_current_step,
                     rewind_steps=rewind_steps,
                     step_labels=step_labels,
                     include_approval_guidance=workflow_mode != 'auto',
                 ),
             ]
-            workflow_stop_tools = ['advance_step_and_handoff']
+            workflow_stop_tools = ['advance_step_and_hand_off']
 
             if workflow_mode == 'dynamic':
                 workflow_tools.extend([
@@ -2271,7 +2264,7 @@ def resolve_workflow_injection(
                 workflow_catalog, disabled_builtin_workflows, allowed_workflow_refs,
             )
             workflow_tools = triggers + build_cold_advance_tools(workflow_mode)
-            workflow_stop_tools = ['advance_step_and_handoff']
+            workflow_stop_tools = ['advance_step_and_hand_off']
             workflow_artifact_context = _build_preflight_context_section(
                 agentic_config_patch.get('workflow_preflight_context')
             )
@@ -2302,7 +2295,7 @@ def resolve_workflow_injection(
             workflow_catalog, disabled_builtin_workflows, allowed_workflow_refs,
         )
         workflow_tools = triggers + build_cold_advance_tools(workflow_mode)
-        workflow_stop_tools = ['advance_step_and_handoff']
+        workflow_stop_tools = ['advance_step_and_hand_off']
         workflow_artifact_context = _build_cold_execution_policy(workflow_mode)
         if triggers:
             scenarios = [

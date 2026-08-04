@@ -37,7 +37,7 @@ make lint
 Compatibility paths remain observable and rollback-safe; none is deleted without a
 zero-use observation window. The counters are `workflow_legacy_client_hits`,
 `workflow_legacy_db_hits`, `workflow_legacy_route_hits`,
-`compat_handoff_alias_hits`, `legacy_policy_hits`, and legacy dispatch hits.
+`legacy_policy_hits` and legacy dispatch hits.
 The test baseline is zero for every default-on path; rollback tests deliberately
 increment the associated counter.
 
@@ -45,7 +45,6 @@ increment the associated counter.
 |---|---|---|
 | Python legacy Workflow client/DB adapter | off | production counters remain zero for the declared observation window |
 | legacy API route aliases | off/flagged | route counter zero and all clients advertise `workflow.v1` |
-| `advance_step_and_hand_off` wire alias | compatibility only | alias counter zero after client rollout |
 | legacy duplicated policy prompt | off | policy comparison stable and `legacy_policy_hits` zero |
 | fixed SubAgent endpoint and `plugin_run_outbox` | rollback only | queued dispatch healthy and legacy dispatch hits zero |
 

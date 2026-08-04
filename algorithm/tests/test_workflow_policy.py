@@ -15,7 +15,7 @@ def test_lazymind_can_handoff_but_codex_is_synchronous():
     projection = {'status': 'running', 'ready_steps': ['draft']}
     lazy = policy.decide(projection, {'advance_tools': ['advance_step'], 'handoff': True})
     codex = policy.decide(projection, {'advance_tools': ['advance_step'], 'handoff': False})
-    assert lazy.tool == 'advance_step_and_handoff'
+    assert lazy.tool == 'advance_step_and_hand_off'
     assert codex.tool == 'advance_step'
 
 

@@ -10,7 +10,6 @@ from typing import Mapping
 POLICY_FLAG = 'LAZYMIND_WORKFLOW_POLICY_V1'
 POLICY_VERSION = 'workflow.policy.v1'
 legacy_policy_hits = 0
-compat_handoff_alias_hits = 0
 
 
 def shared_policy_enabled(environ: Mapping[str, str] | None = None) -> bool:
@@ -22,11 +21,6 @@ def shared_policy_enabled(environ: Mapping[str, str] | None = None) -> bool:
 def record_legacy_policy_call() -> None:
     global legacy_policy_hits
     legacy_policy_hits += 1
-
-
-def record_handoff_alias_call() -> None:
-    global compat_handoff_alias_hits
-    compat_handoff_alias_hits += 1
 
 
 def _skill_root() -> Path:
@@ -50,7 +44,7 @@ def lazymind_host_prompt(workflow_mode: str) -> str:
     return (
         '\n\n## LazyMind Host Profile\n\n'
         '- This Host supports synchronous waiting and durable handoff.\n'
-        '- `advance_step_and_handoff` is the canonical handoff tool name.\n'
+        '- `advance_step_and_hand_off` is the canonical handoff tool name.\n'
         f'- Driver is {"enabled" if driver else "disabled"}; this changes only turn orchestration.\n'
         '- A handoff ends the ChatAgent turn only after durable Supervisor ownership.\n'
         '- Driver, approval, stop-tool, and synthetic-turn behavior never change Runtime projection, '

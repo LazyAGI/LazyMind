@@ -2,7 +2,7 @@
   "contract_version": "workflow.v1",
   "scenario": "handoff",
   "input": {
-    "tool": "advance_step_and_handoff"
+    "tool": "advance_step_and_hand_off"
   },
   "projection": {
     "session_id": "s-handoff",

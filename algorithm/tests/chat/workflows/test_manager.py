@@ -132,7 +132,7 @@ def test_dynamic_launch_policy_defaults_to_hand_off():
     assert 'Ordinary Ready frontier' in policy
     assert 'LazyMind Workflow Launch Binding' in policy
     assert [tool.__name__ for tool in workflow_manager.build_cold_advance_tools()] == [
-        'advance_step_and_handoff', 'advance_step',
+        'advance_step_and_hand_off', 'advance_step',
     ]
 
 
@@ -189,11 +189,11 @@ def test_cold_start_trigger_hides_hand_off_choice_when_tool_is_static(
             explicit_workflow_request=False,
         ))
 
-    assert result['launch_plan']['advance_tool'] == 'advance_step_and_handoff'
+    assert result['launch_plan']['advance_tool'] == 'advance_step_and_hand_off'
     assert 'hand_off' not in result['launch_plan']
     internal_plan = mock_agentic_config['prepared_workflow']['launch_plan']
     assert internal_plan['hand_off'] is True
-    assert internal_plan['advance_tool'] == 'advance_step_and_handoff'
+    assert internal_plan['advance_tool'] == 'advance_step_and_hand_off'
 
 
 def test_cold_start_trigger_rejects_empty_input(loaded_workflow, mock_write_agent_data, mock_agentic_config):
@@ -379,7 +379,7 @@ def test_cold_advance_commits_exact_prepared_plan(
     }
     handoff = next(
         t for t in workflow_manager.build_cold_advance_tools()
-        if t.__name__ == 'advance_step_and_handoff'
+        if t.__name__ == 'advance_step_and_hand_off'
     )
 
     result = handoff(step_id='step_a')
@@ -434,7 +434,7 @@ def test_cold_advance_rejects_tool_that_disagrees_with_launch_plan(
     }
     handoff = next(
         t for t in workflow_manager.build_cold_advance_tools()
-        if t.__name__ == 'advance_step_and_handoff'
+        if t.__name__ == 'advance_step_and_hand_off'
     )
 
     with pytest.raises(ValueError, match='requires advance_step'):
@@ -593,8 +593,8 @@ def test_cold_injection_without_approval_choice_registers_only_hand_off_tool(
     names = {tool.__name__ for tool in tools}
     assert 'trigger_test_workflow' in names
     assert 'advance_step' not in names
-    assert 'advance_step_and_handoff' in names
-    assert stop_tools == ['advance_step_and_handoff']
+    assert 'advance_step_and_hand_off' in names
+    assert stop_tools == ['advance_step_and_hand_off']
     assert 'trigger_test_workflow' not in stop_tools
     assert patch_config['workflow_mode'] == 'auto'
     assert patch_config['workflow_preflight_context']['preflight_id'] == 'pf-old'
@@ -653,13 +653,13 @@ def test_active_injection_switches_tools_and_request_local_policy_per_turn(
     auto_names = {tool.__name__ for tool in auto_tools}
     dynamic_names = {tool.__name__ for tool in dynamic_tools}
 
-    assert 'advance_step_and_handoff' in auto_names
+    assert 'advance_step_and_hand_off' in auto_names
     assert 'advance_step' not in auto_names
-    assert {'advance_step', 'advance_step_and_handoff'} <= dynamic_names
+    assert {'advance_step', 'advance_step_and_hand_off'} <= dynamic_names
     assert 'advance_steps' not in dynamic_names
     assert 'advance_steps_and_hand_off' not in dynamic_names
-    assert set(auto_stop_tools) == {'advance_step_and_handoff'}
-    assert set(dynamic_stop_tools) == {'advance_step_and_handoff'}
+    assert set(auto_stop_tools) == {'advance_step_and_hand_off'}
+    assert set(dynamic_stop_tools) == {'advance_step_and_hand_off'}
     assert 'Current Workflow Execution Policy' not in auto_system_prompt
     assert 'Current Workflow Execution Policy' not in dynamic_system_prompt
     assert 'Shared Workflow Decision Policy' in auto_context
@@ -673,10 +673,10 @@ def test_active_injection_switches_tools_and_request_local_policy_per_turn(
     assert 'dynamic mode' not in dynamic_context.lower()
 
     auto_advance = next(
-        tool for tool in auto_tools if tool.__name__ == 'advance_step_and_handoff'
+        tool for tool in auto_tools if tool.__name__ == 'advance_step_and_hand_off'
     )
     dynamic_advance = next(
-        tool for tool in dynamic_tools if tool.__name__ == 'advance_step_and_handoff'
+        tool for tool in dynamic_tools if tool.__name__ == 'advance_step_and_hand_off'
     )
     assert 'default approval' not in (auto_advance.__doc__ or '').lower()
     assert 'default approval' in (dynamic_advance.__doc__ or '').lower()

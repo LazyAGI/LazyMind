@@ -27,7 +27,7 @@ permits parallel execution; alternatives must be narrowed from Runtime condition
 and user intent. Never submit a blocked or downstream step speculatively.
 
 Use `advance_step` when the Host must wait for the Attempt result. Use
-`advance_step_and_handoff` only when the active profile permits handoff and a
+`advance_step_and_hand_off` only when the active profile permits handoff and a
 durable Supervisor has accepted ownership. Handoff is a turn boundary, not a
 different transition. Never choose retry versus rewind: name a Ready or previously
 attempted target and let Runtime return `resolved_operation`. On a version conflict,

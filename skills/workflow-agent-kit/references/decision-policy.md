@@ -14,7 +14,7 @@ Apply the first matching rule. Runtime state wins over conversation recollection
 | 8 | Explicit continuous scope/boundary | Wait through prerequisites; hand off only at the requested/final boundary if permitted. |
 | 9 | Ordinary Ready frontier | Use handoff if permitted; otherwise use the waiting tool. |
 
-`advance_step` and `advance_step_and_handoff` request the same Runtime transition.
+`advance_step` and `advance_step_and_hand_off` request the same Runtime transition.
 Only waiting/ownership semantics differ. Codex never selects handoff. LazyMind may
 select it only after durable ownership acceptance.
 

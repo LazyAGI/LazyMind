@@ -1,6 +1,6 @@
 version: workflow.v1
 profile: lazymind
-advance_tools: [advance_step, advance_step_and_handoff]
+advance_tools: [advance_step, advance_step_and_hand_off]
 parallel_ready_steps: true
 approval: ask_user
 handoff: true

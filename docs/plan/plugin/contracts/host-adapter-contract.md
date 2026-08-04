@@ -25,7 +25,7 @@ Agent-facing Transition Tools：
 ```text
 get_ready_steps
 advance_step
-advance_step_and_handoff
+advance_step_and_hand_off
 ```
 
 Executor-only Tools：
@@ -44,7 +44,7 @@ Executor-only Tools 只注册给受认证的 Executor Supervisor，不注册给�
 
 ## 3. 两种 advance 等待语义
 
-`advance_step` 与 `advance_step_and_handoff` 必须复用同一个 Runtime transition handler 和 Executor Supervisor。
+`advance_step` 与 `advance_step_and_hand_off` 必须复用同一个 Runtime transition handler 和 Executor Supervisor。
 
 ### `advance_step`
 
@@ -58,7 +58,7 @@ transition commit
 → return terminal result
 ```
 
-### `advance_step_and_handoff`
+### `advance_step_and_hand_off`
 
 ```text
 transition commit
@@ -142,14 +142,14 @@ workflow_tools:
     - resume_workflow
 
   disabled:
-    - advance_step_and_handoff
+    - advance_step_and_hand_off
 
 execution:
   executor: codex
   advance_mode: synchronous
 ```
 
-Codex v1 不选择 `advance_step_and_handoff`。
+Codex v1 不选择 `advance_step_and_hand_off`。
 Codex v1 注册 `patch_artifact` 供模型自主修订 Artifact，但不在 Status View 中提供用户手工编辑；Codex 不接入 LazyMind Chat，只使用只读 Workflow Status View 和 Artifact 下载。
 
 ### LazyMind v1
@@ -166,7 +166,7 @@ workflow_tools:
     - get_workflow_state
     - get_ready_steps
     - advance_step
-    - advance_step_and_handoff
+    - advance_step_and_hand_off
     - list_artifacts
     - read_artifact
     - patch_artifact
@@ -272,7 +272,7 @@ Host 只有同时满足以下条件才能启用执行：
 - 同一 transition fixture 在同步和 handoff 模式产生相同 Attempt/Artifact 领域结果。
 - 模型不调用任何 lifecycle tool 时，Supervisor 仍产生 heartbeat 和唯一合法终态。
 - handoff 在 durable ownership 之前失败，不结束 turn。
-- Codex tool selection trace 不出现 `advance_step_and_handoff`。
+- Codex tool selection trace 不出现 `advance_step_and_hand_off`。
 - LazyMind approval/Driver handoff 后可由事件恢复并继续。
 - capability allowlist 不向 SubAgent 泄漏未授权 Host 工具。
 - required output 缺失时 Attempt 失败，不错误完成。

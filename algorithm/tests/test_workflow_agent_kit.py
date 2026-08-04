@@ -32,7 +32,7 @@ def test_host_profiles_cover_contract_capabilities():
     for name, profile in profiles.items():
         assert required <= set(profile), name
         assert profile['version'] == 'workflow.v1'
-    assert 'advance_step_and_handoff' in profiles['lazymind']['advance_tools']
+    assert 'advance_step_and_hand_off' in profiles['lazymind']['advance_tools']
     assert profiles['codex']['advance_tools'] == ['advance_step']
     assert profiles['codex']['handoff'] is False
 

@@ -131,11 +131,7 @@ class WorkflowClient:
         return self._read(f'/workflow-sessions/{session_id}/projection').result
 
     def advance(self, request: AdvanceRequest) -> WorkflowResponse:
-        # Core's pre-v1 wire spelling remains a metered transport alias. Agent
-        # surfaces and policy use the canonical ``..._handoff`` name.
-        if request.handoff:
-            from lazymind.chat.workflow.decision_policy import record_handoff_alias_call
-            record_handoff_alias_call()
+        # Keep the established public tool spelling across Host and Runtime.
         tool = 'advance_step_and_hand_off' if request.handoff else 'advance_step'
         payload = {
             'contract_version': CONTRACT_VERSION,

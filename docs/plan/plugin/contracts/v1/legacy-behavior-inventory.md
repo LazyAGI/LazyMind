@@ -27,6 +27,6 @@ must not add new business rules.
 - Stop interrupts active execution without deleting saved partial artifacts;
   resume derives new readiness from persisted state.
 - `advance_step` waits for a terminal Attempt while
-  `advance_step_and_handoff` acknowledges only after durable ownership.
+  `advance_step_and_hand_off` acknowledges only after durable ownership.
 - Artifact revisions are immutable, ordered, and linked to their producer
   Attempt.

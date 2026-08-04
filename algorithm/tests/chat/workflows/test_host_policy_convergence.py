@@ -39,10 +39,8 @@ def test_driver_profile_changes_host_tools_not_runtime_projection_or_lineage():
     ]
 
 
-def test_historical_handoff_spelling_is_only_a_metered_builder_alias():
-    from lazymind.chat.workflow import decision_policy, workflow_manager
+def test_handoff_builder_keeps_established_public_spelling():
+    from lazymind.chat.workflow import workflow_manager
 
-    before = decision_policy.compat_handoff_alias_hits
     tool = workflow_manager.build_advance_step_and_hand_off_tool('wf', 'step')
-    assert tool.__name__ == 'advance_step_and_handoff'
-    assert decision_policy.compat_handoff_alias_hits == before + 1
+    assert tool.__name__ == 'advance_step_and_hand_off'

@@ -14,7 +14,6 @@ from .tool_limit_control import tool_limit_decision_coordinator
 
 _EXPANDED_BUDGET_TOOLS = {
     'advance_step',
-    'advance_step_and_handoff',
     'advance_step_and_hand_off',
     'create_workflow_draft',
     'create_subagent',

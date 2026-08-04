@@ -75,7 +75,7 @@ Core 中现有 `plugin/graphengine`、Plugin Session、transition、projection�
 
 共享 Skill 应定义一条完整而稳定的 Agent 工作流：Agent 先搜索适用 Workflow，读取轻量元数据并完成启动前检查；Runtime 创建 Session 后，Agent 每次都以最新权威 projection 为依据选择 Ready step；步骤由当前 Host 的执行器完成，Executor Supervisor 负责持久化并校验 required Artifact；步骤结束后，Agent 根据 acceptance criteria、用户要求和当前产物决定继续、重新执行目标步骤、等待或完成。Host 可以通过 `get_workflow_state` 或可恢复的 Workflow Event Stream 获得最新 projection，发现 state version 缺口时必须重新同步快照，不在 Agent 内部维护另一套状态机，也不得在每个事件后无条件重复查询。
 
-共享 Skill 不直接写死 `ask_user`、`stop_tool`、`create_subagent` 或 Codex 协作工具等 Host 专属名称，而是读取 Host Profile 中声明的能力和策略。公共规则相同，具体交互方式允许不同。`advance_step` 与 `advance_step_and_handoff` 都属于公共 Workflow Tool Protocol，因此共享 Skill 可以定义两者的选择准则；Host Profile 决定当前 Host 是否选择 handoff。LazyMind Profile 在审批、Driver、auto/dynamic 异步推进场景选择 `advance_step_and_handoff`，Codex Profile 明确始终选择 `advance_step`。
+共享 Skill 不直接写死 `ask_user`、`stop_tool`、`create_subagent` 或 Codex 协作工具等 Host 专属名称，而是读取 Host Profile 中声明的能力和策略。公共规则相同，具体交互方式允许不同。`advance_step` 与 `advance_step_and_hand_off` 都属于公共 Workflow Tool Protocol，因此共享 Skill 可以定义两者的选择准则；Host Profile 决定当前 Host 是否选择 handoff。LazyMind Profile 在审批、Driver、auto/dynamic 异步推进场景选择 `advance_step_and_hand_off`，Codex Profile 明确始终选择 `advance_step`。
 
 建议采用以下目录结构：
 
@@ -112,7 +112,7 @@ Codex 第一阶段不强求复刻 LazyMind 的每一种交互。为了降低接�
 | 策略 | LazyMind 默认 | Codex 初期默认 |
 |---|---|---|
 | 启动前审批 | 可按 Workflow 或用户设置开启 | 关闭，满足条件后自动启动 |
-| 步骤推进 | 同步 `advance_step`；审批、Driver 和异步模式选择标准 handoff 工具 `advance_step_and_handoff` | Profile 明确只选择同步 `advance_step`，自动执行全部 Ready step |
+| 步骤推进 | 同步 `advance_step`；审批、Driver 和异步模式选择标准 handoff 工具 `advance_step_and_hand_off` | Profile 明确只选择同步 `advance_step`，自动执行全部 Ready step |
 | 步骤执行器 | LazyMind SubAgent | Codex 原生 SubAgent |
 | 结果验收 | 可启用 DriverAgent | 主 Agent 验收或 Codex review SubAgent |
 | Handoff | 支持结束当前 turn 并由事件重新唤醒 | 默认在当前任务中持续推进 |
@@ -130,7 +130,7 @@ Host Profile 可以覆盖执行器选择、最大并行数、是否启用 Review
 |---|---|---|
 | Workflow Discovery | `list_workflows`、`get_workflow` | 返回有权访问且已启用的 Workflow 及其固定 revision 元数据 |
 | Session Lifecycle | `prepare_workflow`、`start_workflow`、`get_workflow_state`、`stop_workflow`、`resume_workflow` | `prepare_workflow` 完成 revision 固定、权限与必要输入检查并返回短期 preparation，但不创建 Session；`start_workflow` 使用有效 preparation 正式创建并启动 Workflow Session |
-| Transition | `get_ready_steps`、`advance_step`、`advance_step_and_handoff` | 两个 advance 工具共享同一 transition；Agent 只选择目标步骤，Runtime 自动解析内部 `execute`、`retry` 或 `rewind`。`advance_step` 同步等待终态，`advance_step_and_handoff` 在可靠接管后返回 handoff acknowledgement |
+| Transition | `get_ready_steps`、`advance_step`、`advance_step_and_hand_off` | 两个 advance 工具共享同一 transition；Agent 只选择目标步骤，Runtime 自动解析内部 `execute`、`retry` 或 `rewind`。`advance_step` 同步等待终态，`advance_step_and_hand_off` 在可靠接管后返回 handoff acknowledgement |
 | Attempt Execution（Executor-only） | `claim_attempt`、`get_attempt_context`、`report_attempt_progress`、`save_artifact`、`complete_attempt`、`fail_attempt`、`cancel_attempt` | 由 Host Adapter 的确定性 Executor Supervisor 调用，不暴露给模型自行决定是否调用；解耦 Workflow Attempt 与具体 Agent Executor |
 | Artifact | `list_artifacts`、`read_artifact`、`patch_artifact` | Agent 使用 `patch_artifact` 自主修订既有 Artifact；步骤输出由 Supervisor 使用 Executor-only `save_artifact` 提交；用户在 LazyMind Panel 的手工编辑走产品侧 human revision 接口，不调用模型工具 |
 | Workflow Authoring | `get_skill_conversion_context`、`create_workflow_draft`、`update_workflow_draft_file`、`validate_workflow_draft`、`get_workflow_diagnostics`、`publish_workflow` | 支持 LazyMind 或 Codex 使用自己的模型完成 Skill to Workflow |
@@ -139,7 +139,7 @@ Host Profile 可以覆盖执行器选择、最大并行数、是否启用 Review
 
 `advance_step` 是唯一面向 Agent 的步骤执行工具，不再公开 `retry_step` 或 `rewind_step`。当目标步骤没有有效 Attempt 时，Runtime 将其解析为首次 `execute`；当有效 Attempt 为 failed 或 interrupted 时解析为 `retry`；当有效 Attempt 为 succeeded 时解析为 `rewind`。工具响应必须返回 `resolved_operation`，使 Host 能解释实际动作。三个内部动作仍保留各自的不变量、权限与审计语义：特别是 `rewind` 必须传播下游 Attempt 和 Artifact stale，`retry` 只能使失败或中断的 Attempt 失效。工具合并不得弱化这些 Runtime 校验。
 
-模型调用步骤推进工具后，后续 Attempt 生命周期不得依赖模型继续记得调用工具。Host Adapter 必须用确定性 Executor Supervisor 包裹完整执行：事务性创建 Attempt、claim、启动系统 heartbeat、运行 SubAgent、从执行器 callback 转发进度、持久化结构化输出、校验 required Artifact，并在 `defer/finally` 中写入 complete/fail/cancel。`advance_step` 与 `advance_step_and_handoff` 都是公共 Tool Protocol 的标准工具并调用同一个 Runtime command 和 Supervisor；差异只在等待策略。同步工具在步骤终态后返回，handoff 工具在 Attempt 已持久化且 Supervisor 已可靠接管后返回 acknowledgement。LazyMind Profile 可选择两者，Codex Profile 明确只选择同步 `advance_step`。
+模型调用步骤推进工具后，后续 Attempt 生命周期不得依赖模型继续记得调用工具。Host Adapter 必须用确定性 Executor Supervisor 包裹完整执行：事务性创建 Attempt、claim、启动系统 heartbeat、运行 SubAgent、从执行器 callback 转发进度、持久化结构化输出、校验 required Artifact，并在 `defer/finally` 中写入 complete/fail/cancel。`advance_step` 与 `advance_step_and_hand_off` 都是公共 Tool Protocol 的标准工具并调用同一个 Runtime command 和 Supervisor；差异只在等待策略。同步工具在步骤终态后返回，handoff 工具在 Attempt 已持久化且 Supervisor 已可靠接管后返回 acknowledgement。LazyMind Profile 可选择两者，Codex Profile 明确只选择同步 `advance_step`。
 
 ### 2.7 Attempt 与 Executor 解耦
 
@@ -172,7 +172,7 @@ Codex 的 `advance_step` 是一个同步的 Agent-facing 工具调用，但内�
 
 停止需要区分 Agent turn、Attempt 和 Workflow 三个层次。LazyMind stop-tool 可以立即结束当前 Agent turn，但实际执行中的任务还必须调用 `cancel_attempt`，整个 Workflow 停止则必须调用 `stop_workflow`；Runtime 应保留已经保存的部分 Artifact，将 Session 置为可恢复状态，并阻止新 Attempt 继续派发。Codex 没有相同 stop-tool 时，可以在收到用户中止要求后直接调用 `stop_workflow`，并等待运行中的 Codex SubAgent结束或被取消。
 
-Handoff 是公共工具支持、由 Host Profile 选择的调度策略，不是状态机 transition。LazyMind 可通过 `advance_step_and_handoff` 在 Runtime 已接受 transition、Attempt 已持久化且 Executor Supervisor 已取得可靠执行责任后结束当前 turn，并在任务终态时通过 synthetic turn 或事件重新唤醒 ChatAgent；如果可靠接管失败，该工具必须返回失败且不得 handoff。Codex Profile 不选择该工具，在同步 `advance_step` 中等待 SubAgent 终态并自动推进。Runtime 只记录 Attempt 状态和结果，不把 handoff 写入 graph 或领域状态。
+Handoff 是公共工具支持、由 Host Profile 选择的调度策略，不是状态机 transition。LazyMind 可通过 `advance_step_and_hand_off` 在 Runtime 已接受 transition、Attempt 已持久化且 Executor Supervisor 已取得可靠执行责任后结束当前 turn，并在任务终态时通过 synthetic turn 或事件重新唤醒 ChatAgent；如果可靠接管失败，该工具必须返回失败且不得 handoff。Codex Profile 不选择该工具，在同步 `advance_step` 中等待 SubAgent 终态并自动推进。Runtime 只记录 Attempt 状态和结果，不把 handoff 写入 graph 或领域状态。
 
 审批同样属于 Host Policy。Workflow 可以声明风险或建议审批点，但 LazyMind 可以在这些位置调用 `ask_user` 或 stop-tool 暂停，Codex 初期则可以仅对高风险外部操作保留平台级审批，其余 Workflow 自动执行。无论 Host 是否展示审批，Runtime 的权限和安全检查都必须强制执行。
 
@@ -277,7 +277,7 @@ Core 将 transition accepted 后直接调用 `/api/subagent/run` 的模式改为
 
 ### 4.2 阶段二：串行全自动执行
 
-开放 Agent-facing `prepare_workflow`、`start_workflow`、`get_ready_steps` 和同步 `advance_step`，并向 CodexExecutor Supervisor 开放 Executor-only `claim_attempt`、`get_attempt_context`、`report_attempt_progress`、`save_artifact`、`complete_attempt`、`fail_attempt` 和 `cancel_attempt`。Codex 先调用 `prepare_workflow` 完成不创建 Session、不启动执行的准备，在返回 ready 后以 `preparation_id` 调用 `start_workflow`；全自动 Profile 在信息充分时自动完成串行 Workflow，不选择 `advance_step_and_handoff`，也不实现 LazyMind 的逐步审批和 synthetic turn。
+开放 Agent-facing `prepare_workflow`、`start_workflow`、`get_ready_steps` 和同步 `advance_step`，并向 CodexExecutor Supervisor 开放 Executor-only `claim_attempt`、`get_attempt_context`、`report_attempt_progress`、`save_artifact`、`complete_attempt`、`fail_attempt` 和 `cancel_attempt`。Codex 先调用 `prepare_workflow` 完成不创建 Session、不启动执行的准备，在返回 ready 后以 `preparation_id` 调用 `start_workflow`；全自动 Profile 在信息充分时自动完成串行 Workflow，不选择 `advance_step_and_hand_off`，也不实现 LazyMind 的逐步审批和 synthetic turn。
 
 Codex 主 Agent 负责读取 projection、选择目标步骤、验收终态结果并推进下一步；CodexExecutor Adapter 程序化创建 SubAgent，Executor Supervisor 保存并校验 required outputs；Runtime 继续负责 Ready 校验、Attempt 状态和 Artifact revision。需要外部高风险操作时，仍由 Codex 平台现有审批能力控制，而不是复制 LazyMind approval UI。
 
@@ -289,7 +289,7 @@ Codex 执行状态由 CodexExecutor Supervisor 的确定性代码回报，不依
 
 在串行链路稳定后，增加多个 Ready step 的并行执行、Codex review SubAgent、retry、rewind、partial retry、stop/resume 和模型自主 Artifact patch。Codex 主 Agent 根据共享 Skill 决定并行边界、恢复策略、需要重新执行的目标步骤以及是否调用 `patch_artifact` 直接修订既有 Artifact；Runtime 根据权威 Attempt 状态解析 retry 或 rewind，并对 patch 产生新 revision、更新 lineage 和传播 stale。Status View 仍为只读，不提供用户手工编辑入口。
 
-Codex 不使用 `advance_step_and_handoff`，也不依赖主 Agent在长任务中反复调用进度工具；它只使用同步 `advance_step`，由 Supervisor 在当前 Codex task 内执行 SubAgent 并可靠维护状态。若后续 Codex 提供后台唤醒机制，只需增加新的 Host execution disposition，不改变 Agent-facing 工具名、共享 Skill 主流程或 Runtime invariant。
+Codex 不使用 `advance_step_and_hand_off`，也不依赖主 Agent在长任务中反复调用进度工具；它只使用同步 `advance_step`，由 Supervisor 在当前 Codex task 内执行 SubAgent 并可靠维护状态。若后续 Codex 提供后台唤醒机制，只需增加新的 Host execution disposition，不改变 Agent-facing 工具名、共享 Skill 主流程或 Runtime invariant。
 
 完成标准是 Codex 通过第一阶段的完整 golden scenarios，除明确标记为 LazyMind UI 或交互差异的项目外，Workflow projection、Attempt 和 Artifact 结果与 LazyMind 一致。
 
