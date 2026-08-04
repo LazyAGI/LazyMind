@@ -53,6 +53,11 @@ type CompiledNode struct {
 	Outputs         []string      `json:"outputs,omitempty"`
 	RequiredOutputs []string      `json:"required_outputs,omitempty"`
 	SkipIf          *Expression   `json:"skip_if,omitempty"`
+	Prompt          string        `json:"prompt,omitempty"`
+	Acceptance      []string      `json:"acceptance_criteria,omitempty"`
+	Capabilities    []string      `json:"capabilities,omitempty"`
+	LegacyTools     []string      `json:"legacy_tools,omitempty"`
+	Mode            string        `json:"mode,omitempty"`
 }
 
 type CompiledEdge struct {

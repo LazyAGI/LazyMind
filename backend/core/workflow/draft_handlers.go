@@ -55,6 +55,7 @@ type draftResponse struct {
 	StateYAMLContent      string `json:"state_yaml_content"`
 	StateLayoutContent    string `json:"state_layout_content"`
 	ScenarioContent       string `json:"scenario_content"`
+	DriverContent         string `json:"driver_content"`
 	ScriptsContent        string `json:"scripts_content"`
 	DesignBriefContent    string `json:"design_brief_content"`
 	GenerateStatus        string `json:"generate_status"`
@@ -90,6 +91,7 @@ func toDraftResponse(d orm.WorkflowDraft) draftResponse {
 		StateYAMLContent:      d.StateYAMLContent,
 		StateLayoutContent:    d.StateLayoutContent,
 		ScenarioContent:       d.ScenarioContent,
+		DriverContent:         d.DriverContent,
 		ScriptsContent:        d.ScriptsContent,
 		DesignBriefContent:    d.DesignBriefContent,
 		GenerateStatus:        d.GenerateStatus,

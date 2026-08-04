@@ -10,6 +10,9 @@ import (
 type WorkflowSession struct {
 	ID                 string `gorm:"column:id;type:varchar(36);primaryKey"`
 	ConversationID     string `gorm:"column:conversation_id;type:varchar(36);not null"`
+	OriginHost         string `gorm:"column:origin_host;type:varchar(32);not null;default:'lazymind'"`
+	OriginRef          string `gorm:"column:origin_ref;type:varchar(255);not null;default:''"`
+	ControllerHost     string `gorm:"column:controller_host;type:varchar(32);not null;default:'lazymind'"`
 	WorkflowID         string `gorm:"column:plugin_id;type:varchar(64);not null"`
 	WorkflowRef        string `gorm:"column:plugin_ref;type:varchar(512);not null;default:''"`
 	WorkflowRevisionID string `gorm:"column:plugin_revision_id;type:varchar(36);not null;default:''"`
@@ -256,6 +259,7 @@ type WorkflowDraft struct {
 	// Saved with last-write-wins; no version check needed (single-user, AI never writes this).
 	StateLayoutContent string `gorm:"column:state_layout_content;type:text;not null;default:''"`
 	ScenarioContent    string `gorm:"column:scenario_content;type:text;not null;default:''"`
+	DriverContent      string `gorm:"column:driver_content;type:text;not null;default:''"`
 	ScriptsContent     string `gorm:"column:scripts_content;type:text;not null;default:'{}'"`
 	GenerateStatus     string `gorm:"column:generate_status;type:varchar(32);not null;default:''"`
 	// GenerateError stores the last error message when GenerateStatus = 'failed' (migration 20260707120000).

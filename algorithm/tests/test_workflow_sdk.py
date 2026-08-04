@@ -32,8 +32,8 @@ def test_mcp_lists_only_real_public_tools():
     names = set(TOOL_SCHEMAS)
     assert {'list_workflows', 'prepare_workflow', 'start_workflow',
             'get_workflow_state', 'get_ready_steps', 'advance_step'} <= names
-    assert 'stop_workflow' not in names
-    assert 'patch_artifact' not in names
+    assert {'stop_workflow', 'resume_workflow', 'list_artifacts', 'patch_artifact',
+            'import_input_resource', 'bind_workflow_input'} <= names
     assert {
         'get_skill_conversion_context', 'create_workflow_draft',
         'update_workflow_draft_file', 'validate_workflow_draft',

@@ -28,6 +28,9 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/workflow"
+	workflowattempt "lazymind/core/workflow/attempt"
+	workflowexecutor "lazymind/core/workflow/executor"
+	workflowhostlazymind "lazymind/core/workflow/hosts/lazymind"
 
 	"github.com/gorilla/mux"
 	"gopkg.in/yaml.v3"
@@ -213,12 +216,26 @@ func main() {
 
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
 	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
+	if err := workflow.SeedBuiltinWorkflows(context.Background(), store.DB()); err != nil {
+		log.Logger.Fatal().Err(err).Msg("seed built-in Workflows failed")
+	}
 	evalset.RegisterAsyncJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
+	workflowHosts := workflowexecutor.DefaultHostRegistry
+	workflowHosts.RegisterHost("lazymind", workflowexecutor.HostRegistration{
+		Executor:             workflowhostlazymind.Executor{DB: store.DB(), State: store.State()},
+		AllowAllCapabilities: true,
+		AllowLegacyTools:     true,
+	})
 	startBackgroundJobs := backgroundJobsEnabled()
 	if !startBackgroundJobs {
 		log.Logger.Info().Msg("core background jobs are disabled")
 	} else {
+		workflowexecutor.StartHostWorkers(
+			context.Background(), workflowattempt.New(store.DB(), workflowattempt.Config{}),
+			workflowexecutor.DBContextLoader{DB: store.DB()}, workflowexecutor.DBArtifactSink{DB: store.DB()}, workflowHosts,
+			workflowexecutor.WorkerConfig{},
+		)
 		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
 		asyncjob.Start(context.Background(), store.DB(), asyncjob.Options{
 			Concurrency:  asyncConfig.Concurrency,

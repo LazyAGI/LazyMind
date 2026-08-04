@@ -12,17 +12,23 @@ import (
 )
 
 type AttemptContext struct {
-	ContractVersion string            `json:"contract_version"`
-	SessionID       string            `json:"session_id"`
-	AttemptID       string            `json:"attempt_id"`
-	StepID          string            `json:"step_id"`
-	AttemptNo       int               `json:"attempt_no"`
-	Operation       string            `json:"operation"`
-	Objective       string            `json:"objective,omitempty"`
-	Inputs          map[string]any    `json:"inputs,omitempty"`
-	RequiredOutputs []string          `json:"required_outputs,omitempty"`
-	Capabilities    []string          `json:"capabilities,omitempty"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
+	ContractVersion  string            `json:"contract_version"`
+	SessionID        string            `json:"session_id"`
+	AttemptID        string            `json:"attempt_id"`
+	StepID           string            `json:"step_id"`
+	AttemptNo        int               `json:"attempt_no"`
+	Operation        string            `json:"operation"`
+	Objective        string            `json:"objective,omitempty"`
+	Prompt           string            `json:"prompt,omitempty"`
+	Acceptance       []string          `json:"acceptance_criteria,omitempty"`
+	Instruction      string            `json:"instruction,omitempty"`
+	PartialSelector  map[string][]int  `json:"partial_selector,omitempty"`
+	WorkflowRevision string            `json:"workflow_revision"`
+	Inputs           map[string]any    `json:"inputs,omitempty"`
+	RequiredOutputs  []string          `json:"required_outputs,omitempty"`
+	Capabilities     []string          `json:"capabilities,omitempty"`
+	LegacyTools      []string          `json:"legacy_tools,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
 }
 
 type HostRunSpec struct {
@@ -49,7 +55,10 @@ type Callbacks struct {
 	Artifact func(Artifact) error
 }
 
-type HostAdapter interface {
+// HostExecutor is the only pluggable execution boundary used by Workflow
+// Runtime. Concrete Hosts implement it in their own integration package; the
+// Runtime never selects a model provider or imports Host-specific state.
+type HostExecutor interface {
 	BuildRunSpec(context.Context, AttemptContext) (HostRunSpec, error)
 	RunSubAgent(context.Context, HostRunSpec, Callbacks) (Result, error)
 	Cancel(context.Context, string) error
@@ -74,13 +83,14 @@ type AttemptService interface {
 
 type Config struct {
 	ExecutorID        string
+	Host              string
 	HeartbeatInterval time.Duration
 }
 
 type Supervisor struct {
 	Attempts  AttemptService
 	Contexts  ContextLoader
-	Adapter   HostAdapter
+	Executor  HostExecutor
 	Artifacts ArtifactSink
 	Config    Config
 }
@@ -96,8 +106,13 @@ type executorError string
 func (err executorError) Error() string { return string(err) }
 
 func (s *Supervisor) claim(ctx context.Context) (attempt.Claim, error) {
-	if s.Attempts == nil || s.Contexts == nil || s.Adapter == nil {
+	if s.Attempts == nil || s.Contexts == nil || s.Executor == nil {
 		return attempt.Claim{}, executorError("executor supervisor is not configured")
+	}
+	if service, ok := s.Attempts.(interface {
+		ClaimForHost(context.Context, string, string) (attempt.Claim, error)
+	}); ok {
+		return service.ClaimForHost(ctx, s.Config.ExecutorID, s.Config.Host)
 	}
 	return s.Attempts.Claim(ctx, s.Config.ExecutorID)
 }
@@ -186,7 +201,7 @@ func (s *Supervisor) runClaimed(ctx context.Context, claim attempt.Claim) (resul
 		}
 	}()
 
-	spec, err := s.Adapter.BuildRunSpec(runCtx, attemptCtx)
+	spec, err := s.Executor.BuildRunSpec(runCtx, attemptCtx)
 	if err != nil {
 		_ = finish("failed", "RUN_SPEC_INVALID", errorJSON(err))
 		return result, err
@@ -212,7 +227,7 @@ func (s *Supervisor) runClaimed(ctx context.Context, claim attempt.Claim) (resul
 			return nil
 		},
 	}
-	result, err = s.Adapter.RunSubAgent(runCtx, spec, callbacks)
+	result, err = s.Executor.RunSubAgent(runCtx, spec, callbacks)
 	select {
 	case heartbeat := <-heartbeatErr:
 		if err == nil {
@@ -222,7 +237,7 @@ func (s *Supervisor) runClaimed(ctx context.Context, claim attempt.Claim) (resul
 	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
-			_ = s.Adapter.Cancel(context.Background(), claim.AttemptID)
+			_ = s.Executor.Cancel(context.Background(), claim.AttemptID)
 			_ = finish("cancelled", "CANCELLED", nil)
 		} else {
 			_ = finish("failed", "EXECUTION_FAILED", errorJSON(err))

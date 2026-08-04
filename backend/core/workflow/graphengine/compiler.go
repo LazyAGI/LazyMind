@@ -40,6 +40,11 @@ type rawStep struct {
 	OptionalInputs  any
 	Outputs         any
 	SkipIf          any
+	Prompt          string
+	Acceptance      any
+	Capabilities    any
+	Tools           any
+	Mode            string
 }
 
 func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileResult {
@@ -110,7 +115,17 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		if _, ok := workflowSteps[id]; !ok {
 			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_PLUGIN_STEP_MISSING", "error", "plugin.yaml.steps", id, "state step is not declared in plugin.yaml"))
 		}
-		node := CompiledNode{ID: id, Label: step.Label, Route: step.Route}
+		node := CompiledNode{ID: id, Label: step.Label, Route: step.Route, Prompt: step.Prompt,
+			Acceptance: stringList(step.Acceptance), Capabilities: stringList(step.Capabilities),
+			LegacyTools: stringList(step.Tools), Mode: step.Mode}
+		if definition := workflowSteps[id]; definition != nil {
+			if len(node.Acceptance) == 0 {
+				node.Acceptance = stringList(definition["acceptance_criteria"])
+			}
+			if len(node.Capabilities) == 0 {
+				node.Capabilities = stringList(definition["capabilities"])
+			}
+		}
 		if node.Route == "" {
 			node.Route = "all"
 		}
@@ -409,7 +424,28 @@ func normalizeSteps(value any) (map[string]rawStep, []Diagnostic) {
 }
 
 func decodeRawStep(id string, raw map[string]any) rawStep {
-	return rawStep{ID: id, Label: scalar(raw["label"]), Route: scalar(raw["route"]), Inputs: raw["inputs"], InputExpression: raw["input_expression"], OptionalInputs: raw["optional_inputs"], Outputs: raw["outputs"], SkipIf: firstNonNil(raw["skip_if"], raw["skipif"])}
+	return rawStep{ID: id, Label: scalar(raw["label"]), Route: scalar(raw["route"]),
+		Inputs: raw["inputs"], InputExpression: raw["input_expression"], OptionalInputs: raw["optional_inputs"],
+		Outputs: raw["outputs"], SkipIf: firstNonNil(raw["skip_if"], raw["skipif"]),
+		Prompt: scalar(raw["prompt"]), Acceptance: raw["acceptance_criteria"],
+		Capabilities: raw["capabilities"], Tools: raw["tools"], Mode: scalar(raw["mode"])}
+}
+
+func stringList(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		if strings.TrimSpace(scalar(value)) == "" {
+			return nil
+		}
+		return []string{strings.TrimSpace(scalar(value))}
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if text := strings.TrimSpace(scalar(item)); text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
 }
 
 func parseExpression(value any) (*Expression, error) {

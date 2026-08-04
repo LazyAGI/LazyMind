@@ -98,13 +98,21 @@ func CreateAuthoringWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	userID := common.UserID(r)
 	var body struct {
 		Name       string            `json:"name"`
+		SourceType string            `json:"source_type"`
 		SkillID    string            `json:"skill_id"`
 		RevisionID string            `json:"revision_id"`
 		TreeHash   string            `json:"tree_hash"`
 		Files      map[string]string `json:"files"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" || body.SkillID == "" || body.RevisionID == "" || body.TreeHash == "" {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if body.SourceType == "" {
+		body.SourceType = "skill"
+	}
+	if body.SourceType != "skill" && body.SourceType != "blank" && body.SourceType != "import" {
+		common.ReplyErr(w, "invalid source_type", http.StatusBadRequest)
 		return
 	}
 	for path := range body.Files {
@@ -113,12 +121,20 @@ func CreateAuthoringWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	snapshot, err := loadWorkflowSourceSkillRevision(r.Context(), store.DB(), userID, body.SkillID, body.RevisionID)
-	if err != nil || snapshot.TreeHash != body.TreeHash {
-		common.ReplyErr(w, "draft snapshot changed", http.StatusConflict)
-		return
+	var snapshot workflowSourceSkillSnapshot
+	if body.SourceType == "skill" {
+		if body.SkillID == "" || body.RevisionID == "" || body.TreeHash == "" {
+			common.ReplyErr(w, "skill_id, revision_id and tree_hash are required", http.StatusBadRequest)
+			return
+		}
+		var err error
+		snapshot, err = loadWorkflowSourceSkillRevision(r.Context(), store.DB(), userID, body.SkillID, body.RevisionID)
+		if err != nil || snapshot.TreeHash != body.TreeHash {
+			common.ReplyErr(w, "draft snapshot changed", http.StatusConflict)
+			return
+		}
 	}
-	draft := orm.WorkflowDraft{ID: uuid.NewString(), Name: body.Name, CreatedBy: userID, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), Version: 1, SourceType: "skill", SourceSkillID: body.SkillID, SourceSkillName: snapshot.Name, SourceSkillRevisionID: snapshot.RevisionID, SourceSkillRevisionNo: snapshot.RevisionNo, SourceSkillTreeHash: snapshot.TreeHash, ScriptsContent: "{}"}
+	draft := orm.WorkflowDraft{ID: uuid.NewString(), Name: body.Name, CreatedBy: userID, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), Version: 1, SourceType: body.SourceType, SourceSkillID: body.SkillID, SourceSkillName: snapshot.Name, SourceSkillRevisionID: snapshot.RevisionID, SourceSkillRevisionNo: snapshot.RevisionNo, SourceSkillTreeHash: snapshot.TreeHash, ScriptsContent: "{}"}
 	applyAuthoringFiles(&draft, body.Files)
 	if err := store.DB().Create(&draft).Error; err != nil {
 		common.ReplyErr(w, "create failed", http.StatusInternalServerError)
@@ -132,12 +148,14 @@ func applyAuthoringFiles(draft *orm.WorkflowDraft, files map[string]string) {
 	for path, content := range files {
 		path = filepath.ToSlash(filepath.Clean(path))
 		switch path {
-		case "plugin.yaml":
+		case "workflow.yaml", "plugin.yaml": // plugin.yaml is a persistence compatibility alias.
 			draft.WorkflowYAMLContent = content
 		case "scenario/state.yml":
 			draft.StateYAMLContent = content
 		case "scenario/scenario.md":
 			draft.ScenarioContent = content
+		case "scenario/driver.md":
+			draft.DriverContent = content
 		case "scenario/layout.json":
 			draft.StateLayoutContent = content
 		default:
@@ -158,7 +176,7 @@ func validAuthoringPath(path string) bool {
 		return false
 	}
 	switch clean {
-	case "plugin.yaml", "scenario/state.yml", "scenario/scenario.md", "scenario/layout.json":
+	case "workflow.yaml", "plugin.yaml", "scenario/state.yml", "scenario/scenario.md", "scenario/driver.md", "scenario/layout.json":
 		return true
 	}
 	return strings.HasPrefix(clean, "scripts/") && len(strings.TrimPrefix(clean, "scripts/")) > 0
@@ -191,7 +209,7 @@ func UpdateAuthoringWorkflowDraftFile(w http.ResponseWriter, r *http.Request) {
 	files := map[string]string{body.Path: body.Content}
 	applyAuthoringFiles(&draft, files)
 	// Use domain field names here; GORM owns the legacy physical-column mapping.
-	updates := map[string]any{"WorkflowYAMLContent": draft.WorkflowYAMLContent, "StateYAMLContent": draft.StateYAMLContent, "ScenarioContent": draft.ScenarioContent, "StateLayoutContent": draft.StateLayoutContent, "ScriptsContent": draft.ScriptsContent, "WorkflowID": extractWorkflowID(draft.WorkflowYAMLContent), "Version": gorm.Expr("version + 1"), "UpdatedAt": time.Now().UTC()}
+	updates := map[string]any{"WorkflowYAMLContent": draft.WorkflowYAMLContent, "StateYAMLContent": draft.StateYAMLContent, "ScenarioContent": draft.ScenarioContent, "DriverContent": draft.DriverContent, "StateLayoutContent": draft.StateLayoutContent, "ScriptsContent": draft.ScriptsContent, "WorkflowID": extractWorkflowID(draft.WorkflowYAMLContent), "Version": gorm.Expr("version + 1"), "UpdatedAt": time.Now().UTC()}
 	result := store.DB().Model(&orm.WorkflowDraft{}).Where("id=? AND created_by=? AND version=?", draftID, userID, body.ExpectedVersion).Updates(updates)
 	if result.Error != nil {
 		common.ReplyErr(w, "save failed", http.StatusInternalServerError)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -99,6 +100,11 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string) (gr
 	if err := db.WithContext(ctx).Where("session_id = ? AND selected = ?", sessionID, true).Find(&revisions).Error; err != nil {
 		return graphengine.RuntimeSnapshot{}, err
 	}
+	var inputBindings []orm.WorkflowInputBinding
+	if err := db.WithContext(ctx).Where("workflow_session_id = ? AND validity = 'effective'", sessionID).
+		Find(&inputBindings).Error; err != nil && !strings.Contains(strings.ToLower(err.Error()), "no such table") {
+		return graphengine.RuntimeSnapshot{}, err
+	}
 	var decisions []orm.WorkflowRouteDecision
 	if err := db.WithContext(ctx).Where("session_id = ?", sessionID).Order("created_at ASC").Find(&decisions).Error; err != nil {
 		return graphengine.RuntimeSnapshot{}, err
@@ -117,6 +123,11 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string) (gr
 			validity = "effective"
 		}
 		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{MaterialID: row.SlotID, RevisionID: row.ID, Valid: validity == "effective"})
+	}
+	for _, row := range inputBindings {
+		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{
+			MaterialID: row.MaterialID, RevisionID: row.ID, Valid: true,
+		})
 	}
 	for _, row := range decisions {
 		var active, pruned, bypassed []string

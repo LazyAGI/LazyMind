@@ -51,6 +51,19 @@ func enqueueCanonicalAttempt(ctx context.Context, db *gorm.DB, request subagent.
 	if inputs, ok := request.Params["inputs"].(map[string]any); ok {
 		value.Inputs = inputs
 	}
+	if instruction, ok := request.Params["retry_hint"].(string); ok {
+		value.Instruction = instruction
+	}
+	if selector, ok := request.Params["partial_indices"].(map[string][]int); ok {
+		value.PartialSelector = selector
+	} else if raw, ok := request.Params["partial_indices"].(map[string]any); ok {
+		value.PartialSelector = map[string][]int{}
+		for slot, item := range raw {
+			if values, ok := item.([]int); ok {
+				value.PartialSelector[slot] = values
+			}
+		}
+	}
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return err

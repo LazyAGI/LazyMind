@@ -104,10 +104,10 @@ func (f fakeAdapter) RunSubAgent(ctx context.Context, _ HostRunSpec, c Callbacks
 }
 func (fakeAdapter) Cancel(context.Context, string) error { return nil }
 
-func newSupervisor(adapter HostAdapter) (*Supervisor, *fakeAttempts, *memorySink) {
+func newSupervisor(executor HostExecutor) (*Supervisor, *fakeAttempts, *memorySink) {
 	a := &fakeAttempts{claim: attempt.Claim{AttemptID: "a1", LeaseToken: "lease", FencingGeneration: 4}}
 	sink := &memorySink{}
-	return &Supervisor{Attempts: a, Contexts: fakeLoader{AttemptContext{AttemptID: "a1", SessionID: "s1", StepID: "step", AttemptNo: 1, Operation: "run", RequiredOutputs: []string{"report"}}}, Adapter: adapter, Artifacts: sink, Config: Config{ExecutorID: "worker", HeartbeatInterval: time.Millisecond}}, a, sink
+	return &Supervisor{Attempts: a, Contexts: fakeLoader{AttemptContext{AttemptID: "a1", SessionID: "s1", StepID: "step", AttemptNo: 1, Operation: "run", RequiredOutputs: []string{"report"}}}, Executor: executor, Artifacts: sink, Config: Config{ExecutorID: "worker", HeartbeatInterval: time.Millisecond}}, a, sink
 }
 
 func TestSupervisorHeartbeatCallbacksArtifactsAndSingleTerminal(t *testing.T) {

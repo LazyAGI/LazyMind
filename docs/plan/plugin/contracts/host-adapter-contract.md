@@ -220,7 +220,7 @@ executor_capabilities:
 
 ## 8. Codex 与 LazyMind Executor
 
-`CodexExecutor`：
+任意外部 Host 的 `HostExecutor` 实现：
 
 - 使用 Codex 程序化 SubAgent 执行接口。
 - 同步 `advance_step` 等待 Attempt 终态。

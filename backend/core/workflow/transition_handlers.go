@@ -16,6 +16,8 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/workflow/attempt"
+	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -610,17 +612,26 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			for _, optional := range nodeDef.OptionalInputs {
 				inputKeys = append(inputKeys, optional.Material)
 			}
-			params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs}
-			_, taskID, _, launchErr := launchWorkflowAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, target.Objective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
-			if launchErr != nil {
-				return launchErr
+			taskID := target.TaskID
+			if session.ConversationID == "" {
+				if err := queueHostAttempt(tx, session, target, nodeDef, now); err != nil {
+					return err
+				}
+			} else {
+				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs}
+				var launchErr error
+				_, taskID, _, launchErr = launchWorkflowAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, target.Objective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
+				if launchErr != nil {
+					return launchErr
+				}
 			}
 			var attempt orm.WorkflowSessionStep
 			if err := tx.Where("task_id = ?", taskID).First(&attempt).Error; err != nil {
 				return err
 			}
 			for _, witness := range evaluations[target.TargetStepID].Witnesses {
-				if err := tx.Create(&orm.WorkflowAttemptInputBinding{ID: newAttemptInputBindingID(), SessionID: session.ID, AttemptID: attempt.ID, MaterialID: witness.MaterialID, MaterialRevisionID: witness.RevisionID, BindAs: witness.BindAs, CreatedAt: now}).Error; err != nil {
+				binding := attemptInputBindingFromWitness(tx, session.ID, attempt.ID, witness, now)
+				if err := tx.Create(&binding).Error; err != nil {
 					return err
 				}
 			}
@@ -651,6 +662,48 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		emitTaskCreatedConvEvent(r.Context(), taskID, session.ID, session.ConversationID)
 	}
 	writeTransitionResponse(w, response, http.StatusOK)
+}
+
+func queueHostAttempt(tx *gorm.DB, session orm.WorkflowSession, target transitionTarget,
+	node graphengine.CompiledNode, now time.Time) error {
+	var count int64
+	if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND step_id = ?", session.ID, target.TargetStepID).Count(&count).Error; err != nil {
+		return err
+	}
+	value := executor.AttemptContext{ContractVersion: attempt.ContractVersion, SessionID: session.ID,
+		AttemptID: target.TaskID, StepID: target.TargetStepID, AttemptNo: int(count) + 1, Operation: "execute",
+		Objective: target.Objective, Prompt: node.Prompt, Acceptance: node.Acceptance,
+		Instruction: target.RuntimeInstruction, PartialSelector: target.PartialIndices,
+		WorkflowRevision: session.WorkflowRevisionID, RequiredOutputs: node.RequiredOutputs,
+		Capabilities: node.Capabilities, LegacyTools: node.LegacyTools}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	row := orm.WorkflowSessionStep{ID: target.TaskID, SessionID: session.ID, StepID: target.TargetStepID,
+		Attempt: value.AttemptNo, TaskID: target.TaskID, Status: "queued", Validity: "effective",
+		ProgressJSON: `{}`, ResultJSON: `{}`, CreatedAt: now, UpdatedAt: now}
+	if err := tx.Create(&row).Error; err != nil {
+		return err
+	}
+	return tx.Create(&orm.WorkflowOutbox{ID: uuid.NewString(), AttemptID: row.ID, SessionID: session.ID,
+		PayloadJSON: payload, Status: "pending", CreatedAt: now, UpdatedAt: now}).Error
+}
+
+func attemptInputBindingFromWitness(tx *gorm.DB, sessionID, attemptID string,
+	witness graphengine.Witness, createdAt time.Time) orm.WorkflowAttemptInputBinding {
+	value := orm.WorkflowAttemptInputBinding{ID: newAttemptInputBindingID(), SessionID: sessionID,
+		AttemptID: attemptID, MaterialID: witness.MaterialID, MaterialRevisionID: witness.RevisionID,
+		BindAs: witness.BindAs, CreatedAt: createdAt, SourceType: "artifact"}
+	var input orm.WorkflowInputBinding
+	if err := tx.Where("id = ? AND workflow_session_id = ? AND validity = 'effective'",
+		witness.RevisionID, sessionID).First(&input).Error; err == nil {
+		value.SourceType = "input_resource"
+		value.SourceID = input.ResourceID
+		value.SourceRevision = fmt.Sprintf("%d", input.ResourceRevision)
+		value.ContentHash = input.ContentHash
+	}
+	return value
 }
 
 // resolveAdvanceOperation keeps lifecycle vocabulary out of the model-facing

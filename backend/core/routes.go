@@ -31,6 +31,7 @@ import (
 	"lazymind/core/workflow"
 	workflowattempt "lazymind/core/workflow/attempt"
 	workflowcompat "lazymind/core/workflow/compat"
+	workflowexecutor "lazymind/core/workflow/executor"
 	workflowfacade "lazymind/core/workflow/facade"
 	workflowstore "lazymind/core/workflow/store"
 	workflowstream "lazymind/core/workflow/stream"
@@ -83,9 +84,11 @@ func registerAllRoutes(r *mux.Router) {
 	workflowRepository := workflowstore.New(corestore.DB())
 	workflowFacade := workflowfacade.Handler{
 		Store:            workflowRepository,
+		Hosts:            workflowexecutor.DefaultHostRegistry,
 		PlanLegacy:       http.HandlerFunc(workflow.PlanWorkflowSessionStart),
 		StartLegacy:      http.HandlerFunc(workflow.StartWorkflowSession),
 		TransitionLegacy: http.HandlerFunc(workflow.TransitionWorkflowSession),
+		Projection:       http.HandlerFunc(workflow.GetSessionProjection),
 	}
 
 	// ----- Datasettext -----
@@ -268,12 +271,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}/events", nil, subagent.InternalGetTaskEvents)
 
 	// ----- Workflow Info -----
-	handleAPI(r, "GET", "/workflows", []string{"qa.read"}, workflow.ListWorkflows)
-	handleAPI(r, "GET", "/workflows/{workflow_id}", []string{"qa.read"}, func(w http.ResponseWriter, req *http.Request) {
-		vars := mux.Vars(req)
-		vars["workflow_id"] = vars["workflow_id"] // persistence adapter input
-		workflow.GetWorkflowInfo(w, mux.SetURLVars(req, vars))
-	})
+	handleAPI(r, "GET", "/workflows", []string{"qa.read"}, workflowFacade.ListWorkflows)
+	handleAPI(r, "GET", "/workflows/{workflow_id}", []string{"qa.read"}, workflowFacade.GetWorkflow)
 	if workflowcompat.LegacyRoutesEnabled() {
 		handleAPI(r, "GET", "/plugins", []string{"qa.read"}, workflowcompat.LegacyRouteMetrics.Wrap("/plugins", workflow.ListWorkflows))
 		handleAPI(r, "GET", "/plugins/{workflow_id}", []string{"qa.read"}, workflowcompat.LegacyRouteMetrics.Wrap("/plugins/{workflow_id}", workflow.GetWorkflowInfo))
@@ -298,6 +297,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/chat/settings/workflows/{workflow_ref:.+}", []string{"qa.write"}, workflow.PatchUserWorkflowSetting)
 	handleAPI(r, "POST", "/published-workflows/{workflow_ref:.+}:rollback", []string{"qa.write"}, workflow.RollbackWorkflow)
 	handleAPI(r, "POST", "/published-workflows/{workflow_ref:.+}:archive", []string{"qa.write"}, workflow.ArchiveWorkflow)
+	handleAPI(r, "POST", "/published-workflows/{workflow_ref:.+}:restore", []string{"qa.write"}, workflow.RestoreWorkflow)
 	handleAPI(r, "GET", "/published-workflows/{workflow_ref:.+}/versions", []string{"qa.read"}, workflow.ListWorkflowVersions)
 	handleAPI(r, "GET", "/published-workflows/{workflow_ref:.+}/versions/{revision_id}", []string{"qa.read"}, workflow.GetWorkflowVersion)
 	handleAPI(r, "POST", "/published-workflows/{workflow_ref:.+}/versions/{revision_id}:edit", []string{"qa.write"}, workflow.ReplaceDraftFromWorkflowVersion)
@@ -339,11 +339,19 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-authoring/v1/drafts/{draft_id}:publish", []string{"qa.write"}, workflow.PublishAuthoringWorkflow)
 	handleAPI(r, "GET", "/workflow-authoring/v1/fixture", []string{"qa.read"}, workflow.GenerateAuthoringFixture)
 	handleAPI(r, "POST", "/workflow-input-resources", []string{"qa.write"}, workflowFacade.ImportInputResource)
+	handleAPI(r, "GET", "/workflow-input-resources/{resource_id}", []string{"qa.read"}, workflowFacade.ReadInputResource)
 	handleAPI(r, "POST", "/workflow-preparations", []string{"qa.write"}, workflowFacade.Prepare)
 	handleAPI(r, "POST", "/workflow-preparations/{preparation_id}:consume", []string{"qa.write"}, workflowFacade.Consume)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:advance-step", []string{"qa.write"}, workflowFacade.Command(http.HandlerFunc(workflow.TransitionWorkflowSession)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:advance-step-and-hand-off", []string{"qa.write"}, workflowFacade.Command(http.HandlerFunc(workflow.TransitionWorkflowSession)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.write"}, workflowFacade.BindInput)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.read"}, workflowFacade.ListInputs)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/artifacts", []string{"qa.read"}, workflowFacade.ListArtifacts)
+	handleAPI(r, "GET", "/workflow-artifacts/{artifact_id}", []string{"qa.read"}, workflowFacade.ReadArtifact)
+	handleAPI(r, "PATCH", "/workflow-artifacts/{artifact_id}", []string{"qa.write"}, workflowFacade.PatchArtifact)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:stop", []string{"qa.write"}, workflowFacade.StopWorkflow)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:resume", []string{"qa.write"}, workflowFacade.ResumeWorkflow)
+	handleAPI(r, "GET", "/workflow-commands/{command_id}", []string{"qa.read"}, workflowFacade.GetCommand)
 	workflowEvents := workflowstream.Handler{Store: workflowRepository, Snapshot: func(req *http.Request, sessionID, owner string) (any, error) {
 		if err := workflowRepository.AuthorizeSession(req.Context(), sessionID, owner); err != nil {
 			return nil, err

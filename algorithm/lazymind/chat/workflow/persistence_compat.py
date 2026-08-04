@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -417,7 +418,48 @@ class SubAgentDB:
                     ),
                     {'task_id': task_id, 'slot': slot},
                 ).mappings().all()
-            return [dict(row) for row in rows]
+            values = [dict(row) for row in rows]
+            with self._conn() as conn:
+                resources = conn.execute(
+                    text(
+                        'SELECT '
+                        '  paib.material_id AS slot, '
+                        '  paib.material_id AS slot_id, '
+                        '  wir.revision, '
+                        '  NULL AS list_index, '
+                        '  NULL AS artifact_seq, '
+                        '  NULL AS human_artifact_id, '
+                        '  wir.content AS resource_content, '
+                        '  wir.name AS resource_name, '
+                        '  wir.mime_type AS resource_mime_type, '
+                        "  'input_resource' AS change_source, "
+                        '  NULL AS task_id '
+                        'FROM workflow_attempt_input_bindings paib '
+                        'INNER JOIN workflow_session_steps consumer '
+                        '  ON consumer.id = paib.attempt_id '
+                        'INNER JOIN workflow_input_resources wir '
+                        '  ON wir.id = paib.source_id '
+                        'WHERE consumer.task_id = :task_id '
+                        "  AND paib.source_type = 'input_resource' "
+                        '  AND (paib.bind_as = :slot OR paib.material_id = :slot) '
+                        'ORDER BY paib.created_at ASC'
+                    ),
+                    {'task_id': task_id, 'slot': slot},
+                ).mappings().all()
+            for raw in resources:
+                row = dict(raw)
+                content = row.pop('resource_content', b'')
+                if isinstance(content, memoryview):
+                    content = content.tobytes()
+                if isinstance(content, str):
+                    content = content.encode('utf-8')
+                row['content_snapshot'] = json.dumps({
+                    'resource_name': row.pop('resource_name', ''),
+                    'mime_type': row.pop('resource_mime_type', ''),
+                    'content_base64': base64.b64encode(content or b'').decode('ascii'),
+                }, ensure_ascii=False)
+                values.append(row)
+            return values
         except Exception:
             return []
 

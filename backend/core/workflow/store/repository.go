@@ -6,12 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"lazymind/core/common/orm"
 )
 
 var (
@@ -28,6 +30,93 @@ type Repository struct {
 	db   *gorm.DB
 	mu   sync.RWMutex
 	subs map[string]map[chan Event]struct{}
+}
+
+// ListWorkflowPackages returns active published Workflows visible to owner.
+// Enabled settings are respected when present; absence of a setting keeps an
+// owned/public Workflow discoverable so newly published revisions are usable.
+func (r *Repository) ListWorkflowPackages(ctx context.Context, owner string) ([]WorkflowPackage, error) {
+	type row struct {
+		orm.WorkflowResource
+		TreeHash           string          `gorm:"column:tree_hash"`
+		GraphHash          string          `gorm:"column:graph_hash"`
+		GraphSchemaVersion string          `gorm:"column:graph_schema_version"`
+		CompiledGraph      json.RawMessage `gorm:"column:compiled_graph"`
+		Enabled            *bool           `gorm:"column:enabled"`
+	}
+	var rows []row
+	err := r.db.WithContext(ctx).Table("plugins p").
+		Select("p.*, pr.tree_hash, pr.graph_hash, pr.graph_schema_version, pr.compiled_graph, ups.enabled").
+		Joins("JOIN plugin_revisions pr ON pr.id = p.head_revision_id").
+		Joins("LEFT JOIN user_plugin_settings ups ON ups.plugin_ref = p.plugin_ref AND ups.user_id = ?", owner).
+		Where("p.status = 'active' AND (p.owner_user_id = ? OR p.owner_user_id = '') AND (ups.enabled IS NULL OR ups.enabled = ?)", owner, true).
+		Order("p.plugin_ref ASC").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]WorkflowPackage, 0, len(rows))
+	for _, value := range rows {
+		out = append(out, WorkflowPackage{WorkflowRef: value.WorkflowRef, WorkflowID: value.WorkflowID,
+			Name: value.Name, Description: value.Description, WhenToUse: value.WhenToUse,
+			SourceType: value.SourceType, RevisionID: value.HeadRevisionID, RevisionNo: value.Version,
+			TreeHash: value.TreeHash, GraphHash: value.GraphHash, GraphVersion: value.GraphSchemaVersion,
+			CompiledGraph: append([]byte(nil), value.CompiledGraph...), ContainsScripts: value.ContainsScripts})
+	}
+	return out, nil
+}
+
+func (r *Repository) GetWorkflowPackage(ctx context.Context, owner, refOrID, revisionID string) (WorkflowPackage, error) {
+	var resource orm.WorkflowResource
+	query := r.db.WithContext(ctx).Where("status = 'active' AND (owner_user_id = ? OR owner_user_id = '')", owner)
+	if err := query.Where("plugin_ref = ? OR plugin_id = ?", refOrID, refOrID).First(&resource).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return WorkflowPackage{}, ErrNotFound
+		}
+		return WorkflowPackage{}, err
+	}
+	if revisionID == "" {
+		revisionID = resource.HeadRevisionID
+	}
+	var revision orm.WorkflowRevision
+	if err := r.db.WithContext(ctx).Where("id = ? AND plugin_resource_id = ?", revisionID, resource.ID).First(&revision).Error; err != nil {
+		return WorkflowPackage{}, ErrNotFound
+	}
+	var entries []orm.WorkflowRevisionEntry
+	if err := r.db.WithContext(ctx).Where("revision_id = ?", revision.ID).Order("path ASC").Find(&entries).Error; err != nil {
+		return WorkflowPackage{}, err
+	}
+	files := make(map[string][]byte, len(entries))
+	for _, entry := range entries {
+		if entry.BlobHash == nil || entry.EntryType != "file" {
+			continue
+		}
+		var blob orm.WorkflowBlob
+		if err := r.db.WithContext(ctx).Where("hash = ?", *entry.BlobHash).First(&blob).Error; err != nil {
+			return WorkflowPackage{}, err
+		}
+		path := entry.Path
+		if path == "plugin.yaml" {
+			path = "workflow.yaml"
+		}
+		files[path] = append([]byte(nil), blob.Content...)
+	}
+	// Force deterministic JSON/map consumers even when the database returned a
+	// non-deterministic entry order.
+	keys := make([]string, 0, len(files))
+	for key := range files {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	ordered := make(map[string][]byte, len(keys))
+	for _, key := range keys {
+		ordered[key] = files[key]
+	}
+	return WorkflowPackage{WorkflowRef: resource.WorkflowRef, WorkflowID: resource.WorkflowID,
+		Name: resource.Name, Description: resource.Description, WhenToUse: resource.WhenToUse,
+		SourceType: resource.SourceType, RevisionID: revision.ID, RevisionNo: revision.RevisionNo,
+		TreeHash: revision.TreeHash, GraphHash: revision.GraphHash, GraphVersion: revision.GraphSchemaVersion,
+		CompiledGraph: append([]byte(nil), revision.CompiledGraph...), ContainsScripts: resource.ContainsScripts,
+		Files: ordered}, nil
 }
 
 func New(db *gorm.DB) *Repository {
@@ -70,6 +159,281 @@ func (r *Repository) BindInput(ctx context.Context, owner string, binding InputB
 	binding.CreatedAt = time.Now().UTC()
 	binding.Validity = "effective"
 	return r.db.WithContext(ctx).Create(&binding).Error
+}
+
+func (r *Repository) GetInputResource(ctx context.Context, owner, id string) (InputResource, error) {
+	var resource InputResource
+	if err := r.db.WithContext(ctx).Where("id = ? AND owner_user_id = ?", id, owner).First(&resource).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return InputResource{}, ErrNotFound
+		}
+		return InputResource{}, err
+	}
+	return resource, nil
+}
+
+func (r *Repository) ListInputBindings(ctx context.Context, owner, sessionID string) ([]InputBinding, error) {
+	if err := r.AuthorizeSession(ctx, sessionID, owner); err != nil {
+		return nil, err
+	}
+	var values []InputBinding
+	err := r.db.WithContext(ctx).Where("workflow_session_id = ? AND validity = 'effective'", sessionID).
+		Order("material_id ASC, created_at ASC").Find(&values).Error
+	return values, err
+}
+
+func (r *Repository) ListArtifacts(ctx context.Context, owner, sessionID string) ([]Artifact, error) {
+	if err := r.AuthorizeSession(ctx, sessionID, owner); err != nil {
+		return nil, err
+	}
+	var revisions []orm.WorkflowSlotRevision
+	if err := r.db.WithContext(ctx).Where("session_id = ? AND selected = ?", sessionID, true).
+		Order("slot_id ASC, list_index ASC, revision ASC").Find(&revisions).Error; err != nil {
+		return nil, err
+	}
+	out := make([]Artifact, 0, len(revisions))
+	for _, revision := range revisions {
+		value, contentType, caption, err := r.resolveArtifact(ctx, revision)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Artifact{ID: revision.ID, SessionID: revision.SessionID, SlotID: revision.SlotID,
+			Slot: revision.Slot, StepID: revision.StepID, Attempt: revision.Attempt,
+			ProducerAttemptID: revision.ProducerAttemptID, Revision: revision.Revision,
+			ListIndex: revision.ListIndex, Selected: revision.Selected, Validity: revision.Validity,
+			ChangeSource: revision.ChangeSource, ContentType: contentType, Value: value,
+			Caption: caption, CreatedAt: revision.CreatedAt})
+	}
+	return out, nil
+}
+
+func (r *Repository) resolveArtifact(ctx context.Context, revision orm.WorkflowSlotRevision) (json.RawMessage, string, *string, error) {
+	if revision.HumanArtifactID != nil {
+		var value orm.WorkflowHumanArtifact
+		if err := r.db.WithContext(ctx).Where("id = ?", *revision.HumanArtifactID).First(&value).Error; err != nil {
+			return nil, "", nil, err
+		}
+		return append(json.RawMessage(nil), value.Value...), value.ContentType, value.Caption, nil
+	}
+	if revision.ArtifactSeq != nil {
+		var step orm.WorkflowSessionStep
+		if err := r.db.WithContext(ctx).Where("session_id = ? AND step_id = ? AND attempt = ?",
+			revision.SessionID, revision.StepID, revision.Attempt).First(&step).Error; err != nil {
+			return nil, "", nil, err
+		}
+		var value orm.SubAgentArtifact
+		if err := r.db.WithContext(ctx).Where("task_id = ? AND slot = ? AND seq = ?",
+			step.TaskID, revision.Slot, *revision.ArtifactSeq).First(&value).Error; err != nil {
+			return nil, "", nil, err
+		}
+		return append(json.RawMessage(nil), value.Value...), value.ContentType, value.Caption, nil
+	}
+	return append(json.RawMessage(nil), revision.ContentSnapshot...), "json", nil, nil
+}
+
+func (r *Repository) ReadArtifact(ctx context.Context, owner, artifactID string) (Artifact, error) {
+	var revision orm.WorkflowSlotRevision
+	if err := r.db.WithContext(ctx).Where("id = ?", artifactID).First(&revision).Error; err != nil {
+		return Artifact{}, ErrNotFound
+	}
+	if err := r.AuthorizeSession(ctx, revision.SessionID, owner); err != nil {
+		return Artifact{}, err
+	}
+	value, contentType, caption, err := r.resolveArtifact(ctx, revision)
+	if err != nil {
+		return Artifact{}, err
+	}
+	return Artifact{ID: revision.ID, SessionID: revision.SessionID, SlotID: revision.SlotID,
+		Slot: revision.Slot, StepID: revision.StepID, Attempt: revision.Attempt,
+		ProducerAttemptID: revision.ProducerAttemptID, Revision: revision.Revision,
+		ListIndex: revision.ListIndex, Selected: revision.Selected, Validity: revision.Validity,
+		ChangeSource: revision.ChangeSource, ContentType: contentType, Value: value,
+		Caption: caption, CreatedAt: revision.CreatedAt}, nil
+}
+
+func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string, baseRevision int,
+	contentType string, value json.RawMessage, caption *string, commandID string) (Artifact, error) {
+	current, err := r.ReadArtifact(ctx, owner, artifactID)
+	if err != nil {
+		return Artifact{}, err
+	}
+	if !current.Selected || current.Revision != baseRevision {
+		return Artifact{}, ErrIdempotencyConflict
+	}
+	now := time.Now().UTC()
+	humanID, revisionID := uuid.NewString(), uuid.NewString()
+	var created orm.WorkflowSlotRevision
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&orm.WorkflowSlotRevision{}).Where(
+			"session_id = ? AND slot_id = ? AND selected = ?", current.SessionID, current.SlotID, true)
+		if current.ListIndex == nil {
+			query = query.Where("list_index IS NULL")
+		} else {
+			query = query.Where("list_index = ?", *current.ListIndex)
+		}
+		result := query.Where("revision = ?", baseRevision).Update("selected", false)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrIdempotencyConflict
+		}
+		if err := tx.Create(&orm.WorkflowHumanArtifact{ID: humanID, SessionID: current.SessionID,
+			Slot: current.Slot, ContentType: contentType, Value: value, Caption: caption, CreatedAt: now}).Error; err != nil {
+			return err
+		}
+		created = orm.WorkflowSlotRevision{ID: revisionID, SessionID: current.SessionID,
+			SlotID: current.SlotID, Revision: baseRevision + 1, ListIndex: current.ListIndex, Selected: true,
+			HumanArtifactID: &humanID, ChangeSource: "agent", Slot: current.Slot, StepID: current.StepID,
+			Attempt: current.Attempt, Validity: "effective", CreatedAt: now}
+		if err := tx.Create(&created).Error; err != nil {
+			return err
+		}
+		var session orm.WorkflowSession
+		if err := tx.Where("id = ?", current.SessionID).First(&session).Error; err != nil {
+			return err
+		}
+		stateVersion := session.StateVersion + 1
+		if err := tx.Model(&session).Updates(map[string]any{"state_version": stateVersion, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(map[string]any{"artifact_id": created.ID, "slot_id": created.SlotID,
+			"revision": created.Revision, "state_version": stateVersion})
+		return tx.Create(&orm.WorkflowEvent{SessionID: current.SessionID, OwnerUserID: owner,
+			ContractVersion: "workflow.v1", EventType: "artifact.upsert", EntityID: created.ID,
+			StateVersion: stateVersion, CommandID: commandID, PayloadJSON: payload, CreatedAt: now}).Error
+	})
+	if err != nil {
+		return Artifact{}, err
+	}
+	return r.ReadArtifact(ctx, owner, created.ID)
+}
+
+func (r *Repository) CommandByID(ctx context.Context, owner, commandID string) (Command, error) {
+	var value Command
+	if err := r.db.WithContext(ctx).Where("command_id = ? AND owner_user_id = ?", commandID, owner).First(&value).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Command{}, ErrNotFound
+		}
+		return Command{}, err
+	}
+	return value, nil
+}
+
+func (r *Repository) UpdateCommandResponse(ctx context.Context, owner, commandID string, status int, response json.RawMessage) error {
+	result := r.db.WithContext(ctx).Model(&Command{}).Where("command_id = ? AND owner_user_id = ?", commandID, owner).
+		Updates(map[string]any{"http_status": status, "response_json": response})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repository) SetSessionStopped(ctx context.Context, owner, sessionID, commandID string, stop bool) (int64, error) {
+	if err := r.AuthorizeSession(ctx, sessionID, owner); err != nil {
+		return 0, err
+	}
+	var version int64
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var session orm.WorkflowSession
+		if err := tx.Where("id = ? AND create_user_id = ?", sessionID, owner).First(&session).Error; err != nil {
+			return err
+		}
+		status := "active"
+		if stop {
+			status = "stopped"
+			if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND status IN ?", sessionID,
+				[]string{"queued", "claimed", "running", "pending"}).Updates(map[string]any{
+				"status": "interrupted", "terminal_code": "WORKFLOW_STOPPED", "lease_expires_at": nil,
+				"updated_at": time.Now().UTC(),
+			}).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&orm.WorkflowOutbox{}).Where("session_id = ? AND status IN ?", sessionID,
+				[]string{"pending", "claimed"}).Updates(map[string]any{"status": "cancelled", "updated_at": time.Now().UTC()}).Error; err != nil {
+				return err
+			}
+		} else if session.Status != "stopped" {
+			return repositoryError("WORKFLOW_NOT_STOPPED")
+		}
+		version = session.StateVersion + 1
+		if err := tx.Model(&orm.WorkflowSession{}).Where("id = ?", sessionID).Updates(map[string]any{
+			"status": status, "state_version": version, "updated_at": time.Now().UTC(),
+		}).Error; err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(map[string]any{"session_id": sessionID, "status": status, "state_version": version})
+		return tx.Create(&orm.WorkflowEvent{SessionID: sessionID, OwnerUserID: owner, ContractVersion: "workflow.v1",
+			EventType: "workflow.patch", EntityID: sessionID, StateVersion: version, CommandID: commandID,
+			PayloadJSON: payload, CreatedAt: time.Now().UTC()}).Error
+	})
+	return version, err
+}
+
+func (r *Repository) CreateHostSession(ctx context.Context, owner, sessionID, originHost,
+	originRef, controllerHost string, workflow WorkflowPackage) (orm.WorkflowSession, bool, error) {
+	var existing orm.WorkflowSession
+	if err := r.db.WithContext(ctx).Where("id = ?", sessionID).First(&existing).Error; err == nil {
+		if existing.CreateUserID != owner || existing.WorkflowRevisionID != workflow.RevisionID {
+			return orm.WorkflowSession{}, false, ErrIdempotencyConflict
+		}
+		return existing, false, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return orm.WorkflowSession{}, false, err
+	}
+	if originHost == "" {
+		originHost = "lazymind"
+	}
+	if controllerHost == "" {
+		controllerHost = originHost
+	}
+	now := time.Now().UTC()
+	created := orm.WorkflowSession{ID: sessionID, ConversationID: "", OriginHost: originHost,
+		OriginRef: originRef, ControllerHost: controllerHost, WorkflowID: workflow.WorkflowID,
+		WorkflowRef: workflow.WorkflowRef, WorkflowRevisionID: workflow.RevisionID,
+		WorkflowRevisionNo: workflow.RevisionNo, WorkflowTreeHash: workflow.TreeHash,
+		StateVersion: 1, GraphHash: workflow.GraphHash, GraphSchemaVersion: workflow.GraphVersion,
+		Status: "active", CreateUserID: owner, CreatedAt: now, UpdatedAt: now}
+	if err := r.db.WithContext(ctx).Create(&created).Error; err != nil {
+		return orm.WorkflowSession{}, false, err
+	}
+	payload, _ := json.Marshal(map[string]any{"session_id": sessionID, "status": "active", "state_version": 1})
+	_ = r.AppendEvent(ctx, &Event{SessionID: sessionID, OwnerUserID: owner, EventType: "workflow.snapshot",
+		EntityID: sessionID, StateVersion: 1, PayloadJSON: payload})
+	return created, true, nil
+}
+
+func (r *Repository) WaitTaskStatuses(ctx context.Context, sessionID string, taskIDs []string) (map[string]string, error) {
+	statuses := map[string]string{}
+	if len(taskIDs) == 0 {
+		return statuses, nil
+	}
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var rows []orm.WorkflowSessionStep
+		if err := r.db.WithContext(ctx).Where("session_id = ? AND task_id IN ?", sessionID, taskIDs).Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		terminal := len(rows) == len(taskIDs)
+		for _, row := range rows {
+			statuses[row.TaskID] = row.Status
+			if row.Status != "succeeded" && row.Status != "failed" && row.Status != "cancelled" && row.Status != "interrupted" {
+				terminal = false
+			}
+		}
+		if terminal {
+			return statuses, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func (r *Repository) AutoMigrate() error { return r.db.AutoMigrate(Models()...) }

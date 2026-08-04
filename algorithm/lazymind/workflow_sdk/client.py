@@ -1,6 +1,7 @@
 """Host-neutral client and local LazyMind endpoint discovery for Workflow v1."""
 from __future__ import annotations
 
+import base64
 import json
 import os
 import platform
@@ -8,7 +9,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
@@ -114,13 +115,16 @@ class WorkflowClient:
     """Shared HTTP implementation used by LazyMind and MCP adapters."""
 
     def __init__(self, base_url: str = '', user_id: str = '', *, token: str = '',
-                 timeout: float = 15.0, read_retries: int = 2, transport: Any = httpx):
+                 host: str = '', timeout: float = 15.0, read_retries: int = 2,
+                 execution_timeout: float = 7200.0, transport: Any = httpx):
         connection = ConnectionInfo(base_url.rstrip('/'), 'argument') if base_url else discover_connection()
         self.connection = connection
         self.base_url = connection.base_url
         self.user_id = user_id or os.getenv('LAZYMIND_WORKFLOW_USER_ID', '').strip()
         self.token = token or os.getenv('LAZYMIND_WORKFLOW_TOKEN', '').strip()
+        self.host = host or os.getenv('LAZYMIND_WORKFLOW_HOST', '').strip() or 'lazymind'
         self.timeout = timeout
+        self.execution_timeout = execution_timeout
         self.read_retries = read_retries
         self.transport = transport
 
@@ -180,8 +184,9 @@ class WorkflowClient:
     def list_workflows(self) -> WorkflowResponse:
         return self._read('/workflows')
 
-    def get_workflow(self, workflow_id: str) -> WorkflowResponse:
-        return self._read(f'/workflows/{workflow_id}')
+    def get_workflow(self, workflow_id: str, revision_id: str = '') -> WorkflowResponse:
+        query = ('?' + urlencode({'revision_id': revision_id})) if revision_id else ''
+        return self._read(f'/workflows/{quote(workflow_id, safe="")}{query}')
 
     def get_state(self, session_id: str) -> Dict[str, Any]:
         return self._read(f'/workflow-sessions/{session_id}/projection').result
@@ -192,13 +197,115 @@ class WorkflowClient:
         return {'session_id': session_id, 'state_version': state.get('state_version'),
                 'ready_steps': ready, 'projection': state}
 
+    def iter_events(self, session_id: str, after_event_id: int = 0) -> Iterator[Dict[str, Any]]:
+        """Yield the durable SSE stream, reconnecting with Last-Event-ID for replay."""
+        last_id = max(0, after_event_id)
+        while True:
+            headers = self._headers()
+            if last_id:
+                headers['Last-Event-ID'] = str(last_id)
+            try:
+                with self.transport.stream(
+                    'GET', f'{self.base_url}/workflow-sessions/{quote(session_id, safe="")}/events',
+                    headers=headers, timeout=None,
+                ) as response:
+                    if response.status_code >= 400:
+                        self._decode(response)
+                    event: Dict[str, Any] = {}
+                    for line in response.iter_lines():
+                        if not line:
+                            if 'data' in event:
+                                if 'id' in event:
+                                    last_id = int(event['id'])
+                                yield event
+                            event = {}
+                        elif line.startswith('id:'):
+                            event['id'] = line[3:].strip()
+                        elif line.startswith('event:'):
+                            event['event'] = line[6:].strip()
+                        elif line.startswith('data:'):
+                            event['data'] = json.loads(line[5:].strip())
+            except (httpx.TimeoutException, httpx.TransportError):
+                time.sleep(0.2)
+
     def prepare_workflow(self, workflow_id: str, *, input_bindings: Optional[Dict[str, Any]] = None,
                          command_id: str = '', fields: Optional[Dict[str, Any]] = None) -> WorkflowResponse:
         command_id = command_id or str(uuid.uuid4())
         payload = {**(fields or {}), 'workflow_id': workflow_id, 'preparation_id': command_id,
-                   'idempotency_key': command_id, 'input_bindings': input_bindings or {}}
+                   'idempotency_key': command_id, 'input_bindings': input_bindings or {},
+                   'origin_host': self.host, 'controller_host': self.host}
         return self._decode(self.transport.post(
             self.base_url + '/workflow-preparations', json=payload,
+            headers=self._headers(command_id), timeout=self.timeout,
+        ))
+
+    def import_input_resource(self, name: str, mime_type: str, content: bytes) -> WorkflowResponse:
+        import hashlib
+        digest = 'sha256:' + hashlib.sha256(content).hexdigest()
+        return self._decode(self.transport.post(
+            self.base_url + '/workflow-input-resources',
+            json={'contract_version': CONTRACT_VERSION, 'name': name, 'mime_type': mime_type,
+                  'size': len(content), 'content_hash': digest,
+                  'content_base64': base64.b64encode(content).decode('ascii')},
+            headers=self._headers(), timeout=self.timeout,
+        ))
+
+    def read_input_resource(self, resource_id: str) -> Dict[str, Any]:
+        result = self._read(
+            f'/workflow-input-resources/{quote(resource_id, safe="")}').result
+        encoded = str(result.get('content_base64') or '')
+        result['content'] = base64.b64decode(encoded) if encoded else b''
+        return result
+
+    def list_workflow_inputs(self, session_id: str) -> WorkflowResponse:
+        return self._read(
+            f'/workflow-sessions/{quote(session_id, safe="")}/input-bindings')
+
+    def bind_workflow_input(self, session_id: str, material_id: str, resource: Dict[str, Any],
+                            command_id: str = '') -> WorkflowResponse:
+        command_id = command_id or str(uuid.uuid4())
+        return self._decode(self.transport.post(
+            f'{self.base_url}/workflow-sessions/{quote(session_id, safe="")}/input-bindings',
+            json={'material_id': material_id, 'resource_type': 'input_resource',
+                  'resource_id': resource['resource_id'], 'resource_revision': resource['revision'],
+                  'content_hash': resource['content_hash'], 'command_id': command_id},
+            headers=self._headers(command_id), timeout=self.timeout,
+        ))
+
+    def stop_workflow(self, session_id: str, command_id: str = '') -> WorkflowResponse:
+        return self._lifecycle(session_id, 'stop', command_id)
+
+    def resume_workflow(self, session_id: str, command_id: str = '') -> WorkflowResponse:
+        return self._lifecycle(session_id, 'resume', command_id)
+
+    def _lifecycle(self, session_id: str, action: str, command_id: str) -> WorkflowResponse:
+        command_id = command_id or str(uuid.uuid4())
+        return self._decode(self.transport.post(
+            f'{self.base_url}/workflow-sessions/{quote(session_id, safe="")}:{action}',
+            json={'command_id': command_id}, headers=self._headers(command_id), timeout=self.timeout,
+        ))
+
+    def get_command(self, command_id: str) -> WorkflowResponse:
+        return self._read(f'/workflow-commands/{quote(command_id, safe="")}')
+
+    def list_artifacts(self, session_id: str) -> WorkflowResponse:
+        return self._read(f'/workflow-sessions/{quote(session_id, safe="")}/artifacts')
+
+    def read_artifact(self, artifact_id: str) -> WorkflowResponse:
+        return self._read(f'/workflow-artifacts/{quote(artifact_id, safe="")}')
+
+    def patch_artifact(self, artifact_id: str, base_revision: int, value: Any,
+                       content_type: str = 'json', caption: str = '',
+                       command_id: str = '') -> WorkflowResponse:
+        command_id = command_id or str(uuid.uuid4())
+        payload: Dict[str, Any] = {
+            'base_revision': base_revision, 'value': value,
+            'content_type': content_type, 'command_id': command_id,
+        }
+        if caption:
+            payload['caption'] = caption
+        return self._decode(self.transport.patch(
+            f'{self.base_url}/workflow-artifacts/{quote(artifact_id, safe="")}', json=payload,
             headers=self._headers(command_id), timeout=self.timeout,
         ))
 
@@ -221,7 +328,7 @@ class WorkflowClient:
         try:
             response = self.transport.post(
                 self.base_url + path, json=payload, headers=self._headers(request.command_id),
-                timeout=self.timeout,
+                timeout=self.execution_timeout,
             )
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             raise WorkflowClientError('TRANSITION_RESULT_UNKNOWN', str(exc), retryable=True) from exc
@@ -234,7 +341,24 @@ class WorkflowClient:
             fields=start_fields,
         ).result
         preparation_id = str(prepared.get('id') or prepared.get('preparation_id') or command_id)
-        return self.start_workflow(preparation_id, session_id, command_id=command_id)
+        started = self.start_workflow(preparation_id, session_id, command_id=command_id)
+        target = str(start_fields.get('target_step_id') or '')
+        # Compatibility starts may already execute their first step. The public
+        # lifecycle creates a Session first and advances only through the same
+        # common transition tool used for every later step.
+        if not target or started.result.get('accepted') or started.result.get('task_id'):
+            return started
+        return self.advance(AdvanceRequest(
+            session_id=session_id,
+            expected_state_version=int(started.result.get('state_version') or 1),
+            steps=[StepCommand(
+                step_id=target, task_id=str(start_fields.get('task_id') or ''),
+                objective=str(start_fields.get('objective') or ''),
+                user_input=str(start_fields.get('user_input') or ''),
+            )],
+            handoff=bool(start_fields.get('hand_off')),
+            command_id=str(uuid.uuid4()),
+        ))
 
     def get_skill_conversion_context(self, skill_id: str,
                                      revision_id: str = '') -> WorkflowResponse:
@@ -243,13 +367,45 @@ class WorkflowClient:
             query['revision_id'] = revision_id
         return self._read('/workflow-authoring/v1/skill-context?' + urlencode(query))
 
-    def create_workflow_draft(self, name: str, skill_id: str, revision_id: str,
-                              tree_hash: str, files: Dict[str, str]) -> WorkflowResponse:
+    def list_skills(self) -> WorkflowResponse:
+        return self._read('/skills')
+
+    def create_workflow_draft(self, name: str, skill_id: str = '', revision_id: str = '',
+                              tree_hash: str = '', files: Optional[Dict[str, str]] = None,
+                              source_type: str = '') -> WorkflowResponse:
+        source_type = source_type or ('skill' if skill_id else 'blank')
         return self._decode(self.transport.post(
             self.base_url + '/workflow-authoring/v1/drafts',
             json={'name': name, 'skill_id': skill_id, 'revision_id': revision_id,
-                  'tree_hash': tree_hash, 'files': files},
+                  'tree_hash': tree_hash, 'files': files or {}, 'source_type': source_type},
             headers=self._headers(), timeout=self.timeout,
+        ))
+
+    def list_workflow_drafts(self) -> WorkflowResponse:
+        return self._read('/workflow-drafts')
+
+    def get_workflow_draft(self, draft_id: str) -> WorkflowResponse:
+        return self._read(f'/workflow-drafts/{quote(draft_id, safe="")}')
+
+    def delete_workflow_draft(self, draft_id: str) -> WorkflowResponse:
+        return self._decode(self.transport.delete(
+            f'{self.base_url}/workflow-drafts/{quote(draft_id, safe="")}',
+            headers=self._headers(), timeout=self.timeout,
+        ))
+
+    def list_workflow_versions(self, workflow_ref: str) -> WorkflowResponse:
+        return self._read(f'/published-workflows/{quote(workflow_ref, safe="")}/versions')
+
+    def archive_workflow(self, workflow_ref: str) -> WorkflowResponse:
+        return self._decode(self.transport.post(
+            f'{self.base_url}/published-workflows/{quote(workflow_ref, safe="")}:archive',
+            json={}, headers=self._headers(), timeout=self.timeout,
+        ))
+
+    def restore_workflow(self, workflow_ref: str) -> WorkflowResponse:
+        return self._decode(self.transport.post(
+            f'{self.base_url}/published-workflows/{quote(workflow_ref, safe="")}:restore',
+            json={}, headers=self._headers(), timeout=self.timeout,
         ))
 
     def update_workflow_draft_file(self, draft_id: str, path: str, content: str,

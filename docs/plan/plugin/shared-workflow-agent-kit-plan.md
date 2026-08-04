@@ -21,17 +21,17 @@ flowchart TB
     Runtime["Workflow Runtime<br/>Graph、Projection、State、Revision、Outbox"]
 
     LazyHost["LazyMind Host Adapter<br/>LazyLLM / ReActAgent / Driver / Approval / Handoff"]
-    CodexHost["Codex Host Adapter<br/>Codex Model / Codex SubAgent / 自动执行"]
+    ExternalHost["External Host Adapter<br/>Host Model / Host SubAgent / 自动执行"]
 
     LazyApp["LazyMind Chat"]
-    CodexApp["Codex"]
+    ExternalApp["Any Agent Host"]
 
     LazyApp --> LazyHost
-    CodexApp --> CodexHost
+    ExternalApp --> ExternalHost
     LazyHost --> SharedSkill
-    CodexHost --> SharedSkill
+    ExternalHost --> SharedSkill
     LazyHost --> RuntimeTools
-    CodexHost --> RuntimeTools
+    ExternalHost --> RuntimeTools
     RuntimeTools --> Runtime
 ```
 
@@ -164,7 +164,7 @@ sequenceDiagram
 
 Attempt Context 应包含步骤目标、acceptance criteria、允许使用的能力声明、固定的 Input Resource/Artifact revision、required outputs、当前意图约束、Runtime 已解析的 operation 和 partial selector，但不得包含 Host 原始附件引用、`llm_config`、模型 API key、LazyLLM sid、本地绝对路径或其他 Host 私有状态。
 
-LazyMind 第一阶段实现 `LazyMindExecutor`，把 Attempt Context 转换成现有 SubAgentContext 和 AgentRunPlan，并由 Supervisor 可靠回报生命周期。Codex 接入时实现 `CodexExecutor`，用 Codex 原生 SubAgent 执行同一份 Attempt Context。模型只负责选择目标步骤和生成步骤内容，不负责维持 heartbeat、选择终态或保证状态回报；这些职责属于可测试的 Host Adapter 代码。这样 Runtime 不关心执行者使用哪一种模型，用户也不需要为 Codex 配置 LazyMind 模型。
+LazyMind 第一阶段提供自己的 `HostExecutor` 实现，把 Attempt Context 转换成现有 SubAgentContext 和 AgentRunPlan，并由 Supervisor 可靠回报生命周期。其他 Agent Host 接入时实现同一公共 `HostExecutor`，用 Host 原生 SubAgent 执行同一份 Attempt Context。模型只负责选择目标步骤和生成步骤内容，不负责维持 heartbeat、选择终态或保证状态回报；这些职责属于可测试的 Host Adapter 代码。这样 Runtime 不关心执行者使用哪一种模型，其他 Host 也不需要配置 LazyMind 模型。
 
 Codex 的 `advance_step` 是一个同步的 Agent-facing 工具调用，但内部不是单个数据库事务：它先提交短事务使流程可靠进入 queued/running，再由 Supervisor 执行长时间 SubAgent，并在执行期间用独立 timer/callback 持续 heartbeat 和 progress，最后提交终态事务后返回模型。即使工具连接被取消或 Codex 进程硬崩溃，lease reaper 也必须在超时后将 Attempt 标记为 interrupted/recoverable；不能让状态永久停在 running。Runtime 只信任带 lease/fencing 的协议事实，并通过 Workflow Event Stream 发布状态。
 
@@ -277,11 +277,11 @@ Core 将 transition accepted 后直接调用 `/api/subagent/run` 的模式改为
 
 ### 4.2 阶段二：串行全自动执行
 
-开放 Agent-facing `prepare_workflow`、`start_workflow`、`get_ready_steps` 和同步 `advance_step`，并向 CodexExecutor Supervisor 开放 Executor-only `claim_attempt`、`get_attempt_context`、`report_attempt_progress`、`save_artifact`、`complete_attempt`、`fail_attempt` 和 `cancel_attempt`。Codex 先调用 `prepare_workflow` 完成不创建 Session、不启动执行的准备，在返回 ready 后以 `preparation_id` 调用 `start_workflow`；全自动 Profile 在信息充分时自动完成串行 Workflow，不选择 `advance_step_and_hand_off`，也不实现 LazyMind 的逐步审批和 synthetic turn。
+开放 Agent-facing `prepare_workflow`、`start_workflow`、`get_ready_steps` 和同步 `advance_step`，并向 HostExecutor Supervisor 开放 Executor-only `claim_attempt`、`get_attempt_context`、`report_attempt_progress`、`save_artifact`、`complete_attempt`、`fail_attempt` 和 `cancel_attempt`。Host 先调用 `prepare_workflow` 完成不创建 Session、不启动执行的准备，在返回 ready 后以 `preparation_id` 调用 `start_workflow`；全自动 Profile 在信息充分时自动完成串行 Workflow，不选择 `advance_step_and_hand_off`，也不实现 LazyMind 的逐步审批和 synthetic turn。
 
-Codex 主 Agent 负责读取 projection、选择目标步骤、验收终态结果并推进下一步；CodexExecutor Adapter 程序化创建 SubAgent，Executor Supervisor 保存并校验 required outputs；Runtime 继续负责 Ready 校验、Attempt 状态和 Artifact revision。需要外部高风险操作时，仍由 Codex 平台现有审批能力控制，而不是复制 LazyMind approval UI。
+Host 主 Agent 负责读取 projection、选择目标步骤、验收终态结果并推进下一步；HostExecutor Adapter 程序化创建 SubAgent，Executor Supervisor 保存并校验 required outputs；Runtime 继续负责 Ready 校验、Attempt 状态和 Artifact revision。需要外部高风险操作时，仍由 Host 平台现有审批能力控制，而不是复制 LazyMind approval UI。
 
-Codex 执行状态由 CodexExecutor Supervisor 的确定性代码回报，不依赖主 Agent 或 SubAgent 主动记住工具调用。Agent 只调用一次 `advance_step`；Supervisor 在调用内部完成 claim、系统 heartbeat、callback progress、Artifact 持久化和 terminal command。`advance_step` 先发布 queued/running，再同步等待 SubAgent，终态写入成功后才返回 Agent。只读 Workflow Status View 可通过持久 Workflow Event Stream 展示 queued、running、progress、waiting、succeeded 或 failed，并在 Artifact 产生后提供下载。Runtime 看不到也不需要保存 Codex 内部 reasoning，只记录公共执行事实。
+Host 执行状态由 HostExecutor Supervisor 的确定性代码回报，不依赖主 Agent 或 SubAgent 主动记住工具调用。Agent 只调用一次 `advance_step`；Supervisor 在调用内部完成 claim、系统 heartbeat、callback progress、Artifact 持久化和 terminal command。`advance_step` 先发布 queued/running，再同步等待 SubAgent，终态写入成功后才返回 Agent。只读 Workflow Status View 可通过持久 Workflow Event Stream 展示 queued、running、progress、waiting、succeeded 或 failed，并在 Artifact 产生后提供下载。Runtime 看不到也不需要保存 Host 内部 reasoning，只记录公共执行事实。
 
 完成标准是一个只包含串行步骤的 Workflow 可以完全由 Codex 模型执行到终态，Runtime 中不出现 LazyMind model config，LazyMind 算法服务关闭时也不影响 Codex 执行。
 
@@ -331,7 +331,7 @@ Runtime 层应以纯状态测试和事务测试为主，覆盖 graph compile、p
 
 命名迁移必须增加边界测试：公共 JSON、Tool schema、SSE event、Python/Go 类型和生成文件中不得出现 `plugin` 字段；persistence adapter 则用旧 `plugin_*` schema fixture 验证 Workflow 领域模型的查询、创建、更新和关联加载均正确。CI 可对公共接口与非 persistence 目录增加残留名称扫描，数据库 migration、SQL、ORM column tag 和专门的兼容测试列入白名单。
 
-每个阶段必须保留跨 Host contract tests，确保 LazyMindExecutor、FakeExecutor 和 CodexExecutor 对同一 Attempt Context 使用相同的 Artifact 和终态协议。共享 Tool schema 和 Skill references 应版本化，Runtime 对不支持的客户端版本返回明确错误，不以静默兼容掩盖语义变化。
+每个阶段必须保留跨 Host contract tests，确保 LazyMind Host、FakeHost 和其他 HostExecutor 对同一 Attempt Context 使用相同的 Artifact 和终态协议。共享 Tool schema 和 Skill references 应版本化，Runtime 对不支持的客户端版本返回明确错误，不以静默兼容掩盖语义变化。
 
 Workflow Event Stream 必须增加 snapshot + reducer 重建、cursor 重放、cursor 过期 resync、state version 缺口、progress 合并和未知 major version 测试。Input Resource 必须增加 LazyMind/Codex 两种来源导入、来源 Host 离线后读取、短期 capability 失效和输入替换 stale 传播测试。Attempt 协议必须增加 lease 过期、fencing、重复领取、Executor 崩溃和 complete/cancel 竞争测试。
 

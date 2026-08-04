@@ -137,14 +137,25 @@ func newToken() (string, error) {
 // Claim uses a compare-and-swap update. Expired claimed/running Attempts may
 // be reclaimed and always receive a new token and higher fencing generation.
 func (s *Service) Claim(ctx context.Context, executorID string) (Claim, error) {
+	return s.ClaimForHost(ctx, executorID, "")
+}
+
+// ClaimForHost restricts ownership to Sessions controlled by the requested
+// Host. An empty Host is retained only for compatibility and tests.
+func (s *Service) ClaimForHost(ctx context.Context, executorID, host string) (Claim, error) {
 	if !SchemaCapable(s.db) {
 		return Claim{}, ErrSchemaUnavailable
 	}
 	now := s.now()
 	var candidate orm.WorkflowSessionStep
-	err := s.db.WithContext(ctx).Where(
+	query := s.db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).Where(
 		"validity = 'effective' AND (status = 'queued' OR (status IN ('claimed','running') AND lease_expires_at < ?))", now,
-	).Order("created_at ASC").First(&candidate).Error
+	)
+	if host != "" {
+		query = query.Joins("JOIN plugin_sessions ps ON ps.id = plugin_session_steps.session_id").
+			Where("COALESCE(ps.controller_host, 'lazymind') = ?", host)
+	}
+	err := query.Order("plugin_session_steps.created_at ASC").First(&candidate).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return Claim{}, ErrNotClaimable
 	}

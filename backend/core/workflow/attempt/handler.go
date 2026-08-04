@@ -69,7 +69,7 @@ func (h Handler) Claim(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	claim, err := h.Service.Claim(r.Context(), id)
+	claim, err := h.Service.ClaimForHost(r.Context(), id, r.Header.Get("X-Workflow-Host"))
 	if err != nil {
 		status, body := protocolToolError(err)
 		respond(w, status, nil, body)

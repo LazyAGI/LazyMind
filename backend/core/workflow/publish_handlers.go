@@ -71,9 +71,12 @@ func workflowFiles(d orm.WorkflowDraft) (map[string][]byte, error) {
 		return nil, fmt.Errorf("plugin.yaml, state.yml and scenario.md are required")
 	}
 	files := map[string][]byte{
-		"plugin.yaml":          []byte(d.WorkflowYAMLContent),
+		"workflow.yaml":        []byte(d.WorkflowYAMLContent),
 		"scenario/state.yml":   []byte(d.StateYAMLContent),
 		"scenario/scenario.md": []byte(d.ScenarioContent),
+	}
+	if strings.TrimSpace(d.DriverContent) != "" {
+		files["scenario/driver.md"] = []byte(d.DriverContent)
 	}
 	if strings.TrimSpace(d.ScriptsContent) != "" && strings.TrimSpace(d.ScriptsContent) != "{}" {
 		var scripts map[string]string
@@ -145,7 +148,7 @@ func PublishWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	compiled := graphengine.Compile(d.WorkflowYAMLContent, d.StateYAMLContent, d.ScenarioContent, graphengine.ProfilePublish)
 	pid := extractWorkflowID(d.WorkflowYAMLContent)
 	if pid == "" {
-		common.ReplyErr(w, "plugin.yaml id required", http.StatusBadRequest)
+		common.ReplyErr(w, "workflow.yaml id required", http.StatusBadRequest)
 		return
 	}
 	ref, scope := "user:"+userID+":"+pid, ownerScope(userID)
@@ -337,12 +340,20 @@ func RollbackWorkflow(w http.ResponseWriter, r *http.Request) {
 }
 
 func ArchiveWorkflow(w http.ResponseWriter, r *http.Request) {
+	setWorkflowPublicationStatus(w, r, "archived")
+}
+
+func RestoreWorkflow(w http.ResponseWriter, r *http.Request) {
+	setWorkflowPublicationStatus(w, r, "active")
+}
+
+func setWorkflowPublicationStatus(w http.ResponseWriter, r *http.Request, status string) {
 	userID, ref := common.UserID(r), workflowRefPathVar(r)
 	if userID == "" {
 		common.ReplyErr(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	res := store.DB().Model(&orm.WorkflowResource{}).Where("plugin_ref=? AND owner_user_id=?", ref, userID).Updates(map[string]any{"status": "archived", "updated_at": time.Now().UTC()})
+	res := store.DB().Model(&orm.WorkflowResource{}).Where("plugin_ref=? AND owner_user_id=?", ref, userID).Updates(map[string]any{"status": status, "updated_at": time.Now().UTC()})
 	if res.Error != nil {
 		common.ReplyErr(w, res.Error.Error(), http.StatusInternalServerError)
 		return
@@ -351,5 +362,5 @@ func ArchiveWorkflow(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "plugin not found", http.StatusNotFound)
 		return
 	}
-	common.ReplyOK(w, nil)
+	common.ReplyOK(w, map[string]any{"workflow_ref": ref, "status": status})
 }

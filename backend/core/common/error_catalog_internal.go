@@ -474,4 +474,14 @@ func init() {
 	registerAdditionalErrorAlias("cron expression produces no future times within 5 years", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("cron expression has no previous time within 5 years", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorPattern("no sql block for database dialect %q", "Database migration configuration is invalid", http.StatusBadRequest, 2001991)
+	for _, source := range []string{
+		"invalid source_type", "skill_id, revision_id and tree_hash are required",
+		"workflow.yaml id required", "invalid package", "workflow id is required",
+		"attempt_id and operation are required",
+	} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	registerAdditionalErrorPattern("seed builtin workflow %s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("lazymind host execution failed: %s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorAlias("lazymind host execution failed", "Internal server error", http.StatusInternalServerError, 2000000)
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
+	workflowexecutor "lazymind/core/workflow/executor"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -36,10 +37,44 @@ type envelope struct {
 
 type Handler struct {
 	Store *workflowstore.Repository
+	Hosts *workflowexecutor.HostRegistry
 	// Legacy handlers remain the sole Runtime writers during PR4.
 	PlanLegacy       http.Handler
 	StartLegacy      http.Handler
 	TransitionLegacy http.Handler
+	Projection       http.Handler
+}
+
+func (h Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
+	owner, ok := identityAndVersion(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.Store.ListWorkflowPackages(r.Context(), owner)
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "WORKFLOW_CATALOG_UNAVAILABLE", err.Error(), true)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{"workflows": items}})
+}
+
+func (h Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
+	owner, ok := identityAndVersion(w, r)
+	if !ok {
+		return
+	}
+	value, err := h.Store.GetWorkflowPackage(
+		r.Context(), owner, mux.Vars(r)["workflow_id"], r.URL.Query().Get("revision_id"),
+	)
+	if errors.Is(err, workflowstore.ErrNotFound) {
+		fail(w, http.StatusNotFound, "WORKFLOW_NOT_FOUND", "workflow or revision was not found", false)
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "WORKFLOW_READ_FAILED", err.Error(), true)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: value})
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -80,6 +115,9 @@ type prepareRequest struct {
 	IdempotencyKey string         `json:"idempotency_key"`
 	WorkflowID     string         `json:"workflow_id"`
 	InputBindings  map[string]any `json:"input_bindings"`
+	OriginHost     string         `json:"origin_host"`
+	OriginRef      string         `json:"origin_ref"`
+	ControllerHost string         `json:"controller_host"`
 }
 
 type toolCommandRequest struct {
@@ -133,6 +171,174 @@ func (h Handler) ImportInputResource(w http.ResponseWriter, r *http.Request) {
 		"size": resource.Size, "content_hash": resource.ContentHash, "revision": resource.Revision,
 	}})
 }
+
+func (h Handler) ReadInputResource(w http.ResponseWriter, r *http.Request) {
+	owner, ok := identityAndVersion(w, r)
+	if !ok {
+		return
+	}
+	resource, err := h.Store.GetInputResource(r.Context(), owner, mux.Vars(r)["resource_id"])
+	if errors.Is(err, workflowstore.ErrNotFound) {
+		fail(w, http.StatusNotFound, "INPUT_RESOURCE_NOT_FOUND", "input resource was not found", false)
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "INPUT_RESOURCE_READ_FAILED", err.Error(), true)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{
+		"resource_id": resource.ID, "name": resource.Name, "mime_type": resource.MimeType,
+		"size": resource.Size, "content_hash": resource.ContentHash, "revision": resource.Revision,
+		"content_base64": base64.StdEncoding.EncodeToString(resource.Content),
+	}})
+}
+
+func (h Handler) ListInputs(w http.ResponseWriter, r *http.Request) {
+	owner, ok := identityAndVersion(w, r)
+	if !ok {
+		return
+	}
+	values, err := h.Store.ListInputBindings(r.Context(), owner, mux.Vars(r)["session_id"])
+	if errors.Is(err, workflowstore.ErrPermissionDenied) {
+		fail(w, http.StatusForbidden, "PERMISSION_DENIED", "workflow session belongs to another owner", false)
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "INPUT_BINDINGS_READ_FAILED", err.Error(), true)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{"inputs": values}})
+}
+
+func (h Handler) ListArtifacts(w http.ResponseWriter, r *http.Request) {
+	owner, ok := identityAndVersion(w, r)
+	if !ok {
+		return
+	}
+	values, err := h.Store.ListArtifacts(r.Context(), owner, mux.Vars(r)["session_id"])
+	if errors.Is(err, workflowstore.ErrPermissionDenied) {
+		fail(w, http.StatusForbidden, "PERMISSION_DENIED", "workflow session belongs to another owner", false)
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "ARTIFACT_LIST_FAILED", err.Error(), true)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{"artifacts": values}})
+}
+
+func (h Handler) ReadArtifact(w http.ResponseWriter, r *http.Request) {
+	owner, ok := identityAndVersion(w, r)
+	if !ok {
+		return
+	}
+	value, err := h.Store.ReadArtifact(r.Context(), owner, mux.Vars(r)["artifact_id"])
+	if errors.Is(err, workflowstore.ErrNotFound) {
+		fail(w, http.StatusNotFound, "ARTIFACT_NOT_FOUND", "artifact was not found", false)
+		return
+	}
+	if errors.Is(err, workflowstore.ErrPermissionDenied) {
+		fail(w, http.StatusForbidden, "PERMISSION_DENIED", "artifact belongs to another owner", false)
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "ARTIFACT_READ_FAILED", err.Error(), true)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: value})
+}
+
+func (h Handler) PatchArtifact(w http.ResponseWriter, r *http.Request) {
+	owner, ok := identityAndVersion(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		BaseRevision int             `json:"base_revision"`
+		ContentType  string          `json:"content_type"`
+		Value        json.RawMessage `json:"value"`
+		Caption      *string         `json:"caption"`
+		CommandID    string          `json:"command_id"`
+	}
+	if json.NewDecoder(r.Body).Decode(&body) != nil || body.BaseRevision < 1 || len(body.Value) == 0 {
+		fail(w, http.StatusUnprocessableEntity, "INVALID_ARTIFACT_PATCH", "base_revision and value are required", false)
+		return
+	}
+	if body.ContentType == "" {
+		body.ContentType = "json"
+	}
+	if body.CommandID == "" {
+		body.CommandID = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	}
+	if body.CommandID == "" {
+		fail(w, http.StatusUnprocessableEntity, "IDEMPOTENCY_KEY_REQUIRED", "command_id is required", false)
+		return
+	}
+	value, err := h.Store.PatchArtifact(r.Context(), owner, mux.Vars(r)["artifact_id"],
+		body.BaseRevision, body.ContentType, body.Value, body.Caption, body.CommandID)
+	if errors.Is(err, workflowstore.ErrIdempotencyConflict) {
+		fail(w, http.StatusConflict, "ARTIFACT_REVISION_CONFLICT", "artifact revision is no longer selected", false)
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "ARTIFACT_PATCH_FAILED", err.Error(), true)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: value})
+}
+
+func (h Handler) GetCommand(w http.ResponseWriter, r *http.Request) {
+	owner, ok := identityAndVersion(w, r)
+	if !ok {
+		return
+	}
+	command, err := h.Store.CommandByID(r.Context(), owner, mux.Vars(r)["command_id"])
+	if errors.Is(err, workflowstore.ErrNotFound) {
+		fail(w, http.StatusNotFound, "COMMAND_NOT_FOUND", "workflow command was not found", false)
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "COMMAND_READ_FAILED", err.Error(), true)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: command})
+}
+
+func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool) {
+	owner, ok := identityAndVersion(w, r)
+	if !ok {
+		return
+	}
+	commandID := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if commandID == "" {
+		var body struct {
+			CommandID string `json:"command_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		commandID = strings.TrimSpace(body.CommandID)
+	}
+	if commandID == "" {
+		fail(w, http.StatusUnprocessableEntity, "IDEMPOTENCY_KEY_REQUIRED", "command_id is required", false)
+		return
+	}
+	version, err := h.Store.SetSessionStopped(r.Context(), owner, mux.Vars(r)["session_id"], commandID, stopped)
+	if errors.Is(err, workflowstore.ErrPermissionDenied) {
+		fail(w, http.StatusForbidden, "PERMISSION_DENIED", "workflow session belongs to another owner", false)
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusConflict, "LIFECYCLE_REJECTED", err.Error(), false)
+		return
+	}
+	status := "active"
+	if stopped {
+		status = "stopped"
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{"session_id": mux.Vars(r)["session_id"], "status": status, "state_version": version}})
+}
+
+func (h Handler) StopWorkflow(w http.ResponseWriter, r *http.Request)   { h.setStopped(w, r, true) }
+func (h Handler) ResumeWorkflow(w http.ResponseWriter, r *http.Request) { h.setStopped(w, r, false) }
 
 func (h Handler) BindInput(w http.ResponseWriter, r *http.Request) {
 	owner, ok := identityAndVersion(w, r)
@@ -263,7 +469,63 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	plan := json.RawMessage(`{"status":"ready"}`)
-	if h.PlanLegacy != nil {
+	if workflow, packageErr := h.Store.GetWorkflowPackage(r.Context(), owner, req.WorkflowID, ""); packageErr == nil {
+		controllerHost := req.ControllerHost
+		if controllerHost == "" {
+			controllerHost = req.OriginHost
+		}
+		if controllerHost == "" {
+			controllerHost = "lazymind"
+		}
+		if h.Hosts != nil {
+			var graph struct {
+				Nodes map[string]struct {
+					Capabilities []string `json:"capabilities"`
+					LegacyTools  []string `json:"legacy_tools"`
+				} `json:"nodes"`
+				MaterialProducers map[string]struct {
+					Kind string `json:"kind"`
+				} `json:"material_producers"`
+			}
+			_ = json.Unmarshal(workflow.CompiledGraph, &graph)
+			capabilities, legacyTools := []string{}, []string{}
+			for _, node := range graph.Nodes {
+				capabilities = append(capabilities, node.Capabilities...)
+				legacyTools = append(legacyTools, node.LegacyTools...)
+			}
+			if supported, missing := h.Hosts.Supports(controllerHost, capabilities, legacyTools); !supported {
+				fail(w, http.StatusUnprocessableEntity, "HOST_CAPABILITY_MISSING",
+					"selected Host cannot execute this Workflow", false)
+				return
+			} else if len(missing) > 0 {
+				fail(w, http.StatusUnprocessableEntity, "HOST_CAPABILITY_MISSING",
+					strings.Join(missing, ", "), false)
+				return
+			}
+			missingInputs := []string{}
+			for materialID, producer := range graph.MaterialProducers {
+				if producer.Kind == "external" {
+					if _, exists := req.InputBindings[materialID]; !exists {
+						missingInputs = append(missingInputs, materialID)
+					}
+				}
+			}
+			if len(missingInputs) > 0 {
+				plan, _ = json.Marshal(map[string]any{"status": "needs_input", "workflow_ref": workflow.WorkflowRef,
+					"workflow_id": workflow.WorkflowID, "workflow_revision": workflow.RevisionID,
+					"revision_no": workflow.RevisionNo, "tree_hash": workflow.TreeHash,
+					"missing_inputs": missingInputs, "controller_host": controllerHost})
+				goto prepared
+			}
+		}
+		plan, _ = json.Marshal(map[string]any{
+			"status": "ready", "workflow_ref": workflow.WorkflowRef, "workflow_id": workflow.WorkflowID,
+			"workflow_revision": workflow.RevisionID, "revision_no": workflow.RevisionNo,
+			"tree_hash": workflow.TreeHash, "warnings": []string{}, "missing_inputs": []string{},
+			"origin_host": req.OriginHost, "origin_ref": req.OriginRef,
+			"controller_host": controllerHost,
+		})
+	} else if h.PlanLegacy != nil {
 		recorder := &capture{header: http.Header{}}
 		clone := r.Clone(r.Context())
 		clone.Body = io.NopCloser(bytes.NewReader(body))
@@ -276,6 +538,7 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 		}
 		plan = append(plan[:0], recorder.body.Bytes()...)
 	}
+prepared:
 	prepared, _, err := h.Store.Prepare(r.Context(), owner, key, req.WorkflowID, ContractVersion, body, plan)
 	if err != nil {
 		fail(w, 503, "PREPARATION_STORE_FAILED", err.Error(), true)
@@ -308,6 +571,46 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		fail(w, 503, "PREPARATION_CONSUME_FAILED", err.Error(), true)
+		return
+	}
+	var preparedResult map[string]any
+	_ = json.Unmarshal(prepared.ResponseJSON, &preparedResult)
+	if status, _ := preparedResult["status"].(string); status != "" && status != "ready" {
+		fail(w, http.StatusConflict, "PREPARATION_NOT_READY", "preparation requires additional input", false)
+		return
+	}
+	revisionID, _ := preparedResult["workflow_revision"].(string)
+	if workflowPackage, packageErr := h.Store.GetWorkflowPackage(r.Context(), owner, prepared.WorkflowID, revisionID); packageErr == nil {
+		var original prepareRequest
+		_ = json.Unmarshal(prepared.RequestJSON, &original)
+		session, _, createErr := h.Store.CreateHostSession(r.Context(), owner, req.SessionID,
+			original.OriginHost, original.OriginRef, original.ControllerHost, workflowPackage)
+		if createErr != nil {
+			fail(w, http.StatusConflict, "SESSION_CREATE_FAILED", createErr.Error(), false)
+			return
+		}
+		for materialID, raw := range original.InputBindings {
+			value, _ := raw.(map[string]any)
+			resourceID, _ := value["resource_id"].(string)
+			hash, _ := value["content_hash"].(string)
+			revision, _ := value["revision"].(float64)
+			if resourceID == "" {
+				continue
+			}
+			binding := workflowstore.InputBinding{WorkflowSessionID: session.ID, MaterialID: materialID,
+				ResourceType: "input_resource", ResourceID: resourceID, ResourceRevision: int64(revision),
+				ContentHash: hash, CreatedByCommandID: "prepare:" + prepared.ID}
+			if bindErr := h.Store.BindInput(r.Context(), owner, binding); bindErr != nil {
+				fail(w, http.StatusConflict, "INPUT_BINDING_CONFLICT", bindErr.Error(), false)
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, envelope{Data: map[string]any{
+			"workflow_session_id": session.ID, "session_id": session.ID, "status": session.Status,
+			"state_version":    session.StateVersion,
+			"event_stream_url": "/workflow-sessions/" + session.ID + "/events",
+			"status_url":       "/workflow-sessions/" + session.ID + "/projection",
+		}})
 		return
 	}
 	if h.StartLegacy != nil {
@@ -388,7 +691,53 @@ func (h Handler) Command(delegate http.Handler) http.HandlerFunc {
 			fail(w, 503, "COMMAND_FAILED", err.Error(), true)
 			return
 		}
-		writeJSON(w, result.HTTPStatus, envelope{Data: json.RawMessage(result.ResponseJSON)})
+		var command toolCommandRequest
+		_ = json.Unmarshal(body, &command)
+		response := append(json.RawMessage(nil), result.ResponseJSON...)
+		if result.HTTPStatus < 400 && command.Tool == "advance_step" {
+			var value map[string]any
+			_ = json.Unmarshal(response, &value)
+			taskIDs := []string{}
+			if taskID, _ := value["task_id"].(string); taskID != "" {
+				taskIDs = append(taskIDs, taskID)
+			}
+			if tasks, _ := value["tasks"].([]any); len(tasks) > 0 {
+				taskIDs = taskIDs[:0]
+				for _, raw := range tasks {
+					if item, ok := raw.(map[string]any); ok {
+						if taskID, _ := item["task_id"].(string); taskID != "" {
+							taskIDs = append(taskIDs, taskID)
+						}
+					}
+				}
+			}
+			statuses, waitErr := h.Store.WaitTaskStatuses(r.Context(), sessionID, taskIDs)
+			if waitErr != nil {
+				fail(w, http.StatusGatewayTimeout, "ATTEMPT_WAIT_FAILED", waitErr.Error(), true)
+				return
+			}
+			value["execution_mode"] = "synchronous"
+			value["attempt_statuses"] = statuses
+			if len(statuses) == 1 {
+				for _, status := range statuses {
+					value["attempt_status"] = status
+				}
+			}
+			if h.Projection != nil {
+				recorder := &capture{header: http.Header{}}
+				clone := r.Clone(r.Context())
+				h.Projection.ServeHTTP(recorder, clone)
+				var projectionResponse map[string]any
+				if json.Unmarshal(recorder.body.Bytes(), &projectionResponse) == nil {
+					if data, ok := projectionResponse["data"].(map[string]any); ok {
+						value["projection"] = data
+					}
+				}
+			}
+			response, _ = json.Marshal(value)
+			_ = h.Store.UpdateCommandResponse(r.Context(), owner, commandID, result.HTTPStatus, response)
+		}
+		writeJSON(w, result.HTTPStatus, envelope{Data: response})
 	}
 }
 
