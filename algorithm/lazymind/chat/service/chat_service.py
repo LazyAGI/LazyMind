@@ -689,6 +689,12 @@ async def _handle_chat_impl(
             *(selected_skills or []),
         ]))
         skill_config = selected_skills or False
+    workflow_skill_dir = ''
+    if agentic_config.get('enable_workflow', True):
+        from lazymind.workflow_toolkit import WORKFLOW_SKILL_NAME, workflow_skills_dir
+        selected_skills = list(dict.fromkeys([*(selected_skills or []), WORKFLOW_SKILL_NAME]))
+        skill_config = selected_skills
+        workflow_skill_dir = workflow_skills_dir()
     set_trace_context({
         'trace_id': conversation.session_id,
         'session_id': conversation.session_id,
@@ -731,11 +737,6 @@ async def _handle_chat_impl(
         ),
         'agent.workspace',
         priority=70,
-    )
-    # Workflow policy historically followed the common system prompt.
-    prompt_builder.system(
-        'chat_workflow_policy', 'Workflow Policy', workflow_contribution.system_prompt,
-        'workflow.scenario', priority=80,
     )
     prompt_builder.runtime(
         'chat_workflow_runtime', 'Workflow State', workflow_contribution.runtime_context,
@@ -823,7 +824,7 @@ async def _handle_chat_impl(
             workspace=workspace,
             keep_full_turns=_cfg['agentic_keep_full_turns'],
             fs=FS,
-            skills_dir=_cfg['skill_fs_url'],
+            skills_dir=','.join(filter(None, [_cfg['skill_fs_url'], workflow_skill_dir])),
             max_retries={
                 'low': _cfg['agentic_max_rounds_low'],
                 'medium': _cfg['agentic_max_rounds_medium'],

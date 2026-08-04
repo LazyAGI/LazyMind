@@ -30,7 +30,6 @@ import (
 	"lazymind/core/wordgroup"
 	"lazymind/core/workflow"
 	workflowattempt "lazymind/core/workflow/attempt"
-	workflowcompat "lazymind/core/workflow/compat"
 	workflowexecutor "lazymind/core/workflow/executor"
 	workflowfacade "lazymind/core/workflow/facade"
 	workflowstore "lazymind/core/workflow/store"
@@ -83,12 +82,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:cancel", nil, attemptHandler.Cancel)
 	workflowRepository := workflowstore.New(corestore.DB())
 	workflowFacade := workflowfacade.Handler{
-		Store:            workflowRepository,
-		Hosts:            workflowexecutor.DefaultHostRegistry,
-		PlanLegacy:       http.HandlerFunc(workflow.PlanWorkflowSessionStart),
-		StartLegacy:      http.HandlerFunc(workflow.StartWorkflowSession),
-		TransitionLegacy: http.HandlerFunc(workflow.TransitionWorkflowSession),
-		Projection:       http.HandlerFunc(workflow.GetSessionProjection),
+		Store:      workflowRepository,
+		Hosts:      workflowexecutor.DefaultHostRegistry,
+		Projection: http.HandlerFunc(workflow.GetSessionProjection),
 	}
 
 	// ----- Datasettext -----
@@ -273,20 +269,12 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- Workflow Info -----
 	handleAPI(r, "GET", "/workflows", []string{"qa.read"}, workflowFacade.ListWorkflows)
 	handleAPI(r, "GET", "/workflows/{workflow_id}", []string{"qa.read"}, workflowFacade.GetWorkflow)
-	if workflowcompat.LegacyRoutesEnabled() {
-		handleAPI(r, "GET", "/plugins", []string{"qa.read"}, workflowcompat.LegacyRouteMetrics.Wrap("/plugins", workflow.ListWorkflows))
-		handleAPI(r, "GET", "/plugins/{workflow_id}", []string{"qa.read"}, workflowcompat.LegacyRouteMetrics.Wrap("/plugins/{workflow_id}", workflow.GetWorkflowInfo))
-	}
-
 	// ----- Workflow Drafts (user-created workflow authoring) -----
 	handleAPI(r, "GET", "/workflow-drafts", []string{"qa.read"}, workflow.ListWorkflowDrafts)
 	handleAPI(r, "POST", "/workflow-drafts", []string{"qa.write"}, workflow.CreateWorkflowDraft)
-	handleAPI(r, "POST", "/workflow-drafts:polish-info", []string{"qa.write"}, workflow.PolishWorkflowDraftInfo)
 	handleAPI(r, "GET", "/workflow-drafts/{draft_id}", []string{"qa.read"}, workflow.GetWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:save", []string{"qa.write"}, workflow.SaveWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:validate", []string{"qa.read"}, workflow.ValidateWorkflowDraft)
-	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:ai-generate", []string{"qa.write"}, workflow.AIGenerateWorkflowDraft)
-	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:ai-repair", []string{"qa.write"}, workflow.AIRepairWorkflowDraft)
 	handleAPI(r, "GET", "/workflow-drafts/{draft_id}/generation-analysis", []string{"qa.read"}, workflow.GetWorkflowGenerationAnalysis)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:confirm-workflow", []string{"qa.write"}, workflow.ConfirmWorkflowWorkflow)
 	handleAPI(r, "GET", "/workflow-drafts/{draft_id}/repair-runs/{repair_id}", []string{"qa.read"}, workflow.GetWorkflowRepairRun)
@@ -349,6 +337,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/artifacts", []string{"qa.read"}, workflowFacade.ListArtifacts)
 	handleAPI(r, "GET", "/workflow-artifacts/{artifact_id}", []string{"qa.read"}, workflowFacade.ReadArtifact)
 	handleAPI(r, "PATCH", "/workflow-artifacts/{artifact_id}", []string{"qa.write"}, workflowFacade.PatchArtifact)
+	handleAPI(r, "DELETE", "/workflow-artifacts/{artifact_id}", []string{"qa.write"}, workflowFacade.DeleteArtifact)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:stop", []string{"qa.write"}, workflowFacade.StopWorkflow)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:resume", []string{"qa.write"}, workflowFacade.ResumeWorkflow)
 	handleAPI(r, "GET", "/workflow-commands/{command_id}", []string{"qa.read"}, workflowFacade.GetCommand)

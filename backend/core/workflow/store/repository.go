@@ -202,7 +202,7 @@ func (r *Repository) ListArtifacts(ctx context.Context, owner, sessionID string)
 			ProducerAttemptID: revision.ProducerAttemptID, Revision: revision.Revision,
 			ListIndex: revision.ListIndex, Selected: revision.Selected, Validity: revision.Validity,
 			ChangeSource: revision.ChangeSource, ContentType: contentType, Value: value,
-			Caption: caption, CreatedAt: revision.CreatedAt})
+			Caption: caption, Deleted: revision.Validity == "deleted", CreatedAt: revision.CreatedAt})
 	}
 	return out, nil
 }
@@ -248,7 +248,7 @@ func (r *Repository) ReadArtifact(ctx context.Context, owner, artifactID string)
 		ProducerAttemptID: revision.ProducerAttemptID, Revision: revision.Revision,
 		ListIndex: revision.ListIndex, Selected: revision.Selected, Validity: revision.Validity,
 		ChangeSource: revision.ChangeSource, ContentType: contentType, Value: value,
-		Caption: caption, CreatedAt: revision.CreatedAt}, nil
+		Caption: caption, Deleted: revision.Validity == "deleted", CreatedAt: revision.CreatedAt}, nil
 }
 
 func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string, baseRevision int,
@@ -257,7 +257,7 @@ func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string
 	if err != nil {
 		return Artifact{}, err
 	}
-	if !current.Selected || current.Revision != baseRevision {
+	if !current.Selected || current.Deleted || current.Revision != baseRevision {
 		return Artifact{}, ErrIdempotencyConflict
 	}
 	now := time.Now().UTC()
@@ -284,7 +284,8 @@ func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string
 		}
 		created = orm.WorkflowSlotRevision{ID: revisionID, SessionID: current.SessionID,
 			SlotID: current.SlotID, Revision: baseRevision + 1, ListIndex: current.ListIndex, Selected: true,
-			HumanArtifactID: &humanID, ChangeSource: "agent", Slot: current.Slot, StepID: current.StepID,
+			HumanArtifactID: &humanID, ChangeSource: "agent", ProducerAttemptID: current.ProducerAttemptID,
+			Slot: current.Slot, StepID: current.StepID,
 			Attempt: current.Attempt, Validity: "effective", CreatedAt: now}
 		if err := tx.Create(&created).Error; err != nil {
 			return err
@@ -301,6 +302,72 @@ func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string
 			"revision": created.Revision, "state_version": stateVersion})
 		return tx.Create(&orm.WorkflowEvent{SessionID: current.SessionID, OwnerUserID: owner,
 			ContractVersion: "workflow.v1", EventType: "artifact.upsert", EntityID: created.ID,
+			StateVersion: stateVersion, CommandID: commandID, PayloadJSON: payload, CreatedAt: now}).Error
+	})
+	if err != nil {
+		return Artifact{}, err
+	}
+	return r.ReadArtifact(ctx, owner, created.ID)
+}
+
+// DeleteArtifact creates an immutable selected tombstone revision. Historical
+// revisions and their bytes remain readable by id for lineage and audit.
+func (r *Repository) DeleteArtifact(ctx context.Context, owner, artifactID string,
+	baseRevision int, commandID string) (Artifact, error) {
+	current, err := r.ReadArtifact(ctx, owner, artifactID)
+	if err != nil {
+		return Artifact{}, err
+	}
+	if !current.Selected || current.Deleted || current.Revision != baseRevision {
+		return Artifact{}, ErrIdempotencyConflict
+	}
+	now := time.Now().UTC()
+	humanID, revisionID := uuid.NewString(), uuid.NewString()
+	var created orm.WorkflowSlotRevision
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&orm.WorkflowSlotRevision{}).Where(
+			"session_id = ? AND slot_id = ? AND selected = ?", current.SessionID, current.SlotID, true)
+		if current.ListIndex == nil {
+			query = query.Where("list_index IS NULL")
+		} else {
+			query = query.Where("list_index = ?", *current.ListIndex)
+		}
+		result := query.Where("revision = ?", baseRevision).Update("selected", false)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrIdempotencyConflict
+		}
+		caption := "deleted"
+		if err := tx.Create(&orm.WorkflowHumanArtifact{ID: humanID, SessionID: current.SessionID,
+			Slot: current.Slot, ContentType: "application/x-lazymind-deleted",
+			Value: json.RawMessage(`null`), Caption: &caption, CreatedAt: now}).Error; err != nil {
+			return err
+		}
+		created = orm.WorkflowSlotRevision{ID: revisionID, SessionID: current.SessionID,
+			SlotID: current.SlotID, Revision: baseRevision + 1, ListIndex: current.ListIndex, Selected: true,
+			HumanArtifactID: &humanID, ChangeSource: "agent", ProducerAttemptID: current.ProducerAttemptID,
+			Slot: current.Slot, StepID: current.StepID,
+			Attempt: current.Attempt, Validity: "deleted", CreatedAt: now}
+		if err := tx.Create(&created).Error; err != nil {
+			return err
+		}
+		var session orm.WorkflowSession
+		if err := tx.Where("id = ?", current.SessionID).First(&session).Error; err != nil {
+			return err
+		}
+		stateVersion := session.StateVersion + 1
+		if err := tx.Model(&session).Updates(map[string]any{
+			"state_version": stateVersion, "updated_at": now,
+		}).Error; err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(map[string]any{"artifact_id": created.ID,
+			"previous_artifact_id": current.ID, "slot_id": created.SlotID,
+			"revision": created.Revision, "deleted": true, "state_version": stateVersion})
+		return tx.Create(&orm.WorkflowEvent{SessionID: current.SessionID, OwnerUserID: owner,
+			ContractVersion: "workflow.v1", EventType: "artifact.delete", EntityID: created.ID,
 			StateVersion: stateVersion, CommandID: commandID, PayloadJSON: payload, CreatedAt: now}).Error
 	})
 	if err != nil {

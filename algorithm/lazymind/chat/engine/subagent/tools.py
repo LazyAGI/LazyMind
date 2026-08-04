@@ -364,12 +364,11 @@ def _resolve_list_index_from_sort_order(
         session_id: str = cfg.get('workflow_session_id', '')
         if not session_id:
             return None, None
-        ctx = require_context()
-        order_list = ctx.db.load_slot_order_list(session_id, slot)
-        if not order_list:
+        artifacts = _public_workflow_artifacts(session_id, slot)
+        if not artifacts:
             # Single-cardinality slot — sort_order is meaningless, ignore silently.
             return None, None
-        n = len(order_list)
+        n = len(artifacts)
         if sort_order < 1:
             return None, (
                 f'sort_order must be >= 1 (sort_order is 1-based, where 1 is the first item). '
@@ -381,7 +380,7 @@ def _resolve_list_index_from_sort_order(
                 f'(valid range: 1–{n}). Artifact appended as a new item instead. '
                 f'If you intended to overwrite, use a sort_order between 1 and {n}.'
             )
-        return int(order_list[sort_order - 1]), None
+        return sort_order - 1, None
     except Exception:
         return None, None
 
@@ -423,13 +422,8 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
     except Exception:
         workflow_session_id = ''
 
-    bound_rows = ctx.db.load_bound_slot_artifacts(ctx.task_id, key) if workflow_session_id else []
-    if bound_rows:
-        result = _get_bound_workflow_artifacts(ctx, key, bound_rows, sort_order)
-    elif workflow_session_id and sort_order is not None:
-        result = _get_workflow_artifact_by_sort_order(ctx, key, workflow_session_id, sort_order)
-    elif workflow_session_id and sort_order is None:
-        result = _get_workflow_artifact_all(ctx, key, workflow_session_id)
+    if workflow_session_id:
+        result = _get_public_workflow_artifacts(key, workflow_session_id, sort_order)
     elif sort_order is not None:
         # Ordinary SubAgent: read from sub_agent_artifacts.
         rows = ctx.local_artifacts(keys=[key]) or ctx.db.load_artifacts(ctx.task_id, keys=[key])
@@ -487,30 +481,15 @@ def _resolve_artifact_text(
         workflow_session_id = ''
 
     if workflow_session_id:
-        so = sort_order if sort_order is not None else 1
-        bound_rows = ctx.db.load_bound_slot_artifacts(ctx.task_id, key)
-        if bound_rows:
-            row = bound_rows[so - 1] if 1 <= so <= len(bound_rows) else None
-            if row is None:
-                return None, 'text'
-            value, content_type = ctx.db.resolve_slot_revision_value(row)
-            if value is None:
-                return None, 'text'
+        values = _public_workflow_artifacts(workflow_session_id, key)
+        position = (sort_order or 1) - 1
+        if 0 <= position < len(values):
+            value = values[position].get('value') or {}
+            content_type = str(values[position].get('content_type') or 'text')
             original_type = 'json' if content_type == 'json' else 'text'
-            if content_type == 'file':
+            if content_type == 'file' and isinstance(value, dict):
                 original_type = value.get('type', 'text')
             return _extract_text_from_value(ctx, value, original_type), original_type
-
-        row = ctx.db.load_slot_artifact_by_sort_order(workflow_session_id, key, so)
-        if row is not None:
-            value, content_type = ctx.db.resolve_slot_revision_value(row)
-            if value is not None:
-                original_type = 'json' if content_type == 'json' else 'text'
-                if content_type == 'file':
-                    original_type = value.get('type', 'text')
-                text = _extract_text_from_value(ctx, value, original_type)
-                if text is not None:
-                    return text, original_type
 
     # 3. Local in-memory cache (same step).
     rows = ctx.local_artifacts(keys=[key])
@@ -608,86 +587,34 @@ def _apply_line_range(
     })
 
 
-def _get_workflow_artifact_by_sort_order(
-    ctx: Any, key: str, session_id: str, sort_order: int
+def _workflow_client() -> Any:
+    import httpx
+    import lazyllm
+    from lazymind.config import config
+    from lazymind.workflow_sdk import WorkflowClient
+    cfg = lazyllm.globals.get('agentic_config') or {}
+    return WorkflowClient(
+        str(config['core_api_url']).rstrip('/'), str(cfg.get('user_id') or ''),
+        host='lazymind', transport=httpx,
+    )
+
+
+def _public_workflow_artifacts(session_id: str, key: str = '') -> List[Dict[str, Any]]:
+    response = _workflow_client().list_artifacts(session_id).result
+    artifacts = response.get('artifacts') if isinstance(response, dict) else []
+    values = [dict(item) for item in artifacts if isinstance(item, dict)]
+    if key:
+        values = [item for item in values if item.get('slot') == key]
+    return values
+
+
+def _get_public_workflow_artifacts(
+    key: str, session_id: str, sort_order: Optional[int],
 ) -> Dict[str, Any]:
-    """Fetch a single workflow slot artifact by sort_order via DB resolve."""
-    row = ctx.db.load_slot_artifact_by_sort_order(session_id, key, sort_order)
-    if row is None:
-        return tool_success('get_artifact', {
-            'status': 'empty',
-            'message': (
-                f"No artifact found for key '{key}' at sort_order={sort_order} "
-                f'in workflow session {session_id}.'
-            ),
-        })
-
-    value, content_type = ctx.db.resolve_slot_revision_value(row)
-    if value is None:
-        return tool_success('get_artifact', {
-            'status': 'empty',
-            'message': f"Artifact key '{key}' at sort_order={sort_order} resolved to null value.",
-        })
-    return tool_success('get_artifact', {
-        'status': 'ok',
-        'key': key,
-        'sort_order': sort_order,
-        'content_type': content_type,
-        'artifacts': [{'slot': key, 'content_type': content_type, 'value': value, 'sort_order': sort_order}],
-    })
-
-
-def _get_bound_workflow_artifacts(
-    ctx: Any,
-    key: str,
-    rows: list[Dict[str, Any]],
-    sort_order: Optional[int],
-) -> Dict[str, Any]:
-    """Resolve artifacts from the immutable input bindings of this attempt."""
-    selected_rows = rows
+    """Read Workflow Artifacts only through the public SDK."""
+    artifacts = _public_workflow_artifacts(session_id, key)
     if sort_order is not None:
-        if sort_order < 1 or sort_order > len(rows):
-            return tool_success('get_artifact', {
-                'status': 'empty',
-                'message': f"No bound artifact found for key '{key}' at sort_order={sort_order}.",
-            })
-        selected_rows = [rows[sort_order - 1]]
-
-    artifacts = []
-    for position, row in enumerate(selected_rows, start=1):
-        value, content_type = ctx.db.resolve_slot_revision_value(row)
-        if value is None:
-            continue
-        artifact_sort_order = sort_order if sort_order is not None else position
-        artifacts.append({
-            'slot': key,
-            'content_type': content_type,
-            'value': value,
-            'sort_order': artifact_sort_order,
-            'revision': row.get('revision'),
-            '_from_attempt_binding': True,
-        })
-    if not artifacts:
-        return tool_success('get_artifact', {
-            'status': 'empty',
-            'message': f"Bound artifact key '{key}' could not be resolved.",
-        })
-    return tool_success('get_artifact', {'status': 'ok', 'key': key, 'artifacts': artifacts})
-
-
-def _get_workflow_artifact_all(ctx: Any, key: str, session_id: str) -> Dict[str, Any]:
-    """Return all selected revisions for a workflow slot key (sort_order=None)."""
-    resolved_rows = ctx.db.load_selected_slot_artifacts_resolved_with_order(session_id)
-    artifacts = [
-        {
-            'slot': r['slot'],
-            'content_type': r.get('content_type'),
-            'value': r['value'],
-            'sort_order': r.get('sort_order'),
-        }
-        for r in resolved_rows
-        if r.get('slot') == key
-    ]
+        artifacts = artifacts[sort_order - 1:sort_order] if sort_order > 0 else []
     if not artifacts:
         return tool_success('get_artifact', {
             'status': 'empty',
@@ -1425,12 +1352,7 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
             'status': 'error',
             'message': 'find_artifact requires an active SubAgent context.',
         })
-    if sort_order is not None:
-        result_dict = _get_workflow_artifact_by_sort_order(
-            ctx, slot, session_id, sort_order,
-        )
-    else:
-        result_dict = _get_workflow_artifact_all(ctx, slot, session_id)
+    result_dict = get_artifact(slot, sort_order=sort_order)
 
     # Unwrap inner result to extract the path.
     inner = result_dict.get('result', result_dict)

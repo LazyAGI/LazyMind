@@ -19,7 +19,7 @@ or decide that missing required output is success.
 - Workflow definition and projection reads;
 - prepare/start, input binding, stop/resume, and state transitions themselves;
 - Ready computation and Runtime execute/retry/rewind resolution;
-- Artifact list/read/patch/persistence and lineage propagation;
+- Input Resource import/read/bind and Artifact list/read/patch/delete/persistence;
 - Skill snapshot and conversion context reads;
 - draft create/update, compile, diagnostics, script audit, and publish;
 - permission, capability, contract-version, and idempotency checks.

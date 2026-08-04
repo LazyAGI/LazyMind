@@ -58,6 +58,10 @@ TOOL_SCHEMAS = {
         'value': {}, 'content_type': {'type': 'string'}, 'caption': {'type': 'string'},
         'command_id': {'type': 'string'},
     }, ['artifact_id', 'base_revision', 'value']),
+    'delete_artifact': _object({
+        'artifact_id': {'type': 'string'}, 'base_revision': {'type': 'integer', 'minimum': 1},
+        'command_id': {'type': 'string'},
+    }, ['artifact_id', 'base_revision']),
     'advance_step': _object({
         'session_id': {'type': 'string'},
         'expected_state_version': {'type': 'integer', 'minimum': 0},
@@ -111,6 +115,7 @@ TOOL_DESCRIPTIONS = {
     'list_artifacts': 'List selected immutable Artifact revisions for a Workflow Session.',
     'read_artifact': 'Read one authorized Artifact revision and its lineage metadata.',
     'patch_artifact': 'Create an Agent-authored immutable revision from a selected Artifact.',
+    'delete_artifact': 'Create an immutable deletion tombstone revision without erasing history.',
     'advance_step': 'Synchronously request one or more Ready targets; Runtime resolves execute/retry/rewind.',
     'get_skill_conversion_context': 'Read a complete, immutable Skill revision snapshot; never invokes a model.',
     'list_skills': 'List Skills visible to the current user for deterministic Workflow conversion.',
@@ -192,6 +197,10 @@ class WorkflowMCPServer:
             result = client.patch_artifact(
                 arguments['artifact_id'], arguments['base_revision'], arguments['value'],
                 arguments.get('content_type', 'json'), arguments.get('caption', ''),
+                arguments.get('command_id', '')).result
+        elif name == 'delete_artifact':
+            result = client.delete_artifact(
+                arguments['artifact_id'], arguments['base_revision'],
                 arguments.get('command_id', '')).result
         elif name == 'advance_step':
             steps = [StepCommand(**step) for step in arguments['steps']]

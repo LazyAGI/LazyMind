@@ -46,8 +46,6 @@ def ensure_chat_runtime() -> ModuleType:
     started = time.monotonic()
     try:
         module = importlib.import_module('lazymind.chat.service.chat_service')
-        from lazymind.chat.workflow import workflow_loader
-        workflow_loader.ensure_loaded()
     except BaseException as exc:
         with _condition:
             _loading = False

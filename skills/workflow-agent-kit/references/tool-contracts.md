@@ -27,6 +27,14 @@ Choose by declared capability, required inputs, outputs, and risk.
 
 Returns definition and revision metadata. Do not construct ids from display names.
 
+### Input Resource tools
+
+- `import_input_resource(name, mime_type, content_base64)` stores immutable bytes.
+- `read_input_resource(resource_id)` returns metadata and base64 content.
+- `list_workflow_inputs(session_id)` returns exact Session bindings.
+- `bind_workflow_input(session_id, material_id, resource, command_id?)` binds the
+  returned resource id, revision, and hash; it never accepts a local path or URL.
+
 ## Preparation and start
 
 ### `prepare_workflow(workflow_id, input_bindings?, command_id?)`
@@ -80,6 +88,25 @@ MCP tool failures return `isError: true` with structured `code`, `message`,
 - `PERMISSION_DENIED`: stop and obtain the correct identity/authority.
 - `LAZYMIND_NOT_FOUND`: follow `installation-and-connection.md`.
 
+## Artifact revisions
+
+### `list_artifacts(session_id)` and `read_artifact(artifact_id)`
+
+List returns selected output revisions. Read accepts an exact revision id and
+returns content, `revision`, `selected`, `validity`, `deleted`, producer Attempt,
+slot, list index, and lineage metadata.
+
+### `patch_artifact(artifact_id, base_revision, value, content_type?, caption?, command_id?)`
+
+Creates a new selected immutable revision from exact Agent-authored content.
+`base_revision` must still be selected. It performs no generation or review.
+
+### `delete_artifact(artifact_id, base_revision, command_id?)`
+
+Creates a new selected tombstone revision with `deleted: true` and emits
+`artifact.delete`. Historical revisions remain readable. Repeated or stale delete
+requests return a revision conflict rather than erasing additional data.
+
 ## Deterministic Skill-to-Workflow authoring
 
 ### `get_skill_conversion_context(skill_id, revision_id?)`
@@ -118,7 +145,6 @@ call it until diagnostics are clean. The tool does not generate or revise files.
 
 ## Capability boundary
 
-The MCP server advertises only implemented public facade tools. At this revision,
-standard stop/resume and Artifact list/read/patch tools are not advertised because
-their Core public facades are not yet complete. Tool-list absence is a capability
-result, not permission to call internal endpoints.
+Tool-list absence is a capability result, not permission to call internal or
+product-specific endpoints. `advance_step_and_hand_off` is a Host extension and
+may be absent; all other lifecycle and Artifact operations above are public.

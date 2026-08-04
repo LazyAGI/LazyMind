@@ -33,7 +33,7 @@ def test_mcp_lists_only_real_public_tools():
     assert {'list_workflows', 'prepare_workflow', 'start_workflow',
             'get_workflow_state', 'get_ready_steps', 'advance_step'} <= names
     assert {'stop_workflow', 'resume_workflow', 'list_artifacts', 'patch_artifact',
-            'import_input_resource', 'bind_workflow_input'} <= names
+            'delete_artifact', 'import_input_resource', 'bind_workflow_input'} <= names
     assert {
         'get_skill_conversion_context', 'create_workflow_draft',
         'update_workflow_draft_file', 'validate_workflow_draft',
@@ -93,3 +93,18 @@ def test_sdk_authoring_routes_do_not_use_generation_endpoints():
     path = transport.get.call_args.args[0]
     assert path.endswith('/workflow-authoring/v1/drafts/d1/diagnostics')
     assert 'ai-' not in path
+
+
+def test_sdk_delete_artifact_creates_public_tombstone_request():
+    transport = MagicMock()
+    transport.delete.return_value = MagicMock(
+        status_code=200, json=lambda: {'ok': True, 'result': {'deleted': True, 'revision': 3}},
+    )
+    from lazymind.workflow_sdk import WorkflowClient
+
+    result = WorkflowClient('http://core/api/core', 'u1', transport=transport).delete_artifact(
+        'a2', 2, 'cmd-delete')
+    assert result.result['deleted'] is True
+    call = transport.delete.call_args
+    assert call.args[0].endswith('/workflow-artifacts/a2')
+    assert call.kwargs['json'] == {'base_revision': 2, 'command_id': 'cmd-delete'}

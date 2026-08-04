@@ -7,9 +7,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+	"lazymind/core/common/orm"
 )
 
 func testRepo(t *testing.T) *Repository {
@@ -23,6 +25,46 @@ func testRepo(t *testing.T) *Repository {
 		t.Fatal(err)
 	}
 	return repo
+}
+
+func TestDeleteArtifactCreatesTombstoneAndPreservesHistory(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := repo.db.AutoMigrate(&orm.WorkflowSession{}, &orm.WorkflowHumanArtifact{},
+		&orm.WorkflowSlotRevision{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.db.Create(&orm.WorkflowSession{ID: "s1", CreateUserID: "u1",
+		WorkflowID: "wf", Status: "active", StateVersion: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	caption := "original"
+	if err := repo.db.Create(&orm.WorkflowHumanArtifact{ID: "h1", SessionID: "s1", Slot: "report",
+		ContentType: "text/plain", Value: json.RawMessage(`{"text":"kept"}`), Caption: &caption,
+		CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	humanID := "h1"
+	if err := repo.db.Create(&orm.WorkflowSlotRevision{ID: "a1", SessionID: "s1", SlotID: "report",
+		Slot: "report", StepID: "draft", Revision: 1, Selected: true, HumanArtifactID: &humanID,
+		Validity: "effective", ChangeSource: "agent", CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := repo.DeleteArtifact(ctx, "u1", "a1", 1, "cmd-delete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deleted.Deleted || deleted.Revision != 2 || deleted.Validity != "deleted" || !deleted.Selected {
+		t.Fatalf("unexpected tombstone: %#v", deleted)
+	}
+	original, err := repo.ReadArtifact(ctx, "u1", "a1")
+	if err != nil || original.Selected || original.Deleted || string(original.Value) != `{"text":"kept"}` {
+		t.Fatalf("history was not preserved: %#v err=%v", original, err)
+	}
+	if _, err := repo.DeleteArtifact(ctx, "u1", deleted.ID, 2, "cmd-again"); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("repeated delete must conflict: %v", err)
+	}
 }
 
 func TestPreparationIsOwnerScopedAndConsumedOnce(t *testing.T) {

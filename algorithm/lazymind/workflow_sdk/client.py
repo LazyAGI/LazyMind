@@ -309,6 +309,16 @@ class WorkflowClient:
             headers=self._headers(command_id), timeout=self.timeout,
         ))
 
+    def delete_artifact(self, artifact_id: str, base_revision: int,
+                        command_id: str = '') -> WorkflowResponse:
+        """Create an immutable deletion tombstone for the selected revision."""
+        command_id = command_id or str(uuid.uuid4())
+        return self._decode(self.transport.delete(
+            f'{self.base_url}/workflow-artifacts/{quote(artifact_id, safe="")}',
+            json={'base_revision': base_revision, 'command_id': command_id},
+            headers=self._headers(command_id), timeout=self.timeout,
+        ))
+
     def start_workflow(self, preparation_id: str, session_id: str,
                        *, command_id: str = '') -> WorkflowResponse:
         command_id = command_id or preparation_id

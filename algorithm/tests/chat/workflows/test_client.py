@@ -5,7 +5,6 @@ import pytest
 
 from lazymind.chat.workflow.client import (
     AdvanceRequest, StepCommand, WorkflowClient, WorkflowClientError,
-    sanitize_attempt_context,
 )
 from lazymind.chat.workflow.file_adapter import LazyMindHostFileAdapter
 
@@ -62,23 +61,3 @@ def test_host_file_adapter_returns_only_stable_resource_fields(tmp_path: Path):
     assert not hasattr(resource, 'path')
     assert not hasattr(resource, 'url')
     assert str(tmp_path) not in repr(resource)
-
-
-@pytest.mark.parametrize('private', [
-    {'llm_config': {'model': 'private'}},
-    {'inputs': [{'local_path': '/tmp/private.pdf'}]},
-    {'inputs': [{'temporary_url': 'https://host.invalid/signed'}]},
-    {'token': 'secret'},
-])
-def test_attempt_context_rejects_host_private_fields(private):
-    with pytest.raises(WorkflowClientError) as caught:
-        sanitize_attempt_context({'contract_version': 'workflow.v1', **private})
-    assert caught.value.code == 'ATTEMPT_CONTEXT_PRIVATE_DATA'
-
-
-def test_attempt_context_accepts_stable_input_binding():
-    context = sanitize_attempt_context({'inputs': [{
-        'material_id': 'requirements', 'resource_id': 'res1', 'revision': 1,
-        'content_hash': 'sha256:abc', 'read_capability': 'capability-id',
-    }]})
-    assert context['inputs'][0]['resource_id'] == 'res1'

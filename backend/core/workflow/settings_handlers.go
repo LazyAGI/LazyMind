@@ -62,34 +62,6 @@ func ListUserWorkflowSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, map[string]any{"workflow_ref": v.WorkflowRef, "workflow_id": v.WorkflowID, "name": v.Name, "description": v.Description, "when_to_use": v.WhenToUse, "source_type": v.SourceType, "revision_id": v.HeadRevisionID, "revision_no": v.Version, "remote_root": "remote://" + v.RelativeRoot, "enabled": enabled, "status": v.Status})
 	}
-	if req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, common.ChatServiceEndpoint()+"/api/workflows", nil); err == nil {
-		if resp, err := http.DefaultClient.Do(req); err == nil {
-			defer resp.Body.Close()
-			var payload struct {
-				Workflows []struct {
-					ID          string `json:"id"`
-					Name        string `json:"name"`
-					Description string `json:"description"`
-				} `json:"plugins"`
-			}
-			if resp.StatusCode == http.StatusOK && json.NewDecoder(resp.Body).Decode(&payload) == nil {
-				var settings []orm.UserWorkflowSetting
-				_ = store.DB().Where("user_id=? AND plugin_ref LIKE 'builtin:%'", userID).Find(&settings).Error
-				values := map[string]bool{}
-				for _, s := range settings {
-					values[s.WorkflowRef] = s.Enabled
-				}
-				for _, b := range payload.Workflows {
-					ref := "builtin:" + b.ID
-					enabled, exists := values[ref]
-					if !exists {
-						enabled = true
-					}
-					items = append(items, map[string]any{"workflow_ref": ref, "workflow_id": b.ID, "name": b.Name, "description": b.Description, "source_type": "builtin", "enabled": enabled, "status": "active"})
-				}
-			}
-		}
-	}
 	common.ReplyOK(w, map[string]any{"plugins": items})
 }
 

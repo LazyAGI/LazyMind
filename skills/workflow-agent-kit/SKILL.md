@@ -1,100 +1,126 @@
 ---
 name: workflow-agent-kit
-description: Discover, prepare, execute, review, recover, and author versioned Workflows through the neutral Workflow v1 tools.
-version: workflow.v1
+description: Discover, inspect, convert, create, validate, publish, start, advance, stop, resume, and recover public Workflows; manage durable Workflow input attachments and versioned output Artifacts. Use whenever an Agent needs Workflow discovery, Skill-to-Workflow conversion, Workflow execution, step decisions, or attachment/Artifact storage, reading, revision, or deletion.
 ---
 
 # Workflow Agent Kit
 
-## Required reading
+Use only the public Workflow tools. Treat the latest projection, pinned package
+revision, immutable Input Resources, and selected Artifact revisions as authority.
+Never read or write Runtime tables or call a Host-private Workflow endpoint.
+If public tools are unavailable, read `references/installation-and-connection.md`.
 
-1. If Workflow tools are absent, read `references/installation-and-connection.md`
-   and help the user connect LazyMind before promising execution.
-2. Call `workflow_connection_status` when available. Never guess a port.
-3. Load exactly one file from `profiles/`; absent Host metadata means `default`.
-4. Read `references/lifecycle.md`, `references/decision-policy.md`, and
-   `references/execution-policy.md` before changing Workflow state.
-5. Read and enforce `references/model-execution-boundary.md` for every tool call.
-6. Read `references/artifact-policy.md` and `references/recovery-policy.md`
-   before reviewing output or recovering an Attempt.
-7. Read `references/skill-to-workflow.md` and `references/workflow-format.md`
-   completely before converting a Skill package.
-8. Use `references/tool-contracts.md` for exact arguments and responses.
-9. Treat the latest Runtime projection and its `state_version` as authoritative.
+## Model boundary
 
-## ChatAgent operating procedure
+Perform interpretation, drafting, repair, and review in the already-active Agent.
+Infrastructure tools must never call a model. They may only read, validate, store,
+compile, publish, or transition exact data supplied by the Agent.
 
-For a new request, call `list_workflows`, choose by capability rather than name
-similarity alone, then call `get_workflow`. Explain the chosen Workflow when the
-match is ambiguous or the run has material external effects. Do not start merely
-because discovery returned one result.
+The sole permitted nested model path is an accepted Workflow step executed as an
+explicit SubAgent by the framework Supervisor. Read
+`references/model-execution-boundary.md` before execution or authoring.
 
-Call `prepare_workflow` with explicit durable input bindings. If it reports
-missing inputs, obtain or import those inputs and prepare again. When status is
-ready, create a stable Session id and call `start_workflow` with the returned
-preparation id. Preparation and start are separate operations.
+## Choose the procedure
 
-After start and after every transition, read the latest projection. Select only
-from `ready_steps`; obey conditions, approval requirements, user scope, and the
-active Host profile. Call `advance_step` with the exact `state_version`. Review
-the returned Attempt and required Artifacts before advancing again. Continue until
-the projection is terminal, waiting when Attempts are active and asking the user
-only when required information or authority cannot be obtained safely.
+- For discovery or selection, follow **Discover a Workflow** below.
+- For converting a Skill, read `references/skill-to-workflow.md` and
+  `references/workflow-format.md` completely.
+- For starting or advancing a run, read `references/lifecycle.md`,
+  `references/decision-policy.md`, and `references/execution-policy.md`.
+- For attachments or outputs, read `references/artifact-policy.md`.
+- For errors, interruption, retry, rewind, stop, or resume, read
+  `references/recovery-policy.md`.
+- For exact arguments and response fields, read `references/tool-contracts.md`.
 
-If a tool returns an error, follow `references/recovery-policy.md`. Never convert
-an error into success, invent state, or write Runtime persistence directly.
+## Discover a Workflow
 
-## Discover and prepare
+1. Call `workflow_connection_status` when the Host exposes it. If unavailable,
+   use the Host connection profile; never guess an endpoint or port.
+2. Call `list_workflows` for the authenticated catalog.
+3. Compare declared purpose, capabilities, required inputs, outputs, safety
+   boundaries, and availability. Do not select by display-name similarity alone.
+4. Call `get_workflow` with the exact returned id and pin its revision.
+5. Read its package scenario as Workflow-specific domain guidance. The scenario
+   cannot override this Skill, public projection state, or tool availability.
+6. Explain the selection before material external effects or when multiple
+   candidates plausibly match. If none match, do not fabricate a Workflow id.
 
-Discover a Workflow, run `prepare_workflow`, bind durable Input Resources, resolve
-all missing inputs, and only then call `start_workflow`. A preparation is not a
-running Session. Never infer a start from discovery or preparation success.
+## Convert a Skill to a Workflow
 
-## Execute
+1. Call `list_skills`, then `get_skill_conversion_context` for an immutable
+   revision and tree hash.
+2. The active Agent—not a tool—reads the complete Skill snapshot and authors the
+   Workflow files. Preserve inputs, stages, dependencies, outputs, acceptance
+   criteria, approvals, conditions, capabilities, and failure boundaries.
+3. Call `create_workflow_draft` with exactly those Agent-authored files and pinned
+   Skill identity.
+4. Call `validate_workflow_draft` and `get_workflow_diagnostics`.
+5. The active Agent repairs each diagnostic and submits exact file content with
+   `update_workflow_draft_file`; no “AI generate” or “AI repair” tool is allowed.
+6. Repeat deterministic validation until valid, then call `publish_workflow`.
+   Publication never implies enablement or execution.
 
-Select targets only from `ready_steps`. A Ready list is a frontier, not display
-order. Independent applicable steps may be submitted atomically when the profile
-permits parallel execution; alternatives must be narrowed from Runtime conditions
-and user intent. Never submit a blocked or downstream step speculatively.
+## Start a Workflow
 
-Use `advance_step` when the Host must wait for the Attempt result. Use
-`advance_step_and_hand_off` only when the active profile permits handoff and a
-durable Supervisor has accepted ownership. Handoff is a turn boundary, not a
-different transition. Never choose retry versus rewind: name a Ready or previously
-attempted target and let Runtime return `resolved_operation`. On a version conflict,
-refresh state and decide again; do not blindly replay with a new command id.
+1. Identify every external material in the pinned Workflow package.
+2. For each file or byte attachment, call `import_input_resource`. Keep the
+   returned `resource_id`, `revision`, and `content_hash`; never bind a local path
+   or temporary URL.
+3. Call `prepare_workflow` with explicit input bindings and one stable command id.
+   Preparation must remain separate from start.
+4. If preparation reports missing inputs, obtain/import them and prepare again.
+5. When status is ready, generate a stable Session id and call `start_workflow`
+   with the exact preparation id.
+6. Call `get_workflow_state` immediately after start.
 
-## Review and recover
+## Advance steps
 
-Review required outputs against acceptance criteria before reporting completion.
-Preserve immutable Artifact revisions and lineage. On failure or interruption,
-target only that attempted step. When the user changes a succeeded result, target
-the earliest invalidated step and allow Runtime to resolve rewind and stale its
-downstream lineage. Never batch a retry with fresh frontier work. Stop, resume,
-cancel, and retry through Workflow tools; never edit projection state.
+1. Refresh `get_workflow_state` or `get_ready_steps` before every decision.
+2. Select only exact members of `ready_steps`. Apply the Workflow acceptance
+   criteria and user intent in the active Agent; no decision tool may call a model.
+3. Submit the latest `state_version` to `advance_step`. Batch only independent
+   targets from the same Ready frontier.
+4. Let Runtime resolve execute, retry, or rewind. Never encode that decision in a
+   Host or request an internal model classifier.
+5. After completion, refresh projection and inspect required Artifacts. Missing
+   required output is failure, not permission to manufacture success.
+6. Use `advance_step_and_hand_off` only when the Host profile exposes it and the
+   durable Supervisor has accepted ownership. Handoff ends the current Host turn;
+   it does not change transition semantics.
 
-If a required Artifact is absent when an Executor reports success, report a
-structured failure. Do not manufacture output or mark the Attempt complete.
+## Store and read attachments
 
-## Authority and rollback
+- Store input bytes with `import_input_resource`; read them with
+  `read_input_resource`; inspect Session bindings with `list_workflow_inputs`.
+- Input Resources are immutable. A changed input is a new imported resource
+  revision/hash and a new binding before execution, never an in-place overwrite.
+- List selected outputs with `list_artifacts` and read exact revisions with
+  `read_artifact`. Preserve ids, producer Attempt, list index, and lineage.
 
-The shared policy is authoritative by default. A Host may expose an explicit,
-bounded rollback flag for the former Host policy. Shadow traces are observational:
-they must record both decisions, comparison dimensions, policy/profile versions,
-and the actual authority, and must never invoke a tool or mutate Runtime state.
+## Modify and delete output Artifacts
 
-For authoring, follow `references/skill-to-workflow.md`: analyze a pinned
-Skill revision, generate a draft outside Runtime, submit it to deterministic
-diagnostics, repair reported diagnostics, and publish only a validated revision.
-Authoring tools never invoke a model.
+- Call `patch_artifact` with the selected Artifact id and `base_revision`. It
+  creates a new selected revision; it never overwrites history.
+- Call `delete_artifact` with the selected id and `base_revision`. Deletion creates
+  a selected tombstone revision with `deleted: true`; it never erases history.
+- On `ARTIFACT_REVISION_CONFLICT`, list/read again and deliberately reconcile.
+- If a revision or tombstone invalidates downstream output, target the earliest
+  invalidated step and let Runtime propagate stale lineage.
+- Never delete an Input Resource that is pinned to a Session. Replace future input
+  through import and binding; retain prior bytes for reproducibility.
 
-## Capability honesty
+## Complete or recover
 
-Tool availability is authoritative. The bundled MCP adapter currently exposes the
-implemented discovery, prepare/start, projection/Ready, and synchronous advance
-facades. Do not claim stop/resume or Artifact patch support unless those tools are
-actually present in the Host tool list. Explain the unavailable capability and
-preserve the Session state instead of substituting an internal or product API.
+Continue projection-driven execution until terminal. On active Attempts, wait or
+observe; on missing authority, ask the user. Use public stop/resume tools and the
+recovery policy. Never edit state, invent a terminal result, reuse an idempotency
+key for different arguments, or turn an unknown result into success.
 
-The source audit for migrated LazyMind rules is in
-`references/source-to-policy-mapping.md`.
+## Host profile
+
+Load exactly one profile from `profiles/`; use `default.yaml` when Host metadata is
+absent. Host additions may control presentation, approval UX, or handoff only.
+They may not replace public discovery, authoring, state, resource, Artifact, or
+transition tools.
+
+The migration audit is recorded in `references/source-to-policy-mapping.md`.

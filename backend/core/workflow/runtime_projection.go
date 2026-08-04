@@ -61,34 +61,7 @@ func loadSessionGraph(ctx context.Context, db *gorm.DB, session *orm.WorkflowSes
 		}
 		return &graph, nil
 	}
-	// Compatibility path for built-ins and pre-v2 revisions. It is read-only;
-	// new publishes are required to persist a strict compiled graph.
-	upstream := common.JoinURL(common.ChatServiceEndpoint(), "/api/workflows/"+session.WorkflowID)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, upstream, nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("load legacy plugin spec: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("load legacy plugin spec: status %d", resp.StatusCode)
-	}
-	var body struct {
-		WorkflowYAML string `json:"workflow_yaml_raw"`
-		StateYAML    string `json:"state_yaml_raw"`
-		Scenario     string `json:"scenario_raw"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, err
-	}
-	compiled := graphengine.Compile(body.WorkflowYAML, body.StateYAML, body.Scenario, graphengine.ProfileRuntimeLoad)
-	if !compiled.Valid || compiled.Graph == nil {
-		return nil, fmt.Errorf("legacy plugin cannot be compiled: %v", compiled.Diagnostics)
-	}
-	if err := ensureLegacySessionGraphUnchanged(session, compiled.Graph); err != nil {
-		return nil, err
-	}
-	return compiled.Graph, nil
+	return nil, fmt.Errorf("workflow session has no pinned public revision")
 }
 
 func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string) (graphengine.RuntimeSnapshot, error) {

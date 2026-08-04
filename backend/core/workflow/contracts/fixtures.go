@@ -223,7 +223,7 @@ func ReadBaselineManifest(path string) (BaselineManifest, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return BaselineManifest{}, err
 	}
-	if manifest.ContractVersion != VersionV1 || manifest.Authority != "legacy_runtime" || len(manifest.ProductionSources) == 0 {
+	if manifest.ContractVersion != VersionV1 || manifest.Authority != "public_runtime" || len(manifest.ProductionSources) == 0 {
 		return BaselineManifest{}, fmt.Errorf("invalid workflow baseline authority")
 	}
 	syncTool, syncOK := manifest.ToolSemantics["advance_step"]

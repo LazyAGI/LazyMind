@@ -28,7 +28,7 @@ const subagentRunTimeout = 2 * time.Hour
 // objective, input_slots, and output_slots are intentionally
 // omitted: the Python runner reads those from the sub_agent_tasks DB record.
 // tools is still forwarded for non-workflow_step agent types; workflow_step tasks
-// resolve their tools from workflow_loader at execution time.
+// resolve their tools from the immutable public Host Attempt context.
 type RunRequest struct {
 	TaskID        string         `json:"task_id"`
 	AgentType     string         `json:"agent_type"`

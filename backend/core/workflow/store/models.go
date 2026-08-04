@@ -57,5 +57,6 @@ type Artifact struct {
 	ContentType       string          `json:"content_type"`
 	Value             json.RawMessage `json:"value,omitempty"`
 	Caption           *string         `json:"caption,omitempty"`
+	Deleted           bool            `json:"deleted"`
 	CreatedAt         time.Time       `json:"created_at"`
 }

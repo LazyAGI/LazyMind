@@ -372,80 +372,6 @@ func TestOnSubAgentDone_Failed_SetsSessionFailed(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────
-// callDriverAgent — mock HTTP server
-// ──────────────────────────────────────────────
-
-func TestCallDriverAgent_ReturnsMessage(t *testing.T) {
-	cases := []struct {
-		body       string
-		wantMsgHas string
-	}{
-		{
-			body:       `{"message":"optimized_prompt saved with 65 words."}`,
-			wantMsgHas: "optimized_prompt",
-		},
-		{
-			body:       `{"message":"enhanced_image_url saved. The pipeline is complete."}`,
-			wantMsgHas: "complete",
-		},
-		{
-			body:       `{"message":"No artifact found; prompt generation may have failed."}`,
-			wantMsgHas: "artifact",
-		},
-	}
-
-	for i, tc := range cases {
-		t.Run(fmt.Sprintf("case%d", i), func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprint(w, tc.body)
-			}))
-			defer srv.Close()
-
-			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
-
-			msg, fallback := callDriverAgent("image-plugin", "optimize_prompt", "step output", "ps-1", nil, nil, "")
-			if fallback {
-				t.Fatalf("unexpected fallback")
-			}
-			if !strings.Contains(msg, tc.wantMsgHas) {
-				t.Fatalf("expected message to contain %q, got %q", tc.wantMsgHas, msg)
-			}
-		})
-	}
-}
-
-func TestCallDriverAgent_DefaultsToFallbackOnError(t *testing.T) {
-	// Point to a non-existent server so the HTTP call fails.
-	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://127.0.0.1:19999")
-
-	msg, fallback := callDriverAgent("image-plugin", "generate_image", "result", "ps-1", nil, nil, "")
-	if !fallback {
-		t.Fatal("expected fallback=true on connection error")
-	}
-	if !strings.Contains(msg, "generate_image") {
-		t.Fatalf("fallback message should contain step ID, got %q", msg)
-	}
-}
-
-func TestCallDriverAgent_DefaultsToFallbackOnEmptyMessage(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"message":""}`)
-	}))
-	defer srv.Close()
-	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
-
-	msg, fallback := callDriverAgent("image-plugin", "analyze_subject", "output", "ps-1", nil, nil, "")
-	if !fallback {
-		t.Fatal("empty DriverAgent message must trigger the explicit fallback path")
-	}
-	if !strings.Contains(msg, "analyze_subject") {
-		t.Fatalf("fallback message should contain step ID, got %q", msg)
-	}
-}
-
 func TestCheckAndFallbackIfStuck_SkipsWhenSubAgentRunning(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
@@ -515,47 +441,6 @@ func TestCheckAndFallbackIfStuck_DemotesWhenIdle(t *testing.T) {
 	}
 	if gotEvent != "step_waiting" {
 		t.Fatalf("expected step_waiting event, got %q", gotEvent)
-	}
-}
-
-// ──────────────────────────────────────────────
-// resolveSlotBinding — mock Python API
-// ──────────────────────────────────────────────
-
-func TestResolveSlotBinding_FoundBinding(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		workflowID := r.URL.Query().Get("workflow_id")
-		slot := r.URL.Query().Get("slot")
-		if workflowID != "image-plugin" || slot != "enhanced_image_url" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"slot_id":"enhanced_image_output","cardinality":"list"}`)
-	}))
-	defer srv.Close()
-	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
-
-	slotID, cardinality := resolveSlotBinding("image-plugin", "enhanced_image_url")
-	if slotID != "enhanced_image_output" {
-		t.Fatalf("expected enhanced_image_output, got %q", slotID)
-	}
-	if cardinality != "list" {
-		t.Fatalf("expected list cardinality, got %q", cardinality)
-	}
-}
-
-func TestResolveSlotBinding_NoBinding_ReturnsEmpty(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"slot_id":"","cardinality":"single"}`)
-	}))
-	defer srv.Close()
-	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
-
-	slotID, _ := resolveSlotBinding("image-plugin", "some_internal_artifact")
-	if slotID != "" {
-		t.Fatalf("expected empty slotID, got %q", slotID)
 	}
 }
 

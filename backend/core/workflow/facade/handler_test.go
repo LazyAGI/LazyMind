@@ -94,39 +94,13 @@ func decodeEnvelope(t *testing.T, recorder *httptest.ResponseRecorder) envelope 
 	return got
 }
 
-func TestPrepareHTTPIsOwnerScopedIdempotentAndPreservesLegacyPlan(t *testing.T) {
+func TestPrepareHTTPRejectsUnknownPublicWorkflow(t *testing.T) {
 	h, _ := testHandler(t)
-	var calls atomic.Int32
-	h.PlanLegacy = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"legacy_plan":true}`))
-	})
 	body := []byte(`{"workflow_id":"writer","idempotency_key":"same","input_bindings":{"source":"r1"}}`)
-	var firstID string
-	for i := 0; i < 2; i++ {
-		recorder := httptest.NewRecorder()
-		h.Prepare(recorder, request(http.MethodPost, "/workflow-preparations", "owner", body))
-		if recorder.Code != http.StatusOK {
-			t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
-		}
-		got := decodeEnvelope(t, recorder)
-		encoded, _ := json.Marshal(got.Data)
-		var prepared workflowstore.Preparation
-		if err := json.Unmarshal(encoded, &prepared); err != nil {
-			t.Fatal(err)
-		}
-		if string(prepared.ResponseJSON) != `{"legacy_plan":true}` {
-			t.Fatalf("legacy parity lost: %s", prepared.ResponseJSON)
-		}
-		if firstID == "" {
-			firstID = prepared.ID
-		} else if prepared.ID != firstID {
-			t.Fatalf("idempotency changed id: %s != %s", prepared.ID, firstID)
-		}
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("idempotent prepare planned %d times", calls.Load())
+	recorder := httptest.NewRecorder()
+	h.Prepare(recorder, request(http.MethodPost, "/workflow-preparations", "owner", body))
+	if recorder.Code != http.StatusNotFound || decodeEnvelope(t, recorder).Error.Code != "WORKFLOW_NOT_FOUND" {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -147,12 +121,8 @@ func TestConsumeHTTPChecksOwnerAndConsumesExactlyOnce(t *testing.T) {
 	if denied.Code != http.StatusForbidden || decodeEnvelope(t, denied).Error.Code != "PERMISSION_DENIED" {
 		t.Fatalf("denied=%d %s", denied.Code, denied.Body.String())
 	}
-	if got := consume("owner", "s1"); got.Code != http.StatusOK {
+	if got := consume("owner", "s1"); got.Code != http.StatusNotFound {
 		t.Fatalf("consume=%d %s", got.Code, got.Body.String())
-	}
-	second := consume("owner", "s2")
-	if second.Code != http.StatusOK || !bytes.Contains(second.Body.Bytes(), []byte(`"session_id":"s1"`)) {
-		t.Fatalf("second consume changed session: %s", second.Body.String())
 	}
 }
 

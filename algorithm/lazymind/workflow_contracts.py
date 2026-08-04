@@ -40,7 +40,7 @@ def replay_projection(events: tuple[dict[str, Any], ...] | list[dict[str, Any]])
 def read_baseline_manifest(path: str | Path) -> BaselineManifest:
     payload = json.loads(Path(path).read_text(encoding='utf-8'))
     if (payload.get('contract_version') != VERSION_V1
-            or payload.get('authority') != 'legacy_runtime'
+            or payload.get('authority') != 'public_runtime'
             or not payload.get('production_sources')):
         raise ValueError('invalid Workflow baseline authority')
     tools = payload.get('tool_semantics', {})

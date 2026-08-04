@@ -220,7 +220,6 @@ func main() {
 		log.Logger.Fatal().Err(err).Msg("seed built-in Workflows failed")
 	}
 	evalset.RegisterAsyncJobs()
-	workflow.RegisterWorkflowDraftGenerateJob()
 	workflowHosts := workflowexecutor.DefaultHostRegistry
 	workflowHosts.RegisterHost("lazymind", workflowexecutor.HostRegistration{
 		Executor:             workflowhostlazymind.Executor{DB: store.DB(), State: store.State()},

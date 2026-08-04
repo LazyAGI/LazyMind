@@ -57,6 +57,7 @@ func (adapter Executor) BuildRunSpec(ctx context.Context, value workflowexecutor
 	return workflowexecutor.HostRunSpec{Attempt: value, Params: map[string]any{
 		"operation": value.Operation, "objective": value.Objective, "inputs": value.Inputs,
 		"capabilities": value.Capabilities, "prompt": value.Prompt,
+		"legacy_tools": value.LegacyTools, "user_id": session.CreateUserID,
 		"runtime_instruction": value.Instruction, "partial_indices": value.PartialSelector,
 		"_host_task_id": step.TaskID, "_host_workspace_path": task.WorkspacePath,
 		"_host_llm_config": llmConfig,

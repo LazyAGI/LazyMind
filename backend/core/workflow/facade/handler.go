@@ -36,13 +36,9 @@ type envelope struct {
 }
 
 type Handler struct {
-	Store *workflowstore.Repository
-	Hosts *workflowexecutor.HostRegistry
-	// Legacy handlers remain the sole Runtime writers during PR4.
-	PlanLegacy       http.Handler
-	StartLegacy      http.Handler
-	TransitionLegacy http.Handler
-	Projection       http.Handler
+	Store      *workflowstore.Repository
+	Hosts      *workflowexecutor.HostRegistry
+	Projection http.Handler
 }
 
 func (h Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
@@ -287,6 +283,47 @@ func (h Handler) PatchArtifact(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, envelope{Data: value})
 }
 
+func (h Handler) DeleteArtifact(w http.ResponseWriter, r *http.Request) {
+	owner, ok := identityAndVersion(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		BaseRevision int    `json:"base_revision"`
+		CommandID    string `json:"command_id"`
+	}
+	if json.NewDecoder(r.Body).Decode(&body) != nil || body.BaseRevision < 1 {
+		fail(w, http.StatusUnprocessableEntity, "INVALID_ARTIFACT_DELETE", "base_revision is required", false)
+		return
+	}
+	if body.CommandID == "" {
+		body.CommandID = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	}
+	if body.CommandID == "" {
+		fail(w, http.StatusUnprocessableEntity, "IDEMPOTENCY_KEY_REQUIRED", "command_id is required", false)
+		return
+	}
+	value, err := h.Store.DeleteArtifact(r.Context(), owner, mux.Vars(r)["artifact_id"],
+		body.BaseRevision, body.CommandID)
+	if errors.Is(err, workflowstore.ErrIdempotencyConflict) {
+		fail(w, http.StatusConflict, "ARTIFACT_REVISION_CONFLICT", "artifact revision is no longer selected", false)
+		return
+	}
+	if errors.Is(err, workflowstore.ErrNotFound) {
+		fail(w, http.StatusNotFound, "ARTIFACT_NOT_FOUND", "artifact was not found", false)
+		return
+	}
+	if errors.Is(err, workflowstore.ErrPermissionDenied) {
+		fail(w, http.StatusForbidden, "PERMISSION_DENIED", "artifact belongs to another owner", false)
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "ARTIFACT_DELETE_FAILED", err.Error(), true)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: value})
+}
+
 func (h Handler) GetCommand(w http.ResponseWriter, r *http.Request) {
 	owner, ok := identityAndVersion(w, r)
 	if !ok {
@@ -525,18 +562,9 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 			"origin_host": req.OriginHost, "origin_ref": req.OriginRef,
 			"controller_host": controllerHost,
 		})
-	} else if h.PlanLegacy != nil {
-		recorder := &capture{header: http.Header{}}
-		clone := r.Clone(r.Context())
-		clone.Body = io.NopCloser(bytes.NewReader(body))
-		h.PlanLegacy.ServeHTTP(recorder, clone)
-		if recorder.status >= 400 {
-			w.Header().Set("Content-Type", recorder.header.Get("Content-Type"))
-			w.WriteHeader(recorder.status)
-			_, _ = w.Write(recorder.body.Bytes())
-			return
-		}
-		plan = append(plan[:0], recorder.body.Bytes()...)
+	} else {
+		fail(w, http.StatusNotFound, "WORKFLOW_NOT_FOUND", "workflow package was not found", false)
+		return
 	}
 prepared:
 	prepared, _, err := h.Store.Prepare(r.Context(), owner, key, req.WorkflowID, ContractVersion, body, plan)
@@ -613,27 +641,7 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 		}})
 		return
 	}
-	if h.StartLegacy != nil {
-		var startPayload map[string]any
-		if err := json.Unmarshal(prepared.RequestJSON, &startPayload); err != nil {
-			fail(w, 422, "INVALID_REQUEST", "stored preparation is invalid", false)
-			return
-		}
-		startPayload["command_id"] = "prepare:" + prepared.ID
-		startPayload["session_id"] = req.SessionID
-		startBody, _ := json.Marshal(startPayload)
-		recorder := &capture{header: http.Header{}}
-		clone := r.Clone(r.Context())
-		clone.Body = io.NopCloser(bytes.NewReader(startBody))
-		h.StartLegacy.ServeHTTP(recorder, clone)
-		if recorder.status >= 400 {
-			writeJSON(w, recorder.status, envelope{Error: &Error{Code: "INVALID_TRANSITION", Message: recorder.body.String(), Retryable: false}})
-			return
-		}
-		writeJSON(w, recorder.status, envelope{Data: json.RawMessage(recorder.body.Bytes())})
-		return
-	}
-	writeJSON(w, 200, envelope{Data: prepared})
+	fail(w, http.StatusNotFound, "WORKFLOW_NOT_FOUND", "prepared workflow package was not found", false)
 }
 
 func (h Handler) Command(delegate http.Handler) http.HandlerFunc {

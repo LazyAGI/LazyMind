@@ -18,7 +18,6 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/modelconfig"
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
@@ -840,44 +839,9 @@ func advanceAutoMode(
 		return
 	}
 
-	// Load LLM config for DriverAgent.
-	var llmCfg map[string]any
-	if db != nil {
-		if cfg, err := loadDriverLLMConfig(ctx, db, pctx.UserID); err == nil {
-			llmCfg = cfg
-		} else {
-			fmt.Printf("[Workflow] loadDriverLLMConfig failed user=%s err=%v\n", pctx.UserID, err)
-		}
-	}
-	if len(llmCfg) == 0 {
-		fmt.Printf("[Workflow] driver LLM config empty for user=%s session=%s step=%s\n",
-			pctx.UserID, pctx.SessionID, pctx.StepID)
-	}
-
-	// Build plugin artifacts summary for DriverAgent evaluation.
-	artifactsSummary, _ := buildWorkflowArtifactsSummary(ctx, db, pctx.SessionID, pctx.StepID)
-
-	driverInput := fmt.Sprintf("Terminal status: %s\nAttempt: %d\n%s", terminalStatus, attempt, summary)
-	driverMsg, fallback := callDriverAgent(pctx.WorkflowID, pctx.StepID, driverInput, pctx.SessionID,
-		pctx.HistoryFilesPerTurn, llmCfg, artifactsSummary)
-
-	if fallback {
-		// DriverAgent failed: degrade to dynamic (notify user, do not auto-advance).
-		onSSE("driver_fallback", map[string]any{
-			"session_id": pctx.SessionID,
-			"step_id":    pctx.StepID,
-			"reason":     "driver_unavailable",
-		})
-		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
-		onSSE("step_waiting", map[string]any{
-			"session_id": pctx.SessionID,
-			"step_id":    pctx.StepID,
-			"reason":     "driver_fallback",
-		})
-		return
-	}
-
-	// Emit driver_input so the frontend can render the DriverAgent assessment.
+	// LazyMind's handoff resumes Chat with the durable Host Attempt summary. Step
+	// decisions remain in the public runtime and never invoke a LazyMind model.
+	driverMsg := summary
 	onSSE("driver_input", map[string]any{
 		"session_id": pctx.SessionID,
 		"step_id":    pctx.StepID,
@@ -1198,110 +1162,15 @@ func extractCaption(ctx context.Context, db *gorm.DB, taskID, slot string) strin
 	return ""
 }
 
-// resolveSlotBinding looks up (slotID, cardinality) for a slot from the Python plugin API.
+// resolveSlotBinding is retained only for the pre-public callback below. Public
+// Host outputs are resolved and persisted by executor.ArtifactSink.
 func resolveSlotBinding(workflowID, slot string) (slotID, cardinality string) {
-	endpoint := common.ChatServiceEndpoint()
-	url := fmt.Sprintf("%s/api/plugin/slot-binding?workflow_id=%s&slot=%s",
-		endpoint, workflowID, slot)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", ""
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", ""
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", ""
-	}
-	var result struct {
-		SlotID      string `json:"slot_id"`
-		Cardinality string `json:"cardinality"`
-	}
-	if json.NewDecoder(resp.Body).Decode(&result) != nil {
-		return "", ""
-	}
-	return result.SlotID, result.Cardinality
+	return "", ""
 }
 
 // defaultDriverMaxRetries is the global max retry count for DriverAgent RETRY verdicts.
 // Not configurable per plugin.yaml — global platform setting only.
 const defaultDriverMaxRetries = 3
-
-// callDriverAgent posts to the Python DriverAgent endpoint and returns the natural-language
-// assessment message and a fallback flag. On any error, fallback=true is returned.
-// A retry (up to 1 time with 5s backoff) is performed before falling back.
-func callDriverAgent(
-	workflowID, stepID, stepResult, sessionID string,
-	historyFilesPerTurn map[string][]string,
-	llmConfig map[string]any,
-	artifactsSummary string,
-) (message string, fallback bool) {
-	doCall := func() (string, bool) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		reqBody := map[string]any{
-			"workflow_id": workflowID,
-			"step_id":     stepID,
-			"step_result": stepResult,
-			"session_id":  sessionID,
-		}
-		if len(historyFilesPerTurn) > 0 {
-			reqBody["history_files_per_turn"] = historyFilesPerTurn
-		}
-		if len(llmConfig) > 0 {
-			reqBody["llm_config"] = llmConfig
-		}
-		if artifactsSummary != "" {
-			reqBody["workflow_artifacts_summary"] = artifactsSummary
-		}
-		body, _ := json.Marshal(reqBody)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, driverEndpoint(), bytes.NewReader(body))
-		if err != nil {
-			return "", true
-		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return "", true
-		}
-		defer resp.Body.Close()
-		var result struct {
-			Message string `json:"message"`
-		}
-		if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&result) != nil {
-			return "", true
-		}
-		if strings.TrimSpace(result.Message) == "" {
-			return "", true
-		}
-		return result.Message, false
-	}
-
-	msg, fb := doCall()
-	if fb {
-		// Retry once after 5s backoff.
-		time.Sleep(5 * time.Second)
-		msg, fb = doCall()
-	}
-	if fb {
-		return fmt.Sprintf("Step %q completed.", stepID), true
-	}
-	return msg, false
-}
-
-// driverEndpoint returns the DriverAgent URL.
-func driverEndpoint() string {
-	return common.ChatServiceEndpoint() + "/api/plugin/driver"
-}
-
-// loadDriverLLMConfig loads the LLM config for a user to pass to the DriverAgent.
-func loadDriverLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
-	return modelconfig.LoadLLMConfig(ctx, db, userID)
-}
 
 // buildWorkflowArtifactsSummary builds a text summary of all artifacts produced in this
 // plugin session and the current step, for injection into the DriverAgent evaluation context.

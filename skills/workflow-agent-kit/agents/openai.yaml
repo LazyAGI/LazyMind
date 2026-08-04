@@ -1,0 +1,7 @@
+interface:
+  display_name: "Workflow Agent Kit"
+  short_description: "Discover, author, run, and revise public Workflows"
+  default_prompt: "Use $workflow-agent-kit to discover or operate the appropriate public Workflow for this request."
+
+policy:
+  allow_implicit_invocation: true

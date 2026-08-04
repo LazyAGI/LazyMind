@@ -302,6 +302,7 @@ func init() {
 	registerAdditionalErrorPattern("bundled ffmpeg install is not supported on %s/%s", "bundled ffmpeg install is not supported on this platform", http.StatusBadRequest, 2001592)
 	registerAdditionalErrorPattern("downloaded %s binary could not run", "downloaded ffmpeg binary could not run", http.StatusInternalServerError, 2001593)
 	registerAdditionalError("ffmpeg download checksum mismatch", http.StatusBadGateway, 2001594)
+	registerAdditionalError("workflow session has no pinned public revision", http.StatusUnprocessableEntity, 2001595)
 
 }
 

@@ -23,8 +23,23 @@ def test_skill_references_exist_and_cover_required_lifecycle():
     ):
         assert reference in skill
         assert (KIT / reference).is_file()
-    for clause in ('Discover and prepare', 'Execute', 'Review and recover', 'authoring'):
+    for clause in ('Discover a Workflow', 'Convert a Skill', 'Start a Workflow',
+                   'Advance steps', 'Store and read attachments', 'delete_artifact'):
         assert clause in skill
+
+
+def test_skill_is_the_complete_model_free_workflow_operating_procedure():
+    skill = (KIT / 'SKILL.md').read_text()
+    for tool in (
+        'list_workflows', 'get_workflow', 'get_skill_conversion_context',
+        'create_workflow_draft', 'prepare_workflow', 'start_workflow',
+        'get_ready_steps', 'advance_step', 'import_input_resource',
+        'read_input_resource', 'list_artifacts', 'read_artifact',
+        'patch_artifact', 'delete_artifact',
+    ):
+        assert tool in skill
+    assert 'Infrastructure tools must never call a model' in skill
+    assert 'explicit SubAgent' in skill
 
 
 def test_host_profiles_cover_contract_capabilities():
