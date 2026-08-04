@@ -2060,20 +2060,6 @@ type evalSetImportPreviewOpenAPIRequest struct {
 type workflowDraftPathParams struct {
 	DraftID string `path:"draft_id"`
 }
-type workflowRepairRunPathParams struct {
-	DraftID  string `path:"draft_id"`
-	RepairID string `path:"repair_id"`
-}
-type workflowWorkflowConfirmOpenAPIRequest struct {
-	AnalysisID            string `json:"analysis_id"`
-	CandidateID           string `json:"candidate_id"`
-	SourceSkillRevisionID string `json:"source_skill_revision_id"`
-	DraftVersion          int    `json:"draft_version"`
-}
-type workflowRepairPreviewOpenAPIRequest struct {
-	Target string `json:"target"`
-	Mode   string `json:"mode"`
-}
 
 type writerDocumentSyncPathParams struct {
 	SessionID string `path:"session_id"`
@@ -2138,10 +2124,6 @@ func registeredCoreOperations() []openAPIOperation {
 		}},
 	}
 	return []openAPIOperation{
-		{Method: "GET", Path: "/workflow-drafts/{draft_id}/generation-analysis", Summary: "Get Workflow generation analysis", Tags: []string{"plugin"}, PathParams: workflowDraftPathParams{}, Responses: map[int]openAPIResponse{200: evoJSONResp("Generation analysis")}},
-		{Method: "POST", Path: "/workflow-drafts/{draft_id}:confirm-workflow", Summary: "Confirm Skill workflow candidate", Tags: []string{"plugin"}, PathParams: workflowDraftPathParams{}, RequestBody: jsonBodyOf(workflowWorkflowConfirmOpenAPIRequest{}, true), Responses: map[int]openAPIResponse{200: evoJSONResp("Confirmation result")}},
-		{Method: "POST", Path: "/workflow-drafts/{draft_id}:repair-preview", Summary: "Preview Workflow repair", Tags: []string{"plugin"}, PathParams: workflowDraftPathParams{}, RequestBody: jsonBodyOf(workflowRepairPreviewOpenAPIRequest{}, true), Responses: map[int]openAPIResponse{200: evoJSONResp("Repair preview")}},
-		{Method: "GET", Path: "/workflow-drafts/{draft_id}/repair-runs/{repair_id}", Summary: "Get Workflow repair run", Tags: []string{"plugin"}, PathParams: workflowRepairRunPathParams{}, Responses: map[int]openAPIResponse{200: evoJSONResp("Repair run")}},
 		{
 			Method:      "POST",
 			Path:        "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document",

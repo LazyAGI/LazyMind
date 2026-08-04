@@ -217,31 +217,3 @@ func TestPatchUserWorkflowSetting_NonBuiltinNotFound(t *testing.T) {
 		t.Fatalf("got %d, want %d", rec.Code, http.StatusNotFound)
 	}
 }
-
-// --- GetWorkflowGenerationAnalysis ---
-
-func TestGetWorkflowGenerationAnalysis_NotFound(t *testing.T) {
-	newHandlerTestDB(t)
-	req := httptest.NewRequest(http.MethodGet, "/drafts/d1/analysis", nil)
-	req = mux.SetURLVars(req, map[string]string{"draft_id": "d1"})
-	req.Header.Set("X-User-Id", "user-1")
-	rec := httptest.NewRecorder()
-	GetWorkflowGenerationAnalysis(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("got %d, want %d", rec.Code, http.StatusNotFound)
-	}
-}
-
-// --- GetWorkflowRepairRun ---
-
-func TestGetWorkflowRepairRun_NotFound(t *testing.T) {
-	newHandlerTestDB(t)
-	req := httptest.NewRequest(http.MethodGet, "/drafts/d1/repairs/r1", nil)
-	req = mux.SetURLVars(req, map[string]string{"draft_id": "d1", "repair_id": "r1"})
-	req.Header.Set("X-User-Id", "user-1")
-	rec := httptest.NewRecorder()
-	GetWorkflowRepairRun(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("got %d, want %d", rec.Code, http.StatusNotFound)
-	}
-}
