@@ -582,6 +582,7 @@
     }
 
     .chat-mention-editor {
+      position: relative;
       min-height: 48px;
       max-height: 132px;
       overflow-y: auto;
@@ -590,6 +591,7 @@
       word-break: break-word;
 
       &[data-empty="true"]::before {
+        position: absolute;
         color: #b8c3d6;
         content: attr(data-placeholder);
         pointer-events: none;
@@ -631,6 +633,11 @@
       box-shadow: 0 16px 48px rgba(38, 54, 84, 0.16);
       backdrop-filter: blur(16px);
       transform: translateX(-50%);
+
+      &.is-below {
+        top: calc(100% + 8px);
+        bottom: auto;
+      }
 
       &::-webkit-scrollbar {
         width: 8px;
