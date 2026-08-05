@@ -693,6 +693,7 @@ const enUS = {
     featuredTitle: "Featured capabilities",
     featuredDescription: "Start with a real case and turn an idea into a deliverable result.",
     viewAll: "View all capabilities",
+    viewMore: "View more",
     loadingFeatured: "Loading featured cases…",
     galleryTitle: "Capability center",
     galleryDescription: "Explore what Lazymind can help you accomplish, starting with a good case.",

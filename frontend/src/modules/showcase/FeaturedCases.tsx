@@ -52,14 +52,10 @@ export default function FeaturedCases() {
 
   return (
     <section className="showcase-featured" aria-labelledby="showcase-featured-title">
-      <div className="showcase-section-heading">
-        <div>
-          <p className="showcase-eyebrow">LazyMind Showcase</p>
-          <h2 id="showcase-featured-title">{t("showcase.featuredTitle")}</h2>
-          <p>{t("showcase.featuredDescription")}</p>
-        </div>
+      <div className="showcase-featured-heading">
+        <h2 id="showcase-featured-title">{t("showcase.featuredTitle")}</h2>
         <Link className="showcase-more-link" to="/agent/chat/cases">
-          {t("showcase.viewAll")} <span aria-hidden="true">→</span>
+          {t("showcase.viewMore")} <span aria-hidden="true">→</span>
         </Link>
       </div>
       {isLoading ? (

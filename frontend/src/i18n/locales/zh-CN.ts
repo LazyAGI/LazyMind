@@ -656,6 +656,7 @@ const zhCN = {
     featuredTitle: "精选能力",
     featuredDescription: "从一个真实案例开始，让想法直接变成可交付的结果。",
     viewAll: "查看全部能力",
+    viewMore: "查看更多",
     loadingFeatured: "正在加载精选案例…",
     galleryTitle: "能力中心",
     galleryDescription: "探索 Lazymind 可以帮你完成的任务，从一个好案例开始。",
