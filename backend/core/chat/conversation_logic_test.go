@@ -1110,6 +1110,60 @@ func TestFeedBackChatHistoryCancelsFeedback(t *testing.T) {
 	}
 }
 
+func TestFeedBackChatHistoryReplacesOnlyTargetFeedback(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/feedback-update.db")
+	if err != nil {
+		t.Fatalf("connect db: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.ChatHistory{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	for _, history := range []orm.ChatHistory{
+		{
+			ID: "h_1", Seq: 1, ConversationID: "conv-1", RawContent: "question", Content: "question", Result: "answer",
+			FeedBack: 2, Reason: "old reason", ExpectedAnswer: "old expected answer",
+			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+		},
+		{
+			ID: "h_2", Seq: 1, ConversationID: "conv-1", RawContent: "question", Content: "question", Result: "another answer",
+			FeedBack: 1, TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+		},
+	} {
+		if err := db.Create(&history).Error; err != nil {
+			t.Fatalf("create history: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/core/conversations:feedBackChatHistory",
+		strings.NewReader(`{"history_id":"h_1","type":"FEED_BACK_TYPE_UNLIKE","reason":"new reason","expected_answer":"new expected answer"}`),
+	)
+	rec := httptest.NewRecorder()
+	FeedBackChatHistory(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var target, sibling orm.ChatHistory
+	if err := db.Where("id = ?", "h_1").First(&target).Error; err != nil {
+		t.Fatalf("load target: %v", err)
+	}
+	if target.FeedBack != 2 || target.Reason != "new reason" || target.ExpectedAnswer != "new expected answer" {
+		t.Fatalf("target feedback was not replaced: %#v", target)
+	}
+	if err := db.Where("id = ?", "h_2").First(&sibling).Error; err != nil {
+		t.Fatalf("load sibling: %v", err)
+	}
+	if sibling.FeedBack != 1 {
+		t.Fatalf("sibling feedback was unexpectedly reset: %#v", sibling)
+	}
+}
+
 func TestPluginModeFromReqBody(t *testing.T) {
 	tests := []struct {
 		name string

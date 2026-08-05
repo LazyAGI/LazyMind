@@ -1772,6 +1772,54 @@ export interface RollbackResponse {
     'revision_id': string;
     'revision_no': number;
 }
+export interface RouterAlgorithmTraffic {
+    'actual_ratio': number;
+    'algorithm_id': string;
+    'answer_count': number;
+    'conversation_count': number;
+    'dislike_count': number;
+    'feedback_rate': number;
+    'like_count': number;
+    'positive_rate': number | null;
+    'user_count': number;
+}
+export interface RouterDislikeReason {
+    'algorithm_id': string;
+    'count': number;
+    'ratio': number;
+    'reason': string;
+}
+export interface RouterTrafficPoint {
+    'counts': { [key: string]: number; };
+    'time': string;
+}
+export interface RouterTrafficRange {
+    'end_time': string;
+    'granularity': RouterTrafficRangeGranularityEnum;
+    'start_time': string;
+}
+
+export const RouterTrafficRangeGranularityEnum = {
+    Hour: 'hour',
+    Day: 'day'
+} as const;
+
+export type RouterTrafficRangeGranularityEnum = typeof RouterTrafficRangeGranularityEnum[keyof typeof RouterTrafficRangeGranularityEnum];
+
+export interface RouterTrafficStatsResponse {
+    'algorithms': Array<RouterAlgorithmTraffic>;
+    'dislike_reasons': Array<RouterDislikeReason>;
+    'range': RouterTrafficRange;
+    'summary': RouterTrafficSummary;
+    'trend': Array<RouterTrafficPoint>;
+}
+export interface RouterTrafficSummary {
+    'answer_count': number;
+    'conversation_count': number;
+    'feedback_count': number;
+    'feedback_rate': number;
+    'user_count': number;
+}
 export interface SearchDatasetMemberRequest {
     'is_all'?: boolean;
     'name_prefix'?: string;
@@ -2967,6 +3015,57 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             };
         },
         /**
+         * Aggregates persisted single-answer chat histories by the final Router algorithm, excluding task conversations and unattributed legacy rows.
+         * @summary Get Router traffic statistics
+         * @param {string} startTime Inclusive UTC RFC3339 start time.
+         * @param {string} endTime Exclusive UTC RFC3339 end time.
+         * @param {ApiCoreAgentRouterTrafficStatsGetGranularityEnum} granularity
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentRouterTrafficStatsGet: async (startTime: string, endTime: string, granularity: ApiCoreAgentRouterTrafficStatsGetGranularityEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'startTime' is not null or undefined
+            assertParamExists('apiCoreAgentRouterTrafficStatsGet', 'startTime', startTime)
+            // verify required parameter 'endTime' is not null or undefined
+            assertParamExists('apiCoreAgentRouterTrafficStatsGet', 'endTime', endTime)
+            // verify required parameter 'granularity' is not null or undefined
+            assertParamExists('apiCoreAgentRouterTrafficStatsGet', 'granularity', granularity)
+            const localVarPath = `/api/core/agent/router/traffic-stats`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (startTime !== undefined) {
+                localVarQueryParameter['start_time'] = startTime;
+            }
+
+            if (endTime !== undefined) {
+                localVarQueryParameter['end_time'] = endTime;
+            }
+
+            if (granularity !== undefined) {
+                localVarQueryParameter['granularity'] = granularity;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * List the current user\'s Core thread index entries. Core refreshes status from Evo when available.
          * @summary List agent threads
          * @param {number} [pageSize] 
@@ -3886,6 +3985,21 @@ export const AgentApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Aggregates persisted single-answer chat histories by the final Router algorithm, excluding task conversations and unattributed legacy rows.
+         * @summary Get Router traffic statistics
+         * @param {string} startTime Inclusive UTC RFC3339 start time.
+         * @param {string} endTime Exclusive UTC RFC3339 end time.
+         * @param {ApiCoreAgentRouterTrafficStatsGetGranularityEnum} granularity
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAgentRouterTrafficStatsGet(startTime: string, endTime: string, granularity: ApiCoreAgentRouterTrafficStatsGetGranularityEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RouterTrafficStatsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAgentRouterTrafficStatsGet(startTime, endTime, granularity, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AgentApi.apiCoreAgentRouterTrafficStatsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * List the current user\'s Core thread index entries. Core refreshes status from Evo when available.
          * @summary List agent threads
          * @param {number} [pageSize] 
@@ -4259,6 +4373,16 @@ export const AgentApiFactory = function (configuration?: Configuration, basePath
             return localVarFp.apiCoreAgentRouterStatusGet(requestParameters.routerAdminUrl, requestParameters.routerChatUrl, options).then((request) => request(axios, basePath));
         },
         /**
+         * Aggregates persisted single-answer chat histories by the final Router algorithm, excluding task conversations and unattributed legacy rows.
+         * @summary Get Router traffic statistics
+         * @param {AgentApiApiCoreAgentRouterTrafficStatsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentRouterTrafficStatsGet(requestParameters: AgentApiApiCoreAgentRouterTrafficStatsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<RouterTrafficStatsResponse> {
+            return localVarFp.apiCoreAgentRouterTrafficStatsGet(requestParameters.startTime, requestParameters.endTime, requestParameters.granularity, options).then((request) => request(axios, basePath));
+        },
+        /**
          * List the current user\'s Core thread index entries. Core refreshes status from Evo when available.
          * @summary List agent threads
          * @param {AgentApiApiCoreAgentThreadsGetRequest} requestParameters Request parameters.
@@ -4585,6 +4709,23 @@ export interface AgentApiApiCoreAgentRouterStatusGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreAgentRouterTrafficStatsGet operation in AgentApi.
+ */
+export interface AgentApiApiCoreAgentRouterTrafficStatsGetRequest {
+    /**
+     * Inclusive UTC RFC3339 start time.
+     */
+    readonly startTime: string
+
+    /**
+     * Exclusive UTC RFC3339 end time.
+     */
+    readonly endTime: string
+
+    readonly granularity: ApiCoreAgentRouterTrafficStatsGetGranularityEnum
+}
+
+/**
  * Request parameters for apiCoreAgentThreadsGet operation in AgentApi.
  */
 export interface AgentApiApiCoreAgentThreadsGetRequest {
@@ -4865,6 +5006,17 @@ export class AgentApi extends BaseAPI {
     }
 
     /**
+     * Aggregates persisted single-answer chat histories by the final Router algorithm, excluding task conversations and unattributed legacy rows.
+     * @summary Get Router traffic statistics
+     * @param {AgentApiApiCoreAgentRouterTrafficStatsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAgentRouterTrafficStatsGet(requestParameters: AgentApiApiCoreAgentRouterTrafficStatsGetRequest, options?: RawAxiosRequestConfig) {
+        return AgentApiFp(this.configuration).apiCoreAgentRouterTrafficStatsGet(requestParameters.startTime, requestParameters.endTime, requestParameters.granularity, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * List the current user\'s Core thread index entries. Core refreshes status from Evo when available.
      * @summary List agent threads
      * @param {AgentApiApiCoreAgentThreadsGetRequest} requestParameters Request parameters.
@@ -5093,6 +5245,11 @@ export const ApiCoreAgentRouterAlgorithmsGetStatusEnum = {
     Missing: 'missing'
 } as const;
 export type ApiCoreAgentRouterAlgorithmsGetStatusEnum = typeof ApiCoreAgentRouterAlgorithmsGetStatusEnum[keyof typeof ApiCoreAgentRouterAlgorithmsGetStatusEnum];
+export const ApiCoreAgentRouterTrafficStatsGetGranularityEnum = {
+    Hour: 'hour',
+    Day: 'day'
+} as const;
+export type ApiCoreAgentRouterTrafficStatsGetGranularityEnum = typeof ApiCoreAgentRouterTrafficStatsGetGranularityEnum[keyof typeof ApiCoreAgentRouterTrafficStatsGetGranularityEnum];
 export const ApiCoreAgentThreadsThreadIdGatesStepVersionsVersionDownloadGetFormatEnum = {
     Json: 'json'
 } as const;
@@ -36055,6 +36212,5 @@ export class WriterApi extends BaseAPI {
         return WriterApiFp(this.configuration).apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, requestParameters.writerDocumentSyncOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
-
 
 

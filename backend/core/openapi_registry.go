@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"lazymind/core/agent"
 	"lazymind/core/chat"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
@@ -698,6 +699,12 @@ type agentRouterAlgorithmPathParams struct {
 type agentRouterQueryParams struct {
 	RouterAdminURL string `query:"router_admin_url" desc:"Optional Router admin origin override."`
 	RouterChatURL  string `query:"router_chat_url" desc:"Optional Router chat stream URL override."`
+}
+
+type agentRouterTrafficQueryParams struct {
+	StartTime   string `query:"start_time" required:"true" desc:"Inclusive UTC RFC3339 start time."`
+	EndTime     string `query:"end_time" required:"true" desc:"Exclusive UTC RFC3339 end time."`
+	Granularity string `query:"granularity" required:"true" enum:"hour,day"`
 }
 
 type agentRouterAlgorithmQueryParams struct {
@@ -4126,6 +4133,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"agent"},
 			QueryParams: agentRouterQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Router AB strategy", agentRouterABStrategyResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/router/traffic-stats",
+			Summary:     "Get Router traffic statistics",
+			Description: "Aggregates persisted single-answer chat histories by the final Router algorithm, excluding task conversations and unattributed legacy rows.",
+			Tags:        []string{"agent"},
+			QueryParams: agentRouterTrafficQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Router traffic statistics", agent.RouterTrafficStatsResponse{})},
 		},
 		{
 			Method:      "PUT",
