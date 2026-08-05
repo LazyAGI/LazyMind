@@ -56,9 +56,28 @@ function response(overrides: Partial<TaskListResponse> = {}): TaskListResponse {
   };
 }
 
+const statusChangeMock = vi.fn();
+const pageChangeMock = vi.fn();
+
+// Status and page live in the parent page, so every render needs the controlled
+// pair plus their callbacks.
+function renderTaskList(active = true) {
+  return renderWithProviders(
+    <TaskList
+      active={active}
+      status=""
+      onStatusChange={statusChangeMock}
+      page={1}
+      onPageChange={pageChangeMock}
+    />,
+  );
+}
+
 describe("TaskList", () => {
   beforeEach(() => {
     navigateMock.mockReset();
+    statusChangeMock.mockReset();
+    pageChangeMock.mockReset();
     listTasksMock.mockReset().mockResolvedValue(response());
     removeTaskMock.mockReset().mockResolvedValue(undefined);
   });
@@ -68,18 +87,18 @@ describe("TaskList", () => {
   });
 
   it("loads tasks when active becomes true", async () => {
-    renderWithProviders(<TaskList active />);
+    renderTaskList();
     await waitFor(() => expect(listTasksMock).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("My Conversation")).toBeInTheDocument();
   });
 
   it("does not load tasks when inactive", () => {
-    renderWithProviders(<TaskList active={false} />);
+    renderTaskList(false);
     expect(listTasksMock).not.toHaveBeenCalled();
   });
 
   it("searches by keyword and resets the page", async () => {
-    renderWithProviders(<TaskList active />);
+    renderTaskList();
     await waitFor(() => expect(listTasksMock).toHaveBeenCalledTimes(1));
 
     fireEvent.change(screen.getByPlaceholderText("taskCenter.searchPlaceholder"), {
@@ -91,17 +110,18 @@ describe("TaskList", () => {
         expect.objectContaining({ keyword: "rag", page: 1 }),
       ),
     );
+    expect(pageChangeMock).toHaveBeenCalledWith(1);
   });
 
   it("opens the task detail drawer when a row is clicked", async () => {
-    renderWithProviders(<TaskList active />);
+    renderTaskList();
     const title = await screen.findByText("My Conversation");
     fireEvent.click(title);
     expect(await screen.findByText("taskCenter.taskDetail")).toBeInTheDocument();
   });
 
   it("reloads the list after successfully deleting a task from the detail drawer", async () => {
-    renderWithProviders(<TaskList active />);
+    renderTaskList();
     const title = await screen.findByText("My Conversation");
     fireEvent.click(title);
 

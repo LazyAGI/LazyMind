@@ -39,10 +39,19 @@ describe("syncUserAgreementFromServer", () => {
     await expect(syncUserAgreementFromServer()).resolves.toBe(true);
   });
 
-  it("returns false (fail closed) when the request throws", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.mocked(fetchUserUiPreferences).mockRejectedValue(new Error("network error"));
+  it("returns false when the server reports a stale accepted version", async () => {
+    vi.mocked(fetchUserUiPreferences).mockResolvedValue({
+      accepted_user_agreement_version: "V0.1",
+    } as never);
     await expect(syncUserAgreementFromServer()).resolves.toBe(false);
+  });
+
+  // The request error must propagate so callers can tell "check failed" apart
+  // from "not accepted". `useUserAgreementConsentGate` fails closed on it by
+  // blocking the layout behind a retry panel.
+  it("propagates the error when the request throws", async () => {
+    vi.mocked(fetchUserUiPreferences).mockRejectedValue(new Error("network error"));
+    await expect(syncUserAgreementFromServer()).rejects.toThrow("network error");
   });
 });
 

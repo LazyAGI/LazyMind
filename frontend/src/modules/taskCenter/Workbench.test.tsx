@@ -20,6 +20,8 @@ vi.mock("react-router-dom", async (importOriginal) => {
   return { ...actual, useNavigate: () => navigateMock };
 });
 
+const viewAllStatusMock = vi.fn();
+
 function task(overrides: Partial<Task> = {}): Task {
   return {
     id: "t1",
@@ -36,7 +38,7 @@ function task(overrides: Partial<Task> = {}): Task {
   };
 }
 
-function response(items: Task[] = [task()]): TaskListResponse {
+function response(items: Task[] = [task()], counts: Partial<TaskListResponse["status_counts"]> = {}): TaskListResponse {
   return {
     items,
     total: items.length,
@@ -51,14 +53,33 @@ function response(items: Task[] = [task()]): TaskListResponse {
       succeeded: items.filter((t) => ["completed", "succeeded"].includes(t.status)).length,
       failed: items.filter((t) => t.status === "failed").length,
       canceled: items.filter((t) => t.status === "canceled").length,
+      ...counts,
     },
   };
+}
+
+// `load` fans out into three parallel `listTasks` calls: the full list plus the
+// capped `failed` and `canceled` sections. Assert on load rounds, not raw calls.
+const CALLS_PER_LOAD = 3;
+
+// Route each of those three calls to its own slice so a task never renders in
+// more than one section.
+function stubSections(all: Task[], failed: Task[] = [], canceled: Task[] = []) {
+  listTasksMock.mockImplementation((params: { status?: string } = {}) => {
+    if (params.status === "failed") return Promise.resolve(response(failed));
+    if (params.status === "canceled") return Promise.resolve(response(canceled));
+    return Promise.resolve(
+      response(all, { failed: failed.length, canceled: canceled.length }),
+    );
+  });
 }
 
 describe("Workbench", () => {
   beforeEach(() => {
     navigateMock.mockReset();
-    listTasksMock.mockReset().mockResolvedValue(response());
+    viewAllStatusMock.mockReset();
+    listTasksMock.mockReset();
+    stubSections([task()]);
     removeTaskMock.mockReset().mockResolvedValue(undefined);
   });
 
@@ -67,25 +88,25 @@ describe("Workbench", () => {
   });
 
   it("loads tasks and shows the needs-attention metric when active", async () => {
-    renderWithProviders(<Workbench active />);
-    await waitFor(() => expect(listTasksMock).toHaveBeenCalledTimes(1));
+    renderWithProviders(<Workbench active onViewAllStatus={viewAllStatusMock} />);
+    await waitFor(() => expect(listTasksMock).toHaveBeenCalledTimes(CALLS_PER_LOAD));
     expect(await screen.findByText("Waiting task")).toBeInTheDocument();
   });
 
   it("does not load tasks when inactive", () => {
-    renderWithProviders(<Workbench active={false} />);
+    renderWithProviders(<Workbench active={false} onViewAllStatus={viewAllStatusMock} />);
     expect(listTasksMock).not.toHaveBeenCalled();
   });
 
   it("renders an empty state for a section with no tasks", async () => {
-    listTasksMock.mockResolvedValue(response([]));
-    renderWithProviders(<Workbench active />);
-    await waitFor(() => expect(listTasksMock).toHaveBeenCalledTimes(1));
+    stubSections([]);
+    renderWithProviders(<Workbench active onViewAllStatus={viewAllStatusMock} />);
+    await waitFor(() => expect(listTasksMock).toHaveBeenCalledTimes(CALLS_PER_LOAD));
     expect((await screen.findAllByText("taskCenter.empty")).length).toBeGreaterThan(0);
   });
 
   it("opens the task detail drawer when a waiting task card action is clicked", async () => {
-    renderWithProviders(<Workbench active />);
+    renderWithProviders(<Workbench active onViewAllStatus={viewAllStatusMock} />);
     await screen.findByText("Waiting task");
 
     fireEvent.click(screen.getByText("taskCenter.confirmAction"));
@@ -94,11 +115,25 @@ describe("Workbench", () => {
   });
 
   it("reloads tasks when the refresh button is clicked", async () => {
-    renderWithProviders(<Workbench active />);
-    await waitFor(() => expect(listTasksMock).toHaveBeenCalledTimes(1));
+    renderWithProviders(<Workbench active onViewAllStatus={viewAllStatusMock} />);
+    await waitFor(() => expect(listTasksMock).toHaveBeenCalledTimes(CALLS_PER_LOAD));
 
     fireEvent.click(screen.getByText("taskCenter.refresh"));
 
-    await waitFor(() => expect(listTasksMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(listTasksMock).toHaveBeenCalledTimes(CALLS_PER_LOAD * 2));
+  });
+
+  it("reports the section status when a status card view-all is triggered", async () => {
+    // The failed count must exceed the capped card list for view-all to render.
+    const failed = [1, 2, 3, 4].map((n) =>
+      task({ id: `f${n}`, status: "failed", conversation_title: `Failed ${n}` }),
+    );
+    stubSections([], failed);
+    renderWithProviders(<Workbench active onViewAllStatus={viewAllStatusMock} />);
+    await screen.findByText("Failed 1");
+
+    fireEvent.click(screen.getByText("taskCenter.viewAll"));
+
+    expect(viewAllStatusMock).toHaveBeenCalledWith("failed");
   });
 });

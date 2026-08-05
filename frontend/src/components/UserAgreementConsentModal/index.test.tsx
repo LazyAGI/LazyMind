@@ -116,4 +116,32 @@ describe("useUserAgreementConsentGate", () => {
     });
     expect(result.current.needsConsent).toBe(false);
   });
+
+  // Fails closed: a failed check must not fall through to the normal layout as
+  // if consent had been granted. MainLayout blocks on `checkFailed`.
+  it("reports checkFailed without requiring consent when the sync throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mockedSync.mockRejectedValue(new Error("network error"));
+    const { renderHook } = await import("@testing-library/react");
+    const { result } = renderHook(() => useUserAgreementConsentGate(true));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.checkFailed).toBe(true);
+    expect(result.current.needsConsent).toBe(false);
+  });
+
+  it("retryCheck re-runs the sync and clears checkFailed on success", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mockedSync.mockRejectedValueOnce(new Error("network error")).mockResolvedValue(true);
+    const { renderHook } = await import("@testing-library/react");
+    const { result } = renderHook(() => useUserAgreementConsentGate(true));
+    await waitFor(() => expect(result.current.checkFailed).toBe(true));
+
+    act(() => {
+      result.current.retryCheck();
+    });
+
+    await waitFor(() => expect(result.current.checkFailed).toBe(false));
+    expect(result.current.needsConsent).toBe(false);
+  });
 });
