@@ -19,6 +19,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
 	"lazymind/core/evalset"
+	"lazymind/core/knowledge_market"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
@@ -172,6 +173,9 @@ func main() {
 	modelprovider.MustSeedModelCatalog(context.Background(), db.DB, catalogPath)
 	datasourceCatalogPath := filepath.Join(".", "config", "datasource_catalog.yaml")
 	modelprovider.MustSeedDatasourceCatalog(context.Background(), db.DB, datasourceCatalogPath)
+
+	knowledgeMarketCatalogPath := filepath.Join(".", "config", "knowledge_market_catalog.yaml")
+	knowledge_market.MustSeedCatalog(context.Background(), db.DB, knowledgeMarketCatalogPath)
 
 	readonlyDriver := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DRIVER"))
 	readonlyDSN := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DSN"))

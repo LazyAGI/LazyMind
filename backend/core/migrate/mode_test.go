@@ -23,8 +23,8 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if len(catalog.VersionMigrations) != 2 {
 		t.Fatalf("version migration count=%d, want 2", len(catalog.VersionMigrations))
 	}
-	if len(catalog.Modes) != 2 {
-		t.Fatalf("mode count=%d, want 2", len(catalog.Modes))
+	if len(catalog.Modes) != 3 {
+		t.Fatalf("mode count=%d, want 3", len(catalog.Modes))
 	}
 	v01 := catalog.Modes[0]
 	if v01.Name != "v0_1" || v01.ModeVersion != 1 ||
@@ -94,6 +94,31 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if !strings.Contains(string(down), `DROP COLUMN "api_key_ciphertext"`) ||
 		!strings.Contains(string(down), `DROP COLUMN "credential_version"`) {
 		t.Fatal("v0_2 aggregate down is missing encrypted provider credential rollback")
+	}
+
+	mode = catalog.Modes[2]
+	if mode.Name != "v0_3" || mode.ModeVersion != 3 || mode.Aggregate != nil {
+		t.Fatalf("unexpected v0_3 mode: %#v", mode)
+	}
+	if len(mode.Dev) != 1 {
+		t.Fatalf("v0_3 dev migration count=%d, want 1", len(mode.Dev))
+	}
+	if !containsMigrationFileVersion(mode.Dev, 20260804100000) {
+		t.Fatal("v0_3 dev migrations are missing create_knowledge_market_tables")
+	}
+	for _, migration := range mode.Dev {
+		wantVersion, err := combineDevVersion(3, migration.FileVersion)
+		if err != nil {
+			t.Fatalf("combine v0_3 dev migration %d: %v", migration.FileVersion, err)
+		}
+		if migration.Version != wantVersion {
+			t.Fatalf(
+				"v0_3 dev migration %d full version=%d, want %d",
+				migration.FileVersion,
+				migration.Version,
+				wantVersion,
+			)
+		}
 	}
 }
 

@@ -1833,6 +1833,80 @@ type marketDeleteOpenAPIResponse struct {
 	SourceSkillID string `json:"source_skill_id"`
 }
 
+type knowledgeMarketItemPathParams struct {
+	MarketItemID string `path:"market_item_id"`
+}
+
+type knowledgeMarketListQueryParams struct {
+	Category string `query:"category" desc:"Filter by category: industry or evaluation." enum:"industry,evaluation"`
+	Domain   string `query:"domain" desc:"Filter by exact domain."`
+	Keyword  string `query:"keyword" desc:"Case-insensitive match on name, description or domain; tags are not searched."`
+	Page     int32  `query:"page"`
+	PageSize int32  `query:"page_size"`
+}
+
+type knowledgeMarketListItemOpenAPIResponse struct {
+	ID          string   `json:"id"`
+	Category    string   `json:"category"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Icon        string   `json:"icon"`
+	Domain      string   `json:"domain"`
+	Tags        []string `json:"tags"`
+	Version     string   `json:"version"`
+	VersionDate string   `json:"version_date"`
+	DocCount    int64    `json:"doc_count"`
+	DataSource  string   `json:"data_source"`
+	SortOrder   int      `json:"sort_order"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
+}
+
+type knowledgeMarketListOpenAPIResponse struct {
+	Items    []knowledgeMarketListItemOpenAPIResponse `json:"items"`
+	Page     int32                                    `json:"page"`
+	PageSize int32                                    `json:"page_size"`
+	Total    int32                                    `json:"total"`
+}
+
+type knowledgeMarketFileOpenAPIResponse struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+	Path string `json:"path"`
+}
+
+type knowledgeMarketDetailOpenAPIResponse struct {
+	ID              string                               `json:"id"`
+	Category        string                               `json:"category"`
+	Name            string                               `json:"name"`
+	Description     string                               `json:"description"`
+	Icon            string                               `json:"icon"`
+	Domain          string                               `json:"domain"`
+	Tags            []string                             `json:"tags"`
+	Version         string                               `json:"version"`
+	VersionDate     string                               `json:"version_date"`
+	VersionNote     string                               `json:"version_note"`
+	PackageURL      string                               `json:"package_url"`
+	PackageSHA256   string                               `json:"package_sha256"`
+	PackageSize     int64                                `json:"package_size"`
+	DocCount        int64                                `json:"doc_count"`
+	DataSource      string                               `json:"data_source"`
+	Files           []knowledgeMarketFileOpenAPIResponse `json:"files"`
+	SampleQuestions []string                             `json:"sample_questions"`
+	SortOrder       int                                  `json:"sort_order"`
+	CreatedAt       string                               `json:"created_at"`
+	UpdatedAt       string                               `json:"updated_at"`
+}
+
+type knowledgeMarketDomainsGroupOpenAPIResponse struct {
+	Industry   []string `json:"industry"`
+	Evaluation []string `json:"evaluation"`
+}
+
+type knowledgeMarketDomainsOpenAPIResponse struct {
+	Domains knowledgeMarketDomainsGroupOpenAPIResponse `json:"domains"`
+}
+
 type skillDeleteOpenAPIResponse struct {
 	Deleted bool `json:"deleted"`
 }
@@ -3224,6 +3298,31 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:       []string{"skill-market"},
 			PathParams: marketItemPathParams{},
 			Responses:  map[int]openAPIResponse{200: resp("Unpublished market skill", marketItemOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/knowledge-market",
+			Summary:     "List published knowledge market items",
+			Description: "Read-only catalog browsing. Filters combine with AND semantics; only published items are returned.",
+			Tags:        []string{"knowledge-market"},
+			QueryParams: knowledgeMarketListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Knowledge market item list", knowledgeMarketListOpenAPIResponse{})},
+		},
+		{
+			Method:    "GET",
+			Path:      "/knowledge-market/domains",
+			Summary:   "List knowledge market domains grouped by category",
+			Tags:      []string{"knowledge-market"},
+			Responses: map[int]openAPIResponse{200: resp("Knowledge market domains", knowledgeMarketDomainsOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/knowledge-market/items/{market_item_id}",
+			Summary:     "Get knowledge market item details",
+			Description: "Returns the full catalog entry including files and sample questions. 404 when the item does not exist or is not published.",
+			Tags:        []string{"knowledge-market"},
+			PathParams:  knowledgeMarketItemPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Knowledge market item", knowledgeMarketDetailOpenAPIResponse{})},
 		},
 		{
 			Method:      "POST",
