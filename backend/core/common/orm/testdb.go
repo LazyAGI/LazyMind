@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // OpenTestDB opens a test database.  The driver is selected by TEST_DB_DRIVER.
@@ -82,10 +83,19 @@ func openTestPostgres(t testing.TB) *DB {
 		t.Fatalf("create schema %q: %v", schema, err)
 	}
 
+	sqlDB, err := db.DB.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(5)
+	sqlDB.SetMaxIdleConns(2)
+	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+
 	t.Cleanup(func() {
 		if err := db.Exec("DROP SCHEMA IF EXISTS " + quoteIdent(schema) + " CASCADE").Error; err != nil {
 			t.Logf("cleanup: drop schema %q: %v", schema, err)
 		}
+		_ = sqlDB.Close()
 	})
 
 	return db
