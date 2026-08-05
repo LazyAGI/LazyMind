@@ -316,15 +316,20 @@ def writer_generate_draft_blocks(
         writing_context_json=_read_json_string(writing_context_path),
     ), [])
     root = _run_root('draft-blocks')
-    return [
-        _save_json_artifact(
-            f'draft_block_{index:04d}',
-            json.dumps(block, ensure_ascii=False),
-            WriterToolkitBase.WRITER_BLOCK_SCHEMA,
-            directory=root,
-        )
-        for index, block in enumerate(blocks, start=1)
-    ]
+    paths = []
+    for index, block in enumerate(blocks, start=1):
+        if isinstance(block, str):
+            path = root / f'draft_block_{index:04d}.md'
+            path.write_text(block, encoding='utf-8')
+            paths.append(str(path))
+        else:
+            paths.append(_save_json_artifact(
+                f'draft_block_{index:04d}',
+                json.dumps(block, ensure_ascii=False),
+                WriterToolkitBase.WRITER_BLOCK_SCHEMA,
+                directory=root,
+            ))
+    return paths
 
 
 def writer_generate_draft_blocks_markdown(
@@ -430,30 +435,6 @@ def writer_update_writing_context(
     return _save_json_artifact(
         'writing_context', content, writer_schema('context.WritingContext'),
     )
-
-
-def writer_generate_final_document(
-    draft_path: str,
-    writing_context_path: str,
-) -> dict:
-    """Generate final artifacts without changing the draft representation."""
-    content = WriterCreateToolkit().generate_final_document(
-        draft_document_json=_read_json_string(draft_path),
-        writing_context_json=_read_json_string(writing_context_path),
-    )
-    payload = _json_loads(content, {})
-    final_document_path = _save_writer_document(
-        'final_document',
-        payload.get('final_document') or {},
-        expected_stage='final',
-        editable=True,
-    )
-    markdown_path = _workspace_root() / 'final_document.md'
-    markdown_path.write_text(str(payload.get('final_document_md') or ''), encoding='utf-8')
-    return {
-        'final_document': final_document_path,
-        'final_document_md': str(markdown_path),
-    }
 
 
 def writer_export_markdown(content_path: str) -> str:
@@ -585,7 +566,7 @@ def writer_apply_revision(
         'revised_document': _save_writer_document(
             'revised_document',
             payload.get('revised_document') or {},
-            expected_stage=(None if is_markdown else 'final' if is_body_step else 'outline'),
+            expected_stage=(None if is_markdown or is_body_step else 'outline'),
             editable=True,
             directory=root,
         ),

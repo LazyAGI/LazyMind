@@ -247,9 +247,6 @@ export function parseWriterDocument(value: unknown): WriterIRParseResult {
   if (typeof value.document_id !== 'string' || !value.document_id.trim()) {
     issues.push('document_id must be a non-empty string');
   }
-  if (typeof value.stage !== 'string' || !value.stage.trim()) {
-    issues.push('stage must be a non-empty string');
-  }
   if (typeof value.title !== 'string') {
     issues.push('title must be a string');
   }

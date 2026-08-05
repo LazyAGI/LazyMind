@@ -2,8 +2,8 @@ id: writer-workflow
 name: AI Writer
 description: >
   Read source documents and knowledge, create or reuse an outline, draft a
-  structured document, revise either the outline or full text, and deliver it
-  as Markdown or publish it to Feishu through one Markdown/WriterDocument workflow.
+  structured document, and revise either the outline or full text through one
+  Markdown/WriterDocument workflow.
 
 when_to_use: >
   Always use this workflow when the user's primary request is to create a complete
@@ -11,8 +11,7 @@ when_to_use: >
   materials or knowledge-base evidence. Such a direct writing request matches
   this workflow even when the user does not know or name AI Writer; do not
   generate the requested full document directly in chat. Also use it for
-  continuing from a supplied outline, revising an existing Feishu document, or
-  publishing a generated document to Feishu. Do not require the
+  continuing from a supplied outline or revising an existing Feishu document. Do not require the
   user to choose between creation and revision workflows; select the applicable
   reachable step from the user's request and the available artifacts. When
   triggering after clarification or a cloud-file read, request_context must
@@ -36,24 +35,16 @@ tool_scripts:
       - writer_generate_draft_document
       - writer_generate_draft_document_markdown
       - writer_update_writing_context
-      - writer_generate_final_document
-      - writer_export_markdown
       - writer_build_revision_task
       - writer_locate_revision_target
       - writer_generate_modify_plan
       - writer_generate_revision_set
       - writer_apply_revision
-      - writer_convert_markdown_to_ir
-      - writer_create_document
-      - writer_publish_revision
-      - writer_replace_document
-      - writer_append_document
 
 steps:
   - id: prepare
   - id: outline
   - id: write_document
-  - id: publish
 
 slots:
   - id: writing_task
@@ -132,19 +123,6 @@ slots:
     label: Writing Context After Draft
     type: file
     cardinality: single
-  - id: final_document
-    label: Final Document
-    type: file
-    cardinality: single
-  - id: final_document_md
-    label: Final Document Markdown
-    type: file
-    cardinality: single
-  - id: delivery_ir
-    label: Delivery IR
-    type: file
-    cardinality: single
-
   - id: document_revision_task
     label: Document Revision Task
     type: file
@@ -165,27 +143,6 @@ slots:
     label: Document Revision Result
     type: file
     cardinality: single
-  - id: delivered_markdown
-    label: Delivered Markdown
-    type: file
-    cardinality: single
-  - id: publish_result
-    label: Publish Result
-    type: file
-    cardinality: single
-  - id: publish_target_document
-    label: Created Publish Target
-    type: file
-    cardinality: single
-  - id: published_document
-    label: Published Document
-    type: file
-    cardinality: single
-  - id: published_link
-    label: Published Document Link
-    type: text
-    cardinality: single
-
 ui:
   tabs:
     - id: prepare
@@ -207,16 +164,7 @@ ui:
       label: Final Document
       layout: list
       slots:
-        - id: final_document
-
-    - id: publish
-      step_id: publish
-      label: 交付文稿
-      layout: list
-      slots:
-        - id: delivered_markdown
-        - id: published_link
-        - id: published_document
+        - id: draft_document
 
 i18n:
   zh-CN:
@@ -225,12 +173,10 @@ i18n:
       prepare: {label: 写作准备}
       outline: {label: 大纲}
       write_document: {label: 成稿}
-      publish: {label: 交付文稿}
     tabs:
       prepare: {label: 写作准备}
       outline: {label: 大纲}
       result: {label: 成稿}
-      publish: {label: 交付文稿}
     slots:
       writing_task: {label: 写作任务}
       resource_profiles: {label: 资源画像}
@@ -240,13 +186,5 @@ i18n:
       outline_document: {label: 大纲}
       section_instructions: {label: 章节规划}
       draft_blocks: {label: 章节草稿}
-      draft_document: {label: 完整初稿}
-      draft_document_md: {label: 完整初稿 Markdown}
-      final_document: {label: 最终正文}
-      final_document_md: {label: 最终正文 Markdown}
-      delivery_ir: {label: 交付 IR}
-      delivered_markdown: {label: Markdown 文稿}
-      publish_result: {label: 发布结果}
-      publish_target_document: {label: 新建发布目标}
-      published_document: {label: 已发布飞书文档}
-      published_link: {label: 飞书文档链接}
+      draft_document: {label: 成稿}
+      draft_document_md: {label: 成稿 Markdown}

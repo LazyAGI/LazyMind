@@ -25,37 +25,15 @@ value is merely a local path string does not satisfy an output and must be RETRY
 
 ## write_document
 
-- PASS when final_document and writing_context_after_draft exist.
-- final_document must be Markdown, or WriterDocument IR with stage="final" and ui_editable=true.
-- An outline-stage artifact saved under final_document is invalid and must be RETRY.
-- For generation/rewrite mode, section_instructions, draft_blocks, and draft_document
+- PASS when draft_document and writing_context_after_draft exist.
+- draft_document must be Markdown, or non-outline WriterDocument IR with ui_editable=true.
+- An outline-stage artifact saved under draft_document is invalid and must be RETRY.
+- For generation/rewrite mode, section_instructions and draft_blocks
   must exist in the selected representation.
 - For targeted revision mode, document_revision_task, document_locate_result,
   document_modify_plan, document_revision_set, and document_revision_result must exist.
-- A cloud-bound body revision must remain local in this step; provider confirmation is
-  required only after the publish step.
+- A cloud-bound body revision must remain local in this step.
 - Missing mode-specific outputs → RETRY.
-
-## publish
-
-- Determine the selected delivery mode from the complete user request.
-- For Markdown delivery, DONE only when delivered_markdown is a real `.md` file
-  generated from the latest selected final_document. Feishu publish artifacts are not
-  required.
-- A Feishu/Lark URL used only as source or reference does not select Feishu delivery.
-- For explicitly requested Feishu delivery, DONE only when publish_result and
-  published_document are tool-produced file artifacts, publish_result reports success,
-  published_document has ui_editable=true, and published_link is a valid Feishu/Lark
-  document URL.
-- If the selected content was Markdown, Feishu delivery also requires delivery_ir from
-  writer_convert_markdown_to_ir.
-- When final_document exists, publishing outline_document instead is invalid and must be FAIL.
-- Text summaries such as "manual publishing required" do not satisfy any publish output.
-  If document creation, writing, or provider read-back failed, the publish step must not
-  be marked complete.
-- An explicit request to write an unbound result to "my Feishu" authorizes creation in
-  the user's Feishu root; missing publish artifacts after that request must be RETRY.
-- Otherwise RETRY; two consecutive non-recoverable failures → FAIL.
 
 Use exactly:
 
