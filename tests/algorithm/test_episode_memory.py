@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -323,11 +324,27 @@ def test_memory_tools_registers_as_eager_container_with_episode_schema():
     episode_schema = descriptions['MemoryTools_episode_create']['parameters']
     assert set(episode_schema['properties']) == {'summary', 'episode_type'}
     assert set(episode_schema['required']) == {'summary', 'episode_type'}
+
     for editor_name in ('MemoryTools_soul_editor', 'MemoryTools_profile_editor'):
         editor_schema = descriptions[editor_name]['parameters']
         assert set(editor_schema['properties']) == {'operations'}
         assert set(editor_schema['required']) == {'operations'}
-        assert manager.tools_info[editor_name].serial_group == 'current_memory'
+
+    resource_tools = {
+        'MemoryTools_read_memory',
+        'MemoryTools_read_memory_reference',
+        'MemoryTools_soul_editor',
+        'MemoryTools_profile_editor',
+        'MemoryTools_preference_editor',
+    }
+    assert all(
+        manager.tools_info[name].concurrency_spec is not None
+        for name in resource_tools
+    )
+    assert manager.tools_info['MemoryTools_episode_create'].concurrency_spec is None
+    schema = json.dumps(manager.tools_description)
+    assert '__lazyllm_tool_concurrency__' not in schema
+    assert 'concurrency_spec' not in schema
 
 
 def test_memory_review_episode_search_is_tenant_scoped_and_capped(monkeypatch):

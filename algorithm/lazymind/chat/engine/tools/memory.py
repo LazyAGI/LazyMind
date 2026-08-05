@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Union
 
 import lazyllm
 import requests
-from lazyllm.tools import serial_tool
+from lazyllm.tools import tool_concurrency
 from pydantic import ValidationError
 
 from lazymind.chat.engine.tools.infra import tool_error, tool_success
@@ -186,6 +186,12 @@ def _memory_result_error(tool_name: str, result: Dict[str, Any]) -> Dict[str, An
 
 
 MAX_REFERENCE_READ_COUNT = 10
+_CURRENT_MEMORY_PATHS = {
+    'soul': SOUL_PATH,
+    'profile': PROFILE_PATH,
+    'preference': PREFERENCE_PATH,
+}
+_REFERENCE_COLLECTION_KEY = ('memory-reference-collection',)
 
 
 def _normalize_refs(refs: Union[str, List[str]]) -> list[str]:
@@ -205,6 +211,19 @@ def _normalize_refs(refs: Union[str, List[str]]) -> list[str]:
         seen.add(ref)
         normalized.append(ref)
     return normalized
+
+
+def _read_memory_keys(arguments: dict[str, Any]):
+    target = str(arguments.get('target') or '').strip().lower()
+    return 'memory', _CURRENT_MEMORY_PATHS[target]
+
+
+def _read_memory_reference_keys(arguments: dict[str, Any]):
+    refs = _normalize_refs(arguments.get('refs'))
+    return [
+        _REFERENCE_COLLECTION_KEY,
+        *[('memory', split_reference_ref(ref)[0]) for ref in refs],
+    ]
 
 
 def _read_single_reference(store: MemoryStore, raw_ref: str) -> dict[str, Any]:
@@ -234,6 +253,7 @@ class MemoryTools:
     def __lazy_source__(self) -> bool:
         return False
 
+    @tool_concurrency(read_keys=_read_memory_keys)
     def read_memory(
         self,
         target: Literal['soul', 'profile', 'preference'],
@@ -310,6 +330,7 @@ class MemoryTools:
             },
         )
 
+    @tool_concurrency(read_keys=_read_memory_reference_keys)
     def read_memory_reference(self, refs: Union[str, List[str]]) -> Dict[str, Any]:
         """Read detailed user-preference reference files on demand.
 
@@ -394,7 +415,7 @@ class MemoryTools:
             },
         )
 
-    @serial_tool(group='current_memory')
+    @tool_concurrency(write_keys=('memory', SOUL_PATH))
     def soul_editor(self, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Apply one atomic batch of operations to the agent Soul.
 
@@ -440,7 +461,7 @@ class MemoryTools:
             mutation=True,
         )
 
-    @serial_tool(group='current_memory')
+    @tool_concurrency(write_keys=('memory', PROFILE_PATH))
     def profile_editor(self, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Apply one atomic batch of operations to the user Profile.
 
@@ -489,6 +510,10 @@ class MemoryTools:
             mutation=True,
         )
 
+    @tool_concurrency(write_keys=[
+        ('memory', PREFERENCE_PATH),
+        _REFERENCE_COLLECTION_KEY,
+    ])
     def preference_editor(
         self,
         op: Literal['add', 'delete'],
