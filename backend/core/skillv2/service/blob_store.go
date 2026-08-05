@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +41,18 @@ func (s *LocalObjectStore) URL(key string) string {
 	if s == nil {
 		return ""
 	}
-	return "file://" + filepath.Join(s.root, filepath.FromSlash(key))
+	return localObjectFileURL(filepath.Join(s.root, filepath.FromSlash(key)))
+}
+
+func localObjectFileURL(localPath string) string {
+	if absolutePath, err := filepath.Abs(localPath); err == nil {
+		localPath = absolutePath
+	}
+	uriPath := filepath.ToSlash(localPath)
+	if filepath.VolumeName(localPath) != "" && !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	return (&url.URL{Scheme: "file", Path: uriPath}).String()
 }
 
 type BlobStore struct {
@@ -104,7 +116,14 @@ func (s *BlobStore) Put(ctx context.Context, tx *gorm.DB, path string, data []by
 		row.Content = data
 		info.StorageBackend = row.StorageBackend
 	}
-	if err := tx.Create(&row).Error; err != nil {
+	create := tx
+	if binary {
+		// A nil []byte is encoded as an empty blob by the SQLite driver. Omit the
+		// nullable column so the database stores SQL NULL as required by the
+		// storage-shape constraint.
+		create = create.Omit("content")
+	}
+	if err := create.Create(&row).Error; err != nil {
 		return blobInfo{}, err
 	}
 	return info, nil

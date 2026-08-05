@@ -130,6 +130,11 @@ steps:
 
       Your task:
       0. UPLOAD-FIRST OVERRIDE (highest priority):
+         - User uploads are NOT plugin artifacts. Never use find_artifact/get_artifact/list_artifacts
+           to discover uploaded images.
+         - Always try find_user_attachment first when this step starts, even if routing text is
+           incomplete. If find_user_attachment is unavailable or returns no candidate, stop with
+           a clear failure note instead of fabricating search steps.
          - If the current user request contains one or more uploaded images, use
            find_user_attachment and save those uploads directly as material_images
            (sort_order=1..N, maximum 3).
@@ -223,6 +228,8 @@ steps:
       - material: image_output
         required: false
     acceptance_criteria: |
+      The step must never use find_artifact/get_artifact/list_artifacts to locate user uploads.
+      Uploaded files must be resolved through find_user_attachment only.
       If the current request has uploaded images, only those uploads may be saved as
       material_images; no knowledge-base or web image search may be performed or appended.
       For uploaded edit workflows, the first upload must also be raw_source_image.
@@ -396,6 +403,8 @@ steps:
              'value': <gif path>, 'source_tool': 'video_to_gif',
              'caption': 'Sticker i'}
           ])
+        If GIF conversion failed but video generation succeeded, save that sticker's
+        video_output entry alone so the user still receives the generated video.
         Do NOT save image_output (origins already saved by collect_materials).
         Never put GIF into image_output.
         Saving gif_output in the same i-order keeps composite rows aligned with
@@ -428,6 +437,8 @@ steps:
       Still workflows: generated_image_output must be saved (sort_order=1 only for overwrite / still path).
       Animated workflows: gif_output must exist for each successful sticker after
       video_generator → video_to_gif → sequential append saves (omit sort_order on first full run).
+      If GIF conversion fails after video generation, save video_output as the fallback;
+      gif_output is not required for that run.
       Origins stay in image_output from collect_materials — do NOT re-save image_output here.
       Never put GIF into image_output.
       Use sort_order=N only when overwriting an existing list row on partial retry.

@@ -1,2 +1,0 @@
--- Deprecated resource entity/version/suggestion tables are intentionally not recreated.
--- New installations use skills/skill_* and personal_resource_* tables for editable resources.

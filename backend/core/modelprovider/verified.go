@@ -101,6 +101,7 @@ func loadVerifiedGroupsForUser(ctx context.Context, db *gorm.DB, userID, categor
 		GroupName           string `gorm:"column:group_name"`
 		BaseURL             string `gorm:"column:base_url"`
 		APIKey              string `gorm:"column:api_key"`
+		APIKeyCiphertext    string `gorm:"column:api_key_ciphertext"`
 		Category            string `gorm:"column:category"`
 		DefaultProviderID   string `gorm:"column:default_model_provider_id"`
 	}
@@ -112,7 +113,7 @@ func loadVerifiedGroupsForUser(ctx context.Context, db *gorm.DB, userID, categor
 				"p.name AS provider_name, "+
 				"g.name AS group_name, "+
 				"g.base_url, "+
-				"g.api_key, "+
+				"g.api_key, g.api_key_ciphertext, "+
 				"p.category, "+
 				"p.default_model_provider_id",
 		).
@@ -130,6 +131,10 @@ func loadVerifiedGroupsForUser(ctx context.Context, db *gorm.DB, userID, categor
 
 	out := make([]verifiedGroupItem, 0, len(rows))
 	for _, r := range rows {
+		r.APIKey, err = ResolveAPIKey(r.APIKey, r.APIKeyCiphertext)
+		if err != nil {
+			return nil, err
+		}
 		if !isSelectableProviderGroup(ctx, db, r.DefaultProviderID, r.BaseURL, r.APIKey) {
 			continue
 		}
@@ -150,10 +155,11 @@ func countValidProviderSelection(ctx context.Context, db *gorm.DB, userID, categ
 		DefaultProviderID string `gorm:"column:default_model_provider_id"`
 		BaseURL           string `gorm:"column:base_url"`
 		APIKey            string `gorm:"column:api_key"`
+		APIKeyCiphertext  string `gorm:"column:api_key_ciphertext"`
 	}
 	var rows []row
 	q := db.WithContext(ctx).Table("user_selected_providers usp").
-		Select("p.default_model_provider_id, g.base_url, g.api_key").
+		Select("p.default_model_provider_id, g.base_url, g.api_key, g.api_key_ciphertext").
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = usp.user_model_provider_group_id AND "+
@@ -179,6 +185,11 @@ func countValidProviderSelection(ctx context.Context, db *gorm.DB, userID, categ
 	}
 	var count int64
 	for _, row := range rows {
+		resolvedAPIKey, decryptErr := ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
+		if decryptErr != nil {
+			return 0, decryptErr
+		}
+		row.APIKey = resolvedAPIKey
 		if isSelectableProviderGroup(ctx, db, row.DefaultProviderID, row.BaseURL, row.APIKey) {
 			count++
 		}
@@ -195,6 +206,7 @@ func getSharedProviderDetail(ctx context.Context, db *gorm.DB, category string) 
 		DefaultProviderID string `gorm:"column:default_model_provider_id"`
 		BaseURL           string `gorm:"column:base_url"`
 		APIKey            string `gorm:"column:api_key"`
+		APIKeyCiphertext  string `gorm:"column:api_key_ciphertext"`
 	}
 	err := db.WithContext(ctx).Table("user_selected_providers usp").
 		Select(
@@ -204,7 +216,7 @@ func getSharedProviderDetail(ctx context.Context, db *gorm.DB, category string) 
 				"g.name AS group_name, "+
 				"p.default_model_provider_id, "+
 				"g.base_url, "+
-				"g.api_key",
+				"g.api_key, g.api_key_ciphertext",
 		).
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
@@ -225,6 +237,10 @@ func getSharedProviderDetail(ctx context.Context, db *gorm.DB, category string) 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	row.APIKey, err = ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
 	if err != nil {
 		return nil, err
 	}

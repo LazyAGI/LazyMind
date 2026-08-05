@@ -9,8 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
+	"unsafe"
 
 	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/winprocess"
 	"golang.org/x/sys/windows"
@@ -45,8 +48,11 @@ type runningProcess struct {
 }
 
 type commandOptions struct {
-	Command    string
-	InstallDir string
+	Command               string
+	InstallDir            string
+	TempDir               string
+	MinimumFreeSpaceMB    uint64
+	MaximumRelativeLength int
 }
 
 func main() {
@@ -59,6 +65,12 @@ func main() {
 		fatalf("resolve Local AppData: %v", err)
 	}
 	switch opts.Command {
+	case "preflight":
+		if err := installerPreflight(opts); err != nil {
+			logMaintenance(root, "installer preflight failed: %v", err)
+			fatalf("installer preflight: %v", err)
+		}
+		logMaintenance(root, "installer preflight passed for install-dir=%q temp-dir=%q", opts.InstallDir, opts.TempDir)
 	case "check-stopped":
 		started := time.Now()
 		processes, err := discoverRunningProcesses(root, opts.InstallDir)
@@ -96,7 +108,7 @@ func main() {
 
 func parseCommandOptions(args []string) (commandOptions, error) {
 	if len(args) == 0 {
-		return commandOptions{}, errors.New("usage: lazymind-installer-maintenance check-stopped|force-stop|purge-local-data [--install-dir <path>]")
+		return commandOptions{}, errors.New("usage: lazymind-installer-maintenance preflight|check-stopped|force-stop|purge-local-data [options]")
 	}
 	opts := commandOptions{Command: args[0]}
 	for index := 1; index < len(args); index++ {
@@ -107,11 +119,134 @@ func parseCommandOptions(args []string) (commandOptions, error) {
 				return commandOptions{}, errors.New("--install-dir requires a path")
 			}
 			opts.InstallDir = filepath.Clean(args[index])
+		case "--temp-dir":
+			index++
+			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
+				return commandOptions{}, errors.New("--temp-dir requires a path")
+			}
+			opts.TempDir = filepath.Clean(args[index])
+		case "--minimum-free-space-mb":
+			index++
+			if index >= len(args) {
+				return commandOptions{}, errors.New("--minimum-free-space-mb requires a value")
+			}
+			value, err := strconv.ParseUint(args[index], 10, 64)
+			if err != nil || value == 0 {
+				return commandOptions{}, errors.New("--minimum-free-space-mb must be a positive integer")
+			}
+			opts.MinimumFreeSpaceMB = value
+		case "--maximum-relative-path-length":
+			index++
+			if index >= len(args) {
+				return commandOptions{}, errors.New("--maximum-relative-path-length requires a value")
+			}
+			value, err := strconv.Atoi(args[index])
+			if err != nil || value <= 0 {
+				return commandOptions{}, errors.New("--maximum-relative-path-length must be a positive integer")
+			}
+			opts.MaximumRelativeLength = value
 		default:
 			return commandOptions{}, fmt.Errorf("unsupported argument %q", args[index])
 		}
 	}
+	if opts.Command == "preflight" {
+		if opts.InstallDir == "" || opts.TempDir == "" || opts.MinimumFreeSpaceMB == 0 || opts.MaximumRelativeLength == 0 {
+			return commandOptions{}, errors.New("preflight requires --install-dir, --temp-dir, --minimum-free-space-mb, and --maximum-relative-path-length")
+		}
+	}
 	return opts, nil
+}
+
+func installerPreflight(opts commandOptions) error {
+	for label, directory := range map[string]string{"installation": opts.InstallDir, "temporary": opts.TempDir} {
+		if !filepath.IsAbs(directory) {
+			return fmt.Errorf("%s directory is not an absolute path: %q", label, directory)
+		}
+		if err := requireReliableLocalVolume(directory); err != nil {
+			return fmt.Errorf("%s directory %q is unreliable: %w", label, directory, err)
+		}
+		if err := ensureWritableDirectory(directory); err != nil {
+			return fmt.Errorf("%s directory %q is not writable: %w", label, directory, err)
+		}
+		freeBytes, err := diskFreeBytes(directory)
+		if err != nil {
+			return fmt.Errorf("cannot inspect free space for %s directory %q: %w", label, directory, err)
+		}
+		requiredBytes := opts.MinimumFreeSpaceMB * 1024 * 1024
+		if freeBytes < requiredBytes {
+			return fmt.Errorf("%s directory %q has %.1f GiB free; at least %.1f GiB is required", label, directory, float64(freeBytes)/(1<<30), float64(requiredBytes)/(1<<30))
+		}
+	}
+
+	projectedLength := windowsPathLength(filepath.Clean(opts.InstallDir)) + 1 + opts.MaximumRelativeLength
+	if projectedLength >= 260 {
+		return fmt.Errorf("installation path is too long: packaged files may reach %d characters (limit 259); use a Windows account with a shorter Local AppData path", projectedLength)
+	}
+	return nil
+}
+
+func windowsPathLength(path string) int {
+	return len(utf16.Encode([]rune(path)))
+}
+
+func requireReliableLocalVolume(directory string) error {
+	volume := filepath.VolumeName(directory)
+	if volume == "" || strings.HasPrefix(volume, `\\`) {
+		return errors.New("UNC/network paths are not supported")
+	}
+	rootPointer, err := windows.UTF16PtrFromString(volume + `\`)
+	if err != nil {
+		return err
+	}
+	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
+	getDriveType := kernel32.NewProc("GetDriveTypeW")
+	driveType, _, _ := getDriveType.Call(uintptr(unsafe.Pointer(rootPointer)))
+	const (
+		driveFixed   = 3
+		driveRAMDisk = 6
+	)
+	if driveType != driveFixed && driveType != driveRAMDisk {
+		return fmt.Errorf("volume must be a local fixed disk (Windows drive type %d)", driveType)
+	}
+	return nil
+}
+
+func ensureWritableDirectory(directory string) error {
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return err
+	}
+	probe, err := os.CreateTemp(directory, ".lazymind-installer-write-test-")
+	if err != nil {
+		return err
+	}
+	name := probe.Name()
+	if closeErr := probe.Close(); closeErr != nil {
+		_ = os.Remove(name)
+		return closeErr
+	}
+	return os.Remove(name)
+}
+
+func diskFreeBytes(directory string) (uint64, error) {
+	pathPointer, err := windows.UTF16PtrFromString(directory)
+	if err != nil {
+		return 0, err
+	}
+	var freeBytes uint64
+	var totalBytes uint64
+	var totalFreeBytes uint64
+	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
+	getDiskFreeSpaceEx := kernel32.NewProc("GetDiskFreeSpaceExW")
+	result, _, callErr := getDiskFreeSpaceEx.Call(
+		uintptr(unsafe.Pointer(pathPointer)),
+		uintptr(unsafe.Pointer(&freeBytes)),
+		uintptr(unsafe.Pointer(&totalBytes)),
+		uintptr(unsafe.Pointer(&totalFreeBytes)),
+	)
+	if result == 0 {
+		return 0, callErr
+	}
+	return freeBytes, nil
 }
 
 func fatalf(format string, args ...any) {

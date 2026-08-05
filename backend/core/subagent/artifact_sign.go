@@ -45,6 +45,7 @@ func resolveArtifactPaths(raw json.RawMessage, workspacePath string) json.RawMes
 		return raw
 	}
 	workspaceRoot = filepath.Clean(workspaceRoot)
+	resolvedWorkspaceRoot, workspaceResolveErr := filepath.EvalSymlinks(workspaceRoot)
 	var value map[string]any
 	if json.Unmarshal(raw, &value) != nil {
 		return raw
@@ -60,7 +61,13 @@ func resolveArtifactPaths(raw json.RawMessage, workspacePath string) json.RawMes
 		if !filepath.IsAbs(resolved) {
 			resolved = filepath.Clean(filepath.Join(workspaceRoot, resolved))
 		}
-		relative, err := filepath.Rel(workspaceRoot, resolved)
+		containmentRoot := workspaceRoot
+		containmentPath := resolved
+		if resolvedPath, err := filepath.EvalSymlinks(resolved); err == nil && workspaceResolveErr == nil {
+			containmentRoot = resolvedWorkspaceRoot
+			containmentPath = resolvedPath
+		}
+		relative, err := filepath.Rel(containmentRoot, containmentPath)
 		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 			return ""
 		}

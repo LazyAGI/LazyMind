@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,14 +10,7 @@ import (
 
 func newTestSchedulerDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "sched.db"))
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.UserSchedule{}, &orm.TaskCenterTask{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	return orm.MigrateTestDB(t, &orm.UserSchedule{}, &orm.TaskCenterTask{})
 }
 
 // ──────────────────────────────────────────────
@@ -56,6 +48,135 @@ func TestCreateAndCancelSchedule(t *testing.T) {
 	}
 	if got.Enabled {
 		t.Fatal("expected schedule to be disabled after cancel")
+	}
+}
+
+func TestNextCronTimeAfterUsesScheduleTimezone(t *testing.T) {
+	now := time.Date(2026, time.July, 30, 5, 30, 0, 0, time.UTC)
+
+	next, err := nextCronTimeAfter("0 14 * * *", "Asia/Shanghai", now)
+	if err != nil {
+		t.Fatalf("nextCronTimeAfter: %v", err)
+	}
+	want := time.Date(2026, time.July, 30, 6, 0, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Fatalf("next run = %s, want %s", next, want)
+	}
+}
+
+func TestNextCronTimeRejectsUnknownTimezone(t *testing.T) {
+	if _, err := nextCronTimeAfter("0 14 * * *", "Invalid/Timezone", time.Now()); err == nil {
+		t.Fatal("expected an invalid timezone error")
+	}
+	if _, err := previousCronTime("0 14 * * *", "Invalid/Timezone", time.Now()); err == nil {
+		t.Fatal("expected an invalid timezone error for previous cron time")
+	}
+}
+
+func TestRepairFutureScheduleNextRunsCorrectsTimezoneFallback(t *testing.T) {
+	db := newTestSchedulerDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.July, 30, 5, 30, 0, 0, time.UTC)
+	wrongFuture := time.Date(2026, time.July, 30, 14, 0, 0, 0, time.UTC)
+	overdue := time.Date(2026, time.July, 29, 6, 0, 0, 0, time.UTC)
+
+	for _, schedule := range []*orm.UserSchedule{
+		{
+			ID:             "sched-wrong-timezone",
+			UserID:         "user-1",
+			CronExpr:       "0 14 * * *",
+			Timezone:       "Asia/Shanghai",
+			PromptTemplate: "future",
+			Enabled:        true,
+			NextRunAt:      wrongFuture,
+			CreatedAt:      now.Add(-time.Hour),
+		},
+		{
+			ID:             "sched-overdue",
+			UserID:         "user-1",
+			CronExpr:       "0 14 * * *",
+			Timezone:       "Asia/Shanghai",
+			PromptTemplate: "overdue",
+			Enabled:        true,
+			NextRunAt:      overdue,
+			CreatedAt:      now.Add(-48 * time.Hour),
+		},
+	} {
+		if err := db.Create(schedule).Error; err != nil {
+			t.Fatalf("seed schedule %s: %v", schedule.ID, err)
+		}
+	}
+
+	repairFutureScheduleNextRunsAt(ctx, db.DB, now)
+
+	var repaired orm.UserSchedule
+	if err := db.First(&repaired, "id = ?", "sched-wrong-timezone").Error; err != nil {
+		t.Fatalf("fetch repaired schedule: %v", err)
+	}
+	want := time.Date(2026, time.July, 30, 6, 0, 0, 0, time.UTC)
+	if !repaired.NextRunAt.Equal(want) {
+		t.Fatalf("repaired next run = %s, want %s", repaired.NextRunAt, want)
+	}
+
+	var preserved orm.UserSchedule
+	if err := db.First(&preserved, "id = ?", "sched-overdue").Error; err != nil {
+		t.Fatalf("fetch overdue schedule: %v", err)
+	}
+	if !preserved.NextRunAt.Equal(overdue) {
+		t.Fatalf("overdue next run changed to %s, want %s", preserved.NextRunAt, overdue)
+	}
+}
+
+func TestDeleteScheduleRemovesRuleAndDependencyEdgesKeepsHistory(t *testing.T) {
+	db := newTestSchedulerDB(t)
+	if err := db.AutoMigrate(&orm.ScheduleDependency{}); err != nil {
+		t.Fatalf("auto migrate dependencies: %v", err)
+	}
+	now := time.Now().UTC()
+	schedules := []orm.UserSchedule{
+		{ID: "source", UserID: "user-1", CronExpr: "0 9 * * 1", Timezone: "UTC", PromptTemplate: "source", Enabled: true, NextRunAt: now, CreatedAt: now},
+		{ID: "target", UserID: "user-1", CronExpr: "0 10 * * 1", Timezone: "UTC", PromptTemplate: "target", Enabled: true, NextRunAt: now, CreatedAt: now},
+		{ID: "other", UserID: "user-1", CronExpr: "0 11 * * 1", Timezone: "UTC", PromptTemplate: "other", Enabled: true, NextRunAt: now, CreatedAt: now},
+	}
+	if err := db.Create(&schedules).Error; err != nil {
+		t.Fatalf("seed schedules: %v", err)
+	}
+	deps := []orm.ScheduleDependency{
+		{ID: "dep-in", UserID: "user-1", SourceScheduleID: "source", TargetScheduleID: "target", Enabled: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "dep-out", UserID: "user-1", SourceScheduleID: "target", TargetScheduleID: "other", Enabled: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "dep-keep", UserID: "user-1", SourceScheduleID: "source", TargetScheduleID: "other", Enabled: true, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := db.Create(&deps).Error; err != nil {
+		t.Fatalf("seed dependencies: %v", err)
+	}
+	scheduleID := "target"
+	history := orm.TaskCenterTask{ID: "target-history", UserID: "user-1", TaskType: "scheduled", Status: "succeeded", ScheduleID: &scheduleID, CreatedAt: now, UpdatedAt: now}
+	if err := db.Create(&history).Error; err != nil {
+		t.Fatalf("seed history: %v", err)
+	}
+
+	if err := DeleteSchedule(context.Background(), db.DB, "user-1", "target"); err != nil {
+		t.Fatalf("delete schedule: %v", err)
+	}
+	var deleted orm.UserSchedule
+	if err := db.First(&deleted, "id = ?", "target").Error; err == nil {
+		t.Fatal("expected deleted schedule to be absent")
+	}
+	var dependencyCount int64
+	if err := db.Model(&orm.ScheduleDependency{}).
+		Where("source_schedule_id = ? OR target_schedule_id = ?", "target", "target").Count(&dependencyCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if dependencyCount != 0 {
+		t.Fatalf("expected deleted schedule dependencies to be removed, got %d", dependencyCount)
+	}
+	var keptDependency orm.ScheduleDependency
+	if err := db.First(&keptDependency, "id = ?", "dep-keep").Error; err != nil {
+		t.Fatalf("unrelated dependency was removed: %v", err)
+	}
+	var keptHistory orm.TaskCenterTask
+	if err := db.First(&keptHistory, "id = ?", history.ID).Error; err != nil {
+		t.Fatalf("task history was removed with schedule: %v", err)
 	}
 }
 

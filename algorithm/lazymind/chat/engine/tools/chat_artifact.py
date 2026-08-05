@@ -10,6 +10,11 @@ from typing import Any, Dict, Optional
 
 import lazyllm
 from lazyllm.tools.agent.base import _write_agent_data
+from lazyllm.tools.agent.file_tool import (
+    list_dir as _list_dir,
+    read_file as _read_file,
+    write_file as _write_file,
+)
 
 from lazymind.config import config as _cfg
 from lazymind.chat.engine.tools.infra import tool_success
@@ -47,17 +52,36 @@ def _current_artifact_scope() -> tuple[str, str]:
 
 
 def _scope_hash(value: str) -> str:
+    # 128 bits is ample for workspace isolation and keeps generated paths below
+    # the legacy Windows MAX_PATH limit in packaged desktop installations.
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()[:32]
+
+
+def _legacy_scope_hash(value: str) -> str:
+    # Read-only compatibility for workspaces created before hashes were shortened.
     return hashlib.sha256(value.encode('utf-8')).hexdigest()
 
 
 def chat_agent_workspace(user_id: str, conversation_id: str) -> str:
     """Return the isolated main-Agent workspace for one conversation."""
-    return os.path.join(
-        os.path.realpath(_cfg['agentic_workspace']),
+    workspace_root = os.path.realpath(_cfg['agentic_workspace'])
+    current = os.path.join(
+        workspace_root,
         _CHAT_FILE_DIRECTORY,
         _scope_hash(str(user_id or '0')),
         _scope_hash(str(conversation_id)),
     )
+    legacy = os.path.join(
+        workspace_root,
+        _CHAT_FILE_DIRECTORY,
+        _legacy_scope_hash(str(user_id or '0')),
+        _legacy_scope_hash(str(conversation_id)),
+    )
+    # Prefer the 32-character layout whenever it has been initialized. Only an
+    # existing legacy directory keeps an older conversation on the 64-character layout.
+    if not os.path.exists(current) and os.path.isdir(legacy):
+        return legacy
+    return current
 
 
 def _published_file_directory(user_id: str, conversation_id: str, artifact_id: str) -> str:
@@ -75,19 +99,20 @@ def _published_file_directory(user_id: str, conversation_id: str, artifact_id: s
     )
 
 
+def _resolve_workspace_path(path: str, user_id: str, conversation_id: str) -> tuple[str, str]:
+    workspace = os.path.realpath(chat_agent_workspace(user_id, conversation_id))
+    candidate = path if os.path.isabs(path) else os.path.join(workspace, path)
+    resolved = os.path.realpath(candidate)
+    if os.path.commonpath((workspace, resolved)) != workspace:
+        raise ValueError('path must stay inside the current main-Agent workspace')
+    return workspace, resolved
+
+
 def _resolve_source_file(path: str, user_id: str, conversation_id: str) -> str:
     raw_path = str(path or '').strip()
     if not raw_path:
         raise ValueError('path is required')
-    workspace = chat_agent_workspace(user_id, conversation_id)
-    candidate = raw_path if os.path.isabs(raw_path) else os.path.join(workspace, raw_path)
-    source = os.path.realpath(candidate)
-    try:
-        in_workspace = os.path.commonpath((workspace, source)) == workspace
-    except ValueError:
-        in_workspace = False
-    if not in_workspace:
-        raise ValueError('path must point to a file inside the main Agent workspace')
+    _, source = _resolve_workspace_path(raw_path, user_id, conversation_id)
     if not os.path.isfile(source):
         raise ValueError('path must point to an existing regular file')
     return source
@@ -161,7 +186,7 @@ def save_chat_file(
     artifact_id = artifact_id or str(uuid.uuid4())
     destination_dir = _published_file_directory(user_id, conversation_id, artifact_id)
     destination = os.path.join(destination_dir, filename)
-    temporary = destination + f'.{uuid.uuid4().hex}.tmp'
+    temporary = os.path.join(destination_dir, f'.{uuid.uuid4().hex[:8]}.tmp')
     created_directory = False
 
     try:
@@ -199,3 +224,83 @@ def save_chat_file(
         'size': size,
         'message': f"Saved downloadable artifact '{filename}'.",
     })
+
+
+def write_file(
+    path: str,
+    content: str,
+    mode: str = 'overwrite',
+    encoding: str = 'utf-8',
+    create_parents: bool = True,
+    allow_unsafe: bool = False,
+) -> Dict[str, Any]:
+    """Write a text file in the current chat workspace.
+
+    Args:
+        path: Workspace-relative path or absolute path inside the workspace.
+        content: Text to write.
+        mode: "overwrite" or "append".
+        encoding: Text encoding.
+        create_parents: Create parent directories when needed.
+        allow_unsafe: Allow overwriting an existing file. Append mode does not require it.
+    """
+    user_id, conversation_id = _current_artifact_scope()
+    workspace, target = _resolve_workspace_path(path, user_id, conversation_id)
+    return _write_file(
+        target,
+        content,
+        mode=mode,
+        encoding=encoding,
+        root=workspace,
+        create_parents=create_parents,
+        allow_unsafe=allow_unsafe,
+    )
+
+
+def read_file(
+    path: str,
+    start_line: Optional[int] = None,
+    end_line: Optional[int] = None,
+    encoding: str = 'utf-8',
+    errors: str = 'replace',
+    max_chars: int = 200000,
+) -> Dict[str, Any]:
+    """Read a text file from the current chat workspace.
+
+    Args:
+        path: Workspace-relative path or absolute path inside the workspace.
+        start_line: Optional 1-based first line.
+        end_line: Optional 1-based last line.
+        encoding: Text encoding.
+        errors: Decode error handling.
+        max_chars: Maximum returned characters.
+    """
+    user_id, conversation_id = _current_artifact_scope()
+    workspace, source = _resolve_workspace_path(path, user_id, conversation_id)
+    return _read_file(
+        source,
+        start_line=start_line,
+        end_line=end_line,
+        encoding=encoding,
+        errors=errors,
+        root=workspace,
+        max_chars=max_chars,
+    )
+
+
+def list_dir(path: str = '.', recursive: bool = False, max_depth: int = 5) -> Dict[str, Any]:
+    """List files in the current chat workspace.
+
+    Args:
+        path: Workspace-relative directory or absolute directory inside the workspace.
+        recursive: Recursively include descendants.
+        max_depth: Maximum recursive depth.
+    """
+    user_id, conversation_id = _current_artifact_scope()
+    workspace, directory = _resolve_workspace_path(path, user_id, conversation_id)
+    return _list_dir(
+        directory,
+        recursive=recursive,
+        max_depth=max_depth,
+        root=workspace,
+    )

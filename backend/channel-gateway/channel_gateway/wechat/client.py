@@ -9,16 +9,13 @@ import httpx
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+from channel_gateway.wechat.domain import WeChatError
 
 ILINK_APP_ID = 'bot'
 ILINK_CLIENT_VERSION = (2 << 16) | (4 << 8) | 6
 QR_BOT_TYPE = '3'
 BOT_AGENT = 'lazymind-channel-gateway'
 ILINK_CDN_BASE_URL = 'https://novac2c.cdn.weixin.qq.com/c2c'
-
-
-class WeChatError(RuntimeError):
-    pass
 
 
 class WeChatClient:
@@ -209,7 +206,8 @@ class WeChatClient:
             to_user_id=to_user_id,
             file_key=file_key,
             aes_key=aes_key,
-            image=image,
+            media_type=1,
+            content=image,
             encrypted_size=len(ciphertext),
         )
         upload_url = str(upload.get('upload_full_url') or '').strip()
@@ -238,6 +236,72 @@ class WeChatClient:
             },
         }
 
+    def upload_file(
+        self,
+        *,
+        base_url: str,
+        token: str,
+        to_user_id: str,
+        content: bytes,
+        filename: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        if not content:
+            raise WeChatError('Cannot send an empty file')
+        normalized_filename = filename.strip() or 'lazymind-output'
+        key_material = hmac.new(
+            token.encode('utf-8'),
+            (
+                b'lazymind-wechat-file-v1\x00'
+                + idempotency_key.encode('utf-8')
+                + b'\x00'
+                + hashlib.sha256(content).digest()
+            ),
+            hashlib.sha256,
+        ).digest()
+        file_key = key_material[:16].hex()
+        aes_key = key_material[16:]
+        ciphertext = self._encrypt_media(content, aes_key)
+        upload = self._get_upload_url(
+            base_url=base_url,
+            token=token,
+            to_user_id=to_user_id,
+            file_key=file_key,
+            aes_key=aes_key,
+            media_type=3,
+            content=content,
+            encrypted_size=len(ciphertext),
+        )
+        upload_url = str(upload.get('upload_full_url') or '').strip()
+        if not upload_url:
+            upload_param = str(upload.get('upload_param') or '').strip()
+            if not upload_param:
+                raise WeChatError('WeChat did not return a file upload URL')
+            upload_url = (
+                f'{ILINK_CDN_BASE_URL}/upload'
+                f'?encrypted_query_param={quote(upload_param, safe="")}'
+                f'&filekey={quote(file_key, safe="")}'
+            )
+        download_param = self._upload_media(upload_url, ciphertext)
+        return {
+            'type': 4,
+            'file_item': {
+                'media': {
+                    'encrypt_query_param': download_param,
+                    'aes_key': base64.b64encode(
+                        aes_key.hex().encode('ascii')
+                    ).decode('ascii'),
+                    'encrypt_type': 1,
+                },
+                'file_name': normalized_filename,
+                'md5': hashlib.md5(
+                    content,
+                    usedforsecurity=False,
+                ).hexdigest(),
+                'len': str(len(content)),
+            },
+        }
+
     def send_image(
         self,
         *,
@@ -259,6 +323,27 @@ class WeChatClient:
             run_id=run_id,
         )
 
+    def send_file(
+        self,
+        *,
+        base_url: str,
+        token: str,
+        to_user_id: str,
+        context_token: str,
+        file_item: dict[str, Any],
+        client_id: str,
+        run_id: str,
+    ) -> None:
+        self._send_item(
+            base_url=base_url,
+            token=token,
+            to_user_id=to_user_id,
+            context_token=context_token,
+            item=file_item,
+            client_id=client_id,
+            run_id=run_id,
+        )
+
     def _get_upload_url(
         self,
         *,
@@ -267,7 +352,8 @@ class WeChatClient:
         to_user_id: str,
         file_key: str,
         aes_key: bytes,
-        image: bytes,
+        media_type: int,
+        content: bytes,
         encrypted_size: int,
     ) -> dict[str, Any]:
         endpoint = f'{base_url.rstrip("/")}/ilink/bot/getuploadurl'
@@ -276,11 +362,11 @@ class WeChatClient:
                 endpoint,
                 json={
                     'filekey': file_key,
-                    'media_type': 1,
+                    'media_type': media_type,
                     'to_user_id': to_user_id,
-                    'rawsize': len(image),
+                    'rawsize': len(content),
                     'rawfilemd5': hashlib.md5(
-                        image,
+                        content,
                         usedforsecurity=False,
                     ).hexdigest(),
                     'filesize': encrypted_size,
@@ -292,7 +378,9 @@ class WeChatClient:
                 timeout=20.0,
             )
         except httpx.HTTPError as exc:
-            raise WeChatError('Cannot request a WeChat image upload URL') from exc
+            raise WeChatError(
+                'Cannot request a WeChat media upload URL'
+            ) from exc
         payload = self._decode_response(response)
         if payload.get('ret') not in (None, 0):
             raise WeChatError(
@@ -310,7 +398,7 @@ class WeChatClient:
                 timeout=60.0,
             )
         except httpx.HTTPError as exc:
-            raise WeChatError('Cannot upload image to WeChat CDN') from exc
+            raise WeChatError('Cannot upload media to WeChat CDN') from exc
         if response.status_code != 200:
             raise WeChatError(
                 f'WeChat CDN returned HTTP {response.status_code}'
@@ -319,7 +407,7 @@ class WeChatClient:
             response.headers.get('x-encrypted-param') or ''
         ).strip()
         if not download_param:
-            raise WeChatError('WeChat CDN returned no image download token')
+            raise WeChatError('WeChat CDN returned no media download token')
         return download_param
 
     def _send_item(

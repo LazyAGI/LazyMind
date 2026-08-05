@@ -98,6 +98,66 @@ def test_build_cold_start_tools_honours_mentioned_plugin_allowlist(loaded_plugin
     assert [tool.__name__ for tool in tools] == ['trigger_test_plugin']
 
 
+def test_cold_start_call_modes_only_match_auto_until_explicitly_allowed(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+
+    catalog = [
+        {'plugin_ref': 'user:auto-workflow', 'plugin_id': 'auto-workflow', 'call_mode': 'auto'},
+        {'plugin_ref': 'user:manual-workflow', 'plugin_id': 'manual-workflow', 'call_mode': 'manual'},
+        {'plugin_ref': 'user:paused-workflow', 'plugin_id': 'paused-workflow', 'call_mode': 'disabled'},
+    ]
+
+    automatic_names = {
+        tool.__name__ for tool in plugin_manager.build_cold_start_tools(plugin_catalog=catalog)
+    }
+    assert any(name.startswith('trigger_auto_workflow_') for name in automatic_names)
+    assert not any(name.startswith('trigger_manual_workflow_') for name in automatic_names)
+    assert not any(name.startswith('trigger_paused_workflow_') for name in automatic_names)
+
+    manual_names = {
+        tool.__name__ for tool in plugin_manager.build_cold_start_tools(
+            plugin_catalog=catalog,
+            allowed_plugin_refs=['user:manual-workflow'],
+        )
+    }
+    assert any(name.startswith('trigger_manual_workflow_') for name in manual_names)
+    assert not any(name.startswith('trigger_auto_workflow_') for name in manual_names)
+
+
+def test_builtin_manual_call_mode_requires_explicit_reference(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+
+    assert not plugin_manager._builtin_catalog_allowed(
+        'test-plugin', set(), {'test-plugin'}, set()
+    )
+    assert plugin_manager._builtin_catalog_allowed(
+        'test-plugin', set(), {'test-plugin'}, {'builtin:test-plugin'}
+    )
+
+
+def test_paused_active_workflow_does_not_inject_session_tools(
+        loaded_plugin, mock_agentic_config):
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config['enable_plugin'] = True
+
+    contribution = plugin_manager.resolve_plugin_injection(
+        {
+            'session_id': 'session-1',
+            'plugin_id': 'test-plugin',
+            'current_step': 'step_a',
+            'plugin_ref': 'builtin:test-plugin',
+        },
+        disabled_builtin_plugins=['test-plugin'],
+    )
+
+    names = {tool.__name__ for tool in contribution.tools}
+    assert 'plugin_session_id' not in contribution.agentic_config_patch
+    assert 'list_plugin_steps' not in names
+    assert 'get_step_result' not in names
+    assert 'save_plugin_artifact' not in names
+    assert 'trigger_test_plugin' not in names
+
+
 def test_cold_start_prompt_treats_named_workflow_use_as_explicit_selection():
     from lazymind.chat.plugin import plugin_manager
 

@@ -1,39 +1,37 @@
-"""Chat engine tool package.
+"""Chat tools public API with imports deferred until an attribute is used."""
 
-Importing this package eagerly loads built-in tool modules so any module-level
-registration side effects happen in one consistent place.
-"""
+from __future__ import annotations
 
-from .calculator import calculator
-from .external_db import ExternalDatabaseToolkit
-from .kb import KBToolkit, kb_tmp_search
-from .local_fs import LocalFileToolkit
-from .multimodal import image_editor, image_generator, video_generator, video_to_gif, vision_extractor
-from .plugin_chat_tools import create_plugin_draft
-from .schedule import build_schedule_toolkit
-from .skill_editor import SkillManagementToolkit
-from .system_query import list_data_sources
-from .vocab_learn import vocab_learn
-from .web_search import url_fetch
-from .writer import WriterCreateToolkit, WriterRevisionToolkit
+import importlib
 
-__all__ = [
-    'build_schedule_toolkit',
-    'calculator',
-    'create_plugin_draft',
-    'ExternalDatabaseToolkit',
-    'image_editor',
-    'image_generator',
-    'video_generator',
-    'video_to_gif',
-    'KBToolkit',
-    'kb_tmp_search',
-    'LocalFileToolkit',
-    'vision_extractor',
-    'SkillManagementToolkit',
-    'list_data_sources',
-    'vocab_learn',
-    'url_fetch',
-    'WriterCreateToolkit',
-    'WriterRevisionToolkit',
-]
+
+_EXPORTS = {
+    'build_schedule_toolkit': ('.schedule', 'build_schedule_toolkit'),
+    'calculator': ('.calculator', 'calculator'),
+    'create_plugin_draft': ('.plugin_chat_tools', 'create_plugin_draft'),
+    'ExternalDatabaseToolkit': ('.external_db', 'ExternalDatabaseToolkit'),
+    'image_editor': ('.multimodal', 'image_editor'),
+    'image_generator': ('.multimodal', 'image_generator'),
+    'video_generator': ('.multimodal', 'video_generator'),
+    'video_to_gif': ('.multimodal', 'video_to_gif'),
+    'LocalFileToolkit': ('.local_fs', 'LocalFileToolkit'),
+    'vision_extractor': ('.multimodal', 'vision_extractor'),
+    'SkillManagementToolkit': ('.skill_editor', 'SkillManagementToolkit'),
+    'list_data_sources': ('.system_query', 'list_data_sources'),
+    'vocab_learn': ('.vocab_learn', 'vocab_learn'),
+    'url_fetch': ('.web_search', 'url_fetch'),
+    'WriterCreateToolkit': ('.writer', 'WriterCreateToolkit'),
+    'WriterRevisionToolkit': ('.writer', 'WriterRevisionToolkit'),
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str):
+    try:
+        module_name, attribute = _EXPORTS[name]
+    except KeyError as exc:
+        raise AttributeError(name) from exc
+    value = getattr(importlib.import_module(module_name, __name__), attribute)
+    globals()[name] = value
+    return value

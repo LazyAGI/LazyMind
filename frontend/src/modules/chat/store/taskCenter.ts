@@ -5,6 +5,7 @@ import { TaskServiceApi, taskStreamUrl, convEventsUrl } from "@/modules/chat/uti
 import UIUtils from "@/modules/chat/utils/ui";
 import { PLUGIN_GRAPH_REFRESH_EVENT } from "@/components/StateGraphModal";
 import { localizeErrorCode } from "@/components/request";
+import { CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT } from "@/modules/chat/constants/chat";
 
 export type TaskStatus =
   | "pending"
@@ -318,6 +319,15 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               ...(task.execution_log ?? []),
               { type: "tool_results", content: "", tool_results: results },
             ];
+            if (
+              results.some((result) =>
+                JSON.stringify(result.result).includes("FFMPEG_DEPENDENCY_MISSING"),
+              )
+            ) {
+              window.dispatchEvent(
+                new CustomEvent(CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT),
+              );
+            }
           }
           break;
         }

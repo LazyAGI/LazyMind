@@ -24,6 +24,8 @@ export interface WriterBlock {
   provider_binding?: Record<string, unknown>;
   provider_payload?: Record<string, unknown>;
   editable?: boolean;
+  /** Syntax language for code blocks. Unknown values fall back to plain text. */
+  language?: string;
   [key: string]: unknown;
 }
 
@@ -50,6 +52,28 @@ export type WriterInlineStyle = 'strong' | 'italic';
 export type WriterBlockFormat = 'paragraph' | 'heading' | 'code' | 'list_item';
 /** Feishu Docx FontColor / FontBackgroundColor value fields. */
 export type WriterSpanColorField = 'text_color' | 'background_color';
+
+const WRITER_CODE_LANGUAGE_ALIASES: Record<string, string> = {
+  cs: 'csharp',
+  dockerfile: 'docker',
+  golang: 'go',
+  html: 'markup',
+  js: 'javascript',
+  md: 'markdown',
+  plaintext: 'text',
+  py: 'python',
+  sh: 'bash',
+  shell: 'bash',
+  ts: 'typescript',
+  xml: 'markup',
+  yml: 'yaml',
+};
+
+export function normalizeWriterCodeLanguage(language: unknown): string {
+  if (typeof language !== 'string') return 'text';
+  const normalized = language.trim().toLowerCase();
+  return WRITER_CODE_LANGUAGE_ALIASES[normalized] || normalized || 'text';
+}
 
 export interface WriterPaletteColor {
   id: number;
@@ -338,13 +362,6 @@ export function countWriterBlocks(blocks: WriterBlock[]): number {
   );
 }
 
-export function getWriterOutlineInstruction(block: WriterBlock): string | null {
-  const instruction = block.authoring?.instruction;
-  if (typeof instruction !== 'string') return null;
-  const trimmed = instruction.trim();
-  return trimmed || null;
-}
-
 export function findWriterBlock(
   blocks: WriterBlock[],
   nodeId: string,
@@ -369,6 +386,23 @@ export function findWriterBlockParent(
     if (nested) return nested;
   }
   return undefined;
+}
+
+export function updateWriterCodeLanguage(
+  document: WriterDocument,
+  nodeId: string,
+  language: string,
+): WriterDocument {
+  const normalized = normalizeWriterCodeLanguage(language);
+  const result = replaceBlockInTree(document.blocks, nodeId, (block) => {
+    if (
+      block.type !== 'code'
+      || block.editable === false
+      || block.language === normalized
+    ) return block;
+    return { ...block, language: normalized };
+  });
+  return result.changed ? { ...document, blocks: result.blocks } : document;
 }
 
 function replaceBlockInTree(
@@ -574,6 +608,70 @@ export function updateWriterBlockContent(
     };
   });
   return result.changed ? { ...document, blocks: result.blocks } : document;
+}
+
+const WRITER_CODE_LANGUAGE_MENU_TEXT = [
+  'Plain text',
+  'JavaScript',
+  'TypeScript',
+  'JSX',
+  'TSX',
+  'Python',
+  'Java',
+  'Go',
+  'Rust',
+  'C',
+  'C++',
+  'C#',
+  'SQL',
+  'Shell',
+  'JSON',
+  'YAML',
+  'HTML / XML',
+  'CSS',
+  'Markdown',
+  'Dockerfile',
+].join('');
+
+function isWriterCodeToolbarPollution(content: string): boolean {
+  const prefixes = ['代码块', 'Code block'];
+  const suffixes = [
+    '取消自动换行复制',
+    '自动换行复制',
+    '取消自动换行已复制',
+    '自动换行已复制',
+    'Disable wrappingCopy',
+    'Wrap linesCopy',
+    'Disable wrappingCopied',
+    'Wrap linesCopied',
+  ];
+  return prefixes.some((prefix) => suffixes.some(
+    (suffix) => content === `${prefix}${WRITER_CODE_LANGUAGE_MENU_TEXT}${suffix}`,
+  ));
+}
+
+/**
+ * Repairs documents affected by the short-lived code-toolbar parsing bug.
+ * The match is intentionally exact so legitimate code is never modified.
+ */
+export function repairWriterCodeToolbarPollution(
+  document: WriterDocument,
+): WriterDocument {
+  const pollutedNodeIds: string[] = [];
+  const visit = (blocks: WriterBlock[]) => {
+    blocks.forEach((block) => {
+      if (
+        block.type === 'code'
+        && isWriterCodeToolbarPollution(block.content ?? '')
+      ) pollutedNodeIds.push(block.node_id);
+      visit(block.children ?? []);
+    });
+  };
+  visit(document.blocks);
+  return pollutedNodeIds.reduce(
+    (current, nodeId) => updateWriterBlockContent(current, nodeId, ''),
+    document,
+  );
 }
 
 function withWriterInlineStyle(
@@ -926,7 +1024,7 @@ export function splitWriterBlock(
 
 /**
  * Nest the current block as the last child of its previous sibling.
- * Used for Tab-based outline hierarchy.
+ * Used for Tab-based block hierarchy.
  */
 export function indentWriterBlock(
   document: WriterDocument,
@@ -1045,7 +1143,7 @@ export function insertWriterChildParagraph(
 
 /**
  * Split a heading at the caret: keep the leading text as the heading, and move
- * the trailing text into a new first-child paragraph (outline-style Enter).
+ * the trailing text into a new first-child paragraph.
  */
 export function splitWriterHeadingIntoChild(
   document: WriterDocument,

@@ -1,6 +1,11 @@
 package chat
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+
+	"lazymind/core/common/orm"
+)
 
 func TestParseMaxInputTokens(t *testing.T) {
 	tests := map[string]int64{
@@ -35,9 +40,16 @@ func TestPreviewQueryReadsTextInput(t *testing.T) {
 }
 
 func TestMentionedBuiltinPluginReplacesDefaultCatalog(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "plugin-settings.db"))
+	if err != nil {
+		t.Fatalf("connect SQLite database: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.UserPluginSetting{}); err != nil {
+		t.Fatalf("migrate plugin settings: %v", err)
+	}
 	catalog := []map[string]any{{"plugin_ref": "plugin:default", "plugin_id": "default"}}
 	selected, builtins, err := mergeMentionedPlugins(
-		t.Context(), nil, "user-1", []string{"builtin:image-plugin"}, catalog,
+		t.Context(), db.DB, "user-1", []string{"builtin:image-plugin"}, catalog,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -47,5 +59,118 @@ func TestMentionedBuiltinPluginReplacesDefaultCatalog(t *testing.T) {
 	}
 	if len(builtins) != 1 || builtins[0] != "image-plugin" {
 		t.Fatalf("builtins = %#v, want image-plugin", builtins)
+	}
+}
+
+// TestParseMaxInputTokens_EdgeCases covers more input variants.
+func TestParseMaxInputTokens_EdgeCases(t *testing.T) {
+	tests := []struct {
+		input string
+		want  *int64
+	}{
+		{"0.5K", int64Ptr(500)},
+		{"1.5M", int64Ptr(1500000)},
+		{"1k", int64Ptr(1000)},
+		{"1m", int64Ptr(1000000)},
+		{"2048", int64Ptr(2048)},
+		{" 128k ", int64Ptr(128000)},
+		{"", nil},
+		{"nope", nil},
+		{"0", nil},
+		{"-1K", nil},
+		{"K", nil},
+		{"M", nil},
+	}
+	for _, tt := range tests {
+		got := parseMaxInputTokens(tt.input)
+		if tt.want == nil {
+			if got != nil {
+				t.Fatalf("parseMaxInputTokens(%q) = %d, want nil", tt.input, *got)
+			}
+		} else {
+			if got == nil || *got != *tt.want {
+				t.Fatalf("parseMaxInputTokens(%q) = %v, want %d", tt.input, got, *tt.want)
+			}
+		}
+	}
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+
+// TestPreviewQuery_QueryKey extracts the "query" key from raw map.
+func TestPreviewQuery_QueryKey(t *testing.T) {
+	raw := map[string]any{"query": "  what is AI?  "}
+	if got := previewQuery(raw); got != "what is AI?" {
+		t.Fatalf("previewQuery(query) = %q, want 'what is AI?'", got)
+	}
+}
+
+// TestPreviewQuery_ContentKey falls back to "content" when "query" is missing.
+func TestPreviewQuery_ContentKey(t *testing.T) {
+	raw := map[string]any{"content": "  summarize this  "}
+	if got := previewQuery(raw); got != "summarize this" {
+		t.Fatalf("previewQuery(content) = %q, want 'summarize this'", got)
+	}
+}
+
+// TestPreviewQuery_QueryOverContent prefers "query" over "content" when both present.
+func TestPreviewQuery_QueryOverContent(t *testing.T) {
+	raw := map[string]any{"query": "Q", "content": "C"}
+	if got := previewQuery(raw); got != "Q" {
+		t.Fatalf("previewQuery = %q, want Q (query wins)", got)
+	}
+}
+
+// TestPreviewQuery_EmptyQuery uses content when query is whitespace.
+func TestPreviewQuery_EmptyQuery(t *testing.T) {
+	raw := map[string]any{"query": "   ", "content": "ok"}
+	if got := previewQuery(raw); got != "ok" {
+		t.Fatalf("previewQuery = %q, want ok", got)
+	}
+}
+
+// TestPreviewQuery_InputTextItem extracts text from input array items.
+func TestPreviewQuery_InputTextItem(t *testing.T) {
+	raw := map[string]any{
+		"input": []any{
+			map[string]any{"input_type": "file", "uri": "/a.txt"},
+			map[string]any{"input_type": "text", "text": " extracted text "},
+		},
+	}
+	if got := previewQuery(raw); got != "extracted text" {
+		t.Fatalf("previewQuery(input) = %q, want 'extracted text'", got)
+	}
+}
+
+// TestPreviewQuery_NoMatch returns empty when nothing matches.
+func TestPreviewQuery_NoMatch(t *testing.T) {
+	raw := map[string]any{"unknown": "value"}
+	if got := previewQuery(raw); got != "" {
+		t.Fatalf("previewQuery = %q, want empty", got)
+	}
+}
+
+// TestPreviewQuery_InputWithoutText ignores input items that are not text type.
+func TestPreviewQuery_InputWithoutText(t *testing.T) {
+	raw := map[string]any{
+		"input": []any{
+			map[string]any{"input_type": "file", "uri": "/a.txt"},
+		},
+	}
+	if got := previewQuery(raw); got != "" {
+		t.Fatalf("previewQuery(file-only input) = %q, want empty", got)
+	}
+}
+
+// TestPreviewQuery_InputParsingGraceful handles malformed input entries.
+func TestPreviewQuery_InputParsingGraceful(t *testing.T) {
+	raw := map[string]any{
+		"input": []any{
+			"not-a-map",
+			map[string]any{"input_type": "text", "text": "valid"},
+		},
+	}
+	if got := previewQuery(raw); got != "valid" {
+		t.Fatalf("previewQuery(mixed input) = %q, want valid", got)
 	}
 }

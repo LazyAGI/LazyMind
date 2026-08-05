@@ -74,10 +74,20 @@
     color: #1f3a5f;
   }
 
+  &.is-invalid code {
+    border-color: #ffccc7;
+    background: #fff2f0;
+    color: #a8071a;
+  }
+
   p {
     margin: 8px 0 0;
     color: #64748b;
     font-size: 13px;
+  }
+
+  .ant-alert {
+    margin-top: 10px;
   }
 }
 

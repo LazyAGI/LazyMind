@@ -1,35 +1,42 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
 import math
 import threading
-import time
-import uuid
-from typing import Any, Iterable
+from dataclasses import dataclass
+from typing import Any
 
-from channel_gateway.common.database import GatewayStore
-from channel_gateway.common.inbound import InboundMessage, InboundMessageProcessor
-from channel_gateway.common.lazymind import LazyMindClient
-from channel_gateway.common.outbound import split_outbound_parts
-from channel_gateway.common.security import JsonCipher
-from channel_gateway.settings import Settings
-from channel_gateway.wechat.client import WeChatClient, WeChatError
+from channel_gateway.common.domain.channel import (
+    InboundEnvelope,
+    ReceiverCheckpoint,
+)
+from channel_gateway.common.ports.providers import (
+    ReceiverRepository,
+    RuntimeCredentialStore,
+    RuntimeLease,
+)
+from channel_gateway.wechat.domain import (
+    WeChatAddressFactory,
+    WeChatConfig,
+    WeChatError,
+)
+from channel_gateway.wechat.ports import WeChatReceiverClient
 
 
 _logger = logging.getLogger(__name__)
-_SEND_ATTEMPTS = 3
 _MIN_POLL_TIMEOUT_MS = 5_000
 _MAX_POLL_TIMEOUT_MS = 60_000
-_WELCOME_MESSAGE = """补充介绍一下：我是 LazyMind，你的个人 AI 助手。这里与 LazyMind 网页端使用同一账号、普通会话和历史记录。
 
-除了刚才的对话，你还可以直接用自然语言：
-1. “帮我创建一个新会话，并整理今天的周报”
-2. “列出我的历史会话”或“切到第 2 个会话”
-3. “这轮使用 AI学习资料 知识库”
-4. “查看当前可用的知识库、Skill 和工具”
-5. “帮我生成一张可爱的小狗图片”
 
-微信端暂不支持 Plugin、SubAgent、后台 Task 和结构化 Ask。直接发消息即可开始。"""
+@dataclass(slots=True)
+class _AccountWorker:
+    account_id: str
+    revision: int
+    stop_event: threading.Event
+    thread: threading.Thread | None = None
+    lease: RuntimeLease | None = None
 
 
 def _message_key(message: dict[str, Any]) -> str:
@@ -37,7 +44,12 @@ def _message_key(message: dict[str, Any]) -> str:
     if message_id is not None and str(message_id).strip():
         raw = str(message_id).strip()
     else:
-        raw = json.dumps(message, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+        raw = json.dumps(
+            message,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(',', ':'),
+        )
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
 
@@ -56,77 +68,143 @@ def _message_text(message: dict[str, Any]) -> str:
     return ''
 
 
-def _split_text(text: str, size: int) -> Iterable[str]:
-    remaining = text.strip()
-    while remaining:
-        if len(remaining) <= size:
-            yield remaining
-            return
-        cut = remaining.rfind('\n', 0, size + 1)
-        if cut < size // 2:
-            cut = remaining.rfind('。', 0, size + 1)
-            if cut >= size // 2:
-                cut += 1
-        if cut < size // 2:
-            cut = size
-        yield remaining[:cut].strip()
-        remaining = remaining[cut:].strip()
-
-
 class WeChatRuntime:
+    """Receives iLink events and durably enqueues them without calling Core."""
+
     def __init__(
         self,
         *,
-        settings: Settings,
-        store: GatewayStore,
-        cipher: JsonCipher,
-        inbound: InboundMessageProcessor,
-        lazymind: LazyMindClient,
+        config: WeChatConfig,
+        store: ReceiverRepository,
+        credentials: RuntimeCredentialStore,
+        client: WeChatReceiverClient,
+        addresses: WeChatAddressFactory,
     ):
-        self._settings = settings
+        self._config = config
         self._store = store
-        self._cipher = cipher
-        self._wechat = WeChatClient(
-            settings.wechat_ilink_base_url,
-            settings.wechat_poll_timeout_seconds,
-        )
-        self._inbound = inbound
-        self._lazymind = lazymind
+        self._credentials = credentials
+        self._client = client
+        self._addresses = addresses
         self._shutdown = threading.Event()
         self._lock = threading.Lock()
-        self._workers: dict[str, tuple[threading.Thread, threading.Event]] = {}
+        self._workers: dict[str, _AccountWorker] = {}
 
-    def start(self) -> None:
-        for account in self._store.connected_accounts():
-            self.start_account(account['id'])
+    def reconcile_accounts(
+        self,
+        accounts: list[dict[str, Any]],
+    ) -> None:
+        desired = {
+            str(account['id']): int(account['credential_revision'])
+            for account in accounts
+        }
+        with self._lock:
+            current = {
+                account_id: worker.revision
+                for account_id, worker in self._workers.items()
+            }
+        for account_id in current.keys() - desired.keys():
+            self.stop_account(account_id)
+        for account_id, revision in desired.items():
+            if current.get(account_id) != revision:
+                self.start_account(account_id, revision=revision)
 
     def stop(self) -> None:
         self._shutdown.set()
         with self._lock:
-            workers = list(self._workers.items())
-        for _, (_, stop_event) in workers:
-            stop_event.set()
-        for _, (thread, _) in workers:
-            thread.join(timeout=1.0)
+            workers = list(self._workers.values())
+        for worker in workers:
+            worker.stop_event.set()
+            if worker.lease:
+                try:
+                    self._store.set_runtime_status(
+                        worker.account_id,
+                        'stopped',
+                        runtime_fence=worker.lease.fence,
+                    )
+                except Exception:
+                    _logger.exception(
+                        'wechat_runtime_stop_status_failed '
+                        'account_id=%s',
+                        worker.account_id,
+                    )
+                worker.lease.close()
+        for worker in workers:
+            if worker.thread:
+                worker.thread.join(timeout=1.0)
 
-    def start_account(self, account_id: str) -> None:
+    def start_account(
+        self,
+        account_id: str,
+        *,
+        revision: int = 0,
+    ) -> None:
+        old_worker = None
         with self._lock:
             existing = self._workers.get(account_id)
-            if existing and existing[0].is_alive():
+            if (
+                existing
+                and existing.thread
+                and existing.thread.is_alive()
+                and (revision == 0 or existing.revision == revision)
+            ):
                 return
+            if existing:
+                self._workers.pop(account_id, None)
+                existing.stop_event.set()
+                if existing.lease:
+                    existing.lease.close()
+                old_worker = existing
             stop_event = threading.Event()
+            worker = _AccountWorker(
+                account_id=account_id,
+                revision=revision,
+                stop_event=stop_event,
+            )
             thread = threading.Thread(
                 target=self._run_account,
-                args=(account_id, stop_event),
-                name=f'channel-wechat-{account_id[-8:]}',
+                args=(worker,),
+                name=f'channel-wechat-receiver-{account_id[-8:]}',
                 daemon=True,
             )
-            self._workers[account_id] = (thread, stop_event)
+            worker.thread = thread
+            self._workers[account_id] = worker
             thread.start()
+        if old_worker and old_worker.thread:
+            old_worker.thread.join(timeout=1.0)
 
-    def _run_account(self, account_id: str, stop_event: threading.Event) -> None:
+    def restart_account(self, account_id: str) -> None:
         try:
-            startup_failures = 0
+            account = self._credentials.load_runtime_account(account_id)
+        except Exception:
+            _logger.exception(
+                'wechat_account_reload_failed account_id=%s',
+                account_id,
+            )
+            return
+        self.start_account(
+            account_id,
+            revision=int(account['credential_revision']),
+        )
+
+    def stop_account(self, account_id: str) -> None:
+        with self._lock:
+            worker = self._workers.pop(account_id, None)
+        if not worker:
+            return
+        worker.stop_event.set()
+        if worker.lease:
+            worker.lease.close()
+        if worker.thread:
+            worker.thread.join(timeout=1.0)
+
+    def _run_account(
+        self,
+        worker: _AccountWorker,
+    ) -> None:
+        account_id = worker.account_id
+        stop_event = worker.stop_event
+        failures = 0
+        try:
             while not self._shutdown.is_set() and not stop_event.is_set():
                 lease = None
                 try:
@@ -134,130 +212,120 @@ class WeChatRuntime:
                     if lease is None:
                         stop_event.wait(5)
                         continue
-                    account = self._store.get_account_internal(account_id)
-                    if not account or account['status'] != 'connected':
+                    with self._lock:
+                        worker.lease = lease
+                    account = self._credentials.load_runtime_account(account_id)
+                    if account.get('status') != 'connected':
                         return
-                    if account['provider'] != 'wechat':
-                        self._store.set_runtime_status(account_id, 'unsupported')
-                        return
-                    credentials = self._credentials(account)
-                    self._store.set_runtime_status(account_id, 'starting')
-                    try:
-                        self._wechat.notify_start(
-                            base_url=credentials['base_url'],
-                            token=credentials['token'],
-                        )
-                    except WeChatError as exc:
-                        _logger.warning(
-                            'wechat_notify_start_failed account_id=%s error=%s',
-                            account_id,
-                            exc,
-                        )
-                    startup_failures = 0
-                    self._poll(
-                        account,
-                        credentials,
-                        stop_event,
-                        claim_owner=f'gateway_{uuid.uuid4().hex}',
-                        lease=lease,
+                    credentials = dict(account['credentials'])
+                    self._store.set_runtime_status(
+                        account_id,
+                        'starting',
+                        runtime_fence=lease.fence,
                     )
+                    self._notify_start(account_id, credentials)
+                    failures = 0
+                    self._poll(account, credentials, stop_event, lease)
                 except Exception as exc:
-                    startup_failures += 1
-                    delay = min(30, 2 ** min(startup_failures, 5))
+                    failures += 1
+                    delay = min(30, 2 ** min(failures, 5))
                     _logger.exception(
-                        'channel_runtime_failed account_id=%s retry_in=%s',
+                        'wechat_receiver_failed account_id=%s retry_in=%s',
                         account_id,
                         delay,
                     )
-                    try:
-                        self._store.set_runtime_status(
-                            account_id,
-                            'failed',
-                            str(exc)[:500],
-                        )
-                    except Exception:
-                        pass
+                    if lease is not None:
+                        try:
+                            self._store.set_runtime_status(
+                                account_id,
+                                'failed',
+                                str(exc)[:500],
+                                runtime_fence=lease.fence,
+                            )
+                        except Exception:
+                            pass
                     stop_event.wait(delay)
                 finally:
                     if lease is not None:
-                        if self._shutdown.is_set() or stop_event.is_set():
-                            try:
-                                self._store.set_runtime_status(
-                                    account_id,
-                                    'stopped',
-                                )
-                            except Exception:
-                                pass
-                        self._store.release_runtime_lease(lease)
+                        lease.close()
+                        with self._lock:
+                            if worker.lease is lease:
+                                worker.lease = None
                 if not self._shutdown.is_set() and not stop_event.is_set():
                     stop_event.wait(2)
         finally:
             with self._lock:
-                self._workers.pop(account_id, None)
+                current = self._workers.get(account_id)
+                if current is worker:
+                    self._workers.pop(account_id, None)
 
     def _poll(
         self,
         account: dict[str, Any],
         credentials: dict[str, str],
         stop_event: threading.Event,
-        claim_owner: str,
-        lease: Any,
+        lease: RuntimeLease,
     ) -> None:
         account_id = str(account['id'])
         checkpoint = self._store.get_checkpoint(account_id)
         cursor = str(checkpoint.get('cursor') or '')
         timeout_ms = int(checkpoint.get('longpoll_timeout_ms') or 35000)
         failures = 0
-        self._store.set_runtime_status(account_id, 'running')
-        _logger.info('wechat_message_runtime_started account_id=%s', account_id)
+        self._store.set_runtime_status(
+            account_id,
+            'running',
+            runtime_fence=lease.fence,
+        )
+        _logger.info('wechat_receiver_started account_id=%s', account_id)
 
         while not self._shutdown.is_set() and not stop_event.is_set():
-            lease.execute('SELECT 1')
+            lease.keepalive()
             try:
-                self._inbound.retry_pending(
-                    account_id,
-                    send=lambda to_user_id, context_token, text, message_key: self._reply_then_welcome(
-                        account,
-                        credentials,
-                        to_user_id,
-                        context_token,
-                        text,
-                        message_key,
-                    ),
-                )
-                result = self._wechat.get_updates(
+                result = self._client.get_updates(
                     base_url=credentials['base_url'],
                     token=credentials['token'],
                     cursor=cursor,
                     timeout_ms=timeout_ms,
                 )
+                if self._shutdown.is_set() or stop_event.is_set():
+                    return
+                lease.keepalive()
                 failures = 0
-                suggested_timeout = result.get('longpolling_timeout_ms')
-                if (
-                    isinstance(suggested_timeout, (int, float))
-                    and math.isfinite(suggested_timeout)
-                ):
-                    timeout_ms = min(
-                        _MAX_POLL_TIMEOUT_MS,
-                        max(_MIN_POLL_TIMEOUT_MS, int(suggested_timeout)),
-                    )
-                for message in result.get('msgs') or []:
-                    if isinstance(message, dict):
-                        self._handle_message(
-                            account,
-                            credentials,
-                            message,
-                            claim_owner,
-                        )
-                next_cursor = str(result.get('get_updates_buf') or '')
-                if next_cursor:
-                    cursor = next_cursor
-                self._store.save_checkpoint(account_id, cursor, timeout_ms)
+                timeout_ms = self._next_timeout(result, timeout_ms)
+                next_cursor = str(result.get('get_updates_buf') or cursor)
+                envelopes = [
+                    envelope
+                    for message in (result.get('msgs') or [])
+                    if isinstance(message, dict)
+                    for envelope in [
+                        self._normalize(account, credentials, message)
+                    ]
+                    if envelope is not None
+                ]
+                self._store.ingest_batch(
+                    account_id,
+                    envelopes,
+                    ReceiverCheckpoint(
+                        cursor=next_cursor,
+                        metadata={'longpoll_timeout_ms': timeout_ms},
+                    ),
+                    lease.fence,
+                )
+                cursor = next_cursor
             except WeChatError as exc:
                 failures += 1
-                delay = 30 if failures >= self._settings.wechat_max_consecutive_errors else 2
-                error = f'{exc.__class__.__name__}: {exc}'
-                self._store.set_runtime_status(account_id, 'degraded', error[:500])
+                delay = (
+                    30
+                    if failures
+                    >= self._config.max_consecutive_errors
+                    else 2
+                )
+                self._store.set_runtime_status(
+                    account_id,
+                    'degraded',
+                    f'{exc.__class__.__name__}: {exc}'[:500],
+                    lease.fence,
+                )
                 _logger.warning(
                     'wechat_getupdates_failed account_id=%s attempt=%s retry_in=%s',
                     account_id,
@@ -265,303 +333,66 @@ class WeChatRuntime:
                     delay,
                 )
                 stop_event.wait(delay)
-            except Exception as exc:
-                failures += 1
-                delay = 30 if failures >= self._settings.wechat_max_consecutive_errors else 2
-                try:
-                    self._store.set_runtime_status(
-                        account_id,
-                        'degraded',
-                        exc.__class__.__name__,
-                    )
-                except Exception:
-                    pass
-                _logger.exception(
-                    'channel_runtime_iteration_failed account_id=%s retry_in=%s',
-                    account_id,
-                    delay,
-                )
-                claim_owner = f'gateway_{uuid.uuid4().hex}'
-                stop_event.wait(delay)
 
-    def _handle_message(
+    def _normalize(
         self,
         account: dict[str, Any],
         credentials: dict[str, str],
         message: dict[str, Any],
-        claim_owner: str,
-    ) -> None:
-        account_id = str(account['id'])
-        key = _message_key(message)
-
+    ) -> InboundEnvelope | None:
+        if message.get('message_type') not in (None, 1):
+            return None
         sender_id = str(message.get('from_user_id') or '')
         if sender_id != credentials['authorized_user_id']:
-            self._store.mark_message_processed(account_id, key, 'ignored_unauthorized')
-            return
-        if message.get('message_type') not in (None, 1):
-            self._store.mark_message_processed(account_id, key, 'ignored_type')
-            return
+            return None
         context_token = str(message.get('context_token') or '')
         text = _message_text(message)
-        if not text or not context_token:
-            self._store.mark_message_processed(account_id, key, 'ignored_empty')
-            return
-        address_hash = hashlib.sha256(
-            f'wechat:{account_id}:{sender_id}'.encode('utf-8')
-        ).hexdigest()
-        self._inbound.process(
-            InboundMessage(
-                provider='wechat',
-                account_id=account_id,
-                external_address_hash=address_hash,
-                owner_user_id=str(account['owner_user_id']),
-                sender_id=sender_id,
-                context_token=context_token,
-                text=text,
-                message_key=key,
-            ),
-            claim_owner=claim_owner,
-            send=lambda to_user_id, reply_context, reply_text, message_key: self._reply_then_welcome(
-                account,
-                credentials,
-                to_user_id,
-                reply_context,
-                reply_text,
-                message_key,
-            ),
-        )
-
-    def _reply_then_welcome(
-        self,
-        account: dict[str, Any],
-        credentials: dict[str, str],
-        to_user_id: str,
-        context_token: str,
-        text: str,
-        idempotency_seed: str,
-    ) -> None:
-        self._reply(
-            credentials,
-            str(account['id']),
-            str(account['owner_user_id']),
-            to_user_id,
-            context_token,
-            text,
-            idempotency_seed,
-        )
-        self._send_pending_welcome(
-            account=account,
-            credentials=credentials,
-            sender_id=to_user_id,
-            context_token=context_token,
-        )
-
-    def _send_pending_welcome(
-        self,
-        *,
-        account: dict[str, Any],
-        credentials: dict[str, str],
-        sender_id: str,
-        context_token: str,
-    ) -> None:
-        if not account.get('welcome_pending'):
-            return
+        if not sender_id or not context_token or not text:
+            return None
         account_id = str(account['id'])
-        try:
-            self._reply(
-                credentials,
-                account_id,
-                str(account['owner_user_id']),
-                sender_id,
-                context_token,
-                _WELCOME_MESSAGE,
-                f'account:{account_id}:welcome:v1',
-            )
-            self._store.mark_welcome_sent(account_id)
-            account['welcome_pending'] = False
-            _logger.info('wechat_welcome_sent account_id=%s', account_id)
-        except Exception:
-            # A welcome failure must never block the user's actual chat. The
-            # stable idempotency seed makes a later retry safe.
-            _logger.exception('wechat_welcome_send_failed account_id=%s', account_id)
-
-    def _reply(
-        self,
-        credentials: dict[str, str],
-        account_id: str,
-        owner_user_id: str,
-        to_user_id: str,
-        context_token: str,
-        text: str,
-        idempotency_seed: str,
-    ) -> None:
-        run_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f'lazymind:{idempotency_seed}:run'))
-        for part_index, part in enumerate(split_outbound_parts(text)):
-            if part.kind == 'image':
-                self._send_image_part(
-                    credentials=credentials,
-                    account_id=account_id,
-                    owner_user_id=owner_user_id,
-                    to_user_id=to_user_id,
-                    context_token=context_token,
-                    source=part.source,
-                    idempotency_seed=idempotency_seed,
-                    part_index=part_index,
-                    run_id=run_id,
-                )
-                continue
-            self._send_text_part(
-                credentials=credentials,
-                to_user_id=to_user_id,
-                context_token=context_token,
-                text=part.text,
-                idempotency_seed=idempotency_seed,
-                part_index=part_index,
-                run_id=run_id,
-            )
-
-    def _send_text_part(
-        self,
-        *,
-        credentials: dict[str, str],
-        to_user_id: str,
-        context_token: str,
-        text: str,
-        idempotency_seed: str,
-        part_index: int,
-        run_id: str,
-    ) -> None:
-        for chunk_index, chunk in enumerate(
-            _split_text(text, self._settings.wechat_text_chunk_size)
-        ):
-            client_id = str(
-                uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    f'lazymind:{idempotency_seed}:part:{part_index}:chunk:{chunk_index}',
-                )
-            )
-            self._retry_send(
-                lambda chunk=chunk, client_id=client_id: self._wechat.send_text(
-                    base_url=credentials['base_url'],
-                    token=credentials['token'],
-                    to_user_id=to_user_id,
-                    context_token=context_token,
-                    text=chunk,
-                    client_id=client_id,
-                    run_id=run_id,
-                )
-            )
-
-    def _send_image_part(
-        self,
-        *,
-        credentials: dict[str, str],
-        account_id: str,
-        owner_user_id: str,
-        to_user_id: str,
-        context_token: str,
-        source: str,
-        idempotency_seed: str,
-        part_index: int,
-        run_id: str,
-    ) -> None:
-        client_id = str(
-            uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f'lazymind:{idempotency_seed}:part:{part_index}:image',
-            )
-        )
-        media_state = self._load_media_state(
+        address_hash = self._addresses.direct(
             account_id,
-            idempotency_seed,
-            owner_user_id,
-        )
-        part_key = str(part_index)
-        stored = media_state.get(part_key)
-        image_item = (
-            stored.get('item')
-            if isinstance(stored, dict)
-            and stored.get('source') == source
-            and isinstance(stored.get('item'), dict)
-            else None
-        )
-        if image_item is None:
-            image = self._lazymind.download_static_image(source=source)
-            image_item = self._wechat.upload_image(
-                base_url=credentials['base_url'],
-                token=credentials['token'],
-                to_user_id=to_user_id,
-                image=image,
-                idempotency_key=client_id,
-            )
-            media_state[part_key] = {'source': source, 'item': image_item}
-            saved = self._store.save_reply_media(
-                account_id,
-                idempotency_seed,
-                self._cipher.encrypt(owner_user_id, {'parts': media_state}),
-            )
-            if not saved:
-                raise RuntimeError('Cannot persist the prepared channel image')
-        self._retry_send(
-            lambda: self._wechat.send_image(
-                base_url=credentials['base_url'],
-                token=credentials['token'],
-                to_user_id=to_user_id,
-                context_token=context_token,
-                image_item=image_item,
-                client_id=client_id,
-                run_id=run_id,
-            )
+            sender_id,
+        ).route_hash
+        return InboundEnvelope(
+            provider='wechat',
+            account_id=account_id,
+            message_key=_message_key(message),
+            order_key=address_hash,
+            external_address_hash=address_hash,
+            owner_user_id=str(account['owner_user_id']),
+            recipient_id=sender_id,
+            text=text,
+            provider_context={
+                'context_token': context_token,
+                'session_id': str(message.get('session_id') or ''),
+            },
         )
 
-    def _load_media_state(
+    def _notify_start(
         self,
         account_id: str,
-        message_key: str,
-        owner_user_id: str,
-    ) -> dict[str, Any]:
-        ciphertext = self._store.get_reply_media(account_id, message_key)
-        if not ciphertext:
-            return {}
-        value = self._cipher.decrypt(owner_user_id, ciphertext)
-        parts = value.get('parts')
-        return dict(parts) if isinstance(parts, dict) else {}
+        credentials: dict[str, str],
+    ) -> None:
+        try:
+            self._client.notify_start(
+                base_url=credentials['base_url'],
+                token=credentials['token'],
+            )
+        except WeChatError:
+            _logger.warning(
+                'wechat_notify_start_failed account_id=%s',
+                account_id,
+            )
 
     @staticmethod
-    def _retry_send(send: Any) -> None:
-        last_error: WeChatError | None = None
-        for attempt in range(_SEND_ATTEMPTS):
-            try:
-                send()
-                last_error = None
-                break
-            except WeChatError as exc:
-                last_error = exc
-                if attempt + 1 < _SEND_ATTEMPTS:
-                    time.sleep(2)
-        if last_error is not None:
-            raise last_error
-
-    def _credentials(self, account: dict[str, Any]) -> dict[str, str]:
-        ciphertext = str(account['credentials_ciphertext'])
-        try:
-            raw = self._cipher.decrypt(
-                str(account['owner_user_id']),
-                ciphertext,
-            )
-        except Exception as exc:
-            raise RuntimeError('Cannot decrypt channel credentials') from exc
-        credentials = {
-            'token': str(raw.get('token') or ''),
-            'account_id': str(raw.get('account_id') or ''),
-            'authorized_user_id': str(raw.get('authorized_user_id') or ''),
-            'base_url': str(raw.get('base_url') or '').rstrip('/'),
-        }
-        if not all(credentials.values()):
-            raise RuntimeError('Channel credentials are incomplete')
-        if self._cipher.needs_migration(ciphertext):
-            self._store.update_account_credentials(
-                str(account['id']),
-                self._cipher.encrypt(str(account['owner_user_id']), raw),
-            )
-        return credentials
+    def _next_timeout(result: dict[str, Any], current: int) -> int:
+        suggested = result.get('longpolling_timeout_ms')
+        if not isinstance(suggested, (int, float)):
+            return current
+        if not math.isfinite(suggested):
+            return current
+        return min(
+            _MAX_POLL_TIMEOUT_MS,
+            max(_MIN_POLL_TIMEOUT_MS, int(suggested)),
+        )

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -57,12 +58,12 @@ func usage() {
     flask db migrate [-m "msg"]  →  dbmigrate migrate [-m "msg"]
     flask db upgrade             →  dbmigrate upgrade  text  core Starttext RunUp()
 
-Env: ACL_DB_DRIVER, ACL_DB_DSN, MIGRATIONS_DIR (default: ./migrations), MIGRATION_FAKE_VERSIONS
+Env: ACL_DB_DRIVER, ACL_DB_DSN, MIGRATIONS_DIR (default: ./migrations)
 
 Commands:
-  migrate [-m "message"]         text（text orm/models text DDL，text Postgres + ACL_DB_DSN）
+  migrate [-m "message"] [-version v0_N]  text（text orm/models text DDL，text Postgres + ACL_DB_DSN）
   upgrade                       text（text）
-  create -name <name> [-with-ddl]  textCreatetext（text -with-ddl text DDL）
+  create -name <name> [-version v0_N] [-with-ddl]  textCreatetext（text -with-ddl text DDL）
   up [-n <steps>]               text upgrade；-n text
   down [-n <steps>]              text N text
   goto -version <v>              text
@@ -95,28 +96,34 @@ func dbConfigFromEnv() (driver, dsn string) {
 func migrateCmd(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	msg := fs.String("m", "auto", "migration message (used as migration name)")
+	release := fs.String("version", "", "development release directory, e.g. v0_2")
 	_ = fs.Parse(args)
 	name := strings.TrimSpace(*msg)
 	if name == "" {
 		name = "auto"
 	}
-	createCmdWith(sanitizeName(name), true)
+	createCmdWith(sanitizeName(name), true, *release)
 }
 
 func createCmd(args []string) {
 	fs := flag.NewFlagSet("create", flag.ExitOnError)
 	name := fs.String("name", "", "migration name, e.g. init or add_xxx")
+	release := fs.String("version", "", "development release directory, e.g. v0_2")
 	withDDL := fs.Bool("with-ddl", false, "generate full CREATE TABLE from orm/models (requires postgres + ACL_DB_DSN)")
 	_ = fs.Parse(args)
 	if strings.TrimSpace(*name) == "" {
 		log.Logger.Error().Msg("create: -name is required")
 		os.Exit(2)
 	}
-	createCmdWith(sanitizeName(*name), *withDDL)
+	createCmdWith(sanitizeName(*name), *withDDL, *release)
 }
 
-func createCmdWith(name string, withDDL bool) {
-	dir := migrationsDir()
+func createCmdWith(name string, withDDL bool, release string) {
+	dir, err := migrationCreateDir(release)
+	if err != nil {
+		log.Logger.Error().Err(err).Msg("create: invalid migration version")
+		os.Exit(2)
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		log.Logger.Error().Err(err).Msg("create: mkdir failed")
 		os.Exit(1)
@@ -150,6 +157,30 @@ func createCmdWith(name string, withDDL bool) {
 	writeIfNotExists(downPath, downContent)
 	fmt.Println(upPath)
 	fmt.Println(downPath)
+}
+
+var releaseVersionPattern = regexp.MustCompile(`^v0_[1-9]\d*$`)
+
+func migrationCreateDir(release string) (string, error) {
+	root := migrationsDir()
+	release = strings.TrimSpace(release)
+	structured := pathExists(filepath.Join(root, "version_mode")) ||
+		pathExists(filepath.Join(root, "dev_mode"))
+	if release == "" {
+		if structured {
+			return "", fmt.Errorf("-version v0_N is required for the structured migration layout")
+		}
+		return root, nil
+	}
+	if !releaseVersionPattern.MatchString(release) {
+		return "", fmt.Errorf("invalid version %q; expected v0_N", release)
+	}
+	return filepath.Join(root, "dev_mode", release), nil
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // capturePostgresDDL text Postgres，text GORM text SQL，text up（CREATE TABLE）text down（DROP TABLE）。

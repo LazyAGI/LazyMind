@@ -1,1 +1,0 @@
-"""Channel-independent gateway code."""

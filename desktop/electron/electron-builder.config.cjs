@@ -18,14 +18,6 @@ const macSigningMode = process.env.LAZYMIND_DESKTOP_SIGNING_MODE || "adhoc";
 if (!["adhoc", "developer-id", "none"].includes(macSigningMode)) {
   throw new Error(`Unsupported LAZYMIND_DESKTOP_SIGNING_MODE: ${macSigningMode}`);
 }
-const notarizeMac = process.env.LAZYMIND_DESKTOP_NOTARIZE === "true";
-if (notarizeMac && macSigningMode !== "developer-id") {
-  throw new Error("LAZYMIND_DESKTOP_NOTARIZE=true requires LAZYMIND_DESKTOP_SIGNING_MODE=developer-id");
-}
-if (notarizeMac && !process.env.APPLE_TEAM_ID) {
-  throw new Error("APPLE_TEAM_ID is required for notarytool notarization");
-}
-
 const extraResources = [
   {
     from: runtimeStage,
@@ -118,69 +110,130 @@ async function developerIdSigningContext(context) {
   };
 }
 
-async function signAndStageEmbeddedRuntime(context) {
-  if (macSigningMode !== "developer-id") {
-    return;
-  }
-
+function stageEmbeddedRuntime(appOutDir) {
   const runtimeRoot = path.join(
-    context.appOutDir,
+    appOutDir,
     "LazyMind.app",
     "Contents",
     "Resources",
     "runtime",
   );
-  const binaries = collectRuntimeMachOBinaries(runtimeRoot);
-  console.log(`Signing ${binaries.length} embedded runtime Mach-O binaries`);
-  const { entitlements, identity, keychainFile } = await developerIdSigningContext(context);
-
-  // Keep a small amount of concurrency so timestamp requests are faster
-  // without overwhelming Apple's timestamp service.
-  const workers = Array.from({ length: Math.min(8, binaries.length) }, async () => {
-    while (binaries.length > 0) {
-      const binary = binaries.pop();
-      const args = [
-        "--sign",
-        identity,
-        "--force",
-        "--timestamp",
-        "--options",
-        "runtime",
-        "--entitlements",
-        entitlements,
-      ];
-      if (keychainFile) {
-        args.push("--keychain", keychainFile);
-      }
-      args.push(binary);
-      await codesignWithRetry(args, binary);
-    }
-  });
-  await Promise.all(workers);
-
   // electron-osx-sign opens every file below the app concurrently even when
   // signIgnore matches it. Keep the large Python runtime outside the app while
-  // electron-builder signs the Electron bundle, then restore and reseal it in
-  // afterSign before manual notarization.
-  const stagedRuntime = path.join(context.appOutDir, ".lazymind-runtime-for-signing");
+  // the Electron bundle is signed, then restore and reseal afterwards.
+  const stagedRuntime = path.join(appOutDir, ".lazymind-runtime-for-signing");
   fs.rmSync(stagedRuntime, { recursive: true, force: true });
   fs.renameSync(runtimeRoot, stagedRuntime);
-  stagedRuntimePaths.set(context.appOutDir, { runtimeRoot, stagedRuntime });
+  stagedRuntimePaths.set(appOutDir, { runtimeRoot, stagedRuntime });
   console.log("Staged embedded runtime outside the app for Electron bundle signing");
+  return { runtimeRoot, stagedRuntime };
 }
 
-async function restoreRuntimeAndFinalizeSignature(context) {
-  if (macSigningMode !== "developer-id") {
-    return;
-  }
-
-  const staged = stagedRuntimePaths.get(context.appOutDir);
+function restoreEmbeddedRuntime(appOutDir) {
+  const staged = stagedRuntimePaths.get(appOutDir);
   if (!staged || !fs.existsSync(staged.stagedRuntime)) {
     throw new Error("Staged embedded runtime was not found after Electron bundle signing");
   }
   fs.mkdirSync(path.dirname(staged.runtimeRoot), { recursive: true });
   fs.renameSync(staged.stagedRuntime, staged.runtimeRoot);
-  stagedRuntimePaths.delete(context.appOutDir);
+  stagedRuntimePaths.delete(appOutDir);
+  return staged.runtimeRoot;
+}
+
+async function adhocSignAppBundle(appPath) {
+  const frameworksDir = path.join(appPath, "Contents", "Frameworks");
+  const electronFramework = path.join(frameworksDir, "Electron Framework.framework");
+  const electronBinary = path.join(
+    electronFramework,
+    "Versions",
+    "A",
+    "Electron Framework",
+  );
+  if (fs.existsSync(electronBinary)) {
+    await codesignWithRetry(["--force", "--sign", "-", "--timestamp=none", electronBinary], electronBinary);
+  }
+  if (fs.existsSync(electronFramework)) {
+    await codesignWithRetry(["--force", "--sign", "-", "--timestamp=none", electronFramework], electronFramework);
+  }
+
+  for (const entry of fs.readdirSync(frameworksDir)) {
+    const absolutePath = path.join(frameworksDir, entry);
+    if (entry.endsWith(".app")) {
+      await codesignWithRetry(
+        ["--force", "--deep", "--sign", "-", "--timestamp=none", absolutePath],
+        absolutePath,
+      );
+      continue;
+    }
+    if (entry.endsWith(".framework") && entry !== "Electron Framework.framework") {
+      await codesignWithRetry(
+        ["--force", "--sign", "-", "--timestamp=none", absolutePath],
+        absolutePath,
+      );
+    }
+  }
+
+  await codesignWithRetry(["--force", "--sign", "-", "--timestamp=none", appPath], appPath);
+}
+
+async function signAndStageEmbeddedRuntime(context) {
+  if (context.electronPlatformName !== "darwin" || macSigningMode === "none") {
+    return;
+  }
+
+  const appPath = path.join(context.appOutDir, "LazyMind.app");
+  const runtimeRoot = path.join(appPath, "Contents", "Resources", "runtime");
+
+  if (macSigningMode === "developer-id") {
+    const binaries = collectRuntimeMachOBinaries(runtimeRoot);
+    console.log(`Signing ${binaries.length} embedded runtime Mach-O binaries`);
+    const { entitlements, identity, keychainFile } = await developerIdSigningContext(context);
+
+    // Keep a small amount of concurrency so timestamp requests are faster
+    // without overwhelming Apple's timestamp service.
+    const workers = Array.from({ length: Math.min(8, binaries.length) }, async () => {
+      while (binaries.length > 0) {
+        const binary = binaries.pop();
+        const args = [
+          "--sign",
+          identity,
+          "--force",
+          "--timestamp",
+          "--options",
+          "runtime",
+          "--entitlements",
+          entitlements,
+        ];
+        if (keychainFile) {
+          args.push("--keychain", keychainFile);
+        }
+        args.push(binary);
+        await codesignWithRetry(args, binary);
+      }
+    });
+    await Promise.all(workers);
+    stageEmbeddedRuntime(context.appOutDir);
+    return;
+  }
+
+  // electron-builder 24 treats identity "-" as a keychain name lookup and skips
+  // signing when no matching identity exists. Perform ad-hoc signing ourselves
+  // in afterPack because afterSign is skipped when electron-builder did not sign.
+  stageEmbeddedRuntime(context.appOutDir);
+  console.log("Ad-hoc signing Electron app bundle");
+  await adhocSignAppBundle(appPath);
+  restoreEmbeddedRuntime(context.appOutDir);
+  await codesignWithRetry(["--force", "--sign", "-", "--timestamp=none", appPath], appPath);
+  await execFile("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath]);
+  console.log("Restored embedded runtime and resealed the outer ad-hoc app signature");
+}
+
+async function restoreRuntimeAndFinalizeSignature(context) {
+  if (context.electronPlatformName !== "darwin" || macSigningMode !== "developer-id") {
+    return;
+  }
+
+  restoreEmbeddedRuntime(context.appOutDir);
 
   const appPath = path.join(context.appOutDir, "LazyMind.app");
   const { entitlements, identity, keychainFile } = await developerIdSigningContext(context);
@@ -228,9 +281,9 @@ module.exports = {
     category: "public.app-category.productivity",
     icon: "assets/LazyMind.icns",
     target: ["dir"],
-    identity: macSigningMode === "developer-id"
-      ? undefined
-      : (macSigningMode === "adhoc" ? "-" : null),
+    // electron-builder 24 treats "-" as a keychain identity instead of ad-hoc.
+    // Ad-hoc local signing runs explicitly in afterPack.
+    identity: macSigningMode === "developer-id" ? undefined : null,
     hardenedRuntime: macSigningMode === "developer-id",
     entitlements: "assets/entitlements.mac.plist",
     entitlementsInherit: "assets/entitlements.mac.plist",
@@ -245,19 +298,18 @@ module.exports = {
     icon: process.env.LAZYMIND_DESKTOP_WINDOWS_ICON || "assets/LazyMind.ico",
     target: ["zip"],
     requestedExecutionLevel: "asInvoker",
-    signAndEditExecutable: Boolean(process.env.CSC_LINK),
   },
   nsis: {
     oneClick: false,
     perMachine: false,
     allowElevation: false,
+    uninstallDisplayName: "LazyMind",
     allowToChangeInstallationDirectory: false,
     installerLanguages: ["en_US", "zh_CN"],
     displayLanguageSelector: false,
     include: path.join(__dirname, "..", "installer", "installer.nsh"),
     artifactName: "LazyMind-windows-x64-installer.${ext}",
     differentialPackage: false,
-    useZip: true,
     runAfterFinish: true,
   },
   afterPack: signAndStageEmbeddedRuntime,

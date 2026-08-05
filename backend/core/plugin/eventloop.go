@@ -111,6 +111,9 @@ func (p PluginStepParams) asMap() map[string]any {
 	if len(p.HistoryFilesPerTurn) > 0 {
 		m["history_files_per_turn"] = p.HistoryFilesPerTurn
 	}
+	if len(p.ParentAgenticConfig) > 0 {
+		m["parent_agentic_config"] = p.ParentAgenticConfig
+	}
 	if len(p.Filters) > 0 {
 		m["filters"] = p.Filters
 	}
@@ -481,6 +484,14 @@ func launchPluginAttempt(
 	}
 
 	// Create sub_agent_tasks record.
+	// Python SubAgent reads params from the DB row (not the HTTP RunRequest body),
+	// so attachment context and parent agentic_config must be persisted here.
+	if len(params.HistoryFilesPerTurn) == 0 {
+		params.HistoryFilesPerTurn = historyFilesFromConversation(db, convID)
+	}
+	if len(params.HistoryFilesPerTurn) == 0 {
+		params.HistoryFilesPerTurn = historyFilesFromParentAgentic(params.ParentAgenticConfig)
+	}
 	rawParamsMap := map[string]any{
 		"plugin_id":     pluginID,
 		"step_id":       stepID,
@@ -514,11 +525,20 @@ func launchPluginAttempt(
 	if len(params.HistoryFilesPerTurn) > 0 {
 		rawParamsMap["history_files_per_turn"] = params.HistoryFilesPerTurn
 	}
+	if len(params.ParentAgenticConfig) > 0 {
+		rawParamsMap["parent_agentic_config"] = params.ParentAgenticConfig
+	}
 	filters := params.Filters
 	if len(filters) == 0 {
 		filters = filtersFromConversation(db, convID)
 		if len(filters) > 0 {
 			params.Filters = filters
+		}
+	}
+	if len(filters) == 0 && len(params.ParentAgenticConfig) > 0 {
+		if parentFilters, ok := params.ParentAgenticConfig["filters"].(map[string]any); ok && len(parentFilters) > 0 {
+			filters = parentFilters
+			params.Filters = parentFilters
 		}
 	}
 	if len(filters) > 0 {

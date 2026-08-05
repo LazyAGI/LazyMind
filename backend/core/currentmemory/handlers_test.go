@@ -493,7 +493,7 @@ func TestPreferencePublicHandlersListDetailReorderAndDelete(t *testing.T) {
 	conflictRecorder := httptest.NewRecorder()
 	handler.ReorderPreferences(conflictRecorder, conflictRequest)
 	if conflictRecorder.Code != http.StatusConflict ||
-		!bytes.Contains(conflictRecorder.Body.Bytes(), []byte(`"code":2000107`)) ||
+		!bytes.Contains(conflictRecorder.Body.Bytes(), []byte(`"code":2001992`)) ||
 		!bytes.Contains(conflictRecorder.Body.Bytes(), []byte(`"message":"preference etag conflict"`)) ||
 		!bytes.Contains(conflictRecorder.Body.Bytes(), []byte(`"current_etag"`)) {
 		t.Fatalf(

@@ -6,10 +6,20 @@ import os
 import shutil
 import subprocess
 from collections.abc import Mapping
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
 ALGORITHM_APP = Path('algorithm/lazymind/chat/app.py')
+SOURCE_IGNORE_PATTERNS = (
+    '.git',
+    '.evo_repair_logs',
+    '__pycache__',
+    '*.pyc',
+    '.venv',
+    '.venv-*',
+    'venv',
+)
 
 
 def workspace_path(policy: Mapping[str, Any], plan: Mapping[str, Any]) -> Path:
@@ -108,7 +118,7 @@ def workspace_fingerprint(workspace: Path) -> dict[str, str]:
 
 def _copy_source(source: Path, target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
-    ignore = shutil.ignore_patterns('.git', '.evo_repair_logs', '__pycache__', '*.pyc')
+    ignore = shutil.ignore_patterns(*SOURCE_IGNORE_PATTERNS)
     for name in ('algorithm',):
         if (source / name).exists():
             shutil.copytree(source / name, target / name, ignore=ignore, dirs_exist_ok=True)
@@ -145,13 +155,22 @@ def _write_workspace_fingerprint(workspace: Path, value: Mapping[str, str]) -> N
 def _tree_hash(source: Path) -> str:
     digest = hashlib.sha1()
     for path in sorted(source.rglob('*')):
-        if path.is_file() and not any(part in {'.git', '__pycache__'} for part in path.parts):
-            rel = path.relative_to(source).as_posix()
+        relative = path.relative_to(source)
+        if path.is_file() and not _ignored_source_path(relative):
+            rel = relative.as_posix()
             content = path.read_bytes()
             digest.update(rel.encode())
             digest.update(b'\0')
             digest.update(content)
     return digest.hexdigest()
+
+
+def _ignored_source_path(path: Path) -> bool:
+    return any(
+        fnmatchcase(part, pattern)
+        for part in path.parts
+        for pattern in SOURCE_IGNORE_PATTERNS
+    )
 
 
 def _text(value: Any) -> str:

@@ -325,7 +325,7 @@ const CreateKnowledgeBaseModal = forwardRef<
                 <Paragraph className="data-source-create-provider-intro">
                   {t("knowledge.createFromCloudDocumentsIntro")}
                 </Paragraph>
-                <DataSourceProviderPicker vm={syncCreateVm} />
+                <DataSourceProviderPicker vm={syncCreateVm} showGoogleDrive />
               </div>
             ),
           },

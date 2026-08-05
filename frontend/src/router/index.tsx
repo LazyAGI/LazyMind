@@ -9,6 +9,8 @@ import SigninDashboard from "@/modules/signin/pages/dashboard";
 import LoginTransition from "@/modules/signin/pages/loginTransition";
 import ChatApp from "@/modules/chat/ChatApp";
 import Home from "@/modules/chat/pages/home";
+import ShowcaseGalleryPage from "@/modules/showcase/GalleryPage";
+import ShowcaseDetailPage from "@/modules/showcase/DetailPage";
 import KnowledgeApp from "@/modules/knowledge/KnowledgeApp";
 import KnowledgeList from "@/modules/knowledge/pages/list";
 import KnowledgeAuth from "@/modules/knowledge/pages/auth";
@@ -30,7 +32,9 @@ import FeishuSetupGuide from "@/modules/modelProvider/pages/FeishuSetupGuide";
 import NotionSetupGuide from "@/modules/modelProvider/pages/NotionSetupGuide";
 import DatasetListPage from "@/modules/datasetManagement/pages/list";
 import DatasetDetailPage from "@/modules/datasetManagement/pages/detail";
-import { WechatConnectionPage } from "@/modules/channelGateway";
+import {
+  TerminalConnectionPage,
+} from "@/modules/channelGateway";
 import MemoryManagement from "@/modules/memory";
 import MemoryManagementListPage from "@/modules/memory/pages/list";
 import MemoryReviewPage from "@/modules/memory/pages/review";
@@ -51,6 +55,7 @@ import {
 import { getAntdLocale } from "@/i18n/antdLocale";
 import { runtimeFeatures } from "@/runtime/features";
 import { isLocalSessionEnabled } from "@/runtime/localSession";
+import UserAgreementPage from "@/pages/UserAgreementPage";
 
 const PluginDetailPage = lazy(() => import("@/modules/plugin/pages/detail"));
 const BuiltinPluginDetailPage = lazy(() => import("@/modules/plugin/pages/builtin-detail"));
@@ -64,6 +69,10 @@ export default function AppRouter() {
       locale={getAntdLocale(i18n.resolvedLanguage || i18n.language)}
     >
       <Routes>
+        <Route
+          path="/legal/user-agreement"
+          element={<UserAgreementPage />}
+        />
         {localSessionEnabled ? (
           <Route path="/login" element={<Navigate to="/agent/chat" replace />} />
         ) : (
@@ -121,6 +130,8 @@ export default function AppRouter() {
           <Route path="agent/chat" element={<ChatApp />}>
             <Route index element={<Navigate to="home" replace />} />
             <Route path="home" element={<Home />} />
+            <Route path="cases" element={<ShowcaseGalleryPage />} />
+            <Route path="cases/:caseId" element={<ShowcaseDetailPage />} />
           </Route>
           <Route path="lib/knowledge" element={<KnowledgeApp />}>
             <Route index element={<Navigate to="list" replace />} />
@@ -145,7 +156,15 @@ export default function AppRouter() {
             element={<DatasetDetailPage />}
           />
           <Route path="databases" element={<DatabaseConnectionsPage />} />
-          <Route path="channels/wechat" element={<WechatConnectionPage />} />
+          <Route path="channels" element={<TerminalConnectionPage />} />
+          <Route
+            path="channels/wechat"
+            element={<Navigate to="/channels?provider=wechat" replace />}
+          />
+          <Route
+            path="channels/feishu"
+            element={<Navigate to="/channels?provider=feishu" replace />}
+          />
           <Route path="cloud-documents" element={<CloudDocumentsLayout />}>
             <Route index element={<CloudDocumentsPage />} />
             <Route path="local" element={<LocalDataSourcePage />} />

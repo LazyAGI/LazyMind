@@ -80,10 +80,8 @@ def test_wikipedia_remains_available_without_web_provider():
 
 
 def test_registry_key_source_activates_function_tool():
-    from lazymind.chat.engine.tools import kb_tmp_search
     from lazyllm.tools.agent.toolsManager import ToolManager
 
-    assert not hasattr(kb_tmp_search, '__key_source__')
     assert 'temp_kb' not in _active_tool_names()
     assert _tool_group('temp_kb')['active'] is False
 
@@ -231,8 +229,10 @@ def test_prompt_appendix_deduplication_normalizes_whitespace():
 
 def test_cloud_files_use_nested_supplier_toolkits():
     from lazyllm.tools.agent.toolsManager import ToolManager
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
 
     config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'cloud_files')
+    ensure_lazyllm_tool_docs([config.tool])
     manager = ToolManager([config.tool])
     names = {item['function']['name'] for item in manager.tools_description}
     assert names == {'get_CloudFileToolkit_methods'}

@@ -1450,6 +1450,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 		log.Printf("[startParseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
 		llmConfig = nil
 	}
+	llmConfig = normalizeParsingLLMConfig(llmConfig)
 	ocrConfig, err := modelconfig.LoadOCRConfig(r.Context(), store.DB(), userID)
 	if err != nil {
 		log.Printf("[startParseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
@@ -2756,6 +2757,7 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		log.Printf("[startReparseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
 		llmConfig = nil
 	}
+	llmConfig = normalizeParsingLLMConfig(llmConfig)
 	ocrConfig, err := modelconfig.LoadOCRConfig(r.Context(), store.DB(), userID)
 	if err != nil {
 		log.Printf("[startReparseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
@@ -2876,6 +2878,52 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		Strs("ng_names", ngNames).
 		Msg("reparse tasks submitted")
 	return results, nil
+}
+
+func normalizeParsingLLMConfig(cfg map[string]any) map[string]any {
+	if len(cfg) == 0 {
+		return cfg
+	}
+	out := make(map[string]any, len(cfg)+4)
+	for k, v := range cfg {
+		out[k] = v
+	}
+
+	type roleAlias struct {
+		from      string
+		to        string
+		modelType string
+	}
+	aliases := []roleAlias{
+		{from: "stt", to: "speech_to_text", modelType: "stt"},
+		{from: "text2image", to: "image_generator", modelType: "text2image"},
+		{from: "image_editing", to: "image_editor", modelType: "image_editing"},
+		{from: "text2video", to: "video_generator", modelType: "text2video"},
+	}
+	for _, alias := range aliases {
+		value, exists := out[alias.to]
+		if !exists {
+			value, exists = out[alias.from]
+		}
+		if !exists {
+			continue
+		}
+		roleConfig, ok := value.(map[string]any)
+		if !ok {
+			out[alias.to] = value
+			continue
+		}
+		normalized := make(map[string]any, len(roleConfig)+1)
+		for key, field := range roleConfig {
+			normalized[key] = field
+		}
+		modelType, _ := normalized["type"].(string)
+		if strings.TrimSpace(modelType) == "" {
+			normalized["type"] = alias.modelType
+		}
+		out[alias.to] = normalized
+	}
+	return out
 }
 
 func validateTransferTarget(ctx context.Context, targetDatasetID, targetPID string) error {

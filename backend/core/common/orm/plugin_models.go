@@ -234,24 +234,46 @@ type PluginDraft struct {
 func (PluginDraft) TableName() string { return "plugin_drafts" }
 
 type PluginGenerationAnalysis struct {
-	ID, DraftID, UserID, SourceType, SourceSkillID           string
-	SourceSkillRevisionID                                    string
-	SourceSkillRevisionNo                                    int64
-	SourceSkillTreeHash, Status, VerdictCode, VerdictMessage string
-	CandidatesJSON, SelectedCandidateID, CoverageReportJSON  string
-	ToolMappingReportJSON, ScriptReportJSON                  string
-	SourcePackageJSON                                        string
-	CreatedAt, UpdatedAt                                     time.Time
+	ID                    string    `gorm:"column:id;type:varchar(36);primaryKey"`
+	DraftID               string    `gorm:"column:draft_id;type:varchar(36);not null;index:idx_plugin_generation_analyses_draft,priority:1"`
+	UserID                string    `gorm:"column:user_id;type:varchar(255);not null"`
+	SourceType            string    `gorm:"column:source_type;type:varchar(16);not null"`
+	SourceSkillID         string    `gorm:"column:source_skill_id;type:varchar(36);not null;default:''"`
+	SourceSkillRevisionID string    `gorm:"column:source_skill_revision_id;type:varchar(36);not null;default:''"`
+	SourceSkillRevisionNo int64     `gorm:"column:source_skill_revision_no;not null;default:0"`
+	SourceSkillTreeHash   string    `gorm:"column:source_skill_tree_hash;type:varchar(64);not null;default:''"`
+	Status                string    `gorm:"column:status;type:varchar(32);not null"`
+	VerdictCode           string    `gorm:"column:verdict_code;type:varchar(64);not null;default:''"`
+	VerdictMessage        string    `gorm:"column:verdict_message;type:text;not null;default:''"`
+	CandidatesJSON        string    `gorm:"column:candidates_json;type:text;not null;default:'[]'"`
+	SelectedCandidateID   string    `gorm:"column:selected_candidate_id;type:varchar(128);not null;default:''"`
+	CoverageReportJSON    string    `gorm:"column:coverage_report_json;type:text;not null;default:'{}'"`
+	ToolMappingReportJSON string    `gorm:"column:tool_mapping_report_json;type:text;not null;default:'{}'"`
+	ScriptReportJSON      string    `gorm:"column:script_report_json;type:text;not null;default:'{}'"`
+	SourcePackageJSON     string    `gorm:"column:source_package_json;type:text;not null;default:'{}'"`
+	CreatedAt             time.Time `gorm:"column:created_at;not null;index:idx_plugin_generation_analyses_draft,priority:2"`
+	UpdatedAt             time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (PluginGenerationAnalysis) TableName() string { return "plugin_generation_analyses" }
 
 type PluginRepairRun struct {
-	ID, DraftID, UserID, BasePluginRevisionID                         string
-	DraftVersionBefore                                                int
-	Target, Mode, SourceAnalysisID, SourceSkillRevisionID, RepairHint string
-	DiagnosticsBeforeJSON, ChangesJSON, DiagnosticsAfterJSON, Status  string
-	CreatedAt, UpdatedAt                                              time.Time
+	ID                    string    `gorm:"column:id;type:varchar(36);primaryKey"`
+	DraftID               string    `gorm:"column:draft_id;type:varchar(36);not null;index:idx_plugin_repair_runs_draft,priority:1"`
+	UserID                string    `gorm:"column:user_id;type:varchar(255);not null"`
+	BasePluginRevisionID  string    `gorm:"column:base_plugin_revision_id;type:varchar(36);not null;default:''"`
+	DraftVersionBefore    int       `gorm:"column:draft_version_before;not null"`
+	Target                string    `gorm:"column:target;type:varchar(32);not null"`
+	Mode                  string    `gorm:"column:mode;type:varchar(32);not null"`
+	SourceAnalysisID      string    `gorm:"column:source_analysis_id;type:varchar(36);not null;default:''"`
+	SourceSkillRevisionID string    `gorm:"column:source_skill_revision_id;type:varchar(36);not null;default:''"`
+	RepairHint            string    `gorm:"column:repair_hint;type:text;not null;default:''"`
+	DiagnosticsBeforeJSON string    `gorm:"column:diagnostics_before_json;type:text;not null;default:'{}'"`
+	ChangesJSON           string    `gorm:"column:changes_json;type:text;not null;default:'{}'"`
+	DiagnosticsAfterJSON  string    `gorm:"column:diagnostics_after_json;type:text;not null;default:'{}'"`
+	Status                string    `gorm:"column:status;type:varchar(32);not null"`
+	CreatedAt             time.Time `gorm:"column:created_at;not null;index:idx_plugin_repair_runs_draft,priority:2"`
+	UpdatedAt             time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (PluginRepairRun) TableName() string { return "plugin_repair_runs" }
@@ -323,6 +345,7 @@ type UserPluginSetting struct {
 	UserID    string    `gorm:"column:user_id;type:varchar(255);primaryKey"`
 	PluginRef string    `gorm:"column:plugin_ref;type:varchar(512);primaryKey"`
 	Enabled   bool      `gorm:"column:enabled;not null;default:false"`
+	CallMode  string    `gorm:"column:call_mode;type:varchar(16);not null;default:disabled"` // auto | manual | disabled
 	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
 }
 

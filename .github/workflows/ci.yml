@@ -68,13 +68,73 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install and test
-        run: cd tests/frontend && npm install && npm test
+      - name: Install and test with coverage
+        run: |
+          cd tests/frontend
+          npm install
+          npm install -D c8
+          npx c8 --reporter=html --reporter=cobertura npm test
+
+      - name: Upload HTML coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-frontend
+          path: tests/frontend/coverage
+
+      - name: Check total coverage ≥10%
+        run: |
+          cd tests/frontend
+          npx c8 check-coverage --lines 10 --functions 10 --branches 10
+
+  test-local-runtime:
+    needs: [lint, doc_check]
+    name: Test local runtime (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-2025]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.11'
+      - name: Test Local Proxy
+        working-directory: local/local-proxy
+        run: go test ./... -v
+      - name: Test Local Runtime Manager
+        working-directory: local/local-runtime-manager
+        run: go test ./... -v
+
+  test-desktop-shell:
+    needs: [lint, doc_check]
+    name: Test desktop shell (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Test Desktop shell
+        shell: bash
+        run: node --test desktop/scripts/*.test.mjs
 
   test-auth-service:
     needs: [lint, doc_check]
@@ -84,19 +144,36 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install deps
+      - name: Install deps + coverage tools
         run: |
           pip install -r backend/auth-service/requirements.txt
           pip install -r tests/backend/auth-service/requirements-test.txt
-          pip install 'httpx<0.28' 'anyio<4.5'
+          pip install 'httpx<0.28' 'anyio<4.5' coverage diff-cover
 
-      - name: Test
-        run: python -m pytest tests/backend/auth-service/ -v
+      - name: Test with coverage
+        run: |
+          coverage run --source=backend/auth-service -m pytest tests/backend/auth-service/ -v
+          coverage html -d htmlcov-auth
+          coverage xml -o coverage-auth.xml
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-auth
+          path: htmlcov-auth
+
+      - name: Check total coverage ≥10%
+        run: coverage report --include=backend/auth-service/* --fail-under=10
+
+      - name: Check incremental coverage ≥0%
+        run: diff-cover coverage-auth.xml --compare-branch=origin/main --fail-under=0
 
   test-backend-core:
     needs: [lint, doc_check]
@@ -104,15 +181,84 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U root -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
 
-      - name: Test
+      - name: Verify migration paths
+        env:
+          MIGRATION_TEST_POSTGRES_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
+        run: cd backend/core && go test ./migrate -v
+
+      - name: Test backend core (SQLite)
+        run: cd backend/core && go test ./... -v
+
+      - name: Test backend core (PostgreSQL)
+        env:
+          TEST_DB_DRIVER: postgres
+          TEST_DB_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
+        run: cd backend/core && go test ./... -v
+
+      - name: Test backend core integration module
         run: cd tests/backend/core && go mod tidy && go test ./... -v
+
+      - name: Generate coverage for backend-core
+        run: |
+          cd backend/core
+          go test ./... -coverprofile=coverage-core.out
+          go tool cover -html=coverage-core.out -o coverage-core.html
+          go tool cover -func=coverage-core.out
+
+      - name: Install gocover-cobertura
+        run: go install github.com/boumenot/gocover-cobertura@latest
+
+      - name: Convert Go coverage to cobertura XML
+        run: |
+          cd backend/core
+          gocover-cobertura < coverage-core.out > coverage-core.xml
+
+      - name: Upload Go coverage HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-core
+          path: backend/core/coverage-core.html
+
+      - name: Check total coverage ≥10%
+        run: |
+          cd backend/core
+          COV=$(go tool cover -func=coverage-core.out | awk '/total:/{gsub(/%/,""); print $3}' | cut -d. -f1)
+          echo "Total coverage: $COV%"
+          if [ "$COV" -lt 10 ]; then
+            echo "ERROR: coverage too low ($COV% < 10%)"
+            exit 1
+          fi
+
+      - name: Install diff-cover
+        run: pip install diff-cover
+
+      - name: Check incremental coverage ≥0%
+        run: |
+          cd backend/core
+          diff-cover coverage-core.xml --compare-branch=origin/main --fail-under=0
 
   test-evo-cli:
     needs: [lint, doc_check]
@@ -124,44 +270,67 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install deps
+      - name: Install deps + coverage tools
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq cmake
-          pip install scikit-build-core pybind11
+          pip install scikit-build-core pybind11 coverage diff-cover
           CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install --no-cache-dir algorithm/lazyllm
           cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
           pip install -r evo/requirements.txt
           pip install pytest httpx
 
-      - name: Test
-        run: python -m pytest tests/evo/ tests/test_cli.py -v
+      - name: Test with coverage
+        run: |
+          coverage run --source=evo -m pytest tests/evo/ tests/test_cli.py -v
+          coverage html -d htmlcov-evo
+          coverage xml -o coverage-evo.xml
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-evo
+          path: htmlcov-evo
+
+      - name: Check total coverage ≥10%
+        run: coverage report --include=evo/* --fail-under=10
+
+      - name: Check incremental coverage ≥0%
+        run: diff-cover coverage-evo.xml --compare-branch=origin/main --fail-under=0
 
   test-algorithm:
     needs: [lint, doc_check]
-    runs-on: ubuntu-latest
+    name: Test algorithm (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-2025]
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install deps
+      - name: Install deps + coverage tools
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: '3.5'
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq cmake
-          pip install scikit-build-core pybind11
-          CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install --no-cache-dir algorithm/lazyllm
-          cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
+          pip install scikit-build-core pybind11 coverage diff-cover
+          pip install --no-cache-dir algorithm/lazyllm
+          python -c "import lazyllm, pathlib, shutil; shutil.copy2('algorithm/lazyllm/pyproject.toml', pathlib.Path(lazyllm.__path__[0]) / 'pyproject.toml')"
           pip install -r algorithm/requirements.txt
           pip install -r tests/algorithm/requirements-test.txt
 
@@ -171,7 +340,22 @@ jobs:
           python -c "from lazyllm.module import ModuleBase; print('module OK')"
           python -c "from lazyllm import fc_register; print('fc_register OK')"
 
-      - name: Test
+      - name: Test with coverage
         env:
           LAZYLLM_INIT_DOC: "1"
-        run: python -m pytest tests/algorithm/ -v
+        run: |
+          coverage run --source=algorithm -m pytest tests/algorithm/ -v
+          coverage html -d htmlcov-algorithm
+          coverage xml -o coverage-algorithm.xml
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-algorithm-${{ matrix.os }}
+          path: htmlcov-algorithm
+
+      - name: Check total coverage ≥10%
+        run: coverage report --include=algorithm/* --fail-under=10
+
+      - name: Check incremental coverage ≥0%
+        run: diff-cover coverage-algorithm.xml --compare-branch=origin/main --fail-under=0

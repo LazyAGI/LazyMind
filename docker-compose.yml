@@ -74,7 +74,7 @@ x-upload-paths: &upload-paths
 # per-OS default; ECS_01 should override this to /tmp/test_watch.
 x-file-watcher-watch-host-dir: &file-watcher-watch-host-dir ${LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR:-${HOME}}
 
-# Local lazyllm source -> /opt/lazyllm (edit on host, docker compose restart; no image rebuild).
+# Development compose overrides the installed package with the LazyLLM submodule.
 x-lazyllm-src-mount: &lazyllm-src-mount ./algorithm/lazyllm:/opt/lazyllm
 x-algorithm-src-mount: &algorithm-src-mount ./algorithm:/app/algorithm:ro
 
@@ -363,7 +363,6 @@ services:
     environment:
       <<: *core-env
       MIGRATIONS_DIR: /migrations
-      MIGRATION_FAKE_VERSIONS: ${MIGRATION_FAKE_VERSIONS:-}
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
       LAZYMIND_SUBAGENT_DB_DSN: ${ACL_DB_DSN}
@@ -468,7 +467,7 @@ services:
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
     command: ["python", "backend/core/doc/doc_server.py"]
     healthcheck:
-      test: ['CMD-SHELL', 'curl -f http://localhost:8000/v1/health && curl -f http://lazyllm-parse-server:8000/health || exit 1']
+      test: ['CMD-SHELL', 'curl -f http://localhost:8000/v1/ready || exit 1']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -476,17 +475,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      lazyllm-parse-server:
-        condition: service_healthy
-      lazyllm-algo:
-        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
     networks:
       default:
         aliases:
           - doc-server
 
   # ---------- Algorithm stack: MinerU/PaddleOCR -> Processor (server + worker) <-> Parsing (Document) <- Chat ----------
-  # Base image (lazyllm[rag]==0.7.6a0) is shared; mineru extra/backend are configured by env.
+  # Base image (lazyllm[rag]==1.2.2) is shared; mineru extra/backend are configured by env.
   mineru:
     profiles:
       - mineru
@@ -598,7 +595,7 @@ services:
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
     command: ["python", "-m", "lazymind.processor.service.server"]
     healthcheck:
-      test: ['CMD-SHELL', 'curl -f http://localhost:8000/health || exit 1']
+      test: ['CMD-SHELL', 'curl -f http://localhost:8000/ready || exit 1']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -643,7 +640,7 @@ services:
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
     command: ["python", "-m", "lazymind.processor.service.worker"]
     healthcheck:
-      test: ['CMD-SHELL', 'curl -f http://localhost:8001/health || exit 1']
+      test: ['CMD-SHELL', 'curl -f http://localhost:8001/ready || exit 1']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -653,8 +650,6 @@ services:
         condition: service_healthy
       db-bootstrap:
         condition: service_completed_successfully
-      lazyllm-parse-server:
-        condition: service_healthy
     networks:
       default:
         aliases:
@@ -690,7 +685,7 @@ services:
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_ALGO_SERVER_PORT: "8000"
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
-      LAZYLLM_ALGO_REGISTER_POLICY: ${LAZYLLM_ALGO_REGISTER_POLICY:-}
+      LAZYLLM_ALGO_REGISTER_POLICY: ${LAZYLLM_ALGO_REGISTER_POLICY:-update}
       LAZYMIND_USE_INNER_MODEL: "true"
       LAZYMIND_MILVUS_URI: ${LAZYMIND_MILVUS_URI:-http://milvus:19530}
       LAZYMIND_SEGMENT_STORE_TYPE: ${LAZYMIND_SEGMENT_STORE_TYPE:-opensearch}
@@ -701,10 +696,10 @@ services:
       LAZYMIND_RESET_ALL_ON_STARTUP: ${LAZYMIND_RESET_ALL_ON_STARTUP:-false}
     command: ["python", "-m", "lazymind.parsing.app"]
     depends_on:
-      lazyllm-parse-server:
+      db:
         condition: service_healthy
-      lazyllm-parse-worker:
-        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
     networks:
       default:
         aliases:
@@ -771,7 +766,7 @@ services:
       LAZYMIND_REVIEW_MAX_RETRIES: "5"
       LAZYMIND_SKILL_REVIEW_DEBUG: "false"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
-      LAZYLLM_INIT_DOC: 1
+      LAZYLLM_INIT_DOC: "False"
       # Chat uses the shared model config selector. Default dynamic mode enables
       # per-user model/API-key selection from core; set LAZYMIND_MODEL_CONFIG_PATH=online
       # or inner only when forcing a static config.
@@ -789,6 +784,12 @@ services:
     command: ["python", "-m", "lazymind.router.app", "--port", "8046"]
     depends_on:
       lazyllm-algo:
+        condition: service_healthy
+      lazyllm-doc-server:
+        condition: service_healthy
+      lazyllm-parse-server:
+        condition: service_healthy
+      lazyllm-parse-worker:
         condition: service_healthy
 
   evo-api:
@@ -821,14 +822,15 @@ services:
       LAZYMIND_OPENSEARCH_USER: ${LAZYMIND_OPENSEARCH_USER:-admin}
       LAZYMIND_OPENSEARCH_PASSWORD: ${LAZYMIND_OPENSEARCH_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
-      LAZYLLM_INIT_DOC: 1
-      PYTHONPATH: /app/algorithm/lazyllm:/opt/lazyllm:/app/algorithm
+      LAZYLLM_INIT_DOC: "False"
+      PYTHONPATH: /opt/lazyllm:/app/algorithm
       <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *upload-paths, *ocr-env, *llm-api-keys]
     volumes:
       - evo-data:/var/lib/lazymind/evo
       - ./data/traces:/var/lib/lazymind/traces
       - ./data/core/uploads:/var/lib/lazymind/uploads:ro
       - *algorithm-src-mount
+      - *lazyllm-src-mount
       - ./evo:/app/evo:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8047/healthz || exit 1"]

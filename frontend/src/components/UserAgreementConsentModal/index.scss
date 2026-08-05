@@ -1,0 +1,117 @@
+.user-agreement-consent-modal {
+  .ant-modal-content {
+    overflow: hidden;
+    padding: 0;
+    border-radius: 16px;
+  }
+
+  .ant-modal-body {
+    padding: 0;
+  }
+}
+
+.user-agreement-consent-language {
+  position: absolute;
+  z-index: 1;
+  top: 12px;
+  right: 16px;
+}
+
+.user-agreement-consent-hero {
+  position: relative;
+  padding: 30px 32px 24px;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(87, 119, 255, 0.13), transparent 66%),
+    linear-gradient(180deg, #f7f9ff 0%, #fff 100%);
+
+  h1 {
+    margin: 14px 0 8px;
+    color: rgba(0, 0, 0, 0.88);
+    font-size: 22px;
+    line-height: 1.35;
+  }
+
+  p {
+    max-width: 400px;
+    margin: 0 auto;
+    color: rgba(0, 0, 0, 0.58);
+    font-size: 14px;
+    line-height: 1.65;
+  }
+}
+
+.user-agreement-consent-logo {
+  display: block;
+  width: 76px;
+  height: 58px;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+.user-agreement-consent-checkbox {
+  display: flex;
+  margin: 22px 32px 0;
+  padding: 13px 14px;
+  border-radius: 10px;
+  background: #f7f8fa;
+  color: rgba(0, 0, 0, 0.68);
+  font-size: 13px;
+  line-height: 1.55;
+
+  .ant-checkbox {
+    align-self: flex-start;
+    margin-top: 3px;
+  }
+}
+
+.user-agreement-consent-link {
+  padding: 0;
+  border: 0;
+  color: #5265df;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+
+  &:hover {
+    color: #3548c9;
+    text-decoration: underline;
+  }
+
+  &:focus-visible {
+    border-radius: 2px;
+    outline: 2px solid #5265df;
+    outline-offset: 2px;
+  }
+}
+
+.user-agreement-consent-actions {
+  display: grid;
+  gap: 9px;
+  padding: 20px 32px 26px;
+  text-align: center;
+
+  .ant-btn {
+    height: 42px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+
+  > span {
+    color: rgba(0, 0, 0, 0.35);
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 560px) {
+  .user-agreement-consent-hero,
+  .user-agreement-consent-actions {
+    padding-right: 22px;
+    padding-left: 22px;
+  }
+
+  .user-agreement-consent-checkbox {
+    margin-right: 22px;
+    margin-left: 22px;
+  }
+}

@@ -5,27 +5,28 @@ import re
 import threading
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from channel_gateway.common.database import ACTIVE_SESSION_STATUSES, GatewayStore
-from channel_gateway.common.security import JsonCipher
-from channel_gateway.settings import Settings
-from channel_gateway.wechat.client import WeChatClient, WeChatError
+from channel_gateway.common.domain.channel import (
+    ACTIVE_CONNECTION_SESSION_STATUSES,
+)
+from channel_gateway.common.domain.channel import account_view
+from channel_gateway.common.errors import GatewayError
+from channel_gateway.common.ports.providers import RuntimeSupervisor
+from channel_gateway.common.ports.providers import PayloadCipher
+from channel_gateway.common.ports.providers import RuntimeLease
+from channel_gateway.wechat.domain import WeChatConfig, WeChatError
+from channel_gateway.wechat.ports import (
+    WeChatConnectionRepository,
+    WeChatLoginClient,
+)
 
 
 _logger = logging.getLogger(__name__)
 _TERMINAL_STATUSES = {'connected', 'expired', 'canceled', 'failed'}
 _REDIRECT_HOST_RE = re.compile(r'^[A-Za-z0-9.-]+$')
-
-
-class GatewayError(RuntimeError):
-    def __init__(self, http_status: int, code: str, message: str, retryable: bool = False):
-        super().__init__(http_status, code, message, retryable)
-        self.http_status = http_status
-        self.code = code
-        self.message = message
-        self.retryable = retryable
 
 
 def _utc_now() -> dt.datetime:
@@ -36,73 +37,107 @@ def _iso(value: dt.datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
+@dataclass(slots=True)
+class _LoginWorker:
+    stop_event: threading.Event
+    thread: threading.Thread | None = None
+    lease: RuntimeLease | None = None
+
+
 class WeChatConnectionService:
     def __init__(
         self,
         *,
-        settings: Settings,
-        store: GatewayStore,
-        cipher: JsonCipher,
+        config: WeChatConfig,
+        store: WeChatConnectionRepository,
+        cipher: PayloadCipher,
+        client: WeChatLoginClient,
         on_account_connected: Callable[[str], None] | None = None,
+        on_account_disconnected: Callable[[str], None] | None = None,
     ):
-        self._settings = settings
+        self._config = config
         self._store = store
         self._cipher = cipher
         self._on_account_connected = on_account_connected
-        self._wechat = WeChatClient(
-            settings.wechat_ilink_base_url,
-            settings.wechat_poll_timeout_seconds,
-        )
+        self._on_account_disconnected = on_account_disconnected
+        self._wechat = client
         self._lock = threading.Lock()
-        self._workers: dict[tuple[str, int], tuple[threading.Thread, threading.Event]] = {}
+        self._workers: dict[tuple[str, int], _LoginWorker] = {}
         self._shutdown = threading.Event()
+        self._reconciler: threading.Thread | None = None
 
     def start(self) -> None:
-        self._store.initialize()
+        if self._reconciler and self._reconciler.is_alive():
+            return
+        self._reconcile_sessions()
+        self._reconciler = threading.Thread(
+            target=self._reconcile_loop,
+            name='wechat-login-reconciler',
+            daemon=True,
+        )
+        self._reconciler.start()
+
+    def _reconcile_loop(self) -> None:
+        while not self._shutdown.wait(2):
+            try:
+                self._reconcile_sessions()
+            except Exception:
+                _logger.exception('wechat_login_reconcile_failed')
+
+    def _reconcile_sessions(self) -> None:
         now = _utc_now()
-        for row in self._store.recoverable_sessions():
+        for row in self._store.recoverable_sessions('wechat'):
             if row['expires_at'] <= now:
                 self._store.mark_expired(row['id'], row['qr_version'])
                 continue
             if not row.get('provider_state_ciphertext'):
-                self._store.mark_failed(
-                    row['id'],
-                    row['qr_version'],
-                    code='LOGIN_INTERRUPTED',
-                    message='登录过程被中断，请刷新二维码后重试',
-                    retryable=True,
-                )
+                updated_at = row.get('updated_at') or now
+                if now - updated_at > dt.timedelta(seconds=30):
+                    self._store.mark_failed(
+                        row['id'],
+                        row['qr_version'],
+                        code='LOGIN_INTERRUPTED',
+                        message='登录过程被中断，请刷新二维码后重试',
+                        retryable=True,
+                    )
                 continue
             self._start_worker(row['id'], row['qr_version'])
 
     def stop(self) -> None:
         self._shutdown.set()
+        if (
+            self._reconciler
+            and self._reconciler is not threading.current_thread()
+        ):
+            self._reconciler.join(timeout=3)
+        self._reconciler = None
         with self._lock:
             workers = list(self._workers.values())
-        for _, stop_event in workers:
-            stop_event.set()
-        for thread, _ in workers:
-            thread.join(timeout=0.2)
+        for worker in workers:
+            worker.stop_event.set()
+            if worker.lease is not None:
+                worker.lease.close()
+        for worker in workers:
+            if worker.thread is not None:
+                worker.thread.join(timeout=1)
 
     def create_session(
         self,
         *,
         owner_user_id: str,
-        provider: str,
         idempotency_key: str | None,
     ) -> dict[str, Any]:
-        provider = provider.strip().lower()
-        if provider != 'wechat':
-            raise GatewayError(422, 'PROVIDER_NOT_SUPPORTED', f'暂不支持频道类型：{provider}')
         normalized_idempotency_key = (idempotency_key or '').strip()
         if len(normalized_idempotency_key) > 128:
             raise GatewayError(422, 'INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key 长度不能超过 128 个字符')
-        expires_at = _utc_now() + dt.timedelta(seconds=self._settings.wechat_qr_session_ttl_seconds)
+        expires_at = _utc_now() + dt.timedelta(
+            seconds=self._config.qr_session_ttl_seconds
+        )
         session_id = f'cs_{uuid.uuid4().hex}'
         row, created = self._store.reserve_session(
             session_id=session_id,
             owner_user_id=owner_user_id,
-            provider=provider,
+            provider='wechat',
             idempotency_key=normalized_idempotency_key or None,
             expires_at=expires_at,
         )
@@ -135,6 +170,7 @@ class WeChatConnectionService:
             session_id,
             self._cipher.encrypt(owner_user_id, state),
             expires_at,
+            '请使用微信扫码并在手机上确认',
         )
         if not row:
             raise GatewayError(409, 'INVALID_STATE', '连接会话状态已经变化')
@@ -168,6 +204,7 @@ class WeChatConnectionService:
         updated = self._store.update_active_session(
             session_id=session_id,
             qr_version=row['qr_version'],
+            expected_revision=row['revision'],
             status='confirming',
             message='正在验证，请稍候',
             state_ciphertext=self._cipher.encrypt(owner_user_id, state),
@@ -201,12 +238,15 @@ class WeChatConnectionService:
             'base_url': base_url,
             'verify_code': '',
         }
-        expires_at = _utc_now() + dt.timedelta(seconds=self._settings.wechat_qr_session_ttl_seconds)
+        expires_at = _utc_now() + dt.timedelta(
+            seconds=self._config.qr_session_ttl_seconds
+        )
         updated = self._store.refresh_session(
             owner_user_id=owner_user_id,
             session_id=session_id,
             state_ciphertext=self._cipher.encrypt(owner_user_id, state),
             expires_at=expires_at,
+            message='请使用微信扫码并在手机上确认',
         )
         if not updated:
             raise GatewayError(409, 'INVALID_STATE', '连接会话状态已经变化')
@@ -222,35 +262,79 @@ class WeChatConnectionService:
         if not self._store.cancel_session(owner_user_id, session_id):
             raise GatewayError(409, 'INVALID_STATE', '连接会话状态已经变化')
 
-    def list_accounts(self, owner_user_id: str, provider: str) -> dict[str, Any]:
-        provider = provider.strip().lower()
-        if provider != 'wechat':
-            raise GatewayError(422, 'PROVIDER_NOT_SUPPORTED', f'暂不支持频道类型：{provider}')
-        rows = self._store.list_accounts(owner_user_id, provider)
-        return {'items': [self._account_view(row) for row in rows]}
+    def list_accounts(self, owner_user_id: str) -> dict[str, Any]:
+        rows = self._store.list_accounts(owner_user_id, 'wechat')
+        return {'items': [account_view(row) for row in rows]}
+
+    def disconnect_account(self, owner_user_id: str, account_id: str) -> None:
+        account = self._store.get_account(owner_user_id, account_id)
+        if not account:
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '微信账号不存在或已解除连接')
+        if not self._store.delete_account(owner_user_id, account_id):
+            raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '微信账号状态已经变化，请刷新后重试')
+        if self._on_account_disconnected:
+            self._on_account_disconnected(account_id)
+        _logger.info(
+            'wechat_account_disconnected account_id=%s owner_user_id=%s',
+            account_id,
+            owner_user_id,
+        )
 
     def _start_worker(self, session_id: str, qr_version: int) -> None:
         key = (session_id, qr_version)
         with self._lock:
             existing = self._workers.get(key)
-            if existing and existing[0].is_alive():
+            if existing and existing.thread and existing.thread.is_alive():
                 return
-            stop_event = threading.Event()
+            worker = _LoginWorker(stop_event=threading.Event())
             thread = threading.Thread(
                 target=self._poll_worker,
-                args=(session_id, qr_version, stop_event),
+                args=(session_id, qr_version, worker),
                 name=f'wechat-login-{session_id[-8:]}-{qr_version}',
                 daemon=True,
             )
-            self._workers[key] = (thread, stop_event)
+            worker.thread = thread
+            self._workers[key] = worker
             thread.start()
 
-    def _poll_worker(self, session_id: str, qr_version: int, stop_event: threading.Event) -> None:
+    def _poll_worker(
+        self,
+        session_id: str,
+        qr_version: int,
+        worker: _LoginWorker,
+    ) -> None:
         consecutive_errors = 0
+        lease = None
+        stop_event = worker.stop_event
         try:
+            lease_key = f'wechat-login:{session_id}:{qr_version}'
             while not self._shutdown.is_set() and not stop_event.is_set():
+                lease = self._store.acquire_runtime_lease(lease_key)
+                if lease is not None:
+                    break
                 row = self._store.get_session_internal(session_id)
-                if not row or row['qr_version'] != qr_version or row['status'] not in ACTIVE_SESSION_STATUSES:
+                if (
+                    not row
+                    or row['qr_version'] != qr_version
+                    or row['status']
+                    not in ACTIVE_CONNECTION_SESSION_STATUSES
+                ):
+                    return
+                stop_event.wait(2)
+            if lease is None:
+                return
+            with self._lock:
+                if self._workers.get((session_id, qr_version)) is not worker:
+                    return
+                worker.lease = lease
+            while not self._shutdown.is_set() and not stop_event.is_set():
+                lease.keepalive()
+                row = self._store.get_session_internal(session_id)
+                if (
+                    not row
+                    or row['qr_version'] != qr_version
+                    or row['status'] not in ACTIVE_CONNECTION_SESSION_STATUSES
+                ):
                     return
                 if row['expires_at'] <= _utc_now():
                     self._store.mark_expired(session_id, qr_version)
@@ -259,9 +343,12 @@ class WeChatConnectionService:
                 try:
                     result = self._wechat.poll_login_status(
                         str(state.get('qrcode') or ''),
-                        str(state.get('base_url') or self._settings.wechat_ilink_base_url),
+                        str(state.get('base_url') or self._config.ilink_base_url),
                         str(state.get('verify_code') or ''),
                     )
+                    if self._shutdown.is_set() or stop_event.is_set():
+                        return
+                    lease.keepalive()
                     consecutive_errors = 0
                 except WeChatError as exc:
                     consecutive_errors += 1
@@ -271,7 +358,7 @@ class WeChatConnectionService:
                         consecutive_errors,
                         exc,
                     )
-                    if consecutive_errors >= self._settings.wechat_max_consecutive_errors:
+                    if consecutive_errors >= self._config.max_consecutive_errors:
                         self._store.mark_failed(
                             session_id,
                             qr_version,
@@ -290,6 +377,7 @@ class WeChatConnectionService:
                     self._store.update_active_session(
                         session_id=session_id,
                         qr_version=qr_version,
+                        expected_revision=row['revision'],
                         status='scanned',
                         message='二维码已扫描，请在手机微信中确认',
                         state_ciphertext=self._cipher.encrypt(str(row['owner_user_id']), state),
@@ -300,13 +388,16 @@ class WeChatConnectionService:
                     self._store.update_active_session(
                         session_id=session_id,
                         qr_version=qr_version,
+                        expected_revision=row['revision'],
                         status='verification_required',
                         message='请输入手机微信中显示的数字',
                         state_ciphertext=self._cipher.encrypt(str(row['owner_user_id']), state),
                     )
                     continue
                 if provider_status == 'scaned_but_redirect':
-                    redirect_host = self._validated_redirect_host(str(result.get('redirect_host') or ''))
+                    redirect_host = self._validated_redirect_host(
+                        str(result.get('redirect_host') or '')
+                    )
                     if not redirect_host:
                         self._store.mark_failed(
                             session_id,
@@ -320,6 +411,7 @@ class WeChatConnectionService:
                     self._store.update_active_session(
                         session_id=session_id,
                         qr_version=qr_version,
+                        expected_revision=row['revision'],
                         status='confirming',
                         message='正在完成微信登录',
                         state_ciphertext=self._cipher.encrypt(str(row['owner_user_id']), state),
@@ -356,14 +448,18 @@ class WeChatConnectionService:
                 )
                 stop_event.wait(1)
         finally:
+            if lease is not None:
+                lease.close()
             with self._lock:
-                self._workers.pop((session_id, qr_version), None)
+                worker.lease = None
+                if self._workers.get((session_id, qr_version)) is worker:
+                    self._workers.pop((session_id, qr_version), None)
 
     def _handle_confirmed(self, row: dict[str, Any], result: dict[str, Any]) -> None:
         token = str(result.get('bot_token') or '')
         provider_account_id = str(result.get('ilink_bot_id') or '')
         authorized_user_id = str(result.get('ilink_user_id') or '')
-        base_url = str(result.get('baseurl') or self._settings.wechat_ilink_base_url)
+        base_url = str(result.get('baseurl') or self._config.ilink_base_url)
         if (
             not token
             or not provider_account_id
@@ -389,11 +485,14 @@ class WeChatConnectionService:
         account = self._store.save_connected_account(
             session_id=row['id'],
             qr_version=row['qr_version'],
+            expected_revision=row['revision'],
             owner_user_id=row['owner_user_id'],
             provider='wechat',
             external_id_hash=external_id_hash,
             label='微信 ClawBot',
             credentials_ciphertext=self._cipher.encrypt(str(row['owner_user_id']), credentials),
+            conflict_message='该微信身份已绑定到另一个 LazyMind 用户',
+            connected_message='微信连接成功',
         )
         if account:
             _logger.info(
@@ -435,7 +534,10 @@ class WeChatConnectionService:
     def _session_view(self, row: dict[str, Any]) -> dict[str, Any]:
         status = str(row['status'])
         qr = None
-        if status in ACTIVE_SESSION_STATUSES and row.get('provider_state_ciphertext'):
+        if (
+            status in ACTIVE_CONNECTION_SESSION_STATUSES
+            and row.get('provider_state_ciphertext')
+        ):
             state = self._decrypt_session_state(row)
             qr_payload = str(state.get('qr_payload') or '')
             if qr_payload:
@@ -452,7 +554,7 @@ class WeChatConnectionService:
                 'input_mode': 'numeric',
             }
         allowed_actions: list[str] = []
-        if status in ACTIVE_SESSION_STATUSES:
+        if status in ACTIVE_CONNECTION_SESSION_STATUSES:
             allowed_actions.append('cancel')
         if status == 'verification_required':
             allowed_actions.insert(0, 'submit_challenge')
@@ -462,7 +564,7 @@ class WeChatConnectionService:
         if status == 'connected' and row.get('account_id'):
             account_row = self._store.get_account(row['owner_user_id'], row['account_id'])
             if account_row:
-                account = self._account_view(account_row)
+                account = account_view(account_row)
         error = None
         if row.get('error_code'):
             error = {
@@ -485,17 +587,23 @@ class WeChatConnectionService:
             'error': error,
         }
 
-    @staticmethod
-    def _account_view(row: dict[str, Any]) -> dict[str, Any]:
-        return {
-            'id': row['id'],
-            'provider': row['provider'],
-            'label': row['label'],
-            'status': row['status'],
-            'runtime_status': row.get('runtime_status') or 'stopped',
-            'connected_at': _iso(row.get('connected_at')),
-            'last_poll_at': _iso(row.get('last_poll_at')),
-            'last_message_at': _iso(row.get('last_message_at')),
-            'last_error': row.get('last_error'),
-            'updated_at': _iso(row['updated_at']),
-        }
+
+class WeChatRuntimeSupervisor:
+    """Owns the lifecycle of WeChat login and message receivers."""
+
+    def __init__(
+        self,
+        *,
+        connections: WeChatConnectionService,
+        accounts: RuntimeSupervisor,
+    ):
+        self._connections = connections
+        self._accounts = accounts
+
+    def start(self) -> None:
+        self._accounts.start()
+        self._connections.start()
+
+    def stop(self) -> None:
+        self._connections.stop()
+        self._accounts.stop()

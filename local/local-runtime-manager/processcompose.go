@@ -69,6 +69,8 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 	commandForLocalProxyDown := commandWithEnv(commandEnv, commandPrefix+"internal local-proxy-down")
 	commandForAuthServiceRun := commandWithEnv(commandEnv, commandPrefix+"internal auth-service-run")
 	commandForAuthServiceDown := commandWithEnv(commandEnv, commandPrefix+"internal auth-service-down")
+	commandForChannelGatewayRun := commandWithEnv(commandEnv, commandPrefix+"internal channel-gateway-run")
+	commandForChannelGatewayDown := commandWithEnv(commandEnv, commandPrefix+"internal channel-gateway-down")
 	commandForCoreRun := commandWithEnv(commandEnv, commandPrefix+"internal core-run")
 	commandForCoreDown := commandWithEnv(commandEnv, commandPrefix+"internal core-down")
 	commandForScanControlPlaneRun := commandWithEnv(commandEnv, commandPrefix+"internal scan-control-plane-run")
@@ -103,6 +105,16 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 					TimeoutSeconds: 15,
 				},
 				LogLocation: paths.AuthServiceLog,
+				Namespace:   "host",
+			},
+			channelGatewayProcessName: {
+				WorkingDir: repoRoot,
+				Command:    commandForChannelGatewayRun,
+				Shutdown: processComposeShutdown{
+					Command:        commandForChannelGatewayDown,
+					TimeoutSeconds: 15,
+				},
+				LogLocation: paths.ChannelGatewayLog,
 				Namespace:   "host",
 			},
 			coreProcessName: {
@@ -223,6 +235,7 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 		localProxyCoreHostPortEnvVar+"="+strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		localProxyChatHostPortEnvVar+"="+strconv.Itoa(cfg.LocalProxy.ChatHostPort),
 		localProxyScanHostPortEnvVar+"="+strconv.Itoa(cfg.LocalProxy.ScanHostPort),
+		localProxyChannelHostPortEnvVar+"="+strconv.Itoa(cfg.LocalProxy.ChannelHostPort),
 		localProxyEvoHostPortEnvVar+"="+strconv.Itoa(cfg.LocalProxy.EvoHostPort),
 		localFileWatcherPortEnvVar+"="+strconv.Itoa(cfg.FileWatcher.Port),
 		localPostgresPortEnvVar+"="+strconv.Itoa(cfg.Algorithm.PostgresPort),
@@ -239,6 +252,9 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 		routerPortPoolEndEnvVar+"="+strconv.Itoa(routerPoolEnd),
 		routerPortsPerInstanceEnvVar+"="+strconv.Itoa(defaultRouterPortsPerInstance),
 	)
+	if binDir := loadFFmpegBinDirForRuntime(paths); binDir != "" {
+		env = prependPathEnv(env, binDir)
+	}
 	return env
 }
 

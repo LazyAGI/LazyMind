@@ -1,6 +1,6 @@
 {
   "name": "lazymind-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0-alpha.10",
   "description": "Production-ready enterprise knowledge-base and RAG chat platform with automated RAG quality optimization.",
   "author": "LazyAGI",
   "private": true,
@@ -10,8 +10,9 @@
     "start": "electron .",
     "pack:mac:arm64": "electron-builder --config electron-builder.config.cjs --mac --arm64 --dir",
     "dist:mac:arm64": "electron-builder --config electron-builder.config.cjs --mac dmg --arm64 --publish never",
-    "pack:win:x64": "electron-builder --config electron-builder.config.cjs --win zip --x64",
-    "pack:win:x64:installer": "electron-builder --config electron-builder.config.cjs --win nsis --x64"
+    "dist:mac:arm64:prepackaged": "electron-builder --config electron-builder.config.cjs --mac dmg --arm64 --prepackaged ../dist/mac-arm64 --publish never",
+    "pack:win:x64": "electron-builder --config electron-builder.config.cjs --win zip --x64 --publish never",
+    "pack:win:x64:installer": "electron-builder --config electron-builder.config.cjs --win nsis --x64 --publish never"
   },
   "devDependencies": {
     "electron": "^31.7.7",

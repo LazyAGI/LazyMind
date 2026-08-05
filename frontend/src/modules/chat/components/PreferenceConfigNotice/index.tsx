@@ -8,7 +8,7 @@ import {
 } from "@/modules/user/uiPreferencesApi";
 
 interface Props {
-  /** 如果为 true，则不渲染（避免和模型未配置警告同时出现） */
+  /** 如果为 true，则配置服务尚不可用，暂不渲染 */
   hidden?: boolean;
 }
 
@@ -18,19 +18,46 @@ const PreferenceConfigNotice = ({ hidden }: Props) => {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    if (hidden) return;
-    fetchUserUiPreferences()
-      .then((prefs) => {
-        if (prefs.chat_preference_notice_dismissed) return;
-        if (prefs.user_preference_configured) return;
-        setVisible(true);
-      })
-      .catch((error) => {
-        console.error("Failed to load UI preferences:", error);
-      });
+    let cancelled = false;
+    let retryTimer: number | undefined;
+
+    const updateVisibility = (nextVisible: boolean) => {
+      if (cancelled) return;
+      setVisible(nextVisible);
+    };
+
+    if (hidden) {
+      updateVisibility(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const loadPreferences = () => {
+      fetchUserUiPreferences({ silentError: true } as never)
+        .then((prefs) => {
+          updateVisibility(
+            !prefs.chat_preference_notice_dismissed &&
+              !prefs.user_preference_configured,
+          );
+        })
+        .catch(() => {
+          if (!cancelled) {
+            retryTimer = window.setTimeout(loadPreferences, 1000);
+          }
+        });
+    };
+
+    loadPreferences();
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer);
+      }
+    };
   }, [hidden]);
 
-  if (!visible) return null;
+  if (hidden || !visible) return null;
 
   const handleDismiss = () => {
     setVisible(false);

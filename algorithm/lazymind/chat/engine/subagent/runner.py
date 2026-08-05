@@ -312,6 +312,11 @@ def _build_agentic_config(
             'plugin_session_id': params.get('session_id', ''),
             'plugin_step': params.get('step_id', ''),
         })
+    # Prefer the launched plugin session id whenever present so artifact tools work
+    # even if parent_agentic_config carried a stale empty plugin_session_id.
+    launched_session_id = str(params.get('session_id') or '').strip()
+    if launched_session_id:
+        agentic_config['plugin_session_id'] = launched_session_id
     return agentic_config
 
 
@@ -473,11 +478,7 @@ def _build_subagent_plan(
         force_summarize_context=ctx.objective,
         execution_options=AgentExecutionOptions(
             extra_stop_condition=_make_cancel_stop_condition(),
-            max_retries=(
-                max(1, int(_cfg['agentic_expanded_max_rounds']) - 1)
-                if str((lazyllm.globals.get('agentic_config') or {}).get('thinking_depth') or '').lower() == 'max'
-                else None
-            ),
+            max_retries=max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
         ),
     )
 
@@ -644,9 +645,15 @@ async def run_subagent_stream(
 
         llm = AutoModel(model='llm')
         runtime_tools = _resolve_runtime_tools(tools, plugin_id=params.get('plugin_id') or None)
+        # Plugin steps often need find_user_attachment even when the current synthetic
+        # chat turn has no files; keep the tools available and let the tool report empty.
         attachment_configs = (
             [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
-            if agentic_config.get('files') or agentic_config.get('history_files_per_turn')
+            if (
+                agentic_config.get('files')
+                or agentic_config.get('history_files_per_turn')
+                or effective_agent_type == 'plugin_step'
+            )
             else []
         )
         subagent_tools_all = _build_subagent_tools(runtime_tools, attachment_configs)
@@ -907,6 +914,8 @@ def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:
 def _coerce_str_list(value: Any) -> List[str]:
     if isinstance(value, list):
         return [str(v) for v in value if str(v).strip()]
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode('utf-8')
     if isinstance(value, str):
         try:
             parsed = json.loads(value)
@@ -920,6 +929,8 @@ def _coerce_str_list(value: Any) -> List[str]:
 def _coerce_dict(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return value
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode('utf-8')
     if isinstance(value, str):
         try:
             parsed = json.loads(value)

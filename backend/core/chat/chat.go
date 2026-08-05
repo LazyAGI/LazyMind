@@ -125,6 +125,7 @@ type ChatPluginOptions struct {
 	PluginContext          map[string]any   `json:"plugin_context,omitempty"`
 	Catalog                []map[string]any `json:"catalog,omitempty"`
 	DisabledBuiltinPlugins []string         `json:"disabled_builtin_plugins,omitempty"`
+	ManualBuiltinPlugins   []string         `json:"manual_builtin_plugins,omitempty"`
 	AllowedPluginRefs      []string         `json:"allowed_plugin_refs,omitempty"`
 }
 
@@ -525,6 +526,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if ids, ok := body["disabled_builtin_plugins"].([]string); ok {
 		req.Plugin.DisabledBuiltinPlugins = ids
+	}
+	if ids, ok := body["manual_builtin_plugins"].([]string); ok {
+		req.Plugin.ManualBuiltinPlugins = ids
 	}
 	if refs, ok := body["allowed_plugin_refs"].([]string); ok {
 		req.Plugin.AllowedPluginRefs = refs

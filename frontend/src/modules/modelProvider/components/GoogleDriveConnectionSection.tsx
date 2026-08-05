@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, Form, Input, Modal, Space, Tag, message } from "antd";
+import { Alert, Button, Form, Input, Modal, Space, Tag, message } from "antd";
 import { DeleteOutlined, FileTextOutlined, GoogleOutlined, LinkOutlined, SettingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 
 import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
 import { unwrapApiData } from "@/modules/dataSource/api/unwrap";
-import { getCloudDataSourceCallbackUrl } from "@/modules/dataSource/oauth/urls";
+import {
+  getCloudDataSourceCallbackUrl,
+  isGoogleOAuthRedirectUriSupported,
+} from "@/modules/dataSource/oauth/urls";
 import {
   CLOUD_DATA_SOURCE_OAUTH_CHANNEL,
   consumeCloudDataSourceOAuthResult,
@@ -38,6 +41,7 @@ export default function GoogleDriveConnectionSection() {
   const [saving, setSaving] = useState(false);
   const [secretConfigured, setSecretConfigured] = useState(false);
   const callbackUrl = getCloudDataSourceCallbackUrl("googledrive");
+  const callbackUrlSupported = isGoogleOAuthRedirectUriSupported(callbackUrl);
 
   const refreshConnection = useCallback(async () => {
     setLoading(true);
@@ -106,6 +110,10 @@ export default function GoogleDriveConnectionSection() {
   };
 
   const connect = async () => {
+    if (!callbackUrlSupported) {
+      message.error(t("modelProvider.external.googleDriveInvalidRedirectTitle"));
+      return;
+    }
     try {
       const values = await form.validateFields();
       const clientSecret = values.clientSecret?.trim() || "";
@@ -208,6 +216,7 @@ export default function GoogleDriveConnectionSection() {
         confirmLoading={saving}
         onCancel={() => setModalOpen(false)}
         onOk={() => void connect()}
+        okButtonProps={{ disabled: !callbackUrlSupported }}
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -230,9 +239,16 @@ export default function GoogleDriveConnectionSection() {
               placeholder={secretConfigured ? t("modelProvider.external.googleDriveSecretConfigured") : undefined}
             />
           </Form.Item>
-          <p className="google-drive-connection-hint">
-            {t("modelProvider.external.googleDriveConfigHint", { callbackUrl })}
-          </p>
+          <Alert
+            showIcon
+            type={callbackUrlSupported ? "info" : "error"}
+            message={callbackUrlSupported
+              ? t("modelProvider.external.googleDriveRedirectReadyTitle")
+              : t("modelProvider.external.googleDriveInvalidRedirectTitle")}
+            description={callbackUrlSupported
+              ? t("modelProvider.external.googleDriveConfigHint", { callbackUrl })
+              : t("modelProvider.external.googleDriveInvalidRedirectHint", { callbackUrl })}
+          />
           <p className="google-drive-connection-guide">
             <a
               href={`${CLOUD_DOCUMENTS_GOOGLE_DRIVE_SETUP_PATH}?from=google-drive-provider`}

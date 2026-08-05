@@ -12,6 +12,7 @@ import (
 	"lazymind/core/evalset"
 	"lazymind/core/mcp"
 	"lazymind/core/modelprovider"
+	"lazymind/core/showcase"
 	"lazymind/core/wordgroup"
 )
 
@@ -551,6 +552,15 @@ type promptListQueryParams struct {
 	Locale    string `query:"locale"`
 }
 
+type showcaseCasePathParams struct {
+	CaseID string `path:"case_id"`
+}
+
+type showcaseListQueryParams struct {
+	Keyword  string `query:"keyword"`
+	Category string `query:"category"`
+}
+
 type promptGetQueryParams struct {
 	Locale string `query:"locale"`
 }
@@ -929,6 +939,7 @@ type listModelProviderGroupModelsOpenAPIItem struct {
 	GroupName                string  `json:"group_name"`
 	BaseURL                  string  `json:"base_url"`
 	IsDefault                bool    `json:"is_default"`
+	IsEditable               bool    `json:"is_editable" desc:"Whether this option supports image editing"`
 	MaxInputTokens           *string `json:"max_input_tokens" desc:"Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
 }
 
@@ -949,6 +960,7 @@ type selectedModelOpenAPIItem struct {
 	ProviderName             string  `json:"provider_name"`
 	GroupName                string  `json:"group_name"`
 	BaseURL                  string  `json:"base_url"`
+	IsEditable               bool    `json:"is_editable" desc:"Whether the selected model supports image editing"`
 	MaxInputTokens           *string `json:"max_input_tokens" desc:"Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
 }
 
@@ -1866,13 +1878,15 @@ type personalizationSettingOpenAPIResponse struct {
 }
 
 type userUIPreferencesPatchOpenAPIRequest struct {
-	ChatPreferenceNoticeDismissed *bool `json:"chat_preference_notice_dismissed,omitempty"`
-	DeveloperModeActive           *bool `json:"developer_mode_active,omitempty"`
+	ChatPreferenceNoticeDismissed *bool   `json:"chat_preference_notice_dismissed,omitempty"`
+	DeveloperModeActive           *bool   `json:"developer_mode_active,omitempty"`
+	AcceptedUserAgreementVersion  *string `json:"accepted_user_agreement_version,omitempty"`
 }
 
 type userUIPreferencesOpenAPIResponse struct {
 	ChatPreferenceNoticeDismissed bool   `json:"chat_preference_notice_dismissed"`
 	DeveloperModeActive           bool   `json:"developer_mode_active"`
+	AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
 	UserPreferenceConfigured      bool   `json:"user_preference_configured"`
 	UpdatedAt                     string `json:"updated_at"`
 }
@@ -3443,6 +3457,24 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:       []string{"prompts"},
 			PathParams: promptPathParams{},
 			Responses:  map[int]openAPIResponse{200: resp("Usage recorded", promptStateOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/showcase/cases",
+			Summary:     "Showcase case list",
+			Tags:        []string{"showcase"},
+			QueryParams: showcaseListQueryParams{},
+			Headers:     localizedCatalogHeaders{},
+			Responses:   map[int]openAPIResponse{200: resp("Showcase case list", showcase.ShowcaseCaseListResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/showcase/cases/{case_id}",
+			Summary:    "Showcase case details",
+			Tags:       []string{"showcase"},
+			PathParams: showcaseCasePathParams{},
+			Headers:    localizedCatalogHeaders{},
+			Responses:  map[int]openAPIResponse{200: resp("Showcase case details", showcase.ShowcaseCase{})},
 		},
 		{
 			Method:      "GET",

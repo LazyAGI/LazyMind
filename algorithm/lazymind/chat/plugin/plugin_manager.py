@@ -852,27 +852,74 @@ def _emit_preflight_snapshot(snapshot: Optional[Dict[str, Any]]) -> None:
     )
 
 
+def _builtin_catalog_allowed(
+    plugin_id: str,
+    disabled_builtin_plugins: set[str],
+    manual_builtin_plugins: set[str],
+    allowed_plugin_refs: set[str],
+) -> bool:
+    plugin_ref = f'builtin:{plugin_id}'
+    return (
+        plugin_id not in disabled_builtin_plugins
+        and (not allowed_plugin_refs or plugin_ref in allowed_plugin_refs)
+        and (plugin_id not in manual_builtin_plugins or plugin_ref in allowed_plugin_refs)
+    )
+
+
+def _catalog_entry_allowed(entry: Dict[str, Any], allowed_plugin_refs: set[str]) -> bool:
+    plugin_ref = str(entry.get('plugin_ref') or '')
+    call_mode = str(entry.get('call_mode') or '').strip()
+    if not call_mode:
+        call_mode = 'auto' if entry.get('enabled', True) else 'disabled'
+    return (
+        call_mode != 'disabled'
+        and (not allowed_plugin_refs or plugin_ref in allowed_plugin_refs)
+        and (call_mode != 'manual' or plugin_ref in allowed_plugin_refs)
+    )
+
+
+def _active_plugin_context_allowed(
+    plugin_context: Optional[Dict[str, Any]],
+    plugin_catalog: Optional[List[Dict[str, Any]]],
+    disabled_builtin_plugins: Optional[List[str]],
+) -> bool:
+    if not isinstance(plugin_context, dict):
+        return True
+    plugin_ref = str(plugin_context.get('plugin_ref') or '').strip()
+    if not plugin_ref:
+        return True
+    if plugin_ref.startswith('builtin:'):
+        plugin_id = plugin_ref.removeprefix('builtin:')
+        return plugin_id not in set(disabled_builtin_plugins or [])
+    catalog_refs = {
+        str(entry.get('plugin_ref') or '').strip()
+        for entry in (plugin_catalog or [])
+    }
+    return plugin_ref in catalog_refs
+
+
 def build_cold_start_tools(
     plugin_catalog: Optional[List[Dict[str, Any]]] = None,
     disabled_builtin_plugins: Optional[List[str]] = None,
+    manual_builtin_plugins: Optional[List[str]] = None,
     allowed_plugin_refs: Optional[List[str]] = None,
 ) -> List[Any]:
     """Build one side-effect-free preflight trigger per loaded plugin."""
     tools = []
     disabled = set(disabled_builtin_plugins or [])
+    manual = set(manual_builtin_plugins or [])
     allowed = set(allowed_plugin_refs or [])
     candidates = [
         (spec, None)
         for spec in (plugin_loader._registry or {}).values()
         if (
             not spec.plugin_id.startswith('user_')
-            and spec.plugin_id not in disabled
-            and (not allowed or f'builtin:{spec.plugin_id}' in allowed)
+            and _builtin_catalog_allowed(spec.plugin_id, disabled, manual, allowed)
         )
     ]
     candidates.extend(
         (None, entry) for entry in (plugin_catalog or [])
-        if not allowed or str(entry.get('plugin_ref') or '') in allowed
+        if _catalog_entry_allowed(entry, allowed)
     )
     for spec, catalog_entry in candidates:
         if catalog_entry is not None:
@@ -1077,6 +1124,17 @@ def build_cold_start_tools(
                     }, ensure_ascii=False)
 
                 static_advancement = plugin_mode == 'auto'
+                first_step_default_approval = (
+                    'required'
+                    if plugin_loader.get_step_mode(
+                        resolved_plugin_id, result['first_step_id']
+                    ) == 'human'
+                    else 'not_required'
+                )
+                inline_auto_step = (
+                    plugin_mode == 'dynamic'
+                    and first_step_default_approval == 'not_required'
+                )
                 launch_plan: Dict[str, Any] = {
                     'first_step_id': result['first_step_id'],
                     'normalized_request': result['normalized_request'],
@@ -1086,20 +1144,20 @@ def build_cold_start_tools(
                         'hand_off': True,
                         'advance_tool': 'advance_step_and_hand_off',
                     })
+                elif inline_auto_step:
+                    launch_plan.update({
+                        'hand_off': False,
+                        'advance_tool': 'advance_step',
+                    })
                 step_name_index = _build_step_name_index(resolved_plugin_id)
-                first_step_default_approval = (
-                    'required'
-                    if plugin_loader.get_step_mode(
-                        resolved_plugin_id, result['first_step_id']
-                    ) == 'human'
-                    else 'not_required'
-                )
                 prepared = {
                     **snapshot,
                     'must_advance': True,
                     'advance_committed': False,
-                    'requires_hand_off_choice': not static_advancement,
-                    'fallback_hand_off': True,
+                    'requires_hand_off_choice': not (
+                        static_advancement or inline_auto_step
+                    ),
+                    'fallback_hand_off': not inline_auto_step,
                     'step_name_index': step_name_index,
                     'launch_plan': launch_plan,
                     'scenario': resolved_spec.scenario_md,
@@ -1107,7 +1165,7 @@ def build_cold_start_tools(
                 cfg['prepared_plugin'] = prepared
                 cfg.update(runtime_meta)
                 visible_launch_plan = dict(launch_plan)
-                if static_advancement:
+                if static_advancement or inline_auto_step:
                     visible_launch_plan.pop('hand_off', None)
                     instruction = (
                         'You MUST now call the advancement tool named by launch_plan in this '
@@ -1635,7 +1693,8 @@ def build_advance_step_tool(
 
     advance_step.__doc__ = (
         'Start one or more Ready workflow steps synchronously and return their results.\n\n'
-        'Use only when the user explicitly requests multiple workflow steps, for example\n'
+        'Use when the selected step has default approval `not_required`, or when the user\n'
+        'explicitly requests multiple workflow steps, for example\n'
         '"帮我执行 N 步", "连续执行到 X", "一次性执行完", "run N steps",\n'
         '"continue through X", or "run all steps". A complete-deliverable request alone\n'
         'does not authorize this synchronous tool.\n'
@@ -1936,21 +1995,31 @@ def _build_cold_execution_policy(plugin_mode: str) -> str:
     return (
         '## Current Workflow Launch Policy [AUTHORITATIVE]\n'
         'After a trigger returns ready, it provides a compact index of every workflow step, '
-        'the valid first step, and that first step\'s default approval. You must still infer '
-        'the execution scope from the user\'s words; approval metadata does not choose the tool. '
+        'the valid first step, that first step\'s default approval, and a launch_plan. '
+        'When launch_plan names an advancement tool, call that tool exactly. Otherwise infer '
+        'the execution scope from the user\'s words. '
         'Match any user-named '
         'target boundary against the full id/name index. The index contains names only and '
         'does not imply order or reachability.\n'
-        '- DEFAULT: use `advance_step_and_hand_off` for the first step.\n'
-        '- Use `advance_step` only when the user explicitly requests more than one workflow '
-        'step, such as "帮我执行 N 步", "连续执行到 X", "一次性执行完", '
+        '- If the selected Ready step has default approval `not_required`, use `advance_step`.\n'
+        '- If the completed step explicitly directs automatic continuation based on its result, '
+        'use `advance_step_and_hand_off` for the directed Ready step and stop.\n'
+        '- Otherwise, use `advance_step_and_hand_off` for the first step by default.\n'
+        '- For any other step whose default approval is required, use `advance_step` only when the user '
+        'explicitly requests more than one workflow step, such as "帮我执行 N 步", "连续执行到 X", "一次性执行完", '
         '"run N steps", "continue through X", or "run the whole workflow without stopping".\n'
         '- Asking for a complete article, image, report, or other final deliverable does NOT '
         'by itself request multi-step or uninterrupted execution.\n'
         'Always start only the first_step_id returned by the trigger. After each synchronous '
         '`advance_step` result, use only the newly returned reachable-step details and repeat '
-        'the decision. Continue synchronously through prerequisites; when the named boundary '
-        'itself becomes a valid target, start it with `advance_step_and_hand_off` and stop.'
+        'the decision. Continue automatically through `not_required` steps. When the completed '
+        'step explicitly directs automatic continuation based on its result, such as a preparation '
+        'step confirming that no source file exists, start the directed Ready step with '
+        '`advance_step_and_hand_off` and stop. '
+        'Otherwise, when the next Ready step requires approval and the user did not explicitly '
+        'request continuous execution, stop and present the completed result without starting '
+        'that step. When the user named a boundary, start that boundary with '
+        '`advance_step_and_hand_off` and stop.'
     )
 
 
@@ -1959,6 +2028,7 @@ def resolve_plugin_injection(
     conversation_id: str = '',
     plugin_catalog: Optional[List[Dict[str, Any]]] = None,
     disabled_builtin_plugins: Optional[List[str]] = None,
+    manual_builtin_plugins: Optional[List[str]] = None,
     allowed_plugin_refs: Optional[List[str]] = None,
 ) -> PluginAgentContribution:
     """Resolve plugin tools, system prompt, stop-tools and agentic_config patches.
@@ -1993,6 +2063,11 @@ def resolve_plugin_injection(
             plugin_tools, plugin_system_prompt, plugin_stop_tools,
             agentic_config_patch, plugin_artifact_context,
         )
+
+    if not _active_plugin_context_allowed(
+        plugin_context, plugin_catalog, disabled_builtin_plugins,
+    ):
+        plugin_context = None
 
     # Resolve plugin_mode from plugin_context (injected by Go).
     plugin_mode = 'dynamic'
@@ -2110,7 +2185,7 @@ def resolve_plugin_injection(
         else:
             # Cold start: no active session yet
             triggers = build_cold_start_tools(
-                plugin_catalog, disabled_builtin_plugins, allowed_plugin_refs,
+                plugin_catalog, disabled_builtin_plugins, manual_builtin_plugins, allowed_plugin_refs,
             )
             plugin_tools = triggers + build_cold_advance_tools(plugin_mode)
             plugin_stop_tools = ['advance_step_and_hand_off']
@@ -2126,14 +2201,18 @@ def resolve_plugin_injection(
                     plugin_loader.get_plugin_intro(spec.plugin_id)
                     for spec in (plugin_loader._registry or {}).values()
                     if (
-                        spec.plugin_id not in set(disabled_builtin_plugins or [])
-                        and (not allowed_plugin_refs or f'builtin:{spec.plugin_id}' in set(allowed_plugin_refs))
+                        _builtin_catalog_allowed(
+                            spec.plugin_id,
+                            set(disabled_builtin_plugins or []),
+                            set(manual_builtin_plugins or []),
+                            set(allowed_plugin_refs or []),
+                        )
                         and not spec.plugin_id.startswith('user_')
                     )
                 ]
                 scenarios.extend(
                     _catalog_intro(entry) for entry in (plugin_catalog or [])
-                    if not allowed_plugin_refs or str(entry.get('plugin_ref') or '') in set(allowed_plugin_refs)
+                    if _catalog_entry_allowed(entry, set(allowed_plugin_refs or []))
                 )
                 plugin_system_prompt = (
                     _COLD_START_PLUGIN_PROMPT
@@ -2141,7 +2220,7 @@ def resolve_plugin_injection(
     else:
         # No plugin_context provided: still inject cold-start triggers
         triggers = build_cold_start_tools(
-            plugin_catalog, disabled_builtin_plugins, allowed_plugin_refs,
+            plugin_catalog, disabled_builtin_plugins, manual_builtin_plugins, allowed_plugin_refs,
         )
         plugin_tools = triggers + build_cold_advance_tools(plugin_mode)
         plugin_stop_tools = ['advance_step_and_hand_off']
@@ -2151,14 +2230,18 @@ def resolve_plugin_injection(
                 plugin_loader.get_plugin_intro(spec.plugin_id)
                 for spec in (plugin_loader._registry or {}).values()
                 if (
-                    spec.plugin_id not in set(disabled_builtin_plugins or [])
-                    and (not allowed_plugin_refs or f'builtin:{spec.plugin_id}' in set(allowed_plugin_refs))
+                    _builtin_catalog_allowed(
+                        spec.plugin_id,
+                        set(disabled_builtin_plugins or []),
+                        set(manual_builtin_plugins or []),
+                        set(allowed_plugin_refs or []),
+                    )
                     and not spec.plugin_id.startswith('user_')
                 )
             ]
             scenarios.extend(
                 _catalog_intro(entry) for entry in (plugin_catalog or [])
-                if not allowed_plugin_refs or str(entry.get('plugin_ref') or '') in set(allowed_plugin_refs)
+                if _catalog_entry_allowed(entry, set(allowed_plugin_refs or []))
             )
             plugin_system_prompt = (
                 _COLD_START_PLUGIN_PROMPT
@@ -2331,13 +2414,16 @@ def _build_mode_guidance(
         'with a separate user_input/runtime_instruction for every step. Do not issue repeated\n'
         'single-step calls for the same frontier. Never include a Blocked node or a downstream\n'
         'node that needs another batch item\'s future output. Running an attempted step again remains single-step.\n\n'
-        '### Rule 3 — Dynamic mode defaults to hand-off\n'
-        'DEFAULT: call `advance_step_and_hand_off` and stop after starting the selected Ready step(s).\n'
-        'Use `advance_step` only when the latest query or persisted session intent explicitly asks\n'
+        '### Rule 3 — Dynamic mode honors step approval\n'
+        'If the selected Ready step has `[default approval: not_required]`, call `advance_step`\n'
+        'and continue from its result without asking the user for confirmation.\n'
+        'Otherwise, call `advance_step_and_hand_off` and stop after starting the selected Ready step(s).\n'
+        'For steps whose default approval is required, use `advance_step` only when the latest\n'
+        'query or persisted session intent explicitly asks\n'
         'to execute multiple workflow steps, for example "帮我执行 N 步", "连续执行到 X",\n'
         '"一次性执行完", "run N steps", "continue through X", or "run all steps".\n'
         'A request for a complete deliverable or a named workflow is NOT a request for continuous\n'
-        'execution. Step approval annotations are context only and never override this dynamic-mode default.\n'
+        'execution by itself; the not_required approval exception above still applies.\n'
         'When several independent Ready steps form the same frontier, pass them in one call to the\n'
         'chosen tool; the number of parallel Ready nodes does not itself imply continuous execution.\n\n'
         'If the user clearly asks to proceed with the existing workflow and\n'

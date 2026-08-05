@@ -9,6 +9,11 @@ from lazymind.config import config as _cfg
 
 
 def _upload_root() -> str:
+    # Prefer process env so local-runtime LAZYMIND_UPLOAD_ROOT wins even when
+    # config was initialized with the Docker default marker path.
+    env = (os.environ.get('LAZYMIND_UPLOAD_ROOT') or os.environ.get('LAZYMIND_SHARED_UPLOAD_DIR') or '').strip()
+    if env:
+        return str(Path(env).resolve())
     for key in ('shared_upload_dir', 'upload_dir'):
         try:
             value = (_cfg[key] or '').strip()
@@ -16,9 +21,6 @@ def _upload_root() -> str:
             value = ''
         if value:
             return str(Path(value).resolve())
-    env = (os.environ.get('LAZYMIND_UPLOAD_ROOT') or os.environ.get('LAZYMIND_SHARED_UPLOAD_DIR') or '').strip()
-    if env:
-        return str(Path(env).resolve())
     return '/var/lib/lazymind/uploads'
 
 
@@ -77,8 +79,20 @@ def static_file_url_from_full_path(full_path: str) -> str:
 
 def basename_from_path(path: str) -> str:
     without_query = (path or '').split('?')[0]
-    parts = without_query.split('/')
+    parts = without_query.replace('\\', '/').split('/')
     return unquote(parts[-1] if parts else without_query)
+
+
+def _resolve_upload_relative_path(root: Path, rel: str) -> str:
+    normalized = unquote(rel).replace('\\', '/')
+    if any(part in ('', '.', '..') for part in normalized.split('/')):
+        return ''
+    candidate = (root / normalized).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return ''
+    return str(candidate)
 
 
 def local_path_from_static_file_url(path_or_url: str) -> str:
@@ -91,12 +105,11 @@ def local_path_from_static_file_url(path_or_url: str) -> str:
         rel_encoded = path_only[len('/static-files/'):].lstrip('/')
         if not rel_encoded:
             return ''
-        rel = '/'.join(unquote(part) for part in rel_encoded.split('/'))
-        return str((root / rel).resolve())
+        return _resolve_upload_relative_path(root, rel_encoded)
     marker = '/var/lib/lazymind/uploads/'
     if raw.startswith(marker):
         rel = raw.split('?', 1)[0][len(marker):].lstrip('/')
-        return str((root / rel).resolve())
+        return _resolve_upload_relative_path(root, rel)
     try:
         resolved_root = str(root)
         if raw.startswith(resolved_root):
@@ -107,7 +120,7 @@ def local_path_from_static_file_url(path_or_url: str) -> str:
         idx = raw.find(marker)
         if idx >= 0:
             rel = raw[idx:].split('?', 1)[0][len(marker):].lstrip('/')
-            return str((root / rel).resolve())
+            return _resolve_upload_relative_path(root, rel)
         idx = raw.find(str(root))
         if idx >= 0:
             return str(Path(raw[idx:].split('?', 1)[0]).resolve())

@@ -157,12 +157,8 @@ func TestAggregateDocumentsFiltersUnreadableDatasets(t *testing.T) {
 func newDocumentTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 
-	t.Setenv("LAZYMIND_READONLY_SCHEMA", "main")
-	dsn := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"), time.Now().UnixNano())
-	db, err := orm.Connect(orm.DriverSQLite, dsn)
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
+	t.Setenv("LAZYMIND_READONLY_SCHEMA", "")
+	db := orm.OpenTestDB(t)
 	if err := db.AutoMigrate(
 		&orm.Dataset{},
 		&orm.Document{},
@@ -905,5 +901,30 @@ func assertFolderHasZeroSize(t *testing.T, db *orm.DB, datasetID, folderID strin
 	}
 	if got := docFromRow(row).DocumentSize; got != 0 {
 		t.Fatalf("expected folder document_size 0 after deleting child, got %d", got)
+	}
+}
+
+func TestRewriteCanonicalUploadPathMapsDockerMarker(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+
+	dockerPath := "/var/lib/lazymind/uploads/tmp/users/u1/files/upload_a/dog.jpg"
+	got := rewriteCanonicalUploadPath(dockerPath)
+	want := filepath.Join(root, "tmp", "users", "u1", "files", "upload_a", "dog.jpg")
+	if got != want {
+		t.Fatalf("rewriteCanonicalUploadPath = %q, want %q", got, want)
+	}
+
+	rel := fileRelativePath(dockerPath)
+	if rel != "tmp/users/u1/files/upload_a/dog.jpg" {
+		t.Fatalf("fileRelativePath = %q, want tmp/users/u1/files/upload_a/dog.jpg", rel)
+	}
+}
+
+func TestRewriteCanonicalUploadPathKeepsDockerRootUnchanged(t *testing.T) {
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", "/var/lib/lazymind/uploads")
+	dockerPath := "/var/lib/lazymind/uploads/tmp/dog.jpg"
+	if got := rewriteCanonicalUploadPath(dockerPath); got != dockerPath {
+		t.Fatalf("rewriteCanonicalUploadPath = %q, want unchanged %q", got, dockerPath)
 	}
 }

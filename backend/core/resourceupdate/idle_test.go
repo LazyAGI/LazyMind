@@ -3,7 +3,6 @@ package resourceupdate
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -323,17 +322,10 @@ func TestIdleCleanupKeepsHistoryForNewerEvent(t *testing.T) {
 
 func newIdleTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "idle.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(
+	return orm.MigrateTestDB(t,
 		&orm.ResourceUpdateTask{},
 		&orm.ConversationIdleEvent{},
-	); err != nil {
-		t.Fatalf("auto migrate idle models: %v", err)
-	}
-	return db.DB
+	).DB
 }
 
 func insertIdleEvent(t *testing.T, db *gorm.DB, eventID, sessionID, userID, messageID string, lastActivityAt, dueAt time.Time) {

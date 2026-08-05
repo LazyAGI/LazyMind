@@ -1,2 +1,0 @@
--- The task_type enum-style check is intentionally not restored.
--- Restoring it would make every new application task type require a schema migration.

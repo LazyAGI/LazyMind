@@ -423,7 +423,7 @@ func (w *Worker) handleMemoryReview(ctx context.Context, task orm.ResourceUpdate
 			code = "memory_review_partial"
 		}
 		if resp.Retryable {
-			return retryableOutcome(code, errors.New(message))
+			return retryableOutcome(code, fmt.Errorf("memory review failed: %s", message))
 		}
 		return permanentOutcome(code, message)
 	}

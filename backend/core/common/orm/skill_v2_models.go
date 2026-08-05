@@ -127,9 +127,9 @@ type SkillMarketItem struct {
 func (SkillMarketItem) TableName() string { return "skill_market_items" }
 
 type SkillMarketInstall struct {
-	MarketItemID string    `gorm:"column:market_item_id;type:varchar(36);primaryKey"`
-	UserID       string    `gorm:"column:user_id;type:varchar(255);primaryKey"`
-	SkillID      string    `gorm:"column:skill_id;type:varchar(36);not null"`
+	MarketItemID string    `gorm:"column:market_item_id;type:varchar(36);primaryKey;index:idx_skill_market_installs_user,priority:2"`
+	UserID       string    `gorm:"column:user_id;type:varchar(255);primaryKey;index:idx_skill_market_installs_user,priority:1"`
+	SkillID      string    `gorm:"column:skill_id;type:varchar(36);not null;index:idx_skill_market_installs_skill"`
 	CreatedAt    time.Time `gorm:"column:created_at;not null"`
 	UpdatedAt    time.Time `gorm:"column:updated_at;not null"`
 }

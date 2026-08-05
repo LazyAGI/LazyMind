@@ -10,7 +10,7 @@ import (
 )
 
 func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
-	t.Setenv("UV", "uv")
+	installFakeUVOnPath(t)
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	if err := os.MkdirAll(filepath.Join(repo, "algorithm", "lazyllm", "lazyllm"), 0o755); err != nil {
@@ -63,7 +63,7 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
-			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "lazyllm")
+			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "lazyllm==1.2.2")
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
@@ -120,6 +120,114 @@ func TestAlgorithmServiceEnvPinsLocalRouterHost(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_ROUTER_HOST=127.0.0.1")
 }
 
+func TestDesktopAlgorithmRegisterPolicyForInstallVersion(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig("desktop", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "")
+	t.Setenv(desktopAppVersionEnvVar, "1.2.3")
+
+	if got := algorithmRegisterPolicy(cfg, paths); got != "force" {
+		t.Fatalf("first registration policy = %q, want force", got)
+	}
+	if err := markAlgorithmRegistrationVersion(cfg, paths); err != nil {
+		t.Fatalf("mark registration version: %v", err)
+	}
+	if got := algorithmRegisterPolicy(cfg, paths); got != "update" {
+		t.Fatalf("ordinary restart policy = %q, want update", got)
+	}
+
+	t.Setenv(desktopAppVersionEnvVar, "1.2.4")
+	if got := algorithmRegisterPolicy(cfg, paths); got != "force" {
+		t.Fatalf("upgraded registration policy = %q, want force", got)
+	}
+}
+
+func TestDesktopAlgorithmRegisterPolicyHonorsExplicitOverride(t *testing.T) {
+	cfg := RuntimeConfig{Profile: "desktop"}
+	paths := RuntimePaths{StateDir: t.TempDir()}
+	t.Setenv(desktopAppVersionEnvVar, "1.2.3")
+	t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "none")
+
+	if got := algorithmRegisterPolicy(cfg, paths); got != "none" {
+		t.Fatalf("explicit registration policy = %q, want none", got)
+	}
+}
+
+func TestDesktopAlgorithmRegisterPolicyWithoutVersionDefaultsToUpdate(t *testing.T) {
+	cfg := RuntimeConfig{Profile: "desktop"}
+	paths := RuntimePaths{StateDir: t.TempDir()}
+	t.Setenv(desktopAppVersionEnvVar, "")
+	t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "")
+
+	if got := algorithmRegisterPolicy(cfg, paths); got != "update" {
+		t.Fatalf("versionless desktop registration policy = %q, want update", got)
+	}
+}
+
+func TestLocalAlgorithmRegisterPolicyDefaultsToUpdate(t *testing.T) {
+	cfg := RuntimeConfig{Profile: "local"}
+	paths := RuntimePaths{StateDir: t.TempDir()}
+	t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "")
+
+	if got := algorithmRegisterPolicy(cfg, paths); got != "update" {
+		t.Fatalf("local registration policy = %q, want update", got)
+	}
+}
+
+func TestAlgorithmServiceEnvDisablesRouter(t *testing.T) {
+	for _, profile := range []string{"local", "desktop"} {
+		t.Run(profile, func(t *testing.T) {
+			repo := t.TempDir()
+			writeComposeFixture(t, repo)
+			cfg, paths, err := NewRuntimeConfig(profile, repo)
+			if err != nil {
+				t.Fatalf("runtime config: %v", err)
+			}
+			t.Setenv("LAZYMIND_ENABLE_ROUTER", "true")
+
+			env := algorithmServiceEnv(cfg, paths, algoProcessName)
+
+			assertEnvContains(t, env, "LAZYMIND_ENABLE_ROUTER=false")
+		})
+	}
+}
+
+func TestAlgorithmServiceEnvAlwaysDisablesLazyLLMRuntimeDocs(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	t.Setenv("LAZYLLM_INIT_DOC", "True")
+
+	env := algorithmServiceEnv(cfg, paths, chatProcessName)
+
+	assertEnvContains(t, env, "LAZYLLM_INIT_DOC=False")
+}
+
+func TestRAGServicesDoNotWaitBeforeStarting(t *testing.T) {
+	manager := NewAlgorithmServiceManager(&fakeRunner{t: t})
+
+	for _, service := range []string{
+		processorServerProcessName,
+		processorWorkerProcessName,
+		algoProcessName,
+		docServerProcessName,
+	} {
+		if err := manager.waitForDependencies(context.Background(), RuntimeConfig{}, service); err != nil {
+			t.Fatalf("%s dependencies: %v", service, err)
+		}
+	}
+}
+
 func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
@@ -135,6 +243,7 @@ func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_UPLOAD_ROOT="+paths.UploadRoot)
 	assertEnvContains(t, env, "LAZYMIND_HOME="+paths.AlgorithmHome)
 	assertEnvContains(t, env, "LAZYLLM_HOME="+paths.LazyLLMHome)
+	assertEnvContains(t, env, "TIKTOKEN_CACHE_DIR="+filepath.Join(paths.LazyLLMHome, "tiktoken"))
 	assertEnvContains(t, env, "LAZYMIND_DOCUMENT_SERVICE_STORAGE_DIR="+paths.UploadRoot)
 	assertEnvContains(t, env, "LAZYLLM_TEMP_DIR="+paths.LazyLLMTempDir)
 	assertEnvContains(t, env, "LAZYMIND_OCR_CACHE_DIR="+paths.OCRCacheDir)
@@ -148,34 +257,80 @@ func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "evo"))
 }
 
-func TestAlgorithmServiceEnvUsesFileBackedRelayArgumentsOnWindowsDesktop(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows-specific Desktop process policy")
-	}
+func TestEnsureTiktokenCacheWarmsOnceAndWritesMarker(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
-	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
-	cfg.Profile = "desktop"
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	runner := &fakeRunner{t: t}
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		assertCommand(t, cmd, paths.AlgorithmPython, "-c", "import tiktoken; tiktoken.get_encoding('gpt2')")
+		assertEnvContains(t, cmd.Env, "TIKTOKEN_CACHE_DIR="+filepath.Join(paths.LazyLLMHome, "tiktoken"))
+		cacheFile := filepath.Join(paths.LazyLLMHome, "tiktoken", "gpt2-cache")
+		if err := os.WriteFile(cacheFile, []byte("cached"), 0o644); err != nil {
+			t.Fatalf("write fake tiktoken cache: %v", err)
+		}
+		return CommandResult{}, nil
+	})
+	manager := NewAlgorithmServiceManager(runner)
 
-	env := algorithmServiceEnv(cfg, paths, chatProcessName)
+	if err := manager.ensureTiktokenCache(context.Background(), paths); err != nil {
+		t.Fatalf("first tiktoken warmup: %v", err)
+	}
+	if err := manager.ensureTiktokenCache(context.Background(), paths); err != nil {
+		t.Fatalf("second tiktoken warmup: %v", err)
+	}
+	runner.assertCommandCount(1)
+	if _, err := os.Stat(filepath.Join(paths.PythonStateDir, tiktokenReadyFileName)); err != nil {
+		t.Fatalf("tiktoken ready marker: %v", err)
+	}
+}
 
-	assertEnvContains(t, env, "LAZYLLM_PASS_ARGS_BY_FILE=1")
+func TestAlgorithmServiceEnvUsesFileBackedRelayArgumentsOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific process policy")
+	}
+	for _, profile := range []string{"local", "desktop"} {
+		t.Run(profile, func(t *testing.T) {
+			repo := t.TempDir()
+			writeComposeFixture(t, repo)
+			cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+			if err != nil {
+				t.Fatalf("runtime config: %v", err)
+			}
+			cfg.Profile = profile
+
+			env := algorithmServiceEnv(cfg, paths, chatProcessName)
+
+			assertEnvContains(t, env, "LAZYLLM_PASS_ARGS_BY_FILE=1")
+		})
+	}
 }
 
 func TestAlgorithmServiceCommandArgsUsesWindowsDesktopBootstrap(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows-specific Desktop process policy")
-	}
-	cfg := RuntimeConfig{Profile: "desktop"}
-	spec := AlgorithmServiceSpec{Module: []string{"-m", "lazymind.router.app", "--port", "8092"}}
+	for _, profile := range []string{"local", "desktop"} {
+		t.Run(profile, func(t *testing.T) {
+			cfg := RuntimeConfig{Profile: profile}
+			spec := AlgorithmServiceSpec{
+				Name:   chatProcessName,
+				Module: []string{"-m", "lazymind.chat.app", "--host", "0.0.0.0", "--port", "8092"},
+				Port:   8092,
+			}
 
-	args := algorithmServiceCommandArgs(cfg, spec)
+			args := algorithmServiceCommandArgs(cfg, spec)
 
-	want := []string{"-m", "lazymind.windows_runtime", "--", "-m", "lazymind.router.app", "--port", "8092"}
-	if !reflect.DeepEqual(args, want) {
-		t.Fatalf("algorithm service args = %#v, want %#v", args, want)
+			want := []string{"-m", "lazymind.chat.app", "--host", "0.0.0.0", "--port", "8092"}
+			if runtime.GOOS == "windows" && profile == "desktop" {
+				want = append([]string{"-m", "lazymind.windows_runtime", "--"}, want...)
+			}
+			if !reflect.DeepEqual(args, want) {
+				t.Fatalf("algorithm service args = %#v, want %#v", args, want)
+			}
+		})
 	}
 }

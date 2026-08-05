@@ -16,13 +16,7 @@ import (
 
 func newTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/mcp.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.MCPServer{}, &orm.MCPServerTool{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.MCPServer{}, &orm.MCPServerTool{})
 	return db
 }
 
@@ -475,5 +469,312 @@ func TestDiscoverReplacesToolsAndSoftDeletesMissing(t *testing.T) {
 	}
 	if !detail.IsVerified || len(detail.Tools) != 1 || detail.Tools[0].ToolName != "new-tool" {
 		t.Fatalf("unexpected server detail: %#v", detail)
+	}
+}
+
+// TestNewServerID generates IDs with the msp_ prefix.
+func TestNewServerID(t *testing.T) {
+	id := newServerID()
+	if !strings.HasPrefix(id, "msp_") {
+		t.Fatalf("got %q, want prefix msp_", id)
+	}
+	id2 := newServerID()
+	if id == id2 {
+		t.Fatal("expected different IDs")
+	}
+}
+
+// TestNewToolID generates IDs with the mst_ prefix.
+func TestNewToolID(t *testing.T) {
+	id := newToolID()
+	if !strings.HasPrefix(id, "mst_") {
+		t.Fatalf("got %q, want prefix mst_", id)
+	}
+}
+
+// TestNormalizeStringList deduplicates and trims whitespace.
+func TestNormalizeStringList(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []string
+		want  []string
+	}{
+		{"no_dups", []string{"a", "b"}, []string{"a", "b"}},
+		{"with_dups", []string{"a", "b", "a"}, []string{"a", "b"}},
+		{"with_empty", []string{"", " a ", "b", ""}, []string{"a", "b"}},
+		{"nil", nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeStringList(tt.input)
+			if len(got) != len(tt.want) {
+				t.Fatalf("len: got %d, want %d: %v", len(got), len(tt.want), got)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("[%d]: got %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestNormalizedTimeout returns defaultTimeoutSeconds (5) for <= 0.
+func TestNormalizedTimeout(t *testing.T) {
+	if got := normalizedTimeout(0); got != defaultTimeoutSeconds {
+		t.Fatalf("0 got %d, want %d", got, defaultTimeoutSeconds)
+	}
+	if got := normalizedTimeout(-5); got != defaultTimeoutSeconds {
+		t.Fatalf("-5 got %d, want %d", got, defaultTimeoutSeconds)
+	}
+	if got := normalizedTimeout(30); got != 30 {
+		t.Fatalf("30 got %d, want 30", got)
+	}
+}
+
+// TestMaskAPIKey masks different lengths of API keys.
+func TestMaskAPIKey(t *testing.T) {
+	// Short key (<= 6 runes)
+	if got := maskAPIKey("ab"); got != "a-***" {
+		t.Fatalf("short got %q, want a-***", got)
+	}
+
+	// Medium key (7-10 runes)
+	if got := maskAPIKey("1234567"); got != "12***67" {
+		t.Fatalf("medium got %q, want 12***67", got)
+	}
+
+	// Long key (> 10 runes)
+	masked := maskAPIKey("1234567890abcdef")
+	if !strings.Contains(masked, "-***") {
+		t.Fatal("missing -*** in masked key")
+	}
+
+	// Empty key
+	if got := maskAPIKey(""); got != "" {
+		t.Fatalf("empty got %q, want empty", got)
+	}
+}
+
+// TestValidateHTTPURL normalizes and validates HTTP/HTTPS URLs.
+func TestValidateHTTPURL(t *testing.T) {
+	// Valid http
+	got, err := validateHTTPURL("http://example.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "http://example.com" {
+		t.Fatalf("got %q", got)
+	}
+
+	// Whitespace trimmed
+	got2, err := validateHTTPURL("  https://example.com  ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got2 != "https://example.com" {
+		t.Fatalf("got %q", got2)
+	}
+
+	// Empty
+	_, err = validateHTTPURL("")
+	if err == nil {
+		t.Fatal("expected error for empty URL")
+	}
+
+	// Non-HTTP scheme
+	_, err = validateHTTPURL("ftp://example.com")
+	if err == nil {
+		t.Fatal("expected error for non-HTTP scheme")
+	}
+}
+
+// TestApiKeyPreview decodes headers JSON and returns masked Bearer token.
+func TestApiKeyPreview(t *testing.T) {
+	// Valid Authorization header
+	headers := `{"Authorization":"Bearer sk-test-key-12345"}`
+	if got := apiKeyPreview(json.RawMessage(headers)); got == "" {
+		t.Fatal("should return non-empty preview for valid auth")
+	}
+
+	// No Authorization header
+	headersNoAuth := `{"X-Custom":"value"}`
+	if got := apiKeyPreview(json.RawMessage(headersNoAuth)); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+
+	// Invalid JSON
+	if got := apiKeyPreview(json.RawMessage("bad json")); got != "" {
+		t.Fatalf("invalid got %q, want empty", got)
+	}
+
+	// Nil
+	if got := apiKeyPreview(nil); got != "" {
+		t.Fatalf("nil got %q, want empty", got)
+	}
+}
+
+// TestParseStringJSON parses a JSON array of strings.
+func TestParseStringJSON(t *testing.T) {
+	// Valid array
+	got := parseStringJSON(json.RawMessage(`["a","b","c"]`))
+	if len(got) != 3 || got[0] != "a" {
+		t.Fatalf("got %v", got)
+	}
+
+	// Empty array
+	if got := parseStringJSON(json.RawMessage(`[]`)); len(got) != 0 {
+		t.Fatalf("empty got %v", got)
+	}
+
+	// Nil
+	if got := parseStringJSON(nil); len(got) != 0 {
+		t.Fatalf("nil got %v", got)
+	}
+
+	// Invalid JSON
+	if got := parseStringJSON(json.RawMessage("not json")); len(got) != 0 {
+		t.Fatalf("invalid got %v", got)
+	}
+}
+
+// TestSanitizeError cleans up error messages with raw JSON headers.
+func TestSanitizeError(t *testing.T) {
+	got := sanitizeError("test message", json.RawMessage(`{"key":"value"}`))
+	if got != "test message" {
+		t.Fatalf("got %q, want test message", got)
+	}
+	if got := sanitizeError("", nil); got != "" {
+		t.Fatalf("empty got %q, want empty", got)
+	}
+}
+
+// TestDedupeServers removes duplicate servers by ID, keeping first occurrence.
+func TestDedupeServers(t *testing.T) {
+	rows := []orm.MCPServer{
+		{ID: "a", Name: "first"},
+		{ID: "b", Name: "second"},
+		{ID: "a", Name: "duplicate"},
+		{ID: "c", Name: "third"},
+	}
+	deduped := dedupeServers(rows)
+	if len(deduped) != 3 {
+		t.Fatalf("got %d servers, want 3", len(deduped))
+	}
+	if deduped[0].Name != "first" {
+		t.Fatalf("first occurrence should be kept, got %q", deduped[0].Name)
+	}
+
+	// Nil input returns empty slice
+	if got := dedupeServers(nil); len(got) != 0 {
+		t.Fatalf("nil got %v, want empty", got)
+	}
+}
+
+// TestEscapeListServersLikePattern escapes special LIKE wildcards ! % _.
+func TestEscapeListServersLikePattern(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"hello", "hello"},
+		{"100%", "100!%"},
+		{"under_score", "under!_score"},
+		{"bang!", "bang!!"},
+		{"mix_%!", "mix!_!%!!"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := escapeListServersLikePattern(tt.input); got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeListServersRequest applies defaults for page and page_size.
+func TestNormalizeListServersRequest(t *testing.T) {
+	// Negative page → 1
+	req := normalizeListServersRequest(ListServersRequest{Page: -1, PageSize: -1})
+	if req.Page != 1 {
+		t.Fatalf("page = %d, want 1", req.Page)
+	}
+	if req.PageSize != 0 {
+		t.Fatalf("page_size = %d, want 0", req.PageSize)
+	}
+
+	// Zero page → 1
+	req2 := normalizeListServersRequest(ListServersRequest{Page: 0, PageSize: 10})
+	if req2.Page != 1 {
+		t.Fatalf("page = %d, want 1", req2.Page)
+	}
+
+	// Valid values preserved
+	req3 := normalizeListServersRequest(ListServersRequest{Keyword: "  test  ", Page: 2, PageSize: 20})
+	if req3.Page != 2 || req3.PageSize != 20 {
+		t.Fatalf("page=%d page_size=%d", req3.Page, req3.PageSize)
+	}
+	if req3.Keyword != "test" {
+		t.Fatalf("keyword = %q, want test", req3.Keyword)
+	}
+}
+
+// TestServerResponse maps ORM server row to response DTO.
+func TestServerResponse(t *testing.T) {
+	row := orm.MCPServer{
+		ID:               "srv-1",
+		Name:             "test-server",
+		Transport:        "sse",
+		URL:              "http://localhost:8080",
+		HeadersJSON:      nil,
+		AllowedToolsJSON: nil,
+		Enabled:          true,
+		IsVerified:       true,
+		Share:            false,
+		Timeout:          10,
+	}
+	tools := []ToolResponse{
+		{ID: "t1", ToolName: "search", Description: "search docs"},
+	}
+	resp := serverResponse(row, 1, tools)
+	if resp.ID != "srv-1" {
+		t.Fatalf("ID = %q", resp.ID)
+	}
+	if resp.Name != "test-server" {
+		t.Fatalf("name = %q", resp.Name)
+	}
+	if resp.Timeout != normalizedTimeout(10) {
+		t.Fatalf("timeout = %d", resp.Timeout)
+	}
+	if len(resp.Tools) != 1 {
+		t.Fatalf("tools = %d, want 1", len(resp.Tools))
+	}
+	if resp.ToolCount != 1 {
+		t.Fatalf("tool_count = %d, want 1", resp.ToolCount)
+	}
+}
+
+// TestToolResponse maps ORM tool row to response DTO, defaulting InputSchema to {}.
+func TestToolResponse(t *testing.T) {
+	// With input schema
+	row := orm.MCPServerTool{
+		ID:              "tool-1",
+		ToolName:        "search",
+		Description:     "search docs",
+		InputSchemaJSON: json.RawMessage(`{"type":"object"}`),
+	}
+	resp := toolResponse(row)
+	if resp.ToolName != "search" {
+		t.Fatalf("tool_name = %q", resp.ToolName)
+	}
+	if string(resp.InputSchema) != `{"type":"object"}` {
+		t.Fatalf("input_schema = %s", string(resp.InputSchema))
+	}
+
+	// Empty schema → {}
+	row2 := orm.MCPServerTool{ID: "tool-2", ToolName: "empty"}
+	resp2 := toolResponse(row2)
+	if string(resp2.InputSchema) != `{}` {
+		t.Fatalf("empty input_schema = %s", string(resp2.InputSchema))
 	}
 }

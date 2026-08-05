@@ -1,6 +1,7 @@
 import { loadPendingCloudOAuthSession } from "./storage";
 import type { CloudDataSourceProvider } from "./types";
 import { getCloudDocumentsUrl } from "@/modules/modelProvider/utils/cloudDocumentUrls";
+export { isGoogleOAuthRedirectUriSupported } from "./redirectUri";
 
 function getBaseName() {
   return ((window as Window & { BASENAME?: string }).BASENAME || "").trim();

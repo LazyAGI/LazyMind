@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, createContext, useContext } from "react";
 import ReactDOM from "react-dom";
+import { Image as AntImage } from 'antd';
+import { EyeOutlined } from '@ant-design/icons';
 import type { SlotRevision, SlotVersionEntry } from "@/modules/chat/store/pluginPanel";
 import { usePluginStore, draftStore } from "@/modules/chat/store/pluginPanel";
 import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync, isExpiredSignedUrl } from "@/modules/knowledge/utils/imageUrl";
@@ -1254,6 +1256,13 @@ export function SlotImage({
     if (e.key === 'Escape') setCaptionEditing(false);
   }, [handleCaptionSave]);
 
+  const handlePreviewClick = useCallback((e: React.MouseEvent) => {
+    // Prevent parent list item focus/sort handlers from firing when opening preview.
+    e.stopPropagation();
+  }, []);
+
+  const [previewVisible, setPreviewVisible] = useState(false);
+
   if (!hasSource || pending || !url) {
     return <SlotPending type='image' cardMode={cardMode} />;
   }
@@ -1333,11 +1342,42 @@ export function SlotImage({
     </>
   ) : null;
 
+  const previewableImage = (
+    <AntImage
+      src={url}
+      alt={alt}
+      className={cardMode ? 'plugin-slot__image-card-img' : 'plugin-slot__image'}
+      rootClassName={cardMode ? 'plugin-slot__image-antd plugin-slot__image-antd--card' : 'plugin-slot__image-antd'}
+      loading='lazy'
+      preview={{
+        mask: (
+          <span className='plugin-slot__image-preview-mask'>
+            <EyeOutlined className='plugin-slot__image-preview-mask-icon' />
+            <span>{tr('chat.slots.preview')}</span>
+          </span>
+        ),
+        visible: previewVisible,
+        onVisibleChange: setPreviewVisible,
+      }}
+      role='button'
+      tabIndex={0}
+      aria-label={alt || tr('chat.previewImage')}
+      onClick={handlePreviewClick}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          setPreviewVisible(true);
+        }
+      }}
+    />
+  );
+
   if (cardMode) {
     return (
       <div className='plugin-slot plugin-slot--image-card-wrap'>
         <div className='plugin-slot plugin-slot--image-card'>
-          <img src={url} alt={alt} className='plugin-slot__image-card-img' loading='lazy' />
+          {previewableImage}
           {alt && <div className='plugin-slot__image-card-caption'>{alt}</div>}
           {overlays}
         </div>
@@ -1384,7 +1424,7 @@ export function SlotImage({
   }
   return (
     <div className='plugin-slot plugin-slot--image'>
-      <img src={url} alt={alt} className='plugin-slot__image' loading='lazy' />
+      {previewableImage}
       {overlays}
       {hasActions && (
         <div className='plugin-slot__caption'>

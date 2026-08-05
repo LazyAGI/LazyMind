@@ -60,27 +60,83 @@ func validArtifactFilename(name string) bool {
 }
 
 func artifactScopeHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	// Keep this in lockstep with algorithm/lazymind/chat/engine/tools/chat_artifact.py.
+	// The algorithm publishes files below the first 128 bits of the SHA-256 digest
+	// to keep packaged Windows paths comfortably below MAX_PATH.
+	return fmt.Sprintf("%x", sum[:16])
+}
+
+func legacyArtifactScopeHash(value string) string {
+	// Read-only compatibility for artifacts created before workspace hashes were
+	// shortened for Windows. New paths must continue to use artifactScopeHash.
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(value)))
+}
+
+func conversationArtifactConversationRootWithHash(
+	userID, conversationID string, scopeHash func(string) string,
+) string {
+	return filepath.Join(
+		subagent.WorkspaceRoot(),
+		conversationArtifactFileDirectory,
+		scopeHash(userID),
+		scopeHash(conversationID),
+	)
 }
 
 func conversationArtifactFileRoot(userID, conversationID, artifactID string) string {
 	return filepath.Join(
-		conversationArtifactConversationRoot(userID, conversationID),
-		artifactID,
+		conversationArtifactConversationRoot(userID, conversationID), artifactID,
 	)
 }
 
-func conversationArtifactConversationRoot(userID, conversationID string) string {
+func legacyConversationArtifactFileRoot(userID, conversationID, artifactID string) string {
 	return filepath.Join(
-		subagent.WorkspaceRoot(),
-		conversationArtifactFileDirectory,
-		artifactScopeHash(userID),
-		artifactScopeHash(conversationID),
+		legacyConversationArtifactConversationRoot(userID, conversationID), artifactID,
+	)
+}
+
+func conversationArtifactFileRoots(userID, conversationID, artifactID string) []string {
+	return []string{
+		conversationArtifactFileRoot(userID, conversationID, artifactID),
+		legacyConversationArtifactFileRoot(userID, conversationID, artifactID),
+	}
+}
+
+func matchingConversationArtifactFileRoot(
+	userID, conversationID, artifactID, filename, actualAbs string,
+) (string, string) {
+	for _, root := range conversationArtifactFileRoots(userID, conversationID, artifactID) {
+		candidate, err := filepath.Abs(filepath.Join(root, filename))
+		if err == nil && filepath.Clean(actualAbs) == filepath.Clean(candidate) {
+			return root, candidate
+		}
+	}
+	return "", ""
+}
+
+func conversationArtifactConversationRoot(userID, conversationID string) string {
+	return conversationArtifactConversationRootWithHash(
+		userID, conversationID, artifactScopeHash,
+	)
+}
+
+func legacyConversationArtifactConversationRoot(userID, conversationID string) string {
+	return conversationArtifactConversationRootWithHash(
+		userID, conversationID, legacyArtifactScopeHash,
 	)
 }
 
 func removeConversationArtifactFiles(userID, conversationID string) error {
-	return os.RemoveAll(conversationArtifactConversationRoot(userID, conversationID))
+	for _, root := range []string{
+		conversationArtifactConversationRoot(userID, conversationID),
+		legacyConversationArtifactConversationRoot(userID, conversationID),
+	} {
+		if err := os.RemoveAll(root); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func canonicalConversationFileValue(
@@ -98,15 +154,14 @@ func canonicalConversationFileValue(
 	if !ok || strings.TrimSpace(storedPath) == "" {
 		return nil, errors.New("file artifact value must contain path")
 	}
-	expectedPath := filepath.Join(
-		conversationArtifactFileRoot(userID, conversationID, artifactID), filename,
-	)
 	actualAbs, err := filepath.Abs(strings.TrimSpace(storedPath))
 	if err != nil {
 		return nil, errors.New("file artifact path is invalid")
 	}
-	expectedAbs, err := filepath.Abs(expectedPath)
-	if err != nil || filepath.Clean(actualAbs) != filepath.Clean(expectedAbs) {
+	_, expectedAbs := matchingConversationArtifactFileRoot(
+		userID, conversationID, artifactID, filename, actualAbs,
+	)
+	if expectedAbs == "" {
 		return nil, errors.New("file artifact path is outside its conversation workspace")
 	}
 	resolvedPath, err := filepath.EvalSymlinks(actualAbs)
@@ -138,10 +193,23 @@ func conversationArtifactResponseValue(
 	if artifact.ContentType != "file" {
 		return artifact.Value
 	}
+	workspaceRoot := conversationArtifactFileRoot(userID, conversationID, artifact.ID)
+	var value map[string]any
+	if json.Unmarshal(artifact.Value, &value) == nil {
+		if storedPath, ok := value["path"].(string); ok {
+			if actualAbs, err := filepath.Abs(strings.TrimSpace(storedPath)); err == nil {
+				if matchedRoot, _ := matchingConversationArtifactFileRoot(
+					userID, conversationID, artifact.ID, artifact.Filename, actualAbs,
+				); matchedRoot != "" {
+					workspaceRoot = matchedRoot
+				}
+			}
+		}
+	}
 	return subagent.SignArtifactValue(
 		artifact.ContentType,
 		artifact.Value,
-		conversationArtifactFileRoot(userID, conversationID, artifact.ID),
+		workspaceRoot,
 	)
 }
 

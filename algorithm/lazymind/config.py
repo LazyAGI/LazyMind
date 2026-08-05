@@ -245,8 +245,8 @@ config.add('agentic_expanded_max_rounds', int, 200, 'AGENTIC_EXPANDED_MAX_ROUNDS
            description='Maximum ReAct rounds for one ChatAgent invocation after the user continues.')
 config.add('agentic_workspace', str, './workspace', 'AGENTIC_WORKSPACE',
            description='Workspace directory for agentic tools.')
-config.add('agentic_keep_full_turns', int, 3, 'AGENTIC_KEEP_FULL_TURNS',
-           description='Number of full turns retained in agentic history.')
+config.add('agentic_keep_full_turns', int, 0, 'AGENTIC_KEEP_FULL_TURNS',
+           description='Number of full turns retained in agentic history; 0 disables rolling compaction.')
 config.add('dynamic_prompt_modules', bool, True, 'DYNAMIC_PROMPT_MODULES',
            description='Enable per-turn task profiling and progressive prompt-module disclosure.')
 config.add('agentic_stream_chunk_size', int, 24, 'AGENTIC_STREAM_CHUNK_SIZE',

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +18,7 @@ type uiPreferencesAPITestResponse struct {
 	Data    struct {
 		ChatPreferenceNoticeDismissed bool   `json:"chat_preference_notice_dismissed"`
 		DeveloperModeActive           bool   `json:"developer_mode_active"`
+		AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
 		UserPreferenceConfigured      bool   `json:"user_preference_configured"`
 		UpdatedAt                     string `json:"updated_at"`
 	} `json:"data"`
@@ -27,15 +27,7 @@ type uiPreferencesAPITestResponse struct {
 func newUIPreferencesTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db, err := orm.Connect(orm.DriverSQLite, dbPath)
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(orm.AllModelsForDDL()...); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	return orm.MigrateAllModelsForTest(t)
 }
 
 func decodeUIPreferencesResponse(t *testing.T, rec *httptest.ResponseRecorder) uiPreferencesAPITestResponse {
@@ -158,6 +150,78 @@ func TestPatchUIPreferencesPartiallyUpdatesProvidedFields(t *testing.T) {
 	thirdResp := decodeUIPreferencesResponse(t, thirdRec)
 	if !thirdResp.Data.ChatPreferenceNoticeDismissed || thirdResp.Data.DeveloperModeActive {
 		t.Fatalf("expected false value to update without clearing dismissed, got %#v", thirdResp.Data)
+	}
+}
+
+func TestPatchUIPreferencesPersistsAcceptedUserAgreementVersion(t *testing.T) {
+	db := newUIPreferencesTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	patchReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/core/user/ui-preferences",
+		strings.NewReader(`{"accepted_user_agreement_version":" V0.2 "}`),
+	)
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchReq.Header.Set("X-User-Id", "u1")
+	patchRec := httptest.NewRecorder()
+
+	PatchUIPreferences(patchRec, patchReq)
+
+	if patchRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", patchRec.Code, patchRec.Body.String())
+	}
+	patchResp := decodeUIPreferencesResponse(t, patchRec)
+	if patchResp.Data.AcceptedUserAgreementVersion != "V0.2" {
+		t.Fatalf("expected trimmed agreement version V0.2, got %q", patchResp.Data.AcceptedUserAgreementVersion)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/core/user/ui-preferences", nil)
+	getReq.Header.Set("X-User-Id", "u1")
+	getRec := httptest.NewRecorder()
+
+	GetUIPreferences(getRec, getReq)
+
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", getRec.Code, getRec.Body.String())
+	}
+	getResp := decodeUIPreferencesResponse(t, getRec)
+	if getResp.Data.AcceptedUserAgreementVersion != "V0.2" {
+		t.Fatalf("expected persisted agreement version V0.2, got %q", getResp.Data.AcceptedUserAgreementVersion)
+	}
+}
+
+func TestUIPreferencesHandlersRejectMissingUserIdentity(t *testing.T) {
+	db := newUIPreferencesTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+		request *http.Request
+	}{
+		{
+			name:    "get",
+			handler: GetUIPreferences,
+			request: httptest.NewRequest(http.MethodGet, "/api/core/user/ui-preferences", nil),
+		},
+		{
+			name:    "patch",
+			handler: PatchUIPreferences,
+			request: httptest.NewRequest(http.MethodPatch, "/api/core/user/ui-preferences", strings.NewReader(`{"accepted_user_agreement_version":"V0.2"}`)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			tt.handler(rec, tt.request)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 

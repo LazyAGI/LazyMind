@@ -16,6 +16,8 @@ import {
   message,
 } from "antd";
 import {
+  CheckOutlined,
+  CloseOutlined,
   DeleteOutlined,
   FileAddOutlined,
   FolderAddOutlined,
@@ -59,6 +61,9 @@ import {
   getDiffStatusColor,
   isPendingHunkDecision,
   mapSkillDiffEntryLines,
+  summarizeSkillReviewFiles,
+  type SkillReviewPendingHunk,
+  type SkillReviewStats,
 } from "./skillDiffUtils";
 import {
   buildAntTreeData,
@@ -93,6 +98,13 @@ const { Text } = Typography;
 interface CachedFileContent {
   content: string;
   binary: boolean;
+}
+
+interface SkillReviewSnapshot extends SkillReviewStats {
+  reviewId: string;
+  reviewVersion: number;
+  canUndo: boolean;
+  pendingHunks: SkillReviewPendingHunk[];
 }
 
 const EllipsisText = ({
@@ -131,16 +143,22 @@ export default function SkillPackageEditor({
   const [committing, setCommitting] = useState(false);
   const [reviewedPaths, setReviewedPaths] = useState<Set<string>>(new Set());
   const [reviewMeta, setReviewMeta] = useState<SkillDraftReviewMeta | null>(null);
+  const [reviewSnapshot, setReviewSnapshot] = useState<SkillReviewSnapshot | null>(null);
+  const [reviewSnapshotLoading, setReviewSnapshotLoading] = useState(false);
+  const [reviewSnapshotError, setReviewSnapshotError] = useState("");
   const [fileHunkSummaries, setFileHunkSummaries] = useState<
     Record<string, { hunkIds: string[]; allDecided: boolean }>
   >({});
   const [hunkSubmitting, setHunkSubmitting] = useState<Record<string, SkillDraftReviewDecision>>({});
+  const [batchSubmitting, setBatchSubmitting] = useState<"accept" | "reject" | "">("");
   const [undoing, setUndoing] = useState(false);
   const [createFileOpen, setCreateFileOpen] = useState(false);
   const [createDirOpen, setCreateDirOpen] = useState(false);
   const [newParentPath, setNewParentPath] = useState("");
   const [newItemName, setNewItemName] = useState("");
   const contentCacheRef = useRef<Map<string, CachedFileContent>>(new Map());
+  const reviewSnapshotRequestRef = useRef(0);
+  const reviewMutationLockRef = useRef(false);
 
   const flatFiles = useMemo(
     () => (treeRoot ? flattenSkillTree(treeRoot) : []),
@@ -163,15 +181,45 @@ export default function SkillPackageEditor({
   );
   const allFilesViewed =
     !reviewMode || changedPaths.every((path) => reviewedPaths.has(path));
-  const usesHunkReview = Boolean(reviewMeta?.reviewId);
+  const usesHunkReview = Boolean(reviewSnapshot?.reviewId || reviewMeta?.reviewId);
   const allHunksDecided =
     !usesHunkReview ||
     changedPaths.every((path) => {
       const summary = fileHunkSummaries[path];
       return Boolean(summary?.allDecided);
     });
-  const allReviewed = allFilesViewed && allHunksDecided;
+  const allReviewed = usesHunkReview
+    ? Boolean(reviewSnapshot && !reviewSnapshotError && reviewSnapshot.pending === 0)
+    : allFilesViewed && allHunksDecided;
   const canUndoReview = Boolean(reviewMode && reviewMeta?.canUndo && reviewMeta.reviewId);
+  const reviewMutationBusy = Boolean(
+    committing ||
+      undoing ||
+      reviewSnapshotLoading ||
+      batchSubmitting ||
+      Object.keys(hunkSubmitting).length > 0,
+  );
+  const canBulkReview = Boolean(
+    canEdit &&
+      reviewMode &&
+      usesHunkReview &&
+      reviewSnapshot &&
+      !reviewSnapshotLoading &&
+      !reviewSnapshotError &&
+      reviewSnapshot.pending > 0 &&
+      reviewSnapshot.pendingHunks.length === reviewSnapshot.pending &&
+      !reviewMutationBusy,
+  );
+  const canBulkReject = Boolean(
+    canEdit &&
+      reviewMode &&
+      usesHunkReview &&
+      reviewSnapshot &&
+      !reviewSnapshotLoading &&
+      !reviewSnapshotError &&
+      reviewSnapshot.pending > 0 &&
+      !reviewMutationBusy,
+  );
 
   const directoryOptions = useMemo(() => {
     const directories = treeRoot ? collectSkillTreeDirectories(treeRoot) : [];
@@ -281,6 +329,100 @@ export default function SkillPackageEditor({
     }));
   }, []);
 
+  const loadReviewSnapshot = useCallback(async (): Promise<SkillReviewSnapshot | null> => {
+    const requestId = ++reviewSnapshotRequestRef.current;
+    if (!reviewMode || !changedPaths.length) {
+      if (requestId === reviewSnapshotRequestRef.current) {
+        setReviewSnapshot(null);
+        setReviewSnapshotError("");
+        setReviewSnapshotLoading(false);
+      }
+      return null;
+    }
+
+    setReviewSnapshotLoading(true);
+    setReviewSnapshotError("");
+    try {
+      const files = await Promise.all(
+        changedPaths.map((path) => compareSkillFileDiff(skillId, path)),
+      );
+      if (requestId !== reviewSnapshotRequestRef.current) {
+        return null;
+      }
+
+      const reviewFile = files.find((file) => file.review?.reviewId);
+      if (!reviewFile?.review) {
+        setReviewSnapshot(null);
+        setReviewSnapshotError(t("admin.memorySkillReviewSnapshotUnavailable"));
+        return null;
+      }
+
+      const summary = summarizeSkillReviewFiles(files);
+      const snapshot: SkillReviewSnapshot = {
+        reviewId: reviewFile.review.reviewId,
+        reviewVersion: reviewFile.review.reviewVersion,
+        canUndo: reviewFile.review.canUndo,
+        ...summary.stats,
+        pendingHunks: summary.pendingHunks,
+      };
+      const nextSummaries = files.reduce<
+        Record<string, { hunkIds: string[]; allDecided: boolean }>
+      >((result, file) => {
+        const hunks = buildDiffHunkBlocks(mapSkillDiffEntryLines(file.diffEntryLines));
+        result[file.path] = {
+          hunkIds: hunks.map((hunk) => hunk.hunkId),
+          allDecided: hunks.every((hunk) => !isPendingHunkDecision(hunk.decision)),
+        };
+        return result;
+      }, {});
+
+      setReviewSnapshot(snapshot);
+      setReviewMeta((previous) => ({
+        ...(previous || {
+          reviewId: snapshot.reviewId,
+          reviewVersion: snapshot.reviewVersion,
+          canUndo: snapshot.canUndo,
+        }),
+        reviewId: snapshot.reviewId,
+        reviewVersion: snapshot.reviewVersion,
+        canUndo: snapshot.canUndo,
+        pendingCount: snapshot.pending,
+        acceptedCount: snapshot.accepted,
+        rejectedCount: snapshot.rejected,
+      }));
+      setFileHunkSummaries(nextSummaries);
+      setReviewedPaths(new Set(changedPaths));
+      return snapshot;
+    } catch (error) {
+      if (requestId === reviewSnapshotRequestRef.current) {
+        setReviewSnapshotError(
+          getLocalizedErrorMessage(error) ||
+            t("admin.memorySkillReviewSnapshotUnavailable"),
+        );
+      }
+      return null;
+    } finally {
+      if (requestId === reviewSnapshotRequestRef.current) {
+        setReviewSnapshotLoading(false);
+      }
+    }
+  }, [changedPaths, reviewMode, skillId, t]);
+
+  useEffect(() => {
+    if (!reviewMode) {
+      reviewSnapshotRequestRef.current += 1;
+      setReviewSnapshot(null);
+      setReviewSnapshotError("");
+      setReviewSnapshotLoading(false);
+      return;
+    }
+
+    void loadReviewSnapshot();
+    return () => {
+      reviewSnapshotRequestRef.current += 1;
+    };
+  }, [loadReviewSnapshot, reviewMode]);
+
   const loadFileView = useCallback(
     async (path: string) => {
       if (!path) {
@@ -359,21 +501,100 @@ export default function SkillPackageEditor({
     void loadFileView(selectedPath);
   }, [loadFileView, loading, selectedFile, selectedPath]);
 
+  const handleDeletePath = useCallback(
+    (path: string, isDirectory: boolean) => {
+      if (!path || !draftStatus || reviewMode) {
+        return;
+      }
+      Modal.confirm({
+        title: isDirectory
+          ? t("admin.memorySkillPackageDeleteFolderConfirmTitle")
+          : t("admin.memorySkillPackageDeleteConfirmTitle"),
+        content: isDirectory
+          ? t("admin.memorySkillPackageDeleteFolderConfirmContent", { path })
+          : t("admin.memorySkillPackageDeleteConfirmContent", { path }),
+        okText: t("common.delete"),
+        cancelText: t("common.cancel"),
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          try {
+            const nextVersion = await deleteSkillDraftPath(skillId, {
+              path,
+              expectedDraftVersion: draftStatus.draftVersion,
+              recursive: isDirectory,
+            });
+            setDraftStatus((previous) =>
+              previous
+                ? { ...previous, draftVersion: nextVersion, hasUncommittedDraft: true }
+                : previous,
+            );
+            await refreshPackage();
+            message.success(
+              isDirectory
+                ? t("admin.memorySkillPackageDeleteFolderSuccess")
+                : t("admin.memorySkillPackageDeleteSuccess"),
+            );
+          } catch (error) {
+            console.error(
+              isDirectory ? "Delete skill folder failed:" : "Delete skill file failed:",
+              error,
+            );
+          }
+        },
+      });
+    },
+    [draftStatus, refreshPackage, reviewMode, skillId, t],
+  );
+
+  const handleDeleteFile = () => {
+    if (!selectedPath) {
+      return;
+    }
+    handleDeletePath(selectedPath, false);
+  };
+
   const treeData = useMemo<DataNode[]>(() => {
     if (!treeRoot) {
       return [];
     }
-    return buildAntTreeData(treeRoot, diffStatusMap, (item, status) => (
-      <span className="memory-skill-tree-node-title">
-        <EllipsisText text={item.name} className="memory-skill-tree-node-name" />
-        {status && status !== "unchanged" ? (
-          <Tag bordered={false} color={getDiffStatusColor(status)} className="memory-skill-tree-status">
-            {t(`admin.memorySkillDiffStatus_${status}`, { defaultValue: status })}
-          </Tag>
-        ) : null}
-      </span>
-    ));
-  }, [diffStatusMap, t, treeRoot]);
+    return buildAntTreeData(treeRoot, diffStatusMap, (item, status) => {
+      const isDirectory = item.type === "dir";
+      const canDelete =
+        canEdit &&
+        !reviewMode &&
+        status !== "deleted" &&
+        (isDirectory || item.path !== SKILL_MD_PATH);
+      const deleteLabel = isDirectory
+        ? t("admin.memorySkillPackageDeleteFolder")
+        : t("admin.memorySkillPackageDelete");
+      return (
+        <span className="memory-skill-tree-node-title">
+          <EllipsisText text={item.name} className="memory-skill-tree-node-name" />
+          {status && status !== "unchanged" ? (
+            <Tag bordered={false} color={getDiffStatusColor(status)} className="memory-skill-tree-status">
+              {t(`admin.memorySkillDiffStatus_${status}`, { defaultValue: status })}
+            </Tag>
+          ) : null}
+          {canDelete ? (
+            <Tooltip title={deleteLabel}>
+              <button
+                type="button"
+                className="memory-skill-tree-node-delete"
+                aria-label={deleteLabel}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleDeletePath(item.path, isDirectory);
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                <DeleteOutlined />
+              </button>
+            </Tooltip>
+          ) : null}
+        </span>
+      );
+    });
+  }, [canEdit, diffStatusMap, handleDeletePath, reviewMode, t, treeRoot]);
 
   const handleSaveFile = async () => {
     if (!selectedPath || !canEdit || reviewMode || saving) {
@@ -449,13 +670,26 @@ export default function SkillPackageEditor({
     setSelectedPath(nextSelectedPath);
     const treeDiff = await compareSkillTreeDiff(skillId);
     setDiffFiles(treeDiff.files);
-  }, [selectedPath, skillId]);
+    if (nextSelectedPath) {
+      const nextFileDiff = await compareSkillFileDiff(skillId, nextSelectedPath);
+      setFileDiff(nextFileDiff);
+      if (nextFileDiff.review) {
+        setReviewMeta(nextFileDiff.review);
+      }
+      updateFileHunkSummary(nextSelectedPath, nextFileDiff);
+    }
+  }, [selectedPath, skillId, updateFileHunkSummary]);
 
   const handleHunkDecision = async (
     hunkId: string,
     decision: SkillDraftReviewDecision,
   ) => {
-    if (!selectedPath || !reviewMeta?.reviewId) {
+    if (
+      !selectedPath ||
+      !reviewMeta?.reviewId ||
+      reviewMutationBusy ||
+      reviewMutationLockRef.current
+    ) {
       return;
     }
     setHunkSubmitting((previous) => ({ ...previous, [hunkId]: decision }));
@@ -470,9 +704,6 @@ export default function SkillPackageEditor({
               ...previous,
               reviewVersion: result.reviewVersion,
               canUndo: result.canUndo,
-              pendingCount: result.pendingCount ?? previous.pendingCount,
-              acceptedCount: result.acceptedCount ?? previous.acceptedCount,
-              rejectedCount: result.rejectedCount ?? previous.rejectedCount,
             }
           : previous,
       );
@@ -493,8 +724,152 @@ export default function SkillPackageEditor({
     }
   };
 
+  const resetReviewState = () => {
+    reviewSnapshotRequestRef.current += 1;
+    setReviewSnapshot(null);
+    setReviewSnapshotError("");
+    setReviewSnapshotLoading(false);
+    setReviewedPaths(new Set());
+    setReviewMeta(null);
+    setFileHunkSummaries({});
+  };
+
+  const handleBatchAccept = () => {
+    if (!canBulkReview || reviewMutationLockRef.current) {
+      return;
+    }
+
+    Modal.confirm({
+      title: t("admin.memorySkillBatchAcceptConfirmTitle"),
+      content: t("admin.memorySkillBatchAcceptConfirmContent", {
+        count: reviewSnapshot?.pending ?? 0,
+      }),
+      okText: t("admin.memorySkillBatchAcceptConfirmOk"),
+      cancelText: t("common.cancel"),
+      onOk: async () => {
+        if (reviewMutationLockRef.current) {
+          return;
+        }
+        reviewMutationLockRef.current = true;
+        setBatchSubmitting("accept");
+        try {
+          const snapshot = await loadReviewSnapshot();
+          if (!snapshot || !snapshot.pendingHunks.length) {
+            return;
+          }
+          if (snapshot.pendingHunks.length !== snapshot.pending) {
+            message.error(t("admin.memorySkillHunkActionsUnavailable"));
+            return;
+          }
+
+          const result = await submitSkillDraftReviewActions(skillId, snapshot.reviewId, {
+            expectedReviewVersion: snapshot.reviewVersion,
+            items: snapshot.pendingHunks.map((hunk) => ({
+              path: hunk.path,
+              hunkId: hunk.hunkId,
+              decision: "accept" as const,
+            })),
+          });
+          const acceptedCount = snapshot.pendingHunks.length;
+          setReviewSnapshot((previous) =>
+            previous
+              ? {
+                  ...previous,
+                  reviewVersion: result.reviewVersion,
+                  canUndo: result.canUndo,
+                  accepted: previous.accepted + acceptedCount,
+                  pending: previous.pending - acceptedCount,
+                  pendingHunks: [],
+                }
+              : previous,
+          );
+          setReviewMeta((previous) =>
+            previous
+              ? {
+                  ...previous,
+                  reviewVersion: result.reviewVersion,
+                  canUndo: result.canUndo,
+                  pendingCount: 0,
+                  acceptedCount: (previous.acceptedCount ?? 0) + acceptedCount,
+                }
+              : previous,
+          );
+          setFileHunkSummaries((previous) =>
+            Object.fromEntries(
+              Object.entries(previous).map(([path, summary]) => [
+                path,
+                { ...summary, allDecided: true },
+              ]),
+            ),
+          );
+          await refreshCurrentFileDiff().catch((error) => {
+            console.error("Refresh skill diff after batch accept failed:", error);
+          });
+          await loadReviewSnapshot();
+          message.success(t("admin.memorySkillBatchAcceptSuccess"));
+        } catch (error) {
+          console.error("Batch accept skill draft review failed:", error);
+          message.error(
+            getLocalizedErrorMessage(error) || t("admin.memorySkillBatchActionFailed"),
+          );
+          await loadReviewSnapshot();
+        } finally {
+          setBatchSubmitting("");
+          reviewMutationLockRef.current = false;
+        }
+      },
+    });
+  };
+
+  const discardDraft = async () => {
+    if (reviewMutationLockRef.current) {
+      return;
+    }
+    reviewMutationLockRef.current = true;
+    setBatchSubmitting("reject");
+    try {
+      await discardSkillDraft(skillId);
+      message.success(t("admin.memorySkillDraftDiscardSuccess"));
+      setReviewMode(false);
+      resetReviewState();
+      await refreshPackage();
+      await onSkillUpdated?.();
+    } catch (error) {
+      console.error("Discard skill draft failed:", error);
+      message.error(
+        getLocalizedErrorMessage(error) || t("admin.memorySkillBatchActionFailed"),
+      );
+    } finally {
+      setBatchSubmitting("");
+      reviewMutationLockRef.current = false;
+    }
+  };
+
+  const handleBatchReject = () => {
+    if (!canBulkReject || reviewMutationLockRef.current) {
+      return;
+    }
+
+    Modal.confirm({
+      title: t("admin.memorySkillBatchRejectConfirmTitle"),
+      content: t("admin.memorySkillBatchRejectConfirmContent", {
+        count: reviewSnapshot?.pending ?? 0,
+      }),
+      okText: t("admin.memorySkillBatchRejectConfirmOk"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      onOk: () => discardDraft(),
+    });
+  };
+
   const handleUndoReview = async () => {
-    if (!reviewMode || !reviewMeta?.reviewId || undoing) {
+    if (
+      !reviewMode ||
+      !reviewMeta?.reviewId ||
+      undoing ||
+      batchSubmitting ||
+      Object.keys(hunkSubmitting).length > 0
+    ) {
       return;
     }
     setUndoing(true);
@@ -510,15 +885,13 @@ export default function SkillPackageEditor({
               ...previous,
               reviewVersion: result.reviewVersion,
               canUndo: result.canUndo,
-              pendingCount: result.pendingCount ?? previous.pendingCount,
-              acceptedCount: result.acceptedCount ?? previous.acceptedCount,
-              rejectedCount: result.rejectedCount ?? previous.rejectedCount,
             }
           : previous,
       );
       message.success(t("admin.memorySkillDraftReviewUndoSuccess"));
       setFileHunkSummaries({});
       setReviewedPaths(new Set());
+      setReviewSnapshot(null);
       await refreshPackage();
     } catch (error) {
       console.error("Undo skill draft review failed:", error);
@@ -528,7 +901,7 @@ export default function SkillPackageEditor({
   };
 
   const handleConfirmReview = async () => {
-    if (!canEdit || !reviewMode || committing) {
+    if (!canEdit || !reviewMode || committing || !allReviewed || reviewMutationBusy) {
       return;
     }
     setCommitting(true);
@@ -544,9 +917,7 @@ export default function SkillPackageEditor({
       }
       message.success(t("admin.memorySkillDraftConfirmSuccess"));
       setReviewMode(false);
-      setReviewedPaths(new Set());
-      setReviewMeta(null);
-      setFileHunkSummaries({});
+      resetReviewState();
       await refreshPackage();
       await onSkillUpdated?.();
     } catch (error) {
@@ -556,27 +927,17 @@ export default function SkillPackageEditor({
     }
   };
 
-  const handleDiscardDraft = async () => {
+  const handleDiscardDraft = () => {
+    if (reviewMutationBusy || reviewMutationLockRef.current) {
+      return;
+    }
     Modal.confirm({
       title: t("admin.memorySkillDraftDiscardConfirmTitle"),
       content: t("admin.memorySkillDraftDiscardConfirmContent"),
       okText: t("admin.memorySkillDraftDiscardConfirmOk"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          await discardSkillDraft(skillId);
-          message.success(t("admin.memorySkillDraftDiscardSuccess"));
-          setReviewMode(false);
-          setReviewedPaths(new Set());
-          setReviewMeta(null);
-          setFileHunkSummaries({});
-          await refreshPackage();
-          await onSkillUpdated?.();
-        } catch (error) {
-          console.error("Discard skill draft failed:", error);
-        }
-      },
+      onOk: () => discardDraft(),
     });
   };
 
@@ -667,37 +1028,6 @@ export default function SkillPackageEditor({
       />
     </Space.Compact>
   );
-
-  const handleDeleteFile = () => {
-    if (!selectedPath || !draftStatus || reviewMode) {
-      return;
-    }
-    Modal.confirm({
-      title: t("admin.memorySkillPackageDeleteConfirmTitle"),
-      content: t("admin.memorySkillPackageDeleteConfirmContent", { path: selectedPath }),
-      okText: t("common.delete"),
-      cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          const nextVersion = await deleteSkillDraftPath(skillId, {
-            path: selectedPath,
-            expectedDraftVersion: draftStatus.draftVersion,
-            recursive: false,
-          });
-          setDraftStatus((previous) =>
-            previous
-              ? { ...previous, draftVersion: nextVersion, hasUncommittedDraft: true }
-              : previous,
-          );
-          await refreshPackage();
-          message.success(t("admin.memorySkillPackageDeleteSuccess"));
-        } catch (error) {
-          console.error("Delete skill file failed:", error);
-        }
-      },
-    });
-  };
 
   const handleUploadFile = async (file: File) => {
     if (!selectedPath || !draftStatus || reviewMode) {
@@ -877,6 +1207,22 @@ export default function SkillPackageEditor({
           description={t("admin.memorySkillPackageUncommittedHint")}
         />
       ) : null}
+      {reviewMode && reviewSnapshotError ? (
+        <Alert
+          type="error"
+          showIcon
+          message={reviewSnapshotError}
+          action={
+            <Button
+              size="small"
+              loading={reviewSnapshotLoading}
+              onClick={() => void loadReviewSnapshot()}
+            >
+              {t("common.retry")}
+            </Button>
+          }
+        />
+      ) : null}
 
       <div className="memory-skill-package-toolbar">
         <Space wrap>
@@ -890,21 +1236,49 @@ export default function SkillPackageEditor({
               </Button>
             </>
           ) : null}
-          {canEdit && reviewMode && usesHunkReview && reviewMeta ? (
-            <span className="memory-skill-review-stats">
-              {t("admin.memorySkillReviewDecisionStats", {
-                accepted: reviewMeta.acceptedCount ?? 0,
-                rejected: reviewMeta.rejectedCount ?? 0,
-                pending: reviewMeta.pendingCount ?? 0,
-              })}
+          {canEdit && reviewMode && usesHunkReview ? (
+            <span className="memory-skill-review-stats" aria-live="polite">
+              {reviewSnapshotLoading && !reviewSnapshot
+                ? t("admin.memorySkillReviewStatsLoading")
+                : t("admin.memorySkillReviewDecisionStats", {
+                    accepted: reviewSnapshot?.accepted ?? 0,
+                    rejected: reviewSnapshot?.rejected ?? 0,
+                    pending: reviewSnapshot?.pending ?? 0,
+                  })}
             </span>
           ) : null}
           {canEdit && reviewMode ? (
             <>
+              {usesHunkReview ? (
+                <>
+                  <Button
+                    icon={<CheckOutlined />}
+                    loading={batchSubmitting === "accept"}
+                    disabled={!canBulkReview}
+                    onClick={handleBatchAccept}
+                  >
+                    {t("admin.memorySkillBatchAccept")}
+                  </Button>
+                  <Button
+                    danger
+                    icon={<CloseOutlined />}
+                    loading={batchSubmitting === "reject"}
+                    disabled={!canBulkReject}
+                    onClick={handleBatchReject}
+                  >
+                    {t("admin.memorySkillBatchReject")}
+                  </Button>
+                </>
+              ) : null}
               {canUndoReview ? (
                 <Button
                   icon={<RollbackOutlined />}
                   loading={undoing}
+                  disabled={
+                    batchSubmitting !== "" ||
+                    committing ||
+                    Object.keys(hunkSubmitting).length > 0
+                  }
                   onClick={() => void handleUndoReview()}
                 >
                   {t("admin.memorySkillDraftReviewUndo")}
@@ -913,12 +1287,17 @@ export default function SkillPackageEditor({
               <Button
                 type="primary"
                 loading={committing}
-                disabled={!allReviewed}
+                disabled={!allReviewed || reviewMutationBusy}
                 onClick={() => void handleConfirmReview()}
               >
                 {t("admin.memorySkillDraftConfirm")}
               </Button>
-              <Button danger onClick={() => void handleDiscardDraft()}>
+              <Button
+                danger
+                loading={batchSubmitting === "reject"}
+                disabled={reviewMutationBusy}
+                onClick={() => void handleDiscardDraft()}
+              >
                 {t("admin.memorySkillDraftDiscard")}
               </Button>
             </>
@@ -933,7 +1312,12 @@ export default function SkillPackageEditor({
               >
                 {t("admin.memorySkillDraftCommit")}
               </Button>
-              <Button danger onClick={() => void handleDiscardDraft()}>
+              <Button
+                danger
+                loading={batchSubmitting === "reject"}
+                disabled={reviewMutationBusy}
+                onClick={() => void handleDiscardDraft()}
+              >
                 {t("admin.memorySkillDraftDiscard")}
               </Button>
             </>

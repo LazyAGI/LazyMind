@@ -185,18 +185,19 @@ def test_subagent_plan_preserves_extension_params_without_structured_duplicates(
     assert 'required_output_artifact_keys' not in parameter_section.content
 
 
-def test_subagent_plan_uses_200_rounds_in_max_mode(tmp_path):
+@pytest.mark.parametrize('thinking_depth', ['low', 'medium', 'high', 'max'])
+def test_subagent_plan_uses_200_rounds_in_every_thinking_mode(tmp_path, thinking_depth):
     import lazyllm
     from lazymind.chat.engine.subagent.context import SubAgentContext
 
     ctx = SubAgentContext(
-        task_id='task-max', conversation_id='conv-1', agent_type='research',
-        objective='deep research', params={'_thinking_depth': 'max'}, workspace_path=str(tmp_path),
+        task_id=f'task-{thinking_depth}', conversation_id='conv-1', agent_type='research',
+        objective='deep research', params={'_thinking_depth': thinking_depth}, workspace_path=str(tmp_path),
         input_slots=[], output_slots=[], db=None, emit=lambda _event: None,
     )
     previous = lazyllm.globals.get('agentic_config')
     try:
-        lazyllm.globals['agentic_config'] = {'thinking_depth': 'max'}
+        lazyllm.globals['agentic_config'] = {'thinking_depth': thinking_depth}
         with runner_mod._cfg.temp('agentic_expanded_max_rounds', 200):
             plan = runner_mod._build_subagent_plan(
                 ctx, None, tools=[], tool_prompt_appendices={},

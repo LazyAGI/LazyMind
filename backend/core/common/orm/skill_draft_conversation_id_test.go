@@ -11,7 +11,7 @@ import (
 
 func TestSkillDraftConversationIDMigrationContract(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
-	migrationDir := filepath.Join(filepath.Dir(file), "..", "..", "migrations")
+	migrationDir := filepath.Join(filepath.Dir(file), "..", "..", "migrations", "dev_mode", "v0_2")
 	up, err := os.ReadFile(filepath.Join(migrationDir, "20260714170000_expand_skill_draft_conversation_id.up.sql"))
 	if err != nil {
 		t.Fatal(err)

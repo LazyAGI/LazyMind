@@ -376,6 +376,11 @@
   margin-bottom: 10px;
 }
 
+.rag-markdown .md-paragraph--with-image {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
 .rag-markdown blockquote {
   margin: 0;
   padding: 0 1em;
@@ -634,6 +639,7 @@
 }
 
 .rag-markdown p,
+.rag-markdown .md-paragraph--with-image,
 .rag-markdown blockquote,
 .rag-markdown ul,
 .rag-markdown ol,

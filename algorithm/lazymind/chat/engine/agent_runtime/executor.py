@@ -12,14 +12,33 @@ from .models import AgentRole, AgentRunPlan
 from .tool_limit_control import tool_limit_decision_coordinator
 
 
+_EXPANDED_BUDGET_TOOLS = {
+    'advance_step',
+    'advance_step_and_hand_off',
+    'create_plugin_draft',
+    'create_subagent',
+}
+
+
+def _requires_expanded_budget(tool_name: str) -> bool:
+    """Return whether invoking this tool starts plugin or SubAgent work."""
+    return tool_name in _EXPANDED_BUDGET_TOOLS or tool_name.startswith('trigger_')
+
+
 class ToolCallGuard:
     """Stop selected tools from looping after failures without limiting successful work."""
 
-    def __init__(self, manager: Any, failure_limits: dict[str, int] | None = None):
+    def __init__(
+        self,
+        manager: Any,
+        failure_limits: dict[str, int] | None = None,
+        expanded_round_limit: int | None = None,
+    ):
         self._manager = manager
         self._failure_limits = dict(failure_limits or {})
         self._failed_signatures: set[str] = set()
         self._consecutive_failures: dict[str, int] = {}
+        self._expanded_round_limit = expanded_round_limit
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
@@ -77,6 +96,18 @@ class ToolCallGuard:
         for index, tool_call in enumerate(tool_calls):
             function = tool_call.get('function') or {}
             name = str(function.get('name') or '')
+            if _requires_expanded_budget(name):
+                workspace = lazyllm.locals.get('_lazyllm_agent', {}).get('workspace')
+                if (
+                    isinstance(workspace, dict)
+                    and self._expanded_round_limit is not None
+                    and workspace.get('_react_round_limit') != self._expanded_round_limit
+                ):
+                    workspace['_react_round_limit'] = self._expanded_round_limit
+                    lazyllm.LOG.info(
+                        f'ChatAgent used tool={name}; automatically expanding '
+                        f'tool round limit to {self._expanded_round_limit}.'
+                    )
             signature = self._signature(tool_call)
             guarded = name in self._failure_limits
             if guarded and signature in self._failed_signatures:
@@ -148,6 +179,8 @@ class AgentExecutor:
     """Create and drive ReactAgent instances from a fully assembled run plan."""
 
     def create_agent(self, llm: Any, plan: AgentRunPlan) -> Any:
+        from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+
         options = plan.execution_options
         kwargs = {
             'stream': True,
@@ -169,14 +202,18 @@ class AgentExecutor:
             'extra_stop_condition': options.extra_stop_condition,
         }
         kwargs.update({key: value for key, value in optional.items() if value is not None})
+        tools = _deduplicate_tools(plan.tools)
+        ensure_lazyllm_tool_docs(tools)
         agent = _agent_mod.ReactAgent(
             llm=llm,
-            tools=_deduplicate_tools(plan.tools),
+            tools=tools,
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
         agent._tools_manager = ToolCallGuard(
-            agent._tools_manager, options.tool_failure_limits,
+            agent._tools_manager,
+            options.tool_failure_limits,
+            max(2, int(_cfg['agentic_expanded_max_rounds'])),
         )
         # Restore lazy Toolkit activation before the streaming helper takes over.
         # Relying only on ReactAgent._pre_process makes restoration dependent on

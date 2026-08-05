@@ -1,6 +1,7 @@
 import type { NormalizedThreadEvent, StepStatus } from "./types";
 import {
   getEventCaseId,
+  getEventPayloadData,
   getNestedRecordField,
   getNumberField,
   getStringField,
@@ -285,11 +286,61 @@ function getRepairTraceLifecycle(event: NormalizedThreadEvent): RepairTraceLifec
 
 function getRepairTraceCaseId(event: NormalizedThreadEvent): string | undefined {
   const caseRecord = getNestedRecordField(event.payload, ["case"]);
+  const summary = getRepairTraceSummary(event);
+  const summaryRecord = isRecord(summary) ? summary : undefined;
+  const eventData = getEventPayloadData(event.payload);
   return (
     getStringField(caseRecord, ["case_id", "caseId", "id"]) ||
     getEventCaseId(event.payload) ||
+    getStringField(summaryRecord, ["case_id", "caseId"]) ||
+    getStringField(eventData, ["case_id", "caseId"]) ||
     undefined
   );
+}
+
+function getRepairTraceAttempt(event: NormalizedThreadEvent): number | undefined {
+  const summary = getRepairTraceSummary(event);
+  const summaryRecord = isRecord(summary) ? summary : undefined;
+  return (
+    getNumberField(event.payload, ["attempt"]) ??
+    getNumberField(summaryRecord, ["attempt"])
+  );
+}
+
+function getRepairTraceCommand(event: NormalizedThreadEvent): string | undefined {
+  const summary = getRepairTraceSummary(event);
+  const summaryRecord = isRecord(summary) ? summary : undefined;
+  const eventData = getEventPayloadData(event.payload);
+  return (
+    getStringField(summaryRecord, ["command"]) ||
+    getStringField(eventData, ["command"]) ||
+    getStringField(event.payload, ["command"])
+  );
+}
+
+/**
+ * Pair start/finish event types into one stable row identity when backend does not
+ * send lifecycle.id (e.g. candidate.case_started + candidate.case_completed).
+ */
+function getRepairTracePairBase(eventType: string): string | undefined {
+  if (ONE_SHOT_LOG_EVENT_TYPES.has(eventType)) {
+    return undefined;
+  }
+  // service_stopped is a separate cleanup step; do not merge into service start/ready.
+  if (eventType === "candidate.service_stopped") {
+    return undefined;
+  }
+  for (const suffix of LIFECYCLE_START_EVENT_SUFFIXES) {
+    if (eventType.endsWith(suffix)) {
+      return eventType.slice(0, -suffix.length);
+    }
+  }
+  for (const suffix of LIFECYCLE_FINISH_EVENT_SUFFIXES) {
+    if (eventType.endsWith(suffix)) {
+      return eventType.slice(0, -suffix.length);
+    }
+  }
+  return undefined;
 }
 
 function normalizeRepairTraceAction(action?: string): StepStatus {
@@ -560,9 +611,31 @@ function buildRepairTraceRowKey(
   event: NormalizedThreadEvent,
   lifecycle: RepairTraceLifecycle | undefined,
 ): string {
+  const eventType = getRepairTracePayloadEventType(event);
+  const pairBase = getRepairTracePairBase(eventType);
+  // Prefer start/finish pair identity over synthetic lifecycle ids that fall back
+  // to unique event_id (which would otherwise create duplicate cards).
+  if (pairBase) {
+    const attempt = getRepairTraceAttempt(event);
+    const caseId = getRepairTraceCaseId(event);
+    const command = pairBase.endsWith(".command")
+      ? getRepairTraceCommand(event)
+      : undefined;
+    return [
+      "pair",
+      pairBase,
+      typeof attempt === "number" ? `attempt:${attempt}` : undefined,
+      caseId ? `case:${caseId}` : undefined,
+      command ? `cmd:${command}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(":");
+  }
+
   if (lifecycle?.id) {
     return `lifecycle:${lifecycle.id}`;
   }
+
   const eventId = getStringField(event.payload, ["event_id", "eventId"]);
   return `event:${eventId || event.key}`;
 }
@@ -809,11 +882,11 @@ export function buildRepairTraceRows(
     const existing = rowMap.get(rowKey);
     const resolvedAction = resolveLifecycleRowAction(event, lifecycle, existing);
     const action = coalesceRowAction(existing, resolvedAction);
-    const displayEventType =
-      existing?.eventType &&
-      (lifecycle?.phase === "finish" ||
-        lifecycle?.terminal === true ||
-        isLifecycleFinishEventType(eventType))
+    // Prefer finish event type so the single card title reflects completion/failure.
+    // Keep an existing finish type if a late start event arrives out of order.
+    const displayEventType = isLifecycleFinishEventType(eventType)
+      ? eventType
+      : existing?.eventType && isLifecycleFinishEventType(existing.eventType)
         ? existing.eventType
         : eventType;
     const nextOrder = existing?.order ?? order;
@@ -827,13 +900,15 @@ export function buildRepairTraceRows(
       category: getRepairTraceCategory(displayEventType),
       action,
       statusLabel: getStepStatusLabel(action),
-      attempt,
+      attempt: attempt ?? existing?.attempt,
       caseId: getRepairTraceCaseId(event) ?? existing?.caseId,
       title: buildRepairTraceEventTitle(displayEventType),
       detail: pickRepairTraceDetail(summaryRecord, event, existing),
       chips: mergeRepairTraceChips(
         existing,
-        buildRepairTraceChips(summaryRecord, { includeAttempt: typeof attempt !== "number" }),
+        buildRepairTraceChips(summaryRecord, {
+          includeAttempt: typeof (attempt ?? existing?.attempt) !== "number",
+        }),
       ),
       timestamp: event.timestamp || existing?.timestamp,
       order: nextOrder,

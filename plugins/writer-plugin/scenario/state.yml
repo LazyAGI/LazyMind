@@ -35,6 +35,7 @@ transitions:
 steps:
   prepare:
     label: 写作准备
+    mode: auto
     route: choice
     prompt: |
       {{runtime_instruction}}
@@ -80,6 +81,9 @@ steps:
       required next step. Use "next step: outline revision" for stage="outline", and
       "next step: full-document revision" for stage="draft" or stage="final". This
       routing information must be stated even when the user did not ask to see it.
+      When source_ir does not exist, explicitly state: "No source file was provided.
+      Continue directly to outline without requesting confirmation." Do not emit this
+      instruction when source_ir exists.
     tools:
       - kb
       - cloud_files

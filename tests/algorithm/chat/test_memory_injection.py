@@ -83,6 +83,7 @@ def test_truncate_preference_index_uses_configured_item_and_character_limits():
 def test_load_memory_context_reads_store_without_references():
     fs = FakeRemoteFS({
         SOUL_PATH: (
+            'schema_version: 2\n'
             'identity:\n'
             '  name: "LazyMind"\n'
             '  role: "personal_ai_assistant"\n'
@@ -101,6 +102,7 @@ def test_load_memory_context_reads_store_without_references():
             '  verification_mode: "when_material"\n'
         ),
         PROFILE_PATH: (
+            'schema_version: 2\n'
             'identity:\n'
             '  preferred_name: "Alice"\n'
             '  aliases: []\n'

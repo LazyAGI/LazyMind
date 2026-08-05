@@ -7,10 +7,10 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
 _ENV_KEY = 'LAZYMIND_AUTH_CLOUD_SECRET_KEY'
+_LEGACY_DEFAULT_KEY = 'dev-ragscan-secret-key-change-me'
 
 
-def _resolve_secret_key() -> bytes:
-    raw = (os.environ.get(_ENV_KEY) or '').strip()
+def _key_bytes(raw: str) -> bytes:
     if not raw:
         raise RuntimeError('LAZYMIND_AUTH_CLOUD_SECRET_KEY is required for cloud oauth credential encryption')
 
@@ -32,6 +32,10 @@ def _resolve_secret_key() -> bytes:
     return hashlib.sha256(raw.encode('utf-8')).digest()
 
 
+def _resolve_secret_key() -> bytes:
+    return _key_bytes((os.environ.get(_ENV_KEY) or '').strip())
+
+
 def _aesgcm() -> AESGCM:
     return AESGCM(_resolve_secret_key())
 
@@ -49,6 +53,15 @@ def decrypt_json(ciphertext: str) -> dict:
     if len(raw) < 13:
         raise ValueError('invalid ciphertext')
     nonce, encrypted = raw[:12], raw[12:]
-    plain = _aesgcm().decrypt(nonce, encrypted, None)
+    try:
+        plain = _aesgcm().decrypt(nonce, encrypted, None)
+    except Exception as current_error:
+        current_raw = (os.environ.get(_ENV_KEY) or '').strip()
+        if current_raw == _LEGACY_DEFAULT_KEY:
+            raise
+        try:
+            plain = AESGCM(_key_bytes(_LEGACY_DEFAULT_KEY)).decrypt(nonce, encrypted, None)
+        except Exception:
+            raise current_error
     decoded = json.loads(plain.decode('utf-8'))
     return decoded if isinstance(decoded, dict) else {}

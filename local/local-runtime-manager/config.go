@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -16,6 +17,7 @@ const (
 	localBuildRootEnvVar             = "LAZYMIND_LOCAL_BUILD_ROOT"
 	runtimeResourcesRootEnvVar       = "LAZYMIND_RUNTIME_RESOURCES_ROOT"
 	runtimeOwnerTokenEnvVar          = "LAZYMIND_RUNTIME_OWNER_TOKEN"
+	desktopAppVersionEnvVar          = "LAZYMIND_DESKTOP_APP_VERSION"
 	localPortsPinnedEnvVar           = "LAZYMIND_LOCAL_PORTS_PINNED"
 	processComposePortEnvVar         = "LAZYMIND_PROCESS_COMPOSE_PORT"
 	processComposeDownTimeoutEnvVar  = "LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT"
@@ -30,6 +32,7 @@ const (
 	localProxyCoreHostPortEnvVar     = "LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT"
 	localProxyChatHostPortEnvVar     = "LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT"
 	localProxyScanHostPortEnvVar     = "LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT"
+	localProxyChannelHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_CHANNEL_GATEWAY_HOST_PORT"
 	localProxyEvoHostPortEnvVar      = "LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT"
 	localFileWatcherPortEnvVar       = "LAZYMIND_LOCAL_FILE_WATCHER_PORT"
 	localPostgresPortEnvVar          = "LAZYMIND_LOCAL_POSTGRES_PORT"
@@ -54,6 +57,7 @@ const (
 	authServiceUVEnvVar              = "LAZYMIND_AUTH_SERVICE_UV"
 	authServiceDatabaseURLEnvVar     = "LAZYMIND_AUTH_SERVICE_DATABASE_URL"
 	authServiceInstallDepsEnvVar     = "LAZYMIND_AUTH_SERVICE_INSTALL_DEPS"
+	channelGatewayInstallDepsEnvVar  = "LAZYMIND_CHANNEL_GATEWAY_INSTALL_DEPS"
 	localPythonVersionEnvVar         = "LAZYMIND_LOCAL_PYTHON_VERSION"
 	localSQLiteDirEnvVar             = "LAZYMIND_LOCAL_SQLITE_DIR"
 	caddyBinEnvVar                   = "LAZYMIND_CADDY_BIN"
@@ -73,6 +77,7 @@ const (
 	defaultLocalProxyCoreHostPort    = 18001
 	defaultLocalProxyChatHostPort    = 18046
 	defaultLocalProxyScanHostPort    = 18080
+	defaultLocalProxyChannelHostPort = 18085
 	defaultLocalProxyEvoHostPort     = 18047
 	defaultLocalFileWatcherPort      = 19090
 	defaultLocalPostgresPort         = 15432
@@ -88,11 +93,13 @@ const (
 	composeGeneratedFileName         = "process-compose.generated.yaml"
 	serviceEndpointsJSONName         = "service-endpoints.json"
 	serviceEndpointsEnvName          = "service-endpoints.env"
+	algoRegistrationVersionFileName  = "algo-registration-version"
 	tokenFileName                    = "pc-token"
 	upLockFileName                   = "up.lock"
 	logFileName                      = "process-compose.log"
 	localProxyLogFileName            = "local-proxy.log"
 	authServiceLogFileName           = "auth-service.log"
+	channelGatewayLogFileName        = "channel-gateway.log"
 	coreLogFileName                  = "core.log"
 	frontendLogFileName              = "frontend.log"
 	localProcessComposeBin           = "local/build/bin/process-compose"
@@ -100,10 +107,12 @@ const (
 	localProxyScriptDirName          = "local/local-proxy/scripts"
 	localProxySourceDirName          = "local/local-proxy"
 	authServiceSourceDirName         = "backend/auth-service"
+	channelGatewaySourceDirName      = "backend/channel-gateway"
 	coreSourceDirName                = "backend/core"
 	processComposeServiceName        = "process-supervisor"
 	localProxyProcessName            = "local-proxy"
 	authServiceProcessName           = "auth-service"
+	channelGatewayProcessName        = "channel-gateway"
 	coreProcessName                  = "core"
 	scanControlPlaneProcessName      = "scan-control-plane"
 	fileWatcherProcessName           = "file-watcher"
@@ -144,6 +153,11 @@ type RuntimePaths struct {
 	AuthServiceLog           string
 	AuthServicePIDFile       string
 	AuthServiceVenvDir       string
+	ChannelGatewayLog        string
+	ChannelGatewayPIDFile    string
+	ChannelGatewayVenvDir    string
+	ChannelGatewayDBPath     string
+	ChannelGatewayKeyPath    string
 	PythonRuntimeDir         string
 	NodeRuntimeDir           string
 	PythonStateDir           string
@@ -218,6 +232,7 @@ type RuntimeConfig struct {
 	NetworkProfile     string
 	LocalProxy         LocalProxyConfig
 	AuthService        AuthServiceConfig
+	ChannelGateway     ChannelGatewayConfig
 	CaddyVersion       string
 	Algorithm          AlgorithmConfig
 	FileWatcher        FileWatcherConfig
@@ -242,19 +257,26 @@ type RuntimePathLayout struct {
 }
 
 type LocalProxyConfig struct {
-	Address      string
-	Port         int
-	AuthHostPort int
-	CoreHostPort int
-	ChatHostPort int
-	ScanHostPort int
-	EvoHostPort  int
+	Address         string
+	Port            int
+	AuthHostPort    int
+	CoreHostPort    int
+	ChatHostPort    int
+	ScanHostPort    int
+	ChannelHostPort int
+	EvoHostPort     int
 }
 
 type AuthServiceConfig struct {
 	Port          int
 	PythonVersion string
 	DatabaseURL   string
+	InstallDeps   bool
+}
+
+type ChannelGatewayConfig struct {
+	Port          int
+	PythonVersion string
 	InstallDeps   bool
 }
 
@@ -470,7 +492,16 @@ func localPortAvailable(port int) bool {
 }
 
 func localPortAvailableOn(address string, port int) bool {
-	ln, err := net.Listen("tcp", net.JoinHostPort(address, strconv.Itoa(port)))
+	target := net.JoinHostPort(address, strconv.Itoa(port))
+	// On macOS a listener created with socket reuse options (for example a
+	// Colima SSH port forward) can make a second net.Listen probe appear to
+	// succeed.  A successful connect is definitive evidence that the port is
+	// already serving another process, so check it before attempting to bind.
+	if conn, err := net.DialTimeout("tcp", target, 100*time.Millisecond); err == nil {
+		_ = conn.Close()
+		return false
+	}
+	ln, err := net.Listen("tcp", target)
 	if err != nil {
 		return false
 	}
@@ -729,6 +760,11 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		AuthServiceLog:           filepath.Join(logsRoot, authServiceLogFileName),
 		AuthServicePIDFile:       filepath.Join(runtimeRoot, "run", "auth-service.pid"),
 		AuthServiceVenvDir:       filepath.Join(depsRoot, "python", "auth-service"),
+		ChannelGatewayLog:        filepath.Join(logsRoot, channelGatewayLogFileName),
+		ChannelGatewayPIDFile:    filepath.Join(runtimeRoot, "run", channelGatewayProcessName+".pid"),
+		ChannelGatewayVenvDir:    filepath.Join(depsRoot, "python", channelGatewayProcessName),
+		ChannelGatewayDBPath:     filepath.Join(sqliteRoot, channelGatewayProcessName, "channel-gateway.db"),
+		ChannelGatewayKeyPath:    filepath.Join(dataRoot, channelGatewayProcessName, "master.key"),
 		PythonRuntimeDir:         filepath.Join(buildRoot, "runtimes", "python"),
 		NodeRuntimeDir:           filepath.Join(buildRoot, "runtimes", "node"),
 		PythonStateDir:           filepath.Join(runtimeRoot, "state", "python"),
@@ -808,6 +844,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 	authHostPort := ports.resolvedPort("auth-service", []string{localAuthPortEnvVar, localProxyAuthHostPortEnvVar, authServicePortEnvVar}, defaultLocalProxyAuthHostPort)
 	coreHostPort := ports.resolvedPort("core", []string{localCorePortEnvVar, localProxyCoreHostPortEnvVar}, defaultLocalProxyCoreHostPort)
 	scanHostPort := ports.resolvedPort("scan-control-plane", []string{localProxyScanHostPortEnvVar}, defaultLocalProxyScanHostPort)
+	channelHostPort := ports.resolvedPort(channelGatewayProcessName, []string{localProxyChannelHostPortEnvVar}, defaultLocalProxyChannelHostPort)
 	fileWatcherPort := ports.resolvedPort("file-watcher", []string{localFileWatcherPortEnvVar}, defaultLocalFileWatcherPort)
 	postgresPort := ports.resolvedPort("postgres", []string{localPostgresPortEnvVar}, defaultLocalPostgresPort)
 	docPort := ports.resolvedPort("document-service", []string{localDocPortEnvVar}, defaultLocalDocPort)
@@ -867,13 +904,14 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 		NetworkProfile:     networkProfile,
 		CaddyVersion:       envText(caddyVersionEnvVar, defaultCaddyVersion),
 		LocalProxy: LocalProxyConfig{
-			Address:      envText(localProxyAddressEnvVar, defaultLocalProxyAddress),
-			Port:         localProxyPort,
-			AuthHostPort: authHostPort,
-			CoreHostPort: coreHostPort,
-			ChatHostPort: chatPort,
-			ScanHostPort: scanHostPort,
-			EvoHostPort:  evoPort,
+			Address:         envText(localProxyAddressEnvVar, defaultLocalProxyAddress),
+			Port:            localProxyPort,
+			AuthHostPort:    authHostPort,
+			CoreHostPort:    coreHostPort,
+			ChatHostPort:    chatPort,
+			ScanHostPort:    scanHostPort,
+			ChannelHostPort: channelHostPort,
+			EvoHostPort:     evoPort,
 		},
 		Algorithm: AlgorithmConfig{
 			PostgresPort:        postgresPort,
@@ -893,6 +931,11 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 			PythonVersion: envText(localPythonVersionEnvVar, defaultLocalPythonVersion),
 			DatabaseURL:   authServiceDatabaseURL(p.AuthServiceDBPath),
 			InstallDeps:   envBool(authServiceInstallDepsEnvVar, true),
+		},
+		ChannelGateway: ChannelGatewayConfig{
+			Port:          channelHostPort,
+			PythonVersion: envText(localPythonVersionEnvVar, defaultLocalPythonVersion),
+			InstallDeps:   envBool(channelGatewayInstallDepsEnvVar, true),
 		},
 		FileWatcher: FileWatcherConfig{
 			Port:          fileWatcherPort,
@@ -948,6 +991,9 @@ func applyDesktopManifestPaths(paths *RuntimePaths) error {
 	}
 	if value := joinResource(manifest.Paths.AuthServiceVenv); value != "" {
 		paths.AuthServiceVenvDir = value
+	}
+	if value := joinResource(manifest.Paths.ChannelGatewayVenv); value != "" {
+		paths.ChannelGatewayVenvDir = value
 	}
 	if value := joinResource(manifest.Paths.AlgorithmVenv); value != "" {
 		paths.AlgorithmVenv = value
@@ -1086,6 +1132,9 @@ func (p RuntimePaths) EnsureAllDirs() error {
 		filepath.Dir(p.AuthServicePIDFile),
 		p.AuthServiceStateDir,
 		filepath.Dir(p.AuthServiceDBPath),
+		filepath.Dir(p.ChannelGatewayPIDFile),
+		filepath.Dir(p.ChannelGatewayDBPath),
+		filepath.Dir(p.ChannelGatewayKeyPath),
 		p.CoreStateDir,
 		filepath.Dir(p.CoreDBPath),
 		filepath.Dir(p.LazyLLMDBPath),
@@ -1111,6 +1160,7 @@ func (p RuntimePaths) EnsureAllDirs() error {
 			p.PythonRuntimeDir,
 			p.NodeRuntimeDir,
 			p.AuthServiceVenvDir,
+			p.ChannelGatewayVenvDir,
 			filepath.Dir(p.AlgorithmVenv),
 			p.FrontendNodeModules,
 		)
@@ -1123,6 +1173,7 @@ func (p RuntimePaths) EnsureAllDirs() error {
 	for _, d := range []string{
 		filepath.Dir(filepath.Dir(p.AuthServiceDBPath)),
 		filepath.Dir(p.AuthServiceDBPath),
+		filepath.Dir(p.ChannelGatewayDBPath),
 		filepath.Dir(p.CoreDBPath),
 		filepath.Dir(p.LazyLLMDBPath),
 		filepath.Dir(p.ScanDBPath),

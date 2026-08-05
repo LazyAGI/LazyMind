@@ -1,12 +1,12 @@
 import {
   Alert,
   message,
+  Modal,
   Button,
   Badge,
   Dropdown,
   Tooltip,
   Input,
-  Tag,
   Space,
 } from "antd";
 import { axiosInstance, BASE_URL } from "@/components/request";
@@ -52,6 +52,7 @@ import ImportTaskManage, {
 } from "./components/ImportTaskManage";
 import TreeUtils from "@/modules/knowledge/utils/tree";
 import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
+import { isFFmpegDependencyError } from "@/modules/knowledge/utils/taskError";
 import TypedConfirmModal, {
   type TypedConfirmModalRef,
 } from "@/components/ui/TypedConfirmModal";
@@ -121,6 +122,7 @@ const Detail = () => {
   const importTaskRef = useRef<IImportTaskManageRef>();
   const pollingRef = useRef(new Polling());
   const importingTaskListRef = useRef([]);
+  const promptedDependencyTaskIdsRef = useRef(new Set<string>());
   const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
 
@@ -288,6 +290,7 @@ const Detail = () => {
     if (completeTasks.length > 0) {
       getDetail();
     }
+    void notifyDependencyFailures(completeTasks);
 
     // There are multiple tasks to complete or the root node needs to be updated.
     if (
@@ -320,6 +323,36 @@ const Detail = () => {
     knowledgeListRef.current!.updateDocument({
       documentId: parentNode.document_id ?? "",
     });
+  }
+
+  async function notifyDependencyFailures(tasks: any[]) {
+    for (const task of tasks) {
+      const taskId = String(task?.task_id || "");
+      if (!taskId || promptedDependencyTaskIdsRef.current.has(taskId)) {
+        continue;
+      }
+      try {
+        const response = await TaskServiceApi().getTask(
+          id,
+          taskId,
+          { silentError: true } as never,
+        );
+        const finishedTask = response.data as any;
+        if (!isFFmpegDependencyError(finishedTask?.err_msg)) {
+          continue;
+        }
+        promptedDependencyTaskIdsRef.current.add(taskId);
+        Modal.confirm({
+          title: t("knowledge.ffmpegRequiredTitle"),
+          content: t("knowledge.ffmpegRequiredDesc"),
+          okText: t("knowledge.configureFfmpeg"),
+          cancelText: t("common.close"),
+          onOk: () => navigate("/model-providers/tools#ffmpeg-dependency"),
+        });
+      } catch (error) {
+        console.error("Failed to inspect completed task:", error);
+      }
+    }
   }
 
   function openImportModal(data?: any) {
@@ -400,7 +433,13 @@ const Detail = () => {
       }}
     >
       <DetailPageHeader
-        title={detail?.display_name}
+        className="knowledge-detail-header"
+        title={
+          <span className="knowledge-detail-title-copy">
+            <strong>{detail?.display_name}</strong>
+            {detail?.desc ? <small>{detail.desc}</small> : null}
+          </span>
+        }
         titleExtra={
           developerActive ? (
             <>
@@ -429,81 +468,51 @@ const Detail = () => {
         settingsMenu={
           detail?.acl?.includes(DatasetAclEnum.DatasetWrite) && (
             <div>
-              <Tooltip title={t("common.edit")}>
-                <Button
-                  icon={<EditOutlined />}
-                  style={{ marginLeft: "12px", width: "24px", height: "24px" }}
-                  onClick={() => {
-                    createUpdateRef.current?.onOpen(detail);
-                  }}
-                />
-              </Tooltip>
+              <Button
+                icon={<EditOutlined />}
+                onClick={() => {
+                  createUpdateRef.current?.onOpen(detail);
+                }}
+              >
+                {t("common.edit")}
+              </Button>
               {!runtimeFeatures.hideUserGroupSurfaces && (
-                <Tooltip title={t("knowledge.authorize")}>
-                  <Button
-                    icon={<SettingOutlined />}
-                    style={{
-                      marginLeft: "12px",
-                      width: "24px",
-                      height: "24px",
-                    }}
-                    onClick={() =>
-                      navigate({
-                        pathname: `/lib/knowledge/auth/${id}`,
-                      })
-                    }
-                  />
-                </Tooltip>
-              )}
-              <Tooltip title={t("common.delete")}>
                 <Button
-                  icon={<DeleteOutlined />}
-                  style={{ marginLeft: "12px", width: "24px", height: "24px" }}
-                  onClick={() => {
-                    const knowledgeName = detail?.display_name || id;
-                    confirmRef.current?.onOpen({
-                      id,
-                      title: t("knowledge.deleteTitle", {
-                        name: knowledgeName,
-                      }),
-                      content: t("knowledge.deleteContent"),
-                      confirmText: t("knowledge.deleteConfirmText", {
-                        name: knowledgeName,
-                      }),
-                    });
-                  }}
-                />
-              </Tooltip>
+                  icon={<SettingOutlined />}
+                  onClick={() =>
+                    navigate({
+                      pathname: `/lib/knowledge/auth/${id}`,
+                    })
+                  }
+                >
+                  {t("knowledge.authorize")}
+                </Button>
+              )}
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => {
+                  const knowledgeName = detail?.display_name || id;
+                  confirmRef.current?.onOpen({
+                    id,
+                    title: t("knowledge.deleteTitle", {
+                      name: knowledgeName,
+                    }),
+                    content: t("knowledge.deleteContent"),
+                    confirmText: t("knowledge.deleteConfirmText", {
+                      name: knowledgeName,
+                    }),
+                  });
+                }}
+              >
+                {t("common.delete")}
+              </Button>
             </div>
           )
         }
         breadcrumbs={[
           { title: t("layout.knowledgeBase"), href: "/lib/knowledge/list" },
           { title: detail?.display_name },
-        ]}
-        description={detail?.desc}
-        extraContent={[
-          {
-            label: t("knowledge.tags"),
-            value:
-              detail?.tags && detail?.tags.length > 0
-                ? detail.tags.map((tag) => (
-                    <Tooltip key={tag} title={tag}>
-                      <Tag
-                        style={{
-                          marginLeft: "8px",
-                          maxWidth: "240px",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {tag}
-                      </Tag>
-                    </Tooltip>
-                  ))
-                : "-",
-          },
         ]}
         onBack={() => {
           const bool = ["aiwrite", "aireview", "chat"].includes(

@@ -282,6 +282,26 @@ func init() {
 	registerAdditionalError("write slot revision failed", http.StatusInternalServerError, 2001574)
 	registerAdditionalError("无法查询 skill 维护任务状态", http.StatusServiceUnavailable, 2001575)
 	registerAdditionalError("请先配置 llm 和 evo_llm 模型后再创建任务", http.StatusUnprocessableEntity, 2001576)
+
+	// systemdeps / local ffmpeg dependency management
+	registerAdditionalError("local runtime root is not configured", http.StatusServiceUnavailable, 2001577)
+	registerAdditionalError("load ffmpeg dependency status failed", http.StatusInternalServerError, 2001578)
+	registerAdditionalError("ffmpeg dependency settings are only supported in local/desktop runtime", http.StatusForbidden, 2001579)
+	registerAdditionalError("source must be custom or bundled", http.StatusBadRequest, 2001580)
+	registerAdditionalError("customPath is required when source is custom", http.StatusBadRequest, 2001581)
+	registerAdditionalError("bundled ffmpeg install is only supported in local/desktop runtime", http.StatusForbidden, 2001582)
+	registerAdditionalError("runtime root is not configured", http.StatusServiceUnavailable, 2001583)
+	registerAdditionalError("ffmpeg executable not found", http.StatusBadRequest, 2001584)
+	registerAdditionalError("ffprobe was not found next to the selected ffmpeg binary", http.StatusBadRequest, 2001585)
+	registerAdditionalError("extract ffmpeg download failed", http.StatusBadRequest, 2001586)
+	registerAdditionalError("downloaded ffmpeg archives did not contain ffmpeg and ffprobe binaries", http.StatusBadRequest, 2001587)
+	registerAdditionalError("ffmpeg install finished but binaries were not detected", http.StatusInternalServerError, 2001588)
+	registerAdditionalError("ffmpeg download failed", http.StatusBadGateway, 2001589)
+	registerAdditionalError("write ffmpeg download failed", http.StatusInternalServerError, 2001590)
+	registerAdditionalError("unsupported ffmpeg archive format", http.StatusBadRequest, 2001591)
+	registerAdditionalErrorPattern("bundled ffmpeg install is not supported on %s/%s", "bundled ffmpeg install is not supported on this platform", http.StatusBadRequest, 2001592)
+	registerAdditionalErrorPattern("downloaded %s binary could not run", "downloaded ffmpeg binary could not run", http.StatusInternalServerError, 2001593)
+	registerAdditionalError("ffmpeg download checksum mismatch", http.StatusBadGateway, 2001594)
 }
 
 func registerAdditionalError(message string, status, code int) {

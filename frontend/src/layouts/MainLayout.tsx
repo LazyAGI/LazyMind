@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, WheelEvent as ReactWheelEvent } from "react";
 import { Button, Form, Input, Layout, Modal, Popover, Spin, Tooltip, message } from "antd";
 import {
   CodeOutlined,
@@ -20,7 +20,7 @@ import {
   HistoryOutlined,
   BookOutlined,
   CloudOutlined,
-  WechatOutlined,
+  LinkOutlined,
 } from "@ant-design/icons";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { UserDetailResponse } from "@/api/generated/auth-client";
@@ -51,6 +51,9 @@ import {
 import { runtimeFeatures } from "@/runtime/features";
 import { shouldHideLocalUserControls } from "@/runtime/localSession";
 import { useLocalSessionGate } from "@/runtime/useLocalSessionGate";
+import UserAgreementConsentModal, {
+  useUserAgreementConsentGate,
+} from "@/components/UserAgreementConsentModal";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
@@ -79,6 +82,20 @@ function isAdminRole(role?: string) {
     normalizedRole === "system_admin" ||
     normalizedRole.endsWith(".admin")
   );
+}
+
+function canScrollVertically(element: HTMLElement, deltaY: number) {
+  const style = window.getComputedStyle(element);
+  if (style.overflowY !== "auto" && style.overflowY !== "scroll") {
+    return false;
+  }
+
+  const maxScrollTop = element.scrollHeight - element.clientHeight;
+  if (maxScrollTop <= 1) {
+    return false;
+  }
+
+  return deltaY < 0 ? element.scrollTop > 0 : element.scrollTop < maxScrollTop;
 }
 
 interface ProfileFormValues {
@@ -195,13 +212,48 @@ export default function MainLayout() {
     pathname.startsWith("/self-evolution");
   const isSelfEvolutionObservationPage =
     pathname.startsWith("/self-evolution/detail/") && pathname.includes("/observation/");
+  const isChatPage = pathname.startsWith("/agent/chat");
   const contentClassName = [
     "main-layout-content",
+    isChatPage ? "is-chat-page" : "",
     isMenuCollapsed ? "is-sidebar-collapsed" : "",
     isMenuCollapsed && needsRestoreButtonSafeArea ? "is-restore-safe-area-page" : "",
   ]
     .filter(Boolean)
     .join(" ");
+
+  const handleChatWheel = useCallback(
+    (event: ReactWheelEvent<HTMLDivElement>) => {
+      if (!isChatPage || event.deltaY === 0) {
+        return;
+      }
+
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const messageContainer = event.currentTarget.querySelector<HTMLElement>(
+        ".message-container",
+      );
+      if (!target || !messageContainer) {
+        return;
+      }
+
+      let ancestor: HTMLElement | null = target;
+      while (ancestor && ancestor !== event.currentTarget) {
+        if (canScrollVertically(ancestor, event.deltaY)) {
+          return;
+        }
+        ancestor = ancestor.parentElement;
+      }
+
+      // The message list already handles its own wheel events, including
+      // nested scrollable blocks such as long thinking text.
+      if (messageContainer.contains(target)) {
+        return;
+      }
+
+      messageContainer.scrollBy({ top: event.deltaY, behavior: "auto" });
+    },
+    [isChatPage],
+  );
 
   const refreshLayoutUser = useCallback(async () => {
     if (!AgentAppsAuth.isLoggedIn()) {
@@ -220,6 +272,13 @@ export default function MainLayout() {
     }
   }, []);
   const localSessionGate = useLocalSessionGate(refreshLayoutUser);
+  const {
+    needsConsent,
+    markAccepted,
+    loading: agreementLoading,
+    checkFailed: agreementCheckFailed,
+    retryCheck: retryAgreementCheck,
+  } = useUserAgreementConsentGate(isLoggedIn);
 
   useEffect(() => {
     if (!localSessionGate.enabled) {
@@ -682,8 +741,29 @@ export default function MainLayout() {
     return <Navigate to="/login" replace />;
   }
 
+  if (agreementLoading || agreementCheckFailed) {
+    return (
+      <div className="local-session-gate">
+        <div className="local-session-panel">
+          {agreementLoading ? <Spin /> : null}
+          <div className="local-session-title">LazyMind</div>
+          <div className="local-session-message">
+            {agreementCheckFailed
+              ? t("legal.consentCheckFailed")
+              : t("legal.consentChecking")}
+          </div>
+          {agreementCheckFailed ? (
+            <Button type="primary" onClick={retryAgreementCheck}>
+              {t("common.retry", "Retry")}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <Layout hasSider className="main-layout">
+    <Layout hasSider className="main-layout" onWheelCapture={handleChatWheel}>
       <Sider
         width={252}
         collapsedWidth={0}
@@ -812,10 +892,6 @@ export default function MainLayout() {
             </div>
           )}
           <div className="sider-bar-bottom">
-            <div className="bottom-item language-item">
-              <GlobalOutlined className="bottom-icon" />
-              {shouldRenderMenuContent && <LanguageSwitcher />}
-            </div>
             {showSettingsTrigger && (
               <Popover
                 content={
@@ -831,9 +907,15 @@ export default function MainLayout() {
                           onClick={() => handleSettingsNavigate(item.key)}
                         >
                           {item.icon}
-                          <span>{item.label}</span>
+                          <span className="settings-popover-label">{item.label}</span>
                           {item.key === "developer-toggle" && developerActive && (
                             <span className="settings-active-badge">{t("admin.developerActiveTag")}</span>
+                          )}
+                          {[
+                            "/model-providers/default-services",
+                            "/admin",
+                          ].includes(item.key) && (
+                            <RightOutlined className="settings-popover-accessory" />
                           )}
                         </Button>
                       );
@@ -854,6 +936,10 @@ export default function MainLayout() {
                       }
                       return btn;
                     })}
+                    <div className="settings-popover-language">
+                      <GlobalOutlined className="settings-popover-icon" />
+                      <LanguageSwitcher />
+                    </div>
                     {!hideLocalUserControls && (
                       isLoggedIn ? (
                         <Button
@@ -876,6 +962,7 @@ export default function MainLayout() {
                   </div>
                 }
                 arrow={false}
+                overlayClassName="settings-popover-overlay"
                 placement="top"
                 trigger="click"
                 open={settingsOpen}
@@ -898,22 +985,22 @@ export default function MainLayout() {
               </Popover>
             )}
             <div
-              className={`bottom-item wechat-entry${
-                pathname.startsWith("/channels/wechat") ? " is-active" : ""
+              className={`bottom-item terminal-entry${
+                pathname.startsWith("/channels") ? " is-active" : ""
               }`}
               role="button"
               tabIndex={0}
-              onClick={() => handleModuleNavigate("/channels/wechat")}
+              onClick={() => handleModuleNavigate("/channels")}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
-                  handleModuleNavigate("/channels/wechat");
+                  handleModuleNavigate("/channels");
                 }
               }}
             >
-              <WechatOutlined className="bottom-icon" />
+              <LinkOutlined className="bottom-icon" />
               {shouldRenderMenuContent && (
-                <span className="bottom-text">{t("layout.channelConnection")}</span>
+                <span className="bottom-text">{t("layout.terminalConnection")}</span>
               )}
             </div>
             {userName && !hideLocalUserControls && (
@@ -1095,6 +1182,10 @@ export default function MainLayout() {
           </Form.Item>
         </Form>
       </Modal>
+      <UserAgreementConsentModal
+        open={needsConsent}
+        onAccepted={markAccepted}
+      />
     </Layout>
   );
 }

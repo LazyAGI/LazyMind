@@ -26,6 +26,7 @@ from lazymind.chat.engine.tools.infra.video_generation_support import (
     run_video_model,
     run_video_to_gif,
 )
+from lazymind.common.ffmpeg_deps import resolve_ffmpeg_binaries
 
 
 def _coerce_url_list(urls: Optional[Union[str, List[str]]]) -> Optional[List[str]]:
@@ -258,6 +259,21 @@ def video_to_gif(
     raw = str(url or '').strip()
     if not raw:
         return tool_error('video_to_gif', 'url is required')
+    ffmpeg_path, ffprobe_path = resolve_ffmpeg_binaries()
+    if not ffmpeg_path or not ffprobe_path:
+        return tool_error(
+            'video_to_gif',
+            (
+                'FFMPEG_DEPENDENCY_MISSING: Animated GIF output requires FFmpeg. '
+                'The generated video remains available.'
+            ),
+            error_type='MissingDependency',
+            meta={
+                'dependency': 'ffmpeg',
+                'settings_path': '/model-providers/tools#ffmpeg-dependency',
+                'fallback': 'video',
+            },
+        )
     local_path = resolve_tool_video_path(raw)
     if not local_path:
         raise ValueError(f'video file not found: {raw}')

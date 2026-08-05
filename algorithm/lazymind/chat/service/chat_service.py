@@ -6,6 +6,7 @@ import re
 import threading
 import time
 from html import escape as escape_xml
+import sys
 from typing import Any, Dict, List, Optional, Union
 import lazyllm
 from lazyllm import LOG, set_trace_context
@@ -61,6 +62,7 @@ from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
     render_intent_section,
 )
+from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
 from lazymind.chat.service.utils import (
     SensitiveFilter,
     SensitiveMatch,
@@ -73,7 +75,6 @@ from lazymind.chat.service.utils import (
 )
 from lazyllm.tools.fs.client import FS
 from lazymind.model_config import inject_model_config, summarize_model_config_for_log
-from lazyllm.tools.rag import inject_reader_config
 from lazyllm.tools.tool_config_inject import inject_tool_config
 from lazyllm import AutoModel
 from lazyllm.tools.mcp.client import MCPClient
@@ -183,6 +184,13 @@ def _select_recent_progress_memory_reference(
     return reference, selected_records
 
 
+def _inject_reader_config(ocr_config: Dict[str, Any]) -> None:
+    if not ocr_config and 'lazyllm.tools.rag' not in sys.modules:
+        return
+    from lazyllm.tools.rag import inject_reader_config
+    inject_reader_config(ocr_config=ocr_config)
+
+
 def _normalize_cite_message_query_for_agent(query: str) -> tuple[str, str]:
     cite_messages: list[str] = []
 
@@ -214,6 +222,28 @@ def _normalize_kb_id_filter(raw_kb_id: Any) -> str | list[str] | None:
         cleaned = [item.strip() for item in raw_kb_id if isinstance(item, str) and item.strip()]
         return cleaned[0] if len(cleaned) == 1 else (cleaned or None)
     return None
+
+
+def _active_skills_from_history(
+    history: list[dict[str, Any]],
+    available_skills: list[str] | None,
+) -> list[str]:
+    available = [str(skill) for skill in (available_skills or []) if str(skill).strip()]
+    activated = set()
+    for message in history:
+        for tool_call in message.get('tool_calls') or []:
+            function = tool_call.get('function') if isinstance(tool_call, dict) else None
+            if not isinstance(function, dict) or function.get('name') != 'get_skill':
+                continue
+            arguments = function.get('arguments', {})
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    continue
+            if isinstance(arguments, dict) and isinstance(arguments.get('name'), str):
+                activated.add(arguments['name'].strip())
+    return [skill for skill in available if skill in activated]
 
 
 def check_sensitive_content(query: str) -> Optional[SensitiveMatch]:
@@ -279,9 +309,14 @@ def _build_subagent_chat_tools() -> list:
 
 
 def _build_chat_artifact_tools() -> list:
-    """Tools for artifacts produced directly by the main ChatAgent."""
-    from lazymind.chat.engine.tools.chat_artifact import save_chat_artifact
-    return [save_chat_artifact]
+    """Workspace and artifact tools for the main ChatAgent."""
+    from lazymind.chat.engine.tools.chat_artifact import (
+        list_dir,
+        read_file,
+        save_chat_artifact,
+        write_file,
+    )
+    return [save_chat_artifact, read_file, write_file, list_dir]
 
 
 def _build_user_attachment_tools(has_files: bool) -> list:
@@ -452,6 +487,7 @@ async def _handle_chat_impl(
     plugin = request.plugin
     explicit_resources = request.explicit_resource_bindings
     from lazymind.chat.plugin.plugin_manager import (
+        _active_plugin_context_allowed,
         _build_chat_agent_task_context,
         guard_plugin_agent_stream,
         is_plugin_driver_turn,
@@ -590,7 +626,7 @@ async def _handle_chat_impl(
     lazyllm.locals._init_sid(sid=conversation.session_id)
     inject_model_config(runtime.llm_config)
     inject_tool_config(runtime.tool_config)
-    inject_reader_config(ocr_config=runtime.ocr_config)
+    _inject_reader_config(runtime.ocr_config)
     lazyllm.globals['agentic_config'] = agentic_config
 
     memory_context = None
@@ -653,6 +689,10 @@ async def _handle_chat_impl(
         task_profile.excluded_resources.plugin_refs if task_profile else ()
     )
     effective_plugin_context = plugin.plugin_context
+    if not _active_plugin_context_allowed(
+        effective_plugin_context, plugin.catalog, plugin.disabled_builtin_plugins,
+    ):
+        effective_plugin_context = None
     if str((effective_plugin_context or {}).get('plugin_ref') or '') in excluded_plugin_refs:
         effective_plugin_context = None
     effective_plugin_catalog = [
@@ -667,12 +707,17 @@ async def _handle_chat_impl(
         ref.removeprefix('builtin:') for ref in excluded_plugin_refs
         if ref.startswith('builtin:')
     )
+    effective_manual_builtin_plugins = [
+        plugin_id for plugin_id in plugin.manual_builtin_plugins
+        if f'builtin:{plugin_id}' not in excluded_plugin_refs
+    ]
 
     plugin_contribution = resolve_plugin_injection(
         effective_plugin_context,
         conversation_id=conversation_id,
         plugin_catalog=effective_plugin_catalog,
         disabled_builtin_plugins=list(dict.fromkeys(effective_disabled_builtin_plugins)),
+        manual_builtin_plugins=list(dict.fromkeys(effective_manual_builtin_plugins)),
         allowed_plugin_refs=effective_allowed_plugin_refs,
     )
     plugin_tools = plugin_contribution.tools
@@ -683,7 +728,7 @@ async def _handle_chat_impl(
         current_query=query,
         current_intent=conversation.intent_context,
     )
-    intentwriter = update_intentwriter(intentwriter, plugin.plugin_context)
+    intentwriter = update_intentwriter(intentwriter, effective_plugin_context)
 
     # Inject SubAgent task context into the system prompt independently of plugin state.
     # Injected when either plugin or subagent is enabled so the model knows about ongoing tasks.
@@ -733,12 +778,18 @@ async def _handle_chat_impl(
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
     ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
     artifact_tools = _build_chat_artifact_tools()
+    workspace = chat_agent_workspace(user_id or '0', conversation_id)
+    skill_listing_tools = [build_list_skills_tool(agent.available_skills)]
     all_tools = ([intentwriter] + agent_tools + artifact_tools + subagent_tools + attachment_tools
-                 + ask_user_tools + plugin_tools + mcp_tools)
+                 + skill_listing_tools + ask_user_tools + plugin_tools + mcp_tools)
     skill_config = agent.available_skills
     selected_skills = agent.available_skills
     if task_profile is not None:
         selected_skills = select_skill_candidates(agent.available_skills, language_query, task_profile)
+        selected_skills = list(dict.fromkeys([
+            *_active_skills_from_history(agent_history, agent.available_skills),
+            *(selected_skills or []),
+        ]))
         skill_config = selected_skills or False
     set_trace_context({
         'trace_id': conversation.session_id,
@@ -840,6 +891,19 @@ async def _handle_chat_impl(
         task_profile=task_profile,
         dynamic_prompt_modules=_cfg['dynamic_prompt_modules'],
     )
+    prompt_builder.system(
+        'chat_workspace',
+        'Workspace',
+        (
+            f'Use `{workspace}` as the single working directory for all generated and intermediate files. '
+            'When a skill requires an output directory, create it under this workspace and pass its absolute '
+            'path to skill scripts. Treat files outside this workspace as read-only inputs. Use `read_file`, '
+            '`write_file`, and `list_dir` to inspect and update workspace files, then publish completed files '
+            'with `save_chat_artifact`.'
+        ),
+        'agent.workspace',
+        priority=70,
+    )
     # Plugin policy historically followed the common system prompt.
     prompt_builder.system(
         'chat_plugin_policy', 'Plugin Policy', plugin_contribution.system_prompt,
@@ -940,7 +1004,7 @@ async def _handle_chat_impl(
         force_summarize_context=query,
         execution_options=AgentExecutionOptions(
             skills=skill_config,
-            workspace=chat_agent_workspace(user_id or '0', conversation_id),
+            workspace=workspace,
             keep_full_turns=_cfg['agentic_keep_full_turns'],
             fs=FS,
             skills_dir=_cfg['skill_fs_url'],

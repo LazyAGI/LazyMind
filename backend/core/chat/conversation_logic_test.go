@@ -18,7 +18,7 @@ import (
 )
 
 func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{}, nil, "", 1)
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{}, nil, "", 1)
 	sessionID, ok := body["session_id"].(string)
 	if !ok {
 		t.Fatalf("expected session_id string, got %T", body["session_id"])
@@ -36,7 +36,7 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyPropagatesSensitiveFilterBypass(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{"skip_sensitive_filter": true}, nil, "", 1)
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{"skip_sensitive_filter": true}, nil, "", 1)
 	if skip, _ := body["skip_sensitive_filter"].(bool); !skip {
 		t.Fatalf("expected skip_sensitive_filter=true, got %#v", body["skip_sensitive_filter"])
 	}
@@ -156,7 +156,7 @@ func TestPluginStepParamsFromEventParamsPreservesChatSessionID(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyUsesDatasetListFilters(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"conversation": map[string]any{
 			"search_config": map[string]any{
 				"dataset_list": []any{
@@ -200,7 +200,7 @@ func TestBuildChatRequestBodyUsesDatasetListFilters(t *testing.T) {
 }
 
 func TestBuildLazyChatRequestPreservesDatasetListFilters(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"conversation": map[string]any{
 			"search_config": map[string]any{
 				"dataset_list": []any{
@@ -218,13 +218,7 @@ func TestBuildLazyChatRequestPreservesDatasetListFilters(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyLoadsFiltersFromConversationDB(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-filters.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.Conversation{})
 	now := time.Now()
 	searchConfig := json.RawMessage(`{"dataset_list":[{"id":"ds_db_1"},{"id":"ds_db_2"}],"creators":["u1"]}`)
 	if err := db.Create(&orm.Conversation{
@@ -254,7 +248,7 @@ func TestBuildChatRequestBodyLoadsFiltersFromConversationDB(t *testing.T) {
 
 func TestBuildChatRequestBodyKeepsExistingFilters(t *testing.T) {
 	existing := map[string]any{"kb_id": []string{"manual"}}
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"filters": existing,
 		"conversation": map[string]any{
 			"search_config": map[string]any{
@@ -283,7 +277,7 @@ func TestBuildChatRequestBodyAddsResourceContextWithoutLegacyMemory(t *testing.T
 		AvailableSkills:    []string{"coding/git-workflow"},
 		UsePersonalization: true,
 	}
-	body := buildChatRequestBody(nil, nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "user-1", 1)
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "user-1", 1)
 
 	if got := body["session_id"]; got != "session-1" {
 		t.Fatalf("expected session_id to be preserved, got %#v", got)
@@ -317,7 +311,7 @@ func TestBuildChatRequestBodyAddsResourceContextWithoutLegacyMemory(t *testing.T
 func TestBuildChatRequestBodyMergesRequestDisabledTools(t *testing.T) {
 	ctx := &evolution.ChatResourceContext{DisabledTools: []string{"bing"}}
 	body := buildChatRequestBody(
-		nil, nil, "conv-1", "session-1", "hello", nil,
+		context.TODO(), nil, "conv-1", "session-1", "hello", nil,
 		map[string]any{"disabled_tools": []any{"ask_user"}}, ctx, "user-1", 1,
 	)
 
@@ -345,7 +339,7 @@ func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled
 		AvailableSkills:    []string{"coding/git-workflow"},
 		UsePersonalization: false,
 	}
-	body := buildChatRequestBody(nil, nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "", 1)
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "", 1)
 
 	if got, ok := body["use_memory"].(bool); !ok || got {
 		t.Fatalf("expected use_memory false, got %#v", body["use_memory"])
@@ -359,7 +353,7 @@ func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled
 }
 
 func TestBuildChatRequestBodyPreservesExplicitReasoningFalse(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"reasoning": false,
 	}, nil, "", 1)
 
@@ -369,7 +363,7 @@ func TestBuildChatRequestBodyPreservesExplicitReasoningFalse(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyForwardsThinkingDepth(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"thinking_depth": "low",
 	}, nil, "", 1)
 
@@ -383,7 +377,7 @@ func TestBuildChatRequestBodyForwardsThinkingDepth(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyDefaultsInvalidThinkingDepth(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"thinking_depth": "turbo",
 	}, nil, "", 1)
 	if got := body["thinking_depth"]; got != "medium" {
@@ -392,7 +386,7 @@ func TestBuildChatRequestBodyDefaultsInvalidThinkingDepth(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyAcceptsMaxThinkingDepth(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"thinking_depth": "MAX",
 	}, nil, "", 1)
 	if got := body["thinking_depth"]; got != "max" {
@@ -431,22 +425,34 @@ func TestBuildChatHistoryExtPreservesMultimodalInput(t *testing.T) {
 
 func TestBuildChatHistoryExtUsesDisplayQueryForAutomatedContext(t *testing.T) {
 	ext := buildChatHistoryExt(map[string]any{
-		"input":         []any{map[string]any{"input_type": "text", "text": "large internal model context"}},
+		"input": []any{
+			map[string]any{"input_type": "text", "text": "large internal model context"},
+			map[string]any{"input_type": "image", "uri": "/uploads/dog.jpg"},
+		},
 		"display_query": "用户任务描述",
 	}, "用户任务描述")
-	if !strings.Contains(string(ext), "用户任务描述") || strings.Contains(string(ext), "large internal model context") {
-		t.Fatalf("history ext must contain display query only: %s", ext)
+	var payload struct {
+		Input []map[string]any `json:"input"`
+	}
+	if err := json.Unmarshal(ext, &payload); err != nil {
+		t.Fatalf("unmarshal ext: %v", err)
+	}
+	if len(payload.Input) != 2 {
+		t.Fatalf("expected text+image input items, got %#v", payload.Input)
+	}
+	if got := payload.Input[0]["text"]; got != "用户任务描述" {
+		t.Fatalf("expected display query text, got %#v", got)
+	}
+	if strings.Contains(string(ext), "large internal model context") {
+		t.Fatalf("history ext must not keep internal model text: %s", ext)
+	}
+	if got := payload.Input[1]["uri"]; got != "/uploads/dog.jpg" {
+		t.Fatalf("expected image uri to be preserved, got %#v", got)
 	}
 }
 
 func TestCollectedInputsForConversationReturnsSnapshotAndSummary(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/collected-inputs.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.AutoMigrate(&orm.TaskCenterTask{}, &orm.TaskRunInput{}, &orm.TaskRunOutput{}); err != nil {
-		t.Fatal(err)
-	}
+	db := orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.TaskRunInput{}, &orm.TaskRunOutput{})
 	now := time.Now().UTC()
 	if err := db.Create(&orm.TaskCenterTask{ID: "downstream", UserID: "u", ConversationID: "weekly-conv", TaskType: "scheduled", Status: "succeeded", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -465,13 +471,7 @@ func TestCollectedInputsForConversationReturnsSnapshotAndSummary(t *testing.T) {
 }
 
 func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-detail.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -599,13 +599,7 @@ func TestElapsedThinkingSecondsRoundsUp(t *testing.T) {
 }
 
 func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-detail-datasets.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -689,13 +683,7 @@ func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
 }
 
 func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-history.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -780,7 +768,7 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyMergesInputURIsIntoFiles(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "sid", "what animal", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "sid", "what animal", nil, map[string]any{
 		"input": []any{
 			map[string]any{"input_type": "text", "text": "hello"},
 			map[string]any{"input_type": "image", "uri": "/var/lib/lazymind/uploads/tmp/u1/a.png"},
@@ -802,7 +790,7 @@ func TestBuildChatRequestBodyMergesInputURIsIntoFiles(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyFilesMergeDedupesAndSkipsHTTP(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "sid", "q", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "sid", "q", nil, map[string]any{
 		"files": []any{"/data/x.jpg"},
 		"input": []any{
 			map[string]any{"input_type": "image", "uri": "https://cdn.example.com/p.png"},
@@ -1032,13 +1020,7 @@ func TestShouldEmitStreamFrame(t *testing.T) {
 }
 
 func TestFeedBackChatHistoryCancelsFeedback(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/feedback.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.ChatHistory{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.ChatHistory{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 

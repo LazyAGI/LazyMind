@@ -55,7 +55,6 @@ import {
   getSkillReviewSummary,
   listIncomingSkillShares,
   listOutgoingSkillShares,
-  listSkillReviewResultsByRequest,
   listSkillReviewTasks,
   listSkillShareTargets,
   listSkillAssetsPage,
@@ -206,9 +205,6 @@ const isSkillReviewTaskTerminal = (status?: string) => {
     normalized === "skipped"
   );
 };
-const MANUAL_SKILL_REVIEW_RESULT_ATTEMPTS = 5;
-const MANUAL_SKILL_REVIEW_SKILL_READY_ATTEMPTS = 8;
-const MANUAL_SKILL_REVIEW_RETRY_DELAY_MS = 1200;
 const MANUAL_SKILL_REVIEW_RUNNING_TASK_PAGE_SIZE = 1000;
 const waitManualSkillReviewRetry = () =>
   new Promise((resolve) =>
@@ -708,71 +704,6 @@ export default function MemoryManagement() {
     [t],
   );
 
-  const loadManualSkillReviewResults = useCallback(
-    async (requestId: string) => {
-      if (!requestId.trim()) {
-        return [];
-      }
-
-      for (
-        let attempt = 0;
-        attempt < MANUAL_SKILL_REVIEW_RESULT_ATTEMPTS;
-        attempt += 1
-      ) {
-        const results = await listSkillReviewResultsByRequest(requestId);
-        if (
-          results.length > 0 ||
-          attempt === MANUAL_SKILL_REVIEW_RESULT_ATTEMPTS - 1
-        ) {
-          return results;
-        }
-        await waitManualSkillReviewRetry();
-      }
-
-      return [];
-    },
-    [],
-  );
-
-  const waitForManualSkillReviewCreatedSkills = useCallback(
-    async (results: SkillReviewResultRecord[]) => {
-      const skillNames = getManualSkillReviewCreatedSkillNames(results);
-      if (skillNames.length === 0) {
-        return;
-      }
-
-      for (
-        let attempt = 0;
-        attempt < MANUAL_SKILL_REVIEW_SKILL_READY_ATTEMPTS;
-        attempt += 1
-      ) {
-        const readyResults = await Promise.all(
-          skillNames.map(async (skillName) => {
-            const result = await listSkillAssetsPage({
-              keyword: skillName,
-              page: 1,
-              pageSize: 50,
-            });
-
-            return result.records.some((item) =>
-              skillRecordNameMatches(item, skillName),
-            );
-          }),
-        );
-
-        if (
-          readyResults.every(Boolean) ||
-          attempt === MANUAL_SKILL_REVIEW_SKILL_READY_ATTEMPTS - 1
-        ) {
-          return;
-        }
-
-        await waitManualSkillReviewRetry();
-      }
-    },
-    [],
-  );
-
   const pollManualSkillReviewTasks = useCallback(
     (requestId: string) => {
       const normalizedRequestId = requestId.trim();
@@ -822,23 +753,17 @@ export default function MemoryManagement() {
             return;
           }
 
-          const results =
-            await loadManualSkillReviewResults(normalizedRequestId);
-          try {
-            await waitForManualSkillReviewCreatedSkills(results);
-          } catch (error) {
-            console.warn("Wait manual skill review skills failed:", error);
-          }
+          const resultCount = task?.resultCount || 0;
           await Promise.all([
             refreshSkillAssets({ page: 1, preserveChangeProposals: true }),
             refreshManualSkillReviewSummary({ silent: true }),
           ]);
-          setManualSkillReviewResults(results);
+          setManualSkillReviewResults([]);
           setManualSkillReviewResultStatus(
-            results.length > 0 ? "done" : "empty",
+            resultCount > 0 ? "done" : "empty",
           );
           setManualSkillReviewRunning(false);
-          if (results.length > 0) {
+          if (resultCount > 0) {
             message.success(t("admin.memoryManualSkillReviewDone"));
           } else {
             message.info(t("admin.memoryManualSkillReviewNoResult"));
@@ -884,6 +809,7 @@ export default function MemoryManagement() {
       if (
         (error as { response?: { status?: number } })?.response?.status === 409
       ) {
+        setManualSkillReviewRunning(false);
         await refreshManualSkillReviewSummary({ silent: true });
         return;
       }
@@ -2322,28 +2248,6 @@ export default function MemoryManagement() {
     }
   };
 
-  const applySkillRepoImport = (repoUrl: string) => {
-    const trimmedUrl = repoUrl.trim();
-    if (!trimmedUrl) {
-      return;
-    }
-
-    setPendingSkillSourceUrl(trimmedUrl);
-    setPendingSkillPackageFile(null);
-
-    const rawName = trimmedUrl.split("/").filter(Boolean).pop() || "";
-    const name =
-      rawName.replace(/[-_]/g, " ") || t("admin.memorySkillUploadDefaultName");
-
-    setDraft((previous) => ({
-      ...previous,
-      name: previous.name.trim() || name,
-      description:
-        previous.description.trim() || t("admin.memorySkillUploadPersonalDesc"),
-      category: previous.category.trim() || "personal",
-    }));
-  };
-
   const handleImportSkillPackage = (file: File) => {
     void handleUploadSkillFile(file, {
       parentOnlyMarkdown: true,
@@ -2449,10 +2353,11 @@ export default function MemoryManagement() {
   };
 
   const openSkillCreateModal = (source: SkillCreateSource) => {
+    if (skillSaving) {
+      return;
+    }
+
     if (source === "zip") {
-      if (skillSaving) {
-        return;
-      }
       setPendingSkillSourceUrl("");
       skillZipInputRef.current?.click();
       return;
@@ -2464,7 +2369,11 @@ export default function MemoryManagement() {
     setSkillUrlImportOpen(true);
   };
 
-  const handleConfirmSkillUrlImport = () => {
+  const handleConfirmSkillUrlImport = async () => {
+    if (skillSaving) {
+      return;
+    }
+
     const trimmedUrl = skillUrlImportDraft.trim();
     if (!trimmedUrl) {
       message.warning(t("admin.memorySkillUploadRepoPlaceholder"));
@@ -2472,8 +2381,29 @@ export default function MemoryManagement() {
     }
 
     setSkillUrlImportOpen(false);
-    applySkillRepoImport(trimmedUrl);
-    openModal("add");
+    setSkillSaving(true);
+
+    try {
+      await createSkillAsset({
+        name: t("admin.memorySkillUploadDefaultName"),
+        description: t("admin.memorySkillUploadPersonalDesc"),
+        category: "personal",
+        tags: [],
+        isEnabled: true,
+        source: { type: "url", url: trimmedUrl },
+      });
+      await Promise.all([refreshSkillAssets(), refreshSkillCategories()]);
+      message.success(
+        t("admin.memorySkillUploadSuccess", {
+          name: t("admin.memorySkillUploadDefaultName"),
+        }),
+      );
+    } catch (error) {
+      console.error("Import skill from URL failed:", error);
+      message.error(t("admin.memorySkillUploadFailed"));
+    } finally {
+      setSkillSaving(false);
+    }
   };
 
   const handleSkillZipFileSelected = async (
@@ -4487,22 +4417,6 @@ export default function MemoryManagement() {
           <Tag className="memory-category-tag" bordered={false}>
             {value}
           </Tag>
-        ) : (
-          "-"
-        ),
-    },
-    {
-      title: t("admin.memoryTagSet"),
-      dataIndex: "tags",
-      key: "tags",
-      width: 260,
-      render: (tags: string[]) =>
-        tags.length ? (
-          <div className="memory-tag-group">
-            {tags.map((item) => (
-              <Tag key={item}>{item}</Tag>
-            ))}
-          </div>
         ) : (
           "-"
         ),

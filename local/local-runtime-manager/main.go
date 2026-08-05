@@ -175,6 +175,10 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 		return manager.authService.Run(ctx, cfg, paths)
 	case "auth-service-down":
 		return manager.authService.Down(ctx, cfg, paths)
+	case "channel-gateway-run":
+		return manager.channelGateway.Run(ctx, cfg, paths)
+	case "channel-gateway-down":
+		return manager.channelGateway.Down(ctx, paths)
 	case "core-run":
 		return manager.coreService.Run(ctx, cfg, paths)
 	case "core-down":
@@ -330,5 +334,5 @@ func (c *CLI) usage() {
 	_, _ = io.WriteString(c.out, "  local-runtime-manager reset --scope kb|all\n")
 	_, _ = io.WriteString(c.out, "  local-runtime-manager service --name file-watcher --action build|start|stop\n")
 	_, _ = io.WriteString(c.out, "  local-runtime-manager guard --owner-pid <pid>\n")
-	_, _ = io.WriteString(c.out, "  local-runtime-manager internal local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|core-run|core-down|scan-control-plane-run|scan-control-plane-down|file-watcher-run|file-watcher-down|frontend-run|frontend-down|milvus-lite-run|milvus-lite-down|algorithm-run|algorithm-down\n")
+	_, _ = io.WriteString(c.out, "  local-runtime-manager internal local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|channel-gateway-run|channel-gateway-down|core-run|core-down|scan-control-plane-run|scan-control-plane-down|file-watcher-run|file-watcher-down|frontend-run|frontend-down|milvus-lite-run|milvus-lite-down|algorithm-run|algorithm-down\n")
 }

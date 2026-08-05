@@ -19,8 +19,9 @@ cors:
 
 timeouts:
   connect: 10s
-  read: 30s
-  write: 30s
+  # Upstream ResponseHeaderTimeout. FFmpeg bundled install downloads before responding.
+  read: 30m
+  write: 30m
 
 log:
   level: "info"
@@ -33,6 +34,13 @@ routes:
     enabled: true
     optional: false
     healthPath: "/api/authservice/auth/health"
+  - name: "channel-gateway-route"
+    prefix: "/api/channel-gateway"
+    upstream: "http://127.0.0.1:${LAZYMIND_LOCAL_PROXY_CHANNEL_GATEWAY_HOST_PORT}"
+    stripPath: false
+    enabled: true
+    optional: false
+    healthPath: "/readyz"
   - name: "chat-route"
     prefix: "/api/chat"
     upstream: "http://127.0.0.1:${LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT}"

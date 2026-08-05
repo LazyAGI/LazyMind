@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { message } from "antd";
+import { message, Modal } from "antd";
+import { useNavigate } from "react-router-dom";
 import {
   ChatConversationsRequestActionEnum,
   ChatConversationsResponseFinishReasonEnum,
@@ -9,6 +10,7 @@ import type { ChatFileList, ChatInputImperativeProps, SendMessageParams } from "
 import { RoleTypes } from "@/modules/chat/constants/common";
 import {
   CHAT_AUTO_ADVANCE_EVENT,
+  CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
   CHAT_RESUME_CONVERSATION_KEY,
   type ChatAutoAdvanceDetail,
 } from "@/modules/chat/constants/chat";
@@ -32,8 +34,10 @@ import { getFileUrls } from "../utils/fileInputs";
 import type { ChatContainerProps } from "../types";
 import type { useUserMessageEdit } from "./useUserMessageEdit";
 import { useChatScroll } from "./useChatScroll";
+import { waitForRuntimeCapability } from "@/runtime/readiness";
 
 type UserEditApi = ReturnType<typeof useUserMessageEdit>;
+type RuntimeWaitingOperation = "chat" | "workflow";
 
 interface UseChatConversationOptions {
   canChat: boolean;
@@ -66,6 +70,7 @@ export function useChatConversation({
   getUserEdit,
   t,
 }: UseChatConversationOptions) {
+  const navigate = useNavigate();
   const sseRef = useRef<any>(null);
   const activeStreamRef = useRef(false);
   const fileRef = useRef<any>(null);
@@ -73,12 +78,19 @@ export function useChatConversation({
   const messageListRef = useRef<any[]>([]);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const conversationMessagesCache = useRef<Map<string, any[]>>(new Map());
+  const ffmpegErrorBufferRef = useRef("");
+  const ffmpegPromptOpenRef = useRef(false);
+  const runtimeWaitAbortRef = useRef<AbortController | null>(null);
+  const runtimeWaitInProgressRef = useRef(false);
 
   const [messageList, setMessageList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [content, setContent] = useState("");
   const [fileList, setFileList] = useState<ChatFileList[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [runtimeWaiting, setRuntimeWaiting] = useState(false);
+  const [runtimeWaitingOperation, setRuntimeWaitingOperation] =
+    useState<RuntimeWaitingOperation>("chat");
 
   const scroll = useChatScroll({
     chatInputRef,
@@ -86,8 +98,35 @@ export function useChatConversation({
     thinkingCollapseMap,
   });
 
+  function showFFmpegDependencyPrompt() {
+    if (ffmpegPromptOpenRef.current) {
+      return;
+    }
+    ffmpegPromptOpenRef.current = true;
+    ffmpegErrorBufferRef.current = "";
+    Modal.confirm({
+      title: t("chat.ffmpegGifRequiredTitle"),
+      content: t("chat.ffmpegGifRequiredDesc"),
+      okText: t("chat.configureFfmpeg"),
+      cancelText: t("common.close"),
+      onOk: () => navigate("/model-providers/tools#ffmpeg-dependency"),
+      afterClose: () => {
+        ffmpegPromptOpenRef.current = false;
+      },
+    });
+  }
+
   useEffect(() => {
+    window.addEventListener(
+      CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
+      showFFmpegDependencyPrompt,
+    );
     return () => {
+      runtimeWaitAbortRef.current?.abort();
+      window.removeEventListener(
+        CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
+        showFFmpegDependencyPrompt,
+      );
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         const currentId = currentConversationIdRef.current;
@@ -109,6 +148,40 @@ export function useChatConversation({
       }
     };
   }, []);
+
+  async function waitForChatRuntime(
+    operation: RuntimeWaitingOperation = "chat",
+  ) {
+    if (runtimeWaitInProgressRef.current) {
+      return false;
+    }
+
+    runtimeWaitInProgressRef.current = true;
+    const controller = new AbortController();
+    runtimeWaitAbortRef.current = controller;
+
+    try {
+      await waitForRuntimeCapability("chat", {
+        signal: controller.signal,
+        onWaiting: () => {
+          setRuntimeWaitingOperation(operation);
+          setRuntimeWaiting(true);
+        },
+      });
+      return true;
+    } catch (error) {
+      if ((error as Error)?.name !== "AbortError") {
+        message.error(t("runtime.initializationFailed"));
+      }
+      return false;
+    } finally {
+      if (runtimeWaitAbortRef.current === controller) {
+        runtimeWaitAbortRef.current = null;
+      }
+      runtimeWaitInProgressRef.current = false;
+      setRuntimeWaiting(false);
+    }
+  }
 
   function clearMultiData() {
     setFileList([]);
@@ -226,6 +299,16 @@ export function useChatConversation({
     const result = UIUtils.jsonParser(e.data)?.result;
     if (!result) {
       return;
+    }
+
+    ffmpegErrorBufferRef.current = (
+      ffmpegErrorBufferRef.current + JSON.stringify(result)
+    ).slice(-8192);
+    if (
+      !ffmpegPromptOpenRef.current &&
+      ffmpegErrorBufferRef.current.includes("FFMPEG_DEPENDENCY_MISSING")
+    ) {
+      showFFmpegDependencyPrompt();
     }
 
     if (result.task_created && result.task_created.task_id) {
@@ -389,6 +472,19 @@ export function useChatConversation({
 
     const updateMessageListInternal = (list: any[]) => {
       const newList = [...list];
+      if (result.history_id) {
+        const lastUserIndex = newList.findLastIndex(
+          (item) => item?.role === RoleTypes.USER,
+        );
+        const lastUser = newList[lastUserIndex];
+        if (lastUserIndex >= 0 && lastUser && !lastUser.history_id) {
+          newList[lastUserIndex] = {
+            ...lastUser,
+            history_id: result.history_id,
+            seq: result.seq,
+          };
+        }
+      }
       let assistantMessage =
         newList.length > 0 ? newList[newList.length - 1] : null;
 
@@ -475,6 +571,12 @@ export function useChatConversation({
     action: ChatConversationsRequestActionEnum,
     extras?: Record<string, unknown>,
   ) => {
+    const operation =
+      extras?.run_in_background === true ? "workflow" : "chat";
+    if (!(await waitForChatRuntime(operation))) {
+      return false;
+    }
+
     activeStreamRef.current = true;
     setLoading(true);
     setIsStreaming(true);
@@ -524,6 +626,7 @@ export function useChatConversation({
           .catch(() => { });
       }, 400);
     }
+    return true;
   };
 
   async function syncGeneratingHistory(conversationId: string) {
@@ -563,8 +666,11 @@ export function useChatConversation({
     }
   }
 
-  function openResumeSSE(conversationId: string) {
+  async function openResumeSSE(conversationId: string) {
     if (!onOpenResumeSSE) {
+      return;
+    }
+    if (!(await waitForChatRuntime())) {
       return;
     }
     if (streamManager.hasActiveStream(conversationId)) {
@@ -649,7 +755,7 @@ export function useChatConversation({
 
   function appendAutoAdvanceTurn(conversationId: string, driverMessage: string) {
     ensureAutoAdvanceUserTurn(conversationId, driverMessage);
-    openResumeSSE(conversationId);
+    void openResumeSSE(conversationId);
   }
 
   useEffect(() => {
@@ -668,7 +774,7 @@ export function useChatConversation({
           return;
         }
         void syncGeneratingHistory(detail.conversationId).finally(() => {
-          openResumeSSE(detail.conversationId);
+          void openResumeSSE(detail.conversationId);
         });
       }
     };
@@ -683,6 +789,7 @@ export function useChatConversation({
       text,
       citeMessage: paramsCiteMessage,
       citeMessages: paramsCiteMessages,
+      citeHistoryIds: paramsCiteHistoryIds,
       clearInput = true,
       create_time,
     } = params;
@@ -693,7 +800,12 @@ export function useChatConversation({
       }
       return;
     }
-    if (activeStreamRef.current || loading || !normalizedText) {
+    if (
+      activeStreamRef.current ||
+      runtimeWaitInProgressRef.current ||
+      loading ||
+      !normalizedText
+    ) {
       return;
     }
     const normalizedCiteMessages =
@@ -750,6 +862,9 @@ export function useChatConversation({
       display_delta: normalizedText,
       cite_message: normalizedCiteMessages.join("\n\n"),
       cite_messages: normalizedCiteMessages,
+      cite_history_ids: paramsCiteHistoryIds?.filter(
+        (historyId): historyId is string => Boolean(historyId?.trim()),
+      ),
       role: RoleTypes.USER,
       images: tempGroup?.image,
       files: tempGroup?.file,
@@ -781,12 +896,19 @@ export function useChatConversation({
 
     scroll.isMouseScrollingRef.current = true;
     scroll.scrollToEnd();
-    openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, {
+    await openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, {
       ...(params.run_in_background ? { run_in_background: true } : {}),
       ...(params.thinking_depth
         ? { thinking_depth: params.thinking_depth }
         : {}),
       ...(params.mentions?.length ? { mentions: params.mentions } : {}),
+      ...(paramsCiteHistoryIds?.length
+        ? {
+            cite_history_ids: paramsCiteHistoryIds.filter(
+              (historyId): historyId is string => Boolean(historyId?.trim()),
+            ),
+          }
+        : {}),
     });
 
     const currentId = currentConversationIdRef.current;
@@ -949,7 +1071,7 @@ export function useChatConversation({
       }
       return;
     }
-    if (loading) {
+    if (loading || runtimeWaitInProgressRef.current) {
       return;
     }
     const userMessage = messageListRef.current.findLast(
@@ -992,7 +1114,7 @@ export function useChatConversation({
     }
 
     scroll.isMouseScrollingRef.current = true;
-    openSSE(
+    void openSSE(
       regenerationInputs,
       ChatConversationsRequestActionEnum.ChatActionRegeneration,
     );
@@ -1003,6 +1125,8 @@ export function useChatConversation({
     setMessageList,
     loading,
     isStreaming,
+    runtimeWaiting,
+    runtimeWaitingOperation,
     content,
     setContent,
     activeStreamRef,

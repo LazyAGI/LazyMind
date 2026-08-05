@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -1068,7 +1070,14 @@ func (h *Handler) blobData(blob skillBlobRow) ([]byte, error) {
 	if u.Scheme != "file" {
 		return nil, fmt.Errorf("unsupported storage url: %s", rawURL)
 	}
-	return os.ReadFile(u.Path)
+	localPath := u.Path
+	if runtime.GOOS == "windows" && len(localPath) >= 3 && localPath[0] == '/' && localPath[2] == ':' {
+		localPath = localPath[1:]
+	}
+	if u.Host != "" && !strings.EqualFold(u.Host, "localhost") {
+		localPath = "//" + u.Host + "/" + strings.TrimPrefix(localPath, "/")
+	}
+	return os.ReadFile(filepath.FromSlash(localPath))
 }
 
 func relaxSQLiteFixtureIndexes(db *gorm.DB) {

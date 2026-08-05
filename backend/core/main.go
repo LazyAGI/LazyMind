@@ -177,16 +177,14 @@ func main() {
 		log.Logger.Fatal().Msg("ACL_DB_DRIVER set but ACL_DB_DSN is empty")
 	}
 	db := orm.MustConnect(driver, dsn)
-	if driver == orm.DriverSQLite {
-		if err := db.AutoMigrate(orm.AllModelsForDDL()...); err != nil {
-			log.Logger.Fatal().Err(err).Msg("run SQLite AutoMigrate failed")
-		}
-		log.Logger.Info().Msg("SQLite schema initialized")
-	} else if err := migrate.RunUp(); err != nil {
+	if err := migrate.RunUp(); err != nil {
 		log.Logger.Fatal().Err(err).Msg("run SQL migrations failed")
 	}
 	if err := episode.Initialize(db.DB); err != nil {
 		log.Logger.Fatal().Err(err).Msg("initialize Episode Memory search failed")
+	}
+	if err := modelprovider.MigrateLegacyAPIKeys(db.DB); err != nil {
+		log.Logger.Fatal().Err(err).Msg("migrate model provider credentials failed")
 	}
 	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
 	modelprovider.MustSeedModelCatalog(context.Background(), db.DB, catalogPath)

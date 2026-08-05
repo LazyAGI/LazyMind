@@ -365,18 +365,13 @@ def test_memory_review_prompt_embeds_escaped_untrusted_memory_state():
     assert 'Use the conversation history as the source of truth' in prompt
 
 
-def test_memory_review_route_returns_missing_context_when_conversation_id_is_absent(monkeypatch):
+def test_memory_review_route_returns_missing_context_when_conversation_id_is_absent():
     memory_review_routes = _load_memory_review_routes_module()
 
     assert 'conversation_id' in (
         memory_review_routes.MemoryReviewPayload.model_json_schema()['required']
     )
 
-    monkeypatch.setattr(
-        memory_review_routes,
-        'review_memory',
-        lambda **_kwargs: pytest.fail('review_memory must not run without conversation_id'),
-    )
     app = FastAPI()
     app.include_router(memory_review_routes.router)
 
@@ -417,7 +412,9 @@ def test_memory_review_route_returns_task_id(monkeypatch):
             outcome='saved',
         )
 
-    monkeypatch.setattr(memory_review_routes, 'review_memory', fake_review_memory)
+    fake_service = ModuleType('lazymind.review.service.memory_review')
+    fake_service.review_memory = fake_review_memory
+    monkeypatch.setitem(sys.modules, 'lazymind.review.service.memory_review', fake_service)
     payload = memory_review_routes.MemoryReviewPayload(
         task_id='memory_review_core-task-123',
         user_id='user-1',

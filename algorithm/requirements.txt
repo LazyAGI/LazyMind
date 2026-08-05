@@ -9,7 +9,6 @@ setuptools<81
 
 
 beautifulsoup4
-ragas
 openpyxl==3.1.5
 python-docx
 pillow
@@ -38,6 +37,8 @@ opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0
 psycopg[binary]>=3,<4
 greenlet==3.2.2
 aiosqlite>=0.20.0,<1.0.0
+sqlalchemy>=2.0.34,<3.0.0
+fsspec
 
 dashscope>=1.20.0
 volcengine-python-sdk[ark]>=4.0.6

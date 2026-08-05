@@ -1,0 +1,10 @@
+-- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.uk_skill_resources_owner_origin_builtin_uid;
+
+DROP INDEX IF EXISTS public.idx_skill_resources_origin_builtin_uid;
+
+ALTER TABLE public.skill_resources
+    DROP COLUMN IF EXISTS origin_builtin_skill_uid;
+
+-- +migrate Dialect sqlite
+SELECT 1; -- Historical SQLite change is included by the first v0.2 dev migration.

@@ -4,14 +4,19 @@ import type { ReactNode } from "react";
 import {
   ApartmentOutlined,
   BellOutlined,
+  CheckOutlined,
   ClockCircleOutlined,
   DownOutlined,
+  ExclamationCircleOutlined,
   GlobalOutlined,
+  LoadingOutlined,
   PlusOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import type { SkillCreateSource } from "../MemoryDraftModal";
 import type { SkillViewMode } from "../../shared";
+
+export type SkillOrganizeStatus = "idle" | "running" | "success" | "skipped" | "error";
 
 interface SkillManagementToolbarProps {
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -22,6 +27,8 @@ interface SkillManagementToolbarProps {
   onCreateSkill: (source: SkillCreateSource) => void;
   organizeMode: boolean;
   organizeDisabled: boolean;
+  organizeDisabledReason?: string;
+  organizeStatus: SkillOrganizeStatus;
   onOrganizeSkills: () => void;
   manualSkillReviewCount: number;
   manualSkillReviewDisabled: boolean;
@@ -52,6 +59,8 @@ export default function SkillManagementToolbar({
   onCreateSkill,
   organizeMode,
   organizeDisabled,
+  organizeDisabledReason,
+  organizeStatus,
   onOrganizeSkills,
   manualSkillReviewCount,
   manualSkillReviewDisabled,
@@ -100,6 +109,22 @@ export default function SkillManagementToolbar({
     onCreateSkill(key as SkillCreateSource);
   };
 
+  const organizeStatusTitle = {
+    idle: t("admin.memorySkillOrganizeTitle"),
+    running: t("admin.memorySkillOrganizeRunning"),
+    success: t("admin.memorySkillOrganizeCompleted"),
+    skipped: t("admin.memorySkillOrganizeSkipped"),
+    error: t("admin.memorySkillOrganizeFailed"),
+  }[organizeStatus];
+
+  const organizeStatusIcon = {
+    idle: <ApartmentOutlined />,
+    running: <LoadingOutlined spin />,
+    success: <CheckOutlined />,
+    skipped: <ApartmentOutlined />,
+    error: <ExclamationCircleOutlined />,
+  }[organizeStatus];
+
   const renderInstalledActions = () => (
     <>
       <Dropdown
@@ -121,21 +146,35 @@ export default function SkillManagementToolbar({
         </button>
       </Dropdown>
 
-      <button
-        type="button"
-        className={`memory-skill-insight-card is-organize ${organizeMode ? "is-active" : ""}`}
-        onClick={onOrganizeSkills}
-        disabled={organizeDisabled || organizeMode}
-        aria-pressed={organizeMode}
-        title={t("admin.memorySkillOrganizeHint")}
-      >
-        <span className="memory-skill-insight-card__icon">
-          <ApartmentOutlined />
+      <Tooltip title={organizeDisabledReason} trigger={["hover", "focus"]}>
+        <span
+          className="memory-skill-insight-card-tooltip"
+          tabIndex={organizeDisabled && organizeDisabledReason ? 0 : undefined}
+          aria-label={organizeDisabledReason}
+        >
+          <button
+            type="button"
+            className={`memory-skill-insight-card is-organize is-${organizeStatus} ${organizeMode ? "is-active" : ""}`}
+            onClick={onOrganizeSkills}
+            disabled={organizeDisabled || organizeMode}
+            aria-pressed={organizeMode}
+            aria-busy={organizeStatus === "running"}
+            title={
+              organizeDisabledReason ??
+              (organizeStatus === "idle"
+                ? t("admin.memorySkillOrganizeHint")
+                : organizeStatusTitle)
+            }
+          >
+            <span className="memory-skill-insight-card__icon" aria-hidden="true">
+              {organizeStatusIcon}
+            </span>
+            <span className="memory-skill-insight-card__title" aria-live="polite">
+              {organizeStatusTitle}
+            </span>
+          </button>
         </span>
-        <span className="memory-skill-insight-card__title">
-          {t("admin.memorySkillOrganizeTitle")}
-        </span>
-      </button>
+      </Tooltip>
 
       <Tooltip title={manualSkillReviewDisabledReason} trigger={["hover", "focus"]}>
         <span

@@ -22,11 +22,14 @@ import "./index.scss";
 import MessageList from "./components/MessageList";
 import ChatMessageContent from "./components/ChatMessageContent";
 import ScrollToBottomButton from "./components/ScrollToBottomButton";
+import ConversationTrail from "./components/ConversationTrail";
 import { useChatConversation } from "./hooks/useChatConversation";
 import { useCiteMessagesInput } from "./hooks/useCiteMessagesInput";
 import { useThinkingCollapse } from "./hooks/useThinkingCollapse";
 import { useUserMessageEdit } from "./hooks/useUserMessageEdit";
 import type { ChatContainerProps, ChatImperativeProps } from "./types";
+import { useConversationTrail } from "./hooks/useConversationTrail";
+import { mergeConversationTrailIntoMessageList } from "@/modules/chat/utils/message";
 
 export type { ChatImperativeProps, ChatMessage } from "./types";
 
@@ -124,6 +127,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
 
     const {
       citeMessages,
+      citeHistoryIds,
       handleAddCiteMessage,
       handleRemoveCiteMessage,
       clearCiteMessages,
@@ -144,6 +148,34 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       getUserEdit: () => userEditRef.current,
       t,
     });
+
+    const trailRefreshKey = `${conversation.messageList.length}:${conversation.isStreaming ? "streaming" : "idle"}`;
+    const conversationTrail = useConversationTrail({
+      conversationId: sessionId,
+      refreshKey: trailRefreshKey,
+      enabled: Boolean(sessionId),
+    });
+    useEffect(() => {
+      if (conversationTrail.items.length === 0) {
+        return;
+      }
+      const merged = mergeConversationTrailIntoMessageList(
+        conversation.messageList,
+        conversationTrail.items,
+      );
+      if (merged === conversation.messageList) {
+        return;
+      }
+      conversation.messageListRef.current = merged;
+      conversation.setMessageList(merged);
+      const currentId = conversation.currentConversationIdRef.current;
+      if (currentId) {
+        conversation.conversationMessagesCache.current.set(currentId, merged);
+      }
+    }, [
+      conversation.messageList,
+      conversationTrail.items,
+    ]);
 
     const userEdit = useUserMessageEdit({
       canChat,
@@ -351,11 +383,12 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
             sessionId={sessionId}
             isStreaming={conversation.isStreaming}
             onStopGeneration={conversation.stopGeneration}
-            disabled={!canChat}
-            disabledReason={disabledReason}
-            disabledDescription={disabledDescription}
-            disabledAction={disabledAction}
+            disabled={!canChat || conversation.runtimeWaiting}
+            disabledReason={canChat ? undefined : disabledReason}
+            disabledDescription={canChat ? undefined : disabledDescription}
+            disabledAction={canChat ? undefined : disabledAction}
             citeMessages={citeMessages}
+            citeHistoryIds={citeHistoryIds}
             onRemoveCiteMessage={handleRemoveCiteMessage}
             onClearCiteMessage={clearCiteMessages}
             skillDepositStats={skillDepositStats}
@@ -370,6 +403,15 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
             hasPluginSession={hasPluginSession}
           />
         </div>
+        <ConversationTrail
+          key={sessionId || "new-conversation"}
+          items={conversationTrail.items}
+          scrollContainerRef={conversation.scroll.chatContentRef}
+          messageListLength={conversation.messageList.length}
+          loading={conversationTrail.loading}
+          error={conversationTrail.error}
+          onRetry={conversationTrail.retry}
+        />
       </div>
     );
   },

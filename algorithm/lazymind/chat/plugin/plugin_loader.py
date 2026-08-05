@@ -21,6 +21,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import types
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -37,6 +38,8 @@ _PLUGINS_DIR = Path(_cfg['plugins_dir'])
 # Registry: {plugin_id: PluginSpec}
 _registry: Dict[str, 'PluginSpec'] = {}
 _runtime_registry: Dict[tuple[str, str, str], 'PluginSpec'] = {}
+_load_lock = threading.Lock()
+_loaded = False
 
 
 def resolve_remote_plugin(entry: Dict[str, Any]) -> tuple[str, 'PluginSpec']:
@@ -307,34 +310,44 @@ class PluginSpec:
 
 
 def load_all() -> None:
-    """Discover and load all plugins from the plugins directory. Called at startup."""
-    global _registry
-    _registry = {}
-    if not _PLUGINS_DIR.is_dir():
-        LOG.warning('[PluginLoader] plugins directory not found: %s', _PLUGINS_DIR)
-        return
+    """Discover and load all plugins from the plugins directory on demand."""
+    global _registry, _loaded
+    with _load_lock:
+        _registry = {}
+        if not _PLUGINS_DIR.is_dir():
+            LOG.warning('[PluginLoader] plugins directory not found: %s', _PLUGINS_DIR)
+            _loaded = True
+            return
 
-    for entry in sorted(_PLUGINS_DIR.iterdir()):
-        if not entry.is_dir():
-            continue
-        plugin_yaml = entry / 'plugin.yaml'
-        if not plugin_yaml.exists():
-            continue
-        plugin_id = entry.name
-        try:
-            spec = PluginSpec(plugin_id=plugin_id, plugin_dir=entry)
-            _registry[plugin_id] = spec
-            LOG.info('[PluginLoader] loaded plugin: %s', plugin_id)
-        except Exception as exc:
-            LOG.error('[PluginLoader] failed to load plugin %s: %s', plugin_id, exc)
+        for entry in sorted(_PLUGINS_DIR.iterdir()):
+            if not entry.is_dir():
+                continue
+            plugin_yaml = entry / 'plugin.yaml'
+            if not plugin_yaml.exists():
+                continue
+            plugin_id = entry.name
+            try:
+                spec = PluginSpec(plugin_id=plugin_id, plugin_dir=entry)
+                _registry[plugin_id] = spec
+                LOG.info('[PluginLoader] loaded plugin: %s', plugin_id)
+            except Exception as exc:
+                LOG.error('[PluginLoader] failed to load plugin %s: %s', plugin_id, exc)
+        _loaded = True
+
+
+def ensure_loaded() -> None:
+    if not _loaded:
+        load_all()
 
 
 def get_plugin(plugin_id: str) -> Optional[PluginSpec]:
+    ensure_loaded()
     return _registry.get(plugin_id)
 
 
 def list_plugins() -> List[Dict[str, Any]]:
     """Return summary info for all loaded plugins."""
+    ensure_loaded()
     out = []
     for spec in _registry.values():
         steps = [
@@ -482,7 +495,3 @@ def list_script_tool_names(plugin_id: str) -> List[str]:
     """Return names of all script tools registered for a plugin."""
     spec = get_plugin(plugin_id)
     return spec.list_script_tool_names() if spec else []
-
-
-# Auto-load on import.
-load_all()

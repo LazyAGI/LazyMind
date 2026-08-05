@@ -73,6 +73,25 @@ def test_runner_restores_attachment_context_for_ordinary_subagent():
     assert config['is_subagent'] is True
 
 
+def test_coerce_dict_accepts_sqlite_blob_params():
+    # Local SQLite stores JSON columns as BLOB; the runner must decode bytes.
+    raw = (
+        b'{"history_files_per_turn":{"1":["/uploads/dog.jpg"]},'
+        b'"session_id":"ps_1","user_id":"user-1"}'
+    )
+    params = runner._coerce_dict(raw)
+    assert params['history_files_per_turn'] == {'1': ['/uploads/dog.jpg']}
+    assert runner._coerce_str_list(b'["a","b"]') == ['a', 'b']
+
+    config = runner._build_agentic_config(
+        {'conversation_id': 'conversation-1', 'objective': 'use dog.jpg'},
+        params,
+        'plugin_step',
+    )
+    assert config['history_files_per_turn'] == {'1': ['/uploads/dog.jpg']}
+    assert config['files'] == ['/uploads/dog.jpg']
+
+
 def test_subagent_plan_renders_inherited_attachments_without_exposing_internal_params(tmp_path):
     attachment = tmp_path / 'current.txt'
     attachment.write_text('content', encoding='utf-8')

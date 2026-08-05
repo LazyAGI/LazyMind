@@ -1,24 +1,13 @@
 package orm
 
 import (
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 )
 
 func TestResourceUpdateSchemaModelsAutoMigrate(t *testing.T) {
-	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "resource-update.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-
-	if err := db.AutoMigrate(
-		&Conversation{},
-		&ChatHistory{},
-	); err != nil {
-		t.Fatalf("auto migrate chat history models: %v", err)
-	}
+	db := MigrateTestDB(t, &Conversation{}, &ChatHistory{})
 	if !db.Migrator().HasColumn(&ChatHistory{}, "tool_call_turns") {
 		t.Fatal("expected chat_histories.tool_call_turns column")
 	}
@@ -53,13 +42,7 @@ func TestDeprecatedResourceUpdateModelsNotRegisteredForDDL(t *testing.T) {
 }
 
 func TestChatHistoryToolCallTurnsDefaultsAndRejectsNegative(t *testing.T) {
-	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "chat-history.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&ChatHistory{}); err != nil {
-		t.Fatalf("auto migrate chat history: %v", err)
-	}
+	db := MigrateTestDB(t, &ChatHistory{})
 
 	now := time.Now()
 	if err := db.Create(&ChatHistory{
@@ -82,7 +65,7 @@ func TestChatHistoryToolCallTurnsDefaultsAndRejectsNegative(t *testing.T) {
 		t.Fatalf("expected default tool_call_turns=0, got %d", got.ToolCallTurns)
 	}
 
-	err = db.Create(&ChatHistory{
+	err := db.Create(&ChatHistory{
 		ID:             "history-negative",
 		Seq:            2,
 		ConversationID: "conversation-1",
