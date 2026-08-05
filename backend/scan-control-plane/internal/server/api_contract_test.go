@@ -1031,6 +1031,10 @@ func (s *serverSourceEngineStub) UpdateBindingChatEnabled(_ context.Context, bin
 	return nil
 }
 
+func (s *serverSourceEngineStub) IsBindingPathAccessible(context.Context, string, string) bool {
+	return true
+}
+
 func (s *serverSourceEngineStub) BatchGetSourcesByDatasetIDs(_ context.Context, datasetIDs []string) (map[string]bool, error) {
 	result := make(map[string]bool, len(datasetIDs))
 	for _, id := range datasetIDs {

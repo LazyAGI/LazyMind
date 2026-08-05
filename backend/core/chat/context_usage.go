@@ -306,6 +306,10 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		}
 	}
 	reqBody["plugin_context"] = pluginContext
+	if err := applyPluginContextCallMode(db, userID, reqBody); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if err := applyPluginSelection(
 		r.Context(), db, userID, reqBody, mentioned.PluginRefs, mentioned.ExcludedPluginRefs,
 	); err != nil {

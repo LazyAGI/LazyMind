@@ -127,7 +127,7 @@ func TestDisabledBuiltinPluginIDs_ReturnsDisabled(t *testing.T) {
 		UpdatedAt: now,
 	})
 	db.DB.Create(&orm.UserPluginSetting{
-		UserID: "user-1", PluginRef: "builtin:bsk_02", Enabled: true,
+		UserID: "user-1", PluginRef: "builtin:bsk_02", Enabled: true, CallMode: PluginCallModeAuto,
 		UpdatedAt: now,
 	})
 	ids, err := DisabledBuiltinPluginIDs(db.DB, "user-1")

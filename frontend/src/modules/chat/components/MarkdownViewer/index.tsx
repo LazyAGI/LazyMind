@@ -255,10 +255,33 @@ const LiComponent = (props: any) => {
   return <li>{children}</li>;
 };
 
+/**
+ * antd Image renders a <div>, but react-markdown wraps standalone images in <p>.
+ * Use a <div> for paragraphs that contain images to avoid invalid <p><div> nesting.
+ */
+const ParagraphComponent = (props: any) => {
+  const { node: _node, children, ...rest } = props;
+  const childList = Array.isArray(children) ? children : children != null ? [children] : [];
+  const hasBlockImage = childList.some(
+    (child) => isValidElement(child) && child.type === ImageComponent,
+  );
+
+  if (hasBlockImage) {
+    return (
+      <div className="md-paragraph md-paragraph--with-image" {...rest}>
+        {children}
+      </div>
+    );
+  }
+
+  return <p {...rest}>{children}</p>;
+};
+
 const defaultMarkdownComponents = {
   a: LinkComponent,
   script: ScriptComponent,
   li: LiComponent,
+  p: ParagraphComponent,
   img: ImageComponent,
   pre: PreComponent,
   code: CodeComponent,

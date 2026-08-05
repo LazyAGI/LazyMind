@@ -4030,6 +4030,9 @@ components:
                     type: string
                 group_name:
                     type: string
+                is_editable:
+                    description: Whether this option supports image editing
+                    type: boolean
                 id:
                     type: string
                 is_default:
@@ -4051,6 +4054,7 @@ components:
             required:
                 - base_url
                 - group_name
+                - is_editable
                 - id
                 - is_default
                 - model_type
@@ -4755,6 +4759,9 @@ components:
                     type: string
                 group_name:
                     type: string
+                is_editable:
+                    description: Whether the selected model supports image editing
+                    type: boolean
                 max_input_tokens:
                     description: Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
                     nullable: true
@@ -4774,6 +4781,7 @@ components:
             required:
                 - base_url
                 - group_name
+                - is_editable
                 - model_id
                 - model_key
                 - name
@@ -11917,6 +11925,17 @@ paths:
                     description: OK
             summary: POST /schedules
     /api/core/schedules/{schedule_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /schedules/{schedule_id}
         put:
             parameters:
                 - in: path

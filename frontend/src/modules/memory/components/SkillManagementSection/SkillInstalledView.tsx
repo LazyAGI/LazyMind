@@ -1,4 +1,4 @@
-import { Button, Empty, Input, Select, Table } from "antd";
+import { Button, Empty, Input, Popconfirm, Select, Table } from "antd";
 import { ApartmentOutlined } from "@ant-design/icons";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import type { ColumnsType } from "antd/es/table";
@@ -16,8 +16,6 @@ interface SkillInstalledViewProps {
   onCategoryChange: (value?: string) => void;
   categories: string[];
   categoriesLoading: boolean;
-  source: "all" | "builtin" | "admin" | "personal";
-  onSourceChange: (value: "all" | "builtin" | "admin" | "personal") => void;
   onReset: () => void;
   organizeMode: boolean;
   organizeLoading: boolean;
@@ -50,8 +48,6 @@ export default function SkillInstalledView({
   onCategoryChange,
   categories,
   categoriesLoading,
-  source,
-  onSourceChange,
   onReset,
   organizeMode,
   organizeLoading,
@@ -80,6 +76,7 @@ export default function SkillInstalledView({
     },
     t,
   );
+  const visibleColumns = columns.filter((column) => column.key !== "tags");
 
   return (
     <div className="memory-skill-installed">
@@ -103,17 +100,6 @@ export default function SkillInstalledView({
           }))}
           className="memory-skill-installed-select"
           onChange={onCategoryChange}
-        />
-        <Select
-          value={source}
-          className="memory-skill-installed-select"
-          options={[
-            { value: "all", label: t("admin.memorySkillInstalledSourceAll") },
-            { value: "builtin", label: t("admin.memorySkillSourceBuiltin") },
-            { value: "admin", label: t("admin.memorySkillSourceAdmin") },
-            { value: "personal", label: t("admin.memorySkillSourcePersonal") },
-          ]}
-          onChange={onSourceChange}
         />
         <Button type="default" className="memory-skill-reset-button" onClick={onReset}>
           {t("admin.memoryReset")}
@@ -143,15 +129,29 @@ export default function SkillInstalledView({
             <Button onClick={onOrganizeCancel} disabled={organizeLoading}>
               {t("common.cancel")}
             </Button>
-            <Button
-              type="primary"
-              icon={<ApartmentOutlined />}
-              loading={organizeLoading}
-              disabled={selectedOrganizeSkillIds.length === 0}
-              onClick={onOrganizeSubmit}
+            <Popconfirm
+              title={t("admin.memorySkillOrganizeConfirmTitle", {
+                count: selectedOrganizeSkillIds.length,
+              })}
+              description={t("admin.memorySkillOrganizeConfirmContent")}
+              okText={t("admin.memorySkillOrganizeConfirmSubmit")}
+              cancelText={t("common.cancel")}
+              disabled={
+                selectedOrganizeSkillIds.length === 0 || organizeLoading
+              }
+              onConfirm={() => {
+                void onOrganizeSubmit();
+              }}
             >
-              {t("admin.memorySkillOrganizeSubmit")}
-            </Button>
+              <Button
+                type="primary"
+                icon={<ApartmentOutlined />}
+                loading={organizeLoading}
+                disabled={selectedOrganizeSkillIds.length === 0}
+              >
+                {t("admin.memorySkillOrganizeSubmit")}
+              </Button>
+            </Popconfirm>
           </div>
         </div>
       ) : null}
@@ -162,7 +162,7 @@ export default function SkillInstalledView({
           rowKey="id"
           loading={loading}
           dataSource={dataSource}
-          columns={columns}
+          columns={visibleColumns}
           rowSelection={
             organizeMode
               ? {

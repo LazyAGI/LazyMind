@@ -209,7 +209,17 @@ export async function editPluginVersion(pluginRef: string, revisionId: string): 
 export interface UserPluginSetting {
   plugin_ref: string; plugin_id: string; name: string; description: string;
   when_to_use: string; source_type: string; revision_id: string;
-  revision_no: number; remote_root: string; enabled: boolean; status: string;
+  revision_no: number; remote_root: string; enabled: boolean;
+  call_mode?: PluginCallMode; status: string;
+}
+
+export type PluginCallMode = 'auto' | 'manual' | 'disabled';
+
+function encodePluginRefPath(pluginRef: string): string {
+  if (pluginRef.startsWith('builtin:')) {
+    return `builtin/${encodeURIComponent(pluginRef.slice('builtin:'.length))}`;
+  }
+  return encodeURIComponent(pluginRef).replace(/%3A/gi, ':');
 }
 
 export async function listUserPluginSettings(): Promise<UserPluginSetting[]> {
@@ -217,8 +227,8 @@ export async function listUserPluginSettings(): Promise<UserPluginSetting[]> {
   return resp.data.data.plugins;
 }
 
-export async function setUserPluginEnabled(pluginRef: string, enabled: boolean): Promise<void> {
-  await axiosInstance.patch(`${coreBasePath}/chat/settings/plugins/${encodeURIComponent(pluginRef)}`, { enabled });
+export async function setUserPluginCallMode(pluginRef: string, callMode: PluginCallMode): Promise<void> {
+  await axiosInstance.patch(`${coreBasePath}/chat/settings/plugins/${encodePluginRefPath(pluginRef)}`, { call_mode: callMode });
 }
 
 // Trigger AI generation for a plugin draft.

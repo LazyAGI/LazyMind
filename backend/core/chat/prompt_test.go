@@ -434,13 +434,39 @@ func TestPromptCategoryLifecycleAndUserIsolation(t *testing.T) {
 		t.Fatalf("delete category failed: status=%d body=%s", deleteRec.Code, deleteRec.Body.String())
 	}
 	var prompt orm.Prompt
-	if err := db.Where("create_user_id = ? AND name = ? AND deleted_at IS NULL", "u1", "Review").First(&prompt).Error; err == nil {
-		t.Fatal("deleted category prompt is still active")
+	if err := db.Where("create_user_id = ? AND name = ? AND deleted_at IS NULL", "u1", "Review").First(&prompt).Error; err != nil {
+		t.Fatalf("prompt should remain active after category delete: %v", err)
 	}
-	if err := db.Unscoped().Where("create_user_id = ? AND name = ?", "u1", "Review").First(&prompt).Error; err != nil {
-		t.Fatalf("load deleted prompt: %v", err)
+	if prompt.Category != "general" {
+		t.Fatalf("prompt category = %q, want general", prompt.Category)
 	}
-	if prompt.DeletedAt == nil {
-		t.Fatal("deleted category prompt was not soft-deleted")
+	var remainingCategories int64
+	if err := db.Model(&orm.PromptCategory{}).Where("id = ?", category.ID).Count(&remainingCategories).Error; err != nil {
+		t.Fatalf("count deleted category: %v", err)
+	}
+	if remainingCategories != 0 {
+		t.Fatal("deleted category still exists")
+	}
+
+	listAfterDeleteReq := httptest.NewRequest(http.MethodGet, "/api/core/prompts?category=general", nil)
+	listAfterDeleteReq.Header.Set("X-User-Id", "u1")
+	listAfterDeleteRec := httptest.NewRecorder()
+	ListPrompts(listAfterDeleteRec, listAfterDeleteReq)
+	if listAfterDeleteRec.Code != http.StatusOK {
+		t.Fatalf("list general prompts failed: status=%d body=%s", listAfterDeleteRec.Code, listAfterDeleteRec.Body.String())
+	}
+	var listAfterDeleteResp promptListResponse
+	if err := json.Unmarshal(listAfterDeleteRec.Body.Bytes(), &listAfterDeleteResp); err != nil {
+		t.Fatalf("decode general list: %v", err)
+	}
+	foundMoved := false
+	for _, item := range listAfterDeleteResp.Prompts {
+		if item.DisplayName == "Review" && item.Category == "general" {
+			foundMoved = true
+			break
+		}
+	}
+	if !foundMoved {
+		t.Fatalf("moved prompt not found in general category: %#v", listAfterDeleteResp.Prompts)
 	}
 }

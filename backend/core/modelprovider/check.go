@@ -619,14 +619,6 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "group not found", http.StatusNotFound)
 		return
 	}
-	if apiKey == "" {
-		storedAPIKey, err := apiKeyForGroup(db.WithContext(r.Context()), &group)
-		if err != nil {
-			common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
-			return
-		}
-		apiKey = strings.TrimSpace(storedAPIKey)
-	}
 	apiKeyRequired := isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, urlStr)
 	if apiKey == "" && apiKeyRequired {
 		common.ReplyErr(w, "api_key is required when using the default base_url", http.StatusBadRequest)

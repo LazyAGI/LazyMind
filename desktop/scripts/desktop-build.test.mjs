@@ -192,6 +192,9 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
   assert.match(source, /Start-Process -FilePath \$uninstaller -ArgumentList "\/S" -Wait/);
   assert.match(source, /RegistryView\]::Registry64[\s\S]*RegistryView\]::Registry32/);
   assert.match(source, /name: Upload installer diagnostics[\s\S]*if: always\(\)/);
+  assert.doesNotMatch(source, /name: Run explicit Electron warmup/);
+  assert.doesNotMatch(source, /steps\.warmup\.outcome/);
+  assert.match(source, /name: Verify installer warmup result[\s\S]*startup-metrics-latest\.json/);
 });
 
 test("Windows NSIS installer uses electron-builder's default LZMA payload", () => {
@@ -373,6 +376,15 @@ test("Desktop renderer keeps Node disabled behind an isolated preload bridge", (
   assert.match(source, /contextIsolation:\s*true/);
   assert.match(source, /nodeIntegration:\s*false/);
   assert.match(source, /preload:\s*path\.join\(__dirname, "preload\.js"\)/);
+});
+
+test("Desktop clears stale frontend caches before opening a renderer", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(source, /await clearFrontendCaches\(session\.defaultSession/);
+  assert.ok(
+    source.indexOf("await clearFrontendCaches(session.defaultSession") < source.indexOf("return runMacInstallationWarmupIfNeeded()"),
+    "frontend caches must be cleared before installation warmup or the main window loads",
+  );
 });
 
 test("Desktop opens the home page from the sidecar readiness event with status polling as fallback", () => {

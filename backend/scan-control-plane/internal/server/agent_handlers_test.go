@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -232,11 +233,27 @@ func TestAgentRegisterQueuesLocalWatcherStartCommands(t *testing.T) {
 	if command.AgentID != "agent-1" || command.CommandType != "start_source" || command.Status != "PENDING" {
 		t.Fatalf("unexpected command identity: %+v", command)
 	}
+	if command.QueueGeneration != store.AgentCommandQueueGeneration {
+		t.Fatalf("start command should use current queue generation: %+v", command)
+	}
 	if command.Payload["type"] != "start_source" || command.Payload[agentCommandRootKey()] != "/workspace/docs" || command.Payload["skip_initial_scan"] != true {
 		t.Fatalf("start_source payload does not match file-watcher contract: %+v", command.Payload)
 	}
 	if command.Payload["tenant_id"] != "tenant-1" || command.Payload["source_id"] != "source-1" || command.Payload["binding_id"] != "binding-1" {
 		t.Fatalf("start_source payload lost source identity: %+v", command.Payload)
+	}
+	if len(agents.reconciles) != 1 || agents.reconciles[0].BindingID != "binding-1" || !agents.reconciles[0].RunAt.Equal(now.Add(30*time.Second)) {
+		t.Fatalf("register should schedule one metadata recovery reconcile: %+v", agents.reconciles)
+	}
+
+	agents.createdCommands = nil
+	heartbeat := agentRequest(t, "/api/v1/agents/heartbeat", map[string]any{
+		"agent_id": "agent-1", "tenant_id": "tenant-1", "source_count": 0, "active_watch_count": 0,
+	})
+	heartbeatResp := httptest.NewRecorder()
+	handler.ServeHTTP(heartbeatResp, heartbeat)
+	if heartbeatResp.Code != http.StatusOK || len(agents.createdCommands) != 0 {
+		t.Fatalf("zero-count heartbeat must not create watcher commands: status=%d commands=%+v", heartbeatResp.Code, agents.createdCommands)
 	}
 }
 
@@ -272,7 +289,7 @@ func TestAgentPullAndAckCommands(t *testing.T) {
 	now := time.Date(2026, 6, 13, 10, 40, 0, 0, time.UTC)
 	agents := &agentStoreStub{
 		commands: []store.AgentCommand{{
-			CommandID:   "42",
+			CommandID:   "9007199254740993",
 			AgentID:     "agent-1",
 			CommandType: "start_source",
 			Payload: store.JSON{
@@ -296,19 +313,22 @@ func TestAgentPullAndAckCommands(t *testing.T) {
 	if pullResp.Code != http.StatusOK {
 		t.Fatalf("pull expected OK, got %d body=%s", pullResp.Code, pullResp.Body.String())
 	}
+	if !strings.Contains(pullResp.Body.String(), `"id":9007199254740993`) {
+		t.Fatalf("legacy numeric id lost precision: %s", pullResp.Body.String())
+	}
 	var decoded map[string]any
 	if err := json.NewDecoder(pullResp.Body).Decode(&decoded); err != nil {
 		t.Fatalf("decode pull response: %v", err)
 	}
 	commands := decoded["commands"].([]any)
 	command := commands[0].(map[string]any)
-	if command[agentCommandRootKey()] != "/workspace/docs" || command["type"] != "start_source" || command["skip_initial_scan"] != true {
+	if command[agentCommandRootKey()] != "/workspace/docs" || command["type"] != "start_source" || command["skip_initial_scan"] != true || command["command_id"] != "9007199254740993" {
 		t.Fatalf("pull response did not preserve file-watcher command contract: %#v", command)
 	}
 
 	ack := agentRequest(t, "/api/v1/agents/commands/ack", map[string]any{
 		"agent_id":    "agent-1",
-		"command_id":  42,
+		"command_id":  "9007199254740993",
 		"success":     true,
 		"result_json": `{"started":true}`,
 	})
@@ -317,8 +337,17 @@ func TestAgentPullAndAckCommands(t *testing.T) {
 	if ackResp.Code != http.StatusOK {
 		t.Fatalf("ack expected OK, got %d body=%s", ackResp.Code, ackResp.Body.String())
 	}
-	if agents.lastAck.CommandID != "42" || !agents.lastAck.Success || agents.lastAck.Result["started"] != true || !agents.lastAck.AckedAt.Equal(now) {
+	if agents.lastAck.CommandID != "9007199254740993" || !agents.lastAck.Success || agents.lastAck.Result["started"] != true || !agents.lastAck.AckedAt.Equal(now) {
 		t.Fatalf("ack did not preserve result: %+v", agents.lastAck)
+	}
+
+	legacyAck := agentRequest(t, "/api/v1/agents/commands/ack", map[string]any{
+		"agent_id": "agent-1", "command_id": 42, "success": true,
+	})
+	legacyAckResp := httptest.NewRecorder()
+	handler.ServeHTTP(legacyAckResp, legacyAck)
+	if legacyAckResp.Code != http.StatusOK || agents.lastAck.CommandID != "42" {
+		t.Fatalf("legacy numeric ack should remain compatible: status=%d ack=%+v", legacyAckResp.Code, agents.lastAck)
 	}
 }
 
@@ -340,6 +369,7 @@ type agentStoreStub struct {
 	localBindings           []store.Binding
 	commands                []store.AgentCommand
 	createdCommands         []store.AgentCommand
+	reconciles              []store.ReconcileRequest
 	lastSourceID            string
 	lastBindingAgentID      string
 	lastLocalWatcherAgentID string
@@ -380,6 +410,11 @@ func (s *agentStoreStub) ListPendingAgentCommands(_ context.Context, agentID str
 func (s *agentStoreStub) AckAgentCommand(_ context.Context, ack store.AgentCommandAck) error {
 	s.lastAck = ack
 	return nil
+}
+
+func (s *agentStoreStub) EnqueueBindingReconcile(_ context.Context, req store.ReconcileRequest) (store.ReconcileResult, error) {
+	s.reconciles = append(s.reconciles, req)
+	return store.ReconcileResult{Run: store.SyncRun{RunID: req.RequestID}}, nil
 }
 
 type watchSchedulerStub struct {

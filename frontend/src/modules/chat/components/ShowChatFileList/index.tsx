@@ -1,10 +1,6 @@
-import React from "react";
+import { useState } from "react";
 import { ChatFileList } from "../ChatInput";
-import {
-  CloseCircleFilled,
-  CloseOutlined,
-  FileTextOutlined,
-} from "@ant-design/icons";
+import { CloseCircleFilled } from "@ant-design/icons";
 import { Image, Tooltip } from "antd";
 import { allowedImageTypes } from "../ImageUpload";
 import "./index.scss";
@@ -17,12 +13,21 @@ interface ShowChatFileListProps {
 
 function ShowChatFileList(props: ShowChatFileListProps) {
   const { fileList, onRemove } = props;
+  const [previewUid, setPreviewUid] = useState<string | null>(null);
 
   const tempGroup = Object.groupBy(fileList, (item) => {
-    const name = item.name ?? '';
+    const name = item.name ?? "";
     const suffix = name.substring(name.lastIndexOf(".")).toLowerCase();
     return allowedImageTypes.includes(suffix) ? "image" : "file";
   });
+
+  const openNonImagePreview = (item: ChatFileList) => {
+    const url = item.previewUrl;
+    if (!url) {
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
   function renderImageItem(
     item: ChatFileList,
@@ -30,22 +35,72 @@ function ShowChatFileList(props: ShowChatFileListProps) {
     isAllImage: boolean,
   ) {
     const suffix1 = item.suffix.substring(1).toUpperCase();
+    const src = item.base64 || item.previewUrl || "";
     if (isAllImage) {
       return (
-        <div className={"chat-images-item"} key={`img-${index}`}>
-          <Image src={item.base64} height={48} />
+        <div className="chat-images-item" key={`img-${index}`}>
+          <Image
+            src={src}
+            height={48}
+            alt={item.name}
+            preview={{
+              visible: previewUid === item.uid,
+              src,
+              onVisibleChange: (visible) => {
+                setPreviewUid(visible ? item.uid : null);
+              },
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (src) {
+                setPreviewUid(item.uid);
+              }
+            }}
+          />
           <CloseCircleFilled
             className="chat-files-remove"
-            onClick={() => onRemove(item.uid)}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove(item.uid);
+            }}
           />
         </div>
       );
     }
     return (
-      <div className="chat-files-item" key={`img-${index}`}>
+      <div
+        className="chat-files-item is-clickable"
+        key={`img-${index}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => {
+          if (src) {
+            setPreviewUid(item.uid);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            if (src) {
+              setPreviewUid(item.uid);
+            }
+          }
+        }}
+      >
         <div className="chat-files-name">
           <div className="chatFileImage">
-            <Image src={item.base64} height={40} />
+            <Image
+              src={src}
+              height={40}
+              alt={item.name}
+              preview={{
+                visible: previewUid === item.uid,
+                src,
+                onVisibleChange: (visible) => {
+                  setPreviewUid(visible ? item.uid : null);
+                },
+              }}
+            />
           </div>
           <div className="chat-file-box">
             <Tooltip title={item.name}>
@@ -59,15 +114,31 @@ function ShowChatFileList(props: ShowChatFileListProps) {
         </div>
         <CloseCircleFilled
           className="chat-files-remove"
-          onClick={() => onRemove(item.uid)}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove(item.uid);
+          }}
         />
       </div>
     );
   }
+
   function renderFileItem(item: ChatFileList, index: number) {
     const suffix1 = item.suffix.substring(1).toUpperCase();
     return (
-      <div className="chat-files-item" key={`img-${index}`}>
+      <div
+        className="chat-files-item is-clickable"
+        key={`img-${index}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => openNonImagePreview(item)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openNonImagePreview(item);
+          }
+        }}
+      >
         <div className="chat-files-name">
           <FileIcon />
           <div className="chat-file-box">
@@ -82,7 +153,10 @@ function ShowChatFileList(props: ShowChatFileListProps) {
         </div>
         <CloseCircleFilled
           className="chat-files-remove"
-          onClick={() => onRemove(item.uid)}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove(item.uid);
+          }}
         />
       </div>
     );

@@ -64,6 +64,7 @@ import { sourceTypeOptions } from "@/modules/dataSource/constants/sourceTypeOpti
 import { mapScanSourceToDataSource } from "@/modules/dataSource/mappers/scanSourceToDataSource";
 import {
   getFirstScanBinding,
+  getScanSourceId,
   type ScanV2Binding,
   type ScanV2Source,
 } from "@/modules/dataSource/utils/scanAccessors";
@@ -265,9 +266,35 @@ const KnowledgePage: FC = () => {
           keyword: keyword.trim() || undefined,
         });
         const sourceList = (sourcesResponse.data.items || []) as ScanV2Source[];
-        const nextSources = sourceList
-          .filter((source) => normalizeDataSourceStatus(source.status) !== "deleted")
-          .map((source) => mapScanSourceToDataSource(source, t));
+        const visibleSourceList = sourceList.filter(
+          (source) => normalizeDataSourceStatus(source.status) !== "deleted",
+        );
+        const nextSources = await Promise.all(
+          visibleSourceList.map(async (source) => {
+            const sourceId = getScanSourceId(source);
+            if (!sourceId) {
+              return mapScanSourceToDataSource(source, t);
+            }
+            try {
+              const detailResponse = await dataSourceScanApi.getSource({ sourceId });
+              const detailSource = {
+                ...source,
+                ...detailResponse.data.source,
+                summary: source.summary,
+              } as ScanV2Source;
+              const bindings = (detailResponse.data.bindings || []) as ScanV2Binding[];
+              return mapScanSourceToDataSource(
+                detailSource,
+                t,
+                undefined,
+                getFirstScanBinding(bindings),
+                bindings,
+              );
+            } catch {
+              return mapScanSourceToDataSource(source, t);
+            }
+          }),
+        );
 
         if (cloudSourceRequestSeqRef.current !== requestSeq) {
           return;
@@ -1042,7 +1069,10 @@ const KnowledgePage: FC = () => {
           onClick={() => {
             createKnowledgeRef.current?.onOpen();
           }}
-          onSearch={() => {
+          onSearch={(value) => {
+            // Ant Design Search fires onSearch on clear before Form.Item updates;
+            // sync keyword first so getTableData reads the cleared value.
+            form.setFieldsValue({ keyword: value ?? "" });
             getTableData();
           }}
           extra={

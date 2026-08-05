@@ -237,6 +237,86 @@ func TestPersistConversationFileArtifactValidatesSharedWorkspace(t *testing.T) {
 	}
 }
 
+func TestArtifactScopeHashMatchesAlgorithmContract(t *testing.T) {
+	got := artifactScopeHash("user-1")
+	const want = "c6c289e49e9c05b2145860387b73bcb1"
+	if got != want {
+		t.Fatalf("artifact scope hash mismatch: got %q, want %q", got, want)
+	}
+	const legacyWant = "c6c289e49e9c05b2145860387b73bcb18df43fb09a1e4a4a9713c76c88bb541b"
+	if legacy := legacyArtifactScopeHash("user-1"); legacy != legacyWant {
+		t.Fatalf("legacy artifact scope hash mismatch: got %q, want %q", legacy, legacyWant)
+	}
+}
+
+func TestCanonicalConversationFileValueAcceptsLegacyScopeHash(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", workspace)
+	artifactID := "da41e7e1-c085-447b-af51-6f89490c393a"
+	root := legacyConversationArtifactFileRoot("user-1", "conversation-1", artifactID)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("create legacy artifact directory: %v", err)
+	}
+	path := filepath.Join(root, "legacy.docx")
+	if err := os.WriteFile(path, []byte("legacy"), 0o644); err != nil {
+		t.Fatalf("write legacy artifact: %v", err)
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"filename": "legacy.docx", "path": path, "size": 999,
+	})
+
+	canonical, err := canonicalConversationFileValue(
+		"user-1", "conversation-1", artifactID, "legacy.docx", raw,
+	)
+	if err != nil {
+		t.Fatalf("canonicalize legacy artifact: %v", err)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(canonical, &value); err != nil {
+		t.Fatalf("decode canonical legacy artifact: %v", err)
+	}
+	if value["size"] != float64(len("legacy")) || value["path"] != path {
+		t.Fatalf("unexpected canonical legacy artifact: %#v", value)
+	}
+}
+
+func TestConversationArtifactResponseValueSignsLegacyScopeHash(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", workspace)
+	t.Setenv("LAZYMIND_FILE_URL_SIGN_SECRET", "artifact-test-secret")
+	artifactID := "da41e7e1-c085-447b-af51-6f89490c393a"
+	root := legacyConversationArtifactFileRoot("user-1", "conversation-1", artifactID)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("create legacy artifact directory: %v", err)
+	}
+	path := filepath.Join(root, "legacy.docx")
+	if err := os.WriteFile(path, []byte("legacy"), 0o644); err != nil {
+		t.Fatalf("write legacy artifact: %v", err)
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"filename": "legacy.docx", "path": path, "size": len("legacy"),
+	})
+	artifact := orm.ConversationArtifact{
+		ID: artifactID, Filename: "legacy.docx", ContentType: "file", Value: raw,
+	}
+
+	signed := conversationArtifactResponseValue("user-1", "conversation-1", artifact)
+	var value map[string]any
+	if err := json.Unmarshal(signed, &value); err != nil {
+		t.Fatalf("decode signed legacy artifact: %v", err)
+	}
+	if _, exposed := value["path"]; exposed {
+		t.Fatalf("legacy server path must not be exposed: %#v", value)
+	}
+	url, _ := value["url"].(string)
+	wantPrefix := "/static-files/subagent/chat-artifacts/" +
+		legacyArtifactScopeHash("user-1") + "/" +
+		legacyArtifactScopeHash("conversation-1") + "/" + artifactID + "/legacy.docx?"
+	if !strings.HasPrefix(url, wantPrefix) {
+		t.Fatalf("legacy artifact URL = %q, want prefix %q", url, wantPrefix)
+	}
+}
+
 func TestPersistConversationFileArtifactRejectsForeignPath(t *testing.T) {
 	db := newArtifactTestDB(t)
 	workspace := t.TempDir()

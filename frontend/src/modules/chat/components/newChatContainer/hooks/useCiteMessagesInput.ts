@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { message } from "antd";
 import { useTranslation } from "react-i18next";
 import type { RefObject } from "react";
@@ -10,6 +10,8 @@ export function useCiteMessagesInput(
 ) {
   const { t } = useTranslation();
   const [citeMessages, setCiteMessages] = useState<string[]>([]);
+  const citeMessagesRef = useRef(citeMessages);
+  citeMessagesRef.current = citeMessages;
 
   const handleAddCiteMessage = useCallback(
     (text: string) => {
@@ -18,16 +20,20 @@ export function useCiteMessagesInput(
         return;
       }
 
+      // Keep setState pure: warn outside the updater so the tip always surfaces.
+      if (citeMessagesRef.current.length >= MAX_CITE_MESSAGE_COUNT) {
+        message.warning(
+          t("chat.maxCitationsWarning", {
+            count: MAX_CITE_MESSAGE_COUNT,
+          }),
+        );
+        return;
+      }
+
       setCiteMessages((prev) => {
         if (prev.length >= MAX_CITE_MESSAGE_COUNT) {
-          message.warning(
-            t("chat.maxCitationsWarning", {
-              count: MAX_CITE_MESSAGE_COUNT,
-            }),
-          );
           return prev;
         }
-
         return [...prev, normalizedText];
       });
       requestAnimationFrame(() => {
