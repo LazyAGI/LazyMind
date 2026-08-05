@@ -9,6 +9,8 @@ import SigninDashboard from "@/modules/signin/pages/dashboard";
 import LoginTransition from "@/modules/signin/pages/loginTransition";
 import ChatApp from "@/modules/chat/ChatApp";
 import Home from "@/modules/chat/pages/home";
+import ShowcaseGalleryPage from "@/modules/showcase/GalleryPage";
+import ShowcaseDetailPage from "@/modules/showcase/DetailPage";
 import KnowledgeApp from "@/modules/knowledge/KnowledgeApp";
 import KnowledgeList from "@/modules/knowledge/pages/list";
 import KnowledgeAuth from "@/modules/knowledge/pages/auth";
@@ -129,6 +131,8 @@ export default function AppRouter() {
           <Route path="agent/chat" element={<ChatApp />}>
             <Route index element={<Navigate to="home" replace />} />
             <Route path="home" element={<Home />} />
+            <Route path="cases" element={<ShowcaseGalleryPage />} />
+            <Route path="cases/:caseId" element={<ShowcaseDetailPage />} />
           </Route>
           <Route path="lib/knowledge" element={<KnowledgeApp />}>
             <Route index element={<Navigate to="list" replace />} />

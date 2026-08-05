@@ -94,6 +94,13 @@ export interface ChatMessage {
   display_delta?: string;
   cite_message?: string;
   cite_messages?: string[];
+  cite_history_ids?: string[];
+  seq?: number;
+  trail_depth?: number;
+  trail_parent_history_id?: string;
+  trail_source?: string;
+  trail_summary?: string;
+  trail_question?: string;
   tool_call_turns?: number;
   tool_limit_pending?: {
     decision_id: string;

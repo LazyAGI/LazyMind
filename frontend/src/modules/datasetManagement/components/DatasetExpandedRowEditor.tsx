@@ -56,14 +56,18 @@ export default function DatasetExpandedRowEditor({
   }, [form, initialValues, item, onDirtyChange]);
 
   const handleSave = async () => {
-    const values = await form.validateFields();
-    onSave({
-      ...values,
-      case_id: item?.case_id || values.case_id,
-      reference_doc_ids: joinListField(item?.reference_doc_ids) || values.reference_doc_ids,
-      reference_chunk_ids:
-        joinListField(item?.reference_chunk_ids) || values.reference_chunk_ids,
-    });
+    try {
+      const values = await form.validateFields();
+      onSave({
+        ...values,
+        case_id: item?.case_id || values.case_id,
+        reference_doc_ids: joinListField(item?.reference_doc_ids) || values.reference_doc_ids,
+        reference_chunk_ids:
+          joinListField(item?.reference_chunk_ids) || values.reference_chunk_ids,
+      });
+    } catch {
+      // Validation errors are already rendered inline by antd Form.
+    }
   };
 
   return (

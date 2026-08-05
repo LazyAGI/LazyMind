@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -23,11 +22,7 @@ import (
 func newPromptTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db, err := orm.Connect(orm.DriverSQLite, dbPath)
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
+	db := orm.OpenTestDB(t)
 	if err := db.AutoMigrate(orm.AllModelsForDDL()...); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}

@@ -3,7 +3,6 @@ package taskcenter
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,14 +11,7 @@ import (
 
 func newTestTaskDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "tasks.db"))
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.TaskCenterTask{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	return orm.MigrateTestDB(t, &orm.TaskCenterTask{})
 }
 
 // ──────────────────────────────────────────────

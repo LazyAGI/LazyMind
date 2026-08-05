@@ -472,6 +472,19 @@ export function useChatConversation({
 
     const updateMessageListInternal = (list: any[]) => {
       const newList = [...list];
+      if (result.history_id) {
+        const lastUserIndex = newList.findLastIndex(
+          (item) => item?.role === RoleTypes.USER,
+        );
+        const lastUser = newList[lastUserIndex];
+        if (lastUserIndex >= 0 && lastUser && !lastUser.history_id) {
+          newList[lastUserIndex] = {
+            ...lastUser,
+            history_id: result.history_id,
+            seq: result.seq,
+          };
+        }
+      }
       let assistantMessage =
         newList.length > 0 ? newList[newList.length - 1] : null;
 
@@ -776,6 +789,7 @@ export function useChatConversation({
       text,
       citeMessage: paramsCiteMessage,
       citeMessages: paramsCiteMessages,
+      citeHistoryIds: paramsCiteHistoryIds,
       clearInput = true,
       create_time,
     } = params;
@@ -848,6 +862,9 @@ export function useChatConversation({
       display_delta: normalizedText,
       cite_message: normalizedCiteMessages.join("\n\n"),
       cite_messages: normalizedCiteMessages,
+      cite_history_ids: paramsCiteHistoryIds?.filter(
+        (historyId): historyId is string => Boolean(historyId?.trim()),
+      ),
       role: RoleTypes.USER,
       images: tempGroup?.image,
       files: tempGroup?.file,
@@ -885,6 +902,13 @@ export function useChatConversation({
         ? { thinking_depth: params.thinking_depth }
         : {}),
       ...(params.mentions?.length ? { mentions: params.mentions } : {}),
+      ...(paramsCiteHistoryIds?.length
+        ? {
+            cite_history_ids: paramsCiteHistoryIds.filter(
+              (historyId): historyId is string => Boolean(historyId?.trim()),
+            ),
+          }
+        : {}),
     });
 
     const currentId = currentConversationIdRef.current;

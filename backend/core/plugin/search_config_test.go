@@ -1,7 +1,6 @@
 package plugin
 
 import (
-	"path/filepath"
 	"testing"
 
 	"lazymind/core/common/orm"
@@ -91,14 +90,7 @@ func TestDatasetIDsFromSearchConfig_Empty(t *testing.T) {
 
 func newConversationTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "search_cfg.db"))
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	return orm.MigrateTestDB(t, &orm.Conversation{})
 }
 
 // TestLoadConversationSearchConfig_NoDB returns nil for nil DB.

@@ -4,6 +4,7 @@ import DisclaimerIcon from "../../assets/icons/disclaimer_icon.svg?react";
 import WarningIcon from "../../assets/icons/warning.svg?react";
 import ChatInput, {
   ChatInputImperativeProps,
+  type ShowcaseSelection,
 } from "@/modules/chat/components/ChatInput";
 import ChatLayout from "../chatLayout";
 import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
@@ -15,7 +16,7 @@ import {
 } from "@/modules/chat/constants/chat";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProviderGuard";
 import { AgentAppsAuth } from "@/components/auth";
 import { localizeErrorCode } from "@/components/request";
@@ -23,6 +24,8 @@ import PreferenceConfigNotice from "@/modules/chat/components/PreferenceConfigNo
 import type { ConversationPluginSettings } from "@/modules/chat/utils/request";
 import { RightOutlined, ScheduleOutlined } from "@ant-design/icons";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
+import FeaturedCases from "@/modules/showcase/FeaturedCases";
+import { getShowcaseCase, type ShowcaseCase } from "@/modules/showcase/api";
 
 function readRunInBackgroundMode() {
   try {
@@ -46,9 +49,24 @@ function getInitialPluginSettings(
   return runInBackground ? null : { enable_plugin: false };
 }
 
+function getShowcasePrompt(
+  item: ShowcaseCase,
+  taskId: string | null,
+  secondaryId?: string,
+) {
+  const taskPrompt = item.tasks?.find((task) => task.id === taskId)?.prompt;
+  const secondaryPrompt = item.secondary_options?.find(
+    (option) => option.id === secondaryId,
+  )?.prompt;
+  const basePrompt = taskPrompt || item.prompt;
+  return secondaryPrompt ? `${basePrompt}\n\n${secondaryPrompt}` : basePrompt;
+}
+
 const NewChatPage = () => {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
+  const locale = i18n.resolvedLanguage || i18n.language;
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const modelProviderGuard = useChatModelProviderGuard();
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
   const getGreeting = () => {
@@ -70,6 +88,10 @@ const NewChatPage = () => {
     );
 
   const [isDragging, setIsDragging] = useState(false);
+  const [showcaseCase, setShowcaseCase] = useState<ShowcaseCase | null>(null);
+  const showcaseCaseId = searchParams.get("showcase_case");
+  const showcaseTaskId = searchParams.get("showcase_task");
+  const [selectedShowcaseSecondaryId, setSelectedShowcaseSecondaryId] = useState<string>();
 
   useEffect(() => {
     useChatThinkStore
@@ -146,6 +168,43 @@ const NewChatPage = () => {
     }
   }, [isChatContent]);
 
+  useEffect(() => {
+    if (!showcaseCaseId) {
+      setShowcaseCase(null);
+      setSelectedShowcaseSecondaryId(undefined);
+      setInputValue("");
+      return;
+    }
+
+    const controller = new AbortController();
+    setShowcaseCase(null);
+    setSelectedShowcaseSecondaryId(undefined);
+    setInputValue("");
+    getShowcaseCase(showcaseCaseId, { signal: controller.signal })
+      .then((item) => {
+        const defaultSecondaryId = item.secondary_options?.[0]?.id;
+        setShowcaseCase(item);
+        setInputValue(getShowcasePrompt(item, showcaseTaskId, defaultSecondaryId));
+        setSelectedShowcaseSecondaryId(defaultSecondaryId);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setShowcaseCase(null);
+          setSelectedShowcaseSecondaryId(undefined);
+          setInputValue("");
+        }
+      });
+
+    return () => controller.abort();
+  }, [locale, showcaseCaseId, showcaseTaskId]);
+
+  const handleShowcaseSecondaryChange = (secondaryId: string) => {
+    setSelectedShowcaseSecondaryId(secondaryId);
+    if (showcaseCase) {
+      setInputValue(getShowcasePrompt(showcaseCase, showcaseTaskId, secondaryId));
+    }
+  };
+
   const handleSetIsChatContent = (value: boolean) => {
     if (value && !chatLayoutMounted) {
       setChatLayoutMounted(true);
@@ -157,6 +216,7 @@ const NewChatPage = () => {
       // Reset pending settings and KB config so a fresh new conversation starts clean.
       setPendingPluginSettings(getInitialPluginSettings(nextRunInBackground));
       setChatConfig({});
+      setSearchParams({}, { replace: true });
     }
     setIsChatContent(value);
   };
@@ -273,6 +333,24 @@ const NewChatPage = () => {
     newChatInputRef.current?.uploadFiles(files);
   };
 
+  const showcaseSelection: ShowcaseSelection | undefined = showcaseCase
+    ? {
+        primaryValue: showcaseCase.primary_category || showcaseCase.id,
+        primaryLabel: showcaseCase.primary_category || showcaseCase.title,
+        primaryAriaLabel: t("showcase.primaryCategory"),
+        secondaryValue: selectedShowcaseSecondaryId,
+        secondaryOptions: showcaseCase.secondary_options?.map((option) => ({
+          value: option.id,
+          label: option.label,
+          description: option.description,
+          prompt: option.prompt,
+        })),
+        secondaryAriaLabel: t("showcase.secondaryCategory"),
+        onSecondaryChange: handleShowcaseSecondaryChange,
+      }
+    : undefined;
+  const shouldShowFeaturedCases = inputValue.trim().length === 0;
+
   return (
     <div className="new-chat-page">
       {}
@@ -374,6 +452,29 @@ const NewChatPage = () => {
                   <PreferenceConfigNotice
                     hidden={hidePreferenceConfigNotice}
                   />
+                  {showcaseCase ? (
+                    <div className="showcase-template-banner" role="status">
+                      <div>
+                        <strong>{t("showcase.loadedCase", { title: showcaseCase.title })}</strong>
+                        <span>
+                          {showcaseCase.attachment_hint
+                            ? t("showcase.uploadSuggestion", { hint: showcaseCase.attachment_hint })
+                            : t("showcase.promptReady")}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowcaseCase(null);
+                          setInputValue("");
+                          newChatInputRef.current?.clearFiles();
+                          setSearchParams({}, { replace: true });
+                        }}
+                      >
+                        {t("showcase.clearCase")}
+                      </button>
+                    </div>
+                  ) : null}
                   <ChatInput
                     ref={newChatInputRef}
                     value={inputValue}
@@ -388,6 +489,7 @@ const NewChatPage = () => {
                     setIsChatContent={(value) => {
                       if (value) {
                         setInputValue("");
+                        setSearchParams({}, { replace: true });
                       }
                       handleSetIsChatContent(value);
                     }}
@@ -410,7 +512,9 @@ const NewChatPage = () => {
                     }}
                     initialPluginSettings={pendingPluginSettings ?? undefined}
                     runInBackground={runInBackground}
+                    showcaseSelection={showcaseSelection}
                   />
+                  {shouldShowFeaturedCases ? <FeaturedCases /> : null}
                 </div>
               </div>
             </div>

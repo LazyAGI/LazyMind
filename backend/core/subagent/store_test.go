@@ -11,14 +11,7 @@ import (
 
 func newTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/subagent.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.SubAgentTask{}, &orm.SubAgentStep{}, &orm.SubAgentArtifact{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	return orm.MigrateTestDB(t, &orm.SubAgentTask{}, &orm.SubAgentStep{}, &orm.SubAgentArtifact{})
 }
 
 func TestCreateTaskAllocatesSequentialSeq(t *testing.T) {

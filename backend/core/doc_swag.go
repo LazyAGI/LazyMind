@@ -376,6 +376,11 @@ func _swagGetConversationDetail() {}
 // @Router    /conversations/{name}:history [get]
 func _swagGetConversationHistory() {}
 
+// @Summary  List conversation trail metadata
+// @Tags      conversations
+// @Router    /conversations/{name}:trail [get]
+func _swagGetConversationTrail() {}
+
 // @Summary  Delete conversation
 // @Tags      conversations
 // @Router    /conversations/{name} [delete]

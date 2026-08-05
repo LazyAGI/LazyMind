@@ -10,11 +10,14 @@ export function useCiteMessagesInput(
 ) {
   const { t } = useTranslation();
   const [citeMessages, setCiteMessages] = useState<string[]>([]);
+  const [citeHistoryIds, setCiteHistoryIds] = useState<(string | undefined)[]>(
+    [],
+  );
   const citeMessagesRef = useRef(citeMessages);
   citeMessagesRef.current = citeMessages;
 
   const handleAddCiteMessage = useCallback(
-    (text: string) => {
+    (text: string, historyId?: string) => {
       const normalizedText = text.trim();
       if (!normalizedText) {
         return;
@@ -30,12 +33,14 @@ export function useCiteMessagesInput(
         return;
       }
 
-      setCiteMessages((prev) => {
-        if (prev.length >= MAX_CITE_MESSAGE_COUNT) {
-          return prev;
-        }
-        return [...prev, normalizedText];
-      });
+      setCiteHistoryIds((prev) =>
+        prev.length >= MAX_CITE_MESSAGE_COUNT
+          ? prev
+          : [...prev, historyId?.trim() || undefined],
+      );
+      setCiteMessages((prev) =>
+        prev.length >= MAX_CITE_MESSAGE_COUNT ? prev : [...prev, normalizedText],
+      );
       requestAnimationFrame(() => {
         chatInputRef.current?.focus();
       });
@@ -45,14 +50,17 @@ export function useCiteMessagesInput(
 
   const handleRemoveCiteMessage = useCallback((index: number) => {
     setCiteMessages((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+    setCiteHistoryIds((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
   }, []);
 
   const clearCiteMessages = useCallback(() => {
     setCiteMessages([]);
+    setCiteHistoryIds([]);
   }, []);
 
   return {
     citeMessages,
+    citeHistoryIds,
     setCiteMessages,
     handleAddCiteMessage,
     handleRemoveCiteMessage,
