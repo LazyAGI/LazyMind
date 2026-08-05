@@ -1252,6 +1252,10 @@ export interface ListModelProviderGroupModelsOpenAPIItem {
     'id': string;
     'is_default': boolean;
     /**
+     * Whether this option supports image editing
+     */
+    'is_editable': boolean;
+    /**
      * Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
      */
     'max_input_tokens'?: string | null;
@@ -1782,6 +1786,10 @@ export interface SearchWordGroupsRequest {
 export interface SelectedModelOpenAPIItem {
     'base_url': string;
     'group_name': string;
+    /**
+     * Whether the selected model supports image editing
+     */
+    'is_editable': boolean;
     /**
      * Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
      */
@@ -35687,6 +35695,5 @@ export class WriterApi extends BaseAPI {
         return WriterApiFp(this.configuration).apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, requestParameters.writerDocumentSyncOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
-
 
 

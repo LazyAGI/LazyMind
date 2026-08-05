@@ -930,6 +930,7 @@ type listModelProviderGroupModelsOpenAPIItem struct {
 	GroupName                string  `json:"group_name"`
 	BaseURL                  string  `json:"base_url"`
 	IsDefault                bool    `json:"is_default"`
+	IsEditable               bool    `json:"is_editable" desc:"Whether this option supports image editing"`
 	MaxInputTokens           *string `json:"max_input_tokens" desc:"Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
 }
 
@@ -950,6 +951,7 @@ type selectedModelOpenAPIItem struct {
 	ProviderName             string  `json:"provider_name"`
 	GroupName                string  `json:"group_name"`
 	BaseURL                  string  `json:"base_url"`
+	IsEditable               bool    `json:"is_editable" desc:"Whether the selected model supports image editing"`
 	MaxInputTokens           *string `json:"max_input_tokens" desc:"Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
 }
 

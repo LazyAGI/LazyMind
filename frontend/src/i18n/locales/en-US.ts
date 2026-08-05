@@ -265,6 +265,7 @@ const enUS = {
     defaultConfigAria: "Module default model configuration",
     defaultTitle: "System Default Settings",
     defaultSubtitle: "Different modules can use different models. Required items must be configured before all features are available.",
+    editableModelSuffix: "(Editable)",
     embeddingLimitedAlert: "Embedding models can currently be selected only from platform-approved providers and models. The option list can be narrowed once the final allowlist is confirmed.",
     moduleHelpAria: "{{title}} help",
     limited: "Limited",

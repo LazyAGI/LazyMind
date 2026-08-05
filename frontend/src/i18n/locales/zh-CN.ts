@@ -251,6 +251,7 @@ const zhCN = {
     defaultConfigAria: "模块默认模型配置",
     defaultTitle: "系统默认设置",
     defaultSubtitle: "不同模块可以选择不同模型；必配项未完成时，系统功能将受限。",
+    editableModelSuffix: "(可编辑)",
     embeddingLimitedAlert: "向量模型当前仅允许从平台限定的供应商和模型中选择；后续名单确定后可直接收敛这里的选项。",
     moduleHelpAria: "{{title}} 说明",
     limited: "限定",

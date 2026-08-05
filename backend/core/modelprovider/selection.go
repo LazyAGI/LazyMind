@@ -55,6 +55,7 @@ type selectedModelItem struct {
 	GroupName                string  `json:"group_name" gorm:"column:group_name"`
 	BaseURL                  string  `json:"base_url" gorm:"column:base_url"`
 	Share                    bool    `json:"share" gorm:"column:share"`
+	IsEditable               bool    `json:"is_editable" gorm:"-"`
 	MaxInputTokens           *string `json:"max_input_tokens" gorm:"column:max_input_tokens"`
 }
 
@@ -332,7 +333,13 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 		Where("usm.user_id = ?", strings.TrimSpace(userID)).
 		Order("usm.model_type ASC").
 		Scan(&out).Error
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].IsEditable = strings.EqualFold(strings.TrimSpace(out[i].ModelKey), "image_editing")
+	}
+	return out, nil
 }
 
 // SetSharedModel sets or clears the share flag for a selected model row.

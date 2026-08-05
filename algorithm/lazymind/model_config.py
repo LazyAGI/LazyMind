@@ -181,6 +181,32 @@ def _normalize_model_config(model_config: Optional[Dict[str, Any]]) -> Optional[
         if target in normalized:
             continue
         normalized[target] = role_cfg
+    return _mirror_image_roles(normalized)
+
+
+def _clone_role_cfg_with_type(role_cfg: Any, role_type: str) -> Any:
+    if not isinstance(role_cfg, dict):
+        return role_cfg
+    mirrored = dict(role_cfg)
+    mirrored['type'] = role_type
+    return mirrored
+
+
+def _mirror_image_roles(model_config: Dict[str, Any]) -> Dict[str, Any]:
+    '''Unidirectional mirror: editable image_editor also fills image_generator.
+
+    - image_editor only → also inject image_generator (same model, type=text2image)
+    - image_generator only → keep generator only (do not invent an editor)
+    - both present → leave each role as configured
+    '''
+    normalized = dict(model_config)
+    has_generator = 'image_generator' in normalized
+    has_editor = 'image_editor' in normalized
+    if has_editor and not has_generator:
+        normalized['image_generator'] = _clone_role_cfg_with_type(
+            normalized['image_editor'],
+            'text2image',
+        )
     return normalized
 
 

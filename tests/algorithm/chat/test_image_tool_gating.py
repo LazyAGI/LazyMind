@@ -99,3 +99,127 @@ def test_runtime_models_declares_image_roles(tmp_path, monkeypatch):
     raw = load_model_config(str(config_path))
     assert raw['image_generator']['type'] == 'text2image'
     assert raw['image_editor']['type'] == 'image_editing'
+
+
+def test_image_editor_unavailable_when_generator_only_config_is_injected(tmp_path, monkeypatch):
+    config_path = write_yaml(tmp_path, """
+        image_generator:
+          source: dynamic
+          type: text2image
+        image_editor:
+          source: dynamic
+          type: image_editing
+    """)
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(config_path))
+    import lazyllm
+    from lazymind.model_config import inject_model_config
+
+    inject_model_config({
+        'text2image': {'source': 'qwen', 'model': 'wanx', 'api_key': 'k1'},
+    })
+    assert is_model_role_available('image_generator')
+    assert not is_model_role_available('image_editor')
+    names = _active_tool_names()
+    assert 'image_generator' in names
+    assert 'image_editor' not in names
+    lazyllm.inject_model_config(None)
+
+
+def test_image_generator_available_when_editor_only_config_is_injected(tmp_path, monkeypatch):
+    config_path = write_yaml(tmp_path, """
+        image_generator:
+          source: dynamic
+          type: text2image
+        image_editor:
+          source: dynamic
+          type: image_editing
+    """)
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(config_path))
+    import lazyllm
+    from lazymind.model_config import inject_model_config
+
+    inject_model_config({
+        'image_editing': {'source': 'qwen', 'model': 'wanx-edit', 'api_key': 'k2'},
+    })
+    assert is_model_role_available('image_generator')
+    assert is_model_role_available('image_editor')
+    names = _active_tool_names()
+    assert 'image_generator' in names
+    assert 'image_editor' in names
+    lazyllm.inject_model_config(None)
+
+
+def test_inject_model_config_does_not_mirror_generator_into_editor(tmp_path, monkeypatch):
+    config_path = write_yaml(tmp_path, """
+        image_generator:
+          source: dynamic
+          type: text2image
+        image_editor:
+          source: dynamic
+          type: image_editing
+    """)
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(config_path))
+    import lazyllm
+    from lazymind.model_config import inject_model_config
+
+    inject_model_config({
+        'text2image': {'source': 'siliconflow', 'model': 'Kwai-Kolors/Kolors', 'api_key': 'k1'},
+    })
+    cfg = lazyllm.globals['config']['dynamic_model_configs']
+    assert cfg['image_generator']['multimodal']['source'] == 'siliconflow'
+    assert cfg['image_generator']['multimodal']['model'] == 'Kwai-Kolors/Kolors'
+    assert 'image_editor' not in cfg
+    lazyllm.inject_model_config(None)
+
+
+def test_inject_model_config_mirrors_editable_editor_into_generator(tmp_path, monkeypatch):
+    config_path = write_yaml(tmp_path, """
+        image_generator:
+          source: dynamic
+          type: text2image
+        image_editor:
+          source: dynamic
+          type: image_editing
+    """)
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(config_path))
+    import lazyllm
+    from lazymind.model_config import inject_model_config
+
+    inject_model_config({
+        'image_editing': {
+            'source': 'siliconflow',
+            'model': 'Qwen/Qwen-Image-Edit',
+            'api_key': 'k1',
+        },
+    })
+    cfg = lazyllm.globals['config']['dynamic_model_configs']
+    assert cfg['image_editor']['multimodal']['source'] == 'siliconflow'
+    assert cfg['image_editor']['multimodal']['model'] == 'Qwen/Qwen-Image-Edit'
+    assert cfg['image_generator']['multimodal']['source'] == 'siliconflow'
+    assert cfg['image_generator']['multimodal']['model'] == 'Qwen/Qwen-Image-Edit'
+    lazyllm.inject_model_config(None)
+
+
+def test_inject_model_config_keeps_both_image_roles_distinct(tmp_path, monkeypatch):
+    config_path = write_yaml(tmp_path, """
+        image_generator:
+          source: dynamic
+          type: text2image
+        image_editor:
+          source: dynamic
+          type: image_editing
+    """)
+    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', str(config_path))
+    import lazyllm
+    from lazymind.model_config import inject_model_config
+
+    inject_model_config({
+        'text2image': {'source': 'siliconflow', 'model': 'gen-model', 'api_key': 'k1'},
+        'image_editing': {'source': 'siliconflow', 'model': 'edit-model', 'api_key': 'k2'},
+    })
+    cfg = lazyllm.globals['config']['dynamic_model_configs']
+    assert cfg['image_generator']['multimodal']['source'] == 'siliconflow'
+    assert cfg['image_generator']['multimodal']['model'] == 'gen-model'
+    assert cfg['image_editor']['multimodal']['source'] == 'siliconflow'
+    assert cfg['image_editor']['multimodal']['model'] == 'edit-model'
+    lazyllm.inject_model_config(None)
