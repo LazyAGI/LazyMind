@@ -8,10 +8,6 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
-      // monaco-editor's package.json only exposes a "module" field with no "main"/"exports",
-      // which Vite's dependency resolver cannot resolve outside a real bundler context. Alias
-      // it to a tiny stub so `vi.mock("monaco-editor", ...)` factories can intercept it in tests.
-      "monaco-editor": path.resolve(__dirname, "src/test/mocks/monaco-editor.ts"),
     },
   },
   test: {

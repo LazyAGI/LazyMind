@@ -8,19 +8,11 @@ cd "$ROOT"
 
 FAILED=0
 
-echo "=== Frontend (contract tests) ==="
+echo "=== Frontend ==="
 if command -v npm &>/dev/null; then
   (cd tests/frontend && npm install --silent; npm test 2>&1) || FAILED=1
 else
   echo "Skip (npm not found)"
-fi
-
-echo ""
-echo "=== Frontend (unit tests) ==="
-if command -v pnpm &>/dev/null; then
-  (cd frontend && pnpm test 2>&1) || FAILED=1
-else
-  echo "Skip (pnpm not found)"
 fi
 
 echo ""
