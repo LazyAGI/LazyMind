@@ -183,7 +183,7 @@ func TestRecoverStaleJobsRestoresPendingAndFailsExhausted(t *testing.T) {
 		t.Fatalf("expected stale retry job to become pending and unlocked, got %+v", retry)
 	}
 	want := now.Truncate(time.Microsecond)
-	if !retry.NextRunAt.Equal(want) {
+	if !retry.NextRunAt.Truncate(time.Microsecond).Equal(want) {
 		t.Fatalf("expected retry next_run_at to be now, got %v want %v", retry.NextRunAt, want)
 	}
 
