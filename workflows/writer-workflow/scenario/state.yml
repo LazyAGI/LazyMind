@@ -20,10 +20,16 @@ transitions:
   outline:
     - to: write_document
       when: Draft the full document from the latest outline revision.
+    - to: publish
+      when: Publish the outline itself to a cloud document.
     - to: __end__
       when: The requested outline work is complete.
 
   write_document:
+    - to: publish
+      when: Deliver the completed local document as Markdown or publish it to Feishu.
+
+  publish:
     - to: __end__
 
 steps:
@@ -65,13 +71,18 @@ steps:
          target_document. Do not call writer_load_document for unrelated ordinary URLs.
       3. Call writer_build_writing_task(query="{{user_input}}",
          representation=<resolved `ir` or `markdown`>) and save its path as writing_task.
-      4. If the request selects or references a knowledge base, use the kb framework
+      4. Call writer_collect_available_media with writing_task_path. It returns
+         media_assets and profile_input_resources file paths. Save media_assets and
+         retain profile_input_resources for step 6. This call is required even when
+         the user uploaded no images.
+      5. If the request selects or references a knowledge base, use the kb framework
          tools to retrieve the relevant evidence first. Preserve the returned evidence
          text for the next call.
-      5. Call writer_profile_resources with writing_task_path, the complete original
+      6. Call writer_profile_resources with writing_task_path, the complete original
          user_input, source_document_path when present, and knowledge_text when KB evidence was
-         retrieved. Save resource_profiles.
-      6. Call writer_create_writing_context with writing_task_path,
+         retrieved. Also pass the profile_input_resources path returned by step 4. Save
+         resource_profiles.
+      7. Call writer_create_writing_context with writing_task_path,
          resource_profiles_path, and source_document_path when present. Save its returned path
          as writing_context.
 
@@ -92,11 +103,13 @@ steps:
       - cloud_files
       - writer_build_writing_task
       - writer_load_local_document
+      - writer_collect_available_media
       - writer_load_document
       - writer_profile_resources
       - writer_create_writing_context
     outputs:
       - material: writing_task
+      - material: media_assets
       - material: resource_profiles
       - material: writing_context
       - material: source_document
@@ -104,7 +117,8 @@ steps:
       - material: target_document
         required: false
     acceptance_criteria: |
-      writing_task, resource_profiles, and writing_context are present.
+      writing_task, media_assets, resource_profiles, and writing_context are present.
+      media_assets is valid even when its assets mapping is empty.
       When a Feishu/Lark source was required, source_document and target_document are also present.
 
   outline:
@@ -206,44 +220,50 @@ steps:
       Save every declared output in this step with content_type="file" and the exact
       returned path as value. Never save a path with content_type="json" or "text".
 
-      Maintain one user-visible full-document artifact: draft_document. Preserve the
-      selected representation: Markdown stays `.md`; IR stays `.lmd` with stage="draft"
+      Maintain one user-visible full-document artifact: final_document. Preserve the
+      selected representation: Markdown stays `.md`; IR stays `.lmd` with stage="final"
       and ui_editable=true. Save every successful result under that same slot as a new
       revision rather than a second card.
 
-      Retrieve the latest selected draft_document when it exists, plus source_document,
+      Retrieve the latest selected final_document when it exists, plus source_document,
       outline_document, writing_task, writing_context, writing_context_after_outline, and
-      writing_context_after_draft when available.
+      writing_context_after_draft when available. Also retrieve media_assets for
+      generation mode and resolved_media_assets when resuming an earlier generation.
 
       Dynamically select exactly one mode:
 
       A. Generate or rewrite from outline:
-         Use this mode when draft_document does not exist and an outline is available, or
+         Use this mode when final_document does not exist and an outline is available, or
          when the user explicitly asks to rewrite from the latest outline.
          This rule is mandatory when outline_document is the current outline: requests such as
          "expand the outline into a full article" or "write it back after drafting" are
          generation requests, not targeted revisions. The requested later destination
          does not change the mode selected in this step.
 
-         1. Call writer_generate_section_instructions using the latest outline_document and
-            writing_context_after_outline. Save section_instructions.
+         1. Call writer_generate_section_instructions using writing_task, the latest
+            outline_document, and writing_context_after_outline. Save section_instructions
+            and visual_plan.
          2. Route from the outline file format without changing representation:
             - Markdown outline: call writer_generate_draft_blocks_markdown, then
               writer_generate_draft_document_markdown.
-            - IR outline: call writer_generate_draft_blocks, then
-              writer_generate_draft_document.
+            - IR outline: call writer_resolve_visual_media using visual_plan and
+              media_assets, save resolved_media_assets, then call
+              writer_generate_draft_blocks with visual_plan and resolved_media_assets,
+              followed by writer_generate_draft_document.
             Save every returned section path as a separate ordered draft_blocks entry.
             Never stringify the path list or save it as one file entry. Save the assembled
             result as draft_document; save draft_document_md when returned.
          3. Call writer_update_writing_context using draft_document and save
             writing_context_after_draft.
+         4. Call writer_generate_final_document using draft_document and
+            writing_context_after_draft. Save final_document and final_document_md.
 
          Chapter planning therefore always runs after the latest outline revision and
          immediately before drafting.
 
       B. Revise current full document:
          Use this mode when the user asks for a targeted modification. Prefer the latest
-         selected draft_document as base_document; for a direct revision workflow, use
+         selected final_document as base_document; for a direct revision workflow, use
          source_document. An IR base must have stage="draft" or stage="final"; Markdown
          has no stage field.
 
@@ -255,26 +275,29 @@ steps:
             IR PatchSet for `.lmd` or a StringReplaceSet for Markdown.
          3. Persist the task, locate result, modify plan, revision set, and revision result
             under the document_* internal keys.
-         4. Save the returned revised_document path as draft_document, not under a new key.
-         5. Call writer_update_writing_context using the revised draft_document and save
+         4. Save the returned revised_document path as final_document, not under a new key.
+         5. Call writer_update_writing_context using the revised final_document and save
             writing_context_after_draft.
 
          Do not rerun chapter planning for a targeted body revision. A cloud-bound
-         body revision remains local in this step. Human frontend edits remain revisions
-         of this same slot.
+         body revision remains local in this step. An IR document_revision_set can be
+         applied to its bound source only by the publish step. Human frontend edits remain
+         revisions of this same slot.
 
       Complete exactly one mode in each run. Generation mode is complete when its draft
-      lineage produces draft_document. Revision mode is complete when its revision task,
+      lineage produces final_document. Revision mode is complete when its revision task,
       locate result, modify plan, revision set, and successful revision result produce
-      draft_document. A tool failure leaves the selected mode incomplete and should be
+      final_document. A tool failure leaves the selected mode incomplete and should be
       retried within that same mode.
     tools:
       - writer_generate_section_instructions
+      - writer_resolve_visual_media
       - writer_generate_draft_blocks
       - writer_generate_draft_blocks_markdown
       - writer_generate_draft_document
       - writer_generate_draft_document_markdown
       - writer_update_writing_context
+      - writer_generate_final_document
       - writer_build_revision_task
       - writer_locate_revision_target
       - writer_generate_modify_plan
@@ -287,18 +310,28 @@ steps:
           - material: source_document
       - material: writing_task
         required: true
+      - material: media_assets
+        required: true
       - material: writing_context_after_outline
         required: true
         alternatives:
           - material: writing_context
     outputs:
-      - material: draft_document
+      - material: final_document
       - material: writing_context_after_draft
       - material: section_instructions
         required: false
+      - material: visual_plan
+        required: false
+      - material: resolved_media_assets
+        required: false
       - material: draft_blocks
         required: false
+      - material: draft_document
+        required: false
       - material: draft_document_md
+        required: false
+      - material: final_document_md
         required: false
       - material: document_revision_task
         required: false
@@ -311,8 +344,138 @@ steps:
       - material: document_revision_result
         required: false
     acceptance_criteria: |
-      draft_document and writing_context_after_draft are present. Markdown output is a
-      `.md` file; IR output is not an outline and has ui_editable=true. Drafting artifacts are required
-      for generation/rewrite mode. A targeted revision requires document_revision_task,
+      final_document and writing_context_after_draft are present. Markdown output is a
+      `.md` file; IR output has stage="final" and ui_editable=true. Drafting artifacts are required
+      for generation/rewrite mode; IR generation also requires visual_plan and
+      resolved_media_assets. A targeted revision requires document_revision_task,
       document_locate_result, document_modify_plan, document_revision_set, and a successful
       document_revision_result. This step must not mutate a cloud document.
+
+  publish:
+    label: 交付文稿
+    prompt: |
+      {{runtime_instruction}}
+
+      This is the unified delivery step. Retrieve the latest selected final_document.
+      Use outline_document only when final_document does not exist and the user explicitly
+      requested delivering the outline itself. Never substitute outline_document after
+      final-document generation or revision fails.
+
+      Select exactly one delivery mode from the user's complete request:
+
+      A. Markdown delivery (default):
+         Use this mode unless the user explicitly requested a Feishu/Lark destination
+         or write-back action. A Feishu/Lark URL used only as a source or reference does
+         not authorize publishing to it.
+         1. Call writer_export_markdown with the latest selected document path. Markdown
+            input is returned as Markdown; IR input is rendered to Markdown.
+         2. writer_export_markdown returns the .md path as a plain string. Save that
+            string directly as delivered_markdown with content_type="file".
+         3. Do not call any Feishu publishing tool and do not ask for a destination.
+
+      B. Feishu delivery:
+         Use this mode only when the user explicitly asks to write back/update the
+         original Feishu document, publish/write to Feishu, create a new Feishu
+         document, save as another Feishu document, append to a Feishu document, or
+         supplies an explicit destination.
+
+      Before any Feishu write, inspect the selected content path. If it is Markdown,
+      call writer_convert_markdown_to_ir once and save the returned `.lmd` path as
+      delivery_ir. Use delivery_ir as content_path for the subsequent Feishu write.
+      Do not convert Markdown for local delivery or local revision.
+
+      1. If publish_target_document already exists from an earlier attempt of this step,
+         reuse it as target_document_path. Do not create another document.
+      2. A targeted revision of the original bound IR source uses patch delivery. Retrieve
+         source_document and document_revision_set, verify both are IR/PatchSet artifacts,
+         then call writer_publish_revision. Never pass a Markdown StringReplaceSet to this
+         tool.
+      3. A document generated through the draft lineage uses replacement delivery when
+         the user requests writing it back to the same bound source. Retrieve
+         final_document and source_document, then call writer_replace_document. This route
+         applies to generated or explicitly rewritten content rather than a targeted
+         revision.
+      4. Call writer_append_document only when the user explicitly requests append,
+         continue-at-end, or preservation of all existing target content.
+      5. If the selected WriterDocument is unbound and the user explicitly asks to
+         write/publish it to "my Feishu", or requests "new document", "create in
+         Feishu", or "save as", call writer_create_document first. Pass parent_uri when
+         a folder/wiki parent was supplied; otherwise create in the user's Feishu root.
+         The explicit Feishu delivery request authorizes this creation; do not ask for
+         another confirmation. Save the returned artifact as publish_target_document,
+         then pass its path as target_document_path to writer_append_document. A newly
+         created target is empty.
+      6. If an existing non-empty target is specified but append versus replace is not
+         clear from the user request and artifact lineage, ask the user. Never default
+         to append for an existing document.
+
+      Before passing an existing artifact to a writer tool, call get_artifact, extract
+      the absolute path string from value.path, and pass that string to the tool. Never
+      pass the value object or only an artifact filename.
+      If resolved_media_assets exists, retrieve it and pass its absolute path as
+      media_assets_path to writer_replace_document or writer_append_document. This is
+      required whenever the selected WriterDocument contains image blocks. Do not put
+      the media library inside final_document. Pure-text documents and older runs may
+      omit media_assets_path.
+
+      writer_create_document only needs the intended title and optional parent_uri. Save
+      its exact returned file path as publish_target_document. Then call
+      writer_append_document with absolute content_path and target_document_path values.
+
+      Only after the selected publishing tool succeeds, save its exact publish_result
+      and published_document file paths and save its exact published_link string. If
+      any create, write, or read-back call fails, do not synthesize or save any of
+      these outputs; report the tool failure so the step can retry or fail.
+
+      All publishing tools return published_document re-read from the provider with
+      ui_editable=true.
+
+      Artifact persistence rule: delivered_markdown, publish_target_document,
+      publish_result, and published_document are absolute local file paths and must be
+      saved with content_type="file". published_link is text. Never save a file path as
+      JSON or text.
+    tools:
+      - writer_export_markdown
+      - writer_convert_markdown_to_ir
+      - writer_create_document
+      - writer_publish_revision
+      - writer_replace_document
+      - writer_append_document
+    inputs:
+      - material: final_document
+        required: true
+        alternatives:
+          - material: outline_document
+      - material: target_document
+        required: false
+      - material: source_document
+        required: false
+      - material: document_revision_task
+        required: false
+      - material: document_revision_set
+        required: false
+      - material: document_revision_result
+        required: false
+      - material: resolved_media_assets
+        required: false
+    outputs:
+      - material: delivered_markdown
+        required: false
+      - material: delivery_ir
+        required: false
+      - material: publish_target_document
+        required: false
+      - material: publish_result
+        required: false
+      - material: published_document
+        required: false
+      - material: published_link
+        required: false
+    acceptance_criteria: |
+      Exactly one delivery mode succeeds. Markdown mode requires delivered_markdown to
+      be a real .md file generated from the latest selected WriterDocument and requires
+      no Feishu artifacts. Feishu mode requires publish_result to report success,
+      published_document to be the provider-confirmed editable WriterDocument, and
+      published_link to be the provider URL returned by the same successful tool call.
+      A targeted IR revision succeeds through writer_publish_revision with its prepared
+      document_revision_set. Markdown is converted to delivery_ir only for Feishu mode.

@@ -10,12 +10,13 @@ import json
 import re
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Mapping
 
 from lazyllm.tools.writer.data_models import WriterDocument
 from lazyllm.tools.writer.utils import parse_document_markdown, save_artifact_json
 
 from lazymind.chat.engine.subagent.context import require_context
+from lazymind.chat.engine.prompts.writer_media import WRITER_IMAGE_ACQUISITION_PROMPT
 from lazymind.chat.engine.tools.writer import (
     WriterCreateToolkit,
     WriterResourceToolkit,
@@ -23,6 +24,8 @@ from lazymind.chat.engine.tools.writer import (
     WriterToolkitBase,
     writer_schema,
 )
+from lazymind.chat.engine.tools.multimodal import image_generator
+from lazymind.model_config import is_model_role_available
 
 
 def _workspace_root() -> Path:
@@ -172,7 +175,12 @@ def writer_build_writing_task(query: str, representation: str = 'markdown') -> s
     """Build a WritingTask artifact from the user's complete request."""
     if representation not in {'ir', 'markdown'}:
         raise ValueError("representation must be 'ir' or 'markdown'.")
-    task = _json_loads(WriterCreateToolkit().build_writing_task(query=query), {})
+    plugin_session_id = str(require_context().params.get('session_id') or '').strip()
+    if not plugin_session_id:
+        raise RuntimeError('writer plugin session_id is required to build a stable WritingTask')
+    task = _json_loads(WriterCreateToolkit().build_writing_task(
+        query=query, task_id=plugin_session_id,
+    ), {})
     task['output'] = {**(task.get('output') or {}), 'representation': representation}
     content = json.dumps(task, ensure_ascii=False)
     return _save_json_artifact('writing_task', content, writer_schema('task.WritingTask'))
@@ -227,26 +235,99 @@ def writer_profile_resources(
     user_input: str,
     source_document_path: str = '',
     knowledge_text: str = '',
+    profile_input_resources_path: str = '',
 ) -> str:
     """Profile attachments, a loaded source document, and retrieved KB evidence."""
     toolkit = WriterCreateToolkit()
-    files_by_turn = require_context().params.get('history_files_per_turn') or {}
-    file_paths = [path for paths in files_by_turn.values() for path in paths]
-    resources = toolkit.build_resources(
-        file_paths_json=json.dumps(file_paths, ensure_ascii=False),
-        source_document_json=(
-            _read_json_string(source_document_path) if source_document_path else ''
-        ),
-        knowledge_text=knowledge_text,
-    )
+    if profile_input_resources_path:
+        resources = _read_json_file(profile_input_resources_path)
+        resources.extend(_json_loads(toolkit.build_resources(
+            file_paths_json='[]',
+            source_document_json=(
+                _read_json_string(source_document_path) if source_document_path else ''
+            ),
+            knowledge_text=knowledge_text,
+        ), []))
+    else:
+        files_by_turn = require_context().params.get('history_files_per_turn') or {}
+        file_paths = [path for paths in files_by_turn.values() for path in paths]
+        resources = _json_loads(toolkit.build_resources(
+            file_paths_json=json.dumps(file_paths, ensure_ascii=False),
+            source_document_json=(
+                _read_json_string(source_document_path) if source_document_path else ''
+            ),
+            knowledge_text=knowledge_text,
+        ), [])
     content = toolkit.profile_resources(
         writing_task_json=_read_json_string(writing_task_path),
         user_input=user_input,
-        resources_json=resources,
+        resources_json=json.dumps(resources, ensure_ascii=False),
     )
     return _save_json_artifact(
         'resource_profiles', content, writer_schema('resource.ResourceProfile'),
     )
+
+
+def writer_collect_available_media(writing_task_path: str) -> dict:
+    """Collect user-attached images into the task's authoritative media library."""
+    ctx = require_context()
+    files_by_turn = ctx.params.get('history_files_per_turn') or {}
+    file_paths: list[str] = []
+    seen: set[str] = set()
+    for paths in files_by_turn.values():
+        for path in paths or []:
+            normalized = str(path).strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                file_paths.append(normalized)
+
+    toolkit = WriterCreateToolkit()
+    resources = _json_loads(
+        toolkit.build_resources(
+            file_paths_json=json.dumps(file_paths, ensure_ascii=False),
+        ),
+        [],
+    )
+    root = _run_root('collect-media')
+    media_root = root / 'media'
+    media_root.mkdir(parents=True, exist_ok=True)
+    writing_task_json = _read_json_string(writing_task_path)
+    try:
+        payload = _json_loads(toolkit.collect_available_media(
+            writing_task_json=writing_task_json,
+            input_resources_json=json.dumps(resources, ensure_ascii=False),
+            media_store=str(media_root),
+            use_vision_model=is_model_role_available('vlm'),
+        ), {})
+    except Exception as exc:
+        task_id = str((_json_loads(writing_task_json, {}) or {}).get('task_id') or uuid.uuid4().hex)
+        payload = {
+            'media_assets': {
+                'library_id': f'media-library-{task_id}',
+                'assets': {},
+            },
+            'profile_input_resources': resources,
+            'warnings': [
+                f'Image collection failed: {type(exc).__name__}: {exc}',
+            ],
+        }
+    media_assets_path = _save_json_artifact(
+        'media_assets',
+        json.dumps(payload.get('media_assets') or {}, ensure_ascii=False),
+        writer_schema('multimodal.MediaAssetLibrary'),
+        directory=root,
+    )
+    profile_input_resources_path = _save_json_artifact(
+        'profile_input_resources',
+        json.dumps(payload.get('profile_input_resources') or [], ensure_ascii=False),
+        writer_schema('task.InputResource'),
+        directory=root,
+    )
+    return {
+        'media_assets': media_assets_path,
+        'profile_input_resources': profile_input_resources_path,
+        'warnings': payload.get('warnings') or [],
+    }
 
 
 def writer_create_writing_context(
@@ -289,31 +370,188 @@ def writer_generate_outline(writing_task_path: str, writing_context_path: str) -
 
 
 def writer_generate_section_instructions(
+    writing_task_path: str,
     outline_path: str,
     writing_context_path: str,
 ) -> str:
     """Generate internal section instructions from the selected outline IR."""
-    content = WriterCreateToolkit().generate_section_instructions(
+    payload = _json_loads(WriterCreateToolkit().generate_section_instructions(
+        writing_task_json=_read_json_string(writing_task_path),
         outline_json=_read_json_string(outline_path),
         writing_context_json=_read_json_string(writing_context_path),
+    ), {})
+    return {
+        'section_instructions': _save_json_artifact(
+            'section_instructions',
+            json.dumps(payload.get('section_instructions') or {}, ensure_ascii=False),
+            writer_schema('planning.SectionInstructionList'),
+        ),
+        'visual_plan': _save_json_artifact(
+            'visual_plan',
+            json.dumps(payload.get('visual_plan') or {'instructions': []}, ensure_ascii=False),
+            writer_schema('multimodal.VisualPlan'),
+        ),
+        'warnings': payload.get('warnings') or [],
+    }
+
+
+def _acquire_generated_image(
+    request: Mapping[str, Any],
+    *,
+    generator: Callable[..., dict] | None = None,
+) -> dict:
+    visual_type = str(request.get('visual_type') or '')
+    if visual_type not in {'image', 'diagram'}:
+        raise ValueError(
+            f'image generation does not support visual type {visual_type!r}',
+        )
+    prompt = WRITER_IMAGE_ACQUISITION_PROMPT.format(
+        visual_type=visual_type,
+        purpose=str(request.get('purpose') or ''),
+    ).strip()
+    result = (generator or image_generator)(
+        prompt=prompt,
+        image_size='1024x1024',
+        batch_size=1,
     )
-    return _save_json_artifact(
-        'section_instructions',
-        content,
-        writer_schema('planning.SectionInstructionList'),
+    local_path = str((result or {}).get('local_path') or '').strip()
+    if not local_path:
+        images = (result or {}).get('images') or []
+        if images and isinstance(images[0], dict):
+            local_path = str(images[0].get('local_path') or '').strip()
+    if not local_path:
+        raise ValueError('image_generator returned no local image path')
+    return {
+        'resource_id': f"acquired-{request.get('instruction_id') or uuid.uuid4().hex}",
+        'resource_type': 'image',
+        'uri': local_path,
+        'title': Path(local_path).name,
+        'summary': str(request.get('purpose') or ''),
+        'meta': {
+            'source_type': 'image_generation',
+            'generation_prompt': prompt,
+            'summary_source': 'generation_prompt',
+            'semantic_status': 'unverified',
+        },
+    }
+
+
+def _acquire_visual_media(
+    request: Mapping[str, Any],
+    acquirers: Mapping[str, Callable[[Mapping[str, Any]], dict]],
+) -> dict:
+    strategies = request['strategies']
+    for strategy in strategies:
+        acquirer = acquirers.get(strategy)
+        if acquirer is None:
+            continue
+        resource = dict(acquirer(request))
+        resource['meta'] = {
+            **dict(resource.get('meta') or {}),
+            'requested_strategy': strategies[0],
+            'acquisition_strategy': strategy,
+        }
+        return resource
+    raise ValueError(
+        f"no media acquirer is available for visual instruction {request.get('instruction_id')!r} "
+        f"({request.get('visual_type')}, strategies={strategies})",
     )
+
+
+def writer_resolve_visual_media(
+    visual_plan_path: str,
+    media_assets_path: str,
+) -> dict:
+    """Resolve visual needs and materialize missing media through registered acquirers."""
+    root = _run_root('resolve-media')
+    media_root = root / 'media'
+    media_root.mkdir(parents=True, exist_ok=True)
+    toolkit = WriterCreateToolkit()
+    acquirers = {}
+    if is_model_role_available('image_generator'):
+        acquirers['image_generation'] = _acquire_generated_image
+    visual_plan_json = _read_json_string(visual_plan_path)
+    media_assets_json = _read_json_string(media_assets_path)
+    try:
+        matched = _json_loads(toolkit.resolve_visual_needs(
+            visual_plan_json=visual_plan_json,
+            media_assets_json=media_assets_json,
+        ), {})
+    except Exception as exc:
+        matched = {
+            'media_assets': _json_loads(media_assets_json, {}),
+            'acquisition_requests': [],
+            'warnings': [
+                f'Visual media resolution failed: {type(exc).__name__}: {exc}',
+            ],
+        }
+    warnings = list(matched.get('warnings') or [])
+    acquired_resources = {}
+    acquired_by_purpose = {}
+    for request in matched.get('acquisition_requests') or []:
+        instruction_id = str(request['instruction_id'])
+        key = (
+            str(request.get('visual_type') or ''),
+            ' '.join(str(request.get('purpose') or '').split()).casefold(),
+        )
+        try:
+            resource = acquired_by_purpose.get(key)
+            if resource is None:
+                resource = _acquire_visual_media(request, acquirers)
+                acquired_by_purpose[key] = resource
+            acquired_resources[instruction_id] = resource
+        except Exception as exc:
+            message = (
+                f'Failed to acquire visual instruction {instruction_id!r}: '
+                f'{type(exc).__name__}: {exc}'
+            )
+            warnings.append(f'{message} (required={request.get("required", False)}).')
+
+    try:
+        outcome = _json_loads(toolkit.materialize_acquired_media(
+            visual_plan_json=visual_plan_json,
+            media_assets_json=json.dumps(matched.get('media_assets') or {}, ensure_ascii=False),
+            acquired_resources_json=json.dumps(acquired_resources, ensure_ascii=False),
+            media_store=str(media_root),
+        ), {})
+    except Exception as exc:
+        outcome = {
+            'media_assets': matched.get('media_assets') or {},
+            'warnings': [
+                f'Acquired media materialization failed: {type(exc).__name__}: {exc}',
+            ],
+        }
+    warnings.extend(outcome.get('warnings') or [])
+    resolved_path = save_artifact_json(
+        outcome.get('media_assets') or {},
+        str(root / 'resolved_media_assets.json'),
+        schema_name=writer_schema('multimodal.MediaAssetLibrary'),
+        created_by='writer-plugin-wrapper',
+    )
+    return {
+        'resolved_media_assets': resolved_path,
+        'warnings': warnings,
+    }
 
 
 def writer_generate_draft_blocks(
     writing_task_path: str,
     section_instructions_path: str,
     writing_context_path: str,
+    visual_plan_path: str = '',
+    media_assets_path: str = '',
 ) -> list[str]:
     """Generate and persist all planned draft blocks."""
     blocks = _json_loads(WriterCreateToolkit().generate_draft_blocks(
         writing_task_json=_read_json_string(writing_task_path),
         section_instructions_json=_read_json_string(section_instructions_path),
         writing_context_json=_read_json_string(writing_context_path),
+        visual_plan_json=(
+            _read_json_string(visual_plan_path) if visual_plan_path else ''
+        ),
+        media_assets_json=(
+            _read_json_string(media_assets_path) if media_assets_path else ''
+        ),
     ), [])
     root = _run_root('draft-blocks')
     paths = []
@@ -616,6 +854,7 @@ def writer_replace_document(
     source_document_path: str,
     target_document_path: str = '',
     target_uri: str = '',
+    media_assets_path: str = '',
 ) -> dict:
     """Replace a bound cloud source with the selected final WriterDocument."""
     root = _run_root('replace-document')
@@ -626,6 +865,9 @@ def writer_replace_document(
             _read_json_string(target_document_path) if target_document_path else ''
         ),
         target_uri=target_uri,
+        media_assets_json=(
+            _read_json_string(media_assets_path) if media_assets_path else ''
+        ),
     ), {})
     return _save_publish_payload(payload, root)
 
@@ -635,6 +877,7 @@ def writer_append_document(
     target_document_path: str = '',
     target_uri: str = '',
     publish_outline: bool = False,
+    media_assets_path: str = '',
 ) -> dict:
     """Append a local WriterDocument to a Feishu target and return its confirmed IR."""
     root = _run_root('append-document')
@@ -645,6 +888,9 @@ def writer_append_document(
         ),
         target_uri=target_uri,
         publish_outline=publish_outline,
+        media_assets_json=(
+            _read_json_string(media_assets_path) if media_assets_path else ''
+        ),
     ), {})
     return _save_publish_payload(payload, root)
 

@@ -7,7 +7,8 @@ value is merely a local path string does not satisfy an output and must be RETRY
 
 ## prepare
 
-- PASS when writing_task, resource_profiles, and writing_context exist.
+- PASS when writing_task, media_assets, resource_profiles, and writing_context exist.
+  media_assets may contain an empty assets mapping when no image was uploaded.
 - If the request required a Feishu/Lark source, source_document and target_document must exist.
 - References to "this/my/original Feishu document" require source_document and target_document;
   a prose summary of its content is not a source artifact.
@@ -30,6 +31,7 @@ value is merely a local path string does not satisfy an output and must be RETRY
 - An outline-stage artifact saved under draft_document is invalid and must be RETRY.
 - For generation/rewrite mode, section_instructions and draft_blocks
   must exist in the selected representation.
+- IR generation also requires visual_plan and resolved_media_assets.
 - For targeted revision mode, document_revision_task, document_locate_result,
   document_modify_plan, document_revision_set, and document_revision_result must exist.
 - A cloud-bound body revision must remain local in this step.

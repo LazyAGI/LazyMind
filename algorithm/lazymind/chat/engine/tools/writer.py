@@ -14,6 +14,7 @@ from lazyllm.tools.writer.data_models import (
     InputResource,
     SectionInstruction,
     TargetDocument,
+    VisualPlan,
     WriterBlock,
     WriterDocument,
     WritingTask,
@@ -21,6 +22,7 @@ from lazyllm.tools.writer.data_models import (
 from lazyllm.tools.writer.tools import (
     WriterContextTools,
     WriterDraftingTools,
+    WriterMultimodalTools,
     WriterPlanningTools,
     WriterQualityTools,
     WriterResourceTools,
@@ -213,9 +215,9 @@ class WriterToolkitBase:
     WRITER_BLOCK_SCHEMA = f'{WRITER_DATA_MODEL_SCHEMA_PREFIX}.writer_ir.WriterBlock'
     __public_apis__: list[str] = []
 
-    def build_writing_task(self, query: str) -> str:
+    def build_writing_task(self, query: str, task_id: str = '') -> str:
         """Build a writing task from the user's original request."""
-        task = WritingTask(query=query, task_type='write')
+        task = WritingTask(task_id=task_id.strip() or None, query=query, task_type='write')
         return _json_dumps(task.model_dump(exclude_defaults=True))
 
     def build_resources(
@@ -265,6 +267,110 @@ class WriterToolkitBase:
                 'meta': {'provider': 'knowledge_base', 'role': 'background'},
             })
         return _json_dumps(resources)
+
+    def collect_available_media(
+        self,
+        writing_task_json: str,
+        input_resources_json: str = '[]',
+        media_store: str = '',
+        use_vision_model: bool = False,
+    ) -> str:
+        """Collect available images through LazyLLM's multimodal writer tools."""
+        root = _temp_root()
+        task_path = _write_input_artifact(
+            root,
+            'writing_task.json',
+            _json_loads(writing_task_json, {}),
+            writer_schema('task.WritingTask'),
+        )
+        resources_path = _write_input_artifact(
+            root,
+            'input_resources.json',
+            _json_loads(input_resources_json, []),
+            writer_schema('task.InputResource'),
+        )
+        artifact_store = Path(media_store.strip()) if media_store.strip() else root
+        artifact_store.mkdir(parents=True, exist_ok=True)
+        result = WriterMultimodalTools(
+            llm=AutoModel(model='vlm') if use_vision_model else None,
+            artifact_store=str(artifact_store),
+        ).collect_available_media(task=task_path, input_resources=resources_path)
+        return _json_dumps({
+            'media_assets': _result_data(result, 'media_assets'),
+            'profile_input_resources': _result_data(result, 'profile_input_resources'),
+            'warnings': (result.get('metadata') or {}).get('warnings') or [],
+        })
+
+    def resolve_visual_needs(
+        self,
+        visual_plan_json: str,
+        media_assets_json: str,
+    ) -> str:
+        """Match visual needs against media already available to the task."""
+        root = _temp_root()
+        visual_plan_path = _write_input_artifact(
+            root,
+            'visual_plan.json',
+            _json_loads(visual_plan_json, {}),
+            writer_schema('multimodal.VisualPlan'),
+        )
+        media_assets_path = _write_input_artifact(
+            root,
+            'media_assets.json',
+            _json_loads(media_assets_json, {}),
+            writer_schema('multimodal.MediaAssetLibrary'),
+        )
+        result = WriterMultimodalTools(
+            llm=AutoModel(model='llm'),
+        ).resolve_visual_needs(
+            visual_plan=visual_plan_path,
+            media_assets=media_assets_path,
+        )
+        return _json_dumps({
+            **result,
+            'media_assets': result['media_assets'].model_dump(),
+        })
+
+    def materialize_acquired_media(
+        self,
+        visual_plan_json: str,
+        media_assets_json: str,
+        acquired_resources_json: str,
+        media_store: str = '',
+    ) -> str:
+        """Validate and bind explicitly acquired media to visual needs."""
+        root = _temp_root()
+        visual_plan_path = _write_input_artifact(
+            root,
+            'visual_plan.json',
+            _json_loads(visual_plan_json, {}),
+            writer_schema('multimodal.VisualPlan'),
+        )
+        media_assets_path = _write_input_artifact(
+            root,
+            'media_assets.json',
+            _json_loads(media_assets_json, {}),
+            writer_schema('multimodal.MediaAssetLibrary'),
+        )
+        acquired_resources_path = _write_input_artifact(
+            root,
+            'acquired_resources.json',
+            _json_loads(acquired_resources_json, {}),
+            'lazyllm.tools.writer.artifacts.acquired_resources',
+        )
+        artifact_store = Path(media_store.strip()) if media_store.strip() else root
+        artifact_store.mkdir(parents=True, exist_ok=True)
+        result = WriterMultimodalTools(
+            artifact_store=str(artifact_store),
+        ).materialize_acquired_media(
+            visual_plan=visual_plan_path,
+            media_assets=media_assets_path,
+            acquired_resources=acquired_resources_path,
+        )
+        return _json_dumps({
+            **result,
+            'media_assets': result['media_assets'].model_dump(),
+        })
 
     def profile_resources(self, writing_task_json: str, user_input: str, resources_json: str = '[]') -> str:
         """Profile writing resources."""
@@ -431,23 +537,51 @@ class WriterToolkitBase:
 
     def generate_section_instructions(
         self,
+        writing_task_json: str,
         outline_json: str,
         writing_context_json: str,
     ) -> str:
         """Generate section instructions from an IR or Markdown outline."""
         root = _temp_root()
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+        )
         outline_path = _write_document_input(root, 'outline', outline_json)
         context_path = _write_input_artifact(
             root, 'writing_context.json', _json_loads(writing_context_json, {}),
             writer_schema('context.WritingContext'),
         )
-        result = WriterPlanningTools(
+        planning = WriterPlanningTools(
             llm=AutoModel(model='llm'), artifact_store=str(root),
-        ).generate_section_instructions(
+        )
+        warnings = []
+        try:
+            visual_result = planning.generate_visual_plan(
+                task=task_path,
+                outline=outline_path,
+                context=context_path,
+            )
+            visual_plan = _primary_data(visual_result)
+            warnings.extend((visual_result.get('metadata') or {}).get('warnings') or [])
+        except Exception as exc:
+            visual_plan = VisualPlan().model_dump()
+            warnings.append(f'Visual planning failed: {type(exc).__name__}: {exc}')
+        visual_plan_path = _write_input_artifact(
+            root,
+            'visual_plan.json',
+            visual_plan,
+            writer_schema('multimodal.VisualPlan'),
+        )
+        result = planning.generate_section_instructions(
             outline=outline_path,
             context=context_path,
+            visual_plan=visual_plan_path,
         )
-        return _json_dumps(_primary_data(result))
+        return _json_dumps({
+            'section_instructions': _primary_data(result),
+            'visual_plan': visual_plan,
+            'warnings': warnings,
+        })
 
     def generate_draft_section(
         self,
@@ -455,6 +589,8 @@ class WriterToolkitBase:
         section_instruction_json: str,
         writing_context_json: str,
         previous_blocks_json: str = '[]',
+        visual_plan_json: str = '',
+        media_assets_json: str = '',
     ) -> str:
         """Generate one draft section in the instruction's representation."""
         root = _temp_root()
@@ -467,6 +603,22 @@ class WriterToolkitBase:
         )
         instruction = SectionInstruction.model_validate(_json_loads(section_instruction_json, {}))
         previous_blocks = _json_loads(previous_blocks_json, [])
+        visual_plan_path = None
+        if visual_plan_json:
+            visual_plan_path = _write_input_artifact(
+                root,
+                'visual_plan.json',
+                _json_loads(visual_plan_json, {}),
+                writer_schema('multimodal.VisualPlan'),
+            )
+        media_assets_path = None
+        if media_assets_json:
+            media_assets_path = _write_input_artifact(
+                root,
+                'media_assets.json',
+                _json_loads(media_assets_json, {}),
+                writer_schema('multimodal.MediaAssetLibrary'),
+            )
         result = WriterDraftingTools(
             llm=AutoModel(model='llm'), artifact_store=str(root),
         ).generate_draft_section(
@@ -474,6 +626,8 @@ class WriterToolkitBase:
             section_instruction=instruction,
             context=context_path,
             previous_blocks=previous_blocks,
+            visual_plan=visual_plan_path,
+            media_assets=media_assets_path,
         )
         return _json_dumps(_primary_data(result))
 
@@ -497,6 +651,8 @@ class WriterToolkitBase:
         writing_task_json: str,
         section_instructions_json: str,
         writing_context_json: str,
+        visual_plan_json: str = '',
+        media_assets_json: str = '',
     ) -> str:
         """Generate every planned draft section in order."""
         instructions_data = _json_loads(section_instructions_json, {})
@@ -514,6 +670,8 @@ class WriterToolkitBase:
                 section_instruction_json=_json_dumps(instruction),
                 writing_context_json=writing_context_json,
                 previous_blocks_json=_json_dumps(blocks),
+                visual_plan_json=visual_plan_json,
+                media_assets_json=media_assets_json,
             ), {})
             blocks.append(block)
         return _json_dumps(blocks)
@@ -957,6 +1115,7 @@ class WriterToolkitBase:
         source_document_json: str,
         target_document_json: str = '',
         target_uri: str = '',
+        media_assets_json: str = '',
     ) -> str:
         """Replace a provider document with the selected WriterDocument."""
         return self._write_document(
@@ -965,6 +1124,7 @@ class WriterToolkitBase:
             source_document_json=source_document_json,
             target_document_json=target_document_json,
             target_uri=target_uri,
+            media_assets_json=media_assets_json,
         )
 
     def append_document(
@@ -973,6 +1133,7 @@ class WriterToolkitBase:
         target_document_json: str = '',
         target_uri: str = '',
         publish_outline: bool = False,
+        media_assets_json: str = '',
     ) -> str:
         """Append a WriterDocument to a provider target."""
         document = WriterDocument.model_validate(_json_loads(content_json, {}))
@@ -987,6 +1148,7 @@ class WriterToolkitBase:
             source_document_json=content_json,
             target_document_json=target_document_json,
             target_uri=target_uri,
+            media_assets_json=media_assets_json,
         )
 
     def _write_document(
@@ -997,6 +1159,7 @@ class WriterToolkitBase:
         source_document_json: str = '',
         target_document_json: str = '',
         target_uri: str = '',
+        media_assets_json: str = '',
     ) -> str:
         root = _temp_root()
         document = WriterDocument.model_validate(_json_loads(content_json, {}))
@@ -1009,10 +1172,13 @@ class WriterToolkitBase:
             raise ValueError('A target provider document is required.')
         publish_document = _set_document_editable(document, stage='final')
         resource = WriterResourceTools(llm=None, artifact_store=str(root))
+        media_assets = (
+            _json_loads(media_assets_json, {}) if media_assets_json.strip() else None
+        )
         write_result = (
-            resource.replace_document(publish_document, target)
+            resource.replace_document(publish_document, target, media_assets)
             if mode == 'replace'
-            else resource.append_to_document(publish_document, target)
+            else resource.append_to_document(publish_document, target, media_assets)
         )
         refreshed = resource.document_to_docir(TargetDocument(
             **target.model_dump(exclude={'meta'}),

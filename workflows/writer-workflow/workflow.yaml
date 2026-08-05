@@ -24,12 +24,14 @@ tool_scripts:
     functions:
       - writer_build_writing_task
       - writer_load_local_document
+      - writer_collect_available_media
       - writer_load_document
       - writer_profile_resources
       - writer_create_writing_context
       - writer_prepare_outline
       - writer_generate_outline
       - writer_generate_section_instructions
+      - writer_resolve_visual_media
       - writer_generate_draft_blocks
       - writer_generate_draft_blocks_markdown
       - writer_generate_draft_document
@@ -49,6 +51,18 @@ steps:
 slots:
   - id: writing_task
     label: Writing Task
+    type: file
+    cardinality: single
+  - id: media_assets
+    label: Available Media
+    type: file
+    cardinality: single
+  - id: resolved_media_assets
+    label: Resolved Media
+    type: file
+    cardinality: single
+  - id: visual_plan
+    label: Visual Plan
     type: file
     cardinality: single
   - id: resource_profiles
@@ -179,6 +193,9 @@ i18n:
       result: {label: 成稿}
     slots:
       writing_task: {label: 写作任务}
+      media_assets: {label: 可用图片素材}
+      resolved_media_assets: {label: 已解析图片素材}
+      visual_plan: {label: 视觉规划}
       resource_profiles: {label: 资源画像}
       writing_context: {label: 写作上下文}
       source_document: {label: 资源文档}
