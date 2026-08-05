@@ -15,9 +15,10 @@ import (
 	adaptercore "lazymind/core/compat/internal/adapters/core"
 	compatknowledge "lazymind/core/compat/knowledge"
 	compatruntime "lazymind/core/compat/runtime"
+	"lazymind/core/doc"
 )
 
-func TestKnowledgeRuntimeWithRealChatSearch(t *testing.T) {
+func TestKnowledgeRuntimeWithRealPureSearch(t *testing.T) {
 	if strings.TrimSpace(os.Getenv("COMPAT_INTEGRATION")) != "1" ||
 		strings.TrimSpace(os.Getenv("COMPAT_KNOWLEDGE_SEARCH_INTEGRATION")) != "1" {
 		t.Skip("set COMPAT_INTEGRATION=1 and COMPAT_KNOWLEDGE_SEARCH_INTEGRATION=1 to run knowledge search integration tests")
@@ -28,7 +29,11 @@ func TestKnowledgeRuntimeWithRealChatSearch(t *testing.T) {
 	}
 	query := strings.TrimSpace(os.Getenv("COMPAT_KNOWLEDGE_SEARCH_QUERY"))
 	if query == "" {
-		query = "请根据指定知识库回答。"
+		t.Fatal("COMPAT_KNOWLEDGE_SEARCH_QUERY is required for pure search integration")
+	}
+	knowledgeID := strings.TrimSpace(os.Getenv("COMPAT_KNOWLEDGE_SEARCH_DATASET_ID"))
+	if knowledgeID == "" {
+		t.Fatal("COMPAT_KNOWLEDGE_SEARCH_DATASET_ID is required so the test can assert dataset.id != kb_id")
 	}
 
 	driver, dsn := dbConfigFromCoreEnv(t)
@@ -46,73 +51,75 @@ func TestKnowledgeRuntimeWithRealChatSearch(t *testing.T) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	acl.InitStore(db)
 
-	tx := db.Begin()
-	if tx.Error != nil {
-		t.Fatalf("begin tx: %v", tx.Error)
+	var ds orm.Dataset
+	if err := db.WithContext(context.Background()).Where("id = ? AND deleted_at IS NULL", knowledgeID).First(&ds).Error; err != nil {
+		t.Fatalf("load dataset %q: %v", knowledgeID, err)
 	}
-	t.Cleanup(func() { _ = tx.Rollback().Error })
+	if strings.TrimSpace(ds.KbID) == "" {
+		t.Fatalf("dataset %q has empty kb_id", knowledgeID)
+	}
+	if ds.KbID == ds.ID {
+		t.Fatalf("integration requires dataset.id != kb_id, both are %q", ds.ID)
+	}
 
-	catalogAdapter, err := adaptercore.NewKnowledgeCatalogAdapterForDB(tx)
-	if err != nil {
-		t.Fatalf("NewKnowledgeCatalogAdapterForDB: %v", err)
-	}
-	rtForCatalog, err := compatruntime.New(compatruntime.Dependencies{KnowledgeCatalog: catalogAdapter})
-	if err != nil {
-		t.Fatalf("Runtime.New catalog: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	callCtx := contract.CallContext{UserID: userID}
-	list, err := rtForCatalog.Knowledge.List(ctx, callCtx, compatknowledge.ListInput{
-		Page: contract.PageRequest{PageSize: contract.DefaultPageSize},
-	})
-	if err != nil {
-		t.Fatalf("Knowledge.List: %v", err)
-	}
-	if len(list.Items) == 0 {
-		t.Fatalf("Knowledge.List returned no datasets for user %q", userID)
-	}
-	knowledgeID := list.Items[0].ID
-
-	searchAdapter, err := adaptercore.NewKnowledgeSearchAdapterForDB(tx, common.ChatServiceEndpoint())
+	searchAdapter, err := adaptercore.NewKnowledgeSearchAdapterForDB(db.DB, common.ChatServiceEndpoint())
 	if err != nil {
 		t.Fatalf("NewKnowledgeSearchAdapterForDB: %v", err)
 	}
-	rt, err := compatruntime.New(compatruntime.Dependencies{KnowledgeSearch: searchAdapter})
+	docService, err := doc.NewDocumentService(doc.DocumentServiceDeps{DB: db.DB})
+	if err != nil {
+		t.Fatalf("NewDocumentService: %v", err)
+	}
+	documentAdapter, err := adaptercore.NewKnowledgeDocumentAdapter(docService)
+	if err != nil {
+		t.Fatalf("NewKnowledgeDocumentAdapter: %v", err)
+	}
+	rt, err := compatruntime.New(compatruntime.Dependencies{
+		KnowledgeSearch:   searchAdapter,
+		KnowledgeDocument: documentAdapter,
+	})
 	if err != nil {
 		t.Fatalf("Runtime.New search: %v", err)
 	}
-	if rt.Knowledge == nil {
-		t.Fatal("Runtime.Knowledge is nil")
-	}
 
-	result, err := rt.Knowledge.Search(ctx, callCtx, compatknowledge.SearchInput{
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	result, err := rt.Knowledge.Search(ctx, contract.CallContext{UserID: userID}, compatknowledge.SearchInput{
 		Query:        query,
 		KnowledgeIDs: []string{knowledgeID},
+		TopK:         10,
 	})
 	if err != nil {
 		t.Fatalf("Knowledge.Search: %v", err)
 	}
-	if strings.TrimSpace(result.Answer) == "" {
-		t.Fatalf("Knowledge.Search returned empty answer")
+	if result.Hits == nil {
+		t.Fatalf("Knowledge.Search returned nil Hits")
 	}
-	if strings.TrimSpace(result.ConversationID) == "" || strings.TrimSpace(result.MessageID) == "" {
-		t.Fatalf("missing conversation/message id: %#v", result)
+	if len(result.Hits) == 0 {
+		t.Fatalf("Knowledge.Search returned no hits")
 	}
-	for _, source := range result.Sources {
-		if source.KnowledgeID != "" && source.KnowledgeID != knowledgeID {
-			t.Fatalf("source escaped requested knowledge id: %#v", source)
-		}
-		raw, err := json.Marshal(source)
-		if err != nil {
-			t.Fatalf("marshal source: %v", err)
-		}
-		lower := strings.ToLower(string(raw))
-		for _, forbidden := range []string{"local_path", "stored_path", "parse_stored_path", "metadata", "global_metadata", "lazyllm_doc_id", "docid"} {
-			if strings.Contains(lower, forbidden) {
-				t.Fatalf("source leaked %q: %s", forbidden, raw)
-			}
+	first := result.Hits[0]
+	if first.KnowledgeID != knowledgeID {
+		t.Fatalf("hit knowledge id = %q, want %q", first.KnowledgeID, knowledgeID)
+	}
+	if strings.TrimSpace(first.DocumentID) == "" {
+		t.Fatalf("hit did not map to Core document id: %#v", first)
+	}
+	if _, err := rt.Knowledge.GetDocument(ctx, contract.CallContext{UserID: userID}, compatknowledge.GetDocumentInput{
+		KnowledgeID: first.KnowledgeID,
+		DocumentID:  first.DocumentID,
+	}); err != nil {
+		t.Fatalf("GetDocument with search hit document id: %v", err)
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	lower := strings.ToLower(string(raw))
+	for _, forbidden := range []string{"answer", "conversation", "message_id", "local_path", "stored_path", "parse_stored_path", "metadata", "global_metadata", "lazyllm_doc_id", "docid"} {
+		if strings.Contains(lower, `"`+forbidden+`"`) {
+			t.Fatalf("search result leaked %q: %s", forbidden, raw)
 		}
 	}
-	t.Logf("Knowledge Search integration driver=%s knowledge_id=%s answer_len=%d source_count=%d", driver, knowledgeID, len(result.Answer), len(result.Sources))
+	t.Logf("Knowledge pure search integration driver=%s dataset_id=%s kb_id=%s hit_count=%d", driver, ds.ID, ds.KbID, len(result.Hits))
 }

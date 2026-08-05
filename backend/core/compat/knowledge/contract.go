@@ -83,23 +83,21 @@ type DocumentChunk struct {
 }
 
 type SearchInput struct {
-	Query          string
-	KnowledgeIDs   []string
-	ConversationID string
+	Query        string
+	KnowledgeIDs []string
+	TopK         int
 }
 
 type SearchResult struct {
-	Answer         string
-	Sources        []SearchSource
-	ConversationID string
-	MessageID      string
+	Hits []SearchHit
 }
 
-type SearchSource struct {
+type SearchHit struct {
 	KnowledgeID string
 	DocumentID  string
 	ChunkID     string
-	Title       string
 	Text        string
-	Number      int
+	Score       float64
+	SourceURL   string
+	Title       string
 }

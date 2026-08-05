@@ -19,6 +19,11 @@ type FacadeDeps struct {
 	Search   SearchPort
 }
 
+const (
+	DefaultSearchTopK = 10
+	MaxSearchTopK     = 50
+)
+
 func NewFacade(port CatalogPort) (*Facade, error) {
 	if port == nil {
 		return nil, contract.NewError(contract.Internal, "knowledge.facade.new", "catalog port is required", false, nil)
@@ -124,11 +129,21 @@ func (f *Facade) Search(ctx context.Context, callCtx contract.CallContext, input
 	if len(input.KnowledgeIDs) == 0 {
 		return SearchResult{}, contract.InvalidArgumentError("knowledge.search", "knowledge_ids is required")
 	}
-	input.ConversationID = strings.TrimSpace(input.ConversationID)
+	input.TopK = normalizeSearchTopK(input.TopK)
 	if f.search == nil {
 		return SearchResult{}, contract.NewError(contract.Unsupported, "knowledge.search", "knowledge search is not configured", false, nil)
 	}
 	return f.search.Search(ctx, callCtx, input)
+}
+
+func normalizeSearchTopK(topK int) int {
+	if topK <= 0 {
+		return DefaultSearchTopK
+	}
+	if topK > MaxSearchTopK {
+		return MaxSearchTopK
+	}
+	return topK
 }
 
 func normalizeKnowledgeIDs(ids []string) []string {

@@ -51,7 +51,7 @@ func (stubKnowledgeDocumentPort) ListDocumentChunks(context.Context, contract.Ca
 type stubKnowledgeSearchPort struct{}
 
 func (stubKnowledgeSearchPort) Search(context.Context, contract.CallContext, knowledge.SearchInput) (knowledge.SearchResult, error) {
-	return knowledge.SearchResult{Answer: "answer", ConversationID: "conv-1", MessageID: "msg-1"}, nil
+	return knowledge.SearchResult{Hits: []knowledge.SearchHit{{KnowledgeID: "ds-1", DocumentID: "doc-1", Text: "hit"}}}, nil
 }
 
 func TestNewCreatesSkillFacadeWhenPortProvided(t *testing.T) {
@@ -129,7 +129,7 @@ func TestNewCreatesKnowledgeFacadeWhenSearchProvided(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
 	}
-	if got.Answer != "answer" || got.ConversationID != "conv-1" || got.MessageID != "msg-1" {
+	if len(got.Hits) != 1 || got.Hits[0].DocumentID != "doc-1" {
 		t.Fatalf("Search = %#v", got)
 	}
 }

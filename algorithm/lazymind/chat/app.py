@@ -10,6 +10,7 @@ from lazymind.chat.api import (
     generate_plugin_routes,
     generate_plugin_staged_routes,
     health_routes,
+    knowledge_search_routes,
     model_check_routes,
     model_features_routes,
     plugin_routes,
@@ -31,6 +32,7 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
 
     if not config['enable_router']:
         app.include_router(chat_routes.router)
+        app.include_router(knowledge_search_routes.router)
         app.include_router(subagent_routes.router)
 
     if not config['router_child_proxied_only']:

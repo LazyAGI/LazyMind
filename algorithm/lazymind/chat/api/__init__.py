@@ -6,6 +6,7 @@ from . import (
     generate_plugin_routes,
     generate_plugin_staged_routes,
     health_routes,
+    knowledge_search_routes,
     model_check_routes,
     model_features_routes,
 )
@@ -16,6 +17,7 @@ __all__ = [
     'generate_plugin_routes',
     'generate_plugin_staged_routes',
     'health_routes',
+    'knowledge_search_routes',
     'model_check_routes',
     'model_features_routes',
 ]

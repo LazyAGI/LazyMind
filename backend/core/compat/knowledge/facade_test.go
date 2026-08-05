@@ -359,31 +359,39 @@ func TestFacadeSearchValidationAndUnsupported(t *testing.T) {
 
 func TestFacadeSearchNormalizesInputAndReturnsResult(t *testing.T) {
 	port := &fakeSearchPort{result: SearchResult{
-		Answer:         "answer",
-		ConversationID: "conv-1",
-		MessageID:      "msg-1",
-		Sources:        []SearchSource{{KnowledgeID: "ds-1", Text: "source"}},
+		Hits: []SearchHit{{KnowledgeID: "ds-1", DocumentID: "doc-1", Text: "source", Score: 0.8}},
 	}}
 	facade := mustKnowledgeFacadeWithDeps(t, FacadeDeps{Search: port})
 	result, err := facade.Search(context.Background(), contract.CallContext{UserID: " user "}, SearchInput{
-		Query:          "  hello  ",
-		KnowledgeIDs:   []string{" ds-1 ", "", "ds-2", "ds-1"},
-		ConversationID: " conv-1 ",
+		Query:        "  hello  ",
+		KnowledgeIDs: []string{" ds-1 ", "", "ds-2", "ds-1"},
+		TopK:         500,
 	})
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
 	}
-	if result.Answer != "answer" || result.ConversationID != "conv-1" || len(result.Sources) != 1 {
+	if len(result.Hits) != 1 || result.Hits[0].DocumentID != "doc-1" || result.Hits[0].Score != 0.8 {
 		t.Fatalf("unexpected result: %#v", result)
 	}
 	if port.calls != 1 || port.callCtx.UserID != "user" {
 		t.Fatalf("unexpected search calls=%d callCtx=%#v", port.calls, port.callCtx)
 	}
-	if port.input.Query != "hello" || port.input.ConversationID != "conv-1" {
+	if port.input.Query != "hello" || port.input.TopK != MaxSearchTopK {
 		t.Fatalf("input not normalized: %#v", port.input)
 	}
 	if len(port.input.KnowledgeIDs) != 2 || port.input.KnowledgeIDs[0] != "ds-1" || port.input.KnowledgeIDs[1] != "ds-2" {
 		t.Fatalf("knowledge ids not normalized: %#v", port.input.KnowledgeIDs)
+	}
+}
+
+func TestFacadeSearchDefaultTopK(t *testing.T) {
+	port := &fakeSearchPort{result: SearchResult{Hits: []SearchHit{}}}
+	facade := mustKnowledgeFacadeWithDeps(t, FacadeDeps{Search: port})
+	if _, err := facade.Search(context.Background(), contract.CallContext{UserID: "user"}, SearchInput{Query: "q", KnowledgeIDs: []string{"ds-1"}, TopK: -1}); err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if port.input.TopK != DefaultSearchTopK {
+		t.Fatalf("TopK = %d, want default %d", port.input.TopK, DefaultSearchTopK)
 	}
 }
 
