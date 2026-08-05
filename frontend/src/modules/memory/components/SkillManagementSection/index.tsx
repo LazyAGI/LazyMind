@@ -10,6 +10,7 @@ import { useMemoryManagementOutletContext } from "../../context";
 import type { SkillViewMode, StructuredAsset } from "../../shared";
 import type { MarketSkillAsset } from "./skillMarketMockData";
 import {
+  deleteSkillMarketItem,
   getSkillMarketItem,
   installSkillFromMarket,
   listBuiltinSkills,
@@ -24,7 +25,9 @@ import {
 } from "../../skillApi";
 import SkillAdminPublishModal from "./SkillAdminPublishModal";
 import SkillInstalledView from "./SkillInstalledView";
-import SkillManagementToolbar from "./SkillManagementToolbar";
+import SkillManagementToolbar, {
+  type SkillOrganizeStatus,
+} from "./SkillManagementToolbar";
 import SkillMarketView from "./SkillMarketView";
 import SkillTrashedView from "./SkillTrashedView";
 import {
@@ -40,7 +43,6 @@ import "./index.scss";
 
 const DEFAULT_MARKET_PAGE_SIZE = 8;
 const MAX_SKILL_ORGANIZE_SELECTION = 20;
-
 export default function SkillManagementSection() {
   const listContentRef = useRef<HTMLDivElement>(null);
   const marketRequestIdRef = useRef(0);
@@ -49,6 +51,7 @@ export default function SkillManagementSection() {
   const [newPluginOpen, setNewPluginOpen] = useState(false);
   const [organizeMode, setOrganizeMode] = useState(false);
   const [organizeSubmitting, setOrganizeSubmitting] = useState(false);
+  const [organizeStatus, setOrganizeStatus] = useState<SkillOrganizeStatus>("idle");
   const [selectedOrganizeSkills, setSelectedOrganizeSkills] = useState<
     Map<string, StructuredAsset>
   >(new Map());
@@ -70,6 +73,7 @@ export default function SkillManagementSection() {
   const [marketListPageSize, setMarketListPageSize] = useState(DEFAULT_MARKET_PAGE_SIZE);
   const [marketListTotal, setMarketListTotal] = useState(0);
   const [marketInstallingId, setMarketInstallingId] = useState<string>();
+  const [marketDeletingId, setMarketDeletingId] = useState<string>();
   const [trashAssets, setTrashAssets] = useState<StructuredAsset[]>([]);
   const [trashLoading, setTrashLoading] = useState(false);
   const [trashListPage, setTrashListPage] = useState(1);
@@ -94,8 +98,6 @@ export default function SkillManagementSection() {
     genericColumns,
     skillView,
     setSkillView,
-    installedSkillSource,
-    setInstalledSkillSource,
     marketSkillSource,
     setMarketSkillSource,
     marketCategory,
@@ -399,21 +401,29 @@ export default function SkillManagementSection() {
   const manualSkillReviewButtonDisabled =
     manualSkillReviewLoading ||
     manualSkillReviewButtonBusy ||
+    organizeMode ||
+    organizeSubmitting ||
     manualSkillReviewCount <= 0;
-  const manualSkillReviewDisabledReason = manualSkillReviewLoading
-    ? t("admin.memorySkillReviewDisabledLoading")
+  const manualSkillReviewDisabledReason = organizeMode || organizeSubmitting
+    ? t("admin.memorySkillReviewDisabledOrganizeRunning")
+    : manualSkillReviewLoading
+      ? t("admin.memorySkillReviewDisabledLoading")
+      : manualSkillReviewButtonBusy
+        ? t("admin.memorySkillReviewDisabledRunning")
+        : manualSkillReviewCount <= 0
+          ? t("admin.memorySkillReviewDisabledEmpty")
+          : undefined;
+  const organizeDisabledReason = organizeSubmitting
+    ? t("admin.memorySkillOrganizeTaskRunning")
     : manualSkillReviewButtonBusy
-      ? t("admin.memorySkillReviewDisabledRunning")
-      : manualSkillReviewCount <= 0
-        ? t("admin.memorySkillReviewDisabledEmpty")
-        : undefined;
+      ? t("admin.memorySkillOrganizeDisabledReviewRunning")
+      : undefined;
 
   const tableScroll = memoryTableBodyHeight
     ? { x: 1070, y: memoryTableBodyHeight }
     : { x: 1070 };
 
   const handleInstalledReset = () => {
-    setInstalledSkillSource("all");
     resetFilters();
   };
 
@@ -556,74 +566,56 @@ export default function SkillManagementSection() {
     }
   };
 
-  const handleOrganizeSubmit = () => {
+  const handleOrganizeSubmit = async () => {
     const skills = [...selectedOrganizeSkills.values()];
     if (skills.length === 0 || organizeSubmitting) {
       return;
     }
 
-    Modal.confirm({
-      title: t("admin.memorySkillOrganizeConfirmTitle", {
-        count: skills.length,
-      }),
-      content: t("admin.memorySkillOrganizeConfirmContent"),
-      okText: t("admin.memorySkillOrganizeConfirmSubmit"),
-      cancelText: t("common.cancel"),
-      onOk: async () => {
-        organizePollingControllerRef.current?.abort();
-        const pollingController = new AbortController();
-        organizePollingControllerRef.current = pollingController;
-        setOrganizeSubmitting(true);
-        try {
-          const result = await organizeSkills(
-            skills.map((skill) => `skills/${skill.category}/${skill.name}`),
-          );
-          if (!result.requestId || !result.taskId) {
-            throw new Error("Skill organize task was not accepted");
-          }
-          const task = await waitForSkillOrganize(
-            result.requestId,
-            pollingController.signal,
-          );
-          if (task.status === "failed") {
-            throw new Error("Skill organize task failed");
-          }
-          if (task.status === "skipped") {
-            message.warning(t("admin.memorySkillOrganizeSkipped"));
-            cancelSkillOrganize();
-            return;
-          }
-          await refreshSkillAssets({ page: skillListPage });
-          message.success(
-            t("admin.memorySkillOrganizeSuccess", { count: skills.length }),
-          );
-          cancelSkillOrganize();
-        } catch (error) {
-          if (pollingController.signal.aborted) {
-            return;
-          }
-          console.error("Skill organize task failed:", error);
-          const reasonCode = String(
-            (error as { response?: { data?: { data?: { code?: unknown } } } })
-              ?.response?.data?.data?.code ?? "",
-          );
-          if (reasonCode === "skill_organize_draft_conflict") {
-            message.error(t("admin.memorySkillOrganizeDraftConflict"));
-          } else if (reasonCode === "skill_maintenance_task_running") {
-            message.error(t("admin.memorySkillOrganizeTaskRunning"));
-          } else {
-            message.error(t("admin.memorySkillOrganizeFailed"));
-          }
-        } finally {
-          if (organizePollingControllerRef.current === pollingController) {
-            organizePollingControllerRef.current = null;
-          }
-          if (!pollingController.signal.aborted) {
-            setOrganizeSubmitting(false);
-          }
-        }
-      },
-    });
+    organizePollingControllerRef.current?.abort();
+    const pollingController = new AbortController();
+    organizePollingControllerRef.current = pollingController;
+    setOrganizeSubmitting(true);
+    setOrganizeStatus("running");
+    // Exit selection mode immediately so the page stays usable while the
+    // organize task runs in the background.
+    cancelSkillOrganize();
+
+    try {
+      const result = await organizeSkills(
+        skills.map((skill) => `skills/${skill.category}/${skill.name}`),
+      );
+      if (!result.requestId || !result.taskId) {
+        throw new Error("Skill organize task was not accepted");
+      }
+
+      const task = await waitForSkillOrganize(
+        result.requestId,
+        pollingController.signal,
+      );
+      if (task.status === "failed") {
+        throw new Error("Skill organize task failed");
+      }
+      if (task.status === "skipped") {
+        setOrganizeStatus("skipped");
+        return;
+      }
+      await refreshSkillAssets({ page: skillListPage });
+      setOrganizeStatus("success");
+    } catch (error) {
+      if (pollingController.signal.aborted) {
+        return;
+      }
+      console.error("Skill organize task failed:", error);
+      setOrganizeStatus("error");
+    } finally {
+      if (organizePollingControllerRef.current === pollingController) {
+        organizePollingControllerRef.current = null;
+      }
+      if (!pollingController.signal.aborted) {
+        setOrganizeSubmitting(false);
+      }
+    }
   };
 
   const handleMarketInstall = (item: StructuredAsset) => {
@@ -697,6 +689,57 @@ export default function SkillManagementSection() {
       }
       openModal("view", item, { skipSkillDetailLoad: true });
     })();
+  };
+
+  const handleMarketDelete = (item: StructuredAsset) => {
+    const marketItem = item as MarketSkillAsset;
+    if (!isAdmin || marketItem.marketSource !== "admin" || marketDeletingId) {
+      return;
+    }
+    const marketItemId = marketItem.marketItemId || item.id;
+    if (!marketItemId) {
+      return;
+    }
+
+    Modal.confirm({
+      title: t("admin.memorySkillMarketDeleteConfirmTitle"),
+      content: t("admin.memorySkillMarketDeleteConfirmContent"),
+      okText: t("common.delete"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setMarketDeletingId(marketItemId);
+        try {
+          const deleted = await deleteSkillMarketItem(marketItemId);
+          if (!deleted) {
+            throw new Error("Skill market delete was not confirmed");
+          }
+
+          const nextTotal = Math.max(0, marketListTotal - 1);
+          const lastPage = Math.max(1, Math.ceil(nextTotal / marketListPageSize));
+          setMarketCatalogAssets((previous) =>
+            previous.filter(
+              (asset) => (asset.marketItemId || asset.id) !== marketItemId,
+            ),
+          );
+          setMarketListTotal(nextTotal);
+
+          await loadMarketTags();
+          if (marketListPage > lastPage) {
+            setMarketListPage(lastPage);
+          } else {
+            await loadMarketCatalog();
+          }
+          message.success(t("admin.memorySkillMarketDeleteSuccess"));
+        } catch (error) {
+          console.error("Delete market skill failed:", error);
+          message.error(t("admin.memorySkillMarketDeleteFailed"));
+          throw error;
+        } finally {
+          setMarketDeletingId(undefined);
+        }
+      },
+    });
   };
 
   const installingUid = marketInstallingId || [...builtinSkillEnableLoading][0];
@@ -797,11 +840,17 @@ export default function SkillManagementSection() {
         trashCount={trashListTotal}
         onCreateSkill={openSkillCreateModal}
         organizeMode={organizeMode}
+        organizeStatus={organizeStatus}
+        organizeDisabledReason={organizeDisabledReason}
         organizeDisabled={
-          skillLoading || manualSkillReviewButtonBusy || skillListTotal <= 0
+          skillLoading ||
+          organizeSubmitting ||
+          manualSkillReviewButtonBusy ||
+          skillListTotal <= 0
         }
         onOrganizeSkills={() => {
           setSelectedOrganizeSkills(new Map());
+          setOrganizeStatus("idle");
           setOrganizeMode(true);
         }}
         manualSkillReviewCount={manualSkillReviewCount}
@@ -833,8 +882,6 @@ export default function SkillManagementSection() {
           onCategoryChange={setCategory}
           categories={availableCategories}
           categoriesLoading={skillCategoriesLoading}
-          source={installedSkillSource}
-          onSourceChange={setInstalledSkillSource}
           onReset={handleInstalledReset}
           organizeMode={organizeMode}
           organizeLoading={organizeSubmitting}
@@ -862,9 +909,12 @@ export default function SkillManagementSection() {
             loading={marketCatalogLoading}
             skillAssets={marketSkillAssets}
             installedSkills={skillAssets}
+            isAdmin={isAdmin}
             onInstall={handleMarketInstall}
             onDetail={handleMarketDetail}
+            onDelete={handleMarketDelete}
             installingUid={installingUid}
+            deletingUid={marketDeletingId}
             page={marketListPage}
             pageSize={marketListPageSize}
             total={marketListTotal}

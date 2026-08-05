@@ -176,18 +176,6 @@ export function useFeishuOAuthFlow({
     const reauthorizeConnectionId = options?.reauthorizeConnectionId?.trim();
 
     try {
-      setAccounts((current) =>
-        current.map((item) =>
-          item.id === account.id
-            ? {
-                ...item,
-                status: "waiting" as OAuthState,
-                updatedAt: new Date().toISOString(),
-              }
-            : item,
-        ),
-      );
-
       const authorizeUrl = reauthorizeConnectionId
         ? await requestFeishuDataSourceAuthorizeUrl({
             tenantId: getScanTenantId(),
@@ -212,6 +200,18 @@ export function useFeishuOAuthFlow({
         accountId: account.id,
         appId: account.appId,
       };
+
+      setAccounts((current) =>
+        current.map((item) =>
+          item.id === account.id
+            ? {
+                ...item,
+                status: "waiting" as OAuthState,
+                updatedAt: new Date().toISOString(),
+              }
+            : item,
+        ),
+      );
 
       if (reauthorizeConnectionId) {
         window.location.assign(authorizeUrl);

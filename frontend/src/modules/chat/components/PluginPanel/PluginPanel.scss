@@ -9,15 +9,27 @@
   transition: border-color 0.2s;
 
   &--expanded {
+    // Fit content height instead of stretching to the full viewport;
+    // only grow up to the available area, then scroll the body.
     position: absolute;
-    inset: 16px calc(clamp(320px, 27vw, 440px) + 16px) 16px 16px;
+    top: 16px;
+    left: 16px;
+    right: calc(clamp(320px, 27vw, 440px) + 16px);
+    bottom: auto;
+    max-height: calc(100% - 32px);
     z-index: 100;
     border-color: #dbe4f0;
     border-radius: 12px;
     box-shadow: 0 8px 28px rgba(15, 23, 42, 0.1);
 
+    .plugin-panel__header,
+    .plugin-panel__tabs,
+    .plugin-panel__footer {
+      flex-shrink: 0;
+    }
+
     .plugin-panel__body {
-      flex: 1;
+      flex: 1 1 auto;
       min-height: 0;
       max-height: none;
       overflow: auto;
@@ -1448,6 +1460,61 @@
     &:hover .plugin-slot__drag-handle--overlay {
       opacity: 1;
     }
+  }
+
+  // antd Image wrapper — keep layout identical to native <img>
+  &__image-antd {
+    display: block;
+    max-width: 100%;
+    cursor: pointer;
+    border-radius: 6px;
+    overflow: hidden;
+
+    .ant-image-img {
+      display: block;
+      max-width: 100%;
+      border-radius: 6px;
+    }
+
+    .ant-image-mask {
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.45);
+      color: #fff;
+    }
+
+    &--card {
+      width: 100%;
+      height: 140px;
+      border-radius: 10px;
+
+      .ant-image-img {
+        width: 100%;
+        height: 140px;
+        object-fit: cover;
+        border-radius: 10px;
+      }
+
+      .ant-image-mask {
+        border-radius: 10px;
+      }
+    }
+  }
+
+  &__image-preview-mask {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    user-select: none;
+  }
+
+  &__image-preview-mask-icon {
+    font-size: 16px;
   }
 
   // Top-right action group (upload + delete buttons)

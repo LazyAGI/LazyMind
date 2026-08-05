@@ -274,7 +274,7 @@ const NewChatPage = () => {
   };
 
   return (
-    <div>
+    <div className="new-chat-page">
       {}
       {chatLayoutMounted && (
         <div style={{ display: isChatContent ? "block" : "none" }}>

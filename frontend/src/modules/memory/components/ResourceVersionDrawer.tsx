@@ -215,6 +215,13 @@ const getContentLines = (content: string) =>
     text: text || " ",
   }));
 
+const isDiffHunkHeader = (text: string) =>
+  /^@@\s*-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@(?:\s.*)?$/.test(text.trim());
+
+const mapHistoricalSkillDiffLines = (
+  lines: Parameters<typeof mapDiffEntryLines>[0],
+) => mapDiffEntryLines(lines).filter((line) => !isDiffHunkHeader(line.text));
+
 function VersionContentPanel({
   label,
   content,
@@ -922,7 +929,9 @@ export default function ResourceVersionDrawer({
     }
 
     if (selectedDiffFile.diffEntryLines.length) {
-      setSelectedDiffLines(mapDiffEntryLines(selectedDiffFile.diffEntryLines));
+      setSelectedDiffLines(
+        mapHistoricalSkillDiffLines(selectedDiffFile.diffEntryLines),
+      );
       setDiffLoading(false);
       setDiffError("");
       return undefined;
@@ -982,7 +991,7 @@ export default function ResourceVersionDrawer({
           return;
         }
 
-        setSelectedDiffLines(mapDiffEntryLines(file.diffEntryLines));
+        setSelectedDiffLines(mapHistoricalSkillDiffLines(file.diffEntryLines));
       } catch (error) {
         if (!ignore && diffRequestIdRef.current === requestId) {
           console.error("Load revision diff file failed:", error);

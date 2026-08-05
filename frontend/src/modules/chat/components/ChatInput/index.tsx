@@ -400,6 +400,8 @@ export interface ChatFileList {
   uid: string;
   name: string;
   base64: string;
+  /** Local object URL or data URL for preview / open. */
+  previewUrl?: string;
   suffix: string;
   size: string;
 }
@@ -542,7 +544,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     );
 
     const clearMultiData = useCallback(() => {
-      setFileList([]);
+      setFileList((prev) => {
+        prev.forEach((item) => {
+          if (item.previewUrl?.startsWith("blob:")) {
+            URL.revokeObjectURL(item.previewUrl);
+          }
+        });
+        return [];
+      });
       fileListRef.current?.clear();
       setTimeout(() => onHeightChange?.(), 0);
     }, [onHeightChange]);
@@ -661,29 +670,49 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           .toLowerCase();
 
         const tempImgData = allowedImageTypes.includes(suffix);
-        const obj = {
+        const obj: ChatFileList = {
           name: list[i].name,
           uid: list[i].uid,
           suffix,
           size: formatFileSize(list[i].size),
           base64: "",
+          previewUrl: "",
         };
         if (tempImgData) {
           const res = await fileToBase64(list[i]);
-          obj["base64"] = res as string;
+          obj.base64 = res as string;
+          obj.previewUrl = obj.base64;
         } else {
-          obj["base64"] = "";
+          obj.base64 = "";
+          // Object URL lets users open/preview non-image attachments on click.
+          obj.previewUrl = URL.createObjectURL(list[i]);
         }
         data.push(obj);
       }
-      setFileList(data);
+      setFileList((prev) => {
+        prev.forEach((item) => {
+          if (
+            item.previewUrl &&
+            item.previewUrl.startsWith("blob:") &&
+            !data.some((next) => next.previewUrl === item.previewUrl)
+          ) {
+            URL.revokeObjectURL(item.previewUrl);
+          }
+        });
+        return data;
+      });
       setTimeout(() => onHeightChange?.(), 0);
     };
 
     const removeImage = (uid: string) => {
       fileListRef.current?.removeFile(uid);
-      const list = [...fileList].filter((item) => item.uid !== uid);
-      setFileList(list);
+      setFileList((prev) => {
+        const target = prev.find((item) => item.uid === uid);
+        if (target?.previewUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(target.previewUrl);
+        }
+        return prev.filter((item) => item.uid !== uid);
+      });
       setTimeout(() => onHeightChange?.(), 0);
     };
 
@@ -1105,8 +1134,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           <button
                             type="button"
                             onClick={() => {
-                              setAddMenuOpen(false);
+                              if (fileList.length >= MAX_UPLOAD_FILES) {
+                                message.warning(t("chat.maxFilesWarning"));
+                                setAddMenuOpen(false);
+                                return;
+                              }
+                              // Open the file picker while still inside the
+                              // user gesture, then close the popover.
                               fileListRef.current?.openFileDialog();
+                              setAddMenuOpen(false);
                             }}
                           >
                             <PaperClipOutlined />

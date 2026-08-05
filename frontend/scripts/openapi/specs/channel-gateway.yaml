@@ -1,0 +1,431 @@
+openapi: 3.0.3
+info:
+  title: LazyMind Channel Gateway
+  description: APIs for connecting and managing external chat channel accounts.
+  version: 0.1.0
+tags:
+  - name: ChannelAccounts
+    description: Connected external chat channel accounts.
+  - name: ConnectionSessions
+    description: QR-code connection session lifecycle.
+paths:
+  /api/channel-gateway/v1/channel-accounts:
+    get:
+      tags:
+        - ChannelAccounts
+      summary: List channel accounts
+      operationId: listChannelAccounts
+      parameters:
+        - name: provider
+          in: query
+          required: true
+          description: External chat channel provider identifier.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 32
+      responses:
+        "200":
+          description: Connected accounts for the requested provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountListView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+  /api/channel-gateway/v1/channel-accounts/{account_id}:
+    delete:
+      tags:
+        - ChannelAccounts
+      summary: Disconnect a channel account
+      operationId: disconnectChannelAccount
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+      responses:
+        "204":
+          description: Account disconnected.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/channel-gateway/v1/connection-sessions:
+    post:
+      tags:
+        - ConnectionSessions
+      summary: Create a connection session
+      operationId: createConnectionSession
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional key used to make session creation idempotent.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectionSessionCreate"
+      responses:
+        "201":
+          description: Connection session created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionSessionView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+  /api/channel-gateway/v1/connection-sessions/{session_id}:
+    get:
+      tags:
+        - ConnectionSessions
+      summary: Get a connection session
+      operationId: getConnectionSession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Current connection session state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionSessionView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags:
+        - ConnectionSessions
+      summary: Cancel a connection session
+      operationId: cancelConnectionSession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "204":
+          description: Connection session canceled.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/channel-gateway/v1/connection-sessions/{session_id}:submit-challenge:
+    post:
+      tags:
+        - ConnectionSessions
+      summary: Submit a connection challenge
+      operationId: submitConnectionChallenge
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectionChallengeSubmit"
+      responses:
+        "200":
+          description: Updated connection session state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionSessionView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/InvalidRequest"
+  /api/channel-gateway/v1/connection-sessions/{session_id}:refresh:
+    post:
+      tags:
+        - ConnectionSessions
+      summary: Refresh a connection session
+      operationId: refreshConnectionSession
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Refreshed connection session state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionSessionView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+components:
+  parameters:
+    AccountId:
+      name: account_id
+      in: path
+      required: true
+      description: Channel account identifier.
+      schema:
+        type: string
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      description: Connection session identifier.
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: The request cannot be completed in the current state.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/GatewayErrorResponse"
+    Unauthorized:
+      description: The user is not authenticated.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/GatewayErrorResponse"
+    NotFound:
+      description: The requested account or session does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/GatewayErrorResponse"
+    Conflict:
+      description: The request conflicts with the current resource state.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/GatewayErrorResponse"
+    InvalidRequest:
+      description: The request parameters or body are invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/GatewayErrorResponse"
+  schemas:
+    ConnectionSessionCreate:
+      type: object
+      required:
+        - provider
+      properties:
+        provider:
+          type: string
+          minLength: 1
+          maxLength: 32
+          description: External chat channel provider identifier.
+    ConnectionChallengeSubmit:
+      type: object
+      required:
+        - value
+      properties:
+        type:
+          type: string
+          default: numeric_code
+          maxLength: 32
+          description: Challenge type expected by the provider.
+        value:
+          type: string
+          minLength: 1
+          maxLength: 12
+          description: Challenge response entered by the user.
+    QRCodeView:
+      type: object
+      required:
+        - payload
+        - version
+        - expires_at
+      properties:
+        payload:
+          type: string
+        version:
+          type: integer
+        expires_at:
+          type: string
+    ChallengeView:
+      type: object
+      required:
+        - type
+        - prompt
+        - input_mode
+      properties:
+        type:
+          type: string
+        prompt:
+          type: string
+        input_mode:
+          type: string
+    AccountView:
+      type: object
+      required:
+        - id
+        - provider
+        - label
+        - status
+        - runtime_status
+        - connected_at
+        - last_poll_at
+        - last_message_at
+        - last_error
+        - updated_at
+      properties:
+        id:
+          type: string
+        provider:
+          type: string
+        label:
+          type: string
+        status:
+          type: string
+          enum:
+            - provisioning
+            - connected
+            - disconnected
+        runtime_status:
+          type: string
+          enum:
+            - stopped
+            - starting
+            - running
+            - degraded
+            - failed
+        connected_at:
+          type: string
+          nullable: true
+        last_poll_at:
+          type: string
+          nullable: true
+        last_message_at:
+          type: string
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+    SessionErrorView:
+      type: object
+      required:
+        - code
+        - message
+        - retryable
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+    ConnectionSessionView:
+      type: object
+      required:
+        - id
+        - provider
+        - mode
+        - status
+        - revision
+        - message
+        - qr
+        - challenge
+        - poll_after_ms
+        - allowed_actions
+        - account
+        - error
+      properties:
+        id:
+          type: string
+        provider:
+          type: string
+        mode:
+          type: string
+          enum:
+            - qr_code
+        status:
+          type: string
+          enum:
+            - preparing
+            - waiting_scan
+            - scanned
+            - verification_required
+            - confirming
+            - connected
+            - expired
+            - canceled
+            - failed
+        revision:
+          type: integer
+        message:
+          type: string
+        qr:
+          allOf:
+            - $ref: "#/components/schemas/QRCodeView"
+          nullable: true
+        challenge:
+          allOf:
+            - $ref: "#/components/schemas/ChallengeView"
+          nullable: true
+        poll_after_ms:
+          type: integer
+        allowed_actions:
+          type: array
+          items:
+            type: string
+            enum:
+              - cancel
+              - submit_challenge
+              - refresh
+        account:
+          allOf:
+            - $ref: "#/components/schemas/AccountView"
+          nullable: true
+        error:
+          allOf:
+            - $ref: "#/components/schemas/SessionErrorView"
+          nullable: true
+    AccountListView:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountView"
+    GatewayErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: "#/components/schemas/GatewayErrorView"
+    GatewayErrorView:
+      type: object
+      required:
+        - code
+        - message
+        - retryable
+        - request_id
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+        request_id:
+          type: string

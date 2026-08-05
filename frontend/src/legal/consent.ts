@@ -12,14 +12,8 @@ export function isAcceptedUserAgreementVersion(version?: string | null): boolean
 }
 
 export async function syncUserAgreementFromServer(): Promise<boolean> {
-  try {
-    const prefs = await fetchUserUiPreferences();
-    return isAcceptedUserAgreementVersion(prefs.accepted_user_agreement_version);
-  } catch (error) {
-    console.error('Failed to sync user agreement from server:', error);
-    // Fail closed: keep showing the consent modal until the server confirms.
-    return false;
-  }
+  const prefs = await fetchUserUiPreferences();
+  return isAcceptedUserAgreementVersion(prefs.accepted_user_agreement_version);
 }
 
 export async function persistUserAgreementAccepted(): Promise<void> {

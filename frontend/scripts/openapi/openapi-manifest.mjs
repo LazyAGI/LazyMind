@@ -22,6 +22,11 @@ export function getOpenApiApis(cwdPath = process.cwd()) {
       input: path.resolve(localSpecsDir, "scan.yaml"),
       output: path.resolve(outputDirname, "scan-client"),
     },
+    {
+      name: "channel-gateway",
+      input: path.resolve(localSpecsDir, "channel-gateway.yaml"),
+      output: path.resolve(outputDirname, "channel-gateway-client"),
+    },
   ];
 }
 

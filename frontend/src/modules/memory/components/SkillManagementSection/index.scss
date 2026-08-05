@@ -422,6 +422,90 @@
   width: 140px;
 }
 
+.memory-skill-call-mode-select {
+  .ant-select-selector {
+    min-height: 28px !important;
+    padding: 0 26px 0 12px !important;
+    border: 1px solid transparent !important;
+    border-radius: 7px !important;
+    transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .ant-select-selection-item {
+    color: currentColor;
+    font-size: 14px;
+    font-weight: 500;
+    padding-inline-end: 0 !important;
+  }
+
+  .ant-select-arrow {
+    color: currentColor;
+    opacity: 0.6;
+  }
+
+  &.is-auto {
+    color: #0958d9;
+
+    .ant-select-selector {
+      background: #e6f4ff;
+    }
+  }
+
+  &.is-manual {
+    color: #531dab;
+
+    .ant-select-selector {
+      background: #f9f0ff;
+    }
+  }
+
+  &.is-disabled {
+    color: #595959;
+
+    .ant-select-selector {
+      background: #f5f5f5;
+    }
+  }
+
+  &:not(.ant-select-disabled):hover .ant-select-selector {
+    border-color: currentColor !important;
+  }
+
+  &.ant-select-focused .ant-select-selector {
+    border-color: #1677ff !important;
+    box-shadow: 0 0 0 2px rgb(22 119 255 / 12%) !important;
+  }
+
+  &.ant-select-disabled {
+    cursor: not-allowed;
+    opacity: 0.72;
+  }
+}
+
+.memory-skill-call-mode-dropdown {
+  .ant-select-item-option-content {
+    overflow: visible;
+    white-space: normal;
+  }
+}
+
+.memory-skill-call-mode-option {
+  padding: 2px 0;
+
+  &__label {
+    color: #1f1f1f;
+    font-weight: 500;
+    line-height: 22px;
+  }
+
+  &__description {
+    color: #8c8c8c;
+    font-size: 12px;
+    line-height: 18px;
+    white-space: normal;
+  }
+}
+
 .memory-skill-reset-button {
   flex-shrink: 0;
   height: 32px;

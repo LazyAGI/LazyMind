@@ -127,23 +127,25 @@ def _user_from_token(token: str, *, load_permissions: bool):
 def authorize(body: AuthorizeBody, request: Request):
     """
     Authorization: called by gateway (Kong); determine allow/deny based on request method, path, and user Bearer token
-      1. If no required permission is configured for the API, allow directly;
-      2. Otherwise verify user role and permission groups; allow if admin or if any required permission is present;
-      3. Otherwise return 403.
+      1. If the API is not registered, allow directly;
+      2. If the API is registered, require a valid user token (an empty permission list means login-only);
+      3. For non-empty permission lists, allow admins or users with any required permission;
+      4. Otherwise return 403.
     """
     method = (body.method or 'GET').upper()
     path = _normalize_path(body.path or '/')
     required = _required_permissions_for(method, path)
+    requires_auth = required is not None
     token = _token_from_request(request)
     if not token:
-        if not required:
+        if not requires_auth:
             return {'allowed': True}
         raise_error(ErrorCodes.UNAUTHORIZED)
 
     try:
         user = _user_from_token(token, load_permissions=bool(required))
     except AppException:
-        if not required:
+        if not requires_auth:
             return {'allowed': True}
         raise
 

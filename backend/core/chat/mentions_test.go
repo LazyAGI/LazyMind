@@ -2,9 +2,12 @@ package chat
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/plugin"
 )
 
 func TestParseChatMentionsDeduplicatesByTypeAndResource(t *testing.T) {
@@ -27,6 +30,48 @@ func TestApplyMentionedToolsOnlyEnablesMentionedNames(t *testing.T) {
 	want := []string{"search", "browser"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("applyMentionedTools() = %#v, want %#v", got, want)
+	}
+}
+
+func TestApplyPluginContextCallModeClearsPausedActiveWorkflow(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "plugin-call-mode.db"))
+	if err != nil {
+		t.Fatalf("connect SQLite database: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.UserPluginSetting{}); err != nil {
+		t.Fatalf("migrate plugin settings: %v", err)
+	}
+	if err := db.Create(&orm.UserPluginSetting{
+		UserID:    "user-1",
+		PluginRef: "user:paused-workflow",
+		Enabled:   false,
+		CallMode:  plugin.PluginCallModeDisabled,
+		UpdatedAt: time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("create paused plugin setting: %v", err)
+	}
+	body := map[string]any{
+		"plugin_context": map[string]any{
+			"session_id":       "session-1",
+			"plugin_id":        "paused-workflow",
+			"current_step":     "step-1",
+			"plugin_ref":       "user:paused-workflow",
+			"plugin_mode":      "dynamic",
+			"plugin_preflight": map[string]any{"preflight_id": "preflight-1"},
+		},
+	}
+
+	if err := applyPluginContextCallMode(db.DB, "user-1", body); err != nil {
+		t.Fatalf("apply active plugin call mode: %v", err)
+	}
+	context := body["plugin_context"].(map[string]any)
+	for _, key := range []string{"session_id", "plugin_id", "current_step", "plugin_ref"} {
+		if _, exists := context[key]; exists {
+			t.Fatalf("paused plugin context retained %s: %#v", key, context)
+		}
+	}
+	if context["plugin_mode"] != "dynamic" || context["plugin_preflight"] == nil {
+		t.Fatalf("request-local plugin context was not preserved: %#v", context)
 	}
 }
 

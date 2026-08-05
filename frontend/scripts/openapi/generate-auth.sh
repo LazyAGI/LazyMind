@@ -26,3 +26,4 @@ fi
 node scripts/openapi/generate-api.mjs auth
 node scripts/openapi/generate-api.mjs core
 node scripts/openapi/generate-api.mjs scan
+node scripts/openapi/generate-api.mjs channel-gateway

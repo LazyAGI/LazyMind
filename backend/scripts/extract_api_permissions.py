@@ -146,8 +146,8 @@ def extract_from_go_file(filepath: Path) -> list[dict]:
         raw_path = _normalize_path(m.group(2) or '/')
         path = _normalize_path(_join_paths(api_prefix, raw_path))
         perms = _parse_go_permissions(m.group(3))
-        if perms:
-            entries.append({'method': method, 'path': path, 'permissions': sorted(perms)})
+        # An empty list is meaningful: the route is login-only with no extra RBAC permission.
+        entries.append({'method': method, 'path': path, 'permissions': sorted(perms)})
     return entries
 
 

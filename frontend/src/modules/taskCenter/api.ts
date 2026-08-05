@@ -4,7 +4,10 @@ const CORE = `${BASE_URL}/api/core`;
 
 export interface StepInfo {
   step_id: string;
+  title?: string;
   status: string;
+  current_phase?: string;
+  summary?: string;
   artifact?: string;
 }
 
@@ -156,6 +159,10 @@ export async function runScheduleNow(id: string): Promise<{ task_id: string; con
 export async function updateSchedule(id: string, req: Partial<CreateScheduleRequest>): Promise<Schedule> {
   const resp = await axiosInstance.put<Schedule>(`${CORE}/schedules/${id}`, req);
   return resp.data;
+}
+
+export async function deleteSchedule(id: string): Promise<void> {
+  await axiosInstance.delete(`${CORE}/schedules/${id}`);
 }
 
 export async function listScheduleTasks(

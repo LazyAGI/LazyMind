@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -218,6 +219,33 @@ func TestFinalizeTaskOutputStoresPlainChatAnswer(t *testing.T) {
 	}
 	if output.OutputStatus != "ready" || output.FinalAnswerText != "daily result" || output.ContentHash == "" {
 		t.Fatalf("unexpected output: %+v", output)
+	}
+}
+
+func TestFinalizeTaskOutputStoresEmptyResultFailureReason(t *testing.T) {
+	db := automationTestDB(t)
+	now := time.Now().UTC()
+	task := orm.TaskCenterTask{ID: "empty-task", UserID: "u", ConversationID: "empty-conv", TaskType: "scheduled", Status: "running", CreatedAt: now, UpdatedAt: now}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if status := finalizeTaskOutput(context.Background(), db, task.ID, task.ConversationID); status != "empty" {
+		t.Fatalf("expected empty output status, got %q", status)
+	}
+	var got orm.TaskCenterTask
+	if err := db.First(&got, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "failed" || got.FinishedAt == nil {
+		t.Fatalf("expected failed task with finished_at, got %#v", got)
+	}
+	var progress map[string]any
+	if err := json.Unmarshal(got.ProgressJSON, &progress); err != nil {
+		t.Fatalf("decode progress: %v", err)
+	}
+	if progress["failure_reason"] != "聊天服务未生成可用结果" {
+		t.Fatalf("unexpected failure reason: %#v", progress["failure_reason"])
 	}
 }
 
