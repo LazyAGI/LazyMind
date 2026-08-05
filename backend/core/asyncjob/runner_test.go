@@ -182,8 +182,9 @@ func TestRecoverStaleJobsRestoresPendingAndFailsExhausted(t *testing.T) {
 	if retry.Status != string(StatusPending) || retry.LockedBy != "" || retry.LockUntil != nil {
 		t.Fatalf("expected stale retry job to become pending and unlocked, got %+v", retry)
 	}
-	if !retry.NextRunAt.Equal(now) {
-		t.Fatalf("expected retry next_run_at to be now, got %v want %v", retry.NextRunAt, now)
+	want := now.Truncate(time.Microsecond)
+	if !retry.NextRunAt.Equal(want) {
+		t.Fatalf("expected retry next_run_at to be now, got %v want %v", retry.NextRunAt, want)
 	}
 
 	exhausted := getTestJob(t, db, exhaustedJob.ID)
