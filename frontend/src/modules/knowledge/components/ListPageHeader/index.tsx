@@ -36,7 +36,8 @@ interface Props {
   secondaryBtnDisabled?: boolean;
   secondaryBtnDisabledTooltip?: ReactNode;
   onSecondaryClick?: () => void;
-  onSearch: () => void;
+  /** Triggered on Enter / search button / clear. Value is the current keyword (empty when cleared). */
+  onSearch: (value?: string) => void;
 }
 
 const ListPageHeaderComponent: FC<Props> = ({
@@ -73,7 +74,7 @@ const ListPageHeaderComponent: FC<Props> = ({
           allowClear={allowClear}
           className="search-input ghost-custom-border"
           variant="borderless"
-          onSearch={onSearch}
+          onSearch={(value) => onSearch(value)}
         />
       </Form.Item>
       {extra}
@@ -86,7 +87,7 @@ const ListPageHeaderComponent: FC<Props> = ({
                 options={sortOption}
                 variant={"underlined"}
                 className="sort-select"
-                onSearch={onSearch}
+                onChange={() => onSearch()}
               />
             </Form.Item>
             <span>{t("common.sort")}</span>

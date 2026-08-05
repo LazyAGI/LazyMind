@@ -667,6 +667,7 @@
   "2001591": { "en-US": "Unsupported FFmpeg archive format", "zh-CN": "不支持的 FFmpeg 压缩包格式" },
   "2001592": { "en-US": "Bundled FFmpeg install is not supported on this platform", "zh-CN": "当前平台不支持安装内置 FFmpeg" },
   "2001593": { "en-US": "Downloaded FFmpeg binary could not run", "zh-CN": "下载的 FFmpeg 二进制无法运行" },
+  "2001594": { "en-US": "FFmpeg download checksum mismatch", "zh-CN": "FFmpeg 下载文件校验失败" },
   "2001601": { "en-US": "Primary and fallback document parsing failed", "zh-CN": "主解析器和备用解析器均处理失败" },
   "2001602": { "en-US": "Acl_db_dsn is empty", "zh-CN": "acl_db_dsn 为空" },
   "2001603": { "en-US": "Active plugin session already exists for conversation", "zh-CN": "当前会话已有活动的插件会话" },

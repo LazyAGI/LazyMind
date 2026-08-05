@@ -57,14 +57,31 @@ def _scope_hash(value: str) -> str:
     return hashlib.sha256(value.encode('utf-8')).hexdigest()[:32]
 
 
+def _legacy_scope_hash(value: str) -> str:
+    # Read-only compatibility for workspaces created before hashes were shortened.
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+
 def chat_agent_workspace(user_id: str, conversation_id: str) -> str:
     """Return the isolated main-Agent workspace for one conversation."""
-    return os.path.join(
-        os.path.realpath(_cfg['agentic_workspace']),
+    workspace_root = os.path.realpath(_cfg['agentic_workspace'])
+    current = os.path.join(
+        workspace_root,
         _CHAT_FILE_DIRECTORY,
         _scope_hash(str(user_id or '0')),
         _scope_hash(str(conversation_id)),
     )
+    legacy = os.path.join(
+        workspace_root,
+        _CHAT_FILE_DIRECTORY,
+        _legacy_scope_hash(str(user_id or '0')),
+        _legacy_scope_hash(str(conversation_id)),
+    )
+    # Prefer the 32-character layout whenever it has been initialized. Only an
+    # existing legacy directory keeps an older conversation on the 64-character layout.
+    if not os.path.exists(current) and os.path.isdir(legacy):
+        return legacy
+    return current
 
 
 def _published_file_directory(user_id: str, conversation_id: str, artifact_id: str) -> str:

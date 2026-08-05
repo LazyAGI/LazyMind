@@ -668,7 +668,10 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_EVO_ROUTER_CHAT_URL=" + fmt.Sprintf("http://127.0.0.1:%d/api/chat/stream", cfg.Algorithm.ChatPort),
 		"LAZYMIND_WORD_GROUP_APPLY_URL=" + envText("LAZYMIND_WORD_GROUP_APPLY_URL", ""),
 	}
-	if runtime.GOOS == "windows" && cfg.Profile == "desktop" {
+	// RelayServer serializes Python callables into command-line arguments. The
+	// payload can exceed CreateProcess' command-line limit on Windows in both
+	// packaged Desktop and source/local profiles, so always spill it to files.
+	if runtime.GOOS == "windows" {
 		env = append(env, "LAZYLLM_PASS_ARGS_BY_FILE=1")
 	}
 	if service == docServerProcessName {

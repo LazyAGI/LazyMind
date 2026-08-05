@@ -18,3 +18,5 @@ rapidfuzz>=3.0
 apted>=1.0,<2
 psutil>=6,<7
 psycopg[binary]>=3.1
+aiosqlite>=0.20.0,<1.0.0
+pytest-asyncio>=0.23,<2.0

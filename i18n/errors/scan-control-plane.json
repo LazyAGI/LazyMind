@@ -199,6 +199,10 @@
     "en-US": "Failed to commit the scan-control-plane database bootstrap",
     "zh-CN": "提交 Scan Control Plane 数据库初始化事务失败"
   },
+  "COMMAND_ID_INVALID": {
+    "en-US": "Command_id is invalid",
+    "zh-CN": "command_id 无效"
+  },
   "COMPENSATION_POLL_INTERVAL_MUST_BE_POSITIVE": {
     "en-US": "Compensation poll interval must be positive",
     "zh-CN": "补偿轮询间隔必须为正数"

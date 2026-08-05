@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Button, Empty, Input, Popconfirm, Radio, Switch, Table, Tag, Tooltip, message } from 'antd';
+import { Button, Empty, Input, Popconfirm, Radio, Select, Table, Tag, Tooltip, message } from 'antd';
 import { DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useNavigate } from 'react-router-dom';
@@ -10,9 +10,9 @@ import {
   updatePluginDraftContent,
   listBuiltinPlugins,
   listUserPluginSettings,
-  setUserPluginEnabled,
+  setUserPluginCallMode,
 } from '@/modules/plugin/pluginDraftApi';
-import type { PluginDraftRecord, BuiltinPlugin } from '@/modules/plugin/pluginDraftApi';
+import type { PluginDraftRecord, BuiltinPlugin, PluginCallMode } from '@/modules/plugin/pluginDraftApi';
 import PluginInfoModal from '@/modules/plugin/components/StateGraphEditor/PluginInfoModal';
 import { parsePluginYaml } from '@/modules/plugin/components/StateGraphEditor/core/pluginParser';
 import { serializePluginModel } from '@/modules/plugin/components/StateGraphEditor/core/pluginSerializer';
@@ -47,7 +47,8 @@ export default function PluginInstalledView({
   const navigate = useNavigate();
   const [draftRecords, setDraftRecords] = useState<PluginDraftRecord[]>([]);
   const [builtinPlugins, setBuiltinPlugins] = useState<BuiltinPlugin[]>([]);
-  const [enabledByRef, setEnabledByRef] = useState<Record<string, boolean>>({});
+  const [callModeByRef, setCallModeByRef] = useState<Record<string, PluginCallMode>>({});
+  const [callModePendingByRef, setCallModePendingByRef] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
@@ -67,7 +68,10 @@ export default function PluginInstalledView({
       ]);
       setDraftRecords(draftsResp.records ?? []);
       setBuiltinPlugins(builtins);
-      setEnabledByRef(Object.fromEntries(pluginSettings.map((item) => [item.plugin_ref, item.enabled])));
+      setCallModeByRef(Object.fromEntries(pluginSettings.map((item) => [
+        item.plugin_ref,
+        item.call_mode ?? (item.enabled ? 'auto' : 'disabled'),
+      ])));
     } catch {
     } finally {
       setLoading(false);
@@ -99,11 +103,19 @@ export default function PluginInstalledView({
     setPage(1);
   };
 
-  const handleEnabledChange = async (pluginRef: string, enabled: boolean) => {
-    const previous = enabledByRef[pluginRef] ?? false;
-    setEnabledByRef((current) => ({ ...current, [pluginRef]: enabled }));
-    try { await setUserPluginEnabled(pluginRef, enabled); message.success(enabled ? 'Plugin 已默认启用' : 'Plugin 已默认关闭'); }
-    catch { setEnabledByRef((current) => ({ ...current, [pluginRef]: previous })); }
+  const handleCallModeChange = async (pluginRef: string, callMode: PluginCallMode) => {
+    const previous = callModeByRef[pluginRef] ?? 'disabled';
+    setCallModeByRef((current) => ({ ...current, [pluginRef]: callMode }));
+    setCallModePendingByRef((current) => ({ ...current, [pluginRef]: true }));
+    try {
+      await setUserPluginCallMode(pluginRef, callMode);
+      message.success(t('admin.memoryPluginCallModeUpdated'));
+    } catch {
+      setCallModeByRef((current) => ({ ...current, [pluginRef]: previous }));
+      message.error(t('admin.memoryPluginCallModeUpdateFailed'));
+    } finally {
+      setCallModePendingByRef((current) => ({ ...current, [pluginRef]: false }));
+    }
   };
 
   const openInfoModal = (record: PluginDraftRecord) => {
@@ -255,14 +267,42 @@ export default function PluginInstalledView({
       },
     },
     {
-      title: '默认启用',
-      key: 'default_enabled',
-      width: 110,
+      title: t('admin.memoryPluginColCallMode'),
+      key: 'call_mode',
+      width: 180,
       align: 'center',
       render: (_: unknown, row: PluginRow) => {
         const pluginRef = row._type === 'builtin' ? `builtin:${row.id}` : row.published_plugin_ref;
-        if (!pluginRef) return <Tooltip title="发布后才可启用"><Switch size="small" disabled /></Tooltip>;
-        return <Switch size="small" checked={enabledByRef[pluginRef] ?? (row._type === 'builtin')} onChange={(enabled) => void handleEnabledChange(pluginRef, enabled)} />;
+        const callMode = callModeByRef[pluginRef] ?? (row._type === 'builtin' ? 'auto' : 'disabled');
+        const options = [
+          { value: 'auto' as const, label: t('admin.memoryPluginCallModeAuto'), title: t('admin.memoryPluginCallModeAutoDesc') },
+          { value: 'manual' as const, label: t('admin.memoryPluginCallModeManual'), title: t('admin.memoryPluginCallModeManualDesc') },
+          { value: 'disabled' as const, label: t('admin.memoryPluginCallModeDisabled'), title: t('admin.memoryPluginCallModeDisabledDesc') },
+        ];
+        const select = (
+          <Select<PluginCallMode>
+            size="small"
+            value={callMode}
+            options={options}
+            className={`memory-skill-call-mode-select is-${callMode}`}
+            variant="borderless"
+            popupMatchSelectWidth={300}
+            classNames={{ popup: { root: 'memory-skill-call-mode-dropdown' } }}
+            loading={!!callModePendingByRef[pluginRef]}
+            disabled={!pluginRef || !!callModePendingByRef[pluginRef]}
+            aria-label={`${t('admin.memoryPluginColCallMode')}: ${row.name}`}
+            style={{ width: 160, textAlign: 'left' }}
+            labelRender={({ value }: { value: string | number }) => options.find((option) => option.value === value)?.label}
+            optionRender={(option: { data: { label?: React.ReactNode; title?: string } }) => (
+              <div className="memory-skill-call-mode-option">
+                <div className="memory-skill-call-mode-option__label">{option.data.label}</div>
+                <div className="memory-skill-call-mode-option__description">{option.data.title}</div>
+              </div>
+            )}
+            onChange={(value: PluginCallMode) => void handleCallModeChange(pluginRef, value)}
+          />
+        );
+        return pluginRef ? select : <Tooltip title={t('admin.memoryPluginCallModePublishHint')}>{select}</Tooltip>;
       },
     },
     {

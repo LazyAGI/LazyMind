@@ -552,6 +552,7 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"get", "/api/core/skill-review/tasks", false, false, false},
 		{"get", "/api/core/agent/threads", false, true, true},
 		{"get", "/api/core/conversations/{name}:history", false, true, true},
+		{"get", "/api/core/conversations/{name}:trail", false, true, true},
 	}
 
 	for _, tc := range cases {
@@ -652,6 +653,36 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 	} {
 		if got, ok := historyParamNames[want.name]; !ok || got != want.inVal {
 			t.Fatalf("expected history parameter %q in %q, got %q (%v)", want.name, want.inVal, got, historyParamNames)
+		}
+	}
+
+	trailItem, ok := paths["/api/core/conversations/{name}:trail"].(map[string]any)
+	if !ok {
+		t.Fatalf("path missing: /api/core/conversations/{name}:trail")
+	}
+	trailGet, ok := trailItem["get"].(map[string]any)
+	if !ok {
+		t.Fatalf("get operation missing for conversation trail")
+	}
+	trailParams, ok := trailGet["parameters"].([]any)
+	if !ok {
+		t.Fatalf("parameters missing for conversation trail")
+	}
+	trailParamNames := make(map[string]string, len(trailParams))
+	for _, item := range trailParams {
+		p, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		trailParamNames[p["name"].(string)] = p["in"].(string)
+	}
+	for _, want := range []struct{ name, inVal string }{
+		{"name", "path"},
+		{"page_size", "query"},
+		{"page_token", "query"},
+	} {
+		if got, ok := trailParamNames[want.name]; !ok || got != want.inVal {
+			t.Fatalf("expected trail parameter %q in %q, got %q (%v)", want.name, want.inVal, got, trailParamNames)
 		}
 	}
 }

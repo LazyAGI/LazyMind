@@ -3,7 +3,6 @@ package resourcefs
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,11 +12,7 @@ import (
 
 func newResourceFSTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "resourcefs.db"))
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(
+	return orm.MigrateTestDB(t,
 		&orm.PersonalResource{},
 		&orm.PersonalResourceBlob{},
 		&orm.PersonalResourceRevision{},
@@ -25,10 +20,7 @@ func newResourceFSTestDB(t *testing.T) *orm.DB {
 		&orm.PersonalResourceReviewSession{},
 		&orm.PersonalResourceReviewActionBatch{},
 		&orm.PersonalResourceReviewActionItem{},
-	); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	)
 }
 
 func TestServiceDraftCommitRevisionRollback(t *testing.T) {

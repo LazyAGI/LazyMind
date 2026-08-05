@@ -3316,6 +3316,36 @@
   .memory-skill-tree-status {
     flex: 0 0 auto;
   }
+
+  .memory-skill-tree-node-delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #98a2b3;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+
+    &:hover {
+      color: #d92d20;
+      background: rgba(217, 45, 32, 0.08);
+    }
+  }
+}
+
+.memory-skill-package-tree .ant-tree-treenode:hover .memory-skill-tree-node-delete,
+.memory-skill-package-tree .ant-tree-treenode-selected .memory-skill-tree-node-delete {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .memory-skill-tree-status {

@@ -183,6 +183,181 @@ func TestSQLiteAutoMigrateCreatesUpsertConstraints(t *testing.T) {
 	})
 }
 
+func TestSQLiteAutoMigrateUpgradesLegacyAgentCommandQueue(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "scan.db"))+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewSQLRepositoryWithDriver("sqlite", db)
+	type legacyAgentCommand struct {
+		CommandID    string `gorm:"column:command_id;primaryKey"`
+		AgentID      string `gorm:"column:agent_id"`
+		CommandType  string `gorm:"column:command_type"`
+		Payload      JSON   `gorm:"column:payload_json;type:jsonb"`
+		Status       string `gorm:"column:status"`
+		AttemptCount int64  `gorm:"column:attempt_count"`
+		NextRetryAt  *time.Time
+		AckedAt      *time.Time
+		LastError    JSON `gorm:"column:last_error;type:jsonb"`
+		Result       JSON `gorm:"column:result_json;type:jsonb"`
+		CreatedAt    time.Time
+		DispatchedAt *time.Time
+	}
+	if err := repo.orm.Table("agent_commands").AutoMigrate(&legacyAgentCommand{}); err != nil {
+		t.Fatalf("prepare legacy sqlite schema: %v", err)
+	}
+	legacy := legacyAgentCommand{
+		CommandID:   "legacy-command",
+		AgentID:     "agent-1",
+		CommandType: "start_source",
+		Payload:     JSON{},
+		Status:      "PENDING",
+		CreatedAt:   time.Date(2026, 8, 3, 15, 0, 0, 0, time.UTC),
+	}
+	if err := repo.orm.Table("agent_commands").Create(&legacy).Error; err != nil {
+		t.Fatalf("seed legacy sqlite command: %v", err)
+	}
+	if err := repo.AutoMigrate(); err != nil {
+		t.Fatalf("upgrade legacy sqlite schema: %v", err)
+	}
+
+	var generation int64
+	if err := db.QueryRow("SELECT queue_generation FROM agent_commands WHERE command_id = ?", "legacy-command").Scan(&generation); err != nil {
+		t.Fatalf("read migrated legacy command: %v", err)
+	}
+	if generation != 1 {
+		t.Fatalf("legacy command queue generation = %d, want 1", generation)
+	}
+
+	var indexCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?", "idx_agent_commands_current_pending").Scan(&indexCount); err != nil {
+		t.Fatalf("read migrated command index: %v", err)
+	}
+	if indexCount != 1 {
+		t.Fatalf("migrated command index count = %d, want 1", indexCount)
+	}
+}
+
+func TestAgentCommandQueueGenerationBypassesLegacyBacklogAndCleansIt(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "scan.db"))+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	repo := NewSQLRepositoryWithDriver("sqlite", db)
+	if err := repo.AutoMigrate(); err != nil {
+		t.Fatalf("auto migrate sqlite: %v", err)
+	}
+	now := time.Date(2026, 8, 3, 15, 0, 0, 0, time.UTC)
+	if err := repo.orm.Create(&ormAgent{AgentID: "agent-1", Status: "ONLINE", LastHeartbeatAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	legacy := ormAgentCommand{CommandID: "1", AgentID: "agent-1", QueueGeneration: 1, CommandType: "start_source", Payload: JSON{}, Status: "PENDING", CreatedAt: now.Add(-time.Hour)}
+	if err := repo.orm.Create(&legacy).Error; err != nil {
+		t.Fatalf("seed legacy command: %v", err)
+	}
+	legacyExtension := ormAgentCommand{CommandID: "2", AgentID: "agent-1", QueueGeneration: 1, CommandType: "extension_command", Payload: JSON{}, Status: "PENDING", CreatedAt: now.Add(-time.Hour)}
+	if err := repo.orm.Create(&legacyExtension).Error; err != nil {
+		t.Fatalf("seed legacy extension command: %v", err)
+	}
+	current := AgentCommand{CommandID: "9007199254740993", AgentID: "agent-1", QueueGeneration: AgentCommandQueueGeneration, CommandType: "start_source", Payload: JSON{}, Status: "PENDING", CreatedAt: now}
+	if err := repo.CreateAgentCommand(context.Background(), current); err != nil {
+		t.Fatalf("create current command: %v", err)
+	}
+	if err := repo.CreateAgentCommand(context.Background(), current); err != nil {
+		t.Fatalf("duplicate deterministic command should be idempotent: %v", err)
+	}
+
+	commands, err := repo.ListPendingAgentCommands(context.Background(), "agent-1", now, 10)
+	if err != nil {
+		t.Fatalf("list pending commands: %v", err)
+	}
+	if len(commands) != 2 || commands[0].CommandID != legacyExtension.CommandID || commands[1].CommandID != current.CommandID || commands[1].QueueGeneration != AgentCommandQueueGeneration {
+		t.Fatalf("current queue should bypass legacy backlog: %+v", commands)
+	}
+	if err := repo.AckAgentCommand(context.Background(), AgentCommandAck{AgentID: "agent-1", CommandID: current.CommandID, Success: true, AckedAt: now}); err != nil {
+		t.Fatalf("ack current command: %v", err)
+	}
+	current.CreatedAt = now.Add(time.Minute)
+	if err := repo.CreateAgentCommand(context.Background(), current); err != nil {
+		t.Fatalf("requeue deterministic command after agent restart: %v", err)
+	}
+	restarted, err := repo.ListPendingAgentCommands(context.Background(), "agent-1", current.CreatedAt, 10)
+	if err != nil || len(restarted) != 1 || restarted[0].CommandID != current.CommandID {
+		t.Fatalf("agent restart should requeue an already acked watcher command: commands=%+v err=%v", restarted, err)
+	}
+	retried, err := repo.ListPendingAgentCommands(context.Background(), "agent-1", current.CreatedAt.Add(agentCommandLeaseTTL), 10)
+	if err != nil || len(retried) != 1 || retried[0].CommandID != current.CommandID {
+		t.Fatalf("expired lifecycle command lease should be retried: commands=%+v err=%v", retried, err)
+	}
+	var retriedRow ormAgentCommand
+	if err := repo.orm.Where("command_id = ?", current.CommandID).First(&retriedRow).Error; err != nil || retriedRow.AttemptCount != 2 {
+		t.Fatalf("lease retry should persist the new attempt count: row=%+v err=%v", retriedRow, err)
+	}
+	deleted, err := repo.MaintainAgentCommands(context.Background(), now, 10)
+	if err != nil {
+		t.Fatalf("maintain commands: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("expected one legacy command deleted, got %d", deleted)
+	}
+	var remaining int64
+	if err := repo.orm.Model(&ormAgentCommand{}).Count(&remaining).Error; err != nil || remaining != 2 {
+		t.Fatalf("maintenance should preserve current command: remaining=%d err=%v", remaining, err)
+	}
+}
+
+func TestRecoverLocalWatchersQueuesCurrentCommandAndMetadataReconcile(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "scan.db"))+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	repo := NewSQLRepositoryWithDriver("sqlite", db)
+	if err := repo.AutoMigrate(); err != nil {
+		t.Fatalf("auto migrate sqlite: %v", err)
+	}
+	now := time.Date(2026, 8, 3, 15, 0, 0, 0, time.UTC)
+	if err := repo.orm.Create(&ormAgent{AgentID: "agent-1", TenantID: "tenant-1", Status: "ONLINE", LastHeartbeatAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if err := repo.orm.Create(&ormSource{SourceID: "source-1", TenantID: "tenant-1", CreatedBy: "user-1", Name: "Docs", DatasetID: "dataset-1", Status: "ACTIVE", ConfigVersion: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("seed source: %v", err)
+	}
+	binding := ormBinding{BindingID: "binding-1", SourceID: "source-1", ConnectorType: "local_fs", TargetType: "local_path", TargetRef: "/workspace/docs", TargetFingerprint: "/workspace/docs", TreeKey: "root", BindingGeneration: 1, AgentID: "agent-1", SyncMode: "manual", Status: "ACTIVE", CreatedAt: now, UpdatedAt: now}
+	if err := repo.orm.Create(&binding).Error; err != nil {
+		t.Fatalf("seed binding: %v", err)
+	}
+	if err := repo.orm.Create(&ormSyncCheckpoint{SourceID: "source-1", BindingID: "binding-1", BindingGeneration: 1, LastError: JSON{}, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("seed checkpoint: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		recovered, err := repo.RecoverLocalWatchers(context.Background(), now)
+		if err != nil || recovered != 1 {
+			t.Fatalf("recover local watchers pass=%d recovered=%d err=%v", i+1, recovered, err)
+		}
+	}
+	commands, err := repo.ListPendingAgentCommands(context.Background(), "agent-1", now, 10)
+	if err != nil || len(commands) != 1 {
+		t.Fatalf("recovery should queue one idempotent current command: commands=%+v err=%v", commands, err)
+	}
+	if commands[0].Payload["tenant_id"] != "tenant-1" || commands[0].Payload["root_path"] != "/workspace/docs" {
+		t.Fatalf("recovery command lost binding metadata: %+v", commands[0].Payload)
+	}
+	var runCount int64
+	if err := repo.orm.Model(&ormSyncRun{}).Where("binding_id = ? AND trigger_type = ?", "binding-1", "reconcile").Count(&runCount).Error; err != nil || runCount != 1 {
+		t.Fatalf("recovery should queue one idempotent metadata reconcile: count=%d err=%v", runCount, err)
+	}
+}
+
 func TestSQLiteCreateOperationUpsertUsesCallerRequestConstraint(t *testing.T) {
 	t.Parallel()
 

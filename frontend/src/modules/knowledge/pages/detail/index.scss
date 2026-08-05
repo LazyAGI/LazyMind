@@ -63,3 +63,158 @@
   scrollbar-width: thin;
   scrollbar-color: #d1d1d1 #f1f1f1;
 }
+
+.knowledge-detail-page {
+  padding: 4px 4px 24px;
+  color: #101828;
+
+  .knowledge-detail-header {
+    gap: 10px;
+
+    .ant-breadcrumb {
+      color: #667085;
+      font-size: 13px;
+    }
+
+    .detail-page-title {
+      min-height: 38px;
+    }
+
+    .detail-page-title-main {
+      gap: 10px;
+    }
+
+    .detail-page-title-main > .ant-btn {
+      width: 34px;
+      min-width: 34px;
+      height: 34px;
+      padding: 0;
+      border-radius: 6px;
+    }
+
+    .detail-title {
+      min-width: 0;
+      font-size: inherit;
+    }
+
+    .settings-menu > div {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .settings-menu button {
+      width: auto !important;
+      height: 30px !important;
+      padding: 0 10px;
+      border-radius: 6px;
+    }
+  }
+
+  > .toolbar {
+    width: 100%;
+    margin: 14px 0 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+
+    .search-input {
+      width: min(420px, 100%) !important;
+      height: 34px;
+      border-color: #d9d9d9;
+      background: #fff;
+    }
+
+    .toolbar-actions {
+      margin-left: auto;
+      gap: 8px;
+
+      .ant-btn {
+        height: 34px;
+        border-radius: 6px;
+      }
+    }
+  }
+
+  > div:last-of-type {
+    min-width: 0;
+  }
+
+  .ant-table-wrapper {
+    min-width: 0;
+
+    .ant-table {
+      color: #344054;
+      font-size: 13px;
+    }
+
+    .ant-table-thead > tr > th {
+      height: 50px;
+      padding: 12px 14px;
+      background: #fafafa;
+      color: #262626;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .ant-table-tbody > tr > td {
+      height: 54px;
+      padding: 10px 14px;
+    }
+
+    .ant-table-tbody > tr:hover > td {
+      background: #f8fbff !important;
+    }
+
+    .ant-table-pagination.ant-pagination {
+      margin: 14px 0 0;
+    }
+  }
+}
+
+.knowledge-detail-title-copy {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+
+  strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #101828;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    min-width: 0;
+    max-width: 520px;
+    overflow: hidden;
+    color: #667085;
+    font-size: 13px;
+    font-weight: 400;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 760px) {
+  .knowledge-detail-title-copy {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .knowledge-detail-page > .toolbar {
+    align-items: stretch;
+    flex-direction: column;
+
+    .search-input { width: 100% !important; }
+    .toolbar-actions { width: 100%; margin-left: 0; }
+  }
+}

@@ -117,13 +117,25 @@ func TestSourceReadRefresherReportsMissingBindingTarget(t *testing.T) {
 	}
 }
 
-func TestSourceReadRefresherDoesNotFetchNonFeishuBindings(t *testing.T) {
+func TestSourceReadRefresherFetchesLocalFSAndMarksModified(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 6, 16, 8, 30, 0, 0, time.UTC)
 	repo := newRefreshTestRepo(now)
 	repo.binding.ConnectorType = "local_fs"
-	conn := &treeConnectorSpy{}
+	object := refreshObject("doc-1", "", true, false, now)
+	repo.objects[object.ObjectKey] = object
+	repo.states[object.ObjectKey] = store.DocumentState{
+		SourceID: "source-1", BindingID: "binding-1", BindingGeneration: 1,
+		ObjectKey: object.ObjectKey, SourceVersion: "old-v1", BaselineVersion: "old-v1",
+		SourceState: "UNCHANGED", SyncState: "IDLE", DocumentListVisible: true, Selectable: true,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	conn := &treeConnectorSpy{
+		connectorType: connector.ConnectorType("local_fs"),
+		childrenSet:   true,
+		children:      []connector.RawObject{rawTreeObject("doc-1", "", "doc-1", true, false)},
+	}
 	registry, err := connector.NewDefaultConnectorRegistry(conn)
 	if err != nil {
 		t.Fatalf("create registry: %v", err)
@@ -133,17 +145,21 @@ func TestSourceReadRefresherDoesNotFetchNonFeishuBindings(t *testing.T) {
 	if err := refresher.RefreshSourceRead(context.Background(), SourceReadRefreshRequest{SourceID: "source-1", BindingID: "binding-1"}); err != nil {
 		t.Fatalf("refresh source read: %v", err)
 	}
-	if len(conn.listRequests) != 0 || len(repo.objects) != 0 || len(repo.states) != 0 {
-		t.Fatalf("non-feishu read should not refresh connector or state, lists=%d objects=%+v states=%+v", len(conn.listRequests), repo.objects, repo.states)
+	if len(conn.listRequests) == 0 {
+		t.Fatalf("local filesystem read should fetch current metadata")
+	}
+	got := repo.states[object.ObjectKey]
+	if got.SourceVersion != "v1" || got.SourceState != "MODIFIED" || got.PendingAction != "REPARSE" {
+		t.Fatalf("changed local file should be marked pending update: %+v", got)
 	}
 }
 
-func TestSourceReadRefresherRefreshesCachedNonFeishuPolicyState(t *testing.T) {
+func TestSourceReadRefresherRefreshesCachedConnectorPolicyState(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 6, 16, 8, 30, 0, 0, time.UTC)
 	repo := newRefreshTestRepo(now)
-	repo.binding.ConnectorType = "local_fs"
+	repo.binding.ConnectorType = string(treeTestConnectorType)
 	repo.binding.IncludeExtensions = store.JSON{"items": []any{"xlsx"}}
 
 	syncedPDF := refreshObject("synced.pdf", "root", true, false, now)

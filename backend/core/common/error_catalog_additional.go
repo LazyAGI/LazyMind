@@ -301,6 +301,7 @@ func init() {
 	registerAdditionalError("unsupported ffmpeg archive format", http.StatusBadRequest, 2001591)
 	registerAdditionalErrorPattern("bundled ffmpeg install is not supported on %s/%s", "bundled ffmpeg install is not supported on this platform", http.StatusBadRequest, 2001592)
 	registerAdditionalErrorPattern("downloaded %s binary could not run", "downloaded ffmpeg binary could not run", http.StatusInternalServerError, 2001593)
+	registerAdditionalError("ffmpeg download checksum mismatch", http.StatusBadGateway, 2001594)
 }
 
 func registerAdditionalError(message string, status, code int) {

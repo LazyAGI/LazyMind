@@ -12,13 +12,7 @@ import (
 
 func initTestStore(t *testing.T) {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, "file::memory:?cache=shared")
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	if err := db.AutoMigrate(orm.AllModelsForDDL()...); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := orm.MigrateAllModelsForTest(t)
 	acl.InitStore(db)
 }
 

@@ -215,7 +215,7 @@ func PublishPluginDraft(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if next == 1 {
-			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&orm.UserPluginSetting{UserID: userID, PluginRef: ref, Enabled: false, UpdatedAt: now}).Error; err != nil {
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&orm.UserPluginSetting{UserID: userID, PluginRef: ref, Enabled: false, CallMode: PluginCallModeDisabled, UpdatedAt: now}).Error; err != nil {
 				return err
 			}
 		}
@@ -227,7 +227,8 @@ func PublishPluginDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	var setting orm.UserPluginSetting
 	enabled := store.DB().Where("user_id=? AND plugin_ref=?", userID, out.PluginRef).First(&setting).Error == nil && setting.Enabled
-	common.ReplyOK(w, map[string]any{"plugin_ref": out.PluginRef, "revision_id": out.HeadRevisionID, "revision_no": out.Version, "remote_root": "remote://" + out.RelativeRoot, "enabled": enabled})
+	callMode := normalizePluginCallMode(setting.CallMode, enabled)
+	common.ReplyOK(w, map[string]any{"plugin_ref": out.PluginRef, "revision_id": out.HeadRevisionID, "revision_no": out.Version, "remote_root": "remote://" + out.RelativeRoot, "enabled": enabled, "call_mode": callMode})
 }
 
 func scriptsApprovedForPublish(db *gorm.DB, draft orm.PluginDraft) bool {

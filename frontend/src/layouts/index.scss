@@ -588,6 +588,10 @@
   position: relative;
 }
 
+.main-layout-content.is-chat-page .sub-app-container {
+  overflow: hidden;
+}
+
 .main-layout-content.is-sidebar-collapsed {
   .knowledge-list-page .knowledge-title,
   .dataset-page .dataset-page-header,

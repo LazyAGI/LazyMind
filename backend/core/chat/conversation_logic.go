@@ -535,6 +535,164 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 	return b
 }
 
+// buildChatHistoryExtWithTrail extends the existing history metadata only when
+// the request explicitly used the citation/reference action. Relationship
+// inference from question text is intentionally excluded from this path.
+func buildChatHistoryExtWithTrail(
+	raw map[string]any,
+	query string,
+	histories []orm.ChatHistory,
+	target chatPersistTarget,
+) json.RawMessage {
+	base := buildChatHistoryExt(raw, query)
+	ext := map[string]any{}
+	if len(base) > 0 {
+		_ = json.Unmarshal(base, &ext)
+	}
+
+	if target.IsRegeneration && target.Existing != nil {
+		var previous struct {
+			Trail json.RawMessage `json:"trail"`
+		}
+		if json.Unmarshal(target.Existing.Ext, &previous) == nil && len(previous.Trail) > 0 {
+			ext["trail"] = json.RawMessage(previous.Trail)
+		}
+	}
+	// Regeneration reuses the existing user turn. A citation tag embedded in
+	// its stored input is not a new reference action; only an explicit source
+	// ID can change the relationship during regeneration/editing.
+	if target.IsRegeneration && len(referencedHistoryIDs(raw)) == 0 {
+		return marshalChatHistoryExt(ext)
+	}
+
+	if !hasExplicitConversationReference(raw) {
+		return marshalChatHistoryExt(ext)
+	}
+
+	referenceHistoryIDs := referencedHistoryIDs(raw)
+	trail := conversationTrailMetadata{
+		Source:              "reference",
+		ReferenceHistoryIDs: referenceHistoryIDs,
+	}
+	parentID := firstExistingHistoryID(referenceHistoryIDs, histories, target)
+	if parentID == "" && len(referenceHistoryIDs) == 0 {
+		// Keep legacy clients that send only <cite_message> usable. New clients
+		// always send the source ID and must not silently attach to another turn
+		// when that ID is stale or belongs to a different conversation.
+		parentID = latestReferenceableHistoryID(histories, target)
+	}
+	trail.ParentHistoryID = parentID
+	if parentID != "" {
+		for _, history := range histories {
+			if history.ID != parentID {
+				continue
+			}
+			parent := conversationTrailMetadataFromExt(history.Ext)
+			trail.Depth = parent.Depth + 1
+			break
+		}
+	}
+	if trail.Depth > maxConversationTrailDepth {
+		trail.Depth = maxConversationTrailDepth
+	}
+	ext["trail"] = trail
+	return marshalChatHistoryExt(ext)
+}
+
+func marshalChatHistoryExt(ext map[string]any) json.RawMessage {
+	if len(ext) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(ext)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func hasExplicitConversationReference(raw map[string]any) bool {
+	if len(referencedHistoryIDs(raw)) > 0 {
+		return true
+	}
+	if value, ok := raw["query"].(string); ok && strings.Contains(strings.ToLower(value), "<cite_message>") {
+		return true
+	}
+	if value, ok := raw["content"].(string); ok && strings.Contains(strings.ToLower(value), "<cite_message>") {
+		return true
+	}
+	input, _ := raw["input"].([]any)
+	for _, item := range input {
+		entry, _ := item.(map[string]any)
+		text, _ := entry["text"].(string)
+		if strings.Contains(strings.ToLower(text), "<cite_message>") {
+			return true
+		}
+	}
+	return false
+}
+
+func referencedHistoryIDs(raw map[string]any) []string {
+	value, ok := raw["cite_history_ids"]
+	if !ok {
+		return nil
+	}
+	var values []string
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			if id, ok := item.(string); ok && strings.TrimSpace(id) != "" {
+				values = append(values, strings.TrimSpace(id))
+			}
+		}
+	case []string:
+		for _, id := range typed {
+			if strings.TrimSpace(id) != "" {
+				values = append(values, strings.TrimSpace(id))
+			}
+		}
+	}
+	return uniqueStrings(values)
+}
+
+func firstExistingHistoryID(ids []string, histories []orm.ChatHistory, target chatPersistTarget) string {
+	allowed := make(map[string]struct{}, len(histories))
+	for _, history := range histories {
+		if target.IsRegeneration && target.Existing != nil && history.ID == target.Existing.ID {
+			continue
+		}
+		allowed[history.ID] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := allowed[id]; ok {
+			return id
+		}
+	}
+	return ""
+}
+
+func latestReferenceableHistoryID(histories []orm.ChatHistory, target chatPersistTarget) string {
+	for index := len(histories) - 1; index >= 0; index-- {
+		if target.IsRegeneration && target.Existing != nil && histories[index].ID == target.Existing.ID {
+			continue
+		}
+		return histories[index].ID
+	}
+	return ""
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
 func chatHistoryInput(raw map[string]any, query string) any {
 	in, hasInput := raw["input"].([]any)
 	if displayQuery, ok := raw["display_query"].(string); ok && strings.TrimSpace(displayQuery) != "" {

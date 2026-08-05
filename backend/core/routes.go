@@ -20,6 +20,7 @@ import (
 	"lazymind/core/resourcefs"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
+	"lazymind/core/showcase"
 	skillv2handler "lazymind/core/skillv2/handler"
 	"lazymind/core/subagent"
 	"lazymind/core/systemdeps"
@@ -264,6 +265,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/schedules", []string{"qa.read"}, scheduler.ListSchedulesHandler)
 	handleAPI(r, "POST", "/schedules", []string{"qa.write"}, scheduler.CreateScheduleHandler)
 	handleAPI(r, "PUT", "/schedules/{schedule_id}", []string{"qa.write"}, scheduler.UpdateScheduleHandler)
+	handleAPI(r, "DELETE", "/schedules/{schedule_id}", []string{"qa.write"}, scheduler.DeleteScheduleHandler)
 	handleAPI(r, "POST", "/schedules/{schedule_id}:cancel", []string{"qa.write"}, scheduler.CancelScheduleHandler)
 	handleAPI(r, "POST", "/schedules/{schedule_id}:enable", []string{"qa.write"}, scheduler.EnableScheduleHandler)
 	handleAPI(r, "POST", "/schedules/{schedule_id}:run-now", []string{"qa.write"}, scheduler.RunNowHandler)
@@ -414,6 +416,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/conversations/{name}:search-config", []string{"qa.write"}, chat.PatchConversationSearchConfig)
 	handleAPI(r, "GET", "/conversations/{name}:detail", []string{"qa.read"}, chat.GetConversationDetail)
 	handleAPI(r, "GET", "/conversations/{name}:history", []string{"qa.read"}, chat.GetConversationHistory)
+	handleAPI(r, "GET", "/conversations/{name}:trail", []string{"qa.read"}, chat.GetConversationTrail)
 	handleAPI(r, "GET", "/conversations/{name}", []string{"qa.read"}, chat.GetConversation)
 	handleAPI(r, "DELETE", "/conversations/{name}", []string{"qa.write"}, chat.DeleteConversation)
 	handleAPI(r, "POST", "/conversations:batchDelete", []string{"qa.write"}, chat.BatchDeleteConversations)
@@ -484,6 +487,10 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/prompt_categories", []string{"document.read"}, chat.ListPromptCategories)
 	handleAPI(r, "POST", "/prompt_categories", []string{"document.write"}, chat.CreatePromptCategory)
 	handleAPI(r, "DELETE", "/prompt_categories/{name}", []string{"document.write"}, chat.DeletePromptCategory)
+
+	// ----- Showcase cases -----
+	handleAPI(r, "GET", "/showcase/cases", []string{"document.read"}, showcase.ListCases)
+	handleAPI(r, "GET", "/showcase/cases/{case_id}", []string{"document.read"}, showcase.GetCase)
 
 	// Algorithm service callbacks: no request-level RBAC, protected by internal service token at infra level.
 	handleAPI(r, "POST", "/skill/create", nil, skillv2handler.InternalCreate)

@@ -494,6 +494,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         ...(Array.isArray(extras?.mentions) && extras.mentions.length > 0
           ? { mentions: extras.mentions }
           : {}),
+        ...(Array.isArray(extras?.cite_history_ids) && extras.cite_history_ids.length > 0
+          ? { cite_history_ids: extras.cite_history_ids }
+          : {}),
         // If the user changed plugin settings before a conversation was created,
         // carry them in the first request so Go can persist them on ensureConversation.
         // Only send the three known fields to avoid polluting the payload with API response leftovers.

@@ -430,6 +430,8 @@ func init() {
 
 	// Stable aliases found by the repository-wide API/error-constructor audit.
 	// Reuse the public generic codes while preserving the source text as Detail.
+	registerAdditionalErrorPattern("call_mode must be '%s', '%s' or '%s'", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("workflow is paused", "Conflict", http.StatusConflict, 2000107)
 	for _, source := range []string{
 		"invalid channel intent request", "invalid channel intent state", "invalid channel command registry",
 		"invalid channel intent response", "basic chat does not support background execution",

@@ -378,6 +378,15 @@ test("Desktop renderer keeps Node disabled behind an isolated preload bridge", (
   assert.match(source, /preload:\s*path\.join\(__dirname, "preload\.js"\)/);
 });
 
+test("Desktop clears stale frontend caches before opening a renderer", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(source, /await clearFrontendCaches\(session\.defaultSession/);
+  assert.ok(
+    source.indexOf("await clearFrontendCaches(session.defaultSession") < source.indexOf("return runMacInstallationWarmupIfNeeded()"),
+    "frontend caches must be cleared before installation warmup or the main window loads",
+  );
+});
+
 test("Desktop opens the home page from the sidecar readiness event with status polling as fallback", () => {
   const source = readFileSync(electronMainScript, "utf8");
 

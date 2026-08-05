@@ -114,6 +114,7 @@ func (h *HeartbeatReporter) pullLoop(ctx context.Context) {
 			for _, cmd := range resp.Commands {
 				h.log.Info("handling command",
 					zap.Int64("command_id", cmd.ID),
+					zap.String("exact_command_id", cmd.CommandID),
 					zap.String("type", string(cmd.Type)),
 					zap.String("source_id", cmd.SourceID),
 					zap.String("document_id", cmd.DocumentID),
@@ -121,9 +122,10 @@ func (h *HeartbeatReporter) pullLoop(ctx context.Context) {
 				)
 				result, err := h.dispatcher.HandleCommand(ctx, cmd)
 				ack := internal.AckCommandRequest{
-					AgentID:   h.cfg.AgentID,
-					CommandID: cmd.ID,
-					Success:   err == nil,
+					AgentID:         h.cfg.AgentID,
+					CommandID:       cmd.CommandID,
+					LegacyCommandID: cmd.ID,
+					Success:         err == nil,
 				}
 				if err != nil {
 					ack.Error = err.Error()
@@ -133,7 +135,7 @@ func (h *HeartbeatReporter) pullLoop(ctx context.Context) {
 						ack.ResultJSON = string(raw)
 					}
 				}
-				if cmd.ID <= 0 {
+				if cmd.CommandID == "" && cmd.ID <= 0 {
 					continue
 				}
 				if ackErr := h.client.AckCommand(ctx, ack); ackErr != nil {

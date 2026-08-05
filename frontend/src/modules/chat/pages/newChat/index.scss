@@ -32,14 +32,26 @@
   }
 }
 
+.new-chat-page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+
+  > div {
+    height: 100%;
+  }
+}
+
 .new-chat-container {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 
   .drag-overlay {
     position: absolute;
@@ -109,11 +121,13 @@
   .new-chat-main {
     position: relative;
     width: 100%;
-    height: 100%;
+    min-height: 100%;
+    height: auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
+    padding: 64px 24px 96px;
 
     // Background blur effect
     .blur-background {
@@ -137,7 +151,7 @@
         flex-direction: column;
         align-items: center;
         gap: 48px;
-        width: 812px;
+        width: min(1040px, calc(100vw - 48px));
 
         border-radius: 12px;
         padding: 0;
@@ -277,6 +291,57 @@
       align-items: center;
       gap: 16px;
       width: 100%;
+
+        .showcase-template-banner {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          width: calc(100% - 20px);
+          padding: 11px 14px;
+          border: 1px solid #dce8fb;
+          border-radius: 12px;
+          background: #f6f9ff;
+          color: #52647e;
+          font-size: 12px;
+          line-height: 1.5;
+
+          div {
+            display: grid;
+            gap: 2px;
+            min-width: 0;
+          }
+
+          strong {
+            overflow: hidden;
+            color: #38537d;
+            font-weight: 600;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          span {
+            overflow: hidden;
+            color: #8291a8;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          button {
+            flex: 0 0 auto;
+            padding: 4px 8px;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: #477be8;
+            cursor: pointer;
+            font-size: 12px;
+          }
+
+          button:hover {
+            background: #e7f0ff;
+          }
+        }
 
       .task-mode-notice {
         display: grid;

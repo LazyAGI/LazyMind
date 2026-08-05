@@ -189,13 +189,13 @@ model_providers:
           type: llm
           max_input_tokens: "224K"
         - name: doubao-seedream-5-0-pro-260628
-          type: text2image
+          type: image_editing
         - name: doubao-seedream-5-0-260128
-          type: text2image
+          type: image_editing
         - name: doubao-seedream-4-5-251128
-          type: text2image
+          type: image_editing
         - name: doubao-seedream-4-0-250828
-          type: text2image
+          type: image_editing
         - name: doubao-seedream-3-0-t2i-250415
           type: text2image
         - name: doubao-seedance-2-0
@@ -461,9 +461,9 @@ model_providers:
         - name: Speech-2.8-Turbo
           type: tts
         - name: image-01
-          type: text2image
+          type: image_editing
         - name: image-01-live
-          type: text2image
+          type: image_editing
 
     - name: OpenAI
       description:
@@ -548,9 +548,9 @@ model_providers:
           type: vlm
           max_input_tokens: "1M"
         - name: gpt-image-1.5
-          type: text2image
+          type: image_editing
         - name: gpt-image-2
-          type: text2image
+          type: image_editing
         - name: o3
           type: vlm
           max_input_tokens: "200K"
@@ -834,15 +834,15 @@ model_providers:
         - name: wanx2.1-t2i-turbo
           type: text2image
         - name: qwen-image-2.0-pro
-          type: text2image
+          type: image_editing
         - name: qwen-image-2.0-pro-2026-04-22
-          type: text2image
+          type: image_editing
         - name: qwen-image-2.0-pro-2026-03-03
-          type: text2image
+          type: image_editing
         - name: qwen-image-2.0
-          type: text2image
+          type: image_editing
         - name: qwen-image-2.0-2026-03-03
-          type: text2image
+          type: image_editing
         - name: qwen-image-max
           type: text2image
         - name: qwen-image-max-2025-12-30
@@ -1027,8 +1027,6 @@ model_providers:
         - name: sensenova-6.7-flash-lite
           type: llm
           max_input_tokens: "256K"
-        - name: sensenova-u1-fast
-          type: text2image
         - name: sensenova-u1-fast
           type: image_editing
 
@@ -1274,13 +1272,13 @@ model_providers:
         - name: Pro/BAAI/bge-reranker-v2-m3
           type: rerank
         - name: Qwen/Qwen-Image-Edit-2509
-          type: text2image
+          type: image_editing
         - name: Qwen/Qwen-Image-Edit
-          type: text2image
+          type: image_editing
         - name: Qwen/Qwen-Image
           type: text2image
         - name: Kwai-Kolors/Kolors
-          type: text2image
+          type: image_editing
         - name: fnlp/MOSS-TTSD-v0.5
           type: tts
         - name: FunAudioLLM/CosyVoice2-0.5B

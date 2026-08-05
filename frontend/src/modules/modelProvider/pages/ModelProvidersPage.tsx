@@ -726,7 +726,13 @@ export default function ModelProviderPage() {
     openProviderConfig(provider);
   };
 
-  const verifyProviderGroup = async (providerId: string, groupId: string, apiKey?: string) => {
+  const verifyProviderGroup = async (providerId: string, groupId: string, apiKey: string) => {
+    const requestApiKey = normalizeFormText(apiKey);
+    if (!requestApiKey) {
+      message.warning(t("modelProvider.message.fillApiKeyBeforeVerify"));
+      return;
+    }
+
     const verifyKey = `${providerId}:${groupId}`;
     if (verifyingGroupIds[verifyKey]) {
       return;
@@ -739,15 +745,10 @@ export default function ModelProviderPage() {
       if (!provider || !group) {
         return;
       }
-      if (!apiKey && !group.apiKeyConfigured) {
-        message.warning(t("modelProvider.message.fillApiKeyBeforeVerify"));
-        return;
-      }
-
       const payload: Record<string, unknown> = {
         provider_name: provider.name,
         base_url: group.baseUrl,
-        api_key: apiKey || "",
+        api_key: requestApiKey,
         dry_run: false,
       };
       // The new SenseNova platform URL requires a model name for connectivity check.
@@ -1424,17 +1425,13 @@ export default function ModelProviderPage() {
             </div>
           ) : null}
           <Form.Item
-            extra={
-              verifyGroupModal?.group.apiKeyConfigured
-                ? t("modelProvider.verifyConfiguredApiKeyExtra")
-                : t("modelProvider.verifyApiKeyExtra")
-            }
+            extra={t("modelProvider.verifyApiKeyExtra")}
             label="API Key"
             name="apiKey"
             normalize={(value: string | undefined) => value?.trim()}
             rules={[
               {
-                required: !verifyGroupModal?.group.apiKeyConfigured,
+                required: true,
                 message: t("modelProvider.validation.apiKeyRequired"),
               },
               { max: 512, message: t("modelProvider.validation.apiKeyMax") },

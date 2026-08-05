@@ -24,6 +24,8 @@ import (
 // Register this hook at startup from the plugin package to avoid import cycles.
 var OnCancelHook func(ctx context.Context, convID string)
 
+const taskExecutionTimeoutReason = "任务执行超过2小时，未正常完成"
+
 // ── DB helpers ───────────────────────────────────────────────────────────────
 
 // CreateTask inserts a new TaskCenterTask row.
@@ -58,7 +60,50 @@ func UpdateTaskStatus(ctx context.Context, db *gorm.DB, id, status string) error
 		now := time.Now().UTC()
 		updates["finished_at"] = now
 	}
-	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).Where("id = ?", id).Updates(updates).Error
+	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
+		Where("id = ? AND archived_at IS NULL AND status NOT IN ('canceled')", id).
+		Updates(updates).Error
+}
+
+// UpdateTaskFailure persists a terminal task failure together with a user-facing reason.
+func UpdateTaskFailure(ctx context.Context, db *gorm.DB, id, reason string) error {
+	var task orm.TaskCenterTask
+	if err := db.WithContext(ctx).
+		Select("id", "status", "progress_json").
+		Where("id = ?", id).
+		First(&task).Error; err != nil {
+		return err
+	}
+	if isTerminal(task.Status) && task.Status != "failed" {
+		return nil
+	}
+	now := time.Now().UTC()
+	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
+		Where("id = ? AND archived_at IS NULL AND status NOT IN ('succeeded','skipped','canceled')", id).
+		Updates(map[string]any{
+			"status":        "failed",
+			"progress_json": progressWithFailureReason(task.ProgressJSON, reason),
+			"finished_at":   now,
+			"updated_at":    now,
+		}).Error
+}
+
+func progressWithFailureReason(progress orm.RawJSON, reason string) orm.RawJSON {
+	payload := map[string]any{}
+	if strings.TrimSpace(string(progress)) != "" {
+		if err := json.Unmarshal(progress, &payload); err != nil || payload == nil {
+			payload = map[string]any{}
+		}
+	}
+	if existing, ok := payload["failure_reason"].(string); ok && strings.TrimSpace(existing) != "" {
+		return progress
+	}
+	if existing, ok := payload["error_message"].(string); ok && strings.TrimSpace(existing) != "" {
+		return progress
+	}
+	payload["failure_reason"] = reason
+	encoded, _ := json.Marshal(payload)
+	return orm.RawJSON(encoded)
 }
 
 // UpdateTaskStatusBySession updates the TaskCenter record whose plugin_session_id matches.
@@ -73,7 +118,7 @@ func UpdateTaskStatusBySession(ctx context.Context, db *gorm.DB, sessionID, stat
 		updates["finished_at"] = now
 	}
 	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("plugin_session_id = ? AND status NOT IN ('succeeded','failed','canceled')", sessionID).
+		Where("plugin_session_id = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", sessionID).
 		Updates(updates).Error
 }
 
@@ -102,9 +147,12 @@ func IsTerminalStatus(status string) bool { return isTerminal(status) }
 // ── response types ────────────────────────────────────────────────────────────
 
 type stepInfo struct {
-	StepID   string  `json:"step_id"`
-	Status   string  `json:"status"`
-	Artifact *string `json:"artifact,omitempty"`
+	StepID       string  `json:"step_id"`
+	Title        string  `json:"title,omitempty"`
+	Status       string  `json:"status"`
+	CurrentPhase string  `json:"current_phase,omitempty"`
+	Summary      string  `json:"summary,omitempty"`
+	Artifact     *string `json:"artifact,omitempty"`
 }
 
 type taskResponse struct {
@@ -154,16 +202,20 @@ func toResponse(t orm.TaskCenterTask, conversationTitle string, scheduleName *st
 // loadStepsForPluginSession loads steps from plugin_session_steps for a given session.
 func loadStepsForPluginSession(ctx context.Context, db *gorm.DB, sessionID string) []stepInfo {
 	type pssRow struct {
-		StepID string `gorm:"column:step_id"`
-		Status string `gorm:"column:status"`
-		TaskID string `gorm:"column:task_id"`
+		StepID       string `gorm:"column:step_id"`
+		Title        string `gorm:"column:title"`
+		Status       string `gorm:"column:status"`
+		TaskID       string `gorm:"column:task_id"`
+		CurrentPhase string `gorm:"column:current_phase"`
+		Summary      string `gorm:"column:summary"`
 	}
 	var rows []pssRow
 	if err := db.WithContext(ctx).
-		Table("plugin_session_steps").
-		Select("step_id, status, task_id").
-		Where("session_id = ?", sessionID).
-		Order("created_at ASC").
+		Table("plugin_session_steps AS pss").
+		Select("pss.step_id, pss.status, pss.task_id, sat.title, sat.current_phase, sat.summary").
+		Joins("LEFT JOIN sub_agent_tasks AS sat ON sat.id = pss.task_id").
+		Where("pss.session_id = ?", sessionID).
+		Order("pss.created_at ASC").
 		Find(&rows).Error; err != nil {
 		return nil
 	}
@@ -192,7 +244,13 @@ func loadStepsForPluginSession(ctx context.Context, db *gorm.DB, sessionID strin
 	}
 	steps := make([]stepInfo, 0, len(rows))
 	for _, r := range rows {
-		s := stepInfo{StepID: r.StepID, Status: r.Status}
+		s := stepInfo{
+			StepID:       r.StepID,
+			Title:        r.Title,
+			Status:       r.Status,
+			CurrentPhase: r.CurrentPhase,
+			Summary:      r.Summary,
+		}
 		if key, ok := artifactByTask[r.TaskID]; ok {
 			s.Artifact = &key
 		}
@@ -204,14 +262,16 @@ func loadStepsForPluginSession(ctx context.Context, db *gorm.DB, sessionID strin
 // loadStepsForConversation loads steps from sub_agent_tasks for a given conversation (no plugin).
 func loadStepsForConversation(ctx context.Context, db *gorm.DB, convID string) []stepInfo {
 	type satRow struct {
-		Title       string `gorm:"column:title"`
-		Status      string `gorm:"column:status"`
-		OutputSlots string `gorm:"column:output_slots"`
+		Title        string `gorm:"column:title"`
+		Status       string `gorm:"column:status"`
+		CurrentPhase string `gorm:"column:current_phase"`
+		Summary      string `gorm:"column:summary"`
+		OutputSlots  string `gorm:"column:output_slots"`
 	}
 	var rows []satRow
 	if err := db.WithContext(ctx).
 		Table("sub_agent_tasks").
-		Select("title, status, output_slots").
+		Select("title, status, current_phase, summary, output_slots").
 		Where("conversation_id = ?", convID).
 		Order("seq_in_conversation ASC").
 		Find(&rows).Error; err != nil {
@@ -219,7 +279,13 @@ func loadStepsForConversation(ctx context.Context, db *gorm.DB, convID string) [
 	}
 	steps := make([]stepInfo, 0, len(rows))
 	for _, r := range rows {
-		s := stepInfo{StepID: r.Title, Status: r.Status}
+		s := stepInfo{
+			StepID:       r.Title,
+			Title:        r.Title,
+			Status:       r.Status,
+			CurrentPhase: r.CurrentPhase,
+			Summary:      r.Summary,
+		}
 		var keys []string
 		if json.Unmarshal([]byte(r.OutputSlots), &keys) == nil && len(keys) > 0 {
 			s.Artifact = &keys[0]
@@ -274,6 +340,18 @@ func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) s
 		return "failed"
 	}
 	return "running"
+}
+
+func resolveTaskForResponse(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) orm.TaskCenterTask {
+	storedStatus := t.Status
+	t.Status = resolveTaskStatus(ctx, db, t)
+	if t.Status == "failed" &&
+		!isTerminal(storedStatus) &&
+		(t.PluginSessionID == nil || *t.PluginSessionID == "") &&
+		time.Since(t.CreatedAt) > 2*time.Hour {
+		t.ProgressJSON = progressWithFailureReason(t.ProgressJSON, taskExecutionTimeoutReason)
+	}
+	return t
 }
 
 func waitingDependencyReason(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) string {
@@ -395,8 +473,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		"canceled":       0,
 	}
 	for _, row := range rows {
-		t := row.TaskCenterTask
-		t.Status = resolveTaskStatus(r.Context(), db, t)
+		t := resolveTaskForResponse(r.Context(), db, row.TaskCenterTask)
 		statusCounts["all"]++
 		if _, tracked := statusCounts[t.Status]; tracked {
 			statusCounts[t.Status]++
@@ -470,8 +547,7 @@ func GetTaskByID(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	effectiveStatus := resolveTaskStatus(r.Context(), db, t)
-	t.Status = effectiveStatus
+	t = resolveTaskForResponse(r.Context(), db, t)
 
 	var steps []stepInfo
 	if t.PluginSessionID != nil && *t.PluginSessionID != "" {
@@ -521,12 +597,17 @@ func CancelTaskByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // RemoveTaskHandler handles POST /task-center/tasks/{task_id}:remove.
-// It archives the run and soft-deletes its task conversation as one operation.
+// It archives the run and, for scheduler-owned task conversations, soft-deletes
+// the conversation as one operation.
 func RemoveTaskHandler(w http.ResponseWriter, r *http.Request) {
-	userID := store.UserID(r)
+	userID := strings.TrimSpace(store.UserID(r))
 	path := strings.TrimPrefix(r.URL.Path, "/task-center/tasks/")
 	id := strings.TrimSuffix(path, ":remove")
 	id = strings.Split(id, ":")[0]
+	if userID == "" {
+		common.ReplyErr(w, "user not found", http.StatusUnauthorized)
+		return
+	}
 
 	db := store.DB()
 	if db == nil {
@@ -563,12 +644,18 @@ func archiveTaskRun(ctx context.Context, db *gorm.DB, userID, id string) (orm.Ta
 			updates["dependency_status"] = "canceled"
 			updates["finished_at"] = now
 		}
-		if err := tx.Model(&orm.TaskCenterTask{}).Where("id = ? AND user_id = ?", id, userID).Updates(updates).Error; err != nil {
-			return err
+		result := tx.Model(&orm.TaskCenterTask{}).
+			Where("id = ? AND user_id = ? AND archived_at IS NULL", id, userID).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
 		}
-		if existing.ConversationID != "" {
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		if existing.TaskType == "scheduled" && existing.ConversationID != "" {
 			if err := tx.Model(&orm.Conversation{}).
-				Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", existing.ConversationID, userID).
+				Where("id = ? AND create_user_id = ? AND is_task_conv = ? AND deleted_at IS NULL", existing.ConversationID, userID, true).
 				Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
 				return err
 			}
@@ -727,8 +814,7 @@ func ListScheduleTasks(w http.ResponseWriter, r *http.Request) {
 	schedName := sched.Name
 	items := make([]taskResponse, 0, len(rows))
 	for _, t := range rows {
-		effectiveStatus := resolveTaskStatus(r.Context(), db, t)
-		t.Status = effectiveStatus
+		t = resolveTaskForResponse(r.Context(), db, t)
 		var steps []stepInfo
 		if t.PluginSessionID != nil && *t.PluginSessionID != "" {
 			steps = loadStepsForPluginSession(r.Context(), db, *t.PluginSessionID)

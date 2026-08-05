@@ -852,27 +852,74 @@ def _emit_preflight_snapshot(snapshot: Optional[Dict[str, Any]]) -> None:
     )
 
 
+def _builtin_catalog_allowed(
+    plugin_id: str,
+    disabled_builtin_plugins: set[str],
+    manual_builtin_plugins: set[str],
+    allowed_plugin_refs: set[str],
+) -> bool:
+    plugin_ref = f'builtin:{plugin_id}'
+    return (
+        plugin_id not in disabled_builtin_plugins
+        and (not allowed_plugin_refs or plugin_ref in allowed_plugin_refs)
+        and (plugin_id not in manual_builtin_plugins or plugin_ref in allowed_plugin_refs)
+    )
+
+
+def _catalog_entry_allowed(entry: Dict[str, Any], allowed_plugin_refs: set[str]) -> bool:
+    plugin_ref = str(entry.get('plugin_ref') or '')
+    call_mode = str(entry.get('call_mode') or '').strip()
+    if not call_mode:
+        call_mode = 'auto' if entry.get('enabled', True) else 'disabled'
+    return (
+        call_mode != 'disabled'
+        and (not allowed_plugin_refs or plugin_ref in allowed_plugin_refs)
+        and (call_mode != 'manual' or plugin_ref in allowed_plugin_refs)
+    )
+
+
+def _active_plugin_context_allowed(
+    plugin_context: Optional[Dict[str, Any]],
+    plugin_catalog: Optional[List[Dict[str, Any]]],
+    disabled_builtin_plugins: Optional[List[str]],
+) -> bool:
+    if not isinstance(plugin_context, dict):
+        return True
+    plugin_ref = str(plugin_context.get('plugin_ref') or '').strip()
+    if not plugin_ref:
+        return True
+    if plugin_ref.startswith('builtin:'):
+        plugin_id = plugin_ref.removeprefix('builtin:')
+        return plugin_id not in set(disabled_builtin_plugins or [])
+    catalog_refs = {
+        str(entry.get('plugin_ref') or '').strip()
+        for entry in (plugin_catalog or [])
+    }
+    return plugin_ref in catalog_refs
+
+
 def build_cold_start_tools(
     plugin_catalog: Optional[List[Dict[str, Any]]] = None,
     disabled_builtin_plugins: Optional[List[str]] = None,
+    manual_builtin_plugins: Optional[List[str]] = None,
     allowed_plugin_refs: Optional[List[str]] = None,
 ) -> List[Any]:
     """Build one side-effect-free preflight trigger per loaded plugin."""
     tools = []
     disabled = set(disabled_builtin_plugins or [])
+    manual = set(manual_builtin_plugins or [])
     allowed = set(allowed_plugin_refs or [])
     candidates = [
         (spec, None)
         for spec in (plugin_loader._registry or {}).values()
         if (
             not spec.plugin_id.startswith('user_')
-            and spec.plugin_id not in disabled
-            and (not allowed or f'builtin:{spec.plugin_id}' in allowed)
+            and _builtin_catalog_allowed(spec.plugin_id, disabled, manual, allowed)
         )
     ]
     candidates.extend(
         (None, entry) for entry in (plugin_catalog or [])
-        if not allowed or str(entry.get('plugin_ref') or '') in allowed
+        if _catalog_entry_allowed(entry, allowed)
     )
     for spec, catalog_entry in candidates:
         if catalog_entry is not None:
@@ -1981,6 +2028,7 @@ def resolve_plugin_injection(
     conversation_id: str = '',
     plugin_catalog: Optional[List[Dict[str, Any]]] = None,
     disabled_builtin_plugins: Optional[List[str]] = None,
+    manual_builtin_plugins: Optional[List[str]] = None,
     allowed_plugin_refs: Optional[List[str]] = None,
 ) -> PluginAgentContribution:
     """Resolve plugin tools, system prompt, stop-tools and agentic_config patches.
@@ -2015,6 +2063,11 @@ def resolve_plugin_injection(
             plugin_tools, plugin_system_prompt, plugin_stop_tools,
             agentic_config_patch, plugin_artifact_context,
         )
+
+    if not _active_plugin_context_allowed(
+        plugin_context, plugin_catalog, disabled_builtin_plugins,
+    ):
+        plugin_context = None
 
     # Resolve plugin_mode from plugin_context (injected by Go).
     plugin_mode = 'dynamic'
@@ -2132,7 +2185,7 @@ def resolve_plugin_injection(
         else:
             # Cold start: no active session yet
             triggers = build_cold_start_tools(
-                plugin_catalog, disabled_builtin_plugins, allowed_plugin_refs,
+                plugin_catalog, disabled_builtin_plugins, manual_builtin_plugins, allowed_plugin_refs,
             )
             plugin_tools = triggers + build_cold_advance_tools(plugin_mode)
             plugin_stop_tools = ['advance_step_and_hand_off']
@@ -2148,14 +2201,18 @@ def resolve_plugin_injection(
                     plugin_loader.get_plugin_intro(spec.plugin_id)
                     for spec in (plugin_loader._registry or {}).values()
                     if (
-                        spec.plugin_id not in set(disabled_builtin_plugins or [])
-                        and (not allowed_plugin_refs or f'builtin:{spec.plugin_id}' in set(allowed_plugin_refs))
+                        _builtin_catalog_allowed(
+                            spec.plugin_id,
+                            set(disabled_builtin_plugins or []),
+                            set(manual_builtin_plugins or []),
+                            set(allowed_plugin_refs or []),
+                        )
                         and not spec.plugin_id.startswith('user_')
                     )
                 ]
                 scenarios.extend(
                     _catalog_intro(entry) for entry in (plugin_catalog or [])
-                    if not allowed_plugin_refs or str(entry.get('plugin_ref') or '') in set(allowed_plugin_refs)
+                    if _catalog_entry_allowed(entry, set(allowed_plugin_refs or []))
                 )
                 plugin_system_prompt = (
                     _COLD_START_PLUGIN_PROMPT
@@ -2163,7 +2220,7 @@ def resolve_plugin_injection(
     else:
         # No plugin_context provided: still inject cold-start triggers
         triggers = build_cold_start_tools(
-            plugin_catalog, disabled_builtin_plugins, allowed_plugin_refs,
+            plugin_catalog, disabled_builtin_plugins, manual_builtin_plugins, allowed_plugin_refs,
         )
         plugin_tools = triggers + build_cold_advance_tools(plugin_mode)
         plugin_stop_tools = ['advance_step_and_hand_off']
@@ -2173,14 +2230,18 @@ def resolve_plugin_injection(
                 plugin_loader.get_plugin_intro(spec.plugin_id)
                 for spec in (plugin_loader._registry or {}).values()
                 if (
-                    spec.plugin_id not in set(disabled_builtin_plugins or [])
-                    and (not allowed_plugin_refs or f'builtin:{spec.plugin_id}' in set(allowed_plugin_refs))
+                    _builtin_catalog_allowed(
+                        spec.plugin_id,
+                        set(disabled_builtin_plugins or []),
+                        set(manual_builtin_plugins or []),
+                        set(allowed_plugin_refs or []),
+                    )
                     and not spec.plugin_id.startswith('user_')
                 )
             ]
             scenarios.extend(
                 _catalog_intro(entry) for entry in (plugin_catalog or [])
-                if not allowed_plugin_refs or str(entry.get('plugin_ref') or '') in set(allowed_plugin_refs)
+                if _catalog_entry_allowed(entry, set(allowed_plugin_refs or []))
             )
             plugin_system_prompt = (
                 _COLD_START_PLUGIN_PROMPT

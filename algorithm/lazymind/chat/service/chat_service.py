@@ -397,6 +397,7 @@ async def _handle_chat_impl(
     plugin = request.plugin
     explicit_resources = request.explicit_resource_bindings
     from lazymind.chat.plugin.plugin_manager import (
+        _active_plugin_context_allowed,
         _build_chat_agent_task_context,
         guard_plugin_agent_stream,
         is_plugin_driver_turn,
@@ -589,6 +590,10 @@ async def _handle_chat_impl(
         task_profile.excluded_resources.plugin_refs if task_profile else ()
     )
     effective_plugin_context = plugin.plugin_context
+    if not _active_plugin_context_allowed(
+        effective_plugin_context, plugin.catalog, plugin.disabled_builtin_plugins,
+    ):
+        effective_plugin_context = None
     if str((effective_plugin_context or {}).get('plugin_ref') or '') in excluded_plugin_refs:
         effective_plugin_context = None
     effective_plugin_catalog = [
@@ -603,12 +608,17 @@ async def _handle_chat_impl(
         ref.removeprefix('builtin:') for ref in excluded_plugin_refs
         if ref.startswith('builtin:')
     )
+    effective_manual_builtin_plugins = [
+        plugin_id for plugin_id in plugin.manual_builtin_plugins
+        if f'builtin:{plugin_id}' not in excluded_plugin_refs
+    ]
 
     plugin_contribution = resolve_plugin_injection(
         effective_plugin_context,
         conversation_id=conversation_id,
         plugin_catalog=effective_plugin_catalog,
         disabled_builtin_plugins=list(dict.fromkeys(effective_disabled_builtin_plugins)),
+        manual_builtin_plugins=list(dict.fromkeys(effective_manual_builtin_plugins)),
         allowed_plugin_refs=effective_allowed_plugin_refs,
     )
     plugin_tools = plugin_contribution.tools
@@ -619,7 +629,7 @@ async def _handle_chat_impl(
         current_query=query,
         current_intent=conversation.intent_context,
     )
-    intentwriter = update_intentwriter(intentwriter, plugin.plugin_context)
+    intentwriter = update_intentwriter(intentwriter, effective_plugin_context)
 
     # Inject SubAgent task context into the system prompt independently of plugin state.
     # Injected when either plugin or subagent is enabled so the model knows about ongoing tasks.

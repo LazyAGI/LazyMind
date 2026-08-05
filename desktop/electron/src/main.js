@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray, session } = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
@@ -21,6 +21,8 @@ const {
   markMacWarmupCompleted,
   runInstallerWarmupLifecycle,
 } = require("./installer-warmup");
+const { clearFrontendCaches } = require("./frontend-cache");
+const { installExternalNavigationHandler } = require("./external-navigation");
 
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
@@ -1143,6 +1145,14 @@ function browserWindowOptions(show = true) {
   };
 }
 
+function attachExternalNavigationHandler(window) {
+  installExternalNavigationHandler(
+    window.webContents,
+    (url) => shell.openExternal(url),
+    (error) => appendStartupLog("error", `failed to open external URL: ${serializeError(error)}`),
+  );
+}
+
 function windowsDesktopIconPath() {
   if (!isWindows) {
     return undefined;
@@ -1326,6 +1336,7 @@ async function createWindow() {
       return;
     }
     nextMainWindow = new BrowserWindow(browserWindowOptions(false));
+    attachExternalNavigationHandler(nextMainWindow);
     mainWindow = nextMainWindow;
     nextMainWindow.once("closed", () => {
       if (mainWindow === nextMainWindow) {
@@ -1477,8 +1488,13 @@ if (!hasSingleInstanceLock) {
   app.on("activate", () => {
     void showActiveWindow();
   });
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     startupMetricsRecorder.mark("electronReady");
+    try {
+      await clearFrontendCaches(session.defaultSession, (message) => appendStartupLog("desktop", message));
+    } catch (error) {
+      appendStartupLog("error", `failed to clear frontend caches: ${serializeError(error)}`);
+    }
     if (isWindows) {
       app.setAppUserModelId("ai.lazymind.desktop");
     }

@@ -662,6 +662,41 @@ components:
                     format: int64
                     type: integer
             type: object
+        ConversationTrailItem:
+            properties:
+                create_time:
+                    type: string
+                depth:
+                    type: integer
+                history_id:
+                    type: string
+                parent_history_id:
+                    type: string
+                question:
+                    type: string
+                seq:
+                    type: integer
+                source:
+                    type: string
+                summary:
+                    type: string
+            type: object
+        ConversationTrailListResponse:
+            properties:
+                conversation_id:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/ConversationTrailItem'
+                    type: array
+                name:
+                    type: string
+                next_page_token:
+                    type: string
+                total_size:
+                    format: int64
+                    type: integer
+            type: object
         ConversationItem:
             properties:
                 chat_times:
@@ -4030,6 +4065,9 @@ components:
                     type: string
                 group_name:
                     type: string
+                is_editable:
+                    description: Whether this option supports image editing
+                    type: boolean
                 id:
                     type: string
                 is_default:
@@ -4051,6 +4089,7 @@ components:
             required:
                 - base_url
                 - group_name
+                - is_editable
                 - id
                 - is_default
                 - model_type
@@ -4602,6 +4641,120 @@ components:
                 - is_favorite
                 - usage_count
             type: object
+        showcaseCase:
+            properties:
+                attachment_hint:
+                    type: string
+                category:
+                    type: string
+                description:
+                    type: string
+                id:
+                    type: string
+                image_url:
+                    type: string
+                output_label:
+                    type: string
+                output_type:
+                    type: string
+                primary_category:
+                    type: string
+                prompt:
+                    type: string
+                prompt_short:
+                    type: string
+                result_highlights:
+                    items:
+                        type: string
+                    type: array
+                result_summary:
+                    type: string
+                secondary_options:
+                    items:
+                        $ref: '#/components/schemas/showcaseCaseOption'
+                    type: array
+                steps:
+                    items:
+                        $ref: '#/components/schemas/showcaseCaseStep'
+                    type: array
+                tasks:
+                    items:
+                        $ref: '#/components/schemas/showcaseCaseTask'
+                    type: array
+                title:
+                    type: string
+            required:
+                - category
+                - description
+                - id
+                - image_url
+                - output_label
+                - output_type
+                - prompt
+                - prompt_short
+                - result_highlights
+                - result_summary
+                - steps
+                - title
+            type: object
+        showcaseCaseListResponse:
+            properties:
+                cases:
+                    items:
+                        $ref: '#/components/schemas/showcaseCase'
+                    type: array
+                categories:
+                    items:
+                        type: string
+                    type: array
+                total:
+                    type: integer
+            required:
+                - cases
+                - categories
+                - total
+            type: object
+        showcaseCaseOption:
+            properties:
+                description:
+                    type: string
+                id:
+                    type: string
+                label:
+                    type: string
+                prompt:
+                    type: string
+            required:
+                - id
+                - label
+            type: object
+        showcaseCaseTask:
+            properties:
+                description:
+                    type: string
+                id:
+                    type: string
+                output_label:
+                    type: string
+                prompt:
+                    type: string
+                title:
+                    type: string
+            required:
+                - description
+                - id
+                - title
+            type: object
+        showcaseCaseStep:
+            properties:
+                description:
+                    type: string
+                title:
+                    type: string
+            required:
+                - description
+                - title
+            type: object
         remoteFSCopyOpenAPIRequest:
             properties:
                 from:
@@ -4755,6 +4908,9 @@ components:
                     type: string
                 group_name:
                     type: string
+                is_editable:
+                    description: Whether the selected model supports image editing
+                    type: boolean
                 max_input_tokens:
                     description: Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
                     nullable: true
@@ -4774,6 +4930,7 @@ components:
             required:
                 - base_url
                 - group_name
+                - is_editable
                 - model_id
                 - model_key
                 - name
@@ -7297,6 +7454,35 @@ paths:
                                 $ref: '#/components/schemas/ConversationHistoryListResponse'
                     description: Chat history page ordered by seq descending; may include in-flight turns from Redis
             summary: List conversation history (paginated)
+    /api/core/conversations/{name}:trail:
+        get:
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    description: Conversation ID or resource name (e.g. conv-1 or conversations/conv-1; :trail suffix is stripped)
+                    type: string
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    description: Page size (default 20, max 100)
+                    type: integer
+                - in: query
+                  name: page_token
+                  required: false
+                  schema:
+                    description: Pagination offset token from a previous response next_page_token
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationTrailListResponse'
+                    description: Conversation navigation metadata ordered by seq ascending
+            summary: List conversation trail metadata (paginated)
     /api/core/conversations/{name}:search-config:
         patch:
             description: Replaces the knowledge bases on an existing conversation while preserving its other search settings.
@@ -11399,6 +11585,59 @@ paths:
             summary: Polish prompt
             tags:
                 - prompts
+    /api/core/showcase/cases:
+        get:
+            parameters:
+                - description: Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
+                  in: header
+                  name: Accept-Language
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/showcaseCaseListResponse'
+                    description: Showcase case list
+            summary: Showcase case list
+            tags:
+                - showcase
+    /api/core/showcase/cases/{case_id}:
+        get:
+            parameters:
+                - description: Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
+                  in: header
+                  name: Accept-Language
+                  required: false
+                  schema:
+                    type: string
+                - in: path
+                  name: case_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/showcaseCase'
+                    description: Showcase case details
+            summary: Showcase case details
+            tags:
+                - showcase
     /api/core/published-plugins/{plugin_ref:.+}/versions:
         get:
             parameters:
@@ -11917,6 +12156,17 @@ paths:
                     description: OK
             summary: POST /schedules
     /api/core/schedules/{schedule_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /schedules/{schedule_id}
         put:
             parameters:
                 - in: path

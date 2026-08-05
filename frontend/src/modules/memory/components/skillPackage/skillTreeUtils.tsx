@@ -87,7 +87,7 @@ export const buildAntTreeData = (
   return children.map((child) => {
     const path = child.path || child.name;
     const isDir = child.type === "dir";
-    const status = !isDir ? diffStatusMap.get(path) : undefined;
+    const status = diffStatusMap.get(path);
     const fileItem: SkillTreeFileItem = {
       path,
       name: child.name,

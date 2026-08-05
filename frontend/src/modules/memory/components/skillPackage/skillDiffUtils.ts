@@ -41,11 +41,22 @@ export interface SkillDiffChangeRegion {
   isContextOnly: boolean;
 }
 
+export interface SkillReviewPendingHunk {
+  path: string;
+  hunkId: string;
+}
+
+export interface SkillReviewStats {
+  accepted: number;
+  rejected: number;
+  pending: number;
+}
+
 const isChangeLine = (line: SkillDiffEntryLine) =>
   line.type === "add" || line.type === "remove";
 
 export const isActionableHunkId = (hunkId?: string) =>
-  Boolean(hunkId) && !/^hunk-\d+$/.test(hunkId);
+  Boolean(hunkId) && !/^hunk-\d+$/.test(hunkId ?? "");
 
 const readRawField = (line: Record<string, unknown>, keys: string[]): string => {
   for (const key of keys) {
@@ -125,6 +136,30 @@ export const isRejectedHunkDecision = (decision?: SkillHunkDecision) =>
   String(decision || "")
     .trim()
     .toLowerCase() === "rejected";
+
+export const summarizeSkillReviewFiles = (
+  files: Array<{ path: string; diffEntryLines: DraftDiffEntryLineInput[] }>,
+) => {
+  const stats: SkillReviewStats = { accepted: 0, rejected: 0, pending: 0 };
+  const pendingHunks: SkillReviewPendingHunk[] = [];
+
+  files.forEach((file) => {
+    buildDiffHunkBlocks(mapSkillDiffEntryLines(file.diffEntryLines)).forEach((hunk) => {
+      if (isAcceptedHunkDecision(hunk.decision)) {
+        stats.accepted += 1;
+      } else if (isRejectedHunkDecision(hunk.decision)) {
+        stats.rejected += 1;
+      } else {
+        stats.pending += 1;
+        if (isActionableHunkId(hunk.hunkId)) {
+          pendingHunks.push({ path: file.path, hunkId: hunk.hunkId });
+        }
+      }
+    });
+  });
+
+  return { stats, pendingHunks };
+};
 
 export const buildDiffHunkBlocks = (lines: SkillDiffEntryLine[]): SkillDiffHunkBlock[] => {
   const blocks: SkillDiffHunkBlock[] = [];

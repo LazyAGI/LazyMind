@@ -2,7 +2,6 @@ package asyncjob
 
 import (
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"gorm.io/gorm"
@@ -13,11 +12,7 @@ import (
 // newRepoTestDB creates a SQLite test database.
 func newRepoTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "asyncjob_test.db"))
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	return db.DB
+	return orm.OpenTestDB(t).DB
 }
 
 // TestIsUniqueConflict detects duplicate/unique constraint errors.
