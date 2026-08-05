@@ -128,7 +128,7 @@ def test_stream_parallel_requests_see_isolated_config(monkeypatch):
         obs = obs_by_query[f's_{i}']
         assert obs['sid'] == f'stream-session-{i}'
         assert obs['config']['filters']['kb_id'] == f's_id_{i}'
-        assert obs['agent_kwargs_skills'] == ()
+        assert obs['agent_kwargs_skills'] == ('workflow-agent-kit',)
 
     for i, (body, outer, session_id) in enumerate(results):
         assert session_id == f'stream-session-{i}'

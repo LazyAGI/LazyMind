@@ -80,7 +80,7 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
     assert agent_calls
     assert agent_calls[0]['llm'].startswith('llm:')
     assert agent_calls[0]['tools']
-    assert agent_calls[0]['kwargs']['skills'] is False
+    assert agent_calls[0]['kwargs']['skills'] == ['workflow-agent-kit']
     assert agent_calls[0]['kwargs']['stream'] is True
     tool_names = {getattr(tool, '__name__', '') for tool in agent_calls[0]['tools']}
     assert {'read_file', 'write_file', 'list_dir'} <= tool_names

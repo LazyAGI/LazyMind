@@ -161,6 +161,24 @@ class TaskQueryDB:
         except Exception:
             return []
 
+    def load_artifacts_for_tasks(self, task_ids: List[str]) -> List[Dict[str, Any]]:
+        """Read visible artifacts for ordinary LazyMind tasks."""
+        if not task_ids:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(text(
+                'SELECT task_id, slot, content_type, value, seq FROM sub_agent_artifacts '
+                'WHERE task_id IN :ids AND hidden = FALSE ORDER BY task_id, slot, seq'
+            ).bindparams(bindparam('ids', expanding=True)), {'ids': task_ids}).mappings().all()
+        return [{'task_id': row['task_id'], 'slot': row['slot'],
+                 'content_type': row['content_type'], 'value': _decode(row['value'], {}),
+                 'seq': row['seq']} for row in rows]
+
+    def format_task_artifacts(self, task_ids: List[str]) -> List[str]:
+        """Render ordinary task artifacts for the parent ChatAgent context."""
+        return [json.dumps(row, ensure_ascii=False, default=str)
+                for row in self.load_artifacts_for_tasks(task_ids)]
+
     def build_chat_agent_task_context(self, conversation_id: str) -> str:
         tasks = self.list_tasks_by_conversation(conversation_id)
         visible = [task for task in tasks if task.get('status') in {
@@ -168,7 +186,15 @@ class TaskQueryDB:
         }]
         if not visible:
             return ''
-        return '## LazyMind Tasks\n' + '\n'.join(
-            f'- {task.get("title") or task.get("id")} [{task.get("status")}]'
-            for task in visible
-        )
+        status_labels = {'succeeded': 'done', 'failed': 'failed',
+                         'interrupted': 'interrupted', 'pending': 'pending',
+                         'running': 'running'}
+        lines = [
+            f'Task {index}. {task.get("title") or task.get("id")} '
+            f'[{status_labels.get(str(task.get("status")), task.get("status"))}]'
+            + (f': {task.get("summary")}' if task.get('summary') else '')
+            for index, task in enumerate(visible, 1)
+        ]
+        task_ids = [str(task.get('id') or task.get('task_id') or '') for task in visible]
+        lines.extend(self.format_task_artifacts([task_id for task_id in task_ids if task_id]))
+        return '## LazyMind Tasks\n' + '\n'.join(lines)

@@ -1,6 +1,6 @@
 -- +migrate Dialect postgres
--- Create Workflow tables: plugin_sessions, plugin_session_steps, plugin_slot_revisions
--- Workflow sessions track one plugin workflow per conversation.
+-- Create Plugin tables: plugin_sessions, plugin_session_steps, plugin_slot_revisions
+-- Plugin sessions track one plugin workflow per conversation.
 -- SubAgent tables (sub_agent_tasks / sub_agent_steps / sub_agent_artifacts) are reused unchanged.
 
 CREATE TABLE IF NOT EXISTS plugin_sessions (

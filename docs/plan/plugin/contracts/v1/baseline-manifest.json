@@ -32,8 +32,8 @@
     "advance_step": {
       "transition": "submit_ready_attempt",
       "wait": "attempt_terminal",
-      "production_source": "algorithm/lazymind/chat/workflow/workflow_manager.py",
-      "production_symbol": "_advance_tool",
+      "production_source": "algorithm/lazymind/workflow_toolkit.py",
+      "production_symbol": "advance_step",
       "transition_source": "backend/core/workflow/transition_handlers.go",
       "transition_symbol": "resolveAdvanceOperation"
     },
@@ -41,7 +41,7 @@
       "transition": "submit_ready_attempt",
       "wait": "durable_submission",
       "production_source": "algorithm/lazymind/chat/workflow/workflow_manager.py",
-      "production_symbol": "_advance_tool",
+      "production_symbol": "advance_step_and_hand_off",
       "transition_source": "backend/core/workflow/transition_handlers.go",
       "transition_symbol": "resolveAdvanceOperation"
     }

@@ -1,27 +1,6 @@
 -- 20260723183515_squash_post_init
 -- +migrate Down
 -- +migrate Dialect postgres
-DROP TABLE IF EXISTS public.workflow_events CASCADE;
-DROP TABLE IF EXISTS public.workflow_commands CASCADE;
-DROP TABLE IF EXISTS public.workflow_preparations CASCADE;
-DROP TABLE IF EXISTS public.workflow_input_bindings CASCADE;
-DROP TABLE IF EXISTS public.workflow_input_resources CASCADE;
-DROP TABLE IF EXISTS public.workflow_outbox CASCADE;
-ALTER TABLE public.plugin_attempt_input_bindings DROP COLUMN IF EXISTS content_hash;
-ALTER TABLE public.plugin_attempt_input_bindings DROP COLUMN IF EXISTS source_revision;
-ALTER TABLE public.plugin_attempt_input_bindings DROP COLUMN IF EXISTS source_id;
-ALTER TABLE public.plugin_attempt_input_bindings DROP COLUMN IF EXISTS source_type;
-ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS result_json;
-ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS terminal_code;
-ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS progress_json;
-ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS heartbeat_at;
-ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS lease_expires_at;
-ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS fencing_generation;
-ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS lease_token;
-ALTER TABLE public.plugin_session_steps DROP COLUMN IF EXISTS lease_owner;
-ALTER TABLE public.plugin_sessions DROP COLUMN IF EXISTS controller_host;
-ALTER TABLE public.plugin_sessions DROP COLUMN IF EXISTS origin_ref;
-ALTER TABLE public.plugin_sessions DROP COLUMN IF EXISTS origin_host;
 
 -- Reverse the flattened net migration back to the unchanged init schema.
 -- Data from tables intentionally dropped by the historical migrations cannot be restored.
@@ -436,9 +415,6 @@ CREATE UNIQUE INDEX uk_system_memories_user_id ON public.system_memories USING b
 CREATE UNIQUE INDEX uk_system_user_preferences_user_id ON public.system_user_preferences USING btree (user_id);
 
 -- +migrate Dialect sqlite
-DROP TABLE IF EXISTS workflow_events;
-DROP TABLE IF EXISTS workflow_commands;
-DROP TABLE IF EXISTS workflow_preparations;
 PRAGMA defer_foreign_keys = ON;
 DROP TABLE IF EXISTS plugin_repair_runs;
 DROP TABLE IF EXISTS plugin_generation_analyses;

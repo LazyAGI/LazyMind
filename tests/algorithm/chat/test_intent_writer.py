@@ -110,31 +110,19 @@ def test_legacy_intent_is_rendered_as_inherited_constraint():
     assert '执行到初稿后确认' in rendered
 
 
-def test_chat_workflow_intent_section_excludes_step_intents():
+def test_chat_workflow_manager_does_not_rebuild_runtime_intent_from_db():
     from lazymind.chat.workflow import workflow_manager
 
-    fake_db = type('FakeDB', (), {
-        'get_session_intent': lambda self, session_id: '本次执行到初稿后确认',
-        'list_step_intents': lambda self, session_id: {'draft': '初稿不超过500字'},
-    })()
-    with patch('lazymind.chat.engine.subagent.db.TaskQueryDB', return_value=fake_db):
-        section = workflow_manager._build_intent_section('ws-1', step_id='draft')
-
-    assert '本次执行到初稿后确认' in section
-    assert '初稿不超过500字' not in section
+    assert not hasattr(workflow_manager, '_build_intent_section')
 
 
-def test_subagent_receives_conversation_session_and_current_step_intent():
+def test_subagent_receives_frozen_runtime_instruction():
     from lazymind.chat.engine.subagent.runner import _build_intent_context_section
 
-    fake_db = type('FakeDB', (), {
-        'get_conversation_intent': lambda self, conversation_id: '只总结经验',
-        'get_session_intent': lambda self, session_id: '执行到初稿后确认',
-        'get_step_intent': lambda self, session_id, step_id: '初稿不超过500字',
-    })()
-    lines = _build_intent_context_section(fake_db, 'conv-1', 'ps-1', 'draft')
+    lines = _build_intent_context_section({
+        'runtime_instruction': '执行到初稿后确认；初稿不超过500字',
+    })
     section = '\n'.join(lines)
 
-    assert '只总结经验' in section
     assert '执行到初稿后确认' in section
     assert '初稿不超过500字' in section

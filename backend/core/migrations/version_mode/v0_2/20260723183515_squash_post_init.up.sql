@@ -627,7 +627,6 @@ CREATE TABLE public.plugin_drafts (
     plugin_yaml_content text DEFAULT ''::text NOT NULL,
     state_yaml_content text DEFAULT ''::text NOT NULL,
     scenario_content text DEFAULT ''::text NOT NULL,
-    driver_content text DEFAULT ''::text NOT NULL,
     scripts_content text DEFAULT '{}'::text NOT NULL,
     generate_status character varying(32) DEFAULT ''::character varying NOT NULL,
     generate_error text DEFAULT ''::text NOT NULL,
@@ -3246,66 +3245,6 @@ INSERT INTO public.eval_set_shards (
     5368709120, 0, 0, now(), now()
 ) ON CONFLICT (id) DO NOTHING;
 
-CREATE TABLE public.workflow_preparations (id varchar(36) PRIMARY KEY, idempotency_key varchar(255) NOT NULL, owner_user_id varchar(255) NOT NULL, workflow_id varchar(255) NOT NULL, contract_version varchar(32) NOT NULL, request_json jsonb NOT NULL, response_json jsonb NOT NULL, consumed_at timestamp NULL, session_id varchar(36) NOT NULL DEFAULT '', created_at timestamp NOT NULL, updated_at timestamp NOT NULL, CONSTRAINT uk_workflow_preparation_owner_key UNIQUE(owner_user_id, idempotency_key));
-CREATE INDEX idx_workflow_preparations_owner ON public.workflow_preparations(owner_user_id);
-CREATE TABLE public.workflow_commands (command_id varchar(255) PRIMARY KEY, owner_user_id varchar(255) NOT NULL, session_id varchar(36) NOT NULL, contract_version varchar(32) NOT NULL, request_hash varchar(64) NOT NULL, http_status integer NOT NULL, response_json jsonb NOT NULL, created_at timestamp NOT NULL);
-CREATE INDEX idx_workflow_commands_owner ON public.workflow_commands(owner_user_id);
-CREATE INDEX idx_workflow_commands_session ON public.workflow_commands(session_id);
-CREATE TABLE public.workflow_events (id bigserial PRIMARY KEY, session_id varchar(36) NOT NULL, owner_user_id varchar(255) NOT NULL, contract_version varchar(32) NOT NULL, event_type varchar(64) NOT NULL, entity_id varchar(255) NOT NULL DEFAULT '', state_version bigint NOT NULL DEFAULT 0, command_id varchar(255) NOT NULL DEFAULT '', payload_json jsonb NOT NULL, created_at timestamp NOT NULL);
-CREATE INDEX idx_workflow_events_session_cursor ON public.workflow_events(session_id, id);
-CREATE INDEX idx_workflow_events_owner ON public.workflow_events(owner_user_id);
-CREATE INDEX idx_workflow_events_command ON public.workflow_events(command_id);
-
-ALTER TABLE public.plugin_sessions ADD COLUMN origin_host varchar(32) NOT NULL DEFAULT 'lazymind';
-ALTER TABLE public.plugin_sessions ADD COLUMN origin_ref varchar(255) NOT NULL DEFAULT '';
-ALTER TABLE public.plugin_sessions ADD COLUMN controller_host varchar(32) NOT NULL DEFAULT 'lazymind';
-CREATE INDEX idx_plugin_sessions_origin ON public.plugin_sessions(origin_host, origin_ref);
-
-ALTER TABLE public.plugin_session_steps ADD COLUMN lease_owner varchar(255) NOT NULL DEFAULT '';
-ALTER TABLE public.plugin_session_steps ADD COLUMN lease_token varchar(255) NOT NULL DEFAULT '';
-ALTER TABLE public.plugin_session_steps ADD COLUMN fencing_generation bigint NOT NULL DEFAULT 0;
-ALTER TABLE public.plugin_session_steps ADD COLUMN lease_expires_at timestamp NULL;
-ALTER TABLE public.plugin_session_steps ADD COLUMN heartbeat_at timestamp NULL;
-ALTER TABLE public.plugin_session_steps ADD COLUMN progress_json jsonb NOT NULL DEFAULT '{}';
-ALTER TABLE public.plugin_session_steps ADD COLUMN terminal_code varchar(64) NOT NULL DEFAULT '';
-ALTER TABLE public.plugin_session_steps ADD COLUMN result_json jsonb NOT NULL DEFAULT '{}';
-CREATE INDEX idx_plugin_session_steps_claim ON public.plugin_session_steps(status, lease_expires_at, id);
-
-CREATE TABLE public.workflow_outbox (
-    id varchar(36) PRIMARY KEY,
-    attempt_id varchar(36) NOT NULL UNIQUE,
-    session_id varchar(36) NOT NULL,
-    payload_json jsonb NOT NULL,
-    status varchar(16) NOT NULL DEFAULT 'pending',
-    created_at timestamp NOT NULL,
-    updated_at timestamp NOT NULL
-);
-CREATE INDEX idx_workflow_outbox_status ON public.workflow_outbox(status, created_at);
-CREATE INDEX idx_workflow_outbox_session ON public.workflow_outbox(session_id);
-
-CREATE TABLE public.workflow_input_resources (
-    id varchar(36) PRIMARY KEY, owner_user_id varchar(255) NOT NULL,
-    name varchar(255) NOT NULL, mime_type varchar(255) NOT NULL,
-    size bigint NOT NULL, content_hash varchar(80) NOT NULL,
-    revision bigint NOT NULL DEFAULT 1, content bytea NOT NULL,
-    created_at timestamp NOT NULL
-);
-CREATE INDEX idx_workflow_input_resources_owner_hash ON public.workflow_input_resources(owner_user_id, content_hash);
-CREATE TABLE public.workflow_input_bindings (
-    id varchar(36) PRIMARY KEY, workflow_session_id varchar(36) NOT NULL,
-    material_id varchar(64) NOT NULL, resource_type varchar(32) NOT NULL,
-    resource_id varchar(36) NOT NULL, resource_revision bigint NOT NULL,
-    content_hash varchar(80) NOT NULL, validity varchar(16) NOT NULL DEFAULT 'effective',
-    created_by_command_id varchar(64) NOT NULL, created_at timestamp NOT NULL
-);
-CREATE INDEX idx_workflow_input_bindings_session ON public.workflow_input_bindings(workflow_session_id);
-CREATE INDEX idx_workflow_input_bindings_resource ON public.workflow_input_bindings(resource_id);
-
-ALTER TABLE public.plugin_attempt_input_bindings ADD COLUMN source_type varchar(32) NOT NULL DEFAULT 'artifact';
-ALTER TABLE public.plugin_attempt_input_bindings ADD COLUMN source_id varchar(128) NOT NULL DEFAULT '';
-ALTER TABLE public.plugin_attempt_input_bindings ADD COLUMN source_revision varchar(64) NOT NULL DEFAULT '';
-ALTER TABLE public.plugin_attempt_input_bindings ADD COLUMN content_hash varchar(80) NOT NULL DEFAULT '';
-
 -- +migrate Dialect sqlite
 PRAGMA defer_foreign_keys = ON;
 ALTER TABLE "acl_groups" RENAME TO "__v01_acl_groups";
@@ -3489,7 +3428,7 @@ CREATE TABLE IF NOT EXISTS `plugin_attempt_input_bindings` (`id` varchar(36),`se
 
 CREATE TABLE IF NOT EXISTS `plugin_blobs` (`hash` varchar(64),`size` integer NOT NULL,`mime` varchar(128),`file_type` varchar(32) NOT NULL DEFAULT "unknown",`is_binary` numeric NOT NULL DEFAULT false,`content` blob NOT NULL,`created_at` datetime NOT NULL,PRIMARY KEY (`hash`));
 
-CREATE TABLE IF NOT EXISTS `plugin_drafts` (`id` varchar(36),`name` varchar(255) NOT NULL DEFAULT "",`content` text NOT NULL DEFAULT "",`created_by` varchar(255) NOT NULL DEFAULT "",`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,`plugin_yaml_content` text NOT NULL DEFAULT "",`state_yaml_content` text NOT NULL DEFAULT "",`state_layout_content` text NOT NULL DEFAULT "",`scenario_content` text NOT NULL DEFAULT "",`driver_content` text NOT NULL DEFAULT "",`scripts_content` text NOT NULL DEFAULT "{}",`generate_status` varchar(32) NOT NULL DEFAULT "",`generate_error` text NOT NULL DEFAULT "",`generate_warning` text NOT NULL DEFAULT "",`version` integer NOT NULL DEFAULT 1,`source_type` varchar(16) NOT NULL DEFAULT "",`source_skill_id` varchar(36) NOT NULL DEFAULT "",`source_skill_name` varchar(255) NOT NULL DEFAULT "",`source_skill_revision_id` varchar(36) NOT NULL DEFAULT "",`source_skill_revision_no` integer NOT NULL DEFAULT 0,`source_skill_tree_hash` varchar(64) NOT NULL DEFAULT "",`source_analysis_id` varchar(36) NOT NULL DEFAULT "",`design_brief_content` text NOT NULL DEFAULT "",`plugin_id` varchar(255) NOT NULL DEFAULT "",`base_revision_id` varchar(36) NOT NULL DEFAULT "",PRIMARY KEY (`id`));
+CREATE TABLE IF NOT EXISTS `plugin_drafts` (`id` varchar(36),`name` varchar(255) NOT NULL DEFAULT "",`content` text NOT NULL DEFAULT "",`created_by` varchar(255) NOT NULL DEFAULT "",`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,`plugin_yaml_content` text NOT NULL DEFAULT "",`state_yaml_content` text NOT NULL DEFAULT "",`state_layout_content` text NOT NULL DEFAULT "",`scenario_content` text NOT NULL DEFAULT "",`scripts_content` text NOT NULL DEFAULT "{}",`generate_status` varchar(32) NOT NULL DEFAULT "",`generate_error` text NOT NULL DEFAULT "",`generate_warning` text NOT NULL DEFAULT "",`version` integer NOT NULL DEFAULT 1,`source_type` varchar(16) NOT NULL DEFAULT "",`source_skill_id` varchar(36) NOT NULL DEFAULT "",`source_skill_name` varchar(255) NOT NULL DEFAULT "",`source_skill_revision_id` varchar(36) NOT NULL DEFAULT "",`source_skill_revision_no` integer NOT NULL DEFAULT 0,`source_skill_tree_hash` varchar(64) NOT NULL DEFAULT "",`source_analysis_id` varchar(36) NOT NULL DEFAULT "",`design_brief_content` text NOT NULL DEFAULT "",`plugin_id` varchar(255) NOT NULL DEFAULT "",`base_revision_id` varchar(36) NOT NULL DEFAULT "",PRIMARY KEY (`id`));
 
 CREATE TABLE IF NOT EXISTS `plugin_generation_analyses` (`id` varchar(36),`draft_id` varchar(36) NOT NULL,`user_id` varchar(255) NOT NULL,`source_type` varchar(16) NOT NULL,`source_skill_id` varchar(36) NOT NULL DEFAULT "",`source_skill_revision_id` varchar(36) NOT NULL DEFAULT "",`source_skill_revision_no` integer NOT NULL DEFAULT 0,`source_skill_tree_hash` varchar(64) NOT NULL DEFAULT "",`status` varchar(32) NOT NULL,`verdict_code` varchar(64) NOT NULL DEFAULT "",`verdict_message` text NOT NULL DEFAULT "",`candidates_json` text NOT NULL DEFAULT "[]",`selected_candidate_id` varchar(128) NOT NULL DEFAULT "",`coverage_report_json` text NOT NULL DEFAULT "{}",`tool_mapping_report_json` text NOT NULL DEFAULT "{}",`script_report_json` text NOT NULL DEFAULT "{}",`source_package_json` text NOT NULL DEFAULT "{}",`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,PRIMARY KEY (`id`));
 
@@ -3508,10 +3447,6 @@ CREATE TABLE IF NOT EXISTS `plugin_run_outbox` (`task_id` varchar(36),`payload` 
 CREATE TABLE IF NOT EXISTS `plugin_session_steps` (`id` varchar(36),`session_id` varchar(36) NOT NULL,`step_id` varchar(64) NOT NULL,`attempt` integer NOT NULL DEFAULT 1,`task_id` varchar(36) NOT NULL,`status` varchar(16) NOT NULL DEFAULT "pending",`validity` varchar(16) NOT NULL DEFAULT "effective",`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,PRIMARY KEY (`id`));
 
 CREATE TABLE IF NOT EXISTS `plugin_sessions` (`id` varchar(36),`conversation_id` varchar(36) NOT NULL,`plugin_id` varchar(64) NOT NULL,`plugin_ref` varchar(512) NOT NULL DEFAULT "",`plugin_revision_id` varchar(36) NOT NULL DEFAULT "",`plugin_revision_no` integer NOT NULL DEFAULT 0,`plugin_tree_hash` varchar(64) NOT NULL DEFAULT "",`plugin_remote_root` varchar(1024) NOT NULL DEFAULT "",`state_version` integer NOT NULL DEFAULT 0,`graph_hash` varchar(64) NOT NULL DEFAULT "",`graph_schema_version` varchar(16) NOT NULL DEFAULT "",`trigger_history_id` varchar(36),`status` varchar(16) NOT NULL DEFAULT "active",`current_step_id` varchar(64),`dismissed` boolean NOT NULL DEFAULT false,`intent_context` text NOT NULL DEFAULT "{}",`create_user_id` varchar(255) NOT NULL DEFAULT "",`created_at` datetime NOT NULL,`updated_at` datetime NOT NULL,PRIMARY KEY (`id`));
-ALTER TABLE plugin_sessions ADD COLUMN origin_host varchar(32) NOT NULL DEFAULT 'lazymind';
-ALTER TABLE plugin_sessions ADD COLUMN origin_ref varchar(255) NOT NULL DEFAULT '';
-ALTER TABLE plugin_sessions ADD COLUMN controller_host varchar(32) NOT NULL DEFAULT 'lazymind';
-CREATE INDEX IF NOT EXISTS idx_plugin_sessions_origin ON plugin_sessions(origin_host, origin_ref);
 
 CREATE TABLE IF NOT EXISTS `plugin_slot_order` (`session_id` varchar(36) NOT NULL,`slot_id` varchar(64) NOT NULL,`order_list` jsonb NOT NULL DEFAULT '[]',`order_version` integer NOT NULL DEFAULT 0,`updated_at` datetime NOT NULL,PRIMARY KEY (`session_id`,`slot_id`));
 
@@ -4015,28 +3950,3 @@ INSERT OR IGNORE INTO eval_set_shards (
   id,status,row_limit,row_open_threshold,size_limit_bytes,size_open_threshold_bytes,
   actual_rows,estimated_bytes,created_at,updated_at
 ) VALUES ('eval_shard_0001','open',200000,120000,8589934592,5368709120,0,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
-
-CREATE TABLE workflow_preparations (
-    id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL, owner_user_id TEXT NOT NULL,
-    workflow_id TEXT NOT NULL, contract_version TEXT NOT NULL, request_json TEXT NOT NULL,
-    response_json TEXT NOT NULL, consumed_at DATETIME NULL, session_id TEXT NOT NULL DEFAULT '',
-    created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
-    UNIQUE(owner_user_id, idempotency_key)
-);
-CREATE INDEX idx_workflow_preparations_owner ON workflow_preparations(owner_user_id);
-CREATE TABLE workflow_commands (
-    command_id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL, session_id TEXT NOT NULL,
-    contract_version TEXT NOT NULL, request_hash TEXT NOT NULL, http_status INTEGER NOT NULL,
-    response_json TEXT NOT NULL, created_at DATETIME NOT NULL
-);
-CREATE INDEX idx_workflow_commands_owner ON workflow_commands(owner_user_id);
-CREATE INDEX idx_workflow_commands_session ON workflow_commands(session_id);
-CREATE TABLE workflow_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, owner_user_id TEXT NOT NULL,
-    contract_version TEXT NOT NULL, event_type TEXT NOT NULL, entity_id TEXT NOT NULL DEFAULT '',
-    state_version INTEGER NOT NULL DEFAULT 0, command_id TEXT NOT NULL DEFAULT '',
-    payload_json TEXT NOT NULL, created_at DATETIME NOT NULL
-);
-CREATE INDEX idx_workflow_events_session_cursor ON workflow_events(session_id, id);
-CREATE INDEX idx_workflow_events_owner ON workflow_events(owner_user_id);
-CREATE INDEX idx_workflow_events_command ON workflow_events(command_id);
