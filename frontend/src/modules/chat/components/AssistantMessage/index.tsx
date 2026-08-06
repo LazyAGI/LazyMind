@@ -17,7 +17,6 @@ import {
 import {
   ChatConversationsResponseFinishReasonEnum,
   FeedBackChatHistoryRequestTypeEnum,
-  Source,
 } from "@/api/generated/chatbot-client";
 import { AgentAppsAuth } from "@/components/auth";
 import { ChatServiceApi, decideToolLimit } from "@/modules/chat/utils/request";
@@ -28,6 +27,14 @@ import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
+import {
+  type ChatSource,
+  getSourceDedupKey,
+  getSourceLabel,
+  getSourceSubtitle,
+  isExternalSource,
+  openSource,
+} from "@/modules/chat/utils/sourceAdapter";
 
 const BotAvatarIcon = new URL(
   "../../assets/images/bot_avatar.png",
@@ -363,35 +370,10 @@ const AssistantMessage = (props: any) => {
     );
   }
 
-  function getSourceDisplayIndex(source: any) {
-    const index = source?.index;
-    if (source?.display_index !== undefined && source?.display_index !== null) {
-      return source.display_index;
-    }
-    if (source?.document_index !== undefined && source?.document_index !== null) {
-      return source.document_index;
-    }
-    if (typeof index === "string" && index.includes(".")) {
-      return index.split(".")[0];
-    }
-    return index;
-  }
-
-  function getSourceDocumentKey(source: any, sourceIndex: number) {
-    const displayIndex = getSourceDisplayIndex(source);
-    if (displayIndex !== undefined && displayIndex !== null) {
-      return `${source?.dataset_id || ""}:${source?.file_name || source?.document_id || ""}:${displayIndex}`;
-    }
-    if (source?.document_id) {
-      return `${source?.dataset_id || ""}:${source.document_id}`;
-    }
-    return `source-${sourceIndex}`;
-  }
-
-  function getDocumentSources(sources: Source[]) {
+  function getDisplaySources(sources: ChatSource[]) {
     const seen = new Set<string>();
-    return Object.values(sources).filter((source: any, sourceIndex: number) => {
-      const key = getSourceDocumentKey(source, sourceIndex);
+    return Object.values(sources).filter((source, sourceIndex) => {
+      const key = getSourceDedupKey(source, sourceIndex);
       if (seen.has(key)) {
         return false;
       }
@@ -400,37 +382,35 @@ const AssistantMessage = (props: any) => {
     });
   }
 
-  function openSource(source: any) {
-    if (source?.dataset_id === "default") {
+  function handleOpenSource(source: ChatSource) {
+    if (!isExternalSource(source) && source.dataset_id === "default") {
       message.error(t("chat.tempFileNotSupportJump"));
       return;
     }
-    const url = `/lib/knowledge/knowledge/${source.dataset_id}/${source.document_id}?group_name=${source.group_name}&segement_id=${source.segement_id}&number=${source.segment_number}&from=chat`;
-    window.open(url, "_blank");
+    openSource(source);
   }
 
-  function renderKnowledgeBase() {
-    const sources = item.sources as Source[];
+  function renderSources() {
+    const sources = item.sources as ChatSource[];
     if (!sources || sources.length < 1) {
       return <></>;
     }
     return (
       <div className="chat-assistant-msg-knowledge-info">
-        {getDocumentSources(sources).map((source: Source, sourceIndex: number) => {
+        {getDisplaySources(sources).map((source, sourceIndex) => {
+          const subtitle = getSourceSubtitle(source);
           return (
             <div
               className="chat-assistant-msg-knowledge"
-              key={getSourceDocumentKey(source, sourceIndex)}
+              key={getSourceDedupKey(source, sourceIndex)}
             >
-              <span style={{ marginRight: "8px" }}>
-                {getSourceDisplayIndex(source)}
-              </span>
               <span
                 className="knowledgeName"
-                onClick={() => openSource(source)}
+                onClick={() => handleOpenSource(source)}
               >
-                {source.file_name}
+                {getSourceLabel(source)}
               </span>
+              {subtitle && <span className="sourceSubtitle">{subtitle}</span>}
             </div>
           );
         })}
@@ -666,34 +646,33 @@ const AssistantMessage = (props: any) => {
       .catch(() => {});
   }
 
-  function renderAnswerKnowledgeBase(answerIndex: number) {
+  function renderAnswerSources(answerIndex: number) {
     const answer = item.answers?.[answerIndex];
     if (!answer) {
       return null;
     }
 
-    const sources = answer.sources as Source[];
+    const sources = answer.sources as ChatSource[];
     if (!sources || sources.length < 1) {
       return null;
     }
 
     return (
       <div className="chat-assistant-msg-knowledge-info">
-        {getDocumentSources(sources).map((source: Source, sourceIndex: number) => {
+        {getDisplaySources(sources).map((source, sourceIndex) => {
+          const subtitle = getSourceSubtitle(source);
           return (
             <div
               className="chat-assistant-msg-knowledge"
-              key={getSourceDocumentKey(source, sourceIndex)}
+              key={getSourceDedupKey(source, sourceIndex)}
             >
-              <span style={{ marginRight: "8px" }}>
-                {getSourceDisplayIndex(source)}
-              </span>
               <span
                 className="knowledgeName"
-                onClick={() => openSource(source)}
+                onClick={() => handleOpenSource(source)}
               >
-                {source.file_name}
+                {getSourceLabel(source)}
               </span>
+              {subtitle && <span className="sourceSubtitle">{subtitle}</span>}
             </div>
           );
         })}
@@ -1018,10 +997,10 @@ const AssistantMessage = (props: any) => {
                   ? renderAnswerFooter
                   : undefined
               }
-              renderKnowledgeBase={
+              renderSources={
                 item.finish_reason ===
                 ChatConversationsResponseFinishReasonEnum.FinishReasonStop
-                  ? renderAnswerKnowledgeBase
+                  ? renderAnswerSources
                   : undefined
               }
               initialSelectedIndex={item.selected_answer_index}
@@ -1077,7 +1056,7 @@ const AssistantMessage = (props: any) => {
           {item.finish_reason ===
             ChatConversationsResponseFinishReasonEnum.FinishReasonStop &&
             !item.onboardingInfo &&
-            renderKnowledgeBase()}
+            renderSources()}
 
           {}
           {item.finish_reason ===

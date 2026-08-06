@@ -165,6 +165,9 @@
 }
 
 .chat-assistant-msg-knowledge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 4px;
   border-right: 1px solid #dfe6ef;
   margin-right: 10px;
@@ -181,6 +184,10 @@
     &:hover {
       color: #4689ff;
     }
+  }
+
+  .sourceSubtitle {
+    color: #8d9ab2;
   }
 }
 

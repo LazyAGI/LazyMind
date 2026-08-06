@@ -60,6 +60,43 @@ func TestMergeChunksToFirstChunk_Multiple(t *testing.T) {
 	}
 }
 
+func TestMergeChunksToFirstChunk_PreservesLastNonEmptySources(t *testing.T) {
+	external := map[string]any{
+		"source_type": "external",
+		"index":       "1.1",
+		"title":       "Example",
+		"url":         "https://example.com",
+	}
+	got := mergeChunksToFirstChunk([]*ChatChunkResponse{
+		{Delta: "answer", Sources: []any{external}},
+		{FinishReason: "FINISH_REASON_STOP"},
+	})
+	if len(got.Sources) != 1 {
+		t.Fatalf("sources: got %d, want 1", len(got.Sources))
+	}
+	if got.Sources[0].(map[string]any)["url"] != "https://example.com" {
+		t.Fatalf("unexpected source: %#v", got.Sources[0])
+	}
+}
+
+func TestRetrievalSourcesPreservesExternalSource(t *testing.T) {
+	sources := []any{map[string]any{
+		"source_type": "external",
+		"index":       "2.1",
+		"title":       "External source",
+		"url":         "https://example.com/article",
+		"content":     "Evidence",
+	}}
+	got := retrievalSources(marshalRetrievalResult(sources))
+	if len(got) != 1 {
+		t.Fatalf("sources: got %d, want 1", len(got))
+	}
+	source := got[0].(map[string]any)
+	if source["source_type"] != "external" || source["index"] != "2.1" {
+		t.Fatalf("unexpected source: %#v", source)
+	}
+}
+
 // TestMergeChunksToFirstChunk_SkipNil skips nil entries in the slice.
 func TestMergeChunksToFirstChunk_SkipNil(t *testing.T) {
 	chunks := []*ChatChunkResponse{

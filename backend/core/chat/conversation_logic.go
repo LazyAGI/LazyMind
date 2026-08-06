@@ -62,6 +62,19 @@ func marshalRetrievalResult(sources []any) json.RawMessage {
 	return payload
 }
 
+func retrievalSources(raw json.RawMessage) []any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var result struct {
+		Sources []any `json:"sources"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil
+	}
+	return result.Sources
+}
+
 func nonNegativeToolCallTurns(v int64) int {
 	if v < 0 {
 		return 0
@@ -1602,6 +1615,7 @@ func streamDualAnswer(
 
 	var primaryText, secondaryText string
 	var primaryResult, secondaryResult string
+	var primarySources, secondarySources []any
 	var primaryPendingThink, secondaryPendingThink string
 	var primaryToolCallTurns, secondaryToolCallTurns int
 	thinkStart := time.Now()
@@ -1630,6 +1644,9 @@ func streamDualAnswer(
 	primaryDone := primaryCh == nil
 	secondaryDone := secondaryCh == nil
 	appendPrimary := func(delta, reasoning string, sources []any) {
+		if len(sources) > 0 {
+			primarySources = sources
+		}
 		if reasoning != "" {
 			primaryPendingThink += reasoning
 			primaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
@@ -1663,6 +1680,9 @@ func streamDualAnswer(
 		}
 	}
 	appendSecondary := func(delta, reasoning string, sources []any) {
+		if len(sources) > 0 {
+			secondarySources = sources
+		}
 		if reasoning != "" {
 			secondaryPendingThink += reasoning
 			secondaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
@@ -1738,6 +1758,9 @@ func streamDualAnswer(
 						primaryDone = true
 						primaryCh = nil
 					} else {
+						if len(d.Sources) > 0 {
+							primarySources = d.Sources
+						}
 						if d.ArtifactCreated != nil {
 							persistAndPublishConversationArtifact(
 								bg, reqCtx, w, flusher, db, stateStore, reqBody,
@@ -1776,6 +1799,9 @@ func streamDualAnswer(
 						secondaryDone = true
 						secondaryCh = nil
 					} else {
+						if len(d.Sources) > 0 {
+							secondarySources = d.Sources
+						}
 						if d.ArtifactCreated != nil {
 							persistAndPublishConversationArtifact(
 								bg, reqCtx, w, flusher, db, stateStore, reqBody,
@@ -1825,7 +1851,7 @@ dualPersist:
 	primaryHistory := &orm.MultiAnswersChatHistory{
 		ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: primaryResult,
 		ToolCallTurns: primaryToolCallTurns, ThinkingDurationS: primaryThinkingDurationS,
-		Ext:       historyExt,
+		RetrievalResult: marshalRetrievalResult(primarySources), Ext: historyExt,
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
 	if primaryProgressCreated {
@@ -1836,7 +1862,7 @@ dualPersist:
 	secondaryHistory := &orm.MultiAnswersChatHistory{
 		ID: secondaryHistoryID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: secondaryResult,
 		ToolCallTurns: secondaryToolCallTurns, ThinkingDurationS: secondaryThinkingDurationS,
-		Ext:       historyExt,
+		RetrievalResult: marshalRetrievalResult(secondarySources), Ext: historyExt,
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
 	if secondaryProgressCreated {

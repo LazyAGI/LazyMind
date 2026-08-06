@@ -16,6 +16,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { customSchema } from "./config";
@@ -31,6 +32,16 @@ import {
   getRawLanguageFromClassName,
   highlightCode,
 } from "./syntaxHighlight";
+import {
+  type ChatSource,
+  findSourceByCitationId,
+  getSourceEvidenceText,
+  getSourceLabel,
+  getSourceSubtitle,
+  normalizeSourceMarkers,
+  openSource,
+  stripRedundantSourceUrls,
+} from "@/modules/chat/utils/sourceAdapter";
 
 const SOURCE_PREFIXES = ["#source-", "#user-content-source-"];
 const BOLD_BARE_URL_PATTERN = /\*\*((?:https?:\/\/|www\.)[^\s*<>()]+)\*\*/g;
@@ -49,7 +60,7 @@ const markdownRehypePlugins = [
 
 const MarkdownRenderContext = createContext<{
   isStreaming: boolean;
-  markSources: any[];
+  markSources: ChatSource[];
 }>({
   isStreaming: false,
   markSources: [],
@@ -199,41 +210,139 @@ const PreComponent = (props: any) => {
   return <pre {...props} />;
 };
 
+function containsPointer(element: Element | null, x: number, y: number) {
+  if (!element) return false;
+  const rect = element.getBoundingClientRect();
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+function useSourcePopoverHover() {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const pointerRef = useRef({ x: 0, y: 0 });
+  const enteredPreviewRef = useRef(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    if (!open) return;
+
+    const clearCloseTimer = () => {
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = undefined;
+      }
+    };
+    const popup = () => contentRef.current?.closest(".ant-popover") || null;
+    const handlePointerMove = (event: PointerEvent) => {
+      pointerRef.current = { x: event.clientX, y: event.clientY };
+      if (containsPointer(popup(), event.clientX, event.clientY)) {
+        enteredPreviewRef.current = true;
+        clearCloseTimer();
+        return;
+      }
+      if (containsPointer(triggerRef.current, event.clientX, event.clientY)) {
+        clearCloseTimer();
+        return;
+      }
+      if (enteredPreviewRef.current) {
+        enteredPreviewRef.current = false;
+        setOpen(false);
+      }
+    };
+    const handleWheel = (event: WheelEvent) => {
+      const content = contentRef.current?.querySelector<HTMLElement>(
+        ".md-content-card-content",
+      );
+      if (!content || !containsPointer(popup(), event.clientX, event.clientY)) return;
+      event.preventDefault();
+      content.scrollBy({ left: event.deltaX, top: event.deltaY });
+    };
+
+    document.addEventListener("pointermove", handlePointerMove, { passive: true });
+    document.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("wheel", handleWheel);
+      clearCloseTimer();
+    };
+  }, [open]);
+
+  const onOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) {
+      enteredPreviewRef.current = false;
+      setOpen(true);
+      return;
+    }
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => {
+      const { x, y } = pointerRef.current;
+      const popup = contentRef.current?.closest(".ant-popover") || null;
+      if (!containsPointer(triggerRef.current, x, y) && !containsPointer(popup, x, y)) {
+        setOpen(false);
+      }
+    }, 180);
+  };
+
+  return { contentRef, onOpenChange, open, triggerRef };
+}
+
 const LinkComponent = (props: any) => {
   const { isStreaming, markSources } = useContext(MarkdownRenderContext);
+  const sourcePopover = useSourcePopoverHover();
   const href = props.href;
   const sourceIndex = getSourceIndex(href);
 
   if (sourceIndex) {
-    if (isStreaming) {
-      return (
-        <span
-          className="md-segment-index"
-          style={{ backgroundColor: "var(--color-text-description)" }}
-        >
-          {props.children}
-        </span>
-      );
+    const source = findSourceByCitationId(markSources, sourceIndex);
+    const label = source
+      ? getSourceLabel(source)
+      : typeof props.title === "string" && props.title
+        ? props.title
+        : "Source";
+    const subtitle = source ? getSourceSubtitle(source) : "";
+    const chip = (
+      <span
+        ref={sourcePopover.triggerRef}
+        className={classnames("md-source-chip", {
+          "md-source-chip--pending": isStreaming || !source,
+          "md-source-chip--clickable": Boolean(source),
+        })}
+        role={source ? "link" : undefined}
+        tabIndex={source ? 0 : undefined}
+        onClick={() => source && openSource(source)}
+        onKeyDown={(event) => {
+          if (source && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            openSource(source);
+          }
+        }}
+      >
+        <span className="md-source-chip-label">{label}</span>
+      </span>
+    );
+
+    if (isStreaming || !source) {
+      return chip;
     }
 
     return (
       <Popover
-        title={props.title || ""}
+        open={sourcePopover.open}
+        onOpenChange={sourcePopover.onOpenChange}
+        mouseEnterDelay={0.2}
+        mouseLeaveDelay={0}
+        classNames={{ root: "md-source-popover" }}
+        title={subtitle ? `${label} · ${subtitle}` : label}
         content={
-          <div className="md-content-card">
+          <div ref={sourcePopover.contentRef} className="md-content-card">
             <div className="md-content-card-content">
-              <MarkdownViewer>
-                {
-                  markSources.find(
-                    (source) => String(source.index) === sourceIndex,
-                  )?.content
-                }
-              </MarkdownViewer>
+              <MarkdownViewer>{getSourceEvidenceText(source)}</MarkdownViewer>
             </div>
           </div>
         }
       >
-        <span className="md-segment-index">{props.children}</span>
+        {chip}
       </Popover>
     );
   }
@@ -274,10 +383,14 @@ const MarkdownViewer = memo((props: any) => {
   } = props;
   const normalizedChildren =
     typeof children === "string"
-      ? normalizeBoldBareUrls(normalizeBareUrls(children))
+      ? normalizeBoldBareUrls(
+          normalizeBareUrls(
+            stripRedundantSourceUrls(normalizeSourceMarkers(children)),
+          ),
+        )
       : children;
 
-  const [markSources, setMarkSources] = useState<any[]>([]);
+  const [markSources, setMarkSources] = useState<ChatSource[]>([]);
 
   useEffect(() => {
     if (sources && sources.length > 0) {

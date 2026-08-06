@@ -1,15 +1,43 @@
-.md-segment-index {
+.md-source-chip {
   display: inline-flex;
-  background-color: var(--color-primary);
+  max-width: min(240px, calc(100% - 8px));
+  box-sizing: border-box;
+  border: 1px solid var(--color-border-muted);
   border-radius: 6px;
-  color: white;
+  padding: 1px 6px;
+  color: var(--color-accent-fg);
+  background-color: var(--color-canvas-subtle);
   justify-content: center;
   align-items: center;
-  width: 15px;
-  height: 15px;
   vertical-align: middle;
   margin: 0 3px;
-  font-size: smaller;
+  font-size: 12px;
+  line-height: 18px;
+  overflow: hidden;
+}
+
+.md-source-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.md-source-chip--pending {
+  color: var(--color-fg-muted);
+}
+
+.md-source-chip--clickable {
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--color-accent-fg);
+    background-color: rgb(9 105 218 / 10%);
+  }
+}
+
+.md-source-popover {
+  pointer-events: none;
 }
 
 .md-content-card {

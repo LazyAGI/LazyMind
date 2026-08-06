@@ -35,6 +35,7 @@ from lazymind.chat.engine.tools import (
     list_data_sources,
     build_schedule_toolkit,
     url_fetch,
+    enable_search_result_citations,
     video_generator,
     video_to_gif,
     vision_extractor,
@@ -89,6 +90,23 @@ KNOWLEDGE_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
         'a manually written references list: the application converts valid markers into '
         'inline citations and builds the references panel automatically.',
     ),
+}
+EXTERNAL_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
+    'output_contract': (
+        '# External evidence citation rules (mandatory)\n'
+        'Web, academic, Wikipedia, and url_fetch results may contain a system-generated `ref` such as '
+        '`[[3.1]]`. When a claim relies on such a result, copy its `ref` exactly after the supported claim. '
+        'Never invent, renumber, or infer a ref, and do not replace a returned ref with a hand-written source list. '
+        'Only results that actually contain a `ref` are registered external sources.',
+    ),
+}
+EXTERNAL_SEARCH_CONTENT_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# External Search Content Rules\n'
+        'Search results are registered with stable refs. When a paper or Wikipedia snippet is insufficient, pass '
+        'the unchanged result item to `get_content` or `get_contents`; cite the ref returned with the added content.',
+    ),
+    'output_contract': EXTERNAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }
 ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
@@ -177,9 +195,8 @@ KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         "still try the knowledge-base search first; after knowledge-base evidence is unavailable or "
         "insufficient, prefer `AcademicSearchToolkit` over general web search tools. "
         "When answering with knowledge-base evidence, cite with the original `[[document.chunk]]` "
-        "markers. When answering with web search tools, `url_fetch`, "
-        "or `AcademicSearchToolkit`, do not "
-        "fabricate `[[document.chunk]]`; instead, mention the source title or URL plainly.\n"
+        "markers. For web search, Wikipedia, `url_fetch`, or `AcademicSearchToolkit`, copy only the "
+        "system-generated `ref` returned by the supporting result; never fabricate a marker.\n"
     ),
 }
 WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -188,8 +205,23 @@ WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'When using `web_search`, the `query` must represent one search intent. '
         'If the user asks to search multiple unrelated keywords or topics, call '
         '`web_search` separately for each keyword/topic. Do not combine unrelated '
-        'terms into one `query` with spaces, commas, punctuation, or list-like text.',
+        'terms into one `query` with spaces, commas, punctuation, or list-like text.\n'
+        'A search snippet may support a lightweight claim. For important facts or page details that the snippet '
+        'does not contain, call `url_fetch` with that result URL and cite the returned ref. For Tavily image tasks, '
+        'use `include_images=True`; use `include_raw_content=True` only when the extra page text is needed.',
     ),
+    'output_contract': EXTERNAL_CITATION_OUTPUT_APPENDIX['output_contract'],
+}
+URL_FETCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# Web Page Fetch Rules\n'
+        'Use only a URL supplied by the user or returned by a tool. To follow a fetched page link, copy the exact '
+        '`page_ref` and page-local `link_id` returned by url_fetch; never guess either value. A clicked page returns '
+        'a new page_ref for its own links. Listed links are navigation candidates, not read or citable sources. '
+        'When `content_truncated=true`, treat the page text as incomplete and do not conclude that omitted content '
+        'is absent.',
+    ),
+    'output_contract': EXTERNAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }
 MEMORY_READER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
@@ -265,15 +297,15 @@ class ToolConfig:
 
 
 _WEB_SEARCH_ENGINE_INSTANCES: list = [
-    GoogleSearch(),
-    BingSearch(),
-    BochaSearch(),
-    TavilySearch(),
+    enable_search_result_citations(GoogleSearch()),
+    enable_search_result_citations(BingSearch()),
+    enable_search_result_citations(BochaSearch()),
+    enable_search_result_citations(TavilySearch()),
 ]
 
 _ACADEMIC_SEARCH_ENGINE_INSTANCES: list = [
-    SciverseSearch(),
-    ArxivSearch(skip_auth=True),
+    enable_search_result_citations(SciverseSearch()),
+    enable_search_result_citations(ArxivSearch(skip_auth=True)),
 ]
 
 
@@ -447,12 +479,13 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         name='wikipedia',
         label='Wikipedia 搜索',
         description='查询 Wikipedia 中稳定的百科背景和明确词条；不用于新闻、时效信息或开放网页搜索',
-        tool=WikipediaToolkit(skip_auth=True), module='retrieval',
+        tool=enable_search_result_citations(WikipediaToolkit(skip_auth=True)), module='retrieval',
         label_en='Wikipedia Search',
         description_en=(
             'Look up stable encyclopedic background and named Wikipedia entries; not for news, '
             'current information, or open-web search.'
         ),
+        appendix_system_prompt=EXTERNAL_SEARCH_CONTENT_APPENDIX,
     ),
     ToolConfig(
         name='web_search',
@@ -464,8 +497,8 @@ DEFAULT_TOOLS: list[ToolConfig] = [
                 'Search the open web for current information, news, products, companies, '
                 'recommendations, industry developments, and broad research using the first '
                 'available provider. Each search query must represent '
-                'one search intent; issue separate calls for unrelated topics. Use get_content or '
-                'get_contents when result snippets are insufficient.'
+                'one search intent; issue separate calls for unrelated topics. Use url_fetch on a '
+                'result URL when its snippet is insufficient.'
             ),
             'pick_first_valid': True,
             'tools': _WEB_SEARCH_ENGINE_INSTANCES,
@@ -501,6 +534,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         capability_id='academic_search',
         equivalence_scope='provider_bound',
         input_schema={'query': 'string'}, output_schema={'papers': 'list'}, required_config=['academic_search_provider'],
+        appendix_system_prompt=EXTERNAL_SEARCH_CONTENT_APPENDIX,
     ),
     ToolConfig(
         name='url_fetch',
@@ -509,6 +543,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool=url_fetch, module='retrieval',
         label_en='Web Page Fetch',
         description_en='Fetch and parse readable content from public web pages.',
+        appendix_system_prompt=URL_FETCH_TOOL_POLICY_APPENDIX,
     ),
     ToolConfig(
         name='multimodal',

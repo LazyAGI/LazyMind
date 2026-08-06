@@ -3,6 +3,7 @@ import pytest
 import lazyllm
 from lazymind.chat.service.component.tool_registry import (
     DEFAULT_TOOLS,
+    EXTERNAL_CITATION_OUTPUT_APPENDIX,
     IMAGE_MARKDOWN_OUTPUT_APPENDIX,
     SKILL_TOOL_CONFIG,
     ToolConfig,
@@ -176,6 +177,31 @@ def test_search_tool_descriptions_distinguish_open_web_from_encyclopedic_lookup(
     assert 'current information' in web_config.tool['desc']
     assert 'stable encyclopedic background' in wikipedia_config.description_en
     assert 'not for news' in wikipedia_config.description_en
+
+
+def test_external_retrieval_tools_share_the_citation_output_contract():
+    configs = [
+        cfg for cfg in DEFAULT_TOOLS
+        if cfg.name in {'web_search', 'academic_search', 'wikipedia', 'url_fetch'}
+    ]
+    collected = collect_system_prompt_appendices(configs)
+
+    assert collected['output_contract'] == list(EXTERNAL_CITATION_OUTPUT_APPENDIX['output_contract'])
+    assert any('page_ref' in item and 'link_id' in item for item in collected['tool_policy'])
+    assert any('get_content' in item for item in collected['tool_policy'])
+
+
+def test_wrapped_search_providers_keep_their_runtime_tool_names():
+    from lazyllm.tools.agent.toolsManager import ToolManager
+
+    lazyllm.globals.config['dynamic_tool_auth'] = {'tavily': 'tavily-token'}
+    web_config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'web_search')
+    manager = ToolManager([web_config.tool])
+    names = set(manager._tools[0].get_flat_tools())
+
+    assert 'TavilySearch_search' in names
+    assert 'TavilySearch_get_content' in names
+    assert not any('Citation' in name or 'Adapter' in name for name in names)
 
 
 def test_prompt_appendix_deduplication_normalizes_whitespace():

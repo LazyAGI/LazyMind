@@ -22,6 +22,7 @@ _EXPORTS = {
     'list_data_sources': ('.system_query', 'list_data_sources'),
     'vocab_learn': ('.vocab_learn', 'vocab_learn'),
     'url_fetch': ('.web_search', 'url_fetch'),
+    'enable_search_result_citations': ('.external_search', 'enable_search_result_citations'),
     'WriterCreateToolkit': ('.writer', 'WriterCreateToolkit'),
     'WriterRevisionToolkit': ('.writer', 'WriterRevisionToolkit'),
 }
