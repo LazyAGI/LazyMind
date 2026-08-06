@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+# Runs lint + related unit tests on staged frontend files before allowing a commit.
+# Skipped automatically when no frontend/src files are staged.
+
+if git diff --cached --name-only --diff-filter=ACM | grep -q '^frontend/src/'; then
+  cd frontend && npx lint-staged --no-stash
+fi

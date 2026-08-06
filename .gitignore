@@ -13,6 +13,8 @@ __pycache__
 
 # temp files
 test/
+# Frontend vitest infrastructure (setup, mocks, helpers) must stay tracked.
+!frontend/src/test/
 node_modules/
 dist/
 tmp/
@@ -81,6 +83,8 @@ lazyllm_cpp.egg-info/
 !build*.ps1
 !build_document.py
 !builder.py
+!build*.ts
+!build*.tsx
 
 .venv/
 .venv-test/

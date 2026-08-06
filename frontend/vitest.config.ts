@@ -8,12 +8,16 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
+      // monaco-editor's package.json only exposes a "module" field with no "main"/"exports",
+      // which Vite's dependency resolver cannot resolve outside a real bundler context. Alias
+      // it to a tiny stub so `vi.mock("monaco-editor", ...)` factories can intercept it in tests.
+      "monaco-editor": path.resolve(__dirname, "src/test/mocks/monaco-editor.ts"),
     },
   },
   test: {
     environment: "jsdom",
     globals: true,
-    setupFiles: ["./vitest.setup.ts"],
+    setupFiles: ["./src/test/setup.ts"],
     css: true,
     // `react-markdown-editor-lite` is referenced by MarkdownEditor but is not an
     // installed dependency (missing from package.json/node_modules). Without this
@@ -41,6 +45,12 @@ export default defineConfig({
         "src/**/*.test.{ts,tsx}",
         "src/test/**",
       ],
+      thresholds: {
+        lines: 10,
+        functions: 10,
+        branches: 10,
+        statements: 10,
+      },
     },
   },
 });

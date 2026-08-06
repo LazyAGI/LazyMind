@@ -63,7 +63,7 @@ jobs:
   test-frontend:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -71,27 +71,43 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.22.2'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
-      - name: Install and test with coverage
-        run: |
-          cd tests/frontend
-          npm install
-          npm install -D c8
-          npx c8 --reporter=html --reporter=cobertura npm test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      # Coverage thresholds (≥10%) are enforced by `coverage.thresholds` in
+      # frontend/vitest.config.ts, so a shortfall fails this step.
+      - name: Test with coverage
+        working-directory: frontend
+        run: pnpm test:coverage --coverage.reporter=text --coverage.reporter=html --coverage.reporter=cobertura
 
       - name: Upload HTML coverage
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-frontend
-          path: tests/frontend/coverage
+          path: frontend/coverage
 
-      - name: Check total coverage ≥10%
-        run: |
-          cd tests/frontend
-          npx c8 check-coverage --lines 10 --functions 10 --branches 10
+      - name: Install diff-cover
+        run: pip install diff-cover
+
+      - name: Check incremental coverage ≥0%
+        working-directory: frontend
+        run: diff-cover coverage/cobertura-coverage.xml --compare-branch=origin/main --fail-under=0
 
   test-local-runtime:
     needs: [lint, doc_check]
