@@ -9,7 +9,7 @@ steps operate on either Markdown or WriterDocument IR:
 - generate an outline or use a supplied outline;
 - generate, regenerate, or revise that same outline artifact;
 - plan sections and write a complete document;
-- generate, rewrite, or revise that same full-document artifact.
+- generate, rewrite, revise, and explicitly deliver that same full-document artifact.
 
 Do not route users between separate creation and revision workflows or expose separate
 revision cards. The ChatAgent chooses the applicable mode inside the current product step.
@@ -66,8 +66,17 @@ Targeted revision mode:
 Do not run section planning for a targeted body revision. Do run it again whenever the
 body is generated or rewritten from a changed outline.
 
-Frontend edits and AI body revisions are revisions of the same `draft_document` slot and
-remain local. Cloud synchronization is a separate user-triggered action.
+Frontend edits and AI body revisions are revisions of the same `draft_document` slot.
+When a Feishu target is requested or already bound, `write_document` writes the selected
+content, reads the provider document back, and saves that read-back as the next
+`draft_document` revision. A request without a destination remains local and does not
+mutate a cloud document. Markdown export, when explicitly requested, is also saved as a
+new `draft_document` revision rather than a separate delivery artifact.
+
+Feishu synchronization converts Markdown to IR transiently when necessary, then creates,
+replaces, appends, or publishes a revision using the existing resource tools. The
+`resolved_media_assets` path is passed to provider writes whenever the document contains
+Image WriterBlocks.
 
 ## Supported paths
 
@@ -85,6 +94,8 @@ a hidden current-document pointer.
 - From-scratch and Markdown inputs remain Markdown. Feishu and `.lmd` inputs remain IR.
 - `outline_document` and `draft_document` preserve that representation across steps.
 - User-visible IR outline and draft documents have ui_editable=true.
+- A successful Feishu write produces a new provider-confirmed `draft_document` revision;
+  Markdown-to-IR conversion and provider result metadata remain internal to the step.
 - Internal locate results, modify plans, revision sets, section plans, and draft blocks are
   persisted but are not exposed as separate product cards.
 - Workflow tools pass artifact paths and do not copy complete documents into ChatAgent
