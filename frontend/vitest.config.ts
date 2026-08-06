@@ -17,7 +17,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    setupFiles: ["./vitest.setup.ts"],
+    setupFiles: ["./src/test/setup.ts"],
     css: true,
     // `react-markdown-editor-lite` is referenced by MarkdownEditor but is not an
     // installed dependency (missing from package.json/node_modules). Without this
