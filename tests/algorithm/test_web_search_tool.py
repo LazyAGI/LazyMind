@@ -1,3 +1,4 @@
+import json
 from copy import deepcopy
 
 import lazyllm
@@ -179,11 +180,100 @@ def test_url_fetch_rejects_canonical_and_redirect_cycles(monkeypatch):
         web_search_mod.url_fetch(page_ref=root['page_ref'], link_id=1)
 
 
-def test_url_fetch_rejects_mixed_or_unpaired_click_inputs():
+def test_url_fetch_accepts_matching_redundant_click_url(monkeypatch):
+    pages = {
+        'https://example.test/root': {
+            'title': 'Root',
+            'content': 'Root content',
+            'links': [{'id': 1, 'text': 'Child', 'target_url': 'https://example.test/child'}],
+        },
+        'https://example.test/child': {
+            'title': 'Child',
+            'content': 'Child content',
+            'links': [],
+        },
+    }
+
+    def fake_fetch(url):
+        page = deepcopy(pages[url])
+        page.update({'status': 'ok', 'source_status': 'ok', 'url': url, 'final_url': url})
+        return page
+
+    monkeypatch.setattr(web_search_mod, 'fetch_url_content', fake_fetch)
+    root = web_search_mod.url_fetch(url='https://example.test/root')['result']
+    child = web_search_mod.url_fetch(
+        url='https://example.test/child#details',
+        page_ref=root['page_ref'],
+        link_id=1,
+    )['result']
+
+    assert child['parent_page_ref'] == root['page_ref']
+    assert child['via_link_id'] == 1
+    assert child['depth'] == 1
+    with pytest.raises(ValueError, match='does not match'):
+        web_search_mod.url_fetch(
+            url='https://example.test/other',
+            page_ref=root['page_ref'],
+            link_id=1,
+        )
+
+
+def test_url_fetch_rejects_unpaired_or_batch_click_inputs():
     with pytest.raises(ValueError, match='required together'):
         web_search_mod.url_fetch(page_ref='page_missing')
     with pytest.raises(ValueError, match='cannot be combined'):
-        web_search_mod.url_fetch(url='https://example.test', page_ref='page_x', link_id=1)
+        web_search_mod.url_fetch(urls=['https://example.test'], page_ref='page_x', link_id=1)
+
+
+def test_restore_web_navigation_state_supports_cross_turn_click(monkeypatch):
+    history = [{
+        'role': 'tool',
+        'name': 'url_fetch',
+        'content': json.dumps({
+            'success': True,
+            'tool': 'url_fetch',
+            'result': {
+                'url': 'https://example.test/root',
+                'final_url': 'https://example.test/root',
+                'page_ref': 'page_previous',
+                'parent_page_ref': None,
+                'via_link_id': None,
+                'depth': 0,
+                'links': [{'id': 1, 'target_url': 'https://example.test/child'}],
+            },
+        }),
+    }]
+    lazyllm.globals['agentic_config']['web_navigation_state'] = (
+        web_search_mod.restore_web_navigation_state(history)
+    )
+    monkeypatch.setattr(web_search_mod, 'fetch_url_content', lambda url: {
+        'status': 'ok',
+        'source_status': 'ok',
+        'url': url,
+        'final_url': url,
+        'content': 'Child content',
+        'links': [],
+    })
+
+    child = web_search_mod.url_fetch(page_ref='page_previous', link_id=1)['result']
+
+    assert child['final_url'] == 'https://example.test/child'
+    assert child['parent_page_ref'] == 'page_previous'
+    assert child['depth'] == 1
+
+
+def test_restore_web_navigation_state_skips_failed_and_invalid_results():
+    history = [
+        {'role': 'tool', 'name': 'url_fetch', 'content': 'not-json'},
+        {
+            'role': 'tool',
+            'name': 'url_fetch',
+            'content': json.dumps({'success': False, 'result': {'page_ref': 'page_failed'}}),
+        },
+        {'role': 'tool', 'name': 'kb_search', 'content': json.dumps({'page_ref': 'page_other_tool'})},
+    ]
+
+    assert web_search_mod.restore_web_navigation_state(history) == {}
 
 
 def test_non_html_fetch_result_is_not_registered(monkeypatch, reset_web_tool_state):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
@@ -55,6 +56,47 @@ def _normalize_page_links(page: Dict[str, Any]) -> List[Dict[str, Any]]:
         seen.add(key)
         links.append({**item, 'id': len(links) + 1})
     return links
+
+
+def restore_web_navigation_state(history: List[Dict[str, Any]]) -> Dict[str, Any]:
+    navigation: Dict[str, Any] = {}
+
+    def restore_page(page: Any) -> None:
+        if not isinstance(page, dict):
+            return
+        page_ref = str(page.get('page_ref') or '').strip()
+        if page_ref:
+            links = {
+                int(item['id']): str(item['target_url'])
+                for item in (page.get('links') or [])
+                if isinstance(item, dict)
+                and str(item.get('id') or '').isdigit()
+                and normalize_external_url(item.get('target_url'))
+            }
+            navigation[page_ref] = {
+                'final_url': page.get('final_url') or page.get('url') or '',
+                'source_keys': _page_source_keys(page),
+                'parent_page_ref': page.get('parent_page_ref'),
+                'via_link_id': page.get('via_link_id'),
+                'depth': int(page.get('depth') or 0),
+                'links': links,
+            }
+        for item in page.get('results') or []:
+            if isinstance(item, dict) and item.get('success') is not False:
+                restore_page(item.get('result'))
+
+    for message in history or []:
+        if message.get('role') != 'tool' or message.get('name') != 'url_fetch':
+            continue
+        content = message.get('content')
+        try:
+            payload = json.loads(content) if isinstance(content, str) else content
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or payload.get('success') is False:
+            continue
+        restore_page(payload.get('result', payload))
+    return navigation
 
 
 def _finalize_page(
@@ -128,7 +170,9 @@ def url_fetch(
 
     Args:
         url: One absolute URL, or a domain/path that can be normalized to HTTPS.
-            Use this for a single page and omit it when `urls` is supplied.
+            Use this for a single page and omit it when `urls` is supplied. When
+            following a page link, omit it; a redundant URL is accepted only when
+            it matches the target identified by page_ref and link_id.
         urls: Public URLs to fetch as one batch. Duplicate URLs are fetched once.
         page_ref: A page reference returned by an earlier url_fetch call. Supply it
             together with link_id to follow one of that page's links.
@@ -143,9 +187,12 @@ def url_fetch(
     if click_mode:
         if not str(page_ref or '').strip() or link_id is None:
             raise ValueError('page_ref and link_id are required together')
-        if str(url or '').strip() or urls:
-            raise ValueError('url/urls cannot be combined with page_ref/link_id')
+        if urls:
+            raise ValueError('urls cannot be combined with page_ref/link_id')
         target, depth = _click_target(str(page_ref).strip(), int(link_id))
+        provided_url = str(url or '').strip()
+        if provided_url and normalize_external_url(provided_url) != normalize_external_url(target):
+            raise ValueError('url does not match the page_ref/link_id target')
         fetched = fetch_url_content(target)
         if set(_page_source_keys(fetched)) & _ancestor_source_keys(str(page_ref).strip()):
             raise ValueError('navigation_cycle')

@@ -56,6 +56,7 @@ from lazymind.chat.engine.tools.intent_writer import (
     render_intent_section,
 )
 from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
+from lazymind.chat.engine.tools.web_search import restore_web_navigation_state
 from lazymind.chat.service.utils import (
     SensitiveFilter,
     SensitiveMatch,
@@ -478,6 +479,7 @@ async def _handle_chat_impl(
     raw_history = list(message.history) if isinstance(message.history, list) else []
     agent_history = normalize_history_for_agent(raw_history)
     translator = AgentEventFrameTranslator(query=query)
+    web_navigation_state = restore_web_navigation_state(agent_history)
 
     agentic_config = {
         'session_id': conversation.session_id,
@@ -496,6 +498,7 @@ async def _handle_chat_impl(
         'user_id': user_id or '',
         'use_memory': personalization.use_memory,
         'citation_state': translator.citation_state,
+        'web_navigation_state': web_navigation_state,
         'mode': conversation.mode if conversation.mode in ('auto', 'manual') else 'auto',
         'has_subagents': bool(agent.has_subagents),
         'conversation_id': conversation_id,
