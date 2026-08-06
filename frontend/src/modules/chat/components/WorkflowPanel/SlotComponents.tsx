@@ -2014,6 +2014,106 @@ interface SlotJsonFileProps {
   readOnly?: boolean;
 }
 
+async function loadSelectedWriterDocument(
+  sessionId: string,
+  slotId: string,
+): Promise<WriterDocument> {
+  const response = await WorkflowSessionApi().getSlots(sessionId, { silentError: true } as never);
+  const slots: SlotRevision[] = response?.data?.data?.slots ?? [];
+  const slot = slots.find((item) => item.selected && item.slot_id === slotId);
+  if (!slot) throw new Error(tr('chat.writerIR.writeBackFailed'));
+
+  const inline = getInlineStructuredArtifactPayload(slot);
+  if (isWriterDocument(inline)) return inline;
+
+  const raw = slot.artifact_value as Record<string, unknown> | undefined;
+  const source = String(raw?.url ?? raw?.path ?? '').trim();
+  if (!source) throw new Error(tr('chat.writerIR.writeBackFailed'));
+  const apiUrl = raw?.url ? resolveCoreAssetUrl(String(raw.url)) : '';
+  const url = apiUrl && !isExpiredSignedUrl(apiUrl)
+    ? apiUrl
+    : await resolveMarkdownImageUrlAsync(source);
+  const fileResponse = await fetch(url);
+  if (!fileResponse.ok) throw new Error(tr('chat.writerIR.writeBackFailed'));
+  const document = unwrapArtifactPayload(await fileResponse.json());
+  if (!isWriterDocument(document)) throw new Error(tr('chat.writerIR.writeBackFailed'));
+  return document;
+}
+
+function WriterWriteBackButton({
+  sessionId,
+  revision,
+  revisedDocument,
+  disabled,
+  onSuccess,
+}: {
+  sessionId: string;
+  revision: number;
+  revisedDocument: WriterDocument;
+  disabled?: boolean;
+  onSuccess?: (revision: number, document: WriterDocument) => void;
+}) {
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
+  const writeBack = useCallback(async () => {
+    setStatus('loading');
+    try {
+      const sourceDocument = await loadSelectedWriterDocument(sessionId, 'source_document');
+      const response = await WorkflowSessionApi().writeBackWriterDocument(
+        sessionId,
+        revision,
+        normalizeWriterDocumentForSync(sourceDocument),
+        normalizeWriterDocumentForSync(revisedDocument),
+        { silentError: true } as never,
+      );
+      const result = response?.data?.data;
+      if (
+        response?.data?.code !== 0
+        || result?.status !== 'synced'
+        || result.feishu_synced !== true
+        || result.artifact_saved !== true
+        || typeof result.revision !== 'number'
+        || result.patch_result?.success !== true
+        || !isWriterDocument(result.document)
+      ) {
+        throw new Error(tr('chat.writerIR.writeBackFailed'));
+      }
+      setStatus('success');
+      onSuccess?.(result.revision, result.document);
+    } catch {
+      setStatus('error');
+    }
+  }, [onSuccess, revisedDocument, revision, sessionId]);
+
+  return (
+    <>
+      <button
+        className='workflow-slot__file-action-btn'
+        type='button'
+        disabled={disabled || status === 'loading'}
+        onClick={(event) => {
+          event.stopPropagation();
+          void writeBack();
+        }}
+      >
+        {status === 'loading'
+          ? tr('chat.writerIR.writingBack')
+          : tr('chat.writerIR.writeBack')}
+      </button>
+      {status === 'success' && (
+        <span className='workflow-slot__write-back-status' role='status'>
+          {tr('chat.writerIR.writeBackSuccess')}
+        </span>
+      )}
+      {status === 'error' && (
+        <span className='workflow-slot__write-back-status workflow-slot__write-back-status--error' role='alert'>
+          {tr('chat.writerIR.writeBackFailed')}
+        </span>
+      )}
+    </>
+  );
+}
+
 function SlotJsonFile({
   slot,
   sessionId,
@@ -2118,7 +2218,13 @@ function SlotJsonFile({
   const resolvedSlotId = slotId ?? slot.slot;
   const showArtifactActions = !WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
   const writerDocument = isWriterDocument(payload) ? payload : null;
-  const usesWriterSync = apiListIndex === -1 && hasProviderTarget(writerDocument);
+  const usesWriterSync = resolvedSlotId !== 'draft_document'
+    && apiListIndex === -1
+    && hasProviderTarget(writerDocument);
+  const canWriteBack = resolvedSlotId === 'draft_document'
+    && Boolean(sessionId)
+    && apiListIndex === -1
+    && writerDocument !== null;
   const canEditWriterIR = Boolean(sessionId && slotId)
     && !readOnly
     && writerDocument?.ui_editable === true
@@ -2317,7 +2423,20 @@ function SlotJsonFile({
             />
           )}
         </div>
-        <div className='workflow-slot__artifact-actions' hidden={!showArtifactActions}>
+        <div className='workflow-slot__artifact-actions' hidden={!showArtifactActions && !canWriteBack}>
+          {canWriteBack && (
+            <WriterWriteBackButton
+              sessionId={sessionId!}
+              revision={displayRevision}
+              revisedDocument={writerDocument!}
+              disabled={writerEditing}
+              onSuccess={(revision, document) => {
+                setPayload(document);
+                applySavedRevision(revision);
+                onRefresh?.();
+              }}
+            />
+          )}
           {allowDownload && writerMarkdownDownload ? (
             <a
               className='workflow-slot__file-action-btn'
@@ -2370,7 +2489,13 @@ function SlotInlineStructured({
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
   const writerDocument = isWriterDocument(payload) ? payload : null;
-  const usesWriterSync = apiListIndex === -1 && hasProviderTarget(writerDocument);
+  const usesWriterSync = resolvedSlotId !== 'draft_document'
+    && apiListIndex === -1
+    && hasProviderTarget(writerDocument);
+  const canWriteBack = resolvedSlotId === 'draft_document'
+    && Boolean(sessionId)
+    && apiListIndex === -1
+    && writerDocument !== null;
   const canEditWriterIR = Boolean(sessionId && slotId)
     && !readOnly
     && writerDocument?.ui_editable === true;
@@ -2515,6 +2640,18 @@ function SlotInlineStructured({
           )}
         </div>
         <div className='workflow-slot__artifact-actions'>
+          {canWriteBack && (
+            <WriterWriteBackButton
+              sessionId={sessionId!}
+              revision={displayRevision}
+              revisedDocument={writerDocument!}
+              disabled={writerEditing}
+              onSuccess={(revision) => {
+                applySavedRevision(revision);
+                onRefresh?.();
+              }}
+            />
+          )}
           {allowDownload && writerMarkdownDownload && (
             <a
               className='workflow-slot__file-action-btn'

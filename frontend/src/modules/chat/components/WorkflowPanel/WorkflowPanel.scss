@@ -2089,6 +2089,15 @@
   }
 }
 
+.workflow-slot__write-back-status {
+  font-size: 12px;
+  color: #16a34a;
+
+  &--error {
+    color: #dc2626;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // SlotJsonFile — structured artifact content for text slots stored as JSON files
 // ---------------------------------------------------------------------------

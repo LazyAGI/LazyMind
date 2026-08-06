@@ -31,6 +31,26 @@ func TestWriterDocumentSyncRouteParsesSingleSlotIndex(t *testing.T) {
 	}
 }
 
+func TestWriterDocumentWriteBackRoute(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/workflow-sessions/ps-1/writer-document:write-back",
+		nil,
+	)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatal("expected WriterDocument write-back route to match")
+	}
+	want := "/workflow-sessions/{session_id}/writer-document:write-back"
+	if got, err := match.Route.GetPathTemplate(); err != nil || got != want {
+		t.Fatalf("expected route template %q, got %q (err=%v)", want, got, err)
+	}
+}
+
 func TestAgentThreadEventsRouteWinsOverGenericThreadRoute(t *testing.T) {
 	r := mux.NewRouter()
 	r.UseEncodedPath()

@@ -66,17 +66,12 @@ Targeted revision mode:
 Do not run section planning for a targeted body revision. Do run it again whenever the
 body is generated or rewritten from a changed outline.
 
-Frontend edits and AI body revisions are revisions of the same `draft_document` slot.
-When a Feishu target is requested or already bound, `write_document` writes the selected
-content, reads the provider document back, and saves that read-back as the next
-`draft_document` revision. A request without a destination remains local and does not
-mutate a cloud document. Markdown export, when explicitly requested, is also saved as a
-new `draft_document` revision rather than a separate delivery artifact.
-
-Feishu synchronization converts Markdown to IR transiently when necessary, then creates,
-replaces, appends, or publishes a revision using the existing resource tools. The
-`resolved_media_assets` path is passed to provider writes whenever the document contains
-Image WriterBlocks.
+When the first full `.lmd` draft is derived from a cloud-bound Feishu source, generation
+or direct revision writes it back once and replaces `draft_document` with the
+provider-confirmed IR. Frontend edits and later AI body revisions are revisions of the
+same `draft_document` slot and remain local until the user explicitly writes them back.
+The initial provider write receives `resolved_media_assets` whenever the generated IR
+contains Image WriterBlocks.
 
 ## Supported paths
 

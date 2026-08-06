@@ -249,7 +249,17 @@ steps:
             Save every returned section path as a separate ordered draft_blocks entry.
             Never stringify the path list or save it as one file entry. Save the assembled
             result as draft_document; save draft_document_md when returned.
-         3. Call writer_update_writing_context using draft_document and save
+         3. When this execution started without draft_document and source_document is a
+            cloud-bound `.lmd`, perform the one-time initial Feishu write-back:
+            call writer_replace_document with the new draft_document, source_document,
+            target_document when it exists, and resolved_media_assets when available.
+            Save publish_result as
+            document_write_result and replace draft_document with the returned
+            provider-confirmed published_document.
+            Do not perform this automatic write-back for Markdown or when a draft_document
+            already existed at the start of the execution.
+         4. Call writer_update_writing_context using the final draft_document (the
+            provider-confirmed document after an automatic write-back) and save
             writing_context_after_draft.
 
          Chapter planning therefore always runs after the latest outline revision and
@@ -270,46 +280,19 @@ steps:
          3. Persist the task, locate result, modify plan, revision set, and revision result
             under the document_* internal keys.
          4. Save the returned revised_document path as draft_document, not under a new key.
-         5. Call writer_update_writing_context using the revised draft_document and save
-            writing_context_after_draft.
+         5. When this execution started without draft_document and the base is the
+            cloud-bound `.lmd` source_document, perform the one-time initial Feishu
+            write-back: call writer_publish_revision with source_document and the
+            generated document_revision_set. Save publish_result as
+            document_write_result and replace draft_document with the returned
+            provider-confirmed published_document. Do not automatically publish later
+            revisions once draft_document already existed at execution start.
+         6. Call writer_update_writing_context using the final revised draft_document
+            and save writing_context_after_draft.
 
-         Do not rerun chapter planning for a targeted body revision. Keep the revised
-         document local unless the user explicitly requests a Feishu write in this step.
+         Do not rerun chapter planning for a targeted body revision. After the one-time
+         initial write-back, later cloud-bound body revisions remain local in this step.
          Human frontend edits remain revisions of this same slot.
-
-      After the selected generation or revision mode succeeds, keep the result in
-      draft_document. If the user requested Feishu delivery or a Feishu target is bound,
-      perform the provider write in this same step and replace draft_document with the
-      provider read-back as its next revision:
-
-      1. For a local result without a Feishu target, keep draft_document as-is.
-
-      2. When a Markdown file is explicitly requested, call writer_export_markdown and
-         save the returned .md path as the next draft_document revision.
-
-      3. For Feishu delivery, if the selected content is Markdown, call
-         writer_convert_markdown_to_ir once and keep the returned path transiently.
-         Otherwise use draft_document directly.
-      4. If document_revision_set exists for a targeted IR revision, call
-         writer_publish_revision with source_document and document_revision_set.
-      5. For a generated or rewritten document bound to an existing source, call
-         writer_replace_document with the selected content and source_document. Pass
-         target_document_path when target_document exists.
-      6. For an unbound document, append to target_document when it exists. Otherwise
-         call writer_create_document once, save its target under target_document, then
-         call writer_append_document with the selected content and target path. Reuse
-         target_document on retry; never create a second target for the same attempt.
-      7. When resolved_media_assets exists, pass its path as media_assets_path to
-         writer_replace_document or writer_append_document. This is required for Image
-         WriterBlocks and keeps local media outside the Writer IR.
-      8. After provider write and read-back succeed, save the returned provider document
-         path as the next draft_document revision. A failed image upload must be reported
-         as a partial delivery result and must not be claimed as successful.
-
-      Before passing an existing artifact to a writer tool, call get_artifact, extract
-      the absolute path string from value.path, and pass that string to the tool. When a
-      writer tool returns a file descriptor with filename, path, and size, pass only its
-      path string to save_artifacts, never the whole descriptor object.
 
       Complete exactly one mode in each run. Generation mode is complete when its draft
       lineage produces draft_document. Revision mode is complete when its revision task,
@@ -335,6 +318,8 @@ steps:
       - writer_generate_modify_plan
       - writer_generate_revision_set
       - writer_apply_revision
+      - writer_publish_revision
+      - writer_replace_document
     inputs:
       - material: outline_document
         required: true
@@ -355,8 +340,6 @@ steps:
     outputs:
       - material: draft_document
       - material: writing_context_after_draft
-      - material: target_document
-        required: false
       - material: section_instructions
         required: false
       - material: visual_plan
@@ -377,11 +360,15 @@ steps:
         required: false
       - material: document_revision_result
         required: false
+      - material: document_write_result
+        required: false
     acceptance_criteria: |
       draft_document and writing_context_after_draft are present. Markdown output is a
       `.md` file or an IR document with ui_editable=true. Drafting artifacts are required
       for generation/rewrite mode; IR generation also requires visual_plan and
       resolved_media_assets. A targeted revision requires document_revision_task,
       document_locate_result, document_modify_plan, document_revision_set, and a successful
-      document_revision_result. When Feishu delivery is requested, the latest
-      draft_document must be the provider-confirmed read-back document.
+      document_revision_result. When the execution started without draft_document and
+      used a cloud-bound `.lmd` source, document_write_result must report success and
+      draft_document must be the provider-confirmed document. Later revisions must not
+      mutate the cloud document automatically.

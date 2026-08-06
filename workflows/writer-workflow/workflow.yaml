@@ -49,6 +49,8 @@ tool_scripts:
       - writer_generate_modify_plan
       - writer_generate_revision_set
       - writer_apply_revision
+      - writer_publish_revision
+      - writer_replace_document
 
 steps:
   - id: prepare
@@ -162,6 +164,10 @@ slots:
     cardinality: single
   - id: document_revision_result
     label: Document Revision Result
+    type: file
+    cardinality: single
+  - id: document_write_result
+    label: Document Cloud Sync Result
     type: file
     cardinality: single
 ui:
