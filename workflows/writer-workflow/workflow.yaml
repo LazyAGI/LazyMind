@@ -38,6 +38,7 @@ tool_scripts:
       - writer_generate_outline
       - writer_generate_section_instructions
       - writer_resolve_visual_media
+      - writer_resolve_revision_media
       - writer_generate_draft_blocks
       - writer_generate_draft_blocks_markdown
       - writer_generate_draft_document

@@ -193,11 +193,11 @@ def writer_build_writing_task(query: str, representation: str = 'markdown') -> s
     """Build a WritingTask artifact from the user's complete request."""
     if representation not in {'ir', 'markdown'}:
         raise ValueError("representation must be 'ir' or 'markdown'.")
-    plugin_session_id = str(require_context().params.get('session_id') or '').strip()
-    if not plugin_session_id:
-        raise RuntimeError('writer plugin session_id is required to build a stable WritingTask')
+    workflow_session_id = str(require_context().params.get('session_id') or '').strip()
+    if not workflow_session_id:
+        raise RuntimeError('writer workflow session_id is required to build a stable WritingTask')
     task = _json_loads(WriterCreateToolkit().build_writing_task(
-        query=query, task_id=plugin_session_id,
+        query=query, task_id=workflow_session_id,
     ), {})
     task['output'] = {**(task.get('output') or {}), 'representation': representation}
     content = json.dumps(task, ensure_ascii=False)
@@ -479,6 +479,8 @@ def _acquire_visual_media(
 def writer_resolve_visual_media(
     visual_plan_path: str,
     media_assets_path: str,
+    strict_required: bool = False,
+    allowed_strategies_json: str = '',
 ) -> dict:
     """Resolve visual needs and materialize missing media through registered acquirers."""
     root = _run_root('resolve-media')
@@ -494,8 +496,11 @@ def writer_resolve_visual_media(
         matched = _json_loads(toolkit.resolve_visual_needs(
             visual_plan_json=visual_plan_json,
             media_assets_json=media_assets_json,
+            allowed_strategies_json=allowed_strategies_json,
         ), {})
     except Exception as exc:
+        if strict_required:
+            raise
         matched = {
             'media_assets': _json_loads(media_assets_json, {}),
             'acquisition_requests': [],
@@ -519,6 +524,11 @@ def writer_resolve_visual_media(
                 acquired_by_purpose[key] = resource
             acquired_resources[instruction_id] = resource
         except Exception as exc:
+            if strict_required and request.get('required'):
+                raise RuntimeError(
+                    f'Failed to acquire required visual media for {instruction_id!r}: '
+                    f'{request.get("purpose") or "current visual requirement"}'
+                ) from exc
             message = (
                 f'Failed to acquire visual instruction {instruction_id!r}: '
                 f'{type(exc).__name__}: {exc}'
@@ -533,6 +543,8 @@ def writer_resolve_visual_media(
             media_store=str(media_root),
         ), {})
     except Exception as exc:
+        if strict_required:
+            raise
         outcome = {
             'media_assets': matched.get('media_assets') or {},
             'warnings': [
@@ -550,6 +562,29 @@ def writer_resolve_visual_media(
         'resolved_media_assets': resolved_path,
         'warnings': warnings,
     }
+
+
+def writer_resolve_revision_media(
+    modify_plan_path: str,
+    media_assets_path: str,
+) -> dict:
+    """Resolve required image additions in a revision plan without partial success."""
+    root = _run_root('revision-visual-plan')
+    visual_plan_json = WriterRevisionToolkit().build_revision_visual_plan(
+        modify_plan_json=_read_json_string(modify_plan_path),
+    )
+    visual_plan_path = _save_json_artifact(
+        'visual_plan',
+        visual_plan_json,
+        writer_schema('multimodal.VisualPlan'),
+        directory=root,
+    )
+    return writer_resolve_visual_media(
+        visual_plan_path=visual_plan_path,
+        media_assets_path=media_assets_path,
+        strict_required=True,
+        allowed_strategies_json=json.dumps(['image_generation']),
+    )
 
 
 def writer_generate_draft_blocks(
@@ -761,6 +796,7 @@ def writer_generate_revision_set(
     base_document_path: str,
     writing_context_path: str,
     modify_plan_path: str,
+    media_assets_path: str = '',
 ) -> str:
     """Generate an IR PatchSet or Markdown StringReplaceSet from a ModifyPlan."""
     document = _read_json_string(base_document_path)
@@ -778,6 +814,9 @@ def writer_generate_revision_set(
             writer_document_json=document,
             modify_plan_json=_read_json_string(modify_plan_path),
             writing_context_json=_read_json_string(writing_context_path),
+            media_assets_json=(
+                _read_json_string(media_assets_path) if media_assets_path else ''
+            ),
         )
         schema_name = writer_schema('revision.PatchSet')
     return _save_json_artifact(
@@ -790,6 +829,7 @@ def writer_apply_revision(
     base_document_path: str,
     writing_context_path: str,
     revision_set_path: str,
+    media_assets_path: str = '',
 ) -> dict:
     """Apply an IR patch or Markdown string replacements locally."""
     root = _run_root('apply-revision')
@@ -808,6 +848,9 @@ def writer_apply_revision(
             writer_document_json=_read_json_string(base_document_path),
             patch_set_json=_read_json_string(revision_set_path),
             writing_context_json=_read_json_string(writing_context_path),
+            media_assets_json=(
+                _read_json_string(media_assets_path) if media_assets_path else ''
+            ),
             sync_provider=not is_body_step,
             allow_outline=not is_body_step,
         ), {})
@@ -860,12 +903,16 @@ def writer_convert_markdown_to_ir(content_path: str, stage: str = 'final') -> st
 def writer_publish_revision(
     source_document_path: str,
     revision_set_path: str,
+    media_assets_path: str = '',
 ) -> dict:
     """Apply a prepared local revision to its bound source document."""
     root = _run_root('publish-revision')
     payload = _json_loads(WriterResourceToolkit().publish_revision(
         source_document_json=_read_json_string(source_document_path),
         patch_set_json=_read_json_string(revision_set_path),
+        media_assets_json=(
+            _read_json_string(media_assets_path) if media_assets_path else ''
+        ),
     ), {})
     return _save_publish_payload(payload, root)
 

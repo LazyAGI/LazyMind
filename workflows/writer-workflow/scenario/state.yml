@@ -289,28 +289,34 @@ steps:
 
          1. Call writer_build_revision_task with the current user instruction and
             base_document_path.
-         2. Call writer_locate_revision_target, writer_generate_modify_plan,
-            writer_generate_revision_set, then writer_apply_revision using the same base
-            document and latest context. The revision-set tool automatically creates an
-            IR PatchSet for `.lmd` or a StringReplaceSet for Markdown.
-         3. Persist the task, locate result, modify plan, revision set, and revision result
+         2. Call writer_locate_revision_target and writer_generate_modify_plan. For an IR
+            ModifyPlan containing visual_instruction, call writer_resolve_revision_media
+            with modify_plan and media_assets and save resolved_media_assets. This resolver
+            is strict: a required image failure stops the revision. Do not resolve media
+            for delete-only or pure-text revisions.
+         3. Call writer_generate_revision_set and writer_apply_revision using the same base
+            document and latest context. Pass resolved_media_assets as media_assets_path
+            when it exists. The
+            revision-set tool automatically creates an IR PatchSet for `.lmd` or a
+            StringReplaceSet for Markdown.
+         4. Persist the task, locate result, modify plan, revision set, and revision result
             under the document_* internal keys.
-         4. The successful writer_apply_revision result already contains the complete
+         5. The successful writer_apply_revision result already contains the complete
             Markdown/IR output path in its `revised_document` field. Immediately save that
             exact path as the `draft_document` file slot with `content_type="file"`.
             Do not call get_artifact for `revised_document`, `revision_result`, or
             `document_revision_result`; those are returned paths, not artifact keys. Do not
             call read_user_attachment, list_artifacts, string_replace, or manually rebuild
             the document after apply_revision succeeds.
-         5. When this execution started without draft_document and the base is the
+         6. When this execution started without draft_document and the base is the
             cloud-bound `.lmd` source_document, perform the one-time initial Feishu
-            write-back: call writer_publish_revision with source_document and the
-            generated document_revision_set. Save publish_result as
-            document_write_result and save the returned provider-confirmed
-            draft_document as the next revision of the same draft_document slot. Do not
-            automatically publish later revisions once draft_document already existed at
-            execution start.
-         6. Call writer_update_writing_context using the final revised draft_document
+            write-back: call writer_publish_revision with source_document, the generated
+            document_revision_set, and resolved_media_assets when it exists. Save
+            publish_result as document_write_result and save the returned
+            provider-confirmed draft_document as the next revision of the same
+            draft_document slot. Do not automatically publish later revisions once
+            draft_document already existed at execution start.
+         7. Call writer_update_writing_context using the final revised draft_document
             and save writing_context_after_draft.
 
          Do not rerun chapter planning for a targeted body revision. After the one-time
@@ -337,6 +343,7 @@ steps:
       - writer_build_revision_task
       - writer_locate_revision_target
       - writer_generate_modify_plan
+      - writer_resolve_revision_media
       - writer_generate_revision_set
       - writer_apply_revision
     inputs:
@@ -385,7 +392,7 @@ steps:
       for generation/rewrite mode; IR generation also requires visual_plan and
       resolved_media_assets. A targeted revision requires document_revision_task,
       document_locate_result, document_modify_plan, document_revision_set, and a successful
-      document_revision_result.
+      document_revision_result. A targeted image-adding revision also requires resolved_media_assets.
       When the execution started without draft_document and
       used a cloud-bound `.lmd` source, document_write_result must report success and
       draft_document must be the provider-confirmed document. Later revisions must not

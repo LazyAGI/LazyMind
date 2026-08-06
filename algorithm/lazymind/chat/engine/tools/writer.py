@@ -14,8 +14,10 @@ from typing import Any, ClassVar
 from lazyllm import LOG, AutoModel
 from lazyllm.tools.writer.data_models import (
     InputResource,
+    ModifyPlan,
     SectionInstruction,
     TargetDocument,
+    VisualInstruction,
     VisualPlan,
     WriterBlock,
     WriterDocument,
@@ -375,6 +377,7 @@ class WriterToolkitBase:
         self,
         visual_plan_json: str,
         media_assets_json: str,
+        allowed_strategies_json: str = '',
     ) -> str:
         """Match visual needs against media already available to the task."""
         root = _temp_root()
@@ -390,11 +393,15 @@ class WriterToolkitBase:
             _json_loads(media_assets_json, {}),
             writer_schema('multimodal.MediaAssetLibrary'),
         )
+        allowed_strategies = _json_loads(allowed_strategies_json, None)
+        if allowed_strategies is not None and not isinstance(allowed_strategies, list):
+            raise TypeError('allowed_strategies_json must contain a JSON list.')
         result = WriterMultimodalTools(
             llm=AutoModel(model='llm'),
         ).resolve_visual_needs(
             visual_plan=visual_plan_path,
             media_assets=media_assets_path,
+            allowed_strategies=allowed_strategies,
         )
         return _json_dumps({
             **result,
@@ -991,11 +998,35 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
+    def build_revision_visual_plan(self, modify_plan_json: str) -> str:
+        """Extract the explicit visual needs from a structured revision plan."""
+        plan = ModifyPlan.model_validate(_json_loads(modify_plan_json, {}))
+        instructions: list[VisualInstruction] = []
+        for instruction in plan.instructions:
+            visual = instruction.visual_instruction
+            if visual is None:
+                continue
+            if instruction.modify_type != 'create':
+                raise ValueError('visual_instruction is only valid for create instructions.')
+            if visual.visual_type != 'image':
+                raise ValueError('revision visual_instruction.visual_type must be "image".')
+            if visual.need_id != instruction.instruction_id:
+                raise ValueError('visual_instruction.need_id must equal instruction_id.')
+            if visual.content_ref != instruction.content_ref:
+                raise ValueError(
+                    'visual_instruction.content_ref must equal content_ref.'
+                )
+            if not visual.purpose.strip() or not visual.required:
+                raise ValueError('revision image visual_instruction must be required and non-empty.')
+            instructions.append(visual)
+        return _json_dumps(VisualPlan(instructions=instructions).model_dump(exclude_defaults=True))
+
     def generate_patch_set(
         self,
         writer_document_json: str,
         modify_plan_json: str,
         writing_context_json: str,
+        media_assets_json: str = '',
     ) -> str:
         """Generate a WriterDocument patch set from a modification plan."""
         root = _temp_root()
@@ -1010,9 +1041,22 @@ class WriterToolkitBase:
             root, 'writing_context.json', _json_loads(writing_context_json, {}),
             writer_schema('context.WritingContext'),
         )
+        media_assets_path = ''
+        if media_assets_json.strip():
+            media_assets_path = _write_input_artifact(
+                root,
+                'media_assets.json',
+                _json_loads(media_assets_json, {}),
+                writer_schema('multimodal.MediaAssetLibrary'),
+            )
         result = WriterRevisionTools(
             llm=AutoModel(model='llm'), artifact_store=str(root),
-        ).generate_patch_set(document=document_path, modify_plan=plan_path, context=context_path)
+        ).generate_patch_set(
+            document=document_path,
+            modify_plan=plan_path,
+            context=context_path,
+            media_assets=media_assets_path or None,
+        )
         return _json_dumps(_primary_data(result))
 
     def generate_string_replace_set(
@@ -1046,6 +1090,7 @@ class WriterToolkitBase:
         writing_task_json: str,
         writer_document_json: str,
         writing_context_json: str,
+        media_assets_json: str = '',
     ) -> str:
         """Locate targets, build a modification plan, and generate a PatchSet."""
         located = self.locate_revision_target(
@@ -1063,6 +1108,7 @@ class WriterToolkitBase:
             writer_document_json=writer_document_json,
             modify_plan_json=plan,
             writing_context_json=writing_context_json,
+            media_assets_json=media_assets_json,
         )
         return _json_dumps({
             'locate_result': _json_loads(located, {}),
@@ -1075,6 +1121,7 @@ class WriterToolkitBase:
         writer_document_json: str,
         patch_set_json: str,
         writing_context_json: str,
+        media_assets_json: str = '',
     ) -> str:
         """Apply a validated patch set and return the revised WriterDocument."""
         root = _temp_root()
@@ -1088,10 +1135,19 @@ class WriterToolkitBase:
             root, 'writing_context.json', _json_loads(writing_context_json, {}),
             writer_schema('context.WritingContext'),
         )
+        media_assets_path = ''
+        if media_assets_json.strip():
+            media_assets_path = _write_input_artifact(
+                root,
+                'media_assets.json',
+                _json_loads(media_assets_json, {}),
+                writer_schema('multimodal.MediaAssetLibrary'),
+            )
         result = WriterRevisionTools(llm=None, artifact_store=str(root)).apply_patch(
             document=document_path,
             patch_set=patch_path,
             context=context_path,
+            media_assets=media_assets_path or None,
         )
         artifact_paths = (result.get('metadata') or {}).get('artifact_paths') or {}
         revised_path = artifact_paths.get('revised_document', '')
@@ -1143,6 +1199,7 @@ class WriterToolkitBase:
         writing_context_json: str,
         sync_provider: bool = False,
         allow_outline: bool = True,
+        media_assets_json: str = '',
     ) -> str:
         """Apply a local revision and optionally synchronize its bound provider."""
         source = WriterDocument.model_validate(
@@ -1156,6 +1213,7 @@ class WriterToolkitBase:
             writer_document_json=writer_document_json,
             patch_set_json=patch_set_json,
             writing_context_json=writing_context_json,
+            media_assets_json=media_assets_json,
         ), {})
         output = {
             'patch_result': applied.get('patch_result') or {},
@@ -1168,6 +1226,7 @@ class WriterToolkitBase:
         published = _json_loads(WriterResourceToolkit().publish_revision(
             source_document_json=writer_document_json,
             patch_set_json=patch_set_json,
+            media_assets_json=media_assets_json,
         ), {})
         output['revised_document'] = published.get('draft_document') or {}
         output['write_result'] = published.get('publish_result') or {}
@@ -1207,6 +1266,7 @@ class WriterToolkitBase:
         self,
         source_document_json: str,
         patch_set_json: str,
+        media_assets_json: str = '',
     ) -> str:
         """Apply a prepared PatchSet to its bound provider document."""
         root = _temp_root()
@@ -1221,6 +1281,7 @@ class WriterToolkitBase:
         ).apply_patch_to_document(
             patch_set=_json_loads(patch_set_json, {}),
             source_document=source,
+            media_assets=_json_loads(media_assets_json, {}) if media_assets_json.strip() else None,
         )
         persisted = _set_document_editable(
             _result_data(result, 'persisted_document'),
@@ -1344,7 +1405,8 @@ class WriterRevisionToolkit(WriterToolkitBase):
 
     __public_apis__ = [
         'build_revise_task', 'build_revision_task', 'locate_revision_target',
-        'generate_modify_plan', 'generate_patch_set', 'generate_string_replace_set',
+        'generate_modify_plan', 'build_revision_visual_plan', 'generate_patch_set',
+        'generate_string_replace_set',
         'plan_revision', 'validate_patch_set', 'apply_patch',
         'apply_string_replace', 'apply_revision',
     ]
