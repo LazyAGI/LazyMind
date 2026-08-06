@@ -720,16 +720,26 @@ async def _handle_chat_impl(
         task_profile=task_profile,
         dynamic_prompt_modules=_cfg['dynamic_prompt_modules'],
     )
-    prompt_builder.system(
-        'chat_workspace',
-        'Workspace',
-        (
+    if _cfg['trusted_local_mode']:
+        workspace_policy = (
+            f'Use `{workspace}` as the default working directory for generated and intermediate files. '
+            'Trusted local mode is active: when the user requests it, you may read and write absolute local '
+            'paths outside this workspace and use `shell_tool` to run local commands. Keep relative paths '
+            'inside the default workspace. Use `read_file`, `write_file`, and `list_dir` for file operations, '
+            'then publish completed downloadable files with `save_chat_artifact`.'
+        )
+    else:
+        workspace_policy = (
             f'Use `{workspace}` as the single working directory for all generated and intermediate files. '
             'When a skill requires an output directory, create it under this workspace and pass its absolute '
             'path to skill scripts. Treat files outside this workspace as read-only inputs. Use `read_file`, '
             '`write_file`, and `list_dir` to inspect and update workspace files, then publish completed files '
             'with `save_chat_artifact`.'
-        ),
+        )
+    prompt_builder.system(
+        'chat_workspace',
+        'Workspace',
+        workspace_policy,
         'agent.workspace',
         priority=70,
     )

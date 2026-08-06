@@ -15,10 +15,15 @@ type RuntimeManifest struct {
 	Profile   string                     `json:"profile"`
 	Platform  string                     `json:"platform"`
 	Arch      string                     `json:"arch"`
+	Features  RuntimeManifestFeatures    `json:"features,omitempty"`
 	Binaries  map[string]string          `json:"binaries"`
 	Paths     RuntimeManifestPaths       `json:"paths"`
 	Services  map[string]ManifestService `json:"services,omitempty"`
 	Checksums map[string]string          `json:"checksums,omitempty"`
+}
+
+type RuntimeManifestFeatures struct {
+	TrustedLocalMode bool `json:"trustedLocalMode,omitempty"`
 }
 
 type RuntimeManifestPaths struct {

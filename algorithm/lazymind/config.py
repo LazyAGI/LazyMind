@@ -147,6 +147,8 @@ config.add('agentic_expanded_max_rounds', int, 200, 'AGENTIC_EXPANDED_MAX_ROUNDS
            description='Maximum ReAct rounds for one ChatAgent invocation after the user continues.')
 config.add('agentic_workspace', str, './workspace', 'AGENTIC_WORKSPACE',
            description='Workspace directory for agentic tools.')
+config.add('trusted_local_mode', bool, False, 'TRUSTED_LOCAL_MODE',
+           description='Allow agents to access host paths outside their workspace and use local command tools.')
 config.add('agentic_keep_full_turns', int, 0, 'AGENTIC_KEEP_FULL_TURNS',
            description='Number of full turns retained in agentic history; 0 disables rolling compaction.')
 config.add('dynamic_prompt_modules', bool, True, 'DYNAMIC_PROMPT_MODULES',
