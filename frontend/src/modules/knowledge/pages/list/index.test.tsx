@@ -4,7 +4,7 @@ import KnowledgePage from "./index";
 
 const listDatasetsMock = vi.fn();
 const allDatasetTagsMock = vi.fn();
-const searchAllDocumentsMock = vi.fn();
+const listSourcesMock = vi.fn();
 const deleteDatasetMock = vi.fn();
 const axiosGetMock = vi.fn();
 
@@ -18,10 +18,6 @@ vi.mock("@/modules/knowledge/utils/request", () => ({
       deleteDatasetMock(...args),
     datasetServiceUpdateDataset: vi.fn().mockResolvedValue({}),
     datasetServiceCreateDataset: vi.fn().mockResolvedValue({}),
-  }),
-  DocumentServiceApi: () => ({
-    documentServiceSearchAllDocuments: (...args: unknown[]) =>
-      searchAllDocumentsMock(...args),
   }),
 }));
 
@@ -39,7 +35,7 @@ vi.mock("@/hooks/useModelFeatures", () => ({
 
 vi.mock("@/modules/dataSource/api/clients", () => ({
   dataSourceScanApi: {
-    listSources: vi.fn().mockResolvedValue({ data: { items: [], total: 0 } }),
+    listSources: (...args: unknown[]) => listSourcesMock(...args),
     getSource: vi.fn(),
     getSourceSummary: vi.fn(),
   },
@@ -93,16 +89,19 @@ describe("KnowledgePage (pages/list)", () => {
       },
     });
     allDatasetTagsMock.mockReset().mockResolvedValue({ data: { tags: [] } });
-    searchAllDocumentsMock.mockReset().mockResolvedValue({
-      data: { documents: [], total_size: 0 },
+    listSourcesMock.mockReset().mockResolvedValue({
+      data: { items: [], total: 0 },
     });
     deleteDatasetMock.mockReset().mockResolvedValue({});
     axiosGetMock.mockReset().mockResolvedValue({ data: { ready: true } });
   });
 
-  it("loads and renders the knowledge base list on mount", async () => {
+  it("loads and renders the knowledge base list after selecting my knowledge", async () => {
     renderWithProviders(<KnowledgePage />);
 
+    fireEvent.click(
+      screen.getByRole("tab", { name: /knowledge\.myKnowledge/ }),
+    );
     await waitFor(() => {
       expect(listDatasetsMock).toHaveBeenCalled();
     });
@@ -119,21 +118,17 @@ describe("KnowledgePage (pages/list)", () => {
     ).toBeInTheDocument();
   });
 
-  it("switches to the document list view when the type selector changes", async () => {
+  it("switches to cloud archive sources when the source tab changes", async () => {
     renderWithProviders(<KnowledgePage />);
 
+    fireEvent.click(
+      screen.getByRole("tab", { name: /knowledge\.myKnowledge/ }),
+    );
     await waitFor(() => expect(listDatasetsMock).toHaveBeenCalled());
 
-    const typeSelect = screen.getAllByRole("combobox")[0];
-    fireEvent.mouseDown(typeSelect);
-
-    await waitFor(() => {
-      expect(screen.getByText("knowledge.knowledge")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByText("knowledge.knowledge"));
-
-    await waitFor(() => {
-      expect(searchAllDocumentsMock).toHaveBeenCalled();
-    });
+    fireEvent.click(
+      screen.getByRole("tab", { name: "knowledge.cloudArchiveCreated" }),
+    );
+    await waitFor(() => expect(listSourcesMock).toHaveBeenCalled());
   });
 });
