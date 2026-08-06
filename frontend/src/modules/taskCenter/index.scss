@@ -619,6 +619,8 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 
 .batch-task-editor { display: grid; max-height: 62vh; gap: 12px; overflow: auto; }
 .schedule-create-modal .ant-modal-body { max-height: calc(100vh - 210px); overflow: auto; }
+.schedule-detail-actions { display: flex; gap: 8px; }
+.schedule-detail-actions > .ant-btn { flex: 1; }
 .creation-type-picker { display: grid; margin-bottom: 22px; grid-template-columns: 1fr 1fr; gap: 14px; }
 .creation-type-picker button {
   position: relative;
