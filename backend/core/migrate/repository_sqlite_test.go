@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"database/sql"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -226,7 +227,7 @@ WHERE name = 'v0_2/add_accepted_user_agreement_version'
 	}
 }
 
-func TestRepositorySQLiteFreshInstallAppliesPostAggregateAgreementMigration(t *testing.T) {
+func TestRepositorySQLiteExistingAggregateAppliesUncoveredAgreementMigration(t *testing.T) {
 	dir := t.TempDir()
 	writeMigrationPair(t, versionModeDir(t, dir, "v0_2"), "20260723183515_baseline", `
 -- +migrate Dialect sqlite
@@ -247,6 +248,12 @@ ALTER TABLE user_ui_preferences ADD COLUMN accepted_user_agreement_version varch
 `, "ALTER TABLE user_ui_preferences DROP COLUMN accepted_user_agreement_version;")
 
 	dsn := t.TempDir() + "/fresh-agreement.db"
+	raw := openRawSQLite(t, dsn)
+	execMigrationFileForDriver(t, raw, filepath.Join(versionModeDir(t, dir, "v0_2"), "20260723183515_baseline.up.sql"), "sqlite")
+	seedHistory(t, raw, []historyRecord{{Version: 20260723183515, Name: "baseline"}})
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close aggregate seed database: %v", err)
+	}
 	runner, err := NewRunner("sqlite", dsn, dir)
 	if err != nil {
 		t.Fatalf("create SQLite runner: %v", err)
@@ -261,7 +268,7 @@ ALTER TABLE user_ui_preferences ADD COLUMN accepted_user_agreement_version varch
 SELECT name FROM pragma_table_info('user_ui_preferences')
 WHERE name = 'accepted_user_agreement_version'
 `).Scan(&column); err != nil {
-		t.Fatalf("fresh install did not apply post-aggregate agreement column: %v", err)
+		t.Fatalf("existing aggregate did not apply uncovered agreement column: %v", err)
 	}
 }
 
