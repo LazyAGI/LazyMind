@@ -464,7 +464,7 @@
   .conversation-trail {
     position: absolute;
     top: 0;
-    right: 4px;
+    left: 4px;
     bottom: 0;
     z-index: 24;
     width: 30px;
@@ -546,7 +546,7 @@
     .conversation-trail-popover {
       position: absolute;
       top: 50%;
-      right: 32px;
+      left: 32px;
       z-index: 2;
       width: min(240px, calc(100vw - 58px));
       max-height: min(360px, calc(100% - 24px));
@@ -625,7 +625,7 @@
     .conversation-trail-toggle,
     .conversation-trail-error {
       position: absolute;
-      right: 0;
+      left: 0;
       display: inline-flex;
       align-items: center;
       justify-content: center;
