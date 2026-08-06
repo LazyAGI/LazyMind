@@ -81,8 +81,11 @@ class ConversationActions:
         features: ChannelFeatureProfile,
         conversation_id_override: str | None = None,
         ask_answers_structured: dict[str, Any] | None = None,
+        ask_already_validated: bool = False,
+        inputs: Sequence[dict[str, str]] = (),
         mentions: Sequence[dict[str, str]] = (),
         plugin_mode: str | None = None,
+        thinking_depth: str | None = None,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> ConversationResult:
         conversation_id = (
@@ -177,7 +180,10 @@ class ConversationActions:
             )
 
         try:
-            if ask_answers_structured is not None:
+            if (
+                ask_answers_structured is not None
+                and not ask_already_validated
+            ):
                 self._validate_pending_ask(
                     owner_user_id=owner_user_id,
                     conversation_id=conversation_id,
@@ -185,9 +191,15 @@ class ConversationActions:
                     structured=ask_answers_structured,
                 )
             options.features = features
+            options.inputs.extend(dict(item) for item in inputs)
             options.ask_answers_structured = ask_answers_structured
             options.mentions.extend(dict(item) for item in mentions)
             options.plugin_mode = plugin_mode
+            options.thinking_depth = (
+                thinking_depth
+                if thinking_depth in {'low', 'medium', 'high', 'max'}
+                else None
+            )
             turn = self._client.chat(
                 owner_user_id=owner_user_id,
                 text=message,
@@ -838,6 +850,9 @@ class ConversationActions:
                     history_label='最近对话',
                     turns=self._history_turns(history),
                     footer='后续消息会继续当前会话。',
+                    reached_start=not bool(
+                        history.get('next_page_token')
+                    ),
                 ),
             ),
             suppress_text_when_presented=True,

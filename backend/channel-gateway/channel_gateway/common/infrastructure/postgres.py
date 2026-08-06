@@ -2232,6 +2232,192 @@ class GatewayStore:
             ).fetchone()
             return dict(row) if row else None
 
+    def get_feishu_workspace_state(
+        self,
+        account_id: str,
+        external_address_hash: str,
+    ) -> dict[str, Any]:
+        state = self.get_navigation_state(account_id, external_address_hash)
+        if not state:
+            return {}
+        snapshot = state.get('snapshot_json')
+        if isinstance(snapshot, str):
+            snapshot = json.loads(snapshot)
+        if not isinstance(snapshot, dict):
+            return {}
+        workspace = snapshot.get('feishu_workspace')
+        return dict(workspace) if isinstance(workspace, dict) else {}
+
+    def save_feishu_workspace_state(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        state: dict[str, Any],
+    ) -> None:
+        value = json.dumps(
+            state,
+            ensure_ascii=False,
+            separators=(',', ':'),
+        )
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO channel_navigation_states(
+                    account_id, external_address_hash, mode, snapshot_json
+                )
+                VALUES(
+                    %s, %s, 'active',
+                    jsonb_build_object('feishu_workspace', %s::jsonb)
+                )
+                ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                    snapshot_json = jsonb_set(
+                        CASE
+                            WHEN jsonb_typeof(channel_navigation_states.snapshot_json) = 'object'
+                                THEN channel_navigation_states.snapshot_json
+                            ELSE '{}'::jsonb
+                        END,
+                        '{feishu_workspace}',
+                        %s::jsonb,
+                        true
+                    ),
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    account_id,
+                    external_address_hash,
+                    value,
+                    value,
+                ),
+            )
+
+    def patch_feishu_workspace_state(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        patch: dict[str, Any],
+        operation_id: str = '',
+    ) -> dict[str, Any]:
+        value = json.dumps(
+            patch,
+            ensure_ascii=False,
+            separators=(',', ':'),
+        )
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                INSERT INTO channel_navigation_states(
+                    account_id, external_address_hash, mode, snapshot_json
+                )
+                VALUES(
+                    %s, %s, 'active',
+                    jsonb_build_object('feishu_workspace', %s::jsonb)
+                )
+                ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                    snapshot_json = jsonb_set(
+                        CASE
+                            WHEN jsonb_typeof(channel_navigation_states.snapshot_json) = 'object'
+                                THEN channel_navigation_states.snapshot_json
+                            ELSE '{}'::jsonb
+                        END,
+                        '{feishu_workspace}',
+                        (
+                            CASE
+                                WHEN jsonb_typeof(
+                                    channel_navigation_states.snapshot_json
+                                    -> 'feishu_workspace'
+                                ) = 'object'
+                                    THEN channel_navigation_states.snapshot_json
+                                        -> 'feishu_workspace'
+                                ELSE '{}'::jsonb
+                            END
+                        ) || %s::jsonb,
+                        true
+                    ),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE
+                    %s::text = ''
+                    OR COALESCE(
+                        channel_navigation_states.snapshot_json
+                            -> 'feishu_workspace'
+                            ->> 'active_operation_id',
+                        ''
+                    ) = %s::text
+                RETURNING snapshot_json -> 'feishu_workspace' AS workspace
+                """,
+                (
+                    account_id,
+                    external_address_hash,
+                    value,
+                    value,
+                    operation_id,
+                    operation_id,
+                ),
+            ).fetchone()
+        if not row:
+            return self.get_feishu_workspace_state(
+                account_id,
+                external_address_hash,
+            )
+        workspace = row.get('workspace')
+        if isinstance(workspace, str):
+            workspace = json.loads(workspace)
+        return dict(workspace) if isinstance(workspace, dict) else {}
+
+    def save_feishu_workspace_message(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        message_id: str,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO channel_navigation_states(
+                    account_id, external_address_hash, mode, snapshot_json
+                )
+                VALUES(
+                    %s, %s, 'active',
+                    jsonb_build_object(
+                        'feishu_workspace',
+                        jsonb_build_object('message_id', %s::text)
+                    )
+                )
+                ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                    snapshot_json = jsonb_set(
+                        CASE
+                            WHEN jsonb_typeof(
+                                channel_navigation_states.snapshot_json
+                            ) = 'object'
+                                THEN channel_navigation_states.snapshot_json
+                            ELSE '{}'::jsonb
+                        END,
+                        '{feishu_workspace}',
+                        jsonb_set(
+                            CASE
+                                WHEN jsonb_typeof(
+                                    channel_navigation_states.snapshot_json
+                                    -> 'feishu_workspace'
+                                ) = 'object'
+                                    THEN channel_navigation_states.snapshot_json
+                                        -> 'feishu_workspace'
+                                ELSE '{}'::jsonb
+                            END,
+                            '{message_id}',
+                            to_jsonb(%s::text),
+                            true
+                        ),
+                        true
+                    ),
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    account_id,
+                    external_address_hash,
+                    message_id,
+                    message_id,
+                ),
+            )
+
     def begin_new_conversation(
         self,
         account_id: str,
@@ -2266,11 +2452,9 @@ class GatewayStore:
                         %s::jsonb
                     ) || CASE
                         WHEN jsonb_typeof(channel_navigation_states.snapshot_json) = 'object'
-                          AND channel_navigation_states.snapshot_json ? 'pending_turn'
-                            THEN jsonb_build_object(
-                                'pending_turn',
-                                channel_navigation_states.snapshot_json->'pending_turn'
-                            )
+                            THEN channel_navigation_states.snapshot_json
+                                - 'selection'
+                                - 'new_conversation'
                         ELSE '{}'::jsonb
                     END,
                     snapshot_expires_at = NULL,

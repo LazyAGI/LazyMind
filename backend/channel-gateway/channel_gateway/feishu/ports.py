@@ -8,13 +8,83 @@ from channel_gateway.common.domain.channel import (
     RuntimeFence,
 )
 from channel_gateway.common.ports.messaging import ReplyStream
+from channel_gateway.common.ports.providers import ReceiverRepository
+from channel_gateway.common.ports.repository import NavigationRepository
 from channel_gateway.common.ports.providers import RuntimeLease
 from channel_gateway.feishu.domain import (
     FeishuAppCredentials,
     FeishuAppRegistration,
     FeishuInboundAction,
+    FeishuInboundMenu,
     FeishuInboundMessage,
 )
+
+
+class FeishuRuntimeRepository(
+    ReceiverRepository,
+    NavigationRepository,
+    Protocol,
+):
+    pass
+
+
+class FeishuWorkspaceRepository(Protocol):
+    def get_route(
+        self,
+        account_id: str,
+        external_address_hash: str,
+    ) -> str:
+        ...
+
+    def get_feishu_workspace_state(
+        self,
+        account_id: str,
+        external_address_hash: str,
+    ) -> dict[str, Any]:
+        ...
+
+    def get_pending_turn(
+        self,
+        account_id: str,
+        external_address_hash: str,
+    ) -> dict[str, Any]:
+        ...
+
+    def activate_conversation(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        conversation_id: str,
+        history_next_page_token: str | None = None,
+        *,
+        consume_pending_turn: bool = False,
+    ) -> None:
+        ...
+
+    def save_feishu_workspace_state(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        state: dict[str, Any],
+    ) -> None:
+        ...
+
+    def patch_feishu_workspace_state(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        patch: dict[str, Any],
+        operation_id: str = '',
+    ) -> dict[str, Any]:
+        ...
+
+    def save_feishu_workspace_message(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        message_id: str,
+    ) -> None:
+        ...
 
 
 class FeishuAccountRepository(Protocol):
@@ -270,6 +340,24 @@ class FeishuOutboundClient(Protocol):
     ) -> str:
         ...
 
+    def send_card_to_user(
+        self,
+        *,
+        open_id: str,
+        card: dict[str, Any],
+        idempotency_key: str,
+    ) -> str:
+        ...
+
+    def send_card_to_user_with_chat(
+        self,
+        *,
+        open_id: str,
+        card: dict[str, Any],
+        idempotency_key: str,
+    ) -> tuple[str, str]:
+        ...
+
     def send_image(
         self,
         *,
@@ -278,6 +366,17 @@ class FeishuOutboundClient(Protocol):
         caption: str,
         idempotency_key: str,
     ) -> None:
+        ...
+
+    def upload_image(self, *, content: bytes) -> str:
+        ...
+
+    def download_image(
+        self,
+        *,
+        image_key: str,
+        message_id: str,
+    ) -> bytes:
         ...
 
     def send_card(
@@ -312,6 +411,9 @@ class FeishuOutboundClient(Protocol):
         *,
         chat_id: str,
         initial_card: dict[str, Any],
+        message_id: str = '',
+        should_render: Callable[[], bool] | None = None,
+        collapse_process: bool = True,
     ) -> ReplyStream:
         ...
 
@@ -321,8 +423,18 @@ class FeishuReceiverFactory(Protocol):
         self,
         credentials: FeishuAppCredentials,
         on_message: Callable[[FeishuInboundMessage], None],
-        on_action: Callable[[FeishuInboundAction], None],
+        on_action: Callable[
+            [FeishuInboundAction],
+            dict[str, Any] | None,
+        ],
+        on_menu: Callable[[FeishuInboundMenu], None],
     ) -> FeishuReceiverClient:
+        ...
+
+    def create_sender(
+        self,
+        credentials: FeishuAppCredentials,
+    ) -> FeishuOutboundClient:
         ...
 
 
@@ -334,7 +446,7 @@ class FeishuOutboundFactory(Protocol):
         ...
 
 
-class FeishuTaskOutboxRepository(Protocol):
+class FeishuTaskOutboxRepository(FeishuWorkspaceRepository, Protocol):
     def list_sent_task_outbounds(
         self,
         *,

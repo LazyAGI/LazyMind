@@ -15,6 +15,14 @@ class FeishuInboundMessage:
     sender_id: str
     sender_is_bot: bool
     text: str
+    image_key: str = ''
+
+
+@dataclass(frozen=True, slots=True)
+class FeishuInboundMenu:
+    event_id: str
+    sender_id: str
+    event_key: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +37,7 @@ class FeishuInboundAction:
     intended_chat_id: str
     ask_answers_structured: dict[str, Any] | None
     command_action: dict[str, Any] | None
+    workspace_action: dict[str, Any] | None
 
 
 @dataclass(frozen=True, slots=True)

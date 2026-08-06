@@ -27,7 +27,15 @@ class ActionKind(str, Enum):
     CLARIFY = 'clarify'
 
 
-ResourceType = Literal['knowledge_base', 'skill', 'tool', 'personalization']
+ResourceType = Literal[
+    'knowledge_base',
+    'skill',
+    'plugin',
+    'tool',
+    'prompt',
+    'conversation',
+    'personalization',
+]
 Evidence: TypeAlias = Annotated[str, Field(min_length=1, max_length=300)]
 GroundingMessage: TypeAlias = Annotated[str, Field(min_length=1, max_length=4000)]
 
@@ -285,7 +293,7 @@ class SelectionChooseParameters(_StrictModel):
 class CapabilityListParameters(_StrictModel):
     capabilities: list[ResourceType] = Field(
         min_length=1,
-        max_length=4,
+        max_length=7,
         description='Configurable resource categories whose names or status should be listed.',
     )
     evidence: list[Evidence] = Field(

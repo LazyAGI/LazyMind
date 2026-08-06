@@ -222,6 +222,7 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         credentials=feishu_credentials,
         channels=feishu_channels,
         addresses=feishu_addresses,
+        core=lazymind,
     )
     feishu_accounts = FeishuAccountService(
         store=store,
@@ -243,6 +244,7 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         lazymind=lazymind,
     )
     feishu_delivery = FeishuDeliveryProvider(
+        store=store,
         credentials=feishu_credentials,
         channels=feishu_channels,
         renderer=OutboundRenderer(

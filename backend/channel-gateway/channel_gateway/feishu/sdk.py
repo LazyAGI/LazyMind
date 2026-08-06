@@ -1,8 +1,10 @@
 import asyncio
+import copy
 import json
 import logging
 import queue
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -24,9 +26,16 @@ from lark_channel import (
     TextBatchConfig,
     TransportConfig,
 )
+from lark_channel.api.cardkit.v1.model.id_convert_card_request import (
+    IdConvertCardRequest,
+)
+from lark_channel.api.cardkit.v1.model.id_convert_card_request_body import (
+    IdConvertCardRequestBody,
+)
 from lark_channel.event.callback.model.p2_card_action_trigger import (
     P2CardActionTriggerResponse,
 )
+from lark_channel.event.custom import CustomizedEventProcessor
 
 from channel_gateway.common.errors import RetryableProviderSideEffectError
 from channel_gateway.common.domain.chat import CoreStreamUpdate
@@ -34,6 +43,7 @@ from channel_gateway.common.ports.messaging import ReplyStream
 from channel_gateway.feishu.domain import (
     FeishuAppCredentials,
     FeishuInboundAction,
+    FeishuInboundMenu,
     FeishuInboundMessage,
 )
 from channel_gateway.feishu.domain import FeishuRuntimeError
@@ -42,6 +52,7 @@ from channel_gateway.feishu.presentation import (
     presentable_feishu_text,
     streamable_feishu_text,
 )
+from channel_gateway.feishu.workspace import is_feishu_image_key
 
 
 _logger = logging.getLogger(__name__)
@@ -69,6 +80,20 @@ def _message_text(message_type: str, raw_content: str) -> str:
     return ''
 
 
+def _message_image_key(message_type: str, raw_content: str) -> str:
+    if message_type != 'image':
+        return ''
+    try:
+        content = json.loads(raw_content or '{}')
+    except (TypeError, ValueError):
+        return ''
+    return (
+        str(content.get('image_key') or '')
+        if isinstance(content, dict)
+        else ''
+    )
+
+
 def _post_text(paragraphs: Any) -> str:
     if not isinstance(paragraphs, list):
         return ''
@@ -91,19 +116,108 @@ def _post_text(paragraphs: Any) -> str:
     return '\n'.join(lines)
 
 
-class _DurableFeishuChannel(FeishuChannel):
+class _WorkspaceFeishuChannel(FeishuChannel):
+    """Closes CardKit streaming state after an in-place reply finishes."""
+
+    def __init__(self, *args, **kwargs):
+        self._card_ids: dict[str, str] = {}
+        self._card_sequences: dict[str, int] = {}
+        self._card_state_lock = threading.Lock()
+        super().__init__(*args, **kwargs)
+
+    async def finish_message_stream(self, message_id: str) -> None:
+        card_id = await self._card_id_for_message(message_id)
+        with self._card_state_lock:
+            sequence = max(
+                int(time.time()),
+                self._card_sequences.get(card_id, 0) + 1,
+            )
+            self._card_sequences[card_id] = sequence
+        await self.finish_streaming_card(card_id, sequence)
+
+    async def _card_id_for_message(self, message_id: str) -> str:
+        with self._card_state_lock:
+            cached = self._card_ids.get(message_id)
+        if cached:
+            return cached
+        request = (
+            IdConvertCardRequest.builder()
+            .request_body(
+                IdConvertCardRequestBody.builder()
+                .message_id(message_id)
+                .build()
+            )
+            .build()
+        )
+        response = await self._driver._client.cardkit.v1.card.aid_convert(
+            request
+        )
+        data = getattr(response, 'data', None)
+        card_id = str(getattr(data, 'card_id', '') or '')
+        if int(getattr(response, 'code', -1) or 0) != 0 or not card_id:
+            raise FeishuRuntimeError(
+                'Feishu CardKit id conversion failed '
+                f'code={getattr(response, "code", -1)} '
+                f'msg={getattr(response, "msg", "")}'
+            )
+        with self._card_state_lock:
+            self._card_ids[message_id] = card_id
+        return card_id
+
+
+class _DurableFeishuChannel(_WorkspaceFeishuChannel):
     """Waits for Gateway persistence before the SDK acknowledges an event."""
 
     def __init__(
         self,
         *args,
         on_durable_message: Callable[[FeishuInboundMessage], None],
-        on_durable_action: Callable[[FeishuInboundAction], None] | None,
+        on_durable_action: (
+            Callable[[FeishuInboundAction], dict[str, Any] | None] | None
+        ),
+        on_durable_menu: Callable[[FeishuInboundMenu], None] | None,
         **kwargs,
     ):
         self._on_durable_message = on_durable_message
         self._on_durable_action = on_durable_action
+        self._on_durable_menu = on_durable_menu
         super().__init__(*args, **kwargs)
+
+    def _build_dispatcher(self):
+        dispatcher = super()._build_dispatcher()
+        dispatcher._processorMap[
+            'p2.application.bot.menu_v6'
+        ] = CustomizedEventProcessor(self._on_p2_application_bot_menu_v6)
+        return dispatcher
+
+    def _on_p2_application_bot_menu_v6(self, data: Any) -> None:
+        if self._on_durable_menu is None:
+            return
+        event = getattr(data, 'event', None)
+        raw = event if isinstance(event, dict) else {}
+        operator = raw.get('operator')
+        operator = operator if isinstance(operator, dict) else {}
+        operator_id = operator.get('operator_id')
+        operator_id = (
+            operator_id if isinstance(operator_id, dict) else {}
+        )
+        context = getattr(data, 'header', None)
+        event_id = str(
+            getattr(context, 'event_id', '')
+            or getattr(data, 'event_id', '')
+            or ''
+        )
+        sender_id = str(operator_id.get('open_id') or '')
+        event_key = str(raw.get('event_key') or '')
+        if not sender_id or not event_key:
+            return
+        self._on_durable_menu(
+            FeishuInboundMenu(
+                event_id=event_id,
+                sender_id=sender_id,
+                event_key=event_key,
+            )
+        )
 
     def _on_p2_im_message_receive_v1(self, data: Any) -> None:
         event = getattr(data, 'event', None)
@@ -136,6 +250,10 @@ class _DurableFeishuChannel(FeishuChannel):
                 ),
                 sender_is_bot=sender_type in {'app', 'bot'},
                 text=text,
+                image_key=_message_image_key(
+                    message_type,
+                    str(getattr(message, 'content', '') or ''),
+                ),
             )
         )
 
@@ -157,6 +275,7 @@ class _DurableFeishuChannel(FeishuChannel):
         selection = str(value.get('selection') or '')
         text = str(value.get('text') or selection)
         command_action = value.get('command_action')
+        workspace_action = value.get('workspace_action')
         ask_answers = value.get('ask_answers_structured')
         if action == 'ask' and not text:
             text, ask_answers = parse_ask_form_submission(
@@ -164,7 +283,7 @@ class _DurableFeishuChannel(FeishuChannel):
                 getattr(raw_action, 'form_value', None),
             )
         if (
-            action not in {'select', 'ask', 'command'}
+            action not in {'select', 'ask', 'command', 'local'}
             or not text
             or (
                 action == 'command'
@@ -176,7 +295,7 @@ class _DurableFeishuChannel(FeishuChannel):
         operator = getattr(event, 'operator', None)
         if self._on_durable_action is None:
             return P2CardActionTriggerResponse({})
-        self._on_durable_action(
+        card = self._on_durable_action(
             FeishuInboundAction(
                 message_id=str(
                     getattr(context, 'open_message_id', '') or ''
@@ -207,9 +326,20 @@ class _DurableFeishuChannel(FeishuChannel):
                     if isinstance(command_action, dict)
                     else None
                 ),
+                workspace_action=(
+                    dict(workspace_action)
+                    if isinstance(workspace_action, dict)
+                    else None
+                ),
             )
         )
-        return P2CardActionTriggerResponse({})
+        return P2CardActionTriggerResponse(
+            {
+                'card': {'type': 'raw', 'data': card}
+            }
+            if isinstance(card, dict)
+            else {}
+        )
 
 
 class _LarkCardReplyStream(ReplyStream):
@@ -220,11 +350,21 @@ class _LarkCardReplyStream(ReplyStream):
         chat_id: str,
         initial_card: dict[str, Any],
         timeout_seconds: float,
+        message_id: str = '',
+        should_render: Callable[[], bool] | None = None,
+        collapse_process: bool = True,
     ):
         self._channel = channel
         self._chat_id = chat_id
         self._initial_card = initial_card
+        self._has_thinking_element = _card_element_exists(
+            initial_card,
+            'lazymind_thinking',
+        )
         self._timeout_seconds = timeout_seconds
+        self.message_id = message_id
+        self._should_render = should_render or (lambda: True)
+        self._collapse_process = collapse_process
         self._updates: queue.Queue[tuple[object, object]] = queue.Queue()
         self._future = None
         self._lock = threading.Lock()
@@ -268,6 +408,8 @@ class _LarkCardReplyStream(ReplyStream):
             pass
 
     async def _run(self):
+        if self.message_id:
+            return await self._run_message_updates()
         card_id = await self._provider_call(
             self._channel.create_card_instance(self._initial_card)
         )
@@ -286,6 +428,7 @@ class _LarkCardReplyStream(ReplyStream):
             'feishu_card_stream_started message_id=%s',
             result.message_id,
         )
+        self.message_id = str(result.message_id)
         sequence = 0
         rendered: dict[str, str] = {}
         snapshot = CoreStreamUpdate()
@@ -327,6 +470,16 @@ class _LarkCardReplyStream(ReplyStream):
                             sequence + 1,
                         )
                     )
+                    await self._provider_call(
+                        self._channel.update_card(
+                            result.message_id,
+                            self._message_snapshot_card(
+                                snapshot,
+                                finished=True,
+                                aborted=True,
+                            ),
+                        )
+                    )
                     _logger.info(
                         'feishu_card_stream_aborted '
                         'message_id=%s update_count=%s',
@@ -335,7 +488,7 @@ class _LarkCardReplyStream(ReplyStream):
                     )
                     return result
                 if kind is _STREAM_FINISH:
-                    final_text = str(snapshot.answer or value)
+                    final_text = str(value or snapshot.answer)
                     final_snapshot = CoreStreamUpdate(
                         thinking=snapshot.thinking,
                         answer=final_text,
@@ -352,6 +505,15 @@ class _LarkCardReplyStream(ReplyStream):
                         self._channel.finish_streaming_card(
                             card_id,
                             sequence + 1,
+                        )
+                    )
+                    await self._provider_call(
+                        self._channel.update_card(
+                            result.message_id,
+                            self._message_snapshot_card(
+                                final_snapshot,
+                                finished=True,
+                            ),
                         )
                     )
                     _logger.info(
@@ -386,14 +548,10 @@ class _LarkCardReplyStream(ReplyStream):
         *,
         finished: bool = False,
     ) -> int:
-        if finished:
-            status = '✅ **回答完成**'
-        elif snapshot.answer:
-            status = '✍️ **正在生成回答**'
-        else:
-            status = '⏳ **正在理解你的问题**'
-        if snapshot.thinking_seconds is not None:
-            status += f' · {snapshot.thinking_seconds} 秒'
+        status, thinking, answer = self._snapshot_values(
+            snapshot,
+            finished=finished,
+        )
         sequence = await self._update_element(
             card_id,
             'lazymind_status',
@@ -401,14 +559,9 @@ class _LarkCardReplyStream(ReplyStream):
             sequence,
             rendered,
         )
-        thinking = presentable_feishu_text(snapshot.thinking)
-        if finished and thinking in {
-            '',
-            '正在分析问题...',
-            '正在分析问题…',
-        }:
-            thinking = '分析与处理已完成。'
-        if finished or not snapshot.answer:
+        if self._has_thinking_element and (
+            finished or not snapshot.answer
+        ):
             sequence = await self._update_element(
                 card_id,
                 'lazymind_thinking',
@@ -416,7 +569,6 @@ class _LarkCardReplyStream(ReplyStream):
                 sequence,
                 rendered,
             )
-        answer = streamable_feishu_text(snapshot.answer)
         return await self._update_element(
             card_id,
             'lazymind_answer',
@@ -429,6 +581,138 @@ class _LarkCardReplyStream(ReplyStream):
             sequence,
             rendered,
         )
+
+    async def _run_message_updates(self):
+        result = await self._provider_call(
+            self._channel.update_card(
+                self.message_id,
+                self._initial_card,
+            )
+        )
+        if not result.success:
+            raise FeishuRuntimeError(
+                f'Feishu workspace stream update failed: {result.error}'
+            )
+        snapshot = CoreStreamUpdate()
+        while True:
+            kind, value = await asyncio.to_thread(self._updates.get)
+            latest_snapshot = None
+            terminal = None
+            while True:
+                if kind == 'snapshot' and isinstance(value, CoreStreamUpdate):
+                    latest_snapshot = value
+                elif kind in {_STREAM_ABORT, _STREAM_FINISH}:
+                    terminal = (kind, value)
+                    break
+                try:
+                    kind, value = self._updates.get_nowait()
+                except queue.Empty:
+                    break
+            if latest_snapshot is not None:
+                snapshot = latest_snapshot
+            if terminal is not None:
+                kind, value = terminal
+            if kind is _STREAM_ABORT:
+                if self._should_render():
+                    card = self._message_snapshot_card(
+                        snapshot,
+                        finished=True,
+                        aborted=True,
+                    )
+                    await self._provider_call(
+                        self._channel.update_card(self.message_id, card)
+                    )
+                    await self._finish_message_stream()
+                return result
+            if kind is _STREAM_FINISH:
+                final_snapshot = CoreStreamUpdate(
+                    thinking=snapshot.thinking,
+                    answer=str(value or snapshot.answer),
+                    thinking_seconds=snapshot.thinking_seconds,
+                )
+                if self._should_render():
+                    card = self._message_snapshot_card(
+                        final_snapshot,
+                        finished=True,
+                    )
+                    await self._provider_call(
+                        self._channel.update_card(self.message_id, card)
+                    )
+                    await self._finish_message_stream()
+                return result
+            if latest_snapshot is None and not isinstance(
+                value,
+                CoreStreamUpdate,
+            ):
+                continue
+            if self._should_render():
+                card = self._message_snapshot_card(snapshot)
+                await self._provider_call(
+                    self._channel.update_card(self.message_id, card)
+                )
+
+    async def _finish_message_stream(self) -> None:
+        finish = getattr(self._channel, 'finish_message_stream', None)
+        if callable(finish):
+            await self._provider_call(finish(self.message_id))
+
+    def _message_snapshot_card(
+        self,
+        snapshot: CoreStreamUpdate,
+        *,
+        finished: bool = False,
+        aborted: bool = False,
+    ) -> dict[str, Any]:
+        status, thinking, answer = self._snapshot_values(
+            snapshot,
+            finished=finished,
+        )
+        if aborted:
+            status = '⚠️ **回答已中断**'
+        card = copy.deepcopy(self._initial_card)
+        config = card.get('config')
+        if isinstance(config, dict):
+            config['streaming_mode'] = not finished
+        if finished:
+            _remove_card_element(card, name='cancel_generation')
+            _set_collapsible_expanded(
+                card,
+                expanded=not self._collapse_process,
+            )
+        replacements = {
+            'lazymind_status': status,
+            'lazymind_thinking': thinking or '正在分析问题…',
+            'lazymind_answer': answer or (
+                '本次没有生成可展示的回答。'
+                if finished
+                else '<font color="grey">正在准备回答…</font>'
+            ),
+        }
+        _replace_card_element_content(card, replacements)
+        return card
+
+    @staticmethod
+    def _snapshot_values(
+        snapshot: CoreStreamUpdate,
+        *,
+        finished: bool,
+    ) -> tuple[str, str, str]:
+        if finished:
+            status = '✅ **回答完成**'
+        elif snapshot.answer:
+            status = '✍️ **正在生成回答**'
+        else:
+            status = '⏳ **正在理解你的问题**'
+        if snapshot.thinking_seconds is not None:
+            status += f' · {snapshot.thinking_seconds} 秒'
+        thinking = presentable_feishu_text(snapshot.thinking)
+        if finished and thinking in {
+            '',
+            '正在分析问题...',
+            '正在分析问题…',
+        }:
+            thinking = '分析与处理已完成。'
+        return status, thinking, streamable_feishu_text(snapshot.answer)
 
     async def _update_element(
         self,
@@ -469,7 +753,10 @@ class LarkChannelClient:
         self,
         credentials: FeishuAppCredentials,
         on_message: Callable[[FeishuInboundMessage], None] | None = None,
-        on_action: Callable[[FeishuInboundAction], None] | None = None,
+        on_action: (
+            Callable[[FeishuInboundAction], dict[str, Any] | None] | None
+        ) = None,
+        on_menu: Callable[[FeishuInboundMenu], None] | None = None,
         *,
         send_timeout_seconds: float = 60,
         connect_timeout_seconds: float = 30,
@@ -480,7 +767,7 @@ class LarkChannelClient:
         channel_type = (
             _DurableFeishuChannel
             if on_message is not None
-            else FeishuChannel
+            else _WorkspaceFeishuChannel
         )
         channel_kwargs = dict(
             app_id=credentials.app_id,
@@ -506,7 +793,7 @@ class LarkChannelClient:
             ),
             inbound=InboundConfig(
                 media_capabilities=MediaCapabilities(
-                    image=False,
+                    image=True,
                     audio=False,
                     video=False,
                     file=False,
@@ -523,6 +810,7 @@ class LarkChannelClient:
         if on_message is not None:
             channel_kwargs['on_durable_message'] = on_message
             channel_kwargs['on_durable_action'] = on_action
+            channel_kwargs['on_durable_menu'] = on_menu
         self._channel = channel_type(**channel_kwargs)
 
     def start(self) -> None:
@@ -599,6 +887,38 @@ class LarkChannelClient:
             receive_id_type='open_id',
         )
 
+    def send_card_to_user(
+        self,
+        *,
+        open_id: str,
+        card: dict[str, Any],
+        idempotency_key: str,
+    ) -> str:
+        return self._send(
+            chat_id=open_id,
+            message=OutboundCard(card=card),
+            idempotency_key=idempotency_key,
+            receive_id_type='open_id',
+        )
+
+    def send_card_to_user_with_chat(
+        self,
+        *,
+        open_id: str,
+        card: dict[str, Any],
+        idempotency_key: str,
+    ) -> tuple[str, str]:
+        result = self._send_result(
+            chat_id=open_id,
+            message=OutboundCard(card=card),
+            idempotency_key=idempotency_key,
+            receive_id_type='open_id',
+        )
+        raw = result.raw if isinstance(result.raw, dict) else {}
+        data = raw.get('data') if isinstance(raw, dict) else {}
+        data = data if isinstance(data, dict) else {}
+        return str(result.message_id or ''), str(data.get('chat_id') or '')
+
     def send_image(
         self,
         *,
@@ -615,6 +935,38 @@ class LarkChannelClient:
             ),
             idempotency_key=idempotency_key,
         )
+
+    def upload_image(self, *, content: bytes) -> str:
+        future = self._channel.schedule(
+            self._channel.upload_media(
+                MediaSource(kind='buffer', buffer=content),
+                kind='image',
+            )
+        )
+        image_key = str(
+            future.result(timeout=self._send_timeout_seconds) or ''
+        ).strip()
+        if not is_feishu_image_key(image_key):
+            raise FeishuRuntimeError(
+                '飞书图片上传返回了无效的 image_key'
+            )
+        return image_key
+
+    def download_image(
+        self,
+        *,
+        image_key: str,
+        message_id: str,
+    ) -> bytes:
+        future = self._channel.schedule(
+            self._channel.download_resource(
+                image_key,
+                resource_type='image',
+                message_id=message_id,
+            )
+        )
+        content = future.result(timeout=self._send_timeout_seconds)
+        return bytes(content or b'')
 
     def send_card(
         self,
@@ -673,6 +1025,9 @@ class LarkChannelClient:
         *,
         chat_id: str,
         initial_card: dict[str, Any],
+        message_id: str = '',
+        should_render: Callable[[], bool] | None = None,
+        collapse_process: bool = True,
     ) -> ReplyStream:
         return _LarkCardReplyStream(
             channel=self._channel,
@@ -682,6 +1037,9 @@ class LarkChannelClient:
                 self._send_timeout_seconds,
                 _STREAM_FINISH_TIMEOUT_SECONDS,
             ),
+            message_id=message_id,
+            should_render=should_render,
+            collapse_process=collapse_process,
         )
 
     def _send(
@@ -692,6 +1050,22 @@ class LarkChannelClient:
         idempotency_key: str,
         receive_id_type: str = 'chat_id',
     ) -> str:
+        result = self._send_result(
+            chat_id=chat_id,
+            message=message,
+            idempotency_key=idempotency_key,
+            receive_id_type=receive_id_type,
+        )
+        return str(result.message_id or '')
+
+    def _send_result(
+        self,
+        *,
+        chat_id: str,
+        message,
+        idempotency_key: str,
+        receive_id_type: str = 'chat_id',
+    ):
         options = SendOpts(
             receive_id_type=receive_id_type,
             uuid=str(
@@ -721,4 +1095,68 @@ class LarkChannelClient:
             raise FeishuRuntimeError(
                 'Feishu send succeeded without a message id'
             )
-        return message_id
+        return result
+
+
+def _replace_card_element_content(
+    value: Any,
+    replacements: dict[str, str],
+) -> None:
+    if isinstance(value, list):
+        for item in value:
+            _replace_card_element_content(item, replacements)
+        return
+    if not isinstance(value, dict):
+        return
+    element_id = str(value.get('element_id') or '')
+    if element_id in replacements and 'content' in value:
+        value['content'] = replacements[element_id]
+    for child in value.values():
+        _replace_card_element_content(child, replacements)
+
+
+def _card_element_exists(value: Any, element_id: str) -> bool:
+    if isinstance(value, list):
+        return any(
+            _card_element_exists(item, element_id) for item in value
+        )
+    if not isinstance(value, dict):
+        return False
+    if str(value.get('element_id') or '') == element_id:
+        return True
+    return any(
+        _card_element_exists(child, element_id)
+        for child in value.values()
+    )
+
+
+def _remove_card_element(value: Any, *, name: str) -> None:
+    if isinstance(value, list):
+        value[:] = [
+            item
+            for item in value
+            if not (
+                isinstance(item, dict)
+                and str(item.get('name') or '') == name
+            )
+        ]
+        for item in value:
+            _remove_card_element(item, name=name)
+        return
+    if not isinstance(value, dict):
+        return
+    for child in value.values():
+        _remove_card_element(child, name=name)
+
+
+def _set_collapsible_expanded(value: Any, *, expanded: bool) -> None:
+    if isinstance(value, list):
+        for item in value:
+            _set_collapsible_expanded(item, expanded=expanded)
+        return
+    if not isinstance(value, dict):
+        return
+    if value.get('tag') == 'collapsible_panel':
+        value['expanded'] = expanded
+    for child in value.values():
+        _set_collapsible_expanded(child, expanded=expanded)

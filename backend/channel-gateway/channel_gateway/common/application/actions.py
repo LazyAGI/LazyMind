@@ -92,7 +92,10 @@ class ChannelActionExecutor:
             if isinstance(command, ChatCommand):
                 parameters = command.parameters
                 text = self._conversations.chat(
-                    message=parameters.message,
+                    message=self._workspace_message(
+                        parameters.message,
+                        provider_context,
+                    ),
                     changes=parameters.resource_changes,
                     source_command=command,
                     source_messages=grounding_messages,
@@ -101,6 +104,12 @@ class ChannelActionExecutor:
                     ask_answers_structured=(
                         self._ask_answers(provider_context)
                     ),
+                    ask_already_validated=(
+                        self._workspace_ask_validated(provider_context)
+                    ),
+                    inputs=self._chat_inputs(provider_context),
+                    mentions=self._workspace_mentions(provider_context),
+                    thinking_depth=self._thinking_depth(provider_context),
                     on_stream=on_stream,
                     **context,
                 )
@@ -146,6 +155,35 @@ class ChannelActionExecutor:
                     )
                 )
                 presentations = (capability_presentation,)
+                workspace_action = (
+                    provider_context.get('workspace_action')
+                    if isinstance(provider_context, dict)
+                    else None
+                )
+                if (
+                    isinstance(workspace_action, dict)
+                    and workspace_action.get('kind') == 'navigate'
+                    and workspace_action.get('view') == 'capabilities'
+                ):
+                    try:
+                        _settings_text, settings_presentation = (
+                            self._capabilities.conversation_settings(
+                                section='overview',
+                                catalog=catalog,
+                                features=features,
+                                account_id=account_id,
+                                external_address_hash=external_address_hash,
+                                owner_user_id=owner_user_id,
+                                request_id=request_id,
+                            )
+                        )
+                    except ActionMessage:
+                        pass
+                    else:
+                        presentations = (
+                            capability_presentation,
+                            settings_presentation,
+                        )
             elif isinstance(command, CapabilityConfigureCommand):
                 text = self._capabilities.configure_capabilities(
                     changes=command.parameters.resource_changes,
@@ -204,16 +242,27 @@ class ChannelActionExecutor:
                         request_id=request_id,
                     )
                 text = self._conversations.chat(
-                    message=parameters.message,
+                    message=self._workspace_message(
+                        parameters.message,
+                        provider_context,
+                    ),
                     changes=[],
                     source_command=command,
                     source_messages=grounding_messages,
                     catalog=catalog,
                     features=features,
                     mentions=(
+                        *(
+                            mention
+                            for mention in self._workspace_mentions(
+                                provider_context
+                            )
+                            if mention.get('type') != 'plugin'
+                        ),
                         self._client.mention('plugin', workflow),
                     ),
                     plugin_mode='auto',
+                    thinking_depth=self._thinking_depth(provider_context),
                     on_stream=on_stream,
                     **context,
                 )
@@ -245,6 +294,100 @@ class ChannelActionExecutor:
             return None
         value = provider_context.get('ask_answers_structured')
         return dict(value) if isinstance(value, dict) else None
+
+    @staticmethod
+    def _workspace_mentions(
+        provider_context: dict[str, Any] | None,
+    ) -> tuple[dict[str, str], ...]:
+        if not isinstance(provider_context, dict):
+            return ()
+        values = provider_context.get('workspace_mentions')
+        return tuple(
+            {
+                'mention_id': str(item.get('mention_id') or ''),
+                'type': str(item.get('type') or ''),
+                'resource_id': str(item.get('resource_id') or ''),
+                'display_name': str(item.get('display_name') or ''),
+            }
+            for item in (values if isinstance(values, list) else [])
+            if isinstance(item, dict)
+            and item.get('type')
+            and item.get('resource_id')
+            and item.get('display_name')
+        )
+
+    @staticmethod
+    def _workspace_ask_validated(
+        provider_context: dict[str, Any] | None,
+    ) -> bool:
+        return bool(
+            isinstance(provider_context, dict)
+            and provider_context.get('workspace_ask_validated') is True
+        )
+
+    @staticmethod
+    def _chat_inputs(
+        provider_context: dict[str, Any] | None,
+    ) -> tuple[dict[str, str], ...]:
+        if not isinstance(provider_context, dict):
+            return ()
+        values = provider_context.get('chat_inputs')
+        return tuple(
+            {
+                str(key): str(value)
+                for key, value in item.items()
+                if key in {'input_type', 'input_base64', 'uri'}
+            }
+            for item in (values if isinstance(values, list) else [])
+            if isinstance(item, dict)
+            and item.get('input_type') in {'image', 'file'}
+        )
+
+    @staticmethod
+    def _thinking_depth(
+        provider_context: dict[str, Any] | None,
+    ) -> str | None:
+        if not isinstance(provider_context, dict):
+            return None
+        workspace = provider_context.get('workspace_state')
+        if not isinstance(workspace, dict):
+            return None
+        value = str(workspace.get('thinking_depth') or '')
+        return value if value in {'low', 'medium', 'high', 'max'} else None
+
+    @staticmethod
+    def _workspace_message(
+        message: str,
+        provider_context: dict[str, Any] | None,
+    ) -> str:
+        if not isinstance(provider_context, dict):
+            return message
+        workspace = provider_context.get('workspace_state')
+        if not isinstance(workspace, dict):
+            return message
+        language = str(workspace.get('output_language') or 'zh')
+        instructions = [{
+            'zh': '请使用中文回答。',
+            'en': 'Please answer in English.',
+        }.get(language)]
+        answer_depth = str(workspace.get('answer_depth') or 'medium')
+        instructions.append({
+            'low': {
+                'zh': '请简洁作答，直接给出关键结论。',
+                'en': (
+                    'Answer concisely and state the key conclusion directly.'
+                ),
+            },
+            'high': {
+                'zh': '请深入作答，充分展开关键步骤、依据和权衡。',
+                'en': (
+                    'Answer in depth, fully explaining key steps, evidence, '
+                    'and trade-offs.'
+                ),
+            },
+        }.get(answer_depth, {}).get(language))
+        instruction = ' '.join(item for item in instructions if item)
+        return f'{message}\n\n{instruction}' if instruction else message
 
     @staticmethod
     def _workflow(

@@ -261,7 +261,15 @@ class LazyMindClient:
         payload: dict[str, Any] = {
             'conversation': conversation,
             'stream': True,
-            'input': [{'text': text, 'input_type': 'text'}],
+            'input': [
+                {'text': text, 'input_type': 'text'},
+                *[
+                    dict(item)
+                    for item in options.inputs
+                    if isinstance(item, dict)
+                    and item.get('input_type') in {'image', 'file'}
+                ],
+            ],
             'mode': 'auto',
             'basic_chat_only': options.features.basic_chat_only,
             'enable_plugin': options.features.enable_plugin,
@@ -286,6 +294,8 @@ class LazyMindClient:
             payload['ask_answers_structured'] = (
                 options.ask_answers_structured
             )
+        if options.thinking_depth is not None:
+            payload['thinking_depth'] = options.thinking_depth
         if conversation_id:
             payload['conversation_id'] = conversation_id
         return payload
@@ -399,6 +409,8 @@ class LazyMindClient:
                             ''.join(state.deltas)
                             or state.last_message,
                             result.get('thinking_duration_s'),
+                            conversation_id=state.conversation_id,
+                            history_id=state.history_id,
                         )
                         if update != state.last_stream_update:
                             on_stream(update)
@@ -429,7 +441,7 @@ class LazyMindClient:
         request_id: str,
         conversation_id: str,
         history_id: str,
-    ) -> None:
+    ) -> bool:
         try:
             self._request_json(
                 'POST',
@@ -446,17 +458,39 @@ class LazyMindClient:
                 error_label='chat stop',
                 timeout_seconds=_CHAT_STOP_TIMEOUT_SECONDS,
             )
+            return True
         except LazyMindError as exc:
             _logger.warning(
                 'channel_chat_stop_failed conversation_id=%s error=%s',
                 conversation_id,
                 exc.__class__.__name__,
             )
+            return False
+
+    def stop_conversation(
+        self,
+        *,
+        owner_user_id: str,
+        conversation_id: str,
+        history_id: str,
+        request_id: str,
+    ) -> bool:
+        if not conversation_id or not history_id:
+            return False
+        return self._stop_chat_generation(
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            conversation_id=conversation_id,
+            history_id=history_id,
+        )
 
     @staticmethod
     def _stream_update(
         raw_text: str,
         raw_thinking_seconds: Any,
+        *,
+        conversation_id: str = '',
+        history_id: str = '',
     ) -> CoreStreamUpdate:
         text = _strip_tool_payloads(raw_text)
         boundary = _last_thinking_boundary(text)
@@ -473,6 +507,8 @@ class LazyMindClient:
             thinking=_format_thinking(thinking_raw),
             answer=sanitize_channel_text(answer_raw),
             thinking_seconds=_optional_seconds(raw_thinking_seconds),
+            conversation_id=conversation_id,
+            history_id=history_id,
         )
 
     def _complete_chat_turn(
@@ -1007,43 +1043,67 @@ class LazyMindClient:
         request_id: str,
         kinds: set[str],
     ) -> dict[str, Any]:
-        datasets_payload = self._request_json(
-            'GET',
-            f'{self._base_url}/datasets',
-            owner_user_id=owner_user_id,
-            request_id=f'{request_id}_kb',
-            params={'page_size': 100},
-            error_label='knowledge bases',
-        ) if 'knowledge_base' in kinds else {}
-        skills_payload = self._request_json(
-            'GET',
-            f'{self._base_url}/skills',
-            owner_user_id=owner_user_id,
-            request_id=f'{request_id}_skills',
-            params={'page_size': 100},
-            error_label='skills',
-        ) if 'skill' in kinds else {}
-        tools_payload = self._request_json(
-            'GET',
-            f'{self._base_url}/tools',
-            owner_user_id=owner_user_id,
-            request_id=f'{request_id}_tools',
-            error_label='tools',
-        ) if 'tool' in kinds else {}
-        personalization_payload = self._request_json(
-            'GET',
-            f'{self._base_url}/personalization-setting',
-            owner_user_id=owner_user_id,
-            request_id=f'{request_id}_personalization',
-            error_label='personalization setting',
-        ) if 'personalization' in kinds else {}
-        workflows_payload = self._request_json(
-            'GET',
-            f'{self._base_url}/chat/settings/plugins',
-            owner_user_id=owner_user_id,
-            request_id=f'{request_id}_workflows',
-            error_label='workflows',
-        ) if 'workflow' in kinds else {}
+        requests: dict[str, tuple[str, str, dict[str, Any]]] = {}
+        if 'knowledge_base' in kinds:
+            requests['datasets'] = (
+                '/datasets',
+                'knowledge bases',
+                {'page_size': 100},
+            )
+        if 'skill' in kinds:
+            requests['skills'] = ('/skills', 'skills', {'page_size': 100})
+        if 'tool' in kinds:
+            requests['tools'] = ('/tools', 'tools', {})
+        if 'personalization' in kinds:
+            requests['personalization'] = (
+                '/personalization-setting',
+                'personalization setting',
+                {},
+            )
+        if {'workflow', 'plugin'} & kinds:
+            requests['workflows'] = (
+                '/chat/settings/plugins',
+                'workflows',
+                {},
+            )
+        if 'prompt' in kinds:
+            requests['prompts'] = (
+                '/prompts',
+                'prompts',
+                {'page_size': 100},
+            )
+        if 'conversation' in kinds:
+            requests['conversations'] = (
+                '/conversations',
+                'conversation list',
+                {'page_size': 50},
+            )
+
+        def load(item: tuple[str, tuple[str, str, dict[str, Any]]]):
+            key, (path, error_label, params) = item
+            return key, self._request_json(
+                'GET',
+                f'{self._base_url}{path}',
+                owner_user_id=owner_user_id,
+                request_id=f'{request_id}_{key}',
+                params=params or None,
+                error_label=error_label,
+            )
+
+        payloads: dict[str, dict[str, Any]] = {}
+        if requests:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=len(requests)
+            ) as executor:
+                for key, payload in executor.map(load, requests.items()):
+                    payloads[key] = payload
+        datasets_payload = payloads.get('datasets', {})
+        skills_payload = payloads.get('skills', {})
+        tools_payload = payloads.get('tools', {})
+        personalization_payload = payloads.get('personalization', {})
+        workflows_payload = payloads.get('workflows', {})
+        prompts_payload = payloads.get('prompts', {})
+        conversations_payload = payloads.get('conversations', {})
 
         datasets = datasets_payload.get('datasets')
         skill_data = skills_payload.get('data')
@@ -1062,6 +1122,21 @@ class LazyMindClient:
             if isinstance(workflow_data, dict)
             else None
         )
+        prompts = prompts_payload.get('prompts')
+        conversations = conversations_payload.get('conversations')
+        workflow_items = [
+            {
+                'id': str(item.get('plugin_ref') or ''),
+                'plugin_id': str(item.get('plugin_id') or ''),
+                'name': str(item.get('name') or '').strip(),
+                'description': str(item.get('description') or '').strip(),
+                'enabled': bool(item.get('enabled', False)),
+            }
+            for item in (workflows if isinstance(workflows, list) else [])
+            if isinstance(item, dict)
+            and item.get('plugin_ref')
+            and str(item.get('name') or '').strip()
+        ]
         return {
             'knowledge_base': [
                 {
@@ -1106,18 +1181,44 @@ class LazyMindClient:
                     'enabled': personalization_enabled,
                 }
             ],
-            'workflow': [
+            'workflow': workflow_items,
+            'plugin': workflow_items,
+            'prompt': [
                 {
-                    'id': str(item.get('plugin_ref') or ''),
-                    'plugin_id': str(item.get('plugin_id') or ''),
-                    'name': str(item.get('name') or '').strip(),
+                    'id': str(item.get('id') or ''),
+                    'name': str(
+                        item.get('display_name')
+                        or item.get('name')
+                        or ''
+                    ).strip(),
                     'description': str(item.get('description') or '').strip(),
-                    'enabled': bool(item.get('enabled', False)),
+                    'content': str(item.get('content') or ''),
+                    'enabled': True,
                 }
-                for item in (workflows if isinstance(workflows, list) else [])
+                for item in (prompts if isinstance(prompts, list) else [])
                 if isinstance(item, dict)
-                and item.get('plugin_ref')
-                and str(item.get('name') or '').strip()
+                and item.get('id')
+                and str(
+                    item.get('display_name')
+                    or item.get('name')
+                    or ''
+                ).strip()
+            ],
+            'conversation': [
+                {
+                    'id': str(item.get('conversation_id') or ''),
+                    'name': str(
+                        item.get('display_name')
+                        or item.get('conversation_id')
+                        or ''
+                    ).strip(),
+                    'enabled': True,
+                }
+                for item in (
+                    conversations if isinstance(conversations, list) else []
+                )
+                if isinstance(item, dict)
+                and item.get('conversation_id')
             ],
         }
 

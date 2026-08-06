@@ -83,6 +83,16 @@ class ConversationClient(Protocol):
     ) -> bool:
         ...
 
+    def stop_conversation(
+        self,
+        *,
+        owner_user_id: str,
+        conversation_id: str,
+        history_id: str,
+        request_id: str,
+    ) -> bool:
+        ...
+
 
 class TaskClient(Protocol):
     def list_conversation_tasks(

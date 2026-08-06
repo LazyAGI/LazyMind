@@ -24,6 +24,11 @@ from channel_gateway.feishu.ports import (
     FeishuConnectionRepository,
     FeishuOutboundFactory,
 )
+from channel_gateway.feishu.workspace import (
+    FeishuWorkspaceState,
+)
+from channel_gateway.feishu.presentation import FeishuReplyRenderer
+from channel_gateway.feishu.registration import configure_bot_menu
 from channel_gateway.feishu.domain import FeishuAppCredentials
 from channel_gateway.feishu.accounts import FeishuAccountService
 
@@ -606,6 +611,20 @@ class FeishuConnectionService:
                 'Feishu connection session changed during provisioning'
             )
         try:
+            configure_bot_menu(
+                credentials.app_id,
+                credentials.app_secret,
+                publish=True,
+            )
+        except FeishuRuntimeError as exc:
+            # The account is already recoverable. Keep registration alive and
+            # let the runtime retry the draft configuration on reconnect.
+            _logger.warning(
+                'feishu_bot_menu_publish_pending account_id=%s error=%s',
+                account_id,
+                str(exc)[:500],
+            )
+        try:
             keeper.ensure_owned()
             if not self._store.claim_welcome(account_id):
                 raise FeishuRuntimeError(
@@ -651,9 +670,20 @@ class FeishuConnectionService:
     ) -> None:
         sender = self._channels.create_sender(credentials)
         try:
-            sender.send_markdown_to_user(
+            workspace = FeishuWorkspaceState()
+            sender.send_card_to_user(
                 open_id=credentials.provider_account_id,
-                text=f'**👋 欢迎使用 LazyMind**\n\n{WELCOME_MESSAGE}',
+                card=FeishuReplyRenderer.render(
+                    provider_context={
+                        'chat_id': '',
+                        'workspace_state': workspace.to_dict(),
+                        'workspace_resources': [],
+                    },
+                    text=f'**👋 欢迎使用 LazyMind**\n\n{WELCOME_MESSAGE}',
+                    presentations=[],
+                    status='✅ **连接完成**',
+                    thinking='请直接使用飞书输入框对话；底部菜单用于能力、会话与设置。',
+                ),
                 idempotency_key=(
                     f'feishu-welcome:{account_id}'
                 ),

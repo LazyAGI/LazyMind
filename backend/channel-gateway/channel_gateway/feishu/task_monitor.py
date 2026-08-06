@@ -23,6 +23,10 @@ from channel_gateway.feishu.ports import (
 from channel_gateway.feishu.presentation import (
     FeishuPresentationRenderer,
 )
+from channel_gateway.feishu.workspace import (
+    FeishuWorkspaceRenderer,
+    FeishuWorkspaceState,
+)
 
 
 _logger = logging.getLogger(__name__)
@@ -116,6 +120,7 @@ class FeishuTaskCardMonitor:
         )
         owner_user_id = str(account['owner_user_id'])
         for part_index, anchor_task_id, conversation_id in bindings:
+            part = outbound.rendered_parts[part_index]
             saved_state = dict(
                 outbound.provider_state.get(str(part_index)) or {}
             )
@@ -154,27 +159,163 @@ class FeishuTaskCardMonitor:
                 terminal=terminal,
             )
             message_id = str(saved_state.get('message_id') or '')
-            if signature != str(
-                monitor_state.get('signature') or ''
-            ) or not message_id:
-                card = FeishuPresentationRenderer.task_workflow_card(
-                    workflow,
-                    waiting_for_next_step=waiting,
+            workspace_state: dict[str, Any] = {}
+            workspace_is_current = True
+            if part.get('workspace') is True:
+                workspace_state = self._store.get_feishu_workspace_state(
+                    outbound.account_id,
+                    outbound.order_key,
                 )
-                message_id = self._publish_card(
-                    outbound=outbound,
-                    account=account,
-                    message_id=message_id,
-                    card=card,
-                    part_index=part_index,
+                expected = outbound.provider_context.get('workspace_state')
+                expected_revision = (
+                    int(expected.get('revision') or 0)
+                    if isinstance(expected, dict)
+                    else 0
                 )
+                expected_operation = str(
+                    outbound.provider_context.get(
+                        'workspace_operation_id'
+                    )
+                    or ''
+                )
+                workspace_is_current = (
+                    str(
+                        workspace_state.get('active_operation_id')
+                        or ''
+                    )
+                    == expected_operation
+                    if expected_operation
+                    else int(workspace_state.get('revision') or 0)
+                    == expected_revision
+                )
+                if workspace_is_current:
+                    message_id = str(
+                        workspace_state.get('message_id')
+                        or message_id
+                    )
+            previously_delivered = {
+                str(value)
+                for value in (
+                    monitor_state.get('delivered_artifacts')
+                    if isinstance(
+                        monitor_state.get('delivered_artifacts'),
+                        list,
+                    )
+                    else []
+                )
+                if value
+            }
             delivered_artifacts = self._deliver_images(
                 outbound=outbound,
                 account=account,
                 workflow=workflow,
-                delivered=monitor_state.get('delivered_artifacts'),
+                delivered=previously_delivered,
                 part_index=part_index,
+                workspace_is_current=workspace_is_current,
             )
+            images_changed = delivered_artifacts != previously_delivered
+            if images_changed and part.get('workspace') is True:
+                workspace_state = self._store.get_feishu_workspace_state(
+                    outbound.account_id,
+                    outbound.order_key,
+                )
+                message_id = str(
+                    workspace_state.get('message_id') or message_id
+                )
+            if workspace_is_current and part.get('workspace') is True:
+                task_presentations = _workspace_task_presentations(
+                    part=part,
+                    workflow=workflow,
+                    waiting_for_next_step=waiting,
+                )
+                final_status = str(
+                    workflow[-1].get('status') or ''
+                ).lower()
+                failed = terminal and final_status in {
+                    'failed',
+                    'cancelled',
+                    'canceled',
+                    'stopped',
+                    'interrupted',
+                }
+                workspace = FeishuWorkspaceState.from_dict(
+                    workspace_state
+                )
+                if terminal:
+                    workspace.mark_result_ready(
+                        str(
+                            outbound.provider_context.get(
+                                'workspace_operation_id'
+                            )
+                            or ''
+                        )
+                    )
+                workspace_state = self._store.patch_feishu_workspace_state(
+                    outbound.account_id,
+                    outbound.order_key,
+                    {
+                        'run_status': (
+                            'failed'
+                            if failed
+                            else 'completed'
+                            if terminal
+                            else 'running'
+                        ),
+                        'chat_status': (
+                            '⚠️ **任务未完成**'
+                            if failed
+                            else '✅ **任务完成**'
+                            if terminal
+                            else '⏳ **任务执行中**'
+                        ),
+                        'chat_text': _workspace_task_text(
+                            outbound=outbound,
+                            workflow=workflow,
+                            waiting_for_next_step=waiting,
+                        ),
+                        'chat_presentations': task_presentations,
+                        'unread_results': workspace.unread_results,
+                        'result_notice_operation_id': (
+                            workspace.result_notice_operation_id
+                        ),
+                    },
+                    operation_id=str(
+                        outbound.provider_context.get(
+                            'workspace_operation_id'
+                        )
+                        or ''
+                    ),
+                )
+                message_id = str(
+                    workspace_state.get('message_id') or message_id
+                )
+            if (
+                signature != str(monitor_state.get('signature') or '')
+                or not message_id
+                or images_changed
+            ):
+                if workspace_is_current:
+                    card = (
+                        _workspace_task_card(
+                            outbound=outbound,
+                            part=part,
+                            workspace_state=workspace_state,
+                            workflow=workflow,
+                            waiting_for_next_step=waiting,
+                        )
+                        if part.get('workspace') is True
+                        else FeishuPresentationRenderer.task_workflow_card(
+                            workflow,
+                            waiting_for_next_step=waiting,
+                        )
+                    )
+                    message_id = self._publish_card(
+                        outbound=outbound,
+                        account=account,
+                        message_id=message_id,
+                        card=card,
+                        part_index=part_index,
+                    )
             artifact_keys = {
                 artifact_key
                 for task in workflow
@@ -220,6 +361,7 @@ class FeishuTaskCardMonitor:
         workflow: list[dict[str, Any]],
         delivered: Any,
         part_index: int,
+        workspace_is_current: bool,
     ) -> set[str]:
         delivered_keys = {
             str(value)
@@ -247,27 +389,60 @@ class FeishuTaskCardMonitor:
         try:
             for artifact_key, source, caption in pending:
                 try:
+                    if not workspace_is_current:
+                        delivered_keys.add(artifact_key)
+                        continue
                     content = self._assets.download_static_image(
                         source=source,
                         owner_user_id=owner_user_id,
                     )
                     if len(content) > _MAX_FEISHU_IMAGE_BYTES:
                         raise RuntimeError('飞书图片不能超过 10 MB')
-                    sender.send_image(
-                        chat_id=chat_id,
-                        content=content,
-                        caption=caption,
-                        idempotency_key=str(
-                            uuid.uuid5(
-                                uuid.NAMESPACE_URL,
-                                (
-                                    f'lazymind:{outbound.outbox_id}:'
-                                    f'task-artifact:{part_index}:'
-                                    f'{artifact_key}'
-                                ),
+                    if part_index < len(outbound.rendered_parts) and (
+                        outbound.rendered_parts[part_index].get('workspace')
+                        is True
+                    ):
+                        image_key = sender.upload_image(content=content)
+                        if not image_key:
+                            raise RuntimeError('飞书图片上传失败')
+                        state = FeishuWorkspaceState.from_dict(
+                            self._store.get_feishu_workspace_state(
+                                outbound.account_id,
+                                outbound.order_key,
                             )
-                        ),
-                    )
+                        )
+                        state.add_image(
+                            image_key=image_key,
+                            caption=caption,
+                            identity=artifact_key,
+                        )
+                        self._store.patch_feishu_workspace_state(
+                            outbound.account_id,
+                            outbound.order_key,
+                            {'images': state.to_dict()['images']},
+                            operation_id=str(
+                                outbound.provider_context.get(
+                                    'workspace_operation_id'
+                                )
+                                or ''
+                            ),
+                        )
+                    else:
+                        sender.send_image(
+                            chat_id=chat_id,
+                            content=content,
+                            caption=caption,
+                            idempotency_key=str(
+                                uuid.uuid5(
+                                    uuid.NAMESPACE_URL,
+                                    (
+                                        f'lazymind:{outbound.outbox_id}:'
+                                        f'task-artifact:{part_index}:'
+                                        f'{artifact_key}'
+                                    ),
+                                )
+                            ),
+                        )
                     delivered_keys.add(artifact_key)
                 except Exception:
                     _logger.exception(
@@ -387,6 +562,79 @@ def _task_bindings(
         bindings.append((part_index, task_id, conversation_id))
         claimed.add(task_id)
     return bindings
+
+
+def _workspace_task_card(
+    *,
+    outbound: ClaimedOutbound,
+    part: dict[str, Any],
+    workspace_state: dict[str, Any],
+    workflow: list[dict[str, Any]],
+    waiting_for_next_step: bool,
+) -> dict[str, Any]:
+    presentations = _workspace_task_presentations(
+        part=part,
+        workflow=workflow,
+        waiting_for_next_step=waiting_for_next_step,
+    )
+    return FeishuWorkspaceRenderer.render(
+        provider_context={
+            **outbound.provider_context,
+            'workspace_state': workspace_state,
+        },
+        text=_workspace_task_text(
+            outbound=outbound,
+            workflow=workflow,
+            waiting_for_next_step=waiting_for_next_step,
+        ),
+        presentations=presentations,
+    )
+
+
+def _workspace_task_presentations(
+    *,
+    part: dict[str, Any],
+    workflow: list[dict[str, Any]],
+    waiting_for_next_step: bool,
+) -> list[dict[str, Any]]:
+    presentations = [
+        dict(item)
+        for item in (
+            part.get('workspace_presentations')
+            if isinstance(part.get('workspace_presentations'), list)
+            else []
+        )
+        if isinstance(item, dict) and item.get('kind') != 'task'
+    ]
+    presentations.extend(
+        {
+            **task,
+            'kind': 'task',
+            'status': (
+                '准备下一步'
+                if waiting_for_next_step and index == len(workflow) - 1
+                else task.get('status')
+            ),
+        }
+        for index, task in enumerate(workflow)
+    )
+    return presentations
+
+
+def _workspace_task_text(
+    *,
+    outbound: ClaimedOutbound,
+    workflow: list[dict[str, Any]],
+    waiting_for_next_step: bool,
+) -> str:
+    if any(_task_images(task) for task in workflow):
+        return '图片已生成，并已嵌入当前工作区。'
+    status = str(workflow[-1].get('status') or '').lower()
+    if waiting_for_next_step or status not in _TERMINAL_STATUSES:
+        return '任务正在后台执行，进展会自动更新在本卡片中。'
+    if status in {'failed', 'cancelled', 'canceled', 'stopped', 'interrupted'}:
+        return '任务未能完成，请调整要求后重试。'
+    return '任务已完成。'
 
 
 def _card_title(part: dict[str, Any]) -> str:

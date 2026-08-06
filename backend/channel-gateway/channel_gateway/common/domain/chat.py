@@ -56,6 +56,7 @@ BASIC_CHAT_FEATURES = ChannelFeatureProfile()
 
 @dataclass
 class ChatOptions:
+    inputs: list[dict[str, str]] = field(default_factory=list)
     search_config: dict[str, Any] | None = None
     mentions: list[dict[str, str]] = field(default_factory=list)
     plugin_mode: Literal['auto', 'dynamic'] | None = None
@@ -63,6 +64,7 @@ class ChatOptions:
     disabled_tools: list[str] = field(default_factory=list)
     filters: dict[str, Any] | None = None
     ask_answers_structured: dict[str, Any] | None = None
+    thinking_depth: Literal['low', 'medium', 'high', 'max'] | None = None
     features: ChannelFeatureProfile = BASIC_CHAT_FEATURES
 
 
@@ -87,6 +89,8 @@ class CoreStreamUpdate:
     thinking: str = ''
     answer: str = ''
     thinking_seconds: int | None = None
+    conversation_id: str = ''
+    history_id: str = ''
 
 
 @dataclass(frozen=True, slots=True)

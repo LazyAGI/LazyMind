@@ -796,6 +796,121 @@ class SQLiteGatewayStore(GatewayStore):
             ).fetchone()
         return self._claimed_outbound(row)
 
+    def save_feishu_workspace_state(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        state: dict[str, Any],
+    ) -> None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT snapshot_json FROM channel_navigation_states
+                WHERE account_id = %s AND external_address_hash = %s
+                """,
+                (account_id, external_address_hash),
+            ).fetchone()
+            value = _snapshot(row.get('snapshot_json')) if row else {}
+            value['feishu_workspace'] = state
+            connection.execute(
+                """
+                INSERT INTO channel_navigation_states(
+                    account_id, external_address_hash, mode, snapshot_json
+                )
+                VALUES(%s, %s, 'active', %s)
+                ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                    snapshot_json = EXCLUDED.snapshot_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    account_id,
+                    external_address_hash,
+                    self._json(value),
+                ),
+            )
+
+    def patch_feishu_workspace_state(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        patch: dict[str, Any],
+        operation_id: str = '',
+    ) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT snapshot_json FROM channel_navigation_states
+                WHERE account_id = %s AND external_address_hash = %s
+                """,
+                (account_id, external_address_hash),
+            ).fetchone()
+            value = _snapshot(row.get('snapshot_json')) if row else {}
+            workspace = value.get('feishu_workspace')
+            if not isinstance(workspace, dict):
+                workspace = {}
+            if (
+                operation_id
+                and str(workspace.get('active_operation_id') or '')
+                != operation_id
+            ):
+                return dict(workspace)
+            workspace.update(patch)
+            value['feishu_workspace'] = workspace
+            connection.execute(
+                """
+                INSERT INTO channel_navigation_states(
+                    account_id, external_address_hash, mode, snapshot_json
+                )
+                VALUES(%s, %s, 'active', %s)
+                ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                    snapshot_json = EXCLUDED.snapshot_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    account_id,
+                    external_address_hash,
+                    self._json(value),
+                ),
+            )
+            return dict(workspace)
+
+    def save_feishu_workspace_message(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        message_id: str,
+    ) -> None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT snapshot_json FROM channel_navigation_states
+                WHERE account_id = %s AND external_address_hash = %s
+                """,
+                (account_id, external_address_hash),
+            ).fetchone()
+            value = _snapshot(row.get('snapshot_json')) if row else {}
+            workspace = value.get('feishu_workspace')
+            if not isinstance(workspace, dict):
+                workspace = {}
+            workspace['message_id'] = message_id
+            value['feishu_workspace'] = workspace
+            connection.execute(
+                """
+                INSERT INTO channel_navigation_states(
+                    account_id, external_address_hash, mode, snapshot_json
+                )
+                VALUES(%s, %s, 'active', %s)
+                ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                    snapshot_json = EXCLUDED.snapshot_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    account_id,
+                    external_address_hash,
+                    self._json(value),
+                ),
+            )
+
     def begin_new_conversation(
         self,
         account_id: str,
@@ -811,9 +926,9 @@ class SQLiteGatewayStore(GatewayStore):
                 (account_id, external_address_hash),
             ).fetchone()
             current = _snapshot(row.get('snapshot_json')) if row else {}
-            value = {'new_conversation': draft or {}}
-            if isinstance(current.get('pending_turn'), dict):
-                value['pending_turn'] = current['pending_turn']
+            value = dict(current)
+            value.pop('selection', None)
+            value['new_conversation'] = draft or {}
             connection.execute(
                 """
                 DELETE FROM channel_routes

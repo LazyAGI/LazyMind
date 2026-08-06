@@ -28,7 +28,10 @@ _RESOLVED_RESOURCES_KEY = '_channel_gateway_resolved_resources'
 _CAPABILITY_LABELS = {
     'knowledge_base': '知识库',
     'skill': 'Skill',
+    'plugin': 'Plugin',
     'tool': '工具',
+    'prompt': 'Prompt',
+    'conversation': '会话',
     'personalization': '个人习惯',
     'workflow': '工作流',
 }
@@ -463,7 +466,17 @@ class CapabilityActions:
                     name = str(item.get('name') or '未命名')
                     lines.append(f'{index}. {name}（{status}）')
                     presented_items.append(
-                        {'name': name, 'status': status}
+                        {
+                            'id': str(item.get('id') or ''),
+                            'name': name,
+                            'status': status,
+                            'description': str(
+                                item.get('description') or ''
+                            )[:300],
+                            'content': str(
+                                item.get('content') or ''
+                            )[:4000],
+                        }
                     )
             groups.append(
                 {
@@ -473,7 +486,16 @@ class CapabilityActions:
                     'total': len(values),
                 }
             )
-            if len(kinds) == 1 and values:
+            if (
+                len(kinds) == 1
+                and values
+                and kind in {
+                    'knowledge_base',
+                    'skill',
+                    'tool',
+                    'personalization',
+                }
+            ):
                 self._store.save_selection_snapshot(
                     account_id,
                     external_address_hash,
