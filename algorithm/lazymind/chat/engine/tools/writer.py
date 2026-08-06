@@ -860,7 +860,6 @@ class WriterToolkitBase:
         ), '')
         return _json_dumps({
             'draft_document': markdown,
-            'draft_document_md': markdown,
         })
 
     def update_writing_context(self, content_artifact_json: str, writing_context_json: str) -> str:
@@ -1170,7 +1169,7 @@ class WriterToolkitBase:
             source_document_json=writer_document_json,
             patch_set_json=patch_set_json,
         ), {})
-        output['revised_document'] = published.get('published_document') or {}
+        output['revised_document'] = published.get('draft_document') or {}
         output['write_result'] = published.get('publish_result') or {}
         return _json_dumps(output)
 
@@ -1229,7 +1228,7 @@ class WriterToolkitBase:
         )
         return _json_dumps({
             'publish_result': _primary_data(result),
-            'published_document': persisted.model_dump(exclude_defaults=True),
+            'draft_document': persisted.model_dump(exclude_defaults=True),
             'published_link': _published_link(target),
         })
 
@@ -1311,7 +1310,7 @@ class WriterToolkitBase:
         published = _set_document_editable(_primary_data(refreshed), stage='final')
         return _json_dumps({
             'publish_result': _primary_data(write_result),
-            'published_document': published.model_dump(exclude_defaults=True),
+            'draft_document': published.model_dump(exclude_defaults=True),
             'published_link': _published_link(target),
         })
 

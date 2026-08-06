@@ -2,8 +2,9 @@ id: writer-workflow
 name: AI Writer
 description: >
   Read source documents and knowledge, create or reuse an outline, draft a
-  structured document, revise either the outline or full text, and deliver it
-  as Markdown or to Feishu through one Markdown/WriterDocument workflow.
+  structured document, revise either the outline or full text, and produce
+  Markdown or WriterDocument IR according to the selected writing path. Exporting
+  an IR draft as Markdown is a separate user-initiated download flow.
 
 when_to_use: >
   Always use this workflow when the user's primary request is to create a complete
@@ -138,10 +139,6 @@ slots:
     label: Full Draft
     type: file
     cardinality: single
-  - id: draft_document_md
-    label: Full Draft Markdown
-    type: file
-    cardinality: single
   - id: writing_context_after_draft
     label: Writing Context After Draft
     type: file
@@ -217,4 +214,3 @@ i18n:
       section_instructions: {label: 章节规划}
       draft_blocks: {label: 章节草稿}
       draft_document: {label: 成稿}
-      draft_document_md: {label: 成稿 Markdown}

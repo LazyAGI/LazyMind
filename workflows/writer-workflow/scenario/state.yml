@@ -217,8 +217,10 @@ steps:
 
       Maintain one user-visible full-document artifact: draft_document. Local generation
       preserves the selected representation: Markdown stays `.md`; IR stays `.lmd` and
-      ui_editable=true. After a Feishu write, the provider read-back is saved as the next
-      draft_document revision rather than a second card.
+      ui_editable=true. An IR path must not generate or export a parallel Markdown draft;
+      Markdown export from IR belongs to a separate user-initiated download flow. After a
+      Feishu write, the provider read-back is saved as the next draft_document revision
+      rather than a second card.
       When resolved_media_assets exists and a Feishu write happens, pass its path as
       media_assets_path to writer_replace_document or writer_append_document; this is
       required for Image WriterBlocks.
@@ -250,15 +252,15 @@ steps:
               writer_generate_draft_blocks with visual_plan and resolved_media_assets,
               followed by writer_generate_draft_document.
             Save every returned section path as a separate ordered draft_blocks entry.
-            Never stringify the path list or save it as one file entry. Save the assembled
-            result as draft_document; save draft_document_md when returned.
+            Never stringify the path list or save it as one file entry. Save only the
+            assembled result as draft_document.
          3. When this execution started without draft_document and source_document is a
             cloud-bound `.lmd`, perform the one-time initial Feishu write-back:
             call writer_replace_document with the new draft_document, source_document,
             target_document when it exists, and resolved_media_assets when available.
             Save publish_result as
-            document_write_result and replace draft_document with the returned
-            provider-confirmed published_document.
+            document_write_result and save the returned provider-confirmed
+            draft_document as the next revision of the same draft_document slot.
             Do not perform this automatic write-back for Markdown or when a draft_document
             already existed at the start of the execution.
          4. Call writer_update_writing_context using the final draft_document (the
@@ -287,9 +289,10 @@ steps:
             cloud-bound `.lmd` source_document, perform the one-time initial Feishu
             write-back: call writer_publish_revision with source_document and the
             generated document_revision_set. Save publish_result as
-            document_write_result and replace draft_document with the returned
-            provider-confirmed published_document. Do not automatically publish later
-            revisions once draft_document already existed at execution start.
+            document_write_result and save the returned provider-confirmed
+            draft_document as the next revision of the same draft_document slot. Do not
+            automatically publish later revisions once draft_document already existed at
+            execution start.
          6. Call writer_update_writing_context using the final revised draft_document
             and save writing_context_after_draft.
 
@@ -310,8 +313,6 @@ steps:
       - writer_generate_draft_document
       - writer_generate_draft_document_markdown
       - writer_update_writing_context
-      - writer_export_markdown
-      - writer_convert_markdown_to_ir
       - writer_create_document
       - writer_publish_revision
       - writer_replace_document
@@ -321,8 +322,6 @@ steps:
       - writer_generate_modify_plan
       - writer_generate_revision_set
       - writer_apply_revision
-      - writer_publish_revision
-      - writer_replace_document
     inputs:
       - material: outline_document
         required: true
@@ -351,8 +350,6 @@ steps:
         required: false
       - material: draft_blocks
         required: false
-      - material: draft_document_md
-        required: false
       - material: document_revision_task
         required: false
       - material: document_locate_result
@@ -371,7 +368,8 @@ steps:
       for generation/rewrite mode; IR generation also requires visual_plan and
       resolved_media_assets. A targeted revision requires document_revision_task,
       document_locate_result, document_modify_plan, document_revision_set, and a successful
-      document_revision_result. When the execution started without draft_document and
+      document_revision_result.
+      When the execution started without draft_document and
       used a cloud-bound `.lmd` source, document_write_result must report success and
       draft_document must be the provider-confirmed document. Later revisions must not
       mutate the cloud document automatically.

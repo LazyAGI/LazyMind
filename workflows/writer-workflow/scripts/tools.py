@@ -158,12 +158,12 @@ def _markdown_filename(title: str) -> str:
 
 
 def _save_publish_payload(payload: dict, root: Path) -> dict:
-    published_document = payload.get('published_document') or {}
+    draft_document = payload.get('draft_document') or {}
     publish_result = payload.get('publish_result') or {}
     if isinstance(publish_result, dict):
         publish_result = {
             **publish_result,
-            'success': bool(publish_result.get('success', published_document)),
+            'success': bool(publish_result.get('success', draft_document)),
         }
     return {
         'publish_result': _save_json_artifact(
@@ -172,9 +172,9 @@ def _save_publish_payload(payload: dict, root: Path) -> dict:
             writer_schema('revision.PatchResult'),
             directory=root,
         ),
-        'published_document': _save_writer_document(
-            'published_document',
-            published_document,
+        'draft_document': _save_writer_document(
+            'draft_document',
+            draft_document,
             editable=True,
             directory=root,
             extra_meta={
@@ -651,7 +651,7 @@ def writer_generate_draft_document_markdown(
     draft_sections_anchor_path: str,
     writing_context_path: str,
     outline_path: str = '',
-) -> dict:
+) -> str:
     """Assemble Markdown sections and preserve the Markdown document."""
     anchor = (
         Path(draft_sections_anchor_path)
@@ -673,18 +673,13 @@ def writer_generate_draft_document_markdown(
         outline_json=_read_json_string(outline_path) if outline_path else '',
     ), {})
     root = _run_root('draft-document-markdown')
-    markdown_path = root / 'draft_document.md'
-    markdown_path.write_text(str(payload.get('draft_document_md') or ''), encoding='utf-8')
-    return {
-        'draft_document': _save_writer_document(
-            'draft_document',
-            payload.get('draft_document') or {},
-            expected_stage='draft',
-            editable=True,
-            directory=root,
-        ),
-        'draft_document_md': str(markdown_path),
-    }
+    return _save_writer_document(
+        'draft_document',
+        payload.get('draft_document') or {},
+        expected_stage='draft',
+        editable=True,
+        directory=root,
+    )
 
 
 def writer_update_writing_context(

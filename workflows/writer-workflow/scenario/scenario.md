@@ -90,7 +90,9 @@ a hidden current-document pointer.
 - `outline_document` and `draft_document` preserve that representation across steps.
 - User-visible IR outline and draft documents have ui_editable=true.
 - A successful Feishu write produces a new provider-confirmed `draft_document` revision;
-  Markdown-to-IR conversion and provider result metadata remain internal to the step.
+  provider result metadata remains internal to the step.
+- An IR draft does not produce a parallel Markdown artifact. Markdown export from IR is
+  handled only by a separate user-initiated download flow.
 - Internal locate results, modify plans, revision sets, section plans, and draft blocks are
   persisted but are not exposed as separate product cards.
 - Workflow tools pass artifact paths and do not copy complete documents into ChatAgent
