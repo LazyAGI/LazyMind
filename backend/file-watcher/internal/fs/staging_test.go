@@ -79,6 +79,9 @@ func TestStageFilePreservesModTimeAndSkipsUpToDateCopy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first stage file: %v", err)
 	}
+	if !strings.HasPrefix(first.URI, "file:///data/staging/") {
+		t.Fatalf("expected standard file URI, got %q", first.URI)
+	}
 	info, err := os.Stat(first.HostPath)
 	if err != nil {
 		t.Fatalf("stat staged file: %v", err)
@@ -100,6 +103,9 @@ func TestStageFilePreservesModTimeAndSkipsUpToDateCopy(t *testing.T) {
 	if second.HostPath != first.HostPath {
 		t.Fatalf("expected same staged path, got %q vs %q", second.HostPath, first.HostPath)
 	}
+	if second.URI != first.URI {
+		t.Fatalf("expected stable staged URI %q, got %q", first.URI, second.URI)
+	}
 	info, err = os.Stat(second.HostPath)
 	if err != nil {
 		t.Fatalf("stat restaged file: %v", err)
@@ -113,6 +119,38 @@ func TestStageFilePreservesModTimeAndSkipsUpToDateCopy(t *testing.T) {
 	}
 	if strings.Contains(strings.TrimPrefix(first.HostPath, hostRoot), "doc-1") || strings.Contains(strings.TrimPrefix(first.HostPath, hostRoot), "v1") {
 		t.Fatalf("expected no document/version nesting in staged path, got %q", first.HostPath)
+	}
+}
+
+func TestPathToFileURIForOS(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		path string
+		goos string
+		want string
+	}{
+		{
+			name: "windows drive with spaces and unicode",
+			path: `C:\Users\test\My Files\中文.txt`,
+			goos: "windows",
+			want: "file:///C:/Users/test/My%20Files/%E4%B8%AD%E6%96%87.txt",
+		},
+		{
+			name: "posix path",
+			path: "/data/staging/My Files/report.txt",
+			goos: "linux",
+			want: "file:///data/staging/My%20Files/report.txt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pathToFileURIForOS(tt.path, tt.goos); got != tt.want {
+				t.Fatalf("pathToFileURIForOS() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
