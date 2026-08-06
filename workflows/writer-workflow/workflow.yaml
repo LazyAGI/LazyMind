@@ -15,10 +15,14 @@ when_to_use: >
   continuing from a supplied outline, revising an existing Feishu document, or
   delivering a generated document. Do not require the
   user to choose between creation and revision workflows; select the applicable
-  reachable step from the user's request and the available artifacts. When
-  triggering after clarification or a cloud-file read, request_context must
-  preserve every user-supplied source and destination URL verbatim, including
-  URLs supplied through ask_user; a document-content summary never replaces
+  reachable step from the user's request and the available artifacts. When the
+  current turn supplies a Markdown, plain-text, or LMD file to write, continue,
+  or revise, trigger this workflow before reading or editing that file with generic
+  attachment tools. Preserve its exact basename in request_context and let the
+  prepare step load it; do not substitute the file contents for its identity.
+  When triggering after clarification or a cloud-file read, request_context must
+  likewise preserve every user-supplied source and destination URL verbatim,
+  including URLs supplied through ask_user; a content summary never replaces
   its locator.
 
 tool_scripts:

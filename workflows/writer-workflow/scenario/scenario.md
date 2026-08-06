@@ -89,6 +89,9 @@ a hidden current-document pointer.
 - From-scratch and Markdown inputs remain Markdown. Feishu and `.lmd` inputs remain IR.
 - `outline_document` and `draft_document` preserve that representation across steps.
 - User-visible IR outline and draft documents have ui_editable=true.
+- After `writer_apply_revision` succeeds, its returned `revised_document` path is the
+  authoritative next `draft_document` file. Save that exact path immediately; do not
+  query it as an artifact key or reconstruct the document with generic file tools.
 - A successful Feishu write produces a new provider-confirmed `draft_document` revision;
   provider result metadata remains internal to the step.
 - An IR draft does not produce a parallel Markdown artifact. Markdown export from IR is

@@ -8,12 +8,15 @@ transitions:
   prepare:
     - to: outline
       when: >
-        Generate, reuse, display, or revise an outline. This route is mandatory
-        for a targeted revision when the prepared source_document is an outline.
+        Generate, reuse, display, or revise an authoring outline. Choose this route
+        for a supplied source only when the user explicitly identifies that source
+        as an outline to use or revise.
     - to: write_document
       when: >
-        Revise an existing full document directly. Use this route for a targeted
-        revision only when the prepared source_document is a complete document.
+        Revise an existing full document directly. This is the mandatory route when
+        the user asks to add, delete, replace, or rewrite sections or paragraphs in a
+        supplied article, report, or other complete document. References to headings,
+        section numbers, or insertion positions do not make the source an outline.
     - to: __end__
       when: The requested read-only preparation is complete.
 
@@ -54,8 +57,10 @@ steps:
            `markdown`, even when the final request explicitly asks for Feishu delivery.
          - If the user is modifying or continuing one supplied `.md`, `.markdown`,
            `.txt`, or `.lmd` file, call writer_load_local_document and save its path as
-           source_document. Do not treat ordinary reference attachments as the working
-           document.
+           source_document. This Writer tool resolves the uploaded file from the current
+           attachment history; do not call read_user_attachment or find_user_attachment
+           first, and do not copy the file contents into the task prompt. Do not treat
+           ordinary reference attachments as the working document.
       2. If the request contains a Feishu/Lark document that must be read, call
          writer_load_document(user_input="{{user_input}}", stage=<draft for a direct
          in-place revision of an existing document; outline only when the user explicitly
@@ -84,11 +89,11 @@ steps:
       cloud source. Do not invent either artifact. If a required tool fails, stop without
       synthesizing a fallback artifact.
 
-      In the final summary, when source_document exists, explicitly report its representation
-      and, for IR, its stage and the
-      required next step. Use "next step: outline revision" for stage="outline", and
-      "next step: full-document revision" for stage="draft" or stage="final". This
-      routing information must be stated even when the user did not ask to see it.
+      In the final summary, when source_document exists, report its representation and
+      required next step. Route a source explicitly supplied as an authoring outline to
+      outline; route targeted changes to a supplied complete document to write_document,
+      even when the request names headings or section numbers. For IR, stage="outline"
+      routes to outline, while stage="draft" or stage="final" routes to write_document.
       When source_document does not exist, explicitly state: "No source file was provided.
       Continue directly to outline without requesting confirmation." Do not emit this
       instruction when source_document exists.
@@ -231,6 +236,12 @@ steps:
       retrieve media_assets for generation mode and resolved_media_assets when resuming an
       earlier generation.
 
+      A retrieved draft_document or source_document artifact already is the authoritative
+      working file. Use the exact path returned by get_artifact as base_document_path for
+      the Writer revision tools. Do not call read_user_attachment, find_user_attachment,
+      read_file, string_replace, or other generic file tools to inspect or edit that same
+      document; doing so bypasses the artifact revision lineage.
+
       Dynamically select exactly one mode:
 
       A. Generate or rewrite from outline:
@@ -284,7 +295,13 @@ steps:
             IR PatchSet for `.lmd` or a StringReplaceSet for Markdown.
          3. Persist the task, locate result, modify plan, revision set, and revision result
             under the document_* internal keys.
-         4. Save the returned revised_document path as draft_document, not under a new key.
+         4. The successful writer_apply_revision result already contains the complete
+            Markdown/IR output path in its `revised_document` field. Immediately save that
+            exact path as the `draft_document` file slot with `content_type="file"`.
+            Do not call get_artifact for `revised_document`, `revision_result`, or
+            `document_revision_result`; those are returned paths, not artifact keys. Do not
+            call read_user_attachment, list_artifacts, string_replace, or manually rebuild
+            the document after apply_revision succeeds.
          5. When this execution started without draft_document and the base is the
             cloud-bound `.lmd` source_document, perform the one-time initial Feishu
             write-back: call writer_publish_revision with source_document and the
