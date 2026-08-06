@@ -219,6 +219,9 @@ steps:
       preserves the selected representation: Markdown stays `.md`; IR stays `.lmd` and
       ui_editable=true. After a Feishu write, the provider read-back is saved as the next
       draft_document revision rather than a second card.
+      When resolved_media_assets exists and a Feishu write happens, pass its path as
+      media_assets_path to writer_replace_document or writer_append_document; this is
+      required for Image WriterBlocks.
 
       Retrieve the latest selected draft_document when it exists, plus source_document,
       target_document, outline_document, writing_task, writing_context,
