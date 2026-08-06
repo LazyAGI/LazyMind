@@ -6,10 +6,12 @@ import os
 import re
 import tempfile
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from threading import RLock
+from typing import Any, ClassVar
 
-from lazyllm import AutoModel
+from lazyllm import LOG, AutoModel
 from lazyllm.tools.writer.data_models import (
     InputResource,
     SectionInstruction,
@@ -30,13 +32,81 @@ from lazyllm.tools.writer.tools import (
 )
 from lazyllm.tools.writer.utils import render_document_markdown, save_artifact_json
 
-
 WRITER_DATA_MODEL_SCHEMA_PREFIX = 'lazyllm.tools.writer.data_models'
 _FEISHU_URL_RE = re.compile(
     r"https?://[^\s<>\"']*(?:feishu\.(?:cn|com)|larksuite\.com)/"
     r"[^\s<>\"'，。；！？、（）【】《》「」『』]+",
     re.IGNORECASE,
 )
+
+
+class DraftMarkdownStreamEventEmitter:
+    """Publish each Draft Markdown delta in one attempt-scoped event stream."""
+
+    EVENT_TYPES: ClassVar[dict[str, str]] = {
+        'start': 'artifact_stream_start',
+        'delta': 'artifact_stream',
+        'end': 'artifact_stream_end',
+        'abort': 'artifact_stream_abort',
+    }
+
+    def __init__(
+        self,
+        emit: Callable[[dict[str, Any]], None],
+    ) -> None:
+        self._emit = emit
+        self._stream_id = uuid.uuid4().hex
+        self._chunk_index = 0
+        self._closed = False
+        self._lock = RLock()
+        with self._lock:
+            self._publish_locked('start')
+
+    @property
+    def stream_id(self) -> str:
+        return self._stream_id
+
+    def feed(self, delta: str) -> None:
+        if not delta:
+            return
+        with self._lock:
+            if self._closed:
+                return
+            self._publish_locked('delta', delta=delta)
+
+    def end(self) -> None:
+        self._finish('end')
+
+    def abort(self, message: str = '') -> None:
+        self._finish('abort', message=message)
+
+    def flush(self) -> None:
+        """Compatibility no-op: deltas are already published immediately."""
+
+    def _finish(self, event: str, *, message: str = '') -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._publish_locked(event, message=message)
+            self._closed = True
+
+    def _publish_locked(self, event: str, *, delta: str = '', message: str = '') -> None:
+        self._chunk_index += 1
+        payload: dict[str, Any] = {
+            'type': self.EVENT_TYPES[event],
+            'slot': 'draft_document',
+            'content_type': 'text/markdown',
+            'stream_id': self._stream_id,
+            'chunk_index': self._chunk_index,
+        }
+        if event == 'delta':
+            payload['delta'] = delta
+        elif event == 'abort' and message:
+            payload['message'] = message
+        try:
+            self._emit(payload)
+        except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
+            LOG.warning('[Writer] failed to forward Draft Markdown stream event: %s', exc)
 
 
 def writer_schema(name: str) -> str:
@@ -683,6 +753,21 @@ class WriterToolkitBase:
         writing_context_json: str,
     ) -> str:
         """Generate every planned draft section in Markdown, in order."""
+        return self.generate_draft_blocks(
+            writing_task_json=writing_task_json,
+            section_instructions_json=section_instructions_json,
+            writing_context_json=writing_context_json,
+        )
+
+    def stream_draft_blocks_markdown(
+        self,
+        writing_task_json: str,
+        section_instructions_json: str,
+        writing_context_json: str,
+        on_delta: Callable[[str], None],
+        on_section_end: Callable[[], None] | None = None,
+    ) -> str:
+        """Generate Markdown sections through LazyLLM's non-tool streaming API."""
         instructions_data = _json_loads(section_instructions_json, {})
         instructions = (
             instructions_data.get('instructions')
@@ -691,11 +776,50 @@ class WriterToolkitBase:
         if not isinstance(instructions, list):
             raise TypeError('section_instructions_json must contain instructions.')
 
-        return self.generate_draft_blocks(
-            writing_task_json=writing_task_json,
-            section_instructions_json=section_instructions_json,
-            writing_context_json=writing_context_json,
+        root = _temp_root()
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', _json_loads(writing_task_json, {}),
+            writer_schema('task.WritingTask'),
         )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        drafting = WriterDraftingTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        )
+        sections: list[str] = []
+        for instruction_data in instructions:
+            instruction = SectionInstruction.model_validate(instruction_data)
+            with drafting.stream_draft_section(
+                task=task_path,
+                section_instruction=instruction,
+                context=context_path,
+                previous_blocks=sections,
+            ) as stream:
+                for delta in stream:
+                    try:
+                        on_delta(delta)
+                    except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
+                        LOG.warning(
+                            '[Writer] Draft Markdown delta callback failed: %s', exc,
+                        )
+                result = stream.result()
+            section = _primary_data(result)
+            if not isinstance(section, str):
+                raise TypeError(
+                    'Markdown Draft stream returned a non-Markdown artifact.',
+                )
+            sections.append(section)
+            if on_section_end is not None:
+                try:
+                    on_section_end()
+                except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
+                    LOG.warning(
+                        '[Writer] Draft Markdown section flush callback failed: %s',
+                        exc,
+                    )
+        return _json_dumps(sections)
 
     def generate_draft_document(
         self,

@@ -14,10 +14,10 @@ from typing import Any, Callable, Mapping
 
 from lazyllm.tools.writer.data_models import WriterDocument
 from lazyllm.tools.writer.utils import parse_document_markdown, save_artifact_json
-
 from lazymind.chat.engine.subagent.context import require_context
 from lazymind.chat.engine.prompts.writer_media import WRITER_IMAGE_ACQUISITION_PROMPT
 from lazymind.chat.engine.tools.writer import (
+    DraftMarkdownStreamEventEmitter,
     WriterCreateToolkit,
     WriterResourceToolkit,
     WriterRevisionToolkit,
@@ -576,17 +576,25 @@ def writer_generate_draft_blocks_markdown(
     writing_context_path: str,
 ) -> list[str]:
     """Generate and persist all planned draft sections as Markdown."""
-    sections = _json_loads(WriterCreateToolkit().generate_draft_blocks_markdown(
-        writing_task_json=_read_json_string(writing_task_path),
-        section_instructions_json=_read_json_string(section_instructions_path),
-        writing_context_json=_read_json_string(writing_context_path),
-    ), [])
-    root = _run_root('draft-sections-markdown')
-    paths = []
-    for index, section in enumerate(sections, start=1):
-        path = root / f'draft_section_{index:04d}.md'
-        path.write_text(str(section), encoding='utf-8')
-        paths.append(str(path))
+    events = DraftMarkdownStreamEventEmitter(require_context().emit)
+    try:
+        sections = _json_loads(WriterCreateToolkit().stream_draft_blocks_markdown(
+            writing_task_json=_read_json_string(writing_task_path),
+            section_instructions_json=_read_json_string(section_instructions_path),
+            writing_context_json=_read_json_string(writing_context_path),
+            on_delta=events.feed,
+            on_section_end=events.flush,
+        ), [])
+        root = _run_root('draft-sections-markdown')
+        paths = []
+        for index, section in enumerate(sections, start=1):
+            path = root / f'draft_section_{index:04d}.md'
+            path.write_text(str(section), encoding='utf-8')
+            paths.append(str(path))
+    except Exception as exc:
+        events.abort(str(exc))
+        raise
+    events.end()
     return paths
 
 

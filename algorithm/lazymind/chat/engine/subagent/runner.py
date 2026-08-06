@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -10,9 +11,8 @@ from typing import Any, Dict, List, Optional
 
 import lazyllm
 from lazyllm import LOG, AutoModel
+from lazyllm.tools.tool_config_inject import inject_tool_config
 
-from lazymind.config import config as _cfg
-from lazymind.model_config import inject_model_config
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
     AgentExecutor,
@@ -25,7 +25,6 @@ from lazymind.chat.engine.agent_runtime import (
 )
 from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
-
 from lazymind.chat.service.component.tool_registry import (
     ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
@@ -34,12 +33,14 @@ from lazymind.chat.service.component.tool_registry import (
     filter_tools,
     tool_is_active,
 )
-from lazyllm.tools.tool_config_inject import inject_tool_config
+from lazymind.config import config as _cfg
+from lazymind.model_config import inject_model_config
 
-from .context import SubAgentContext, set_context, LARGE_TOOL_RESULT_THRESHOLD
-from .db import MemorySubAgentStore, SubAgentDB
-from . import tools as subagent_tools
 from . import SUBAGENT_ATTACHMENT_CONTEXT_KEY, SUBAGENT_CORE_TOOL_NAMES
+from . import tools as subagent_tools
+from .context import LARGE_TOOL_RESULT_THRESHOLD, SubAgentContext, set_context
+from .db import MemorySubAgentStore, SubAgentDB
+from .stream_events import DRAFT_STREAM_EVENT_TYPES, merge_agent_and_stream_events
 
 
 def _build_artifact_context_section(
@@ -610,8 +611,16 @@ async def run_subagent_stream(
     start_time = time.time()
     db: Optional[SubAgentDB] = None
     emitted: List[Dict[str, Any]] = []
+    stream_events: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
 
     def _emit(ev: Dict[str, Any]) -> None:
+        if ev.get('type') in DRAFT_STREAM_EVENT_TYPES:
+            try:
+                loop.call_soon_threadsafe(stream_events.put_nowait, dict(ev))
+            except RuntimeError as exc:
+                LOG.warning('[SubAgent] failed to enqueue Draft stream event: %s', exc)
+            return
         emitted.append(ev)
 
     def _sse(ev: Dict[str, Any]) -> str:
@@ -754,7 +763,17 @@ async def run_subagent_stream(
         _pending_think: str = ''
 
         executor = AgentExecutor()
-        async for kind, payload in executor.stream(llm, plan):
+        merged_events = merge_agent_and_stream_events(
+            executor.stream(llm, plan), stream_events,
+        )
+        async for source, merged_payload in merged_events:
+            if source == 'stream':
+                stream_event = dict(merged_payload)
+                stream_event['task_id'] = task_id
+                yield _sse(stream_event)
+                continue
+
+            kind, payload = merged_payload
             if kind == 'event':
                 item = payload
                 tag = item.get('tag')
