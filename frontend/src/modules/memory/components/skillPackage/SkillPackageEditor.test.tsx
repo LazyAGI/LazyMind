@@ -48,6 +48,7 @@ vi.mock("@/modules/knowledge/components/MarkdownViewer", () => ({
 
 const t = ((key: string, options?: Record<string, unknown>) =>
   options ? `${key}:${JSON.stringify(options)}` : key) as any;
+const FILE_LOAD_TIMEOUT = 5_000;
 
 const treeRoot = {
   name: "root",
@@ -111,8 +112,9 @@ describe("SkillPackageEditor", () => {
   it("loads the tree and renders the default markdown file content", async () => {
     render(<SkillPackageEditor skillId="skill-1" canEdit t={t} />);
     await waitFor(() => {
+      expect(readSkillFsFile).toHaveBeenCalledWith("skill-1", "SKILL.md");
       expect(screen.getByTestId("markdown-viewer")).toHaveTextContent("Hello skill");
-    });
+    }, { timeout: FILE_LOAD_TIMEOUT });
     expect(screen.getAllByText("SKILL.md").length).toBeGreaterThan(0);
   });
 
