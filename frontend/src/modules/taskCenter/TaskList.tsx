@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Input, Progress, Segmented, Select, Table, Tooltip } from 'antd';
+import { Button, Input, message, Progress, Segmented, Select, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { AppstoreOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, EllipsisOutlined, HourglassOutlined, ReloadOutlined, SearchOutlined, StopOutlined, SyncOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { listTasks, removeTask } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
+import { taskStatusDescription } from './taskStatusDescription';
 import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 
@@ -73,7 +74,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
     {
       title: t('taskCenter.tasks'),
       key: 'task',
-      width: '40%',
+      width: '52%',
       render: (_, task) => {
         const title = task.conversation_title || task.title || t('taskCenter.noTitle');
         const description = task.title || task.schedule_name || t('taskCenter.noDescription');
@@ -81,14 +82,15 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
       },
     },
     {
-      title: t('taskCenter.statusAndNext'), key: 'state', width: '34%',
+      title: t('taskCenter.statusAndNext'), key: 'state', width: '28%',
       render: (_, task) => {
         const done = task.steps?.filter((step) => ['completed', 'succeeded'].includes(step.status)).length ?? 0;
         const count = task.steps?.length ?? 0;
-        return <div className='task-list-state'><div><StatusTag status={task.status} onClick={task.plugin_session_id ? () => setGraphTask(task) : undefined} /><span>{task.waiting_reason || (count ? t('taskCenter.stepsCompleted', { done, total: count }) : task.title || t('taskCenter.noDescription'))}</span></div>{count ? <Progress percent={Math.round(done / count * 100)} showInfo={false} size='small' /> : null}</div>;
+        const description = taskStatusDescription(task, t);
+        return <div className='task-list-state'><div><StatusTag status={task.status} onClick={task.plugin_session_id ? () => setGraphTask(task) : undefined} /><Tooltip title={description}><span>{description}</span></Tooltip></div>{count ? <Progress percent={Math.round(done / count * 100)} showInfo={false} size='small' /> : null}</div>;
       },
     },
-    { title: t('taskCenter.time'), key: 'time', width: '20%', render: (_, task) => <div className='task-time-cell'><span>{formatDate(task.finished_at || task.updated_at)}</span><small>{t('taskCenter.createdAt')} {formatDate(task.created_at)}</small></div> },
+    { title: t('taskCenter.time'), key: 'time', width: '14%', render: (_, task) => <div className='task-time-cell'><span>{formatDate(task.finished_at || task.updated_at)}</span><small>{t('taskCenter.createdAt')} {formatDate(task.created_at)}</small></div> },
     { title: '', width: 56, align: 'center', render: (_, task) => <Button type='text' icon={<EllipsisOutlined />} aria-label={t('taskCenter.viewDetails')} onClick={(event: React.MouseEvent<HTMLElement>) => { event.stopPropagation(); setSelected(task); }} /> },
   ];
 
@@ -109,6 +111,22 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
     navigate('/agent/chat/home');
   };
 
+  const handleDelete = async (task: Task) => {
+    try {
+      await removeTask(task.id);
+    } catch {
+      message.error(t('taskCenter.taskRemoveFailed'));
+      return;
+    }
+    setSelected(null);
+      message.success(t('taskCenter.taskRemoveSuccess'));
+      if (tasks.length === 1 && page > 1) {
+      onPageChange(page - 1);
+        return;
+    }
+    await load();
+  };
+
   return (
     <div className='all-tasks'>
       <div className='all-tasks-toolbar'>
@@ -124,8 +142,8 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
           <Button icon={<ReloadOutlined />} onClick={() => void load()} aria-label={t('taskCenter.refresh')} />
         </div>
       </div>
-      <Table rowKey='id' className='task-table' loading={loading} columns={columns} dataSource={tasks} onRow={(task: Task) => ({ onClick: () => setSelected(task) })} rowClassName={(task: Task) => `task-table-row status-${task.status}`} pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: onPageChange, showSizeChanger: false, showTotal: (value: number) => t('taskCenter.taskTotalItems', { total: value }) }} />
-      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} onDelete={async (task) => { await removeTask(task.id); setSelected(null); await load(); }} />
+      <Table rowKey='id' className='task-table' tableLayout='fixed' loading={loading} columns={columns} dataSource={tasks} onRow={(task: Task) => ({ onClick: () => setSelected(task) })} rowClassName={(task: Task) => `task-table-row status-${task.status}`} pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: onPageChange, showSizeChanger: false, showTotal: (value: number) => t('taskCenter.taskTotalItems', { total: value }) }} />
+      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} onDelete={handleDelete} />
       {graphTask?.plugin_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.plugin_session_id} pluginId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
     </div>
   );

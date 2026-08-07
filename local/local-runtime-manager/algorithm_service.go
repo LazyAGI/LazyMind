@@ -554,8 +554,10 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 	noProxy := envText("no_proxy", "127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")
 	noProxyUpper := envText("NO_PROXY", noProxy)
 	routerPoolStart, routerPoolEnd := localRouterPortPool(cfg)
+	trustedLocalMode := paths.TrustedLocalMode || envBool("LAZYMIND_TRUSTED_LOCAL_MODE", false)
 	env := []string{
 		"LAZYMIND_RUNTIME_MODE=local",
+		"LAZYMIND_TRUSTED_LOCAL_MODE=" + strconv.FormatBool(trustedLocalMode),
 		"PYTHONPATH=" + pythonPath,
 		"LAZYMIND_HOME=" + paths.AlgorithmHome,
 		"LAZYLLM_HOME=" + paths.LazyLLMHome,

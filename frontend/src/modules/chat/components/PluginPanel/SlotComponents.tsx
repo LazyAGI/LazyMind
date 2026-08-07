@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, createContext, useContext } from "react";
 import ReactDOM from "react-dom";
+import { Image as AntImage } from 'antd';
+import { EyeOutlined } from '@ant-design/icons';
 import type { SlotRevision, SlotVersionEntry } from "@/modules/chat/store/pluginPanel";
 import { usePluginStore, draftStore } from "@/modules/chat/store/pluginPanel";
 import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync, isExpiredSignedUrl } from "@/modules/knowledge/utils/imageUrl";
@@ -203,6 +205,13 @@ function isSpaFallbackHtml(content: string): boolean {
     && (normalized.includes('/@vite/client') || normalized.includes('id="root"'));
 }
 
+export function isWriterIrSource(source: unknown): boolean {
+  const normalized = String(source ?? '')
+    .split(/[?#]/, 1)[0]
+    .toLowerCase();
+  return normalized.endsWith('.lmd') || normalized.endsWith('_ir.json');
+}
+
 /** Shown when the slot has no artifact yet (backend returned no artifact_value). */
 function SlotPending({ type, cardMode }: { type: 'image' | 'file' | 'text'; cardMode?: boolean }) {
   if (type === 'image') {
@@ -342,7 +351,11 @@ async function resolveSnapshotDiffText(snapshot: unknown): Promise<string> {
     const response = await fetch(fetchUrl);
     if (!response.ok) throw new Error(localizeErrorCode('2000509'));
     const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('json') || trimmed.toLowerCase().includes('.json')) {
+    if (
+      contentType.includes('json')
+      || isWriterIrSource(trimmed)
+      || trimmed.toLowerCase().includes('.json')
+    ) {
       return formatPayloadForDiff(await response.json());
     }
     const text = await response.text();
@@ -375,6 +388,8 @@ async function resolveSnapshotDiffText(snapshot: unknown): Promise<string> {
   if (!response.ok) throw new Error(localizeErrorCode('2000509'));
   const contentType = response.headers.get('content-type') || '';
   const looksJson = contentType.includes('json')
+    || isWriterIrSource(pathForSign)
+    || isWriterIrSource(record.filename)
     || pathForSign.toLowerCase().includes('.json')
     || String(record.type ?? '').toLowerCase() === 'json'
     || String(record.filename ?? '').toLowerCase().endsWith('.json');
@@ -1254,6 +1269,13 @@ export function SlotImage({
     if (e.key === 'Escape') setCaptionEditing(false);
   }, [handleCaptionSave]);
 
+  const handlePreviewClick = useCallback((e: React.MouseEvent) => {
+    // Prevent parent list item focus/sort handlers from firing when opening preview.
+    e.stopPropagation();
+  }, []);
+
+  const [previewVisible, setPreviewVisible] = useState(false);
+
   if (!hasSource || pending || !url) {
     return <SlotPending type='image' cardMode={cardMode} />;
   }
@@ -1333,11 +1355,42 @@ export function SlotImage({
     </>
   ) : null;
 
+  const previewableImage = (
+    <AntImage
+      src={url}
+      alt={alt}
+      className={cardMode ? 'plugin-slot__image-card-img' : 'plugin-slot__image'}
+      rootClassName={cardMode ? 'plugin-slot__image-antd plugin-slot__image-antd--card' : 'plugin-slot__image-antd'}
+      loading='lazy'
+      preview={{
+        mask: (
+          <span className='plugin-slot__image-preview-mask'>
+            <EyeOutlined className='plugin-slot__image-preview-mask-icon' />
+            <span>{tr('chat.slots.preview')}</span>
+          </span>
+        ),
+        visible: previewVisible,
+        onVisibleChange: setPreviewVisible,
+      }}
+      role='button'
+      tabIndex={0}
+      aria-label={alt || tr('chat.previewImage')}
+      onClick={handlePreviewClick}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          setPreviewVisible(true);
+        }
+      }}
+    />
+  );
+
   if (cardMode) {
     return (
       <div className='plugin-slot plugin-slot--image-card-wrap'>
         <div className='plugin-slot plugin-slot--image-card'>
-          <img src={url} alt={alt} className='plugin-slot__image-card-img' loading='lazy' />
+          {previewableImage}
           {alt && <div className='plugin-slot__image-card-caption'>{alt}</div>}
           {overlays}
         </div>
@@ -1384,7 +1437,7 @@ export function SlotImage({
   }
   return (
     <div className='plugin-slot plugin-slot--image'>
-      <img src={url} alt={alt} className='plugin-slot__image' loading='lazy' />
+      {previewableImage}
       {overlays}
       {hasActions && (
         <div className='plugin-slot__caption'>
@@ -1742,7 +1795,7 @@ function getFileIcon(filename: string): string {
   if (ext === 'xls' || ext === 'xlsx') return '📊';
   if (ext === 'ppt' || ext === 'pptx') return '📑';
   if (ext === 'txt' || ext === 'md') return '📄';
-  if (ext === 'json' || ext === 'csv') return '📋';
+  if (ext === 'json' || ext === 'lmd' || ext === 'csv') return '📋';
   if (ext === 'zip' || ext === 'tar' || ext === 'gz' || ext === 'rar') return '🗜️';
   if (ext === 'jpg' || ext === 'jpeg' || ext === 'png' || ext === 'gif' || ext === 'webp') return '🖼️';
   return '📎';
@@ -1773,8 +1826,12 @@ function isJsonArtifactFile(slot: SlotRevision): boolean {
 
 function isWriterIrArtifactFile(slot: SlotRevision): boolean {
   const raw = slot.artifact_value;
-  const name = String(raw?.filename ?? raw?.name ?? '').toLowerCase();
-  return name.endsWith('_ir.json');
+  return [
+    raw?.filename,
+    raw?.name,
+    raw?.path,
+    raw?.url,
+  ].some(isWriterIrSource);
 }
 
 function isMarkdownArtifactFile(slot: SlotRevision): boolean {
@@ -1856,9 +1913,13 @@ function hasProviderTarget(document?: WriterDocument | null): boolean {
   );
 }
 
-function ensureJsonFilename(name: string): string {
-  const trimmed = name.trim() || 'writer-document.json';
-  return trimmed.toLowerCase().endsWith('.json') ? trimmed : `${trimmed}.json`;
+function ensureWriterIrFilename(name: string): string {
+  const trimmed = name.trim() || 'writer-document.lmd';
+  if (trimmed.toLowerCase().endsWith('.lmd')) return trimmed;
+  if (trimmed.toLowerCase().endsWith('_ir.json')) {
+    return `${trimmed.slice(0, -5)}.lmd`;
+  }
+  return `${trimmed.replace(/\.json$/i, '')}.lmd`;
 }
 
 async function syncWriterDocumentSlot(
@@ -1942,8 +2003,9 @@ function writerDocumentToMarkdown(document: WriterDocument): string {
 
 function writerMarkdownFilename(name: string): string {
   const trimmed = name.trim() || 'document';
+  if (trimmed.toLowerCase().endsWith('_ir.lmd')) return `${trimmed.slice(0, -7)}.md`;
   if (trimmed.toLowerCase().endsWith('_ir.json')) return `${trimmed.slice(0, -8)}.md`;
-  return `${trimmed.replace(/\.json$/i, '')}.md`;
+  return `${trimmed.replace(/\.(?:lmd|json)$/i, '')}.md`;
 }
 
 function shouldRenderInlineStructuredContent(
@@ -2149,7 +2211,7 @@ function SlotJsonFile({
     }
 
     const serialized = replaceStructuredArtifactPayload(sourceJson, document);
-    const filename = ensureJsonFilename(name);
+    const filename = ensureWriterIrFilename(name);
     const file = new File(
       [JSON.stringify(serialized, null, 2)],
       filename,
@@ -2158,7 +2220,6 @@ function SlotJsonFile({
     const storedPath = await uploadFileInChunks(file);
     const nextValue: Record<string, unknown> = {
       ...(raw && typeof raw === 'object' ? raw : {}),
-      type: 'json',
       path: storedPath,
       filename,
       size: file.size,
@@ -2512,6 +2573,7 @@ function SlotInlineStructured({
 
 interface SlotMarkdownFileProps {
   slot: SlotRevision;
+  originalFileSlot?: SlotRevision;
   sessionId?: string;
   slotId?: string;
   revisionCount?: number;
@@ -2520,6 +2582,7 @@ interface SlotMarkdownFileProps {
 
 function SlotMarkdownFile({
   slot,
+  originalFileSlot,
   sessionId,
   slotId,
   revisionCount,
@@ -2529,6 +2592,9 @@ function SlotMarkdownFile({
   const raw = slot.artifact_value;
   const name: string = raw?.filename ?? raw?.name ?? slotId ?? slot.slot;
   const { url, resolving, hasSource } = useArtifactFileUrl(raw);
+  const originalRaw = originalFileSlot?.artifact_value;
+  const originalName: string = originalRaw?.filename ?? originalRaw?.name ?? 'final_document.lmd';
+  const { url: originalUrl } = useArtifactFileUrl(originalRaw);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [content, setContent] = useState('');
@@ -2622,10 +2688,10 @@ function SlotMarkdownFile({
         >
           {tr('chat.writer.downloadMarkdown')}
         </button>
-        {url ? (
+        {originalUrl ? (
           <a
-            href={url}
-            download={name}
+            href={originalUrl}
+            download={originalName}
             className='plugin-slot__file-action-btn'
             onClick={(e) => e.stopPropagation()}
           >
@@ -2834,6 +2900,7 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
  */
 export function SlotRenderer({
   slot,
+  originalFileSlot,
   cardMode = false,
   expectedType,
   sessionId,
@@ -2846,6 +2913,7 @@ export function SlotRenderer({
   hideImageMutationActions,
 }: {
   slot: SlotRevision;
+  originalFileSlot?: SlotRevision;
   cardMode?: boolean;
   expectedType?: 'image' | 'file' | 'text';
   sessionId?: string;
@@ -2883,6 +2951,7 @@ export function SlotRenderer({
     return (
       <SlotMarkdownFile
         slot={slot}
+        originalFileSlot={originalFileSlot}
         sessionId={sessionId}
         slotId={slotId}
         revisionCount={revisionCount}

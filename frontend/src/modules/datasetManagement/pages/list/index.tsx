@@ -6,7 +6,6 @@ import {
   Modal,
   Space,
   Table,
-  Tag,
   Tooltip,
   Typography,
   message,
@@ -30,6 +29,7 @@ import {
   updateDataset,
 } from "../../api";
 import DatasetFormModal from "../../components/DatasetFormModal";
+import DatasetKnowledgeBaseCell from "../../components/DatasetKnowledgeBaseCell";
 import type {
   DatasetFormValues,
   DatasetListItem,
@@ -40,7 +40,7 @@ import { DATASET_PAGE_SIZE_OPTIONS } from "../../constants";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import "../../index.scss";
 
-const { Text, Paragraph } = Typography;
+const { Paragraph } = Typography;
 
 export default function DatasetListPage() {
   const navigate = useNavigate();
@@ -184,18 +184,10 @@ export default function DatasetListPage() {
         dataIndex: "knowledge_bases",
         width: 220,
         className: "dataset-kb-column",
-        render: (_, record) =>
-          record.knowledge_bases?.length ? (
-            <div className="dataset-kb-scroll-list">
-              {record.knowledge_bases.map((item) => (
-                <Tag key={item.id} className="dataset-kb-scroll-tag">
-                  {item.name}
-                </Tag>
-              ))}
-            </div>
-          ) : (
-            <Text type="secondary">-</Text>
-          ),
+        ellipsis: true,
+        render: (_, record) => (
+          <DatasetKnowledgeBaseCell knowledgeBases={record.knowledge_bases} />
+        ),
       },
       {
         title: t("datasetManagement.fields.sampleCount"),

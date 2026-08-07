@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -183,8 +182,9 @@ func TestRecoverStaleJobsRestoresPendingAndFailsExhausted(t *testing.T) {
 	if retry.Status != string(StatusPending) || retry.LockedBy != "" || retry.LockUntil != nil {
 		t.Fatalf("expected stale retry job to become pending and unlocked, got %+v", retry)
 	}
-	if !retry.NextRunAt.Equal(now) {
-		t.Fatalf("expected retry next_run_at to be now, got %v want %v", retry.NextRunAt, now)
+	want := now.Truncate(time.Microsecond)
+	if !retry.NextRunAt.Truncate(time.Microsecond).Equal(want) {
+		t.Fatalf("expected retry next_run_at to be now, got %v want %v", retry.NextRunAt, want)
 	}
 
 	exhausted := getTestJob(t, db, exhaustedJob.ID)
@@ -246,14 +246,7 @@ func TestEnqueueIdempotencyKeyReturnsExistingJob(t *testing.T) {
 func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "asyncjob.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.AsyncJob{}); err != nil {
-		t.Fatalf("auto migrate async job: %v", err)
-	}
-	return db.DB
+	return orm.MigrateTestDB(t, &orm.AsyncJob{}).DB
 }
 
 func newTestRunner(db *gorm.DB) *Runner {

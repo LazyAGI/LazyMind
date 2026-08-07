@@ -74,22 +74,26 @@ export default function DatabaseConnectionModal({
   }, [editing, form, open]);
 
   const handleOk = async () => {
-    const values = await form.validateFields();
-    const payload: DatabaseConnectionPayload = {
-      display_name: values.display_name.trim(),
-      description: values.description?.trim(),
-      db_type: values.db_type,
-      host: values.host.trim(),
-      port: values.port,
-      database_name: values.database_name.trim(),
-      username: values.username.trim(),
-      password: values.password,
-      options: parseDatabaseConnectionOptions(values.options_text),
-    };
-    if (editing && !payload.password) {
-      delete payload.password;
+    try {
+      const values = await form.validateFields();
+      const payload: DatabaseConnectionPayload = {
+        display_name: values.display_name.trim(),
+        description: values.description?.trim(),
+        db_type: values.db_type,
+        host: values.host.trim(),
+        port: values.port,
+        database_name: values.database_name.trim(),
+        username: values.username.trim(),
+        password: values.password,
+        options: parseDatabaseConnectionOptions(values.options_text),
+      };
+      if (editing && !payload.password) {
+        delete payload.password;
+      }
+      await onSubmit(payload);
+    } catch {
+      // Validation errors are already rendered inline by antd Form.
     }
-    await onSubmit(payload);
   };
 
   return (

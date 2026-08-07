@@ -5,7 +5,7 @@ import re
 from typing import Any, Dict, List, Literal, Optional
 
 from lazyllm import AutoModel
-from lazymind.common.skill_document import (
+from lazymind.common.skill.document import (
     SkillDocumentError,
     require_valid_skill_document,
 )
@@ -15,10 +15,9 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     _repair_json = None
 
-RewriteTaskType = Literal['skill', 'memory', 'user_preference', 'polish']
+RewriteTaskType = Literal['skill', 'polish']
 
 _MAX_REWRITE_ATTEMPTS = 3
-_MAX_MANAGED_CONTENT_CHARS = 1500
 _JSON_BLOCK_RE = re.compile(r'```json\s*(.*?)\s*```', re.DOTALL)
 _THINK_BLOCK_RE = re.compile(r'<think>.*?</think\s*>', re.DOTALL | re.IGNORECASE)
 _SINGLE_STRING_FIELD_RE = re.compile(
@@ -134,26 +133,6 @@ def _validate_generated_content(task_type: RewriteTaskType, content: Any) -> str
             raise UnprocessableContentError(
                 f'Generated SKILL.md is invalid: {exc}'
             ) from exc
-    elif task_type in ('memory', 'user_preference'):
-        compact_content = ''.join(content.split())
-        content_length = len(compact_content)
-        if content_length > _MAX_MANAGED_CONTENT_CHARS:
-            raise UnprocessableContentError(
-                f'Generated content exceeds {_MAX_MANAGED_CONTENT_CHARS} characters '
-                f'after removing whitespace; current length is {content_length}. '
-                f'Reduce the content length to {_MAX_MANAGED_CONTENT_CHARS} characters '
-                'or less after removing whitespace, keeping only the most important '
-                'concise entries.'
-            )
-        if task_type == 'user_preference':
-            from lazymind.chat.engine.tools.infra.user_preference_validation import (
-                validate_user_preference_content,
-            )
-            validation_error = validate_user_preference_content(content)
-            if validation_error:
-                raise UnprocessableContentError(
-                    f'Generated user_preference is invalid: {validation_error}'
-                )
     elif task_type == 'polish' and not content.strip():
         raise UnprocessableContentError("Generated field 'content' must be a non-empty string.")
     return content
@@ -317,7 +296,7 @@ def _apply_replace_text(current: str, old: str, new: str, *, entity_name: str) -
 
 
 def _apply_replace_text_operation(current: str, old: str, new: str, *, entity_name: str) -> str:
-    """Shared by skill and user_preference: handles line deletion when new is empty."""
+    """Apply one exact replacement, handling full-line deletion for skill edits."""
     replacement = '' if not new.strip() else new
     if not replacement:
         lines = current.splitlines()
@@ -376,10 +355,6 @@ def rewrite_content(
     normalized_user_instruct = _normalize_user_instruct(user_instruct)
     if normalized_user_instruct is None:
         raise BadRequestError("'user_instruct' must be a non-empty string.")
-
-    if task_type == 'memory':
-        from .memory import _compact_memory_to_recent_week
-        content = _compact_memory_to_recent_week(content)
 
     error: Optional[str] = None
     for _ in range(_MAX_REWRITE_ATTEMPTS):

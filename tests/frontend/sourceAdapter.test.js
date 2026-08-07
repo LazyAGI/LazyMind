@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   findSourceByCitationId,
-  findSourceByImageUrl,
   getCitationSources,
   getDisplaySources,
   getSearchSources,
@@ -113,15 +112,6 @@ describe('chat source adapter', () => {
     expect(getSearchSources({ '3.1': { ...external, index: undefined } })).toEqual([
       { ...external, index: '3.1', source_roles: ['cited'] },
     ]);
-  });
-
-  it('finds the page source for a rendered image', () => {
-    const source = {
-      ...external,
-      image_urls: [{ url: 'https://cdn.example.com/cover.png' }],
-    };
-
-    expect(findSourceByImageUrl([source], 'https://cdn.example.com/cover.png')).toBe(source);
   });
 
   it('does not open unsafe external schemes', () => {

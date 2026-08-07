@@ -48,8 +48,6 @@ class ChatRuntimeOptions(BaseModel):
 
 class ChatPersonalizationOptions(BaseModel):
     use_memory: Optional[bool] = True
-    memory: Optional[str] = None
-    user_preference: Optional[str] = None
 
 
 class ChatAgentOptions(BaseModel):
@@ -64,6 +62,7 @@ class ChatPluginOptions(BaseModel):
     plugin_context: Optional[Dict[str, Any]] = None
     catalog: List[Dict[str, Any]] = Field(default_factory=list)
     disabled_builtin_plugins: List[str] = Field(default_factory=list)
+    manual_builtin_plugins: List[str] = Field(default_factory=list)
     allowed_plugin_refs: List[str] = Field(default_factory=list)
 
 

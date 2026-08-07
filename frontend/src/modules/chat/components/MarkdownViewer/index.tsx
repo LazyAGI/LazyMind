@@ -35,7 +35,6 @@ import {
 import {
   type ChatSource,
   findSourceByCitationId,
-  findSourceByImageUrl,
   getSourceEvidenceText,
   getSourceLabel,
   getSourceSubtitle,
@@ -99,20 +98,8 @@ function normalizeBareUrls(content: string) {
   });
 }
 
-function safeImageReferenceUrl(value: unknown) {
-  const url = typeof value === "string" ? value.trim() : "";
-  if (!url) return "";
-  try {
-    const parsed = new URL(url, "http://lazymind.local");
-    return parsed.protocol === "http:" || parsed.protocol === "https:" ? url : "";
-  } catch {
-    return "";
-  }
-}
-
 const ImageComponent = (props: any) => {
   const { t } = useTranslation();
-  const { markSources } = useContext(MarkdownRenderContext);
   const [imageLoadError, setImageLoadError] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
   const [resolvedSrc, setResolvedSrc] = useState(() =>
@@ -147,45 +134,27 @@ const ImageComponent = (props: any) => {
   }
 
   const { node: _node, src: _src, ...imageProps } = props;
-  const source = findSourceByImageUrl(markSources, props.src || "")
-    || findSourceByImageUrl(markSources, resolvedSrc);
-  const sourceUrl = safeImageReferenceUrl(source?.url)
-    || safeImageReferenceUrl(props.src)
-    || safeImageReferenceUrl(resolvedSrc);
 
   return (
-    <span className="md-image-with-source">
-      <Image
-        {...imageProps}
-        src={resolvedSrc}
-        preview={{
-          visible: previewVisible,
-          onVisibleChange: setPreviewVisible,
-        }}
-        role="button"
-        tabIndex={0}
-        aria-label={props.alt || t("chat.previewImage")}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            setPreviewVisible(true);
-          }
-        }}
-        onError={() => setImageLoadError(true)}
-        onLoad={() => setImageLoadError(false)}
-      />
-      {sourceUrl && (
-        <a
-          className="md-image-source"
-          href={sourceUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={sourceUrl}
-        >
-          {sourceUrl}
-        </a>
-      )}
-    </span>
+    <Image
+      {...imageProps}
+      src={resolvedSrc}
+      preview={{
+        visible: previewVisible,
+        onVisibleChange: setPreviewVisible,
+      }}
+      role="button"
+      tabIndex={0}
+      aria-label={props.alt || t("chat.previewImage")}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          setPreviewVisible(true);
+        }
+      }}
+      onError={() => setImageLoadError(true)}
+      onLoad={() => setImageLoadError(false)}
+    />
   );
 };
 
@@ -395,10 +364,33 @@ const LiComponent = (props: any) => {
   return <li>{children}</li>;
 };
 
+/**
+ * antd Image renders a <div>, but react-markdown wraps standalone images in <p>.
+ * Use a <div> for paragraphs that contain images to avoid invalid <p><div> nesting.
+ */
+const ParagraphComponent = (props: any) => {
+  const { node: _node, children, ...rest } = props;
+  const childList = Array.isArray(children) ? children : children != null ? [children] : [];
+  const hasBlockImage = childList.some(
+    (child) => isValidElement(child) && child.type === ImageComponent,
+  );
+
+  if (hasBlockImage) {
+    return (
+      <div className="md-paragraph md-paragraph--with-image" {...rest}>
+        {children}
+      </div>
+    );
+  }
+
+  return <p {...rest}>{children}</p>;
+};
+
 const defaultMarkdownComponents = {
   a: LinkComponent,
   script: ScriptComponent,
   li: LiComponent,
+  p: ParagraphComponent,
   img: ImageComponent,
   pre: PreComponent,
   code: CodeComponent,
@@ -411,6 +403,7 @@ const MarkdownViewer = memo((props: any) => {
     components: customComponents,
     sources = [],
     IS_STREAMING,
+    ...markdownProps
   } = props;
   const normalizedChildren =
     typeof children === "string"
@@ -453,7 +446,7 @@ const MarkdownViewer = memo((props: any) => {
     >
       <MarkdownRenderContext.Provider value={renderContextValue}>
         <Markdown
-          {...props}
+          {...markdownProps}
           remarkPlugins={markdownRemarkPlugins}
           rehypePlugins={markdownRehypePlugins}
           components={markdownComponents}

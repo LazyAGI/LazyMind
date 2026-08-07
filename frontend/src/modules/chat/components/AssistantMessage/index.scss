@@ -10,7 +10,8 @@
   .chat-avatar {
     background: transparent;
     flex-shrink: 0;
-    width: 32px; 
+    width: 32px;
+    height: 32px;
   }
 
   .chat-bot-box-single {
@@ -43,7 +44,8 @@
   .chat-avatar {
     background: transparent;
     flex-shrink: 0;
-    width: 32px; 
+    width: 32px;
+    height: 32px;
   }
 
   .chat-bot-box-multi {
@@ -153,6 +155,45 @@
   gap: 10px;
 }
 
+@media (max-width: 720px) {
+  .chat-avatar {
+    --identity-avatar-size: 28px !important;
+    width: 28px !important;
+    height: 28px !important;
+    flex-basis: 28px !important;
+  }
+}
+
+.chat-assistant-msg-knowledge-info {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding: 4px 8px;
+  padding-bottom: 0;
+  background-color: #f2f6f9;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.chat-assistant-msg-knowledge {
+  margin-bottom: 4px;
+  border-right: 1px solid #dfe6ef;
+  margin-right: 10px;
+  padding-right: 16px;
+  &:last-of-type {
+    border-right: 0;
+    margin-right: 0;
+    padding-right: 0;
+  }
+
+  .knowledgeName {
+    color: #5f6b7e;
+    cursor: pointer;
+    &:hover {
+      color: #4689ff;
+    }
+  }
+}
 .chat-assistant-msg-tool-divider {
   margin-top: 16px;
   margin-bottom: 0;

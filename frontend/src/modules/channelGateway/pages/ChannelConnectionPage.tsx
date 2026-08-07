@@ -90,7 +90,10 @@ function statusColor(status: string): string {
   }
 }
 
-function canAct(session: ConnectionSession | null, action: string): boolean {
+function canAct(
+  session: ConnectionSession | null,
+  action: ConnectionSession['allowed_actions'][number],
+): boolean {
   return Boolean(session?.allowed_actions?.includes(action));
 }
 

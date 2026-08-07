@@ -18,6 +18,7 @@ import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
 import type { ChatMention } from "../../ChatInput/MentionEditor";
 import { CHAT_SELECT_CONVERSATION_EVENT } from "@/modules/chat/constants/chat";
+import { IdentityAvatar } from "@/modules/identityAvatar";
 
 const MENTION_ICONS = {
   knowledge_base: <DatabaseOutlined />,
@@ -113,7 +114,7 @@ interface MessageListProps {
   onCancelEditUserMessage?: () => void;
   onResendEditedUserMessage?: (index: number, value: string) => void;
   onCopyUserMessage?: (item: any) => void;
-  onCiteMessage?: (text: string) => void;
+  onCiteMessage?: (text: string, historyId?: string) => void;
   footer?: React.ReactNode;
 }
 
@@ -351,9 +352,10 @@ const MessageList: React.FC<MessageListProps> = ({
           {!isEditing && citeMessageList.length > 0 ? (
             <UserCitationPreview citeMessages={citeMessageList} />
           ) : null}
-          <div className="chat-user">
-            {isEditing ? (
-              <div className="chat-user-edit-wrap">
+          <div className="chat-user-bubble-row">
+            <div className="chat-user">
+              {isEditing ? (
+                <div className="chat-user-edit-wrap">
                 {citeMessageList.length > 0 ? (
                   <div className="chat-user-edit-citation-list">
                     {citeMessageList.map((citeMessage, citeIndex) => (
@@ -415,14 +417,23 @@ const MessageList: React.FC<MessageListProps> = ({
                     {t("chat.send")}
                   </Button>
                 </Space>
-              </div>
-            ) : (
-              Array.isArray(item.mentions) && item.mentions.length > 0 ? (
-                <div className="chat-user-mention-text">
-                  <UserMessageWithMentions text={item.display_delta || item.delta || ""} mentions={item.mentions} />
                 </div>
-              ) : renderText(item)
-            )}
+              ) : Array.isArray(item.mentions) && item.mentions.length > 0 ? (
+                <div className="chat-user-mention-text">
+                  <UserMessageWithMentions
+                    mentions={item.mentions}
+                    text={item.display_delta || item.delta || ""}
+                  />
+                </div>
+              ) : (
+                renderText(item)
+              )}
+            </div>
+            <IdentityAvatar
+              className="chat-user-avatar"
+              kind="profile"
+              size={32}
+            />
           </div>
           {!isEditing ? (
             <div className="chat-user-toolbar">
@@ -460,8 +471,13 @@ const MessageList: React.FC<MessageListProps> = ({
     >
       {messageList.length > 0 &&
         messageList.map((item, index) => {
+          const historyId = item.history_id || item.id;
           return (
-            <div className="chat-item" key={`chat-${index}`}>
+            <div
+              className="chat-item"
+              key={`chat-${index}`}
+              data-chat-history-id={historyId || undefined}
+            >
               {item.role === RoleTypes.USER && renderUser(item, index)}
               {item.role === RoleTypes.ASSISTANT && (
                 <AssistantMessage
@@ -477,7 +493,9 @@ const MessageList: React.FC<MessageListProps> = ({
                   }
                   sessionId={sessionId}
                   onPreferenceSelect={onPreferenceSelect}
-                  onCiteMessage={onCiteMessage}
+                  onCiteMessage={(text: string) =>
+                    onCiteMessage?.(text, item.history_id || item.id)
+                  }
                   isLatestDualAnswer={
                     index === messageList.length - 1 &&
                     !!(

@@ -3,7 +3,10 @@ import {
   type ChatHistory as BaseChatHistory,
   type Query,
 } from "@/api/generated/chatbot-client";
-import type { ConversationHistoryItem as CoreConversationHistoryItem } from "@/api/generated/core-client";
+import type {
+  ConversationHistoryItem as CoreConversationHistoryItem,
+  ConversationTrailItem,
+} from "@/api/generated/core-client";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import { splitThinkingContent } from "@/modules/chat/utils/thinking";
 import type { ChatMention } from "@/modules/chat/components/ChatInput/MentionEditor";
@@ -47,6 +50,16 @@ export type ConversationHistoryRecord = Omit<
     tool_call_turns?: number | string;
     mentions?: ChatMention[] | null;
   };
+
+export type ConversationTrailRecord = ConversationTrailItem & {
+  history_id?: string;
+  seq?: number;
+  depth?: number;
+  parent_history_id?: string;
+  source?: string;
+  summary?: string;
+  question?: string;
+};
 
 interface BuildChatMessageListOptions {
   fallbackCreateTime?: string;
@@ -140,6 +153,8 @@ export function buildChatMessageListFromHistory(
 
     list.push({
       role: RoleTypes.USER,
+      history_id: record.id,
+      seq: record.seq,
       delta: displayQuery,
       display_delta: displayQuery,
       cite_message: citeMessages.join("\n\n"),
@@ -235,6 +250,60 @@ export function buildChatMessageListFromHistory(
   }
 
   return list;
+}
+
+export function mergeConversationTrailIntoMessageList(
+  messageList: any[],
+  trailItems?: ConversationTrailRecord[] | null,
+) {
+  if (!Array.isArray(trailItems) || trailItems.length === 0) {
+    return messageList;
+  }
+  const trailByHistoryID = new Map(
+    trailItems
+      .filter((item) => Boolean(item?.history_id))
+      .map((item) => [item.history_id as string, item]),
+  );
+  if (trailByHistoryID.size === 0) {
+    return messageList;
+  }
+
+  let changed = false;
+  const mergedList = messageList.map((item) => {
+    const historyID = item?.history_id || item?.id;
+    const trail = historyID ? trailByHistoryID.get(historyID) : undefined;
+    if (!trail) {
+      return item;
+    }
+    if (item?.role === RoleTypes.ASSISTANT) {
+      return item;
+    }
+    const nextItem = {
+      ...item,
+      seq: trail.seq ?? item.seq,
+      trail_depth: trail.depth ?? 0,
+      trail_parent_history_id: trail.parent_history_id || "",
+      trail_source: trail.source || "",
+      trail_summary: trail.summary || "",
+      trail_question: trail.question || "",
+      cite_history_ids:
+        item.cite_history_ids ??
+        (trail.parent_history_id ? [trail.parent_history_id] : undefined),
+    };
+    if (
+      nextItem.seq !== item.seq ||
+      nextItem.trail_depth !== item.trail_depth ||
+      nextItem.trail_parent_history_id !== item.trail_parent_history_id ||
+      nextItem.trail_source !== item.trail_source ||
+      nextItem.trail_summary !== item.trail_summary ||
+      nextItem.trail_question !== item.trail_question ||
+      nextItem.cite_history_ids !== item.cite_history_ids
+    ) {
+      changed = true;
+    }
+    return nextItem;
+  });
+  return changed ? mergedList : messageList;
 }
 
 /** Prefer cached (in-memory) list over API list when switching back to a

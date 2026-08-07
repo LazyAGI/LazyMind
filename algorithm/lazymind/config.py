@@ -29,6 +29,61 @@ def _model_config_path_post_action(resolved_path):
     lazyllm.config['auto_model_config_map_path'] = str(resolved_path)
 
 
+def _require_positive_config_value(env_name):
+    def validate(value):
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError(f'{env_name} must be a positive integer')
+
+    return validate
+
+
+def _parse_positive_integer_env(env_name, raw):
+    if raw is None:
+        return None
+    try:
+        value = int(raw.strip())
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError(f'{env_name} must be a positive integer') from exc
+    if value <= 0:
+        raise ValueError(f'{env_name} must be a positive integer')
+    return value
+
+
+def _validate_positive_integer_env(env_name):
+    _parse_positive_integer_env(env_name, os.environ.get(env_name))
+
+
+def _require_integer_range_config_value(env_name, minimum, maximum):
+    def validate(value):
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value < minimum
+            or value > maximum
+        ):
+            raise ValueError(
+                f'{env_name} must be an integer between {minimum} and {maximum}'
+            )
+
+    return validate
+
+
+def _validate_integer_range_env(env_name, minimum, maximum):
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return
+    try:
+        value = int(raw.strip())
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError(
+            f'{env_name} must be an integer between {minimum} and {maximum}'
+        ) from exc
+    if value < minimum or value > maximum:
+        raise ValueError(
+            f'{env_name} must be an integer between {minimum} and {maximum}'
+        )
+
+
 # Single Config instance for the entire algorithm package.
 # All LAZYMIND_* environment variables are registered here.
 config = Config(prefix='LAZYMIND', home='~/.lazyllm_rag')
@@ -123,6 +178,24 @@ config.add('core_internal_token', str, '', 'AUTH_SERVICE_INTERNAL_TOKEN',
 config.add('agentic_kb_name', str, 'general_algo', 'AGENTIC_KB_NAME',
            description='Default knowledge base name for agentic.')
 config.add('skill_fs_url', str, 'remote://skills', 'SKILL_FS_URL', description='Skill filesystem URL.')
+_validate_positive_integer_env('LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS')
+config.add(
+    'preference_index_max_items',
+    int,
+    100,
+    'PREFERENCE_INDEX_MAX_ITEMS',
+    description='Maximum number of Preference index items eligible for resident prompt projection.',
+    post_action=_require_positive_config_value('LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS'),
+)
+_validate_positive_integer_env('LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS')
+config.add(
+    'preference_context_max_chars',
+    int,
+    5000,
+    'PREFERENCE_CONTEXT_MAX_CHARS',
+    description='Maximum rendered Preference index characters injected into a prompt.',
+    post_action=_require_positive_config_value('LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS'),
+)
 config.add('segment_store_type', str, 'opensearch', 'SEGMENT_STORE_TYPE',
            description='Segment store type: opensearch, elasticsearch, or SQLiteStore.')
 config.add('segment_store_uri_or_path', str, 'https://opensearch:9200', 'SEGMENT_STORE_URI_OR_PATH',
@@ -131,6 +204,31 @@ config.add('segment_store_user', str, 'admin', 'SEGMENT_STORE_USER',
            description='Segment store username (OpenSearch/Elasticsearch only).')
 config.add('segment_store_password', str, 'LazyRAG_OpenSearch123!', 'SEGMENT_STORE_PASSWORD',
            description='Segment store password (OpenSearch/Elasticsearch only).')
+config.add('episode_candidate_topk', int, 20, 'EPISODE_CANDIDATE_TOPK',
+           description='Episode FTS candidate count.')
+config.add('episode_inject_topk', int, 5, 'EPISODE_INJECT_TOPK',
+           description='Maximum Episode snapshots injected per chat request.')
+_validate_integer_range_env('LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK', 0, 3)
+config.add(
+    'episode_recent_progress_inject_topk',
+    int,
+    3,
+    'EPISODE_RECENT_PROGRESS_INJECT_TOPK',
+    description='Maximum recent progress Episodes injected on a first-turn semantic miss.',
+    post_action=_require_integer_range_config_value(
+        'LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK',
+        0,
+        3,
+    ),
+)
+config.add('episode_context_max_chars', int, 4000, 'EPISODE_CONTEXT_MAX_CHARS',
+           description='Episode prompt character budget.')
+config.add('episode_relevance_weight', float, 0.75, 'EPISODE_RELEVANCE_WEIGHT',
+           description='Episode hard-filter term coverage ranking weight.')
+config.add('episode_recency_weight', float, 0.20, 'EPISODE_RECENCY_WEIGHT')
+config.add('episode_hit_weight', float, 0.05, 'EPISODE_HIT_WEIGHT')
+config.add('episode_half_life_days', float, 30.0, 'EPISODE_HALF_LIFE_DAYS')
+config.add('episode_hit_saturation', int, 10, 'EPISODE_HIT_SATURATION')
 config.add('web_search_timeout', int, 10, 'WEB_SEARCH_TIMEOUT', description='Web search request timeout in seconds.')
 config.add('url_fetch_max_length', int, 4000, 'URL_FETCH_MAX_LENGTH',
            description='Maximum readable text length returned by url_fetch.')
@@ -147,6 +245,8 @@ config.add('agentic_expanded_max_rounds', int, 200, 'AGENTIC_EXPANDED_MAX_ROUNDS
            description='Maximum ReAct rounds for one ChatAgent invocation after the user continues.')
 config.add('agentic_workspace', str, './workspace', 'AGENTIC_WORKSPACE',
            description='Workspace directory for agentic tools.')
+config.add('trusted_local_mode', bool, False, 'TRUSTED_LOCAL_MODE',
+           description='Allow agents to access host paths outside their workspace and use local command tools.')
 config.add('agentic_keep_full_turns', int, 0, 'AGENTIC_KEEP_FULL_TURNS',
            description='Number of full turns retained in agentic history; 0 disables rolling compaction.')
 config.add('dynamic_prompt_modules', bool, True, 'DYNAMIC_PROMPT_MODULES',

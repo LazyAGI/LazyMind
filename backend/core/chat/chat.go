@@ -110,9 +110,7 @@ type ChatRuntimeOptions struct {
 }
 
 type ChatPersonalizationOptions struct {
-	Memory         string `json:"memory,omitempty"`
-	UserPreference string `json:"user_preference,omitempty"`
-	UseMemory      bool   `json:"use_memory"`
+	UseMemory bool `json:"use_memory"`
 }
 
 type ChatAgentOptions struct {
@@ -127,6 +125,7 @@ type ChatPluginOptions struct {
 	PluginContext          map[string]any   `json:"plugin_context,omitempty"`
 	Catalog                []map[string]any `json:"catalog,omitempty"`
 	DisabledBuiltinPlugins []string         `json:"disabled_builtin_plugins,omitempty"`
+	ManualBuiltinPlugins   []string         `json:"manual_builtin_plugins,omitempty"`
 	AllowedPluginRefs      []string         `json:"allowed_plugin_refs,omitempty"`
 }
 
@@ -432,12 +431,6 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	req.Retrieval.LocalFSSources = anySlice(body["local_fs_sources"])
 	req.Agent.DisabledTools = stringSlice(body["disabled_tools"])
 	req.Agent.AvailableSkills = stringSlice(body["available_skills"])
-	if memory, ok := body["memory"].(string); ok {
-		req.Personalization.Memory = memory
-	}
-	if preference, ok := body["user_preference"].(string); ok {
-		req.Personalization.UserPreference = preference
-	}
 	if useMemory, ok := body["use_memory"].(bool); ok {
 		req.Personalization.UseMemory = useMemory
 	}
@@ -533,6 +526,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if ids, ok := body["disabled_builtin_plugins"].([]string); ok {
 		req.Plugin.DisabledBuiltinPlugins = ids
+	}
+	if ids, ok := body["manual_builtin_plugins"].([]string); ok {
+		req.Plugin.ManualBuiltinPlugins = ids
 	}
 	if refs, ok := body["allowed_plugin_refs"].([]string); ok {
 		req.Plugin.AllowedPluginRefs = refs

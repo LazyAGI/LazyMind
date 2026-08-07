@@ -90,16 +90,19 @@ func TestReviewMemoryMatchesAlgorithmContract(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":  "success",
 			"task_id": "memory_review_core-task-1",
+			"outcome": "saved",
 		})
 	}))
 	t.Cleanup(server.Close)
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
 
 	response, status, err := ReviewMemory(context.Background(), MemoryReviewRequest{
-		TaskID:    "memory_review_core-task-1",
-		UserID:    "user-1",
-		History:   []map[string]any{{"role": "user", "content": "hello"}},
-		LLMConfig: map[string]any{"chat": map[string]any{"model": "demo"}},
+		TaskID:                     "memory_review_core-task-1",
+		UserID:                     "user-1",
+		ConversationID:             "conversation-1",
+		ConversationLastActiveAtMS: 1784791231000,
+		History:                    []map[string]any{{"role": "user", "content": "hello"}},
+		LLMConfig:                  map[string]any{"chat": map[string]any{"model": "demo"}},
 	})
 	if err != nil {
 		t.Fatalf("ReviewMemory() error = %v", err)
@@ -110,8 +113,12 @@ func TestReviewMemoryMatchesAlgorithmContract(t *testing.T) {
 	if gotPath != "/api/chat/memory_review" {
 		t.Fatalf("ReviewMemory() path = %q, want %q", gotPath, "/api/chat/memory_review")
 	}
-	if len(gotBody) != 4 || gotBody["task_id"] != "memory_review_core-task-1" || gotBody["user_id"] != "user-1" {
+	if len(gotBody) != 6 || gotBody["task_id"] != "memory_review_core-task-1" || gotBody["user_id"] != "user-1" {
 		t.Fatalf("ReviewMemory() body = %#v", gotBody)
+	}
+	if gotBody["conversation_id"] != "conversation-1" ||
+		gotBody["conversation_last_active_at_ms"] != float64(1784791231000) {
+		t.Fatalf("ReviewMemory() conversation context = %#v", gotBody)
 	}
 	if _, ok := gotBody["history"]; !ok {
 		t.Fatalf("ReviewMemory() omitted history: %#v", gotBody)
@@ -119,7 +126,7 @@ func TestReviewMemoryMatchesAlgorithmContract(t *testing.T) {
 	if _, ok := gotBody["llm_config"]; !ok {
 		t.Fatalf("ReviewMemory() omitted llm_config: %#v", gotBody)
 	}
-	if response == nil || response.Status != "success" || response.TaskID != "memory_review_core-task-1" {
+	if response == nil || response.Status != "success" || response.TaskID != "memory_review_core-task-1" || response.Outcome != "saved" {
 		t.Fatalf("ReviewMemory() response = %#v", response)
 	}
 }

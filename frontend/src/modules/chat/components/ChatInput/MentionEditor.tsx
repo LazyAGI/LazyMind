@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -56,6 +57,11 @@ type QueryState = {
   range: Range;
 };
 
+type MenuPlacement = {
+  direction: "above" | "below";
+  height: number;
+};
+
 export interface MentionEditorRef {
   focus: () => void;
   getMentions: () => ChatMention[];
@@ -78,6 +84,10 @@ const groups: Array<{
 const shortcutTypes = new Map(groups.map((group) => [group.shortcut, group.type]));
 const candidateCache = new Map<string, Candidate[]>();
 const candidateRequests = new Map<string, Promise<Candidate[]>>();
+const MENU_MAX_HEIGHT = 420;
+const MENU_MIN_UPWARD_HEIGHT = 160;
+// Keep the existing 8px anchor gap plus an 8px viewport margin.
+const MENU_VIEWPORT_OFFSET = 16;
 
 const cacheKey = (type: CandidateType, keyword: string) =>
   `${type}:${keyword.trim().toLocaleLowerCase()}`;
@@ -248,6 +258,32 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   const [activeIndex, setActiveIndex] = useState(-1);
   const [loading, setLoading] = useState(false);
   const [expandedTypes, setExpandedTypes] = useState<Set<CandidateType>>(new Set());
+  const [menuPlacement, setMenuPlacement] = useState<MenuPlacement>({
+    direction: "above",
+    height: MENU_MAX_HEIGHT,
+  });
+
+  const updateMenuPlacement = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const rect = editor.getBoundingClientRect();
+    const aboveSpace = Math.max(0, rect.top - MENU_VIEWPORT_OFFSET);
+    const belowSpace = Math.max(
+      0,
+      window.innerHeight - rect.bottom - MENU_VIEWPORT_OFFSET,
+    );
+    const direction = aboveSpace >= MENU_MIN_UPWARD_HEIGHT || aboveSpace >= belowSpace
+      ? "above"
+      : "below";
+    const height = Math.min(MENU_MAX_HEIGHT, Math.floor(
+      direction === "above" ? aboveSpace : belowSpace,
+    ));
+    setMenuPlacement((current) => (
+      current.direction === direction && current.height === height
+        ? current
+        : { direction, height }
+    ));
+  }, []);
 
   const emit = useCallback(() => {
     if (!editorRef.current) return;
@@ -322,6 +358,17 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     });
   }, [query]);
 
+  useLayoutEffect(() => {
+    if (!query) return;
+    updateMenuPlacement();
+    window.addEventListener("resize", updateMenuPlacement);
+    window.addEventListener("scroll", updateMenuPlacement, true);
+    return () => {
+      window.removeEventListener("resize", updateMenuPlacement);
+      window.removeEventListener("scroll", updateMenuPlacement, true);
+    };
+  }, [query, updateMenuPlacement]);
+
   const refreshQuery = useCallback(() => {
     const next = editorRef.current ? queryAtCaret(editorRef.current) : null;
     queryRef.current = next;
@@ -390,7 +437,9 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         suppressContentEditableWarning
         role="textbox"
         aria-multiline="true"
+        aria-label={placeholder}
         data-placeholder={placeholder}
+        data-empty={value === "" ? "true" : "false"}
         onInput={() => { emit(); refreshQuery(); }}
         onClick={refreshQuery}
         onKeyUp={(event) => { if (!["ArrowUp", "ArrowDown", "Enter"].includes(event.key)) refreshQuery(); }}
@@ -423,7 +472,13 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         }}
       />
       {query && (
-        <div ref={menuRef} className="chat-mention-menu" role="listbox" onMouseDown={(event) => event.preventDefault()}>
+        <div
+          ref={menuRef}
+          className={`chat-mention-menu${menuPlacement.direction === "below" ? " is-below" : ""}`}
+          role="listbox"
+          style={{ height: menuPlacement.height }}
+          onMouseDown={(event) => event.preventDefault()}
+        >
           {loading && candidates.length === 0 ? <div className="chat-mention-empty">{t("common.loading")}</div> : null}
           {!loading && candidates.length === 0 ? <div className="chat-mention-empty">{t("chat.mentionNoResults")}</div> : null}
           {groups.filter((group) => !query.type || group.type === query.type).map((group) => {

@@ -218,13 +218,7 @@ func TestBuildLazyChatRequestPreservesDatasetListFilters(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyLoadsFiltersFromConversationDB(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-filters.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.Conversation{})
 	now := time.Now()
 	searchConfig := json.RawMessage(`{"dataset_list":[{"id":"ds_db_1"},{"id":"ds_db_2"}],"creators":["u1"]}`)
 	if err := db.Create(&orm.Conversation{
@@ -277,13 +271,10 @@ func TestBuildChatRequestBodyKeepsExistingFilters(t *testing.T) {
 	}
 }
 
-func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
-	memoryContent := "---\nagent_persona: |-\n 严谨助手\npreferred_name: |-\n 老师\nresponse_style: |-\n 简洁\n---\n\nmemory-content"
+func TestBuildChatRequestBodyAddsResourceContextWithoutLegacyMemory(t *testing.T) {
 	ctx := &evolution.ChatResourceContext{
 		DisabledTools:      []string{"bing"},
 		AvailableSkills:    []string{"coding/git-workflow"},
-		Memory:             memoryContent,
-		UserPreference:     "preference-content",
 		UsePersonalization: true,
 	}
 	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "user-1", 1)
@@ -303,11 +294,11 @@ func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 	if _, ok := body["skill_fs_url"]; ok {
 		t.Fatalf("expected skill_fs_url to be omitted")
 	}
-	if got := body["memory"]; got != memoryContent {
-		t.Fatalf("unexpected memory: %#v", got)
+	if _, ok := body["memory"]; ok {
+		t.Fatalf("legacy memory content must not be sent")
 	}
-	if got := body["user_preference"]; got != "preference-content" {
-		t.Fatalf("unexpected user_preference: %#v", got)
+	if _, ok := body["user_preference"]; ok {
+		t.Fatalf("legacy user_preference content must not be sent")
 	}
 	if got, ok := body["use_memory"].(bool); !ok || !got {
 		t.Fatalf("expected use_memory default true, got %#v", body["use_memory"])
@@ -346,8 +337,6 @@ func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled
 	ctx := &evolution.ChatResourceContext{
 		DisabledTools:      []string{},
 		AvailableSkills:    []string{"coding/git-workflow"},
-		Memory:             "memory-content",
-		UserPreference:     "preference-content",
 		UsePersonalization: false,
 	}
 	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "", 1)
@@ -463,13 +452,7 @@ func TestBuildChatHistoryExtUsesDisplayQueryForAutomatedContext(t *testing.T) {
 }
 
 func TestCollectedInputsForConversationReturnsSnapshotAndSummary(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/collected-inputs.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.AutoMigrate(&orm.TaskCenterTask{}, &orm.TaskRunInput{}, &orm.TaskRunOutput{}); err != nil {
-		t.Fatal(err)
-	}
+	db := orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.TaskRunInput{}, &orm.TaskRunOutput{})
 	now := time.Now().UTC()
 	if err := db.Create(&orm.TaskCenterTask{ID: "downstream", UserID: "u", ConversationID: "weekly-conv", TaskType: "scheduled", Status: "succeeded", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -488,13 +471,7 @@ func TestCollectedInputsForConversationReturnsSnapshotAndSummary(t *testing.T) {
 }
 
 func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-detail.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -622,13 +599,7 @@ func TestElapsedThinkingSecondsRoundsUp(t *testing.T) {
 }
 
 func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-detail-datasets.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -712,13 +683,7 @@ func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
 }
 
 func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-history.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -873,9 +838,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 		"available_skills": []any{
 			"coding/git-workflow",
 		},
-		"memory":          "memory-content",
-		"user_preference": "preference-content",
-		"use_memory":      true,
+		"use_memory": true,
 		"environment_context": map[string]any{
 			"time": map[string]any{
 				"now":      "2026-05-11T11:48:00.000Z",
@@ -952,9 +915,6 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	}
 	if !req.Agent.HasSubagents || req.Agent.EnableSubagent == nil || *req.Agent.EnableSubagent {
 		t.Fatalf("unexpected agent flags: %#v", req.Agent)
-	}
-	if req.Personalization.Memory != "memory-content" || req.Personalization.UserPreference != "preference-content" {
-		t.Fatalf("unexpected memory context: %+v", req)
 	}
 	if !req.Personalization.UseMemory {
 		t.Fatalf("expected use_memory to be true")
@@ -1060,13 +1020,7 @@ func TestShouldEmitStreamFrame(t *testing.T) {
 }
 
 func TestFeedBackChatHistoryCancelsFeedback(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/feedback.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.ChatHistory{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.ChatHistory{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 

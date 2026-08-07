@@ -18,7 +18,13 @@ while (args.length > 0) {
 }
 
 if (!runtimeRoot || !options.platform || !options.arch) {
-  console.error("usage: write-runtime-manifest.mjs <runtime-root> --platform darwin|windows --arch arm64|amd64");
+  console.error("usage: write-runtime-manifest.mjs <runtime-root> --platform darwin|windows --arch arm64|amd64 [--trusted-local-mode true|false]");
+  process.exit(2);
+}
+
+const trustedLocalModeOption = options["trusted-local-mode"] ?? "false";
+if (!new Set(["true", "false"]).has(trustedLocalModeOption)) {
+  console.error("--trusted-local-mode must be true or false");
   process.exit(2);
 }
 
@@ -58,6 +64,9 @@ const manifest = {
   profile: "desktop",
   platform: options.platform,
   arch: options.arch,
+  features: {
+    trustedLocalMode: trustedLocalModeOption === "true"
+  },
   binaries: {
     "process-supervisor": executable("process-compose"),
     "local-proxy": executable("local-proxy"),

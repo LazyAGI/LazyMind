@@ -70,8 +70,8 @@ steps:
          user_input, source_ir_path when present, and knowledge_text when KB evidence was
          retrieved. Save resource_profiles.
       5. Call writer_create_writing_context with writing_task_path,
-         resource_profiles_path, and source_ir_path when present. Save writing_context
-         and context_ir.
+         resource_profiles_path, and source_ir_path when present. Save its returned path
+         as writing_context.
 
       source_ir and target_document are optional because a from-scratch request has no
       cloud source. Do not invent either artifact. If a required tool fails, stop without
@@ -95,13 +95,12 @@ steps:
       - material: writing_task
       - material: resource_profiles
       - material: writing_context
-      - material: context_ir
       - material: source_ir
         required: false
       - material: target_document
         required: false
     acceptance_criteria: |
-      writing_task, resource_profiles, writing_context, and context_ir are present.
+      writing_task, resource_profiles, and writing_context are present.
       When a Feishu/Lark source was required, source_ir and target_document are also present.
 
   outline:
@@ -220,12 +219,14 @@ steps:
 
          1. Call writer_generate_section_instructions using the latest outline_ir and
             writing_context_after_outline. Save section_instructions and section_plan_ir.
-         2. Call writer_generate_draft_blocks once with writing_task,
+         2. Call writer_generate_draft_blocks_markdown once with writing_task,
             section_instructions, and writing_context_after_outline. It returns every
-            generated block path in order. Save all returned paths as the ordered
-            draft_blocks list, preferably in one save_artifacts call.
-         3. Call writer_generate_draft_document using the last block path, current
-            context, and outline. Save draft_document.
+            generated Markdown section path in order. Save each returned path as a separate
+            draft_blocks entry with content_type="file", preserving order in one
+            save_artifacts call. Never stringify the path list or save the whole list as one
+            content_type="file" entry.
+         3. Call writer_generate_draft_document_markdown using the last section path,
+            current context, and outline. Save draft_document and draft_document_md.
          4. Call writer_update_writing_context using draft_document and save
             writing_context_after_draft.
          5. Call writer_generate_final_document using draft_document and
@@ -255,14 +256,15 @@ steps:
          the bound source only by the publish step. Human frontend edits remain revisions
          of this same slot.
 
-      Do not execute both modes in one run. Do not synthesize missing artifacts when a
-      tool fails. If any generation-mode tool fails, stop the step immediately. Never
-      switch to revision mode, never retry section planning with a different artifact,
-      and never pass source_ir or outline_ir to writer_generate_final_document.
+      Complete exactly one mode in each run. Generation mode is complete when its draft
+      lineage produces final_document. Revision mode is complete when its revision task,
+      locate result, modify plan, patch set, and successful patch result produce
+      final_document. A tool failure leaves the selected mode incomplete and should be
+      retried within that same mode.
     tools:
       - writer_generate_section_instructions
-      - writer_generate_draft_blocks
-      - writer_generate_draft_document
+      - writer_generate_draft_blocks_markdown
+      - writer_generate_draft_document_markdown
       - writer_update_writing_context
       - writer_generate_final_document
       - writer_build_revision_task
@@ -292,6 +294,8 @@ steps:
         required: false
       - material: draft_document
         required: false
+      - material: draft_document_md
+        required: false
       - material: final_document_md
         required: false
       - material: document_revision_task
@@ -307,8 +311,9 @@ steps:
     acceptance_criteria: |
       final_document and writing_context_after_draft are present, with
       final_document.stage="final" and ui_editable=true. Drafting artifacts are required
-      only for generation/rewrite mode. Revision artifacts are required only for targeted
-      revision mode. This step must not mutate a cloud document.
+      for generation/rewrite mode. A targeted revision requires document_revision_task,
+      document_locate_result, document_modify_plan, document_patch_set, and a successful
+      document_patch_result. This step must not mutate a cloud document.
 
   publish:
     label: 交付文稿
@@ -327,8 +332,8 @@ steps:
          or write-back action. A Feishu/Lark URL used only as a source or reference does
          not authorize publishing to it.
          1. Call writer_export_markdown with the latest selected WriterDocument path.
-         2. Save the exact returned .md path as delivered_markdown with
-            content_type="file".
+         2. writer_export_markdown returns the .md path as a plain string. Save that
+            string directly as delivered_markdown with content_type="file".
          3. Do not call any Feishu publishing tool and do not ask for a destination.
 
       B. Feishu delivery:
@@ -339,17 +344,15 @@ steps:
 
       1. If publish_target_document already exists from an earlier attempt of this step,
          reuse it as target_document_path. Do not create another document.
-      2. If document_patch_set exists and the destination is the original bound source,
-         retrieve source_ir and document_patch_set, then call writer_publish_revision.
-         This is mandatory for a targeted body revision. Do not call
-         writer_append_document afterward: appending content to an existing Feishu
-         document would undo deletions or duplicate retained blocks.
-      3. If final_document was generated or rewritten from source_ir/outline_ir and the
-         user requests writing it back to that same bound source, retrieve both
-         final_document and source_ir, then call writer_replace_document. This replaces
-         the source outline/body; never append the generated document after its source.
-         Never call writer_replace_document unless source_ir is bound to that provider
-         document.
+      2. A targeted revision of the original bound source uses patch delivery. Retrieve
+         source_ir and document_patch_set, then call writer_publish_revision. The revision
+         is publishable when document_revision_task, document_patch_set, and a successful
+         document_patch_result are present.
+      3. A document generated through the draft lineage uses replacement delivery when
+         the user requests writing it back to the same bound source. Retrieve
+         final_document and source_ir, then call writer_replace_document. This route
+         applies to generated or explicitly rewritten content rather than a targeted
+         revision.
       4. Call writer_append_document only when the user explicitly requests append,
          continue-at-end, or preservation of all existing target content.
       5. If the selected WriterDocument is unbound and the user explicitly asks to
@@ -364,8 +367,9 @@ steps:
          clear from the user request and artifact lineage, ask the user. Never default
          to append for an existing document.
 
-      Before passing an existing artifact to a writer tool, call get_artifact and use
-      the absolute path in value.path. Never pass only an artifact filename.
+      Before passing an existing artifact to a writer tool, call get_artifact, extract
+      the absolute path string from value.path, and pass that string to the tool. Never
+      pass the value object or only an artifact filename.
 
       writer_create_document only needs the intended title and optional parent_uri. Save
       its exact returned file path as publish_target_document. Then call
@@ -398,7 +402,11 @@ steps:
         required: false
       - material: source_ir
         required: false
+      - material: document_revision_task
+        required: false
       - material: document_patch_set
+        required: false
+      - material: document_patch_result
         required: false
     outputs:
       - material: delivered_markdown
@@ -417,3 +425,5 @@ steps:
       no Feishu artifacts. Feishu mode requires publish_result to report success,
       published_document to be the provider-confirmed editable WriterDocument, and
       published_link to be the provider URL returned by the same successful tool call.
+      A targeted revision succeeds through writer_publish_revision with its prepared
+      document_patch_set.

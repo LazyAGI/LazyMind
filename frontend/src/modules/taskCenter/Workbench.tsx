@@ -8,6 +8,7 @@ import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
 import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
+import { taskStatusDescription } from './taskStatusDescription';
 
 const SECTION_LIMIT = 5;
 const ATTENTION_LIMIT = 3;
@@ -21,6 +22,8 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [failedTasks, setFailedTasks] = useState<Task[]>([]);
+  const [canceledTasks, setCanceledTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [type, setType] = useState('');
@@ -34,8 +37,15 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await listTasks({ keyword: keyword || undefined, task_type: type || undefined, page: 1, page_size: 60 });
+      const filters = { keyword: keyword || undefined, task_type: type || undefined, page: 1 };
+      const [response, failedResponse, canceledResponse] = await Promise.all([
+        listTasks({ ...filters, page_size: 60 }),
+        listTasks({ ...filters, status: 'failed', page_size: ATTENTION_LIMIT }),
+        listTasks({ ...filters, status: 'canceled', page_size: ATTENTION_LIMIT }),
+      ]);
       setTasks(response.items ?? []);
+      setFailedTasks(failedResponse.items ?? []);
+      setCanceledTasks(canceledResponse.items ?? []);
       if (response.status_counts) setStatusCounts(response.status_counts);
     } catch {
       // API errors are reported by the shared request interceptor.
@@ -50,8 +60,6 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
 
   const waiting = tasks.filter((task) => ['waiting', 'interrupted', 'pending'].includes(task.status));
   const running = tasks.filter((task) => task.status === 'running');
-  const failed = tasks.filter((task) => task.status === 'failed');
-  const canceled = tasks.filter((task) => task.status === 'canceled');
   const completed = tasks.filter((task) => ['completed', 'succeeded'].includes(task.status));
   const completedToday = completed.filter(isTaskFinishedToday);
   const recent = completed.filter((task) => isTaskFinishedWithinDays(task, 7));
@@ -85,8 +93,8 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
       <Spin spinning={loading}>
         <AttentionSection tasks={waiting} expanded={attentionExpanded} onToggle={() => setAttentionExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
         <RunningSection tasks={running} expanded={runningExpanded} onToggle={() => setRunningExpanded((value) => !value)} onSelect={setSelected} onOpenGraph={setGraphTask} />
-        <StatusCardSection status='failed' tasks={failed} totalCount={statusCounts.failed} onViewAll={() => onViewAllStatus('failed')} onSelect={setSelected} onOpenGraph={setGraphTask} />
-        <StatusCardSection status='canceled' tasks={canceled} totalCount={statusCounts.canceled} onViewAll={() => onViewAllStatus('canceled')} onSelect={setSelected} onOpenGraph={setGraphTask} />
+        <StatusCardSection status='failed' tasks={failedTasks} totalCount={statusCounts.failed} onViewAll={() => onViewAllStatus('failed')} onSelect={setSelected} onOpenGraph={setGraphTask} />
+        <StatusCardSection status='canceled' tasks={canceledTasks} totalCount={statusCounts.canceled} onViewAll={() => onViewAllStatus('canceled')} onSelect={setSelected} onOpenGraph={setGraphTask} />
         <RecentSection tasks={recent} expanded={recentExpanded} onToggle={() => setRecentExpanded((value) => !value)} onSelect={setSelected} />
       </Spin>
       <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} onDelete={async (task) => { await removeTask(task.id); setSelected(null); await load(); }} />
@@ -126,7 +134,7 @@ function AttentionSection({ tasks, expanded, onToggle, onSelect, onOpenGraph }: 
           <Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip>
           <small>{taskMeta(task, t)}</small>
         </div>
-        <p>{taskDescription(task, t)}</p>
+        <p>{taskStatusDescription(task, t)}</p>
         <footer><time>{formatDate(task.updated_at)}</time><Button type='link' size='small' onClick={() => onSelect(task)}>{t('taskCenter.confirmAction')} <RightOutlined /></Button></footer>
       </article>
     ))}</div> : <WorkbenchEmpty />}
@@ -144,7 +152,7 @@ function RunningSection({ tasks, expanded, onToggle, onSelect, onOpenGraph }: { 
         return <button type='button' className='running-task-row' key={task.id} onClick={() => onSelect(task)}>
           <span className='task-leading-icon running'><SyncOutlined spin /></span>
           <span className='workbench-task-main'><Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip><small>{taskMeta(task, t)}</small></span>
-          <span className='running-task-state'><span><StatusTag status={task.status} onClick={task.plugin_session_id ? () => onOpenGraph(task) : undefined} /><small>{taskDescription(task, t)}</small></span>{progress !== null ? <Progress percent={progress} size='small' /> : null}</span>
+          <span className='running-task-state'><span><StatusTag status={task.status} onClick={task.plugin_session_id ? () => onOpenGraph(task) : undefined} /><small>{taskStatusDescription(task, t)}</small></span>{progress !== null ? <Progress percent={progress} size='small' /> : null}</span>
           <time>{formatDate(task.updated_at)}</time>
           <span className='workbench-row-action'>{t('taskCenter.viewAction')} <RightOutlined /></span>
         </button>;
@@ -177,7 +185,7 @@ function StatusCardSection({ status, tasks, totalCount, onViewAll, onSelect, onO
           <Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip>
           <small>{taskMeta(task, t)}</small>
         </div>
-        <p>{taskDescription(task, t)}</p>
+        <p>{taskStatusDescription(task, t)}</p>
         <footer><time>{formatDate(task.finished_at || task.updated_at)}</time><Button type='link' size='small' onClick={() => onSelect(task)}>{t('taskCenter.viewAction')} <RightOutlined /></Button></footer>
       </article>
     ))}</div> : <WorkbenchEmpty />}
@@ -192,7 +200,7 @@ function RecentSection({ tasks, expanded, onToggle, onSelect }: { tasks: Task[];
       <button type='button' className='recent-task-row' key={task.id} onClick={() => onSelect(task)}>
         <CheckCircleFilled className='recent-task-check' />
         <span className='workbench-task-main'><Tooltip title={taskTitle(task, t)}><strong>{taskTitle(task, t)}</strong></Tooltip><small>{taskMeta(task, t)}</small></span>
-        <span className='recent-task-summary'>{taskDescription(task, t)}</span>
+        <span className='recent-task-summary'>{taskStatusDescription(task, t)}</span>
         <time>{formatDate(task.finished_at || task.updated_at)}</time>
         <RightOutlined className='recent-task-arrow' />
       </button>
@@ -207,10 +215,6 @@ function WorkbenchEmpty() {
 
 function taskTitle(task: Task, t: (key: string) => string) {
   return task.conversation_title || task.title || t('taskCenter.noTitle');
-}
-
-function taskDescription(task: Task, t: (key: string) => string) {
-  return task.title || task.schedule_name || t('taskCenter.noDescription');
 }
 
 function taskMeta(task: Task, t: (key: string) => string) {

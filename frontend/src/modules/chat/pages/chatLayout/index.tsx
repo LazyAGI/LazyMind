@@ -494,6 +494,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         ...(Array.isArray(extras?.mentions) && extras.mentions.length > 0
           ? { mentions: extras.mentions }
           : {}),
+        ...(Array.isArray(extras?.cite_history_ids) && extras.cite_history_ids.length > 0
+          ? { cite_history_ids: extras.cite_history_ids }
+          : {}),
         // If the user changed plugin settings before a conversation was created,
         // carry them in the first request so Go can persist them on ensureConversation.
         // Only send the three known fields to avoid polluting the payload with API response leftovers.
@@ -724,6 +727,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     (chatRef.current as any)?.uploadFiles?.(files);
   };
 
+  const isTaskPanelRestoreVisible =
+    !pluginPanelExpanded && tasks.length > 0 && isTaskPanelCollapsed;
+
   return (
     <div
       className={`detail-container${pluginPanelExpanded ? " detail-container--plugin-expanded" : ""}`}
@@ -748,7 +754,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           <button type="button" role="tab" aria-selected={expandedRailTab === "tasks"} className={expandedRailTab === "tasks" ? "active" : ""} onClick={() => setExpandedRailTab("tasks")}>{t("taskCenter.panelTitle")} {tasks.length > 0 && <span>{tasks.length}</span>}</button>
         </div>
       )}
-      <div className={`chat-conversation-pane${pluginPanelExpanded && expandedRailTab !== "chat" ? " chat-conversation-pane--hidden" : ""}`}>
+      <div className={`chat-conversation-pane${pluginPanelExpanded && expandedRailTab !== "chat" ? " chat-conversation-pane--hidden" : ""}${isTaskPanelRestoreVisible ? " chat-conversation-pane--task-restore-visible" : ""}`}>
       <ChatContainerComponent
         ref={chatRef}
         canChat={chatEnabled}
@@ -791,7 +797,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         }
       />
       </div>
-      {!pluginPanelExpanded && tasks.length > 0 && isTaskPanelCollapsed && (
+      {isTaskPanelRestoreVisible && (
         <button
           type="button"
           className="task-panel-restore-btn"

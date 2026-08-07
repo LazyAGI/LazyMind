@@ -2044,38 +2044,21 @@
 
 .model-provider-cloud-doc-resource-row {
   width: 100%;
-  min-height: 92px;
+  min-height: 118px;
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto 132px;
-  align-items: center;
-  gap: 16px;
-  padding: 18px 20px;
+  grid-template-columns: 44px minmax(0, 1fr) 136px;
+  align-items: start;
+  gap: 14px;
+  padding: 20px;
   border: 0;
   border-bottom: 1px solid #edf0f4;
   background: #fff;
   color: inherit;
   font: inherit;
   text-align: left;
-  cursor: pointer;
-  transition: background-color 0.18s ease;
 
   &:last-child {
     border-bottom: 0;
-  }
-
-  &:hover {
-    background: #fafcff;
-  }
-
-  &:active {
-    background: #f5f9ff;
-  }
-
-  &:focus-visible {
-    position: relative;
-    z-index: 1;
-    outline: 2px solid #91caff;
-    outline-offset: -2px;
   }
 
   &.is-locked {
@@ -2127,7 +2110,7 @@
     line-height: 1.4;
   }
 
-  p {
+  > p {
     overflow: hidden;
     display: -webkit-box;
     margin: 5px 0 0;
@@ -2139,8 +2122,109 @@
   }
 }
 
+.model-provider-cloud-doc-capability-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.model-provider-cloud-doc-capability-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.model-provider-cloud-doc-capability-label {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+
+  &.is-enabled {
+    color: #389e0d;
+  }
+}
+
+.model-provider-cloud-doc-capability-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+}
+
+.model-provider-cloud-doc-capability-item {
+  display: inline-flex;
+  align-items: center;
+  color: #667085;
+  font-size: 12px;
+  line-height: 20px;
+
+  &::after {
+    width: 1px;
+    height: 10px;
+    margin: 0 9px;
+    background: #d0d5dd;
+    content: "";
+  }
+
+  &:last-child::after {
+    display: none;
+  }
+}
+
+.model-provider-cloud-doc-scenario {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: #475467;
+  font-size: 12px;
+  line-height: 1.55;
+
+  .anticon {
+    flex: 0 0 auto;
+    margin-top: 3px;
+    color: #98a2b3;
+  }
+}
+
+.model-provider-cloud-doc-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 1px;
+}
+
+.model-provider-cloud-doc-quick-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #1677ff;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  text-decoration: none;
+
+  &:hover {
+    color: #4096ff;
+    text-decoration: underline;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #91caff;
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+}
+
 .model-provider-cloud-doc-directory-count {
-  min-width: 88px;
   display: inline-flex;
   align-items: baseline;
   justify-content: flex-end;
@@ -2165,6 +2249,15 @@
   font-size: 12px;
   line-height: 22px;
   text-align: center;
+  align-self: flex-end;
+}
+
+.model-provider-cloud-doc-resource-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 9px;
+  padding-top: 1px;
 }
 
 .model-provider-cloud-doc-resource-action {
@@ -2172,14 +2265,30 @@
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  margin: 0;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
   color: #1677ff;
+  font: inherit;
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
+  cursor: pointer;
+
+  &:hover {
+    color: #4096ff;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #91caff;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 }
 
 .model-provider-cloud-doc-skeleton {
-  min-height: 92px;
+  min-height: 128px;
   padding: 20px;
   border-bottom: 1px solid #edf0f4;
 
@@ -2190,12 +2299,7 @@
 
 @media (max-width: 900px) {
   .model-provider-cloud-doc-resource-row {
-    grid-template-columns: 44px minmax(0, 1fr) auto;
-  }
-
-  .model-provider-cloud-doc-resource-action {
-    grid-column: 2 / 4;
-    justify-content: flex-start;
+    grid-template-columns: 44px minmax(0, 1fr) 124px;
   }
 }
 
@@ -2222,15 +2326,18 @@
     padding: 16px;
   }
 
-  .model-provider-cloud-doc-directory-count,
-  .model-provider-cloud-doc-resource-status.ant-tag,
-  .model-provider-cloud-doc-resource-action {
+  .model-provider-cloud-doc-resource-controls {
     grid-column: 2;
+    align-items: flex-start;
     justify-self: flex-start;
   }
 
   .model-provider-cloud-doc-directory-count {
     justify-content: flex-start;
+  }
+
+  .model-provider-cloud-doc-quick-actions {
+    gap: 12px;
   }
 }
 

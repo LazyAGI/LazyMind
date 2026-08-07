@@ -120,6 +120,36 @@ func TestAlgorithmServiceEnvPinsLocalRouterHost(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_ROUTER_HOST=127.0.0.1")
 }
 
+func TestAlgorithmServiceEnvTrustedLocalMode(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name        string
+		manifest    bool
+		environment string
+		want        string
+	}{
+		{name: "disabled by default", want: "LAZYMIND_TRUSTED_LOCAL_MODE=false"},
+		{name: "enabled by desktop manifest", manifest: true, want: "LAZYMIND_TRUSTED_LOCAL_MODE=true"},
+		{name: "enabled by source environment", environment: "true", want: "LAZYMIND_TRUSTED_LOCAL_MODE=true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LAZYMIND_TRUSTED_LOCAL_MODE", tc.environment)
+			testPaths := paths
+			testPaths.TrustedLocalMode = tc.manifest
+
+			env := algorithmServiceEnv(cfg, testPaths, chatProcessName)
+
+			assertEnvContains(t, env, tc.want)
+		})
+	}
+}
+
 func TestDesktopAlgorithmRegisterPolicyForInstallVersion(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

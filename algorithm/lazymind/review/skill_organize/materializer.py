@@ -4,7 +4,7 @@ from concurrent.futures import as_completed
 
 from lazyllm import LOG, ThreadPoolExecutor
 
-from lazymind.common.skill_storage_key import parse_skill_storage_key
+from lazymind.common.skill.storage_key import parse_skill_storage_key
 from lazymind.review.skill_organize.config import DEFAULT_MATERIALIZE_WORKERS
 from lazymind.review.skill_organize.prompts import materialize_draft_prompt
 from lazymind.review.skill_organize.schemas import (

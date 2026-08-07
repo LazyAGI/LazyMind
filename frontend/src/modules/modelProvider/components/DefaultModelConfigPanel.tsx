@@ -85,6 +85,7 @@ interface ApiProvider {
 
 interface ApiModel {
   id: string;
+  is_editable?: boolean;
   name: string;
   model_type?: string;
   is_default?: boolean;
@@ -94,6 +95,7 @@ interface ApiModel {
 interface SelectedModelApiItem {
   base_url?: string;
   group_name: string;
+  is_editable?: boolean;
   max_input_tokens?: string;
   model_id: string;
   model_key: string;
@@ -123,6 +125,8 @@ type ModelOptionItem = {
   group: ProviderConnectionGroup;
   model: ProviderModel;
   value: string;
+  /** True when the option comes from an image_editing catalog model. */
+  isEditable?: boolean;
 };
 
 interface CloudServiceConfig {
@@ -232,11 +236,6 @@ const moduleConfigs: ModuleConfig[] = [
     key: "video_generator",
     titleKey: "modelProvider.module.textToVideoTitle",
     subtitleKey: "modelProvider.module.textToVideoSubtitle",
-  },
-  {
-    key: "image_editor",
-    titleKey: "modelProvider.module.imageEditingTitle",
-    subtitleKey: "modelProvider.module.imageEditingSubtitle",
   },
   {
     key: "evo_llm",
@@ -360,6 +359,26 @@ function getModelTypeByCapability(capability: ModelCapability): string {
     ([, cap]) => cap === capability,
   );
   return entry ? entry[0] : capability;
+}
+
+// Catalog keeps the real provider model name; editable models get a localized,
+// display-only suffix when shown in the unified image-generation dropdown.
+function formatImageEditingDisplayName(name: string, suffix: string) {
+  return name.endsWith(suffix)
+    ? name
+    : `${name}${suffix}`;
+}
+
+function formatUnifiedImageDisplayName(
+  option: {
+    model: { name: string };
+    isEditable?: boolean;
+  },
+  editableSuffix: string,
+) {
+  return option.isEditable
+    ? formatImageEditingDisplayName(option.model.name, editableSuffix)
+    : option.model.name;
 }
 
 const createModelProviderFallbacks = (
@@ -630,8 +649,20 @@ export default function DefaultModelConfigPanel() {
       > = {};
 
       (selectedData.selections || []).forEach((selection) => {
-        const capability = getCapabilityByModelType(selection.model_key);
-        if (!capability) {
+        const rawCapability = getCapabilityByModelType(selection.model_key);
+        if (!rawCapability) {
+          return;
+        }
+        // Unify image_editing into the 文生图 slot; prefer editable when both exist.
+        const capability: ModelCapability =
+          rawCapability === "image_editor" ? "image_generator" : rawCapability;
+        const isEditable = !!selection.is_editable;
+        if (
+          capability === "image_generator" &&
+          !isEditable &&
+          nextSelectedModels.image_generator &&
+          selectedOptions.image_generator?.some((item) => item.isEditable)
+        ) {
           return;
         }
         const provider =
@@ -661,11 +692,12 @@ export default function DefaultModelConfigPanel() {
           enabled: true,
           maxInputTokens: selection.max_input_tokens,
         };
-        const option = {
+        const option: ModelOptionItem = {
           provider,
           group,
           model,
           value: getModelValue(provider.id, group.id, model.id),
+          isEditable,
         };
         nextSelectedModels[capability] = option.value;
         if (selection.max_input_tokens?.trim()) {
@@ -674,7 +706,9 @@ export default function DefaultModelConfigPanel() {
         }
         selectedOptions[capability] = [
           option,
-          ...(selectedOptions[capability] || []),
+          ...(selectedOptions[capability] || []).filter(
+            (item) => item.value !== option.value,
+          ),
         ];
       });
 
@@ -684,10 +718,21 @@ export default function DefaultModelConfigPanel() {
 
       const nextShareStatus: Partial<Record<ModelCapability, boolean>> = {};
       (selectedData.selections || []).forEach((selection) => {
-        const capability = getCapabilityByModelType(selection.model_key);
-        if (capability) {
-          nextShareStatus[capability] = !!selection.share;
+        const rawCapability = getCapabilityByModelType(selection.model_key);
+        if (!rawCapability) {
+          return;
         }
+        const capability: ModelCapability =
+          rawCapability === "image_editor" ? "image_generator" : rawCapability;
+        // Prefer share status from image_editing when both image roles are set.
+        if (
+          capability === "image_generator" &&
+          selection.model_key === "text2image" &&
+          nextShareStatus.image_generator !== undefined
+        ) {
+          return;
+        }
+        nextShareStatus[capability] = !!selection.share;
       });
       setShareStatus(nextShareStatus);
 
@@ -799,63 +844,100 @@ export default function DefaultModelConfigPanel() {
 
     setModuleModelLoading((current) => ({ ...current, [capability]: true }));
     try {
-      const response = await modelProvidersApi.apiCoreModelProvidersModelsGet({
-        modelType: getModelTypeByCapability(capability),
-      });
-      const data = unwrapModelProviderData<{
-        models?: Array<
-          ApiModel & {
-            user_model_provider_id: string;
-            user_model_provider_group_id: string;
-            provider_name: string;
-            group_name: string;
-            base_url?: string;
-          }
-        >;
-      }>(response.data);
-      const fetchedOptions = (data.models || [])
-        .filter((model) =>
-          trimmedKeyword
-            ? `${model.name} ${model.provider_name} ${model.group_name}`
-                .toLowerCase()
-                .includes(trimmedKeyword.toLowerCase())
-            : true,
-        )
-        .map((model) => {
-        const provider =
-          providerOptions.find(
-            (item) => item.id === model.user_model_provider_id,
-          ) ||
-          mapApiProvider(
-            {
-              id: model.user_model_provider_id,
-              name: model.provider_name,
-              base_url: model.base_url,
-            },
-            localizedFallbacks,
-          );
-        const group = createConnectionGroup(provider, {
-          id: model.user_model_provider_group_id,
-          name: model.group_name,
-          baseUrl: model.base_url || provider.baseUrl,
-          verified: true,
-        });
-        const providerModel: ProviderModel = {
-          id: model.id,
-          name: model.name,
-          capability,
-          builtIn: Boolean(model.is_default),
-          enabled: true,
-          maxInputTokens: model.max_input_tokens,
-        };
+      const modelTypes =
+        capability === "image_generator"
+          ? ["text2image", "image_editing"]
+          : [getModelTypeByCapability(capability)];
 
-        return {
-          provider,
-          group,
-          model: providerModel,
-          value: getModelValue(provider.id, group.id, providerModel.id),
-        };
+      const fetchedLists = await Promise.all(
+        modelTypes.map(async (modelType) => {
+          const response = await modelProvidersApi.apiCoreModelProvidersModelsGet({
+            modelType,
+          });
+          const data = unwrapModelProviderData<{
+            models?: Array<
+              ApiModel & {
+                user_model_provider_id: string;
+                user_model_provider_group_id: string;
+                provider_name: string;
+                group_name: string;
+                base_url?: string;
+              }
+            >;
+          }>(response.data);
+          return data.models || [];
+        }),
+      );
+
+      const fetchedOptions: ModelOptionItem[] = [];
+      const seenValues = new Set<string>();
+      fetchedLists.forEach((models) => {
+        models
+          .filter((model) =>
+            trimmedKeyword
+              ? `${model.name} ${model.provider_name} ${model.group_name}`
+                  .toLowerCase()
+                  .includes(trimmedKeyword.toLowerCase())
+              : true,
+          )
+          .forEach((model) => {
+            const provider =
+              providerOptions.find(
+                (item) => item.id === model.user_model_provider_id,
+              ) ||
+              mapApiProvider(
+                {
+                  id: model.user_model_provider_id,
+                  name: model.provider_name,
+                  base_url: model.base_url,
+                },
+                localizedFallbacks,
+              );
+            const group = createConnectionGroup(provider, {
+              id: model.user_model_provider_group_id,
+              name: model.group_name,
+              baseUrl: model.base_url || provider.baseUrl,
+              verified: true,
+            });
+            const providerModel: ProviderModel = {
+              id: model.id,
+              name: model.name,
+              capability,
+              builtIn: Boolean(model.is_default),
+              enabled: true,
+              maxInputTokens: model.max_input_tokens,
+            };
+            const value = getModelValue(
+              provider.id,
+              group.id,
+              providerModel.id,
+            );
+            if (seenValues.has(value)) {
+              // Prefer the editable entry when the same model id appears twice.
+              if (model.is_editable) {
+                const index = fetchedOptions.findIndex(
+                  (item) => item.value === value,
+                );
+                if (index >= 0) {
+                  fetchedOptions[index] = {
+                    ...fetchedOptions[index],
+                    isEditable: true,
+                  };
+                }
+              }
+              return;
+            }
+            seenValues.add(value);
+            fetchedOptions.push({
+              provider,
+              group,
+              model: providerModel,
+              value,
+              isEditable: !!model.is_editable,
+            });
+          });
       });
+
       const selectedValue = selectedModels[capability];
       const selectedOption =
         selectedValue &&
@@ -890,12 +972,39 @@ export default function DefaultModelConfigPanel() {
     capability: ModelCapability,
     value?: string,
   ) => {
-    const selections = [
-      {
-        model_key: getModelTypeByCapability(capability),
-        model_id: value ? parseModelValue(value).modelId : "",
-      },
-    ];
+    const modelId = value ? parseModelValue(value).modelId : "";
+    const selections =
+      capability === "image_generator"
+        ? (() => {
+            const selectedOption = value
+              ? moduleModelOptions.image_generator?.find(
+                  (option) => option.value === value,
+                )
+              : undefined;
+            const isEditable = !!selectedOption?.isEditable;
+            if (!value) {
+              return [
+                { model_key: "text2image", model_id: "" },
+                { model_key: "image_editing", model_id: "" },
+              ];
+            }
+            if (isEditable) {
+              return [
+                { model_key: "text2image", model_id: modelId },
+                { model_key: "image_editing", model_id: modelId },
+              ];
+            }
+            return [
+              { model_key: "text2image", model_id: modelId },
+              { model_key: "image_editing", model_id: "" },
+            ];
+          })()
+        : [
+            {
+              model_key: getModelTypeByCapability(capability),
+              model_id: modelId,
+            },
+          ];
 
     const response = await modelProvidersApi.apiCoreModelProvidersSelectedModelsPut({
       setSelectedModelsOpenAPIRequest: {
@@ -959,22 +1068,25 @@ export default function DefaultModelConfigPanel() {
     void saveSelectedModel(capability, value)
       .then((response) => {
         (response.selections || []).forEach((selection) => {
-          const selectedCapability = getCapabilityByModelType(
-            selection.model_key,
-          );
-          if (selectedCapability) {
-            setShareStatus((current) => ({
-              ...current,
-              [selectedCapability]: !!selection.share,
-            }));
-            setSelectedModelMaxInputTokens((current) => ({
-              ...current,
-              [selectedCapability]:
-                selection.max_input_tokens?.trim()
-                  ? selection.max_input_tokens
-                  : undefined,
-            }));
+          const rawCapability = getCapabilityByModelType(selection.model_key);
+          if (!rawCapability) {
+            return;
           }
+          const selectedCapability: ModelCapability =
+            rawCapability === "image_editor"
+              ? "image_generator"
+              : rawCapability;
+          setShareStatus((current) => ({
+            ...current,
+            [selectedCapability]: !!selection.share,
+          }));
+          setSelectedModelMaxInputTokens((current) => ({
+            ...current,
+            [selectedCapability]:
+              selection.max_input_tokens?.trim()
+                ? selection.max_input_tokens
+                : undefined,
+          }));
         });
       })
       .catch(() => {});
@@ -1322,33 +1434,43 @@ export default function DefaultModelConfigPanel() {
                     : t("modelProvider.noModelOptions")
                 }
               >
-                {options.map(({ provider, group, model, value }) => (
-                  <Select.Option
-                    key={value}
-                    label={
-                      <span className="model-provider-select-value">
+                {options.map((option) => {
+                  const { provider, group, model, value } = option;
+                  const displayName =
+                    module.key === "image_generator"
+                      ? formatUnifiedImageDisplayName(
+                          option,
+                          t("modelProvider.editableModelSuffix"),
+                        )
+                      : model.name;
+                  return (
+                    <Select.Option
+                      key={value}
+                      label={
+                        <span className="model-provider-select-value">
+                          <ProviderLogo provider={provider} compact />
+                          <span className="model-provider-select-value-text">
+                            {displayName} · {group.name}
+                          </span>
+                        </span>
+                      }
+                      value={value}
+                    >
+                      <span className="model-provider-select-option">
                         <ProviderLogo provider={provider} compact />
-                        <span className="model-provider-select-value-text">
-                          {model.name} · {group.name}
+                        <span className="model-provider-select-copy">
+                          <strong>{displayName}</strong>
+                          <small>
+                            {provider.name} / {group.name}
+                            {model.builtIn
+                              ? t("modelProvider.builtInModelSuffix")
+                              : t("modelProvider.customModelSuffix")}
+                          </small>
                         </span>
                       </span>
-                    }
-                    value={value}
-                  >
-                    <span className="model-provider-select-option">
-                      <ProviderLogo provider={provider} compact />
-                      <span className="model-provider-select-copy">
-                        <strong>{model.name}</strong>
-                        <small>
-                          {provider.name} / {group.name}
-                          {model.builtIn
-                            ? t("modelProvider.builtInModelSuffix")
-                            : t("modelProvider.customModelSuffix")}
-                        </small>
-                      </span>
-                    </span>
-                  </Select.Option>
-                ))}
+                    </Select.Option>
+                  );
+                })}
               </Select>
             </div>
           );

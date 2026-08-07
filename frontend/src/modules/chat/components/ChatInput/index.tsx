@@ -12,6 +12,7 @@ import {
 import { RcFile } from "antd/es/upload";
 import { Button, message, Select, Spin, Tooltip } from "antd";
 import {
+  AppstoreOutlined,
   BookOutlined,
   BulbOutlined,
   CloseOutlined,
@@ -338,6 +339,7 @@ export interface SendMessageParams {
   mentions?: ChatMention[];
   citeMessage?: string;
   citeMessages?: string[];
+  citeHistoryIds?: (string | undefined)[];
   clearInput?: boolean;
   fileList?: ChatFileList[];
   fileListRef?: React.RefObject<ImageUploadImperativeProps | null>;
@@ -379,6 +381,8 @@ interface ChatInputProps {
   initialPluginSettings?: ConversationPluginSettings;
   /** When true, the allow-plugin toggle in config is locked (plugin session is active). */
   hasPluginSession?: boolean;
+  /** Optional case-driven category selectors shown in the welcome composer. */
+  showcaseSelection?: ShowcaseSelection;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   disabled?: boolean;
@@ -387,6 +391,7 @@ interface ChatInputProps {
   disabledAction?: ReactNode;
   citeMessage?: string;
   citeMessages?: string[];
+  citeHistoryIds?: (string | undefined)[];
   onRemoveCiteMessage?: (index: number) => void;
   onClearCiteMessage?: () => void;
   skillDepositStats?: SkillDepositStats;
@@ -396,10 +401,29 @@ interface ChatInputProps {
   runInBackground?: boolean;
 }
 
+export interface ShowcaseSelectionOption {
+  value: string;
+  label: string;
+  description?: string;
+  prompt?: string;
+}
+
+export interface ShowcaseSelection {
+  primaryValue: string;
+  primaryLabel: string;
+  primaryAriaLabel: string;
+  secondaryValue?: string;
+  secondaryOptions?: ShowcaseSelectionOption[];
+  secondaryAriaLabel: string;
+  onSecondaryChange?: (value: string) => void;
+}
+
 export interface ChatFileList {
   uid: string;
   name: string;
   base64: string;
+  /** Local object URL or data URL for preview / open. */
+  previewUrl?: string;
   suffix: string;
   size: string;
 }
@@ -487,6 +511,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       disabledAction,
       citeMessage,
       citeMessages,
+      citeHistoryIds,
       onRemoveCiteMessage,
       onClearCiteMessage,
       skillDepositStats,
@@ -495,6 +520,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onPluginSettingsChange,
       initialPluginSettings,
       hasPluginSession,
+      showcaseSelection,
       runInBackground = false,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
@@ -542,7 +568,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     );
 
     const clearMultiData = useCallback(() => {
-      setFileList([]);
+      setFileList((prev) => {
+        prev.forEach((item) => {
+          if (item.previewUrl?.startsWith("blob:")) {
+            URL.revokeObjectURL(item.previewUrl);
+          }
+        });
+        return [];
+      });
       fileListRef.current?.clear();
       setTimeout(() => onHeightChange?.(), 0);
     }, [onHeightChange]);
@@ -661,29 +694,49 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           .toLowerCase();
 
         const tempImgData = allowedImageTypes.includes(suffix);
-        const obj = {
+        const obj: ChatFileList = {
           name: list[i].name,
           uid: list[i].uid,
           suffix,
           size: formatFileSize(list[i].size),
           base64: "",
+          previewUrl: "",
         };
         if (tempImgData) {
           const res = await fileToBase64(list[i]);
-          obj["base64"] = res as string;
+          obj.base64 = res as string;
+          obj.previewUrl = obj.base64;
         } else {
-          obj["base64"] = "";
+          obj.base64 = "";
+          // Object URL lets users open/preview non-image attachments on click.
+          obj.previewUrl = URL.createObjectURL(list[i]);
         }
         data.push(obj);
       }
-      setFileList(data);
+      setFileList((prev) => {
+        prev.forEach((item) => {
+          if (
+            item.previewUrl &&
+            item.previewUrl.startsWith("blob:") &&
+            !data.some((next) => next.previewUrl === item.previewUrl)
+          ) {
+            URL.revokeObjectURL(item.previewUrl);
+          }
+        });
+        return data;
+      });
       setTimeout(() => onHeightChange?.(), 0);
     };
 
     const removeImage = (uid: string) => {
       fileListRef.current?.removeFile(uid);
-      const list = [...fileList].filter((item) => item.uid !== uid);
-      setFileList(list);
+      setFileList((prev) => {
+        const target = prev.find((item) => item.uid === uid);
+        if (target?.previewUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(target.previewUrl);
+        }
+        return prev.filter((item) => item.uid !== uid);
+      });
       setTimeout(() => onHeightChange?.(), 0);
     };
 
@@ -801,6 +854,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         mentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
         citeMessages: normalizedCiteMessages,
+        citeHistoryIds: citeHistoryIds?.filter(
+          (historyId): historyId is string => Boolean(historyId?.trim()),
+        ),
         fileList,
         fileListRef,
         files: fileListRef.current?.getFiles(),
@@ -1105,8 +1161,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           <button
                             type="button"
                             onClick={() => {
-                              setAddMenuOpen(false);
+                              if (fileList.length >= MAX_UPLOAD_FILES) {
+                                message.warning(t("chat.maxFilesWarning"));
+                                setAddMenuOpen(false);
+                                return;
+                              }
+                              // Open the file picker while still inside the
+                              // user gesture, then close the popover.
                               fileListRef.current?.openFileDialog();
+                              setAddMenuOpen(false);
                             }}
                           >
                             <PaperClipOutlined />
@@ -1172,6 +1235,52 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       />
                     </div>
                   </div>
+                  {showcaseSelection ? (
+                    <div className="chat-showcase-selection" data-testid="showcase-selection">
+                      <span className="chat-showcase-control chat-showcase-primary-control">
+                        <AppstoreOutlined
+                          className="chat-showcase-control-icon"
+                          aria-hidden="true"
+                        />
+                        <Select
+                          aria-label={showcaseSelection.primaryAriaLabel}
+                          className="chat-showcase-category-select"
+                          size="small"
+                          value={showcaseSelection.primaryValue}
+                          disabled={disabled || isStreaming}
+                          options={[
+                            {
+                              value: showcaseSelection.primaryValue,
+                              label: showcaseSelection.primaryLabel,
+                            },
+                          ]}
+                        />
+                      </span>
+                      {showcaseSelection.secondaryOptions?.length ? (
+                        <span className="chat-showcase-control chat-showcase-scene-control">
+                          <span className="chat-showcase-scene-icon" aria-hidden="true">
+                            <i />
+                            <i />
+                            <i />
+                            <i />
+                          </span>
+                          <Select
+                            aria-label={showcaseSelection.secondaryAriaLabel}
+                            className="chat-showcase-category-select chat-showcase-subcategory-select"
+                            size="small"
+                            value={showcaseSelection.secondaryValue}
+                            disabled={disabled || isStreaming}
+                            onChange={showcaseSelection.onSecondaryChange}
+                            options={showcaseSelection.secondaryOptions.map((option) => ({
+                              value: option.value,
+                              label: option.label,
+                              title: option.description,
+                            }))}
+                          />
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <Select
                     aria-label={t("chat.thinkingDepth")}
                     className="chat-thinking-depth-select"

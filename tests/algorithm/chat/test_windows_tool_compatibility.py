@@ -2,6 +2,8 @@ import os
 import ntpath
 from pathlib import Path
 
+import pytest
+
 from lazyllm.tools.fs import client as fs_client
 from lazymind.chat.engine.tools import chat_artifact
 
@@ -91,3 +93,34 @@ def test_chat_write_file_append_does_not_require_overwrite_approval(tmp_path, mo
     assert first['status'] == 'ok'
     assert appended['status'] == 'ok'
     assert chat_artifact.read_file('document.md')['content'] == 'first second'
+
+
+def test_chat_file_tools_reject_outside_workspace_by_default(tmp_path, monkeypatch):
+    workspace = tmp_path / 'workspace'
+    outside = tmp_path / 'outside' / 'document.md'
+    monkeypatch.setattr(chat_artifact, 'chat_agent_workspace', lambda *_args: str(workspace))
+    monkeypatch.setattr(
+        chat_artifact, '_current_artifact_scope', lambda: ('windows-user', 'windows-conversation'),
+    )
+
+    with pytest.raises(ValueError, match='inside the current main-Agent workspace'):
+        chat_artifact.write_file(str(outside), 'blocked')
+
+
+def test_chat_file_tools_allow_absolute_host_paths_in_trusted_local_mode(tmp_path, monkeypatch):
+    workspace = tmp_path / 'workspace'
+    outside_dir = tmp_path / 'outside'
+    outside = outside_dir / 'document.md'
+    monkeypatch.setattr(chat_artifact, 'chat_agent_workspace', lambda *_args: str(workspace))
+    monkeypatch.setattr(
+        chat_artifact, '_current_artifact_scope', lambda: ('windows-user', 'windows-conversation'),
+    )
+
+    with chat_artifact._cfg.temp('trusted_local_mode', True):
+        written = chat_artifact.write_file(str(outside), 'trusted')
+        loaded = chat_artifact.read_file(str(outside))
+        listed = chat_artifact.list_dir(str(outside_dir))
+
+    assert written['status'] == 'ok'
+    assert loaded['content'] == 'trusted'
+    assert listed['entries'] == ['document.md']

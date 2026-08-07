@@ -14,3 +14,5 @@ def test_google_drive_tool_group_exposes_search_and_find():
         'read',
         'read_file',
     ]
+    assert drive.search.__doc__
+    assert drive.find.__doc__

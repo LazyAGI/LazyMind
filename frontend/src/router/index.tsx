@@ -9,6 +9,8 @@ import SigninDashboard from "@/modules/signin/pages/dashboard";
 import LoginTransition from "@/modules/signin/pages/loginTransition";
 import ChatApp from "@/modules/chat/ChatApp";
 import Home from "@/modules/chat/pages/home";
+import ShowcaseGalleryPage from "@/modules/showcase/GalleryPage";
+import ShowcaseDetailPage from "@/modules/showcase/DetailPage";
 import KnowledgeApp from "@/modules/knowledge/KnowledgeApp";
 import KnowledgeList from "@/modules/knowledge/pages/list";
 import KnowledgeAuth from "@/modules/knowledge/pages/auth";
@@ -38,7 +40,6 @@ import MemoryManagementListPage from "@/modules/memory/pages/list";
 import MemoryReviewPage from "@/modules/memory/pages/review";
 import MemoryGlossaryDetailPage from "@/modules/memory/pages/glossaryDetail";
 import MemorySkillDetailPage from "@/modules/memory/pages/skillDetail";
-import MemoryExperienceDetailPage from "@/modules/memory/pages/experienceDetail";
 import ModelProviderPage from "@/modules/modelProvider";
 import CloudDocumentsLayout from "@/modules/modelProvider/CloudDocumentsLayout";
 import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
@@ -129,6 +130,8 @@ export default function AppRouter() {
           <Route path="agent/chat" element={<ChatApp />}>
             <Route index element={<Navigate to="home" replace />} />
             <Route path="home" element={<Home />} />
+            <Route path="cases" element={<ShowcaseGalleryPage />} />
+            <Route path="cases/:caseId" element={<ShowcaseDetailPage />} />
           </Route>
           <Route path="lib/knowledge" element={<KnowledgeApp />}>
             <Route index element={<Navigate to="list" replace />} />
@@ -224,12 +227,20 @@ export default function AppRouter() {
             <Route path="experience" element={<MemoryManagementListPage />} />
             <Route
               path="experience/:itemId"
-              element={<MemoryExperienceDetailPage />}
+              element={
+                <Navigate to="/memory-management/experience" replace />
+              }
             />
             <Route path="glossary" element={<MemoryManagementListPage />} />
             <Route
               path="glossary/:itemId"
               element={<MemoryGlossaryDetailPage />}
+            />
+            <Route
+              path="review/experience/:itemId"
+              element={
+                <Navigate to="/memory-management/experience" replace />
+              }
             />
             <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>

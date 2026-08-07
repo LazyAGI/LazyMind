@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,13 +19,7 @@ import (
 // setupWordGroupTest creates a SQLite-backed store with Word and WordGroupConflict tables migrated.
 func setupWordGroupTest(t *testing.T) {
 	t.Helper()
-	ormDB, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "wordgroup-test.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := ormDB.AutoMigrate(&orm.Word{}, &orm.WordGroupConflict{}); err != nil {
-		t.Fatalf("auto migrate wordgroup tables: %v", err)
-	}
+	ormDB := orm.MigrateTestDB(t, &orm.Word{}, &orm.WordGroupConflict{})
 	store.Init(ormDB.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 }

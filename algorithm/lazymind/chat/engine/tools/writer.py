@@ -32,7 +32,7 @@ from lazyllm.tools.writer.utils import render_document_markdown, save_artifact_j
 WRITER_DATA_MODEL_SCHEMA_PREFIX = 'lazyllm.tools.writer.data_models'
 _FEISHU_URL_RE = re.compile(
     r"https?://[^\s<>\"']*(?:feishu\.(?:cn|com)|larksuite\.com)/"
-    r"[^\s<>\"'，。；！？、）】》」』]+",
+    r"[^\s<>\"'，。；！？、（）【】《》「」『』]+",
     re.IGNORECASE,
 )
 
@@ -409,23 +409,24 @@ class WriterToolkitBase:
         document = WriterDocument.model_validate(
             _json_loads(source_document_json, {}),
         )
-        for block in document.blocks:
-            if block.type != 'paragraph':
-                continue
-            lines = [line.strip() for line in block.content.splitlines() if line.strip()]
-            if not lines:
-                continue
-            block.type = 'heading'
-            block.content = lines[0]
-            block.spans = []
-            block.numbering['level'] = 1
-            if len(lines) > 1:
-                block.children.insert(0, WriterBlock(
-                    node_id=f'{block.node_id}-description',
-                    type='paragraph',
-                    content='\n'.join(lines[1:]),
-                    stage='outline',
-                ))
+        if not any(block.type == 'heading' for block in document.blocks):
+            for block in document.blocks:
+                if block.type != 'paragraph':
+                    continue
+                lines = [line.strip() for line in block.content.splitlines() if line.strip()]
+                if not lines:
+                    continue
+                block.type = 'heading'
+                block.content = lines[0]
+                block.spans = []
+                block.numbering['level'] = 1
+                if len(lines) > 1:
+                    block.children.insert(0, WriterBlock(
+                        node_id=f'{block.node_id}-description',
+                        type='paragraph',
+                        content='\n'.join(lines[1:]),
+                        stage='outline',
+                    ))
         return _set_document_editable(
             document, stage='outline',
         ).model_dump_json(exclude_defaults=True)
@@ -480,6 +481,34 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
+    def generate_draft_section_markdown(
+        self,
+        writing_task_json: str,
+        section_instruction_json: str,
+        writing_context_json: str,
+        previous_markdown: str = '',
+    ) -> str:
+        """Generate one draft section as Markdown while preserving the IR API."""
+        root = _temp_root()
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+        )
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        instruction = SectionInstruction.model_validate(_json_loads(section_instruction_json, {}))
+        result = WriterDraftingTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).generate_draft_section_markdown(
+            task=task_path,
+            section_instruction=instruction,
+            context=context_path,
+            previous_markdown=previous_markdown,
+        )
+        with open(result['artifact_path'], 'r', encoding='utf-8') as fh:
+            return fh.read()
+
     def generate_draft_blocks(
         self,
         writing_task_json: str,
@@ -505,6 +534,31 @@ class WriterToolkitBase:
             ), {})
             blocks.append(block)
         return _json_dumps(blocks)
+
+    def generate_draft_blocks_markdown(
+        self,
+        writing_task_json: str,
+        section_instructions_json: str,
+        writing_context_json: str,
+    ) -> str:
+        """Generate every planned draft section in Markdown, in order."""
+        instructions_data = _json_loads(section_instructions_json, {})
+        instructions = (
+            instructions_data.get('instructions')
+            if isinstance(instructions_data, dict) else None
+        )
+        if not isinstance(instructions, list):
+            raise TypeError('section_instructions_json must contain instructions.')
+
+        sections: list[str] = []
+        for instruction in instructions:
+            sections.append(self.generate_draft_section_markdown(
+                writing_task_json=writing_task_json,
+                section_instruction_json=_json_dumps(instruction),
+                writing_context_json=writing_context_json,
+                previous_markdown='\n\n'.join(sections),
+            ))
+        return _json_dumps(sections)
 
     def generate_draft_document(
         self,
@@ -540,6 +594,40 @@ class WriterToolkitBase:
             outline=outline_path,
         )
         return _json_dumps(_primary_data(result))
+
+    def generate_draft_document_markdown(
+        self,
+        draft_sections_json: str,
+        writing_context_json: str,
+        outline_json: str = '',
+    ) -> str:
+        """Combine Markdown sections and convert the completed draft once to IR."""
+        root = _temp_root()
+        sections = _json_loads(draft_sections_json, [])
+        if not isinstance(sections, list) or not sections:
+            raise ValueError('draft_sections_json must be a non-empty JSON array.')
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        outline_path = None
+        if outline_json:
+            outline_path = _write_input_artifact(
+                root, 'outline.lmd', _json_loads(outline_json, {}), self.WRITER_IR_SCHEMA,
+            )
+        result = WriterDraftingTools(
+            llm=None, artifact_store=str(root),
+        ).generate_draft_document_markdown(
+            draft_sections=sections,
+            context=context_path,
+            outline=outline_path,
+        )
+        with open(result['draft_document_md'], 'r', encoding='utf-8') as fh:
+            markdown = fh.read()
+        return _json_dumps({
+            'draft_document': _primary_data(result),
+            'draft_document_md': markdown,
+        })
 
     def update_writing_context(self, content_artifact_json: str, writing_context_json: str) -> str:
         """Update context from a WriterDocument or WriterBlock."""
@@ -942,7 +1030,9 @@ class WriterCreateToolkit(WriterToolkitBase):
         'build_writing_task', 'build_resources', 'profile_resources',
         'create_writing_context', 'prepare_outline', 'generate_outline',
         'generate_section_instructions', 'generate_draft_section',
-        'generate_draft_blocks', 'generate_draft_document',
+        'generate_draft_section_markdown',
+        'generate_draft_blocks', 'generate_draft_blocks_markdown',
+        'generate_draft_document', 'generate_draft_document_markdown',
         'update_writing_context', 'check_consistency',
         'generate_final_document', 'render_markdown',
     ]

@@ -42,6 +42,7 @@ type groupModelListItem struct {
 	GroupName                string  `json:"group_name"`
 	BaseURL                  string  `json:"base_url"`
 	IsDefault                bool    `json:"is_default"`
+	IsEditable               bool    `json:"is_editable"`
 	MaxInputTokens           *string `json:"max_input_tokens"`
 }
 
@@ -239,6 +240,7 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 			GroupName:                group.Name,
 			BaseURL:                  group.BaseURL,
 			IsDefault:                m.IsDefault,
+			IsEditable:               strings.EqualFold(strings.TrimSpace(m.ModelType), "image_editing"),
 			MaxInputTokens:           m.MaxInputTokens,
 		})
 	}
@@ -337,6 +339,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			GroupName:                grp.name,
 			BaseURL:                  grp.baseURL,
 			IsDefault:                m.IsDefault,
+			IsEditable:               strings.EqualFold(modelType, "image_editing"),
 			MaxInputTokens:           m.MaxInputTokens,
 		})
 	}

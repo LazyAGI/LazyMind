@@ -1,6 +1,6 @@
-import { Avatar, Button, Divider, Drawer, Flex, message, Spin, Tooltip } from "antd";
+import { Button, Divider, Drawer, Flex, message, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -40,11 +40,7 @@ import {
   isExternalSource,
   openSource,
 } from "@/modules/chat/utils/sourceAdapter";
-
-const BotAvatarIcon = new URL(
-  "../../assets/images/bot_avatar.png",
-  import.meta.url,
-).href;
+import { IdentityAvatar } from "@/modules/identityAvatar";
 
 async function copyTextToClipboard(text: string) {
   const normalizedText = text.trim();
@@ -220,6 +216,8 @@ const AssistantMessage = (props: any) => {
   const citeButtonRef = useRef<HTMLButtonElement | null>(null);
   const citeSelectionTextRef = useRef("");
   const [drawerSources, setDrawerSources] = useState<ChatSource[]>([]);
+  const onCiteMessageRef = useRef(onCiteMessage);
+  onCiteMessageRef.current = onCiteMessage;
   // Debounced backend persistence for ask-card answers. Created once per component
   // instance with useRef so it is stable across re-renders.
   const persistAskAnswersRef = useRef(
@@ -265,46 +263,78 @@ const AssistantMessage = (props: any) => {
     }
   };
 
-  const hideCiteButton = () => {
+  const hideCiteButton = useCallback(() => {
     citeButtonRef.current?.remove();
     citeButtonRef.current = null;
     citeSelectionTextRef.current = "";
-  };
-
-  useEffect(() => {
-    return hideCiteButton;
   }, []);
 
-  const handleCiteSelectedText = () => {
+  const handleCiteSelectedText = useCallback(() => {
     const selectedText = citeSelectionTextRef.current.trim();
     if (!selectedText) {
       hideCiteButton();
       return;
     }
-    onCiteMessage?.(selectedText);
+    onCiteMessageRef.current?.(selectedText);
     window.getSelection()?.removeAllRanges();
     hideCiteButton();
-  };
+  }, [hideCiteButton]);
 
-  const showCiteButton = (text: string, top: number, left: number) => {
-    let button = citeButtonRef.current;
-    if (!button) {
-      button = document.createElement("button");
-      button.type = "button";
-      button.className = "chat-cite-selection-btn";
-      button.addEventListener("mousedown", (event) => {
-        event.preventDefault();
-      });
-      button.addEventListener("click", handleCiteSelectedText);
-      document.body.appendChild(button);
-      citeButtonRef.current = button;
-    }
+  const handleCiteSelectedTextRef = useRef(handleCiteSelectedText);
+  handleCiteSelectedTextRef.current = handleCiteSelectedText;
 
-    citeSelectionTextRef.current = text;
-    button.textContent = t("chat.cite");
-    button.style.top = `${top}px`;
-    button.style.left = `${left}px`;
-  };
+  const showCiteButton = useCallback(
+    (text: string, top: number, left: number) => {
+      let button = citeButtonRef.current;
+      if (!button) {
+        button = document.createElement("button");
+        button.type = "button";
+        button.className = "chat-cite-selection-btn";
+        // Keep selection while clicking the cite button.
+        button.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        });
+        button.addEventListener("pointerdown", (event) => {
+          event.stopPropagation();
+        });
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          handleCiteSelectedTextRef.current();
+        });
+        document.body.appendChild(button);
+        citeButtonRef.current = button;
+      }
+
+      citeSelectionTextRef.current = text;
+      button.textContent = t("chat.cite");
+      button.style.top = `${top}px`;
+      button.style.left = `${left}px`;
+    },
+    [t],
+  );
+
+  // Dismiss cite float on any outside click (capture), so it closes even when
+  // the click lands outside this message's onMouseUp handler.
+  useEffect(() => {
+    const dismissOnPointerDown = (event: PointerEvent) => {
+      const button = citeButtonRef.current;
+      if (!button) {
+        return;
+      }
+      if (event.target instanceof Node && button.contains(event.target)) {
+        return;
+      }
+      window.getSelection()?.removeAllRanges();
+      hideCiteButton();
+    };
+
+    document.addEventListener("pointerdown", dismissOnPointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOnPointerDown, true);
+      hideCiteButton();
+    };
+  }, [hideCiteButton]);
 
   const handleMouseUp = (event: MouseEvent<HTMLDivElement>) => {
     const selection = window.getSelection();
@@ -327,16 +357,27 @@ const AssistantMessage = (props: any) => {
       return;
     }
 
-    const rect = range.getBoundingClientRect();
-    if (rect.width <= 0 && rect.height <= 0) {
+    // Prefer line boxes from getClientRects(): cross-block / wrapped selections
+    // make getBoundingClientRect() as wide as the container, pushing the button right.
+    const lineRects = Array.from(range.getClientRects()).filter(
+      (lineRect) => lineRect.width > 0 && lineRect.height > 0,
+    );
+    if (lineRects.length === 0) {
       hideCiteButton();
       return;
     }
-    showCiteButton(
-      selectedText,
-      Math.max(8, rect.top - 42),
-      rect.left + rect.width / 2,
+
+    const top = Math.min(...lineRects.map((lineRect) => lineRect.top));
+    const left = Math.min(...lineRects.map((lineRect) => lineRect.left));
+    const right = Math.max(...lineRects.map((lineRect) => lineRect.right));
+    const centerX = (left + right) / 2;
+    // Keep the fixed button inside the viewport (button ~ translateX(-50%)).
+    const clampedLeft = Math.min(
+      Math.max(centerX, 28),
+      window.innerWidth - 28,
     );
+
+    showCiteButton(selectedText, Math.max(8, top - 42), clampedLeft);
   };
 
   function renderLoading() {
@@ -936,10 +977,10 @@ const AssistantMessage = (props: any) => {
         className="chat-assistant-msg-multi-answer-wrap"
         onMouseUp={handleMouseUp}
       >
-        <Avatar
+        <IdentityAvatar
           className="chat-avatar"
-          size={"small"}
-          icon={<img src={BotAvatarIcon} />}
+          kind="soul"
+          size={32}
         />
         <div className="chat-bot-box-multi">
           <div className="chat-bot">
@@ -1019,10 +1060,10 @@ const AssistantMessage = (props: any) => {
       className="chat-assistant-msg-single-answer-wrap"
       onMouseUp={handleMouseUp}
     >
-      <Avatar
+      <IdentityAvatar
         className="chat-avatar"
-        size={"small"}
-        icon={<img src={BotAvatarIcon} />}
+        kind="soul"
+        size={32}
       />
       <div className="chat-bot-box-single">
         <div className="chat-bot">

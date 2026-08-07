@@ -21,8 +21,8 @@ func TestApplyTextReviewAcceptsWholeLineGroupAndRejectsLocalEdit(t *testing.T) {
 	headContent := strings.Join(oldLines, "\n") + "\n"
 	draftContent := strings.Join(newLines, "\n") + "\n"
 	diff, err := filediff.CompareContent(
-		filediff.Content{Path: "memory/user.md", Data: []byte(headContent), EditableText: true},
-		filediff.Content{Path: "memory/user.md", Data: []byte(draftContent), EditableText: true},
+		filediff.Content{Path: "memory/users/preference.yaml", Data: []byte(headContent), EditableText: true},
+		filediff.Content{Path: "memory/users/preference.yaml", Data: []byte(draftContent), EditableText: true},
 		filediff.Options{},
 	)
 	if err != nil {

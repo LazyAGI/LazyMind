@@ -345,6 +345,7 @@ type UserPluginSetting struct {
 	UserID    string    `gorm:"column:user_id;type:varchar(255);primaryKey"`
 	PluginRef string    `gorm:"column:plugin_ref;type:varchar(512);primaryKey"`
 	Enabled   bool      `gorm:"column:enabled;not null;default:false"`
+	CallMode  string    `gorm:"column:call_mode;type:varchar(16);not null;default:disabled"` // auto | manual | disabled
 	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
 }
 

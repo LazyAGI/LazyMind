@@ -177,12 +177,6 @@ func (w *Worker) dispatch(ctx context.Context, task orm.ResourceUpdateTask) task
 	if task.TaskType == orm.ResourceUpdateTaskTypeAutoCommitSkillDraft {
 		return w.handleAutoCommitSkillDraft(ctx, task)
 	}
-	if task.TaskType == orm.ResourceUpdateTaskTypeAutoCommitPersonalDraft {
-		return w.handleAutoCommitPersonalDraft(ctx, task)
-	}
-	if task.TaskType == orm.ResourceUpdateTaskTypeAutoApplyReview {
-		return w.handleAutoApplyReview(ctx, task)
-	}
 	if task.TaskType != orm.ResourceUpdateTaskTypeGenerateReview {
 		return taskOutcome{
 			Status:       orm.ResourceUpdateTaskStatusFailed,
@@ -194,8 +188,8 @@ func (w *Worker) dispatch(ctx context.Context, task orm.ResourceUpdateTask) task
 	switch task.ResourceType {
 	case orm.ResourceUpdateResourceTypeSkill:
 		return w.handleSkillGenerate(ctx, task)
-	case orm.ResourceUpdateResourceTypeMemory, orm.ResourceUpdateResourceTypeUserPreference:
-		return w.handleMemoryGenerate(ctx, task)
+	case orm.ResourceUpdateResourceTypeMemory:
+		return w.handleMemoryReview(ctx, task)
 	default:
 		return taskOutcome{
 			Status:       orm.ResourceUpdateTaskStatusFailed,

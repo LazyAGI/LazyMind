@@ -16,25 +16,27 @@ import (
 	"lazymind/core/store"
 )
 
-func TestCheckGroupAPIKeySelection(t *testing.T) {
+func TestCheckGroupRequiresRequestAPIKey(t *testing.T) {
 	tests := []struct {
 		name        string
 		requestBody string
+		wantStatus  int
 		wantAPIKey  string
 	}{
 		{
-			name:        "omitted key uses stored key",
+			name:        "omitted key is rejected",
 			requestBody: `{"provider_name":"Qwen","base_url":"https://dashscope.aliyuncs.com/","dry_run":false}`,
-			wantAPIKey:  "stored-key",
+			wantStatus:  http.StatusBadRequest,
 		},
 		{
-			name:        "empty key uses stored key",
+			name:        "empty key is rejected",
 			requestBody: `{"provider_name":"Qwen","base_url":"https://dashscope.aliyuncs.com/","api_key":"","dry_run":false}`,
-			wantAPIKey:  "stored-key",
+			wantStatus:  http.StatusBadRequest,
 		},
 		{
 			name:        "provided key takes precedence",
 			requestBody: `{"provider_name":"Qwen","base_url":"https://dashscope.aliyuncs.com/","api_key":"request-key","dry_run":false}`,
+			wantStatus:  http.StatusOK,
 			wantAPIKey:  "request-key",
 		},
 	}
@@ -135,8 +137,11 @@ func TestCheckGroupAPIKeySelection(t *testing.T) {
 
 			CheckGroup(rec, req)
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("expected status %d, got %d: %s", tc.wantStatus, rec.Code, rec.Body.String())
+			}
+			if tc.wantStatus != http.StatusOK {
+				return
 			}
 			if received.APIKey != tc.wantAPIKey {
 				t.Fatalf("upstream api key = %q, want %q", received.APIKey, tc.wantAPIKey)
