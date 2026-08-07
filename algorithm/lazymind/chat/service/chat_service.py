@@ -649,10 +649,22 @@ async def _handle_chat_impl(
 
     # Register the active session so the cancel endpoint can find it by conversation_id.
     _conv_id_key = conversation_id  # already stripped above
-    if _conv_id_key and not runtime.context_usage_preview and not runtime.context_prompt_export:
+    is_context_inspection = runtime.context_usage_preview or runtime.context_prompt_export
+    if _conv_id_key and not is_context_inspection:
         _active_sessions[_conv_id_key] = conversation.session_id
-    lazyllm.globals._init_sid(sid=conversation.session_id)
-    lazyllm.locals._init_sid(sid=conversation.session_id)
+    lazyllm_session_id = conversation.session_id
+    if is_context_inspection:
+        lazyllm_session_id = (
+            f'{conversation.session_id}:context-inspection:'
+            f'{time.time_ns()}:{threading.get_ident()}'
+        )
+    lazyllm.globals._init_sid(sid=lazyllm_session_id)
+    lazyllm.locals._init_sid(sid=lazyllm_session_id)
+    if is_context_inspection:
+        lazyllm.globals.clear()
+        lazyllm.locals.clear()
+        lazyllm.globals._init_sid(sid=lazyllm_session_id)
+        lazyllm.locals._init_sid(sid=lazyllm_session_id)
     inject_model_config(runtime.llm_config)
     inject_tool_config(runtime.tool_config)
     _inject_reader_config(runtime.ocr_config)
@@ -1069,37 +1081,43 @@ async def _handle_chat_impl(
     )
     executor = AgentExecutor()
     react_agent = executor.create_agent(llm, plan)
-    if runtime.context_usage_preview or runtime.context_prompt_export:
-        agent_context = await asyncio.to_thread(
-            react_agent.describe_context, agent_history, language_query,
-        )
-        if runtime.context_prompt_export:
-            prompt_markdown = render_context_markdown(plan, agent_context)
-            if task_profile and task_profile.routing_review_required:
-                prompt_markdown = '\n'.join([
-                    '> ⚠️ This is a rule-only prompt preview and may be inaccurate.',
-                    f'> Reason: {task_profile.routing_review_reason}',
-                    '> ChatAgent will resolve this uncertainty when the request executes.',
-                    '',
-                    prompt_markdown,
-                ])
-            return {'prompt_markdown': prompt_markdown}
-        report = await estimate_context_usage(plan, agent_context)
-        report_data = report_to_dict(report)
-        llm_enhanced = runtime.context_preview_allow_llm_routing
-        requires_llm = bool(
-            not llm_enhanced and task_profile and task_profile.routing_review_required
-        )
-        report_data.update({
-            'preview_accuracy': (
-                'llm_enhanced' if llm_enhanced
-                else 'rule_only' if requires_llm
-                else 'deterministic'
-            ),
-            'requires_llm': requires_llm,
-            'llm_reason': task_profile.routing_review_reason if requires_llm else '',
-        })
-        return report_data
+    if is_context_inspection:
+        try:
+            agent_context = await asyncio.to_thread(
+                react_agent.describe_context, agent_history, language_query,
+            )
+            if runtime.context_prompt_export:
+                prompt_markdown = render_context_markdown(plan, agent_context)
+                if task_profile and task_profile.routing_review_required:
+                    prompt_markdown = '\n'.join([
+                        '> ⚠️ This is a rule-only prompt preview and may be inaccurate.',
+                        f'> Reason: {task_profile.routing_review_reason}',
+                        '> ChatAgent will resolve this uncertainty when the request executes.',
+                        '',
+                        prompt_markdown,
+                    ])
+                return {'prompt_markdown': prompt_markdown}
+            report = await estimate_context_usage(plan, agent_context)
+            report_data = report_to_dict(report)
+            llm_enhanced = runtime.context_preview_allow_llm_routing
+            requires_llm = bool(
+                not llm_enhanced and task_profile and task_profile.routing_review_required
+            )
+            report_data.update({
+                'preview_accuracy': (
+                    'llm_enhanced' if llm_enhanced
+                    else 'rule_only' if requires_llm
+                    else 'deterministic'
+                ),
+                'requires_llm': requires_llm,
+                'llm_reason': task_profile.routing_review_reason if requires_llm else '',
+            })
+            return report_data
+        finally:
+            lazyllm.globals._init_sid(sid=lazyllm_session_id)
+            lazyllm.locals._init_sid(sid=lazyllm_session_id)
+            lazyllm.globals.clear()
+            lazyllm.locals.clear()
 
     async def event_stream() -> Any:
         final_result: Any = None
