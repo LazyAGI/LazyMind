@@ -27,6 +27,15 @@ def _register_items(value: Any) -> Any:
         for item in value:
             if isinstance(item, dict):
                 register_external_search_result(item, state)
+                for image in item.get('images') or []:
+                    image_url = str(image.get('url') if isinstance(image, dict) else image).strip()
+                    if image_url:
+                        register_external_search_result({
+                            'title': str(image.get('description') if isinstance(image, dict) else '').strip()
+                            or item.get('title') or 'Image',
+                            'url': image_url,
+                            'image_urls': [image_url],
+                        }, state)
                 index = item.get('citation_index')
                 if index and index in seen:
                     continue

@@ -35,6 +35,7 @@ import {
 import {
   type ChatSource,
   findSourceByCitationId,
+  findSourceByImageUrl,
   getSourceEvidenceText,
   getSourceLabel,
   getSourceSubtitle,
@@ -100,6 +101,7 @@ function normalizeBareUrls(content: string) {
 
 const ImageComponent = (props: any) => {
   const { t } = useTranslation();
+  const { markSources } = useContext(MarkdownRenderContext);
   const [imageLoadError, setImageLoadError] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
   const [resolvedSrc, setResolvedSrc] = useState(() =>
@@ -134,27 +136,36 @@ const ImageComponent = (props: any) => {
   }
 
   const { node: _node, src: _src, ...imageProps } = props;
+  const source = findSourceByImageUrl(markSources, props.src || "")
+    || findSourceByImageUrl(markSources, resolvedSrc);
 
   return (
-    <Image
-      {...imageProps}
-      src={resolvedSrc}
-      preview={{
-        visible: previewVisible,
-        onVisibleChange: setPreviewVisible,
-      }}
-      role="button"
-      tabIndex={0}
-      aria-label={props.alt || t("chat.previewImage")}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          setPreviewVisible(true);
-        }
-      }}
-      onError={() => setImageLoadError(true)}
-      onLoad={() => setImageLoadError(false)}
-    />
+    <span className="md-image-with-source">
+      <Image
+        {...imageProps}
+        src={resolvedSrc}
+        preview={{
+          visible: previewVisible,
+          onVisibleChange: setPreviewVisible,
+        }}
+        role="button"
+        tabIndex={0}
+        aria-label={props.alt || t("chat.previewImage")}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setPreviewVisible(true);
+          }
+        }}
+        onError={() => setImageLoadError(true)}
+        onLoad={() => setImageLoadError(false)}
+      />
+      {source && (
+        <button type="button" className="md-image-source" onClick={() => openSource(source)}>
+          {t("chat.references")} · {getSourceLabel(source)}
+        </button>
+      )}
+    </span>
   );
 };
 

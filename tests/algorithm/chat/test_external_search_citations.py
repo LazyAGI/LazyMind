@@ -75,6 +75,23 @@ def test_search_adapter_deduplicates_results_by_stable_ref():
     assert results[0]['ref'] == '[[1.1]]'
 
 
+def test_search_adapter_registers_image_results_as_sources():
+    class ImageSearch(FakeSearch):
+        def search(self, query: str, limit: int = 5):
+            return super().search(query, limit) + [{
+                'title': 'summary',
+                'url': '',
+                'images': [{'url': 'https://images.example.test/result.jpg', 'description': 'Result image'}],
+            }]
+
+    state = _setup_state()
+    enable_search_result_citations(ImageSearch()).search('agents')
+
+    image_source = state[CITATION_REFS_KEY]['2.1']
+    assert image_source['url'] == 'https://images.example.test/result.jpg'
+    assert image_source['image_urls'] == ['https://images.example.test/result.jpg']
+
+
 def test_get_content_and_get_contents_supplement_existing_sources():
     state = _setup_state()
     provider = enable_search_result_citations(FakeSearch())

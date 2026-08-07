@@ -94,6 +94,26 @@ def test_fetch_supplements_search_source_and_registers_url_aliases():
     assert state[CITATION_REFS_KEY]['1.1']['content'] == 'Fetched page content'
 
 
+def test_fetch_keeps_image_and_favicon_source_mapping():
+    state = _state()
+    page = upsert_external_source({
+        'url': 'https://example.test/article',
+        'title': 'Article',
+        'content': 'Content',
+        'metadata': {
+            'favicon_url': 'https://example.test/favicon.ico',
+            'image_urls': [
+                {'url': 'https://example.test/cover.png'},
+                {'url': 'https://example.test/cover.png'},
+            ],
+        },
+    }, state)
+
+    source = state[CITATION_REFS_KEY][page['citation_index']]
+    assert source['image_urls'] == ['https://example.test/cover.png']
+    assert source['favicon_url'] == 'https://example.test/favicon.ico'
+
+
 def test_external_search_aliases_deduplicate_provider_identifiers():
     state = _state()
     first = register_external_search_result({

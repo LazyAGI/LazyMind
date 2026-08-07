@@ -36,6 +36,26 @@
   }
 }
 
+.md-image-with-source {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.md-image-source {
+  border: 0;
+  padding: 0;
+  color: var(--color-fg-muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+
+  &:hover {
+    color: var(--color-accent-fg);
+  }
+}
+
 .md-source-popover {
   pointer-events: none;
 }

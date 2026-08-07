@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   findSourceByCitationId,
+  findSourceByImageUrl,
+  getCitationSources,
+  getDisplaySources,
+  getSearchSources,
   getSourceDedupKey,
   getSourceHref,
   getSourceLabel,
@@ -53,6 +57,70 @@ describe('chat source adapter', () => {
   it('finds sources using the internal citation locator without displaying it', () => {
     expect(findSourceByCitationId([external, knowledge], '3.1')).toBe(external);
     expect(getSourceLabel(findSourceByCitationId([external], '3.1'))).not.toContain('3.1');
+  });
+
+  it('keeps cited identities without passing searched-only sources to the body', () => {
+    const duplicatePage = { ...external, index: '3.2', source_roles: ['cited'] };
+    const searchedOnly = { ...external, index: '3.3', source_roles: ['searched'] };
+    expect(getCitationSources([
+      { ...external, source_roles: ['cited', 'searched'] },
+      duplicatePage,
+      searchedOnly,
+    ])).toEqual([
+      { ...external, source_roles: ['cited', 'searched'] },
+      duplicatePage,
+    ]);
+  });
+
+  it('keeps unified source roles while removing duplicates', () => {
+    const direct = {
+      source_type: 'external',
+      title: 'Direct page',
+      url: 'https://direct.example/page',
+    };
+
+    expect(getDisplaySources([{ ...external, source_roles: ['cited', 'searched'] }, knowledge, direct])).toEqual([
+      { ...external, source_roles: ['cited', 'searched'] },
+      { ...knowledge, source_roles: ['cited'] },
+      { ...direct, source_roles: ['cited'] },
+    ]);
+  });
+
+  it('shows every searched source without cited-only sources in the source drawer', () => {
+    const searchedOnly = {
+      source_type: 'external',
+      title: 'Search result',
+      url: 'https://search.example/result',
+      source_roles: ['searched'],
+    };
+
+    expect(getSearchSources([
+      { ...external, source_roles: ['cited', 'searched'] },
+      { ...knowledge, source_roles: ['cited'] },
+      searchedOnly,
+    ])).toEqual([
+      { ...external, source_roles: ['cited', 'searched'] },
+      searchedOnly,
+    ]);
+  });
+
+  it('opens legacy sessions whose sources are stored as an object map', () => {
+    expect(getDisplaySources({ '3.1': { ...external, index: undefined } })).toEqual([
+      { ...external, index: '3.1', source_roles: ['cited'] },
+    ]);
+    expect(getDisplaySources(undefined)).toEqual([]);
+    expect(getSearchSources({ '3.1': { ...external, index: undefined } })).toEqual([
+      { ...external, index: '3.1', source_roles: ['cited'] },
+    ]);
+  });
+
+  it('finds the page source for a rendered image', () => {
+    const source = {
+      ...external,
+      image_urls: [{ url: 'https://cdn.example.com/cover.png' }],
+    };
+
+    expect(findSourceByImageUrl([source], 'https://cdn.example.com/cover.png')).toBe(source);
   });
 
   it('does not open unsafe external schemes', () => {

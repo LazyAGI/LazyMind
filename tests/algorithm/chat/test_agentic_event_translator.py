@@ -6,6 +6,7 @@ from lazymind.chat.service.component.tool_rendering import (
 from lazymind.chat.service.utils.citations import (
     CITATION_REFS_KEY,
     annotate_citations,
+    register_external_search_result,
 )
 
 
@@ -76,6 +77,27 @@ def test_final_answer_citation_display_starts_from_first_cited_document():
     assert '[3](#source-3.1 "doc-3.md")' not in text
     assert sources[0]['index'] == '3.1'
     assert sources[0]['display_index'] == 1
+
+
+def test_translator_merges_searched_and_cited_sources_with_roles():
+    translator = AgentEventFrameTranslator(query='q')
+    first = register_external_search_result({
+        'title': 'First',
+        'url': 'https://example.test/first',
+        'snippet': 'First snippet',
+    }, translator.citation_state)
+    register_external_search_result({
+        'title': 'Second',
+        'url': 'https://example.test/second',
+        'snippet': 'Second snippet',
+    }, translator.citation_state)
+
+    frames = translator.finish(f'Use {first["ref"]}.')
+
+    assert [source['title'] for source in frames[-1]['sources']] == ['First', 'Second']
+    assert frames[-1]['sources'][0]['source_roles'] == ['cited', 'searched']
+    assert frames[-1]['sources'][1]['source_roles'] == ['searched']
+    assert 'searched_sources' not in frames[-1]
 
 
 def test_translator_counts_tool_call_turns_not_individual_calls():

@@ -1,6 +1,6 @@
-import { Avatar, Button, Divider, Flex, message, Spin, Tooltip } from "antd";
+import { Avatar, Button, Divider, Drawer, Flex, message, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -12,6 +12,7 @@ import {
   ExclamationCircleOutlined,
   LikeFilled,
   LikeOutlined,
+  LinkOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import {
@@ -29,7 +30,11 @@ import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
 import {
   type ChatSource,
+  type ChatSourceCollection,
+  getSearchSources,
   getSourceDedupKey,
+  getSourceEvidenceText,
+  getSourceIcon,
   getSourceLabel,
   getSourceSubtitle,
   isExternalSource,
@@ -214,6 +219,7 @@ const AssistantMessage = (props: any) => {
   } = props;
   const citeButtonRef = useRef<HTMLButtonElement | null>(null);
   const citeSelectionTextRef = useRef("");
+  const [drawerSources, setDrawerSources] = useState<ChatSource[]>([]);
   // Debounced backend persistence for ask-card answers. Created once per component
   // instance with useRef so it is stable across re-renders.
   const persistAskAnswersRef = useRef(
@@ -370,18 +376,6 @@ const AssistantMessage = (props: any) => {
     );
   }
 
-  function getDisplaySources(sources: ChatSource[]) {
-    const seen = new Set<string>();
-    return Object.values(sources).filter((source, sourceIndex) => {
-      const key = getSourceDedupKey(source, sourceIndex);
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    });
-  }
-
   function handleOpenSource(source: ChatSource) {
     if (!isExternalSource(source) && source.dataset_id === "default") {
       message.error(t("chat.tempFileNotSupportJump"));
@@ -390,31 +384,57 @@ const AssistantMessage = (props: any) => {
     openSource(source);
   }
 
-  function renderSources() {
-    const sources = item.sources as ChatSource[];
-    if (!sources || sources.length < 1) {
-      return <></>;
-    }
+  function renderSourceButton(sources?: ChatSourceCollection) {
+    const displaySources = getSearchSources(sources);
+    if (!displaySources.length) return null;
     return (
-      <div className="chat-assistant-msg-knowledge-info">
-        {getDisplaySources(sources).map((source, sourceIndex) => {
-          const subtitle = getSourceSubtitle(source);
-          return (
-            <div
-              className="chat-assistant-msg-knowledge"
-              key={getSourceDedupKey(source, sourceIndex)}
-            >
-              <span
-                className="knowledgeName"
+      <Tooltip title={t("chat.references")}>
+        <Button
+          className="tool-btn source-btn"
+          icon={<LinkOutlined />}
+          onClick={() => setDrawerSources(displaySources)}
+        >
+          {t("chat.references")} · {displaySources.length}
+        </Button>
+      </Tooltip>
+    );
+  }
+
+  function renderSourceDrawer() {
+    return (
+      <Drawer
+        className="chat-source-drawer"
+        title={`${t("chat.references")} · ${drawerSources.length}`}
+        placement="right"
+        width={400}
+        open={drawerSources.length > 0}
+        onClose={() => setDrawerSources([])}
+      >
+        <div className="chat-source-list">
+          {drawerSources.map((source, sourceIndex) => {
+            const icon = getSourceIcon(source);
+            return (
+              <button
+                type="button"
+                className="chat-source-item"
+                key={getSourceDedupKey(source, sourceIndex)}
                 onClick={() => handleOpenSource(source)}
               >
-                {getSourceLabel(source)}
-              </span>
-              {subtitle && <span className="sourceSubtitle">{subtitle}</span>}
-            </div>
-          );
-        })}
-      </div>
+                <span className="chat-source-item-heading">
+                  {icon ? <img src={icon} alt="" /> : <LinkOutlined />}
+                  {getSourceSubtitle(source) || t("chat.references")}
+                </span>
+                <strong>{getSourceLabel(source)}</strong>
+                {getSourceEvidenceText(source) && (
+                  <span className="chat-source-item-content">
+                    {getSourceEvidenceText(source)}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </Drawer>
     );
   }
 
@@ -646,40 +666,6 @@ const AssistantMessage = (props: any) => {
       .catch(() => {});
   }
 
-  function renderAnswerSources(answerIndex: number) {
-    const answer = item.answers?.[answerIndex];
-    if (!answer) {
-      return null;
-    }
-
-    const sources = answer.sources as ChatSource[];
-    if (!sources || sources.length < 1) {
-      return null;
-    }
-
-    return (
-      <div className="chat-assistant-msg-knowledge-info">
-        {getDisplaySources(sources).map((source, sourceIndex) => {
-          const subtitle = getSourceSubtitle(source);
-          return (
-            <div
-              className="chat-assistant-msg-knowledge"
-              key={getSourceDedupKey(source, sourceIndex)}
-            >
-              <span
-                className="knowledgeName"
-                onClick={() => handleOpenSource(source)}
-              >
-                {getSourceLabel(source)}
-              </span>
-              {subtitle && <span className="sourceSubtitle">{subtitle}</span>}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
   function renderAnswerFooter(answerIndex: number, showFullToolbar = false) {
     const answer = item.answers?.[answerIndex];
     if (!answer) {
@@ -717,6 +703,7 @@ const AssistantMessage = (props: any) => {
                 />
               </Tooltip>
             )}
+            {renderSourceButton(answer.sources)}
           </div>
           {showFullToolbar && (
             <Flex>
@@ -789,6 +776,7 @@ const AssistantMessage = (props: any) => {
                 />
               </Tooltip>
             )}
+            {renderSourceButton(item.sources)}
           </div>
           <Flex>
             {currentFeedback ===
@@ -997,12 +985,6 @@ const AssistantMessage = (props: any) => {
                   ? renderAnswerFooter
                   : undefined
               }
-              renderSources={
-                item.finish_reason ===
-                ChatConversationsResponseFinishReasonEnum.FinishReasonStop
-                  ? renderAnswerSources
-                  : undefined
-              }
               initialSelectedIndex={item.selected_answer_index}
               initialPreference={item.answer_preference}
               isStreaming={
@@ -1027,6 +1009,7 @@ const AssistantMessage = (props: any) => {
           onSubmit={handleFeedbackSubmit}
           submitLoading={feedbackState.isSubmitting}
         />
+        {renderSourceDrawer()}
       </div>
     );
   }
@@ -1056,12 +1039,6 @@ const AssistantMessage = (props: any) => {
           {item.finish_reason ===
             ChatConversationsResponseFinishReasonEnum.FinishReasonStop &&
             !item.onboardingInfo &&
-            renderSources()}
-
-          {}
-          {item.finish_reason ===
-            ChatConversationsResponseFinishReasonEnum.FinishReasonStop &&
-            !item.onboardingInfo &&
             renderFooter()}
         </div>
         {(item.ask_pending || index === length - 1) && renderBottom()}
@@ -1080,6 +1057,7 @@ const AssistantMessage = (props: any) => {
         onSubmit={handleFeedbackSubmit}
         submitLoading={feedbackState.isSubmitting}
       />
+      {renderSourceDrawer()}
     </div>
   );
 };

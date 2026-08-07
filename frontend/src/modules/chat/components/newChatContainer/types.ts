@@ -3,7 +3,7 @@ import {
   ChatConversationsRequestActionEnum,
   Query,
 } from "@/api/generated/chatbot-client";
-import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
+import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
 import type { SendMessageParams } from "../ChatInput";
 import type { ChatMention } from "../ChatInput/MentionEditor";
 import type { ChatConfig } from "../ChatConfigs";
@@ -77,7 +77,7 @@ export interface ChatMessage {
   thinking_duration_s?: number | string;
   thinking_time_s?: number | string;
   history_id?: string;
-  sources?: ChatSource[];
+  sources?: ChatSourceCollection;
   feed_back?: string;
   answers?: Array<{
     content: string;
@@ -85,7 +85,7 @@ export interface ChatMessage {
     history_id?: string;
     raw_content?: string;
     reasoning_content?: string;
-    sources?: ChatSource[];
+    sources?: ChatSourceCollection;
     thinking_duration_s?: string;
   }>;
   answer_index?: number;

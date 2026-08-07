@@ -7,7 +7,7 @@ import type { ConversationHistoryItem as CoreConversationHistoryItem } from "@/a
 import { RoleTypes } from "@/modules/chat/constants/common";
 import { splitThinkingContent } from "@/modules/chat/utils/thinking";
 import type { ChatMention } from "@/modules/chat/components/ChatInput/MentionEditor";
-import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
+import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
 
 const CITE_MESSAGE_PATTERN =
   /<cite_message>([\s\S]*?)<\/cite_message>\s*/i;
@@ -38,7 +38,7 @@ export type ConversationHistoryRecord = Omit<
   > & {
     feed_back?: BaseChatHistory["feed_back"] | number | string;
     input?: Query[] | Array<Record<string, unknown>> | null;
-    sources?: ChatSource[] | Array<Record<string, unknown>>;
+    sources?: ChatSourceCollection | Array<Record<string, unknown>>;
     second_id?: string;
     second_reasoning_content?: string;
     second_result?: string;

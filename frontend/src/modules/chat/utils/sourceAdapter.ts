@@ -12,6 +12,10 @@ interface BaseChatSource {
   group_name?: string;
   segment_number?: number;
   favicon_url?: string;
+  image_url?: string;
+  image_urls?: Array<string | { url?: string }>;
+  image_markdown?: string;
+  source_roles?: Array<"cited" | "searched">;
   metadata?: Record<string, unknown>;
 }
 
@@ -29,6 +33,7 @@ export interface KnowledgeBaseChatSource extends BaseChatSource {
 }
 
 export type ChatSource = ExternalChatSource | KnowledgeBaseChatSource;
+export type ChatSourceCollection = ChatSource[] | Record<string, ChatSource> | null;
 
 function externalHostname(source: ChatSource) {
   try {
@@ -99,6 +104,72 @@ export function getSourceDedupKey(source: ChatSource, fallbackIndex = 0) {
     return `external:${normalizedExternalUrl(source) || getSourceCitationId(source) || fallbackIndex}`;
   }
   return `knowledge_base:${source.dataset_id || ""}:${source.document_id || source.file_name || getSourceCitationId(source) || fallbackIndex}`;
+}
+
+function sourceValues(collection: ChatSourceCollection) {
+  return (Array.isArray(collection)
+    ? collection
+    : Object.entries(collection || {}).map(([index, source]) => (
+      source?.index || source?.citation_id ? source : { ...source, index }
+    ))).filter(Boolean);
+}
+
+export function getCitationSources(sources: ChatSourceCollection = []) {
+  const values = sourceValues(sources);
+  if (!values.some((source) => source.source_roles?.length)) return values;
+  return values.filter((source) => source.source_roles?.includes("cited"));
+}
+
+export function getDisplaySources(
+  sources: ChatSourceCollection = [],
+) {
+  const merged = new Map<string, ChatSource>();
+  const add = (source: ChatSource, fallbackRole: "cited" | "searched", index: number) => {
+    const key = getSourceDedupKey(source, index);
+    const current = merged.get(key);
+    const roles = new Set(current?.source_roles || []);
+    (source.source_roles?.length ? source.source_roles : [fallbackRole])
+      .forEach((role) => roles.add(role));
+    merged.set(key, { ...source, ...current, source_roles: [...roles] });
+  };
+  const cited = sourceValues(sources);
+  cited.forEach((source, index) => add(source, "cited", index));
+  return [...merged.values()];
+}
+
+export function getSearchSources(sources: ChatSourceCollection = []) {
+  const displaySources = getDisplaySources(sources);
+  if (!sourceValues(sources).some((source) => source.source_roles?.length)) return displaySources;
+  const searchedSources = displaySources.filter((source) => source.source_roles?.includes("searched"));
+  return searchedSources;
+}
+
+function comparableImageUrl(value: string) {
+  try {
+    const url = new URL(value, "http://lazymind.local");
+    if (url.pathname.includes("/static-files/")) url.search = "";
+    return `${url.host}${url.pathname}${url.search}`;
+  } catch {
+    return value.trim();
+  }
+}
+
+function getSourceImageUrls(source: ChatSource) {
+  const metadata = source.metadata || {};
+  const values: unknown[] = [source.image_url, metadata.image_url];
+  values.push(...(source.image_urls || []));
+  if (Array.isArray(metadata.image_urls)) values.push(...metadata.image_urls);
+  const markdown = source.image_markdown || "";
+  values.push(...[...markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map((match) => match[1]));
+  return values
+    .map((value) => typeof value === "string" ? value : (value as { url?: string })?.url || "")
+    .filter(Boolean)
+    .map(comparableImageUrl);
+}
+
+export function findSourceByImageUrl(sources: ChatSource[], imageUrl: string) {
+  const target = comparableImageUrl(imageUrl);
+  return sources.find((source) => getSourceImageUrls(source).includes(target));
 }
 
 export function getSourceHref(source: ChatSource) {

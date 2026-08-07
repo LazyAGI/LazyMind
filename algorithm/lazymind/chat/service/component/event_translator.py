@@ -6,9 +6,11 @@ from typing import Any, Optional
 from lazymind.config import config as _cfg
 from lazymind.chat.service.utils import (
     build_stream_citation_scanner,
+    merge_source_views,
     reset_citation_state,
     rewrite_markdown_image_urls,
     rewrite_citations,
+    registered_search_sources,
 )
 from lazymind.chat.service.component.tool_rendering import (
     _preview_language,
@@ -191,7 +193,10 @@ class AgentEventFrameTranslator:
             for chunk in _iter_text_chunks(final_text, chunk_size):
                 frames.append(_stream_frame(text=chunk))
 
-        sources = output.get('sources') or self._collect_sources()
+        sources = merge_source_views(
+            output.get('sources') or self._collect_sources(),
+            registered_search_sources(self.citation_state),
+        )
         if sources:
             frames.append(_stream_frame(text='', sources=sources))
 

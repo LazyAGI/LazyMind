@@ -23,6 +23,7 @@ CITATION_DOC_KEY_MAP_KEY = '_citation_doc_key_map'
 CITATION_NEXT_DOC_KEY = '_citation_next_doc_index'
 CITATION_DOC_CHUNK_NEXT_KEY = '_citation_next_chunk_index_map'
 EXTERNAL_SOURCE_KEY_MAP_KEY = '_external_source_key_map'
+SEARCHED_SOURCE_INDICES_KEY = '_searched_source_indices'
 CITATION_INDEX_PATTERN = r'\d+\.\d+'
 CITATION_PATTERN = re.compile(r'\[\[(' + CITATION_INDEX_PATTERN + r')\]\]')
 SOURCE_LINK_PATTERN = re.compile(r'\[(\d+)\]\(#source-(' + CITATION_INDEX_PATTERN + r')(?:\s+"[^"]*")?\)')
@@ -195,6 +196,11 @@ def register_external_search_result(item: dict[str, Any], config: dict[str, Any]
 
     refs = config.setdefault(CITATION_REFS_KEY, {})
     key_map = config.setdefault(EXTERNAL_SOURCE_KEY_MAP_KEY, {})
+    image_urls = [
+        str(image.get('url') if isinstance(image, dict) else image).strip()
+        for image in item.get('image_urls') or []
+        if str(image.get('url') if isinstance(image, dict) else image).strip()
+    ]
     index = next((key_map[key] for key in keys if key_map.get(key) in refs), None)
     source = refs.get(index) if index is not None else None
     if not isinstance(source, dict):
@@ -213,9 +219,47 @@ def register_external_search_result(item: dict[str, Any], config: dict[str, Any]
             source['url'] = url
         if not source.get('content') and item.get('snippet'):
             source['content'] = str(item['snippet']).strip()
+    if image_urls:
+        source['image_urls'] = list(dict.fromkeys(image_urls))
     for key in keys:
         key_map[key] = index
+    searched_indices = config.setdefault(SEARCHED_SOURCE_INDICES_KEY, [])
+    if index not in searched_indices:
+        searched_indices.append(index)
     return _attach_external_ref(item, index)
+
+
+def registered_search_sources(config: dict[str, Any]) -> list[dict[str, Any]]:
+    refs = config.get(CITATION_REFS_KEY) or {}
+    return [
+        {**refs[index], 'index': index}
+        for index in config.get(SEARCHED_SOURCE_INDICES_KEY) or []
+        if isinstance(refs.get(index), dict)
+    ]
+
+
+def merge_source_views(
+    cited_sources: list[dict[str, Any]],
+    searched: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: OrderedDict[str, dict[str, Any]] = OrderedDict()
+
+    def add(source: dict[str, Any], role: str) -> None:
+        index = str(source.get('index') or source.get('citation_id') or '')
+        key = index or _external_url_key(source.get('url')) or repr(source)
+        current = merged.setdefault(key, dict(source))
+        roles = list(current.get('source_roles') or [])
+        if role not in roles:
+            roles.append(role)
+        current['source_roles'] = roles
+
+    for source in cited_sources or []:
+        if isinstance(source, dict):
+            add(source, 'cited')
+    for source in searched or []:
+        if isinstance(source, dict):
+            add(source, 'searched')
+    return list(merged.values())
 
 
 def upsert_external_source(page: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
@@ -231,6 +275,13 @@ def upsert_external_source(page: dict[str, Any], config: dict[str, Any]) -> dict
     source = refs.get(index) if index is not None else None
     source_action = 'supplemented_source' if isinstance(source, dict) else 'new_source'
     best_url = urls[0]
+    metadata = page.get('metadata') if isinstance(page.get('metadata'), dict) else {}
+    favicon_url = str(metadata.get('favicon_url') or '').strip()
+    image_urls = [
+        str(item.get('url') if isinstance(item, dict) else item).strip()
+        for item in metadata.get('image_urls') or []
+        if str(item.get('url') if isinstance(item, dict) else item).strip()
+    ]
     if not isinstance(source, dict):
         index = _next_external_citation_index(config)
         source = {
@@ -246,6 +297,10 @@ def upsert_external_source(page: dict[str, Any], config: dict[str, Any]) -> dict
             source['title'] = title
         source['url'] = best_url
         source['content'] = content
+    if image_urls:
+        source['image_urls'] = list(dict.fromkeys(image_urls))
+    if favicon_url:
+        source['favicon_url'] = favicon_url
 
     for key in keys:
         key_map[key] = index
@@ -317,7 +372,7 @@ def build_source_node_from_item(index: Any, item: dict[str, Any]) -> dict[str, A
     }
     image_url = metadata.get('image_url') or item.get('image_url')
     if isinstance(image_url, str) and image_url.strip():
-        source['image_url'] = image_url.strip()
+        source['image_url'] = static_file_url_from_any(image_url.strip()) or image_url.strip()
     image_markdown = item.get('image_markdown')
     if isinstance(image_markdown, str) and image_markdown.strip():
         source['image_markdown'] = image_markdown.strip()
@@ -388,6 +443,7 @@ def reset_citation_state(config: dict[str, Any]) -> None:
     config[CITATION_NEXT_DOC_KEY] = 1
     config[CITATION_DOC_CHUNK_NEXT_KEY] = {}
     config[EXTERNAL_SOURCE_KEY_MAP_KEY] = {}
+    config[SEARCHED_SOURCE_INDICES_KEY] = []
     config[IMAGE_URL_REGISTRY_KEY] = {}
 
 

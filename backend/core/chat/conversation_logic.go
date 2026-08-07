@@ -1079,6 +1079,7 @@ func handleNonStreamChat(
 		"delta":           "",
 		"finish_reason":   "FINISH_REASON_STOP",
 		"history_id":      historyID,
+		"sources":         sources,
 	})
 }
 
