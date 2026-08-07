@@ -225,10 +225,6 @@ def _safe_session_tools(
                 state_refreshed = True
         raise AssertionError('unreachable')
 
-    def resume_workflow() -> Dict[str, Any]:
-        """Resume this stopped Session; Host injects lifecycle command metadata."""
-        return toolkit.resume_workflow(session_id())
-
     def list_workflow_inputs() -> Dict[str, Any]:
         """List durable input bindings for this Session."""
         return toolkit.list_workflow_inputs(session_id())
@@ -252,8 +248,8 @@ def _safe_session_tools(
         )
 
     return [
-        get_workflow_state, get_ready_steps, advance_step, resume_workflow,
-        list_workflow_inputs, list_artifacts, read_artifact, patch_artifact,
+        get_workflow_state, get_ready_steps, advance_step, list_workflow_inputs,
+        list_artifacts, read_artifact, patch_artifact,
     ]
 
 
@@ -296,34 +292,6 @@ def _safe_authoring_tools(toolkit: HostWorkflowToolkit) -> List[Any]:
             )
         value = toolkit.get_workflow_draft(draft_id)
         cfg['workflow_authoring_draft_version'] = int(value.get('version') or 0)
-        return value
-
-    def workflow_connection_status() -> Dict[str, Any]:
-        """Verify Workflow API connectivity."""
-        return toolkit.workflow_connection_status()
-
-    def list_workflows() -> Dict[str, Any]:
-        """List exact Workflow references available for selection."""
-        return toolkit.list_workflows()
-
-    def get_workflow(workflow_id: str) -> Dict[str, Any]:
-        """Select and read a Workflow; Host pins its current revision."""
-        value = toolkit.get_workflow(workflow_id)
-        cfg['workflow_authoring_workflow_ref'] = str(value.get('workflow_ref') or workflow_id)
-        return value
-
-    def list_skills() -> Dict[str, Any]:
-        """List Skills available for Workflow conversion."""
-        return toolkit.list_skills()
-
-    def get_skill_conversion_context(skill_id: str) -> Dict[str, Any]:
-        """Select a Skill snapshot; Host retains revision and tree hash."""
-        value = toolkit.get_skill_conversion_context(skill_id)
-        cfg['workflow_authoring_skill_context'] = {
-            'skill_id': skill_id,
-            'revision_id': str(value.get('revision_id') or ''),
-            'tree_hash': str(value.get('tree_hash') or ''),
-        }
         return value
 
     def create_workflow_draft(name: str, files: Dict[str, str]) -> Dict[str, Any]:
@@ -379,11 +347,9 @@ def _safe_authoring_tools(toolkit: HostWorkflowToolkit) -> List[Any]:
         return toolkit.publish_workflow(str(cfg['workflow_authoring_draft_id']))
 
     return [
-        workflow_connection_status, list_workflows, get_workflow,
-        list_skills, get_skill_conversion_context, create_workflow_draft,
-        list_workflow_drafts, select_workflow_draft, get_workflow_draft,
-        update_workflow_draft_file, validate_workflow_draft,
-        get_workflow_diagnostics, publish_workflow,
+        create_workflow_draft, list_workflow_drafts, select_workflow_draft,
+        get_workflow_draft, update_workflow_draft_file,
+        validate_workflow_draft, get_workflow_diagnostics, publish_workflow,
     ]
 
 
@@ -629,6 +595,15 @@ def _is_bound_workflow_trigger(name: str) -> bool:
     return name.startswith('trigger_') and name.endswith('_workflow')
 
 
+def _workflow_tool_group(name: str, desc: str, tools: List[Any], *, lazy: bool = True) -> Dict[str, Any]:
+    return {
+        'name': name,
+        'desc': desc,
+        'lazy': lazy,
+        'tools': tools,
+    }
+
+
 def resolve_workflow_injection(
     workflow_context: Optional[Dict[str, Any]],
     conversation_id: str = '',
@@ -706,7 +681,7 @@ def resolve_workflow_injection(
     ).expose(candidate_tools)
     execution_tools = {
         'workflow_connection_status', 'get_workflow', 'get_workflow_state',
-        'get_ready_steps', 'advance_step', 'resume_workflow',
+        'get_ready_steps', 'advance_step',
         'list_workflow_inputs', 'get_workflow_command',
         'list_artifacts', 'read_artifact', 'patch_artifact', 'delete_artifact',
     }
@@ -723,36 +698,32 @@ def resolve_workflow_injection(
         handoff = _handoff_tool(lambda: session_holder.get('session_id', ''))
         tools = [
             *[tool for tool in tools if _is_bound_workflow_trigger(tool.__name__)],
-            *[
-                tool for tool in _safe_session_tools(
-                    toolkit, lambda: session_holder.get('session_id', ''),
-                )
-                if tool.__name__ != 'resume_workflow'
-            ],
+            *_safe_session_tools(toolkit, lambda: session_holder.get('session_id', '')),
             handoff,
         ]
     elif not session_id:
         trigger_entry_tools = [tool for tool in tools if _is_bound_workflow_trigger(tool.__name__)]
+        authoring_tools = _safe_authoring_tools(toolkit)
+        authoring_group = _workflow_tool_group(
+            'workflow_authoring',
+            (
+                'Create, edit, validate, diagnose, or publish Workflow drafts. '
+                'Use only when the user explicitly asks to author or modify a Workflow.'
+            ),
+            authoring_tools,
+        )
         if trigger_entry_tools:
-            handoff = _handoff_tool(lambda: session_holder.get('session_id', ''))
+            # Discovery mode: expose triggers directly so the model can route
+            # from the injected catalog without a gateway hop. Execution tools
+            # remain hidden until a Workflow is selected or active.
             tools = [
                 *trigger_entry_tools,
-                *[
-                    tool for tool in _safe_session_tools(
-                        toolkit, lambda: session_holder.get('session_id', ''),
-                    )
-                    if tool.__name__ != 'resume_workflow'
-                ],
-                handoff,
-                *_safe_authoring_tools(toolkit),
+                authoring_group,
             ]
         else:
-            tools = _safe_authoring_tools(toolkit)
+            tools = [authoring_group]
     if session_id:
         tools = _safe_session_tools(toolkit, session_id)
-        status = str(projection.get('status') or context.get('status') or '').lower()
-        if status != 'stopped':
-            tools = [tool for tool in tools if tool.__name__ != 'resume_workflow']
         patch.update({
             'workflow_id': workflow_id,
             'workflow_session_id': session_id,
