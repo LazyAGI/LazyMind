@@ -115,9 +115,7 @@ function sourceValues(collection: ChatSourceCollection) {
 }
 
 export function getCitationSources(sources: ChatSourceCollection = []) {
-  const values = sourceValues(sources);
-  if (!values.some((source) => source.source_roles?.length)) return values;
-  return values.filter((source) => source.source_roles?.includes("cited"));
+  return sourceValues(sources);
 }
 
 export function getDisplaySources(

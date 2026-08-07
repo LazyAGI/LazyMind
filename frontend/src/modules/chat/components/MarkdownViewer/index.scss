@@ -44,12 +44,15 @@
 }
 
 .md-image-source {
-  border: 0;
-  padding: 0;
+  display: block;
+  max-width: 100%;
   color: var(--color-fg-muted);
-  background: transparent;
-  cursor: pointer;
   font-size: 12px;
+  line-height: 18px;
+  overflow: hidden;
+  text-decoration: underline;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 
   &:hover {
     color: var(--color-accent-fg);

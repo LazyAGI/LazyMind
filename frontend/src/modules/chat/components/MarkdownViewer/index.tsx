@@ -99,6 +99,17 @@ function normalizeBareUrls(content: string) {
   });
 }
 
+function safeImageReferenceUrl(value: unknown) {
+  const url = typeof value === "string" ? value.trim() : "";
+  if (!url) return "";
+  try {
+    const parsed = new URL(url, "http://lazymind.local");
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? url : "";
+  } catch {
+    return "";
+  }
+}
+
 const ImageComponent = (props: any) => {
   const { t } = useTranslation();
   const { markSources } = useContext(MarkdownRenderContext);
@@ -138,6 +149,9 @@ const ImageComponent = (props: any) => {
   const { node: _node, src: _src, ...imageProps } = props;
   const source = findSourceByImageUrl(markSources, props.src || "")
     || findSourceByImageUrl(markSources, resolvedSrc);
+  const sourceUrl = safeImageReferenceUrl(source?.url)
+    || safeImageReferenceUrl(props.src)
+    || safeImageReferenceUrl(resolvedSrc);
 
   return (
     <span className="md-image-with-source">
@@ -160,10 +174,16 @@ const ImageComponent = (props: any) => {
         onError={() => setImageLoadError(true)}
         onLoad={() => setImageLoadError(false)}
       />
-      {source && (
-        <button type="button" className="md-image-source" onClick={() => openSource(source)}>
-          {t("chat.references")} · {getSourceLabel(source)}
-        </button>
+      {sourceUrl && (
+        <a
+          className="md-image-source"
+          href={sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={sourceUrl}
+        >
+          {sourceUrl}
+        </a>
       )}
     </span>
   );

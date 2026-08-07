@@ -682,7 +682,7 @@ const AssistantMessage = (props: any) => {
           style={{ margin: "12px 0" }}
         />
         <div className="chat-assistant-msg-tool-chat-toolbar">
-          <div>
+          <div className="chat-assistant-msg-tool-actions">
             <Tooltip title={t("chat.copy")}>
               <Button
                 className="tool-btn"
@@ -755,7 +755,7 @@ const AssistantMessage = (props: any) => {
       <>
         <Divider className="chat-assistant-msg-tool-divider" />
         <div className="chat-assistant-msg-tool-chat-toolbar">
-          <div>
+          <div className="chat-assistant-msg-tool-actions">
             <Tooltip title={t("chat.copy")}>
               <Button
                 className="tool-btn"

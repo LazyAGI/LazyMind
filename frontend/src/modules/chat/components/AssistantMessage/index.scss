@@ -190,9 +190,22 @@
 
   .source-btn {
     width: auto;
-    margin-right: 12px;
     color: #5f6b7e;
     font-size: 12px;
+    white-space: nowrap;
+  }
+}
+
+.chat-assistant-msg-tool-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+
+  .tool-btn {
+    flex: 0 0 auto;
+    margin-right: 0;
   }
 }
 

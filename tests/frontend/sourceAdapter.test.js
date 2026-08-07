@@ -59,7 +59,7 @@ describe('chat source adapter', () => {
     expect(getSourceLabel(findSourceByCitationId([external], '3.1'))).not.toContain('3.1');
   });
 
-  it('keeps cited identities without passing searched-only sources to the body', () => {
+  it('keeps every source identity for markdown citation and image matching', () => {
     const duplicatePage = { ...external, index: '3.2', source_roles: ['cited'] };
     const searchedOnly = { ...external, index: '3.3', source_roles: ['searched'] };
     expect(getCitationSources([
@@ -69,6 +69,7 @@ describe('chat source adapter', () => {
     ])).toEqual([
       { ...external, source_roles: ['cited', 'searched'] },
       duplicatePage,
+      searchedOnly,
     ]);
   });
 
