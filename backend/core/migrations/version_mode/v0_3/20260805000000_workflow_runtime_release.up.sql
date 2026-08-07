@@ -256,6 +256,17 @@ ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS driver_content TEXT NOT NULL 
 ALTER TABLE plugin_drafts ADD COLUMN driver_content TEXT NOT NULL DEFAULT '';
 
 -- +migrate Dialect postgres
+ALTER TABLE public.chat_histories
+    ADD COLUMN IF NOT EXISTS algorithm_id VARCHAR(64);
+CREATE INDEX IF NOT EXISTS idx_chat_histories_algorithm_create_time
+    ON public.chat_histories (algorithm_id, create_time);
+
+-- +migrate Dialect sqlite
+ALTER TABLE chat_histories ADD COLUMN algorithm_id varchar(64);
+CREATE INDEX IF NOT EXISTS idx_chat_histories_algorithm_create_time
+    ON chat_histories (algorithm_id, create_time);
+
+-- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS public.memory_current_entries (
     user_id VARCHAR(255) NOT NULL,
     path VARCHAR(1024) NOT NULL,
