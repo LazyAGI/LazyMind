@@ -109,6 +109,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+	externalExecutor, err := parseExternalAgentExecutor(raw)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	basicChatOnly, _ := raw["basic_chat_only"].(bool)
 	if basicChatOnly {
 		if runInBackground, _ := raw["run_in_background"].(bool); runInBackground {
@@ -247,15 +252,45 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		initialPluginSettings = rawPS
 	}
 
-	_, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, initialPluginSettings)
-	if err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to ensure conversation", err), http.StatusInternalServerError)
-		return
+	var seq int
+	var externalChat *externalAgentChatContext
+	if externalExecutor != nil {
+		externalChat, err = prepareExternalAgentChatConversation(r.Context(), db, externalExecutor, convID)
+		if err != nil {
+			status := http.StatusConflict
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				status = http.StatusNotFound
+			}
+			common.ReplyErr(w, err.Error(), status)
+			return
+		}
+		seq = externalChat.seq
+	} else {
+		_, seq, err = ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, initialPluginSettings)
+		if err != nil {
+			common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to ensure conversation", err), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	var histories []orm.ChatHistory
 	db.Where("conversation_id = ?", convID).Order("seq ASC").Find(&histories)
 	target := resolvePersistTarget(histories, raw, seq)
+	if externalExecutor != nil {
+		if dualReply {
+			common.ReplyErr(w, "invalid request: external agent does not support multiple answers", http.StatusConflict)
+			return
+		}
+		historyID := target.HistoryID
+		if historyID == "" {
+			historyID = newID("h_")
+		}
+		handleExternalAgentChat(
+			w, r, externalChat.service, externalExecutor,
+			convID, historyID, query, userID, target.Seq, stream,
+		)
+		return
+	}
 	upstreamHistories := historiesForUpstream(histories, target)
 	sessionID := upstreamSessionID(convID)
 	resourceContext, err := evolution.BuildChatResourceContext(r.Context(), db, userID, userName, sessionID)
@@ -273,7 +308,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(mentionedResources.PluginRefs) == 1 {
-		if active, activeErr := plugin.GetLatestSession(r.Context(), db, convID); activeErr == nil && active != nil && active.PluginRef != mentionedResources.PluginRefs[0] {
+		if active, activeErr := plugin.GetLatestSession(r.Context(), db, convID); activeErr == nil && active != nil && pluginSessionRef(active) != mentionedResources.PluginRefs[0] {
 			common.ReplyErr(w, "another plugin session is active; finish or close it before mentioning a different plugin", http.StatusConflict)
 			return
 		}
@@ -345,16 +380,9 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			reqBody["plugin_context"] = existing
 		}
 
-		// Promote enable_plugin and enable_subagent from agentic_config to top-level
-		// so Python chat_routes can receive them as explicit parameters.
-		if ac, ok := reqBody["agentic_config"].(map[string]any); ok {
-			if v, ok := ac["enable_plugin"]; ok {
-				reqBody["enable_plugin"] = v
-			}
-			if v, ok := ac["enable_subagent"]; ok {
-				reqBody["enable_subagent"] = v
-			}
-		}
+		// Explicit per-request flags (for example a Feishu workspace selection)
+		// take precedence over persisted conversation defaults.
+		promoteAgentRuntimeFlags(raw, reqBody)
 		if err := applyPluginSelection(
 			r.Context(), db, userID, reqBody, mentionedResources.PluginRefs,
 			mentionedResources.ExcludedPluginRefs,
@@ -466,6 +494,19 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, displayQuery, target, dualReply, historyExt)
+}
+
+func pluginSessionRef(session *orm.PluginSession) string {
+	if session == nil {
+		return ""
+	}
+	if ref := strings.TrimSpace(session.PluginRef); ref != "" {
+		return ref
+	}
+	if id := strings.TrimSpace(session.PluginID); id != "" {
+		return "builtin:" + id
+	}
+	return ""
 }
 
 // ResumeChat text POST /api/v1/conversations:resumeChat
@@ -1444,6 +1485,10 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL", userID)
+	q = q.Where(
+		"NOT EXISTS (SELECT 1 FROM external_agent_bindings " +
+			"WHERE external_agent_bindings.conversation_id = conversations.id)",
+	)
 	if keyword != "" {
 		q = q.Where("display_name LIKE ?", "%"+keyword+"%")
 	}

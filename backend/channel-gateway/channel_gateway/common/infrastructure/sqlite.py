@@ -963,6 +963,7 @@ class SQLiteGatewayStore(GatewayStore):
         history_next_page_token: str | None = None,
         *,
         consume_pending_turn: bool = False,
+        preserve_selection: bool = False,
     ) -> None:
         history_conversation_id = (
             conversation_id
@@ -978,7 +979,8 @@ class SQLiteGatewayStore(GatewayStore):
                 (account_id, external_address_hash),
             ).fetchone()
             value = _snapshot(row.get('snapshot_json')) if row else {}
-            value.pop('selection', None)
+            if not preserve_selection:
+                value.pop('selection', None)
             value.pop('new_conversation', None)
             if consume_pending_turn:
                 value.pop('pending_turn', None)
@@ -1004,7 +1006,10 @@ class SQLiteGatewayStore(GatewayStore):
                 ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
                     mode = 'active',
                     snapshot_json = EXCLUDED.snapshot_json,
-                    snapshot_expires_at = NULL,
+                    snapshot_expires_at = CASE WHEN %s
+                        THEN channel_navigation_states.snapshot_expires_at
+                        ELSE NULL
+                    END,
                     history_conversation_id =
                         EXCLUDED.history_conversation_id,
                     history_next_page_token =
@@ -1017,6 +1022,7 @@ class SQLiteGatewayStore(GatewayStore):
                     self._json(value),
                     history_conversation_id,
                     history_next_page_token or None,
+                    preserve_selection,
                 ),
             )
 

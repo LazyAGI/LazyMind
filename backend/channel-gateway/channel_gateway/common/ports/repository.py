@@ -73,6 +73,7 @@ class NavigationRepository(
         history_next_page_token: str | None = None,
         *,
         consume_pending_turn: bool = False,
+        preserve_selection: bool = False,
     ) -> None:
         ...
 

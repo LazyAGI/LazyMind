@@ -141,6 +141,7 @@ class ChannelCommandRouter:
             command,
             account_id,
             external_address_hash,
+            provider,
         )
         if required_kinds:
             continuation_catalog.update(
@@ -260,6 +261,7 @@ class ChannelCommandRouter:
         command: CommandEnvelope,
         account_id: str,
         external_address_hash: str,
+        provider: str = '',
     ) -> set[str]:
         parameters = command.parameters
         kinds = {
@@ -295,6 +297,8 @@ class ChannelCommandRouter:
             and not self._store.get_route(account_id, external_address_hash)
         ):
             kinds.add('knowledge_base')
+        if provider == 'feishu' and isinstance(command, ChatCommand):
+            kinds.update(('tool', 'workflow'))
         return kinds
 
     def _classifier_state(

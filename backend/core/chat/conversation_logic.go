@@ -960,6 +960,19 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	return body
 }
 
+func promoteAgentRuntimeFlags(raw, body map[string]any) {
+	agentConfig, _ := body["agentic_config"].(map[string]any)
+	for _, key := range []string{"enable_plugin", "enable_subagent"} {
+		if value, ok := raw[key].(bool); ok {
+			body[key] = value
+			continue
+		}
+		if value, ok := agentConfig[key].(bool); ok {
+			body[key] = value
+		}
+	}
+}
+
 // filtersFromSearchConfig builds upstream dataset filters from a search_config dict.
 func filtersFromSearchConfig(sc map[string]any) map[string]any {
 	if sc == nil {

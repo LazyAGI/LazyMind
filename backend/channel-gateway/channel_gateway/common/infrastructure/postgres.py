@@ -2482,6 +2482,7 @@ class GatewayStore:
         history_next_page_token: str | None = None,
         *,
         consume_pending_turn: bool = False,
+        preserve_selection: bool = False,
     ) -> None:
         history_conversation_id = (
             conversation_id
@@ -2511,18 +2512,29 @@ class GatewayStore:
                     mode = 'active',
                     snapshot_json = CASE
                         WHEN jsonb_typeof(channel_navigation_states.snapshot_json) = 'object'
-                            THEN CASE WHEN %s
+                            THEN CASE
+                            WHEN %s AND %s
                                 THEN channel_navigation_states.snapshot_json
-                                    - 'selection'
                                     - 'new_conversation'
                                     - 'pending_turn'
-                                ELSE channel_navigation_states.snapshot_json
-                                    - 'selection'
+                            WHEN %s
+                                THEN channel_navigation_states.snapshot_json
                                     - 'new_conversation'
+                                    - 'pending_turn'
+                                    - 'selection'
+                            WHEN %s
+                                THEN channel_navigation_states.snapshot_json
+                                    - 'new_conversation'
+                            ELSE channel_navigation_states.snapshot_json
+                                - 'new_conversation'
+                                - 'selection'
                             END
                         ELSE '{}'::jsonb
                     END,
-                    snapshot_expires_at = NULL,
+                    snapshot_expires_at = CASE WHEN %s
+                        THEN channel_navigation_states.snapshot_expires_at
+                        ELSE NULL
+                    END,
                     history_conversation_id = EXCLUDED.history_conversation_id,
                     history_next_page_token = EXCLUDED.history_next_page_token,
                     updated_at = CURRENT_TIMESTAMP
@@ -2533,6 +2545,10 @@ class GatewayStore:
                     history_conversation_id,
                     history_token,
                     consume_pending_turn,
+                    preserve_selection,
+                    consume_pending_turn,
+                    preserve_selection,
+                    preserve_selection,
                 ),
             )
 

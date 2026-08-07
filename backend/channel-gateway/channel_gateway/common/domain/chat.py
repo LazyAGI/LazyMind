@@ -65,6 +65,8 @@ class ChatOptions:
     filters: dict[str, Any] | None = None
     ask_answers_structured: dict[str, Any] | None = None
     thinking_depth: Literal['low', 'medium', 'high', 'max'] | None = None
+    enable_plugin: bool | None = None
+    executor: dict[str, Any] | None = None
     features: ChannelFeatureProfile = BASIC_CHAT_FEATURES
 
 
@@ -91,6 +93,7 @@ class CoreStreamUpdate:
     thinking_seconds: int | None = None
     conversation_id: str = ''
     history_id: str = ''
+    external_event: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

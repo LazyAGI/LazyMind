@@ -7,6 +7,7 @@ from channel_gateway.common.domain.channel import (
     ClaimedOutbound,
     RuntimeFence,
 )
+from channel_gateway.common.domain.chat import CoreStreamUpdate
 from channel_gateway.common.ports.messaging import ReplyStream
 from channel_gateway.common.ports.providers import ReceiverRepository
 from channel_gateway.common.ports.repository import NavigationRepository
@@ -58,6 +59,7 @@ class FeishuWorkspaceRepository(Protocol):
         history_next_page_token: str | None = None,
         *,
         consume_pending_turn: bool = False,
+        preserve_selection: bool = False,
     ) -> None:
         ...
 
@@ -414,6 +416,10 @@ class FeishuOutboundClient(Protocol):
         message_id: str = '',
         should_render: Callable[[], bool] | None = None,
         collapse_process: bool = True,
+        render_card: Callable[
+            [CoreStreamUpdate, bool, bool],
+            dict[str, Any],
+        ] | None = None,
     ) -> ReplyStream:
         ...
 

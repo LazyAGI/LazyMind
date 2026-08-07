@@ -20,6 +20,7 @@ import {
   Source,
 } from "@/api/generated/chatbot-client";
 import { AgentAppsAuth } from "@/components/auth";
+import { isAskPendingReadOnly } from "@/modules/chat/utils/message";
 import { ChatServiceApi, decideToolLimit } from "@/modules/chat/utils/request";
 import { usePluginStore } from "@/modules/chat/store/pluginPanel";
 import { PluginPanel } from "@/modules/chat/components/PluginPanel";
@@ -927,7 +928,10 @@ const AssistantMessage = (props: any) => {
     // Render ask_pending card if present
     if (item.ask_pending) {
       const askPending = item.ask_pending;
-      const isReadOnly = !!item.is_history || !!item.ask_answered;
+      const isReadOnly = isAskPendingReadOnly(
+        item.ask_answered,
+        index === length - 1,
+      );
       return (
         <AskCard
           key={askPending.ask_id}

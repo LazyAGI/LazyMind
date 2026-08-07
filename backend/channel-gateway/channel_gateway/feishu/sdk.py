@@ -60,6 +60,7 @@ _STREAM_ABORT = object()
 _STREAM_FINISH = object()
 _STREAM_PROVIDER_TIMEOUT_SECONDS = 60
 _STREAM_FINISH_TIMEOUT_SECONDS = 120
+_STREAM_MESSAGE_UPDATE_INTERVAL_SECONDS = 0.4
 
 
 def _message_text(message_type: str, raw_content: str) -> str:
@@ -272,10 +273,19 @@ class _DurableFeishuChannel(_WorkspaceFeishuChannel):
         if not isinstance(value, dict):
             return P2CardActionTriggerResponse({})
         action = str(value.get('lazymind_action') or '')
-        selection = str(value.get('selection') or '')
+        selection = str(
+            value.get('selection')
+            or getattr(raw_action, 'option', '')
+            or ''
+        )
         text = str(value.get('text') or selection)
         command_action = value.get('command_action')
         workspace_action = value.get('workspace_action')
+        if isinstance(workspace_action, dict) and selection:
+            workspace_action = {
+                **workspace_action,
+                'selection': selection,
+            }
         ask_answers = value.get('ask_answers_structured')
         if action == 'ask' and not text:
             text, ask_answers = parse_ask_form_submission(
@@ -353,6 +363,10 @@ class _LarkCardReplyStream(ReplyStream):
         message_id: str = '',
         should_render: Callable[[], bool] | None = None,
         collapse_process: bool = True,
+        render_card: Callable[
+            [CoreStreamUpdate, bool, bool],
+            dict[str, Any],
+        ] | None = None,
     ):
         self._channel = channel
         self._chat_id = chat_id
@@ -365,6 +379,7 @@ class _LarkCardReplyStream(ReplyStream):
         self.message_id = message_id
         self._should_render = should_render or (lambda: True)
         self._collapse_process = collapse_process
+        self._render_card = render_card
         self._updates: queue.Queue[tuple[object, object]] = queue.Queue()
         self._future = None
         self._lock = threading.Lock()
@@ -376,6 +391,9 @@ class _LarkCardReplyStream(ReplyStream):
                 return
             if self._future is None:
                 self._future = self._channel.schedule(self._run())
+                self._future.add_done_callback(
+                    self._log_background_failure
+                )
             self._updates.put(('snapshot', snapshot))
 
     def finish(self, final_text: str) -> bool:
@@ -470,15 +488,13 @@ class _LarkCardReplyStream(ReplyStream):
                             sequence + 1,
                         )
                     )
-                    await self._provider_call(
-                        self._channel.update_card(
-                            result.message_id,
-                            self._message_snapshot_card(
-                                snapshot,
-                                finished=True,
-                                aborted=True,
-                            ),
-                        )
+                    await self._replace_message_card(
+                        result.message_id,
+                        self._message_snapshot_card(
+                            snapshot,
+                            finished=True,
+                            aborted=True,
+                        ),
                     )
                     _logger.info(
                         'feishu_card_stream_aborted '
@@ -507,14 +523,12 @@ class _LarkCardReplyStream(ReplyStream):
                             sequence + 1,
                         )
                     )
-                    await self._provider_call(
-                        self._channel.update_card(
-                            result.message_id,
-                            self._message_snapshot_card(
-                                final_snapshot,
-                                finished=True,
-                            ),
-                        )
+                    await self._replace_message_card(
+                        result.message_id,
+                        self._message_snapshot_card(
+                            final_snapshot,
+                            finished=True,
+                        ),
                     )
                     _logger.info(
                         'feishu_card_stream_completed '
@@ -583,16 +597,11 @@ class _LarkCardReplyStream(ReplyStream):
         )
 
     async def _run_message_updates(self):
-        result = await self._provider_call(
-            self._channel.update_card(
-                self.message_id,
-                self._initial_card,
-            )
+        result = await self._replace_message_card(
+            self.message_id,
+            self._message_update_card(self._initial_card),
         )
-        if not result.success:
-            raise FeishuRuntimeError(
-                f'Feishu workspace stream update failed: {result.error}'
-            )
+        last_update_at = time.monotonic()
         snapshot = CoreStreamUpdate()
         while True:
             kind, value = await asyncio.to_thread(self._updates.get)
@@ -619,8 +628,9 @@ class _LarkCardReplyStream(ReplyStream):
                         finished=True,
                         aborted=True,
                     )
-                    await self._provider_call(
-                        self._channel.update_card(self.message_id, card)
+                    await self._replace_message_card(
+                        self.message_id,
+                        self._message_update_card(card),
                     )
                     await self._finish_message_stream()
                 return result
@@ -635,8 +645,9 @@ class _LarkCardReplyStream(ReplyStream):
                         final_snapshot,
                         finished=True,
                     )
-                    await self._provider_call(
-                        self._channel.update_card(self.message_id, card)
+                    await self._replace_message_card(
+                        self.message_id,
+                        self._message_update_card(card),
                     )
                     await self._finish_message_stream()
                 return result
@@ -647,9 +658,56 @@ class _LarkCardReplyStream(ReplyStream):
                 continue
             if self._should_render():
                 card = self._message_snapshot_card(snapshot)
-                await self._provider_call(
-                    self._channel.update_card(self.message_id, card)
+                delay = (
+                    _STREAM_MESSAGE_UPDATE_INTERVAL_SECONDS
+                    - (time.monotonic() - last_update_at)
                 )
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                await self._replace_message_card(
+                    self.message_id,
+                    self._message_update_card(card),
+                )
+                last_update_at = time.monotonic()
+
+    @staticmethod
+    def _message_update_card(card: dict[str, Any]) -> dict[str, Any]:
+        """Existing messages use full-card patches, not CardKit streaming."""
+        value = copy.deepcopy(card)
+        config = value.get('config')
+        if isinstance(config, dict):
+            config['streaming_mode'] = False
+            config.pop('streaming_config', None)
+        return value
+
+    @staticmethod
+    def _log_background_failure(future) -> None:
+        if future.cancelled():
+            return
+        try:
+            error = future.exception()
+        except Exception:
+            _logger.exception('feishu_reply_stream_future_check_failed')
+            return
+        if error is not None:
+            _logger.error(
+                'feishu_reply_stream_background_failed error=%s',
+                error,
+            )
+
+    async def _replace_message_card(
+        self,
+        message_id: str,
+        card: dict[str, Any],
+    ):
+        result = await self._provider_call(
+            self._channel.update_card(message_id, card)
+        )
+        if not result.success:
+            raise FeishuRuntimeError(
+                f'Feishu workspace stream update failed: {result.error}'
+            )
+        return result
 
     async def _finish_message_stream(self) -> None:
         finish = getattr(self._channel, 'finish_message_stream', None)
@@ -663,6 +721,8 @@ class _LarkCardReplyStream(ReplyStream):
         finished: bool = False,
         aborted: bool = False,
     ) -> dict[str, Any]:
+        if self._render_card is not None:
+            return self._render_card(snapshot, finished, aborted)
         status, thinking, answer = self._snapshot_values(
             snapshot,
             finished=finished,
@@ -673,6 +733,8 @@ class _LarkCardReplyStream(ReplyStream):
         config = card.get('config')
         if isinstance(config, dict):
             config['streaming_mode'] = not finished
+            if finished:
+                config.pop('streaming_config', None)
         if finished:
             _remove_card_element(card, name='cancel_generation')
             _set_collapsible_expanded(
@@ -1028,6 +1090,10 @@ class LarkChannelClient:
         message_id: str = '',
         should_render: Callable[[], bool] | None = None,
         collapse_process: bool = True,
+        render_card: Callable[
+            [CoreStreamUpdate, bool, bool],
+            dict[str, Any],
+        ] | None = None,
     ) -> ReplyStream:
         return _LarkCardReplyStream(
             channel=self._channel,
@@ -1040,6 +1106,7 @@ class LarkChannelClient:
             message_id=message_id,
             should_render=should_render,
             collapse_process=collapse_process,
+            render_card=render_card,
         )
 
     def _send(

@@ -136,5 +136,4 @@ export interface ChatMessage {
   };
   ask_answered?: boolean;
   ask_saved_answers?: Record<number, unknown>;
-  is_history?: boolean;
 }

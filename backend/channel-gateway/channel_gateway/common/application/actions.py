@@ -91,11 +91,30 @@ class ChannelActionExecutor:
         try:
             if isinstance(command, ChatCommand):
                 parameters = command.parameters
-                text = self._conversations.chat(
-                    message=self._workspace_message(
-                        parameters.message,
+                assistant_conversation_id, executor = (
+                    self._external_agent_executor(
                         provider_context,
-                    ),
+                        request_id,
+                    )
+                )
+                disabled_tools, enable_plugin, plugin_refs = (
+                    self._workspace_capability_policy(
+                        provider,
+                        provider_context,
+                        catalog,
+                    )
+                )
+                if executor is None:
+                    self._prepare_workspace_plugins(
+                        plugin_refs=plugin_refs,
+                        catalog=catalog,
+                        account_id=account_id,
+                        external_address_hash=external_address_hash,
+                        owner_user_id=owner_user_id,
+                        request_id=request_id,
+                    )
+                text = self._conversations.chat(
+                    message=parameters.message,
                     changes=parameters.resource_changes,
                     source_command=command,
                     source_messages=grounding_messages,
@@ -109,7 +128,24 @@ class ChannelActionExecutor:
                     ),
                     inputs=self._chat_inputs(provider_context),
                     mentions=self._workspace_mentions(provider_context),
+                    workspace_dataset_ids=(
+                        self._workspace_dataset_ids(
+                            provider,
+                            provider_context,
+                        )
+                        if executor is None
+                        else None
+                    ),
+                    disabled_tools=disabled_tools,
+                    enable_plugin=enable_plugin,
+                    plugin_mode=self._chat_plugin_mode(
+                        provider,
+                        executor,
+                    ),
                     thinking_depth=self._thinking_depth(provider_context),
+                    conversation_id_override=assistant_conversation_id,
+                    executor=executor,
+                    activate_route=assistant_conversation_id is None,
                     on_stream=on_stream,
                     **context,
                 )
@@ -230,22 +266,30 @@ class ChannelActionExecutor:
                 workflow = self._workflow(
                     parameters.workflow_ref,
                     catalog,
+                    allow_disabled=provider == 'feishu',
                 )
-                conversation_id = self._store.get_route(
-                    account_id,
-                    external_address_hash,
-                )
-                if conversation_id:
-                    self._client.dismiss_terminal_plugin_session(
-                        owner_user_id=owner_user_id,
-                        conversation_id=conversation_id,
-                        request_id=request_id,
-                    )
-                text = self._conversations.chat(
-                    message=self._workspace_message(
-                        parameters.message,
+                _disabled, _enabled, plugin_refs = (
+                    self._workspace_capability_policy(
+                        provider,
                         provider_context,
-                    ),
+                        catalog,
+                    )
+                )
+                workflow_ref = str(workflow.get('id') or '')
+                if provider == 'feishu' and workflow_ref not in plugin_refs:
+                    raise ActionMessage(
+                        '这个插件尚未加入当前会话，请先在“能力”中选择后再试。'
+                    )
+                self._prepare_workspace_plugins(
+                    plugin_refs=(workflow_ref,),
+                    catalog=catalog,
+                    account_id=account_id,
+                    external_address_hash=external_address_hash,
+                    owner_user_id=owner_user_id,
+                    request_id=request_id,
+                )
+                text = self._conversations.chat(
+                    message=parameters.message,
                     changes=[],
                     source_command=command,
                     source_messages=grounding_messages,
@@ -317,6 +361,22 @@ class ChannelActionExecutor:
         )
 
     @staticmethod
+    def _workspace_dataset_ids(
+        provider: str,
+        provider_context: dict[str, Any] | None,
+    ) -> tuple[str, ...] | None:
+        if provider != 'feishu' or not isinstance(provider_context, dict):
+            return None
+        values = provider_context.get('workspace_resources')
+        return tuple(dict.fromkeys(
+            str(item.get('id') or '')
+            for item in (values if isinstance(values, list) else [])
+            if isinstance(item, dict)
+            and item.get('type') == 'knowledge_base'
+            and item.get('id')
+        ))
+
+    @staticmethod
     def _workspace_ask_validated(
         provider_context: dict[str, Any] | None,
     ) -> bool:
@@ -356,50 +416,149 @@ class ChannelActionExecutor:
         return value if value in {'low', 'medium', 'high', 'max'} else None
 
     @staticmethod
-    def _workspace_message(
-        message: str,
+    def _external_agent_executor(
         provider_context: dict[str, Any] | None,
-    ) -> str:
+        request_id: str,
+    ) -> tuple[str | None, dict[str, str] | None]:
         if not isinstance(provider_context, dict):
-            return message
-        workspace = provider_context.get('workspace_state')
-        if not isinstance(workspace, dict):
-            return message
-        language = str(workspace.get('output_language') or 'zh')
-        instructions = [{
-            'zh': '请使用中文回答。',
-            'en': 'Please answer in English.',
-        }.get(language)]
-        answer_depth = str(workspace.get('answer_depth') or 'medium')
-        instructions.append({
-            'low': {
-                'zh': '请简洁作答，直接给出关键结论。',
-                'en': (
-                    'Answer concisely and state the key conclusion directly.'
+            return None, None
+        binding = provider_context.get('external_agent_binding')
+        if not isinstance(binding, dict):
+            return None, None
+        conversation_id = str(binding.get('conversation_id') or '').strip()
+        thread_id = str(binding.get('provider_thread_id') or '').strip()
+        provider = str(binding.get('provider') or 'codex').strip().lower()
+        if not conversation_id or not thread_id:
+            return None, None
+        return conversation_id, {
+            'kind': 'external_agent',
+            'provider': provider,
+            'provider_thread_id': thread_id,
+            'request_id': request_id,
+        }
+
+    @staticmethod
+    def _chat_plugin_mode(
+        provider: str,
+        executor: dict[str, str] | None,
+    ) -> str | None:
+        if provider == 'feishu' and executor is None:
+            return 'auto'
+        return None
+
+    @staticmethod
+    def _workspace_capability_policy(
+        provider: str,
+        provider_context: dict[str, Any] | None,
+        catalog: dict[str, Any],
+    ) -> tuple[tuple[str, ...], bool | None, tuple[str, ...]]:
+        if provider != 'feishu' or not isinstance(provider_context, dict):
+            return (), None, ()
+        values = provider_context.get('workspace_resources')
+        resources = [
+            item
+            for item in (values if isinstance(values, list) else [])
+            if isinstance(item, dict)
+        ]
+        selected = {
+            (str(item.get('type') or ''), str(item.get('id') or ''))
+            for item in resources
+            if item.get('type') and item.get('id')
+        }
+        selected_plugins = tuple(dict.fromkeys(
+            str(item.get('id') or '')
+            for item in resources
+            if item.get('type') == 'plugin' and item.get('id')
+        ))
+        selected_tools = {
+            resource_id
+            for resource_type, resource_id in selected
+            if resource_type == 'tool'
+        }
+        knowledge_selected = any(
+            resource_type == 'knowledge_base'
+            for resource_type, _resource_id in selected
+        )
+        disabled_tools: list[str] = []
+        tools = catalog.get('tool')
+        for item in tools if isinstance(tools, list) else []:
+            if not isinstance(item, dict):
+                continue
+            tool_id = str(item.get('id') or '')
+            if not tool_id or tool_id in selected_tools:
+                continue
+            label = str(item.get('name') or '').lower()
+            if knowledge_selected and (
+                'knowledge' in label
+                or '知识库' in label
+            ):
+                continue
+            disabled_tools.append(tool_id)
+        if not any(kind == 'skill' for kind, _resource_id in selected):
+            disabled_tools.append('skill')
+        return (
+            tuple(dict.fromkeys(disabled_tools)),
+            bool(selected_plugins),
+            selected_plugins,
+        )
+
+    def _prepare_workspace_plugins(
+        self,
+        *,
+        plugin_refs: Sequence[str],
+        catalog: dict[str, Any],
+        account_id: str,
+        external_address_hash: str,
+        owner_user_id: str,
+        request_id: str,
+    ) -> None:
+        refs = tuple(dict.fromkeys(ref for ref in plugin_refs if ref))
+        if not refs:
+            return
+        workflows = catalog.get('workflow')
+        items = workflows if isinstance(workflows, list) else []
+        for position, workflow_ref in enumerate(refs):
+            workflow = next(
+                (
+                    item
+                    for item in items
+                    if isinstance(item, dict)
+                    and str(item.get('id') or '') == workflow_ref
                 ),
-            },
-            'high': {
-                'zh': '请深入作答，充分展开关键步骤、依据和权衡。',
-                'en': (
-                    'Answer in depth, fully explaining key steps, evidence, '
-                    'and trade-offs.'
-                ),
-            },
-        }.get(answer_depth, {}).get(language))
-        instruction = ' '.join(item for item in instructions if item)
-        return f'{message}\n\n{instruction}' if instruction else message
+                None,
+            )
+            if workflow is not None and not bool(workflow.get('enabled', False)):
+                self._client.set_workflow_enabled(
+                    owner_user_id=owner_user_id,
+                    workflow_ref=workflow_ref,
+                    enabled=True,
+                    request_id=f'{request_id}_enable_plugin_{position}',
+                )
+                workflow['enabled'] = True
+        conversation_id = self._store.get_route(
+            account_id,
+            external_address_hash,
+        )
+        if conversation_id:
+            self._client.dismiss_terminal_plugin_session(
+                owner_user_id=owner_user_id,
+                conversation_id=conversation_id,
+                request_id=request_id,
+            )
 
     @staticmethod
     def _workflow(
         workflow_ref: str,
         catalog: dict[str, Any],
+        *,
+        allow_disabled: bool = False,
     ) -> dict[str, Any]:
         workflows = catalog.get('workflow')
         if isinstance(workflows, list):
             for item in workflows:
                 if (
                     isinstance(item, dict)
-                    and bool(item.get('enabled', False))
+                    and (allow_disabled or bool(item.get('enabled', False)))
                     and str(item.get('id') or '') == workflow_ref
                 ):
                     return item

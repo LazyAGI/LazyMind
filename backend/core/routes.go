@@ -11,6 +11,7 @@ import (
 	"lazymind/core/doc"
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
+	"lazymind/core/externalagent"
 	"lazymind/core/file"
 	"lazymind/core/mcp"
 	"lazymind/core/modelprovider"
@@ -206,6 +207,13 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/agent/router/ab-strategy", []string{"user.admin"}, agent.PutRouterABStrategy)
 
 	// ----- Conversation -----
+	handleAPI(r, "GET", "/external-agents/{provider}/threads", []string{"qa.read"}, externalagent.ListThreadsHTTP)
+	handleAPI(r, "GET", "/external-agents/{provider}/threads/{thread_id}", []string{"qa.read"}, externalagent.ReadThreadHTTP)
+	handleAPI(r, "POST", "/external-agents/{provider}/bindings", []string{"qa.write"}, chat.BindExternalAgentConversation)
+	handleAPI(r, "POST", "/external-agent-conversations/{conversation_id}:interrupt", []string{"qa.write"}, externalagent.InterruptHTTP)
+	handleAPI(r, "POST", "/external-agent-conversations/{conversation_id}:release", []string{"qa.write"}, externalagent.ReleaseHTTP)
+	handleAPI(r, "GET", "/external-agent-conversations/{conversation_id}:snapshot", []string{"qa.read"}, externalagent.SnapshotConversationHTTP)
+	handleAPI(r, "POST", "/external-agent-requests/{request_id}:respond", []string{"qa.write"}, externalagent.RespondRequestHTTP)
 	handleAPI(r, "POST", "/conversations:chat", []string{"qa.write"}, chat.ChatConversations)
 	handleAPI(r, "POST", "/conversations:estimateContextUsage", []string{"qa.read"}, chat.EstimateContextUsage)
 	handleAPI(r, "POST", "/conversations:exportContextPrompt", []string{"qa.read"}, chat.ExportContextPrompt)

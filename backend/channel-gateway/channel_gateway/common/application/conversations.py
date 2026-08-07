@@ -80,10 +80,15 @@ class ConversationActions:
         catalog: dict[str, Any],
         features: ChannelFeatureProfile,
         conversation_id_override: str | None = None,
+        executor: dict[str, Any] | None = None,
+        activate_route: bool = True,
         ask_answers_structured: dict[str, Any] | None = None,
         ask_already_validated: bool = False,
         inputs: Sequence[dict[str, str]] = (),
         mentions: Sequence[dict[str, str]] = (),
+        workspace_dataset_ids: Sequence[str] | None = None,
+        disabled_tools: Sequence[str] = (),
+        enable_plugin: bool | None = None,
         plugin_mode: str | None = None,
         thinking_depth: str | None = None,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
@@ -191,9 +196,16 @@ class ConversationActions:
                     structured=ask_answers_structured,
                 )
             options.features = features
+            options.executor = dict(executor) if executor is not None else None
             options.inputs.extend(dict(item) for item in inputs)
             options.ask_answers_structured = ask_answers_structured
             options.mentions.extend(dict(item) for item in mentions)
+            if workspace_dataset_ids is not None:
+                options.search_config = self._capabilities.search_config(
+                    [str(value) for value in workspace_dataset_ids if value]
+                )
+            options.disabled_tools.extend(str(item) for item in disabled_tools)
+            options.enable_plugin = enable_plugin
             options.plugin_mode = plugin_mode
             options.thinking_depth = (
                 thinking_depth
@@ -226,12 +238,13 @@ class ConversationActions:
                     '请等待当前任务结束后直接发送新任务，无需新建会话。'
                 ) from exc
             raise
-        self._store.activate_conversation(
-            account_id,
-            external_address_hash,
-            turn.conversation_id,
-            consume_pending_turn=True,
-        )
+        if activate_route:
+            self._store.activate_conversation(
+                account_id,
+                external_address_hash,
+                turn.conversation_id,
+                consume_pending_turn=True,
+            )
         suppress_text_when_presented = (
             not turn.answer
             and any(
@@ -813,6 +826,7 @@ class ConversationActions:
                 history_next_page_token=str(
                     history.get('next_page_token') or ''
                 ),
+                preserve_selection=True,
             )
         title = self._display_name(detail)
         label = f'{display_index}. {title}' if display_index else title

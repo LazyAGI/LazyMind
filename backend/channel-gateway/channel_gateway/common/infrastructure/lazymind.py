@@ -272,7 +272,11 @@ class LazyMindClient:
             ],
             'mode': 'auto',
             'basic_chat_only': options.features.basic_chat_only,
-            'enable_plugin': options.features.enable_plugin,
+            'enable_plugin': (
+                options.enable_plugin
+                if options.enable_plugin is not None
+                else options.features.enable_plugin
+            ),
             'enable_subagent': options.features.enable_subagent,
             'disabled_tools': self._unique(
                 [
@@ -296,8 +300,20 @@ class LazyMindClient:
             )
         if options.thinking_depth is not None:
             payload['thinking_depth'] = options.thinking_depth
+        if options.executor is not None:
+            payload['executor'] = dict(options.executor)
         if conversation_id:
             payload['conversation_id'] = conversation_id
+        else:
+            initial_plugin_settings: dict[str, Any] = {}
+            if options.enable_plugin is not None:
+                initial_plugin_settings['enable_plugin'] = (
+                    options.enable_plugin
+                )
+            if options.plugin_mode is not None:
+                initial_plugin_settings['plugin_mode'] = options.plugin_mode
+            if initial_plugin_settings:
+                payload['initial_plugin_settings'] = initial_plugin_settings
         return payload
 
     def _consume_chat_stream(
@@ -355,6 +371,18 @@ class LazyMindClient:
                     if isinstance(current_sources, list) and current_sources:
                         state.sources = list(current_sources)
                         semantic_progress = True
+                    external_event = result.get('external_agent_event')
+                    if isinstance(external_event, dict):
+                        semantic_progress = True
+                        state.events.append(
+                            CoreEvent(
+                                source='chat',
+                                type='external_agent_event',
+                                payload=dict(external_event),
+                            )
+                        )
+                    else:
+                        external_event = None
                     for event_type in _CHAT_EVENT_FIELDS:
                         event_payload = result.get(event_type)
                         if event_payload:
@@ -382,7 +410,18 @@ class LazyMindClient:
                                 )
                     finish_reason = str(result.get('finish_reason') or '')
                     if finish_reason == 'FINISH_REASON_UNKNOWN':
-                        raise LazyMindError('LazyMind chat generation failed')
+                        detail = str(
+                            result.get('message')
+                            or (
+                                external_event.get('message')
+                                if isinstance(external_event, dict)
+                                else ''
+                            )
+                            or ''
+                        ).strip()
+                        raise LazyMindError(
+                            detail or 'LazyMind chat generation failed'
+                        )
                     if finish_reason and finish_reason != 'FINISH_REASON_UNSPECIFIED':
                         state.finish_reason = finish_reason
                         semantic_progress = True
@@ -411,6 +450,7 @@ class LazyMindClient:
                             result.get('thinking_duration_s'),
                             conversation_id=state.conversation_id,
                             history_id=state.history_id,
+                            external_event=external_event,
                         )
                         if update != state.last_stream_update:
                             on_stream(update)
@@ -425,7 +465,11 @@ class LazyMindClient:
                 f'Cannot reach LazyMind Core: {exc.__class__.__name__}'
             ) from exc
         finally:
-            if not completed and state.conversation_id:
+            if (
+                not completed
+                and state.conversation_id
+                and not self._is_external_agent_executor(payload)
+            ):
                 self._stop_chat_generation(
                     owner_user_id=owner_user_id,
                     request_id=request_id,
@@ -467,6 +511,14 @@ class LazyMindClient:
             )
             return False
 
+    @staticmethod
+    def _is_external_agent_executor(payload: dict[str, Any]) -> bool:
+        executor = payload.get('executor')
+        return (
+            isinstance(executor, dict)
+            and executor.get('kind') == 'external_agent'
+        )
+
     def stop_conversation(
         self,
         *,
@@ -491,6 +543,7 @@ class LazyMindClient:
         *,
         conversation_id: str = '',
         history_id: str = '',
+        external_event: dict[str, Any] | None = None,
     ) -> CoreStreamUpdate:
         text = _strip_tool_payloads(raw_text)
         boundary = _last_thinking_boundary(text)
@@ -509,6 +562,7 @@ class LazyMindClient:
             thinking_seconds=_optional_seconds(raw_thinking_seconds),
             conversation_id=conversation_id,
             history_id=history_id,
+            external_event=external_event,
         )
 
     def _complete_chat_turn(
@@ -937,6 +991,179 @@ class LazyMindClient:
                 'Cannot download LazyMind static file'
             ) from exc
 
+    def list_external_threads(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        provider: str,
+        cursor: str = '',
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {'limit': limit}
+        if cursor:
+            params['cursor'] = cursor
+        return self._external_data(
+            self._request_json(
+                'GET',
+                (
+                    f'{self._base_url}/external-agents/'
+                    f'{quote(provider, safe="")}/threads'
+                ),
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+                params=params,
+                error_label='external agent threads',
+            ),
+            'external agent threads',
+        )
+
+    def read_external_thread(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        provider: str,
+        thread_id: str,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if offset is not None:
+            params['offset'] = offset
+        if limit is not None:
+            params['limit'] = limit
+        return self._external_data(
+            self._request_json(
+                'GET',
+                (
+                    f'{self._base_url}/external-agents/'
+                    f'{quote(provider, safe="")}/threads/'
+                    f'{quote(thread_id, safe="")}'
+                ),
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+                params=params or None,
+                error_label='external agent thread',
+            ),
+            'external agent thread',
+        )
+
+    def bind_external_thread(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        provider: str,
+        provider_thread_id: str = '',
+        new_session: bool = False,
+        cwd: str = '',
+        conversation_id: str = '',
+        display_name: str = '',
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            'new_session': new_session,
+        }
+        if provider_thread_id:
+            body['provider_thread_id'] = provider_thread_id
+        if cwd:
+            body['cwd'] = cwd
+        if conversation_id:
+            body['conversation_id'] = conversation_id
+        if display_name:
+            body['display_name'] = display_name
+        return self._external_data(
+            self._request_json(
+                'POST',
+                (
+                    f'{self._base_url}/external-agents/'
+                    f'{quote(provider, safe="")}/bindings'
+                ),
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+                json_body=body,
+                error_label='external agent binding',
+            ),
+            'external agent binding',
+        )
+
+    def snapshot_external_conversation(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        conversation_id: str,
+    ) -> dict[str, Any]:
+        return self._external_data(
+            self._request_json(
+                'GET',
+                (
+                    f'{self._base_url}/external-agent-conversations/'
+                    f'{quote(conversation_id, safe="")}:snapshot'
+                ),
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+                error_label='external agent conversation snapshot',
+            ),
+            'external agent conversation snapshot',
+        )
+
+    def interrupt_external_conversation(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        conversation_id: str,
+    ) -> None:
+        self._request_json(
+            'POST',
+            (
+                f'{self._base_url}/external-agent-conversations/'
+                f'{quote(conversation_id, safe="")}:interrupt'
+            ),
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            error_label='external agent interruption',
+        )
+
+    def release_external_conversation(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        conversation_id: str,
+    ) -> None:
+        self._request_json(
+            'POST',
+            (
+                f'{self._base_url}/external-agent-conversations/'
+                f'{quote(conversation_id, safe="")}:release'
+            ),
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            error_label='external agent release',
+        )
+
+    def respond_external_request(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        external_request_id: str,
+        response: dict[str, Any],
+    ) -> None:
+        self._request_json(
+            'POST',
+            (
+                f'{self._base_url}/external-agent-requests/'
+                f'{quote(external_request_id, safe="")}:respond'
+            ),
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            json_body=response,
+            error_label='external agent request response',
+        )
+
     def list_conversations(
         self,
         *,
@@ -1347,6 +1574,18 @@ class LazyMindClient:
         if not isinstance(payload, dict):
             raise LazyMindError(f'LazyMind {error_label} returned an invalid payload')
         return payload
+
+    @staticmethod
+    def _external_data(
+        payload: dict[str, Any],
+        error_label: str,
+    ) -> dict[str, Any]:
+        data = payload.get('data')
+        if not isinstance(data, dict):
+            raise LazyMindError(
+                f'LazyMind {error_label} returned an invalid payload'
+            )
+        return data
 
     @staticmethod
     def _raise_for_status(response: httpx.Response, error_label: str) -> None:

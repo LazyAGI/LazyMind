@@ -51,16 +51,15 @@ _MENU_ITEMS = (
 )
 
 
-def _menu_payload(language: str) -> list[dict[str, Any]]:
-    use_english = language == 'en'
+def _menu_payload() -> list[dict[str, Any]]:
     return [
         {
             'menu_id': event_key,
             'sort': index,
-            'default_name': en_name if use_english else zh_name,
+            'default_name': zh_name,
             'i18n_name': {
-                'zh_cn': en_name if use_english else zh_name,
-                'en_us': en_name if use_english else zh_name,
+                'zh_cn': zh_name,
+                'en_us': en_name,
             },
             'event_key': event_key,
             'menu_content_type': 2,
@@ -76,7 +75,6 @@ def configure_bot_menu(
     app_id: str,
     app_secret: str,
     *,
-    language: str = 'zh',
     publish: bool = False,
 ) -> None:
     client = (
@@ -85,7 +83,7 @@ def configure_bot_menu(
         .app_secret(app_secret)
         .build()
     )
-    menus = _menu_payload(language)
+    menus = _menu_payload()
     bot = AppAbilityBot.builder().enable(True).build()
     # These fields were added to application v7 after the bundled SDK model.
     # The official SDK encoder serializes public instance attributes, so the

@@ -32,6 +32,16 @@ _MAX_PROVIDER_SIDE_EFFECT_ATTEMPTS = 5
 _MAX_OUTBOUND_ATTEMPTS = 5
 
 
+def _failure_message(provider_context: dict, exc: Exception) -> str:
+    binding = provider_context.get('external_agent_binding')
+    if not isinstance(binding, dict):
+        return 'LazyMind 暂时无法处理这条消息，请稍后重试。'
+    detail = str(exc).strip()
+    if not detail:
+        return 'Codex 暂时无法处理这条消息，请稍后重试。'
+    return f'Codex 执行失败：{detail}'
+
+
 class LeaseLostError(RuntimeError):
     pass
 
@@ -253,6 +263,10 @@ class MessageWorker:
         except Exception as exc:
             if stream is not None:
                 stream.abort()
+            fallback = replace(
+                fallback,
+                text=_failure_message(inbound.provider_context, exc),
+            )
             _logger.exception(
                 'channel_inbound_processing_failed inbox_id=%s attempt=%s',
                 inbound.inbox_id,
