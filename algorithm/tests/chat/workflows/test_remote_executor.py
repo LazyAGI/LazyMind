@@ -27,6 +27,13 @@ def test_remote_executor_embeds_host_local_file(tmp_path):
     assert str(tmp_path) not in value['path']
 
 
+def test_remote_executor_preserves_core_static_file_url():
+    signed_url = '/static-files/ai_generated/result.png?expires=123&sig=test'
+    value = RemoteWorkflowExecutor._embed_files(
+        {'path': signed_url}, 'image', '/tmp/workspace')
+    assert value['path'] == signed_url
+
+
 @pytest.mark.asyncio
 async def test_remote_executor_materializes_fenced_inputs_in_host_workspace(tmp_path):
     worker = RemoteWorkflowExecutor()
@@ -135,7 +142,7 @@ async def test_reclaimed_attempt_resumes_durable_steps_in_isolated_workspace(mon
         async def execution_spec(self, *_):
             return {'task': {'input_slots': [], 'output_slots': []}, 'params': {},
                     'steps': [{'seq': 0, 'role': 'text', 'content': {'content': 'checkpoint'}}],
-                    'llm_config': {}}
+                    'llm_config': {}, 'tool_config': {'tavily': 'test-token'}}
 
         async def heartbeat(self, *_):
             return None
@@ -157,6 +164,7 @@ async def test_reclaimed_attempt_resumes_durable_steps_in_isolated_workspace(mon
     await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
     assert runtime.completed is True
     assert captured['resume'] is True
+    assert captured['tool_config'] == {'tavily': 'test-token'}
     assert captured['initial_steps'][0]['content']['content'] == 'checkpoint'
     workspace = captured['task_spec']['workspace_path']
     assert 'lazymind-workflow-attempt-1-' in workspace

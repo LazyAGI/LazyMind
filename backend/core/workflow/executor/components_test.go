@@ -111,7 +111,7 @@ func TestDBArtifactSinkIsIdempotentAndEmitsRevisionEvents(t *testing.T) {
 	}
 	sink := DBArtifactSink{DB: db}
 	ctx := AttemptContext{AttemptID: "attempt-1", SessionID: "session-1", StepID: "write", AttemptNo: 1}
-	first := Artifact{Slot: "report", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"one"}`)}
+	first := Artifact{Slot: "report", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"one","caption":"first result"}`)}
 	if err := sink.Save(context.Background(), ctx, first); err != nil {
 		t.Fatal(err)
 	}
@@ -135,6 +135,13 @@ func TestDBArtifactSinkIsIdempotentAndEmitsRevisionEvents(t *testing.T) {
 	}
 	if eventCount != 2 {
 		t.Fatalf("artifact events=%d", eventCount)
+	}
+	var stored orm.WorkflowHumanArtifact
+	if err := db.Order("created_at ASC").First(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Caption == nil || *stored.Caption != "first result" {
+		t.Fatalf("caption=%v", stored.Caption)
 	}
 	var session orm.WorkflowSession
 	_ = db.First(&session, "id = ?", "session-1").Error

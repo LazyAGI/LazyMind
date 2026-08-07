@@ -47,13 +47,19 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "model config unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	toolConfig, err := modelconfig.LoadSearchToolConfig(r.Context(), store.DB(), task.CreateUserID)
+	if err != nil {
+		common.ReplyErr(w, "tool config unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	steps, _ := LoadSteps(r.Context(), store.DB(), taskID)
 	stepDTOs := make([]stepDTO, 0, len(steps))
 	for i := range steps {
 		stepDTOs = append(stepDTOs, toStepDTO(&steps[i]))
 	}
 	common.ReplyOK(w, map[string]any{"task": toTaskDTO(task), "params": task.Params,
-		"steps": stepDTOs, "create_user_id": task.CreateUserID, "llm_config": config})
+		"steps": stepDTOs, "create_user_id": task.CreateUserID, "llm_config": config,
+		"tool_config": toolConfig})
 }
 
 // InternalIngestTaskEvent preserves the ordinary LazyMind SubAgent task stream

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -47,9 +48,16 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		}
 		seq := artifact.Seq
 		valueID := uuid.NewString()
+		var caption *string
+		var metadata map[string]any
+		if json.Unmarshal(artifact.Value, &metadata) == nil {
+			if text := strings.TrimSpace(stringValue(metadata["caption"])); text != "" {
+				caption = &text
+			}
+		}
 		if err := tx.Create(&orm.WorkflowHumanArtifact{ID: valueID, SessionID: attempt.SessionID,
 			Slot: artifact.Slot, ContentType: artifact.ContentType, Value: append(json.RawMessage(nil), artifact.Value...),
-			CreatedAt: now}).Error; err != nil {
+			Caption: caption, CreatedAt: now}).Error; err != nil {
 			return err
 		}
 		row := orm.WorkflowSlotRevision{ID: uuid.NewString(), SessionID: attempt.SessionID, SlotID: artifact.Slot,
@@ -69,4 +77,9 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 			ContractVersion: "workflow.v1", EventType: "artifact.upsert", EntityID: row.ID,
 			StateVersion: stateVersion, PayloadJSON: payload, CreatedAt: now}).Error
 	})
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return text
 }

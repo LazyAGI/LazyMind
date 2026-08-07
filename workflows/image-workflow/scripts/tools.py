@@ -15,6 +15,7 @@ validate_image_ref probes URL/path accessibility without downloading the full fi
 from __future__ import annotations
 
 from io import BytesIO
+import logging
 from pathlib import Path
 from typing import Any, List, Tuple
 
@@ -30,6 +31,8 @@ from lazymind.chat.service.utils.static_file_url import (
     local_path_from_static_file_url,
     resolve_local_image_path,
 )
+
+LOG = logging.getLogger(__name__)
 
 _SEARCH_ENGINES = [
     GoogleSearch(),
@@ -97,7 +100,8 @@ def _bocha_image_urls(query: str, count: int = 5) -> List[str]:
             timeout=engine._timeout,
         )
         data = resp.json()
-    except Exception:
+    except Exception as exc:
+        LOG.warning('Bocha image search failed: %s', type(exc).__name__)
         return []
     urls: List[str] = []
     _collect_image_urls(data, urls, set())
@@ -110,7 +114,8 @@ def _tavily_image_urls(query: str, count: int = 5) -> List[str]:
         return []
     try:
         results = engine.search(query, include_images=True, max_results=count)
-    except Exception:
+    except Exception as exc:
+        LOG.warning('Tavily image search failed: %s', type(exc).__name__)
         return []
     urls: List[str] = []
     seen: set = set()
@@ -306,9 +311,5 @@ def image_search_tool(query: str) -> str:
             except Exception:
                 pass
     if not urls:
-        return (
-            f'No image URLs found for "{query}". '
-            'Configure Tavily or Bocha for better image results, or try a '
-            'more specific query.'
-        )
+        return f'No image URLs found for "{query}". Try a more specific query.'
     return '\n'.join(urls[:5])

@@ -59,13 +59,14 @@ def test_mentioned_workflow_is_injected_as_authoritative_selection():
     )
     assert list(inspect.signature(
         _tool(contribution, 'trigger_image_workflow'),
-    ).parameters) == ['input_bindings']
+    ).parameters) == []
     assert 'prepare_workflow' not in _tool_names(contribution)
     assert 'list_workflow_attachments' not in _tool_names(contribution)
     assert 'bind_workflow_input' not in _tool_names(contribution)
 
 
 def test_dynamic_trigger_loads_pinned_remote_package_without_listing():
+    lazyllm.globals['agentic_config']['files'] = ['/safe/report.pdf']
     toolkit = MagicMock()
     toolkit.prepare_workflow.return_value = {
         'session_id': 'session-1', 'state_version': 1, 'ready_steps': ['prompt'],

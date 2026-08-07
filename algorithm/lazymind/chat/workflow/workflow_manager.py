@@ -363,6 +363,18 @@ def _import_attachment(path: str) -> Dict[str, Any]:
     return asdict(value)
 
 
+def _conversation_has_attachments() -> bool:
+    cfg = _agentic_config()
+    if any(str(value or '').strip() for value in (cfg.get('files') or [])):
+        return True
+    history = cfg.get('history_files_per_turn') or {}
+    return isinstance(history, dict) and any(
+        any(str(value or '').strip() for value in (values or []))
+        for values in history.values()
+        if isinstance(values, list)
+    )
+
+
 def _clean_workflow_text(value: Any) -> str:
     return re.sub(r'\s+', ' ', str(value or '')).strip()
 
@@ -461,6 +473,7 @@ def _workflow_trigger_tools(
     conversation_id: str = '', session_holder: Optional[Dict[str, str]] = None,
 ) -> List[Any]:
     """Bind backend-prepared activations to public package reads."""
+    attachments_available = _conversation_has_attachments()
     candidates = [
         item for item in activations
         if not allowed_refs or str(item.get('workflow_ref') or '') in allowed_refs
@@ -483,8 +496,7 @@ def _workflow_trigger_tools(
         def make_trigger(
             bound_id: str, bound_ref: str, bound_revision: str, bound_query: str,
         ) -> Any:
-            def bound_trigger(input_bindings: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-                """Initialize the selected Workflow Session and return its Ready frontier."""
+            def run_trigger(input_bindings: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
                 effective_context = bound_query
                 resolved_bindings: Dict[str, Any] = {}
                 for material_id, attachment_ref in (input_bindings or {}).items():
@@ -581,12 +593,30 @@ def _workflow_trigger_tools(
                         ),
                     },
                 }
+            if attachments_available:
+                def bound_trigger(
+                    input_bindings: Optional[Dict[str, str]] = None,
+                ) -> Dict[str, Any]:
+                    """Initialize the selected Workflow with optional user attachments."""
+                    return run_trigger(input_bindings)
+            else:
+                def bound_trigger() -> Dict[str, Any]:
+                    """Initialize the selected Workflow without attachment bindings."""
+                    return run_trigger()
             return bound_trigger
 
         trigger_workflow = make_trigger(workflow_id, workflow_ref, revision_id, current_query)
 
         trigger_workflow.__name__ = name
-        trigger_workflow.__doc__ = str(item.get('tool_description') or '').strip()
+        description = str(item.get('tool_description') or '').strip()
+        attachment_guidance = (
+            ' input_bindings may map material IDs only to exact filenames listed in '
+            'the conversation attachments; omit it for generation or web-search flows.'
+            if attachments_available else
+            ' No user attachments are available; start without input bindings so the '
+            'Workflow can generate from text or collect images itself.'
+        )
+        trigger_workflow.__doc__ = description + attachment_guidance
         tools.append(trigger_workflow)
     return tools
 

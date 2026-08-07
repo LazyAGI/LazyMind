@@ -23,6 +23,8 @@ func remoteSubagentFixture(t *testing.T) *orm.DB {
 	if err := db.AutoMigrate(
 		&orm.WorkflowSessionStep{},
 		&orm.UserSelectedModel{},
+		&orm.UserSelectedProvider{},
+		&orm.UserModelProvider{},
 		&orm.UserModelProviderGroupModel{},
 		&orm.UserModelProviderGroup{},
 	); err != nil {
@@ -60,6 +62,23 @@ func postRemoteTaskEvent(t *testing.T, lease string, event map[string]any) *http
 	return rec
 }
 
+func seedRemoteSearchProvider(t *testing.T, db *orm.DB) {
+	t.Helper()
+	now := time.Now()
+	base := orm.BaseModel{CreateUserID: "user-1", CreateUserName: "user-1", CreatedAt: now, UpdatedAt: now}
+	provider := orm.UserModelProvider{ID: "provider-tavily", DefaultModelProviderID: "default-tavily",
+		Name: "Tavily", Category: "search", BaseModel: base}
+	group := orm.UserModelProviderGroup{ID: "group-tavily", UserModelProviderID: provider.ID,
+		Name: "Tavily", APIKey: "workflow-search-token", IsVerified: true, BaseModel: base}
+	selected := orm.UserSelectedProvider{UserID: "user-1", UserName: "user-1", Category: "search",
+		UserModelProviderGroupID: group.ID, CreatedAt: now, UpdatedAt: now}
+	for _, value := range []any{&provider, &group, &selected} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestRemoteTaskEventsRequireBoundAttemptLease(t *testing.T) {
 	remoteSubagentFixture(t)
 	for _, lease := range []string{"", "stale"} {
@@ -72,6 +91,7 @@ func TestRemoteTaskEventsRequireBoundAttemptLease(t *testing.T) {
 
 func TestRemoteExecutionSpecReturnsTaskParamsAndDurableSteps(t *testing.T) {
 	db := remoteSubagentFixture(t)
+	seedRemoteSearchProvider(t, db)
 	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params",
 		json.RawMessage(`{"operation":"execute"}`)).Error; err != nil {
 		t.Fatal(err)
@@ -94,6 +114,10 @@ func TestRemoteExecutionSpecReturnsTaskParamsAndDurableSteps(t *testing.T) {
 	steps := data["steps"].([]any)
 	if params["operation"] != "execute" || len(steps) != 1 {
 		t.Fatalf("data=%#v", data)
+	}
+	toolConfig := data["tool_config"].(map[string]any)
+	if toolConfig["tavily"] != "workflow-search-token" {
+		t.Fatalf("tool_config=%#v", toolConfig)
 	}
 	if _, exposed := data["workspace_path"]; exposed {
 		t.Fatalf("Core workspace must not be exposed: %#v", data)

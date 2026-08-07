@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import FastAPI
@@ -20,6 +21,12 @@ from lazymind.chat.runtime_loader import start_background_chat_runtime_warmup
 from lazymind.chat.workflow.remote_executor import start_remote_workflow_executor
 from lazymind.rewrite.api import rewrite_routes
 from lazymind.review.api import memory_review_routes, skill_organize_routes, skill_review_routes
+
+
+# Internal workflow polling, heartbeats, and SubAgent event delivery are
+# intentionally frequent.  Keep transport-level success/empty-queue messages
+# out of the Chat service log while preserving warnings and failures.
+logging.getLogger('httpx').setLevel(logging.WARNING)
 
 
 def register_chat_routers(app: FastAPI) -> FastAPI:
