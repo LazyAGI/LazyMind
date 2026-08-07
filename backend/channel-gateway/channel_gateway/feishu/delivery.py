@@ -531,7 +531,7 @@ class FeishuDeliveryProvider:
                             finished=finished,
                             aborted=aborted,
                         )
-                    )
+                     )
                     if assistant
                     else None
                 ),
