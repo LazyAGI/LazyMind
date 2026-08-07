@@ -1,4 +1,4 @@
-import { Avatar, Button, Divider, Flex, message, Spin, Tooltip } from "antd";
+import { Button, Divider, Flex, message, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { MouseEvent } from "react";
@@ -22,18 +22,14 @@ import {
 import { AgentAppsAuth } from "@/components/auth";
 import { isAskPendingReadOnly } from "@/modules/chat/utils/message";
 import { ChatServiceApi, decideToolLimit } from "@/modules/chat/utils/request";
-import { usePluginStore } from "@/modules/chat/store/pluginPanel";
-import { PluginPanel } from "@/modules/chat/components/PluginPanel";
+import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
+import { WorkflowPanel } from "@/modules/chat/components/WorkflowPanel";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
-
-const BotAvatarIcon = new URL(
-  "../../assets/images/bot_avatar.png",
-  import.meta.url,
-).href;
+import { IdentityAvatar } from "@/modules/identityAvatar";
 
 async function copyTextToClipboard(text: string) {
   const normalizedText = text.trim();
@@ -225,8 +221,8 @@ const AssistantMessage = (props: any) => {
     targetHistoryId: undefined,
   });
 
-  const loadActiveSession = usePluginStore((s) => s.loadActiveSession);
-  // Eagerly load the plugin session so the panel appears without waiting for component mount.
+  const loadActiveSession = useWorkflowStore((s) => s.loadActiveSession);
+  // Eagerly load the workflow session so the panel appears without waiting for component mount.
   const isLast = index === length - 1;
   useEffect(() => {
     if (isLast && sessionId) {
@@ -234,7 +230,7 @@ const AssistantMessage = (props: any) => {
     }
   }, [isLast, sessionId, loadActiveSession]);
 
-  const pluginSession = usePluginStore((s) =>
+  const workflowSession = useWorkflowStore((s) =>
     sessionId ? s.sessionByConversation[sessionId] ?? null : null,
   );
 
@@ -1018,10 +1014,10 @@ const AssistantMessage = (props: any) => {
         className="chat-assistant-msg-multi-answer-wrap"
         onMouseUp={handleMouseUp}
       >
-        <Avatar
+        <IdentityAvatar
           className="chat-avatar"
-          size={"small"}
-          icon={<img src={BotAvatarIcon} />}
+          kind="soul"
+          size={32}
         />
         <div className="chat-bot-box-multi">
           <div className="chat-bot">
@@ -1082,8 +1078,8 @@ const AssistantMessage = (props: any) => {
             />
           </div>
           {(item.ask_pending || index === length - 1) && renderBottom()}
-          {index === length - 1 && pluginSession && sessionId && (
-            <PluginPanel
+          {index === length - 1 && workflowSession && sessionId && (
+            <WorkflowPanel
               key={sessionId}
               conversationId={sessionId}
               onSendMessage={(text) => props.sendMessage?.(text)}
@@ -1106,10 +1102,10 @@ const AssistantMessage = (props: any) => {
       className="chat-assistant-msg-single-answer-wrap"
       onMouseUp={handleMouseUp}
     >
-      <Avatar
+      <IdentityAvatar
         className="chat-avatar"
-        size={"small"}
-        icon={<img src={BotAvatarIcon} />}
+        kind="soul"
+        size={32}
       />
       <div className="chat-bot-box-single">
         <div className="chat-bot">
@@ -1135,8 +1131,8 @@ const AssistantMessage = (props: any) => {
             renderFooter()}
         </div>
         {(item.ask_pending || index === length - 1) && renderBottom()}
-        {index === length - 1 && pluginSession && sessionId && (
-          <PluginPanel
+        {index === length - 1 && workflowSession && sessionId && (
+          <WorkflowPanel
             key={sessionId}
             conversationId={sessionId}
             onSendMessage={(text) => props.sendMessage?.(text)}

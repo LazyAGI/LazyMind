@@ -6,7 +6,7 @@ import os
 import shutil
 import unicodedata
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 import lazyllm
 from lazyllm.tools.agent.base import _write_agent_data
@@ -103,9 +103,21 @@ def _resolve_workspace_path(path: str, user_id: str, conversation_id: str) -> tu
     workspace = os.path.realpath(chat_agent_workspace(user_id, conversation_id))
     candidate = path if os.path.isabs(path) else os.path.join(workspace, path)
     resolved = os.path.realpath(candidate)
-    if os.path.commonpath((workspace, resolved)) != workspace:
+    if _cfg['trusted_local_mode']:
+        return workspace, resolved
+    try:
+        inside_workspace = os.path.commonpath((workspace, resolved)) == workspace
+    except ValueError:
+        # Windows raises ValueError when the workspace and requested path use
+        # different drive letters. That is still an outside-workspace path.
+        inside_workspace = False
+    if not inside_workspace:
         raise ValueError('path must stay inside the current main-Agent workspace')
     return workspace, resolved
+
+
+def _file_tool_root(workspace: str) -> Optional[str]:
+    return None if _cfg['trusted_local_mode'] else workspace
 
 
 def _resolve_source_file(path: str, user_id: str, conversation_id: str) -> str:
@@ -121,7 +133,7 @@ def _resolve_source_file(path: str, user_id: str, conversation_id: str) -> str:
 def save_chat_artifact(
     filename: str,
     content: Any,
-    content_type: str = 'text',
+    content_type: Literal['text', 'json', 'file'] = 'text',
     caption: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Save a downloadable artifact produced in the current main-chat turn.
@@ -133,7 +145,9 @@ def save_chat_artifact(
     Args:
         filename: Download filename, for example ``notes.txt``. Directory paths are rejected.
         content: Text, a JSON-compatible value, or a workspace path for a file artifact.
-        content_type: One of ``text``, ``json``, or ``file``.
+        content_type: Exactly one of ``text``, ``json``, or ``file``. Images and
+            other binary attachments use ``file`` with a local path inside the
+            current main-Agent workspace. ``image`` is not a valid value here.
         caption: Optional short human-readable description.
     """
     normalized_type = str(content_type or 'text').strip().lower()
@@ -234,10 +248,10 @@ def write_file(
     create_parents: bool = True,
     allow_unsafe: bool = False,
 ) -> Dict[str, Any]:
-    """Write a text file in the current chat workspace.
+    """Write a text file in the current chat workspace or an allowed host path.
 
     Args:
-        path: Workspace-relative path or absolute path inside the workspace.
+        path: Workspace-relative path. In trusted local mode, absolute host paths are also allowed.
         content: Text to write.
         mode: "overwrite" or "append".
         encoding: Text encoding.
@@ -251,7 +265,7 @@ def write_file(
         content,
         mode=mode,
         encoding=encoding,
-        root=workspace,
+        root=_file_tool_root(workspace),
         create_parents=create_parents,
         allow_unsafe=allow_unsafe,
     )
@@ -265,10 +279,10 @@ def read_file(
     errors: str = 'replace',
     max_chars: int = 200000,
 ) -> Dict[str, Any]:
-    """Read a text file from the current chat workspace.
+    """Read a text file from the current chat workspace or an allowed host path.
 
     Args:
-        path: Workspace-relative path or absolute path inside the workspace.
+        path: Workspace-relative path. In trusted local mode, absolute host paths are also allowed.
         start_line: Optional 1-based first line.
         end_line: Optional 1-based last line.
         encoding: Text encoding.
@@ -283,16 +297,16 @@ def read_file(
         end_line=end_line,
         encoding=encoding,
         errors=errors,
-        root=workspace,
+        root=_file_tool_root(workspace),
         max_chars=max_chars,
     )
 
 
 def list_dir(path: str = '.', recursive: bool = False, max_depth: int = 5) -> Dict[str, Any]:
-    """List files in the current chat workspace.
+    """List files in the current chat workspace or an allowed host path.
 
     Args:
-        path: Workspace-relative directory or absolute directory inside the workspace.
+        path: Workspace-relative directory. In trusted local mode, absolute host paths are also allowed.
         recursive: Recursively include descendants.
         max_depth: Maximum recursive depth.
     """
@@ -302,5 +316,5 @@ def list_dir(path: str = '.', recursive: bool = False, max_depth: int = 5) -> Di
         directory,
         recursive=recursive,
         max_depth=max_depth,
-        root=workspace,
+        root=_file_tool_root(workspace),
     )

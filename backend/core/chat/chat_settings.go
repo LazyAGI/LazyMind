@@ -33,8 +33,8 @@ func GetChatSettings(w http.ResponseWriter, r *http.Request) {
 			// Return defaults.
 			s = orm.UserChatSettings{
 				UserID:         userID,
-				EnablePlugin:   true,
-				PluginMode:     "dynamic",
+				EnableWorkflow: true,
+				WorkflowMode:   "dynamic",
 				EnableSubagent: true,
 			}
 		} else {
@@ -43,16 +43,16 @@ func GetChatSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	common.ReplyOK(w, map[string]any{
-		"enable_plugin":   s.EnablePlugin,
-		"plugin_mode":     s.PluginMode,
+		"enable_workflow": s.EnableWorkflow,
+		"workflow_mode":   s.WorkflowMode,
 		"enable_subagent": s.EnableSubagent,
 		"updated_at":      s.UpdatedAt,
 	})
 }
 
-// PatchConversationPluginSettings updates conversation-level plugin/subagent overrides.
-// Supports enable_plugin, plugin_mode, enable_subagent; null clears back to global default.
-func PatchConversationPluginSettings(w http.ResponseWriter, r *http.Request) {
+// PatchConversationWorkflowSettings updates conversation-level plugin/subagent overrides.
+// Supports enable_workflow, workflow_mode, enable_subagent; null clears back to global default.
+func PatchConversationWorkflowSettings(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	if userID == "" {
 		common.ReplyErr(w, "unauthorized", http.StatusUnauthorized)
@@ -76,7 +76,7 @@ func PatchConversationPluginSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updates := map[string]any{}
-	if raw, present := body["enable_plugin"]; present {
+	if raw, present := body["enable_workflow"]; present {
 		if raw == nil {
 			updates["enable_plugin"] = nil
 		} else if v, ok := raw.(bool); ok {
@@ -90,16 +90,16 @@ func PatchConversationPluginSettings(w http.ResponseWriter, r *http.Request) {
 			updates["enable_subagent"] = v
 		}
 	}
-	if raw, present := body["plugin_mode"]; present {
+	if raw, present := body["workflow_mode"]; present {
 		if raw == nil {
-			updates["plugin_mode"] = nil
+			updates["plugin_mode"] = nil // workflow-naming: persistence
 		} else if v, ok := raw.(string); ok {
 			v = strings.TrimSpace(v)
 			if v != "auto" && v != "dynamic" {
-				common.ReplyErr(w, "plugin_mode must be 'auto' or 'dynamic'", http.StatusBadRequest)
+				common.ReplyErr(w, "workflow_mode must be 'auto' or 'dynamic'", http.StatusBadRequest)
 				return
 			}
-			updates["plugin_mode"] = v
+			updates["plugin_mode"] = v // workflow-naming: persistence
 		}
 	}
 	if len(updates) == 0 {
@@ -108,7 +108,7 @@ func PatchConversationPluginSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if enabled, exists := updates["enable_plugin"]; exists && enabled == false {
 		var workflowCount int64
-		if err := db.WithContext(r.Context()).Model(&orm.PluginSession{}).
+		if err := db.WithContext(r.Context()).Model(&orm.WorkflowSession{}).
 			Where("conversation_id = ? AND dismissed = false", convID).
 			Count(&workflowCount).Error; err != nil {
 			common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
@@ -147,19 +147,20 @@ func PatchChatSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updates := map[string]any{"updated_at": time.Now().UTC()}
-	if v, ok := body["enable_plugin"].(bool); ok {
-		updates["enable_plugin"] = v
+	if v, ok := body["enable_workflow"].(bool); ok {
+		updates["enable_workflow"] = v
 	}
 	if v, ok := body["enable_subagent"].(bool); ok {
 		updates["enable_subagent"] = v
 	}
-	if v, ok := body["plugin_mode"].(string); ok {
+	v, ok := body["workflow_mode"].(string)
+	if ok {
 		v = strings.TrimSpace(v)
 		if v != "auto" && v != "dynamic" {
-			common.ReplyErr(w, "plugin_mode must be 'auto' or 'dynamic'", http.StatusBadRequest)
+			common.ReplyErr(w, "workflow_mode must be 'auto' or 'dynamic'", http.StatusBadRequest)
 			return
 		}
-		updates["plugin_mode"] = v
+		updates["plugin_mode"] = v // workflow-naming: persistence
 	}
 	if len(updates) == 1 { // only updated_at
 		common.ReplyErr(w, "no valid fields to update", http.StatusBadRequest)
@@ -169,8 +170,8 @@ func PatchChatSettings(w http.ResponseWriter, r *http.Request) {
 	// Upsert: insert defaults first if not present, then apply updates.
 	defaults := orm.UserChatSettings{
 		UserID:         userID,
-		EnablePlugin:   true,
-		PluginMode:     "dynamic",
+		EnableWorkflow: true,
+		WorkflowMode:   "dynamic",
 		EnableSubagent: true,
 		UpdatedAt:      time.Now().UTC(),
 	}

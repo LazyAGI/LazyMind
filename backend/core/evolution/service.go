@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"lazymind/core/common/orm"
 	appLog "lazymind/core/log"
@@ -25,28 +24,6 @@ type SkillState struct {
 	Content      string
 	ContentHash  string
 }
-
-type PersonalResourceContent struct {
-	ResourceID             string
-	Content                string
-	ContentHash            string
-	Version                int64
-	AutoEvo                bool
-	AutoEvoApplyStatus     string
-	AutoEvoGeneration      int64
-	AutoEvoError           string
-	LatestVersionChange    *VersionChangeSummary
-	HasPendingReviewResult bool
-	ReviewStatus           string
-	UpdatedBy              string
-	UpdatedByName          string
-	UpdatedAt              time.Time
-}
-
-const (
-	personalMemoryPath         = "memory/memory.md"
-	personalUserPreferencePath = "memory/user.md"
-)
 
 func newUUID() string {
 	var b [16]byte
@@ -96,207 +73,7 @@ func SkillSuggestionResourceKey(row orm.SkillResource) string {
 	return strings.TrimSpace(row.ID)
 }
 
-func SystemResourceKey(resourceType string) string {
-	switch resourceType {
-	case ResourceTypeMemory:
-		return "memory"
-	case ResourceTypeUserPreference:
-		return "user_preference"
-	default:
-		return strings.TrimSpace(resourceType)
-	}
-}
-
-func EnsurePersonalResourceContent(ctx context.Context, db *gorm.DB, userID, resourceType string) (*PersonalResourceContent, error) {
-	userID = strings.TrimSpace(userID)
-	resourceType = strings.TrimSpace(resourceType)
-	initialContent := ""
-	path := personalMemoryPath
-	if resourceType == ResourceTypeUserPreference {
-		initialContent = FormatSystemUserPreferenceForChat(orm.SystemUserPreference{})
-		path = personalUserPreferencePath
-	}
-
-	tx := db.WithContext(ctx)
-	if row, err := loadPersonalResourceContent(ctx, tx, userID, resourceType); err == nil {
-		return row, nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
-	var out *PersonalResourceContent
-	err := tx.Transaction(func(tx *gorm.DB) error {
-		if row, err := loadPersonalResourceContent(ctx, tx, userID, resourceType); err == nil {
-			out = row
-			return nil
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		now := time.Now()
-		resourceID := newUUID()
-		revisionID := newUUID()
-		hash := HashContent(initialContent)
-		blob := orm.PersonalResourceBlob{
-			Hash:           hash,
-			Size:           int64(len([]byte(initialContent))),
-			Mime:           "text/markdown; charset=utf-8",
-			FileType:       "markdown",
-			Binary:         false,
-			StorageBackend: "postgres",
-			Content:        []byte(initialContent),
-			CreatedAt:      now,
-		}
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&blob).Error; err != nil {
-			return err
-		}
-		head := revisionID
-		resource := orm.PersonalResource{
-			ID:                 resourceID,
-			UserID:             userID,
-			ResourceType:       resourceType,
-			HeadRevisionID:     &head,
-			Version:            1,
-			AutoEvo:            true,
-			AutoEvoApplyStatus: AutoEvoApplyStatusIdle,
-			UpdatedBy:          userID,
-			CreatedAt:          now,
-			UpdatedAt:          now,
-		}
-		if err := tx.Create(&resource).Error; err != nil {
-			return err
-		}
-		revision := orm.PersonalResourceRevision{
-			ID:           revisionID,
-			ResourceID:   resourceID,
-			RevisionNo:   1,
-			Path:         path,
-			BlobHash:     hash,
-			ContentHash:  hash,
-			Size:         blob.Size,
-			Mime:         blob.Mime,
-			FileType:     blob.FileType,
-			Binary:       false,
-			Message:      "initial import",
-			ChangeSource: "initial_import",
-			CreatedAt:    now,
-		}
-		if err := tx.Create(&revision).Error; err != nil {
-			return err
-		}
-		draft := orm.PersonalResourceDraft{
-			ResourceID:     resourceID,
-			BaseRevisionID: &head,
-			Path:           path,
-			BlobHash:       hash,
-			ContentHash:    hash,
-			Size:           blob.Size,
-			Mime:           blob.Mime,
-			FileType:       blob.FileType,
-			Binary:         false,
-			DraftStatus:    "",
-			Version:        1,
-			CreatedAt:      now,
-			UpdatedAt:      now,
-		}
-		if err := tx.Create(&draft).Error; err != nil {
-			return err
-		}
-		out = &PersonalResourceContent{
-			ResourceID:         resourceID,
-			Content:            initialContent,
-			ContentHash:        hash,
-			Version:            1,
-			AutoEvo:            true,
-			AutoEvoApplyStatus: AutoEvoApplyStatusIdle,
-			ReviewStatus:       ReviewStatusNone,
-			UpdatedBy:          userID,
-			UpdatedAt:          now,
-		}
-		return nil
-	})
-	return out, err
-}
-
-func loadPersonalResourceContent(ctx context.Context, db *gorm.DB, userID, resourceType string) (*PersonalResourceContent, error) {
-	var resource orm.PersonalResource
-	if err := db.WithContext(ctx).
-		Where("user_id = ? AND resource_type = ?", strings.TrimSpace(userID), strings.TrimSpace(resourceType)).
-		Take(&resource).Error; err != nil {
-		return nil, err
-	}
-	if resource.HeadRevisionID == nil || strings.TrimSpace(*resource.HeadRevisionID) == "" {
-		return nil, gorm.ErrRecordNotFound
-	}
-	var revision orm.PersonalResourceRevision
-	if err := db.WithContext(ctx).
-		Where("id = ? AND resource_id = ?", *resource.HeadRevisionID, resource.ID).
-		Take(&revision).Error; err != nil {
-		return nil, err
-	}
-	var blob orm.PersonalResourceBlob
-	if err := db.WithContext(ctx).Where("hash = ?", revision.BlobHash).Take(&blob).Error; err != nil {
-		return nil, err
-	}
-	if blob.Binary {
-		return nil, fmt.Errorf("personal resource %s head is binary", resourceType)
-	}
-	reviewStatus, hasPending, err := loadPersonalResourceReviewStatus(ctx, db, resource.ID)
-	if err != nil {
-		return nil, err
-	}
-	return &PersonalResourceContent{
-		ResourceID:             resource.ID,
-		Content:                string(blob.Content),
-		ContentHash:            firstNonEmpty(revision.ContentHash, revision.BlobHash),
-		Version:                revision.RevisionNo,
-		AutoEvo:                resource.AutoEvo,
-		AutoEvoApplyStatus:     NormalizeAutoEvoApplyStatus(resource.AutoEvoApplyStatus),
-		AutoEvoGeneration:      resource.AutoEvoGeneration,
-		AutoEvoError:           resource.AutoEvoError,
-		LatestVersionChange:    versionChangeFromRevision(revision),
-		HasPendingReviewResult: hasPending,
-		ReviewStatus:           reviewStatus,
-		UpdatedBy:              resource.UpdatedBy,
-		UpdatedByName:          resource.UpdatedByName,
-		UpdatedAt:              resource.UpdatedAt,
-	}, nil
-}
-
-func loadPersonalResourceReviewStatus(ctx context.Context, db *gorm.DB, resourceID string) (string, bool, error) {
-	var count int64
-	if err := db.WithContext(ctx).Model(&orm.PersonalResourceReviewSession{}).
-		Where("resource_id = ? AND status = ?", strings.TrimSpace(resourceID), "active").
-		Count(&count).Error; err != nil {
-		return ReviewStatusNone, false, err
-	}
-	if count > 0 {
-		return ReviewStatusPending, true, nil
-	}
-	return ReviewStatusNone, false, nil
-}
-
-func versionChangeFromRevision(revision orm.PersonalResourceRevision) *VersionChangeSummary {
-	changeSource := strings.TrimSpace(revision.ChangeSource)
-	if changeSource == "" {
-		return nil
-	}
-	return &VersionChangeSummary{
-		ChangeSource:  changeSource,
-		SourceRefType: strings.TrimSpace(revision.SourceRefType),
-		SourceRefID:   strings.TrimSpace(revision.SourceRefID),
-		ChangedAt:     revision.CreatedAt.Format(time.RFC3339Nano),
-	}
-}
-
 func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName string, sessionID string) (*ChatResourceContext, error) {
-	mem, err := EnsurePersonalResourceContent(ctx, db, userID, ResourceTypeMemory)
-	if err != nil {
-		return nil, err
-	}
-	pref, err := EnsurePersonalResourceContent(ctx, db, userID, ResourceTypeUserPreference)
-	if err != nil {
-		return nil, err
-	}
 	usePersonalization, err := LoadUserPersonalizationEnabled(ctx, db, userID)
 	if err != nil {
 		return nil, err
@@ -311,29 +88,8 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 	}
 	now := time.Now()
 	availableSkills := make([]string, 0, len(v2Skills))
-	snapshots := make([]orm.ResourceSessionSnapshot, 0, len(v2Skills)+2)
+	snapshots := make([]orm.ResourceSessionSnapshot, 0, len(v2Skills))
 	seenSkillNames := map[string]struct{}{}
-
-	snapshots = append(snapshots,
-		orm.ResourceSessionSnapshot{
-			ID:           newUUID(),
-			SessionID:    sessionID,
-			UserID:       userID,
-			ResourceType: ResourceTypeMemory,
-			ResourceKey:  SystemResourceKey(ResourceTypeMemory),
-			SnapshotHash: mem.ContentHash,
-			CreatedAt:    now,
-		},
-		orm.ResourceSessionSnapshot{
-			ID:           newUUID(),
-			SessionID:    sessionID,
-			UserID:       userID,
-			ResourceType: ResourceTypeUserPreference,
-			ResourceKey:  SystemResourceKey(ResourceTypeUserPreference),
-			SnapshotHash: pref.ContentHash,
-			CreatedAt:    now,
-		},
-	)
 
 	for _, skill := range v2Skills {
 		state, err := skillStateFromV2Resource(ctx, db, &skill)
@@ -374,15 +130,15 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 	if len(availableSkills) > 1 {
 		sort.Strings(availableSkills)
 	}
-	if err := db.WithContext(ctx).Create(&snapshots).Error; err != nil {
-		return nil, err
+	if len(snapshots) > 0 {
+		if err := db.WithContext(ctx).Create(&snapshots).Error; err != nil {
+			return nil, err
+		}
 	}
 
 	context := &ChatResourceContext{
 		DisabledTools:      []string{},
 		AvailableSkills:    availableSkills,
-		Memory:             mem.Content,
-		UserPreference:     pref.Content,
 		UsePersonalization: usePersonalization,
 	}
 	appLog.Logger.Info().

@@ -49,3 +49,27 @@ func TestBackgroundJobsEnabledAcceptsFalseValues(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateStartupConfigRequiresInternalToken(t *testing.T) {
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "")
+	if err := validateStartupConfig(); err == nil {
+		t.Fatal("validateStartupConfig() should reject an empty internal token")
+	}
+
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal-secret")
+	if err := validateStartupConfig(); err != nil {
+		t.Fatalf("validateStartupConfig() error = %v", err)
+	}
+}
+
+func TestValidateStartupConfigRejectsInvalidPreferenceCapacity(t *testing.T) {
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal-secret")
+	for _, value := range []string{"", "0", "-1", "invalid"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS", value)
+			if err := validateStartupConfig(); err == nil {
+				t.Fatalf("validateStartupConfig() should reject %q", value)
+			}
+		})
+	}
+}

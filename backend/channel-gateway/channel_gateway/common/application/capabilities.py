@@ -28,7 +28,7 @@ _RESOLVED_RESOURCES_KEY = '_channel_gateway_resolved_resources'
 _CAPABILITY_LABELS = {
     'knowledge_base': '知识库',
     'skill': 'Skill',
-    'plugin': 'Plugin',
+    'plugin': 'Workflow',
     'tool': '工具',
     'prompt': 'Prompt',
     'conversation': '会话',
@@ -128,16 +128,16 @@ class CapabilityActions:
             'personalization',
             id_key='id',
         )
-        plugin_enabled = bool(
-            detail.get('enable_plugin')
-            if detail.get('enable_plugin') is not None
+        workflow_enabled = bool(
+            detail.get('enable_workflow')
+            if detail.get('enable_workflow') is not None
             else True
         )
-        raw_plugin_mode = str(
-            detail.get('plugin_mode') or 'dynamic'
+        raw_workflow_mode = str(
+            detail.get('workflow_mode') or 'dynamic'
         )
-        plugin_mode: Literal['auto', 'dynamic'] = (
-            'auto' if raw_plugin_mode == 'auto' else 'dynamic'
+        workflow_mode: Literal['auto', 'dynamic'] = (
+            'auto' if raw_workflow_mode == 'auto' else 'dynamic'
         )
         subagent_enabled = bool(
             detail.get('enable_subagent')
@@ -157,8 +157,8 @@ class CapabilityActions:
                 conversation_id=conversation_id,
                 section=section,
                 knowledge_bases=tuple(datasets),
-                plugin_enabled=plugin_enabled,
-                plugin_mode=plugin_mode,
+                workflow_enabled=workflow_enabled,
+                workflow_mode=workflow_mode,
                 subagent_enabled=subagent_enabled,
                 skills=tuple(skills),
                 tools=tuple(tools),
@@ -234,14 +234,14 @@ class CapabilityActions:
                 dataset_ids=dataset_ids,
             )
             section: SettingsSection = 'knowledge_base'
-        elif change.setting in ('plugin', 'plugin_mode', 'subagent'):
+        elif change.setting in ('plugin', 'workflow_mode', 'subagent'):
             if change.setting == 'plugin':
-                settings = {'enable_plugin': change.enabled}
+                settings = {'enable_workflow': change.enabled}
                 section = 'plugin'
-            elif change.setting == 'plugin_mode':
+            elif change.setting == 'workflow_mode':
                 settings = {
-                    'enable_plugin': True,
-                    'plugin_mode': change.mode,
+                    'enable_workflow': True,
+                    'workflow_mode': change.mode,
                 }
                 section = 'plugin'
             else:
@@ -512,7 +512,7 @@ class CapabilityActions:
         enabled_features = features.enabled_feature_labels
         if not enabled_features:
             lines.append(
-                '当前渠道不提供 Plugin、SubAgent、后台 Task 和结构化 Ask。'
+                '当前渠道不提供 Workflow、SubAgent、后台 Task 和结构化 Ask。'
             )
         else:
             lines.append(

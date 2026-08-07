@@ -501,9 +501,9 @@ class FeishuPresentationRenderer:
             .config(wide_screen_mode=True)
             .header(
                 _workflow_title(
-                    str(current.get('title') or '插件工作流')
+                    str(current.get('title') or '工作流')
                 ),
-                subtitle='LazyMind 插件工作流',
+                subtitle='LazyMind 工作流',
                 template=template,
             )
         )
@@ -1000,8 +1000,8 @@ def _task_status(status: str) -> tuple[str, str]:
 def _workflow_title(task_title: str) -> str:
     plugin = task_title.split(':', 1)[0].strip().lower()
     return {
-        'writer-plugin': 'AI Writer 写作工作流',
-        'image-plugin': 'AI 绘图工作流',
+        'writer-workflow': 'AI Writer 写作工作流',
+        'image-workflow': 'AI 绘图工作流',
         'ppt-plugin': 'AI PPT 工作流',
     }.get(
         plugin,

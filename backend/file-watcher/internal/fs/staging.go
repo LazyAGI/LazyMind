@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -135,7 +137,7 @@ func (s *stagingService) StageFile(_ context.Context, sourceID, documentID, vers
 			return internal.StageResult{
 				HostPath:      hostDest,
 				ContainerPath: containerDest,
-				URI:           "file://" + containerDest,
+				URI:           pathToFileURI(containerDest),
 				Size:          destInfo.Size(),
 			}, nil
 		}
@@ -160,9 +162,24 @@ func (s *stagingService) StageFile(_ context.Context, sourceID, documentID, vers
 	return internal.StageResult{
 		HostPath:      hostDest,
 		ContainerPath: containerDest,
-		URI:           "file://" + containerDest,
+		URI:           pathToFileURI(containerDest),
 		Size:          written,
 	}, nil
+}
+
+func pathToFileURI(path string) string {
+	return pathToFileURIForOS(path, runtime.GOOS)
+}
+
+func pathToFileURIForOS(path, goos string) string {
+	uriPath := filepath.ToSlash(path)
+	if goos == "windows" {
+		uriPath = strings.ReplaceAll(path, `\`, "/")
+		if len(uriPath) >= 2 && uriPath[1] == ':' && uriPath[0] != '/' {
+			uriPath = "/" + uriPath
+		}
+	}
+	return (&url.URL{Scheme: "file", Path: uriPath}).String()
 }
 
 func safePathSegment(label, value string) (string, error) {

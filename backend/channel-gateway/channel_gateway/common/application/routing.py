@@ -225,7 +225,7 @@ class ChannelCommandRouter:
             external_address_hash,
             surface,
         )
-        if self._feature_resolver(provider).enable_plugin:
+        if self._feature_resolver(provider).enable_workflow:
             workflow_catalog = self._classifier.catalog(
                 owner_user_id=owner_user_id,
                 request_id=request_id,

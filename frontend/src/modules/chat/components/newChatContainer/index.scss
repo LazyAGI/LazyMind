@@ -76,6 +76,18 @@
         align-items: flex-end;
         gap: 4px;
 
+        .chat-user-bubble-row {
+          display: flex;
+          max-width: 100%;
+          align-items: flex-start;
+          justify-content: flex-end;
+          gap: 10px;
+        }
+
+        .chat-user-avatar {
+          margin-top: 2px;
+        }
+
 		.chat-collected-inputs {
 		  width: min(680px, 72vw);
 		  border: 1px solid #d9e5f5;
@@ -188,6 +200,7 @@
           display: flex;
           align-items: center;
           gap: 2px;
+          margin-right: 42px;
 
           .ant-btn {
             color: #8d9ab2;
@@ -344,7 +357,12 @@
           width: 100%;
           align-items: stretch;
 
+          .chat-user-bubble-row {
+            width: 100%;
+          }
+
           .chat-user {
+            flex: 1;
             background: transparent;
             border-radius: 0;
             padding: 0;
@@ -464,7 +482,7 @@
   .conversation-trail {
     position: absolute;
     top: 0;
-    right: 4px;
+    left: 4px;
     bottom: 0;
     z-index: 24;
     width: 30px;
@@ -546,7 +564,7 @@
     .conversation-trail-popover {
       position: absolute;
       top: 50%;
-      right: 32px;
+      left: 32px;
       z-index: 2;
       width: min(240px, calc(100vw - 58px));
       max-height: min(360px, calc(100% - 24px));
@@ -625,7 +643,7 @@
     .conversation-trail-toggle,
     .conversation-trail-error {
       position: absolute;
-      right: 0;
+      left: 0;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -900,4 +918,10 @@ pre {
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+@media (max-width: 720px) {
+  .chat-user-avatar {
+    --identity-avatar-size: 28px !important;
+  }
 }

@@ -18,11 +18,12 @@ import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
 import type { ChatMention } from "../../ChatInput/MentionEditor";
 import { CHAT_SELECT_CONVERSATION_EVENT } from "@/modules/chat/constants/chat";
+import { IdentityAvatar } from "@/modules/identityAvatar";
 
 const MENTION_ICONS = {
   knowledge_base: <DatabaseOutlined />,
   skill: <ThunderboltOutlined />,
-  plugin: <AppstoreOutlined />,
+  workflow: <AppstoreOutlined />,
   tool: <ThunderboltOutlined />,
   conversation: <CommentOutlined />,
 };
@@ -34,10 +35,10 @@ function mentionHref(mention: ChatMention) {
       return `/lib/knowledge/detail/${id}`;
     case "skill":
       return `/memory-management/skills/${id}`;
-    case "plugin":
+    case "workflow":
       return mention.resource_id.startsWith("builtin:")
-        ? `/memory-management/plugins/builtin/${encodeURIComponent(mention.resource_id.slice(8))}`
-        : `/memory-management/plugins/${id}`;
+        ? `/memory-management/workflows/builtin/${encodeURIComponent(mention.resource_id.slice(8))}`
+        : `/memory-management/workflows/${id}`;
     case "tool":
       return "/model-providers/tools";
     case "conversation":
@@ -351,9 +352,10 @@ const MessageList: React.FC<MessageListProps> = ({
           {!isEditing && citeMessageList.length > 0 ? (
             <UserCitationPreview citeMessages={citeMessageList} />
           ) : null}
-          <div className="chat-user">
-            {isEditing ? (
-              <div className="chat-user-edit-wrap">
+          <div className="chat-user-bubble-row">
+            <div className="chat-user">
+              {isEditing ? (
+                <div className="chat-user-edit-wrap">
                 {citeMessageList.length > 0 ? (
                   <div className="chat-user-edit-citation-list">
                     {citeMessageList.map((citeMessage, citeIndex) => (
@@ -415,14 +417,23 @@ const MessageList: React.FC<MessageListProps> = ({
                     {t("chat.send")}
                   </Button>
                 </Space>
-              </div>
-            ) : (
-              Array.isArray(item.mentions) && item.mentions.length > 0 ? (
-                <div className="chat-user-mention-text">
-                  <UserMessageWithMentions text={item.display_delta || item.delta || ""} mentions={item.mentions} />
                 </div>
-              ) : renderText(item)
-            )}
+              ) : Array.isArray(item.mentions) && item.mentions.length > 0 ? (
+                <div className="chat-user-mention-text">
+                  <UserMessageWithMentions
+                    mentions={item.mentions}
+                    text={item.display_delta || item.delta || ""}
+                  />
+                </div>
+              ) : (
+                renderText(item)
+              )}
+            </div>
+            <IdentityAvatar
+              className="chat-user-avatar"
+              kind="profile"
+              size={32}
+            />
           </div>
           {!isEditing ? (
             <div className="chat-user-toolbar">

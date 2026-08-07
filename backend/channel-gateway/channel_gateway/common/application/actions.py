@@ -97,7 +97,7 @@ class ChannelActionExecutor:
                         request_id,
                     )
                 )
-                disabled_tools, enable_plugin, plugin_refs = (
+                disabled_tools, enable_workflow, workflow_refs = (
                     self._workspace_capability_policy(
                         provider,
                         provider_context,
@@ -105,8 +105,8 @@ class ChannelActionExecutor:
                     )
                 )
                 if executor is None:
-                    self._prepare_workspace_plugins(
-                        plugin_refs=plugin_refs,
+                    self._prepare_workspace_workflows(
+                        workflow_refs=workflow_refs,
                         catalog=catalog,
                         account_id=account_id,
                         external_address_hash=external_address_hash,
@@ -137,8 +137,8 @@ class ChannelActionExecutor:
                         else None
                     ),
                     disabled_tools=disabled_tools,
-                    enable_plugin=enable_plugin,
-                    plugin_mode=self._chat_plugin_mode(
+                    enable_workflow=enable_workflow,
+                    workflow_mode=self._chat_workflow_mode(
                         provider,
                         executor,
                     ),
@@ -258,7 +258,7 @@ class ChannelActionExecutor:
                 )
                 presentations = (settings_presentation,)
             elif isinstance(command, WorkflowInvokeCommand):
-                if not features.enable_plugin:
+                if not features.enable_workflow:
                     raise ActionMessage(
                         '当前渠道没有开放工作流功能，配置没有改变。'
                     )
@@ -268,7 +268,7 @@ class ChannelActionExecutor:
                     catalog,
                     allow_disabled=provider == 'feishu',
                 )
-                _disabled, _enabled, plugin_refs = (
+                _disabled, _enabled, workflow_refs = (
                     self._workspace_capability_policy(
                         provider,
                         provider_context,
@@ -276,12 +276,12 @@ class ChannelActionExecutor:
                     )
                 )
                 workflow_ref = str(workflow.get('id') or '')
-                if provider == 'feishu' and workflow_ref not in plugin_refs:
+                if provider == 'feishu' and workflow_ref not in workflow_refs:
                     raise ActionMessage(
-                        '这个插件尚未加入当前会话，请先在“能力”中选择后再试。'
+                        '这个工作流尚未加入当前会话，请先在“能力”中选择后再试。'
                     )
-                self._prepare_workspace_plugins(
-                    plugin_refs=(workflow_ref,),
+                self._prepare_workspace_workflows(
+                    workflow_refs=(workflow_ref,),
                     catalog=catalog,
                     account_id=account_id,
                     external_address_hash=external_address_hash,
@@ -305,7 +305,7 @@ class ChannelActionExecutor:
                         ),
                         self._client.mention('plugin', workflow),
                     ),
-                    plugin_mode='auto',
+                    workflow_mode='auto',
                     thinking_depth=self._thinking_depth(provider_context),
                     on_stream=on_stream,
                     **context,
@@ -438,7 +438,7 @@ class ChannelActionExecutor:
         }
 
     @staticmethod
-    def _chat_plugin_mode(
+    def _chat_workflow_mode(
         provider: str,
         executor: dict[str, str] | None,
     ) -> str | None:
@@ -465,7 +465,7 @@ class ChannelActionExecutor:
             for item in resources
             if item.get('type') and item.get('id')
         }
-        selected_plugins = tuple(dict.fromkeys(
+        selected_workflows = tuple(dict.fromkeys(
             str(item.get('id') or '')
             for item in resources
             if item.get('type') == 'plugin' and item.get('id')
@@ -498,21 +498,21 @@ class ChannelActionExecutor:
             disabled_tools.append('skill')
         return (
             tuple(dict.fromkeys(disabled_tools)),
-            bool(selected_plugins),
-            selected_plugins,
+            bool(selected_workflows),
+            selected_workflows,
         )
 
-    def _prepare_workspace_plugins(
+    def _prepare_workspace_workflows(
         self,
         *,
-        plugin_refs: Sequence[str],
+        workflow_refs: Sequence[str],
         catalog: dict[str, Any],
         account_id: str,
         external_address_hash: str,
         owner_user_id: str,
         request_id: str,
     ) -> None:
-        refs = tuple(dict.fromkeys(ref for ref in plugin_refs if ref))
+        refs = tuple(dict.fromkeys(ref for ref in workflow_refs if ref))
         if not refs:
             return
         workflows = catalog.get('workflow')
@@ -532,7 +532,7 @@ class ChannelActionExecutor:
                     owner_user_id=owner_user_id,
                     workflow_ref=workflow_ref,
                     enabled=True,
-                    request_id=f'{request_id}_enable_plugin_{position}',
+                    request_id=f'{request_id}_enable_workflow_{position}',
                 )
                 workflow['enabled'] = True
         conversation_id = self._store.get_route(
@@ -540,7 +540,7 @@ class ChannelActionExecutor:
             external_address_hash,
         )
         if conversation_id:
-            self._client.dismiss_terminal_plugin_session(
+            self._client.dismiss_terminal_workflow_session(
                 owner_user_id=owner_user_id,
                 conversation_id=conversation_id,
                 request_id=request_id,

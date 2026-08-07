@@ -206,7 +206,7 @@ class LazyMindClient:
         concurrent.futures.Future[list[dict[str, Any]]] | None,
     ]:
         if not (
-            options.features.enable_plugin
+            options.features.enable_workflow
             or options.features.enable_subagent
             or options.features.enable_tasks
         ):
@@ -272,10 +272,10 @@ class LazyMindClient:
             ],
             'mode': 'auto',
             'basic_chat_only': options.features.basic_chat_only,
-            'enable_plugin': (
-                options.enable_plugin
-                if options.enable_plugin is not None
-                else options.features.enable_plugin
+            'enable_workflow': (
+                options.enable_workflow
+                if options.enable_workflow is not None
+                else options.features.enable_workflow
             ),
             'enable_subagent': options.features.enable_subagent,
             'disabled_tools': self._unique(
@@ -288,8 +288,8 @@ class LazyMindClient:
         }
         if options.mentions:
             payload['mentions'] = options.mentions
-        if options.plugin_mode is not None:
-            payload['plugin_mode'] = options.plugin_mode
+        if options.workflow_mode is not None:
+            payload['workflow_mode'] = options.workflow_mode
         if options.use_memory is not None:
             payload['use_memory'] = options.use_memory
         if options.filters is not None:
@@ -305,15 +305,15 @@ class LazyMindClient:
         if conversation_id:
             payload['conversation_id'] = conversation_id
         else:
-            initial_plugin_settings: dict[str, Any] = {}
-            if options.enable_plugin is not None:
-                initial_plugin_settings['enable_plugin'] = (
-                    options.enable_plugin
+            initial_workflow_settings: dict[str, Any] = {}
+            if options.enable_workflow is not None:
+                initial_workflow_settings['enable_workflow'] = (
+                    options.enable_workflow
                 )
-            if options.plugin_mode is not None:
-                initial_plugin_settings['plugin_mode'] = options.plugin_mode
-            if initial_plugin_settings:
-                payload['initial_plugin_settings'] = initial_plugin_settings
+            if options.workflow_mode is not None:
+                initial_workflow_settings['workflow_mode'] = options.workflow_mode
+            if initial_workflow_settings:
+                payload['initial_workflow_settings'] = initial_workflow_settings
         return payload
 
     def _consume_chat_stream(
@@ -779,7 +779,7 @@ class LazyMindClient:
             request_id=request_id,
         )
 
-    def dismiss_terminal_plugin_session(
+    def dismiss_terminal_workflow_session(
         self,
         *,
         owner_user_id: str,
@@ -790,11 +790,11 @@ class LazyMindClient:
             'GET',
             (
                 f'{self._base_url}/conversations/'
-                f'{quote(conversation_id, safe="")}/plugin-sessions:latest'
+                f'{quote(conversation_id, safe="")}/workflow-sessions:latest'
             ),
             owner_user_id=owner_user_id,
-            request_id=f'{request_id}_latest_plugin',
-            error_label='latest plugin session',
+            request_id=f'{request_id}_latest_workflow',
+            error_label='latest workflow session',
         )
         data = payload.get('data')
         session = (
@@ -811,12 +811,12 @@ class LazyMindClient:
         self._request_json(
             'POST',
             (
-                f'{self._base_url}/plugin-sessions/'
+                f'{self._base_url}/workflow-sessions/'
                 f'{quote(session_id, safe="")}:dismiss'
             ),
             owner_user_id=owner_user_id,
-            request_id=f'{request_id}_dismiss_plugin',
-            error_label='plugin session dismissal',
+            request_id=f'{request_id}_dismiss_workflow',
+            error_label='workflow session dismissal',
         )
         return True
 
@@ -1256,7 +1256,7 @@ class LazyMindClient:
         self._request_json(
             'PATCH',
             f'{self._base_url}/conversations/'
-            f'{quote(conversation_id, safe="")}/plugin-settings',
+            f'{quote(conversation_id, safe="")}/workflow-settings',
             owner_user_id=owner_user_id,
             request_id=request_id,
             json_body=settings,
@@ -1289,7 +1289,7 @@ class LazyMindClient:
             )
         if {'workflow', 'plugin'} & kinds:
             requests['workflows'] = (
-                '/chat/settings/plugins',
+                '/chat/settings/workflows',
                 'workflows',
                 {},
             )
@@ -1345,7 +1345,7 @@ class LazyMindClient:
         )
         workflow_data = workflows_payload.get('data')
         workflows = (
-            workflow_data.get('plugins')
+            workflow_data.get('workflows')
             if isinstance(workflow_data, dict)
             else None
         )
@@ -1353,15 +1353,15 @@ class LazyMindClient:
         conversations = conversations_payload.get('conversations')
         workflow_items = [
             {
-                'id': str(item.get('plugin_ref') or ''),
-                'plugin_id': str(item.get('plugin_id') or ''),
+                'id': str(item.get('workflow_ref') or ''),
+                'workflow_id': str(item.get('workflow_id') or ''),
                 'name': str(item.get('name') or '').strip(),
                 'description': str(item.get('description') or '').strip(),
                 'enabled': bool(item.get('enabled', False)),
             }
             for item in (workflows if isinstance(workflows, list) else [])
             if isinstance(item, dict)
-            and item.get('plugin_ref')
+            and item.get('workflow_ref')
             and str(item.get('name') or '').strip()
         ]
         return {
@@ -1513,7 +1513,7 @@ class LazyMindClient:
     ) -> None:
         self._request_json(
             'PATCH',
-            f'{self._base_url}/chat/settings/plugins/'
+            f'{self._base_url}/chat/settings/workflows/'
             f'{quote(workflow_ref, safe="")}',
             owner_user_id=owner_user_id,
             request_id=request_id,

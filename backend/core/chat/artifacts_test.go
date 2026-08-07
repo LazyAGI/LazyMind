@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -13,14 +14,24 @@ import (
 
 func newArtifactTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "artifacts.db"))
-	if err != nil {
-		t.Fatalf("connect artifact test db: %v", err)
+	return orm.MigrateTestDB(t, &orm.ConversationArtifact{})
+}
+
+// assertStoredArtifactValue compares the value read back from the database
+// semantically. PostgreSQL normalizes jsonb formatting, so byte-level
+// comparison against a compact literal is driver-dependent.
+func assertStoredArtifactValue(t *testing.T, got json.RawMessage, want string) {
+	t.Helper()
+	var gotV, wantV map[string]any
+	if err := json.Unmarshal(got, &gotV); err != nil {
+		t.Fatalf("decode stored value: %v", err)
 	}
-	if err := db.AutoMigrate(&orm.ConversationArtifact{}); err != nil {
-		t.Fatalf("migrate artifact test db: %v", err)
+	if err := json.Unmarshal([]byte(want), &wantV); err != nil {
+		t.Fatalf("decode want value: %v", err)
 	}
-	return db
+	if !reflect.DeepEqual(gotV, wantV) {
+		t.Fatalf("stored value = %s, want %s", got, want)
+	}
 }
 
 func TestPersistConversationArtifactBindsAuthoritativeTurn(t *testing.T) {
@@ -117,9 +128,7 @@ func TestPersistConversationArtifactReplacesSameTurnArtifactWhenRequested(t *tes
 	if err := db.First(&stored, "id = ?", artifactID).Error; err != nil {
 		t.Fatalf("load replaced artifact: %v", err)
 	}
-	if string(stored.Value) != `{"text":"second"}` {
-		t.Fatalf("stored replacement value = %s", stored.Value)
-	}
+	assertStoredArtifactValue(t, stored.Value, `{"text":"second"}`)
 }
 
 func TestPersistConversationArtifactReplacesAcrossTurns(t *testing.T) {
@@ -149,9 +158,10 @@ func TestPersistConversationArtifactReplacesAcrossTurns(t *testing.T) {
 	if err := db.First(&stored, "id = ?", event.ArtifactID).Error; err != nil {
 		t.Fatalf("load replaced artifact: %v", err)
 	}
-	if stored.HistoryID != "history-1" || string(stored.Value) != `{"text":"other turn"}` {
+	if stored.HistoryID != "history-1" {
 		t.Fatalf("stored replacement = history %q, value %s", stored.HistoryID, stored.Value)
 	}
+	assertStoredArtifactValue(t, stored.Value, `{"text":"other turn"}`)
 	if _, err := persistConversationArtifact(
 		context.Background(), db.DB, "conversation-2", "history-3", "user-1", event,
 	); err == nil || !strings.Contains(err.Error(), "scope mismatch") {
@@ -265,7 +275,11 @@ func TestCanonicalConversationFileValueAcceptsLegacyScopeHash(t *testing.T) {
 	if err := json.Unmarshal(canonical, &value); err != nil {
 		t.Fatalf("decode canonical legacy artifact: %v", err)
 	}
-	if value["size"] != float64(len("legacy")) || value["path"] != path {
+	expectedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("resolve expected legacy artifact path: %v", err)
+	}
+	if value["size"] != float64(len("legacy")) || value["path"] != expectedPath {
 		t.Fatalf("unexpected canonical legacy artifact: %#v", value)
 	}
 }

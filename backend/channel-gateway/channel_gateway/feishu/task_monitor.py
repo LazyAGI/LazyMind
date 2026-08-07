@@ -707,9 +707,9 @@ def _workflow_tasks(
     anchor_seq = int(anchor.get('seq_in_conversation') or 0)
     anchor_type = str(anchor.get('agent_type') or '')
     anchor_title = str(anchor.get('title') or '')
-    plugin_prefix = (
+    workflow_prefix = (
         anchor_title.split(':', 1)[0]
-        if anchor_type == 'plugin_step' and ':' in anchor_title
+        if anchor_type == 'workflow_step' and ':' in anchor_title
         else ''
     )
     candidates = sorted(
@@ -719,14 +719,14 @@ def _workflow_tasks(
             if int(task.get('seq_in_conversation') or 0) >= anchor_seq
             and (
                 (
-                    plugin_prefix
-                    and str(task.get('agent_type') or '') == 'plugin_step'
+                    workflow_prefix
+                    and str(task.get('agent_type') or '') == 'workflow_step'
                     and str(task.get('title') or '').startswith(
-                        f'{plugin_prefix}:'
+                        f'{workflow_prefix}:'
                     )
                 )
                 or (
-                    not plugin_prefix
+                    not workflow_prefix
                     and str(task.get('task_id') or '') == anchor_task_id
                 )
             )
@@ -785,7 +785,7 @@ def _workflow_state(
         return False, False, 0
     if status in _NON_RETRYABLE_TERMINAL_STATUSES:
         return False, True, now
-    if str(latest.get('agent_type') or '') != 'plugin_step':
+    if str(latest.get('agent_type') or '') != 'workflow_step':
         return False, True, now
     if (
         status in {'completed', 'succeeded', 'success'}

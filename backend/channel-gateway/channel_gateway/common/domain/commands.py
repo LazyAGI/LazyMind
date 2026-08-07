@@ -336,13 +336,13 @@ class ConversationKnowledgeBaseSetting(_StrictModel):
     enabled: bool
 
 
-class ConversationPluginSetting(_StrictModel):
+class ConversationWorkflowSetting(_StrictModel):
     setting: Literal['plugin']
     enabled: bool
 
 
-class ConversationPluginModeSetting(_StrictModel):
-    setting: Literal['plugin_mode']
+class ConversationWorkflowModeSetting(_StrictModel):
+    setting: Literal['workflow_mode']
     mode: Literal['auto', 'dynamic']
 
 
@@ -376,8 +376,8 @@ class AccountWorkflowSetting(_StrictModel):
 
 ConversationSettingChange: TypeAlias = Annotated[
     ConversationKnowledgeBaseSetting
-    | ConversationPluginSetting
-    | ConversationPluginModeSetting
+    | ConversationWorkflowSetting
+    | ConversationWorkflowModeSetting
     | ConversationSubagentSetting
     | AccountSkillSetting
     | AccountToolSetting
@@ -470,7 +470,7 @@ _CAPABILITY_CONFIGURE_DESCRIPTION = (
 )
 _CONVERSATION_SETTINGS_DESCRIPTION = (
     'Show persistent settings for the current conversation and account: knowledge bases, '
-    'Plugin execution mode, SubAgent, Skills, tools, personalization, and workflows. '
+    'Workflow execution mode, SubAgent, Skills, tools, personalization, and workflows. '
     'This never selects a resource for only the next turn.'
 )
 _CONVERSATION_SETTINGS_UPDATE_DESCRIPTION = (

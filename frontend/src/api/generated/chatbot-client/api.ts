@@ -1027,17 +1027,17 @@ export interface Conversation {
    */
   models?: Array<string>;
   /**
-   * Whether plugin tooling is enabled for this conversation.
+   * Whether workflow tooling is enabled for this conversation.
    * @type {boolean}
    * @memberof Conversation
    */
-  enable_plugin?: boolean | null;
+  enable_workflow?: boolean | null;
   /**
-   * Plugin driver mode for this conversation: 'dynamic' or 'auto'.
+   * Workflow driver mode for this conversation: 'dynamic' or 'auto'.
    * @type {string}
    * @memberof Conversation
    */
-  plugin_mode?: string | null;
+  workflow_mode?: string | null;
   /**
    * Whether SubAgent task creation is enabled for this conversation.
    * @type {boolean}

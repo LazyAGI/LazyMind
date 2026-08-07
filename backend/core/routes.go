@@ -1,35 +1,64 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"lazymind/core/acl"
 	"lazymind/core/agent"
 	"lazymind/core/chat"
+	"lazymind/core/currentmemory"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
+	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
 	"lazymind/core/externalagent"
 	"lazymind/core/file"
 	"lazymind/core/mcp"
 	"lazymind/core/modelprovider"
-	"lazymind/core/plugin"
 	"lazymind/core/remotefs"
-	"lazymind/core/resourcefs"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
 	"lazymind/core/showcase"
 	skillv2handler "lazymind/core/skillv2/handler"
+	corestore "lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/systemdeps"
 	"lazymind/core/taskcenter"
 	"lazymind/core/userprefs"
 	"lazymind/core/wordgroup"
+	"lazymind/core/workflow"
+	workflowattempt "lazymind/core/workflow/attempt"
+	workflowexecutor "lazymind/core/workflow/executor"
+	workflowfacade "lazymind/core/workflow/facade"
+	workflowstore "lazymind/core/workflow/store"
+	workflowstream "lazymind/core/workflow/stream"
 
 	"github.com/gorilla/mux"
 )
+
+type routeCapture struct {
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+type routeProjectionError string
+
+func (e routeProjectionError) Error() string { return string(e) }
+
+func (c *routeCapture) Header() http.Header    { return c.header }
+func (c *routeCapture) WriteHeader(status int) { c.status = status }
+func (c *routeCapture) Write(body []byte) (int, error) {
+	if c.status == 0 {
+		c.status = http.StatusOK
+	}
+	return c.body.Write(body)
+}
 
 func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h http.HandlerFunc) {
 	handleAPI(r, method, path, perms, h).MatcherFunc(func(r *http.Request, _ *mux.RouteMatch) bool {
@@ -46,7 +75,27 @@ func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h 
 
 // registerAllRoutes text OpenAPI text（text Job），text handleAPI textPermissiontext（text extract_api_permissions.py text Kong RBAC）。
 func registerAllRoutes(r *mux.Router) {
-	resourcefs.AutoEvoEnabledScanner = resourceupdate.ScanPendingResultsForResource
+	attemptHandler := workflowattempt.Handler{Service: workflowattempt.New(corestore.DB(), workflowattempt.Config{})}
+	remoteExecutorHandler := workflowexecutor.RemoteHandler{
+		DB: corestore.DB(), Attempts: attemptHandler.Service,
+		Contexts:  workflowexecutor.DBContextLoader{DB: corestore.DB()},
+		Artifacts: workflowexecutor.DBArtifactSink{DB: corestore.DB()},
+	}
+	handleAPI(r, "POST", "/internal/workflow-attempts:claim", nil, attemptHandler.Claim)
+	handleAPI(r, "GET", "/internal/workflow-attempts/{attempt_id}/context", nil, remoteExecutorHandler.Context)
+	handleAPI(r, "GET", "/internal/workflow-attempts/{attempt_id}/inputs/{material_id}", nil, remoteExecutorHandler.Input)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/artifacts", nil, remoteExecutorHandler.SaveArtifact)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:heartbeat", nil, attemptHandler.Heartbeat)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:progress", nil, attemptHandler.Progress)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:complete", nil, remoteExecutorHandler.Complete)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:fail", nil, attemptHandler.Fail)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:cancel", nil, attemptHandler.Cancel)
+	workflowRepository := workflowstore.New(corestore.DB())
+	workflowFacade := workflowfacade.Handler{
+		Store:      workflowRepository,
+		Hosts:      workflowexecutor.DefaultHostRegistry,
+		Projection: http.HandlerFunc(workflow.GetSessionProjection),
+	}
 
 	// ----- Datasettext -----
 	handleAPI(r, "GET", "/dataset/algos", []string{"document.read"}, doc.ListAlgos)
@@ -233,33 +282,40 @@ func registerAllRoutes(r *mux.Router) {
 	// Internal endpoint for algorithm service auto polling; no request-level RBAC.
 	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}", nil, subagent.InternalGetTaskStatus)
 	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}/events", nil, subagent.InternalGetTaskEvents)
+	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}/execution-spec", nil, subagent.InternalGetExecutionSpec)
+	handleAPI(r, "POST", "/internal/subagent/tasks/{task_id}/events", nil, subagent.InternalIngestTaskEvent)
 
-	// ----- Plugin Info -----
-	handleAPI(r, "GET", "/plugins", []string{"qa.read"}, plugin.ListPlugins)
-	handleAPI(r, "GET", "/plugins/{plugin_id}", []string{"qa.read"}, plugin.GetPluginInfo)
-
-	// ----- Plugin Drafts (user-created plugin authoring) -----
-	handleAPI(r, "GET", "/plugin-drafts", []string{"qa.read"}, plugin.ListPluginDrafts)
-	handleAPI(r, "POST", "/plugin-drafts", []string{"qa.write"}, plugin.CreatePluginDraft)
-	handleAPI(r, "POST", "/plugin-drafts:polish-info", []string{"qa.write"}, plugin.PolishPluginDraftInfo)
-	handleAPI(r, "GET", "/plugin-drafts/{draft_id}", []string{"qa.read"}, plugin.GetPluginDraft)
-	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:save", []string{"qa.write"}, plugin.SavePluginDraft)
-	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:validate", []string{"qa.read"}, plugin.ValidatePluginDraft)
-	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-generate", []string{"qa.write"}, plugin.AIGeneratePluginDraft)
-	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:ai-repair", []string{"qa.write"}, plugin.AIRepairPluginDraft)
-	handleAPI(r, "GET", "/plugin-drafts/{draft_id}/generation-analysis", []string{"qa.read"}, plugin.GetPluginGenerationAnalysis)
-	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:confirm-workflow", []string{"qa.write"}, plugin.ConfirmPluginWorkflow)
-	handleAPI(r, "GET", "/plugin-drafts/{draft_id}/repair-runs/{repair_id}", []string{"qa.read"}, plugin.GetPluginRepairRun)
-	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:repair-preview", []string{"qa.read"}, plugin.PreviewPluginRepair)
-	handleAPI(r, "POST", "/plugin-drafts/{draft_id}:publish", []string{"qa.write"}, plugin.PublishPluginDraft)
-	handleAPI(r, "DELETE", "/plugin-drafts/{draft_id}", []string{"qa.write"}, plugin.DeletePluginDraft)
-	handleAPI(r, "GET", "/chat/settings/plugins", []string{"qa.read"}, plugin.ListUserPluginSettings)
-	handleAPI(r, "PATCH", "/chat/settings/plugins/{plugin_ref:.+}", []string{"qa.write"}, plugin.PatchUserPluginSetting)
-	handleAPI(r, "POST", "/published-plugins/{plugin_ref:.+}:rollback", []string{"qa.write"}, plugin.RollbackPlugin)
-	handleAPI(r, "POST", "/published-plugins/{plugin_ref:.+}:archive", []string{"qa.write"}, plugin.ArchivePlugin)
-	handleAPI(r, "GET", "/published-plugins/{plugin_ref:.+}/versions", []string{"qa.read"}, plugin.ListPluginVersions)
-	handleAPI(r, "GET", "/published-plugins/{plugin_ref:.+}/versions/{revision_id}", []string{"qa.read"}, plugin.GetPluginVersion)
-	handleAPI(r, "POST", "/published-plugins/{plugin_ref:.+}/versions/{revision_id}:edit", []string{"qa.write"}, plugin.ReplaceDraftFromPluginVersion)
+	// ----- Workflow Info -----
+	// Keep these catalog endpoints on the legacy response shape consumed by the
+	// Workflow management UI. The versioned facade remains in use for runtime
+	// preparation, commands, inputs, and artifacts below.
+	handleAPI(r, "GET", "/workflows", []string{"qa.read"}, workflow.ListWorkflows)
+	handleAPI(r, "GET", "/workflows/{workflow_id}", []string{"qa.read"}, func(w http.ResponseWriter, req *http.Request) {
+		workflow.GetWorkflowInfo(w, req)
+	})
+	// ----- Workflow Drafts (user-created workflow authoring) -----
+	handleAPI(r, "GET", "/workflow-drafts", []string{"qa.read"}, workflow.ListWorkflowDrafts)
+	handleAPI(r, "POST", "/workflow-drafts", []string{"qa.write"}, workflow.CreateWorkflowDraft)
+	handleAPI(r, "POST", "/workflow-drafts:polish-info", []string{"qa.write"}, workflow.PolishWorkflowDraftInfo)
+	handleAPI(r, "GET", "/workflow-drafts/{draft_id}", []string{"qa.read"}, workflow.GetWorkflowDraft)
+	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:save", []string{"qa.write"}, workflow.SaveWorkflowDraft)
+	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:validate", []string{"qa.read"}, workflow.ValidateWorkflowDraft)
+	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:ai-generate", []string{"qa.write"}, workflow.AIGenerateWorkflowDraft)
+	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:ai-repair", []string{"qa.write"}, workflow.AIRepairWorkflowDraft)
+	handleAPI(r, "GET", "/workflow-drafts/{draft_id}/generation-analysis", []string{"qa.read"}, workflow.GetWorkflowGenerationAnalysis)
+	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:confirm-workflow", []string{"qa.write"}, workflow.ConfirmWorkflowWorkflow)
+	handleAPI(r, "GET", "/workflow-drafts/{draft_id}/repair-runs/{repair_id}", []string{"qa.read"}, workflow.GetWorkflowRepairRun)
+	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:repair-preview", []string{"qa.read"}, workflow.PreviewWorkflowRepair)
+	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:publish", []string{"qa.write"}, workflow.PublishWorkflowDraft)
+	handleAPI(r, "DELETE", "/workflow-drafts/{draft_id}", []string{"qa.write"}, workflow.DeleteWorkflowDraft)
+	handleAPI(r, "GET", "/chat/settings/workflows", []string{"qa.read"}, workflow.ListUserWorkflowSettings)
+	handleAPI(r, "PATCH", "/chat/settings/workflows/{workflow_ref:.+}", []string{"qa.write"}, workflow.PatchUserWorkflowSetting)
+	handleAPI(r, "POST", "/published-workflows/{workflow_ref:.+}:rollback", []string{"qa.write"}, workflow.RollbackWorkflow)
+	handleAPI(r, "POST", "/published-workflows/{workflow_ref:.+}:archive", []string{"qa.write"}, workflow.ArchiveWorkflow)
+	handleAPI(r, "POST", "/published-workflows/{workflow_ref:.+}:restore", []string{"qa.write"}, workflow.RestoreWorkflow)
+	handleAPI(r, "GET", "/published-workflows/{workflow_ref:.+}/versions", []string{"qa.read"}, workflow.ListWorkflowVersions)
+	handleAPI(r, "GET", "/published-workflows/{workflow_ref:.+}/versions/{revision_id}", []string{"qa.read"}, workflow.GetWorkflowVersion)
+	handleAPI(r, "POST", "/published-workflows/{workflow_ref:.+}/versions/{revision_id}:edit", []string{"qa.write"}, workflow.ReplaceDraftFromWorkflowVersion)
 
 	// ----- Task Center -----
 	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)
@@ -282,55 +338,120 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "DELETE", "/automation-groups/{group_id}", []string{"qa.write"}, scheduler.DeleteGroupHandler)
 	handleAPI(r, "POST", "/automation-groups:batch-create", []string{"qa.write"}, scheduler.BatchCreateHandler)
 
-	// ----- User Chat Settings (global plugin/subagent defaults) -----
+	// ----- User Chat Settings (global workflow/subagent defaults) -----
 	handleAPI(r, "GET", "/user/chat-settings", []string{"qa.read"}, chat.GetChatSettings)
 	handleAPI(r, "PATCH", "/user/chat-settings", []string{"qa.write"}, chat.PatchChatSettings)
 	// Legal consent is a login prerequisite and must not depend on optional QA permissions.
 	// The handlers still require the gateway-injected X-User-Id identity.
 	handleAPI(r, "GET", "/user/ui-preferences", []string{}, userprefs.GetUIPreferences)
 	handleAPI(r, "PATCH", "/user/ui-preferences", []string{}, userprefs.PatchUIPreferences)
-	handleAPI(r, "PATCH", "/conversations/{conversation_id}/plugin-settings", []string{"qa.write"}, chat.PatchConversationPluginSettings)
+	handleAPI(r, "PATCH", "/conversations/{conversation_id}/workflow-settings", []string{"qa.write"}, chat.PatchConversationWorkflowSettings)
 
-	// ----- Plugin Sessions -----
-	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions", []string{"qa.read"}, plugin.ListConversationSessions)
-	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions:active", []string{"qa.read"}, plugin.GetActiveConversationSession)
-	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions:latest", []string{"qa.read"}, plugin.GetLatestConversationSession)
-	handleAPI(r, "GET", "/plugin-sessions/{session_id}", []string{"qa.read"}, plugin.GetSessionDetail)
-	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots", []string{"qa.read"}, plugin.GetSessionSlots)
-	handleAPI(r, "GET", "/plugin-sessions/{session_id}/steps", []string{"qa.read"}, plugin.GetSessionSteps)
+	// ----- Workflow Sessions -----
+	// Public Runtime package endpoints are intentionally separate from the
+	// legacy /workflows management-UI response shape. Runtime callers require a
+	// pinned revision, hashes, compiled graph, and package files.
+	handleAPI(r, "GET", "/workflow-runtime/v1/workflows", []string{"qa.read"}, workflowFacade.ListWorkflows)
+	handleAPI(r, "GET", "/workflow-runtime/v1/workflows/{workflow_id}", []string{"qa.read"}, workflowFacade.GetWorkflow)
+	handleAPI(r, "GET", "/workflow-authoring/v1/skill-context", []string{"qa.read"}, workflow.GetSkillConversionContext)
+	handleAPI(r, "POST", "/workflow-authoring/v1/drafts", []string{"qa.write"}, workflow.CreateAuthoringWorkflowDraft)
+	handleAPI(r, "PUT", "/workflow-authoring/v1/drafts/{draft_id}/files", []string{"qa.write"}, workflow.UpdateAuthoringWorkflowDraftFile)
+	handleAPI(r, "GET", "/workflow-authoring/v1/drafts/{draft_id}/diagnostics", []string{"qa.read"}, workflow.GetAuthoringWorkflowDiagnostics)
+	handleAPI(r, "POST", "/workflow-authoring/v1/drafts/{draft_id}:publish", []string{"qa.write"}, workflow.PublishAuthoringWorkflow)
+	handleAPI(r, "GET", "/workflow-authoring/v1/fixture", []string{"qa.read"}, workflow.GenerateAuthoringFixture)
+	handleAPI(r, "POST", "/workflow-input-resources", []string{"qa.write"}, workflowFacade.ImportInputResource)
+	handleAPI(r, "GET", "/workflow-input-resources/{resource_id}", []string{"qa.read"}, workflowFacade.ReadInputResource)
+	handleAPI(r, "POST", "/workflow-preparations", []string{"qa.write"}, workflowFacade.Prepare)
+	handleAPI(r, "POST", "/workflow-preparations/{preparation_id}:consume", []string{"qa.write"}, workflowFacade.Consume)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:advance-step", []string{"qa.write"}, workflowFacade.Command(http.HandlerFunc(workflow.TransitionWorkflowSession)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:advance-step-and-hand-off", []string{"qa.write"}, workflowFacade.Command(http.HandlerFunc(workflow.TransitionWorkflowSession)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.write"}, workflowFacade.BindInput)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.read"}, workflowFacade.ListInputs)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/artifacts", []string{"qa.read"}, workflowFacade.ListArtifacts)
+	handleAPI(r, "GET", "/workflow-artifacts/{artifact_id}", []string{"qa.read"}, workflowFacade.ReadArtifact)
+	handleAPI(r, "PATCH", "/workflow-artifacts/{artifact_id}", []string{"qa.write"}, workflowFacade.PatchArtifact)
+	handleAPI(r, "DELETE", "/workflow-artifacts/{artifact_id}", []string{"qa.write"}, workflowFacade.DeleteArtifact)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:stop", []string{"qa.write"}, workflowFacade.StopWorkflow)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:resume", []string{"qa.write"}, workflowFacade.ResumeWorkflow)
+	handleAPI(r, "GET", "/workflow-commands/{command_id}", []string{"qa.read"}, workflowFacade.GetCommand)
+	workflowEvents := workflowstream.Handler{Store: workflowRepository, Snapshot: func(req *http.Request, sessionID, owner string) (any, error) {
+		if err := workflowRepository.AuthorizeSession(req.Context(), sessionID, owner); err != nil {
+			return nil, err
+		}
+		recorder := &routeCapture{header: http.Header{}}
+		projectionRequest := mux.SetURLVars(req.Clone(req.Context()), map[string]string{"session_id": sessionID})
+		workflow.GetSessionProjection(recorder, projectionRequest)
+		if recorder.status >= http.StatusBadRequest {
+			return nil, routeProjectionError(fmt.Sprintf("projection status %d: %s", recorder.status, recorder.body.String()))
+		}
+		var projection any
+		if err := json.Unmarshal(recorder.body.Bytes(), &projection); err != nil {
+			return nil, err
+		}
+		return projection, nil
+	}}
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/events", []string{"qa.read"}, workflowEvents.ServeHTTP)
+	handleAPI(r, "GET", "/conversations/{conversation_id}/workflow-sessions", []string{"qa.read"}, workflow.ListConversationSessions)
+	handleAPI(r, "GET", "/conversations/{conversation_id}/workflow-sessions:active", []string{"qa.read"}, workflow.GetActiveConversationSession)
+	handleAPI(r, "GET", "/conversations/{conversation_id}/workflow-sessions:latest", []string{"qa.read"}, workflow.GetLatestConversationSession)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}", []string{"qa.read"}, workflow.GetSessionDetail)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/slots", []string{"qa.read"}, workflow.GetSessionSlots)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/steps", []string{"qa.read"}, workflow.GetSessionSteps)
 	// Compatibility alias: old clients receive the same authoritative projection;
 	// no independent BFS state calculation remains on an active route.
-	handleAPI(r, "GET", "/plugin-sessions/{session_id}/state-graph", []string{"qa.read"}, plugin.GetSessionProjection)
-	handleAPI(r, "GET", "/plugin-sessions/{session_id}/projection", []string{"qa.read"}, plugin.GetSessionProjection)
-	handleAPI(r, "GET", "/internal/plugin-sessions/{session_id}/projection", nil, plugin.GetSessionProjection)
-	handleAPI(r, "POST", "/internal/plugin-sessions:plan-start", nil, plugin.PlanPluginSessionStart)
-	handleAPI(r, "POST", "/internal/plugin-sessions:start", nil, plugin.StartPluginSession)
-	handleAPI(r, "POST", "/internal/plugin-sessions/{session_id}:transition", nil, plugin.TransitionPluginSession)
-	handleAPI(r, "GET", "/internal/plugin-transition-commands/{command_id}", nil, plugin.GetTransitionCommand)
-	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}", []string{"qa.write"}, plugin.PatchSessionSlot)
-	handleAPI(r, "POST", "/plugin-sessions/{session_id}:sync-search-config", []string{"qa.write"}, plugin.SyncSessionSearchConfig)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/state-graph", []string{"qa.read"}, workflow.GetSessionProjection)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/projection", []string{"qa.read"}, workflow.GetSessionProjection)
+	handleAPI(r, "GET", "/internal/workflow-sessions/{session_id}/projection", nil, workflow.GetSessionProjection)
+	handleAPI(r, "POST", "/internal/workflow-sessions:plan-start", nil, workflow.PlanWorkflowSessionStart)
+	handleAPI(r, "POST", "/internal/workflow-sessions:start", nil, workflow.StartWorkflowSession)
+	handleAPI(r, "POST", "/internal/workflow-sessions/{session_id}:transition", nil, workflow.TransitionWorkflowSession)
+	handleAPI(r, "GET", "/internal/workflow-transition-commands/{command_id}", nil, workflow.GetTransitionCommand)
+	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}", []string{"qa.write"}, workflow.PatchSessionSlot)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:sync-search-config", []string{"qa.write"}, workflow.SyncSessionSearchConfig)
 	// Phase 3: slot item management.
 	// Stable list_index-based routes (preferred).
-	handleAPI(r, "DELETE", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, plugin.DeleteSlotItemByIndex)
-	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, plugin.PatchSlotItemByIndex)
-	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document", []string{"qa.write"}, chat.SyncWriterDocument)
-	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions", []string{"qa.read"}, plugin.GetSlotItemVersionsByIndex)
-	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback", []string{"qa.write"}, plugin.RollbackSlotItemByIndex)
-	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption", []string{"qa.write"}, plugin.PatchSlotCaptionByIndex)
+	handleAPI(r, "DELETE", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, workflow.DeleteSlotItemByIndex)
+	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, workflow.PatchSlotItemByIndex)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document", []string{"qa.write"}, chat.SyncWriterDocument)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions", []string{"qa.read"}, workflow.GetSlotItemVersionsByIndex)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback", []string{"qa.write"}, workflow.RollbackSlotItemByIndex)
+	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption", []string{"qa.write"}, workflow.PatchSlotCaptionByIndex)
 	// Order management
-	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/order", []string{"qa.write"}, plugin.ReorderSlotItems)
-	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots/{slot_id}/order", []string{"qa.read"}, plugin.GetSlotOrderHandler)
+	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}/order", []string{"qa.write"}, workflow.ReorderSlotItems)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/slots/{slot_id}/order", []string{"qa.read"}, workflow.GetSlotOrderHandler)
 	// Phase 4: caption editing and manual item creation
-	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items", []string{"qa.write"}, plugin.CreateSlotItem)
-	handleAPI(r, "POST", "/plugin-sessions/{session_id}/artifacts", []string{"qa.write"}, plugin.SaveArtifactByKey)
-	// Dismiss and restore plugin sessions.
-	handleAPI(r, "POST", "/plugin-sessions/{session_id}:dismiss", []string{"qa.write"}, plugin.DismissSessionHandler)
-	handleAPI(r, "POST", "/plugin-sessions/{session_id}:restore", []string{"qa.write"}, plugin.RestoreSessionHandler)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items", []string{"qa.write"}, workflow.CreateSlotItem)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/artifacts", []string{"qa.write"}, workflow.SaveArtifactByKey)
+	// Dismiss and restore workflow sessions.
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:dismiss", []string{"qa.write"}, workflow.DismissSessionHandler)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:restore", []string{"qa.write"}, workflow.RestoreSessionHandler)
 	// List dismissed sessions for a conversation (used by restore UI).
-	handleAPI(r, "GET", "/conversations/{conversation_id}/dismissed-plugin-sessions", []string{"qa.read"}, plugin.ListDismissedSessionsHandler)
-	handleAPI(r, "GET", "/personalization-items", []string{"qa.read"}, evolution.ListManagedStates)
+	handleAPI(r, "GET", "/conversations/{conversation_id}/dismissed-workflow-sessions", []string{"qa.read"}, workflow.ListDismissedSessionsHandler)
 	handleAPI(r, "GET", "/personalization-setting", []string{"qa.read"}, evolution.GetPersonalizationSetting)
 	handleAPI(r, "PUT", "/personalization-setting", []string{"qa.write"}, evolution.SetPersonalizationSetting)
+	handleAPI(r, "GET", "/memory/soul", []string{"qa.read"}, currentmemory.GetSoul)
+	handleAPI(r, "PATCH", "/memory/soul", []string{"qa.write"}, currentmemory.PatchSoul)
+	handleAPI(r, "GET", "/memory/soul/avatar", []string{"qa.read"}, currentmemory.GetSoulAvatar)
+	handleAPI(r, "PUT", "/memory/soul/avatar", []string{"qa.write"}, currentmemory.PutSoulAvatar)
+	handleAPI(r, "DELETE", "/memory/soul/avatar", []string{"qa.write"}, currentmemory.DeleteSoulAvatar)
+	handleAPI(r, "GET", "/memory/profile", []string{"qa.read"}, currentmemory.GetProfile)
+	handleAPI(r, "PATCH", "/memory/profile", []string{"qa.write"}, currentmemory.PatchProfile)
+	handleAPI(r, "GET", "/memory/profile/avatar", []string{"qa.read"}, currentmemory.GetProfileAvatar)
+	handleAPI(r, "PUT", "/memory/profile/avatar", []string{"qa.write"}, currentmemory.PutProfileAvatar)
+	handleAPI(r, "DELETE", "/memory/profile/avatar", []string{"qa.write"}, currentmemory.DeleteProfileAvatar)
+	handleAPI(r, "GET", "/memory/preferences", []string{"qa.read"}, currentmemory.ListPreferences)
+	handleAPI(r, "PUT", "/memory/preferences:order", []string{"qa.write"}, currentmemory.ReorderPreferences)
+	handleAPI(r, "GET", "/memory/preferences/{name}", []string{"qa.read"}, currentmemory.GetPreference)
+	handleAPI(r, "DELETE", "/memory/preferences/{name}", []string{"qa.write"}, currentmemory.DeletePreference)
+	handleAPI(r, "GET", "/memory/episodes", []string{"qa.read"}, episode.ListEpisodes)
+	handleAPI(r, "GET", "/memory/episodes/{episode_id}", []string{"qa.read"}, episode.GetEpisode)
+	handleAPI(r, "DELETE", "/memory/episodes/{episode_id}", []string{"qa.write"}, episode.DeleteEpisode)
+	handleAPI(r, "POST", "/internal/memory/episodes", nil, episode.InternalCreate)
+	handleAPI(r, "DELETE", "/internal/memory/episodes/{episode_id}", nil, episode.InternalDelete)
+	handleAPI(r, "POST", "/internal/memory/episodes:searchCandidates", nil, episode.InternalSearchCandidates)
+	handleAPI(r, "POST", "/internal/memory/episodes:listRecent", nil, episode.InternalListRecent)
+	handleAPI(r, "GET", "/internal/memory/episodes", nil, episode.InternalListByConversation)
+	handleAPI(r, "POST", "/internal/memory/episodes:recordHits", nil, episode.InternalRecordHits)
 	handleAPI(r, "GET", "/skills", []string{"qa.read"}, skillv2handler.List)
 	handleAPI(r, "GET", "/skills:trash", []string{"qa.read"}, skillv2handler.ListTrash)
 	handleAPI(r, "DELETE", "/skills:trash", []string{"qa.write"}, skillv2handler.EmptyTrash)
@@ -402,20 +523,6 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/skill-review:run", []string{"qa.write"}, resourceupdate.RunSkillReview)
 	handleAPI(r, "GET", "/skill-review/tasks", []string{"qa.read"}, resourceupdate.ListSkillReviewTasks)
 	handleAPI(r, "GET", "/skill-organize/tasks", []string{"qa.read"}, resourceupdate.ListSkillOrganizeTasks)
-	handleAPI(r, "PATCH", "/personal-resource/{resource_type}", []string{"qa.write"}, resourcefs.PatchMetadata)
-	handleAPI(r, "GET", "/personal-resource/{resource_type}:file", []string{"qa.read"}, resourcefs.GetFile)
-	handleAPI(r, "PUT", "/personal-resource/{resource_type}:file", []string{"qa.write"}, resourcefs.WriteDraft)
-	handleAPI(r, "PUT", "/personal-resource/{resource_type}:draft", []string{"qa.write"}, resourcefs.WriteDraft)
-	handleAPI(r, "GET", "/personal-resource/{resource_type}:draft-preview", []string{"qa.read"}, resourcefs.DraftPreview)
-	handleAPI(r, "POST", "/personal-resource/{resource_type}:generate", []string{"qa.write"}, resourcefs.Generate)
-	handleAPI(r, "POST", "/personal-resource/{resource_type}/draft-review/{review_id}/actions", []string{"qa.write"}, resourcefs.ReviewAction)
-	handleAPI(r, "POST", "/personal-resource/{resource_type}/draft-review/{review_id}:undo", []string{"qa.write"}, resourcefs.ReviewUndo)
-	handleAPI(r, "POST", "/personal-resource/{resource_type}:commit", []string{"qa.write"}, resourcefs.CommitDraft)
-	handleAPI(r, "POST", "/personal-resource/{resource_type}:discard", []string{"qa.write"}, resourcefs.DiscardDraft)
-	handleAPI(r, "GET", "/personal-resource/{resource_type}/revisions", []string{"qa.read"}, resourcefs.ListRevisions)
-	handleAPI(r, "GET", "/personal-resource/{resource_type}/revisions/{revision_id}", []string{"qa.read"}, resourcefs.GetRevision)
-	handleAPI(r, "POST", "/personal-resource/{resource_type}:rollback", []string{"qa.write"}, resourcefs.Rollback)
-
 	handleAPI(r, "PATCH", "/conversations/{name}:search-config", []string{"qa.write"}, chat.PatchConversationSearchConfig)
 	handleAPI(r, "GET", "/conversations/{name}:detail", []string{"qa.read"}, chat.GetConversationDetail)
 	handleAPI(r, "GET", "/conversations/{name}:history", []string{"qa.read"}, chat.GetConversationHistory)

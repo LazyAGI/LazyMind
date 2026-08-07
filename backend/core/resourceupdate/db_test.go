@@ -1,7 +1,6 @@
 package resourceupdate
 
 import (
-	"path/filepath"
 	"testing"
 
 	"gorm.io/gorm"
@@ -12,11 +11,7 @@ import (
 // newDBTestDB creates a SQLite DB for testing db.go helpers.
 func newDBTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "dbtest.db"))
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	return db.DB
+	return orm.OpenTestDB(t).DB
 }
 
 // TestWithUpdateLock returns db as-is for SQLite (no locking clause needed).

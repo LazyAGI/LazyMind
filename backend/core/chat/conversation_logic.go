@@ -17,11 +17,11 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/log"
-	"lazymind/core/plugin"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/workflow"
 )
 
 const (
@@ -158,7 +158,7 @@ func conversationIDFromName(name string) string {
 }
 
 // ensureConversation textCreatetextUsertextConversation，textConversation、text history text seq、error
-func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, pluginSettings map[string]any) (*orm.Conversation, int, error) {
+func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, workflowSettings map[string]any) (*orm.Conversation, int, error) {
 	now := time.Now()
 	var c orm.Conversation
 	err := db.Where("id = ? AND create_user_id = ?", convID, userID).First(&c).Error
@@ -200,12 +200,12 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 		},
 	}
 	// Resolve plugin settings for the new conversation.
-	// Priority: caller-supplied pluginSettings > user_chat_settings defaults.
-	// All three fields are always written so conversations.enable_plugin / plugin_mode /
+	// Priority: caller-supplied workflowSettings > user_chat_settings defaults.
+	// All three fields are always written so conversations.enable_workflow / workflow_mode /
 	// enable_subagent are never NULL — no per-request fallback query needed.
-	resolvedPS := resolveInitialPluginSettings(ctx, db, userID, pluginSettings)
-	c.EnablePlugin = &resolvedPS.enablePlugin
-	c.PluginMode = &resolvedPS.pluginMode
+	resolvedPS := resolveInitialWorkflowSettings(ctx, db, userID, workflowSettings)
+	c.EnableWorkflow = &resolvedPS.enableWorkflow
+	c.WorkflowMode = &resolvedPS.workflowMode
 	c.EnableSubagent = &resolvedPS.enableSubagent
 	if err := db.Create(&c).Error; err != nil {
 		return nil, 0, err
@@ -213,40 +213,40 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 	return &c, 1, nil
 }
 
-type resolvedPluginSettings struct {
-	enablePlugin   bool
-	pluginMode     string
+type resolvedWorkflowSettings struct {
+	enableWorkflow bool
+	workflowMode   string
 	enableSubagent bool
 }
 
-// resolveInitialPluginSettings merges caller-supplied overrides with the user's
-// global defaults from user_chat_settings. Fields present in pluginSettings take
+// resolveInitialWorkflowSettings merges caller-supplied overrides with the user's
+// global defaults from user_chat_settings. Fields present in workflowSettings take
 // priority; missing fields fall back to the DB defaults (or hardcoded values if
 // the user has no row yet).
-func resolveInitialPluginSettings(ctx context.Context, db *gorm.DB, userID string, pluginSettings map[string]any) resolvedPluginSettings {
+func resolveInitialWorkflowSettings(ctx context.Context, db *gorm.DB, userID string, workflowSettings map[string]any) resolvedWorkflowSettings {
 	// Start from hardcoded fallbacks (matches user_chat_settings DB defaults).
-	out := resolvedPluginSettings{
-		enablePlugin:   true,
-		pluginMode:     "dynamic",
+	out := resolvedWorkflowSettings{
+		enableWorkflow: true,
+		workflowMode:   "dynamic",
 		enableSubagent: true,
 	}
 	// Load user-level defaults.
 	if db != nil {
 		var s orm.UserChatSettings
 		if err := db.WithContext(ctx).Where("user_id = ?", userID).First(&s).Error; err == nil {
-			out.enablePlugin = s.EnablePlugin
-			out.pluginMode = s.PluginMode
+			out.enableWorkflow = s.EnableWorkflow
+			out.workflowMode = s.WorkflowMode
 			out.enableSubagent = s.EnableSubagent
 		}
 	}
 	// Apply caller-supplied overrides.
-	if v, ok := pluginSettings["enable_plugin"].(bool); ok {
-		out.enablePlugin = v
+	if v, ok := workflowSettings["enable_workflow"].(bool); ok {
+		out.enableWorkflow = v
 	}
-	if v, ok := pluginSettings["plugin_mode"].(string); ok && (v == "dynamic" || v == "auto") {
-		out.pluginMode = v
+	if v, ok := workflowSettings["workflow_mode"].(string); ok && (v == "dynamic" || v == "auto") {
+		out.workflowMode = v
 	}
-	if v, ok := pluginSettings["enable_subagent"].(bool); ok {
+	if v, ok := workflowSettings["enable_subagent"].(bool); ok {
 		out.enableSubagent = v
 	}
 	return out
@@ -910,15 +910,15 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	if environmentContext, ok := raw["environment_context"].(map[string]any); ok {
 		body["environment_context"] = environmentContext
 	}
-	// Propagate plugin_context so Python ChatAgent receives the active session info.
-	// Merge plugin_ui_state (focused_tab, focused_sort_order) from the request body.
+	// Propagate workflow_context so Python ChatAgent receives the active session info.
+	// Merge workflow_ui_state (focused_tab, focused_sort_order) from the request body.
 	// Python reads artifact state directly from the DB via _build_session_artifact_section.
-	if pc, ok := raw["plugin_context"].(map[string]any); ok && len(pc) > 0 {
+	if pc, ok := raw["workflow_context"].(map[string]any); ok && len(pc) > 0 {
 		mergedPC := make(map[string]any, len(pc)+4)
 		for k, v := range pc {
 			mergedPC[k] = v
 		}
-		if uis, ok := raw["plugin_ui_state"].(map[string]any); ok {
+		if uis, ok := raw["workflow_ui_state"].(map[string]any); ok {
 			if ft, ok := uis["focused_tab"]; ok {
 				mergedPC["focused_tab"] = ft
 			}
@@ -926,17 +926,13 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 				mergedPC["focused_sort_order"] = fso
 			}
 		}
-		body["plugin_context"] = mergedPC
+		body["workflow_context"] = mergedPC
 	}
 	if resourceContext != nil {
 		body["disabled_tools"] = mergeDisabledToolNames(
 			requestDisabledTools, resourceContext.DisabledTools,
 		)
 		body["available_skills"] = resourceContext.AvailableSkills
-		if useMemory {
-			body["memory"] = resourceContext.Memory
-			body["user_preference"] = resourceContext.UserPreference
-		}
 	}
 	if body["filters"] == nil {
 		conv, _ := raw["conversation"].(map[string]any)
@@ -962,7 +958,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 
 func promoteAgentRuntimeFlags(raw, body map[string]any) {
 	agentConfig, _ := body["agentic_config"].(map[string]any)
-	for _, key := range []string{"enable_plugin", "enable_subagent"} {
+	for _, key := range []string{"enable_workflow", "enable_subagent"} {
 		if value, ok := raw[key].(bool); ok {
 			body[key] = value
 			continue
@@ -994,11 +990,11 @@ func filtersFromSearchConfig(sc map[string]any) map[string]any {
 	return filters
 }
 
-// resolvePluginMode determines the effective plugin_mode for this request.
+// resolveWorkflowMode determines the effective workflow_mode for this request.
 // Priority: request body > "dynamic" default.
 // Valid values: "auto", "dynamic". Anything else is normalised to "dynamic".
-func resolvePluginMode(raw map[string]any) string {
-	if v, ok := raw["plugin_mode"].(string); ok {
+func resolveWorkflowMode(raw map[string]any) string {
+	if v, ok := raw["workflow_mode"].(string); ok {
 		v = strings.TrimSpace(v)
 		if v == "auto" || v == "dynamic" {
 			return v
@@ -1007,29 +1003,29 @@ func resolvePluginMode(raw map[string]any) string {
 	return "dynamic"
 }
 
-// resolvePluginModeWithFallback determines the effective plugin_mode with full priority chain:
+// resolveWorkflowModeWithFallback determines the effective workflow_mode with full priority chain:
 //
 //	request body > DB-resolved agentic_config (loaded via applyChatRuntimeConfigs) > "dynamic"
 //
 // reqBody must have already been populated by applyChatRuntimeConfigs so that
-// reqBody["agentic_config"]["plugin_mode"] reflects the DB value.
-func resolvePluginModeWithFallback(raw map[string]any, reqBody map[string]any) string {
+// reqBody["agentic_config"]["workflow_mode"] reflects the DB value.
+func resolveWorkflowModeWithFallback(raw map[string]any, reqBody map[string]any) string {
 	// Highest priority: explicit value in the original request body.
-	if v, ok := raw["plugin_mode"].(string); ok {
+	if v, ok := raw["workflow_mode"].(string); ok {
 		v = strings.TrimSpace(v)
 		if v == "auto" || v == "dynamic" {
 			return v
 		}
 	}
-	return pluginModeFromReqBody(reqBody)
+	return workflowModeFromReqBody(reqBody)
 }
 
-// pluginModeFromReqBody reads the resolved plugin_mode from a fully-built chat request body.
-// Priority: plugin_context > agentic_config > "dynamic".
-// Used when persisting plugin_step task params so OnSubAgentDone can branch on auto vs dynamic.
-func pluginModeFromReqBody(reqBody map[string]any) string {
-	if pc, ok := reqBody["plugin_context"].(map[string]any); ok {
-		if v, ok := pc["plugin_mode"].(string); ok {
+// workflowModeFromReqBody reads the resolved workflow_mode from a fully-built chat request body.
+// Priority: workflow_context > agentic_config > "dynamic".
+// Used when persisting workflow_step task params so OnSubAgentDone can branch on auto vs dynamic.
+func workflowModeFromReqBody(reqBody map[string]any) string {
+	if pc, ok := reqBody["workflow_context"].(map[string]any); ok {
+		if v, ok := pc["workflow_mode"].(string); ok {
 			v = strings.TrimSpace(v)
 			if v == "auto" || v == "dynamic" {
 				return v
@@ -1037,7 +1033,7 @@ func pluginModeFromReqBody(reqBody map[string]any) string {
 		}
 	}
 	if ac, ok := reqBody["agentic_config"].(map[string]any); ok {
-		if v, ok := ac["plugin_mode"].(string); ok {
+		if v, ok := ac["workflow_mode"].(string); ok {
 			v = strings.TrimSpace(v)
 			if v == "auto" || v == "dynamic" {
 				return v
@@ -1229,7 +1225,7 @@ func handleNonStreamChat(
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
-	recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, answer, now)
+	recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, answer, now)
 	common.ReplyOK(w, map[string]any{
 		"conversation_id": convID,
 		"seq":             target.Seq,
@@ -1402,12 +1398,12 @@ func streamSingleAnswer(
 		}
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
-			pluginModeForTask := pluginModeFromReqBody(reqBody)
-			notice, taskErr := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody), pluginModeForTask)
+			workflowModeForTask := workflowModeFromReqBody(reqBody)
+			notice, taskErr := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody), workflowModeForTask)
 			if taskErr != nil {
 				failurePrefix := "TASK_START_FAILED: "
-				if d.TaskCreated.AgentType == "plugin_step" {
-					failurePrefix = "PLUGIN_START_FAILED: "
+				if d.TaskCreated.AgentType == "workflow_step" {
+					failurePrefix = "WORKFLOW_START_FAILED: "
 				}
 				failure := failurePrefix + taskErr.Error()
 				fullText += failure
@@ -1498,8 +1494,8 @@ func streamSingleAnswer(
 			}
 			continue
 		}
-		if d.PluginPreflightUpdated != nil {
-			handlePluginPreflightUpdated(chatCtx, db, convID, d.PluginPreflightUpdated)
+		if d.WorkflowPreflightUpdated != nil {
+			handleWorkflowPreflightUpdated(chatCtx, db, convID, d.WorkflowPreflightUpdated)
 			continue
 		}
 		if d.Heartbeat {
@@ -1665,7 +1661,7 @@ func streamSingleAnswer(
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
 	if persisted {
-		recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(fullText), now)
+		recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(fullText), now)
 	}
 	if reqCtx.Err() == nil {
 		// text：message text，finish_reason text STOP
@@ -2023,7 +2019,7 @@ dualPersist:
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
-	recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(primaryText), now)
+	recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(primaryText), now)
 	if reqCtx.Err() == nil {
 		writeSSEChunk(w, flusher, map[string]any{
 			"finish_reason":       "FINISH_REASON_STOP",
@@ -2042,14 +2038,14 @@ dualPersist:
 	}
 }
 
-func recordSkillEditorConversationActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
+func recordConversationIdleActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
 	if db == nil || stateStore == nil || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(historyID) == "" {
 		return
 	}
 	_ = resourceupdate.RecordConversationIdleMessage(ctx, db, stateStore, resourceupdate.ConversationIdleRecord{
-		SessionID:      conversationID,
+		ConversationID: conversationID,
 		UserID:         userID,
-		LastMessageID:  historyID,
+		LastHistoryID:  historyID,
 		LastActivityAt: now,
 		UserContent:    userContent,
 		AssistantText:  assistantText,
@@ -2067,15 +2063,15 @@ func handleTaskCreated(
 	ev *TaskCreatedEvent,
 	llmConfig map[string]any,
 	toolConfig map[string]any,
-	pluginMode string,
+	workflowMode string,
 ) (*TaskCreatedNotice, error) {
 	if ev == nil || strings.TrimSpace(ev.TaskID) == "" {
 		return nil, fmt.Errorf("task_created event is missing task_id")
 	}
 
-	// Plugin Step path — handled separately.
-	if ev.AgentType == "plugin_step" {
-		return handlePluginStepCreated(chatCtx, db, stateStore, convID, historyID, userID, ev, llmConfig, toolConfig, pluginMode)
+	// Workflow Step path — handled separately.
+	if ev.AgentType == "workflow_step" {
+		return handleWorkflowStepCreated(chatCtx, db, stateStore, convID, historyID, userID, ev, llmConfig, toolConfig, workflowMode)
 	}
 	mode := ev.Mode
 	if mode != "auto" && mode != "manual" {
@@ -2162,9 +2158,9 @@ func handleTaskCreated(
 	}, nil
 }
 
-// handlePluginStepCreated processes a task_created event for agent_type='plugin_step'.
+// handleWorkflowStepCreated processes a task_created event for agent_type='workflow_step'.
 // It delegates to the plugin package EventLoop to manage session/step lifecycle.
-func handlePluginStepCreated(
+func handleWorkflowStepCreated(
 	ctx context.Context,
 	db *gorm.DB,
 	stateStore state.Store,
@@ -2172,22 +2168,22 @@ func handlePluginStepCreated(
 	ev *TaskCreatedEvent,
 	llmConfig map[string]any,
 	toolConfig map[string]any,
-	pluginMode string,
+	workflowMode string,
 ) (*TaskCreatedNotice, error) {
-	params := pluginStepParamsFromEventParams(ev.Params)
-	// Carry the resolved plugin_mode into params so it is persisted with the task
-	// and available when OnSubAgentDone reconstructs PluginChatContext from DB.
-	if pluginMode == "auto" || pluginMode == "dynamic" {
-		params.PluginMode = pluginMode
+	params := workflowStepParamsFromEventParams(ev.Params)
+	// Carry the resolved workflow_mode into params so it is persisted with the task
+	// and available when OnSubAgentDone reconstructs WorkflowChatContext from DB.
+	if workflowMode == "auto" || workflowMode == "dynamic" {
+		params.WorkflowMode = workflowMode
 	} else {
-		params.PluginMode = "dynamic"
+		params.WorkflowMode = "dynamic"
 	}
-	if params.PluginID == "" || params.StepID == "" {
-		fmt.Println("[Core] [PLUGIN_STEP_INVALID_PARAMS] plugin_id or step_id missing")
-		return nil, fmt.Errorf("plugin_id or step_id missing")
+	if params.WorkflowID == "" || params.StepID == "" {
+		fmt.Println("[Core] [WORKFLOW_STEP_INVALID_PARAMS] workflow_id or step_id missing")
+		return nil, fmt.Errorf("workflow_id or step_id missing")
 	}
 
-	sessionID, taskID, pluginCompleted, err := plugin.HandlePluginStepCreated(
+	sessionID, taskID, workflowCompleted, err := workflow.HandleWorkflowStepCreated(
 		ctx, db, stateStore, convID, historyID, userID,
 		ev.TaskID, ev.Title, ev.Objective,
 		params,
@@ -2195,18 +2191,18 @@ func handlePluginStepCreated(
 		llmConfig, toolConfig,
 	)
 	if err != nil {
-		fmt.Printf("[Core] [PLUGIN_STEP_FAILED] err=%v\n", err)
+		fmt.Printf("[Core] [WORKFLOW_STEP_FAILED] err=%v\n", err)
 		return nil, err
 	}
 
-	// When ChatAgent signals plugin completion via __end__, emit plugin_completed
+	// When ChatAgent signals plugin completion via __end__, emit workflow_completed
 	// to the conversation event stream so the frontend can close the plugin panel.
-	if pluginCompleted {
+	if workflowCompleted {
 		_ = AppendConvEvent(ctx, stateStore, convID, &ConvEvent{
-			Type: "plugin_completed",
+			Type: "workflow_completed",
 			Payload: map[string]any{
-				"session_id": sessionID,
-				"plugin_id":  params.PluginID,
+				"session_id":  sessionID,
+				"workflow_id": params.WorkflowID,
 			},
 		})
 		return nil, nil
@@ -2215,31 +2211,31 @@ func handlePluginStepCreated(
 	// Fetch the created task for the notice.
 	task, getErr := subagent.GetTask(ctx, db, taskID)
 	if getErr != nil {
-		fmt.Printf("[Core] [PLUGIN_STEP_GET_TASK_FAILED] err=%v\n", getErr)
+		fmt.Printf("[Core] [WORKFLOW_STEP_GET_TASK_FAILED] err=%v\n", getErr)
 		return nil, fmt.Errorf("plugin step was accepted but task lookup failed: %w", getErr)
 	}
 	return &TaskCreatedNotice{
 		TaskID:            task.ID,
 		TriggerHistoryID:  task.TriggerHistoryID,
 		Title:             task.Title,
-		AgentType:         "plugin_step",
+		AgentType:         "workflow_step",
 		Mode:              "manual",
 		Status:            task.Status,
 		SeqInConversation: task.SeqInConversation,
-		PluginSessionID:   sessionID,
+		WorkflowSessionID: sessionID,
 	}, nil
 }
 
-func pluginStepParamsFromEventParams(raw map[string]any) plugin.PluginStepParams {
-	var params plugin.PluginStepParams
+func workflowStepParamsFromEventParams(raw map[string]any) workflow.WorkflowStepParams {
+	var params workflow.WorkflowStepParams
 	if raw == nil {
 		return params
 	}
-	if pid, ok := raw["plugin_id"].(string); ok {
-		params.PluginID = pid
+	if pid, ok := raw["workflow_id"].(string); ok {
+		params.WorkflowID = pid
 	}
-	if v, ok := raw["plugin_ref"].(string); ok {
-		params.PluginRef = v
+	if v, ok := raw["workflow_ref"].(string); ok {
+		params.WorkflowRef = v
 	}
 	if v, ok := raw["revision_id"].(string); ok {
 		params.RevisionID = v
@@ -2321,13 +2317,13 @@ func pluginStepParamsFromEventParams(raw map[string]any) plugin.PluginStepParams
 	return params
 }
 
-// handlePluginPreflightUpdated stores the latest trigger context outside chat history,
+// handleWorkflowPreflightUpdated stores the latest trigger context outside chat history,
 // so long clarification sequences are not lost to agent history compaction.
-func handlePluginPreflightUpdated(
+func handleWorkflowPreflightUpdated(
 	ctx context.Context,
 	db *gorm.DB,
 	convID string,
-	ev *PluginPreflightUpdatedEvent,
+	ev *WorkflowPreflightUpdatedEvent,
 ) {
 	if db == nil || ev == nil || strings.TrimSpace(convID) == "" {
 		return
@@ -2341,15 +2337,15 @@ func handlePluginPreflightUpdated(
 		_ = json.Unmarshal(conv.Ext, &ext)
 	}
 	if ev.Clear {
-		delete(ext, "plugin_preflight")
+		delete(ext, "workflow_preflight")
 	} else if len(ev.Snapshot) > 0 {
-		ext["plugin_preflight"] = ev.Snapshot
+		ext["workflow_preflight"] = ev.Snapshot
 	}
 	raw, _ := json.Marshal(ext)
 	_ = db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
 }
 
-func loadPluginPreflightContext(ctx context.Context, db *gorm.DB, convID string) map[string]any {
+func loadWorkflowPreflightContext(ctx context.Context, db *gorm.DB, convID string) map[string]any {
 	if db == nil || strings.TrimSpace(convID) == "" {
 		return nil
 	}
@@ -2361,7 +2357,7 @@ func loadPluginPreflightContext(ctx context.Context, db *gorm.DB, convID string)
 	if json.Unmarshal(conv.Ext, &ext) != nil {
 		return nil
 	}
-	preflight, _ := ext["plugin_preflight"].(map[string]any)
+	preflight, _ := ext["workflow_preflight"].(map[string]any)
 	return preflight
 }
 
@@ -2509,19 +2505,19 @@ func handleIntentUpdated(ctx context.Context, db *gorm.DB, stateStore state.Stor
 					}
 				}
 			}
-		} else if ev.Scope == "plugin_session" && ev.SessionID != "" {
-			var session orm.PluginSession
+		} else if ev.Scope == "workflow_session" && ev.SessionID != "" {
+			var session orm.WorkflowSession
 			if db.WithContext(ctx).Select("intent_context").Where("id = ?", ev.SessionID).First(&session).Error == nil {
 				doc := map[string]any{}
 				_ = json.Unmarshal([]byte(session.IntentContext), &doc)
 				if updated, err := applyIntentOperations(doc, ev.Operations); err == nil {
 					payload, _ := json.Marshal(updated)
-					_ = db.WithContext(ctx).Model(&orm.PluginSession{}).Where("id = ?", ev.SessionID).
+					_ = db.WithContext(ctx).Model(&orm.WorkflowSession{}).Where("id = ?", ev.SessionID).
 						Updates(map[string]any{"intent_context": string(payload), "updated_at": now}).Error
 				}
 			}
-		} else if ev.Scope == "plugin_step" && ev.SessionID != "" && ev.StepID != "" {
-			var existing orm.PluginStepIntent
+		} else if ev.Scope == "workflow_step" && ev.SessionID != "" && ev.StepID != "" {
+			var existing orm.WorkflowStepIntent
 			doc := map[string]any{}
 			if db.WithContext(ctx).Where("session_id = ? AND step_id = ?", ev.SessionID, ev.StepID).
 				First(&existing).Error == nil {

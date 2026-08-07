@@ -52,7 +52,7 @@ _MARKDOWN_IMAGE = re.compile(r'!\[[^\]]*\]\([^)\s]+\)')
 _CONTEXT_LABELS = {
     'knowledge_base': '知识库',
     'skill': 'Skill',
-    'plugin': 'Plugin',
+    'plugin': 'Workflow',
     'tool': 'Tool',
     'prompt': 'Prompt',
     'conversation': '会话',
@@ -1075,7 +1075,7 @@ class FeishuWorkspaceRenderer:
                 {
                     'knowledge_base': 'Knowledge bases',
                     'skill': 'Skills',
-                    'plugin': 'Plugins',
+                    'plugin': 'Workflows',
                     'tool': 'Tools',
                     'conversation': 'Conversations',
                 }.get(resource_type, 'Capabilities'),
@@ -1185,12 +1185,12 @@ class FeishuWorkspaceRenderer:
                     ),
                 ]
             )
-        plugin_enabled = bool(settings.get('plugin_enabled', True))
+        workflow_enabled = bool(settings.get('workflow_enabled', True))
         subagent_enabled = bool(settings.get('subagent_enabled', True))
         personalization_enabled = bool(
             settings.get('personalization_enabled', True)
         )
-        plugin_mode = str(settings.get('plugin_mode') or 'dynamic')
+        workflow_mode = str(settings.get('workflow_mode') or 'dynamic')
         elements.extend(
             [
                 {
@@ -1205,30 +1205,30 @@ class FeishuWorkspaceRenderer:
                     [
                         {
                             'label': (
-                                _localized(state, '✓ Plugin 自动执行', '✓ Plugin auto-run')
-                                if plugin_enabled and plugin_mode == 'auto'
+                                _localized(state, '✓ Workflow 自动执行', '✓ Workflow auto-run')
+                                if workflow_enabled and workflow_mode == 'auto'
                                 else _localized(
                                     state,
-                                    '○ Plugin 执行前确认',
-                                    '○ Confirm Plugin runs',
+                                    '○ Workflow 执行前确认',
+                                    '○ Confirm Workflow runs',
                                 )
                             ),
                             'style': (
                                 'primary'
-                                if plugin_enabled and plugin_mode == 'auto'
+                                if workflow_enabled and workflow_mode == 'auto'
                                 else 'default'
                             ),
                             'action': _setting_action(
                                 chat_id,
                                 {
-                                    'setting': 'plugin_mode',
+                                    'setting': 'workflow_mode',
                                     'mode': (
                                         'dynamic'
-                                        if plugin_mode == 'auto'
+                                        if workflow_mode == 'auto'
                                         else 'auto'
                                     ),
                                 },
-                                '切换 Plugin 执行方式',
+                                '切换 Workflow 执行方式',
                                 view='capabilities',
                             ),
                         },
@@ -1873,7 +1873,7 @@ class FeishuWorkspaceRenderer:
                     {
                         'knowledge_base': 'Knowledge bases',
                         'skill': 'Skills',
-                        'plugin': 'Plugins',
+                        'plugin': 'Workflows',
                         'tool': 'Tools',
                         'conversation': 'Conversations',
                         'prompt': 'Prompts',

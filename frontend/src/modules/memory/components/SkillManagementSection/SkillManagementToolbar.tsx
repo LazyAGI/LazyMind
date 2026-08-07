@@ -20,8 +20,8 @@ export type SkillOrganizeStatus = "idle" | "running" | "success" | "skipped" | "
 
 interface SkillManagementToolbarProps {
   t: (key: string, options?: Record<string, unknown>) => string;
-  skillView: SkillViewMode | "plugins";
-  onSkillViewChange: (view: SkillViewMode | "plugins") => void;
+  skillView: SkillViewMode | "workflows";
+  onSkillViewChange: (view: SkillViewMode | "workflows") => void;
   installedCount: number;
   trashCount?: number;
   onCreateSkill: (source: SkillCreateSource) => void;
@@ -40,7 +40,7 @@ interface SkillManagementToolbarProps {
   isAdmin: boolean;
   marketFilters?: ReactNode;
   onAdminPublish?: () => void;
-  onNewPlugin?: () => void;
+  onNewWorkflow?: () => void;
 }
 
 function InsightCount({ count }: { count: number }) {
@@ -72,7 +72,7 @@ export default function SkillManagementToolbar({
   isAdmin,
   marketFilters,
   onAdminPublish,
-  onNewPlugin,
+  onNewWorkflow,
 }: SkillManagementToolbarProps) {
   const createMenuItems: MenuProps["items"] = [
     {
@@ -239,12 +239,12 @@ export default function SkillManagementToolbar({
       return marketFilters;
     }
 
-    if (skillView === "plugins") {
+    if (skillView === "workflows") {
       return (
-        <button type="button" className="memory-skill-create-split is-single" onClick={onNewPlugin}>
+        <button type="button" className="memory-skill-create-split is-single" onClick={onNewWorkflow}>
           <span className="memory-skill-create-split__main">
             <PlusOutlined />
-            {t("admin.memoryPluginNewButton")}
+            {t("admin.memoryWorkflowNewButton")}
           </span>
         </button>
       );
@@ -290,11 +290,11 @@ export default function SkillManagementToolbar({
         <button
           type="button"
           role="tab"
-          className={`memory-skill-view-tab ${skillView === "plugins" ? "is-active" : ""}`}
-          aria-selected={skillView === "plugins"}
-          onClick={() => onSkillViewChange("plugins")}
+          className={`memory-skill-view-tab ${skillView === "workflows" ? "is-active" : ""}`}
+          aria-selected={skillView === "workflows"}
+          onClick={() => onSkillViewChange("workflows")}
         >
-          {t("admin.memorySkillViewPlugins")}
+          {t("admin.memorySkillViewWorkflows")}
         </button>
       </div>
 

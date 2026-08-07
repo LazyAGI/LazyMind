@@ -68,10 +68,7 @@ func UpdateTaskStatus(ctx context.Context, db *gorm.DB, id, status string) error
 // UpdateTaskFailure persists a terminal task failure together with a user-facing reason.
 func UpdateTaskFailure(ctx context.Context, db *gorm.DB, id, reason string) error {
 	var task orm.TaskCenterTask
-	if err := db.WithContext(ctx).
-		Select("id", "status", "progress_json").
-		Where("id = ?", id).
-		First(&task).Error; err != nil {
+	if err := db.WithContext(ctx).Select("id", "status", "progress_json").Where("id = ?", id).First(&task).Error; err != nil {
 		return err
 	}
 	if isTerminal(task.Status) && task.Status != "failed" {
@@ -80,12 +77,7 @@ func UpdateTaskFailure(ctx context.Context, db *gorm.DB, id, reason string) erro
 	now := time.Now().UTC()
 	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
 		Where("id = ? AND archived_at IS NULL AND status NOT IN ('succeeded','skipped','canceled')", id).
-		Updates(map[string]any{
-			"status":        "failed",
-			"progress_json": progressWithFailureReason(task.ProgressJSON, reason),
-			"finished_at":   now,
-			"updated_at":    now,
-		}).Error
+		Updates(map[string]any{"status": "failed", "progress_json": progressWithFailureReason(task.ProgressJSON, reason), "finished_at": now, "updated_at": now}).Error
 }
 
 func progressWithFailureReason(progress orm.RawJSON, reason string) orm.RawJSON {
@@ -106,7 +98,7 @@ func progressWithFailureReason(progress orm.RawJSON, reason string) orm.RawJSON 
 	return orm.RawJSON(encoded)
 }
 
-// UpdateTaskStatusBySession updates the TaskCenter record whose plugin_session_id matches.
+// UpdateTaskStatusBySession updates the TaskCenter record whose plugin_session_id matches.  // workflow-naming: persistence
 // Used by the plugin EventLoop to sync task status when a session completes or fails.
 func UpdateTaskStatusBySession(ctx context.Context, db *gorm.DB, sessionID, status string) error {
 	updates := map[string]any{
@@ -118,7 +110,7 @@ func UpdateTaskStatusBySession(ctx context.Context, db *gorm.DB, sessionID, stat
 		updates["finished_at"] = now
 	}
 	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("plugin_session_id = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", sessionID).
+		Where("plugin_session_id = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", sessionID). // workflow-naming: persistence
 		Updates(updates).Error
 }
 
@@ -160,7 +152,7 @@ type taskResponse struct {
 	UserID            string          `json:"user_id"`
 	ConversationID    string          `json:"conversation_id"`
 	ConversationTitle string          `json:"conversation_title,omitempty"`
-	PluginSessionID   *string         `json:"plugin_session_id,omitempty"`
+	WorkflowSessionID *string         `json:"workflow_session_id,omitempty"`
 	TaskType          string          `json:"task_type"`
 	Title             *string         `json:"title,omitempty"`
 	Status            string          `json:"status"`
@@ -183,7 +175,7 @@ func toResponse(t orm.TaskCenterTask, conversationTitle string, scheduleName *st
 		UserID:            t.UserID,
 		ConversationID:    t.ConversationID,
 		ConversationTitle: conversationTitle,
-		PluginSessionID:   t.PluginSessionID,
+		WorkflowSessionID: t.WorkflowSessionID,
 		TaskType:          t.TaskType,
 		Title:             t.Title,
 		Status:            t.Status,
@@ -199,8 +191,8 @@ func toResponse(t orm.TaskCenterTask, conversationTitle string, scheduleName *st
 
 // ── step loading helpers ──────────────────────────────────────────────────────
 
-// loadStepsForPluginSession loads steps from plugin_session_steps for a given session.
-func loadStepsForPluginSession(ctx context.Context, db *gorm.DB, sessionID string) []stepInfo {
+// loadStepsForWorkflowSession loads steps from plugin_session_steps for a given session.  // workflow-naming: persistence
+func loadStepsForWorkflowSession(ctx context.Context, db *gorm.DB, sessionID string) []stepInfo {
 	type pssRow struct {
 		StepID       string `gorm:"column:step_id"`
 		Title        string `gorm:"column:title"`
@@ -244,13 +236,7 @@ func loadStepsForPluginSession(ctx context.Context, db *gorm.DB, sessionID strin
 	}
 	steps := make([]stepInfo, 0, len(rows))
 	for _, r := range rows {
-		s := stepInfo{
-			StepID:       r.StepID,
-			Title:        r.Title,
-			Status:       r.Status,
-			CurrentPhase: r.CurrentPhase,
-			Summary:      r.Summary,
-		}
+		s := stepInfo{StepID: r.StepID, Title: r.Title, Status: r.Status, CurrentPhase: r.CurrentPhase, Summary: r.Summary}
 		if key, ok := artifactByTask[r.TaskID]; ok {
 			s.Artifact = &key
 		}
@@ -279,13 +265,7 @@ func loadStepsForConversation(ctx context.Context, db *gorm.DB, convID string) [
 	}
 	steps := make([]stepInfo, 0, len(rows))
 	for _, r := range rows {
-		s := stepInfo{
-			StepID:       r.Title,
-			Title:        r.Title,
-			Status:       r.Status,
-			CurrentPhase: r.CurrentPhase,
-			Summary:      r.Summary,
-		}
+		s := stepInfo{StepID: r.Title, Title: r.Title, Status: r.Status, CurrentPhase: r.CurrentPhase, Summary: r.Summary}
 		var keys []string
 		if json.Unmarshal([]byte(r.OutputSlots), &keys) == nil && len(keys) > 0 {
 			s.Artifact = &keys[0]
@@ -299,7 +279,7 @@ func loadStepsForConversation(ctx context.Context, db *gorm.DB, convID string) [
 //
 // Decision tree (evaluated only when t.Status is non-terminal):
 //
-//  1. Plugin task (plugin_session_id set): derive from plugin_sessions.status.
+//  1. Workflow task (plugin_session_id set): derive from plugin_sessions.status.  // workflow-naming: persistence
 //  2. No plugin: rely on the persisted task status. Chat histories are written
 //     during streaming to preserve thinking progress, so their presence is not a
 //     completion signal.
@@ -313,14 +293,14 @@ func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) s
 	if t.Status == "waiting" || t.Status == "pending" {
 		return t.Status
 	}
-	if t.PluginSessionID != nil && *t.PluginSessionID != "" {
+	if t.WorkflowSessionID != nil && *t.WorkflowSessionID != "" {
 		var sess struct {
 			Status string `gorm:"column:status"`
 		}
 		if err := db.WithContext(ctx).
-			Table("plugin_sessions").
+			Table("plugin_sessions"). // workflow-naming: persistence
 			Select("status").
-			Where("id = ?", *t.PluginSessionID).
+			Where("id = ?", *t.WorkflowSessionID).
 			First(&sess).Error; err == nil {
 			switch sess.Status {
 			case "active":
@@ -345,9 +325,8 @@ func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) s
 func resolveTaskForResponse(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) orm.TaskCenterTask {
 	storedStatus := t.Status
 	t.Status = resolveTaskStatus(ctx, db, t)
-	if t.Status == "failed" &&
-		!isTerminal(storedStatus) &&
-		(t.PluginSessionID == nil || *t.PluginSessionID == "") &&
+	if t.Status == "failed" && !isTerminal(storedStatus) &&
+		(t.WorkflowSessionID == nil || *t.WorkflowSessionID == "") &&
 		time.Since(t.CreatedAt) > 2*time.Hour {
 		t.ProgressJSON = progressWithFailureReason(t.ProgressJSON, taskExecutionTimeoutReason)
 	}
@@ -439,9 +418,9 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		Select("tct.*, c.display_name AS conv_display_name, us.name AS schedule_name").
 		Joins("LEFT JOIN conversations c ON c.id = tct.conversation_id").
 		Joins("LEFT JOIN user_schedules us ON us.id = tct.schedule_id").
-		Joins("LEFT JOIN plugin_sessions ps ON ps.id = tct.plugin_session_id").
+		Joins("LEFT JOIN plugin_sessions ps ON ps.id = tct.plugin_session_id"). // workflow-naming: persistence
 		Where("tct.user_id = ? AND tct.archived_at IS NULL", userID).
-		Where("tct.plugin_session_id IS NULL OR ps.dismissed = false")
+		Where("tct.plugin_session_id IS NULL OR ps.dismissed = false") // workflow-naming: persistence
 	if taskType != "" {
 		dataQ = dataQ.Where("tct.task_type = ?", taskType)
 	}
@@ -496,8 +475,8 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	for _, resolvedItem := range resolved[offset:end] {
 		t := resolvedItem.task
 		var steps []stepInfo
-		if t.PluginSessionID != nil && *t.PluginSessionID != "" {
-			steps = loadStepsForPluginSession(r.Context(), db, *t.PluginSessionID)
+		if t.WorkflowSessionID != nil && *t.WorkflowSessionID != "" {
+			steps = loadStepsForWorkflowSession(r.Context(), db, *t.WorkflowSessionID)
 		} else {
 			steps = loadStepsForConversation(r.Context(), db, t.ConversationID)
 		}
@@ -550,8 +529,8 @@ func GetTaskByID(w http.ResponseWriter, r *http.Request) {
 	t = resolveTaskForResponse(r.Context(), db, t)
 
 	var steps []stepInfo
-	if t.PluginSessionID != nil && *t.PluginSessionID != "" {
-		steps = loadStepsForPluginSession(r.Context(), db, *t.PluginSessionID)
+	if t.WorkflowSessionID != nil && *t.WorkflowSessionID != "" {
+		steps = loadStepsForWorkflowSession(r.Context(), db, *t.WorkflowSessionID)
 	} else {
 		steps = loadStepsForConversation(r.Context(), db, t.ConversationID)
 	}
@@ -816,8 +795,8 @@ func ListScheduleTasks(w http.ResponseWriter, r *http.Request) {
 	for _, t := range rows {
 		t = resolveTaskForResponse(r.Context(), db, t)
 		var steps []stepInfo
-		if t.PluginSessionID != nil && *t.PluginSessionID != "" {
-			steps = loadStepsForPluginSession(r.Context(), db, *t.PluginSessionID)
+		if t.WorkflowSessionID != nil && *t.WorkflowSessionID != "" {
+			steps = loadStepsForWorkflowSession(r.Context(), db, *t.WorkflowSessionID)
 		} else {
 			steps = loadStepsForConversation(r.Context(), db, t.ConversationID)
 		}

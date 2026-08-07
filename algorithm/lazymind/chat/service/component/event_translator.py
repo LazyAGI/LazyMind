@@ -98,9 +98,9 @@ class AgentEventFrameTranslator:
             payload = {k: v for k, v in event.items() if k != 'tag'}
             frames.append(_stream_frame(extra={'intent_updated': payload}))
             return frames
-        if event_type == 'plugin_preflight_updated':
+        if event_type == 'workflow_preflight_updated':
             payload = {k: v for k, v in event.items() if k != 'tag'}
-            frames.append(_stream_frame(extra={'plugin_preflight_updated': payload}))
+            frames.append(_stream_frame(extra={'workflow_preflight_updated': payload}))
             return frames
         if event_type == 'heartbeat':
             frames.append(_stream_frame(extra={'heartbeat': True}))

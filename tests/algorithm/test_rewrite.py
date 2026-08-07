@@ -9,19 +9,6 @@ from fastapi.testclient import TestClient
 
 
 def _load_rewrite_module():
-    validation_path = (
-        Path(__file__).resolve().parents[2]
-        / 'algorithm/lazymind/chat/engine/tools/infra/user_preference_validation.py'
-    )
-    validation_spec = importlib.util.spec_from_file_location(
-        'test_user_preference_validation',
-        validation_path,
-    )
-    assert validation_spec is not None
-    assert validation_spec.loader is not None
-    user_preference_validation = importlib.util.module_from_spec(validation_spec)
-    validation_spec.loader.exec_module(user_preference_validation)
-
     fake_lazyllm = ModuleType('lazyllm')
     fake_lazyllm.AutoModel = lambda *args, **kwargs: object()
     fake_lazyllm.config = {}
@@ -37,13 +24,6 @@ def _load_rewrite_module():
     fake_lazyllm_configs.Config = FakeConfig
 
     fake_tool_infra = ModuleType('lazymind.chat.engine.tools.infra')
-    fake_tool_infra.parse_user_preference_frontmatter = (
-        user_preference_validation.parse_user_preference_frontmatter
-    )
-    fake_tool_infra.validate_user_preference_content = (
-        user_preference_validation.validate_user_preference_content
-    )
-
     fake_load_config = ModuleType('lazymind.model_config')
     fake_load_config.get_config_path = lambda: ''
 
@@ -61,21 +41,13 @@ def _load_rewrite_module():
         sys.modules['lazymind.model_config'] = fake_load_config
 
         from algorithm.lazymind.rewrite import base
-        from algorithm.lazymind.rewrite import memory
-        from algorithm.lazymind.rewrite import preference
 
         ns = ModuleType('test_rewrite_module')
         ns.BadRequestError = base.BadRequestError
         ns.UnprocessableContentError = base.UnprocessableContentError
-        ns._apply_memory_edit_operations = memory._apply_memory_edit_operations
-        ns._apply_user_preference_edit_operations = preference._apply_user_preference_edit_operations
         ns._PROMPT_BUILDERS = base._PROMPT_BUILDERS
         ns.RewriteTaskType = base.RewriteTaskType
-        ns._compact_memory_to_recent_week = memory._compact_memory_to_recent_week
         ns._format_inputs_block = base._format_inputs_block
-        ns.parse_user_preference_frontmatter = (
-            user_preference_validation.parse_user_preference_frontmatter
-        )
         ns._validate_generated_content = base._validate_generated_content
         ns.rewrite_content = base.rewrite_content
         return ns
@@ -89,13 +61,8 @@ def _load_rewrite_module():
 
 rewrite = _load_rewrite_module()
 BadRequestError = rewrite.BadRequestError
-UnprocessableContentError = rewrite.UnprocessableContentError
-_apply_memory_edit_operations = rewrite._apply_memory_edit_operations
-_apply_user_preference_edit_operations = rewrite._apply_user_preference_edit_operations
 _PROMPT_BUILDERS = rewrite._PROMPT_BUILDERS
-_compact_memory_to_recent_week = rewrite._compact_memory_to_recent_week
 _format_inputs_block = rewrite._format_inputs_block
-parse_user_preference_frontmatter = rewrite.parse_user_preference_frontmatter
 _validate_generated_content = rewrite._validate_generated_content
 rewrite_content = rewrite.rewrite_content
 
@@ -151,7 +118,7 @@ def test_format_inputs_block_includes_required_user_instruct():
 def test_rewrite_content_requires_user_instruct():
     try:
         rewrite_content(
-            task_type='memory',
+            task_type='skill',
             content='old content',
             user_instruct='  ',
         )
@@ -161,21 +128,20 @@ def test_rewrite_content_requires_user_instruct():
         raise AssertionError('Expected BadRequestError')
 
 
-def test_generate_prompts_include_stale_content_governance():
-    for task_type in ('skill', 'memory'):
-        prompt = _PROMPT_BUILDERS[task_type](
-            content='old content that may now be stale',
-            user_instruct='Outdated=TRUE: replace old KB failure diagnosis with the current service-level cause.',
-        )
+def test_skill_prompt_includes_stale_content_governance():
+    prompt = _PROMPT_BUILDERS['skill'](
+        content='old content that may now be stale',
+        user_instruct='Outdated=TRUE: replace old KB failure diagnosis with the current service-level cause.',
+    )
 
-        assert 'bounded, continuously maintained store' in prompt
-        assert 'not an append-only log' in prompt
-        assert 'Outdated=TRUE is only one stale signal' in prompt
-        assert 'Even when the limit is not exceeded' in prompt
-        assert 'proactively compress, consolidate, or delete stale information' in prompt
-        assert 'Current content length after removing whitespace' in prompt
-        assert 'Remaining budget before applying user_instruct' in prompt
-        assert 'upsert' not in prompt
+    assert 'bounded, continuously maintained store' in prompt
+    assert 'not an append-only log' in prompt
+    assert 'Outdated=TRUE is only one stale signal' in prompt
+    assert 'Even when the limit is not exceeded' in prompt
+    assert 'proactively compress, consolidate, or delete stale information' in prompt
+    assert 'Current content length after removing whitespace' in prompt
+    assert 'Remaining budget before applying user_instruct' in prompt
+    assert 'upsert' not in prompt
 
 
 def test_skill_prompt_does_not_require_frontmatter_category():
@@ -220,221 +186,6 @@ def test_polish_prompt_asks_model_to_rewrite_without_answering():
     assert '{"content": "<new complete text>"}' in prompt
 
 
-def test_user_preference_prompt_requires_yaml_frontmatter():
-    prompt = _PROMPT_BUILDERS['user_preference'](
-        content='Prefers concise replies',
-        user_instruct='Keep replies in Chinese.',
-    )
-
-    assert 'Format requirements' in prompt
-    assert 'agent_persona' in prompt
-    assert 'preferred_name' in prompt
-    assert 'response_style' in prompt
-    assert '智能体角色' not in prompt
-    assert '用户称谓' not in prompt
-    assert '回复风格' not in prompt
-    assert '技术助理' not in prompt
-    assert 'legacy/free-form' not in prompt
-    assert 'free-form without any YAML frontmatter' in prompt
-    assert 'frontmatter-plus-body format' in prompt
-    assert 'containing exactly agent_persona, preferred_name, and response_style fields' in prompt
-    assert 'explicit stable agent persona' in prompt
-    assert 'preferred name/address' in prompt
-    assert 'short response style' in prompt
-    assert '100 characters or less' in prompt
-    assert 'existing response_style' in prompt
-    assert 'Do not put language preferences' in prompt
-    assert 'verbs, or full instructions' in prompt
-    assert 'keep existing frontmatter values unchanged' in prompt
-    assert 'response_style is unknown' in prompt
-    assert 'use ""' in prompt
-    assert 'never use generic acknowledgement text' in prompt
-    assert 'only when user_instruct explicitly asks to change that specific field' in prompt
-
-
-def test_user_preference_validation_requires_yaml_frontmatter():
-    valid_english = (
-        '---\n'
-        'agent_persona: "algorithm collaborator"\n'
-        'preferred_name: ""\n'
-        'response_style: "concise"\n'
-        '---\n'
-        '- Prefer manual git commits.\n'
-        '- Prefer algorithm-side changes only.'
-    )
-    valid_chinese = (
-        '---\n'
-        'agent_persona: "算法协作者"\n'
-        'preferred_name: ""\n'
-        'response_style: "简洁"\n'
-        '---\n'
-        '- 偏好手动提交 git。'
-    )
-
-    parsed, body = parse_user_preference_frontmatter(valid_english)
-    assert parsed['agent_persona'] == 'algorithm collaborator'
-    assert body == '- Prefer manual git commits.\n- Prefer algorithm-side changes only.'
-    assert _validate_generated_content('user_preference', valid_english) == valid_english
-    assert _validate_generated_content('user_preference', valid_chinese) == valid_chinese
-    assert _validate_generated_content(
-        'user_preference',
-        (
-            '---\n'
-            'agent_persona: "algorithm collaborator"\n'
-            'preferred_name: ""\n'
-            'response_style: ""\n'
-            '---\n'
-            '- Prefer manual git commits.'
-        ),
-    )
-    assert _validate_generated_content(
-        'user_preference',
-        (
-            '---\n'
-            'agent_persona: "algorithm collaborator"\n'
-            'preferred_name: ""\n'
-            'response_style: "concise, direct"\n'
-            '---\n'
-            '- Prefer manual git commits.'
-        ),
-    )
-    assert _validate_generated_content(
-        'user_preference',
-        (
-            '---\n'
-            'agent_persona: "algorithm collaborator"\n'
-            'preferred_name: ""\n'
-            'response_style: "轻松"\n'
-            '---\n'
-            '- 偏好轻松风格。'
-        ),
-    )
-
-    too_long = 'x' * 101
-    invalid_cases = [
-        'agent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\n\nbody',
-        '---\nagent_persona: "x"\nresponse_style: "concise"\n---\nbody',
-        '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\nextra: "x"\n---\nbody',
-        (
-            '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\n'
-            'work_email: "me@example.com"\n---\nbody'
-        ),
-        '---\nagent_persona: ["x"]\npreferred_name: ""\nresponse_style: "concise"\n---\nbody',
-        f'---\nagent_persona: "{too_long}"\npreferred_name: ""\nresponse_style: ""\n---\nbody',
-        f'---\nagent_persona: ""\npreferred_name: "{too_long}"\nresponse_style: ""\n---\nbody',
-        f'---\nagent_persona: ""\npreferred_name: ""\nresponse_style: "{too_long}"\n---\nbody',
-        '- not: a mapping',
-    ]
-    for invalid in invalid_cases:
-        with pytest.raises(UnprocessableContentError):
-            _validate_generated_content('user_preference', invalid)
-
-
-def test_memory_edit_operations_use_replace_text_to_add_day_and_edit_text():
-    current = (
-        '- 2026-05-14\n'
-        '  用户在做:\n'
-        '  - old task\n'
-        '  状态/冲突:\n'
-        '  - likes tea'
-    )
-
-    edited = _apply_memory_edit_operations(
-        current,
-        {
-            'operations': [
-                {
-                    'op': 'replace_text',
-                    'old': '',
-                    'new': '- 2026-05-15\n  用户在做:\n  - new task',
-                },
-                {
-                    'op': 'replace_text',
-                    'old': 'likes tea',
-                    'new': 'likes coffee',
-                },
-            ],
-        },
-    )
-
-    assert edited == (
-        '- 2026-05-14\n'
-        '  用户在做:\n'
-        '  - old task\n'
-        '  状态/冲突:\n'
-        '  - likes coffee\n'
-        '- 2026-05-15\n'
-        '  用户在做:\n'
-        '  - new task'
-    )
-
-
-def test_memory_edit_operations_can_replace_existing_day_block():
-    current = (
-        '- 2026-05-14\n'
-        '  用户在做:\n'
-        '  - old task'
-    )
-
-    edited = _apply_memory_edit_operations(
-        current,
-        {
-            'operations': [
-                {
-                    'op': 'replace_text',
-                    'old': current,
-                    'new': '- 2026-05-14\n  我们讨论了:\n  - new summary',
-                },
-            ],
-        },
-    )
-
-    assert edited == '- 2026-05-14\n  我们讨论了:\n  - new summary'
-
-
-def test_memory_compaction_keeps_recent_week_and_summarizes_older_records():
-    older_days = []
-    for day in range(1, 15):
-        older_days.append(
-            f'- 2026-05-{day:02d}\n'
-            '  我们讨论了:\n'
-            f'  - old topic {day} ' + ('detail ' * 20)
-        )
-    recent_days = (
-        '- 2026-05-20\n'
-        '  用户在做:\n'
-        '  - recent task\n'
-        '- 2026-05-21\n'
-        '  状态/冲突:\n'
-        '  - recent status'
-    )
-
-    compacted = _compact_memory_to_recent_week('\n'.join(older_days + [recent_days]))
-
-    assert '一周前摘要' in compacted
-    assert '2026-05-01' in compacted
-    assert '- 2026-05-20' in compacted
-    assert '- 2026-05-21' in compacted
-    summary_line = next(line for line in compacted.splitlines() if '2026-05-01' in line)
-    assert len(summary_line.strip()[2:]) <= 500
-
-
-def test_user_preference_edit_operations_can_clear_all_content_via_replace_all():
-    edited = _apply_user_preference_edit_operations(
-        'Prefers concise replies',
-        {
-            'operations': [
-                {
-                    'op': 'replace_all',
-                    'content': '',
-                },
-            ],
-        },
-    )
-
-    assert edited == ''
-
-
 def test_rewrite_route_requires_user_instruct_and_llm_config(monkeypatch):
     rewrite_routes = _load_rewrite_routes_module()
     app = FastAPI()
@@ -474,22 +225,30 @@ def test_rewrite_route_rejects_missing_user_instruct_or_llm_config():
 
     response = client.post(
         '/api/chat/rewrite',
-        json={'task_type': 'memory', 'content': 'old content', 'llm_config': {}},
+        json={'task_type': 'skill', 'content': 'old content', 'llm_config': {}},
     )
 
     assert response.status_code == 422
 
     response = client.post(
         '/api/chat/rewrite',
-        json={'task_type': 'memory', 'content': 'old content', 'user_instruct': 'Apply change'},
+        json={'task_type': 'skill', 'content': 'old content', 'user_instruct': 'Apply change'},
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize('unsupported_task_type', ['memory', 'user_preference', 'unknown'])
+def test_rewrite_route_rejects_removed_and_unknown_task_types(unsupported_task_type):
+    rewrite_routes = _load_rewrite_routes_module()
+    app = FastAPI()
+    app.include_router(rewrite_routes.router)
+    client = TestClient(app)
 
     response = client.post(
         '/api/chat/rewrite',
         json={
-            'task_type': 'unknown',
+            'task_type': unsupported_task_type,
             'content': 'old content',
             'user_instruct': 'Apply change',
             'llm_config': {},

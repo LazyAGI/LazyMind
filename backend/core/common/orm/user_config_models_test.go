@@ -1,22 +1,12 @@
 package orm
 
 import (
-	"path/filepath"
 	"testing"
 )
 
-// TestUserConfigModelsAutoMigrate verifies that user configuration tables are created correctly.
 func TestUserConfigModelsAutoMigrate(t *testing.T) {
-	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "user-config.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
+	db := MigrateTestDB(t, &UserChatSettings{}, &UserUIPreferences{})
 
-	if err := db.AutoMigrate(&UserChatSettings{}, &UserUIPreferences{}); err != nil {
-		t.Fatalf("auto migrate user config models: %v", err)
-	}
-
-	// Verify tables exist.
 	for _, model := range []any{
 		&UserChatSettings{},
 		&UserUIPreferences{},
@@ -26,12 +16,11 @@ func TestUserConfigModelsAutoMigrate(t *testing.T) {
 		}
 	}
 
-	// Verify UserChatSettings columns.
 	if !db.Migrator().HasColumn(&UserChatSettings{}, "user_id") {
 		t.Fatal("expected user_chat_settings.user_id column")
 	}
-	if !db.Migrator().HasColumn(&UserChatSettings{}, "enable_plugin") {
-		t.Fatal("expected user_chat_settings.enable_plugin column")
+	if !db.Migrator().HasColumn(&UserChatSettings{}, "enable_workflow") {
+		t.Fatal("expected user_chat_settings.enable_workflow column")
 	}
 	if !db.Migrator().HasColumn(&UserChatSettings{}, "enable_subagent") {
 		t.Fatal("expected user_chat_settings.enable_subagent column")
@@ -40,24 +29,14 @@ func TestUserConfigModelsAutoMigrate(t *testing.T) {
 		t.Fatal("expected user_chat_settings.plugin_mode column")
 	}
 
-	// Verify UserUIPreferences columns.
 	if !db.Migrator().HasColumn(&UserUIPreferences{}, "user_id") {
 		t.Fatal("expected user_ui_preferences.user_id column")
 	}
 }
 
-// TestMCPServerModelsAutoMigrate verifies that MCP server and tool tables are created correctly.
 func TestMCPServerModelsAutoMigrate(t *testing.T) {
-	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "mcp.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
+	db := MigrateTestDB(t, &MCPServer{}, &MCPServerTool{})
 
-	if err := db.AutoMigrate(&MCPServer{}, &MCPServerTool{}); err != nil {
-		t.Fatalf("auto migrate mcp models: %v", err)
-	}
-
-	// Verify tables exist.
 	for _, model := range []any{
 		&MCPServer{},
 		&MCPServerTool{},
@@ -67,7 +46,6 @@ func TestMCPServerModelsAutoMigrate(t *testing.T) {
 		}
 	}
 
-	// Verify MCPServer columns.
 	if !db.Migrator().HasColumn(&MCPServer{}, "id") {
 		t.Fatal("expected mcp_servers.id column")
 	}
@@ -78,7 +56,6 @@ func TestMCPServerModelsAutoMigrate(t *testing.T) {
 		t.Fatal("expected mcp_servers.url column")
 	}
 
-	// Verify MCPServerTool columns.
 	if !db.Migrator().HasColumn(&MCPServerTool{}, "mcp_server_id") {
 		t.Fatal("expected mcp_server_tools.mcp_server_id column")
 	}
@@ -87,18 +64,9 @@ func TestMCPServerModelsAutoMigrate(t *testing.T) {
 	}
 }
 
-// TestSubAgentModelsAutoMigrate verifies that sub-agent tables are created correctly.
 func TestSubAgentModelsAutoMigrate(t *testing.T) {
-	db, err := Connect(DriverSQLite, filepath.Join(t.TempDir(), "subagent.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
+	db := MigrateTestDB(t, &SubAgentTask{}, &SubAgentStep{}, &SubAgentArtifact{})
 
-	if err := db.AutoMigrate(&SubAgentTask{}, &SubAgentStep{}, &SubAgentArtifact{}); err != nil {
-		t.Fatalf("auto migrate sub-agent models: %v", err)
-	}
-
-	// Verify tables exist.
 	for _, model := range []any{
 		&SubAgentTask{},
 		&SubAgentStep{},
@@ -109,7 +77,6 @@ func TestSubAgentModelsAutoMigrate(t *testing.T) {
 		}
 	}
 
-	// Verify SubAgentTask columns.
 	if !db.Migrator().HasColumn(&SubAgentTask{}, "id") {
 		t.Fatal("expected sub_agent_tasks.id column")
 	}
@@ -120,7 +87,6 @@ func TestSubAgentModelsAutoMigrate(t *testing.T) {
 		t.Fatal("expected sub_agent_tasks.status column")
 	}
 
-	// Verify SubAgentArtifact columns.
 	if !db.Migrator().HasColumn(&SubAgentArtifact{}, "slot") {
 		t.Fatal("expected sub_agent_artifacts.slot column")
 	}

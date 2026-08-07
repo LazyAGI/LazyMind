@@ -101,6 +101,23 @@ function patchBasePath(outputDir) {
   }
 }
 
+function patchNullableRecursiveMemoryValue(outputDir) {
+  const apiTsPath = path.resolve(outputDir, "api.ts");
+  if (!fs.existsSync(apiTsPath)) return;
+
+  const original = fs.readFileSync(apiTsPath, "utf-8");
+  const patched = original.replace(
+    /export type CurrentMemoryDocumentValue = (?!null \| )/,
+    "export type CurrentMemoryDocumentValue = null | ",
+  );
+  if (patched !== original) {
+    fs.writeFileSync(apiTsPath, patched, "utf-8");
+    console.log(
+      `🔧 Preserved nullable CurrentMemoryDocumentValue in ${path.relative(cwdPath, apiTsPath)}`,
+    );
+  }
+}
+
 function removeUnusedGeneratedFiles(outputDir) {
   const unusedFiles = ["git_push.sh"];
 
@@ -109,6 +126,27 @@ function removeUnusedGeneratedFiles(outputDir) {
     if (fs.existsSync(filePath)) {
       fs.rmSync(filePath);
       console.log(`🧹 Removed unused generated file ${path.relative(cwdPath, filePath)}`);
+    }
+  }
+}
+
+function normalizeGeneratedTypeScript(outputDir) {
+  for (const filename of [
+    "api.ts",
+    "base.ts",
+    "common.ts",
+    "configuration.ts",
+    "index.ts",
+  ]) {
+    const filePath = path.resolve(outputDir, filename);
+    if (!fs.existsSync(filePath)) continue;
+
+    const original = fs.readFileSync(filePath, "utf-8");
+    const normalized = `${original
+      .replace(/[ \t]+$/gm, "")
+      .replace(/[\r\n]+$/u, "")}\n`;
+    if (normalized !== original) {
+      fs.writeFileSync(filePath, normalized, "utf-8");
     }
   }
 }
@@ -139,7 +177,9 @@ for (const api of selectedApis) {
       { stdio: "inherit", cwd: cwdPath },
     );
     patchBasePath(api.output);
+    patchNullableRecursiveMemoryValue(api.output);
     removeUnusedGeneratedFiles(api.output);
+    normalizeGeneratedTypeScript(api.output);
     cache[api.name] = currentHash;
     updated = true;
   } catch (error) {

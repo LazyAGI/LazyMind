@@ -88,8 +88,8 @@ class ConversationActions:
         mentions: Sequence[dict[str, str]] = (),
         workspace_dataset_ids: Sequence[str] | None = None,
         disabled_tools: Sequence[str] = (),
-        enable_plugin: bool | None = None,
-        plugin_mode: str | None = None,
+        enable_workflow: bool | None = None,
+        workflow_mode: str | None = None,
         thinking_depth: str | None = None,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> ConversationResult:
@@ -205,8 +205,8 @@ class ConversationActions:
                     [str(value) for value in workspace_dataset_ids if value]
                 )
             options.disabled_tools.extend(str(item) for item in disabled_tools)
-            options.enable_plugin = enable_plugin
-            options.plugin_mode = plugin_mode
+            options.enable_workflow = enable_workflow
+            options.workflow_mode = workflow_mode
             options.thinking_depth = (
                 thinking_depth
                 if thinking_depth in {'low', 'medium', 'high', 'max'}
@@ -878,7 +878,7 @@ class ConversationActions:
         if not enabled:
             return (
                 '当前渠道只执行基础聊天，不会推进原有 '
-                'Plugin、Task、SubAgent 或 Ask 流程。'
+                'Workflow、Task、SubAgent 或 Ask 流程。'
             )
         return (
             f'当前渠道已开放：{"、".join(enabled)}。'

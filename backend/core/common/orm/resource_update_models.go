@@ -6,15 +6,13 @@ import (
 )
 
 const (
-	ResourceUpdateTaskTypeGenerateReview          = "generate_review"
-	ResourceUpdateTaskTypeAutoApplyReview         = "auto_apply_review"
-	ResourceUpdateTaskTypeAutoCommitSkillDraft    = "auto_commit_skill_draft"
-	ResourceUpdateTaskTypeAutoCommitPersonalDraft = "auto_commit_personal_draft"
-	ResourceUpdateTaskTypeOrganizeSkill           = "organize_skill"
+	ResourceUpdateTaskTypeGenerateReview       = "generate_review"
+	ResourceUpdateTaskTypeAutoApplyReview      = "auto_apply_review"
+	ResourceUpdateTaskTypeAutoCommitSkillDraft = "auto_commit_skill_draft"
+	ResourceUpdateTaskTypeOrganizeSkill        = "organize_skill"
 
-	ResourceUpdateResourceTypeSkill          = "skill"
-	ResourceUpdateResourceTypeMemory         = "memory"
-	ResourceUpdateResourceTypeUserPreference = "user_preference"
+	ResourceUpdateResourceTypeSkill  = "skill"
+	ResourceUpdateResourceTypeMemory = "memory"
 
 	ResourceUpdateTriggerTypeScheduled        = "scheduled"
 	ResourceUpdateTriggerTypeConversationIdle = "conversation_idle"
@@ -83,22 +81,24 @@ type SkillReviewSchedulerState struct {
 func (SkillReviewSchedulerState) TableName() string { return "skill_review_scheduler_state" }
 
 type ConversationIdleEvent struct {
-	ID                   string     `gorm:"column:id;type:varchar(36);primaryKey"`
-	EventID              string     `gorm:"column:event_id;type:varchar(512);not null;uniqueIndex:uk_conversation_idle_events_event_id"`
-	SessionID            string     `gorm:"column:session_id;type:varchar(128);not null;index;index:idx_conversation_idle_events_session_waiting,priority:1"`
-	UserID               string     `gorm:"column:user_id;type:varchar(255);not null;index"`
-	LastMessageID        string     `gorm:"column:last_message_id;type:varchar(128);not null"`
-	LastActivityAt       time.Time  `gorm:"column:last_activity_at;not null"`
-	DueAt                time.Time  `gorm:"column:due_at;not null;index;index:idx_conversation_idle_events_due,priority:2;index:idx_conversation_idle_events_session_waiting,priority:3,sort:desc"`
-	Status               string     `gorm:"column:status;type:varchar(32);not null;index;index:idx_conversation_idle_events_due,priority:1;index:idx_conversation_idle_events_session_waiting,priority:2"`
-	SkipReason           string     `gorm:"column:skip_reason;type:varchar(128);not null;default:''"`
-	ErrorCode            string     `gorm:"column:error_code;type:varchar(64);not null;default:''"`
-	ErrorMessage         string     `gorm:"column:error_message;type:text;not null;default:''"`
-	MemoryTaskID         string     `gorm:"column:memory_task_id;type:varchar(36);not null;default:''"`
-	UserPreferenceTaskID string     `gorm:"column:user_preference_task_id;type:varchar(36);not null;default:''"`
-	CreatedAt            time.Time  `gorm:"column:created_at;not null"`
-	UpdatedAt            time.Time  `gorm:"column:updated_at;not null"`
-	TriggeredAt          *time.Time `gorm:"column:triggered_at"`
+	ID      string `gorm:"column:id;type:varchar(36);primaryKey"`
+	EventID string `gorm:"column:event_id;type:varchar(512);not null;uniqueIndex:uk_conversation_idle_events_event_id"`
+	// ConversationID and LastHistoryID intentionally keep the legacy database
+	// column names until a later migration. Their runtime semantics are
+	// conversations.id and one ChatHistory record ID, respectively.
+	ConversationID string     `gorm:"column:session_id;type:varchar(128);not null;index;index:idx_conversation_idle_events_session_waiting,priority:1"`
+	UserID         string     `gorm:"column:user_id;type:varchar(255);not null;index"`
+	LastHistoryID  string     `gorm:"column:last_message_id;type:varchar(128);not null"`
+	LastActivityAt time.Time  `gorm:"column:last_activity_at;not null"`
+	DueAt          time.Time  `gorm:"column:due_at;not null;index;index:idx_conversation_idle_events_due,priority:2;index:idx_conversation_idle_events_session_waiting,priority:3,sort:desc"`
+	Status         string     `gorm:"column:status;type:varchar(32);not null;index;index:idx_conversation_idle_events_due,priority:1;index:idx_conversation_idle_events_session_waiting,priority:2"`
+	SkipReason     string     `gorm:"column:skip_reason;type:varchar(128);not null;default:''"`
+	ErrorCode      string     `gorm:"column:error_code;type:varchar(64);not null;default:''"`
+	ErrorMessage   string     `gorm:"column:error_message;type:text;not null;default:''"`
+	MemoryTaskID   string     `gorm:"column:memory_task_id;type:varchar(36);not null;default:''"`
+	CreatedAt      time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at;not null"`
+	TriggeredAt    *time.Time `gorm:"column:triggered_at"`
 }
 
 func (ConversationIdleEvent) TableName() string { return "conversation_idle_events" }
