@@ -8,12 +8,28 @@ from __future__ import annotations
 
 import json
 import re
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from lazyllm.tools.writer.data_models import WriterDocument
-from lazyllm.tools.writer.utils import parse_document_markdown, save_artifact_json
+from lazyllm import AutoModel
+from lazyllm.tools.writer.data_models import (
+    ContentRef,
+    ModifyInstruction,
+    ModifyPlan,
+    PatchResult,
+    PatchSet,
+    StringReplaceSet,
+    WriterDocument,
+)
+from lazyllm.tools.writer.tools import WriterResourceTools, WriterRevisionTools
+from lazyllm.tools.writer.tools.revision_tools import apply_patch_to_ir
+from lazyllm.tools.writer.utils import (
+    load_artifact_json,
+    parse_document_markdown,
+    save_artifact_json,
+)
 from lazymind.chat.engine.subagent.context import require_context
 from lazymind.chat.engine.prompts.writer_media import WRITER_IMAGE_ACQUISITION_PROMPT
 from lazymind.chat.engine.tools.writer import (
@@ -49,6 +65,40 @@ def _read_json_file(path: str) -> Any:
     if isinstance(raw, dict) and 'data' in raw:
         return raw['data']
     return raw
+
+
+def _action_artifact_data(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        if 'data' in value:
+            return value['data']
+        path = value.get('path')
+        if isinstance(path, str) and path:
+            return _read_json_file(path)
+        return dict(value)
+    if isinstance(value, str):
+        candidate = Path(value)
+        if candidate.is_file():
+            return _read_json_file(value)
+        try:
+            return _json_loads(value, value)
+        except json.JSONDecodeError:
+            return value
+    raise TypeError('artifact must be a JSON value, Markdown string, or file reference.')
+
+
+def _action_context(document: Any) -> dict:
+    return {
+        'context_id': f'selection-{uuid.uuid4().hex}',
+        'doc_id': document.get('document_id') if isinstance(document, dict) else None,
+        'meta': {'source': 'rewrite_selection_action'},
+    }
+
+
+def _action_root(artifact_store: str, name: str) -> Path:
+    base = Path(artifact_store) if artifact_store else Path(tempfile.gettempdir())
+    root = base / 'writer-workflow' / f'{name}-{uuid.uuid4().hex}'
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def _read_json_string(path: str) -> str:
@@ -754,6 +804,141 @@ def writer_build_revision_task(query: str, base_document_path: str) -> str:
         'revision_task', content, writer_schema('task.WritingTask'),
         directory=_run_root('revision-task'),
     )
+
+
+def writer_preview_selection_rewrite(
+    artifact: Any,
+    instruction: str,
+    selection: Mapping[str, Any],
+    artifact_store: str = '',
+) -> dict:
+    """Preview a selected IR block or Markdown paragraph rewrite."""
+    instruction = str(instruction or '').strip()
+    if not instruction:
+        raise ValueError('instruction must not be empty.')
+    document = _action_artifact_data(artifact)
+    context = _action_context(document)
+    revision = WriterRevisionTools(
+        llm=AutoModel(model='llm'),
+        artifact_store=str(_action_root(artifact_store, 'rewrite-preview')),
+    )
+    selection_type = str((selection or {}).get('type') or '')
+    if isinstance(document, Mapping):
+        source = WriterDocument.model_validate(document)
+        if selection_type != 'ir':
+            raise ValueError("IR artifacts require selection.type='ir'.")
+        node_id = str(selection.get('node_id') or '')
+        target = source.block_by_id(node_id)
+        if target is None:
+            raise ValueError('The selected IR node no longer exists.')
+        plan = ModifyPlan(scope='block', instructions=[ModifyInstruction(
+            instruction_id='rewrite-selection',
+            content_ref=ContentRef(node_id=node_id),
+            modify_type='update',
+            instruction=instruction,
+        )])
+        output = revision.generate_patch_set(source, plan, context)
+        patch_set = load_artifact_json(_action_result_path(output), PatchSet)
+        revised, _ = apply_patch_to_ir(source, patch_set)
+        candidate_path = Path(_save_writer_document(
+            'rewrite_candidate', revised, editable=True,
+            directory=Path(revision.artifact_store),
+        ))
+        result = {
+            'representation': 'ir',
+            'target': {'type': 'block', 'block_type': target.type, 'node_id': node_id},
+            'preview': {
+                'old_text': target.content,
+                'new_text': revised.block_by_id(node_id).content,
+            },
+            'patch': {'type': 'writer_ir_patch', 'payload': patch_set.model_dump()},
+        }
+    else:
+        if selection_type != 'markdown':
+            raise ValueError("Markdown artifacts require selection.type='markdown'.")
+        replace_set = StringReplaceSet.model_validate(
+            revision.build_selected_markdown_replace_set(
+                document, instruction, str(selection.get('selected_text') or ''), context,
+            ),
+        )
+        replacement = replace_set.replacements[0]
+        output = revision.apply_string_replace(document, replace_set, context)
+        candidate_path = Path(output['revised_document_md'])
+        result = {
+            'representation': 'markdown',
+            'target': {'type': 'block', 'block_type': 'paragraph'},
+            'preview': {
+                'old_text': replacement.old_string,
+                'new_text': replacement.new_string,
+            },
+            'patch': {'type': 'string_replace_set', 'payload': replace_set.model_dump()},
+        }
+    result['artifact'] = {
+        'content_type': 'file',
+        'value': {
+            'path': str(candidate_path),
+            'filename': candidate_path.name,
+            'size': candidate_path.stat().st_size,
+        },
+    }
+    return result
+
+
+def writer_sync_document(
+    source_document: Mapping[str, Any],
+    revised_document: Mapping[str, Any],
+    artifact_store: str = '',
+) -> dict:
+    """Persist an edited WriterDocument through its configured provider adapter."""
+    source = WriterDocument.model_validate(source_document)
+    revised = WriterDocument.model_validate(revised_document)
+    if source.document_id != revised.document_id:
+        raise ValueError('WriterDocument document_id values must match.')
+    root = _action_root(artifact_store, 'sync-document')
+    revision = WriterRevisionTools(llm=None, artifact_store=str(root))
+    patch_output = revision.build_patch_set_from_documents(source, revised)
+    patch_set = load_artifact_json(_action_result_path(patch_output), PatchSet)
+    candidate, local_result = apply_patch_to_ir(source, patch_set)
+    if not patch_set.hunks and patch_set.new_title is None:
+        candidate.ui_editable = True
+        local_result.message = 'No document changes.'
+        return _sync_document_response(False, patch_set, local_result, candidate)
+    write_output = WriterResourceTools(
+        llm=None, artifact_store=str(root),
+    ).apply_patch_to_document(patch_set, source)
+    persisted = load_artifact_json(
+        _action_result_path(write_output, 'persisted_document'), WriterDocument,
+    )
+    result = load_artifact_json(
+        _action_result_path(write_output, 'patch_result'), PatchResult,
+    )
+    persisted.ui_editable = True
+    return _sync_document_response(True, patch_set, result, persisted)
+
+
+def _action_result_path(result: dict, key: str | None = None) -> str:
+    path = result.get('artifact_path') if key is None else (
+        (result.get('metadata') or {}).get('artifact_paths') or {}
+    ).get(key)
+    if not path:
+        raise ValueError(f'Writer tool did not return artifact {key or "primary"!r}.')
+    return path
+
+
+def _sync_document_response(
+    changed: bool,
+    patch_set: PatchSet,
+    result: PatchResult,
+    document: WriterDocument,
+) -> dict:
+    return {
+        'success': result.success,
+        'changed': changed,
+        'feishu_synced': result.success,
+        'patch_set': patch_set.model_dump(),
+        'patch_result': result.model_dump(),
+        'persisted_document': document.model_dump(),
+    }
 
 
 def writer_locate_revision_target(

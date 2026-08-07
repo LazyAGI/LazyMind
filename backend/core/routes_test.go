@@ -51,6 +51,21 @@ func TestWriterDocumentWriteBackRoute(t *testing.T) {
 	}
 }
 
+func TestArtifactActionRoutes(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+	path := "/workflow-sessions/ps-1/slots/draft_document/items/idx/-1:action-preview"
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatal("expected artifact action preview route to match")
+	}
+	if got := match.Vars["list_index"]; got != "-1" {
+		t.Fatalf("expected list_index -1, got %q", got)
+	}
+}
+
 func TestAgentThreadEventsRouteWinsOverGenericThreadRoute(t *testing.T) {
 	r := mux.NewRouter()
 	r.UseEncodedPath()

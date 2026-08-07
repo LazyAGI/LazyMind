@@ -49,6 +49,8 @@ tool_scripts:
       - writer_create_document
       - writer_publish_revision
       - writer_replace_document
+      - writer_preview_selection_rewrite
+      - writer_sync_document
       - writer_append_document
       - writer_build_revision_task
       - writer_locate_revision_target
@@ -57,6 +59,14 @@ tool_scripts:
       - writer_apply_revision
       - writer_publish_revision
       - writer_replace_document
+
+artifact_actions:
+  rewrite_selection:
+    slots: [draft_document]
+    preview_tool: writer_preview_selection_rewrite
+  sync_document:
+    slots: [draft_document]
+    execute_tool: writer_sync_document
 
 steps:
   - id: prepare

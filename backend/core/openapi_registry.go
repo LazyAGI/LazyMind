@@ -1967,6 +1967,18 @@ type writerDocumentWriteBackOpenAPIRequest struct {
 	BaseRevision int `json:"base_revision"`
 }
 
+type artifactActionPathParams struct {
+	SessionID string `path:"session_id"`
+	SlotID    string `path:"slot_id"`
+	ListIndex int    `path:"list_index"`
+}
+
+type artifactActionPreviewOpenAPIRequest struct {
+	Action       string         `json:"action"`
+	BaseRevision int            `json:"base_revision"`
+	Input        map[string]any `json:"input"`
+}
+
 func registeredCoreOperations() []openAPIOperation {
 	jsonBodyOf := func(v any, required bool) *openAPIBody {
 		return &openAPIBody{Required: required, ContentType: "application/json", Schema: schemaSource{Type: v}}
@@ -2020,9 +2032,18 @@ func registeredCoreOperations() []openAPIOperation {
 	return []openAPIOperation{
 		{
 			Method:      "POST",
+			Path:        "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview",
+			Summary:     "Preview a Workflow-owned artifact action",
+			Tags:        []string{"workflow"},
+			PathParams:  artifactActionPathParams{},
+			RequestBody: jsonBodyOf(artifactActionPreviewOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Artifact action preview")},
+		},
+		{
+			Method:      "POST",
 			Path:        "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document",
 			Summary:     "Sync an edited WriterDocument to Feishu",
-			Tags:        []string{"plugin", "writer"},
+			Tags:        []string{"workflow", "writer"},
 			PathParams:  writerDocumentSyncPathParams{},
 			RequestBody: jsonBodyOf(writerDocumentSyncOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: evoJSONResp("WriterDocument sync result")},

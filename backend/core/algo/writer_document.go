@@ -31,10 +31,7 @@ func SyncWriterDocument(
 	err := common.ApiPost(
 		ctx,
 		common.JoinURL(common.ChatServiceEndpoint(), "/api/writer/documents:sync"),
-		req,
-		nil,
-		&response,
-		2*time.Minute,
+		req, nil, &response, 2*time.Minute,
 	)
 	status := 0
 	var httpErr *common.HTTPError
