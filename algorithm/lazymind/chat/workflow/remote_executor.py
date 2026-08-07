@@ -130,6 +130,7 @@ class RemoteWorkflowExecutor:
                 task_id=task_id,
                 resume=bool(initial_steps),
                 model_config=spec.get('llm_config'),
+                tool_config=spec.get('tool_config'),
                 agent_type='workflow_step',
                 task_spec=task,
                 initial_steps=initial_steps,
@@ -216,7 +217,9 @@ class RemoteWorkflowExecutor:
             embedded = []
             for raw in values:
                 raw_text = str(raw)
-                if raw_text.startswith(('http://', 'https://', 'data:')):
+                if raw_text.startswith((
+                    'http://', 'https://', 'data:', '/static-files/', '/api/core/static-files/',
+                )):
                     embedded.append(raw_text)
                     continue
                 path = pathlib.Path(raw_text)

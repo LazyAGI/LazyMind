@@ -120,9 +120,24 @@ def _build_artifact_value(value: Any, content_type: str):
             return {'type': 'json', 'path': abs_path, 'size': os.path.getsize(abs_path)}, 'file'
         return {'data': value}, 'json'
     if content_type == 'image':
-        src = str(value).strip()
+        image_metadata: Dict[str, Any] = {}
+        if isinstance(value, dict):
+            image_metadata = value
+            src = str(
+                value.get('path') or value.get('image_url') or value.get('url') or ''
+            ).strip()
+        else:
+            src = str(value).strip()
+
+        def image_value(path: str) -> Dict[str, Any]:
+            built = {'path': path}
+            embedded_caption = image_metadata.get('caption')
+            if embedded_caption is not None:
+                built['caption'] = str(embedded_caption)
+            return built
+
         if src.startswith('/static-files/'):
-            return {'path': src}, 'image'
+            return image_value(src), 'image'
         if not src.lower().startswith(('http://', 'https://')):
             src = _materialize_local_path(src)
         if not _is_valid_image_ref(src):
@@ -133,13 +148,13 @@ def _build_artifact_value(value: Any, content_type: str):
         # '/static-files/...' (possibly with query) is a signed URL path, not a local
         # filesystem path. Keep it as URL text instead of copying from disk.
         if src.startswith('/static-files/'):
-            return {'path': src}, 'image'
+            return image_value(src), 'image'
         if os.path.isabs(src):
             # Copy into workspace; keep absolute path so Go core can sign a URL for it.
             dst_rel = ctx.copy_into_workspace(src)
             dst_abs = os.path.join(ctx.workspace_path, dst_rel)
-            return {'path': dst_abs}, 'image'
-        return {'path': src}, 'image'
+            return image_value(dst_abs), 'image'
+        return image_value(src), 'image'
     if content_type == 'file':
         source = str(value).strip()
         if not source:
@@ -233,7 +248,9 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     Args:
         key (str): Artifact key. Must be one of the declared output_slots.
         value (Any): The artifact value. For text: a string. For json: a dict/list.
-            For image/file: a local absolute path. For file_list: a list of absolute paths.
+            For image: a path/URL string or an object containing path/image_url/url and
+            optional caption. For file: a local absolute path. For file_list: a list of
+            absolute paths.
         content_type (str): One of text, json, image, file, file_list. Default text.
         source_tool (str): Optional name of the tool that produced this artifact,
             e.g. 'web_search', 'wikipedia', 'image_generation'. Used for display only.

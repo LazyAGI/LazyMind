@@ -132,9 +132,11 @@ steps:
       0. UPLOAD-FIRST OVERRIDE (highest priority):
          - User uploads are NOT workflow artifacts. Never use find_artifact/get_artifact/list_artifacts
            to discover uploaded images.
-         - Always try find_user_attachment first when this step starts, even if routing text is
-           incomplete. If find_user_attachment is unavailable or returns no candidate, stop with
-           a clear failure note instead of fabricating search steps.
+         - Inspect the conversation attachment list first. Only call find_user_attachment when
+           one or more actual attachment filenames are listed. Do not treat the user's text,
+           a requested subject, or a web URL to be searched as an attachment filename.
+         - If attachment filenames are listed but find_user_attachment cannot resolve them, stop
+           with a clear failure note instead of fabricating an upload path.
          - If the current user request contains one or more uploaded images, use
            find_user_attachment and save those uploads directly as material_images
            (sort_order=1..N, maximum 3).
@@ -146,9 +148,16 @@ steps:
            image_output with sort_order=1.
          - Then write material_summary describing the uploaded materials and stop.
            This override applies even if workflow_routing was classified imprecisely.
-      1. When there is no uploaded image, read WORKFLOW from workflow_routing
-         (not from subject_analysis).
-         - CREATE_NEW / KB_STYLE / REFERENCE_GENERATE: collect 1–3 reference images for prompt writing.
+      1. When there is no uploaded image, do not require or call find_user_attachment. Read
+         WORKFLOW from workflow_routing (not from subject_analysis) and continue with text
+         generation, knowledge-base retrieval, or web image search as appropriate.
+         - CREATE_NEW: reference images are optional (0–3). If the text request is already
+           sufficient, do not search merely to obtain an image.
+         - KB_STYLE: run kb_search first. Treat concrete KB text about palette, brushwork,
+           composition, medium, mood, or other visual traits as sufficient reference material.
+           Save those findings in material_summary and do NOT call web_search or
+           image_search_tool merely because the KB result contains no image.
+         - REFERENCE_GENERATE: collect 1–3 reference images for prompt writing.
          - FIND_AND_EDIT / EDIT_UPLOAD: prepare source image(s) for image editing.
          - CREATE_ANIMATED:
              * Parse desired sticker count N from the user request (三个→3, default 1, max 5).
@@ -163,12 +172,17 @@ steps:
          - ANIMATE_UPLOAD: confirm the uploaded source image as both material_images and
            image_output with sort_order=1 (first frame; generate will reuse it if N>1).
       - This is the ONLY step for external information/material collection.
-      - You may use BOTH kb_search and web_search in this step.
+      - You may use kb_search and web_search in this step only when the selected route needs them.
       - For KB_STYLE (or when filters.kb_id is set), run kb_search first to collect style references.
-      - For web collection, call web_search, then image_search_tool.
+        If the KB returns enough textual style detail to write a usable generation prompt,
+        save it in material_summary and stop collection. A text-only KB result is successful;
+        material_images may remain empty.
+      - For KB_STYLE, use web_search/image_search_tool only when the KB result is empty or lacks
+        usable visual style information, or when the user explicitly asks for image references.
+      - When web image collection is actually needed, call web_search, then image_search_tool.
       - **Save only 1–3 validated images total** — stop as soon as you have enough.
-      - If web_search is unavailable, fall back to wikipedia once, then continue.
-      - If both web_search and wikipedia are unavailable, STOP with a failure note.
+      - Only when web collection is required: if web_search is unavailable, fall back to
+        wikipedia once; if both are unavailable, stop with a failure note.
       - For web-sourced items, call image_search_tool, then validate candidates:
           1. Call validate_image_ref(url=<candidate>) — probe only, no full download
           2. If status is ok, save:
@@ -197,6 +211,9 @@ steps:
         image_output (first frame). Do NOT save prompt_used here.
       - Before stopping, write a concise Chinese summary (80–200 words) of what you collected:
           - for uploaded materials: which uploads were saved (do not claim a search was performed)
+          - for KB_STYLE: record the useful KB style findings, including palette, brushwork,
+            composition, medium, mood, and other available visual traits; do not describe the
+            absence of KB images as a failure
           - otherwise: what you searched for and key findings from web_search / wikipedia
           - how many material_images were saved and which one was chosen as
             raw_source_image / image_output (if any)
@@ -234,7 +251,11 @@ steps:
       material_images; no knowledge-base or web image search may be performed or appended.
       For uploaded edit workflows, the first upload must also be raw_source_image.
       For uploaded animated workflows, the first upload must also be image_output.
-      For CREATE_NEW / KB_STYLE / REFERENCE_GENERATE: 1–3 validated material_images should be saved (never more than 3).
+      For CREATE_NEW: material_images are optional (0–3) when the text request is sufficient.
+      For KB_STYLE: material_summary must preserve the useful KB style findings; material_images
+      are optional (0–3). Sufficient text-only KB results must not trigger web/image search solely
+      because they contain no image.
+      For REFERENCE_GENERATE: 1–3 validated material_images should be saved (never more than 3).
       For CREATE_ANIMATED: if the user asked to find a photo first, 1–3 material_images and
       one image_output must be saved; otherwise material_images optional (0–3).
       material_summary should still be saved.
@@ -261,6 +282,9 @@ steps:
       Optional reference materials:
       {{material_images}}
 
+      Material and style findings:
+      {{material_summary}}
+
       Source image for editing (if already collected):
       {{raw_source_image}}
 
@@ -275,7 +299,7 @@ steps:
       Your task:
       1. Read WORKFLOW from workflow_routing (not from subject_analysis).
       2. For CREATE_NEW, KB_STYLE, or REFERENCE_GENERATE:
-         Combine subject_analysis and any optional material images into a high-quality
+         Combine subject_analysis, material_summary, and any optional material images into a high-quality
          English image-generation prompt (50–200 words, rich in visual detail).
          Include style modifiers, lighting, composition, and quality keywords.
       3. For FIND_AND_EDIT or EDIT_UPLOAD (when raw_source_image is available):
@@ -288,8 +312,9 @@ steps:
          When image_output is present (upload OR web-found first frame): keep that subject
          recognizable and describe how it should move.
          Do NOT write a still-image-only prompt or an image_editor edit instruction.
-      5. When subject_analysis includes KB text findings, mirror their color palette,
-         composition, and artistic style. Use material_images only as an optional reference.
+      5. For KB_STYLE, faithfully translate the KB findings in material_summary into visual prompt
+         language, including the described color palette, brushwork, composition, medium, mood,
+         and other style traits. Do not require material_images when the KB text is sufficient.
       6. Save the result:
            save_artifacts(artifacts=[
              {'key': 'prompt_used', 'content_type': 'text',
@@ -304,6 +329,8 @@ steps:
         required: true
       - material: material_images
         required: false
+      - material: material_summary
+        required: true
       - material: raw_source_image
         required: false
       - material: image_output
