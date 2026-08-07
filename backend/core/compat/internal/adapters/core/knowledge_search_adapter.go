@@ -108,9 +108,10 @@ type PureKnowledgeSearchClient interface {
 }
 
 type PureKnowledgeSearchRequest struct {
-	Query string
-	KBIDs []string
-	TopK  int
+	UserID string
+	Query  string
+	KBIDs  []string
+	TopK   int
 }
 
 type PureKnowledgeSearchResponse struct {
@@ -166,9 +167,10 @@ func (c *HTTPPureKnowledgeSearchClient) Search(ctx context.Context, req PureKnow
 		} `json:"hits"`
 	}
 	payload := map[string]any{
-		"query":  req.Query,
-		"kb_ids": req.KBIDs,
-		"top_k":  req.TopK,
+		"user_id": req.UserID,
+		"query":   req.Query,
+		"kb_ids":  req.KBIDs,
+		"top_k":   req.TopK,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -312,9 +314,10 @@ func (a *KnowledgeSearchAdapter) Search(ctx context.Context, callCtx contract.Ca
 		kbIDs = append(kbIDs, scope.DatasetIDToKBID[datasetID])
 	}
 	resp, err := a.client.Search(ctx, PureKnowledgeSearchRequest{
-		Query: strings.TrimSpace(input.Query),
-		KBIDs: kbIDs,
-		TopK:  input.TopK,
+		UserID: userID,
+		Query:  strings.TrimSpace(input.Query),
+		KBIDs:  kbIDs,
+		TopK:   input.TopK,
 	})
 	if err != nil {
 		return compatknowledge.SearchResult{}, err

@@ -322,6 +322,9 @@ func TestDocumentServiceListDocumentChunksMapsOnePage(t *testing.T) {
 		if r.URL.Host != "algo.test" || r.URL.Path != "/v1/chunks" {
 			return http.StatusNotFound, `{"message":"not found"}`
 		}
+		if r.URL.Query().Get("kb_id") != "kb-dataset-1" {
+			return http.StatusBadRequest, fmt.Sprintf(`{"query":%q}`, r.URL.RawQuery)
+		}
 		if r.URL.Query().Get("page_size") != "20" || r.URL.Query().Get("page") != "1" || r.URL.Query().Get("doc_id") != "lazy-doc-1" {
 			return http.StatusBadRequest, fmt.Sprintf(`{"query":%q}`, r.URL.RawQuery)
 		}
@@ -345,6 +348,42 @@ func TestDocumentServiceListDocumentChunksMapsOnePage(t *testing.T) {
 	}
 	if result.Chunks[0] != (DocumentChunk{ID: "chunk-1", Text: "hello", Number: 1}) {
 		t.Fatalf("unexpected chunk mapping: %+v", result.Chunks[0])
+	}
+}
+
+func TestDocumentServiceListDocumentChunksUsesDatasetKBIDAndResolvedChunkGroup(t *testing.T) {
+	db := newDocumentTestDB(t)
+	installDocumentServiceTransport(t, func(r *http.Request) (int, string) {
+		switch r.URL.Path {
+		case "/v1/algo/algo-1/groups":
+			return http.StatusOK, `{"code":200,"data":[{"type":"Line","name":"line_group"},{"type":"Block","name":"block_group"},{"type":"Chunk","name":"custom_chunk_group"}]}`
+		case "/v1/chunks":
+			if r.URL.Query().Get("kb_id") != "kb_backend_y" {
+				return http.StatusBadRequest, fmt.Sprintf(`{"query":%q}`, r.URL.RawQuery)
+			}
+			if r.URL.Query().Get("group") != "custom_chunk_group" {
+				return http.StatusBadRequest, fmt.Sprintf(`{"query":%q}`, r.URL.RawQuery)
+			}
+			if r.URL.Query().Get("algo_id") != "algo-1" {
+				return http.StatusBadRequest, fmt.Sprintf(`{"query":%q}`, r.URL.RawQuery)
+			}
+			return http.StatusOK, `{"items":[{"chunk_id":"chunk-1","content":"hello","number":1}],"total":1}`
+		default:
+			return http.StatusNotFound, `{"message":"not found"}`
+		}
+	})
+	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+	now := time.Date(2026, 8, 7, 10, 0, 0, 0, time.UTC)
+	seedDocumentServiceDatasetWithKBAndAlgo(t, db, "ds_core_x", "kb_backend_y", "algo-1", "user-1", now)
+	seedDocumentServiceLazyDocument(t, db, "ds_core_x", "doc-1", "lazy-doc-1", "user-1")
+	service := mustDocumentService(t, db)
+
+	result, err := service.ListDocumentChunks(context.Background(), DocumentChunksRequest{UserID: "user-1", DatasetID: "ds_core_x", DocumentID: "doc-1"})
+	if err != nil {
+		t.Fatalf("ListDocumentChunks: %v", err)
+	}
+	if len(result.Chunks) != 1 || result.Chunks[0].ID != "chunk-1" {
+		t.Fatalf("unexpected chunks: %+v", result.Chunks)
 	}
 }
 
@@ -480,9 +519,20 @@ func mustDocumentService(t *testing.T, db *orm.DB) *DocumentService {
 
 func seedDocumentServiceDataset(t *testing.T, db *orm.DB, id, userID string, now time.Time) {
 	t.Helper()
+	seedDocumentServiceDatasetWithKBAndAlgo(t, db, id, "kb-"+id, "", userID, now)
+}
+
+func seedDocumentServiceDatasetWithKBAndAlgo(t *testing.T, db *orm.DB, id, kbID, algoID, userID string, now time.Time) {
+	t.Helper()
+	ext := json.RawMessage(nil)
+	if strings.TrimSpace(algoID) != "" {
+		ext = mustJSON(map[string]any{"algo_id": algoID})
+	}
 	if err := db.Create(&orm.Dataset{
 		ID:          id,
+		KbID:        kbID,
 		DisplayName: id,
+		Ext:         ext,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
 			CreateUserName: userID + " name",

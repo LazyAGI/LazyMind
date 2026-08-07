@@ -30,9 +30,12 @@ class KnowledgeSearchHit:
     source_url: str = ''
 
 
-def search(query: str, kb_ids: List[str], top_k: int) -> List[KnowledgeSearchHit]:
+def search(user_id: str, query: str, kb_ids: List[str], top_k: int) -> List[KnowledgeSearchHit]:
+    user_id = (user_id or '').strip()
     query = (query or '').strip()
     kb_ids = [str(kb_id).strip() for kb_id in kb_ids or [] if str(kb_id).strip()]
+    if not user_id:
+        raise KnowledgeSearchError('INVALID_ARGUMENT', 'user_id is required')
     if not query:
         raise KnowledgeSearchError('INVALID_ARGUMENT', 'query is required')
     if not kb_ids:
@@ -52,7 +55,7 @@ def search(query: str, kb_ids: List[str], top_k: int) -> List[KnowledgeSearchHit
             {
                 'query': query,
                 'filters': {'kb_id': kb_ids},
-                'user_id': '',
+                'user_id': user_id,
             },
             retrievers=retrievers,
             reranker=reranker,

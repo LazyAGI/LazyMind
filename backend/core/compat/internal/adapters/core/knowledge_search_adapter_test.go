@@ -111,7 +111,7 @@ func TestKnowledgeSearchAdapterUsesKBIDsAndMapsHits(t *testing.T) {
 	if resolver.userID != "user-1" || len(resolver.ids) != 2 || resolver.ids[0] != "ds_core_001" {
 		t.Fatalf("unexpected resolver call: user=%q ids=%#v", resolver.userID, resolver.ids)
 	}
-	if client.req.Query != "q" || client.req.TopK != 7 || strings.Join(client.req.KBIDs, ",") != "kb_backend_901,kb_backend_902" {
+	if client.req.UserID != "user-1" || client.req.Query != "q" || client.req.TopK != 7 || strings.Join(client.req.KBIDs, ",") != "kb_backend_901,kb_backend_902" {
 		t.Fatalf("unexpected client request: %#v", client.req)
 	}
 	if len(got.Hits) != 2 {
@@ -375,14 +375,15 @@ func TestHTTPPureKnowledgeSearchClient(t *testing.T) {
 			t.Fatalf("internal token header = %q", got)
 		}
 		var req struct {
-			Query string   `json:"query"`
-			KBIDs []string `json:"kb_ids"`
-			TopK  int      `json:"top_k"`
+			UserID string   `json:"user_id"`
+			Query  string   `json:"query"`
+			KBIDs  []string `json:"kb_ids"`
+			TopK   int      `json:"top_k"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if req.Query != "q" || req.KBIDs[0] != "kb_backend_901" || req.TopK != 10 {
+		if req.UserID != "user-1" || req.Query != "q" || req.KBIDs[0] != "kb_backend_901" || req.TopK != 10 {
 			t.Fatalf("request = %#v", req)
 		}
 		_, _ = w.Write([]byte(`{"hits":[{"kb_id":"kb_backend_901","doc_id":"lazy_doc_1","chunk_id":"chunk","text":"text","score":0.4,"title":"doc"}]}`))
@@ -392,7 +393,7 @@ func TestHTTPPureKnowledgeSearchClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewHTTPPureKnowledgeSearchClient: %v", err)
 	}
-	got, err := client.Search(context.Background(), PureKnowledgeSearchRequest{Query: "q", KBIDs: []string{"kb_backend_901"}, TopK: 10})
+	got, err := client.Search(context.Background(), PureKnowledgeSearchRequest{UserID: "user-1", Query: "q", KBIDs: []string{"kb_backend_901"}, TopK: 10})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}

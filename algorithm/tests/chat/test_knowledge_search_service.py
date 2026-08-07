@@ -34,8 +34,9 @@ def test_search_calls_search_kb_without_chat_agent(monkeypatch):
 
     monkeypatch.setattr(svc, 'search_kb', fake_search_kb)
 
-    hits = svc.search(' query ', ['kb_backend_901'], 3)
+    hits = svc.search('user-1', ' query ', ['kb_backend_901'], 3)
 
+    assert calls['payload']['user_id'] == 'user-1'
     assert calls['payload']['filters']['kb_id'] == ['kb_backend_901']
     assert calls['payload']['query'] == 'query'
     assert calls['kwargs']['k_max'] == 3
@@ -63,9 +64,9 @@ def test_search_normalizes_topk_and_empty_hits(monkeypatch):
 
     monkeypatch.setattr(svc, 'search_kb', fake_search_kb)
 
-    assert svc.search('q', ['kb'], 0) == []
+    assert svc.search('user-1', 'q', ['kb'], 0) == []
     assert captured['k_max'] == 10
-    svc.search('q', ['kb'], 500)
+    svc.search('user-1', 'q', ['kb'], 500)
     assert captured['k_max'] == 50
 
 
@@ -99,7 +100,7 @@ def test_search_filters_image_only_and_unsafe_fields(monkeypatch):
         },
     )
 
-    hits = svc.search('q', ['kb'], 10)
+    hits = svc.search('user-1', 'q', ['kb'], 10)
 
     assert len(hits) == 1
     assert hits[0].doc_id == 'lazy-doc'
@@ -108,21 +109,42 @@ def test_search_filters_image_only_and_unsafe_fields(monkeypatch):
 
 def test_search_validation_and_backend_error(monkeypatch):
     with pytest.raises(svc.KnowledgeSearchError) as invalid:
-        svc.search('', ['kb'], 10)
+        svc.search('user-1', '', ['kb'], 10)
     assert invalid.value.code == 'INVALID_ARGUMENT'
+
+    with pytest.raises(svc.KnowledgeSearchError) as missing_user:
+        svc.search('', 'q', ['kb'], 10)
+    assert missing_user.value.code == 'INVALID_ARGUMENT'
 
     monkeypatch.setattr(svc, '_ensure_kb_search_runtime', lambda: (_ for _ in ()).throw(RuntimeError('down')))
     with pytest.raises(svc.KnowledgeSearchError) as unavailable:
-        svc.search('q', ['kb'], 10)
+        svc.search('user-1', 'q', ['kb'], 10)
     assert unavailable.value.code == 'BACKEND_UNAVAILABLE'
     assert isinstance(unavailable.value.cause, RuntimeError)
+
+
+def test_search_does_not_share_default_user_context(monkeypatch):
+    seen_users = []
+    monkeypatch.setattr(svc, '_ensure_kb_search_runtime', lambda: ([], None, None))
+
+    def fake_search_kb(payload, **kwargs):
+        seen_users.append(payload['user_id'])
+        return []
+
+    monkeypatch.setattr(svc, 'search_kb', fake_search_kb)
+
+    svc.search('user-a', 'q', ['kb'], 10)
+    svc.search('user-b', 'q', ['kb'], 10)
+
+    assert seen_users == ['user-a', 'user-b']
 
 
 def test_internal_route_returns_structured_hits(monkeypatch):
     monkeypatch.setattr(routes, 'expected_internal_token', lambda: 'secret-token')
     app = create_app()
 
-    def fake_search(query, kb_ids, top_k):
+    def fake_search(user_id, query, kb_ids, top_k):
+        assert user_id == 'user-1'
         assert query == 'q'
         assert kb_ids == ['kb']
         assert top_k == 2
@@ -134,7 +156,7 @@ def test_internal_route_returns_structured_hits(monkeypatch):
     resp = client.post(
         '/internal/knowledge:search',
         headers={routes.INTERNAL_TOKEN_HEADER: 'secret-token'},
-        json={'query': 'q', 'kb_ids': ['kb'], 'top_k': 2},
+        json={'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb'], 'top_k': 2},
     )
 
     assert resp.status_code == 200
@@ -154,7 +176,7 @@ def test_internal_route_maps_service_errors(monkeypatch):
     resp = client.post(
         '/internal/knowledge:search',
         headers={routes.INTERNAL_TOKEN_HEADER: 'secret-token'},
-        json={'query': 'q', 'kb_ids': ['kb'], 'top_k': 2},
+        json={'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb'], 'top_k': 2},
     )
 
     assert resp.status_code == 503
@@ -166,21 +188,55 @@ def test_internal_route_requires_service_token(monkeypatch):
     client = TestClient(app)
 
     monkeypatch.setattr(routes, 'expected_internal_token', lambda: '')
-    resp = client.post('/internal/knowledge:search', json={'query': 'q', 'kb_ids': ['kb'], 'top_k': 2})
+    resp = client.post('/internal/knowledge:search', json={'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb'], 'top_k': 2})
     assert resp.status_code == 503
 
     monkeypatch.setattr(routes, 'expected_internal_token', lambda: 'secret-token')
-    resp = client.post('/internal/knowledge:search', json={'query': 'q', 'kb_ids': ['kb'], 'top_k': 2})
+    resp = client.post('/internal/knowledge:search', json={'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb'], 'top_k': 2})
     assert resp.status_code == 401
 
     resp = client.post(
         '/internal/knowledge:search',
         headers={routes.INTERNAL_TOKEN_HEADER: 'wrong-token'},
-        json={'query': 'q', 'kb_ids': ['kb'], 'top_k': 2},
+        json={'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb'], 'top_k': 2},
     )
     assert resp.status_code == 401
     assert 'wrong-token' not in resp.text
     assert 'secret-token' not in resp.text
+
+    resp = client.post(
+        '/internal/knowledge:search',
+        headers={routes.INTERNAL_TOKEN_HEADER: 'secret-token'},
+        json={'query': 'q', 'kb_ids': ['kb'], 'top_k': 2},
+    )
+    assert resp.status_code == 422
+
+
+def test_internal_route_offloads_sync_search(monkeypatch):
+    monkeypatch.setattr(routes, 'expected_internal_token', lambda: 'secret-token')
+    calls = {}
+
+    def fake_search(**kwargs):
+        raise AssertionError('service.search should be invoked through asyncio.to_thread')
+
+    async def fake_to_thread(func, *args, **kwargs):
+        calls['func'] = func
+        calls['kwargs'] = kwargs
+        return [svc.KnowledgeSearchHit(kb_id='kb', doc_id='lazy', chunk_id='chunk', text='text', score=1.5)]
+
+    monkeypatch.setattr(svc, 'search', fake_search)
+    monkeypatch.setattr(routes.asyncio, 'to_thread', fake_to_thread)
+    client = TestClient(create_app())
+
+    resp = client.post(
+        '/internal/knowledge:search',
+        headers={routes.INTERNAL_TOKEN_HEADER: 'secret-token'},
+        json={'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb'], 'top_k': 2},
+    )
+
+    assert resp.status_code == 200
+    assert calls['func'] is fake_search
+    assert calls['kwargs'] == {'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb'], 'top_k': 2}
 
 
 def test_router_internal_proxy_requires_and_replaces_service_token(monkeypatch):
@@ -218,13 +274,13 @@ def test_router_internal_proxy_requires_and_replaces_service_token(monkeypatch):
     monkeypatch.setattr(proxy_routes.httpx, 'AsyncClient', FakeAsyncClient)
     client = TestClient(app)
 
-    missing = client.post('/internal/knowledge:search', json={'query': 'q', 'kb_ids': ['kb']})
+    missing = client.post('/internal/knowledge:search', json={'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb']})
     assert missing.status_code == 401
 
     wrong = client.post(
         '/internal/knowledge:search',
         headers={routes.INTERNAL_TOKEN_HEADER: 'wrong-token'},
-        json={'query': 'q', 'kb_ids': ['kb']},
+        json={'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb']},
     )
     assert wrong.status_code == 401
     assert 'wrong-token' not in wrong.text
@@ -233,7 +289,7 @@ def test_router_internal_proxy_requires_and_replaces_service_token(monkeypatch):
     ok = client.post(
         '/internal/knowledge:search',
         headers={routes.INTERNAL_TOKEN_HEADER: 'server-token'},
-        json={'query': 'q', 'kb_ids': ['kb']},
+        json={'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb']},
     )
     assert ok.status_code == 200
     assert captured['headers'][routes.INTERNAL_TOKEN_HEADER] == 'server-token'

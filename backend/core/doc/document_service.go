@@ -138,6 +138,7 @@ type DocumentChunksResult struct {
 }
 
 type documentServiceRecord struct {
+	dataset  orm.Dataset
 	row      orm.Document
 	ext      documentExt
 	lazy     *readonlyorm.LazyLLMDocRow
@@ -198,12 +199,16 @@ func (s *DocumentService) ListDocumentChunks(ctx context.Context, req DocumentCh
 		return DocumentChunksResult{}, &DocumentServiceError{Code: DocumentServiceInvalidArgument, Message: "page_token offset must align with page_size", Err: fmt.Errorf("unaligned page token offset")}
 	}
 	page := offset/pageSize + 1
-	algoID := s.datasetAlgoID(ctx, req.DatasetID)
-	group := "Chunk"
-	queryURL := buildChunksURL(req.DatasetID, algoID, lazyDocID, group, page, pageSize)
+	kbID := strings.TrimSpace(rec.dataset.KbID)
+	if kbID == "" {
+		return DocumentChunksResult{}, &DocumentServiceError{Code: DocumentServiceInternal, Message: "knowledge backend id is empty"}
+	}
+	algoID := parseDatasetAlgo(rec.dataset.Ext).AlgoID
+	group := resolveDefaultChunkSegmentGroup(ctx, algoID, "DocumentService.ListDocumentChunks")
+	queryURL := buildChunksURL(kbID, algoID, lazyDocID, group, page, pageSize)
 	raw, err := fetchDocumentChunkPayload(ctx, queryURL)
 	if err != nil {
-		fallbackURL := buildParserChunksURL(req.DatasetID, algoID, lazyDocID, group, page, pageSize)
+		fallbackURL := buildParserChunksURL(kbID, algoID, lazyDocID, group, page, pageSize)
 		fallbackRaw, fallbackErr := fetchDocumentChunkPayload(ctx, fallbackURL)
 		if fallbackErr != nil {
 			return DocumentChunksResult{}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "query document chunks failed", Err: fmt.Errorf("%w; fallback parser chunks failed: %v", err, fallbackErr)}
@@ -235,7 +240,8 @@ func (s *DocumentService) loadRecord(ctx context.Context, userID, datasetID, doc
 		return documentServiceRecord{}, &DocumentServiceError{Code: DocumentServiceInvalidArgument, Message: "document_id is required"}
 	}
 	caller.UserID = firstNonEmpty(strings.TrimSpace(caller.UserID), userID)
-	if err := s.requireDatasetRead(ctx, userID, datasetID, caller); err != nil {
+	ds, err := s.requireDatasetRead(ctx, userID, datasetID, caller)
+	if err != nil {
 		return documentServiceRecord{}, err
 	}
 	var row orm.Document
@@ -247,7 +253,7 @@ func (s *DocumentService) loadRecord(ctx context.Context, userID, datasetID, doc
 	}
 	var ext documentExt
 	_ = json.Unmarshal(row.Ext, &ext)
-	rec := documentServiceRecord{row: row, ext: ext}
+	rec := documentServiceRecord{dataset: ds, row: row, ext: ext}
 	lazyDocID := strings.TrimSpace(row.LazyllmDocID)
 	if lazyDocID != "" {
 		if lazy, err := s.loadLazyDocument(ctx, lazyDocID); err != nil {
@@ -261,21 +267,21 @@ func (s *DocumentService) loadRecord(ctx context.Context, userID, datasetID, doc
 	return rec, nil
 }
 
-func (s *DocumentService) requireDatasetRead(ctx context.Context, userID, datasetID string, caller DatasetCatalogCaller) error {
+func (s *DocumentService) requireDatasetRead(ctx context.Context, userID, datasetID string, caller DatasetCatalogCaller) (orm.Dataset, error) {
 	var ds orm.Dataset
 	if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&ds).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return &DocumentServiceError{Code: DocumentServiceNotFound, Message: "dataset not found", Err: err}
+			return orm.Dataset{}, &DocumentServiceError{Code: DocumentServiceNotFound, Message: "dataset not found", Err: err}
 		}
-		return &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "query dataset failed", Err: err}
+		return orm.Dataset{}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "query dataset failed", Err: err}
 	}
 	if !canAccessDataset(&ds, userID, acl.PermissionDatasetRead) {
-		return &DocumentServiceError{Code: DocumentServiceForbidden, Message: "dataset forbidden"}
+		return orm.Dataset{}, &DocumentServiceError{Code: DocumentServiceForbidden, Message: "dataset forbidden"}
 	}
 	if !datasetAllowedByScanSourceForCaller(ctx, caller, ds.ID, acl.PermissionDatasetRead) {
-		return &DocumentServiceError{Code: DocumentServiceForbidden, Message: "dataset forbidden"}
+		return orm.Dataset{}, &DocumentServiceError{Code: DocumentServiceForbidden, Message: "dataset forbidden"}
 	}
-	return nil
+	return ds, nil
 }
 
 func (s *DocumentService) loadLazyDocument(ctx context.Context, lazyDocID string) (*readonlyorm.LazyLLMDocRow, error) {
@@ -313,14 +319,6 @@ func (s *DocumentService) latestLazyTaskStatus(ctx context.Context, lazyDocID st
 		return ""
 	}
 	return strings.TrimSpace(task.Status)
-}
-
-func (s *DocumentService) datasetAlgoID(ctx context.Context, datasetID string) string {
-	var ds orm.Dataset
-	if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&ds).Error; err != nil {
-		return ""
-	}
-	return parseDatasetAlgo(ds.Ext).AlgoID
 }
 
 func (r documentServiceRecord) metadata() DocumentMetadata {

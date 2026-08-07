@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 import os
 from typing import List, Optional
@@ -15,8 +16,9 @@ INTERNAL_TOKEN_HEADER = 'X-LazyMind-Internal-Token'
 
 
 class KnowledgeSearchRequest(BaseModel):
-    query: str = Field(default='')
-    kb_ids: List[str] = Field(default_factory=list)
+    user_id: str = Field(...)
+    query: str = Field(...)
+    kb_ids: List[str] = Field(...)
     top_k: int = Field(default=10)
 
 
@@ -63,7 +65,9 @@ async def search_knowledge(
 ):
     require_internal_token(x_lazymind_internal_token)
     try:
-        hits = knowledge_search_service.search(
+        hits = await asyncio.to_thread(
+            knowledge_search_service.search,
+            user_id=request.user_id,
             query=request.query,
             kb_ids=request.kb_ids,
             top_k=request.top_k,
