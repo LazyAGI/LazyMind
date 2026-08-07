@@ -1070,6 +1070,7 @@
   "2001991": { "en-US": "Database migration configuration is invalid", "zh-CN": "数据库迁移配置无效" },
   "2001992": { "en-US": "Preference ETag conflict", "zh-CN": "偏好设置版本冲突" },
   "2001993": { "en-US": "Artifact sink configuration is invalid", "zh-CN": "产物存储配置无效" },
+  "2001994": { "en-US": "Tool configuration is unavailable", "zh-CN": "工具配置不可用" },
   "active_task_not_found": { "en-US": "Active task not found", "zh-CN": "活跃任务不存在" },
   "algo_failed": { "en-US": "Algorithm service operation failed", "zh-CN": "算法服务操作失败" },
   "auto_apply_failed": { "en-US": "Automatic apply failed", "zh-CN": "自动应用失败" },
