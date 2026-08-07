@@ -775,6 +775,49 @@ class WriterToolkitBase:
         on_section_end: Callable[[], None] | None = None,
     ) -> str:
         """Generate Markdown sections through LazyLLM's non-tool streaming API."""
+        return self._stream_draft_blocks(
+            writing_task_json=writing_task_json,
+            section_instructions_json=section_instructions_json,
+            writing_context_json=writing_context_json,
+            representation='markdown',
+            on_delta=on_delta,
+            on_section_end=on_section_end,
+        )
+
+    def stream_draft_blocks_ir(
+        self,
+        writing_task_json: str,
+        section_instructions_json: str,
+        writing_context_json: str,
+        on_delta: Callable[[str], None],
+        on_section_end: Callable[[], None] | None = None,
+        visual_plan_json: str = '',
+        media_assets_json: str = '',
+    ) -> str:
+        """Generate IR sections while exposing their Markdown preview deltas."""
+        return self._stream_draft_blocks(
+            writing_task_json=writing_task_json,
+            section_instructions_json=section_instructions_json,
+            writing_context_json=writing_context_json,
+            representation='ir',
+            on_delta=on_delta,
+            on_section_end=on_section_end,
+            visual_plan_json=visual_plan_json,
+            media_assets_json=media_assets_json,
+        )
+
+    def _stream_draft_blocks(
+        self,
+        *,
+        writing_task_json: str,
+        section_instructions_json: str,
+        writing_context_json: str,
+        representation: str,
+        on_delta: Callable[[str], None],
+        on_section_end: Callable[[], None] | None,
+        visual_plan_json: str = '',
+        media_assets_json: str = '',
+    ) -> str:
         instructions_data = _json_loads(section_instructions_json, {})
         instructions = (
             instructions_data.get('instructions')
@@ -792,39 +835,71 @@ class WriterToolkitBase:
             root, 'writing_context.json', _json_loads(writing_context_json, {}),
             writer_schema('context.WritingContext'),
         )
+        visual_plan_path = None
+        if visual_plan_json:
+            visual_plan_path = _write_input_artifact(
+                root,
+                'visual_plan.json',
+                _json_loads(visual_plan_json, {}),
+                writer_schema('multimodal.VisualPlan'),
+            )
+        media_assets_path = None
+        if media_assets_json:
+            media_assets_path = _write_input_artifact(
+                root,
+                'media_assets.json',
+                _json_loads(media_assets_json, {}),
+                writer_schema('multimodal.MediaAssetLibrary'),
+            )
         drafting = WriterDraftingTools(
             llm=AutoModel(model='llm'), artifact_store=str(root),
         )
-        sections: list[str] = []
+        sections: list[Any] = []
         for instruction_data in instructions:
             instruction = SectionInstruction.model_validate(instruction_data)
-            with drafting.stream_draft_section(
-                task=task_path,
-                section_instruction=instruction,
-                context=context_path,
-                previous_blocks=sections,
+            stream_factory = (
+                drafting.stream_draft_section
+                if representation == 'markdown'
+                else drafting.stream_draft_section_ir
+            )
+            stream_kwargs: dict[str, Any] = {
+                'task': task_path,
+                'section_instruction': instruction,
+                'context': context_path,
+                'previous_blocks': sections,
+            }
+            if representation == 'ir':
+                if visual_plan_path is not None:
+                    stream_kwargs['visual_plan'] = visual_plan_path
+                if media_assets_path is not None:
+                    stream_kwargs['media_assets'] = media_assets_path
+            with stream_factory(
+                **stream_kwargs,
             ) as stream:
                 for delta in stream:
                     try:
                         on_delta(delta)
                     except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
                         LOG.warning(
-                            '[Writer] Draft Markdown delta callback failed: %s', exc,
+                            '[Writer] Draft %s delta callback failed: %s',
+                            representation, exc,
                         )
                 result = stream.result()
             section = _primary_data(result)
-            if not isinstance(section, str):
+            if representation == 'markdown' and not isinstance(section, str):
                 raise TypeError(
                     'Markdown Draft stream returned a non-Markdown artifact.',
                 )
+            if representation == 'ir' and not isinstance(section, dict):
+                raise TypeError('IR Draft stream returned a non-WriterBlock artifact.')
             sections.append(section)
             if on_section_end is not None:
                 try:
                     on_section_end()
                 except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
                     LOG.warning(
-                        '[Writer] Draft Markdown section flush callback failed: %s',
-                        exc,
+                        '[Writer] Draft %s section callback failed: %s',
+                        representation, exc,
                     )
         return _json_dumps(sections)
 

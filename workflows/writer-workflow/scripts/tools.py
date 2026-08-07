@@ -645,31 +645,34 @@ def writer_generate_draft_blocks(
     media_assets_path: str = '',
 ) -> list[str]:
     """Generate and persist all planned draft blocks."""
-    blocks = _json_loads(WriterCreateToolkit().generate_draft_blocks(
-        writing_task_json=_read_json_string(writing_task_path),
-        section_instructions_json=_read_json_string(section_instructions_path),
-        writing_context_json=_read_json_string(writing_context_path),
-        visual_plan_json=(
-            _read_json_string(visual_plan_path) if visual_plan_path else ''
-        ),
-        media_assets_json=(
-            _read_json_string(media_assets_path) if media_assets_path else ''
-        ),
-    ), [])
-    root = _run_root('draft-blocks')
-    paths = []
-    for index, block in enumerate(blocks, start=1):
-        if isinstance(block, str):
-            path = root / f'draft_block_{index:04d}.md'
-            path.write_text(block, encoding='utf-8')
-            paths.append(str(path))
-        else:
+    events = DraftMarkdownStreamEventEmitter(require_context().emit)
+    try:
+        blocks = _json_loads(WriterCreateToolkit().stream_draft_blocks_ir(
+            writing_task_json=_read_json_string(writing_task_path),
+            section_instructions_json=_read_json_string(section_instructions_path),
+            writing_context_json=_read_json_string(writing_context_path),
+            visual_plan_json=(
+                _read_json_string(visual_plan_path) if visual_plan_path else ''
+            ),
+            media_assets_json=(
+                _read_json_string(media_assets_path) if media_assets_path else ''
+            ),
+            on_delta=events.feed,
+            on_section_end=events.flush,
+        ), [])
+        root = _run_root('draft-blocks')
+        paths = []
+        for index, block in enumerate(blocks, start=1):
             paths.append(_save_json_artifact(
                 f'draft_block_{index:04d}',
                 json.dumps(block, ensure_ascii=False),
                 WriterToolkitBase.WRITER_BLOCK_SCHEMA,
                 directory=root,
             ))
+    except Exception as exc:
+        events.abort(str(exc))
+        raise
+    events.end()
     return paths
 
 
