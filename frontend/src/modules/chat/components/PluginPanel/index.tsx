@@ -22,7 +22,12 @@ import type {
   CompositeColumnNode,
   InnerTabsNode,
 } from '@/modules/chat/store/pluginPanel';
-import { SlotRenderer, SlotDownloadContext, SlotEditingContext } from './SlotComponents';
+import {
+  isWriterIrSource,
+  SlotRenderer,
+  SlotDownloadContext,
+  SlotEditingContext,
+} from './SlotComponents';
 import './PluginPanel.scss';
 
 /** Parse a JSON intent context string and return the text field, or '' if empty/invalid. */
@@ -404,13 +409,14 @@ function getTabSlotRevisions(
   return slots.filter((s) => s.slot === artifactKey && s.selected);
 }
 
-function isJsonArtifactRevision(slot: SlotRevision): boolean {
+function isStructuredWriterArtifactRevision(slot: SlotRevision): boolean {
   if (slot.content_type === 'json') return true;
   const raw = slot.artifact_value;
   if (!raw || typeof raw !== 'object') return false;
   if (raw.type === 'json') return true;
   const source = String(raw.filename ?? raw.name ?? raw.path ?? raw.url ?? '');
-  return source.split(/[?#]/, 1)[0].toLowerCase().endsWith('.json');
+  const normalized = source.split(/[?#]/, 1)[0].toLowerCase();
+  return isWriterIrSource(normalized) || normalized.endsWith('.json');
 }
 
 /** Prefer the structured WriterDocument over its Markdown export when both exist. */
@@ -422,7 +428,7 @@ function resolveWriterFinalSlotDefs(tab: TabDef, session: PluginSession): SlotDe
     if (!slotDef.id.endsWith('_md')) return [slotDef];
     const irSlotId = slotDef.id.slice(0, -3);
     const hasIRArtifact = getTabSlotRevisions(session, tab, irSlotId)
-      .some(isJsonArtifactRevision);
+      .some(isStructuredWriterArtifactRevision);
     if (!hasIRArtifact) return [slotDef];
     if (declaredSlotIds.has(irSlotId)) return [];
 
@@ -935,6 +941,11 @@ function NamedTabSlot({
           >
             <SlotRenderer
               slot={rev}
+              originalFileSlot={
+                slotDef.id === 'delivered_markdown'
+                  ? session.slots?.find((item) => item.slot === 'final_document' && item.selected)
+                  : undefined
+              }
               expectedType={slotDef.type}
               sessionId={session.session_id}
               slotId={slotDef.id}

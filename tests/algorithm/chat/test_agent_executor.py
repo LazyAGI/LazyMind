@@ -56,6 +56,17 @@ def test_executor_does_not_pause_subagent_on_round_limit(monkeypatch) -> None:
     assert constructor.call_args.kwargs['on_max_retries'] is None
 
 
+def test_executor_enables_builtin_tools_in_trusted_local_mode(monkeypatch) -> None:
+    agent = MagicMock()
+    constructor = MagicMock(return_value=agent)
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+
+    with executor_mod._cfg.temp('trusted_local_mode', True):
+        AgentExecutor().create_agent('llm', _plan())
+
+    assert constructor.call_args.kwargs['enable_builtin_tools'] is True
+
+
 def test_executor_auto_expands_after_plugin_or_subagent_tool(monkeypatch) -> None:
     agent = MagicMock()
     agent._tools_manager = MagicMock(return_value=[{'ok': True}])

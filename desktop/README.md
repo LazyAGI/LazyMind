@@ -64,6 +64,19 @@ Windows Desktop supports Windows 10/11 x64, runs as the current user, and does n
 
 The assisted installer supports in-place upgrades, blocks downgrades, and warms the bundled Python, Node, and local services before completing. On a fresh or repair install, existing `%LOCALAPPDATA%\LazyMind` data can be retained (the default) or cleared. Upgrades always retain it. The uninstaller similarly defaults to removing the program only and can optionally clear Local AppData. Neither workflow reads, deletes, or moves `%USERPROFILE%\Documents\LazyMind`.
 
+## Trusted local mode
+
+Desktop packages restrict agent file writes to the per-conversation workspace and disable local command tools by default. For a trusted, single-user package, set `LAZYMIND_TRUSTED_LOCAL_MODE=true` when building:
+
+```powershell
+$env:LAZYMIND_TRUSTED_LOCAL_MODE = 'true'
+make desktop-windows-x64-installer
+```
+
+The build records the feature in the packaged runtime manifest, so the installed app keeps the setting without requiring the user to configure an environment variable. In this mode, agents may read and write user-requested absolute host paths and can use LazyLLM's local command tool. Existing overwrite, delete, move, and dangerous-command approval checks still apply. Do not enable this mode in packages distributed to untrusted or multi-user environments.
+
+For source-based Local runs, setting the same environment variable before `make local-win-up` or `make local-up` enables the mode for that process without changing a desktop package.
+
 ## Runtime behavior
 
 Desktop binds only to `127.0.0.1`. It retains the normal Local/Desktop auto-login flow through `/_local/admin-session`, while LAN auto-login remains disabled.

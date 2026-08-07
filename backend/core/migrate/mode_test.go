@@ -100,8 +100,11 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if v03.Name != "v0_3" || v03.ModeVersion != 3 || v03.Aggregate != nil {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 1 || !containsMigrationFileVersion(v03.Dev, 20260730100000) {
-		t.Fatalf("v0_3 dev migrations are missing plugin call mode migration: %#v", v03.Dev)
+	if len(v03.Dev) != 3 ||
+		!containsMigrationFileVersion(v03.Dev, 20260730100000) ||
+		!containsMigrationFileVersion(v03.Dev, 20260805120000) ||
+		!containsMigrationFileVersion(v03.Dev, 20260805121000) {
+		t.Fatalf("v0_3 dev migrations are missing expected migrations: %#v", v03.Dev)
 	}
 	for _, migration := range v03.Dev {
 		wantVersion, err := combineDevVersion(3, migration.FileVersion)

@@ -92,3 +92,21 @@ def test_normalize_history_drops_ephemeral_intentwrite_trace():
     assert normalize_history_for_agent(history) == [
         {'role': 'assistant', 'content': '继续回答当前问题。', 'reasoning_content': ''},
     ]
+
+
+def test_normalize_history_drops_incomplete_tool_exchange_after_cancel():
+    history = [{
+        'role': 'assistant',
+        'content': (
+            '正在处理。'
+            '<tool_call>{"id":"call-1","name":"trigger_writer_plugin","arguments":{}}</tool_call>'
+        ),
+    }, {
+        'role': 'user',
+        'content': '重新执行',
+    }]
+
+    assert normalize_history_for_agent(history) == [
+        {'role': 'assistant', 'content': '正在处理。', 'reasoning_content': ''},
+        {'role': 'user', 'content': '重新执行'},
+    ]

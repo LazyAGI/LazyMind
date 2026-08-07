@@ -48,8 +48,6 @@ class ChatRuntimeOptions(BaseModel):
 
 class ChatPersonalizationOptions(BaseModel):
     use_memory: Optional[bool] = True
-    memory: Optional[str] = None
-    user_preference: Optional[str] = None
 
 
 class ChatAgentOptions(BaseModel):

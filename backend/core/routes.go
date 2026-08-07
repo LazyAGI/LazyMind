@@ -7,8 +7,10 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/agent"
 	"lazymind/core/chat"
+	"lazymind/core/currentmemory"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
+	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
 	"lazymind/core/file"
@@ -17,7 +19,6 @@ import (
 	"lazymind/core/modelprovider"
 	"lazymind/core/plugin"
 	"lazymind/core/remotefs"
-	"lazymind/core/resourcefs"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
 	"lazymind/core/showcase"
@@ -46,8 +47,6 @@ func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h 
 
 // registerAllRoutes text OpenAPI text（text Job），text handleAPI textPermissiontext（text extract_api_permissions.py text Kong RBAC）。
 func registerAllRoutes(r *mux.Router) {
-	resourcefs.AutoEvoEnabledScanner = resourceupdate.ScanPendingResultsForResource
-
 	// ----- Datasettext -----
 	handleAPI(r, "GET", "/dataset/algos", []string{"document.read"}, doc.ListAlgos)
 	handleAPI(r, "GET", "/dataset/tags", []string{"document.read"}, doc.AllDatasetTags)
@@ -321,9 +320,31 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/plugin-sessions/{session_id}:restore", []string{"qa.write"}, plugin.RestoreSessionHandler)
 	// List dismissed sessions for a conversation (used by restore UI).
 	handleAPI(r, "GET", "/conversations/{conversation_id}/dismissed-plugin-sessions", []string{"qa.read"}, plugin.ListDismissedSessionsHandler)
-	handleAPI(r, "GET", "/personalization-items", []string{"qa.read"}, evolution.ListManagedStates)
 	handleAPI(r, "GET", "/personalization-setting", []string{"qa.read"}, evolution.GetPersonalizationSetting)
 	handleAPI(r, "PUT", "/personalization-setting", []string{"qa.write"}, evolution.SetPersonalizationSetting)
+	handleAPI(r, "GET", "/memory/soul", []string{"qa.read"}, currentmemory.GetSoul)
+	handleAPI(r, "PATCH", "/memory/soul", []string{"qa.write"}, currentmemory.PatchSoul)
+	handleAPI(r, "GET", "/memory/soul/avatar", []string{"qa.read"}, currentmemory.GetSoulAvatar)
+	handleAPI(r, "PUT", "/memory/soul/avatar", []string{"qa.write"}, currentmemory.PutSoulAvatar)
+	handleAPI(r, "DELETE", "/memory/soul/avatar", []string{"qa.write"}, currentmemory.DeleteSoulAvatar)
+	handleAPI(r, "GET", "/memory/profile", []string{"qa.read"}, currentmemory.GetProfile)
+	handleAPI(r, "PATCH", "/memory/profile", []string{"qa.write"}, currentmemory.PatchProfile)
+	handleAPI(r, "GET", "/memory/profile/avatar", []string{"qa.read"}, currentmemory.GetProfileAvatar)
+	handleAPI(r, "PUT", "/memory/profile/avatar", []string{"qa.write"}, currentmemory.PutProfileAvatar)
+	handleAPI(r, "DELETE", "/memory/profile/avatar", []string{"qa.write"}, currentmemory.DeleteProfileAvatar)
+	handleAPI(r, "GET", "/memory/preferences", []string{"qa.read"}, currentmemory.ListPreferences)
+	handleAPI(r, "PUT", "/memory/preferences:order", []string{"qa.write"}, currentmemory.ReorderPreferences)
+	handleAPI(r, "GET", "/memory/preferences/{name}", []string{"qa.read"}, currentmemory.GetPreference)
+	handleAPI(r, "DELETE", "/memory/preferences/{name}", []string{"qa.write"}, currentmemory.DeletePreference)
+	handleAPI(r, "GET", "/memory/episodes", []string{"qa.read"}, episode.ListEpisodes)
+	handleAPI(r, "GET", "/memory/episodes/{episode_id}", []string{"qa.read"}, episode.GetEpisode)
+	handleAPI(r, "DELETE", "/memory/episodes/{episode_id}", []string{"qa.write"}, episode.DeleteEpisode)
+	handleAPI(r, "POST", "/internal/memory/episodes", nil, episode.InternalCreate)
+	handleAPI(r, "DELETE", "/internal/memory/episodes/{episode_id}", nil, episode.InternalDelete)
+	handleAPI(r, "POST", "/internal/memory/episodes:searchCandidates", nil, episode.InternalSearchCandidates)
+	handleAPI(r, "POST", "/internal/memory/episodes:listRecent", nil, episode.InternalListRecent)
+	handleAPI(r, "GET", "/internal/memory/episodes", nil, episode.InternalListByConversation)
+	handleAPI(r, "POST", "/internal/memory/episodes:recordHits", nil, episode.InternalRecordHits)
 	handleAPI(r, "GET", "/skills", []string{"qa.read"}, skillv2handler.List)
 	handleAPI(r, "GET", "/skills:trash", []string{"qa.read"}, skillv2handler.ListTrash)
 	handleAPI(r, "DELETE", "/skills:trash", []string{"qa.write"}, skillv2handler.EmptyTrash)
@@ -405,20 +426,6 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/skill-review:run", []string{"qa.write"}, resourceupdate.RunSkillReview)
 	handleAPI(r, "GET", "/skill-review/tasks", []string{"qa.read"}, resourceupdate.ListSkillReviewTasks)
 	handleAPI(r, "GET", "/skill-organize/tasks", []string{"qa.read"}, resourceupdate.ListSkillOrganizeTasks)
-	handleAPI(r, "PATCH", "/personal-resource/{resource_type}", []string{"qa.write"}, resourcefs.PatchMetadata)
-	handleAPI(r, "GET", "/personal-resource/{resource_type}:file", []string{"qa.read"}, resourcefs.GetFile)
-	handleAPI(r, "PUT", "/personal-resource/{resource_type}:file", []string{"qa.write"}, resourcefs.WriteDraft)
-	handleAPI(r, "PUT", "/personal-resource/{resource_type}:draft", []string{"qa.write"}, resourcefs.WriteDraft)
-	handleAPI(r, "GET", "/personal-resource/{resource_type}:draft-preview", []string{"qa.read"}, resourcefs.DraftPreview)
-	handleAPI(r, "POST", "/personal-resource/{resource_type}:generate", []string{"qa.write"}, resourcefs.Generate)
-	handleAPI(r, "POST", "/personal-resource/{resource_type}/draft-review/{review_id}/actions", []string{"qa.write"}, resourcefs.ReviewAction)
-	handleAPI(r, "POST", "/personal-resource/{resource_type}/draft-review/{review_id}:undo", []string{"qa.write"}, resourcefs.ReviewUndo)
-	handleAPI(r, "POST", "/personal-resource/{resource_type}:commit", []string{"qa.write"}, resourcefs.CommitDraft)
-	handleAPI(r, "POST", "/personal-resource/{resource_type}:discard", []string{"qa.write"}, resourcefs.DiscardDraft)
-	handleAPI(r, "GET", "/personal-resource/{resource_type}/revisions", []string{"qa.read"}, resourcefs.ListRevisions)
-	handleAPI(r, "GET", "/personal-resource/{resource_type}/revisions/{revision_id}", []string{"qa.read"}, resourcefs.GetRevision)
-	handleAPI(r, "POST", "/personal-resource/{resource_type}:rollback", []string{"qa.write"}, resourcefs.Rollback)
-
 	handleAPI(r, "PATCH", "/conversations/{name}:search-config", []string{"qa.write"}, chat.PatchConversationSearchConfig)
 	handleAPI(r, "GET", "/conversations/{name}:detail", []string{"qa.read"}, chat.GetConversationDetail)
 	handleAPI(r, "GET", "/conversations/{name}:history", []string{"qa.read"}, chat.GetConversationHistory)

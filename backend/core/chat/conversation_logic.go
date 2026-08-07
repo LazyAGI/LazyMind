@@ -933,10 +933,6 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 			requestDisabledTools, resourceContext.DisabledTools,
 		)
 		body["available_skills"] = resourceContext.AvailableSkills
-		if useMemory {
-			body["memory"] = resourceContext.Memory
-			body["user_preference"] = resourceContext.UserPreference
-		}
 	}
 	if body["filters"] == nil {
 		conv, _ := raw["conversation"].(map[string]any)
@@ -1216,7 +1212,7 @@ func handleNonStreamChat(
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
-	recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, answer, now)
+	recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, answer, now)
 	common.ReplyOK(w, map[string]any{
 		"conversation_id": convID,
 		"seq":             target.Seq,
@@ -1652,7 +1648,7 @@ func streamSingleAnswer(
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
 	if persisted {
-		recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(fullText), now)
+		recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(fullText), now)
 	}
 	if reqCtx.Err() == nil {
 		// text：message text，finish_reason text STOP
@@ -2010,7 +2006,7 @@ dualPersist:
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
-	recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(primaryText), now)
+	recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(primaryText), now)
 	if reqCtx.Err() == nil {
 		writeSSEChunk(w, flusher, map[string]any{
 			"finish_reason":       "FINISH_REASON_STOP",
@@ -2029,14 +2025,14 @@ dualPersist:
 	}
 }
 
-func recordSkillEditorConversationActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
+func recordConversationIdleActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
 	if db == nil || stateStore == nil || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(historyID) == "" {
 		return
 	}
 	_ = resourceupdate.RecordConversationIdleMessage(ctx, db, stateStore, resourceupdate.ConversationIdleRecord{
-		SessionID:      conversationID,
+		ConversationID: conversationID,
 		UserID:         userID,
-		LastMessageID:  historyID,
+		LastHistoryID:  historyID,
 		LastActivityAt: now,
 		UserContent:    userContent,
 		AssistantText:  assistantText,

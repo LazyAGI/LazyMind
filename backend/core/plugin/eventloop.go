@@ -47,6 +47,9 @@ type PluginStepParams struct {
 
 	// ChatSessionID identifies the ChatAgent turn for task lifecycle context.
 	ChatSessionID string `json:"chat_session_id,omitempty"`
+	// TraceID and ParentSpanID continue the ChatAgent trace in dispatched SubAgent.
+	TraceID      string `json:"trace_id,omitempty"`
+	ParentSpanID string `json:"parent_span_id,omitempty"`
 
 	// PluginMode is "auto" | "dynamic" — resolved from the conversation request and
 	// persisted into params so that OnSubAgentDone can branch correctly even when
@@ -101,6 +104,10 @@ func (p PluginStepParams) asMap() map[string]any {
 	}
 	if p.ChatSessionID != "" {
 		m["chat_session_id"] = p.ChatSessionID
+	}
+	if p.TraceID != "" && p.ParentSpanID != "" {
+		m["trace_id"] = p.TraceID
+		m["parent_span_id"] = p.ParentSpanID
 	}
 	if p.RetryHint != "" {
 		m["retry_hint"] = p.RetryHint
@@ -516,6 +523,10 @@ func launchPluginAttempt(
 	if params.ChatSessionID != "" {
 		rawParamsMap["chat_session_id"] = params.ChatSessionID
 	}
+	if params.TraceID != "" && params.ParentSpanID != "" {
+		rawParamsMap["trace_id"] = params.TraceID
+		rawParamsMap["parent_span_id"] = params.ParentSpanID
+	}
 	if params.RetryHint != "" {
 		rawParamsMap["retry_hint"] = params.RetryHint
 	}
@@ -585,6 +596,10 @@ func launchPluginAttempt(
 		"plugin_id":  pluginID,
 		"step_id":    stepID,
 		"session_id": sessionID,
+	}
+	if params.TraceID != "" && params.ParentSpanID != "" {
+		runParams["trace_id"] = params.TraceID
+		runParams["parent_span_id"] = params.ParentSpanID
 	}
 	if len(params.HistoryFilesPerTurn) > 0 {
 		runParams["history_files_per_turn"] = params.HistoryFilesPerTurn

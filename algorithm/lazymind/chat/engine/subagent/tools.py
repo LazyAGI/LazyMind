@@ -186,6 +186,34 @@ def _build_artifact_value(value: Any, content_type: str):
     return {'text': str(value)}, 'text'
 
 
+def _validate_declared_artifact_type(
+    ctx: Any,
+    key: str,
+    content_type: str,
+) -> Optional[str]:
+    """Validate only the framework-level content type declared by a plugin slot."""
+    plugin_id = str((ctx.params or {}).get('plugin_id') or '').strip()
+    if not plugin_id:
+        return None
+
+    try:
+        from lazymind.chat.plugin import plugin_loader
+        spec = plugin_loader.get_plugin(plugin_id)
+        slot_def = spec.get_slot_def(key) if spec else None
+    except Exception:
+        slot_def = None
+
+    declared_type = str((slot_def or {}).get('type') or '').strip()
+    if declared_type == 'file' and content_type not in {'file', 'file_list'}:
+        return (
+            f'Artifact {key!r} is declared as a file slot and must be saved with '
+            f'content_type="file"; got {content_type!r}. Save the exact path returned '
+            'by the producing tool instead of copying its contents.'
+        )
+
+    return None
+
+
 def _save_artifact(key: str, value: Any, content_type: str = 'text',
                    source_tool: Optional[str] = None,
                    sort_order: Optional[int] = None,
@@ -246,6 +274,9 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
             f'Allowed keys: {", ".join(ctx.output_slots)}',
         )
     ct = content_type if content_type in _CONTENT_TYPES else 'text'
+    contract_error = _validate_declared_artifact_type(ctx, key, ct)
+    if contract_error:
+        return tool_error('save_artifacts', contract_error)
     built, actual_ct = _build_artifact_value(value, ct)
     if source_tool:
         built['_source_tool'] = str(source_tool)
@@ -298,14 +329,17 @@ def save_artifacts(artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
             return tool_error(
                 'save_artifacts', f'artifacts[{index}] requires key and value.',
             )
-        results.append(_save_artifact(
+        saved = _save_artifact(
             key=str(item['key']),
             value=item['value'],
             content_type=str(item.get('content_type') or 'text'),
             source_tool=item.get('source_tool'),
             sort_order=item.get('sort_order'),
             caption=item.get('caption'),
-        ))
+        )
+        if not saved.get('success'):
+            return saved
+        results.append(saved)
     return tool_success('save_artifacts', {
         'status': 'ok',
         'saved_count': len(results),

@@ -5,6 +5,7 @@ import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
+from lazymind.common.memory.field_contract import memory_operation_rules
 
 from .guidance import (
     ANALYSIS_GUIDANCE,
@@ -112,16 +113,11 @@ def _resolve_response_language(
     *,
     current_query: str | None = None,
     conversation_history: list[dict] | None = None,
-    user_preference: str | None = None,
     environment_context: dict | None = None,
 ) -> tuple[str, str]:
     current_instruction = _explicit_language(current_query)
     if current_instruction:
         return current_instruction, 'explicit instruction in the current request'
-
-    saved_preference = _explicit_language(user_preference)
-    if saved_preference:
-        return saved_preference, 'explicit saved user preference'
 
     request_language = _dominant_language(current_query)
     if request_language:
@@ -140,12 +136,10 @@ def _build_response_language_prompt(
     *,
     current_query: str | None = None,
     conversation_history: list[dict] | None = None,
-    user_preference: str | None = None,
 ) -> str:
     language, source = _resolve_response_language(
         current_query=current_query,
         conversation_history=conversation_history,
-        user_preference=user_preference,
         environment_context=environment_context,
     )
     return (
@@ -214,8 +208,9 @@ def add_standard_system_sections(
     *,
     environment_context: dict | None = None,
     use_memory: bool = True,
-    user_preference: str | None = None,
-    memory: str | None = None,
+    soul: str | None = None,
+    profile: str | None = None,
+    preference: str | None = None,
     current_query: str | None = None,
     conversation_history: list[dict] | None = None,
     tool_prompt_appendices: dict[str, list[str]] | None = None,
@@ -230,7 +225,6 @@ def add_standard_system_sections(
             environment_context,
             current_query=current_query,
             conversation_history=conversation_history,
-            user_preference=user_preference,
         ),
         'platform.language', priority=20,
     )
@@ -337,36 +331,60 @@ def add_standard_system_sections(
             )
 
     if use_memory:
-        if isinstance(user_preference, str) and user_preference.strip():
+        if any(
+            isinstance(content, str) and content.strip()
+            for content in (soul, profile)
+        ):
+            builder.system(
+                'memory_field_contract',
+                'Memory Field Contract',
+                memory_operation_rules(),
+                'memory.field_contract',
+                priority=37,
+            )
+        if isinstance(soul, str) and soul.strip():
+            soul_block = (
+                '## Agent Soul\n'
+                'This is the assistant identity and default behavior baseline. '
+                'It does not contain user facts, current-task instructions, tool '
+                'capabilities, or safety rules. System rules and real permissions '
+                'always override Soul. Current-turn requests must not change the '
+                'stored identity unless Soul itself is updated.\n\n'
+                + soul.strip()
+                + '\n\n<!-- end of Agent Soul -->'
+            )
+            builder.system(
+                'agent_soul', '', soul_block, 'agent.soul', priority=38,
+            )
+        if isinstance(profile, str) and profile.strip():
+            profile_block = (
+                '## User Profile\n'
+                'Stable structured facts about who the user is now. '
+                'Use them only when relevant to the current request. '
+                'Do not invent missing fields or treat profile as a history log.\n\n'
+                + profile.strip()
+                + '\n\n<!-- end of User Profile -->'
+            )
+            builder.system(
+                'user_profile', '', profile_block, 'user.profile', priority=40,
+            )
+        if isinstance(preference, str) and preference.strip():
             preference_block = (
-                '## User Profile / Preferences\n'
-                "The following profile entries describe the user's long-term preferences"
-                ' and identity.\n'
-                '`agent_persona` describes the identity, responsibilities, and boundaries'
-                ' the assistant should maintain when replying. If `agent_persona` is'
-                ' set, use it as the assistant identity, including for questions such'
-                ' as "who are you" or "what is your name". If `agent_persona` is not'
-                ' set, the assistant may identify itself as LAZYMIND.\n'
-                '`preferred_name` is how replies should address the user.\n'
-                '`response_style` describes expression habits, length preference, and'
-                ' structure preference.\n'
-                "Apply a preference **only when it is relevant to the user's current"
-                ' intent**.\n'
-                'If a preference conflicts with or is unrelated to what the user is'
-                ' actually asking for in this turn, ignore it.\n'
-                'Do not force-apply style, format, or persona preferences when the'
-                " user's question is factual, technical, or unrelated to that"
-                ' preference.\n\n'
-                + user_preference.strip()
-                + '\n\n<!-- end of User Profile / Preferences -->'
+                '## User Preference Index\n'
+                'Active long-term preferences for how to serve this user. '
+                'Each item has a short executable summary and an optional '
+                '`ref` to a detailed reference file under '
+                '`memory/users/references/`. '
+                'Apply a preference only when it matches the current task. '
+                'When the summary is insufficient, read the referenced detail '
+                'with `read_memory_reference` (one or more `refs` from the index) '
+                'instead of guessing. '
+                'Do not load unrelated reference files.\n\n'
+                + preference.strip()
+                + '\n\n<!-- end of User Preference Index -->'
             )
             builder.system(
-                'user_preferences', '', preference_block, 'user.profile', priority=40,
-            )
-        if isinstance(memory, str) and memory.strip():
-            builder.system(
-                'working_memory', '', f'## Agent Working Memory\n{memory.strip()}',
-                'user.memory', priority=50,
+                'user_preferences', '', preference_block, 'user.preference', priority=50,
             )
 
     if has_tools:

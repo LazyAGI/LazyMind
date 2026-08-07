@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from lazymind.chat.service.component.history import normalize_history_for_agent
-from lazymind.common.postgres import normalize_postgres_sqlalchemy_url
+from lazymind.common.database.postgres import normalize_postgres_sqlalchemy_url
 from lazymind.review.skill_review.schemas import SkillReviewRunStat
 from lazymind.config import config as _cfg
 

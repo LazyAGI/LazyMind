@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -18,6 +19,8 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/currentmemory"
+	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/knowledge_market"
 	"lazymind/core/log"
@@ -89,7 +92,8 @@ func exportOpenAPIArtifacts(openAPIJSON []byte) {
 			log.Logger.Warn().Err(err).Str("path", path).Msg("create OpenAPI output directory failed")
 			continue
 		}
-		if err := os.WriteFile(path, append(body, '\n'), 0o644); err != nil {
+		normalizedBody := append(bytes.TrimRight(body, "\r\n"), '\n')
+		if err := os.WriteFile(path, normalizedBody, 0o644); err != nil {
 			log.Logger.Warn().Err(err).Str("path", path).Msg("write OpenAPI artifact failed")
 			continue
 		}
@@ -141,6 +145,14 @@ func exportRegisteredOpenAPIArtifacts() error {
 	return nil
 }
 
+func validateStartupConfig() error {
+	if err := episode.ValidateInternalTokenConfig(); err != nil {
+		return err
+	}
+	_, err := currentmemory.PreferenceIndexMaxItemsFromEnv()
+	return err
+}
+
 func main() {
 	log.Init()
 
@@ -150,6 +162,9 @@ func main() {
 		}
 		log.Logger.Info().Msg("OpenAPI artifacts exported")
 		return
+	}
+	if err := validateStartupConfig(); err != nil {
+		log.Logger.Fatal().Err(err).Msg("invalid Core internal API configuration")
 	}
 
 	// textInitialize ACL text（text：postgres/sqlite/mysql）。
@@ -165,6 +180,9 @@ func main() {
 	db := orm.MustConnect(driver, dsn)
 	if err := migrate.RunUp(); err != nil {
 		log.Logger.Fatal().Err(err).Msg("run SQL migrations failed")
+	}
+	if err := episode.Initialize(db.DB); err != nil {
+		log.Logger.Fatal().Err(err).Msg("initialize Episode Memory search failed")
 	}
 	if err := modelprovider.MigrateLegacyAPIKeys(db.DB); err != nil {
 		log.Logger.Fatal().Err(err).Msg("migrate model provider credentials failed")

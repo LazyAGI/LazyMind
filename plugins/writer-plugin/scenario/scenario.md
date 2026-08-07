@@ -51,8 +51,9 @@ Generation/rewrite mode:
 
 1. read the latest selected `outline_ir`;
 2. regenerate section instructions;
-3. draft all sections;
-4. assemble and save `final_document`.
+3. draft all sections as Markdown;
+4. assemble the complete Markdown draft and convert it once to WriterDocument IR;
+5. save `final_document`.
 
 Targeted revision mode:
 
@@ -113,7 +114,8 @@ a hidden current-document pointer.
 
 ## Artifact contract
 
-- All structured outline and body results use the same WriterDocument schema.
+- All structured outline and body results use the same WriterDocument schema and
+  `.lmd` file suffix. Markdown draft sections remain internal `.md` artifacts.
 - `outline_ir`, `final_document`, and `published_document` have ui_editable=true.
 - `delivered_markdown` is the Markdown file regenerated from the latest selected
   WriterDocument for local delivery.

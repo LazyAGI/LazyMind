@@ -223,8 +223,14 @@ rsync -a --delete \
 
 prune_runtime_app "${RUNTIME_ROOT}/app"
 assert_desktop_runtime_app "${RUNTIME_ROOT}/app"
+TRUSTED_LOCAL_MODE=false
+if [[ "${LAZYMIND_TRUSTED_LOCAL_MODE:-}" == "true" ]]; then
+  TRUSTED_LOCAL_MODE=true
+  echo "==> Trusted local mode enabled for this desktop package"
+fi
 node "${ROOT}/desktop/scripts/write-runtime-manifest.mjs" \
-  "${RUNTIME_ROOT}" --platform darwin --arch arm64
+  "${RUNTIME_ROOT}" --platform darwin --arch arm64 \
+  --trusted-local-mode "${TRUSTED_LOCAL_MODE}"
 
 echo "==> Packaging Electron app"
 if [[ ! -f "${APP_ICON}" ]]; then

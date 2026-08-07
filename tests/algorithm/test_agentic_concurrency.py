@@ -7,6 +7,7 @@ import threading
 from typing import Any, Dict, List
 
 import lazyllm
+from lazymind.common.memory.context import MemoryContext
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service import chat_service
 
@@ -80,10 +81,19 @@ async def _drain_response(response):
     return ''.join(chunks)
 
 
+def _mock_memory_context(monkeypatch):
+    monkeypatch.setattr(
+        chat_service,
+        'load_memory_context',
+        lambda: MemoryContext(soul='', profile='', preference=''),
+    )
+
+
 def test_stream_parallel_requests_see_isolated_config(monkeypatch):
     _FakeAgent.observations = []
     monkeypatch.setattr(chat_service, 'AutoModel', lambda *_a, **_kw: object())
     monkeypatch.setattr(chat_service.lazyllm.tools.agent, 'ReactAgent', _FakeAgent)
+    _mock_memory_context(monkeypatch)
 
     async def drive_one(i: int):
         session_id = f'stream-session-{i}'
@@ -140,6 +150,7 @@ def test_stream_response_keeps_session_after_route_context_exits(monkeypatch):
     _FakeAgent.observations = []
     monkeypatch.setattr(chat_service, 'AutoModel', lambda *_a, **_kw: object())
     monkeypatch.setattr(chat_service.lazyllm.tools.agent, 'ReactAgent', _FakeAgent)
+    _mock_memory_context(monkeypatch)
 
     async def drive():
         session_id = 'route-stream-session'

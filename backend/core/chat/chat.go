@@ -110,9 +110,7 @@ type ChatRuntimeOptions struct {
 }
 
 type ChatPersonalizationOptions struct {
-	Memory         string `json:"memory,omitempty"`
-	UserPreference string `json:"user_preference,omitempty"`
-	UseMemory      bool   `json:"use_memory"`
+	UseMemory bool `json:"use_memory"`
 }
 
 type ChatAgentOptions struct {
@@ -433,12 +431,6 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	req.Retrieval.LocalFSSources = anySlice(body["local_fs_sources"])
 	req.Agent.DisabledTools = stringSlice(body["disabled_tools"])
 	req.Agent.AvailableSkills = stringSlice(body["available_skills"])
-	if memory, ok := body["memory"].(string); ok {
-		req.Personalization.Memory = memory
-	}
-	if preference, ok := body["user_preference"].(string); ok {
-		req.Personalization.UserPreference = preference
-	}
 	if useMemory, ok := body["use_memory"].(bool); ok {
 		req.Personalization.UseMemory = useMemory
 	}

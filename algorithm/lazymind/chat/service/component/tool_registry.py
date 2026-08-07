@@ -29,8 +29,6 @@ from lazymind.chat.engine.tools import (
     calculator,
     image_editor,
     image_generator,
-    memory_editor,
-    read_memory,
     SkillManagementToolkit,
     list_data_sources,
     build_schedule_toolkit,
@@ -40,6 +38,7 @@ from lazymind.chat.engine.tools import (
     vision_extractor,
     vocab_learn,
 )
+from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
 from lazymind.model_config import is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
@@ -191,14 +190,25 @@ WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'terms into one `query` with spaces, commas, punctuation, or list-like text.',
     ),
 }
-MEMORY_READER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+MEMORY_TOOLS_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Conversation history versus persistent memory\n'
         'Conversation history is already included in the model messages and is the authoritative '
         'source for earlier turns in the current chat. Resolve short follow-ups and omitted subjects '
-        'from that history. Do not call `read_memory` to inspect, summarize, or recover the current '
-        'conversation. `read_memory` only reads optional cross-conversation notes or user-profile '
-        'content; an empty result never implies that chat history is missing.'
+        'from that history. Persistent memory (soul / profile / preference index) is injected when '
+        'available; use `MemoryTools_read_memory` when the exact current YAML document must be '
+        'checked, and use `MemoryTools_read_memory_reference` only for preference reference details '
+        'that are not covered by the injected summaries. Batch all Soul changes into one '
+        '`MemoryTools_soul_editor` call and all Profile changes into one '
+        '`MemoryTools_profile_editor` call; never emit parallel calls to either editor. Use '
+        '`MemoryTools_preference_editor` conservatively: do not save fragmented remarks, one-off '
+        'requests, temporary task details, or casual statements. Objective user facts belong in '
+        'Profile when a matching field exists, not in Preference.',
+        'Call `MemoryTools_episode_create` only when the user explicitly asks to record, remember, '
+        'or save a historical event. Do not call it merely because information seems useful. '
+        'use_memory=false does not disable explicit Episode creation. Never claim that information '
+        'was saved unless `MemoryTools_episode_create` or a structured memory editor '
+        '(`soul_editor` / `profile_editor` / `preference_editor`) succeeded in the current turn.',
     ),
 }
 CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -575,21 +585,16 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         description_en='Learn user-specific vocabulary mappings and synonyms.',
     ),
     ToolConfig(
-        name='read_memory',
-        label='记忆读取',
-        description='读取当前的用户记忆或偏好内容',
-        tool=read_memory, module='personalization',
-        label_en='Memory Reading',
-        description_en='Read the current user memory and preferences.',
-        appendix_system_prompt=MEMORY_READER_TOOL_POLICY_APPENDIX,
-    ),
-    ToolConfig(
-        name='memory_editor',
-        label='记忆编辑',
-        description='记录和编辑跨会话的用户记忆和偏好',
-        tool=memory_editor, module='personalization',
-        label_en='Memory Editing',
-        description_en='Record and edit user memories and preferences across conversations.',
+        name='memory',
+        label='记忆',
+        description='读取跨会话记忆，编辑 soul/profile/preference，并记录不可变历史事件',
+        tool=MemoryTools(), module='personalization',
+        label_en='Memory',
+        description_en=(
+            'Read cross-conversation memory, edit soul/profile/preference, '
+            'and record immutable historical events.'
+        ),
+        appendix_system_prompt=MEMORY_TOOLS_POLICY_APPENDIX,
     ),
     ToolConfig(
         name='skill_editor',

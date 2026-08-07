@@ -9,6 +9,10 @@ import pytest
 import requests
 
 from lazymind.common.integrations.remote_fs import RemoteFS
+from lazymind.common.integrations import remote_fs as remote_fs_module
+
+
+_INTERNAL_HEADERS = {'X-LazyMind-Internal-Token': 'test-internal-token'}
 
 
 class FakeResponse:
@@ -33,8 +37,11 @@ def agentic_config():
     previous = lazyllm.globals.get('agentic_config')
     RemoteFS.clear_instance_cache()
     lazyllm.globals['agentic_config'] = {'user_id': 'user-1', 'task_id': 'task-1', 'session_id': 'session-1'}
+    previous_token = remote_fs_module._cfg._impl.get('core_internal_token')
+    remote_fs_module._cfg._impl['core_internal_token'] = 'test-internal-token'
     yield
     RemoteFS.clear_instance_cache()
+    remote_fs_module._cfg._impl['core_internal_token'] = previous_token
     if previous is None:
         lazyllm.globals.pop('agentic_config', None)
     else:
@@ -73,6 +80,7 @@ def test_ls_qualifies_names_and_sends_user_and_task_id(captured_requests):
     assert result[0]['name'] == 'remote://skills/coding/pkg/SKILL.md'
     assert calls[0]['method'] == 'GET'
     assert calls[0]['url'] == 'http://core/remote-fs/list'
+    assert calls[0]['headers'] == _INTERNAL_HEADERS
     assert calls[0]['params'] == remote_params(
         path='skills/coding/pkg',
     )
@@ -108,7 +116,7 @@ def test_open_text_honors_decode_errors_option(captured_requests):
     responses.append(FakeResponse(content=b'\xffbroken'))
 
     with RemoteFS(base_url='http://core').open(
-        'remote://memory/memory.md',
+        'remote://memory/agents/soul.yaml',
         'r',
         encoding='utf-8',
         errors='replace',
@@ -133,10 +141,13 @@ def test_write_and_write_file_send_raw_body_with_content_type(captured_requests)
     assert calls[0]['url'] == 'http://core/remote-fs/content'
     assert calls[0]['params'] == remote_params(path='skills/coding/pkg/SKILL.md')
     assert calls[0]['data'] == b'body'
-    assert calls[0]['headers'] == {'Content-Type': 'text/plain; charset=utf-8'}
+    assert calls[0]['headers'] == {
+        'Content-Type': 'text/plain; charset=utf-8',
+        **_INTERNAL_HEADERS,
+    }
     assert calls[1]['params'] == remote_params(path='skills/coding/pkg/assets/logo.png')
     assert calls[1]['data'] == b'\x89PNG'
-    assert calls[1]['headers'] == {'Content-Type': 'image/png'}
+    assert calls[1]['headers'] == {'Content-Type': 'image/png', **_INTERNAL_HEADERS}
 
 
 def test_open_write_uses_text_content_type_for_text_mode(captured_requests):
@@ -147,7 +158,10 @@ def test_open_write_uses_text_content_type_for_text_mode(captured_requests):
         fh.write('hello')
 
     assert calls[0]['data'] == b'hello'
-    assert calls[0]['headers'] == {'Content-Type': 'text/plain; charset=utf-8'}
+    assert calls[0]['headers'] == {
+        'Content-Type': 'text/plain; charset=utf-8',
+        **_INTERNAL_HEADERS,
+    }
 
 
 def test_move_calls_remote_fs_move(captured_requests):

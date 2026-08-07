@@ -63,7 +63,7 @@
 - **连接信息随请求下发（SubAgent 执行层）**：`SubAgentDB` 类接收 Go 在调用 `/api/subagent/run` 时下发的 `db_dsn`，直接对 `sub_agent_steps`、`sub_agent_artifacts` 读写。连接随请求创建（`SubAgentDB.__init__`）、完成后释放（`SubAgentDB.dispose`），不做全局单例缓存。
 - **环境配置读取（ChatAgent 工具层）**：`TaskQueryDB` 类从环境变量 `LAZYMIND_CORE_DATABASE_URL` / `ACL_DB_DSN` 取连接串，用于 ChatAgent 工具（如 `create_subagent` auto 模式轮询、`list_subagents`、`get_subagent_artifacts` 等）直接查 `sub_agent_tasks` / `sub_agent_artifacts`。全局单例，进程生命周期内复用。
 
-依赖方向仍是 Go → Python。DSN 经 `lazymind.common.postgres.normalize_postgres_connection_url` 规整后使用；DSN 不落 LLM 上下文、不写日志明文。
+依赖方向仍是 Go → Python。DSN 经 `lazymind.common.database.postgres.normalize_postgres_connection_url` 规整后使用；DSN 不落 LLM 上下文、不写日志明文。
 
 ### 1.6 mode 全链路透传（前置改动）
 
@@ -362,7 +362,6 @@ GET  /internal/subagent/tasks/{task_id}   （内部端点，供 Python auto 轮�
 6. **前端 Task Center 面板**：`task_created` 触发订阅 Task SSE（先 DB 补历史再 tail）；进度条更新；artifact 按 `(key, seq)` 去重逐条追加（图片缩略图网格、文本展开）。
 7. **刷新恢复**：主 SSE 复用现有 resumeChat + Task SSE DB-first 重连。
 8. **中断恢复**：MarkInterrupted + resume 参数 + `sub_agent_steps` tool_call_id 配对重建上下文。
-
 
 
 

@@ -11,8 +11,6 @@ _MODULE_EXPORTS = {
     '.web_search_support': ('fetch_url_content',),
     '.kb_opensearch_client': ('opensearch_search', 'resolve_index', 'term_filter'),
     '.github_skill_installer': ('GitHubSkillInstaller',),
-    '.memory_remote_store': ('MEMORY_TARGET_PATHS', 'MemoryRemoteStore'),
-    '.user_preference_validation': ('parse_user_preference_frontmatter', 'validate_user_preference_content'),
     '.suggestion': ('Suggestion', 'dump_suggestion'),
     '.vocab_support': (
         'VocabSuggestion', 'dedupe_vocab_values_keep_order', 'dump_vocab_suggestion',

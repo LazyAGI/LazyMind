@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 from fastapi.responses import StreamingResponse
 
@@ -40,6 +41,24 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
 
     monkeypatch.setattr(chat_service, 'AutoModel', lambda model, config=False: f'{model}:{config}')
     monkeypatch.setattr(chat_service.lazyllm.tools.agent, 'ReactAgent', FakeAgent)
+    monkeypatch.setattr(
+        chat_service,
+        'get_episode_store',
+        lambda: SimpleNamespace(
+            search=lambda *_args, **_kwargs: [],
+            list_recent=lambda *_args, **_kwargs: [],
+            render=lambda _episode: '',
+        ),
+    )
+    monkeypatch.setattr(
+        chat_service,
+        'load_memory_context',
+        lambda: SimpleNamespace(
+            soul='identity:\n  name: LazyMind',
+            profile='identity:\n  preferred_name: null',
+            preference='preferences: []',
+        ),
+    )
 
     async def drive():
         response = await chat_service.handle_chat(ChatRequest(
