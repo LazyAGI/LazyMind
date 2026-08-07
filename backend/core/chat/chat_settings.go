@@ -148,7 +148,7 @@ func PatchChatSettings(w http.ResponseWriter, r *http.Request) {
 
 	updates := map[string]any{"updated_at": time.Now().UTC()}
 	if v, ok := body["enable_workflow"].(bool); ok {
-		updates["enable_plugin"] = v
+		updates["enable_workflow"] = v
 	}
 	if v, ok := body["enable_subagent"].(bool); ok {
 		updates["enable_subagent"] = v

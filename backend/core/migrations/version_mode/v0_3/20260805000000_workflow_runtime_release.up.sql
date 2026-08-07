@@ -5,6 +5,33 @@ UPDATE user_plugin_settings
 SET call_mode = CASE WHEN enabled THEN 'auto' ELSE 'disabled' END
 WHERE call_mode = 'disabled';
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'user_chat_settings'
+          AND column_name = 'enable_plugin'
+    ) AND NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'user_chat_settings'
+          AND column_name = 'enable_workflow'
+    ) THEN
+        ALTER TABLE public.user_chat_settings RENAME COLUMN enable_plugin TO enable_workflow;
+    ELSIF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'user_chat_settings'
+          AND column_name = 'enable_workflow'
+    ) THEN
+        ALTER TABLE public.user_chat_settings ADD COLUMN enable_workflow BOOLEAN NOT NULL DEFAULT TRUE;
+    END IF;
+END $$;
+
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS origin_host VARCHAR(32) NOT NULL DEFAULT 'lazymind';
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS origin_ref VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS controller_host VARCHAR(32) NOT NULL DEFAULT 'lazymind';
@@ -15,6 +42,19 @@ ALTER TABLE user_plugin_settings ADD COLUMN call_mode varchar(16) NOT NULL DEFAU
 UPDATE user_plugin_settings
 SET call_mode = CASE WHEN enabled THEN 'auto' ELSE 'disabled' END
 WHERE call_mode = 'disabled';
+
+CREATE TABLE IF NOT EXISTS user_chat_settings_next (
+    user_id varchar(255),
+    enable_workflow numeric NOT NULL DEFAULT true,
+    plugin_mode varchar(16) NOT NULL DEFAULT "dynamic",
+    enable_subagent numeric NOT NULL DEFAULT true,
+    updated_at datetime NOT NULL,
+    PRIMARY KEY (user_id)
+);
+DELETE FROM user_chat_settings_next;
+INSERT INTO user_chat_settings_next SELECT * FROM user_chat_settings;
+DROP TABLE user_chat_settings;
+ALTER TABLE user_chat_settings_next RENAME TO user_chat_settings;
 
 ALTER TABLE plugin_sessions ADD COLUMN origin_host varchar(32) NOT NULL DEFAULT 'lazymind';
 ALTER TABLE plugin_sessions ADD COLUMN origin_ref varchar(255) NOT NULL DEFAULT '';
