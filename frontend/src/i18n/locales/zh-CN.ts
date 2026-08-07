@@ -645,6 +645,7 @@ const zhCN = {
     detailsReadAndReturn: "我已阅读并返回",
     consentVersion: "协议版本 {{version}}",
     consentChecking: "正在同步用户协议状态...",
+    consentCheckFailed: "用户协议状态确认失败，请重试",
     consentPersistFailed: "保存同意状态失败，请稍后重试",
   },
 
