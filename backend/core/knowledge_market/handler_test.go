@@ -29,14 +29,8 @@ knowledge_market_items:
     version_date: "2026-07-18"
     version_note: 新增司法解释
     package_url: ""
-    package_sha256: ""
-    package_size: 299892736
-    doc_count: 438
+    online_access_url: https://www.modelscope.cn/datasets/simpleai/HC3-Chinese/summary
     data_source: 国家法律法规数据库及官方公开文件
-    files:
-      - name: 中华人民共和国民法典.pdf
-        size: 3984588
-        path: 中华人民共和国民法典.pdf
     sample_questions:
       - 劳动合同在什么情况下可以解除？
   - id: finance
@@ -50,11 +44,7 @@ knowledge_market_items:
     version_date: "2026-07-10"
     version_note: ""
     package_url: ""
-    package_sha256: ""
-    package_size: 224395264
-    doc_count: 326
     data_source: 金融监管机构公开文件
-    files: []
     sample_questions: []
   - id: gov
     category: industry
@@ -67,11 +57,7 @@ knowledge_market_items:
     version_date: "2026-06-01"
     version_note: ""
     package_url: ""
-    package_sha256: ""
-    package_size: 0
-    doc_count: 120
     data_source: 政府公开文件
-    files: []
     sample_questions: []
   - id: law-qa
     category: evaluation
@@ -84,11 +70,7 @@ knowledge_market_items:
     version_date: "2026-07-01"
     version_note: ""
     package_url: ""
-    package_sha256: ""
-    package_size: 0
-    doc_count: 1000
     data_source: 人工标注
-    files: []
     sample_questions: []
   - id: medical-qa
     category: evaluation
@@ -101,11 +83,7 @@ knowledge_market_items:
     version_date: "2026-07-01"
     version_note: ""
     package_url: ""
-    package_sha256: ""
-    package_size: 0
-    doc_count: 800
     data_source: 人工标注
-    files: []
     sample_questions: []
 `
 
@@ -129,6 +107,9 @@ func marketRouter() *mux.Router {
 	r.HandleFunc("/knowledge-market", MarketList).Methods(http.MethodGet)
 	r.HandleFunc("/knowledge-market/domains", MarketDomains).Methods(http.MethodGet)
 	r.HandleFunc("/knowledge-market/items/{market_item_id}", MarketGet).Methods(http.MethodGet)
+	r.HandleFunc("/knowledge-market/tasks", MarketListInstallTasks).Methods(http.MethodGet)
+	r.HandleFunc("/knowledge-market/tasks/{job_id}", MarketGetInstallTask).Methods(http.MethodGet)
+	r.HandleFunc("/knowledge-market/installs", MarketListInstalls).Methods(http.MethodGet)
 	return r
 }
 
@@ -185,6 +166,9 @@ func TestMarketListDefault(t *testing.T) {
 	}
 	if tags := first["tags"].([]any); len(tags) != 2 {
 		t.Fatalf("tags=%v, want 2 entries", tags)
+	}
+	if first["online_access_url"] != "https://www.modelscope.cn/datasets/simpleai/HC3-Chinese/summary" {
+		t.Fatalf("online_access_url=%v, want catalog value", first["online_access_url"])
 	}
 }
 
@@ -319,21 +303,29 @@ func TestMarketGet(t *testing.T) {
 	if data["id"] != "law-cn" || data["domain"] != "法律" {
 		t.Fatalf("unexpected detail: %v", data)
 	}
-	files := data["files"].([]any)
-	if len(files) != 1 {
-		t.Fatalf("files=%v, want 1 entry", files)
-	}
-	if file := files[0].(map[string]any); file["name"] != "中华人民共和国民法典.pdf" {
-		t.Fatalf("unexpected file: %v", file)
-	}
 	if questions := data["sample_questions"].([]any); len(questions) != 1 {
 		t.Fatalf("sample_questions=%v, want 1 entry", questions)
 	}
-	if got := data["package_size"].(float64); got != 299892736 {
-		t.Fatalf("package_size=%v, want 299892736", got)
+	if data["package_url"] != "" {
+		t.Fatalf("package_url=%v, want empty", data["package_url"])
 	}
-	if data["version_note"] != "新增司法解释" {
-		t.Fatalf("version_note=%v", data["version_note"])
+	if data["online_access_url"] != "https://www.modelscope.cn/datasets/simpleai/HC3-Chinese/summary" {
+		t.Fatalf("online_access_url=%v, want catalog value", data["online_access_url"])
+	}
+	if _, exists := data["package_revision"]; !exists {
+		t.Fatal("detail must include package_revision")
+	}
+	if _, exists := data["files"]; exists {
+		t.Fatal("detail must not include files")
+	}
+	if _, exists := data["package_size"]; exists {
+		t.Fatal("detail must not include package_size")
+	}
+	if _, exists := data["version"]; exists {
+		t.Fatal("detail must not expose version")
+	}
+	if _, exists := data["version_note"]; exists {
+		t.Fatal("detail must not expose version_note")
 	}
 }
 
@@ -402,11 +394,7 @@ knowledge_market_items:
     version_date: "2026-07-01"
     version_note: ""
     package_url: ""
-    package_sha256: ""
-    package_size: 0
-    doc_count: 10
     data_source: 测试数据
-    files: []
     sample_questions: []
 `
 

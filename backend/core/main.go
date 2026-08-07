@@ -218,6 +218,7 @@ func main() {
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
 	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
 	evalset.RegisterAsyncJobs()
+	knowledge_market.RegisterAsyncJobs()
 	plugin.RegisterPluginDraftGenerateJob()
 	startBackgroundJobs := backgroundJobsEnabled()
 	if !startBackgroundJobs {

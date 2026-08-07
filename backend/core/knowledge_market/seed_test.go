@@ -25,14 +25,8 @@ knowledge_market_items:
     version_date: "2026-07-18"
     version_note: 新增司法解释
     package_url: ""
-    package_sha256: ""
-    package_size: 299892736
-    doc_count: 438
+    online_access_url: https://www.modelscope.cn/datasets/simpleai/HC3-Chinese/summary
     data_source: 官方公开文件
-    files:
-      - name: 民法典.pdf
-        size: 1024
-        path: 民法典.pdf
     sample_questions:
       - 劳动合同在什么情况下可以解除？
 `
@@ -48,10 +42,7 @@ knowledge_market_items:
     tags: [监管规则]
     version: v1.8.0
     version_date: "2026-07-10"
-    package_size: 224395264
-    doc_count: 326
     data_source: 金融监管机构公开文件
-    files: []
     sample_questions: []
 `
 
@@ -106,11 +97,14 @@ func TestLoadCatalogParsesAndUpserts(t *testing.T) {
 	}
 
 	row := getItem(t, db, "law-cn")
-	if row.Category != "industry" || row.Name != "中国法律法规知识库" || row.Version != "v2.3.0" {
+	if row.Category != "industry" || row.Name != "中国法律法规知识库" {
 		t.Fatalf("unexpected seeded content: %+v", row)
 	}
 	if row.Status != "published" || row.SortOrder != 0 {
 		t.Fatalf("expected published with sort_order 0, got status=%q sort_order=%d", row.Status, row.SortOrder)
+	}
+	if row.OnlineAccessURL != "https://www.modelscope.cn/datasets/simpleai/HC3-Chinese/summary" {
+		t.Fatalf("unexpected online_access_url %q", row.OnlineAccessURL)
 	}
 }
 
@@ -120,11 +114,10 @@ func TestSeedCatalogRejectsInvalidItem(t *testing.T) {
 knowledge_market_items:
   - id: bad
     category: industry
-    name: 缺少版本
-    version: ""
+    name: ""
 `)
 	if err := SeedCatalog(context.Background(), db, path); err == nil {
-		t.Fatal("expected error for item missing version")
+		t.Fatal("expected error for item missing name")
 	}
 	if n := countItems(t, db); n != 0 {
 		t.Fatalf("expected no rows after failed seed, got %d", n)
@@ -162,6 +155,7 @@ func TestSeedCatalogUpdatesChangedContent(t *testing.T) {
 	first := getItem(t, db, "law-cn")
 
 	changed := strings.Replace(testCatalog, "description: 法律知识库", "description: 更新后的法律知识库描述", 1)
+	changed = strings.Replace(changed, "online_access_url: https://www.modelscope.cn/datasets/simpleai/HC3-Chinese/summary", "online_access_url: https://www.modelscope.cn/datasets/simpleai/HC3-Chinese/summary?tab=files", 1)
 	if changed == testCatalog {
 		t.Fatal("fixture replacement failed")
 	}
@@ -172,6 +166,9 @@ func TestSeedCatalogUpdatesChangedContent(t *testing.T) {
 	second := getItem(t, db, "law-cn")
 	if first.UpdatedAt.Equal(second.UpdatedAt) {
 		t.Fatalf("expected updated_at to change when content changes")
+	}
+	if second.OnlineAccessURL != "https://www.modelscope.cn/datasets/simpleai/HC3-Chinese/summary?tab=files" {
+		t.Fatalf("expected online_access_url updated, got %q", second.OnlineAccessURL)
 	}
 }
 

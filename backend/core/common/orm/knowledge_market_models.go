@@ -22,13 +22,16 @@ type KnowledgeMarketItem struct {
 	VersionDate string `gorm:"column:version_date;type:varchar(10);not null;default:''"`
 	VersionNote string `gorm:"column:version_note;type:text;not null;default:''"`
 
-	PackageURL    string `gorm:"column:package_url;type:text;not null;default:''"`
-	PackageSHA256 string `gorm:"column:package_sha256;type:varchar(64);not null;default:''"`
-	PackageSize   int64  `gorm:"column:package_size;not null;default:0"`
-	DocCount      int64  `gorm:"column:doc_count;not null;default:0"`
-	DataSource    string `gorm:"column:data_source;type:text;not null;default:''"`
+	// PackageURL is the only download entry point (a git repo URL or a direct
+	// file URL); PackageRevision optionally pins a git branch/tag.
+	PackageURL      string `gorm:"column:package_url;type:text;not null;default:''"`
+	PackageRevision string `gorm:"column:package_revision;type:varchar(64);not null;default:''"`
+	// OnlineAccessURL is the public web page used by the P1 online query
+	// feature. It must be directly fetchable by the model (url_fetch), so it
+	// is decoupled from PackageURL and may stay empty to hide online query.
+	OnlineAccessURL string `gorm:"column:online_access_url;type:varchar(1024);not null;default:''"`
+	DataSource      string `gorm:"column:data_source;type:text;not null;default:''"`
 
-	Files           json.RawMessage `gorm:"column:files;type:json;not null;default:'[]'"`
 	SampleQuestions json.RawMessage `gorm:"column:sample_questions;type:json;not null;default:'[]'"`
 	Status          string          `gorm:"column:status;type:varchar(32);not null;default:'published';index:idx_knowledge_market_items_category_status,priority:1"` // published | offline
 	SortOrder       int             `gorm:"column:sort_order;not null;default:0"`
@@ -39,15 +42,31 @@ type KnowledgeMarketItem struct {
 
 func (KnowledgeMarketItem) TableName() string { return "knowledge_market_items" }
 
+// InstallState describes the lifecycle of one user's knowledge base install.
+type InstallState string
+
+const (
+	InstallStatePending     InstallState = "pending"
+	InstallStateDownloading InstallState = "downloading"
+	InstallStateImporting   InstallState = "importing"
+	InstallStateVectorizing InstallState = "vectorizing"
+	InstallStateDone        InstallState = "done"
+	InstallStateFailed      InstallState = "failed"
+)
+
 // KnowledgeMarketInstall records one user's installation of an official
-// knowledge base. It intentionally stays minimal until the M2 install flow
-// adds dataset_id, install_state, config and usage statistics.
+// knowledge base: the resulting personal dataset plus the runtime file
+// snapshot (config) used by later update diffs.
 type KnowledgeMarketInstall struct {
-	MarketItemID     string    `gorm:"column:market_item_id;type:varchar(64);primaryKey;index:idx_knowledge_market_installs_user,priority:2"`
-	UserID           string    `gorm:"column:user_id;type:varchar(255);primaryKey;index:idx_knowledge_market_installs_user,priority:1"`
-	InstalledVersion string    `gorm:"column:installed_version;type:varchar(32);not null;default:''"`
-	CreatedAt        time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt        time.Time `gorm:"column:updated_at;not null"`
+	MarketItemID     string          `gorm:"column:market_item_id;type:varchar(64);primaryKey;index:idx_knowledge_market_installs_user,priority:2"`
+	UserID           string          `gorm:"column:user_id;type:varchar(255);primaryKey;index:idx_knowledge_market_installs_user,priority:1"`
+	InstalledVersion string          `gorm:"column:installed_version;type:varchar(32);not null;default:''"`
+	DatasetID        string          `gorm:"column:dataset_id;type:varchar(64);not null;default:''"`
+	InstallState     string          `gorm:"column:install_state;type:varchar(32);not null;default:'pending'"`
+	InstalledAt      *time.Time      `gorm:"column:installed_at"`
+	Config           json.RawMessage `gorm:"column:config;type:json;not null;default:'{}'"`
+	CreatedAt        time.Time       `gorm:"column:created_at;not null"`
+	UpdatedAt        time.Time       `gorm:"column:updated_at;not null"`
 }
 
 func (KnowledgeMarketInstall) TableName() string { return "knowledge_market_installs" }

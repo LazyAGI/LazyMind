@@ -24,29 +24,18 @@ import (
 
 // catalogItem mirrors one entry of config/knowledge_market_catalog.yaml.
 type catalogItem struct {
-	ID              string        `yaml:"id"`
-	Category        string        `yaml:"category"`
-	Name            string        `yaml:"name"`
-	Description     string        `yaml:"description"`
-	Icon            string        `yaml:"icon"`
-	Domain          string        `yaml:"domain"`
-	Tags            []string      `yaml:"tags"`
-	Version         string        `yaml:"version"`
-	VersionDate     string        `yaml:"version_date"`
-	VersionNote     string        `yaml:"version_note"`
-	PackageURL      string        `yaml:"package_url"`
-	PackageSHA256   string        `yaml:"package_sha256"`
-	PackageSize     int64         `yaml:"package_size"`
-	DocCount        int64         `yaml:"doc_count"`
-	DataSource      string        `yaml:"data_source"`
-	Files           []catalogFile `yaml:"files"`
-	SampleQuestions []string      `yaml:"sample_questions"`
-}
-
-type catalogFile struct {
-	Name string `yaml:"name" json:"name"`
-	Size int64  `yaml:"size" json:"size"`
-	Path string `yaml:"path" json:"path"`
+	ID              string   `yaml:"id"`
+	Category        string   `yaml:"category"`
+	Name            string   `yaml:"name"`
+	Description     string   `yaml:"description"`
+	Icon            string   `yaml:"icon"`
+	Domain          string   `yaml:"domain"`
+	Tags            []string `yaml:"tags"`
+	PackageURL      string   `yaml:"package_url"`
+	PackageRevision string   `yaml:"package_revision"`
+	OnlineAccessURL string   `yaml:"online_access_url"`
+	DataSource      string   `yaml:"data_source"`
+	SampleQuestions []string `yaml:"sample_questions"`
 }
 
 type catalogFileYAML struct {
@@ -112,9 +101,8 @@ func upsertItem(tx *gorm.DB, now time.Time, sortOrder int, item catalogItem) err
 	item.ID = strings.TrimSpace(item.ID)
 	item.Name = strings.TrimSpace(item.Name)
 	item.Category = strings.TrimSpace(item.Category)
-	item.Version = strings.TrimSpace(item.Version)
-	if item.ID == "" || item.Name == "" || item.Category == "" || item.Version == "" {
-		return fmt.Errorf("knowledge market catalog item requires non-empty id, name, category and version")
+	if item.ID == "" || item.Name == "" || item.Category == "" {
+		return fmt.Errorf("knowledge market catalog item requires non-empty id, name and category")
 	}
 	if item.Category != "industry" && item.Category != "evaluation" {
 		return fmt.Errorf("knowledge market catalog item %q has invalid category %q", item.ID, item.Category)
@@ -126,13 +114,6 @@ func upsertItem(tx *gorm.DB, now time.Time, sortOrder int, item catalogItem) err
 	}
 	if string(tagsJSON) == "null" {
 		tagsJSON = []byte("[]")
-	}
-	filesJSON, err := json.Marshal(item.Files)
-	if err != nil {
-		return err
-	}
-	if string(filesJSON) == "null" {
-		filesJSON = []byte("[]")
 	}
 	questionsJSON, err := json.Marshal(item.SampleQuestions)
 	if err != nil {
@@ -150,15 +131,10 @@ func upsertItem(tx *gorm.DB, now time.Time, sortOrder int, item catalogItem) err
 		Icon:            item.Icon,
 		Domain:          item.Domain,
 		Tags:            json.RawMessage(tagsJSON),
-		Version:         item.Version,
-		VersionDate:     item.VersionDate,
-		VersionNote:     item.VersionNote,
 		PackageURL:      item.PackageURL,
-		PackageSHA256:   item.PackageSHA256,
-		PackageSize:     item.PackageSize,
-		DocCount:        item.DocCount,
+		PackageRevision: item.PackageRevision,
+		OnlineAccessURL: item.OnlineAccessURL,
 		DataSource:      item.DataSource,
-		Files:           json.RawMessage(filesJSON),
 		SampleQuestions: json.RawMessage(questionsJSON),
 		Status:          "published",
 		SortOrder:       sortOrder,
@@ -181,25 +157,20 @@ func upsertItem(tx *gorm.DB, now time.Time, sortOrder int, item catalogItem) err
 	return tx.Model(&orm.KnowledgeMarketItem{}).
 		Where("id = ?", row.ID).
 		Updates(map[string]any{
-			"category":         desired.Category,
-			"name":             desired.Name,
-			"description":      desired.Description,
-			"icon":             desired.Icon,
-			"domain":           desired.Domain,
-			"tags":             desired.Tags,
-			"version":          desired.Version,
-			"version_date":     desired.VersionDate,
-			"version_note":     desired.VersionNote,
-			"package_url":      desired.PackageURL,
-			"package_sha256":   desired.PackageSHA256,
-			"package_size":     desired.PackageSize,
-			"doc_count":        desired.DocCount,
-			"data_source":      desired.DataSource,
-			"files":            desired.Files,
-			"sample_questions": desired.SampleQuestions,
-			"status":           "published",
-			"sort_order":       sortOrder,
-			"updated_at":       now,
+			"category":          desired.Category,
+			"name":              desired.Name,
+			"description":       desired.Description,
+			"icon":              desired.Icon,
+			"domain":            desired.Domain,
+			"tags":              desired.Tags,
+			"package_url":       desired.PackageURL,
+			"package_revision":  desired.PackageRevision,
+			"online_access_url": desired.OnlineAccessURL,
+			"data_source":       desired.DataSource,
+			"sample_questions":  desired.SampleQuestions,
+			"status":            "published",
+			"sort_order":        sortOrder,
+			"updated_at":        now,
 		}).Error
 }
 
@@ -212,15 +183,10 @@ func rowContentEqual(row, desired *orm.KnowledgeMarketItem) bool {
 		row.Icon == desired.Icon &&
 		row.Domain == desired.Domain &&
 		jsonEqual(row.Tags, desired.Tags) &&
-		row.Version == desired.Version &&
-		row.VersionDate == desired.VersionDate &&
-		row.VersionNote == desired.VersionNote &&
 		row.PackageURL == desired.PackageURL &&
-		row.PackageSHA256 == desired.PackageSHA256 &&
-		row.PackageSize == desired.PackageSize &&
-		row.DocCount == desired.DocCount &&
+		row.PackageRevision == desired.PackageRevision &&
+		row.OnlineAccessURL == desired.OnlineAccessURL &&
 		row.DataSource == desired.DataSource &&
-		jsonEqual(row.Files, desired.Files) &&
 		jsonEqual(row.SampleQuestions, desired.SampleQuestions)
 }
 

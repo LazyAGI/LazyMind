@@ -848,7 +848,7 @@ type datasetQueryParams struct {
 	OrderBy   string   `query:"order_by"`
 	Keyword   string   `query:"keyword"`
 	Tags      []string `query:"tags"`
-	Source    string   `query:"source" enum:"manual,cloud" desc:"Filter datasets by creation source."`
+	Source    string   `query:"source" enum:"manual,cloud,official_installed" desc:"Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza)."`
 }
 
 type createDatasetQueryParams struct {
@@ -1858,20 +1858,18 @@ type knowledgeMarketListQueryParams struct {
 }
 
 type knowledgeMarketListItemOpenAPIResponse struct {
-	ID          string   `json:"id"`
-	Category    string   `json:"category"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Icon        string   `json:"icon"`
-	Domain      string   `json:"domain"`
-	Tags        []string `json:"tags"`
-	Version     string   `json:"version"`
-	VersionDate string   `json:"version_date"`
-	DocCount    int64    `json:"doc_count"`
-	DataSource  string   `json:"data_source"`
-	SortOrder   int      `json:"sort_order"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
+	ID              string   `json:"id"`
+	Category        string   `json:"category"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
+	Icon            string   `json:"icon"`
+	Domain          string   `json:"domain"`
+	Tags            []string `json:"tags"`
+	OnlineAccessURL string   `json:"online_access_url"`
+	DataSource      string   `json:"data_source"`
+	SortOrder       int      `json:"sort_order"`
+	CreatedAt       string   `json:"created_at"`
+	UpdatedAt       string   `json:"updated_at"`
 }
 
 type knowledgeMarketListOpenAPIResponse struct {
@@ -1881,33 +1879,21 @@ type knowledgeMarketListOpenAPIResponse struct {
 	Total    int32                                    `json:"total"`
 }
 
-type knowledgeMarketFileOpenAPIResponse struct {
-	Name string `json:"name"`
-	Size int64  `json:"size"`
-	Path string `json:"path"`
-}
-
 type knowledgeMarketDetailOpenAPIResponse struct {
-	ID              string                               `json:"id"`
-	Category        string                               `json:"category"`
-	Name            string                               `json:"name"`
-	Description     string                               `json:"description"`
-	Icon            string                               `json:"icon"`
-	Domain          string                               `json:"domain"`
-	Tags            []string                             `json:"tags"`
-	Version         string                               `json:"version"`
-	VersionDate     string                               `json:"version_date"`
-	VersionNote     string                               `json:"version_note"`
-	PackageURL      string                               `json:"package_url"`
-	PackageSHA256   string                               `json:"package_sha256"`
-	PackageSize     int64                                `json:"package_size"`
-	DocCount        int64                                `json:"doc_count"`
-	DataSource      string                               `json:"data_source"`
-	Files           []knowledgeMarketFileOpenAPIResponse `json:"files"`
-	SampleQuestions []string                             `json:"sample_questions"`
-	SortOrder       int                                  `json:"sort_order"`
-	CreatedAt       string                               `json:"created_at"`
-	UpdatedAt       string                               `json:"updated_at"`
+	ID              string   `json:"id"`
+	Category        string   `json:"category"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
+	Icon            string   `json:"icon"`
+	Domain          string   `json:"domain"`
+	Tags            []string `json:"tags"`
+	PackageURL      string   `json:"package_url"`
+	PackageRevision string   `json:"package_revision"`
+	DataSource      string   `json:"data_source"`
+	SampleQuestions []string `json:"sample_questions"`
+	SortOrder       int      `json:"sort_order"`
+	CreatedAt       string   `json:"created_at"`
+	UpdatedAt       string   `json:"updated_at"`
 }
 
 type knowledgeMarketDomainsGroupOpenAPIResponse struct {
@@ -1917,6 +1903,119 @@ type knowledgeMarketDomainsGroupOpenAPIResponse struct {
 
 type knowledgeMarketDomainsOpenAPIResponse struct {
 	Domains knowledgeMarketDomainsGroupOpenAPIResponse `json:"domains"`
+}
+
+type knowledgeMarketInstallOpenAPIResponse struct {
+	JobID string `json:"job_id"`
+	State string `json:"state"`
+}
+
+type knowledgeMarketTaskPathParams struct {
+	JobID string `path:"job_id"`
+}
+
+type knowledgeMarketTaskListQueryParams struct {
+	Page     int32  `query:"page"`
+	PageSize int32  `query:"page_size"`
+	Status   string `query:"status" enum:"pending,running,succeeded,failed,canceled" desc:"Filter background tasks by async job status."`
+	JobType  string `query:"job_type" desc:"Async job type; defaults to knowledge_market_install."`
+}
+
+type knowledgeMarketTaskProgressOpenAPIResponse struct {
+	Current int64 `json:"current"`
+	Total   int64 `json:"total"`
+}
+
+type knowledgeMarketTaskListItemOpenAPIResponse struct {
+	JobID        string                                     `json:"job_id"`
+	JobType      string                                     `json:"job_type"`
+	JobStatus    string                                     `json:"job_status"`
+	InstallState string                                     `json:"install_state"`
+	MarketItemID string                                     `json:"market_item_id"`
+	Name         string                                     `json:"name"`
+	Icon         string                                     `json:"icon"`
+	Progress     knowledgeMarketTaskProgressOpenAPIResponse `json:"progress"`
+	DatasetID    string                                     `json:"dataset_id"`
+	ErrorMessage string                                     `json:"error_message"`
+	CreatedAt    string                                     `json:"created_at"`
+	FinishedAt   string                                     `json:"finished_at,omitempty"`
+}
+
+type knowledgeMarketTaskListOpenAPIResponse struct {
+	Items    []knowledgeMarketTaskListItemOpenAPIResponse `json:"items"`
+	Page     int32                                        `json:"page"`
+	PageSize int32                                        `json:"page_size"`
+	Total    int32                                        `json:"total"`
+}
+
+type knowledgeMarketTaskPayloadOpenAPIResponse struct {
+	MarketItemID string `json:"market_item_id"`
+	Revision     string `json:"revision,omitempty"`
+	Force        bool   `json:"force,omitempty"`
+}
+
+// knowledgeMarketTaskResultOpenAPIResponse describes the structured success
+// result. Install: {dataset_id, submitted}; single update additionally carries
+// updated/skipped/reason/removed; update-all carries checked plus the spawned
+// item id lists.
+type knowledgeMarketTaskResultOpenAPIResponse struct {
+	DatasetID    string   `json:"dataset_id"`
+	Submitted    int      `json:"submitted"`
+	Reason       string   `json:"reason,omitempty"`
+	Removed      int      `json:"removed,omitempty"`
+	Checked      int      `json:"checked,omitempty"`
+	UpdatedItems []string `json:"updated_items,omitempty"`
+	SkippedItems []string `json:"skipped_items,omitempty"`
+}
+
+type knowledgeMarketTaskParseOpenAPIResponse struct {
+	State   string `json:"state"`
+	Total   int    `json:"total"`
+	Pending int    `json:"pending"`
+	Parsing int    `json:"parsing"`
+	Done    int    `json:"done"`
+	Failed  int    `json:"failed"`
+}
+
+type knowledgeMarketTaskDetailOpenAPIResponse struct {
+	JobID          string                                     `json:"job_id"`
+	JobType        string                                     `json:"job_type"`
+	JobStatus      string                                     `json:"job_status"`
+	InstallState   string                                     `json:"install_state"`
+	MarketItemID   string                                     `json:"market_item_id"`
+	Name           string                                     `json:"name"`
+	Icon           string                                     `json:"icon"`
+	Progress       knowledgeMarketTaskProgressOpenAPIResponse `json:"progress"`
+	DatasetID      string                                     `json:"dataset_id"`
+	ErrorMessage   string                                     `json:"error_message"`
+	CreatedAt      string                                     `json:"created_at"`
+	FinishedAt     string                                     `json:"finished_at,omitempty"`
+	StartedAt      string                                     `json:"started_at,omitempty"`
+	UpdatedAt      string                                     `json:"updated_at,omitempty"`
+	AttemptCount   int                                        `json:"attempt_count"`
+	MaxAttempts    int                                        `json:"max_attempts"`
+	Payload        knowledgeMarketTaskPayloadOpenAPIResponse  `json:"payload"`
+	Result         *knowledgeMarketTaskResultOpenAPIResponse  `json:"result"`
+	Stage          string                                     `json:"stage"`
+	OverallPercent int64                                      `json:"overall_percent"`
+	Parse          knowledgeMarketTaskParseOpenAPIResponse    `json:"parse"`
+}
+
+type knowledgeMarketInstallsOpenAPIResponseItem struct {
+	MarketItemID string `json:"market_item_id"`
+	Name         string `json:"name"`
+	Icon         string `json:"icon"`
+	Domain       string `json:"domain"`
+	InstallState string `json:"install_state"`
+	DatasetID    string `json:"dataset_id"`
+	InstalledAt  string `json:"installed_at,omitempty"`
+	UpdatedAt    string `json:"updated_at"`
+	Active       bool   `json:"active"`
+}
+
+type knowledgeMarketInstallsOpenAPIResponse struct {
+	Items []knowledgeMarketInstallsOpenAPIResponseItem `json:"items"`
+	Total int                                          `json:"total"`
 }
 
 type skillDeleteOpenAPIResponse struct {
@@ -3331,10 +3430,62 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/knowledge-market/items/{market_item_id}",
 			Summary:     "Get knowledge market item details",
-			Description: "Returns the full catalog entry including files and sample questions. 404 when the item does not exist or is not published.",
+			Description: "Returns the full catalog entry including download package URL/revision and sample questions. Version fields are intentionally not exposed. 404 when the item does not exist or is not published.",
 			Tags:        []string{"knowledge-market"},
 			PathParams:  knowledgeMarketItemPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Knowledge market item", knowledgeMarketDetailOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/knowledge-market/items/{market_item_id}:install",
+			Summary:     "Install an official knowledge base",
+			Description: "Enqueues a background install job that downloads the package, creates a personal dataset and submits every file to the parsing/vectorizing pipeline. Returns the job id; progress is polled via GET /knowledge-market/tasks/{job_id}. Conflicts with an in-flight install/update of the same item return 409.",
+			Tags:        []string{"knowledge-market"},
+			PathParams:  knowledgeMarketItemPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Install job enqueued", knowledgeMarketInstallOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/knowledge-market/items/{market_item_id}:update",
+			Summary:     "Update one installed official knowledge base",
+			Description: "Enqueues a background update job (strategy A: clear old documents then import the new package). No-change updates finish with updated=false and write nothing. Conflicts with an in-flight install/update of the same item return 409; not-installed items return 404.",
+			Tags:        []string{"knowledge-market"},
+			PathParams:  knowledgeMarketItemPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Update job enqueued", knowledgeMarketInstallOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/knowledge-market:update-all",
+			Summary:     "One-click update of all installed official knowledge bases",
+			Description: "Enqueues a check-only batch job that compares every installed item and spawns an independent update job per changed item. A second batch for the same user returns 409.",
+			Tags:        []string{"knowledge-market"},
+			Responses:   map[int]openAPIResponse{200: resp("Update-all job enqueued", knowledgeMarketInstallOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/knowledge-market/tasks",
+			Summary:     "List background knowledge market tasks",
+			Description: "Returns the current user's knowledge market tasks (default job type knowledge_market_install; pass job_type for update/update-all) with market item info and install-state enrichment.",
+			Tags:        []string{"knowledge-market"},
+			QueryParams: knowledgeMarketTaskListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Background install task list", knowledgeMarketTaskListOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/knowledge-market/tasks/{job_id}",
+			Summary:     "Get background knowledge market task detail",
+			Description: "Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.",
+			Tags:        []string{"knowledge-market"},
+			PathParams:  knowledgeMarketTaskPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Background install task detail", knowledgeMarketTaskDetailOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/knowledge-market/installs",
+			Summary:     "List my knowledge market installs",
+			Description: "Returns the current user's install records (all states, no pagination) so plaza cards and the \"my knowledge bases\" tab can map each item to its install state.",
+			Tags:        []string{"knowledge-market"},
+			Responses:   map[int]openAPIResponse{200: resp("My knowledge market installs", knowledgeMarketInstallsOpenAPIResponse{})},
 		},
 		{
 			Method:      "POST",

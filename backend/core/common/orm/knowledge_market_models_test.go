@@ -29,8 +29,8 @@ func TestKnowledgeMarketModelsAutoMigrate(t *testing.T) {
 	itemColumns := []string{
 		"id", "category", "name", "description", "icon", "domain", "tags",
 		"version", "version_date", "version_note",
-		"package_url", "package_sha256", "package_size", "doc_count", "data_source",
-		"files", "sample_questions", "status", "sort_order", "created_at", "updated_at",
+		"package_url", "package_revision", "online_access_url", "data_source",
+		"sample_questions", "status", "sort_order", "created_at", "updated_at",
 	}
 	for _, col := range itemColumns {
 		if !db.Migrator().HasColumn(&KnowledgeMarketItem{}, col) {
@@ -38,7 +38,10 @@ func TestKnowledgeMarketModelsAutoMigrate(t *testing.T) {
 		}
 	}
 
-	installColumns := []string{"market_item_id", "user_id", "installed_version", "created_at", "updated_at"}
+	installColumns := []string{
+		"market_item_id", "user_id", "installed_version", "dataset_id",
+		"install_state", "installed_at", "config", "created_at", "updated_at",
+	}
 	for _, col := range installColumns {
 		if !db.Migrator().HasColumn(&KnowledgeMarketInstall{}, col) {
 			t.Fatalf("expected knowledge_market_installs.%s column", col)
