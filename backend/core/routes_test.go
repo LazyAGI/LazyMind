@@ -74,6 +74,41 @@ func TestSkillMarketTagsRouteWinsOverItemRoute(t *testing.T) {
 	}
 }
 
+func TestKnowledgeMarketDomainsRouteWinsOverItemRoute(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+
+	var match mux.RouteMatch
+	req := httptest.NewRequest(http.MethodGet, "/knowledge-market/domains", nil)
+	if !r.Match(req, &match) {
+		t.Fatal("expected knowledge market domains route to match")
+	}
+	gotTemplate, err := match.Route.GetPathTemplate()
+	if err != nil {
+		t.Fatalf("get matched route template: %v", err)
+	}
+	if want := "/knowledge-market/domains"; gotTemplate != want {
+		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+
+	itemReq := httptest.NewRequest(http.MethodGet, "/knowledge-market/items/domains", nil)
+	var itemMatch mux.RouteMatch
+	if !r.Match(itemReq, &itemMatch) {
+		t.Fatal("expected knowledge market item route to match")
+	}
+	gotTemplate, err = itemMatch.Route.GetPathTemplate()
+	if err != nil {
+		t.Fatalf("get item route template: %v", err)
+	}
+	if want := "/knowledge-market/items/{market_item_id}"; gotTemplate != want {
+		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+	if gotID := itemMatch.Vars["market_item_id"]; gotID != "domains" {
+		t.Fatalf("expected market_item_id %q, got %q", "domains", gotID)
+	}
+}
+
 func TestAgentThreadMessagesRouteWinsOverGenericThreadRoute(t *testing.T) {
 	r := mux.NewRouter()
 	r.UseEncodedPath()

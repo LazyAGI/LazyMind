@@ -22,6 +22,7 @@ import (
 	"lazymind/core/currentmemory"
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
+	"lazymind/core/knowledge_market"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
@@ -191,6 +192,9 @@ func main() {
 	datasourceCatalogPath := filepath.Join(".", "config", "datasource_catalog.yaml")
 	modelprovider.MustSeedDatasourceCatalog(context.Background(), db.DB, datasourceCatalogPath)
 
+	knowledgeMarketCatalogPath := filepath.Join(".", "config", "knowledge_market_catalog.yaml")
+	knowledge_market.MustSeedCatalog(context.Background(), db.DB, knowledgeMarketCatalogPath)
+
 	readonlyDriver := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DRIVER"))
 	readonlyDSN := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DSN"))
 	if readonlyDriver == "" {
@@ -232,6 +236,7 @@ func main() {
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
 	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
 	evalset.RegisterAsyncJobs()
+	knowledge_market.RegisterAsyncJobs()
 	plugin.RegisterPluginDraftGenerateJob()
 	startBackgroundJobs := backgroundJobsEnabled()
 	if !startBackgroundJobs {
