@@ -16,7 +16,7 @@ export interface Task {
   user_id: string;
   conversation_id: string;
   conversation_title?: string;
-  plugin_session_id?: string;
+  workflow_session_id?: string;
   task_type: string;
   title?: string;
   status: string;

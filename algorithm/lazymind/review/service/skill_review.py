@@ -10,10 +10,10 @@ import lazyllm
 from lazyllm import AutoModel, LOG
 from lazyllm.tools.agent.skill_manager import SkillManager
 
-from lazymind.common.skill_document import require_valid_skill_document
+from lazymind.common.skill.document import require_valid_skill_document
 from lazymind.common.integrations.remote_fs import RemoteFS
-from lazymind.common.skill_remote_store import SkillRemoteStore
-from lazymind.common.skill_storage_key import (
+from lazymind.common.skill.remote_store import SkillRemoteStore
+from lazymind.common.skill.storage_key import (
     EXTERNAL_SKILL_CATEGORY,
     INTERNAL_SKILL_CATEGORY,
     parse_skill_storage_key,

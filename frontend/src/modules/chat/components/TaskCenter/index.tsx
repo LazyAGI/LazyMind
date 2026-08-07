@@ -22,7 +22,7 @@ import {
   TaskStatus,
   useTaskCenterStore,
 } from "@/modules/chat/store/taskCenter";
-import { usePluginStore } from "@/modules/chat/store/pluginPanel";
+import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import {
   basenameFromPath,
   resolveCoreAssetUrl,
@@ -521,10 +521,10 @@ const TaskCenter = (props: Props) => {
   const { t } = useTranslation();
   const [filter, setFilter] = useState<FilterKey>("all");
 
-  const loadActiveSession = usePluginStore((s) => s.loadActiveSession);
+  const loadActiveSession = useWorkflowStore((s) => s.loadActiveSession);
 
-  // Ensure plugin session is loaded whenever the conversation changes,
-  // independently of whether PluginPanel has mounted yet.
+  // Ensure workflow session is loaded whenever the conversation changes,
+  // independently of whether WorkflowPanel has mounted yet.
   useEffect(() => {
     if (sessionId) {
       loadActiveSession(sessionId);

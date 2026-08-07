@@ -16,7 +16,7 @@ def test_prompt_builder_renders_stable_sections_and_boundaries() -> None:
             priority=30, content_kind='reference',
         )
         .runtime(
-            'state', 'Plugin State', 'Step A is ready.', 'backend',
+            'state', 'Workflow State', 'Step A is ready.', 'backend',
             priority=20, authoritative=True, content_kind='state',
         )
         .input(content='Please continue.', source='user')
@@ -26,7 +26,7 @@ def test_prompt_builder_renders_stable_sections_and_boundaries() -> None:
     assert bundle.system_prompt == 'Base policy.'
     assert [section.section_id for section in bundle.sections] == ['base', 'state', 'artifact']
     assert '### Runtime Context' in bundle.current_input
-    assert '#### Plugin State [AUTHORITATIVE]' in bundle.current_input
+    assert '#### Workflow State [AUTHORITATIVE]' in bundle.current_input
     assert bundle.current_input.endswith('### User Instruction\n\nPlease continue.')
 
 

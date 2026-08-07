@@ -5,8 +5,8 @@ import { SettingOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import {
   ChatServiceApi,
   ConversationSettingsApi,
-  parseConversationPluginSettings,
-  type ConversationPluginSettings,
+  parseConversationWorkflowSettings,
+  type ConversationWorkflowSettings,
 } from '../../utils/request';
 import './ChatConfigModal.scss';
 
@@ -14,24 +14,24 @@ interface ChatConfigPopoverProps {
   /** When provided, settings are saved to the server immediately on change. */
   conversationId?: string;
   /** Initial settings to display. If not provided, fetched from server on first open. */
-  initialSettings?: ConversationPluginSettings;
+  initialSettings?: ConversationWorkflowSettings;
   /** Called with the new settings after a successful save. */
-  onSave?: (settings: ConversationPluginSettings) => void;
-  /** When true, plugins cannot be disabled because a plugin session is active. */
-  hasPluginSession?: boolean;
+  onSave?: (settings: ConversationWorkflowSettings) => void;
+  /** When true, workflows cannot be disabled because a workflow session is active. */
+  hasWorkflowSession?: boolean;
 }
 
-type PluginExecutionMode = 'auto' | 'dynamic' | 'disabled';
+type WorkflowExecutionMode = 'auto' | 'dynamic' | 'disabled';
 
 export default function ChatConfigPopover({
   conversationId,
   initialSettings,
   onSave,
-  hasPluginSession = false,
+  hasWorkflowSession = false,
 }: ChatConfigPopoverProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [settings, setSettings] = useState<ConversationPluginSettings | null>(
+  const [settings, setSettings] = useState<ConversationWorkflowSettings | null>(
     initialSettings ?? null,
   );
   // Track whether we've already fetched defaults to avoid repeated requests.
@@ -55,26 +55,26 @@ export default function ChatConfigPopover({
   // conversation. Enforce it once per attached session; users may still switch
   // between auto and approval afterwards, but cannot disable until it is removed.
   useEffect(() => {
-    if (!hasPluginSession) {
+    if (!hasWorkflowSession) {
       enforcedWorkflowConversationRef.current = null;
       return;
     }
     const key = conversationId || 'pending-conversation';
     if (enforcedWorkflowConversationRef.current === key) return;
     enforcedWorkflowConversationRef.current = key;
-    const next: ConversationPluginSettings = {
+    const next: ConversationWorkflowSettings = {
       ...settings,
-      enable_plugin: true,
-      plugin_mode: 'dynamic',
+      enable_workflow: true,
+      workflow_mode: 'dynamic',
     };
     setSettings(next);
     onSave?.(next);
     if (conversationId && !conversationId.startsWith('temp_')) {
-      void ConversationSettingsApi().patchPluginSettings(conversationId, next).catch(() => {
+      void ConversationSettingsApi().patchWorkflowSettings(conversationId, next).catch(() => {
         enforcedWorkflowConversationRef.current = null;
       });
     }
-  }, [conversationId, hasPluginSession, onSave, settings]);
+  }, [conversationId, hasWorkflowSession, onSave, settings]);
 
   // Fetch settings from server the first time the popover opens.
   async function ensureSettings() {
@@ -88,7 +88,7 @@ export default function ChatConfigPopover({
           await ChatServiceApi().conversationServiceGetConversationDetail({
             conversation: conversationId,
           });
-        const convSettings = parseConversationPluginSettings(
+        const convSettings = parseConversationWorkflowSettings(
           detailRes.data.conversation,
         );
         if (convSettings) {
@@ -112,12 +112,12 @@ export default function ChatConfigPopover({
     }
   }
 
-  async function handleChange(patch: Partial<ConversationPluginSettings>) {
+  async function handleChange(patch: Partial<ConversationWorkflowSettings>) {
     const next = { ...settings, ...patch };
     setSettings(next);
     try {
       if (conversationId && !conversationId.startsWith('temp_')) {
-        await ConversationSettingsApi().patchPluginSettings(conversationId, next);
+        await ConversationSettingsApi().patchWorkflowSettings(conversationId, next);
         message.success(t('chat.conversationConfigSaved'));
       }
       onSave?.(next);
@@ -126,46 +126,46 @@ export default function ChatConfigPopover({
     }
   }
 
-  const pluginEnabled = settings?.enable_plugin ?? true;
-  const executionMode: PluginExecutionMode = pluginEnabled
-    ? (settings?.plugin_mode ?? 'dynamic')
+  const workflowEnabled = settings?.enable_workflow ?? true;
+  const executionMode: WorkflowExecutionMode = workflowEnabled
+    ? (settings?.workflow_mode ?? 'dynamic')
     : 'disabled';
 
   function handleExecutionModeChange(mode: string | number) {
-    const nextMode = mode as PluginExecutionMode;
+    const nextMode = mode as WorkflowExecutionMode;
     if (nextMode === 'disabled') {
-      void handleChange({ enable_plugin: false });
+      void handleChange({ enable_workflow: false });
       return;
     }
-    void handleChange({ enable_plugin: true, plugin_mode: nextMode });
+    void handleChange({ enable_workflow: true, workflow_mode: nextMode });
   }
 
   const content = (
     <div className="chat-config-popover-content">
-      <div className="chat-config-section chat-config-plugin-section">
+      <div className="chat-config-section chat-config-workflow-section">
         <div className="chat-config-row-label chat-config-section-title">
-          <span className="chat-config-label">{t('chat.conversationConfigPluginExecution')}</span>
-          <Tooltip title={t('chat.conversationConfigPluginExecutionTooltip')} placement="top">
+          <span className="chat-config-label">{t('chat.conversationConfigWorkflowExecution')}</span>
+          <Tooltip title={t('chat.conversationConfigWorkflowExecutionTooltip')} placement="top">
             <QuestionCircleOutlined className="chat-config-help-icon" />
           </Tooltip>
         </div>
         <Segmented
           block
-          className="chat-config-plugin-mode"
+          className="chat-config-workflow-mode"
           value={executionMode}
           onChange={handleExecutionModeChange}
           options={[
-            { label: t('chat.conversationConfigPluginAuto'), value: 'auto' },
-            { label: t('chat.conversationConfigPluginApproval'), value: 'dynamic' },
+            { label: t('chat.conversationConfigWorkflowAuto'), value: 'auto' },
+            { label: t('chat.conversationConfigWorkflowApproval'), value: 'dynamic' },
             {
-              label: t('chat.conversationConfigPluginDisabled'),
+              label: t('chat.conversationConfigWorkflowDisabled'),
               value: 'disabled',
-              disabled: hasPluginSession,
+              disabled: hasWorkflowSession,
             },
           ]}
         />
-        <p className="chat-config-plugin-description">
-          {t('chat.conversationConfigPluginExecutionDesc')}
+        <p className="chat-config-workflow-description">
+          {t('chat.conversationConfigWorkflowExecutionDesc')}
         </p>
       </div>
 

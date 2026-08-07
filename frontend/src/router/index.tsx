@@ -40,7 +40,6 @@ import MemoryManagementListPage from "@/modules/memory/pages/list";
 import MemoryReviewPage from "@/modules/memory/pages/review";
 import MemoryGlossaryDetailPage from "@/modules/memory/pages/glossaryDetail";
 import MemorySkillDetailPage from "@/modules/memory/pages/skillDetail";
-import MemoryExperienceDetailPage from "@/modules/memory/pages/experienceDetail";
 import ModelProviderPage from "@/modules/modelProvider";
 import CloudDocumentsLayout from "@/modules/modelProvider/CloudDocumentsLayout";
 import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
@@ -59,8 +58,8 @@ import { runtimeFeatures } from "@/runtime/features";
 import { isLocalSessionEnabled } from "@/runtime/localSession";
 import UserAgreementPage from "@/pages/UserAgreementPage";
 
-const PluginDetailPage = lazy(() => import("@/modules/plugin/pages/detail"));
-const BuiltinPluginDetailPage = lazy(() => import("@/modules/plugin/pages/builtin-detail"));
+const WorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/detail"));
+const BuiltinWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/builtin-detail"));
 
 export default function AppRouter() {
   const { i18n } = useTranslation();
@@ -229,18 +228,26 @@ export default function AppRouter() {
             <Route path="experience" element={<MemoryManagementListPage />} />
             <Route
               path="experience/:itemId"
-              element={<MemoryExperienceDetailPage />}
+              element={
+                <Navigate to="/memory-management/experience" replace />
+              }
             />
             <Route path="glossary" element={<MemoryManagementListPage />} />
             <Route
               path="glossary/:itemId"
               element={<MemoryGlossaryDetailPage />}
             />
+            <Route
+              path="review/experience/:itemId"
+              element={
+                <Navigate to="/memory-management/experience" replace />
+              }
+            />
             <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>
-          <Route path="memory-management/plugins" element={<Navigate to="/memory-management/skills?skillView=plugins" replace />} />
-          <Route path="memory-management/plugins/builtin/:pluginId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><BuiltinPluginDetailPage /></Suspense>} />
-          <Route path="memory-management/plugins/:pluginId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><PluginDetailPage /></Suspense>} />
+          <Route path="memory-management/workflows" element={<Navigate to="/memory-management/skills?skillView=workflows" replace />} />
+          <Route path="memory-management/workflows/builtin/:workflowId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><BuiltinWorkflowDetailPage /></Suspense>} />
+          <Route path="memory-management/workflows/:workflowId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><WorkflowDetailPage /></Suspense>} />
           {runtimeFeatures.hideEvo ? (
             <Route
               path="self-evolution/*"

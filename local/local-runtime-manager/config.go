@@ -216,6 +216,7 @@ type RuntimePaths struct {
 	AlgorithmHome            string
 	FrontendNodeModules      string
 	AlgorithmPIDDir          string
+	TrustedLocalMode         bool
 }
 
 type RuntimeConfig struct {
@@ -965,6 +966,7 @@ func applyDesktopManifestPaths(paths *RuntimePaths) error {
 		}
 		return filepath.Join(paths.ResourcesRoot, value)
 	}
+	paths.TrustedLocalMode = manifest.Features.TrustedLocalMode
 	if value := joinResource(manifest.Binaries[processComposeServiceName]); value != "" {
 		paths.ProcessComposeBin = value
 	}

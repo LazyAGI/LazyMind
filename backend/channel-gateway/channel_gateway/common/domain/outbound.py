@@ -66,8 +66,8 @@ class ConversationSettingsPresentation:
         'workflow',
     ]
     knowledge_bases: tuple[dict[str, Any], ...]
-    plugin_enabled: bool
-    plugin_mode: Literal['auto', 'dynamic']
+    workflow_enabled: bool
+    workflow_mode: Literal['auto', 'dynamic']
     subagent_enabled: bool
     skills: tuple[dict[str, Any], ...] = ()
     tools: tuple[dict[str, Any], ...] = ()
@@ -84,8 +84,8 @@ class ConversationSettingsPresentation:
             'knowledge_bases': [
                 dict(item) for item in self.knowledge_bases
             ],
-            'plugin_enabled': self.plugin_enabled,
-            'plugin_mode': self.plugin_mode,
+            'workflow_enabled': self.workflow_enabled,
+            'workflow_mode': self.workflow_mode,
             'subagent_enabled': self.subagent_enabled,
             'skills': [dict(item) for item in self.skills],
             'tools': [dict(item) for item in self.tools],

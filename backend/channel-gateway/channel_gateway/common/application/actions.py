@@ -184,7 +184,7 @@ class ChannelActionExecutor:
                 )
                 presentations = (settings_presentation,)
             elif isinstance(command, WorkflowInvokeCommand):
-                if not features.enable_plugin:
+                if not features.enable_workflow:
                     raise ActionMessage(
                         '当前渠道没有开放工作流功能，配置没有改变。'
                     )
@@ -198,7 +198,7 @@ class ChannelActionExecutor:
                     external_address_hash,
                 )
                 if conversation_id:
-                    self._client.dismiss_terminal_plugin_session(
+                    self._client.dismiss_terminal_workflow_session(
                         owner_user_id=owner_user_id,
                         conversation_id=conversation_id,
                         request_id=request_id,
@@ -213,7 +213,7 @@ class ChannelActionExecutor:
                     mentions=(
                         self._client.mention('plugin', workflow),
                     ),
-                    plugin_mode='auto',
+                    workflow_mode='auto',
                     on_stream=on_stream,
                     **context,
                 )

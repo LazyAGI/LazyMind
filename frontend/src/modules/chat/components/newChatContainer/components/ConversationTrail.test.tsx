@@ -39,9 +39,16 @@ describe("ConversationTrail", () => {
             question: "补充接口设计",
             depth: 1,
           },
+          {
+            history_id: "history-3",
+            seq: 3,
+            summary: "确认实现方案",
+            question: "确认实现方案",
+            depth: 1,
+          },
         ]}
         scrollContainerRef={scrollContainerRef}
-        messageListLength={2}
+        messageListLength={3}
       />,
     );
 
@@ -65,9 +72,23 @@ describe("ConversationTrail", () => {
             question: "问题",
             depth: 0,
           },
+          {
+            history_id: "history-2",
+            seq: 2,
+            summary: "补充信息",
+            question: "补充信息",
+            depth: 0,
+          },
+          {
+            history_id: "history-3",
+            seq: 3,
+            summary: "确认结论",
+            question: "确认结论",
+            depth: 0,
+          },
         ]}
         scrollContainerRef={{ current: null }}
-        messageListLength={1}
+        messageListLength={3}
       />,
     );
 
@@ -94,9 +115,23 @@ describe("ConversationTrail", () => {
             question: "问题",
             depth: 0,
           },
+          {
+            history_id: "history-2",
+            seq: 2,
+            summary: "补充信息",
+            question: "补充信息",
+            depth: 0,
+          },
+          {
+            history_id: "history-3",
+            seq: 3,
+            summary: "确认结论",
+            question: "确认结论",
+            depth: 0,
+          },
         ]}
         scrollContainerRef={{ current: null }}
-        messageListLength={1}
+        messageListLength={3}
       />,
     );
 
@@ -111,6 +146,35 @@ describe("ConversationTrail", () => {
       document.querySelector(".conversation-trail-rail .conversation-trail-node span"),
     ).toBeInTheDocument();
     expect(screen.getByText("问题")).toBeInTheDocument();
+  });
+
+  it("renders the trail only when there are at least three conversation turns", () => {
+    const { rerender } = render(
+      <ConversationTrail
+        items={[
+          { history_id: "history-1", seq: 1, summary: "一", question: "一", depth: 0 },
+          { history_id: "history-2", seq: 2, summary: "二", question: "二", depth: 0 },
+        ]}
+        scrollContainerRef={{ current: null }}
+        messageListLength={2}
+      />,
+    );
+
+    expect(document.querySelector(".conversation-trail")).not.toBeInTheDocument();
+
+    rerender(
+      <ConversationTrail
+        items={[
+          { history_id: "history-1", seq: 1, summary: "一", question: "一", depth: 0 },
+          { history_id: "history-2", seq: 2, summary: "二", question: "二", depth: 0 },
+          { history_id: "history-3", seq: 3, summary: "三", question: "三", depth: 0 },
+        ]}
+        scrollContainerRef={{ current: null }}
+        messageListLength={3}
+      />,
+    );
+
+    expect(document.querySelector(".conversation-trail")).toBeInTheDocument();
   });
 
   it("uses a continuously decaying width profile around the current node", () => {

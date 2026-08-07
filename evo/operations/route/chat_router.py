@@ -346,7 +346,7 @@ def _payload(request: RouterChatRequest) -> dict[str, Any]:
             'has_subagents': False,
             'enable_subagent': False,
         },
-        'plugin': {'enable_plugin': False},
+        'plugin': {'enable_workflow': False},
     }
     if request.llm_config:
         payload['runtime']['llm_config'] = dict(request.llm_config)

@@ -20,8 +20,6 @@ import (
 	"lazymind/core/algo"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
-	"lazymind/core/preferencefile"
-	skillservice "lazymind/core/skillv2/service"
 	"lazymind/core/skillv2/taskguard"
 	"lazymind/core/state"
 	"lazymind/core/store"
@@ -72,7 +70,6 @@ func TestSkillReviewWorkerDefersWithoutConsumingAttempt(t *testing.T) {
 func TestAutoEvoDraftWaitsForEditorThenCommits(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	createSkillReviewResultsTable(t, db)
-	createMemoryReviewTable(t, db)
 	now := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
 	insertSkillResource(t, db, orm.SkillResource{
 		ID: "skill-auto-draft", OwnerUserID: "user-1", Category: "system", SkillName: "auto-draft",
@@ -154,114 +151,9 @@ func TestAutoEvoDraftWaitsForEditorThenCommits(t *testing.T) {
 	}
 }
 
-func TestEnablingAutoEvoPublishesPendingReviewDraft(t *testing.T) {
-	db := newResourceUpdateTestDB(t)
-	createSkillReviewResultsTable(t, db)
-	createMemoryReviewTable(t, db)
-	now := time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC)
-	insertSkillResource(t, db, orm.SkillResource{
-		ID: "skill-pending-review", OwnerUserID: "user-1", Category: "system", SkillName: "pending-review",
-		Content: skillContent("pending-review", "old"), Version: 1, AutoEvo: false, IsEnabled: true,
-		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour), CreateUserID: "user-1",
-	})
-	newContent := skillContent("pending-review", "new")
-	newHash := evolution.HashContent(newContent)
-	if err := db.Create(&orm.SkillV2Blob{
-		Hash: newHash, Size: int64(len(newContent)), Mime: "text/markdown; charset=utf-8", FileType: "markdown",
-		StorageBackend: "postgres", Content: []byte(newContent), CreatedAt: now,
-	}).Error; err != nil {
-		t.Fatalf("insert draft blob: %v", err)
-	}
-	if err := db.Model(&orm.SkillV2Draft{}).Where("skill_id = ?", "skill-pending-review").Updates(map[string]any{
-		"version": 2, "draft_updated_at": now, "updated_at": now,
-	}).Error; err != nil {
-		t.Fatalf("update pending review draft: %v", err)
-	}
-	if err := db.Create(&orm.SkillV2DraftEntry{
-		SkillID: "skill-pending-review", Path: "SKILL.md", Op: "upsert", EntryType: "file", BlobHash: &newHash,
-		Size: int64(len(newContent)), Mime: "text/markdown; charset=utf-8", FileType: "markdown", Mode: 0o644, UpdatedAt: now,
-	}).Error; err != nil {
-		t.Fatalf("insert draft entry: %v", err)
-	}
-	userID := "user-1"
-	if err := db.Create(&orm.SkillDraftReviewSession{
-		ID: "draft-review-session", SkillID: "skill-pending-review",
-		BaseRevisionID: "skill-pending-review-rev", DraftVersionAtStart: 2, DraftSnapshotHash: "snapshot",
-		Status: "active", Version: 1, UndoLimit: 20, CreatedBy: &userID, UpdatedBy: &userID,
-		CreatedAt: now, UpdatedAt: now,
-	}).Error; err != nil {
-		t.Fatalf("insert active draft review: %v", err)
-	}
-
-	svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{
-		DB:        db,
-		BlobStore: skillservice.NewBlobStore(db, skillservice.NewLocalObjectStore(t.TempDir())),
-	})
-	enabled := true
-	if _, err := svc.PatchSkill(context.Background(), skillservice.PatchSkillRequest{
-		SkillID: "skill-pending-review",
-		UserID:  userID,
-		AutoEvo: &enabled,
-	}); err != nil {
-		t.Fatalf("enable auto evo: %v", err)
-	}
-
-	var promoted orm.SkillV2Draft
-	if err := db.Take(&promoted, "skill_id = ?", "skill-pending-review").Error; err != nil {
-		t.Fatalf("load promoted draft: %v", err)
-	}
-	if promoted.DraftStatus != "auto_pending" || !strings.HasPrefix(promoted.TaskID, "review_auto_evo_") {
-		t.Fatalf("promoted draft = %#v, want auto_pending review task", promoted)
-	}
-	detail, err := svc.GetSkill(context.Background(), skillservice.GetSkillRequest{SkillID: "skill-pending-review", UserID: userID})
-	if err != nil {
-		t.Fatalf("load promoted skill: %v", err)
-	}
-	if detail.Draft.HasUncommittedDraft {
-		t.Fatalf("auto pending draft still exposed as pending confirmation: %#v", detail.Draft)
-	}
-
-	// Simulate a legacy row that was already auto-enabled before this fix was deployed.
-	if err := db.Model(&orm.SkillV2Draft{}).Where("skill_id = ?", "skill-pending-review").Updates(map[string]any{
-		"draft_status": "", "task_id": "", "version": 2,
-	}).Error; err != nil {
-		t.Fatalf("restore legacy pending review state: %v", err)
-	}
-	scanner := NewScanner(db, Config{}, "auto-evo-toggle-scanner")
-	scanner.clock = func() time.Time { return now }
-	scanResult, err := scanner.RunOnce(context.Background())
-	if err != nil || scanResult.SkillDraftTasksCreated != 1 {
-		t.Fatalf("scan promoted draft: result=%#v err=%v", scanResult, err)
-	}
-	worker := NewWorker(db, Config{WorkerBatchSize: 1, WorkerLockTTL: time.Minute, MaxAttempts: 1}, "auto-evo-toggle-worker")
-	worker.clock = func() time.Time { return now }
-	runResult, err := worker.RunOnce(context.Background())
-	if err != nil || runResult.Done != 1 {
-		t.Fatalf("publish promoted draft: result=%#v err=%v", runResult, err)
-	}
-	if got := readSkillV2HeadContent(t, db, "skill-pending-review"); got != newContent {
-		t.Fatalf("published content = %q, want %q", got, newContent)
-	}
-	var draftEntryCount int64
-	if err := db.Model(&orm.SkillV2DraftEntry{}).Where("skill_id = ?", "skill-pending-review").Count(&draftEntryCount).Error; err != nil {
-		t.Fatalf("count published draft entries: %v", err)
-	}
-	if draftEntryCount != 0 {
-		t.Fatalf("draft entry count = %d, want 0 after publish", draftEntryCount)
-	}
-	var committedReview orm.SkillDraftReviewSession
-	if err := db.Take(&committedReview, "id = ?", "draft-review-session").Error; err != nil {
-		t.Fatalf("load committed review: %v", err)
-	}
-	if committedReview.Status != "committed" {
-		t.Fatalf("review status = %q, want committed", committedReview.Status)
-	}
-}
-
 func TestAutoEvoCreateDraftCommitsInitialRevisionAfterEditorIdle(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	createSkillReviewResultsTable(t, db)
-	createMemoryReviewTable(t, db)
 	now := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
 	content := skillContent("auto-created", "initial")
 	hash := evolution.HashContent(content)
@@ -364,91 +256,6 @@ func TestAutoEvoCreateDraftCommitsInitialRevisionAfterEditorIdle(t *testing.T) {
 	}
 }
 
-func TestAutoEvoPersonalDraftScannerCommitsConversationDraft(t *testing.T) {
-	db := newResourceUpdateTestDB(t)
-	createSkillReviewResultsTable(t, db)
-	createMemoryReviewTable(t, db)
-	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
-	insertPersonalResource(t, db, "memory-auto-draft", "user-1", orm.ResourceUpdateResourceTypeMemory, "old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
-	insertPersonalResource(t, db, "memory-review-draft", "user-2", orm.ResourceUpdateResourceTypeMemory, "review old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
-	insertPersonalResource(t, db, "memory-manual-draft", "user-3", orm.ResourceUpdateResourceTypeMemory, "manual old", 1, false, 0, now.Add(-time.Hour), now.Add(-time.Hour))
-	insertPersonalResource(t, db, "memory-stuck-auto-draft", "user-4", orm.ResourceUpdateResourceTypeMemory, "stuck old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
-	insertPersonalResource(t, db, "memory-empty-manual-draft", "user-5", orm.ResourceUpdateResourceTypeMemory, "empty manual old", 1, true, 0, now.Add(-time.Hour), now.Add(-time.Hour))
-
-	setPersonalDraft := func(resourceID, content, taskID, status string) {
-		t.Helper()
-		hash := evolution.HashContent(content)
-		if err := db.Create(&orm.PersonalResourceBlob{
-			Hash: hash, Size: int64(len(content)), Mime: "text/markdown; charset=utf-8", FileType: "markdown",
-			StorageBackend: "postgres", Content: []byte(content), CreatedAt: now,
-		}).Error; err != nil {
-			t.Fatalf("insert personal draft blob: %v", err)
-		}
-		if err := db.Model(&orm.PersonalResourceDraft{}).Where("resource_id = ?", resourceID).Updates(map[string]any{
-			"blob_hash": hash, "content_hash": hash, "size": int64(len(content)), "task_id": taskID,
-			"draft_status": status, "draft_updated_at": now, "version": 2, "updated_at": now,
-		}).Error; err != nil {
-			t.Fatalf("update personal draft: %v", err)
-		}
-	}
-	setPersonalDraft("memory-auto-draft", "new", "session-1", "pending_confirm")
-	setPersonalDraft("memory-review-draft", "review new", "memory_review_1", "pending_confirm")
-	setPersonalDraft("memory-manual-draft", "manual new", "session-3", "pending_confirm")
-	setPersonalDraft("memory-stuck-auto-draft", "stuck new", "", "auto_pending")
-	setPersonalDraft("memory-empty-manual-draft", "empty manual new", "", "pending_confirm")
-
-	scanner := NewScanner(db, Config{}, "personal-draft-scanner")
-	scanner.clock = func() time.Time { return now }
-	scanResult, err := scanner.RunOnce(context.Background())
-	if err != nil || scanResult.PersonalDraftTasksCreated != 2 {
-		t.Fatalf("scan personal drafts: result=%#v err=%v", scanResult, err)
-	}
-	var recoveredDraft orm.PersonalResourceDraft
-	if err := db.Take(&recoveredDraft, "resource_id = ?", "memory-stuck-auto-draft").Error; err != nil {
-		t.Fatalf("read recovered draft: %v", err)
-	}
-	if !strings.HasPrefix(recoveredDraft.TaskID, "personal_auto_evo_") || recoveredDraft.Version != 3 {
-		t.Fatalf("recovered draft = %#v, want generated task and version 3", recoveredDraft)
-	}
-	repeatScan, err := scanner.RunOnce(context.Background())
-	if err != nil || repeatScan.PersonalDraftTasksCreated != 0 {
-		t.Fatalf("repeat scan duplicated personal draft task: result=%#v err=%v", repeatScan, err)
-	}
-
-	worker := NewWorker(db, Config{WorkerBatchSize: 2, WorkerLockTTL: time.Minute}, "personal-draft-worker")
-	worker.clock = func() time.Time { return now }
-	result, err := worker.RunOnce(context.Background())
-	if err != nil || result.Done != 2 {
-		var tasks []orm.ResourceUpdateTask
-		if queryErr := db.Where("task_type = ?", orm.ResourceUpdateTaskTypeAutoCommitPersonalDraft).Order("created_at ASC").Find(&tasks).Error; queryErr != nil {
-			t.Fatalf("commit personal draft: result=%#v err=%v; query tasks: %v", result, err, queryErr)
-		}
-		t.Fatalf("commit personal draft: result=%#v err=%v tasks=%#v", result, err, tasks)
-	}
-	if content, _ := readPersonalResourceHeadContent(t, db, "memory-auto-draft"); content != "new" {
-		t.Fatalf("committed content = %q, want new", content)
-	}
-	var committedDraft orm.PersonalResourceDraft
-	if err := db.Take(&committedDraft, "resource_id = ?", "memory-auto-draft").Error; err != nil {
-		t.Fatalf("read committed draft: %v", err)
-	}
-	if committedDraft.DraftStatus != "" || committedDraft.TaskID != "" || committedDraft.DraftUpdatedAt != nil {
-		t.Fatalf("committed draft was not reset: %#v", committedDraft)
-	}
-	if content, _ := readPersonalResourceHeadContent(t, db, "memory-review-draft"); content != "review old" {
-		t.Fatalf("memory review draft was committed: %q", content)
-	}
-	if content, _ := readPersonalResourceHeadContent(t, db, "memory-manual-draft"); content != "manual old" {
-		t.Fatalf("manual draft was committed: %q", content)
-	}
-	if content, _ := readPersonalResourceHeadContent(t, db, "memory-stuck-auto-draft"); content != "stuck new" {
-		t.Fatalf("recovered auto draft was not committed: %q", content)
-	}
-	if content, _ := readPersonalResourceHeadContent(t, db, "memory-empty-manual-draft"); content != "empty manual old" {
-		t.Fatalf("empty manual draft was committed: %q", content)
-	}
-}
-
 func TestAutoEvoDraftDefersWhenEditorStatusIsUnavailable(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	now := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
@@ -544,17 +351,17 @@ func TestCountSkillReviewHistoryStatsCountsTrajectoryToolCalls(t *testing.T) {
 	}
 }
 
-func TestCountSkillReviewHistoryStatsExcludesPluginConversations(t *testing.T) {
+func TestCountSkillReviewHistoryStatsExcludesWorkflowConversations(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	ctx := context.Background()
 	start := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	insertSkillReviewConversation(t, db, "conv-regular", "user-1", start.Add(10*time.Minute), 2, 2)
 	insertSkillReviewConversation(t, db, "conv-plugin", "user-1", start.Add(20*time.Minute), 3, 4)
-	if err := db.Create(&orm.PluginSession{
-		ID:             "plugin-session-1",
+	if err := db.Create(&orm.WorkflowSession{
+		ID:             "workflow-session-1",
 		ConversationID: "conv-plugin",
-		PluginID:       "image-plugin",
+		WorkflowID:     "image-workflow",
 		Status:         "completed",
 		Dismissed:      true,
 		CreateUserID:   "user-1",
@@ -576,17 +383,17 @@ func TestCountSkillReviewHistoryStatsExcludesPluginConversations(t *testing.T) {
 	}
 }
 
-func TestValidateSkillReviewSessionsRejectsOtherUsersAndPluginConversations(t *testing.T) {
+func TestValidateSkillReviewSessionsRejectsOtherUsersAndWorkflowConversations(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	insertConversation(t, db, "conv-owned", "user-1", now)
 	insertConversation(t, db, "conv-other", "user-2", now)
 	insertConversation(t, db, "conv-plugin", "user-1", now)
-	if err := db.Create(&orm.PluginSession{
-		ID:             "plugin-session-validation",
+	if err := db.Create(&orm.WorkflowSession{
+		ID:             "workflow-session-validation",
 		ConversationID: "conv-plugin",
-		PluginID:       "image-plugin",
+		WorkflowID:     "image-workflow",
 		Status:         "completed",
 		CreateUserID:   "user-1",
 		CreatedAt:      now,
@@ -1636,11 +1443,10 @@ func TestMemoryWorkerRetriesThenFailsAndDoesNotPersistLLMConfig(t *testing.T) {
 		TriggerType:  orm.ResourceUpdateTriggerTypeConversationIdle,
 		TriggerID:    "idle-1",
 		Status:       orm.ResourceUpdateTaskStatusPending,
-		RequestJSON: marshalJSON(t, memoryGenerateRequestJSON{
-			SessionID:      "session-1",
-			Target:         orm.ResourceUpdateResourceTypeMemory,
-			History:        json.RawMessage(`[{"role":"user","content":"hello"}]`),
-			CurrentContent: "current memory",
+		RequestJSON: marshalJSON(t, memoryReviewRequestJSON{
+			ConversationID:             "conversation-1",
+			ConversationLastActiveAtMS: now.UnixMilli(),
+			History:                    json.RawMessage(`[{"role":"user","content":"hello"}]`),
 		}),
 		NextRunAt: now,
 		CreatedAt: now,
@@ -1708,9 +1514,10 @@ func TestMemoryWorkerDoesNotRetryUnprocessableRequest(t *testing.T) {
 		TriggerType:  orm.ResourceUpdateTriggerTypeConversationIdle,
 		TriggerID:    "idle-invalid",
 		Status:       orm.ResourceUpdateTaskStatusPending,
-		RequestJSON: marshalJSON(t, memoryGenerateRequestJSON{
-			SessionID: "session-invalid",
-			History:   json.RawMessage(`[{"role":"user","content":"hello"}]`),
+		RequestJSON: marshalJSON(t, memoryReviewRequestJSON{
+			ConversationID:             "conversation-invalid",
+			ConversationLastActiveAtMS: now.UnixMilli(),
+			History:                    json.RawMessage(`[{"role":"user","content":"hello"}]`),
 		}),
 		NextRunAt: now,
 		CreatedAt: now,
@@ -1755,17 +1562,16 @@ func TestMemoryWorkerMarksSuccessfulReviewDone(t *testing.T) {
 	task := insertTask(t, db, orm.ResourceUpdateTask{
 		ID:           "task-memory-done",
 		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
-		ResourceType: orm.ResourceUpdateResourceTypeUserPreference,
+		ResourceType: orm.ResourceUpdateResourceTypeMemory,
 		UserID:       "user-1",
-		ResourceID:   "user_preference",
+		ResourceID:   "conversation-2",
 		TriggerType:  orm.ResourceUpdateTriggerTypeConversationIdle,
 		TriggerID:    "idle-2",
 		Status:       orm.ResourceUpdateTaskStatusPending,
-		RequestJSON: marshalJSON(t, memoryGenerateRequestJSON{
-			SessionID:      "session-2",
-			Target:         orm.ResourceUpdateResourceTypeUserPreference,
-			History:        json.RawMessage(`[{"role":"user","content":"hello"}]`),
-			CurrentContent: "current preference",
+		RequestJSON: marshalJSON(t, memoryReviewRequestJSON{
+			ConversationID:             "conversation-2",
+			ConversationLastActiveAtMS: now.UnixMilli(),
+			History:                    json.RawMessage(`[{"role":"user","content":"hello"}]`),
 		}),
 		NextRunAt: now,
 		CreatedAt: now,
@@ -1786,7 +1592,7 @@ func TestMemoryWorkerMarksSuccessfulReviewDone(t *testing.T) {
 	}
 	worker.callers.Memory = func(_ context.Context, req algo.MemoryReviewRequest) (*algo.MemoryReviewResponse, int, error) {
 		captured = req
-		return &algo.MemoryReviewResponse{Status: "success", TaskID: req.TaskID}, http.StatusOK, nil
+		return &algo.MemoryReviewResponse{Status: "success", TaskID: req.TaskID, Outcome: "saved"}, http.StatusOK, nil
 	}
 
 	result, err := worker.RunOnce(ctx)
@@ -1797,7 +1603,9 @@ func TestMemoryWorkerMarksSuccessfulReviewDone(t *testing.T) {
 		t.Fatalf("expected done result, got %#v", result)
 	}
 	expectedTaskID := "memory_review_" + task.ID
-	if captured.TaskID != expectedTaskID || captured.UserID != "user-1" {
+	if captured.TaskID != expectedTaskID || captured.UserID != "user-1" ||
+		captured.ConversationID != "conversation-2" ||
+		captured.ConversationLastActiveAtMS != now.UnixMilli() {
 		t.Fatalf("unexpected memory review request: %#v", captured)
 	}
 	if captured.History == nil || captured.LLMConfig == nil {
@@ -1826,11 +1634,10 @@ func TestMemoryWorkerSendsAlgorithmContractRequest(t *testing.T) {
 		TriggerType:  orm.ResourceUpdateTriggerTypeConversationIdle,
 		TriggerID:    "idle-combined",
 		Status:       orm.ResourceUpdateTaskStatusPending,
-		RequestJSON: marshalJSON(t, memoryGenerateRequestJSON{
-			SessionID: "session-combined",
-			History:   json.RawMessage(`[{"role":"user","content":"hello"}]`),
-			Memory:    "current memory",
-			User:      "current preference",
+		RequestJSON: marshalJSON(t, memoryReviewRequestJSON{
+			ConversationID:             "conversation-combined",
+			ConversationLastActiveAtMS: now.UnixMilli(),
+			History:                    json.RawMessage(`[{"role":"user","content":"hello"}]`),
 		}),
 		NextRunAt: now,
 		CreatedAt: now,
@@ -1851,7 +1658,7 @@ func TestMemoryWorkerSendsAlgorithmContractRequest(t *testing.T) {
 	}
 	worker.callers.Memory = func(_ context.Context, req algo.MemoryReviewRequest) (*algo.MemoryReviewResponse, int, error) {
 		captured = req
-		return &algo.MemoryReviewResponse{Status: "success", TaskID: req.TaskID}, http.StatusOK, nil
+		return &algo.MemoryReviewResponse{Status: "success", TaskID: req.TaskID, Outcome: "saved"}, http.StatusOK, nil
 	}
 
 	result, err := worker.RunOnce(ctx)
@@ -1863,6 +1670,10 @@ func TestMemoryWorkerSendsAlgorithmContractRequest(t *testing.T) {
 	}
 	if captured.TaskID != "memory_review_"+task.ID || captured.UserID != "user-1" {
 		t.Fatalf("unexpected memory review request: %#v", captured)
+	}
+	if captured.ConversationID != "conversation-combined" ||
+		captured.ConversationLastActiveAtMS != now.UnixMilli() {
+		t.Fatalf("unexpected conversation identity in memory review request: %#v", captured)
 	}
 	if captured.History == nil || captured.LLMConfig == nil {
 		t.Fatalf("expected history and llm_config in memory review request: %#v", captured)
@@ -1876,10 +1687,9 @@ func TestMemoryWorkerSendsAlgorithmContractRequest(t *testing.T) {
 	}
 }
 
-func TestScannerIgnoresDeprecatedSkillResultsAndScansMemory(t *testing.T) {
+func TestScannerIgnoresDeprecatedSkillReviewResults(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	createSkillReviewResultsTable(t, db)
-	createMemoryReviewTable(t, db)
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	insertSkillResource(t, db, orm.SkillResource{
@@ -1916,18 +1726,13 @@ func TestScannerIgnoresDeprecatedSkillResultsAndScansMemory(t *testing.T) {
 	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "patch-new", UserID: "user-1", SkillName: "git-workflow", Type: skillReviewTypePatch, ReviewStatus: reviewStatusPending, SkillContent: skillContent("git-workflow", "new patch"), Time: now.Add(-5 * time.Minute)})
 	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "new-skill", UserID: "user-1", SkillName: "brand-new", Type: skillReviewTypeNew, ReviewStatus: reviewStatusPending, SkillContent: skillContent("brand-new", "body"), Time: now.Add(-4 * time.Minute)})
 	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "manual-patch", UserID: "user-1", SkillName: "manual-skill", Type: skillReviewTypePatch, ReviewStatus: reviewStatusPending, SkillContent: skillContent("manual-skill", "manual"), Time: now.Add(-3 * time.Minute)})
-	insertMemoryResource(t, db, orm.SystemMemory{ID: "memory-auto", UserID: "user-1", Content: "old memory", ContentHash: evolution.HashContent("old memory"), Version: 1, AutoEvo: true, CreatedAt: now, UpdatedAt: now})
-	insertPreferenceResource(t, db, orm.SystemUserPreference{ID: "pref-manual", UserID: "user-1", Content: "old pref", ContentHash: evolution.HashContent("old pref"), Version: 1, AutoEvo: false, CreatedAt: now, UpdatedAt: now})
-	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "memory-result", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeMemory, Content: "new memory", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now})
-	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "pref-result", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeUserPreference, Content: "new pref", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now})
-
 	scanner := NewScanner(db, Config{WorkerBatchSize: 10}, "scanner-test")
 	scanner.clock = func() time.Time { return now }
 	result, err := scanner.RunOnce(ctx)
 	if err != nil {
 		t.Fatalf("scanner run: %v", err)
 	}
-	if result.SkillResultsExpired != 0 || result.SkillTasksCreated != 0 || result.MemoryTasksCreated != 1 || result.UserPreferenceTasksCreated != 0 {
+	if result.SkillResultsExpired != 0 || result.SkillTasksCreated != 0 {
 		t.Fatalf("unexpected scanner result: %#v", result)
 	}
 	for _, id := range []string{"patch-old", "patch-new", "new-skill", "manual-patch"} {
@@ -1943,34 +1748,14 @@ func TestScannerIgnoresDeprecatedSkillResultsAndScansMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scanner second run: %v", err)
 	}
-	if result.SkillTasksCreated != 0 || result.MemoryTasksCreated != 0 {
+	if result.SkillTasksCreated != 0 {
 		t.Fatalf("scanner should not duplicate active tasks: %#v", result)
-	}
-	var taskCount int64
-	if err := db.Model(&orm.ResourceUpdateTask{}).Where("task_type = ?", orm.ResourceUpdateTaskTypeAutoApplyReview).Count(&taskCount).Error; err != nil {
-		t.Fatalf("count tasks: %v", err)
-	}
-	if taskCount != 1 {
-		t.Fatalf("expected one memory auto apply task, got %d", taskCount)
-	}
-	var tasks []orm.ResourceUpdateTask
-	if err := db.Order("resource_type ASC").Find(&tasks, "task_type = ?", orm.ResourceUpdateTaskTypeAutoApplyReview).Error; err != nil {
-		t.Fatalf("list auto apply tasks: %v", err)
-	}
-	for _, task := range tasks {
-		if task.TriggerType != orm.ResourceUpdateTriggerTypeReviewResult {
-			t.Fatalf("expected review_result trigger, got %#v", task)
-		}
-		if task.ResourceType == orm.ResourceUpdateResourceTypeMemory && task.TriggerID != "memory_review:memory-result" {
-			t.Fatalf("unexpected memory trigger id: %s", task.TriggerID)
-		}
 	}
 }
 
 func TestScannerLeavesDeprecatedSkillResultsUntouched(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	createSkillReviewResultsTable(t, db)
-	createMemoryReviewTable(t, db)
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "missing-skill", UserID: "user-1", SkillName: "missing", Type: skillReviewTypePatch, ReviewStatus: reviewStatusPending, SkillContent: skillContent("missing", "body"), Time: now})
@@ -2067,131 +1852,6 @@ func TestScanPendingResultsForSkillIgnoresDeprecatedResults(t *testing.T) {
 	}
 }
 
-func TestAutoApplyReviewSkipsDeprecatedSkillResult(t *testing.T) {
-	db := newResourceUpdateTestDB(t)
-	createSkillReviewResultsTable(t, db)
-	ctx := context.Background()
-	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
-	oldContent := skillContent("git-workflow", "old")
-	newContent := skillContent("git-workflow", "new")
-	insertSkillResource(t, db, orm.SkillResource{
-		ID:           "skill-apply",
-		OwnerUserID:  "user-1",
-		Category:     "system",
-		SkillName:    "git-workflow",
-		NodeType:     evolution.SkillNodeTypeParent,
-		Content:      oldContent,
-		ContentHash:  evolution.HashContent(oldContent),
-		Version:      2,
-		AutoEvo:      true,
-		Ext:          json.RawMessage(`{"draft_suggestion_ids":["legacy"],"keep":"yes"}`),
-		IsEnabled:    true,
-		CreatedAt:    now.Add(-time.Hour),
-		UpdatedAt:    now.Add(-time.Hour),
-		CreateUserID: "user-1",
-	})
-	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "patch-apply", UserID: "user-1", SkillName: "git-workflow", Type: skillReviewTypePatch, ReviewStatus: reviewStatusPending, SkillContent: newContent, Time: now})
-	insertTask(t, db, orm.ResourceUpdateTask{
-		ID:             "task-apply",
-		TaskType:       orm.ResourceUpdateTaskTypeAutoApplyReview,
-		ResourceType:   orm.ResourceUpdateResourceTypeSkill,
-		UserID:         "user-1",
-		ResourceID:     "skill-apply",
-		TriggerType:    orm.ResourceUpdateTriggerTypeReviewResult,
-		TriggerID:      "patch-apply",
-		ReviewResultID: "patch-apply",
-		Status:         orm.ResourceUpdateTaskStatusPending,
-		NextRunAt:      now,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	})
-	worker := NewWorker(db, Config{WorkerBatchSize: 1, WorkerLockTTL: time.Minute, MaxAttempts: 2, RetryBackoffBase: time.Second, RetryBackoffMax: time.Second}, "worker-apply")
-	worker.clock = func() time.Time { return now }
-	result, err := worker.RunOnce(ctx)
-	if err != nil {
-		t.Fatalf("worker run: %v", err)
-	}
-	if result.Skipped != 1 {
-		t.Fatalf("expected skipped auto apply, got %#v", result)
-	}
-	var updated orm.SkillV2Skill
-	if err := db.Take(&updated, "id = ?", "skill-apply").Error; err != nil {
-		t.Fatalf("read skill: %v", err)
-	}
-	updatedContent := readSkillV2HeadContent(t, db, updated.ID)
-	if updatedContent != oldContent || updated.Version != 2 {
-		t.Fatalf("deprecated result changed skill: version=%d content=%q", updated.Version, updatedContent)
-	}
-	if status := skillReviewResultStatus(t, db, "patch-apply"); status != reviewStatusPending {
-		t.Fatalf("expected pending result, got %s", status)
-	}
-}
-
-func TestAutoApplyReviewSkipsWhenAutoEvoDisabledAtExecution(t *testing.T) {
-	db := newResourceUpdateTestDB(t)
-	createSkillReviewResultsTable(t, db)
-	ctx := context.Background()
-	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
-	oldContent := skillContent("git-workflow", "old")
-	insertSkillResource(t, db, orm.SkillResource{
-		ID:           "skill-skip",
-		OwnerUserID:  "user-1",
-		Category:     "system",
-		SkillName:    "git-workflow",
-		NodeType:     evolution.SkillNodeTypeParent,
-		Content:      oldContent,
-		ContentHash:  evolution.HashContent(oldContent),
-		Version:      1,
-		AutoEvo:      false,
-		IsEnabled:    true,
-		CreatedAt:    now.Add(-time.Hour),
-		UpdatedAt:    now.Add(-time.Hour),
-		CreateUserID: "user-1",
-	})
-	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "patch-skip", UserID: "user-1", SkillName: "git-workflow", Type: skillReviewTypePatch, ReviewStatus: reviewStatusPending, SkillContent: skillContent("git-workflow", "new"), Time: now})
-	insertTask(t, db, orm.ResourceUpdateTask{
-		ID:             "task-skip",
-		TaskType:       orm.ResourceUpdateTaskTypeAutoApplyReview,
-		ResourceType:   orm.ResourceUpdateResourceTypeSkill,
-		UserID:         "user-1",
-		ResourceID:     "skill-skip",
-		TriggerType:    orm.ResourceUpdateTriggerTypeReviewResult,
-		TriggerID:      "patch-skip",
-		ReviewResultID: "patch-skip",
-		Status:         orm.ResourceUpdateTaskStatusPending,
-		NextRunAt:      now,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	})
-	worker := NewWorker(db, Config{WorkerBatchSize: 1, WorkerLockTTL: time.Minute, MaxAttempts: 2, RetryBackoffBase: time.Second, RetryBackoffMax: time.Second}, "worker-skip-auto")
-	worker.clock = func() time.Time { return now }
-	result, err := worker.RunOnce(ctx)
-	if err != nil {
-		t.Fatalf("worker run: %v", err)
-	}
-	if result.Skipped != 1 {
-		t.Fatalf("expected skipped auto apply, got %#v", result)
-	}
-	var task orm.ResourceUpdateTask
-	if err := db.Take(&task, "id = ?", "task-skip").Error; err != nil {
-		t.Fatalf("read task: %v", err)
-	}
-	if task.Status != orm.ResourceUpdateTaskStatusSkipped {
-		t.Fatalf("expected skipped task, got %s", task.Status)
-	}
-	var updated orm.SkillV2Skill
-	if err := db.Take(&updated, "id = ?", "skill-skip").Error; err != nil {
-		t.Fatalf("read skill: %v", err)
-	}
-	updatedContent := readSkillV2HeadContent(t, db, updated.ID)
-	if updatedContent != oldContent || updated.Version != 1 {
-		t.Fatalf("skill should remain unchanged, got content=%q version=%d", updatedContent, updated.Version)
-	}
-	if status := skillReviewResultStatus(t, db, "patch-skip"); status != reviewStatusPending {
-		t.Fatalf("expected result pending, got %s", status)
-	}
-}
-
 func TestSkillAcceptRejectAndUserFiltering(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	createSkillReviewResultsTable(t, db)
@@ -2243,193 +1903,14 @@ func TestSkillAcceptRejectAndUserFiltering(t *testing.T) {
 	}
 }
 
-func TestMemoryAcceptRejectTaskAPIAndNoAsyncJobID(t *testing.T) {
-	db := newResourceUpdateTestDB(t)
-	createMemoryReviewTable(t, db)
-	store.Init(db, nil, nil)
-	t.Cleanup(func() { store.Init(nil, nil, nil) })
-	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
-	insertMemoryResource(t, db, orm.SystemMemory{ID: "memory-1", UserID: "user-1", Content: "old memory", ContentHash: evolution.HashContent("old memory"), Version: 1, AutoEvo: false, CreatedAt: now, UpdatedAt: now})
-	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "memory-accept", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeMemory, Content: "new memory", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now})
-	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "memory-reject", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeMemory, Content: "reject memory", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now})
-	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "memory-other", UserID: "other-user", Target: orm.ResourceUpdateResourceTypeMemory, Content: "other memory", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now})
-	insertTask(t, db, orm.ResourceUpdateTask{
-		ID:             "task-user-1",
-		TaskType:       orm.ResourceUpdateTaskTypeAutoApplyReview,
-		ResourceType:   orm.ResourceUpdateResourceTypeMemory,
-		UserID:         "user-1",
-		ResourceID:     "memory-1",
-		TriggerType:    orm.ResourceUpdateTriggerTypeReviewResult,
-		TriggerID:      "memory-accept",
-		ReviewResultID: "memory-accept",
-		Status:         orm.ResourceUpdateTaskStatusSkipped,
-		NextRunAt:      now,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	})
-
-	req := mux.SetURLVars(httptest.NewRequest(http.MethodPost, "/api/core/memory-review-results/memory-accept:accept", nil), map[string]string{"review_result_id": "memory-accept"})
-	req.Header.Set("X-User-Id", "user-1")
-	rec := httptest.NewRecorder()
-	AcceptMemoryReviewResult(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("accept memory failed: code=%d body=%s", rec.Code, rec.Body.String())
-	}
-	memoryContent, memoryResource := readPersonalResourceHeadContent(t, db, "memory-1")
-	if memoryContent != "new memory" || memoryResource.Version != 2 {
-		t.Fatalf("memory not updated: version=%d content=%q", memoryResource.Version, memoryContent)
-	}
-
-	otherReq := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/api/core/memory-review-results/memory-other", nil), map[string]string{"review_result_id": "memory-other"})
-	otherReq.Header.Set("X-User-Id", "user-1")
-	otherRec := httptest.NewRecorder()
-	GetMemoryReviewResult(otherRec, otherReq)
-	if otherRec.Code != http.StatusNotFound {
-		t.Fatalf("expected cross-user memory result hidden as 404, got %d", otherRec.Code)
-	}
-
-	rejectReq := mux.SetURLVars(httptest.NewRequest(http.MethodPost, "/api/core/memory-review-results/memory-reject:reject", nil), map[string]string{"review_result_id": "memory-reject"})
-	rejectReq.Header.Set("X-User-Id", "user-1")
-	rejectRec := httptest.NewRecorder()
-	RejectMemoryReviewResult(rejectRec, rejectReq)
-	if rejectRec.Code != http.StatusOK {
-		t.Fatalf("reject memory failed: code=%d body=%s", rejectRec.Code, rejectRec.Body.String())
-	}
-	if status := memoryReviewStatus(t, db, "memory-reject"); status != reviewStatusRejected {
-		t.Fatalf("expected rejected status, got %s", status)
-	}
-
-	listReq := httptest.NewRequest(http.MethodGet, "/api/core/evolution/tasks", nil)
-	listReq.Header.Set("X-User-Id", "user-1")
-	listRec := httptest.NewRecorder()
-	ListTasks(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("list tasks failed: code=%d body=%s", listRec.Code, listRec.Body.String())
-	}
-	if strings.Contains(listRec.Body.String(), "async_job_id") {
-		t.Fatalf("task response must not contain async_job_id: %s", listRec.Body.String())
-	}
-
-	var listResp struct {
-		Code int `json:"code"`
-		Data struct {
-			Items []taskResponse `json:"items"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
-		t.Fatalf("decode list tasks: %v", err)
-	}
-	if len(listResp.Data.Items) != 1 || listResp.Data.Items[0].ID != "task-user-1" {
-		t.Fatalf("unexpected task list: %#v", listResp.Data.Items)
-	}
-}
-
-func TestListMemoryReviewResultsHidesUnmappedRows(t *testing.T) {
-	db := newResourceUpdateTestDB(t)
-	createMemoryReviewTable(t, db)
-	store.Init(db, nil, nil)
-	t.Cleanup(func() { store.Init(nil, nil, nil) })
-	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
-	insertMemoryResource(t, db, orm.SystemMemory{ID: "memory-1", UserID: "user-1", Content: "old memory", ContentHash: evolution.HashContent("old memory"), Version: 1, AutoEvo: false, CreatedAt: now, UpdatedAt: now})
-	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "mapped", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeMemory, Content: "new memory", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now})
-	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "unmapped-preference", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeUserPreference, Content: "---\nagent_persona: a\npreferred_name: b\nresponse_style: c\n---\n\nbody", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now.Add(time.Second)})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/core/memory-review-results", nil)
-	req.Header.Set("X-User-Id", "user-1")
-	rec := httptest.NewRecorder()
-
-	ListMemoryReviewResults(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list memory review results failed: code=%d body=%s", rec.Code, rec.Body.String())
-	}
-	var resp struct {
-		Code int `json:"code"`
-		Data struct {
-			Items []memoryReviewResultResponse `json:"items"`
-			Total int                          `json:"total"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Data.Total != 1 || len(resp.Data.Items) != 1 || resp.Data.Items[0].ID != "mapped" {
-		t.Fatalf("expected only mapped memory review result, got total=%d items=%#v", resp.Data.Total, resp.Data.Items)
-	}
-}
-
-func TestAcceptUserPreferenceReviewResultParsesFrontmatter(t *testing.T) {
-	db := newResourceUpdateTestDB(t)
-	createMemoryReviewTable(t, db)
-	store.Init(db, nil, nil)
-	t.Cleanup(func() { store.Init(nil, nil, nil) })
-	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
-	resource := orm.SystemUserPreference{
-		ID:            "preference-1",
-		UserID:        "user-1",
-		Content:       "旧正文",
-		AgentPersona:  "旧角色",
-		PreferredName: "旧称谓",
-		ResponseStyle: "旧风格",
-		Version:       1,
-		AutoEvo:       false,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}
-	resource.ContentHash = evolution.HashSystemUserPreference(resource)
-	insertPreferenceResource(t, db, resource)
-	reviewContent := "---\nagent_persona: 新角色\npreferred_name: 用户称谓\nresponse_style: 回复风格\n---\n\n新正文"
-	insertMemoryReviewResult(t, db, MemoryReviewResult{
-		ID:           "preference-accept",
-		UserID:       "user-1",
-		Target:       orm.ResourceUpdateResourceTypeUserPreference,
-		Content:      reviewContent,
-		State:        memoryReviewStateSuccess,
-		ReviewStatus: reviewStatusPending,
-		Time:         now,
-	})
-
-	req := mux.SetURLVars(httptest.NewRequest(http.MethodPost, "/api/core/memory-review-results/preference-accept:accept", nil), map[string]string{"review_result_id": "preference-accept"})
-	req.Header.Set("X-User-Id", "user-1")
-	rec := httptest.NewRecorder()
-
-	AcceptMemoryReviewResult(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("accept user_preference failed: code=%d body=%s", rec.Code, rec.Body.String())
-	}
-	updatedContent, _ := readPersonalResourceHeadContent(t, db, "preference-1")
-	updated, err := preferencefile.ParseFileContent(updatedContent)
-	if err != nil {
-		t.Fatalf("parse updated preference: %v", err)
-	}
-	if updated.Content != "新正文" || updated.AgentPersona != "新角色" || updated.PreferredName != "用户称谓" || updated.ResponseStyle != "回复风格" {
-		t.Fatalf("expected frontmatter in preference file, got %#v", updated)
-	}
-	if status := memoryReviewStatus(t, db, "preference-accept"); status != reviewStatusAccepted {
-		t.Fatalf("expected accepted status, got %s", status)
-	}
-}
-
 func newResourceUpdateTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "resource-update.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(
+	db := orm.MigrateTestDB(t,
 		&orm.Conversation{},
 		&orm.ChatHistory{},
-		&orm.PluginSession{},
+		&orm.WorkflowSession{},
 		&orm.ResourceUpdateTask{},
 		&orm.SkillReviewSchedulerState{},
-		&orm.PersonalResource{},
-		&orm.PersonalResourceBlob{},
-		&orm.PersonalResourceRevision{},
-		&orm.PersonalResourceDraft{},
-		&orm.PersonalResourceReviewSession{},
-		&orm.PersonalResourceReviewActionBatch{},
-		&orm.PersonalResourceReviewActionItem{},
 		&orm.SkillV2Skill{},
 		&orm.SkillV2Blob{},
 		&orm.SkillV2Revision{},
@@ -2440,9 +1921,7 @@ func newResourceUpdateTestDB(t *testing.T) *gorm.DB {
 		&orm.SkillDraftReviewActionBatch{},
 		&orm.SkillDraftReviewActionItem{},
 		&orm.SkillSearchIndex{},
-	); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	)
 	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_skill_maintenance_admission
 		ON resource_update_tasks(user_id)
 		WHERE resource_type = 'skill'
@@ -2609,7 +2088,7 @@ func createSkillReviewResultsTable(t *testing.T, db *gorm.DB) {
 	skill_content text NOT NULL,
 	summary text,
 	review_status varchar(32) NOT NULL,
-	time datetime NOT NULL
+	time timestamp NOT NULL
 )`).Error; err != nil {
 		t.Fatalf("create skill_review_results: %v", err)
 	}
@@ -2628,25 +2107,6 @@ func createSkillReviewStatsTable(t *testing.T, db *gorm.DB) {
 		summary json NOT NULL
 	)`).Error; err != nil {
 		t.Fatalf("create skill_review_stats: %v", err)
-	}
-}
-
-func createMemoryReviewTable(t *testing.T, db *gorm.DB) {
-	t.Helper()
-	if err := db.Exec(`
-CREATE TABLE memory_review (
-	id varchar(128) PRIMARY KEY,
-	user_id varchar(255) NOT NULL DEFAULT '',
-	target varchar(32) NOT NULL DEFAULT '',
-	session_id varchar(128) NOT NULL DEFAULT '',
-	source_content text NOT NULL DEFAULT '',
-	content text NOT NULL DEFAULT '',
-	operations json,
-	state varchar(32) NOT NULL DEFAULT '',
-	review_status varchar(32) NOT NULL,
-	time datetime NOT NULL
-)`).Error; err != nil {
-		t.Fatalf("create memory_review: %v", err)
 	}
 }
 
@@ -2704,30 +2164,6 @@ func insertFullSkillReviewResult(t *testing.T, db *gorm.DB, row SkillReviewResul
 	}
 }
 
-func insertMemoryReviewResult(t *testing.T, db *gorm.DB, row MemoryReviewResult) {
-	t.Helper()
-	if row.ReviewStatus == "" {
-		row.ReviewStatus = reviewStatusPending
-	}
-	if row.Time.IsZero() {
-		row.Time = time.Now()
-	}
-	if err := db.Table("memory_review").Create(map[string]any{
-		"id":             row.ID,
-		"user_id":        row.UserID,
-		"target":         row.Target,
-		"session_id":     row.SessionID,
-		"source_content": row.SourceContent,
-		"content":        row.Content,
-		"operations":     row.Operations,
-		"state":          row.State,
-		"review_status":  row.ReviewStatus,
-		"time":           row.Time,
-	}).Error; err != nil {
-		t.Fatalf("insert memory review result %s: %v", row.ID, err)
-	}
-}
-
 func skillReviewResultStatus(t *testing.T, db *gorm.DB, id string) string {
 	t.Helper()
 	var row struct {
@@ -2735,17 +2171,6 @@ func skillReviewResultStatus(t *testing.T, db *gorm.DB, id string) string {
 	}
 	if err := db.Table("skill_review_results").Select("review_status").Where("id = ?", id).Take(&row).Error; err != nil {
 		t.Fatalf("read skill review result %s: %v", id, err)
-	}
-	return row.ReviewStatus
-}
-
-func memoryReviewStatus(t *testing.T, db *gorm.DB, id string) string {
-	t.Helper()
-	var row struct {
-		ReviewStatus string
-	}
-	if err := db.Table("memory_review").Select("review_status").Where("id = ?", id).Take(&row).Error; err != nil {
-		t.Fatalf("read memory review result %s: %v", id, err)
 	}
 	return row.ReviewStatus
 }
@@ -2771,26 +2196,6 @@ func readSkillV2HeadContent(t *testing.T, db *gorm.DB, skillID string) string {
 		t.Fatalf("read skill blob %s: %v", skillID, err)
 	}
 	return string(blob.Content)
-}
-
-func readPersonalResourceHeadContent(t *testing.T, db *gorm.DB, resourceID string) (string, orm.PersonalResource) {
-	t.Helper()
-	var resource orm.PersonalResource
-	if err := db.Take(&resource, "id = ?", resourceID).Error; err != nil {
-		t.Fatalf("read personal resource %s: %v", resourceID, err)
-	}
-	if resource.HeadRevisionID == nil {
-		t.Fatalf("personal resource %s has no head revision", resourceID)
-	}
-	var revision orm.PersonalResourceRevision
-	if err := db.Take(&revision, "id = ? AND resource_id = ?", *resource.HeadRevisionID, resource.ID).Error; err != nil {
-		t.Fatalf("read personal resource revision %s: %v", resourceID, err)
-	}
-	var blob orm.PersonalResourceBlob
-	if err := db.Take(&blob, "hash = ?", revision.BlobHash).Error; err != nil {
-		t.Fatalf("read personal resource blob %s: %v", resourceID, err)
-	}
-	return string(blob.Content), resource
 }
 
 func insertSkillResource(t *testing.T, db *gorm.DB, row orm.SkillResource) {
@@ -2881,106 +2286,6 @@ func insertSkillResource(t *testing.T, db *gorm.DB, row orm.SkillResource) {
 		UpdatedAt:      row.UpdatedAt,
 	}).Error; err != nil {
 		t.Fatalf("insert skill draft %s: %v", row.ID, err)
-	}
-}
-
-func insertMemoryResource(t *testing.T, db *gorm.DB, row orm.SystemMemory) {
-	t.Helper()
-	if row.CreatedAt.IsZero() {
-		row.CreatedAt = time.Now()
-	}
-	if row.UpdatedAt.IsZero() {
-		row.UpdatedAt = row.CreatedAt
-	}
-	insertPersonalResource(t, db, row.ID, row.UserID, orm.ResourceUpdateResourceTypeMemory, row.Content, row.Version, row.AutoEvo, row.AutoEvoGeneration, row.CreatedAt, row.UpdatedAt)
-}
-
-func insertPreferenceResource(t *testing.T, db *gorm.DB, row orm.SystemUserPreference) {
-	t.Helper()
-	if row.CreatedAt.IsZero() {
-		row.CreatedAt = time.Now()
-	}
-	if row.UpdatedAt.IsZero() {
-		row.UpdatedAt = row.CreatedAt
-	}
-	insertPersonalResource(t, db, row.ID, row.UserID, orm.ResourceUpdateResourceTypeUserPreference, evolution.FormatSystemUserPreferenceForChat(row), row.Version, row.AutoEvo, row.AutoEvoGeneration, row.CreatedAt, row.UpdatedAt)
-}
-
-func insertPersonalResource(t *testing.T, db *gorm.DB, id, userID, resourceType, content string, version int64, autoEvo bool, autoEvoGeneration int64, createdAt, updatedAt time.Time) {
-	t.Helper()
-	if version <= 0 {
-		version = 1
-	}
-	path := "memory/memory.md"
-	if resourceType == orm.ResourceUpdateResourceTypeUserPreference {
-		path = "memory/user.md"
-	}
-	hash := evolution.HashContent(content)
-	revisionID := id + "-rev"
-	head := revisionID
-	if err := db.Create(&orm.PersonalResourceBlob{
-		Hash:           hash,
-		Size:           int64(len([]byte(content))),
-		Mime:           "text/markdown; charset=utf-8",
-		FileType:       "markdown",
-		Binary:         false,
-		StorageBackend: "postgres",
-		Content:        []byte(content),
-		CreatedAt:      createdAt,
-	}).Error; err != nil {
-		t.Fatalf("insert personal resource blob %s: %v", id, err)
-	}
-	if err := db.Create(&orm.PersonalResource{
-		ID:                 id,
-		UserID:             userID,
-		ResourceType:       resourceType,
-		HeadRevisionID:     &head,
-		Version:            version,
-		AutoEvo:            autoEvo,
-		AutoEvoGeneration:  autoEvoGeneration,
-		AutoEvoApplyStatus: evolution.AutoEvoApplyStatusIdle,
-		CreatedAt:          createdAt,
-		UpdatedAt:          updatedAt,
-	}).Error; err != nil {
-		t.Fatalf("insert personal resource %s: %v", id, err)
-	}
-	if err := db.Model(&orm.PersonalResource{}).Where("id = ?", id).Updates(map[string]any{
-		"auto_evo":            autoEvo,
-		"auto_evo_generation": autoEvoGeneration,
-	}).Error; err != nil {
-		t.Fatalf("set personal resource auto_evo %s: %v", id, err)
-	}
-	if err := db.Create(&orm.PersonalResourceRevision{
-		ID:          revisionID,
-		ResourceID:  id,
-		RevisionNo:  version,
-		Path:        path,
-		BlobHash:    hash,
-		ContentHash: hash,
-		Size:        int64(len([]byte(content))),
-		Mime:        "text/markdown; charset=utf-8",
-		FileType:    "markdown",
-		Binary:      false,
-		Message:     "seed",
-		CreatedAt:   createdAt,
-	}).Error; err != nil {
-		t.Fatalf("insert personal resource revision %s: %v", id, err)
-	}
-	if err := db.Create(&orm.PersonalResourceDraft{
-		ResourceID:     id,
-		BaseRevisionID: &head,
-		Path:           path,
-		BlobHash:       hash,
-		ContentHash:    hash,
-		Size:           int64(len([]byte(content))),
-		Mime:           "text/markdown; charset=utf-8",
-		FileType:       "markdown",
-		Binary:         false,
-		Version:        1,
-		CreatedAt:      createdAt,
-		UpdatedAt:      updatedAt,
-	}).Error; err != nil {
-		t.Fatalf("insert personal resource draft %s: %v", id, err)
 	}
 }
 

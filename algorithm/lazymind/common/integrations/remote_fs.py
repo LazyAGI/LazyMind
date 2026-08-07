@@ -12,7 +12,7 @@ from lazymind.config import config as _cfg
 
 
 class RemoteFS(LazyLLMFSBase):
-    """A filesystem proxy for skill resources using the backend core remote-fs API."""
+    """Filesystem proxy for Core's skill, plugin, and memory RemoteFS mounts."""
 
     def __init__(self, token: str = 'remote', base_url: str = '', timeout: float = 10, **kwargs):
         super().__init__(token=token, **kwargs)
@@ -47,6 +47,12 @@ class RemoteFS(LazyLLMFSBase):
             params['user_id'] = user_id
         if task_id:
             params['task_id'] = task_id
+        headers = dict(kwargs.pop('headers', {}) or {})
+        internal_token = str(_cfg['core_internal_token'] or '').strip()
+        if internal_token:
+            headers.setdefault('X-LazyMind-Internal-Token', internal_token)
+        if headers:
+            kwargs['headers'] = headers
         return requests.request(
             method,
             f'{self.base_url}/remote-fs/{endpoint}',
@@ -90,7 +96,7 @@ class RemoteFS(LazyLLMFSBase):
         parts = [part for part in normalized.split('/') if part]
         if len(parts) >= 3 and parts[0] == 'skills':
             return '/'.join(parts[:3])
-        if len(parts) >= 3 and parts[0] == 'plugins':
+        if len(parts) >= 3 and parts[0] == 'workflows':
             return '/'.join(parts[:3])
         return normalized
 
@@ -99,7 +105,12 @@ class RemoteFS(LazyLLMFSBase):
         normalized = self._normalize_path(raw_path)
         if not normalized:
             return ''
-        if normalized == 'skills' or normalized.startswith('skills/'):
+        if (
+            normalized == 'skills'
+            or normalized.startswith('skills/')
+            or normalized == 'memory'
+            or normalized.startswith('memory/')
+        ):
             return normalized
         package_root = self._package_root(parent_path)
         if package_root:

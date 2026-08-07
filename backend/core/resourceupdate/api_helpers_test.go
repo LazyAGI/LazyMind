@@ -67,32 +67,6 @@ func TestTaskToResponseResultIDFallback(t *testing.T) {
 	}
 }
 
-// TestMemoryResultToResponse maps MemoryReviewResult to response DTO.
-func TestMemoryResultToResponse(t *testing.T) {
-	now := time.Now()
-	row := MemoryReviewResult{
-		ID:            "mem-1",
-		UserID:        "user-1",
-		Target:        "memory",
-		SessionID:     "session-1",
-		SourceContent: "source",
-		Content:       "content",
-		State:         memoryReviewStateSuccess,
-		ReviewStatus:  reviewStatusPending,
-		Time:          now,
-	}
-	resp := memoryResultToResponse(row)
-	if resp.ID != "mem-1" {
-		t.Fatalf("ID = %q", resp.ID)
-	}
-	if resp.Target != "memory" {
-		t.Fatalf("target = %q", resp.Target)
-	}
-	if resp.State != memoryReviewStateSuccess {
-		t.Fatalf("state = %q", resp.State)
-	}
-}
-
 // TestSkillResultToResponse maps SkillReviewResult to response DTO.
 func TestSkillResultToResponse(t *testing.T) {
 	now := time.Now()
