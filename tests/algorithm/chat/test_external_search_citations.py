@@ -2,7 +2,7 @@ import inspect
 
 import lazyllm
 
-from lazymind.chat.engine.tools.external_search import enable_search_result_citations
+from lazymind.chat.engine.tools.infra import enable_search_result_citations
 from lazymind.chat.service.utils.citations import CITATION_REFS_KEY, reset_citation_state
 
 

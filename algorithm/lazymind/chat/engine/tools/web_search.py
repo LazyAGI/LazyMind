@@ -58,6 +58,23 @@ def _normalize_page_links(page: Dict[str, Any]) -> List[Dict[str, Any]]:
     return links
 
 
+def _navigation_snapshot(page: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        'final_url': page.get('final_url') or page.get('url') or '',
+        'source_keys': _page_source_keys(page),
+        'parent_page_ref': page.get('parent_page_ref'),
+        'via_link_id': page.get('via_link_id'),
+        'depth': int(page.get('depth') or 0),
+        'links': {
+            int(item['id']): str(item['target_url'])
+            for item in (page.get('links') or [])
+            if isinstance(item, dict)
+            and str(item.get('id') or '').isdigit()
+            and normalize_external_url(item.get('target_url'))
+        },
+    }
+
+
 def restore_web_navigation_state(history: List[Dict[str, Any]]) -> Dict[str, Any]:
     navigation: Dict[str, Any] = {}
 
@@ -66,21 +83,7 @@ def restore_web_navigation_state(history: List[Dict[str, Any]]) -> Dict[str, Any
             return
         page_ref = str(page.get('page_ref') or '').strip()
         if page_ref:
-            links = {
-                int(item['id']): str(item['target_url'])
-                for item in (page.get('links') or [])
-                if isinstance(item, dict)
-                and str(item.get('id') or '').isdigit()
-                and normalize_external_url(item.get('target_url'))
-            }
-            navigation[page_ref] = {
-                'final_url': page.get('final_url') or page.get('url') or '',
-                'source_keys': _page_source_keys(page),
-                'parent_page_ref': page.get('parent_page_ref'),
-                'via_link_id': page.get('via_link_id'),
-                'depth': int(page.get('depth') or 0),
-                'links': links,
-            }
+            navigation[page_ref] = _navigation_snapshot(page)
         for item in page.get('results') or []:
             if isinstance(item, dict) and item.get('success') is not False:
                 restore_page(item.get('result'))
@@ -99,13 +102,17 @@ def restore_web_navigation_state(history: List[Dict[str, Any]]) -> Dict[str, Any
     return navigation
 
 
-def _finalize_page(
-    page: Dict[str, Any],
+def _fetch_page(
+    url: str,
     *,
     parent_page_ref: Optional[str] = None,
     via_link_id: Optional[int] = None,
     depth: int = 0,
+    ancestor_source_keys: Optional[set[str]] = None,
 ) -> Dict[str, Any]:
+    page = fetch_url_content(url)
+    if ancestor_source_keys and set(_page_source_keys(page)) & ancestor_source_keys:
+        raise ValueError('navigation_cycle')
     config = _agentic_config()
     citation_state = config.get('citation_state')
     if isinstance(citation_state, dict) and page.get('source_status') in (None, 'ok'):
@@ -116,29 +123,17 @@ def _finalize_page(
     while page_ref in navigation:
         page_ref = f'page_{secrets.token_hex(6)}'
     page['links'] = _normalize_page_links(page)
-    links = {
-        int(item['id']): str(item['target_url'])
-        for item in (page.get('links') or [])
-        if isinstance(item, dict) and str(item.get('id') or '').isdigit() and item.get('target_url')
-    }
-    navigation[page_ref] = {
-        'final_url': page.get('final_url') or page.get('url') or '',
-        'source_keys': _page_source_keys(page),
-        'parent_page_ref': parent_page_ref,
-        'via_link_id': via_link_id,
-        'depth': depth,
-        'links': links,
-    }
     page.update({
         'page_ref': page_ref,
         'parent_page_ref': parent_page_ref,
         'via_link_id': via_link_id,
         'depth': depth,
     })
+    navigation[page_ref] = _navigation_snapshot(page)
     return page
 
 
-def _click_target(page_ref: str, link_id: int) -> tuple[str, int]:
+def _click_target(page_ref: str, link_id: int) -> tuple[str, int, set[str]]:
     navigation = _agentic_config().get('web_navigation_state') or {}
     snapshot = navigation.get(page_ref)
     if not isinstance(snapshot, dict):
@@ -147,10 +142,11 @@ def _click_target(page_ref: str, link_id: int) -> tuple[str, int]:
     if not target:
         raise ValueError('link_id does not exist in page_ref')
 
+    ancestor_keys = _ancestor_source_keys(page_ref)
     target_key = normalize_external_url(target)
-    if target_key and target_key in _ancestor_source_keys(page_ref):
+    if target_key and target_key in ancestor_keys:
         raise ValueError('navigation_cycle')
-    return str(target), int(snapshot.get('depth') or 0) + 1
+    return str(target), int(snapshot.get('depth') or 0) + 1, ancestor_keys
 
 
 def url_fetch(
@@ -184,38 +180,37 @@ def url_fetch(
         per URL; an individual failure does not discard successful pages.
     """
     click_mode = bool(str(page_ref or '').strip()) or link_id is not None
+    fetch_options: Dict[str, Any] = {}
     if click_mode:
         if not str(page_ref or '').strip() or link_id is None:
             raise ValueError('page_ref and link_id are required together')
         if urls:
             raise ValueError('urls cannot be combined with page_ref/link_id')
-        target, depth = _click_target(str(page_ref).strip(), int(link_id))
+        parent_page_ref = str(page_ref).strip()
+        target, depth, ancestor_keys = _click_target(parent_page_ref, int(link_id))
         provided_url = str(url or '').strip()
         if provided_url and normalize_external_url(provided_url) != normalize_external_url(target):
             raise ValueError('url does not match the page_ref/link_id target')
-        fetched = fetch_url_content(target)
-        if set(_page_source_keys(fetched)) & _ancestor_source_keys(str(page_ref).strip()):
-            raise ValueError('navigation_cycle')
-        page = _finalize_page(
-            fetched,
-            parent_page_ref=str(page_ref).strip(),
-            via_link_id=int(link_id),
-            depth=depth,
-        )
-        return tool_success('url_fetch', page)
-
-    requested = [str(item).strip() for item in (urls or []) if str(item).strip()]
-    if str(url or '').strip():
-        requested.insert(0, str(url).strip())
-    requested = list(dict.fromkeys(requested))
+        requested = [target]
+        fetch_options = {
+            'parent_page_ref': parent_page_ref,
+            'via_link_id': int(link_id),
+            'depth': depth,
+            'ancestor_source_keys': ancestor_keys,
+        }
+    else:
+        requested = [str(item).strip() for item in (urls or []) if str(item).strip()]
+        if str(url or '').strip():
+            requested.insert(0, str(url).strip())
+        requested = list(dict.fromkeys(requested))
     if not requested:
         raise ValueError('url or urls is required')
     if len(requested) == 1:
-        return tool_success('url_fetch', _finalize_page(fetch_url_content(requested[0])))
+        return tool_success('url_fetch', _fetch_page(requested[0], **fetch_options))
 
     def fetch_one(item: str) -> Dict[str, Any]:
         try:
-            return {'url': item, 'success': True, 'result': fetch_url_content(item)}
+            return {'url': item, 'success': True, 'result': _fetch_page(item)}
         except Exception as exc:
             return {
                 'url': item,
@@ -225,9 +220,6 @@ def url_fetch(
 
     with ThreadPoolExecutor(max_workers=min(len(requested), 5)) as executor:
         results = list(executor.map(fetch_one, requested))
-    for item in results:
-        if item['success']:
-            item['result'] = _finalize_page(item['result'])
     succeeded = sum(bool(item['success']) for item in results)
     return tool_success('url_fetch', {
         'total': len(results),

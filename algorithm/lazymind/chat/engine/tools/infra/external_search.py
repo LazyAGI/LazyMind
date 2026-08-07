@@ -1,3 +1,5 @@
+"""Citation adapters for external search providers."""
+
 from __future__ import annotations
 
 from functools import wraps

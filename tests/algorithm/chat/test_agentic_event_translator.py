@@ -84,19 +84,17 @@ def test_translator_merges_searched_and_cited_sources_with_roles():
     first = register_external_search_result({
         'title': 'First',
         'url': 'https://example.test/first',
-        'snippet': 'First snippet',
     }, translator.citation_state)
     register_external_search_result({
         'title': 'Second',
         'url': 'https://example.test/second',
-        'snippet': 'Second snippet',
     }, translator.citation_state)
 
     frames = translator.finish(f'Use {first["ref"]}.')
-
-    assert [source['title'] for source in frames[-1]['sources']] == ['First', 'Second']
-    assert frames[-1]['sources'][0]['source_roles'] == ['cited', 'searched']
-    assert frames[-1]['sources'][1]['source_roles'] == ['searched']
+    assert [(source['title'], source['source_roles']) for source in frames[-1]['sources']] == [
+        ('First', ['cited', 'searched']),
+        ('Second', ['searched']),
+    ]
     assert 'searched_sources' not in frames[-1]
 
 
