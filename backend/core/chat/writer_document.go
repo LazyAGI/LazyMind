@@ -32,11 +32,22 @@ type writerDocumentSyncBody struct {
 
 type writerDocumentWriteBackBody struct {
 	BaseRevision int `json:"base_revision"`
+	// Legacy client fields remain accepted, but the selected server-side
+	// revision and synchronized baseline are authoritative.
+	SourceDocument  json.RawMessage `json:"source_document"`
+	RevisedDocument json.RawMessage `json:"revised_document"`
 }
 
 type selectedWriterArtifact struct {
 	Revision orm.WorkflowSlotRevision
 	Value    json.RawMessage
+}
+
+type writerWriteBackArtifact struct {
+	Format   string
+	Document json.RawMessage
+	Markdown string
+	Title    string
 }
 
 // SyncWriterDocument writes an edited WriterDocument to Feishu, then commits
@@ -70,6 +81,13 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	userID := store.UserID(r)
+	session, err := workflow.GetSession(ctx, db, sessionID)
+	if err != nil || session == nil || session.WorkflowID != "writer-workflow" || session.Dismissed ||
+		(session.CreateUserID != "" && userID != "" && session.CreateUserID != userID) {
+		common.ReplyErr(w, "writer session not found", http.StatusNotFound)
+		return
+	}
 	var index *int
 	if listIndex >= 0 {
 		index = &listIndex
@@ -94,7 +112,7 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	toolConfig, err := loadChatToolConfig(ctx, db, store.UserID(r))
+	toolConfig, err := loadChatToolConfig(ctx, db, userID)
 	if err != nil {
 		common.ReplyErr(w, "load Feishu authorization failed", http.StatusBadGateway)
 		return
@@ -105,6 +123,8 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, status, err := algo.SyncWriterDocument(ctx, algo.WriterDocumentSyncRequest{
+		WorkflowID: session.WorkflowID, RevisionID: session.WorkflowRevisionID,
+		TreeHash: session.WorkflowTreeHash, UserID: userID,
 		SourceDocument: body.SourceDocument, RevisedDocument: body.RevisedDocument,
 		ToolConfig: map[string]any{"feishu": credential},
 	})
@@ -180,7 +200,7 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 	writerSyncReply(w, "synced", revision.Revision, true, result)
 }
 
-// WriteBackWriterDocument applies the active draft's IR delta to Feishu and
+// WriteBackWriterDocument writes the active IR or Markdown draft to Feishu and
 // saves the provider-confirmed IR as a new revision.
 func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 	sessionID := common.PathVar(r, "session_id")
@@ -229,43 +249,15 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 		}, http.StatusConflict)
 		return
 	}
-	revisedDocument, err := writerArtifactData(draft.Value, true)
+	activeDraft, err := loadWriterWriteBackArtifact(draft.Value)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	revisedDocument, err = normalizeWriterDocumentForSync(revisedDocument)
-	if err != nil {
-		common.ReplyErr(w, "invalid current WriterDocument: "+err.Error(), http.StatusBadRequest)
-		return
-	}
 	if writerArtifactRevisionSynced(draft) {
-		common.ReplyErrWithData(w, "current WriterDocument revision is already synchronized", map[string]any{
+		common.ReplyErrWithData(w, "current draft_document revision is already synchronized", map[string]any{
 			"status": "already_synced", "current_revision": draft.Revision.Revision,
 		}, http.StatusConflict)
-		return
-	}
-	baseline, err := loadLatestSyncedWriterArtifact(
-		ctx, db, sessionID, draft.Revision.Revision,
-	)
-	if err != nil {
-		common.ReplyErrWithData(w, "initial Feishu write-back has not completed", map[string]any{
-			"status": "baseline_not_found", "current_revision": draft.Revision.Revision,
-		}, http.StatusConflict)
-		return
-	}
-	baselineDocument, err := writerArtifactData(baseline.Value, true)
-	if err != nil {
-		common.ReplyErr(w, "invalid synchronized WriterDocument baseline", http.StatusConflict)
-		return
-	}
-	baselineDocument, err = normalizeWriterDocumentForSync(baselineDocument)
-	if err != nil {
-		common.ReplyErr(w, "invalid synchronized WriterDocument baseline", http.StatusConflict)
-		return
-	}
-	if err := validateWriterWriteBackPair(baselineDocument, revisedDocument); err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusConflict)
 		return
 	}
 
@@ -279,10 +271,58 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "Feishu authorization required", http.StatusUnauthorized)
 		return
 	}
-	result, status, err := algo.SyncWriterDocument(ctx, algo.WriterDocumentSyncRequest{
-		SourceDocument: baselineDocument, RevisedDocument: revisedDocument,
+	syncRequest := algo.WriterDocumentSyncRequest{
+		WorkflowID: session.WorkflowID, RevisionID: session.WorkflowRevisionID,
+		TreeHash: session.WorkflowTreeHash, UserID: userID,
 		ToolConfig: map[string]any{"feishu": credential},
-	})
+	}
+	if activeDraft.Format == "markdown" {
+		target, targetErr := loadSelectedWriterArtifact(ctx, db, sessionID, "target_document")
+		if targetErr == nil {
+			syncRequest.TargetDocument, err = writerArtifactData(target.Value, false)
+			if err != nil {
+				common.ReplyErr(w, "invalid target_document: "+err.Error(), http.StatusConflict)
+				return
+			}
+		} else if targetErr != gorm.ErrRecordNotFound {
+			common.ReplyErr(w, "load target_document failed", http.StatusInternalServerError)
+			return
+		}
+		syncRequest.MarkdownContent = activeDraft.Markdown
+		syncRequest.Title = activeDraft.Title
+	} else {
+		revisedDocument, normalizeErr := normalizeWriterDocumentForSync(activeDraft.Document)
+		if normalizeErr != nil {
+			common.ReplyErr(w, "invalid current WriterDocument: "+normalizeErr.Error(), http.StatusBadRequest)
+			return
+		}
+		baseline, baselineErr := loadLatestSyncedWriterArtifact(
+			ctx, db, sessionID, draft.Revision.Revision,
+		)
+		if baselineErr != nil {
+			common.ReplyErrWithData(w, "initial Feishu write-back has not completed", map[string]any{
+				"status": "baseline_not_found", "current_revision": draft.Revision.Revision,
+			}, http.StatusConflict)
+			return
+		}
+		baselineDocument, baselineErr := writerArtifactData(baseline.Value, true)
+		if baselineErr != nil {
+			common.ReplyErr(w, "invalid synchronized WriterDocument baseline", http.StatusConflict)
+			return
+		}
+		baselineDocument, baselineErr = normalizeWriterDocumentForSync(baselineDocument)
+		if baselineErr != nil {
+			common.ReplyErr(w, "invalid synchronized WriterDocument baseline", http.StatusConflict)
+			return
+		}
+		if pairErr := validateWriterWriteBackPair(baselineDocument, revisedDocument); pairErr != nil {
+			common.ReplyErr(w, pairErr.Error(), http.StatusConflict)
+			return
+		}
+		syncRequest.SourceDocument = baselineDocument
+		syncRequest.RevisedDocument = revisedDocument
+	}
+	result, status, err := algo.SyncWriterDocument(ctx, syncRequest)
 	if err != nil {
 		common.ReplyErrWithData(w, "writer document write-back failed", map[string]any{
 			"status": "write_back_failed", "feishu_synced": false,
@@ -586,6 +626,55 @@ func writerArtifactData(value json.RawMessage, requireLMD bool) (json.RawMessage
 		return nil, fmt.Errorf("read writer artifact: %w", err)
 	}
 	return writerArtifactData(content, false)
+}
+
+func loadWriterWriteBackArtifact(value json.RawMessage) (*writerWriteBackArtifact, error) {
+	var record map[string]json.RawMessage
+	if err := json.Unmarshal(value, &record); err != nil {
+		return nil, fmt.Errorf("invalid writer artifact")
+	}
+	var path string
+	_ = json.Unmarshal(record["path"], &path)
+	if path == "" {
+		document, err := writerArtifactData(value, false)
+		if err != nil {
+			return nil, err
+		}
+		return &writerWriteBackArtifact{Format: "lmd", Document: document}, nil
+	}
+
+	cleanPath := filepath.Clean(path)
+	if !writerArtifactPathAllowed(cleanPath) {
+		return nil, fmt.Errorf("writer artifact path is outside allowed storage")
+	}
+	content, err := os.ReadFile(cleanPath)
+	if err != nil {
+		return nil, fmt.Errorf("read writer artifact: %w", err)
+	}
+	extension := strings.ToLower(filepath.Ext(cleanPath))
+	switch extension {
+	case ".md", ".markdown":
+		if strings.TrimSpace(string(content)) == "" {
+			return nil, fmt.Errorf("active draft_document Markdown is empty")
+		}
+		var filename string
+		_ = json.Unmarshal(record["filename"], &filename)
+		if filename == "" {
+			filename = filepath.Base(cleanPath)
+		}
+		return &writerWriteBackArtifact{
+			Format: "markdown", Markdown: string(content),
+			Title: strings.TrimSuffix(filename, filepath.Ext(filename)),
+		}, nil
+	case ".lmd":
+		document, dataErr := writerArtifactData(content, false)
+		if dataErr != nil {
+			return nil, dataErr
+		}
+		return &writerWriteBackArtifact{Format: "lmd", Document: document}, nil
+	default:
+		return nil, fmt.Errorf("active draft_document must be an .lmd or .md artifact")
+	}
 }
 
 func writerArtifactPathAllowed(path string) bool {

@@ -337,21 +337,22 @@ export function WorkflowSessionApi() {
     writeBackWriterDocument(
       sessionId: string,
       baseRevision: number,
-      sourceDocument: Record<string, unknown>,
-      revisedDocument: Record<string, unknown>,
+      sourceDocument?: Record<string, unknown>,
+      revisedDocument?: Record<string, unknown>,
       options?: RawAxiosRequestConfig,
     ) {
+      const payload: Record<string, unknown> = { base_revision: baseRevision };
+      // Keep the legacy IR payload compatible while the server treats the
+      // selected revision as the authoritative write-back input.
+      if (sourceDocument !== undefined) payload.source_document = sourceDocument;
+      if (revisedDocument !== undefined) payload.revised_document = revisedDocument;
       return axiosInstance.post<{
         code: number;
         message: string;
         data: WriteBackWriterDocumentResult;
       }>(
 		`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/writer-document:write-back`,
-        {
-          base_revision: baseRevision,
-          source_document: sourceDocument,
-          revised_document: revisedDocument,
-        },
+        payload,
         options,
       );
     },

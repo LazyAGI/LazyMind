@@ -21,6 +21,7 @@ from lazyllm.tools.writer.data_models import (
     PatchResult,
     PatchSet,
     StringReplaceSet,
+    TargetDocument,
     WriterDocument,
 )
 from lazyllm.tools.writer.tools import WriterResourceTools, WriterRevisionTools
@@ -888,11 +889,21 @@ def writer_preview_selection_rewrite(
 
 
 def writer_sync_document(
-    source_document: Mapping[str, Any],
-    revised_document: Mapping[str, Any],
+    source_document: Mapping[str, Any] | None = None,
+    revised_document: Mapping[str, Any] | None = None,
+    markdown_content: str = '',
+    target_document: Mapping[str, Any] | None = None,
+    title: str = '',
     artifact_store: str = '',
 ) -> dict:
-    """Persist an edited WriterDocument through its configured provider adapter."""
+    """Persist the selected IR or Markdown draft through its provider adapter."""
+    if markdown_content:
+        return _sync_markdown_document(
+            markdown_content, target_document=target_document, title=title,
+            artifact_store=artifact_store,
+        )
+    if source_document is None or revised_document is None:
+        raise ValueError('source_document and revised_document are required for IR sync.')
     source = WriterDocument.model_validate(source_document)
     revised = WriterDocument.model_validate(revised_document)
     if source.document_id != revised.document_id:
@@ -917,6 +928,56 @@ def writer_sync_document(
     )
     persisted.ui_editable = True
     return _sync_document_response(True, patch_set, result, persisted)
+
+
+def _sync_markdown_document(
+    markdown_content: str,
+    *,
+    target_document: Mapping[str, Any] | None,
+    title: str,
+    artifact_store: str,
+) -> dict:
+    """Convert Markdown against a provider target, replace it, then read back IR."""
+    markdown = markdown_content.strip()
+    if not markdown:
+        raise ValueError('Markdown draft is empty.')
+    root = _action_root(artifact_store, 'sync-document')
+    if target_document:
+        target = TargetDocument.model_validate(target_document)
+    else:
+        heading = re.search(r'^#\s+(.+?)\s*$', markdown, flags=re.MULTILINE)
+        document_title = (heading.group(1).strip() if heading else title.strip()) or '未命名文档'
+        created = _json_loads(
+            WriterResourceToolkit().create_document(title=document_title), {},
+        )
+        target = TargetDocument.model_validate(created)
+
+    resource = WriterResourceTools(llm=None, artifact_store=str(root))
+    write_output = resource.replace_document(markdown_content, target)
+    write_result = _read_json_file(_action_result_path(write_output))
+    refresh_target = target.model_copy(deep=True)
+    refresh_target.meta = {**refresh_target.meta, 'stage': 'final'}
+    refreshed_output = resource.document_to_docir(refresh_target)
+    persisted = load_artifact_json(
+        _action_result_path(refreshed_output), WriterDocument,
+    )
+    persisted.ui_editable = True
+    result = PatchResult(
+        success=True,
+        message='Markdown converted to IR and document replaced.',
+        meta={
+            'mode': 'replace',
+            'source_format': 'markdown',
+            'write_result': write_result,
+        },
+    )
+    return {
+        'success': True,
+        'changed': True,
+        'feishu_synced': True,
+        'patch_result': result.model_dump(),
+        'persisted_document': persisted.model_dump(),
+    }
 
 
 def _action_result_path(result: dict, key: str | None = None) -> str:

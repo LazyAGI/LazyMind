@@ -3,15 +3,19 @@ package algo
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"time"
-
-	"lazymind/core/common"
+	"fmt"
 )
 
 type WriterDocumentSyncRequest struct {
+	WorkflowID     string          `json:"workflow_id"`
+	RevisionID     string          `json:"revision_id"`
+	TreeHash       string          `json:"tree_hash,omitempty"`
+	UserID         string          `json:"user_id,omitempty"`
 	SourceDocument  json.RawMessage `json:"source_document"`
 	RevisedDocument json.RawMessage `json:"revised_document"`
+	MarkdownContent string          `json:"markdown_content"`
+	TargetDocument  json.RawMessage `json:"target_document"`
+	Title           string          `json:"title"`
 	ToolConfig      map[string]any  `json:"tool_config"`
 }
 
@@ -27,16 +31,39 @@ func SyncWriterDocument(
 	ctx context.Context,
 	req WriterDocumentSyncRequest,
 ) (*WriterDocumentSyncResponse, int, error) {
-	var response WriterDocumentSyncResponse
-	err := common.ApiPost(
-		ctx,
-		common.JoinURL(common.ChatServiceEndpoint(), "/api/writer/documents:sync"),
-		req, nil, &response, 2*time.Minute,
-	)
-	status := 0
-	var httpErr *common.HTTPError
-	if errors.As(err, &httpErr) {
-		status = httpErr.StatusCode
+	arguments := map[string]any{}
+	if len(req.SourceDocument) > 0 {
+		arguments["source_document"] = req.SourceDocument
 	}
-	return &response, status, err
+	if len(req.RevisedDocument) > 0 {
+		arguments["revised_document"] = req.RevisedDocument
+	}
+	if req.MarkdownContent != "" {
+		arguments["markdown_content"] = req.MarkdownContent
+	}
+	if len(req.TargetDocument) > 0 {
+		arguments["target_document"] = req.TargetDocument
+	}
+	if req.Title != "" {
+		arguments["title"] = req.Title
+	}
+	action, status, err := InvokeWorkflowAction(ctx, WorkflowActionInvokeRequest{
+		WorkflowID: req.WorkflowID,
+		RevisionID: req.RevisionID,
+		TreeHash:   req.TreeHash,
+		UserID:     req.UserID,
+		Action:     "sync_document",
+		Phase:      "execute",
+		Slot:       "draft_document",
+		Arguments:  arguments,
+		ToolConfig: req.ToolConfig,
+	})
+	if err != nil {
+		return nil, status, err
+	}
+	var response WriterDocumentSyncResponse
+	if err := json.Unmarshal(action.Result, &response); err != nil {
+		return nil, status, fmt.Errorf("decode sync_document action response: %w", err)
+	}
+	return &response, status, nil
 }
