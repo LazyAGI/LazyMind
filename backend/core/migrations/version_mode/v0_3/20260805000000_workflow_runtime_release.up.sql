@@ -256,6 +256,17 @@ ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS driver_content TEXT NOT NULL 
 ALTER TABLE plugin_drafts ADD COLUMN driver_content TEXT NOT NULL DEFAULT '';
 
 -- +migrate Dialect postgres
+ALTER TABLE public.chat_histories
+    ADD COLUMN IF NOT EXISTS algorithm_id VARCHAR(64);
+CREATE INDEX IF NOT EXISTS idx_chat_histories_algorithm_create_time
+    ON public.chat_histories (algorithm_id, create_time);
+
+-- +migrate Dialect sqlite
+ALTER TABLE chat_histories ADD COLUMN algorithm_id varchar(64);
+CREATE INDEX IF NOT EXISTS idx_chat_histories_algorithm_create_time
+    ON chat_histories (algorithm_id, create_time);
+
+-- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS public.memory_current_entries (
     user_id VARCHAR(255) NOT NULL,
     path VARCHAR(1024) NOT NULL,
@@ -314,6 +325,40 @@ CREATE INDEX IF NOT EXISTS idx_episode_memories_user_conversation_recorded
 CREATE INDEX IF NOT EXISTS idx_episode_memories_search_vector
     ON public.episode_memories USING GIN (search_vector);
 
+CREATE TABLE IF NOT EXISTS external_agent_bindings (
+    id VARCHAR(36) PRIMARY KEY,
+    conversation_id VARCHAR(36) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    provider_thread_id VARCHAR(128) NOT NULL,
+    managed_by_lazymind BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by_user_id VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_agent_binding_conversation UNIQUE (conversation_id),
+    CONSTRAINT uk_external_agent_binding_thread UNIQUE (provider, provider_thread_id)
+);
+
+CREATE TABLE IF NOT EXISTS external_agent_runs (
+    id VARCHAR(36) PRIMARY KEY,
+    request_id VARCHAR(255) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    history_id VARCHAR(36) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    provider_thread_id VARCHAR(128) NOT NULL,
+    provider_turn_id VARCHAR(128),
+    actor_user_id VARCHAR(255) NOT NULL,
+    action VARCHAR(32) NOT NULL DEFAULT 'start',
+    status VARCHAR(32) NOT NULL,
+    error_message TEXT,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_agent_run_request UNIQUE (provider, request_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_agent_runs_conversation_id ON external_agent_runs (conversation_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_runs_provider_thread_id ON external_agent_runs (provider_thread_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_runs_status ON external_agent_runs (status);
+
 ALTER TABLE plugin_transition_commands
     ADD COLUMN IF NOT EXISTS retry_origin VARCHAR(16) NOT NULL DEFAULT 'automatic';
 
@@ -369,6 +414,40 @@ CREATE INDEX IF NOT EXISTS idx_episode_memories_user_recorded
     ON episode_memories (user_id, recorded_at_ms DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_episode_memories_user_conversation_recorded
     ON episode_memories (user_id, conversation_id, recorded_at_ms ASC, id ASC);
+
+CREATE TABLE IF NOT EXISTS external_agent_bindings (
+    id VARCHAR(36) PRIMARY KEY,
+    conversation_id VARCHAR(36) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    provider_thread_id VARCHAR(128) NOT NULL,
+    managed_by_lazymind BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by_user_id VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_agent_binding_conversation UNIQUE (conversation_id),
+    CONSTRAINT uk_external_agent_binding_thread UNIQUE (provider, provider_thread_id)
+);
+
+CREATE TABLE IF NOT EXISTS external_agent_runs (
+    id VARCHAR(36) PRIMARY KEY,
+    request_id VARCHAR(255) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    history_id VARCHAR(36) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    provider_thread_id VARCHAR(128) NOT NULL,
+    provider_turn_id VARCHAR(128),
+    actor_user_id VARCHAR(255) NOT NULL,
+    action VARCHAR(32) NOT NULL DEFAULT 'start',
+    status VARCHAR(32) NOT NULL,
+    error_message TEXT,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_agent_run_request UNIQUE (provider, request_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_agent_runs_conversation_id ON external_agent_runs (conversation_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_runs_provider_thread_id ON external_agent_runs (provider_thread_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_runs_status ON external_agent_runs (status);
 
 ALTER TABLE plugin_transition_commands
     ADD COLUMN retry_origin VARCHAR(16) NOT NULL DEFAULT 'automatic';

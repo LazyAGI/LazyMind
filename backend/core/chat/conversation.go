@@ -1725,30 +1725,17 @@ func FeedBackChatHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&orm.ChatHistory{}).
-			Where("conversation_id = ? AND seq = ?", target.ConversationID, target.Seq).
-			Updates(map[string]any{
-				"feed_back":       0,
-				"reason":          "",
-				"expected_answer": "",
-				"update_time":     now,
-			}).Error; err != nil {
-			return err
-		}
-
-		updates := map[string]any{
-			"feed_back":       feedbackType,
-			"reason":          "",
-			"expected_answer": "",
-			"update_time":     now,
-		}
-		if feedbackType == 2 {
-			updates["reason"] = body.Reason
-			updates["expected_answer"] = body.ExpectedAnswer
-		}
-		return tx.Model(&orm.ChatHistory{}).Where("id = ?", body.HistoryID).Updates(updates).Error
-	}); err != nil {
+	updates := map[string]any{
+		"feed_back":       feedbackType,
+		"reason":          "",
+		"expected_answer": "",
+		"update_time":     now,
+	}
+	if feedbackType == 2 {
+		updates["reason"] = body.Reason
+		updates["expected_answer"] = body.ExpectedAnswer
+	}
+	if err := db.Model(&orm.ChatHistory{}).Where("id = ?", body.HistoryID).Updates(updates).Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "update feedback failed", err), http.StatusInternalServerError)
 		return
 	}

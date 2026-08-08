@@ -26,6 +26,7 @@ import {
   AppstoreOutlined,
   ArrowLeftOutlined,
   BarsOutlined,
+  BarChartOutlined,
   CopyOutlined,
   DeleteOutlined,
   MoreOutlined,
@@ -360,6 +361,12 @@ export function AlgorithmVersionManagementPage() {
                 onClick={() => navigate("/self-evolution/algorithms/routing-strategy")}
               >
                 {t("selfEvolutionRun.algorithmManagementAbTitle")}
+              </Button>
+              <Button
+                icon={<BarChartOutlined />}
+                onClick={() => navigate("/self-evolution/algorithms/traffic-stats")}
+              >
+                {t("selfEvolutionRun.routerTrafficPageTitle")}
               </Button>
             </div>
             <Space size={16} align="center" className="self-evolution-algorithm-toolbar-right">

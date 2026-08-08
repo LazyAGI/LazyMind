@@ -29,7 +29,15 @@ const (
 	maxConversationDisplayNameLength = 255
 	maxTopK                          = 10
 	defaultTopK                      = 3
+	routerTrafficAttemptsExtKey      = "router_traffic_attempts"
 )
+
+type routerTrafficAttempt struct {
+	AlgorithmID string    `json:"algorithm_id"`
+	FeedBack    int       `json:"feed_back"`
+	Reason      string    `json:"reason,omitempty"`
+	CreateTime  time.Time `json:"create_time"`
+}
 
 func shouldEmitStreamFrame(delta string, sources []any) bool {
 	return delta != "" || len(sources) > 0
@@ -610,6 +618,35 @@ func marshalChatHistoryExt(ext map[string]any) json.RawMessage {
 	return b
 }
 
+// archiveRegeneratedTrafficAttempt keeps the minimal traffic fields for the
+// answer that a regeneration replaces. The visible history row remains the
+// latest answer, while statistics can still count every generated answer.
+func archiveRegeneratedTrafficAttempt(historyExt json.RawMessage, target chatPersistTarget) json.RawMessage {
+	if !target.IsRegeneration || target.Existing == nil || strings.TrimSpace(target.Existing.AlgorithmID) == "" {
+		return historyExt
+	}
+
+	ext := map[string]any{}
+	if len(historyExt) > 0 {
+		_ = json.Unmarshal(historyExt, &ext)
+	}
+	var previous struct {
+		Attempts []routerTrafficAttempt `json:"router_traffic_attempts"`
+	}
+	if json.Unmarshal(target.Existing.Ext, &previous) == nil && len(previous.Attempts) > 0 {
+		ext[routerTrafficAttemptsExtKey] = previous.Attempts
+	}
+	attempts, _ := ext[routerTrafficAttemptsExtKey].([]routerTrafficAttempt)
+	attempts = append(attempts, routerTrafficAttempt{
+		AlgorithmID: strings.TrimSpace(target.Existing.AlgorithmID),
+		FeedBack:    target.Existing.FeedBack,
+		Reason:      strings.TrimSpace(target.Existing.Reason),
+		CreateTime:  target.Existing.CreateTime.UTC(),
+	})
+	ext[routerTrafficAttemptsExtKey] = attempts
+	return marshalChatHistoryExt(ext)
+}
+
 func hasExplicitConversationReference(raw map[string]any) bool {
 	if len(referencedHistoryIDs(raw)) > 0 {
 		return true
@@ -1128,6 +1165,7 @@ func handleNonStreamChat(
 	target chatPersistTarget,
 	historyExt json.RawMessage,
 ) {
+	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
 	pyBody, _ := json.Marshal(reqBody)
 	upstreamURL := common.JoinURL(baseURL, "/api/chat")
 	respBytes, _, err := common.HTTPPost(reqCtx, upstreamURL, "application/json", pyBody)
@@ -1195,7 +1233,6 @@ func handleNonStreamChat(
 		TimeMixin:       orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
 	if target.IsRegeneration && target.Existing != nil {
-		hist.TimeMixin.CreateTime = target.Existing.CreateTime
 		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
 			"seq":              target.Seq,
 			"raw_content":      query,
@@ -1207,6 +1244,7 @@ func handleNonStreamChat(
 			"reason":           "",
 			"expected_answer":  "",
 			"ext":              historyExt,
+			"create_time":      now,
 			"update_time":      now,
 		}).Error; err != nil {
 			common.ReplyErr(w, "failed to update history", http.StatusInternalServerError)
@@ -1312,8 +1350,9 @@ func streamSingleAnswer(
 	target chatPersistTarget,
 	historyExt json.RawMessage,
 ) {
+	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
 	seq := target.Seq
-	ch, err := StreamChatUpstream(chatCtx, baseURL, reqBody)
+	ch, algorithmID, err := StreamChatUpstream(chatCtx, baseURL, reqBody)
 	if err != nil {
 		if stateStore != nil {
 			_ = setChatStatus(chatCtx, stateStore, convID, historyID, "failed", "")
@@ -1350,6 +1389,7 @@ func streamSingleAnswer(
 			partialResult += "<think>" + pendingThink + "</think>"
 		}
 		values := map[string]any{
+			"algorithm_id":        algorithmID,
 			"seq":                 seq,
 			"raw_content":         query,
 			"content":             query,
@@ -1366,7 +1406,7 @@ func streamSingleAnswer(
 		}
 		now := time.Now()
 		if err := db.Create(&orm.ChatHistory{
-			ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query,
+			ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, AlgorithmID: algorithmID,
 			Result: partialResult, ThinkingDurationS: thinkingDurationS, Ext: historyExt,
 			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 		}).Error; err != nil {
@@ -1597,6 +1637,7 @@ func streamSingleAnswer(
 	persisted := false
 	if target.IsRegeneration && target.Existing != nil {
 		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
+			"algorithm_id":        algorithmID,
 			"seq":                 seq,
 			"raw_content":         query,
 			"content":             query,
@@ -1608,6 +1649,7 @@ func streamSingleAnswer(
 			"reason":              "",
 			"expected_answer":     "",
 			"ext":                 historyExt,
+			"create_time":         now,
 			"update_time":         now,
 		}).Error; err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to update stream chat history")
@@ -1616,7 +1658,7 @@ func streamSingleAnswer(
 		}
 	} else if progressRowCreated {
 		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
-			"seq": seq, "raw_content": query, "content": query, "result": fullResult,
+			"algorithm_id": algorithmID, "seq": seq, "raw_content": query, "content": query, "result": fullResult,
 			"tool_call_turns": toolCallTurns, "thinking_duration_s": thinkingDurationS,
 			"retrieval_result": retrievalResult, "ext": historyExt, "update_time": now,
 		}).Error; err != nil {
@@ -1629,6 +1671,7 @@ func streamSingleAnswer(
 			ID:                historyID,
 			Seq:               seq,
 			ConversationID:    convID,
+			AlgorithmID:       algorithmID,
 			RawContent:        query,
 			RetrievalResult:   retrievalResult,
 			Content:           query,
@@ -1741,7 +1784,7 @@ func streamDualAnswer(
 	historyExt json.RawMessage,
 ) {
 	seq := target.Seq
-	primaryCh, err1 := StreamChatUpstream(chatCtx, baseURL, reqBody)
+	primaryCh, _, err1 := StreamChatUpstream(chatCtx, baseURL, reqBody)
 	secondaryReq := make(map[string]any)
 	for k, v := range reqBody {
 		secondaryReq[k] = v
@@ -1749,7 +1792,7 @@ func streamDualAnswer(
 	if sc, ok := secondaryReq["filters"].(map[string]any); ok {
 		sc["kb_id"] = nil
 	}
-	secondaryCh, err2 := StreamChatUpstream(chatCtx, baseURL, secondaryReq)
+	secondaryCh, _, err2 := StreamChatUpstream(chatCtx, baseURL, secondaryReq)
 	if err1 != nil && err2 != nil {
 		if stateStore != nil {
 			_ = setChatStatus(chatCtx, stateStore, convID, historyID, "failed", "")

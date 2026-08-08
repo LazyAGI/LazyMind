@@ -2699,6 +2699,308 @@ components:
                 task_id:
                     type: string
             type: object
+        ReviewActionItem:
+            properties:
+                decision:
+                    type: string
+                hunk_id:
+                    type: string
+                path:
+                    type: string
+            required:
+                - decision
+                - hunk_id
+            type: object
+        ReviewActionResponse:
+            properties:
+                batch_id:
+                    type: string
+                can_undo:
+                    type: boolean
+                draft_content:
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+                items:
+                    items:
+                        $ref: '#/components/schemas/ReviewActionItem'
+                    type: array
+                ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                review_id:
+                    type: string
+                review_version:
+                    format: int64
+                    type: integer
+            required:
+                - batch_id
+                - can_undo
+                - draft_content
+                - draft_version
+                - ref
+                - review_id
+                - review_version
+            type: object
+        ReviewUndoResponse:
+            properties:
+                can_undo:
+                    type: boolean
+                draft_content:
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+                items:
+                    items:
+                        $ref: '#/components/schemas/ReviewActionItem'
+                    type: array
+                ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                review_id:
+                    type: string
+                review_version:
+                    format: int64
+                    type: integer
+                undone_batch_id:
+                    type: string
+            required:
+                - can_undo
+                - draft_content
+                - draft_version
+                - ref
+                - review_id
+                - review_version
+                - undone_batch_id
+            type: object
+        RevisionDetailResponse:
+            properties:
+                binary:
+                    type: boolean
+                blob_hash:
+                    type: string
+                content:
+                    type: string
+                file_type:
+                    type: string
+                mime:
+                    type: string
+                revisionSummary:
+                    $ref: '#/components/schemas/RevisionSummary'
+            required:
+                - binary
+                - blob_hash
+                - content
+                - file_type
+                - mime
+                - revisionSummary
+            type: object
+        RevisionListResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/RevisionSummary'
+                    type: array
+            type: object
+        RevisionSummary:
+            properties:
+                change_source:
+                    type: string
+                content_hash:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                created_by:
+                    type: string
+                id:
+                    type: string
+                is_head:
+                    type: boolean
+                message:
+                    type: string
+                parent_revision_id:
+                    type: string
+                path:
+                    type: string
+                revision_id:
+                    type: string
+                revision_no:
+                    format: int64
+                    type: integer
+                size:
+                    format: int64
+                    type: integer
+                source_ref_id:
+                    type: string
+                source_ref_type:
+                    type: string
+            required:
+                - change_source
+                - content_hash
+                - created_at
+                - id
+                - is_head
+                - message
+                - path
+                - revision_id
+                - revision_no
+                - size
+                - source_ref_id
+                - source_ref_type
+            type: object
+        RollbackResponse:
+            properties:
+                content:
+                    type: string
+                path:
+                    type: string
+                ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                revision_id:
+                    type: string
+                revision_no:
+                    format: int64
+                    type: integer
+            required:
+                - content
+                - path
+                - ref
+                - revision_id
+                - revision_no
+            type: object
+        RouterAlgorithmTraffic:
+            properties:
+                actual_ratio:
+                    format: double
+                    type: number
+                algorithm_id:
+                    type: string
+                answer_count:
+                    format: int64
+                    type: integer
+                conversation_count:
+                    type: integer
+                dislike_count:
+                    format: int64
+                    type: integer
+                feedback_rate:
+                    format: double
+                    type: number
+                like_count:
+                    format: int64
+                    type: integer
+                positive_rate:
+                    format: double
+                    nullable: true
+                    type: number
+                user_count:
+                    type: integer
+            required:
+                - actual_ratio
+                - algorithm_id
+                - answer_count
+                - conversation_count
+                - dislike_count
+                - feedback_rate
+                - like_count
+                - positive_rate
+                - user_count
+            type: object
+        RouterDislikeReason:
+            properties:
+                algorithm_id:
+                    type: string
+                count:
+                    format: int64
+                    type: integer
+                ratio:
+                    format: double
+                    type: number
+                reason:
+                    type: string
+            required:
+                - algorithm_id
+                - count
+                - ratio
+                - reason
+            type: object
+        RouterTrafficPoint:
+            properties:
+                counts:
+                    additionalProperties:
+                        format: int64
+                        type: integer
+                    type: object
+                time:
+                    type: string
+            required:
+                - counts
+                - time
+            type: object
+        RouterTrafficRange:
+            properties:
+                end_time:
+                    type: string
+                granularity:
+                    enum:
+                        - hour
+                        - day
+                    type: string
+                start_time:
+                    type: string
+            required:
+                - end_time
+                - granularity
+                - start_time
+            type: object
+        RouterTrafficStatsResponse:
+            properties:
+                algorithms:
+                    items:
+                        $ref: '#/components/schemas/RouterAlgorithmTraffic'
+                    type: array
+                dislike_reasons:
+                    items:
+                        $ref: '#/components/schemas/RouterDislikeReason'
+                    type: array
+                range:
+                    $ref: '#/components/schemas/RouterTrafficRange'
+                summary:
+                    $ref: '#/components/schemas/RouterTrafficSummary'
+                trend:
+                    items:
+                        $ref: '#/components/schemas/RouterTrafficPoint'
+                    type: array
+            required:
+                - algorithms
+                - dislike_reasons
+                - range
+                - summary
+                - trend
+            type: object
+        RouterTrafficSummary:
+            properties:
+                answer_count:
+                    format: int64
+                    type: integer
+                conversation_count:
+                    type: integer
+                feedback_count:
+                    format: int64
+                    type: integer
+                feedback_rate:
+                    format: double
+                    type: number
+                user_count:
+                    type: integer
+            required:
+                - answer_count
+                - conversation_count
+                - feedback_count
+                - feedback_rate
+                - user_count
+            type: object
         SearchDatasetMemberRequest:
             properties:
                 is_all:
@@ -6247,6 +6549,40 @@ paths:
                                 $ref: '#/components/schemas/agentRouterStatusResponse'
                     description: Router status
             summary: Get Evo router status
+            tags:
+                - agent
+    /api/core/agent/router/traffic-stats:
+        get:
+            description: Aggregates persisted single-answer chat histories by the final Router algorithm, excluding task conversations and unattributed legacy rows.
+            parameters:
+                - description: Inclusive UTC RFC3339 start time.
+                  in: query
+                  name: start_time
+                  required: true
+                  schema:
+                    type: string
+                - description: Exclusive UTC RFC3339 end time.
+                  in: query
+                  name: end_time
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: granularity
+                  required: true
+                  schema:
+                    enum:
+                        - hour
+                        - day
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RouterTrafficStatsResponse'
+                    description: Router traffic statistics
+            summary: Get Router traffic statistics
             tags:
                 - agent
     /api/core/agent/threads:

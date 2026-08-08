@@ -307,10 +307,10 @@ func (c *ChatService) Chat(ctx context.Context, req *LazyChatRequest) (*LazyChat
 }
 
 // StreamChat text /api/chat_stream，text channel；ctx Unsettext channel text。
-func (c *ChatService) StreamChat(ctx context.Context, req *LazyChatRequest) (<-chan *LazyStreamData, error) {
+func (c *ChatService) StreamChat(ctx context.Context, req *LazyChatRequest) (<-chan *LazyStreamData, string, error) {
 	bodyBytes, err := json.Marshal(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	fmt.Printf(
 		"[Core] [CHAT_UPSTREAM_REQUEST] [stream=true] [url=%s] [session_id=%s] [user_id=%s] [reasoning=%v] [%s]\n",
@@ -319,22 +319,22 @@ func (c *ChatService) StreamChat(ctx context.Context, req *LazyChatRequest) (<-c
 	)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.streamChatURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
 		fmt.Println("[Core] [CHAT_UPSTREAM_FAILED] url=", c.streamChatURL, " err=", err)
-		return nil, err
+		return nil, "", err
 	}
 	fmt.Println("[Core] [CHAT_UPSTREAM_RESPONSE] url=", c.streamChatURL, " status=", resp.StatusCode)
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		return nil, errors.New("upstream /api/chat_stream returned non-200")
+		return nil, "", errors.New("upstream /api/chat_stream returned non-200")
 	}
 
-	return lazyStreamHandler(ctx, resp), nil
+	return lazyStreamHandler(ctx, resp), strings.TrimSpace(resp.Header.Get("X-Algorithm-Id")), nil
 }
 
 func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStreamData {
@@ -797,13 +797,13 @@ func summarizeSecretMapForLog(v any) map[string]string {
 
 // StreamChatUpstream text：text ChatConversations text，text ChatService.StreamChat text。
 // body textRequest JSON text map text，baseURL text endpoint（text /api/...）。
-func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any) (<-chan UpstreamStreamChunk, error) {
+func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any) (<-chan UpstreamStreamChunk, string, error) {
 	service := NewChatServiceWithEndpoint(baseURL)
 	req := buildLazyChatRequest(body)
 
-	streamChan, err := service.StreamChat(ctx, req)
+	streamChan, algorithmID, err := service.StreamChat(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	out := make(chan UpstreamStreamChunk, 1)
@@ -825,7 +825,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 			}
 		}
 	}()
-	return out, nil
+	return out, algorithmID, nil
 }
 
 func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {

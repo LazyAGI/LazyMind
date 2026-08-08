@@ -506,9 +506,23 @@ const AssistantMessage = (props: any) => {
     return undefined;
   }
 
+  function getFeedbackRecord(historyId?: string) {
+    const resolvedHistoryId = historyId || item?.history_id;
+    if (resolvedHistoryId && item?.answers) {
+      const answer = item.answers.find(
+        (candidate: any) => candidate.history_id === resolvedHistoryId,
+      );
+      if (answer) {
+        return answer;
+      }
+    }
+    return item;
+  }
+
   const createUpdatedItem = (
     feedbackType: FeedBackChatHistoryRequestTypeEnum | undefined,
     targetHistoryId?: string,
+    details?: { reason?: string; expectedAnswer?: string },
   ) => {
     const resolvedHistoryId = targetHistoryId || item?.history_id;
 
@@ -517,7 +531,12 @@ const AssistantMessage = (props: any) => {
       nextFeedBack: FeedBackChatHistoryRequestTypeEnum | undefined,
     ) => {
       if (nextFeedBack !== undefined) {
-        return { ...record, feed_back: nextFeedBack };
+        return {
+          ...record,
+          feed_back: nextFeedBack,
+          reason: details?.reason,
+          expected_answer: details?.expectedAnswer,
+        };
       }
       return {
         ...record,
@@ -534,7 +553,7 @@ const AssistantMessage = (props: any) => {
       const updatedAnswers = item.answers.map((ans: any) =>
         ans.history_id === resolvedHistoryId
           ? applyFeedbackFields(ans, feedbackType)
-          : { ...ans, feed_back: undefined },
+          : ans,
       );
       const itemLevelFeedback =
         resolvedHistoryId === item?.history_id || !hasTargetAnswer
@@ -548,7 +567,6 @@ const AssistantMessage = (props: any) => {
     return applyFeedbackFields(item, feedbackType);
   };
 
-  
   function onFeedBack(
     type: FeedBackChatHistoryRequestTypeEnum,
     historyId?: string,
@@ -594,24 +612,12 @@ const AssistantMessage = (props: any) => {
       });
   }
 
-  
   function handleDislikeClick(historyId?: string) {
     if (feedbackState.isSubmitting) {
       return;
     }
 
-    const currentFeedBack = getCurrentFeedback(historyId);
     const targetHistoryId = historyId || item?.history_id;
-
-    if (
-      currentFeedBack === FeedBackChatHistoryRequestTypeEnum.FeedBackTypeUnlike
-    ) {
-      onFeedBack(
-        FeedBackChatHistoryRequestTypeEnum.FeedBackTypeUnlike,
-        historyId,
-      );
-      return;
-    }
 
     if (!targetHistoryId) {
       message.error(t("chat.historyIdMissingFeedback"));
@@ -629,7 +635,6 @@ const AssistantMessage = (props: any) => {
     );
   }
 
-  
   function handleFeedbackSubmit(_reasons: string[], _comment: string) {
     const targetHistoryId = feedbackState.targetHistoryId || item?.history_id;
     if (!targetHistoryId) {
@@ -657,6 +662,7 @@ const AssistantMessage = (props: any) => {
         const updatedItem = createUpdatedItem(
           FeedBackChatHistoryRequestTypeEnum.FeedBackTypeUnlike,
           targetHistoryId,
+          { reason: _reasons.join(","), expectedAnswer: _comment },
         );
         updateMessage(updatedItem);
 
@@ -1007,6 +1013,7 @@ const AssistantMessage = (props: any) => {
     hasMultipleAnswers &&
     (item.selected_answer_index === undefined ||
       item.selected_answer_index === null);
+  const modalFeedbackRecord = getFeedbackRecord(feedbackState.targetHistoryId);
 
   if (shouldUseMultiAnswerStyle) {
     return (
@@ -1092,6 +1099,8 @@ const AssistantMessage = (props: any) => {
           onCancel={() => dispatch({ type: "CLOSE_MODAL" })}
           onSubmit={handleFeedbackSubmit}
           submitLoading={feedbackState.isSubmitting}
+          initialReason={modalFeedbackRecord?.reason}
+          initialComment={modalFeedbackRecord?.expected_answer}
         />
       </div>
     );
@@ -1145,6 +1154,8 @@ const AssistantMessage = (props: any) => {
         onCancel={() => dispatch({ type: "CLOSE_MODAL" })}
         onSubmit={handleFeedbackSubmit}
         submitLoading={feedbackState.isSubmitting}
+        initialReason={modalFeedbackRecord?.reason}
+        initialComment={modalFeedbackRecord?.expected_answer}
       />
     </div>
   );
