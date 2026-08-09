@@ -13,6 +13,7 @@ type WriterDocumentSyncRequest struct {
 	UserID         string          `json:"user_id,omitempty"`
 	SourceDocument  json.RawMessage `json:"source_document"`
 	RevisedDocument json.RawMessage `json:"revised_document"`
+	MediaAssets     json.RawMessage `json:"media_assets"`
 	MarkdownContent string          `json:"markdown_content"`
 	TargetDocument  json.RawMessage `json:"target_document"`
 	Title           string          `json:"title"`
@@ -37,6 +38,9 @@ func SyncWriterDocument(
 	}
 	if len(req.RevisedDocument) > 0 {
 		arguments["revised_document"] = req.RevisedDocument
+	}
+	if len(req.MediaAssets) > 0 {
+		arguments["media_assets"] = req.MediaAssets
 	}
 	if req.MarkdownContent != "" {
 		arguments["markdown_content"] = req.MarkdownContent

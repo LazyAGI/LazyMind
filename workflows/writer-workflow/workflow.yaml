@@ -13,7 +13,10 @@ when_to_use: >
   this workflow even when the user does not know or name AI Writer; do not
   generate the requested full document directly in chat. Also use it for
   continuing from a supplied outline, revising an existing Feishu document, or
-  delivering a generated document. Do not require the
+  delivering a generated document. When a writer session already owns the current
+  draft, requests to insert, replace, move, or delete an image are document revisions:
+  rerun write_document and keep image acquisition inside that step. Never route such
+  a request to a standalone image task or generic subagent. Do not require the
   user to choose between creation and revision workflows; select the applicable
   reachable step from the user's request and the available artifacts. When the
   current turn supplies a Markdown, plain-text, or LMD file to write, continue,
@@ -36,6 +39,8 @@ tool_scripts:
       - writer_create_writing_context
       - writer_prepare_outline
       - writer_generate_outline
+      - writer_generate_rewrite_outline
+      - writer_generate_rewrite_section_instructions
       - writer_generate_section_instructions
       - writer_resolve_visual_media
       - writer_resolve_revision_media

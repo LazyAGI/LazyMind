@@ -17,7 +17,8 @@ value is merely a local path string does not satisfy an output and must be RETRY
 ## outline
 
 - PASS when outline_document and writing_context_after_outline exist.
-- outline_document must be Markdown, or WriterDocument IR with stage="outline" and ui_editable=true.
+- outline_document must be Markdown, or WriterDocument IR with stage="outline". Only the
+  draft_document slot is currently UI-editable.
 - For generate/prepare mode, revision internals are not required.
 - For AI revision mode, outline_revision_task, outline_locate_result,
   outline_modify_plan, outline_revision_set, and outline_revision_result must exist.
@@ -38,6 +39,9 @@ value is merely a local path string does not satisfy an output and must be RETRY
 - When the execution started without draft_document and used a cloud-bound `.lmd`
   source_document, document_write_result must report success and draft_document must be
   the provider-confirmed document returned by the write-back.
+- Every cloud-bound IR full-document rewrite must likewise report one successful
+  document_write_result and return the provider-confirmed draft_document. A Markdown
+  full-document rewrite remains local and does not require document_write_result.
 - Once draft_document already existed at execution start, a cloud-bound body revision
   must remain local in this step.
 - If the initial provider write contains images, resolved_media_assets must be passed to

@@ -16,6 +16,7 @@ from lazyllm.tools.writer.data_models import (
     InputResource,
     ModifyPlan,
     SectionInstruction,
+    SectionInstructionList,
     TargetDocument,
     VisualInstruction,
     VisualPlan,
@@ -584,6 +585,99 @@ class WriterToolkitBase:
             return outline
         return _set_document_editable(outline, stage='outline').model_dump_json(exclude_defaults=True)
 
+    def generate_rewrite_outline(
+        self,
+        writing_task_json: str,
+        source_document_json: str,
+        writing_context_json: str,
+    ) -> str:
+        """Generate an internal outline for a complete WriterDocument rewrite."""
+        root = _temp_root()
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+        )
+        source_path = _write_document_input(root, 'source_document', source_document_json)
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterPlanningTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).generate_rewrite_outline(
+            task=task_path,
+            source_document=source_path,
+            context=context_path,
+        )
+        return WriterDocument.model_validate(_primary_data(result)).model_dump_json(exclude_defaults=True)
+
+    def generate_rewrite_section_instructions(
+        self,
+        writing_task_json: str,
+        source_document_json: str,
+        writing_context_json: str,
+    ) -> str:
+        """Plan a complete IR or Markdown rewrite without generating an outline."""
+        root = _temp_root()
+        task_path = _write_input_artifact(
+            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+        )
+        source_path = _write_document_input(root, 'source_document', source_document_json)
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        planning = WriterPlanningTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        )
+        result = planning.generate_rewrite_section_instructions(
+            task=task_path,
+            source_document=source_path,
+            context=context_path,
+        )
+        instructions = SectionInstructionList.model_validate(_primary_data(result))
+        representation = str(instructions.meta.get('representation') or 'markdown')
+        document_title = str(instructions.meta.get('document_title') or '').strip()
+        visual_plan: dict[str, Any] = VisualPlan().model_dump()
+        warnings = []
+        if representation == 'ir':
+            transient_outline = WriterDocument(
+                document_id=f'{instructions.instruction_set_id}-visual-outline',
+                stage='outline',
+                title=document_title,
+                blocks=[
+                    WriterBlock(
+                        node_id=instruction.content_ref.node_id or f'rewrite-section-{index}',
+                        type='heading',
+                        content=instruction.section_title,
+                        stage='outline',
+                        numbering={'level': 1},
+                    )
+                    for index, instruction in enumerate(instructions.instructions, start=1)
+                ],
+            )
+            outline_path = _write_input_artifact(
+                root,
+                'rewrite_visual_outline.lmd',
+                transient_outline.model_dump(exclude_defaults=True),
+                self.WRITER_IR_SCHEMA,
+            )
+            try:
+                visual_result = planning.generate_visual_plan(
+                    task=task_path,
+                    outline=outline_path,
+                    context=context_path,
+                )
+                visual_plan = _primary_data(visual_result)
+                warnings.extend((visual_result.get('metadata') or {}).get('warnings') or [])
+            except Exception as exc:
+                warnings.append(f'Visual planning failed: {type(exc).__name__}: {exc}')
+        return _json_dumps({
+            'section_instructions': instructions.model_dump(exclude_defaults=True),
+            'visual_plan': visual_plan,
+            'document_title': document_title,
+            'warnings': warnings,
+        })
+
     def prepare_outline(self, source_document_json: str) -> str:
         """Normalize a supplied document into an editable outline."""
         source = _document_value(source_document_json)
@@ -908,6 +1002,7 @@ class WriterToolkitBase:
         draft_blocks_json: str,
         writing_context_json: str,
         outline_json: str = '',
+        title: str = '',
     ) -> str:
         """Combine draft sections while preserving their representation."""
         root = _temp_root()
@@ -925,6 +1020,7 @@ class WriterToolkitBase:
             draft_blocks=blocks_data,
             context=context_path,
             outline=outline_path,
+            title=title or None,
         )
         return _json_dumps(_primary_data(result))
 
@@ -933,12 +1029,14 @@ class WriterToolkitBase:
         draft_sections_json: str,
         writing_context_json: str,
         outline_json: str = '',
+        title: str = '',
     ) -> str:
         """Combine Markdown sections through the unified drafting API."""
         markdown = _json_loads(self.generate_draft_document(
             draft_blocks_json=draft_sections_json,
             writing_context_json=writing_context_json,
             outline_json=outline_json,
+            title=title,
         ), '')
         return _json_dumps({
             'draft_document': markdown,
@@ -1462,6 +1560,7 @@ class WriterCreateToolkit(WriterToolkitBase):
     __public_apis__ = [
         'build_writing_task', 'build_resources', 'profile_resources',
         'create_writing_context', 'prepare_outline', 'generate_outline',
+        'generate_rewrite_outline', 'generate_rewrite_section_instructions',
         'generate_section_instructions', 'generate_draft_section',
         'generate_draft_section_markdown',
         'generate_draft_blocks', 'generate_draft_blocks_markdown',

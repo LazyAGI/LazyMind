@@ -10,6 +10,7 @@ import json
 import re
 import tempfile
 import uuid
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -18,6 +19,7 @@ from lazyllm.tools.writer.data_models import (
     ContentRef,
     ModifyInstruction,
     ModifyPlan,
+    MediaAssetLibrary,
     PatchResult,
     PatchSet,
     StringReplaceSet,
@@ -438,6 +440,50 @@ def writer_generate_outline(writing_task_path: str, writing_context_path: str) -
     )
 
 
+def writer_generate_rewrite_outline(
+    writing_task_path: str,
+    source_document_path: str,
+    writing_context_path: str,
+) -> str:
+    """Generate a private outline used only to stream a complete document rewrite."""
+    generated = WriterCreateToolkit().generate_rewrite_outline(
+        writing_task_json=_read_json_string(writing_task_path),
+        source_document_json=_read_json_string(source_document_path),
+        writing_context_json=_read_json_string(writing_context_path),
+    )
+    return _save_json_artifact(
+        'rewrite_outline', generated, WriterToolkitBase.WRITER_IR_SCHEMA,
+        directory=_run_root('rewrite-outline'),
+    )
+
+
+def writer_generate_rewrite_section_instructions(
+    writing_task_path: str,
+    source_document_path: str,
+    writing_context_path: str,
+) -> dict:
+    """Plan a complete IR or Markdown rewrite without creating an outline artifact."""
+    payload = _json_loads(WriterCreateToolkit().generate_rewrite_section_instructions(
+        writing_task_json=_read_json_string(writing_task_path),
+        source_document_json=_read_json_string(source_document_path),
+        writing_context_json=_read_json_string(writing_context_path),
+    ), {})
+    return {
+        'section_instructions': _save_json_artifact(
+            'section_instructions',
+            json.dumps(payload.get('section_instructions') or {}, ensure_ascii=False),
+            writer_schema('planning.SectionInstructionList'),
+        ),
+        'visual_plan': _save_json_artifact(
+            'visual_plan',
+            json.dumps(payload.get('visual_plan') or {'instructions': []}, ensure_ascii=False),
+            writer_schema('multimodal.VisualPlan'),
+        ),
+        'document_title': payload.get('document_title') or '',
+        'warnings': payload.get('warnings') or [],
+    }
+
+
 def writer_generate_section_instructions(
     writing_task_path: str,
     outline_path: str,
@@ -709,6 +755,7 @@ def writer_generate_draft_document(
     draft_blocks_anchor_path: str,
     writing_context_path: str,
     outline_path: str = '',
+    document_title: str = '',
 ) -> str:
     """Combine draft WriterBlock artifacts into a draft WriterDocument."""
     anchor = (
@@ -730,6 +777,7 @@ def writer_generate_draft_document(
         draft_blocks_json=json.dumps(draft_blocks, ensure_ascii=False),
         writing_context_json=_read_json_string(writing_context_path),
         outline_json=_read_json_string(outline_path) if outline_path else '',
+        title=document_title,
     )
     return _save_writer_document(
         'draft_document', content, expected_stage='draft', editable=True,
@@ -740,6 +788,7 @@ def writer_generate_draft_document_markdown(
     draft_sections_anchor_path: str,
     writing_context_path: str,
     outline_path: str = '',
+    document_title: str = '',
 ) -> str:
     """Assemble Markdown sections and preserve the Markdown document."""
     anchor = (
@@ -760,6 +809,7 @@ def writer_generate_draft_document_markdown(
         draft_sections_json=json.dumps(sections, ensure_ascii=False),
         writing_context_json=_read_json_string(writing_context_path),
         outline_json=_read_json_string(outline_path) if outline_path else '',
+        title=document_title,
     ), {})
     root = _run_root('draft-document-markdown')
     return _save_writer_document(
@@ -891,6 +941,7 @@ def writer_preview_selection_rewrite(
 def writer_sync_document(
     source_document: Mapping[str, Any] | None = None,
     revised_document: Mapping[str, Any] | None = None,
+    media_assets: Mapping[str, Any] | None = None,
     markdown_content: str = '',
     target_document: Mapping[str, Any] | None = None,
     title: str = '',
@@ -908,18 +959,26 @@ def writer_sync_document(
     revised = WriterDocument.model_validate(revised_document)
     if source.document_id != revised.document_id:
         raise ValueError('WriterDocument document_id values must match.')
+    for source_block in source.iter_blocks():
+        revised_block = revised.block_by_id(source_block.node_id)
+        if revised_block is None:
+            continue
+        revised_block.provider_binding = deepcopy(source_block.provider_binding)
+        revised_block.provider_payload = deepcopy(source_block.provider_payload)
+        revised_block.editable = source_block.editable
+    media_library = MediaAssetLibrary.model_validate(media_assets) if media_assets else None
     root = _action_root(artifact_store, 'sync-document')
     revision = WriterRevisionTools(llm=None, artifact_store=str(root))
-    patch_output = revision.build_patch_set_from_documents(source, revised)
+    patch_output = revision.build_patch_set_from_documents(source, revised, media_library)
     patch_set = load_artifact_json(_action_result_path(patch_output), PatchSet)
-    candidate, local_result = apply_patch_to_ir(source, patch_set)
+    candidate, local_result = apply_patch_to_ir(source, patch_set, media_assets=media_library)
     if not patch_set.hunks and patch_set.new_title is None:
         candidate.ui_editable = True
         local_result.message = 'No document changes.'
         return _sync_document_response(False, patch_set, local_result, candidate)
     write_output = WriterResourceTools(
         llm=None, artifact_store=str(root),
-    ).apply_patch_to_document(patch_set, source)
+    ).apply_patch_to_document(patch_set, source, media_assets=media_library)
     persisted = load_artifact_json(
         _action_result_path(write_output, 'persisted_document'), WriterDocument,
     )
@@ -1104,6 +1163,17 @@ def writer_apply_revision(
             allow_outline=not is_body_step,
         ), {})
         result_schema = writer_schema('revision.PatchResult')
+    document_key = 'draft_document' if is_body_step else 'revised_document'
+    revised_document = _save_writer_document(
+        document_key,
+        payload.get('revised_document') or {},
+        expected_stage=(None if is_markdown or is_body_step else 'outline'),
+        editable=is_body_step,
+        directory=root,
+    )
+    if is_body_step:
+        _emit_draft_markdown_preview(revised_document)
+
     result = {
         'revision_result': _save_json_artifact(
             'revision_result',
@@ -1114,13 +1184,7 @@ def writer_apply_revision(
             result_schema,
             directory=root,
         ),
-        'revised_document': _save_writer_document(
-            'revised_document',
-            payload.get('revised_document') or {},
-            expected_stage=(None if is_markdown or is_body_step else 'outline'),
-            editable=True,
-            directory=root,
-        ),
+        document_key: revised_document,
         'write_result': '',
     }
     if payload.get('write_result'):

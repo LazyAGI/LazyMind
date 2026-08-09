@@ -39,14 +39,14 @@ writing flow; require the missing URL.
 - User edits in the frontend → the frontend saves a human revision of the same
   `outline_document` slot.
 
-IR results have stage="outline" and ui_editable=true; Markdown results remain `.md`.
+IR results have stage="outline" and are not UI-editable; Markdown results remain `.md`.
 If the IR is bound to a cloud
 document, AI or frontend revision synchronizes that document and stores the
 provider-confirmed IR as the next artifact revision.
 
 ### write_document
 
-`write_document` owns the single user-visible `draft_document` slot and has two modes.
+`write_document` owns the single user-visible `draft_document` slot and has three modes.
 
 Generation/rewrite mode:
 
@@ -63,13 +63,31 @@ Targeted revision mode:
 3. generate and apply a PatchSet for IR or StringReplaceSet for Markdown;
 4. save the result as the next revision of `draft_document`.
 
+Image insertion, replacement, movement, and deletion in the current document are
+targeted revisions owned by this mode. Rerun the previously completed `write_document`
+step and let `writer_resolve_revision_media` acquire any newly requested image. Do not
+start a standalone image task, call generic image/file/artifact tools, invoke Writer
+toolkit methods directly, or create a generic subagent for these requests.
+
+Full-document rewrite mode:
+
+1. use the latest selected `draft_document`, falling back to the complete
+   `source_document`;
+2. generate section instructions directly, without generating or exposing an outline;
+3. stream newly generated draft sections in the source's IR or Markdown representation;
+4. assemble and save the new `draft_document`;
+5. for cloud-bound IR, replace the provider document once and save the provider-confirmed
+   IR; keep Markdown local.
+
 Do not run section planning for a targeted body revision. Do run it again whenever the
 body is generated or rewritten from a changed outline.
 
 When the first full `.lmd` draft is derived from a cloud-bound Feishu source, generation
 or direct revision writes it back once and replaces `draft_document` with the
-provider-confirmed IR. Frontend edits and later AI body revisions are revisions of the
-same `draft_document` slot and remain local until the user explicitly writes them back.
+provider-confirmed IR. Every cloud-bound IR full rewrite also writes back exactly once.
+Markdown rewrites stay local. Frontend edits and later targeted AI body revisions are
+revisions of the same `draft_document` slot and remain local until the user explicitly
+writes them back.
 The initial provider write receives `resolved_media_assets` whenever the generated IR
 contains Image WriterBlocks.
 
@@ -78,6 +96,7 @@ contains Image WriterBlocks.
 - From scratch: `prepare → outline → write_document`
 - Supplied Feishu outline: `prepare → outline → write_document`
 - Existing Feishu document revision: `prepare → write_document`
+- Existing Feishu document full rewrite: `prepare → write_document`
 - Outline only: `prepare → outline`
 
 Repeated AI changes rerun/rewind `outline` or `write_document`. Repeated frontend changes
@@ -88,9 +107,9 @@ a hidden current-document pointer.
 
 - From-scratch and Markdown inputs remain Markdown. Feishu and `.lmd` inputs remain IR.
 - `outline_document` and `draft_document` preserve that representation across steps.
-- User-visible IR outline and draft documents have ui_editable=true.
-- After `writer_apply_revision` succeeds, its returned `revised_document` path is the
-  authoritative next `draft_document` file. Save that exact path immediately; do not
+- IR draft documents have ui_editable=true; outline documents are not currently UI-editable.
+- During `write_document`, `writer_apply_revision` returns the authoritative next draft
+  under `draft_document`, using the canonical `.md` or `.lmd` filename. Save that exact path immediately; do not
   query it as an artifact key or reconstruct the document with generic file tools.
 - A successful Feishu write produces a new provider-confirmed `draft_document` revision;
   provider result metadata remains internal to the step.
@@ -110,6 +129,7 @@ a hidden current-document pointer.
 | Modify the current outline with AI | rerun `outline`, revision mode |
 | Write/rewrite the body from the current outline | `write_document`, generation mode |
 | Modify an existing/generated body with AI | rerun `write_document`, revision mode |
+| Insert/replace/move/delete an image in the current body | rerun `write_document`, targeted revision mode |
 
 When an outline change invalidates an existing body, rewind to `outline`; the next
 `write_document` execution replans sections from the newly selected outline revision.
