@@ -886,6 +886,7 @@ def writer_preview_selection_rewrite(
     instruction: str,
     selection: Mapping[str, Any],
     artifact_store: str = '',
+    slot: str = '',
 ) -> dict:
     """Preview a selected IR block or Markdown paragraph rewrite."""
     instruction = str(instruction or '').strip()
@@ -897,6 +898,10 @@ def writer_preview_selection_rewrite(
         llm=AutoModel(model='llm'),
         artifact_store=str(_action_root(artifact_store, 'rewrite-preview')),
     )
+    if slot not in {'outline_document', 'draft_document'}:
+        raise ValueError(
+            'selection rewrite requires an outline_document or draft_document slot.',
+        )
     selection_type = str((selection or {}).get('type') or '')
     if isinstance(document, Mapping):
         source = WriterDocument.model_validate(document)
@@ -916,7 +921,9 @@ def writer_preview_selection_rewrite(
         patch_set = load_artifact_json(_action_result_path(output), PatchSet)
         revised, _ = apply_patch_to_ir(source, patch_set)
         candidate_path = Path(_save_writer_document(
-            'rewrite_candidate', revised, editable=True,
+            slot, revised,
+            expected_stage='outline' if slot == 'outline_document' else None,
+            editable=slot == 'draft_document',
             directory=Path(revision.artifact_store),
         ))
         result = {
@@ -939,6 +946,10 @@ def writer_preview_selection_rewrite(
         replacement = replace_set.replacements[0]
         output = revision.apply_string_replace(document, replace_set, context)
         candidate_path = Path(output['revised_document_md'])
+        canonical_path = candidate_path.with_name(f'{slot}.md')
+        if candidate_path != canonical_path:
+            candidate_path.replace(canonical_path)
+            candidate_path = canonical_path
         result = {
             'representation': 'markdown',
             'target': {'type': 'block', 'block_type': 'paragraph'},
@@ -1184,7 +1195,7 @@ def writer_apply_revision(
             allow_outline=not is_body_step,
         ), {})
         result_schema = writer_schema('revision.PatchResult')
-    document_key = 'draft_document' if is_body_step else 'revised_document'
+    document_key = 'draft_document' if is_body_step else 'outline_document'
     revised_document = _save_writer_document(
         document_key,
         payload.get('revised_document') or {},

@@ -95,6 +95,11 @@ steps:
       outline; route targeted changes to a supplied complete document to write_document,
       even when the request names headings or section numbers. For IR, stage="outline"
       routes to outline, while stage="draft" or stage="final" routes to write_document.
+      A request to rewrite, condense, expand, restructure, retitle, or polish an uploaded
+      complete Markdown/plain-text document is always a direct-document operation. Its
+      final summary MUST say `REQUIRED_NEXT_STEP: write_document`; it MUST NOT recommend
+      outline, generate an outline first, or ask the user to confirm an outline. Keeping,
+      changing, or naming headings does not change this rule.
       When source_document does not exist, explicitly state: "No source file was provided.
       Continue directly to outline without requesting confirmation." Do not emit this
       instruction when source_document exists.
@@ -163,8 +168,8 @@ steps:
          IR PatchSet for `.lmd` and a StringReplaceSet for Markdown. Persist the returned
          task, locate result, modify plan, revision set, and revision result under the
          outline_* internal keys. If write_result is non-empty, persist
-         it as outline_write_result. Save the returned revised_document path as outline_document,
-         not under a new key.
+         it as outline_write_result. Save the returned outline_document path as
+         outline_document, not under a new key.
 
       Do not call generation and revision tools in the same execution. After the selected
       mode produces the new outline_document, call writer_update_writing_context using that

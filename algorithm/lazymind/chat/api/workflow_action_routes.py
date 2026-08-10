@@ -70,7 +70,7 @@ def invoke_workflow_action(request: WorkflowActionInvokeRequest) -> Dict[str, An
         raise HTTPException(status_code=500, detail='artifact action tool is unavailable')
 
     kwargs = dict(request.arguments)
-    reserved = {'artifact', 'artifact_store'} & kwargs.keys()
+    reserved = {'artifact', 'artifact_store', 'slot'} & kwargs.keys()
     if reserved:
         raise HTTPException(status_code=400, detail=f'reserved arguments: {sorted(reserved)}')
     parameters = inspect.signature(tool).parameters
@@ -78,6 +78,8 @@ def invoke_workflow_action(request: WorkflowActionInvokeRequest) -> Dict[str, An
         kwargs['artifact'] = request.artifact
     if 'artifact_store' in parameters:
         kwargs['artifact_store'] = request.artifact_store
+    if 'slot' in parameters:
+        kwargs['slot'] = request.slot
     try:
         inject_model_config(request.llm_config or {})
         inject_tool_config(request.tool_config or {})
