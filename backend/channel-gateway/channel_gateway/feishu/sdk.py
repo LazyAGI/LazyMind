@@ -1,12 +1,15 @@
 import asyncio
 import copy
+import hashlib
 import json
 import logging
+import math
 import queue
+import re
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from lark_channel import (
@@ -32,6 +35,22 @@ from lark_channel.api.cardkit.v1.model.id_convert_card_request import (
 from lark_channel.api.cardkit.v1.model.id_convert_card_request_body import (
     IdConvertCardRequestBody,
 )
+from lark_channel.api.cardkit.v1.model.settings_card_request import (
+    SettingsCardRequest,
+)
+from lark_channel.api.cardkit.v1.model.settings_card_request_body import (
+    SettingsCardRequestBody,
+)
+from lark_channel.api.cardkit.v1.model.content_card_element_request import (
+    ContentCardElementRequest,
+)
+from lark_channel.api.cardkit.v1.model.content_card_element_request_body import (
+    ContentCardElementRequestBody,
+)
+from lark_channel.channel.errors import (
+    FeishuChannelError,
+    FeishuChannelErrorCode,
+)
 from lark_channel.event.callback.model.p2_card_action_trigger import (
     P2CardActionTriggerResponse,
 )
@@ -45,8 +64,9 @@ from channel_gateway.feishu.domain import (
     FeishuInboundAction,
     FeishuInboundMenu,
     FeishuInboundMessage,
+    FeishuRuntimeError,
+    workspace_card_expired,
 )
-from channel_gateway.feishu.domain import FeishuRuntimeError
 from channel_gateway.feishu.presentation import (
     parse_ask_form_submission,
     presentable_feishu_text,
@@ -61,6 +81,90 @@ _STREAM_FINISH = object()
 _STREAM_PROVIDER_TIMEOUT_SECONDS = 60
 _STREAM_FINISH_TIMEOUT_SECONDS = 120
 _STREAM_MESSAGE_UPDATE_INTERVAL_SECONDS = 0.4
+_STREAM_ELEMENT_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
+_STREAM_ELEMENT_RETRY_BUDGET_SECONDS = 30.0
+_STREAM_CLOSE_RETRY_BUDGET_SECONDS = 10.0
+_FEISHU_RATE_LIMIT_CODES = {11020, 11021, 99991400, 99991402}
+
+
+class _StreamRetryCancelled(RuntimeError):
+    pass
+
+
+class _StreamCloseFailed(RuntimeError):
+    pass
+
+
+def _retryable_side_effect_error(
+    label: str,
+    error: Any,
+) -> RetryableProviderSideEffectError:
+    return RetryableProviderSideEffectError(
+        f'{label}: {error}',
+        retry_after_seconds=getattr(
+            error,
+            'retry_after_seconds',
+            None,
+        ),
+    )
+
+
+def _response_retry_after_seconds(response: Any) -> float | None:
+    raw = getattr(response, 'raw', None)
+    headers = getattr(raw, 'headers', None)
+    if not isinstance(headers, Mapping):
+        return None
+    normalized_headers = {
+        str(key).lower(): header_value
+        for key, header_value in headers.items()
+    }
+    value = normalized_headers.get(
+        'x-ogw-ratelimit-reset',
+        normalized_headers.get('retry-after'),
+    )
+    try:
+        retry_after = float(value)
+    except (TypeError, ValueError):
+        return None
+    return (
+        retry_after
+        if math.isfinite(retry_after) and retry_after >= 0
+        else None
+    )
+
+
+def _cardkit_response_error(
+    response: Any,
+    *,
+    label: str,
+) -> FeishuChannelError | None:
+    try:
+        code = int(getattr(response, 'code', None))
+    except (TypeError, ValueError):
+        code = -1
+    raw_response = getattr(response, 'raw', None)
+    try:
+        status_code = int(getattr(raw_response, 'status_code', None))
+    except (TypeError, ValueError):
+        status_code = -1
+    rate_limited = (
+        status_code == 429
+        or code in _FEISHU_RATE_LIMIT_CODES
+    )
+    if code == 0 and not rate_limited:
+        return None
+    error = FeishuChannelError(
+        (
+            FeishuChannelErrorCode.RATE_LIMITED
+            if rate_limited
+            else FeishuChannelErrorCode.UNKNOWN
+        ),
+        f"{label}: {{'code': {code}, 'msg': "
+        f"{getattr(response, 'msg', '')!r}}}",
+    )
+    error.raw_code = code
+    error.retry_after_seconds = _response_retry_after_seconds(response)
+    return error
 
 
 def _message_text(message_type: str, raw_content: str) -> str:
@@ -125,6 +229,86 @@ class _WorkspaceFeishuChannel(FeishuChannel):
         self._card_sequences: dict[str, int] = {}
         self._card_state_lock = threading.Lock()
         super().__init__(*args, **kwargs)
+
+    async def update_card_element_content(
+        self,
+        card_id: str,
+        element_id: str,
+        content: str,
+        sequence: int,
+    ) -> None:
+        request_uuid = str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            ':'.join((
+                card_id,
+                element_id,
+                str(sequence),
+                hashlib.sha256(content.encode('utf-8')).hexdigest(),
+            )),
+        ))
+        request_body = (
+            ContentCardElementRequestBody.builder()
+            .uuid(request_uuid)
+            .content(content)
+            .sequence(sequence)
+            .build()
+        )
+        request = (
+            ContentCardElementRequest.builder()
+            .card_id(card_id)
+            .element_id(element_id)
+            .request_body(request_body)
+            .build()
+        )
+        response = await (
+            self._driver._client.cardkit.v1.card_element.acontent(request)
+        )
+        error = _cardkit_response_error(
+            response,
+            label='update_card_element_content failed',
+        )
+        if error is not None:
+            raise error
+
+    async def finish_streaming_card(
+        self,
+        card_id: str,
+        sequence: int,
+    ) -> None:
+        settings = json.dumps(
+            {'config': {'streaming_mode': False}},
+            ensure_ascii=False,
+        )
+        request_uuid = str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            ':'.join((
+                card_id,
+                str(sequence),
+                hashlib.sha256(settings.encode('utf-8')).hexdigest(),
+            )),
+        ))
+        request_body = (
+            SettingsCardRequestBody.builder()
+            .settings(settings)
+            .uuid(request_uuid)
+            .sequence(sequence)
+            .build()
+        )
+        request = (
+            SettingsCardRequest.builder()
+            .card_id(card_id)
+            .request_body(request_body)
+            .build()
+        )
+        response = await self._driver._client.cardkit.v1.card.asettings(
+            request
+        )
+        error = _cardkit_response_error(
+            response,
+            label='finish_streaming_card failed',
+        )
+        if error is not None:
+            raise error
 
     async def finish_message_stream(self, message_id: str) -> None:
         card_id = await self._card_id_for_message(message_id)
@@ -210,7 +394,7 @@ class _DurableFeishuChannel(_WorkspaceFeishuChannel):
         )
         sender_id = str(operator_id.get('open_id') or '')
         event_key = str(raw.get('event_key') or '')
-        if not sender_id or not event_key:
+        if not event_id or not sender_id or not event_key:
             return
         self._on_durable_menu(
             FeishuInboundMenu(
@@ -307,6 +491,10 @@ class _DurableFeishuChannel(_WorkspaceFeishuChannel):
             return P2CardActionTriggerResponse({})
         card = self._on_durable_action(
             FeishuInboundAction(
+                event_id=str(
+                    getattr(getattr(data, 'header', None), 'event_id', '')
+                    or ''
+                ),
                 message_id=str(
                     getattr(context, 'open_message_id', '') or ''
                 ),
@@ -384,6 +572,11 @@ class _LarkCardReplyStream(ReplyStream):
         self._future = None
         self._lock = threading.Lock()
         self._closed = False
+        self._abort_requested = False
+
+    def retarget_message(self, message_id: str) -> None:
+        if message_id:
+            self.message_id = message_id
 
     def update(self, snapshot: CoreStreamUpdate) -> None:
         with self._lock:
@@ -416,6 +609,7 @@ class _LarkCardReplyStream(ReplyStream):
             future = self._future
             if self._closed:
                 return
+            self._abort_requested = True
             self._closed = True
             if future is None:
                 return
@@ -475,6 +669,12 @@ class _LarkCardReplyStream(ReplyStream):
                 if terminal is not None:
                     kind, value = terminal
                 if kind is _STREAM_ABORT:
+                    if not self._should_render():
+                        await self._finish_streaming_card(
+                            card_id,
+                            sequence + 1,
+                        )
+                        return result
                     sequence = await self._update_element(
                         card_id,
                         'lazymind_status',
@@ -482,11 +682,9 @@ class _LarkCardReplyStream(ReplyStream):
                         sequence,
                         rendered,
                     )
-                    await self._provider_call(
-                        self._channel.finish_streaming_card(
-                            card_id,
-                            sequence + 1,
-                        )
+                    await self._finish_streaming_card(
+                        card_id,
+                        sequence + 1,
                     )
                     await self._replace_message_card(
                         result.message_id,
@@ -504,6 +702,12 @@ class _LarkCardReplyStream(ReplyStream):
                     )
                     return result
                 if kind is _STREAM_FINISH:
+                    if not self._should_render():
+                        await self._finish_streaming_card(
+                            card_id,
+                            sequence + 1,
+                        )
+                        return result
                     final_text = str(value or snapshot.answer)
                     final_snapshot = CoreStreamUpdate(
                         thinking=snapshot.thinking,
@@ -517,11 +721,9 @@ class _LarkCardReplyStream(ReplyStream):
                         rendered,
                         finished=True,
                     )
-                    await self._provider_call(
-                        self._channel.finish_streaming_card(
-                            card_id,
-                            sequence + 1,
-                        )
+                    await self._finish_streaming_card(
+                        card_id,
+                        sequence + 1,
                     )
                     await self._replace_message_card(
                         result.message_id,
@@ -546,7 +748,38 @@ class _LarkCardReplyStream(ReplyStream):
                     sequence,
                     rendered,
                 )
-        except Exception:
+        except _StreamRetryCancelled:
+            try:
+                await self._finish_streaming_card(
+                    card_id,
+                    sequence + 1,
+                )
+            except Exception:
+                _logger.warning(
+                    'feishu_card_stream_close_after_retry_failed '
+                    'card_id=%s',
+                    card_id,
+                    exc_info=True,
+                )
+                raise
+            return result
+        except Exception as exc:
+            if _stream_element_retry_delay(
+                exc,
+                len(_STREAM_ELEMENT_RETRY_DELAYS),
+            ) is not None:
+                try:
+                    await self._finish_streaming_card(
+                        card_id,
+                        sequence + 1,
+                    )
+                except Exception:
+                    _logger.warning(
+                        'feishu_card_stream_close_after_rate_limit_failed '
+                        'card_id=%s',
+                        card_id,
+                        exc_info=True,
+                    )
             _logger.exception(
                 'feishu_card_stream_failed card_id=%s',
                 card_id,
@@ -700,14 +933,30 @@ class _LarkCardReplyStream(ReplyStream):
         message_id: str,
         card: dict[str, Any],
     ):
-        result = await self._provider_call(
-            self._channel.update_card(message_id, card)
-        )
-        if not result.success:
-            raise FeishuRuntimeError(
+        try:
+            result = await self._provider_call(
+                self._channel.update_card(message_id, card)
+            )
+            if result.success:
+                return result
+            error: Exception = FeishuRuntimeError(
                 f'Feishu workspace stream update failed: {result.error}'
             )
-        return result
+        except Exception as exc:
+            error = exc
+        if workspace_card_expired(error) and self._should_render():
+            replacement_message_id = self.message_id
+            if replacement_message_id and replacement_message_id != message_id:
+                result = await self._provider_call(
+                    self._channel.update_card(replacement_message_id, card)
+                )
+                if result.success:
+                    return result
+                error = FeishuRuntimeError(
+                    'Feishu recovered workspace stream update failed: '
+                    f'{result.error}'
+                )
+        raise error
 
     async def _finish_message_stream(self) -> None:
         finish = getattr(self._channel, 'finish_message_stream', None)
@@ -787,25 +1036,141 @@ class _LarkCardReplyStream(ReplyStream):
         if rendered.get(element_id) == content:
             return sequence
         sequence += 1
-        await self._provider_call(
-            self._channel.update_card_element_content(
+        await self._retry_element_update(
+            lambda: self._channel.update_card_element_content(
                 card_id,
                 element_id,
                 content,
                 sequence,
-            )
+            ),
         )
         rendered[element_id] = content
         return sequence
 
-    async def _provider_call(self, operation):
+    async def _retry_element_update(self, operation) -> None:
+        deadline = (
+            time.monotonic() + _STREAM_ELEMENT_RETRY_BUDGET_SECONDS
+        )
+        for attempt in range(len(_STREAM_ELEMENT_RETRY_DELAYS) + 1):
+            try:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError(
+                        'Feishu CardKit element retry budget exhausted'
+                    )
+                await self._provider_call(
+                    operation(),
+                    timeout_seconds=remaining,
+                )
+                return
+            except Exception as exc:
+                delay = _stream_element_retry_delay(exc, attempt)
+                if (
+                    delay is None
+                    or attempt == len(_STREAM_ELEMENT_RETRY_DELAYS)
+                ):
+                    raise
+                if delay > max(0.0, deadline - time.monotonic()):
+                    raise
+                await self._wait_for_element_retry(delay)
+
+    async def _finish_streaming_card(
+        self,
+        card_id: str,
+        sequence: int,
+    ) -> None:
+        deadline = (
+            time.monotonic() + _STREAM_CLOSE_RETRY_BUDGET_SECONDS
+        )
+        for attempt in range(len(_STREAM_ELEMENT_RETRY_DELAYS) + 1):
+            try:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError(
+                        'Feishu CardKit close retry budget exhausted'
+                    )
+                await self._provider_call(
+                    self._channel.finish_streaming_card(card_id, sequence),
+                    timeout_seconds=remaining,
+                )
+                return
+            except Exception as exc:
+                delay = _stream_element_retry_delay(exc, attempt)
+                if (
+                    delay is None
+                    or attempt == len(_STREAM_ELEMENT_RETRY_DELAYS)
+                    or delay > max(0.0, deadline - time.monotonic())
+                ):
+                    raise _StreamCloseFailed(
+                        'Feishu CardKit stream close failed'
+                    ) from exc
+                await asyncio.sleep(delay)
+
+    async def _wait_for_element_retry(self, delay: float) -> None:
+        remaining = delay
+        if self._abort_requested or not self._should_render():
+            raise _StreamRetryCancelled(
+                'Feishu CardKit stream is no longer current'
+            )
+        while remaining > 0:
+            interval = min(0.5, remaining)
+            await asyncio.sleep(interval)
+            remaining -= interval
+            if self._abort_requested:
+                raise _StreamRetryCancelled(
+                    'Feishu CardKit stream retry was cancelled'
+                )
+            if not self._should_render():
+                raise _StreamRetryCancelled(
+                    'Feishu CardKit stream is no longer current'
+                )
+
+    async def _provider_call(
+        self,
+        operation,
+        *,
+        timeout_seconds: float | None = None,
+    ):
+        timeout = min(
+            self._timeout_seconds,
+            _STREAM_PROVIDER_TIMEOUT_SECONDS,
+        )
+        if timeout_seconds is not None:
+            timeout = min(timeout, max(0.001, timeout_seconds))
         return await asyncio.wait_for(
             operation,
-            timeout=min(
-                self._timeout_seconds,
-                _STREAM_PROVIDER_TIMEOUT_SECONDS,
-            ),
+            timeout=timeout,
         )
+
+
+def _stream_element_retry_delay(
+    error: Exception,
+    attempt: int,
+) -> float | None:
+    error_code = getattr(error, 'code', None)
+    error_code = str(getattr(error_code, 'value', error_code) or '')
+    retryable = error_code == 'rate_limited'
+    raw_codes = {
+        int(value)
+        for value in re.findall(
+            r"['\"]?code['\"]?\s*:\s*(\d+)",
+            str(error),
+        )
+    }
+    retryable = retryable or bool(raw_codes & _FEISHU_RATE_LIMIT_CODES)
+    if not retryable:
+        return None
+    delay = _STREAM_ELEMENT_RETRY_DELAYS[
+        min(attempt, len(_STREAM_ELEMENT_RETRY_DELAYS) - 1)
+    ]
+    retry_after = getattr(error, 'retry_after_seconds', None)
+    if (
+        isinstance(retry_after, (int, float))
+        and math.isfinite(retry_after)
+        and retry_after >= 0
+    ):
+        delay = max(delay, float(retry_after))
+    return delay
 
 
 class LarkChannelClient:
@@ -935,20 +1300,6 @@ class LarkChannelClient:
             idempotency_key=idempotency_key,
         )
 
-    def send_markdown_to_user(
-        self,
-        *,
-        open_id: str,
-        text: str,
-        idempotency_key: str,
-    ) -> str:
-        return self._send(
-            chat_id=open_id,
-            message={'markdown': text},
-            idempotency_key=idempotency_key,
-            receive_id_type='open_id',
-        )
-
     def send_card_to_user(
         self,
         *,
@@ -1057,12 +1408,19 @@ class LarkChannelClient:
                 timeout=self._send_timeout_seconds,
             )
         except Exception as exc:
-            raise RetryableProviderSideEffectError(
-                f'Feishu card update failed: {exc}'
+            raise _retryable_side_effect_error(
+                'Feishu card update failed',
+                exc,
             ) from exc
         if not result.success:
+            error = result.error
+            if bool(getattr(error, 'retryable', False)):
+                raise _retryable_side_effect_error(
+                    'Feishu card update failed',
+                    error,
+                )
             raise FeishuRuntimeError(
-                f'Feishu card update failed: {result.error}'
+                f'Feishu card update failed: {error}'
             )
 
     def send_file(
@@ -1150,12 +1508,19 @@ class LarkChannelClient:
                 timeout=self._send_timeout_seconds,
             )
         except Exception as exc:
-            raise RetryableProviderSideEffectError(
-                f'Feishu send failed: {exc}'
+            raise _retryable_side_effect_error(
+                'Feishu send failed',
+                exc,
             ) from exc
         if not result.success:
+            error = result.error
+            if bool(getattr(error, 'retryable', False)):
+                raise _retryable_side_effect_error(
+                    'Feishu send failed',
+                    error,
+                )
             raise FeishuRuntimeError(
-                f'Feishu send failed: {result.error}'
+                f'Feishu send failed: {error}'
             )
         message_id = str(result.message_id or '')
         if not message_id:

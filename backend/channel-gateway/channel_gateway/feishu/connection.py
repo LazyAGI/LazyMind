@@ -28,7 +28,6 @@ from channel_gateway.feishu.workspace import (
     FeishuWorkspaceState,
 )
 from channel_gateway.feishu.presentation import FeishuReplyRenderer
-from channel_gateway.feishu.registration import configure_bot_menu
 from channel_gateway.feishu.domain import FeishuAppCredentials
 from channel_gateway.feishu.accounts import FeishuAccountService
 
@@ -646,20 +645,6 @@ class FeishuConnectionService:
                 'Feishu connection session changed during provisioning'
             )
         try:
-            configure_bot_menu(
-                credentials.app_id,
-                credentials.app_secret,
-                publish=True,
-            )
-        except FeishuRuntimeError as exc:
-            # The account is already recoverable. Keep registration alive and
-            # let the runtime retry the draft configuration on reconnect.
-            _logger.warning(
-                'feishu_bot_menu_publish_pending account_id=%s error=%s',
-                account_id,
-                str(exc)[:500],
-            )
-        try:
             keeper.ensure_owned()
             if not self._store.claim_welcome(account_id):
                 raise FeishuRuntimeError(
@@ -712,10 +697,8 @@ class FeishuConnectionService:
                     provider_context={
                         'chat_id': '',
                         'workspace_state': workspace.to_dict(),
-                        'workspace_resources': [],
                     },
                     text=f'**👋 欢迎使用 LazyMind**\n\n{WELCOME_MESSAGE}',
-                    presentations=[],
                     status='✅ **连接完成**',
                     thinking='请直接使用飞书输入框对话；底部菜单用于能力、会话与设置。',
                 ),

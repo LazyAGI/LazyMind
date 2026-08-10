@@ -1,105 +1,138 @@
 from __future__ import annotations
 
-import json
+from pathlib import PurePath
 from typing import Any
 
 
-_MAX_CODEX_CARD_TEXT_CHARS = 64000
+_ASSISTANT_UI_STATUSES = {'ready', 'error', 'dispatching', 'cancelling'}
+def project_name(cwd: str) -> str:
+    normalized = str(cwd or '').rstrip('/\\')
+    if not normalized:
+        return '未归属项目'
+    return PurePath(normalized).name or normalized
 
 
-def is_user_facing_codex_thread(value: dict[str, Any]) -> bool:
-    name = value.get('name')
-    if isinstance(name, dict):
-        name = name.get('value')
-    return bool(
-        str(name or value.get('title') or '').strip()
-        or value.get('managed_by_lazymind')
-        or value.get('managed')
-        or str(value.get('source') or '').lower() == 'cli'
+def projects_view(response: dict[str, Any]) -> dict[str, Any]:
+    return {
+        'kind': 'projects',
+        'projects': list(response.get('data') or []),
+        'next_cursor': str(response.get('nextCursor') or '')[:512],
+        'total': max(0, int(response.get('total') or 0)),
+    }
+
+
+def sessions_view(response: dict[str, Any]) -> dict[str, Any]:
+    return {
+        'kind': 'sessions',
+        'threads': list(response.get('data') or []),
+        'next_cursor': str(response.get('nextCursor') or '')[:512],
+        'total': max(0, int(response.get('total') or 0)),
+    }
+
+
+def detail_view(page: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **page,
+        'kind': 'detail',
+    }
+
+
+def detail_snapshot(view: dict[str, Any]) -> dict[str, Any]:
+    snapshot = view.get('snapshot')
+    return dict(snapshot) if isinstance(snapshot, dict) else {}
+
+
+def detail_with_prompt(
+    view: dict[str, Any],
+    prompt: str,
+) -> dict[str, Any]:
+    if view.get('kind') != 'detail':
+        return view
+    return {**view, 'prompt': str(prompt or '')[:4000]}
+
+
+def detail_conversation_id(view: dict[str, Any]) -> str:
+    return str(detail_snapshot(view).get('conversation_id') or '')
+
+
+def detail_run_status(view: dict[str, Any]) -> str:
+    snapshot = detail_snapshot(view)
+    status = str(snapshot.get('status') or '')
+    control_release = str(snapshot.get('control_release') or '')
+    if snapshot.get('pending_request'):
+        return 'waiting_for_input'
+    if status == 'releasing' or control_release == 'pending':
+        return 'releasing'
+    if control_release == 'failed':
+        return 'release_failed'
+    if status in {'starting', 'running', 'waiting'}:
+        return 'running'
+    if status == 'failed':
+        return 'failed'
+    if status == 'interrupted':
+        return 'cancelled'
+    if status == 'completed':
+        return 'completed'
+    return 'idle'
+
+
+def detail_readonly(view: dict[str, Any]) -> bool:
+    if detail_run_status(view) in {'releasing', 'release_failed'}:
+        return True
+    thread = view.get('thread')
+    thread = dict(thread) if isinstance(thread, dict) else {}
+    return not bool(thread.get('available')) and not bool(
+        thread.get('controlled_by_lazymind')
     )
 
 
-def codex_turns_for_card(value: Any) -> list[dict[str, str]]:
-    turns: list[dict[str, str]] = []
-    if isinstance(value, (bytes, bytearray)):
-        try:
-            value = json.loads(value.decode('utf-8'))
-        except (TypeError, ValueError):
-            return turns
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except (TypeError, ValueError):
-            return turns
-    if not isinstance(value, list):
-        return turns
-    for item in value:
-        if not isinstance(item, dict):
-            continue
-        items = item.get('items') if isinstance(item.get('items'), list) else []
-        user_text = ''
-        final_answers: list[str] = []
-        assistant_fallback = ''
-        for entry in items:
-            if not isinstance(entry, dict):
-                continue
-            entry_type = str(entry.get('type') or '')
-            text = _codex_item_text(entry)
-            if not text:
-                continue
-            if 'user' in entry_type.lower() or entry.get('role') == 'user':
-                user_text = text
-            elif 'agent' in entry_type.lower() or entry.get('role') in {
-                'assistant',
-                'agent',
-            }:
-                assistant_fallback = text
-                if str(entry.get('phase') or '') == 'final_answer':
-                    final_answers.append(text)
-        assistant_text = '\n\n'.join(final_answers) or assistant_fallback
-        if not user_text and not assistant_text:
-            role = str(item.get('role') or '')
-            text = _codex_item_text(item)
-            if role and text:
-                turns.append({
-                    'role': role[:30],
-                    'text': text[:_MAX_CODEX_CARD_TEXT_CHARS],
-                })
-            continue
-        if user_text:
-            turns.append({
-                'role': 'user',
-                'text': user_text[:_MAX_CODEX_CARD_TEXT_CHARS],
-            })
-        if assistant_text:
-            turns.append({
-                'role': 'assistant',
-                'text': assistant_text[:_MAX_CODEX_CARD_TEXT_CHARS],
-            })
-    return turns[-4:]
+def assistant_view_with_ui(
+    view: dict[str, Any] | None,
+    status: str,
+    error: str = '',
+) -> dict[str, Any]:
+    result = dict(view or {})
+    normalized = status if status in _ASSISTANT_UI_STATUSES else 'ready'
+    result['_ui'] = {
+        'status': normalized,
+        'error': str(error or '')[:500] if normalized == 'error' else '',
+    }
+    return result
 
 
-def _codex_item_text(value: Any) -> str:
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, list):
-        return '\n'.join(
-            text
-            for item in value
-            if (text := _codex_item_text(item))
-        ).strip()
-    if not isinstance(value, dict):
-        return ''
-    item_type = str(value.get('type') or '').lower()
-    if item_type in {
-        'reasoning',
-        'contextcompaction',
-        'commandexecution',
-        'filechange',
-    }:
-        return ''
-    for key in ('text', 'message', 'content'):
-        text = _codex_item_text(value.get(key))
-        if text:
-            return text
-    return ''
+def assistant_ui_status(view: dict[str, Any]) -> str:
+    ui = view.get('_ui')
+    ui = ui if isinstance(ui, dict) else {}
+    status = str(ui.get('status') or 'ready')
+    return status if status in _ASSISTANT_UI_STATUSES else 'ready'
+
+
+def assistant_ui_error(view: dict[str, Any]) -> str:
+    ui = view.get('_ui')
+    ui = ui if isinstance(ui, dict) else {}
+    return str(ui.get('error') or '')[:500]
+
+
+def user_input_answers(
+    structured: dict[str, Any],
+) -> dict[str, dict[str, list[str]]]:
+    answers: dict[str, dict[str, list[str]]] = {}
+    questions = structured.get('questions')
+    for question in questions if isinstance(questions, list) else []:
+        if not isinstance(question, dict):
+            continue
+        question_id = str(question.get('id') or '').strip()
+        answer = question.get('answer')
+        if not question_id or not isinstance(answer, dict):
+            continue
+        raw = answer.get('value')
+        values = (
+            [str(item) for item in raw if str(item)]
+            if isinstance(raw, list)
+            else [str(raw)] if str(raw or '') else []
+        )
+        other = str(answer.get('otherText') or '').strip()
+        if other:
+            values = [other if value == '其他' else value for value in values]
+        answers[question_id] = {'answers': values}
+    return answers

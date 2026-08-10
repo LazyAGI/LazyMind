@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import replace
 from typing import Any
@@ -12,17 +11,18 @@ from channel_gateway.common.domain.channel import (
     sanitize_channel_text,
 )
 from channel_gateway.common.domain.outbound import OutboundRenderer
+from channel_gateway.feishu.cardkit import (
+    ASK_OTHER_OPTION,
+    MAX_ASK_QUESTION_CHARS,
+    ask_form,
+)
 from channel_gateway.feishu.workspace import (
     FeishuWorkspaceRenderer,
     is_feishu_image_key,
 )
 
 
-_MAX_ASK_QUESTION_CHARS = 500
-_MAX_ASK_CHOICE_CHARS = 80
-_MAX_ASK_ACTION_BYTES = 16 * 1024
 _MAX_MERGED_REFERENCE_CHARS = 6000
-_ASK_OTHER_OPTION = '其他'
 _STREAM_ONLY_PREFLIGHT_MARKERS = (
     'preflight_failed',
     'only supports stream mode',
@@ -72,7 +72,6 @@ class FeishuReplyRenderer:
         *,
         provider_context: dict[str, Any],
         text: str,
-        presentations: list[dict[str, Any]],
         status: str = '✅ **回答完成**',
         thinking: str = '分析与处理已完成。',
         streaming: bool = False,
@@ -148,37 +147,6 @@ class FeishuReplyRenderer:
                     'content': caption[:300],
                 }
             elements.append(element)
-        if streaming:
-            elements.append(
-                {
-                    'tag': 'button',
-                    'name': 'cancel_generation',
-                    'text': {
-                        'tag': 'plain_text',
-                        'content': (
-                            'Cancel generation'
-                            if language == 'en'
-                            else '取消本次生成'
-                        ),
-                    },
-                    'type': 'danger',
-                    'width': 'fill',
-                    'value': {
-                        'lazymind_action': 'local',
-                        'text': (
-                            'Cancel generation'
-                            if language == 'en'
-                            else '取消本次生成'
-                        ),
-                        'workspace_action': {
-                            'kind': 'operation.cancel',
-                        },
-                        'intended_chat_id': str(
-                            provider_context.get('chat_id') or ''
-                        ),
-                    },
-                }
-            )
         elements.extend(extra_elements or [])
         return {
             'schema': '2.0',
@@ -260,6 +228,7 @@ def parse_ask_form_submission(
             return '', None
         answered.append(
             {
+                'id': str(raw_question.get('id') or ''),
                 'text': text,
                 'type': question_type,
                 'choices': choices,
@@ -321,10 +290,10 @@ def _ask_answer_text(answer: dict[str, Any]) -> str:
         rendered = str(value or '')
     other_text = str(answer.get('otherText') or '').strip()
     if other_text and (
-        value == _ASK_OTHER_OPTION
-        or isinstance(value, list) and _ASK_OTHER_OPTION in value
+        value == ASK_OTHER_OPTION
+        or isinstance(value, list) and ASK_OTHER_OPTION in value
     ):
-        return rendered.replace(_ASK_OTHER_OPTION, other_text)
+        return rendered.replace(ASK_OTHER_OPTION, other_text)
     return rendered
 
 
@@ -335,7 +304,6 @@ def streaming_reply_card(
     return FeishuReplyRenderer.render(
         provider_context=provider_context,
         text='',
-        presentations=[],
         status=(
             '⏳ **Understanding your question**'
             if language == 'en'
@@ -364,6 +332,8 @@ class FeishuPresentationRenderer:
         self._base = base
 
     def render(self, message: ClaimedOutbound) -> list[dict[str, Any]]:
+        if message.provider_context.get('_workspace_delivery_suppressed'):
+            return []
         presentations = self._presentations(message)
         workspace = message.provider_context.get('workspace_state')
         workspace = workspace if isinstance(workspace, dict) else {}
@@ -385,23 +355,30 @@ class FeishuPresentationRenderer:
             presentations,
             message.provider_context,
         )
-        if (
-            message.provider_context.get('workspace_surface')
-            == 'management'
-        ):
-            return [
-                {
+        workspace_surface = message.provider_context.get(
+            'workspace_surface'
+        )
+        if workspace_surface in {'management', 'assistant'}:
+            non_text_parts = [
+                part for part in parts if part.get('kind') != 'text'
+            ]
+            if (
+                workspace_surface == 'assistant'
+                and message.metadata.get('streamed_text') is True
+            ):
+                return non_text_parts
+            rendered = [{
                     'kind': 'card',
                     'card': FeishuWorkspaceRenderer.render(
                         provider_context=message.provider_context,
-                        text=presentable_feishu_text(text),
                         presentations=presentations,
                     ),
                     'workspace': True,
-                    'workspace_text': presentable_feishu_text(text),
-                    'workspace_presentations': presentations,
                 }
             ]
+            if workspace_surface == 'assistant':
+                rendered.extend(non_text_parts)
+            return rendered
         task = next(
             (
                 presentation
@@ -423,6 +400,7 @@ class FeishuPresentationRenderer:
         if (
             message.metadata.get('streamed_text') is True
             and not extra_elements
+            and not task
             and message.intent_kind != 'failed'
             and not has_sources
         ):
@@ -432,7 +410,6 @@ class FeishuPresentationRenderer:
             'card': FeishuReplyRenderer.render(
                 provider_context=message.provider_context,
                 text=workspace_text,
-                presentations=presentations,
                 status=(
                     '⚠️ **Answer failed**'
                     if message.intent_kind == 'failed' and language == 'en'
@@ -456,8 +433,6 @@ class FeishuPresentationRenderer:
                 )
                 or ''
             ),
-            'workspace_text': workspace_text,
-            'workspace_presentations': presentations,
             'task_id': str(task.get('task_id') or ''),
             'conversation_id': str(task.get('conversation_id') or ''),
         }
@@ -471,6 +446,9 @@ class FeishuPresentationRenderer:
         tasks: list[dict[str, Any]],
         *,
         waiting_for_next_step: bool,
+        inflight_image_count: int,
+        failed_image_count: int,
+        omitted_image_count: int,
     ) -> dict[str, Any]:
         """Render legacy in-flight task outbounds during rolling upgrades."""
         ordered = sorted(
@@ -534,18 +512,33 @@ class FeishuPresentationRenderer:
                 f'**结果摘要**\n{summary[:1800]}'
                 + ('…' if len(summary) > 1800 else '')
             )
-        if waiting_for_retry:
+        delivery_notices: list[str] = []
+        if inflight_image_count > 0:
+            delivery_notices.append(
+                f'{inflight_image_count} 张图片正在通过飞书原生消息投递'
+            )
+        if failed_image_count > 0:
+            delivery_notices.append(
+                f'{failed_image_count} 张图片投递失败'
+            )
+        if omitted_image_count > 0:
+            delivery_notices.append(
+                f'{omitted_image_count} 张历史图片超过每步骤 20 张的展示上限'
+            )
+        if delivery_notices:
+            builder.footer('；'.join(delivery_notices) + '。')
+        elif waiting_for_retry:
             builder.footer(
                 '本次尝试失败，Auto 模式正在等待并检测自动重试；'
                 '后续步骤会继续更新在这张卡片中。'
             )
         elif waiting_for_next_step:
             builder.footer(
-                '当前步骤已完成，正在等待插件进入下一步。'
+                '当前步骤已完成，正在等待 Workflow 进入下一步。'
             )
         elif _task_terminal(status):
             builder.footer(
-                '插件工作流已经结束；最终图片或文件会继续以'
+                'Workflow 已经结束；最终图片或文件会继续以'
                 '飞书原生消息发送。'
             )
         else:
@@ -557,6 +550,21 @@ class FeishuPresentationRenderer:
             tags.append((f'{progress}%', 'blue'))
         _add_header_tags(card, tags)
         return card
+
+    @staticmethod
+    def task_replaced_card() -> dict[str, Any]:
+        return (
+            new_card()
+            .config(wide_screen_mode=True)
+            .header(
+                '任务卡已更新',
+                subtitle='LazyMind 工作流',
+                template='grey',
+            )
+            .markdown('请使用此会话中最新的任务卡片。')
+            .build()
+            .data
+        )
 
     @staticmethod
     def _presentations(
@@ -595,32 +603,25 @@ def _ask_elements(
         )
         if isinstance(question, dict) and question.get('text')
     ]
-    form = _ask_form(ask, questions, provider_context)
+    form = ask_form(ask, questions, provider_context)
     elements: list[dict[str, Any]] = [
         {'tag': 'hr'},
         {
             'tag': 'markdown',
             'content': (
                 '💬 **需要你的回答**\n'
-                f'**{str(ask.get("title") or "补充信息")}**\n'
-                f'{str(ask.get("description") or "")}\n'
+                f'**{str(ask.get("title") or "补充信息")[:200]}**\n'
+                f'{str(ask.get("description") or "")[:1000]}\n'
                 '<font color="grey">直接在卡片内选择或填写，提交后任务会自动继续。</font>'
             ).strip(),
         },
     ]
-    quick_choices = _ask_quick_choice_buttons(
-        ask,
-        questions,
-        provider_context,
-    )
-    if quick_choices:
-        elements.extend(quick_choices)
-        return elements
-    if form is not None:
+    submittable = ask.get('submittable') is not False
+    if submittable and form is not None:
         elements.append(form)
         return elements
     question_text = '\n'.join(
-        f'{index}. {str(question.get("text") or "")}'
+        f'{index}. {str(question.get("text") or "")[:MAX_ASK_QUESTION_CHARS]}'
         for index, question in enumerate(questions, start=1)
     )
     elements.append(
@@ -633,283 +634,6 @@ def _ask_elements(
         }
     )
     return elements
-
-
-def _ask_quick_choice_buttons(
-    payload: dict[str, Any],
-    questions: list[dict[str, Any]],
-    provider_context: dict[str, Any],
-) -> list[dict[str, Any]]:
-    if len(questions) != 1:
-        return []
-    question = questions[0]
-    question_type = str(question.get('type') or 'text')
-    choices = _ask_choices(question)
-    if question_type not in {'boolean', 'single'} or not 1 <= len(choices) <= 6:
-        return []
-    question_text = str(question.get('text') or '')
-    rows: list[dict[str, Any]] = [
-        {
-            'tag': 'markdown',
-            'content': f'**{question_text[:_MAX_ASK_QUESTION_CHARS]}**',
-        }
-    ]
-    for start in range(0, len(choices), 2):
-        columns = []
-        for offset, choice in enumerate(choices[start:start + 2]):
-            answer = {
-                'type': question_type,
-                'value': choice,
-            }
-            if question_type == 'single':
-                answer['otherText'] = ''
-            action = {
-                'lazymind_action': 'ask',
-                'text': f'{question_text}: {choice}',
-                'ask_id': str(payload.get('ask_id') or ''),
-                'ask_answers_structured': {
-                    'ask_id': str(payload.get('ask_id') or ''),
-                    'questions': [
-                        {
-                            'text': question_text,
-                            'type': question_type,
-                            'choices': choices,
-                            'custom_choices': choices,
-                            'answer': answer,
-                        }
-                    ],
-                },
-                'intended_chat_id': str(provider_context.get('chat_id') or ''),
-            }
-            columns.append(
-                {
-                    'tag': 'column',
-                    'width': 'weighted',
-                    'weight': 1,
-                    'elements': [
-                        {
-                            'tag': 'button',
-                            'name': f'ask_quick_answer_{start + offset + 1}',
-                            'text': {
-                                'tag': 'plain_text',
-                                'content': choice[:_MAX_ASK_CHOICE_CHARS],
-                            },
-                            'type': 'primary',
-                            'width': 'fill',
-                            'value': action,
-                        }
-                    ],
-                }
-            )
-        rows.append(
-            {
-                'tag': 'column_set',
-                'flex_mode': 'none',
-                'horizontal_spacing': '8px',
-                'columns': columns,
-            }
-        )
-    return rows
-
-
-def _ask_form(
-    payload: dict[str, Any],
-    questions: list[dict[str, Any]],
-    provider_context: dict[str, Any],
-) -> dict[str, Any] | None:
-    usable = questions[:10]
-    if not usable:
-        return None
-    fields: list[dict[str, Any]] = []
-    schema: list[dict[str, Any]] = []
-    for index, question in enumerate(usable, start=1):
-        field_name = f'ask_q_{index}'
-        question_text = str(question.get('text') or '')
-        question_type = str(question.get('type') or 'text')
-        choices = _ask_choices(question)
-        field = _ask_form_field(
-            field_name,
-            question_type,
-            choices,
-        )
-        if field is None:
-            return None
-        fields.append(
-            {
-                'tag': 'markdown',
-                'content': (
-                    f'**{index}. '
-                    f'{question_text[:_MAX_ASK_QUESTION_CHARS]}**'
-                ),
-            }
-        )
-        fields.append(field)
-        other_name = ''
-        if (
-            question_type in {'single', 'multiple'}
-            and _ASK_OTHER_OPTION in choices
-        ):
-            other_name = f'{field_name}_other'
-            fields.extend(
-                [
-                    {
-                        'tag': 'markdown',
-                        'content': (
-                            '<font color="grey">'
-                            '选择“其他”时请补充说明</font>'
-                        ),
-                    },
-                    {
-                        'tag': 'input',
-                        'element_id': f'ask_other_{index}',
-                        'name': other_name,
-                        'required': False,
-                        'input_type': 'text',
-                        'width': 'fill',
-                        'max_length': 1000,
-                        'placeholder': {
-                            'tag': 'plain_text',
-                            'content': '请输入补充内容',
-                        },
-                    },
-                ]
-            )
-        schema.append(
-            {
-                'name': field_name,
-                'other_name': other_name,
-                'text': question_text,
-                'type': question_type,
-                'choices': choices,
-            }
-        )
-    action = {
-        'lazymind_action': 'ask',
-        'ask_id': str(payload.get('ask_id') or ''),
-        'ask_form_questions': schema,
-        'intended_chat_id': str(provider_context.get('chat_id') or ''),
-    }
-    if len(
-        json.dumps(
-            action,
-            ensure_ascii=False,
-            separators=(',', ':'),
-        ).encode('utf-8')
-    ) > _MAX_ASK_ACTION_BYTES:
-        return None
-    fields.append(
-        {
-            'tag': 'column_set',
-            'flex_mode': 'none',
-            'horizontal_spacing': '8px',
-            'columns': [
-                {
-                    'tag': 'column',
-                    'width': 'weighted',
-                    'weight': 1,
-                    'elements': [
-                        {
-                            'tag': 'button',
-                            'name': 'ask_submit',
-                            'text': {
-                                'tag': 'plain_text',
-                                'content': '提交回答',
-                            },
-                            'type': 'primary',
-                            'width': 'fill',
-                            'action_type': 'form_submit',
-                            'value': action,
-                        }
-                    ],
-                }
-            ],
-        }
-    )
-    return {
-        'tag': 'form',
-        'name': 'ask_form',
-        'elements': fields,
-    }
-
-
-def _ask_form_field(
-    field_name: str,
-    question_type: str,
-    choices: list[str],
-) -> dict[str, Any] | None:
-    common = {
-        'element_id': f'{field_name}_field',
-        'name': field_name,
-        'required': True,
-        'width': 'fill',
-    }
-    if question_type == 'text':
-        return {
-            'tag': 'input',
-            **common,
-            'input_type': 'multiline_text',
-            'rows': 3,
-            'auto_resize': True,
-            'max_rows': 8,
-            'max_length': 1000,
-            'placeholder': {
-                'tag': 'plain_text',
-                'content': '请输入回答',
-            },
-        }
-    if question_type in {'boolean', 'single'} and choices:
-        return {
-            'tag': 'select_static',
-            **common,
-            'placeholder': {
-                'tag': 'plain_text',
-                'content': '请选择',
-            },
-            'options': _ask_select_options(choices),
-        }
-    if question_type == 'multiple' and choices:
-        return {
-            'tag': 'multi_select_static',
-            **common,
-            'placeholder': {
-                'tag': 'plain_text',
-                'content': '可选择多项',
-            },
-            'options': _ask_select_options(choices),
-        }
-    return None
-
-
-def _ask_choices(question: dict[str, Any]) -> list[str]:
-    raw = question.get('choices')
-    choices = [
-        str(choice)
-        for choice in (raw if isinstance(raw, list) else [])
-        if str(choice)
-    ]
-    if not choices and str(question.get('type') or '') == 'boolean':
-        return ['是', '否']
-    return choices
-
-
-def workspace_ask_elements(
-    presentations: list[dict[str, Any]],
-    provider_context: dict[str, Any],
-) -> list[dict[str, Any]]:
-    return _ask_elements(presentations, provider_context)
-
-
-def _ask_select_options(choices: list[str]) -> list[dict[str, Any]]:
-    return [
-        {
-            'text': {
-                'tag': 'plain_text',
-                'content': choice[:_MAX_ASK_CHOICE_CHARS],
-            },
-            'value': choice,
-        }
-        for choice in choices[:20]
-    ]
 
 
 def _merge_reference_parts(
@@ -998,17 +722,16 @@ def _task_status(status: str) -> tuple[str, str]:
 
 
 def _workflow_title(task_title: str) -> str:
-    plugin = task_title.split(':', 1)[0].strip().lower()
+    workflow = task_title.split(':', 1)[0].strip().lower()
     return {
         'writer-workflow': 'AI Writer 写作工作流',
         'image-workflow': 'AI 绘图工作流',
-        'ppt-plugin': 'AI PPT 工作流',
     }.get(
-        plugin,
+        workflow,
         (
-            f'{plugin.removesuffix("-plugin")} 工作流'
-            if plugin
-            else '插件工作流'
+            f'{workflow.removesuffix("-workflow")} 工作流'
+            if workflow
+            else '工作流'
         ),
     )
 
@@ -1054,7 +777,7 @@ def _workflow_step_line(
 
 def _workflow_step_key(task: dict[str, Any]) -> str:
     raw_title = str(task.get('title') or '')
-    return raw_title.split(':', 1)[-1].strip().lower()
+    return raw_title.split(':', 1)[-1].strip().lower()[:200]
 
 
 def _workflow_progress(

@@ -350,6 +350,8 @@ CREATE TABLE IF NOT EXISTS external_agent_runs (
     action VARCHAR(32) NOT NULL DEFAULT 'start',
     status VARCHAR(32) NOT NULL,
     error_message TEXT,
+    control_release VARCHAR(32) NOT NULL DEFAULT '',
+    control_error TEXT,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     CONSTRAINT uk_external_agent_run_request UNIQUE (provider, request_id)
@@ -358,6 +360,20 @@ CREATE TABLE IF NOT EXISTS external_agent_runs (
 CREATE INDEX IF NOT EXISTS idx_external_agent_runs_conversation_id ON external_agent_runs (conversation_id);
 CREATE INDEX IF NOT EXISTS idx_external_agent_runs_provider_thread_id ON external_agent_runs (provider_thread_id);
 CREATE INDEX IF NOT EXISTS idx_external_agent_runs_status ON external_agent_runs (status);
+
+CREATE TABLE IF NOT EXISTS external_agent_operations (
+    id VARCHAR(36) PRIMARY KEY,
+    actor_user_id VARCHAR(255) NOT NULL,
+    operation_id VARCHAR(255) NOT NULL,
+    kind VARCHAR(64) NOT NULL,
+    request_hash VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    result JSONB,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_agent_operation UNIQUE
+        (actor_user_id, operation_id, kind)
+);
 
 ALTER TABLE plugin_transition_commands
     ADD COLUMN IF NOT EXISTS retry_origin VARCHAR(16) NOT NULL DEFAULT 'automatic';
@@ -440,6 +456,8 @@ CREATE TABLE IF NOT EXISTS external_agent_runs (
     action VARCHAR(32) NOT NULL DEFAULT 'start',
     status VARCHAR(32) NOT NULL,
     error_message TEXT,
+    control_release VARCHAR(32) NOT NULL DEFAULT '',
+    control_error TEXT,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     CONSTRAINT uk_external_agent_run_request UNIQUE (provider, request_id)
@@ -448,6 +466,20 @@ CREATE TABLE IF NOT EXISTS external_agent_runs (
 CREATE INDEX IF NOT EXISTS idx_external_agent_runs_conversation_id ON external_agent_runs (conversation_id);
 CREATE INDEX IF NOT EXISTS idx_external_agent_runs_provider_thread_id ON external_agent_runs (provider_thread_id);
 CREATE INDEX IF NOT EXISTS idx_external_agent_runs_status ON external_agent_runs (status);
+
+CREATE TABLE IF NOT EXISTS external_agent_operations (
+    id VARCHAR(36) PRIMARY KEY,
+    actor_user_id VARCHAR(255) NOT NULL,
+    operation_id VARCHAR(255) NOT NULL,
+    kind VARCHAR(64) NOT NULL,
+    request_hash VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    result TEXT,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_agent_operation UNIQUE
+        (actor_user_id, operation_id, kind)
+);
 
 ALTER TABLE plugin_transition_commands
     ADD COLUMN retry_origin VARCHAR(16) NOT NULL DEFAULT 'automatic';

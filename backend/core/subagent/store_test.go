@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -100,6 +101,33 @@ func TestStatusAndArtifactLifecycle(t *testing.T) {
 	cnt, err := CountByConversation(ctx, db.DB, "conv-x")
 	if err != nil || cnt != 1 {
 		t.Fatalf("expected count 1, got %d (err=%v)", cnt, err)
+	}
+}
+
+func TestTerminalTaskRejectsLateArtifact(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if _, err := CreateTask(ctx, db.DB, CreateTaskInput{
+		TaskID: "task-terminal", ConversationID: "conv-terminal", AgentType: "image_generation",
+		Title: "terminal", Mode: "auto",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := UpdateFinalStatus(ctx, db.DB, "task-terminal", StatusSucceeded, "done"); err != nil {
+		t.Fatalf("finish task: %v", err)
+	}
+	if err := SaveArtifact(
+		ctx, db.DB, "task-terminal", "images", "image",
+		json.RawMessage(`{"path":"images/late.png"}`), 1,
+	); !errors.Is(err, ErrTaskTerminal) {
+		t.Fatalf("expected ErrTaskTerminal, got %v", err)
+	}
+	artifacts, err := LoadArtifacts(ctx, db.DB, "task-terminal")
+	if err != nil {
+		t.Fatalf("load artifacts: %v", err)
+	}
+	if len(artifacts) != 0 {
+		t.Fatalf("expected no late artifacts, got %d", len(artifacts))
 	}
 }
 

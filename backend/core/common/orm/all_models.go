@@ -23,6 +23,7 @@ func AllModelsForDDL() []interface{} {
 		&MultiAnswersChatHistory{},
 		&ExternalAgentBinding{},
 		&ExternalAgentRun{},
+		&ExternalAgentOperation{},
 		&SubAgentTask{},
 		&SubAgentStep{},
 		&SubAgentArtifact{},

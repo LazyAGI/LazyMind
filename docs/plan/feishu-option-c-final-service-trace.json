@@ -1,0 +1,250 @@
+{
+  "trace_id": "feishu-option-c-final-service-20260810-0620",
+  "captured_at_start": "2026-08-09T22:19:32Z",
+  "captured_at_end": "2026-08-09T22:32:00Z",
+  "scope": "final source -> rebuilt channel-gateway -> rebuilt Core -> real Codex app-server, plus authenticated Feishu Web callback and CardKit delivery",
+  "source_checkpoint": {
+    "branch": "ch/feishu_update",
+    "head": "69d9b677057fdccbbc3f1df7845576a8cc9377e6",
+    "working_tree_dirty": true,
+    "manifest": "docs/plan/feishu-option-c-current-source-manifest.json",
+    "manifest_schema": "feishu-option-c-source-manifest-v1",
+    "manifest_file_count": 98,
+    "manifest_aggregate_sha256": "ed37b851b6150f51e3a21c90d97c574786b81f34942ece45f85caff57f5b98e7"
+  },
+  "services": {
+    "core": {
+      "container_id": "c161a86e509c1ff1f4afd538353c4236030892d5af46141716bd3fa4eea3861d",
+      "image": "sha256:35f04f617e34f87e48ce1acef2d3c316125c6768fd96f089287611c10152289d",
+      "created_at": "2026-08-09T22:10:36.843130511Z",
+      "started_at": "2026-08-09T22:10:38.626206875Z",
+      "compose_config_hash": "edb4fc3aad272110d82ac84189aac7c6164bb3034503e849ce7e348ac3301c2e",
+      "health": "healthy"
+    },
+    "channel_gateway": {
+      "container_id": "5fb82f957d61746a458f0b0a25968a95d5cb0a93170ae6dac20b47ffc9d863d8",
+      "image": "sha256:e2bd1be854b6e0b46a53f08c91f26e08b02c8d70c940354f8031e7d8d40a9d4c",
+      "created_at": "2026-08-09T22:19:32.115383252Z",
+      "started_at": "2026-08-09T22:19:38.490922334Z",
+      "compose_config_hash": "40c12c40d25f2520f9d6edb7727f0af20359ab4bfe1d3155ca455fc6768f7801",
+      "health": "healthy"
+    }
+  },
+  "verification": {
+    "gateway_contracts": {
+      "result": "pass",
+      "count": 51,
+      "groups": {
+        "assistant_approval": 8,
+        "assistant_fallback": 14,
+        "cardkit_stream": 19,
+        "channel_execution_context": 10
+      }
+    },
+    "core_tests": {
+      "result": "pass",
+      "packages": [
+        "lazymind/core/chat",
+        "lazymind/core/externalagent",
+        "lazymind/core/workflow",
+        "lazymind/core/workflow/attempt",
+        "lazymind/core/workflow/compat",
+        "lazymind/core/workflow/domain",
+        "lazymind/core/workflow/executor",
+        "lazymind/core/workflow/facade",
+        "lazymind/core/workflow/graphengine",
+        "lazymind/core/workflow/store",
+        "lazymind/core/workflow/stream"
+      ]
+    },
+    "architecture": {
+      "files": 98,
+      "classes": 268,
+      "callables": 1581,
+      "diagrams": 2258,
+      "coverage_missing": 0,
+      "coverage_unlisted": 0,
+      "import_cycles": 0,
+      "inheritance_cycles": 0,
+      "resolved_call_cycles": 0,
+      "browser_validation": "2258/2258",
+      "browser_errors": 0
+    }
+  },
+  "real_read_path": {
+    "trace_id": "feishu-ext-a15cee6be3204b2abfc3a62ac90b97b9",
+    "captured_at": "2026-08-09T22:21:16.662244Z",
+    "actor_user_id": "980fe1c4-47ae-4feb-a516-2d0248f718d1",
+    "projects": {
+      "count": 6,
+      "total": 6
+    },
+    "threads": {
+      "cwd": "/Users/chenhao7/LocalScripts/LazyRAG/LazyRAG",
+      "count": 8,
+      "total": 8,
+      "page_counts": [4, 4],
+      "invalid_cursor_status": 400
+    },
+    "detail": {
+      "thread_id": "019fe89c-94f1-7842-9131-22474466d5ef",
+      "conversation_id": "ed02466b-6f53-4c60-8218-b1a12556b9bc",
+      "total_turns": 2,
+      "returned_turns": 4
+    },
+    "actor_isolation": {
+      "hidden_thread_id": "019fe267-a469-7b50-813d-a943bafe72d1",
+      "hidden_owner_user_id": "feishu-cancel-e2e",
+      "owner_status": 200,
+      "other_actor_status": 404
+    }
+  },
+  "real_two_turn": {
+    "captured_at": "2026-08-09T22:20:33.987485Z",
+    "actor_user_id": "980fe1c4-47ae-4feb-a516-2d0248f718d1",
+    "nonce": "OPTION-C-FINAL-20260810-0620",
+    "cwd": "/Users/chenhao7/LocalScripts/LazyRAG/LazyRAG",
+    "binding_id": "7fa57152-ebd8-4a65-b7e4-26d4b9dc2bde",
+    "thread_id": "019fe89c-94f1-7842-9131-22474466d5ef",
+    "conversation_id": "ed02466b-6f53-4c60-8218-b1a12556b9bc",
+    "native_turn_totals": [0, 1, 2],
+    "turns": [
+      {
+        "ordinal": 1,
+        "request_id": "OPTION-C-FINAL-20260810-0620-turn1",
+        "history_id": "h_dkkrgsq6zxvl",
+        "run_id": "d6cf1df8-21a3-4b21-b758-f2f25619df58",
+        "provider_turn_id": "019fe89c-9711-7851-8961-63cac34a7861",
+        "answer": "OPTION-C-FINAL-20260810-0620",
+        "stream_updates": 15,
+        "created_at": "2026-08-09T22:20:04.333547Z",
+        "updated_at": "2026-08-09T22:20:21.133497Z",
+        "status": "completed",
+        "control_release": "unsubscribed"
+      },
+      {
+        "ordinal": 2,
+        "request_id": "OPTION-C-FINAL-20260810-0620-turn2",
+        "history_id": "h_dkkrh0itsinz",
+        "run_id": "f3eb78c8-5c3b-484b-a78a-e499f4d06192",
+        "provider_turn_id": "019fe89c-d8e6-7c42-b347-0d42a96fb00d",
+        "answer": "OPTION-C-FINAL-20260810-0620::TURN2",
+        "stream_updates": 18,
+        "created_at": "2026-08-09T22:20:21.186096Z",
+        "updated_at": "2026-08-09T22:20:33.936904Z",
+        "status": "completed",
+        "control_release": "unsubscribed"
+      }
+    ],
+    "assertions": {
+      "native_turns_progressed_0_1_2": true,
+      "distinct_runs": true,
+      "distinct_histories": true,
+      "distinct_provider_turns": true,
+      "second_turn_recalled_nonce": true,
+      "both_runs_completed": true,
+      "both_runs_released_control": true
+    }
+  },
+  "real_feishu_web": {
+    "captured_at": "2026-08-09T22:24:37.811446Z",
+    "client": "authenticated Feishu Web",
+    "prompt": "Option C FINAL Feishu Web 20260810-0622：请只回复 WEB-FINAL-0622。",
+    "answer": "WEB-FINAL-0622",
+    "account_id": "ca_44f362a0461744b2aa53172420bfac48",
+    "chat_id": "oc_59730a937ad7a7deb2e1abaaca15719c",
+    "external_address_hash": "36cde4b60387217cdb7238746d4abbb405eab8336f9896072833b2520f54f8fb",
+    "inbox_id": "ci_db77ffe36fb345589739d6f41fe4b809",
+    "inbox_status": "completed",
+    "inbox_received_at": "2026-08-09T22:24:31.096180Z",
+    "inbox_updated_at": "2026-08-09T22:24:37.508371Z",
+    "outbox_id": "co_fd8f0779b10c4fc997c5d890a499542f",
+    "outbox_status": "sent",
+    "outbox_created_at": "2026-08-09T22:24:37.508371Z",
+    "outbox_updated_at": "2026-08-09T22:24:37.811446Z",
+    "workspace_message_id": "om_x100b68bbaf242ca4c165840818a0728",
+    "workspace_operation_id": "b0fbdea50d592c436100f5abcf130b64d0bdca1b3c01634e3d177009f7708f10",
+    "conversation_id": "c3b83e17-ea99-4250-8541-f24ce4e9fb64",
+    "thread_id": "019fe829-5f54-7851-b8d6-f0b2b696475e",
+    "run_id": "326ce625-364a-4a81-97d5-f70ca4164cf3",
+    "request_id": "channel_b0fbdea50d592c436100f5ab",
+    "history_id": "h_dkkrk7dz6lvp",
+    "provider_turn_id": "019fe8a0-a9c9-78a2-9c03-d6651ddf2427",
+    "actor_user_id": "980fe1c4-47ae-4feb-a516-2d0248f718d1",
+    "run_status": "completed",
+    "control_release": "unsubscribed",
+    "streamed_text": true,
+    "native_menu_labels": ["能力", "切换会话", "设置", "助理"],
+    "native_menu_routes": {
+      "能力": {
+        "result": "pass",
+        "view": "current-session capability selector",
+        "workflow_confirmation_copy_visible": true
+      },
+      "切换会话": {
+        "result": "pass",
+        "view": "native conversation selector",
+        "visible_conversations": 5,
+        "screenshot": {
+          "path": "docs/plan/feishu-option-c-final-web-switch-20260810-0632.png",
+          "sha256": "052abee66cdfff4df8749cb4c2939840a0eb173174cb324c4d55f05ec4ab0dec",
+          "bytes": 66993
+        }
+      },
+      "设置": {
+        "result": "pass",
+        "view": "experience settings",
+        "saved_state_visible": true
+      },
+      "助理": {
+        "result": "pass",
+        "view": "Codex project selector",
+        "connection_status": "connected",
+        "visible_projects": 6,
+        "screenshot": {
+          "path": "docs/plan/feishu-option-c-final-web-projects-20260810-0632.png",
+          "sha256": "415025ee40f860c53a935ce8376a8e71c4c596b369377a72f54462304a9ac3b2",
+          "bytes": 66008
+        }
+      }
+    },
+    "screenshot": {
+      "path": "docs/plan/feishu-option-c-final-web-20260810-0624.png",
+      "sha256": "a7f9fe0754b93a9adeb8ad3b018e81372005dc9ee985bebe3d7e51c3cd23aff1",
+      "bytes": 72779
+    },
+    "assertions": {
+      "entered_through_real_feishu_callback": true,
+      "same_workspace_message_id_for_inbox_and_outbox": true,
+      "outbox_sent": true,
+      "card_answer_visible": true,
+      "run_completed": true,
+      "control_released": true,
+      "four_native_menu_entries_visible": true
+    }
+  },
+  "native_desktop_observation": {
+    "captured_at": "2026-08-09T22:27:00Z",
+    "client": "Feishu for macOS",
+    "client_version": "7.53.16",
+    "bundle_id": "com.bytedance.macos.feishu",
+    "bot_title": "陈浩 的 LazyMind 助手",
+    "reload_attempted": true,
+    "four_native_menu_entries_visible": false,
+    "latest_web_message_visible": false,
+    "observed_card": "legacy generic new-session card",
+    "result": "fail",
+    "screenshot": {
+      "path": "docs/plan/feishu-option-c-final-mac-20260810-0627.png",
+      "sha256": "1a8db6bd5e6b17e943f14e072fca92642dd7aa7469347bfb85fdba83a7980d90",
+      "bytes": 146378
+    },
+    "interpretation": "The current Web configuration and callback path are proven, but the installed macOS client does not display the same native menu or latest card state. The root cause is not established by this trace."
+  },
+  "evidence_limits": [
+    "The real_two_turn section uses the real Gateway client, rebuilt Core, and real Codex app-server without entering through Feishu; real_feishu_web separately proves one current-source Feishu callback and CardKit terminal delivery.",
+    "It does not prove command, file-change, permissions, or user-input approval cards on real Feishu.",
+    "It does not prove real Feishu 429 headers, expired-card replacement, candidate UUID replay, or process-crash recovery.",
+    "It contains current Feishu Web and native macOS screenshots; the macOS observation fails, and there is no mobile screenshot. Phase 4 therefore remains incomplete."
+  ]
+}

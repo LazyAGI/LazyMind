@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 
 SCHEMA_VERSION = '1'
+RESOLVED_RESOURCE_SELECTIONS_KEY = '_channel_gateway_resolved_resources'
+RESOLVED_CONVERSATION_TARGET_KEY = '_channel_gateway_resolved_conversation'
 
 
 class ActionKind(str, Enum):
@@ -30,7 +32,7 @@ class ActionKind(str, Enum):
 ResourceType = Literal[
     'knowledge_base',
     'skill',
-    'plugin',
+    'workflow',
     'tool',
     'prompt',
     'conversation',
@@ -38,6 +40,10 @@ ResourceType = Literal[
 ]
 Evidence: TypeAlias = Annotated[str, Field(min_length=1, max_length=300)]
 GroundingMessage: TypeAlias = Annotated[str, Field(min_length=1, max_length=4000)]
+PreparedResourcePosition: TypeAlias = Annotated[
+    str,
+    Field(pattern=r'^[0-7]$'),
+]
 
 
 class _StrictModel(BaseModel):
@@ -316,7 +322,6 @@ class ConversationSettingsParameters(_StrictModel):
     section: Literal[
         'overview',
         'knowledge_base',
-        'plugin',
         'subagent',
         'skill',
         'tool',
@@ -336,8 +341,8 @@ class ConversationKnowledgeBaseSetting(_StrictModel):
     enabled: bool
 
 
-class ConversationWorkflowSetting(_StrictModel):
-    setting: Literal['plugin']
+class ConversationWorkflowEnabledSetting(_StrictModel):
+    setting: Literal['workflow_enabled']
     enabled: bool
 
 
@@ -376,7 +381,7 @@ class AccountWorkflowSetting(_StrictModel):
 
 ConversationSettingChange: TypeAlias = Annotated[
     ConversationKnowledgeBaseSetting
-    | ConversationWorkflowSetting
+    | ConversationWorkflowEnabledSetting
     | ConversationWorkflowModeSetting
     | ConversationSubagentSetting
     | AccountSkillSetting
@@ -389,6 +394,11 @@ ConversationSettingChange: TypeAlias = Annotated[
 
 class ConversationSettingsUpdateParameters(_StrictModel):
     change: ConversationSettingChange
+    expected_conversation_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=512,
+    )
     evidence: list[Evidence] = Field(
         min_length=1,
         max_length=8,
@@ -630,6 +640,21 @@ COMMAND_SELECTION_RULES = (
 )
 
 
+class PreparedResourceItem(_StrictModel):
+    id: str = Field(min_length=1, max_length=512)
+    name: str = Field(default='', max_length=200)
+    can_disable: bool = True
+
+
+class PreparedResourceSelection(_StrictModel):
+    resource_type: ResourceType
+    item: PreparedResourceItem
+
+
+class PreparedConversationTarget(_StrictModel):
+    conversation_id: str = Field(min_length=1, max_length=512)
+
+
 class SelectionContinuation(_StrictModel):
     """Validated command suspended until the user selects one displayed item."""
 
@@ -638,7 +663,11 @@ class SelectionContinuation(_StrictModel):
     command: dict[str, Any]
     grounding_messages: list[GroundingMessage] = Field(min_length=1, max_length=10)
     resource_change_index: int | None = Field(default=None, ge=0, le=7)
-    prepared_catalog: dict[str, Any] = Field(default_factory=dict)
+    prepared_resources: dict[
+        PreparedResourcePosition,
+        PreparedResourceSelection,
+    ] = Field(default_factory=dict, max_length=8)
+    prepared_conversation_target: PreparedConversationTarget | None = None
 
     @model_validator(mode='after')
     def validate_command_shape(self) -> 'SelectionContinuation':
@@ -648,6 +677,8 @@ class SelectionContinuation(_StrictModel):
                 raise ValueError('conversation target continuation requires switch command')
             if self.resource_change_index is not None:
                 raise ValueError('conversation target continuation has no resource index')
+            if self.prepared_resources or self.prepared_conversation_target is not None:
+                raise ValueError('conversation target continuation cannot be pre-resolved')
         else:
             changes = list(getattr(command.parameters, 'resource_changes', []))
             if (
@@ -655,6 +686,17 @@ class SelectionContinuation(_StrictModel):
                 or self.resource_change_index >= len(changes)
             ):
                 raise ValueError('resource continuation index is out of range')
+            for position, prepared in self.prepared_resources.items():
+                prepared_index = int(position)
+                if prepared_index >= self.resource_change_index:
+                    raise ValueError('prepared resource must precede pending selection')
+                if changes[prepared_index].resource_type != prepared.resource_type:
+                    raise ValueError('prepared resource type does not match command')
+            if (
+                isinstance(command, ConversationSwitchCommand)
+                and self.prepared_conversation_target is None
+            ):
+                raise ValueError('switch resource continuation requires resolved target')
         return self
 
 

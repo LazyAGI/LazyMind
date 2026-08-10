@@ -796,12 +796,13 @@ class SQLiteGatewayStore(GatewayStore):
             ).fetchone()
         return self._claimed_outbound(row)
 
-    def save_feishu_workspace_state(
+    def save_feishu_workspace_state_if_revision(
         self,
         account_id: str,
         external_address_hash: str,
         state: dict[str, Any],
-    ) -> None:
+        expected_revision: int,
+    ) -> bool:
         with self._connect() as connection:
             row = connection.execute(
                 """
@@ -810,24 +811,51 @@ class SQLiteGatewayStore(GatewayStore):
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            value = _snapshot(row.get('snapshot_json')) if row else {}
-            value['feishu_workspace'] = state
-            connection.execute(
-                """
-                INSERT INTO channel_navigation_states(
-                    account_id, external_address_hash, mode, snapshot_json
+            if not row:
+                if expected_revision != 0:
+                    return False
+                inserted = connection.execute(
+                    """
+                    INSERT INTO channel_navigation_states(
+                        account_id, external_address_hash, mode, snapshot_json
+                    )
+                    VALUES(%s, %s, 'active', %s)
+                    ON CONFLICT(account_id, external_address_hash) DO NOTHING
+                    """,
+                    (
+                        account_id,
+                        external_address_hash,
+                        self._json({'feishu_workspace': dict(state)}),
+                    ),
                 )
-                VALUES(%s, %s, 'active', %s)
-                ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
-                    snapshot_json = EXCLUDED.snapshot_json,
+                return inserted.rowcount == 1
+            value = _snapshot(row.get('snapshot_json')) if row else {}
+            workspace = value.get('feishu_workspace')
+            if not isinstance(workspace, dict):
+                workspace = {}
+            if int(workspace.get('revision') or 0) != expected_revision:
+                return False
+            next_state = dict(state)
+            next_state['message_id'] = str(
+                workspace.get('message_id')
+                or next_state.get('message_id')
+                or ''
+            )
+            value['feishu_workspace'] = next_state
+            result = connection.execute(
+                """
+                UPDATE channel_navigation_states
+                SET snapshot_json = %s,
                     updated_at = CURRENT_TIMESTAMP
+                WHERE account_id = %s AND external_address_hash = %s
                 """,
                 (
+                    self._json(value),
                     account_id,
                     external_address_hash,
-                    self._json(value),
                 ),
             )
+            return result.rowcount == 1
 
     def patch_feishu_workspace_state(
         self,
@@ -854,7 +882,12 @@ class SQLiteGatewayStore(GatewayStore):
                 != operation_id
             ):
                 return dict(workspace)
+            current_revision = max(
+                0,
+                int(workspace.get('revision') or 0),
+            )
             workspace.update(patch)
+            workspace['revision'] = current_revision + 1
             value['feishu_workspace'] = workspace
             connection.execute(
                 """
@@ -879,7 +912,12 @@ class SQLiteGatewayStore(GatewayStore):
         account_id: str,
         external_address_hash: str,
         message_id: str,
-    ) -> None:
+        operation_id: str,
+        expected_message_id: str,
+        expected_revision: int | None = None,
+        *,
+        advance_revision: bool = True,
+    ) -> dict[str, Any]:
         with self._connect() as connection:
             row = connection.execute(
                 """
@@ -892,7 +930,24 @@ class SQLiteGatewayStore(GatewayStore):
             workspace = value.get('feishu_workspace')
             if not isinstance(workspace, dict):
                 workspace = {}
+            if operation_id and str(
+                workspace.get('active_operation_id') or ''
+            ) != operation_id:
+                return dict(workspace)
+            if str(workspace.get('message_id') or '') != expected_message_id:
+                return dict(workspace)
+            if (
+                expected_revision is not None
+                and int(workspace.get('revision') or 0) != expected_revision
+            ):
+                return dict(workspace)
+            workspace = dict(workspace)
             workspace['message_id'] = message_id
+            if advance_revision:
+                workspace['revision'] = max(
+                    0,
+                    int(workspace.get('revision') or 0),
+                ) + 1
             value['feishu_workspace'] = workspace
             connection.execute(
                 """
@@ -910,6 +965,7 @@ class SQLiteGatewayStore(GatewayStore):
                     self._json(value),
                 ),
             )
+        return workspace
 
     def begin_new_conversation(
         self,

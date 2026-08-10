@@ -12,10 +12,12 @@ from channel_gateway.common.domain.channel import (
     OutboundMessage,
     WELCOME_MESSAGE,
 )
+from channel_gateway.common.domain.chat import ChannelExecutionContext
 from channel_gateway.common.errors import RetryableProviderSideEffectError
 from channel_gateway.common.ports.messaging import MessageWorkerRepository
 from channel_gateway.common.ports.messaging import (
     DeliveryProviderRegistry,
+    InboundActionHandlerRegistry,
     OutboxWorkRepository,
     ReplyStreamProviderRegistry,
 )
@@ -33,13 +35,15 @@ _MAX_OUTBOUND_ATTEMPTS = 5
 
 
 def _failure_message(provider_context: dict, exc: Exception) -> str:
-    binding = provider_context.get('external_agent_binding')
-    if not isinstance(binding, dict):
+    execution = ChannelExecutionContext.from_provider_context(
+        provider_context
+    )
+    if not execution.external_agent_conversation_id:
         return 'LazyMind 暂时无法处理这条消息，请稍后重试。'
     detail = str(exc).strip()
     if not detail:
-        return 'Codex 暂时无法处理这条消息，请稍后重试。'
-    return f'Codex 执行失败：{detail}'
+        return '外部智能体暂时无法处理这条消息，请稍后重试。'
+    return f'外部智能体执行失败：{detail}'
 
 
 class LeaseLostError(RuntimeError):
@@ -95,11 +99,13 @@ class MessageWorker:
         store: MessageWorkerRepository,
         messages: ChannelMessageService,
         streams: ReplyStreamProviderRegistry,
+        actions: InboundActionHandlerRegistry,
         worker_count: int = 2,
     ):
         self._store = store
         self._messages = messages
         self._streams = streams
+        self._actions = actions
         self._worker_count = max(1, worker_count)
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
@@ -159,6 +165,26 @@ class MessageWorker:
                 name='channel-inbound-lease',
             ) as lease:
                 lease.ensure_owned()
+                action_handler = self._actions.action_handler(
+                    inbound.provider
+                )
+                handled = (
+                    action_handler.handle_inbound_action(inbound)
+                    if action_handler is not None
+                    else None
+                )
+                if handled is not None:
+                    lease.ensure_owned()
+                    if not self._store.complete_inbound(
+                        inbound.inbox_id,
+                        claim_owner,
+                        [handled],
+                    ):
+                        _logger.warning(
+                            'channel_inbound_completion_fenced inbox_id=%s',
+                            inbound.inbox_id,
+                        )
+                    return
                 stream_provider = self._streams.streaming(
                     inbound.provider
                 )
@@ -205,8 +231,9 @@ class MessageWorker:
                                 for presentation
                                 in result.presentations
                             ],
-                            'suppress_text_when_presented': (
-                                result.suppress_text_when_presented
+                            'task_monitor': any(
+                                presentation.kind == 'task'
+                                for presentation in result.presentations
                             ),
                             'streamed_text': streamed_text,
                         },
@@ -420,17 +447,21 @@ class DeliveryWorker:
                     prepared_state,
                 ):
                     raise RuntimeError('Cannot persist provider delivery state')
+            outbound.provider_state[str(part_index)] = dict(prepared_state)
             lease.ensure_owned()
-            delivered_state = provider.send_part(
-                outbound,
-                part,
-                part_index=part_index,
-                idempotency_key=str(
+            delivery_id = str(part.get('delivery_id') or '')
+            if not delivery_id or len(delivery_id) > 512:
+                delivery_id = str(
                     uuid.uuid5(
                         uuid.NAMESPACE_URL,
                         f'lazymind:{outbound.outbox_id}:part:{part_index}',
                     )
-                ),
+                )
+            delivered_state = provider.send_part(
+                outbound,
+                part,
+                part_index=part_index,
+                idempotency_key=delivery_id,
                 saved_state=prepared_state,
             )
             if (
@@ -446,6 +477,10 @@ class DeliveryWorker:
                     raise RuntimeError(
                         'Cannot persist provider delivery result'
                     )
+            if delivered_state is not None:
+                outbound.provider_state[str(part_index)] = dict(
+                    delivered_state
+                )
             lease.ensure_owned()
             if not self._store.advance_outbound(
                 outbound.outbox_id,

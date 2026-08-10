@@ -74,25 +74,6 @@ class ConversationClient(Protocol):
     ) -> dict[str, Any]:
         ...
 
-    def dismiss_terminal_workflow_session(
-        self,
-        *,
-        owner_user_id: str,
-        conversation_id: str,
-        request_id: str,
-    ) -> bool:
-        ...
-
-    def stop_conversation(
-        self,
-        *,
-        owner_user_id: str,
-        conversation_id: str,
-        history_id: str,
-        request_id: str,
-    ) -> bool:
-        ...
-
 
 class TaskClient(Protocol):
     def list_conversation_tasks(
@@ -106,6 +87,17 @@ class TaskClient(Protocol):
 
 
 class ExternalAgentClient(Protocol):
+    def list_external_projects(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        provider: str,
+        cursor: str = '',
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        ...
+
     def list_external_threads(
         self,
         *,
@@ -113,6 +105,7 @@ class ExternalAgentClient(Protocol):
         request_id: str,
         provider: str,
         cursor: str = '',
+        cwd: str = '',
         limit: int = 20,
     ) -> dict[str, Any]:
         ...
@@ -126,6 +119,7 @@ class ExternalAgentClient(Protocol):
         thread_id: str,
         offset: int | None = None,
         limit: int | None = None,
+        tail: bool = False,
     ) -> dict[str, Any]:
         ...
 
@@ -143,21 +137,13 @@ class ExternalAgentClient(Protocol):
     ) -> dict[str, Any]:
         ...
 
-    def snapshot_external_conversation(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        conversation_id: str,
-    ) -> dict[str, Any]:
-        ...
-
     def interrupt_external_conversation(
         self,
         *,
         owner_user_id: str,
         request_id: str,
         conversation_id: str,
+        expected_run_id: str,
     ) -> None:
         ...
 
@@ -176,7 +162,8 @@ class ExternalAgentClient(Protocol):
         owner_user_id: str,
         request_id: str,
         external_request_id: str,
-        response: dict[str, Any],
+        action_id: str,
+        answers: dict[str, Any] | None = None,
     ) -> None:
         ...
 

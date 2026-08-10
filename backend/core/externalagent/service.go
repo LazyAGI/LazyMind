@@ -6,9 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -25,9 +29,10 @@ const (
 	runStatusCompleted    = "completed"
 	runStatusFailed       = "failed"
 	runStatusInterrupted  = "interrupted"
-	runStatusSteered      = "steered"
+	runStatusReleasing    = "releasing"
+	controlReleasePending = "pending"
+	controlReleaseFailed  = "failed"
 	defaultRequestWait    = 10 * time.Minute
-	defaultUnmanagedQuiet = 2 * time.Minute
 	managedRunPollPeriod  = 2 * time.Second
 )
 
@@ -41,6 +46,12 @@ type managedRun struct {
 	subscribers map[chan Event]struct{}
 	finishing   bool
 	terminal    bool
+	fileChanges map[string]fileChangeReview
+}
+
+type fileChangeReview struct {
+	Changes   json.RawMessage
+	Truncated bool
 }
 
 func newManagedRun(record orm.ExternalAgentRun, query string, seq int) *managedRun {
@@ -53,18 +64,40 @@ func newManagedRun(record orm.ExternalAgentRun, query string, seq int) *managedR
 }
 
 func (r *managedRun) subscribe() <-chan Event {
+	events, _ := r.subscribeCancelable()
+	return events
+}
+
+func (r *managedRun) subscribeCancelable() (<-chan Event, func()) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	ch := make(chan Event, len(r.events)+64)
 	for _, event := range r.events {
 		ch <- event
 	}
 	if r.terminal {
 		close(ch)
-		return ch
+		r.mu.Unlock()
+		return ch, func() {}
 	}
 	r.subscribers[ch] = struct{}{}
-	return ch
+	r.mu.Unlock()
+	return ch, func() {
+		r.mu.Lock()
+		if _, subscribed := r.subscribers[ch]; subscribed {
+			delete(r.subscribers, ch)
+			close(ch)
+		}
+		r.mu.Unlock()
+	}
+}
+
+func (r *managedRun) execution() Execution {
+	record, _, _, seq := r.snapshot()
+	events, cancel := r.subscribeCancelable()
+	return Execution{
+		RunID: record.ID, HistoryID: record.HistoryID,
+		Seq: seq, Events: events, Cancel: cancel,
+	}
 }
 
 func (r *managedRun) broadcast(event Event) {
@@ -127,14 +160,6 @@ func (r *managedRun) snapshot() (orm.ExternalAgentRun, string, string, int) {
 	return r.record, r.query, r.answer, r.seq
 }
 
-func (r *managedRun) eventsSnapshot() []Event {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]Event, len(r.events))
-	copy(out, r.events)
-	return out
-}
-
 func (r *managedRun) setTurn(turnID string) {
 	r.mu.Lock()
 	r.record.ProviderTurnID = turnID
@@ -145,6 +170,47 @@ func (r *managedRun) setTurn(turnID string) {
 func (r *managedRun) setThread(threadID string) {
 	r.mu.Lock()
 	r.record.ProviderThreadID = threadID
+	r.mu.Unlock()
+}
+
+func (r *managedRun) setFileChanges(itemID string, changes json.RawMessage) {
+	itemID = strings.TrimSpace(itemID)
+	if itemID == "" || len(itemID) > 512 || len(changes) == 0 {
+		return
+	}
+	review := fileChangeReview{}
+	if len(changes) > 64*1024 {
+		review.Truncated = true
+	} else {
+		review.Changes = append(json.RawMessage(nil), changes...)
+	}
+	r.mu.Lock()
+	if r.fileChanges == nil {
+		r.fileChanges = make(map[string]fileChangeReview)
+	}
+	if _, exists := r.fileChanges[itemID]; !exists && len(r.fileChanges) >= 64 {
+		r.mu.Unlock()
+		return
+	}
+	r.fileChanges[itemID] = review
+	r.mu.Unlock()
+}
+
+func (r *managedRun) takeFileChange(itemID string) fileChangeReview {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	itemID = strings.TrimSpace(itemID)
+	review := r.fileChanges[itemID]
+	delete(r.fileChanges, itemID)
+	review.Changes = append(json.RawMessage(nil), review.Changes...)
+	return review
+}
+
+func (r *managedRun) setTerminalState(status, controlRelease, controlError string) {
+	r.mu.Lock()
+	r.record.Status = status
+	r.record.ControlRelease = controlRelease
+	r.record.ControlError = controlError
 	r.mu.Unlock()
 }
 
@@ -168,6 +234,9 @@ type pendingRequest struct {
 	ID        string
 	RPCID     json.RawMessage
 	Kind      string
+	Payload   json.RawMessage
+	View      ExternalRequest
+	Responses map[string]json.RawMessage
 	Run       *managedRun
 	ExpiresAt time.Time
 }
@@ -180,7 +249,6 @@ type Service struct {
 	byRequest map[string]*managedRun
 	requests  map[string]*pendingRequest
 	loaded    map[string]int64
-	quietTime time.Duration
 }
 
 var (
@@ -198,11 +266,15 @@ func Default() (*Service, error) {
 	if db == nil {
 		return nil, fmt.Errorf("store not initialized")
 	}
-	defaultService = NewService(db, NewCodexClient())
+	service, err := NewService(db, NewCodexClient())
+	if err != nil {
+		return nil, err
+	}
+	defaultService = service
 	return defaultService, nil
 }
 
-func NewService(db *gorm.DB, client *CodexClient) *Service {
+func NewService(db *gorm.DB, client *CodexClient) (*Service, error) {
 	service := &Service{
 		db:        db,
 		client:    client,
@@ -210,11 +282,14 @@ func NewService(db *gorm.DB, client *CodexClient) *Service {
 		byRequest: make(map[string]*managedRun),
 		requests:  make(map[string]*pendingRequest),
 		loaded:    make(map[string]int64),
-		quietTime: defaultUnmanagedQuiet,
+	}
+	// Rebuild the ownership index before callers can observe provider threads.
+	// Provider reconciliation and unsubscribe remain asynchronous below.
+	if err := service.recoverActiveRuns(); err != nil {
+		return nil, err
 	}
 	go service.consumeClientEvents()
-	go service.recoverActiveRuns()
-	return service
+	return service, nil
 }
 
 func validateProvider(provider string) error {
@@ -224,48 +299,182 @@ func validateProvider(provider string) error {
 	return nil
 }
 
-func (s *Service) ListThreads(ctx context.Context, cursor string, limit int) (ThreadPage, error) {
+func (s *Service) ListThreads(ctx context.Context, cursor, cwd string, limit int, actorUserID string) (ThreadPage, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	params := map[string]any{
-		"limit":         limit,
-		"sortKey":       "updated_at",
-		"sortDirection": "desc",
-		// Codex Desktop currently persists its local tasks as "vscode";
-		// appServer covers tasks created through LazyMind itself.
-		"sourceKinds": []string{"cli", "vscode", "appServer"},
+	offset := 0
+	var err error
+	if strings.TrimSpace(cursor) != "" {
+		offset, err = strconv.Atoi(strings.TrimSpace(cursor))
+		if err != nil || offset < 0 {
+			return ThreadPage{}, ErrInvalidCursor
+		}
 	}
-	if cursor != "" {
-		params["cursor"] = cursor
-	}
-	var page ThreadPage
-	if err := s.client.Call(ctx, "thread/list", params, &page); err != nil {
+	threads, err := s.listProjectedThreads(ctx, strings.TrimSpace(cwd), actorUserID)
+	if err != nil {
 		return ThreadPage{}, err
 	}
-	if err := s.decorateThreads(ctx, page.Data); err != nil {
-		return ThreadPage{}, err
+	if offset > len(threads) {
+		offset = len(threads)
 	}
-	s.markThreadAvailability(page.Data)
-	page.HasMore = page.NextCursor != nil && strings.TrimSpace(*page.NextCursor) != ""
-	if page.Total <= 0 && !page.HasMore {
-		page.Total = len(page.Data)
+	end := offset + limit
+	if end > len(threads) {
+		end = len(threads)
+	}
+	data := append([]Thread(nil), threads[offset:end]...)
+	s.markThreadAvailability(data)
+	page := ThreadPage{Data: data, Total: len(threads), HasMore: end < len(threads)}
+	if page.HasMore {
+		next := strconv.Itoa(end)
+		page.NextCursor = &next
 	}
 	return page, nil
 }
 
-func (s *Service) ReadThread(ctx context.Context, threadID string) (Thread, error) {
-	return s.readThread(ctx, threadID, true)
+func (s *Service) ListProjects(ctx context.Context, cursor string, limit int, actorUserID string) (ProjectList, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	offset := 0
+	var err error
+	if strings.TrimSpace(cursor) != "" {
+		offset, err = strconv.Atoi(strings.TrimSpace(cursor))
+		if err != nil || offset < 0 {
+			return ProjectList{}, ErrInvalidCursor
+		}
+	}
+	threads, err := s.listProjectedThreads(ctx, "", actorUserID)
+	if err != nil {
+		return ProjectList{}, err
+	}
+	projects := make(map[string]Project)
+	for _, thread := range threads {
+		cwd := strings.TrimSpace(thread.Cwd)
+		if cwd == "" {
+			continue
+		}
+		project := projects[cwd]
+		project.Cwd = cwd
+		project.Name = filepath.Base(filepath.Clean(cwd))
+		if project.Name == "." || project.Name == string(filepath.Separator) {
+			project.Name = cwd
+		}
+		project.ThreadCount++
+		if thread.UpdatedAt > project.UpdatedAt {
+			project.UpdatedAt = thread.UpdatedAt
+		}
+		projects[cwd] = project
+	}
+	data := make([]Project, 0, len(projects))
+	for _, project := range projects {
+		data = append(data, project)
+	}
+	sort.Slice(data, func(i, j int) bool {
+		if data[i].UpdatedAt == data[j].UpdatedAt {
+			return data[i].Cwd < data[j].Cwd
+		}
+		return data[i].UpdatedAt > data[j].UpdatedAt
+	})
+	if offset > len(data) {
+		offset = len(data)
+	}
+	end := offset + limit
+	if end > len(data) {
+		end = len(data)
+	}
+	page := ProjectList{
+		Data:    append([]Project(nil), data[offset:end]...),
+		Total:   len(data),
+		HasMore: end < len(data),
+	}
+	if page.HasMore {
+		next := strconv.Itoa(end)
+		page.NextCursor = &next
+	}
+	return page, nil
 }
 
-func (s *Service) ReadThreadPage(ctx context.Context, threadID string, offset, limit int) (TurnPage, error) {
+func (s *Service) listProjectedThreads(
+	ctx context.Context,
+	cwd, actorUserID string,
+) ([]Thread, error) {
+	threads := make([]Thread, 0, 100)
+	cursor := ""
+	seenCursors := make(map[string]struct{})
+	seenThreads := make(map[string]struct{})
+	for pageNumber := 0; pageNumber < 100; pageNumber++ {
+		params := map[string]any{
+			"limit":         100,
+			"sortKey":       "updated_at",
+			"sortDirection": "desc",
+			"sourceKinds":   []string{"cli", "vscode", "appServer"},
+		}
+		if cwd != "" {
+			params["cwd"] = cwd
+		}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		var page ThreadPage
+		if err := s.client.Call(ctx, "thread/list", params, &page); err != nil {
+			return nil, err
+		}
+		pageThreads := make([]Thread, 0, len(page.Data))
+		for _, thread := range page.Data {
+			thread, valid := canonicalThread(thread)
+			if !valid {
+				continue
+			}
+			threadID := thread.ID
+			if cwd != "" && strings.TrimSpace(thread.Cwd) != cwd {
+				continue
+			}
+			if _, exists := seenThreads[threadID]; exists {
+				continue
+			}
+			seenThreads[threadID] = struct{}{}
+			thread.Turns = nil
+			pageThreads = append(pageThreads, thread)
+		}
+		if err := s.decorateThreads(ctx, pageThreads, actorUserID); err != nil {
+			return nil, err
+		}
+		threads = append(threads, actorVisibleThreads(pageThreads)...)
+		if page.NextCursor == nil || strings.TrimSpace(*page.NextCursor) == "" {
+			break
+		}
+		next := strings.TrimSpace(*page.NextCursor)
+		if _, exists := seenCursors[next]; exists {
+			return nil, fmt.Errorf("codex thread/list returned a repeated cursor")
+		}
+		seenCursors[next] = struct{}{}
+		cursor = next
+		if pageNumber == 99 {
+			return nil, fmt.Errorf("codex thread projection exceeded 100 provider pages")
+		}
+	}
+	sort.SliceStable(threads, func(i, j int) bool {
+		if threads[i].UpdatedAt == threads[j].UpdatedAt {
+			return threads[i].ID < threads[j].ID
+		}
+		return threads[i].UpdatedAt > threads[j].UpdatedAt
+	})
+	return threads, nil
+}
+
+func (s *Service) ReadThread(ctx context.Context, threadID, actorUserID string) (Thread, error) {
+	return s.readThread(ctx, threadID, true, actorUserID)
+}
+
+func (s *Service) ReadThreadPage(ctx context.Context, threadID string, offset, limit int, tail bool, actorUserID string) (TurnPage, error) {
 	if offset < 0 {
 		offset = 0
 	}
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
-	thread, err := s.readThread(ctx, threadID, true)
+	thread, err := s.readThread(ctx, threadID, true, actorUserID)
 	if err != nil {
 		return TurnPage{}, err
 	}
@@ -276,61 +485,242 @@ func (s *Service) ReadThreadPage(ctx context.Context, threadID string, offset, l
 		}
 	}
 	total := len(turns)
-	end := offset + limit
+	if tail {
+		offset = max(0, total-limit)
+	}
 	if offset > total {
 		offset = total
 	}
+	end := offset + limit
 	if end > total {
 		end = total
 	}
 	pageTurns := turns[offset:end]
-	raw, err := json.Marshal(pageTurns)
-	if err != nil {
-		return TurnPage{}, err
-	}
 	thread.Turns = nil
+	var snapshot *RunSnapshot
+	if thread.ConversationID != "" {
+		value, err := s.SnapshotConversation(ctx, thread.ConversationID, actorUserID)
+		if err != nil {
+			return TurnPage{}, err
+		}
+		snapshot = &value
+	}
 	return TurnPage{
 		Thread:     thread,
-		Turns:      raw,
+		Turns:      summarizeTurns(pageTurns),
 		Offset:     offset,
 		Limit:      limit,
 		TotalTurns: total,
 		HasMore:    end < total,
+		Snapshot:   snapshot,
 	}, nil
 }
 
-func (s *Service) readThread(ctx context.Context, threadID string, includeTurns bool) (Thread, error) {
+func summarizeTurns(turns []json.RawMessage) []TurnSummary {
+	summaries := make([]TurnSummary, 0, len(turns)*2)
+	for _, raw := range turns {
+		var turn map[string]any
+		if json.Unmarshal(raw, &turn) != nil {
+			continue
+		}
+		items, _ := turn["items"].([]any)
+		userText := ""
+		assistantFallback := ""
+		finalAnswers := make([]string, 0, 1)
+		for _, rawItem := range items {
+			item, ok := rawItem.(map[string]any)
+			if !ok {
+				continue
+			}
+			text := externalAgentItemText(item)
+			if text == "" {
+				continue
+			}
+			itemType := strings.ToLower(strings.TrimSpace(stringValue(item["type"])))
+			role := strings.ToLower(strings.TrimSpace(stringValue(item["role"])))
+			switch {
+			case strings.Contains(itemType, "user") || role == "user":
+				userText = text
+			case strings.Contains(itemType, "agent") || role == "assistant" || role == "agent":
+				assistantFallback = text
+				if stringValue(item["phase"]) == "final_answer" {
+					finalAnswers = append(finalAnswers, text)
+				}
+			}
+		}
+		assistantText := assistantFallback
+		if len(finalAnswers) > 0 {
+			assistantText = strings.Join(finalAnswers, "\n\n")
+		}
+		if userText == "" && assistantText == "" {
+			role := strings.TrimSpace(stringValue(turn["role"]))
+			text := externalAgentItemText(turn)
+			if role != "" && text != "" {
+				summaries = append(summaries, TurnSummary{Role: role, Text: truncateRunes(text, 64000)})
+			}
+			continue
+		}
+		if userText != "" {
+			summaries = append(summaries, TurnSummary{Role: "user", Text: truncateRunes(userText, 64000)})
+		}
+		if assistantText != "" {
+			summaries = append(summaries, TurnSummary{Role: "assistant", Text: truncateRunes(assistantText, 64000)})
+		}
+	}
+	return summaries
+}
+
+func externalAgentItemText(value any) string {
+	switch item := value.(type) {
+	case string:
+		return strings.TrimSpace(item)
+	case []any:
+		parts := make([]string, 0, len(item))
+		for _, child := range item {
+			if text := externalAgentItemText(child); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, "\n"))
+	case map[string]any:
+		itemType := strings.ToLower(strings.TrimSpace(stringValue(item["type"])))
+		switch itemType {
+		case "reasoning", "contextcompaction", "commandexecution", "filechange":
+			return ""
+		}
+		for _, key := range []string{"text", "message", "content"} {
+			if text := externalAgentItemText(item[key]); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return text
+}
+
+func truncateRunes(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit])
+}
+
+func canonicalThread(thread Thread) (Thread, bool) {
+	thread.ID = strings.TrimSpace(thread.ID)
+	thread.Cwd = strings.TrimSpace(thread.Cwd)
+	if thread.ID == "" || len([]rune(thread.ID)) > 128 || len([]rune(thread.Cwd)) > 500 {
+		return Thread{}, false
+	}
+	if thread.Name != nil {
+		name := truncateRunes(strings.TrimSpace(*thread.Name), 200)
+		thread.Name = &name
+	}
+	thread.Preview = truncateRunes(strings.TrimSpace(thread.Preview), 300)
+	thread.Source = truncateRunes(strings.TrimSpace(thread.Source), 100)
+	thread.Status.Type = truncateRunes(strings.TrimSpace(thread.Status.Type), 100)
+	if len(thread.Status.ActiveFlags) > 20 {
+		thread.Status.ActiveFlags = thread.Status.ActiveFlags[:20]
+	}
+	for index := range thread.Status.ActiveFlags {
+		thread.Status.ActiveFlags[index] = truncateRunes(
+			strings.TrimSpace(thread.Status.ActiveFlags[index]), 100,
+		)
+	}
+	return thread, true
+}
+
+func (s *Service) readThread(ctx context.Context, threadID string, includeTurns bool, actorUserID string) (Thread, error) {
 	var response struct {
 		Thread Thread `json:"thread"`
 	}
-	if err := s.client.Call(ctx, "thread/read", map[string]any{
-		"threadId":     threadID,
-		"includeTurns": includeTurns,
-	}, &response); err != nil {
+	params := map[string]any{"threadId": threadID}
+	if includeTurns {
+		params["includeTurns"] = true
+	}
+	if err := s.client.Call(ctx, "thread/read", params, &response); err != nil {
+		if !includeTurns || !isUnmaterializedThreadRead(err) {
+			return Thread{}, err
+		}
+		response = struct {
+			Thread Thread `json:"thread"`
+		}{}
+		if fallbackErr := s.client.Call(ctx, "thread/read", map[string]any{
+			"threadId": threadID,
+		}, &response); fallbackErr != nil {
+			return Thread{}, fmt.Errorf(
+				"thread/read with turns failed: %v; lightweight thread/read failed: %w",
+				err,
+				fallbackErr,
+			)
+		}
+	}
+	canonical, valid := canonicalThread(response.Thread)
+	if !valid {
+		return Thread{}, ErrThreadNotFound
+	}
+	response.Thread = canonical
+	threads := []Thread{response.Thread}
+	if err := s.decorateThreads(ctx, threads, actorUserID); err != nil {
 		return Thread{}, err
 	}
-	threads := []Thread{response.Thread}
-	if err := s.decorateThreads(ctx, threads); err != nil {
-		return Thread{}, err
+	if threads[0].BoundByOther {
+		return Thread{}, ErrThreadNotFound
 	}
 	s.markThreadAvailability(threads)
 	return threads[0], nil
 }
 
+func isUnmaterializedThreadRead(err error) bool {
+	var callErr *rpcCallError
+	return errors.As(err, &callErr) &&
+		callErr.method == "thread/read" &&
+		callErr.response.Code == -32600 &&
+		strings.Contains(callErr.response.Message, "is not materialized yet") &&
+		strings.Contains(callErr.response.Message, "includeTurns is unavailable")
+}
+
+func actorVisibleThreads(threads []Thread) []Thread {
+	visible := threads[:0]
+	for _, thread := range threads {
+		if !thread.BoundByOther {
+			visible = append(visible, thread)
+		}
+	}
+	return visible
+}
+
 func (s *Service) markThreadAvailability(threads []Thread) {
-	now := time.Now()
+	s.mu.Lock()
+	controlled := make(map[string]string, len(s.byThread))
+	for threadID, run := range s.byThread {
+		record, _, _, _ := run.snapshot()
+		controlled[threadID] = record.ActorUserID
+	}
+	s.mu.Unlock()
 	for index := range threads {
 		thread := &threads[index]
-		thread.Available = thread.Status.Type == "idle"
-		if thread.Status.Type == "notLoaded" && thread.UpdatedAt > 0 &&
-			now.Sub(time.Unix(thread.UpdatedAt, 0)) >= s.quietTime {
-			thread.Available = true
+		if thread.BoundByOther {
+			thread.Available = false
+			continue
+		}
+		thread.Available = thread.Status.Type == "idle" || thread.Status.Type == "notLoaded"
+		if thread.CanAcceptInput != nil {
+			thread.Available = *thread.CanAcceptInput
+		}
+		thread.ControlledByLazyMind = controlled[thread.ID] != ""
+		if thread.ControlledByLazyMind {
+			thread.Available = false
 		}
 	}
 }
 
-func (s *Service) decorateThreads(ctx context.Context, threads []Thread) error {
-	if len(threads) == 0 {
+func (s *Service) decorateThreads(ctx context.Context, threads []Thread, actorUserID string) error {
+	if len(threads) == 0 || strings.TrimSpace(actorUserID) == "" {
 		return nil
 	}
 	ids := make([]string, 0, len(threads))
@@ -349,8 +739,12 @@ func (s *Service) decorateThreads(ctx context.Context, threads []Thread) error {
 	}
 	for index := range threads {
 		if binding, ok := byID[threads[index].ID]; ok {
-			threads[index].Managed = binding.ManagedByLazyMind
-			threads[index].ConversationID = binding.ConversationID
+			if binding.CreatedByUserID == actorUserID {
+				threads[index].CreatedByLazyMind = binding.ManagedByLazyMind
+				threads[index].ConversationID = binding.ConversationID
+			} else {
+				threads[index].BoundByOther = true
+			}
 		}
 	}
 	return nil
@@ -359,10 +753,13 @@ func (s *Service) decorateThreads(ctx context.Context, threads []Thread) error {
 func (s *Service) StartThread(ctx context.Context, input StartThreadInput) (Thread, error) {
 	cwd := strings.TrimSpace(input.Cwd)
 	if cwd == "" {
-		var err error
-		cwd, err = os.Getwd()
-		if err != nil {
-			return Thread{}, err
+		cwd = strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_DEFAULT_CWD"))
+		if cwd == "" {
+			var err error
+			cwd, err = os.Getwd()
+			if err != nil {
+				return Thread{}, err
+			}
 		}
 	}
 	var response struct {
@@ -377,7 +774,12 @@ func (s *Service) StartThread(ctx context.Context, input StartThreadInput) (Thre
 	}, &response); err != nil {
 		return Thread{}, err
 	}
-	response.Thread.Managed = true
+	canonical, valid := canonicalThread(response.Thread)
+	if !valid {
+		return Thread{}, errors.New("codex thread/start returned invalid thread")
+	}
+	response.Thread = canonical
+	response.Thread.CreatedByLazyMind = true
 	response.Thread.Available = true
 	s.mu.Lock()
 	s.loaded[response.Thread.ID] = s.client.Generation()
@@ -394,6 +796,9 @@ func (s *Service) Bind(ctx context.Context, input BindInput) (orm.ExternalAgentB
 		Where("provider = ? AND provider_thread_id = ?", ProviderCodex, input.ProviderThreadID).
 		First(&existing).Error
 	if err == nil {
+		if existing.CreatedByUserID != input.CreatedByUserID {
+			return orm.ExternalAgentBinding{}, ErrThreadBusy
+		}
 		return existing, nil
 	}
 	if err != nil && err != gorm.ErrRecordNotFound {
@@ -405,7 +810,7 @@ func (s *Service) Bind(ctx context.Context, input BindInput) (orm.ExternalAgentB
 		ConversationID:    input.ConversationID,
 		Provider:          ProviderCodex,
 		ProviderThreadID:  input.ProviderThreadID,
-		ManagedByLazyMind: input.Managed,
+		ManagedByLazyMind: input.CreatedByLazyMind,
 		CreatedByUserID:   input.CreatedByUserID,
 		CreatedAt:         now,
 		UpdatedAt:         now,
@@ -414,6 +819,9 @@ func (s *Service) Bind(ctx context.Context, input BindInput) (orm.ExternalAgentB
 		if lookupErr := s.db.WithContext(ctx).
 			Where("provider = ? AND provider_thread_id = ?", ProviderCodex, input.ProviderThreadID).
 			First(&existing).Error; lookupErr == nil {
+			if existing.CreatedByUserID != input.CreatedByUserID {
+				return orm.ExternalAgentBinding{}, ErrThreadBusy
+			}
 			return existing, nil
 		}
 		return orm.ExternalAgentBinding{}, err
@@ -421,7 +829,7 @@ func (s *Service) Bind(ctx context.Context, input BindInput) (orm.ExternalAgentB
 	return binding, nil
 }
 
-func (s *Service) BindingByConversation(ctx context.Context, conversationID string) (orm.ExternalAgentBinding, error) {
+func (s *Service) BindingByConversation(ctx context.Context, conversationID, actorUserID string) (orm.ExternalAgentBinding, error) {
 	var binding orm.ExternalAgentBinding
 	if err := s.db.WithContext(ctx).
 		Where("conversation_id = ?", conversationID).
@@ -431,10 +839,13 @@ func (s *Service) BindingByConversation(ctx context.Context, conversationID stri
 		}
 		return orm.ExternalAgentBinding{}, err
 	}
+	if binding.CreatedByUserID != actorUserID {
+		return orm.ExternalAgentBinding{}, ErrThreadBusy
+	}
 	return binding, nil
 }
 
-func (s *Service) BindingByThread(ctx context.Context, provider, threadID string) (orm.ExternalAgentBinding, error) {
+func (s *Service) BindingByThread(ctx context.Context, provider, threadID, actorUserID string) (orm.ExternalAgentBinding, error) {
 	if err := validateProvider(provider); err != nil {
 		return orm.ExternalAgentBinding{}, err
 	}
@@ -447,6 +858,9 @@ func (s *Service) BindingByThread(ctx context.Context, provider, threadID string
 		}
 		return orm.ExternalAgentBinding{}, err
 	}
+	if binding.CreatedByUserID != actorUserID {
+		return orm.ExternalAgentBinding{}, ErrThreadBusy
+	}
 	return binding, nil
 }
 
@@ -457,19 +871,19 @@ func (s *Service) StartOrSteer(ctx context.Context, input ChatInput) (Execution,
 	requestKey := input.Provider + "\x00" + input.RequestID
 	s.mu.Lock()
 	if running := s.byRequest[requestKey]; running != nil {
-		record, _, _, seq := running.snapshot()
+		record, query, _, _ := running.snapshot()
 		s.mu.Unlock()
-		if record.ActorUserID != input.ActorUserID {
-			return Execution{}, ErrThreadBusy
+		if !runInputMatches(record, query, input) {
+			return Execution{}, ErrOperationMismatch
 		}
-		return Execution{RunID: record.ID, HistoryID: record.HistoryID, Seq: seq, Events: running.subscribe()}, nil
+		return running.execution(), nil
 	}
 	s.mu.Unlock()
 
 	if completed, ok, err := s.completedExecution(ctx, input); err != nil || ok {
 		return completed, err
 	}
-	binding, err := s.BindingByConversation(ctx, input.ConversationID)
+	binding, err := s.BindingByConversation(ctx, input.ConversationID, input.ActorUserID)
 	if err != nil {
 		return Execution{}, err
 	}
@@ -485,7 +899,7 @@ func (s *Service) StartOrSteer(ctx context.Context, input ChatInput) (Execution,
 		if record.ActorUserID != input.ActorUserID {
 			return Execution{}, ErrThreadBusy
 		}
-		return s.steer(ctx, active, input)
+		return Execution{}, ErrThreadBusy
 	}
 	forkBeforeStart := false
 	if err := s.requireThreadAvailable(ctx, input.ProviderThreadID); err != nil {
@@ -523,7 +937,7 @@ func (s *Service) StartOrSteer(ctx context.Context, input ChatInput) (Execution,
 	s.byRequest[requestKey] = run
 	s.mu.Unlock()
 	if err := s.createHistory(record, input.Query, "", input.Seq); err != nil {
-		s.finishActive(run)
+		s.detachActive(run)
 		_ = s.db.WithContext(ctx).Delete(&record).Error
 		return Execution{}, err
 	}
@@ -536,7 +950,15 @@ func (s *Service) StartOrSteer(ctx context.Context, input ChatInput) (Execution,
 		}
 		s.startRun(run)
 	}()
-	return Execution{RunID: record.ID, HistoryID: record.HistoryID, Seq: input.Seq, Events: run.subscribe()}, nil
+	return run.execution(), nil
+}
+
+func runInputMatches(record orm.ExternalAgentRun, query string, input ChatInput) bool {
+	return record.Provider == input.Provider &&
+		record.ProviderThreadID == input.ProviderThreadID &&
+		record.ConversationID == input.ConversationID &&
+		record.ActorUserID == input.ActorUserID &&
+		query == input.Query
 }
 
 func (s *Service) completedExecution(ctx context.Context, input ChatInput) (Execution, bool, error) {
@@ -553,6 +975,13 @@ func (s *Service) completedExecution(ctx context.Context, input ChatInput) (Exec
 	if record.ActorUserID != input.ActorUserID {
 		return Execution{}, true, ErrThreadBusy
 	}
+	var history orm.ChatHistory
+	if err := s.db.WithContext(ctx).Where("id = ?", record.HistoryID).First(&history).Error; err != nil {
+		return Execution{}, true, err
+	}
+	if !runInputMatches(record, history.Content, input) {
+		return Execution{}, true, ErrOperationMismatch
+	}
 	if record.Status == runStatusStarting || record.Status == runStatusRunning || record.Status == runStatusWaiting {
 		s.mu.Lock()
 		active := s.byRequest[input.Provider+"\x00"+input.RequestID]
@@ -561,8 +990,7 @@ func (s *Service) completedExecution(ctx context.Context, input ChatInput) (Exec
 		}
 		s.mu.Unlock()
 		if active != nil {
-			live, _, _, seq := active.snapshot()
-			return Execution{RunID: live.ID, HistoryID: live.HistoryID, Seq: seq, Events: active.subscribe()}, true, nil
+			return active.execution(), true, nil
 		}
 		recovered, recoverErr := s.reattachOrFinalizeActiveRun(ctx, record)
 		if recoverErr != nil {
@@ -570,44 +998,96 @@ func (s *Service) completedExecution(ctx context.Context, input ChatInput) (Exec
 		}
 		return recovered, true, nil
 	}
-	var history orm.ChatHistory
-	_ = s.db.WithContext(ctx).Where("id = ?", record.HistoryID).First(&history).Error
-	eventType := "turn_completed"
-	if record.Status == runStatusFailed {
-		eventType = "turn_failed"
-	}
-	if record.Status == runStatusInterrupted {
-		eventType = "turn_interrupted"
+	eventType := terminalEventType(record.Status)
+	if record.ControlRelease == "" || record.ControlRelease == controlReleasePending {
+		execution, releaseErr := s.terminalExecution(record, eventType, "")
+		return execution, true, releaseErr
 	}
 	events := make(chan Event, 1)
 	events <- Event{
 		Type: eventType, Provider: record.Provider, ThreadID: record.ProviderThreadID,
 		TurnID: record.ProviderTurnID, RunID: record.ID, Message: history.Result,
-		Status: record.Status, Terminal: true,
+		Status: record.Status, ControlRelease: record.ControlRelease,
+		ControlError: record.ControlError, Terminal: true,
 	}
 	close(events)
 	return Execution{RunID: record.ID, HistoryID: record.HistoryID, Seq: history.Seq, Events: events}, true, nil
 }
 
-func (s *Service) recoverActiveRuns() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	var records []orm.ExternalAgentRun
-	if err := s.db.WithContext(ctx).
-		Where("provider = ? AND status IN ?", ProviderCodex, []string{runStatusStarting, runStatusRunning, runStatusWaiting}).
-		Find(&records).Error; err != nil {
-		corelog.Logger.Warn().Err(err).Msg("external agent active run recovery query failed")
-		return
-	}
-	for _, record := range records {
-		go s.recoverActiveRun(record)
+func terminalEventType(status string) string {
+	switch status {
+	case runStatusFailed:
+		return "turn_failed"
+	case runStatusInterrupted:
+		return "turn_interrupted"
+	default:
+		return "turn_completed"
 	}
 }
 
-func (s *Service) recoverActiveRun(record orm.ExternalAgentRun) {
+func (s *Service) recoverActiveRuns() error {
+	var records []orm.ExternalAgentRun
+	var queryErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		queryErr = s.db.WithContext(ctx).
+			Where(
+				"provider = ? AND (status IN ? OR control_release IN ?)",
+				ProviderCodex,
+				[]string{runStatusStarting, runStatusRunning, runStatusWaiting},
+				[]string{controlReleasePending, controlReleaseFailed},
+			).
+			Find(&records).Error
+		cancel()
+		if queryErr == nil {
+			break
+		}
+		if attempt < 2 {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	if queryErr != nil {
+		corelog.Logger.Warn().Err(queryErr).Msg("external agent active run recovery query failed")
+		return fmt.Errorf("recover external agent ownership: %w", queryErr)
+	}
+	for _, record := range records {
+		if record.ControlRelease == controlReleasePending {
+			run, created := s.attachTerminalRun(record)
+			if created {
+				go s.finishTerminal(run, Event{
+					Type: terminalEventType(record.Status), Provider: record.Provider,
+					ThreadID: record.ProviderThreadID, TurnID: record.ProviderTurnID,
+					RunID: record.ID, Status: record.Status, Terminal: true,
+				})
+			}
+			continue
+		}
+		if record.ControlRelease == controlReleaseFailed {
+			run, created := s.attachTerminalRun(record)
+			if created {
+				_, _, answer, _ := run.snapshot()
+				run.broadcast(Event{
+					Type: terminalEventType(record.Status), Provider: record.Provider,
+					ThreadID: record.ProviderThreadID, TurnID: record.ProviderTurnID,
+					RunID: record.ID, Message: answer, Status: record.Status,
+					ControlRelease: controlReleaseFailed, ControlError: record.ControlError,
+					Terminal: true,
+				})
+			}
+			continue
+		}
+		run, created := s.attachRecoveredRun(record, false)
+		if created {
+			go s.recoverPersistedRun(record, run)
+		}
+	}
+	return nil
+}
+
+func (s *Service) recoverPersistedRun(record orm.ExternalAgentRun, run *managedRun) {
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		_, err := s.reattachOrFinalizeActiveRun(ctx, record)
+		err := s.reconcileRecoveredRun(ctx, record, run)
 		cancel()
 		if err == nil {
 			return
@@ -628,27 +1108,86 @@ func (s *Service) recoverActiveRun(record orm.ExternalAgentRun) {
 	}
 }
 
+func (s *Service) reconcileRecoveredRun(
+	ctx context.Context,
+	record orm.ExternalAgentRun,
+	run *managedRun,
+) error {
+	thread, err := s.readThread(ctx, record.ProviderThreadID, true, "")
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return err
+		}
+		s.interruptManagedRun(run, "Codex thread unavailable after restart; please retry")
+		return nil
+	}
+	if record.Status == runStatusWaiting {
+		s.interruptManagedRun(run, "Interactive request lost after restart; please retry")
+		return nil
+	}
+	if turn, ok := completedProviderTurn(thread.Turns, record.ProviderTurnID); ok {
+		if turn.Answer != "" {
+			run.setAnswer(turn.Answer)
+		}
+		params, _ := json.Marshal(map[string]any{
+			"threadId": record.ProviderThreadID,
+			"turn": map[string]any{
+				"id": record.ProviderTurnID, "status": turn.Status, "error": turn.Error,
+			},
+		})
+		s.completeRun(run, rpcMessage{Method: "lazymind/recovered", Params: params})
+		return nil
+	}
+	if thread.Status.Type == "idle" {
+		s.interruptManagedRun(run, "Codex turn ended while LazyMind was offline")
+		return nil
+	}
+	if run.finished() {
+		return nil
+	}
+	run.broadcast(Event{
+		Type: "run_attached", Provider: ProviderCodex, ThreadID: record.ProviderThreadID,
+		TurnID: record.ProviderTurnID, RunID: record.ID, Status: record.Status,
+		Message: "Recovered active Codex run after restart",
+	})
+	go s.watchRun(run)
+	return nil
+}
+
 func (s *Service) reattachOrFinalizeActiveRun(ctx context.Context, record orm.ExternalAgentRun) (Execution, error) {
 	s.mu.Lock()
+	if s.byThread == nil {
+		s.byThread = make(map[string]*managedRun)
+	}
+	if s.byRequest == nil {
+		s.byRequest = make(map[string]*managedRun)
+	}
 	if existing := s.byThread[record.ProviderThreadID]; existing != nil {
-		live, _, _, seq := existing.snapshot()
 		s.mu.Unlock()
-		return Execution{RunID: live.ID, HistoryID: live.HistoryID, Seq: seq, Events: existing.subscribe()}, nil
+		return existing.execution(), nil
 	}
 	s.mu.Unlock()
 
-	thread, err := s.readThread(ctx, record.ProviderThreadID, true)
+	thread, err := s.readThread(ctx, record.ProviderThreadID, true, "")
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) ||
 			errors.Is(err, context.Canceled) {
 			return Execution{}, err
 		}
-		s.markRunInterrupted(record, "Codex thread unavailable after restart; please retry")
+		if persistErr := s.markRunInterrupted(record, "Codex thread unavailable after restart; please retry"); persistErr != nil {
+			return Execution{}, persistErr
+		}
+		record.Status = runStatusInterrupted
+		record.ControlRelease = controlReleasePending
 		return s.terminalExecution(record, "turn_interrupted", "Codex thread unavailable after restart; please retry")
 	}
 	if record.Status == runStatusWaiting {
 		// Pending Codex RPC request IDs are process-local and cannot be resumed.
-		s.markRunInterrupted(record, "Interactive request lost after restart; please retry")
+		if err := s.markRunInterrupted(record, "Interactive request lost after restart; please retry"); err != nil {
+			return Execution{}, err
+		}
+		record.Status = runStatusInterrupted
+		record.ControlRelease = controlReleasePending
 		return s.terminalExecution(record, "turn_interrupted", "Interactive request lost after restart; please retry")
 	}
 	if turn, ok := completedProviderTurn(thread.Turns, record.ProviderTurnID); ok {
@@ -662,10 +1201,11 @@ func (s *Service) reattachOrFinalizeActiveRun(ctx context.Context, record orm.Ex
 			status = runStatusInterrupted
 			eventType = "turn_interrupted"
 		}
-		_ = s.db.WithContext(ctx).Model(&orm.ExternalAgentRun{}).Where("id = ?", record.ID).Updates(map[string]any{
-			"status":     status,
-			"updated_at": time.Now(),
-		}).Error
+		if err := s.persistControlRelease(
+			record.ID, status, controlReleasePending, "", nil,
+		); err != nil {
+			return Execution{}, err
+		}
 		if answer != "" {
 			var history orm.ChatHistory
 			if s.db.WithContext(ctx).Where("id = ?", record.HistoryID).First(&history).Error == nil {
@@ -673,10 +1213,15 @@ func (s *Service) reattachOrFinalizeActiveRun(ctx context.Context, record orm.Ex
 			}
 		}
 		record.Status = status
+		record.ControlRelease = controlReleasePending
 		return s.terminalExecution(record, eventType, answer)
 	}
 	if thread.Status.Type == "idle" {
-		s.markRunInterrupted(record, "Codex turn ended while LazyMind was offline")
+		if err := s.markRunInterrupted(record, "Codex turn ended while LazyMind was offline"); err != nil {
+			return Execution{}, err
+		}
+		record.Status = runStatusInterrupted
+		record.ControlRelease = controlReleasePending
 		return s.terminalExecution(record, "turn_interrupted", "Codex turn ended while LazyMind was offline")
 	}
 	var history orm.ChatHistory
@@ -687,9 +1232,8 @@ func (s *Service) reattachOrFinalizeActiveRun(ctx context.Context, record orm.Ex
 	}
 	s.mu.Lock()
 	if existing := s.byThread[record.ProviderThreadID]; existing != nil {
-		live, _, _, seq := existing.snapshot()
 		s.mu.Unlock()
-		return Execution{RunID: live.ID, HistoryID: live.HistoryID, Seq: seq, Events: existing.subscribe()}, nil
+		return existing.execution(), nil
 	}
 	s.byThread[record.ProviderThreadID] = run
 	s.byRequest[record.Provider+"\x00"+record.RequestID] = run
@@ -700,23 +1244,36 @@ func (s *Service) reattachOrFinalizeActiveRun(ctx context.Context, record orm.Ex
 		Message: "Recovered active Codex run after restart",
 	})
 	go s.watchRun(run)
-	return Execution{RunID: record.ID, HistoryID: record.HistoryID, Seq: history.Seq, Events: run.subscribe()}, nil
+	return run.execution(), nil
 }
 
-func (s *Service) markRunInterrupted(record orm.ExternalAgentRun, message string) {
-	now := time.Now()
-	_ = s.db.Model(&orm.ExternalAgentRun{}).Where("id = ?", record.ID).Updates(map[string]any{
-		"status":        runStatusInterrupted,
-		"error_message": message,
-		"updated_at":    now,
-	}).Error
+func (s *Service) markRunInterrupted(record orm.ExternalAgentRun, message string) error {
+	if err := s.persistControlRelease(
+		record.ID, runStatusInterrupted, controlReleasePending, "",
+		map[string]any{"error_message": message},
+	); err != nil {
+		return err
+	}
 	var history orm.ChatHistory
 	if s.db.Where("id = ?", record.HistoryID).First(&history).Error == nil && message != "" {
 		_ = s.updateHistory(record, history.Content, message, history.Seq)
 	}
+	return nil
 }
 
 func (s *Service) terminalExecution(record orm.ExternalAgentRun, eventType, message string) (Execution, error) {
+	if record.ControlRelease == "" {
+		if err := s.persistControlRelease(
+			record.ID, record.Status, controlReleasePending, "", nil,
+		); err != nil {
+			return Execution{}, err
+		}
+		record.ControlRelease = controlReleasePending
+		record.ControlError = ""
+	}
+	if record.ControlRelease == controlReleasePending {
+		return s.resumeTerminalRelease(record, eventType, message)
+	}
 	var history orm.ChatHistory
 	_ = s.db.Where("id = ?", record.HistoryID).First(&history).Error
 	if message == "" {
@@ -726,31 +1283,86 @@ func (s *Service) terminalExecution(record orm.ExternalAgentRun, eventType, mess
 	events <- Event{
 		Type: eventType, Provider: record.Provider, ThreadID: record.ProviderThreadID,
 		TurnID: record.ProviderTurnID, RunID: record.ID, Message: message,
-		Status: record.Status, Terminal: true,
+		Status: record.Status, ControlRelease: record.ControlRelease,
+		ControlError: record.ControlError, Terminal: true,
 	}
 	close(events)
 	return Execution{RunID: record.ID, HistoryID: record.HistoryID, Seq: history.Seq, Events: events}, nil
 }
 
-func (s *Service) SnapshotConversation(ctx context.Context, conversationID string) (RunSnapshot, error) {
-	binding, err := s.BindingByConversation(ctx, conversationID)
+func (s *Service) resumeTerminalRelease(
+	record orm.ExternalAgentRun,
+	eventType, message string,
+) (Execution, error) {
+	run, created := s.attachTerminalRun(record)
+	live, _, answer, seq := run.snapshot()
+	if message == "" {
+		message = answer
+	}
+	events, cancel := run.subscribeCancelable()
+	if created {
+		go s.finishTerminal(run, Event{
+			Type: eventType, Provider: record.Provider,
+			ThreadID: record.ProviderThreadID, TurnID: record.ProviderTurnID,
+			RunID: record.ID, Message: message, Status: record.Status, Terminal: true,
+		})
+	}
+	return Execution{
+		RunID: live.ID, HistoryID: live.HistoryID,
+		Seq: seq, Events: events, Cancel: cancel,
+	}, nil
+}
+
+func (s *Service) attachTerminalRun(record orm.ExternalAgentRun) (*managedRun, bool) {
+	return s.attachRecoveredRun(record, true)
+}
+
+func (s *Service) attachRecoveredRun(
+	record orm.ExternalAgentRun,
+	finishing bool,
+) (*managedRun, bool) {
+	var history orm.ChatHistory
+	_ = s.db.Where("id = ?", record.HistoryID).First(&history).Error
+	s.mu.Lock()
+	if s.byThread == nil {
+		s.byThread = make(map[string]*managedRun)
+	}
+	if s.byRequest == nil {
+		s.byRequest = make(map[string]*managedRun)
+	}
+	if existing := s.byThread[record.ProviderThreadID]; existing != nil {
+		s.mu.Unlock()
+		return existing, false
+	}
+	run := newManagedRun(record, history.Content, history.Seq)
+	run.finishing = finishing
+	if history.Result != "" {
+		run.setAnswer(history.Result)
+	}
+	s.byThread[record.ProviderThreadID] = run
+	s.byRequest[record.Provider+"\x00"+record.RequestID] = run
+	s.mu.Unlock()
+	return run, true
+}
+
+func (s *Service) SnapshotConversation(ctx context.Context, conversationID, actorUserID string) (RunSnapshot, error) {
+	binding, err := s.BindingByConversation(ctx, conversationID, actorUserID)
 	if err != nil {
 		return RunSnapshot{}, err
 	}
 	snapshot := RunSnapshot{
-		ConversationID:   conversationID,
-		Provider:         binding.Provider,
-		ProviderThreadID: binding.ProviderThreadID,
-		Status:           "idle",
+		ConversationID: conversationID,
+		Status:         "idle",
 	}
 	s.mu.Lock()
 	active := s.byThread[binding.ProviderThreadID]
-	var pendingID string
-	for id, request := range s.requests {
+	var pending *ExternalRequest
+	for _, request := range s.requests {
 		if request.Run != nil {
 			record, _, _, _ := request.Run.snapshot()
 			if record.ProviderThreadID == binding.ProviderThreadID {
-				pendingID = id
+				value := request.View
+				pending = &value
 				break
 			}
 		}
@@ -759,11 +1371,10 @@ func (s *Service) SnapshotConversation(ctx context.Context, conversationID strin
 	if active != nil {
 		record, _, answer, _ := active.snapshot()
 		snapshot.RunID = record.ID
-		snapshot.RequestID = record.RequestID
-		snapshot.Status = record.Status
-		snapshot.Answer = answer
-		snapshot.Events = active.eventsSnapshot()
-		snapshot.PendingRequestID = pendingID
+		snapshot.Status = projectedRunStatus(record)
+		snapshot.Answer = truncateRunes(answer, 16000)
+		snapshot.PendingRequest = pending
+		snapshot.ControlRelease = record.ControlRelease
 		return snapshot, nil
 	}
 	var record orm.ExternalAgentRun
@@ -778,77 +1389,31 @@ func (s *Service) SnapshotConversation(ctx context.Context, conversationID strin
 		return RunSnapshot{}, err
 	}
 	snapshot.RunID = record.ID
-	snapshot.RequestID = record.RequestID
-	snapshot.Status = record.Status
+	snapshot.Status = projectedRunStatus(record)
+	snapshot.ControlRelease = record.ControlRelease
 	var history orm.ChatHistory
 	if s.db.WithContext(ctx).Where("id = ?", record.HistoryID).First(&history).Error == nil {
-		snapshot.Answer = history.Result
+		snapshot.Answer = truncateRunes(history.Result, 16000)
 	}
 	return snapshot, nil
 }
 
-func (s *Service) requireThreadAvailable(ctx context.Context, threadID string) error {
-	thread, err := s.readThread(ctx, threadID, false)
-	if err != nil {
-		return err
+func projectedRunStatus(record orm.ExternalAgentRun) string {
+	if record.ControlRelease == controlReleasePending {
+		return runStatusReleasing
 	}
-	if thread.Status.Type == "idle" {
-		return nil
-	}
-	if thread.UpdatedAt == 0 || time.Since(time.Unix(thread.UpdatedAt, 0)) < s.quietTime {
-		return ErrUnmanagedActive
-	}
-	thread, err = s.ReadThread(ctx, threadID)
-	if err != nil {
-		return err
-	}
-	var turns []struct {
-		Status string `json:"status"`
-	}
-	if len(thread.Turns) == 0 || json.Unmarshal(thread.Turns, &turns) != nil || len(turns) == 0 {
-		return ErrUnmanagedActive
-	}
-	last := turns[len(turns)-1].Status
-	if last != runStatusCompleted && last != runStatusFailed && last != runStatusInterrupted {
-		return ErrUnmanagedActive
-	}
-	return nil
+	return record.Status
 }
 
-func (s *Service) steer(ctx context.Context, active *managedRun, input ChatInput) (Execution, error) {
-	record, _, _, _ := active.snapshot()
-	var response struct {
-		TurnID string `json:"turnId"`
+func (s *Service) requireThreadAvailable(ctx context.Context, threadID string) error {
+	thread, err := s.readThread(ctx, threadID, false, "")
+	if err != nil {
+		return err
 	}
-	if err := s.client.Call(ctx, "turn/steer", map[string]any{
-		"threadId":       record.ProviderThreadID,
-		"expectedTurnId": record.ProviderTurnID,
-		"input":          []map[string]string{{"type": "text", "text": input.Query}},
-	}, &response); err != nil {
-		return Execution{}, err
+	if thread.Available {
+		return nil
 	}
-	now := time.Now()
-	steerRun := orm.ExternalAgentRun{
-		ID: uuid.NewString(), RequestID: input.RequestID, ConversationID: input.ConversationID,
-		HistoryID: input.HistoryID, Provider: ProviderCodex, ProviderThreadID: record.ProviderThreadID,
-		ProviderTurnID: record.ProviderTurnID, ActorUserID: input.ActorUserID,
-		Action: "steer", Status: runStatusSteered, CreatedAt: now, UpdatedAt: now,
-	}
-	if err := s.db.WithContext(ctx).Create(&steerRun).Error; err != nil {
-		return Execution{}, err
-	}
-	message := "已追加到正在执行的 Codex 任务"
-	if err := s.createHistory(steerRun, input.Query, message, input.Seq); err != nil {
-		return Execution{}, err
-	}
-	events := make(chan Event, 1)
-	events <- Event{
-		Type: "turn_steered", Provider: ProviderCodex, ThreadID: record.ProviderThreadID,
-		TurnID: record.ProviderTurnID, RunID: steerRun.ID, Message: message,
-		Status: runStatusSteered, Terminal: true,
-	}
-	close(events)
-	return Execution{RunID: steerRun.ID, HistoryID: steerRun.HistoryID, Seq: input.Seq, Events: events}, nil
+	return ErrUnmanagedActive
 }
 
 func (s *Service) startRun(run *managedRun) {
@@ -909,18 +1474,47 @@ func (s *Service) startRun(run *managedRun) {
 			return
 		}
 	}
-	run.setTurn(started.Turn.ID)
+	turnID := strings.TrimSpace(started.Turn.ID)
+	if turnID == "" {
+		s.blockStartedRun(run, errors.New("codex turn/start returned no turn id"))
+		return
+	}
 	now := time.Now()
-	_ = s.db.Model(&orm.ExternalAgentRun{}).Where("id = ?", record.ID).Updates(map[string]any{
-		"provider_turn_id": started.Turn.ID,
-		"status":           runStatusRunning,
-		"updated_at":       now,
-	}).Error
+	updated := s.db.Model(&orm.ExternalAgentRun{}).
+		Where("id = ? AND status = ?", record.ID, runStatusStarting).
+		Updates(map[string]any{
+			"provider_turn_id": turnID,
+			"status":           runStatusRunning,
+			"updated_at":       now,
+		})
+	if updated.Error != nil || updated.RowsAffected != 1 {
+		err := updated.Error
+		if err == nil {
+			err = errors.New("external agent run changed before turn/start commit")
+		}
+		s.blockStartedRun(run, err)
+		return
+	}
+	run.setTurn(turnID)
 	run.broadcast(Event{
 		Type: "turn_started", Provider: ProviderCodex, ThreadID: record.ProviderThreadID,
-		TurnID: started.Turn.ID, RunID: record.ID, Status: runStatusRunning,
+		TurnID: turnID, RunID: record.ID, Status: runStatusRunning,
 	})
 	go s.watchRun(run)
+}
+
+func (s *Service) blockStartedRun(run *managedRun, err error) {
+	record, _, _, _ := run.snapshot()
+	corelog.Logger.Error().Err(err).
+		Str("run_id", record.ID).
+		Str("thread_id", record.ProviderThreadID).
+		Msg("external agent turn started but run state was not persisted")
+	run.broadcast(Event{
+		Type: "control_error", Provider: record.Provider,
+		ThreadID: record.ProviderThreadID, RunID: record.ID,
+		Status:  record.Status,
+		Summary: "Codex 已启动，但运行状态尚未确认；正在等待恢复",
+	})
 }
 
 func isActiveWriterError(err error) bool {
@@ -958,7 +1552,7 @@ func (s *Service) forkBusyThread(ctx context.Context, run *managedRun) error {
 		return tx.Model(&orm.ExternalAgentRun{}).Where("id = ?", record.ID).
 			Update("provider_thread_id", newThreadID).Error
 	}); err != nil {
-		s.unsubscribeThread(newThreadID)
+		_, _ = s.releaseThreadWithRetry(newThreadID)
 		return err
 	}
 
@@ -992,7 +1586,7 @@ func (s *Service) watchRun(run *managedRun) {
 			return
 		}
 		record, _, _, _ := run.snapshot()
-		thread, err := s.ReadThread(context.Background(), record.ProviderThreadID)
+		thread, err := s.readThread(context.Background(), record.ProviderThreadID, true, "")
 		if err != nil {
 			continue
 		}
@@ -1065,17 +1659,24 @@ func (s *Service) failRun(run *managedRun, err error) {
 	record, query, _, seq := run.snapshot()
 	record.Status = runStatusFailed
 	record.ErrorMessage = err.Error()
+	record.ControlRelease = controlReleasePending
+	record.ControlError = ""
 	record.UpdatedAt = time.Now()
-	_ = s.db.Model(&orm.ExternalAgentRun{}).Where("id = ?", record.ID).Updates(map[string]any{
-		"status": record.Status, "error_message": record.ErrorMessage, "updated_at": record.UpdatedAt,
-	}).Error
+	if persistErr := s.persistControlRelease(
+		record.ID, record.Status, record.ControlRelease, record.ControlError,
+		map[string]any{"error_message": record.ErrorMessage},
+	); persistErr != nil {
+		s.blockTerminalOnPersistenceFailure(run, record, persistErr)
+		return
+	}
+	run.setTerminalState(record.Status, record.ControlRelease, record.ControlError)
 	_ = s.updateHistory(record, query, "Codex 执行失败："+err.Error(), seq)
-	s.finishActive(run)
-	run.broadcast(Event{
+	event := Event{
 		Type: "turn_failed", Provider: record.Provider, ThreadID: record.ProviderThreadID,
 		TurnID: record.ProviderTurnID, RunID: record.ID, Message: record.ErrorMessage,
 		Status: record.Status, Terminal: true,
-	})
+	}
+	go s.finishTerminal(run, event)
 }
 
 func (s *Service) consumeClientEvents() {
@@ -1137,14 +1738,19 @@ func (s *Service) interruptManagedRun(run *managedRun, message string) {
 	}
 	record, _, _, _ := run.snapshot()
 	record.Status = runStatusInterrupted
-	s.markRunInterrupted(record, message)
-	s.finishActive(run)
-	run.broadcast(Event{
+	record.ControlRelease = controlReleasePending
+	if err := s.markRunInterrupted(record, message); err != nil {
+		s.blockTerminalOnPersistenceFailure(run, record, err)
+		return
+	}
+	run.setTerminalState(record.Status, record.ControlRelease, "")
+	event := Event{
 		Type: "turn_interrupted", Provider: record.Provider,
 		ThreadID: record.ProviderThreadID, TurnID: record.ProviderTurnID,
 		RunID: record.ID, Message: message,
 		Status: runStatusInterrupted, Terminal: true,
-	})
+	}
+	go s.finishTerminal(run, event)
 }
 
 func threadIDFromParams(params json.RawMessage) string {
@@ -1159,7 +1765,7 @@ func (s *Service) handleNotification(run *managedRun, message rpcMessage) {
 	record, _, _, _ := run.snapshot()
 	base := Event{
 		Provider: ProviderCodex, ThreadID: record.ProviderThreadID, TurnID: record.ProviderTurnID,
-		RunID: record.ID, ProviderEventType: message.Method,
+		RunID: record.ID,
 	}
 	switch message.Method {
 	case "item/agentMessage/delta":
@@ -1171,7 +1777,7 @@ func (s *Service) handleNotification(run *managedRun, message rpcMessage) {
 		base.Type = "agent_message_delta"
 		base.TurnID = params.TurnID
 		base.Delta = params.Delta
-		base.Message = run.appendAnswer(params.Delta)
+		run.appendAnswer(params.Delta)
 		run.broadcast(base)
 	case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
 		var params struct {
@@ -1183,6 +1789,15 @@ func (s *Service) handleNotification(run *managedRun, message rpcMessage) {
 		run.broadcast(base)
 	case "item/started", "item/completed":
 		s.handleItemEvent(run, message, base)
+	case "item/fileChange/patchUpdated":
+		var params struct {
+			ItemID  string          `json:"itemId"`
+			Changes json.RawMessage `json:"changes"`
+		}
+		_ = json.Unmarshal(message.Params, &params)
+		run.setFileChanges(params.ItemID, params.Changes)
+		base.Type, base.Summary = "artifact_available", "代码变更已更新"
+		run.broadcast(base)
 	case "turn/plan/updated":
 		base.Type, base.Summary = "progress", "Codex 已更新执行计划"
 		run.broadcast(base)
@@ -1207,11 +1822,13 @@ func (s *Service) handleItemEvent(run *managedRun, message rpcMessage, event Eve
 	var params struct {
 		TurnID string `json:"turnId"`
 		Item   struct {
-			Type    string `json:"type"`
-			Text    string `json:"text"`
-			Phase   string `json:"phase"`
-			Command string `json:"command"`
-			Status  string `json:"status"`
+			Type    string          `json:"type"`
+			Text    string          `json:"text"`
+			Phase   string          `json:"phase"`
+			Command string          `json:"command"`
+			Status  string          `json:"status"`
+			ID      string          `json:"id"`
+			Changes json.RawMessage `json:"changes"`
 		} `json:"item"`
 	}
 	_ = json.Unmarshal(message.Params, &params)
@@ -1230,6 +1847,7 @@ func (s *Service) handleItemEvent(run *managedRun, message rpcMessage, event Eve
 		}
 		run.broadcast(event)
 	case "fileChange":
+		run.setFileChanges(params.Item.ID, params.Item.Changes)
 		event.Type = "artifact_available"
 		if message.Method == "item/started" {
 			event.Summary = "正在准备文件变更"
@@ -1286,23 +1904,30 @@ func (s *Service) completeRun(run *managedRun, message rpcMessage) {
 		}
 	}
 	record.UpdatedAt = time.Now()
+	record.ControlRelease = controlReleasePending
+	record.ControlError = ""
 	messageText := answer
 	if messageText == "" && record.ErrorMessage != "" {
 		messageText = record.ErrorMessage
 	}
-	_ = s.db.Model(&orm.ExternalAgentRun{}).Where("id = ?", record.ID).Updates(map[string]any{
-		"provider_turn_id": record.ProviderTurnID,
-		"status":           record.Status,
-		"error_message":    record.ErrorMessage,
-		"updated_at":       record.UpdatedAt,
-	}).Error
+	if err := s.persistControlRelease(
+		record.ID, record.Status, record.ControlRelease, record.ControlError,
+		map[string]any{
+			"provider_turn_id": record.ProviderTurnID,
+			"error_message":    record.ErrorMessage,
+		},
+	); err != nil {
+		s.blockTerminalOnPersistenceFailure(run, record, err)
+		return
+	}
+	run.setTerminalState(record.Status, record.ControlRelease, record.ControlError)
 	_ = s.updateHistory(record, query, messageText, seq)
-	s.finishActive(run)
-	run.broadcast(Event{
+	event := Event{
 		Type: eventType, Provider: record.Provider, ThreadID: record.ProviderThreadID,
-		TurnID: record.ProviderTurnID, RunID: record.ID, ProviderEventType: message.Method,
+		TurnID: record.ProviderTurnID, RunID: record.ID,
 		Message: messageText, Status: record.Status, Terminal: true,
-	})
+	}
+	go s.finishTerminal(run, event)
 }
 
 func externalAgentHistory(record orm.ExternalAgentRun, query, answer string, seq int) orm.ChatHistory {
@@ -1324,9 +1949,9 @@ func (s *Service) createHistory(record orm.ExternalAgentRun, query, answer strin
 		if err := tx.Create(&history).Error; err != nil {
 			return err
 		}
-		updates := map[string]any{"updated_at": history.UpdateTime}
-		if record.Action != "steer" {
-			updates["chat_times"] = gorm.Expr("chat_times + ?", 1)
+		updates := map[string]any{
+			"updated_at": history.UpdateTime,
+			"chat_times": gorm.Expr("chat_times + ?", 1),
 		}
 		return tx.Model(&orm.Conversation{}).Where("id = ?", record.ConversationID).Updates(updates).Error
 	})
@@ -1348,7 +1973,7 @@ func (s *Service) updateHistory(record orm.ExternalAgentRun, query, answer strin
 		Update("updated_at", history.UpdateTime).Error
 }
 
-func (s *Service) finishActive(run *managedRun) {
+func (s *Service) detachActive(run *managedRun) {
 	record, _, _, _ := run.snapshot()
 	s.mu.Lock()
 	if s.byThread[record.ProviderThreadID] == run {
@@ -1362,25 +1987,122 @@ func (s *Service) finishActive(run *managedRun) {
 		}
 	}
 	s.mu.Unlock()
-	if s.client != nil {
-		go s.unsubscribeThread(record.ProviderThreadID)
+}
+
+func (s *Service) finishTerminal(run *managedRun, event Event) {
+	record, _, _, _ := run.snapshot()
+	if record.ControlRelease != controlReleasePending {
+		if err := s.persistControlRelease(
+			record.ID, event.Status, controlReleasePending, "", nil,
+		); err != nil {
+			s.blockTerminalOnPersistenceFailure(run, record, err)
+			return
+		}
+		record.ControlRelease = controlReleasePending
+		record.ControlError = ""
+		run.setTerminalState(event.Status, record.ControlRelease, record.ControlError)
+	}
+	if s.client == nil {
+		event.ControlRelease = "not_loaded"
+		if err := s.persistControlRelease(
+			record.ID, event.Status, event.ControlRelease, "", nil,
+		); err != nil {
+			s.blockTerminalOnPersistenceFailure(run, record, err)
+			return
+		}
+		run.setTerminalState(event.Status, event.ControlRelease, "")
+		run.broadcast(event)
+		s.detachActive(run)
+		return
+	}
+	status, err := s.releaseThreadWithRetry(record.ProviderThreadID)
+	if err != nil {
+		event.ControlRelease = controlReleaseFailed
+		event.ControlError = err.Error()
+		corelog.Logger.Error().
+			Err(err).
+			Str("thread_id", record.ProviderThreadID).
+			Msg("external agent terminal control release failed")
+	} else {
+		event.ControlRelease = status
+	}
+	if persistErr := s.persistControlRelease(
+		record.ID, event.Status, event.ControlRelease, event.ControlError, nil,
+	); persistErr != nil {
+		s.blockTerminalOnPersistenceFailure(run, record, persistErr)
+		return
+	}
+	run.setTerminalState(event.Status, event.ControlRelease, event.ControlError)
+	run.broadcast(event)
+	if err == nil {
+		s.detachActive(run)
 	}
 }
 
-func (s *Service) unsubscribeThread(threadID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	var response struct {
-		Status string `json:"status"`
+func (s *Service) blockTerminalOnPersistenceFailure(
+	run *managedRun,
+	record orm.ExternalAgentRun,
+	err error,
+) {
+	run.setTerminalState(record.Status, controlReleaseFailed, err.Error())
+	run.broadcast(Event{
+		Type: "control_release_failed", Provider: record.Provider,
+		ThreadID: record.ProviderThreadID, TurnID: record.ProviderTurnID,
+		RunID: record.ID, Status: record.Status,
+		ControlRelease: controlReleaseFailed, ControlError: err.Error(),
+		Summary: "Core could not persist control-release state; retry release",
+	})
+	corelog.Logger.Error().Err(err).Str("run_id", record.ID).
+		Msg("external agent terminal blocked by control release persistence failure")
+}
+
+func (s *Service) persistControlRelease(
+	runID, status, controlRelease, controlError string,
+	extra map[string]any,
+) error {
+	updates := map[string]any{
+		"status":          status,
+		"control_release": controlRelease,
+		"control_error":   controlError,
+		"updated_at":      time.Now(),
 	}
-	if err := s.client.Call(ctx, "thread/unsubscribe", map[string]any{
-		"threadId": threadID,
-	}, &response); err != nil {
-		corelog.Logger.Warn().
-			Err(err).
-			Str("thread_id", threadID).
-			Msg("external agent thread unsubscribe failed")
+	for key, value := range extra {
+		updates[key] = value
 	}
+	result := s.db.Model(&orm.ExternalAgentRun{}).Where("id = ?", runID).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (s *Service) releaseThreadWithRetry(threadID string) (string, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		var response struct {
+			Status string `json:"status"`
+		}
+		err := s.client.Call(ctx, "thread/unsubscribe", map[string]any{
+			"threadId": threadID,
+		}, &response)
+		cancel()
+		status := strings.TrimSpace(response.Status)
+		if err == nil && (status == "unsubscribed" || status == "notSubscribed" || status == "notLoaded") {
+			return status, nil
+		}
+		if err == nil {
+			err = fmt.Errorf("unexpected thread/unsubscribe status %q", status)
+		}
+		lastErr = err
+		if attempt < 2 {
+			time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
+		}
+	}
+	return "", lastErr
 }
 
 func (s *Service) handleServerRequest(run *managedRun, message rpcMessage) {
@@ -1399,8 +2121,18 @@ func (s *Service) handleServerRequest(run *managedRun, message rpcMessage) {
 		return
 	}
 	record, _, _, _ := run.snapshot()
+	payload := message.Params
+	if kind == "file_change_approval" {
+		payload = fileChangeApprovalPayload(run, payload)
+	}
+	summary := requestSummary(kind, payload)
+	requestID := uuid.NewString()
+	view, responses := projectExternalRequest(
+		requestID, kind, summary, payload,
+	)
 	request := &pendingRequest{
-		ID: uuid.NewString(), RPCID: append(json.RawMessage(nil), message.ID...), Kind: kind,
+		ID: requestID, RPCID: append(json.RawMessage(nil), message.ID...), Kind: kind,
+		Payload: append(json.RawMessage(nil), payload...), View: view, Responses: responses,
 		Run: run, ExpiresAt: time.Now().Add(defaultRequestWait),
 	}
 	s.mu.Lock()
@@ -1410,11 +2142,29 @@ func (s *Service) handleServerRequest(run *managedRun, message rpcMessage) {
 		Updates(map[string]any{"status": runStatusWaiting, "updated_at": time.Now()}).Error
 	run.broadcast(Event{
 		Type: "request_required", Provider: record.Provider, ThreadID: record.ProviderThreadID,
-		TurnID: record.ProviderTurnID, RunID: record.ID, ProviderEventType: message.Method,
-		RequestID: request.ID, RequestKind: kind, RequestPayload: append(json.RawMessage(nil), message.Params...),
-		Summary: requestSummary(kind, message.Params), Status: runStatusWaiting,
+		TurnID: record.ProviderTurnID, RunID: record.ID,
+		Request: &view, Summary: summary, Status: runStatusWaiting,
 	})
 	go s.expireRequest(request)
+}
+
+func fileChangeApprovalPayload(run *managedRun, raw json.RawMessage) json.RawMessage {
+	var payload map[string]any
+	if json.Unmarshal(raw, &payload) != nil || payload == nil {
+		return raw
+	}
+	itemID, _ := payload["itemId"].(string)
+	review := run.takeFileChange(itemID)
+	if review.Truncated {
+		payload["changesTruncated"] = true
+	} else if len(review.Changes) > 0 {
+		payload["changes"] = review.Changes
+	}
+	enriched, err := json.Marshal(payload)
+	if err != nil {
+		return raw
+	}
+	return enriched
 }
 
 func requestSummary(kind string, params json.RawMessage) string {
@@ -1427,10 +2177,10 @@ func requestSummary(kind string, params json.RawMessage) string {
 	}
 	_ = json.Unmarshal(params, &details)
 	if kind == "command_approval" && details.Command != "" {
-		return "Codex 请求执行命令：" + details.Command
+		return boundedRequestSummary("Codex 请求执行命令：" + details.Command)
 	}
 	if details.Reason != "" {
-		return details.Reason
+		return boundedRequestSummary(details.Reason)
 	}
 	switch kind {
 	case "command_approval":
@@ -1441,11 +2191,19 @@ func requestSummary(kind string, params json.RawMessage) string {
 		return "Codex 请求额外权限"
 	case "user_input":
 		if len(details.Questions) > 0 {
-			return details.Questions[0].Question
+			return boundedRequestSummary(details.Questions[0].Question)
 		}
 		return "Codex 请求用户输入"
 	}
 	return "Codex 请求交互"
+}
+
+func boundedRequestSummary(value string) string {
+	runes := []rune(value)
+	if len(runes) <= 1000 {
+		return value
+	}
+	return string(runes[:999]) + "…"
 }
 
 func (s *Service) expireRequest(request *pendingRequest) {
@@ -1457,10 +2215,35 @@ func (s *Service) expireRequest(request *pendingRequest) {
 		s.mu.Unlock()
 		return
 	}
+	response, ok := requestTimeoutResponse(request.Kind, request.Payload)
+	var err error
+	if ok {
+		err = s.client.Respond(request.RPCID, response)
+	} else {
+		err = s.client.RespondError(
+			request.RPCID,
+			-32000,
+			"interactive request timed out without a safe rejection decision",
+		)
+	}
+	if err != nil {
+		s.mu.Unlock()
+		corelog.Logger.Warn().Err(err).
+			Str("request_id", request.ID).
+			Str("request_kind", request.Kind).
+			Msg("external agent timed-out request response failed; retry scheduled")
+		time.AfterFunc(5*time.Second, func() {
+			s.expireRequest(request)
+		})
+		return
+	}
 	delete(s.requests, request.ID)
 	s.mu.Unlock()
-	_ = s.client.Respond(request.RPCID, requestTimeoutResponse(request.Kind))
-	s.markRequestResolved(request, "交互请求超时，已自动拒绝")
+	summary := "交互请求超时，已自动拒绝"
+	if !ok {
+		summary = "交互请求超时，已向 Codex 返回错误"
+	}
+	s.markRequestResolved(request, summary)
 }
 
 func (s *Service) RespondRequest(input RequestResponse) error {
@@ -1474,7 +2257,8 @@ func (s *Service) RespondRequest(input RequestResponse) error {
 	if record.ActorUserID != input.ActorUserID {
 		return ErrRequestNotFound
 	}
-	if err := validateRequestResponse(request.Kind, input.Payload); err != nil {
+	response, err := responseForExternalRequest(request, input)
+	if err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -1482,7 +2266,7 @@ func (s *Service) RespondRequest(input RequestResponse) error {
 		s.mu.Unlock()
 		return ErrRequestNotFound
 	}
-	if err := s.client.Respond(request.RPCID, input.Payload); err != nil {
+	if err := s.client.Respond(request.RPCID, response); err != nil {
 		s.mu.Unlock()
 		return err
 	}
@@ -1494,8 +2278,19 @@ func (s *Service) RespondRequest(input RequestResponse) error {
 
 func (s *Service) markRequestResolved(request *pendingRequest, summary string) {
 	record, _, _, _ := request.Run.snapshot()
-	_ = s.db.Model(&orm.ExternalAgentRun{}).Where("id = ?", record.ID).
-		Updates(map[string]any{"status": runStatusRunning, "updated_at": time.Now()}).Error
+	result := s.db.Model(&orm.ExternalAgentRun{}).
+		Where("id = ? AND status = ?", record.ID, runStatusWaiting).
+		Updates(map[string]any{"status": runStatusRunning, "updated_at": time.Now()})
+	if result.Error != nil {
+		corelog.Logger.Warn().Err(result.Error).
+			Str("request_id", request.ID).
+			Str("run_id", record.ID).
+			Msg("external agent request resolution persistence failed")
+		return
+	}
+	if result.RowsAffected != 1 {
+		return
+	}
 	request.Run.broadcast(Event{
 		Type: "progress", Provider: record.Provider, ThreadID: record.ProviderThreadID,
 		TurnID: record.ProviderTurnID, RunID: record.ID,
@@ -1503,76 +2298,126 @@ func (s *Service) markRequestResolved(request *pendingRequest, summary string) {
 	})
 }
 
-func validateRequestResponse(kind string, payload json.RawMessage) error {
-	var body map[string]json.RawMessage
-	if len(payload) == 0 || json.Unmarshal(payload, &body) != nil || body == nil {
-		return fmt.Errorf("invalid request: response must be an object")
+func commandAvailableDecisions(payload json.RawMessage) ([]any, error) {
+	var request map[string]json.RawMessage
+	if json.Unmarshal(payload, &request) != nil || request == nil {
+		return nil, fmt.Errorf("invalid request: command approval payload")
 	}
-	switch kind {
-	case "file_change_approval":
-		var decision string
-		if json.Unmarshal(body["decision"], &decision) != nil {
-			return fmt.Errorf("invalid request: approval decision")
+	raw, provided := request["availableDecisions"]
+	if !provided || string(raw) == "null" {
+		return []any{"accept", "decline"}, nil
+	}
+	var decisions []any
+	if json.Unmarshal(raw, &decisions) != nil || len(decisions) == 0 || len(decisions) > 8 {
+		return nil, fmt.Errorf("invalid request: command approval choices")
+	}
+	for _, decision := range decisions {
+		if err := validateCommandDecision(decision); err != nil {
+			return nil, fmt.Errorf("invalid request: command approval choices")
 		}
-		switch decision {
+	}
+	return decisions, nil
+}
+
+func validateCommandDecision(decision any) error {
+	if value, ok := decision.(string); ok {
+		switch value {
 		case "accept", "acceptForSession", "decline", "cancel":
 			return nil
 		default:
-			return fmt.Errorf("invalid request: approval decision")
+			return fmt.Errorf("unknown command decision")
 		}
-	case "command_approval":
-		var decision string
-		if json.Unmarshal(body["decision"], &decision) == nil {
-			switch decision {
-			case "accept", "acceptForSession", "decline", "cancel":
-				return nil
-			default:
-				return fmt.Errorf("invalid request: approval decision")
+	}
+	value, ok := decision.(map[string]any)
+	if !ok || len(value) != 1 {
+		return fmt.Errorf("invalid command amendment")
+	}
+	if raw, ok := value["acceptWithExecpolicyAmendment"]; ok {
+		outer, ok := raw.(map[string]any)
+		if !ok || len(outer) != 1 {
+			return fmt.Errorf("invalid execpolicy amendment")
+		}
+		parts, ok := outer["execpolicy_amendment"].([]any)
+		if !ok || len(parts) == 0 || len(parts) > 20 {
+			return fmt.Errorf("invalid execpolicy amendment")
+		}
+		for _, part := range parts {
+			text, ok := part.(string)
+			if !ok || text == "" || utf8.RuneCountInString(text) > 300 {
+				return fmt.Errorf("invalid execpolicy amendment")
 			}
 		}
-		var amendment map[string]json.RawMessage
-		if json.Unmarshal(body["decision"], &amendment) != nil || amendment == nil {
-			return fmt.Errorf("invalid request: approval decision")
-		}
-		if _, ok := amendment["acceptWithExecpolicyAmendment"]; ok {
-			return nil
-		}
-		if _, ok := amendment["applyNetworkPolicyAmendment"]; ok {
-			return nil
-		}
-		return fmt.Errorf("invalid request: approval decision")
-	case "permissions_approval":
-		var permissions map[string]json.RawMessage
-		if raw, ok := body["permissions"]; !ok || json.Unmarshal(raw, &permissions) != nil || permissions == nil {
-			return fmt.Errorf("invalid request: permissions response")
-		}
 		return nil
-	case "user_input":
-		var answers map[string]json.RawMessage
-		if raw, ok := body["answers"]; !ok || json.Unmarshal(raw, &answers) != nil || answers == nil {
-			return fmt.Errorf("invalid request: user input answers")
-		}
-		return nil
-	default:
-		return fmt.Errorf("invalid request: unsupported response kind")
 	}
+	if raw, ok := value["applyNetworkPolicyAmendment"]; ok {
+		outer, ok := raw.(map[string]any)
+		if !ok || len(outer) != 1 {
+			return fmt.Errorf("invalid network policy amendment")
+		}
+		amendment, ok := outer["network_policy_amendment"].(map[string]any)
+		if !ok || len(amendment) != 2 {
+			return fmt.Errorf("invalid network policy amendment")
+		}
+		host, hostOK := amendment["host"].(string)
+		action, actionOK := amendment["action"].(string)
+		if !hostOK || host == "" || len(host) > 253 || !actionOK || (action != "allow" && action != "deny") {
+			return fmt.Errorf("invalid network policy amendment")
+		}
+		return nil
+	}
+	return fmt.Errorf("unknown command amendment")
 }
 
-func requestTimeoutResponse(kind string) any {
+func requestTimeoutResponse(kind string, payload json.RawMessage) (any, bool) {
 	switch kind {
-	case "command_approval", "file_change_approval":
-		return map[string]any{"decision": "decline"}
+	case "command_approval":
+		decision, ok := commandTimeoutDecision(payload)
+		return map[string]any{"decision": decision}, ok
+	case "file_change_approval":
+		return map[string]any{"decision": "decline"}, true
 	case "permissions_approval":
-		return map[string]any{"permissions": map[string]any{}}
+		return map[string]any{
+			"permissions": map[string]any{},
+			"scope":       "turn",
+		}, true
 	case "user_input":
-		return map[string]any{"answers": map[string]any{}}
+		return map[string]any{"answers": map[string]any{}}, true
 	default:
-		return map[string]any{}
+		return map[string]any{}, false
 	}
 }
 
-func (s *Service) Interrupt(ctx context.Context, conversationID, actorUserID string) error {
-	binding, err := s.BindingByConversation(ctx, conversationID)
+func commandTimeoutDecision(payload json.RawMessage) (string, bool) {
+	var body map[string]json.RawMessage
+	if json.Unmarshal(payload, &body) != nil || body == nil {
+		return "", false
+	}
+	raw, provided := body["availableDecisions"]
+	if !provided || string(raw) == "null" {
+		return "decline", true
+	}
+	var decisions []json.RawMessage
+	if json.Unmarshal(raw, &decisions) != nil {
+		return "", false
+	}
+	fallback := ""
+	for _, item := range decisions {
+		var decision string
+		if json.Unmarshal(item, &decision) != nil {
+			continue
+		}
+		if decision == "decline" {
+			return decision, true
+		}
+		if decision == "cancel" {
+			fallback = decision
+		}
+	}
+	return fallback, fallback != ""
+}
+
+func (s *Service) Interrupt(ctx context.Context, conversationID, actorUserID, expectedRunID string) error {
+	binding, err := s.BindingByConversation(ctx, conversationID, actorUserID)
 	if err != nil {
 		return err
 	}
@@ -1610,6 +2455,9 @@ func (s *Service) Interrupt(ctx context.Context, conversationID, actorUserID str
 	if record.ActorUserID != actorUserID {
 		return ErrThreadBusy
 	}
+	if expectedRunID == "" || record.ID != expectedRunID {
+		return fmt.Errorf("task not found: external agent run changed")
+	}
 	return s.client.Call(ctx, "turn/interrupt", map[string]any{
 		"threadId": record.ProviderThreadID,
 		"turnId":   record.ProviderTurnID,
@@ -1617,12 +2465,9 @@ func (s *Service) Interrupt(ctx context.Context, conversationID, actorUserID str
 }
 
 func (s *Service) Release(ctx context.Context, conversationID, actorUserID string) error {
-	binding, err := s.BindingByConversation(ctx, conversationID)
+	binding, err := s.BindingByConversation(ctx, conversationID, actorUserID)
 	if err != nil {
 		return err
-	}
-	if binding.CreatedByUserID != actorUserID {
-		return ErrThreadBusy
 	}
 	s.mu.Lock()
 	active := s.byThread[binding.ProviderThreadID]
@@ -1630,16 +2475,131 @@ func (s *Service) Release(ctx context.Context, conversationID, actorUserID strin
 	if active != nil && !active.finished() {
 		return fmt.Errorf("invalid request: external agent turn is still running")
 	}
-	var response struct {
-		Status string `json:"status"`
+	var record orm.ExternalAgentRun
+	if active != nil {
+		record, _, _, _ = active.snapshot()
+	} else {
+		err = s.db.WithContext(ctx).
+			Where("conversation_id = ? AND provider_thread_id = ?", conversationID, binding.ProviderThreadID).
+			Order("created_at DESC").First(&record).Error
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return err
+		}
 	}
-	if err := s.client.Call(ctx, "thread/unsubscribe", map[string]any{
-		"threadId": binding.ProviderThreadID,
-	}, &response); err != nil {
+	if record.ID != "" {
+		if record.ControlRelease == controlReleasePending {
+			return ErrReleasePending
+		}
+		if controlReleased(record.ControlRelease) {
+			if active != nil {
+				s.detachActive(active)
+			}
+			return nil
+		}
+		claimed, err := s.claimControlRelease(ctx, record)
+		if err != nil {
+			return err
+		}
+		if !claimed {
+			if active != nil {
+				s.detachActive(active)
+			}
+			return nil
+		}
+		if active != nil {
+			active.setTerminalState(record.Status, controlReleasePending, "")
+		}
+	}
+	status := "not_loaded"
+	if s.client != nil {
+		status, err = s.releaseThreadWithRetry(binding.ProviderThreadID)
+	}
+	if err != nil {
+		if record.ID != "" {
+			persistErr := s.persistControlRelease(
+				record.ID, record.Status, controlReleaseFailed, err.Error(), nil,
+			)
+			if active != nil {
+				active.setTerminalState(record.Status, controlReleaseFailed, err.Error())
+			}
+			if persistErr != nil {
+				return errors.Join(err, persistErr)
+			}
+		}
 		return err
+	}
+	if record.ID != "" {
+		if err := s.persistControlRelease(record.ID, record.Status, status, "", nil); err != nil {
+			if active != nil {
+				active.setTerminalState(record.Status, controlReleaseFailed, err.Error())
+			}
+			return err
+		}
+		if active != nil {
+			active.setTerminalState(record.Status, status, "")
+		}
+	}
+	if active != nil {
+		_, _, answer, _ := active.snapshot()
+		active.broadcast(Event{
+			Type: terminalEventType(record.Status), Provider: record.Provider,
+			ThreadID: record.ProviderThreadID, TurnID: record.ProviderTurnID,
+			RunID: record.ID, Message: answer, Status: record.Status,
+			ControlRelease: status, Terminal: true,
+		})
+		s.detachActive(active)
 	}
 	s.mu.Lock()
 	delete(s.loaded, binding.ProviderThreadID)
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *Service) claimControlRelease(
+	ctx context.Context,
+	record orm.ExternalAgentRun,
+) (bool, error) {
+	expected := record.ControlRelease
+	for attempt := 0; attempt < 2; attempt++ {
+		result := s.db.WithContext(ctx).
+			Model(&orm.ExternalAgentRun{}).
+			Where("id = ? AND control_release = ?", record.ID, expected).
+			Updates(map[string]any{
+				"status":          record.Status,
+				"control_release": controlReleasePending,
+				"control_error":   "",
+				"updated_at":      time.Now(),
+			})
+		if result.Error != nil {
+			return false, result.Error
+		}
+		if result.RowsAffected == 1 {
+			return true, nil
+		}
+		var current orm.ExternalAgentRun
+		if err := s.db.WithContext(ctx).Where("id = ?", record.ID).
+			First(&current).Error; err != nil {
+			return false, err
+		}
+		if controlReleased(current.ControlRelease) {
+			return false, nil
+		}
+		if current.ControlRelease == controlReleasePending {
+			return false, ErrReleasePending
+		}
+		if current.ControlRelease == expected {
+			return false, ErrReleasePending
+		}
+		expected = current.ControlRelease
+	}
+	return false, ErrReleasePending
+}
+
+func controlReleased(status string) bool {
+	switch status {
+	case "unsubscribed", "notSubscribed", "notLoaded", "not_loaded":
+		return true
+	default:
+		return false
+	}
 }

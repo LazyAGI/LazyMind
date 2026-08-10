@@ -7,6 +7,8 @@ from typing import Any
 import lark_oapi
 from lark_oapi.api.application.v7 import (
     AppAbilityBot,
+    BotMenuNode,
+    BotMenuUdIcon,
     CreateApplicationPublishRequest,
     CreateApplicationPublishRequestBody,
     PatchApplicationAbilityRequest,
@@ -44,27 +46,35 @@ _ADDONS = {
 }
 
 _MENU_ITEMS = (
-    ('lazymind_capabilities', '能力', 'Capabilities'),
-    ('lazymind_conversations', '切换会话', 'Switch conversation'),
-    ('lazymind_settings', '设置', 'Settings'),
-    ('lazymind_assistant', '助理', 'Assistant'),
+    ('lazymind_capabilities', '能力', 'Capabilities', 'app_outlined'),
+    (
+        'lazymind_conversations',
+        '切换会话',
+        'Switch conversation',
+        'switch_outlined',
+    ),
+    ('lazymind_settings', '设置', 'Settings', 'setting_outlined'),
+    ('lazymind_assistant', '助理', 'Assistant', 'robot_outlined'),
 )
 
 
-def _menu_payload() -> list[dict[str, Any]]:
+def _menu_payload() -> list[BotMenuNode]:
     return [
-        {
-            'menu_id': event_key,
-            'sort': index,
-            'default_name': zh_name,
-            'i18n_name': {
-                'zh_cn': zh_name,
-                'en_us': en_name,
-            },
-            'event_key': event_key,
-            'menu_content_type': 2,
-        }
-        for index, (event_key, zh_name, en_name) in enumerate(
+        BotMenuNode.builder()
+        .menu_id(event_key)
+        .sort(index)
+        .default_name(zh_name)
+        .i18n_name({'zh_cn': zh_name, 'en_us': en_name})
+        .event_key(event_key)
+        .menu_content_type(2)
+        .ud_icon(
+            BotMenuUdIcon.builder()
+            .token(icon_token)
+            .color('blue')
+            .build()
+        )
+        .build()
+        for index, (event_key, zh_name, en_name, icon_token) in enumerate(
             _MENU_ITEMS,
             start=1,
         )
@@ -75,7 +85,7 @@ def configure_bot_menu(
     app_id: str,
     app_secret: str,
     *,
-    publish: bool = False,
+    publish_version: str,
 ) -> None:
     client = (
         lark_oapi.Client.builder()
@@ -84,15 +94,14 @@ def configure_bot_menu(
         .build()
     )
     menus = _menu_payload()
-    bot = AppAbilityBot.builder().enable(True).build()
-    # These fields were added to application v7 after the bundled SDK model.
-    # The official SDK encoder serializes public instance attributes, so the
-    # call remains forward-compatible without carrying a local model fork.
-    bot.bot_menu_enable = True
-    bot.bot_menus = menus
-    # Feishu encodes the two switchable defaults as 1/2 and the floating
-    # menu as 3. Floating menus support five entries and keep input visible.
-    bot.bot_menu_display_strategy = 3
+    bot = (
+        AppAbilityBot.builder()
+        .enable(True)
+        .bot_menu_enable(True)
+        .bot_menus(menus)
+        .bot_menu_display_strategy(3)
+        .build()
+    )
     request = (
         PatchApplicationAbilityRequest.builder()
         .app_id(app_id)
@@ -103,14 +112,17 @@ def configure_bot_menu(
         )
         .build()
     )
-    response = client.application.v7.application_ability.patch(request)
+    try:
+        response = client.application.v7.application_ability.patch(request)
+    except Exception as exc:
+        raise FeishuRuntimeError(
+            'Feishu bot menu configuration request failed'
+        ) from exc
     if not response.success():
         raise FeishuRuntimeError(
             'Feishu bot menu configuration failed '
             f'code={response.code} msg={response.msg}'
         )
-    if not publish:
-        return
     publish_request = (
         CreateApplicationPublishRequest.builder()
         .app_id(app_id)
@@ -120,14 +132,19 @@ def configure_bot_menu(
             .pc_default_ability('bot')
             .remark('LazyMind 原生菜单与对话接入')
             .changelog('新增能力、切换会话、设置和助理悬浮菜单。')
-            .version('1.0.1')
+            .version(publish_version)
             .build()
         )
         .build()
     )
-    publish_response = client.application.v7.application_publish.create(
-        publish_request
-    )
+    try:
+        publish_response = client.application.v7.application_publish.create(
+            publish_request
+        )
+    except Exception as exc:
+        raise FeishuRuntimeError(
+            'Feishu bot menu publish request failed'
+        ) from exc
     if not publish_response.success():
         raise FeishuRuntimeError(
             'Feishu bot menu publish failed '

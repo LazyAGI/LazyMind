@@ -14,6 +14,8 @@ from channel_gateway.common.application.capabilities import (
 from channel_gateway.common.domain.commands import (
     CommandEnvelope,
     ConversationSwitchCommand,
+    PreparedConversationTarget,
+    RESOLVED_CONVERSATION_TARGET_KEY,
     ResourceChange,
     SelectionContinuation,
 )
@@ -40,7 +42,6 @@ _HISTORY_PAGE_SIZE = 3
 _QUERY_PREVIEW_LIMIT = 120
 _ANSWER_PREVIEW_LIMIT = 300
 _CHINA_TIMEZONE = dt.timezone(dt.timedelta(hours=8))
-_SWITCH_TARGET_KEY = '_channel_gateway_switch_target'
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +49,6 @@ class ConversationResult:
     text: str
     turn: CoreTurnResult | None = None
     presentations: tuple[ReplyPresentation, ...] = ()
-    suppress_text_when_presented: bool = False
 
 
 class ConversationActions:
@@ -80,16 +80,11 @@ class ConversationActions:
         catalog: dict[str, Any],
         features: ChannelFeatureProfile,
         conversation_id_override: str | None = None,
-        executor: dict[str, Any] | None = None,
+        external_agent: bool = False,
         activate_route: bool = True,
         ask_answers_structured: dict[str, Any] | None = None,
-        ask_already_validated: bool = False,
         inputs: Sequence[dict[str, str]] = (),
         mentions: Sequence[dict[str, str]] = (),
-        workspace_dataset_ids: Sequence[str] | None = None,
-        disabled_tools: Sequence[str] = (),
-        enable_workflow: bool | None = None,
-        workflow_mode: str | None = None,
         thinking_depth: str | None = None,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> ConversationResult:
@@ -115,7 +110,6 @@ class ConversationActions:
                 source_messages=source_messages,
             )
         )
-
         if conversation_id:
             self._capabilities.apply_persistent_changes(
                 resolved=resolved,
@@ -185,10 +179,7 @@ class ConversationActions:
             )
 
         try:
-            if (
-                ask_answers_structured is not None
-                and not ask_already_validated
-            ):
+            if ask_answers_structured is not None:
                 self._validate_pending_ask(
                     owner_user_id=owner_user_id,
                     conversation_id=conversation_id,
@@ -196,17 +187,10 @@ class ConversationActions:
                     structured=ask_answers_structured,
                 )
             options.features = features
-            options.executor = dict(executor) if executor is not None else None
+            options.external_agent = external_agent
             options.inputs.extend(dict(item) for item in inputs)
             options.ask_answers_structured = ask_answers_structured
             options.mentions.extend(dict(item) for item in mentions)
-            if workspace_dataset_ids is not None:
-                options.search_config = self._capabilities.search_config(
-                    [str(value) for value in workspace_dataset_ids if value]
-                )
-            options.disabled_tools.extend(str(item) for item in disabled_tools)
-            options.enable_workflow = enable_workflow
-            options.workflow_mode = workflow_mode
             options.thinking_depth = (
                 thinking_depth
                 if thinking_depth in {'low', 'medium', 'high', 'max'}
@@ -234,7 +218,7 @@ class ConversationActions:
                 and '2001310' in exc.message
             ):
                 raise ActionMessage(
-                    '当前插件仍在运行或等待操作，暂时不能启动另一个插件。'
+                    '当前 Workflow 仍在运行或等待操作，暂时不能启动另一个 Workflow。'
                     '请等待当前任务结束后直接发送新任务，无需新建会话。'
                 ) from exc
             raise
@@ -245,13 +229,6 @@ class ConversationActions:
                 turn.conversation_id,
                 consume_pending_turn=True,
             )
-        suppress_text_when_presented = (
-            not turn.answer
-            and any(
-                event.type in {'ask_pending', 'task_created'}
-                for event in turn.events
-            )
-        )
         answer = turn.answer or self._event_fallback(turn)
         if explicit_new:
             return ConversationResult(
@@ -267,17 +244,12 @@ class ConversationActions:
                         kind='conversation',
                         state='new',
                         title='新会话',
-                        feature_labels=features.enabled_feature_labels,
-                        footer='后续消息会继续这个新会话。',
                     ),
                 ),
             )
         return ConversationResult(
             text=answer,
             turn=turn,
-            suppress_text_when_presented=(
-                suppress_text_when_presented
-            ),
         )
 
     def _validate_pending_ask(
@@ -344,6 +316,8 @@ class ConversationActions:
             resolved,
             self._capabilities.default_dataset_ids(catalog),
         )
+        if draft.workflow_mode is None:
+            draft.workflow_mode = 'dynamic'
         current_id = self._store.get_route(account_id, external_address_hash)
         previous_title = self._safe_title(
             owner_user_id=owner_user_id,
@@ -387,12 +361,8 @@ class ConversationActions:
                     kind='conversation',
                     state='new',
                     title='等待第一条消息',
-                    previous_title=previous_title if current_id else '',
-                    feature_labels=features.enabled_feature_labels,
-                    footer='发送下一条消息后，LazyMind 会正式创建会话。',
                 ),
             ),
-            suppress_text_when_presented=True,
         )
 
     def list_conversations(
@@ -434,7 +404,6 @@ class ConversationActions:
         lines.extend(('', '直接说“切到第几个会话”即可。'))
         return ConversationResult(
             text='\n'.join(lines),
-            suppress_text_when_presented=True,
         )
 
     def switch(
@@ -452,19 +421,10 @@ class ConversationActions:
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> str | ConversationResult:
         parameters = command.parameters
-        prepared = catalog.get(_SWITCH_TARGET_KEY)
-        if isinstance(prepared, dict) and prepared.get('target_id'):
-            target_id = str(prepared['target_id'])
-            raw_display_index = prepared.get('display_index')
-            display_index = (
-                int(raw_display_index)
-                if isinstance(raw_display_index, int)
-                else None
-            )
-            detail = prepared.get('detail')
-            history = prepared.get('history')
-            prepared_detail = detail if isinstance(detail, dict) else None
-            prepared_history = history if isinstance(history, dict) else None
+        prepared = catalog.get(RESOLVED_CONVERSATION_TARGET_KEY)
+        if isinstance(prepared, dict) and prepared.get('conversation_id'):
+            target_id = str(prepared['conversation_id'])
+            display_index = None
         else:
             target_id, display_index = self._resolve_switch_target(
                 command=command,
@@ -476,8 +436,6 @@ class ConversationActions:
                 owner_user_id=owner_user_id,
                 request_id=request_id,
             )
-            prepared_detail = None
-            prepared_history = None
         resolved_changes: ResolvedChanges | None = None
         if parameters.resource_changes:
             resolved_changes = self._capabilities.resolve_changes(
@@ -487,6 +445,9 @@ class ConversationActions:
                 external_address_hash=external_address_hash,
                 source_command=command,
                 source_messages=source_messages,
+                prepared_conversation_target=PreparedConversationTarget(
+                    conversation_id=target_id,
+                ),
             )
             self._capabilities.validate_resolved_changes(resolved_changes)
         transition = self._switch_to(
@@ -500,8 +461,6 @@ class ConversationActions:
                 not parameters.message
                 and not parameters.resource_changes
             ),
-            prepared_detail=prepared_detail,
-            prepared_history=prepared_history,
             features=features,
         )
         if not parameters.message:
@@ -526,7 +485,6 @@ class ConversationActions:
                 return ConversationResult(
                     text=f'{transition.text}\n\n{configured}',
                     presentations=transition.presentations,
-                    suppress_text_when_presented=True,
                 )
             return transition
         answer = self.chat(
@@ -700,12 +658,8 @@ class ConversationActions:
                     kind='conversation',
                     state='current',
                     title=title,
-                    updated_at=updated_at,
-                    feature_labels=features.enabled_feature_labels,
-                    footer='后续消息会继续当前会话。',
                 ),
             ),
-            suppress_text_when_presented=True,
         )
 
     def more_history(
@@ -766,24 +720,10 @@ class ConversationActions:
                     kind='conversation',
                     state='history',
                     title=self._display_name(detail),
-                    updated_at=self._format_time(
-                        str(detail.get('update_time') or '')
-                    ),
-                    history_label=(
-                        '更早的对话'
-                        if initialized
-                        else '最近对话'
-                    ),
                     turns=self._history_turns(history),
-                    footer=(
-                        '已经到最早一条记录。'
-                        if not next_token
-                        else '还可以继续查看更多历史。'
-                    ),
                     reached_start=not next_token,
                 ),
             ),
-            suppress_text_when_presented=True,
         )
 
     def _switch_to(
@@ -796,18 +736,13 @@ class ConversationActions:
         target_id: str,
         display_index: int | None,
         activate: bool = True,
-        prepared_detail: dict[str, Any] | None = None,
-        prepared_history: dict[str, Any] | None = None,
         features: ChannelFeatureProfile,
     ) -> ConversationResult:
-        if prepared_detail is not None and prepared_history is not None:
-            detail, history = prepared_detail, prepared_history
-        else:
-            detail, history = self._load_switch_target(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                target_id=target_id,
-            )
+        detail, history = self._load_switch_target(
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            target_id=target_id,
+        )
         previous_id = self._store.get_route(account_id, external_address_hash)
         previous_title = (
             self._safe_title(
@@ -856,20 +791,12 @@ class ConversationActions:
                     kind='conversation',
                     state='switched',
                     title=title,
-                    previous_title=previous_title,
-                    updated_at=self._format_time(
-                        str(detail.get('update_time') or '')
-                    ),
-                    feature_labels=features.enabled_feature_labels,
-                    history_label='最近对话',
                     turns=self._history_turns(history),
-                    footer='后续消息会继续当前会话。',
                     reached_start=not bool(
                         history.get('next_page_token')
                     ),
                 ),
             ),
-            suppress_text_when_presented=True,
         )
 
     @staticmethod

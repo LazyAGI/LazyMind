@@ -7,12 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type rpcError struct {
@@ -22,6 +27,18 @@ type rpcError struct {
 }
 
 func (e *rpcError) Error() string { return e.Message }
+
+type rpcCallError struct {
+	method   string
+	response *rpcError
+}
+
+func (e *rpcCallError) Error() string {
+	return fmt.Sprintf(
+		"request failed: codex %s: code=%d message=%s",
+		e.method, e.response.Code, e.response.Message,
+	)
+}
 
 type transportUnavailableError struct{ cause error }
 
@@ -66,6 +83,38 @@ type messageTransport interface {
 	WriteMessage([]byte) error
 	Close() error
 }
+
+type websocketTransport struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func dialWebsocket(endpoint, token string) (messageTransport, error) {
+	header := make(http.Header)
+	if token != "" {
+		header.Set("Authorization", "Bearer "+token)
+	}
+	dialer := *websocket.DefaultDialer
+	dialer.HandshakeTimeout = 10 * time.Second
+	conn, _, err := dialer.Dial(endpoint, header)
+	if err != nil {
+		return nil, err
+	}
+	return &websocketTransport{conn: conn}, nil
+}
+
+func (t *websocketTransport) ReadMessage() ([]byte, error) {
+	_, payload, err := t.conn.ReadMessage()
+	return payload, err
+}
+
+func (t *websocketTransport) WriteMessage(payload []byte) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.conn.WriteMessage(websocket.TextMessage, payload)
+}
+
+func (t *websocketTransport) Close() error { return t.conn.Close() }
 
 type stdioTransport struct {
 	cmd     *exec.Cmd
@@ -132,8 +181,23 @@ type CodexClient struct {
 }
 
 func NewCodexClient() *CodexClient {
+	endpoint := strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_APP_SERVER_URL"))
+	token := strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_APP_SERVER_TOKEN"))
+	binaryName := strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_BIN"))
+	if binaryName == "" {
+		binaryName = "codex"
+	}
 	factory := func() (messageTransport, error) {
-		binary, err := exec.LookPath("codex")
+		if endpoint != "" {
+			parsed, err := url.Parse(endpoint)
+			if err != nil || parsed.Host == "" || (parsed.Scheme != "ws" && parsed.Scheme != "wss") {
+				return nil, &codexConfigurationError{
+					cause: fmt.Errorf("invalid LAZYMIND_CODEX_APP_SERVER_URL %q", endpoint),
+				}
+			}
+			return dialWebsocket(endpoint, token)
+		}
+		binary, err := exec.LookPath(binaryName)
 		if err != nil {
 			return nil, &codexConfigurationError{cause: err}
 		}
@@ -185,6 +249,9 @@ func (c *CodexClient) ensureConnected(ctx context.Context) error {
 			"name":    "lazymind",
 			"title":   "LazyMind Codex Assistant",
 			"version": "0.1.0",
+		},
+		"capabilities": map[string]bool{
+			"experimentalApi": true,
 		},
 	}, &initialized); err != nil {
 		c.disconnect(transport, err)
@@ -248,7 +315,7 @@ func (c *CodexClient) callConnected(ctx context.Context, method string, params, 
 			if response.Error.Code == -1 {
 				return &transportUnavailableError{cause: response.Error}
 			}
-			return fmt.Errorf("request failed: codex %s: code=%d message=%s", method, response.Error.Code, response.Error.Message)
+			return &rpcCallError{method: method, response: response.Error}
 		}
 		if result == nil || len(response.Result) == 0 {
 			return nil

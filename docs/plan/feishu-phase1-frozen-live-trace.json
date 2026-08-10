@@ -1,0 +1,127 @@
+{
+  "trace_id": "feishu-ext-69f3ededc45242cfb10d3d3819d9cdef",
+  "captured_at": "2026-08-09T18:55:01.671970+00:00",
+  "core_url": "http://core:8000",
+  "actor_user_id": "980fe1c4-47ae-4feb-a516-2d0248f718d1",
+  "request_ids": {
+    "projects_page_1": "feishu-ext-69f3ededc45242cfb10d3d3819d9cdef-projects_page_1",
+    "threads_page_1": "feishu-ext-69f3ededc45242cfb10d3d3819d9cdef-threads_page_1",
+    "threads_page_2": "feishu-ext-69f3ededc45242cfb10d3d3819d9cdef-threads_page_2",
+    "detail": "feishu-ext-69f3ededc45242cfb10d3d3819d9cdef-detail",
+    "invalid_cursor": "feishu-ext-69f3ededc45242cfb10d3d3819d9cdef-invalid-cursor"
+  },
+  "timings_ms": {
+    "project_pages": [
+      2895
+    ],
+    "thread_pages": [
+      714,
+      738
+    ],
+    "detail": 13,
+    "hidden_owner_detail": null
+  },
+  "projects": {
+    "count": 6,
+    "total": 6,
+    "items": [
+      {
+        "cwd": "/Users/chenhao7/LocalScripts/LazyRAG",
+        "name": "LazyRAG",
+        "thread_count": 5,
+        "updated_at": 1786301697
+      },
+      {
+        "cwd": "/Users/chenhao7/LocalScripts/LazyRAG/LazyRAG",
+        "name": "LazyRAG",
+        "thread_count": 5,
+        "updated_at": 1786210971
+      },
+      {
+        "cwd": "/Users/chenhao7/LocalScripts/openclaw",
+        "name": "openclaw",
+        "thread_count": 3,
+        "updated_at": 1786008833
+      },
+      {
+        "cwd": "/Users/chenhao7/LocalScripts/LazyRAG_dev",
+        "name": "LazyRAG_dev",
+        "thread_count": 1,
+        "updated_at": 1785988360
+      },
+      {
+        "cwd": "/Users/chenhao7/LocalScripts/DataAnnotation",
+        "name": "DataAnnotation",
+        "thread_count": 1,
+        "updated_at": 1785918309
+      },
+      {
+        "cwd": "/Users/chenhao7/LocalScripts/LazyMind",
+        "name": "LazyMind",
+        "thread_count": 1,
+        "updated_at": 1784264469
+      }
+    ],
+    "pages": [
+      {
+        "cursor": "",
+        "next_cursor": "",
+        "count": 6,
+        "total": 6
+      }
+    ]
+  },
+  "threads": {
+    "cwd": "/Users/chenhao7/LocalScripts/LazyRAG/LazyRAG",
+    "count": 5,
+    "total": 5,
+    "ids": [
+      "019fe278-159a-7923-aec3-41094916116f",
+      "019fe277-1ae4-7162-b67a-22a1fbcc9007",
+      "019fe276-1a51-7bf1-9770-d15de3f8f319",
+      "019fe273-f4e2-7832-a9b9-1e4c41d49c2f",
+      "019fe271-e24a-7b31-8c75-56fa345445b8"
+    ],
+    "pages": [
+      {
+        "page": 1,
+        "cursor": null,
+        "next_cursor": "4",
+        "has_more": true,
+        "count": 4,
+        "ids": [
+          "019fe278-159a-7923-aec3-41094916116f",
+          "019fe277-1ae4-7162-b67a-22a1fbcc9007",
+          "019fe276-1a51-7bf1-9770-d15de3f8f319",
+          "019fe273-f4e2-7832-a9b9-1e4c41d49c2f"
+        ]
+      },
+      {
+        "page": 2,
+        "cursor": "4",
+        "next_cursor": null,
+        "has_more": false,
+        "count": 1,
+        "ids": [
+          "019fe271-e24a-7b31-8c75-56fa345445b8"
+        ]
+      }
+    ],
+    "invalid_cursor_status": 400
+  },
+  "detail": {
+    "thread_id": "019fe278-159a-7923-aec3-41094916116f",
+    "conversation_id": null,
+    "available": true,
+    "controlled_by_lazymind": null,
+    "total_turns": 1,
+    "returned_turns": 2
+  },
+  "actor_isolation": {
+    "hidden_thread_id": null,
+    "hidden_owner_user_id": null,
+    "hidden_owner_detail_status": null,
+    "hidden_owner_detail": null,
+    "hidden_detail_status": null
+  }
+}

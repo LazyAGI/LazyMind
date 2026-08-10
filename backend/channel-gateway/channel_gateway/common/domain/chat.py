@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -40,8 +42,6 @@ class ChannelFeatureProfile:
         tools: list[str] = []
         if not self.enable_ask:
             tools.append('ask_user')
-        if not self.enable_workflow:
-            tools.append('plugin')
         if not self.enable_subagent:
             tools.append('subagent')
         if not self.enable_tasks:
@@ -53,6 +53,100 @@ class ChannelFeatureProfile:
 
 BASIC_CHAT_FEATURES = ChannelFeatureProfile()
 
+
+@dataclass(frozen=True, slots=True)
+class ChannelAttachment:
+    input_type: Literal['image', 'file']
+    input_base64: str = ''
+    uri: str = ''
+
+    @classmethod
+    def from_dict(cls, value: Any) -> ChannelAttachment | None:
+        if not isinstance(value, dict):
+            return None
+        input_type = str(value.get('input_type') or '')
+        if input_type not in {'image', 'file'}:
+            return None
+        attachment = cls(
+            input_type=input_type,
+            input_base64=str(value.get('input_base64') or ''),
+            uri=str(value.get('uri') or ''),
+        )
+        if not attachment.input_base64 and not attachment.uri:
+            return None
+        return attachment
+
+    def to_dict(self) -> dict[str, str]:
+        value = {'input_type': self.input_type}
+        if self.input_base64:
+            value['input_base64'] = self.input_base64
+        if self.uri:
+            value['uri'] = self.uri
+        return value
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelExecutionContext:
+    """Provider-neutral, typed inputs for one routed channel command."""
+
+    attachments: tuple[ChannelAttachment, ...] = ()
+    ask_answers_structured: dict[str, Any] | None = None
+    thinking_depth: Literal['low', 'medium', 'high', 'max'] | None = None
+    external_agent_conversation_id: str = ''
+    include_capability_settings: bool = False
+
+    @classmethod
+    def from_provider_context(
+        cls,
+        provider_context: dict[str, Any] | None,
+    ) -> ChannelExecutionContext:
+        if not isinstance(provider_context, dict):
+            return cls()
+        return cls.from_dict(provider_context.get('channel_execution'))
+
+    @classmethod
+    def from_dict(cls, value: Any) -> ChannelExecutionContext:
+        if not isinstance(value, dict) or value.get('schema_version') != '1':
+            return cls()
+        raw_attachments = value.get('attachments')
+        attachments = tuple(
+            attachment
+            for item in (
+                raw_attachments if isinstance(raw_attachments, list) else []
+            )[:10]
+            if (attachment := ChannelAttachment.from_dict(item)) is not None
+        )
+        raw_answers = value.get('ask_answers_structured')
+        thinking_depth = str(value.get('thinking_depth') or '')
+        if thinking_depth not in {'low', 'medium', 'high', 'max'}:
+            thinking_depth = ''
+        return cls(
+            attachments=attachments,
+            ask_answers_structured=(
+                dict(raw_answers) if isinstance(raw_answers, dict) else None
+            ),
+            thinking_depth=thinking_depth or None,
+            external_agent_conversation_id=str(
+                value.get('external_agent_conversation_id') or ''
+            ).strip()[:512],
+            include_capability_settings=(
+                value.get('include_capability_settings') is True
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'schema_version': '1',
+            'attachments': [item.to_dict() for item in self.attachments],
+            'ask_answers_structured': self.ask_answers_structured,
+            'thinking_depth': self.thinking_depth or '',
+            'external_agent_conversation_id': (
+                self.external_agent_conversation_id
+            ),
+            'include_capability_settings': (
+                self.include_capability_settings
+            ),
+        }
 
 @dataclass
 class ChatOptions:
@@ -66,7 +160,7 @@ class ChatOptions:
     ask_answers_structured: dict[str, Any] | None = None
     thinking_depth: Literal['low', 'medium', 'high', 'max'] | None = None
     enable_workflow: bool | None = None
-    executor: dict[str, Any] | None = None
+    external_agent: bool = False
     features: ChannelFeatureProfile = BASIC_CHAT_FEATURES
 
 

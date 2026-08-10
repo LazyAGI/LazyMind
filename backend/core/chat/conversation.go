@@ -109,11 +109,6 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	externalExecutor, err := parseExternalAgentExecutor(raw)
-	if err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
-		return
-	}
 	basicChatOnly, _ := raw["basic_chat_only"].(bool)
 	if basicChatOnly {
 		if runInBackground, _ := raw["run_in_background"].(bool); runInBackground {
@@ -252,45 +247,15 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		initialWorkflowSettings = rawPS
 	}
 
-	var seq int
-	var externalChat *externalAgentChatContext
-	if externalExecutor != nil {
-		externalChat, err = prepareExternalAgentChatConversation(r.Context(), db, externalExecutor, convID)
-		if err != nil {
-			status := http.StatusConflict
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				status = http.StatusNotFound
-			}
-			common.ReplyErr(w, err.Error(), status)
-			return
-		}
-		seq = externalChat.seq
-	} else {
-		_, seq, err = ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, initialWorkflowSettings)
-		if err != nil {
-			common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to ensure conversation", err), http.StatusInternalServerError)
-			return
-		}
+	_, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, initialWorkflowSettings)
+	if err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to ensure conversation", err), http.StatusInternalServerError)
+		return
 	}
 
 	var histories []orm.ChatHistory
 	db.Where("conversation_id = ?", convID).Order("seq ASC").Find(&histories)
 	target := resolvePersistTarget(histories, raw, seq)
-	if externalExecutor != nil {
-		if dualReply {
-			common.ReplyErr(w, "invalid request: external agent does not support multiple answers", http.StatusConflict)
-			return
-		}
-		historyID := target.HistoryID
-		if historyID == "" {
-			historyID = newID("h_")
-		}
-		handleExternalAgentChat(
-			w, r, externalChat.service, externalExecutor,
-			convID, historyID, query, userID, target.Seq, stream,
-		)
-		return
-	}
 	upstreamHistories := historiesForUpstream(histories, target)
 	sessionID := upstreamSessionID(convID)
 	resourceContext, err := evolution.BuildChatResourceContext(r.Context(), db, userID, userName, sessionID)
@@ -304,13 +269,13 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(mentionedResources.WorkflowRefs) > 1 {
-		common.ReplyErr(w, "at most one plugin mention is allowed per turn", http.StatusBadRequest)
+		common.ReplyErr(w, "at most one workflow mention is allowed per turn", http.StatusBadRequest)
 		return
 	}
 	if len(mentionedResources.WorkflowRefs) == 1 {
 		if active, activeErr := workflow.GetLatestSession(r.Context(), db, convID); activeErr == nil &&
 			!workflowSessionTerminal(active) && active.WorkflowRef != mentionedResources.WorkflowRefs[0] {
-			common.ReplyErr(w, "another plugin session is active; finish or close it before mentioning a different plugin", http.StatusConflict)
+			common.ReplyErr(w, "another workflow session is active; finish or close it before mentioning a different workflow", http.StatusConflict)
 			return
 		}
 	}
@@ -393,7 +358,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			mentionedResources.ExcludedWorkflowRefs, workflowEnabled, true,
 		)
 		if bindingErr != nil {
-			common.ReplyErr(w, "resolve conversation plugin binding failed", http.StatusInternalServerError)
+			common.ReplyErr(w, "resolve conversation workflow binding failed", http.StatusInternalServerError)
 			return
 		}
 		if err := applyWorkflowSelection(

@@ -1,4 +1,6 @@
+import hashlib
 import logging
+import math
 import time
 from dataclasses import replace
 from typing import Any
@@ -7,17 +9,31 @@ from channel_gateway.common.domain.channel import (
     ClaimedInbound,
     ClaimedOutbound,
 )
-from channel_gateway.common.domain.chat import CoreStreamUpdate
+from channel_gateway.common.domain.chat import (
+    ChannelExecutionContext,
+    CoreStreamUpdate,
+)
 from channel_gateway.common.domain.outbound import (
     OutboundRenderer,
     inline_artifact_bytes,
 )
-from channel_gateway.common.errors import InvalidStaticAssetError
+from channel_gateway.common.errors import (
+    InvalidStaticAssetError,
+    RetryableProviderSideEffectError,
+)
 from channel_gateway.common.ports.core import StaticAssetClient
 from channel_gateway.common.ports.providers import RuntimeCredentialStore
 from channel_gateway.common.ports.messaging import ReplyStream
-from channel_gateway.feishu.domain import FeishuRuntimeError
-from channel_gateway.feishu.assistant import codex_turns_for_card
+from channel_gateway.feishu.domain import (
+    FeishuRuntimeError,
+    workspace_card_expired,
+)
+from channel_gateway.feishu.assistant import (
+    assistant_view_with_ui,
+    detail_run_status,
+    detail_view,
+    detail_with_prompt,
+)
 from channel_gateway.feishu.ports import (
     FeishuOutboundFactory,
     FeishuWorkspaceRepository,
@@ -26,23 +42,86 @@ from channel_gateway.feishu.presentation import (
     FeishuPresentationRenderer,
     FeishuReplyRenderer,
     media_free_feishu_text,
-    presentable_feishu_text,
     streamable_feishu_text,
     streaming_reply_card,
 )
 from channel_gateway.feishu.workspace import (
     FeishuWorkspaceRenderer,
     FeishuWorkspaceState,
+    new_conversation_resources,
 )
 
 
 _MAX_FEISHU_IMAGE_BYTES = 10 * 1024 * 1024
 _MAX_FEISHU_FILE_BYTES = 30 * 1024 * 1024
 _STREAM_STATE_CHECK_SECONDS = 1.0
-_STREAM_STATE_SAVE_SECONDS = 10.0
+_WORKSPACE_TOMBSTONE_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
+_WORKSPACE_TOMBSTONE_RETRY_BUDGET_SECONDS = 30.0
 
 
 _logger = logging.getLogger(__name__)
+
+
+def _expire_workspace_card(
+    sender: Any,
+    *,
+    message_id: str,
+    workspace: dict[str, Any],
+) -> None:
+    language = 'en' if workspace.get('output_language') == 'en' else 'zh'
+    card = FeishuReplyRenderer.render(
+        provider_context={'workspace_state': workspace},
+        text=(
+            'Use the latest Codex card.'
+            if language == 'en'
+            else '请使用最新的 Codex 卡片。'
+        ),
+        status=(
+            '⚠️ **Message expired**'
+            if language == 'en'
+            else '⚠️ **消息已过期**'
+        ),
+        thinking='',
+    )
+    deadline = (
+        time.monotonic() + _WORKSPACE_TOMBSTONE_RETRY_BUDGET_SECONDS
+    )
+    for attempt in range(len(_WORKSPACE_TOMBSTONE_RETRY_DELAYS) + 1):
+        try:
+            sender.update_card(message_id=message_id, card=card)
+            return
+        except RetryableProviderSideEffectError as exc:
+            if workspace_card_expired(exc):
+                return
+            if attempt == len(_WORKSPACE_TOMBSTONE_RETRY_DELAYS):
+                break
+            retry_after = exc.retry_after_seconds
+            delay = _WORKSPACE_TOMBSTONE_RETRY_DELAYS[attempt]
+            if (
+                isinstance(retry_after, (int, float))
+                and math.isfinite(retry_after)
+                and retry_after >= 0
+            ):
+                delay = max(delay, float(retry_after))
+            if delay > max(0.0, deadline - time.monotonic()):
+                break
+            time.sleep(delay)
+        except Exception as exc:
+            if workspace_card_expired(exc):
+                return
+            break
+    _logger.warning(
+        'feishu_workspace_card_expire_failed message_id=%s',
+        message_id,
+    )
+
+
+def _external_agent_conversation_id(
+    provider_context: dict[str, Any],
+) -> str:
+    return ChannelExecutionContext.from_provider_context(
+        provider_context
+    ).external_agent_conversation_id
 
 
 class _ManagedReplyStream:
@@ -55,7 +134,6 @@ class _ManagedReplyStream:
         account_id: str,
         address_hash: str,
         *,
-        management: bool,
         core: Any = None,
         owner_user_id: str = '',
     ):
@@ -65,88 +143,68 @@ class _ManagedReplyStream:
         self._store = store
         self._account_id = account_id
         self._address_hash = address_hash
-        self._management = management
         self._core = core
         self._owner_user_id = owner_user_id
         self._conversation_id = ''
-        self._last_state_check = 0.0
-        self._last_state_save = 0.0
         self._state_access_failed = False
-        self._cancelled = False
-        self._saved_history_id = ''
 
     def update(self, snapshot: CoreStreamUpdate) -> None:
-        now = time.monotonic()
-        if self._is_cancelled(now):
-            return
+        assistant = bool(
+            _external_agent_conversation_id(self._provider_context)
+        )
         if (
             snapshot.conversation_id
             and snapshot.conversation_id != self._conversation_id
         ):
             self._activate_conversation(snapshot.conversation_id)
-        language = self._language()
-        status = (
-            '✍️ **Generating an answer**'
-            if language == 'en' and snapshot.answer
-            else '⏳ **Understanding your question**'
-            if language == 'en'
-            else '✍️ **正在生成回答**'
-            if snapshot.answer
-            else '⏳ **正在理解你的问题**'
-        )
-        if snapshot.thinking_seconds is not None:
-            unit = 's' if language == 'en' else '秒'
-            status += f' · {snapshot.thinking_seconds} {unit}'
-        patch = {
-            'run_status': 'running',
-            'chat_text': streamable_feishu_text(snapshot.answer),
-            'chat_status': status,
-            'chat_thinking': presentable_feishu_text(snapshot.thinking),
-            'generation_history_id': snapshot.history_id,
-        }
-        if snapshot.external_event:
-            self._apply_external_thread_rebind(snapshot.external_event)
-            patch.update(_external_event_workspace_patch(snapshot.external_event))
-        self._update_local_workspace(patch)
+        if assistant:
+            workspace = FeishuWorkspaceState.from_dict(
+                self._provider_context.get('workspace_state')
+            )
+            expected_thread_id = workspace.assistant_selected_thread_id
+            rebind_patch: dict[str, Any] = {}
+            if snapshot.external_event:
+                rebind_patch = self._apply_external_thread_rebind(
+                    snapshot.external_event
+                )
+                view = self._provider_context.get('assistant_view')
+                canonical = snapshot.external_event.get('snapshot')
+                if isinstance(view, dict) and isinstance(canonical, dict):
+                    view['snapshot'] = dict(canonical)
+            if rebind_patch:
+                workspace = self._provider_context.get('workspace_state')
+                if isinstance(workspace, dict):
+                    workspace.update(rebind_patch)
+                try:
+                    self._patch_workspace(
+                        rebind_patch,
+                        expected_thread_id=expected_thread_id,
+                    )
+                    self._log_state_recovered()
+                except Exception:
+                    self._log_state_failure('thread_rebind')
         self._stream.update(snapshot)
-        self._save_progress(patch, snapshot.history_id, now)
 
-    def _apply_external_thread_rebind(self, event: dict[str, Any]) -> None:
+    def _apply_external_thread_rebind(
+        self,
+        event: dict[str, Any],
+    ) -> dict[str, Any]:
+        raw_event = event.get('event')
+        if not isinstance(raw_event, dict):
+            return {}
+        event = raw_event
         event_type = str(
             event.get('type') or event.get('event_type') or ''
         )
         if event_type != 'thread_forked':
-            return
-        thread_id = str(event.get('thread_id') or '').strip()
-        binding = self._provider_context.get('external_agent_binding')
-        if thread_id and isinstance(binding, dict):
-            binding['provider_thread_id'] = thread_id
-
-    def _is_cancelled(self, now: float) -> bool:
-        if self._cancelled:
-            return True
-        if now - self._last_state_check < _STREAM_STATE_CHECK_SECONDS:
-            return False
-        self._last_state_check = now
-        try:
-            state = FeishuWorkspaceState.from_dict(
-                self._store.get_feishu_workspace_state(
-                    self._account_id,
-                    self._address_hash,
-                )
-            )
-        except Exception:
-            self._log_state_failure('read')
-            return False
-        self._log_state_recovered()
-        self._cancelled = state.run_status == 'cancelled'
-        return self._cancelled
+            return {}
+        payload = event.get('payload')
+        data = dict(payload) if isinstance(payload, dict) else dict(event)
+        thread_id = str(data.get('thread_id') or '').strip()[:512]
+        return {'assistant_selected_thread_id': thread_id}
 
     def _activate_conversation(self, conversation_id: str) -> None:
-        if isinstance(
-            self._provider_context.get('external_agent_binding'),
-            dict,
-        ):
+        if _external_agent_conversation_id(self._provider_context):
             self._conversation_id = conversation_id
             return
         try:
@@ -162,35 +220,6 @@ class _ManagedReplyStream:
         self._log_state_recovered()
         self._provider_context['workspace_conversation_id'] = conversation_id
         self._conversation_id = conversation_id
-
-    def _save_progress(
-        self,
-        patch: dict[str, Any],
-        history_id: str,
-        now: float,
-    ) -> None:
-        history_changed = bool(
-            history_id and history_id != self._saved_history_id
-        )
-        if (
-            not history_changed
-            and now - self._last_state_save < _STREAM_STATE_SAVE_SECONDS
-        ):
-            return
-        try:
-            self._patch_workspace(patch)
-        except Exception:
-            self._log_state_failure('save')
-            return
-        self._log_state_recovered()
-        self._last_state_save = now
-        if history_id:
-            self._saved_history_id = history_id
-
-    def _update_local_workspace(self, patch: dict[str, Any]) -> None:
-        workspace = self._provider_context.get('workspace_state')
-        if isinstance(workspace, dict):
-            workspace.update(patch)
 
     def _log_state_failure(self, operation: str) -> None:
         if self._state_access_failed:
@@ -217,45 +246,21 @@ class _ManagedReplyStream:
             operation_id = str(
                 self._provider_context.get('workspace_operation_id') or ''
             )
-            state = FeishuWorkspaceState.from_dict(
-                self._provider_context.get('workspace_state')
+            assistant = (
+                bool(_external_agent_conversation_id(self._provider_context))
             )
-            try:
-                state = FeishuWorkspaceState.from_dict(
-                    self._store.get_feishu_workspace_state(
-                        self._account_id,
-                        self._address_hash,
+            if assistant:
+                state = self._assistant_finish_state(operation_id)
+                if state is None:
+                    self._provider_context[
+                        '_workspace_stream_suppress_final'
+                    ] = True
+                else:
+                    self._provider_context['workspace_state'] = (
+                        state.to_dict()
                     )
-                )
-            except Exception:
-                self._log_state_failure('finish_read')
-            if state.run_status == 'cancelled':
-                self._stream.abort()
-                return True
-            if not state.restore_last_view and state.view != 'assistant':
-                state.view = 'chat'
-            state.mark_result_ready(operation_id)
-            final_patch = {
-                'view': state.view,
-                'run_status': 'completed',
-                'chat_text': streamable_feishu_text(final_text),
-                'chat_status': (
-                    '✅ **Answer complete**'
-                    if self._language() == 'en'
-                    else '✅ **回答完成**'
-                ),
-                'unread_results': state.unread_results,
-                'result_notice_operation_id': (
-                    state.result_notice_operation_id
-                ),
-                'generation_history_id': '',
-            }
-            self._update_local_workspace(final_patch)
-            try:
-                self._patch_workspace(final_patch)
-            except Exception:
-                self._log_state_failure('finish_save')
-            self._refresh_external_history()
+            if assistant and state is not None:
+                self._refresh_external_detail()
             streamed = self._stream.finish(final_text)
             message_id = str(
                 getattr(self._stream, 'message_id', '') or ''
@@ -264,34 +269,50 @@ class _ManagedReplyStream:
                 self._provider_context['workspace_stream_message_id'] = (
                     message_id
                 )
-            if message_id and self._management:
-                self._provider_context['workspace_message_id'] = message_id
-                workspace = self._provider_context.get('workspace_state')
-                if isinstance(workspace, dict):
-                    workspace['message_id'] = message_id
-                    try:
-                        self._store.save_feishu_workspace_message(
-                            self._account_id,
-                            self._address_hash,
-                            message_id,
-                        )
-                    except Exception:
-                        self._log_state_failure('message_save')
             return streamed
         finally:
             self._sender.close()
 
-    def _refresh_external_history(self) -> None:
-        binding = self._provider_context.get('external_agent_binding')
-        read_thread = getattr(self._core, 'read_external_thread', None)
+    def _assistant_finish_state(
+        self,
+        operation_id: str,
+    ) -> FeishuWorkspaceState | None:
+        try:
+            state = FeishuWorkspaceState.from_dict(
+                self._store.get_feishu_workspace_state(
+                    self._account_id,
+                    self._address_hash,
+                )
+            )
+        except Exception:
+            self._log_state_failure('finish_read')
+            return None
         if (
-            not isinstance(binding, dict)
+            operation_id
+            and state.active_operation_id
+            and state.active_operation_id != operation_id
+        ):
+            return None
+        if (
+            state.view != 'assistant'
+            or state.assistant_mode != 'detail'
+            or not state.assistant_selected_thread_id
+        ):
+            return None
+        return state
+
+    def _refresh_external_detail(self) -> None:
+        read_thread = getattr(self._core, 'read_external_thread', None)
+        workspace = FeishuWorkspaceState.from_dict(
+            self._provider_context.get('workspace_state')
+        )
+        if (
+            not _external_agent_conversation_id(self._provider_context)
             or not callable(read_thread)
             or not self._owner_user_id
         ):
             return
-        thread_id = str(binding.get('provider_thread_id') or '')
-        provider = str(binding.get('provider') or 'codex')
+        thread_id = workspace.assistant_selected_thread_id
         if not thread_id:
             return
         request_id = str(
@@ -301,143 +322,79 @@ class _ManagedReplyStream:
         try:
             page = read_thread(
                 owner_user_id=self._owner_user_id,
-                request_id=f'{request_id}_history_probe',
-                provider=provider,
+                request_id=f'{request_id}_detail',
+                provider='codex',
                 thread_id=thread_id,
                 offset=0,
                 limit=1,
+                tail=True,
             )
-            total = int(page.get('total_turns') or 0)
-            latest_offset = max(0, total - 1)
-            if latest_offset:
-                page = read_thread(
-                    owner_user_id=self._owner_user_id,
-                    request_id=f'{request_id}_history_latest',
-                    provider=provider,
-                    thread_id=thread_id,
-                    offset=latest_offset,
-                    limit=1,
-                )
-            thread = (
-                dict(page.get('thread'))
-                if isinstance(page.get('thread'), dict)
-                else {}
-            )
-            patch = {
-                'assistant_turns': codex_turns_for_card(
-                    page.get('turns')
-                ),
-                'assistant_turns_offset': int(
-                    page.get('offset') or latest_offset
-                ),
-                'assistant_turns_total': total,
-                'assistant_thread_updated_at': str(
-                    thread.get('updatedAt')
-                    or thread.get('updated_at')
-                    or ''
-                )[:100],
-                'assistant_thread_available': bool(
-                    thread.get('available', True)
-                ),
-                'user_text': '',
-                'chat_text': '',
-                'chat_thinking': '',
-            }
-            self._update_local_workspace(patch)
-            self._patch_workspace(patch)
+            prompt = ''
+            current_view = self._provider_context.get('assistant_view')
+            if isinstance(current_view, dict):
+                prompt = str(current_view.get('prompt') or '')[:4000]
+            view = detail_with_prompt(detail_view(page), prompt)
+            self._provider_context['assistant_view'] = view
         except Exception:
             _logger.warning(
-                'feishu_external_history_refresh_failed thread_id=%s',
+                'feishu_external_detail_refresh_failed thread_id=%s',
                 thread_id,
                 exc_info=True,
             )
 
-    def _patch_workspace(self, patch: dict[str, Any]) -> dict[str, Any]:
-        workspace = self._store.patch_feishu_workspace_state(
+    def _patch_workspace(
+        self,
+        patch: dict[str, Any],
+        *,
+        expected_thread_id: str = '',
+    ) -> dict[str, Any]:
+        operation_id = str(
+            self._provider_context.get('workspace_operation_id') or ''
+        )
+        for _ in range(3):
+            workspace = self._store.get_feishu_workspace_state(
+                self._account_id,
+                self._address_hash,
+            )
+            state = FeishuWorkspaceState.from_dict(workspace)
+            if operation_id and state.active_operation_id != operation_id:
+                self._provider_context['workspace_state'] = workspace
+                return workspace
+            if (
+                expected_thread_id
+                and (
+                    state.assistant_selected_thread_id != expected_thread_id
+                )
+            ):
+                self._provider_context['workspace_state'] = workspace
+                return workspace
+            expected_revision = state.revision
+            merged = {**workspace, **patch}
+            state = FeishuWorkspaceState.from_dict(merged)
+            state.advance()
+            if self._store.save_feishu_workspace_state_if_revision(
+                self._account_id,
+                self._address_hash,
+                state.to_dict(),
+                expected_revision,
+            ):
+                saved = state.to_dict()
+                self._provider_context['workspace_state'] = saved
+                return saved
+        workspace = self._store.get_feishu_workspace_state(
             self._account_id,
             self._address_hash,
-            patch,
-            operation_id=str(
-                self._provider_context.get('workspace_operation_id') or ''
-            ),
         )
         self._provider_context['workspace_state'] = workspace
         return workspace
 
-    def _language(self) -> str:
-        workspace = self._provider_context.get('workspace_state')
-        if not isinstance(workspace, dict):
-            return 'zh'
-        return 'en' if workspace.get('output_language') == 'en' else 'zh'
-
     def abort(self) -> None:
         try:
+            if _external_agent_conversation_id(self._provider_context):
+                self._refresh_external_detail()
             self._stream.abort()
         finally:
             self._sender.close()
-
-
-def _external_event_workspace_patch(event: dict[str, Any]) -> dict[str, Any]:
-    """Translate external-agent stream events into the existing card state."""
-    event_type = str(event.get('type') or event.get('event_type') or '')
-    payload = event.get('payload')
-    data = dict(payload) if isinstance(payload, dict) else dict(event)
-    status = str(data.get('status') or data.get('summary') or '')[:300]
-    message = str(
-        data.get('text') or data.get('delta') or data.get('message') or ''
-    )
-    cumulative_answer = str(data.get('message') or '')
-    patch: dict[str, Any] = {}
-    if event_type in {'progress', 'agent_message_delta', 'run_attached', 'turn_started'}:
-        patch['chat_status'] = status or '⏳ **Codex 正在处理**'
-        if event_type == 'agent_message_delta' and cumulative_answer:
-            patch['chat_text'] = cumulative_answer[:16000]
-        elif event_type != 'agent_message_delta' and message:
-            patch['chat_thinking'] = message[:4000]
-        if event_type in {'run_attached', 'turn_started', 'progress', 'agent_message_delta'}:
-            patch['run_status'] = 'running'
-    elif event_type == 'thread_forked':
-        thread_id = str(data.get('thread_id') or '').strip()
-        patch.update({
-            'run_status': 'running',
-            'chat_status': '🔀 **已创建 Codex 原生续接会话**',
-            'chat_thinking': message[:4000],
-            'assistant_managed': True,
-        })
-        if thread_id:
-            patch['assistant_selected_thread_id'] = thread_id
-    elif event_type == 'request_required':
-        request_id = str(
-            data.get('request_id') or data.get('id') or ''
-        )
-        if request_id:
-            patch['assistant_pending_request'] = {
-                'request_id': request_id,
-                'kind': str(
-                    data.get('request_kind') or data.get('kind') or 'request'
-                ),
-                'summary': str(data.get('summary') or message),
-                'payload': data,
-            }
-        patch['run_status'] = 'waiting_for_input'
-        patch['chat_status'] = '💬 **等待你的确认或输入**'
-    elif event_type in {'turn_completed', 'turn_failed', 'turn_interrupted'}:
-        patch['assistant_pending_request'] = None
-        patch['run_status'] = (
-            'failed' if event_type == 'turn_failed'
-            else 'cancelled' if event_type == 'turn_interrupted'
-            else 'completed'
-        )
-        if message:
-            patch['chat_text'] = message[:16000]
-        patch['chat_status'] = {
-            'turn_completed': '✅ **Codex 已完成**',
-            'turn_failed': '⚠️ **Codex 执行失败**',
-            'turn_interrupted': '⏹️ **Codex 已取消**',
-        }[event_type]
-    elif event_type == 'artifact_available':
-        patch['chat_status'] = status or '📎 **Codex 生成了产物**'
-    return patch
 
 
 class FeishuDeliveryProvider:
@@ -483,7 +440,7 @@ class FeishuDeliveryProvider:
             message.provider_context.get('workspace_message_id')
             or ''
         )
-        management = bool(workspace_message_id) or (
+        management = (
             message.provider_context.get('workspace_surface') in {
                 'management',
                 'assistant',
@@ -499,20 +456,23 @@ class FeishuDeliveryProvider:
         initial_card = (
             FeishuWorkspaceRenderer.render(
                 provider_context=stream_context,
-                text='',
                 presentations=[],
                 streaming=True,
             )
             if assistant
             else streaming_reply_card(stream_context)
         )
+        stream_holder: dict[str, ReplyStream] = {}
         try:
             stream = sender.start_card_stream(
                 chat_id=chat_id,
                 initial_card=initial_card,
-                message_id=workspace_message_id if management else '',
+                message_id=workspace_message_id,
                 should_render=(
-                    (lambda: self._workspace_chat_is_visible(message))
+                    (lambda: self._workspace_chat_is_visible(
+                        message,
+                        stream_holder.get('stream'),
+                    ))
                     if management
                     else None
                 ),
@@ -536,8 +496,11 @@ class FeishuDeliveryProvider:
                     else None
                 ),
             )
-        except Exception:
+            stream_holder['stream'] = stream
+        except Exception as exc:
             sender.close()
+            if assistant:
+                self._fail_assistant_stream_open(message, exc)
             raise
         return _ManagedReplyStream(
             stream,
@@ -546,9 +509,21 @@ class FeishuDeliveryProvider:
             self._store,
             message.account_id,
             message.order_key,
-            management=management,
             core=self._lazymind,
             owner_user_id=message.owner_user_id,
+        )
+
+    def _fail_assistant_stream_open(
+        self,
+        message: ClaimedInbound,
+        error: Exception,
+    ) -> None:
+        view = message.provider_context.get('assistant_view')
+        view = view if isinstance(view, dict) else {}
+        message.provider_context['assistant_view'] = assistant_view_with_ui(
+            view,
+            'error',
+            str(error),
         )
 
     @staticmethod
@@ -563,31 +538,50 @@ class FeishuDeliveryProvider:
         workspace = FeishuWorkspaceState.from_dict(
             message.provider_context.get('workspace_state')
         )
-        if snapshot.answer and not (
-            finished and workspace.assistant_turns
+        assistant_view = message.provider_context.get('assistant_view')
+        if (
+            isinstance(assistant_view, dict)
+            and assistant_view.get('kind') == 'detail'
         ):
-            workspace.chat_text = streamable_feishu_text(snapshot.answer)
-        if snapshot.thinking:
-            workspace.chat_thinking = presentable_feishu_text(
-                snapshot.thinking
+            view_snapshot = assistant_view.get('snapshot')
+            view_snapshot = (
+                dict(view_snapshot)
+                if isinstance(view_snapshot, dict)
+                else {}
             )
-        if aborted:
-            workspace.run_status = 'cancelled'
-            workspace.chat_status = '⏹️ **Codex 已取消**'
-        elif finished:
-            workspace.run_status = 'completed'
-            workspace.chat_status = '✅ **Codex 已完成**'
-        elif workspace.run_status not in {'waiting_for_input', 'completed'}:
-            workspace.run_status = 'running'
-        streaming = workspace.run_status == 'running'
-        message.provider_context['workspace_state'] = workspace.to_dict()
+            if snapshot.answer:
+                view_snapshot['answer'] = streamable_feishu_text(
+                    snapshot.answer
+                )[:16000]
+            current_status = detail_run_status(assistant_view)
+            if aborted and current_status not in {
+                'failed',
+                'cancelled',
+                'releasing',
+                'release_failed',
+            }:
+                view_snapshot['status'] = 'interrupted'
+            elif not finished and current_status not in {
+                'waiting_for_input',
+                'failed',
+                'cancelled',
+                'releasing',
+                'release_failed',
+            }:
+                view_snapshot['status'] = 'running'
+            assistant_view['snapshot'] = view_snapshot
+        streaming = (
+            not finished
+            and not aborted
+            and isinstance(assistant_view, dict)
+            and detail_run_status(assistant_view) == 'running'
+        )
         card = FeishuWorkspaceRenderer.render(
             provider_context={
                 **message.provider_context,
                 'chat_id': chat_id,
                 'workspace_state': workspace.to_dict(),
             },
-            text='',
             presentations=[],
             streaming=streaming,
         )
@@ -595,13 +589,23 @@ class FeishuDeliveryProvider:
             card['config'].pop('streaming_config', None)
         return card
 
-    def _workspace_chat_is_visible(self, message: ClaimedInbound) -> bool:
+    def _workspace_chat_is_visible(
+        self,
+        message: ClaimedInbound,
+        stream: ReplyStream | None = None,
+    ) -> bool:
         context = message.provider_context
+        if context.get('_workspace_stream_suppress_final'):
+            return False
+        assistant = context.get('workspace_surface') == 'assistant'
         now = time.monotonic()
         checked_at = float(
             context.get('_workspace_visibility_checked_at') or 0.0
         )
-        if now - checked_at < _STREAM_STATE_CHECK_SECONDS:
+        if (
+            not assistant
+            and now - checked_at < _STREAM_STATE_CHECK_SECONDS
+        ):
             return bool(context.get('_workspace_chat_visible', True))
         context['_workspace_visibility_checked_at'] = now
         try:
@@ -617,9 +621,6 @@ class FeishuDeliveryProvider:
                 message.account_id,
                 exc_info=True,
             )
-            return bool(context.get('_workspace_chat_visible', True))
-        if state.run_status == 'cancelled':
-            context['workspace_state'] = state.to_dict()
             context['_workspace_chat_visible'] = False
             return False
         operation_id = str(
@@ -637,12 +638,39 @@ class FeishuDeliveryProvider:
             and stream_message_id
             and state.message_id == stream_message_id
         )
+        assistant_thread_id = state.assistant_selected_thread_id
+        assistant_lineage_is_current = bool(
+            assistant
+            and state.view == 'assistant'
+            and state.assistant_mode == 'detail'
+            and assistant_thread_id
+            and state.assistant_selected_thread_id == assistant_thread_id
+        )
+        if (
+            assistant_lineage_is_current
+            and operation_matches
+            and stream_message_id
+            and state.message_id
+            and state.message_id != stream_message_id
+        ):
+            retarget = getattr(stream, 'retarget_message', None)
+            if callable(retarget):
+                retarget(state.message_id)
+                context['workspace_message_id'] = state.message_id
+                stream_message_id = state.message_id
+            else:
+                context['_workspace_chat_visible'] = False
+                return False
+        assistant_card_is_current = bool(
+            assistant_lineage_is_current
+            and (
+                not stream_message_id
+                or state.message_id == stream_message_id
+            )
+        )
         visible = bool(
             operation_matches
-            and (
-                reply_card_is_current
-                or state.view in {'chat', 'assistant'}
-            )
+            and (reply_card_is_current or assistant_card_is_current)
         )
         context['_workspace_chat_visible'] = visible
         return visible
@@ -692,11 +720,19 @@ class FeishuDeliveryProvider:
         context = dict(message.provider_context)
         if not context.get('workspace_state'):
             return message
+        surface = context.get('workspace_surface')
+        if surface == 'assistant':
+            return message
+        if surface != 'management':
+            return message
         state = FeishuWorkspaceState.from_dict(
             self._store.get_feishu_workspace_state(
                 message.account_id,
                 message.order_key,
             )
+        )
+        source_state = FeishuWorkspaceState.from_dict(
+            context.get('workspace_state')
         )
         presentations = [
             dict(item)
@@ -710,222 +746,65 @@ class FeishuDeliveryProvider:
             )
             if isinstance(item, dict)
         ]
-        command = context.get('command_action')
-        command_name = (
-            str(command.get('command') or '')
-            if isinstance(command, dict)
-            else str(message.intent_kind or '')
-        )
-        data_view = {
-            'capability.list': 'capabilities',
-            'conversation.list': 'conversations',
-            'conversation.settings': 'settings',
-            'conversation.settings.update': 'settings',
-        }.get(command_name)
         workspace_action = context.get('workspace_action')
         action_kind = (
             str(workspace_action.get('kind') or '')
             if isinstance(workspace_action, dict)
             else ''
         )
-        if (
-            command_name == 'conversation.settings.update'
-            and action_kind == 'setting.update'
-            and workspace_action.get('view') == 'capabilities'
-        ):
-            data_view = 'capabilities'
-        conversation = next(
-            (
-                item
-                for item in presentations
-                if item.get('kind') == 'conversation'
-                and item.get('state') in {'switched', 'history'}
-            ),
-            None,
+        expected_conversation_id = (
+            str(workspace_action.get('expected_conversation_id') or '')
+            if isinstance(workspace_action, dict)
+            else ''
         )
-        if conversation is not None:
-            conversation_state = str(conversation.get('state') or '')
-            if conversation_state == 'switched':
-                state.replace_chat_history(
-                    title=str(conversation.get('title') or ''),
-                    turns=conversation.get('turns'),
-                    reached_start=bool(
-                        conversation.get('reached_start', False)
-                    ),
-                )
-            else:
-                if not state.conversation_title:
-                    state.conversation_title = str(
-                        conversation.get('title') or ''
-                    )[:200]
-                state.prepend_chat_history(
-                    turns=conversation.get('turns'),
-                    reached_start=bool(
-                        conversation.get('reached_start', False)
-                    ),
-                )
-            state_payload = state.to_dict()
-            persisted = self._store.patch_feishu_workspace_state(
-                message.account_id,
-                message.order_key,
-                {
-                    key: state_payload[key]
-                    for key in (
-                        'view',
-                        'run_status',
-                        'user_text',
-                        'chat_text',
-                        'chat_status',
-                        'chat_thinking',
-                        'conversation_title',
-                        'conversation_switch_index',
-                        'conversation_switch_status',
-                        'chat_history',
-                        'chat_history_page',
-                        'chat_history_reached_start',
-                        'chat_presentations',
-                        'pending_ask_id',
-                        'images',
-                    )
-                },
+        active_conversation_id = self._store.get_route(
+            message.account_id,
+            message.order_key,
+        ) or ''
+        source_conversation_id = str(
+            context.get('workspace_conversation_id') or ''
+        )
+        stale = bool(
+            state.revision != source_state.revision
+            or state.active_operation_id
+            != source_state.active_operation_id
+            or state.view != source_state.view
+            or (
+                action_kind != 'history.switch'
+                and active_conversation_id != source_conversation_id
             )
-            active_conversation_id = self._store.get_route(
-                message.account_id,
-                message.order_key,
+            or (
+                expected_conversation_id
+                and active_conversation_id != expected_conversation_id
             )
-            pending_turn = self._store.get_pending_turn(
-                message.account_id,
-                message.order_key,
-            )
-            resources = FeishuWorkspaceState.from_dict(
-                persisted
-            ).effective_resources(
-                active_conversation_id,
-                pending_turn,
-            )
-            context['workspace_state'] = persisted
-            context['workspace_conversation_id'] = active_conversation_id
-            context['workspace_resources'] = [
-                item.to_dict() for item in resources
-            ]
-            context['workspace_mentions'] = [
-                item.to_mention() for item in resources
-            ]
-            context['workspace_message_id'] = str(
-                persisted.get('message_id')
-                or context.get('workspace_message_id')
-                or ''
-            )
+        )
+        if stale:
+            context['_workspace_delivery_suppressed'] = True
             return replace(
                 message,
                 text='',
+                metadata={**message.metadata, 'presentations': []},
                 provider_context=context,
             )
-        if data_view:
-            view = (
-                state.view
-                if action_kind and state.view in {
-                    'capabilities',
-                    'conversations',
-                    'assistant',
-                    'settings',
-                    'context',
-                }
-                else data_view
-            )
-            state.view = view
-            if data_view == 'conversations':
-                state.conversation_switch_index = 0
-                state.conversation_switch_status = ''
-            state.cache_view(
-                data_view,
-                text=presentable_feishu_text(message.text),
-                presentations=presentations,
-                merge=(
-                    data_view == 'capabilities'
-                    and command_name.startswith('conversation.settings')
-                ),
-            )
-            persisted = self._store.patch_feishu_workspace_state(
+        context['workspace_state'] = state.to_dict()
+        context['workspace_conversation_id'] = active_conversation_id
+        context['workspace_message_id'] = state.message_id
+        context['_workspace_result_complete'] = True
+        if not active_conversation_id:
+            draft = self._store.get_new_conversation_draft(
                 message.account_id,
                 message.order_key,
-                {
-                    'view': view,
-                    'view_snapshots': state.to_dict()['view_snapshots'],
-                    'conversation_switch_index': (
-                        state.conversation_switch_index
-                    ),
-                    'conversation_switch_status': (
-                        state.conversation_switch_status
-                    ),
-                },
             )
-        else:
-            pending_ask_id = next(
-                (
-                    str(item.get('ask_id') or '')
-                    for item in presentations
-                    if item.get('kind') == 'ask'
-                ),
-                '',
+            mode = str(draft.get('workflow_mode') or 'dynamic')
+            context['pending_workflow_mode'] = (
+                mode if mode in {'auto', 'dynamic'} else 'dynamic'
             )
-            failed = message.intent_kind == 'failed'
-            operation_id = str(
-                context.get('workspace_operation_id') or ''
-            )
-            if not state.restore_last_view and state.view != 'assistant':
-                state.view = 'chat'
-            state.mark_result_ready(operation_id)
-            active_conversation_id = self._store.get_route(
-                message.account_id,
-                message.order_key,
-            ) or ''
-            if active_conversation_id and state.pending_conversation_resources:
-                state.complete_new_session(
-                    active_conversation_id
-                )
-            persisted = self._store.patch_feishu_workspace_state(
-                message.account_id,
-                message.order_key,
-                {
-                    'view': state.view,
-                    'run_status': (
-                        'failed'
-                        if failed
-                        else 'waiting_for_input'
-                        if pending_ask_id
-                        else 'completed'
-                    ),
-                    'chat_text': streamable_feishu_text(message.text),
-                    'chat_status': (
-                        '⚠️ **Answer failed**'
-                        if failed and state.output_language == 'en'
-                        else '⚠️ **回答失败**'
-                        if failed
-                        else '💬 **等待补充信息**'
-                        if pending_ask_id
-                        else '✅ **回答完成**'
-                    ),
-                    'chat_presentations': presentations,
-                    'pending_ask_id': pending_ask_id,
-                    'generation_history_id': '',
-                    'unread_results': state.unread_results,
-                    'result_notice_operation_id': (
-                        state.result_notice_operation_id
-                    ),
-                    'conversations': state.to_dict()['conversations'],
-                    'pending_conversation_resources': (
-                        state.to_dict()['pending_conversation_resources']
-                    ),
-                },
-                operation_id=operation_id,
-            )
-        context['workspace_state'] = persisted
-        context['workspace_message_id'] = str(
-            persisted.get('message_id')
-            or context.get('workspace_message_id')
-            or ''
-        )
+            context['pending_capability_resources'] = [
+                item.to_dict()
+                for item in new_conversation_resources(draft)
+            ]
+        if not presentations and message.text:
+            context['_workspace_notice'] = str(message.text)[:2000]
         return replace(message, provider_context=context)
 
     def prepare_part(
@@ -978,18 +857,100 @@ class FeishuDeliveryProvider:
                     raise FeishuRuntimeError(
                         'Feishu card payload is invalid'
                     )
+                workspace = message.provider_context.get('workspace_state')
+                workspace = (
+                    dict(workspace) if isinstance(workspace, dict) else {}
+                )
+                expected_message_id = str(
+                    workspace.get('message_id') or ''
+                )
+                expected_operation_id = str(
+                    message.provider_context.get('workspace_operation_id')
+                    or ''
+                )
+                expected_revision = int(workspace.get('revision') or 0)
+                assistant_surface = (
+                    message.provider_context.get('workspace_surface')
+                    == 'assistant'
+                )
+                workspace_matches = True
+                workspace_stale = False
+                adopted_revision = expected_revision
+                current_workspace = workspace
+                if part.get('workspace') is True:
+                    current_workspace = self._store.get_feishu_workspace_state(
+                        message.account_id,
+                        message.order_key,
+                    )
+                    current_workspace = (
+                        dict(current_workspace)
+                        if isinstance(current_workspace, dict)
+                        else {}
+                    )
+                    current_message_id = str(
+                        current_workspace.get('message_id') or ''
+                    )
+                    lineage_matches = bool(
+                        str(
+                            current_workspace.get('active_operation_id')
+                            or ''
+                        )
+                        == expected_operation_id
+                        and int(current_workspace.get('revision') or 0)
+                        == expected_revision
+                    )
+                    if (
+                        lineage_matches
+                        and not assistant_surface
+                        and current_message_id
+                        and current_message_id != expected_message_id
+                    ):
+                        expected_message_id = current_message_id
+                        message.provider_context['workspace_message_id'] = (
+                            current_message_id
+                        )
+                    workspace_matches = bool(
+                        lineage_matches
+                        and current_message_id == expected_message_id
+                    )
+                    if not workspace_matches and not assistant_surface:
+                        message.provider_context['workspace_state'] = (
+                            current_workspace
+                        )
+                        return {
+                            **saved_state,
+                            'message_id': str(
+                                current_workspace.get('message_id') or ''
+                            ),
+                            'workspace_revision': int(
+                                current_workspace.get('revision') or 0
+                            ),
+                            'workspace_operation_id': str(
+                                current_workspace.get(
+                                    'active_operation_id'
+                                ) or ''
+                            ),
+                            'workspace_stale': True,
+                        }
+                    message.provider_context['workspace_state'] = (
+                        current_workspace
+                    )
                 target_message_id = str(
                     part.get('replace_message_id')
                     or (
-                        message.provider_context.get(
-                            'workspace_message_id'
-                        )
+                        expected_message_id
                         if part.get('workspace') is True
                         else ''
                     )
                     or ''
                 )
-                if target_message_id:
+                if assistant_surface and part.get('workspace') is True:
+                    message_id = sender.send_card(
+                        chat_id=chat_id,
+                        card=card,
+                        idempotency_key=idempotency_key,
+                    )
+                elif target_message_id:
                     try:
                         sender.update_card(
                             message_id=target_message_id,
@@ -997,7 +958,7 @@ class FeishuDeliveryProvider:
                         )
                         message_id = target_message_id
                     except Exception as exc:
-                        if not _workspace_card_expired(exc):
+                        if not workspace_card_expired(exc):
                             raise
                         message_id = sender.send_card(
                             chat_id=chat_id,
@@ -1011,50 +972,240 @@ class FeishuDeliveryProvider:
                         idempotency_key=idempotency_key,
                     )
                 if part.get('workspace') is True:
-                    workspace = message.provider_context.get(
-                        'workspace_state'
-                    )
-                    if isinstance(workspace, dict):
-                        workspace['message_id'] = message_id
-                        self._store.save_feishu_workspace_message(
-                            message.account_id,
-                            message.order_key,
-                            message_id,
+                    if message_id != expected_message_id:
+                        if not workspace_matches:
+                            saved_workspace = current_workspace
+                        else:
+                            saved_workspace = (
+                                self._store.save_feishu_workspace_message(
+                                    message.account_id,
+                                    message.order_key,
+                                    message_id,
+                                    expected_operation_id,
+                                    expected_message_id,
+                                    expected_revision,
+                                    advance_revision=assistant_surface,
+                                )
+                            )
+                        adopted_message_id = str(
+                            saved_workspace.get('message_id') or ''
+                        )
+                        adopted_operation_id = str(
+                            saved_workspace.get('active_operation_id') or ''
+                        )
+                        adopted_revision = int(
+                            saved_workspace.get('revision') or 0
+                        )
+                        replay_adopted = (
+                            adopted_message_id == message_id
+                            and adopted_operation_id == expected_operation_id
+                        )
+                        if replay_adopted:
+                            workspace_stale = (
+                                adopted_revision
+                                != expected_revision
+                                + (1 if assistant_surface else 0)
+                            )
+                        else:
+                            workspace_stale = True
+                            _expire_workspace_card(
+                                sender,
+                                message_id=message_id,
+                                workspace=saved_workspace,
+                            )
+                            message_id = adopted_message_id
+                        message.provider_context['workspace_state'] = (
+                            saved_workspace
+                        )
+                        message.provider_context[
+                            'workspace_message_id'
+                        ] = message_id
+                        message.provider_context[
+                            'workspace_stream_message_id'
+                        ] = message_id
+                        if (
+                            replay_adopted
+                            and not workspace_stale
+                            and assistant_surface
+                            and target_message_id
+                            and target_message_id != message_id
+                        ):
+                            _expire_workspace_card(
+                                sender,
+                                message_id=target_message_id,
+                                workspace=saved_workspace,
+                            )
+                    else:
+                        saved_workspace = current_workspace
+                        adopted_revision = int(
+                            saved_workspace.get('revision') or 0
                         )
                 return {
                     **saved_state,
                     'message_id': message_id,
+                    'workspace_revision': int(
+                        (
+                            message.provider_context.get('workspace_state') or {}
+                        ).get('revision') or adopted_revision
+                    ),
+                    'workspace_operation_id': str(
+                        (
+                            message.provider_context.get('workspace_state') or {}
+                        ).get('active_operation_id')
+                        or expected_operation_id
+                    ),
+                    'workspace_stale': workspace_stale,
                 }
             source = str(part.get('source') or '')
             if kind == 'image':
                 if saved_state.get('image_key'):
                     return saved_state
-                try:
-                    content = self._lazymind.download_static_image(
-                        source=source,
-                        owner_user_id=str(account['owner_user_id']),
-                    )
-                except InvalidStaticAssetError:
-                    self._send_asset_failure(
-                        sender=sender,
-                        chat_id=chat_id,
-                        idempotency_key=idempotency_key,
-                        kind='图片',
-                    )
-                    return
-                if len(content) > _MAX_FEISHU_IMAGE_BYTES:
-                    raise FeishuRuntimeError(
-                        '飞书图片不能超过 10 MB'
-                    )
-                target_message_id = str(
-                    message.provider_context.get(
-                        'workspace_stream_message_id'
-                    )
-                    or ''
+                assistant_surface = (
+                    message.provider_context.get('workspace_surface')
+                    == 'assistant'
                 )
                 caption = str(
                     part.get('caption') or part.get('alt') or ''
                 )
+                image_identity = hashlib.sha256(
+                    (source or idempotency_key).encode('utf-8')
+                ).hexdigest()
+                image_delivery_id = idempotency_key[:512]
+                image_state_committed = False
+                message_state_maybe_committed = False
+                recovered_image_key = ''
+                if assistant_surface:
+                    prior_workspace_state: dict[str, Any] = {}
+                    for prior_index in range(part_index - 1, -1, -1):
+                        candidate = message.provider_state.get(
+                            str(prior_index)
+                        )
+                        if isinstance(candidate, dict) and (
+                            candidate.get('workspace_stale') is True
+                            or candidate.get('message_id')
+                        ):
+                            prior_workspace_state = dict(candidate)
+                            break
+                    if prior_workspace_state.get('workspace_stale') is True:
+                        return {
+                            **saved_state,
+                            'workspace_stale': True,
+                        }
+                    expected_workspace = message.provider_context.get(
+                        'workspace_state'
+                    )
+                    expected_workspace = (
+                        dict(expected_workspace)
+                        if isinstance(expected_workspace, dict)
+                        else {}
+                    )
+                    expected_message_id = str(
+                        prior_workspace_state.get('message_id')
+                        or expected_workspace.get('message_id')
+                        or ''
+                    )
+                    expected_operation_id = str(
+                        prior_workspace_state.get('workspace_operation_id')
+                        or message.provider_context.get(
+                            'workspace_operation_id'
+                        )
+                        or ''
+                    )
+                    expected_revision = int(
+                        prior_workspace_state.get('workspace_revision')
+                        if prior_workspace_state.get('workspace_revision')
+                        is not None
+                        else expected_workspace.get('revision')
+                        or 0
+                    )
+                    current_workspace = self._store.get_feishu_workspace_state(
+                        message.account_id,
+                        message.order_key,
+                    )
+                    current_workspace = (
+                        dict(current_workspace)
+                        if isinstance(current_workspace, dict)
+                        else {}
+                    )
+                    current_message_id = str(
+                        current_workspace.get('message_id') or ''
+                    )
+                    current_operation_id = str(
+                        current_workspace.get('active_operation_id') or ''
+                    )
+                    current_revision = int(
+                        current_workspace.get('revision') or 0
+                    )
+                    normalized_workspace = FeishuWorkspaceState.from_dict(
+                        current_workspace
+                    )
+                    for image in normalized_workspace.images:
+                        if (
+                            isinstance(image, dict)
+                            and str(image.get('delivery_id') or '')
+                            == image_delivery_id
+                        ):
+                            recovered_image_key = str(
+                                image.get('image_key') or ''
+                            )
+                            break
+                    workspace_matches = (
+                        current_message_id == expected_message_id
+                        and current_operation_id == expected_operation_id
+                        and current_revision == expected_revision
+                    )
+                    image_state_committed = (
+                        current_message_id == expected_message_id
+                        and current_operation_id == expected_operation_id
+                        and current_revision == expected_revision + 1
+                        and bool(recovered_image_key)
+                    )
+                    message_state_maybe_committed = (
+                        current_operation_id == expected_operation_id
+                        and current_revision == expected_revision + 2
+                        and bool(recovered_image_key)
+                    )
+                    if not (
+                        workspace_matches
+                        or image_state_committed
+                        or message_state_maybe_committed
+                    ):
+                        message.provider_context['workspace_state'] = (
+                            current_workspace
+                        )
+                        return {
+                            **saved_state,
+                            'workspace_stale': True,
+                        }
+                    message.provider_context['workspace_state'] = (
+                        current_workspace
+                    )
+                target_message_id = str(
+                    expected_message_id
+                    if assistant_surface
+                    else message.provider_context.get(
+                        'workspace_stream_message_id'
+                    )
+                    or ''
+                )
+                if not recovered_image_key:
+                    try:
+                        content = self._lazymind.download_static_image(
+                            source=source,
+                            owner_user_id=str(account['owner_user_id']),
+                        )
+                    except InvalidStaticAssetError:
+                        self._send_asset_failure(
+                            sender=sender,
+                            chat_id=chat_id,
+                            idempotency_key=idempotency_key,
+                            kind='图片',
+                        )
+                        return
+                    if len(content) > _MAX_FEISHU_IMAGE_BYTES:
+                        raise FeishuRuntimeError(
+                            '飞书图片不能超过 10 MB'
+                        )
                 if not target_message_id:
                     sender.send_image(
                         chat_id=chat_id,
@@ -1066,40 +1217,73 @@ class FeishuDeliveryProvider:
                         **saved_state,
                         'image_key': str(part.get('source') or idempotency_key),
                     }
-                image_key = sender.upload_image(content=content)
-                if not image_key:
-                    raise FeishuRuntimeError('飞书图片上传失败')
-                workspace = FeishuWorkspaceState.from_dict(
-                    message.provider_context.get('workspace_state')
-                )
-                workspace.add_image(
-                    image_key=image_key,
-                    caption=caption,
-                    identity=(
-                        str(part.get('source') or '')
-                        or idempotency_key
-                    ),
-                )
-                workspace_payload = workspace.to_dict()
-                try:
-                    persisted = self._store.patch_feishu_workspace_state(
-                        message.account_id,
-                        message.order_key,
-                        {'images': workspace_payload['images']},
-                        operation_id=str(
-                            message.provider_context.get(
-                                'workspace_operation_id'
+                image_key = recovered_image_key
+                if assistant_surface:
+                    if workspace_matches:
+                        if not image_key:
+                            image_key = sender.upload_image(content=content)
+                            if not image_key:
+                                raise FeishuRuntimeError('飞书图片上传失败')
+                        workspace = FeishuWorkspaceState.from_dict(
+                            message.provider_context.get('workspace_state')
+                        )
+                        workspace.add_image(
+                            image_key=image_key,
+                            caption=caption,
+                            identity=image_identity,
+                            delivery_id=image_delivery_id,
+                        )
+                        workspace.advance()
+                        workspace_payload = workspace.to_dict()
+                        if not (
+                            self._store.save_feishu_workspace_state_if_revision(
+                                message.account_id,
+                                message.order_key,
+                                workspace_payload,
+                                expected_revision,
                             )
-                            or ''
-                        ),
+                        ):
+                            raise FeishuRuntimeError(
+                                'Feishu assistant image state changed during delivery'
+                            )
+                        persisted = workspace_payload
+                    else:
+                        persisted = current_workspace
+                    image_revision = expected_revision + 1
+                else:
+                    image_key = sender.upload_image(content=content)
+                    if not image_key:
+                        raise FeishuRuntimeError('飞书图片上传失败')
+                    workspace = FeishuWorkspaceState.from_dict(
+                        message.provider_context.get('workspace_state')
                     )
-                except Exception:
-                    _logger.warning(
-                        'feishu_image_state_save_failed account_id=%s',
-                        message.account_id,
-                        exc_info=True,
+                    workspace.add_image(
+                        image_key=image_key,
+                        caption=caption,
+                        identity=image_identity,
+                        delivery_id=image_delivery_id,
                     )
-                    persisted = workspace_payload
+                    workspace_payload = workspace.to_dict()
+                    try:
+                        persisted = self._store.patch_feishu_workspace_state(
+                            message.account_id,
+                            message.order_key,
+                            {'images': workspace_payload['images']},
+                            operation_id=str(
+                                message.provider_context.get(
+                                    'workspace_operation_id'
+                                )
+                                or ''
+                            ),
+                        )
+                    except Exception:
+                        _logger.warning(
+                            'feishu_image_state_save_failed account_id=%s',
+                            message.account_id,
+                            exc_info=True,
+                        )
+                        persisted = workspace_payload
+                    image_revision = int(persisted.get('revision') or 0)
                 message.provider_context['workspace_state'] = persisted
                 presentations = [
                     dict(item)
@@ -1118,12 +1302,15 @@ class FeishuDeliveryProvider:
                     if persisted.get('output_language') == 'en'
                     else 'zh'
                 )
-                sender.update_card(
-                    message_id=target_message_id,
-                    card=FeishuReplyRenderer.render(
+                final_card = (
+                    FeishuWorkspaceRenderer.render(
+                        provider_context=message.provider_context,
+                        presentations=presentations,
+                    )
+                    if assistant_surface
+                    else FeishuReplyRenderer.render(
                         provider_context=message.provider_context,
                         text=media_free_feishu_text(message.text),
-                        presentations=presentations,
                         status=(
                             '✅ **Answer complete**'
                             if language == 'en'
@@ -1134,11 +1321,94 @@ class FeishuDeliveryProvider:
                             if language == 'en'
                             else '分析与处理已完成。'
                         ),
-                    ),
+                    )
                 )
+                if assistant_surface:
+                    replacement_message_id = sender.send_card(
+                        chat_id=chat_id,
+                        card=final_card,
+                        idempotency_key=idempotency_key,
+                    )
+                    if message_state_maybe_committed:
+                        saved_workspace = current_workspace
+                    else:
+                        saved_workspace = (
+                            self._store.save_feishu_workspace_message(
+                                message.account_id,
+                                message.order_key,
+                                replacement_message_id,
+                                expected_operation_id,
+                                target_message_id,
+                                image_revision,
+                            )
+                        )
+                    adopted_message_id = str(
+                        saved_workspace.get('message_id') or ''
+                    )
+                    adopted_operation_id = str(
+                        saved_workspace.get('active_operation_id') or ''
+                    )
+                    adopted_revision = int(
+                        saved_workspace.get('revision') or 0
+                    )
+                    replay_adopted = (
+                        adopted_message_id == replacement_message_id
+                        and adopted_operation_id == expected_operation_id
+                    )
+                    workspace_stale = not (
+                        replay_adopted
+                        and adopted_revision == expected_revision + 2
+                    )
+                    message.provider_context['workspace_state'] = saved_workspace
+                    if not replay_adopted:
+                        _expire_workspace_card(
+                            sender,
+                            message_id=replacement_message_id,
+                            workspace=saved_workspace,
+                        )
+                    else:
+                        _expire_workspace_card(
+                            sender,
+                            message_id=target_message_id,
+                            workspace=saved_workspace,
+                        )
+                    target_message_id = adopted_message_id
+                    message.provider_context['workspace_message_id'] = (
+                        adopted_message_id
+                    )
+                    message.provider_context[
+                        'workspace_stream_message_id'
+                    ] = adopted_message_id
+                else:
+                    sender.update_card(
+                        message_id=target_message_id,
+                        card=final_card,
+                    )
                 return {
                     **saved_state,
                     'image_key': image_key,
+                    'message_id': target_message_id,
+                    'workspace_revision': int(
+                        (
+                            message.provider_context.get('workspace_state')
+                            or {}
+                        ).get('revision')
+                        or 0
+                    ),
+                    'workspace_operation_id': (
+                        str(
+                            (
+                                message.provider_context.get('workspace_state')
+                                or {}
+                            ).get('active_operation_id')
+                            or expected_operation_id
+                        )
+                        if assistant_surface
+                        else ''
+                    ),
+                    'workspace_stale': (
+                        workspace_stale if assistant_surface else False
+                    ),
                 }
             if kind == 'file':
                 artifact_index = str(
@@ -1203,16 +1473,3 @@ class FeishuDeliveryProvider:
             ),
             idempotency_key=idempotency_key,
         )
-
-
-def _workspace_card_expired(exc: Exception) -> bool:
-    message = str(exc).casefold()
-    return any(
-        marker in message
-        for marker in (
-            '200740',
-            '200750',
-            'card entity does not exist',
-            'card entity has expired',
-        )
-    )

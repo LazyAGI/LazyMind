@@ -1,0 +1,89 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+  %% Feishu to LazyMind to Codex end-to-end architecture overview.
+  %% Production dependency direction is one-way: Feishu to ports/client to Core to Codex.
+
+  subgraph feishuUX["1. Feishu UX surface"]
+    direction TB
+    MenuTag["Stable bilingual native bot menu"]
+    Projects["Codex projects grouped by cwd"]
+    Sessions["Named user-facing sessions with numeric pages"]
+    NativeTurn["Latest native turn auto-refreshed with answer-part paging"]
+    NativeInput["Feishu native input / approval / cancel"]
+    FeishuAuto["Feishu-origin Workflow requests use auto mode"]
+    SameCard["Every user/menu event replaces newest card and recalls prior message"]
+    TerminalCard["Terminal card removes cancel and streaming config"]
+    MenuTag --> Projects --> Sessions --> NativeTurn
+    NativeInput --> FeishuAuto --> SameCard --> TerminalCard
+    NativeTurn --> SameCard
+  end
+
+  subgraph gateway["2. Channel Gateway"]
+    direction TB
+    Runtime["feishu/runtime.py FeishuRuntime"]
+    Delivery["feishu/delivery.py FeishuDeliveryProvider"]
+    Workspace["feishu/workspace.py FeishuWorkspaceRenderer"]
+    AssistantProjection["feishu/assistant.py native transcript projection"]
+    PortsClient["common/ports/core.py LazyMindCore"]
+    InfraClient["common/infrastructure/lazymind.py LazyMindClient"]
+    Runtime --> Delivery
+    Runtime --> Workspace
+    Delivery -->|"same-card stream re-render"| Workspace
+    Runtime --> AssistantProjection
+    Delivery --> AssistantProjection
+    Delivery --> PortsClient
+    PortsClient --> InfraClient
+  end
+
+  subgraph webUX["LazyMind Web client"]
+    direction TB
+    WebHistory["Restore persisted ask_pending from shared history"]
+    WebAsk["Latest unanswered Ask remains interactive"]
+    WebHistory --> WebAsk
+  end
+
+  subgraph coreAssistant["3. Core externalagent assistant"]
+    direction TB
+    CoreChat["chat/conversation.go shared conversation and Ask state"]
+    ChatEA["chat/external_agent.go Bind and chat SSE"]
+    HttpEA["externalagent/http.go list read interrupt release respond"]
+    ServiceEA["externalagent/service.go managedRun cumulative deltas and unsubscribe"]
+    ClientEA["externalagent/client.go CodexClient RPC"]
+    OrmEA["orm ExternalAgentBinding ExternalAgentRun"]
+    CoreChat --> ChatEA --> ServiceEA
+    HttpEA --> ServiceEA
+    ServiceEA --> ClientEA
+    ServiceEA --> OrmEA
+  end
+
+  subgraph persistence["4. State ownership"]
+    direction TB
+    CodexSoT["Codex Thread source of truth for history and runtime"]
+    CoreMeta["Core: binding run request metadata plus LazyMind new messages and final answers"]
+    NormalHistory["Normal LazyMind history excludes external-agent bindings"]
+    GwOnly["Gateway: current project session turn-page projection and card revision; no transcript archive"]
+    CoreMeta --> NormalHistory
+  end
+
+  subgraph codexProvider["5. Codex provider"]
+    direction TB
+    OnDemand["Assistant click resolves codex executable"]
+    LocalServer["Core starts codex app-server over stdio on demand"]
+    Missing["Missing Codex returns an immediate Feishu card error"]
+    CodexRPC["thread/list thread/start thread/resume turn/start turn/steer turn/interrupt"]
+    CodexEvents["item events requestApproval requestUserInput"]
+    OnDemand --> LocalServer --> CodexRPC
+    OnDemand --> Missing
+  end
+
+  feishuUX --> gateway
+  InfraClient -->|"HTTP Core APIs"| CoreChat
+  WebAsk --> CoreChat
+  ClientEA --> OnDemand
+  CodexEvents --> ClientEA
+  CodexSoT --> CoreMeta
+  CoreMeta --> GwOnly
+  CodexRPC --> CodexSoT

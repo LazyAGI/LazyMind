@@ -8,6 +8,19 @@ class FeishuRuntimeError(RuntimeError):
     pass
 
 
+def workspace_card_expired(exc: Exception) -> bool:
+    message = str(exc).casefold()
+    return any(
+        marker in message
+        for marker in (
+            '200740',
+            '200750',
+            'card entity does not exist',
+            'card entity has expired',
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class FeishuInboundMessage:
     message_id: str
@@ -38,6 +51,7 @@ class FeishuInboundAction:
     ask_answers_structured: dict[str, Any] | None
     command_action: dict[str, Any] | None
     workspace_action: dict[str, Any] | None
+    event_id: str = ''
 
 
 @dataclass(frozen=True, slots=True)

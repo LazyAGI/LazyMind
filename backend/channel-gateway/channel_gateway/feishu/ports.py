@@ -5,6 +5,7 @@ from typing import Any, Protocol
 
 from channel_gateway.common.domain.channel import (
     ClaimedOutbound,
+    InboundEnvelope,
     RuntimeFence,
 )
 from channel_gateway.common.domain.chat import CoreStreamUpdate
@@ -19,14 +20,6 @@ from channel_gateway.feishu.domain import (
     FeishuInboundMenu,
     FeishuInboundMessage,
 )
-
-
-class FeishuRuntimeRepository(
-    ReceiverRepository,
-    NavigationRepository,
-    Protocol,
-):
-    pass
 
 
 class FeishuWorkspaceRepository(Protocol):
@@ -44,7 +37,7 @@ class FeishuWorkspaceRepository(Protocol):
     ) -> dict[str, Any]:
         ...
 
-    def get_pending_turn(
+    def get_new_conversation_draft(
         self,
         account_id: str,
         external_address_hash: str,
@@ -63,12 +56,34 @@ class FeishuWorkspaceRepository(Protocol):
     ) -> None:
         ...
 
-    def save_feishu_workspace_state(
+    def save_feishu_workspace_state_if_revision(
         self,
         account_id: str,
         external_address_hash: str,
         state: dict[str, Any],
-    ) -> None:
+        expected_revision: int,
+    ) -> bool:
+        ...
+
+    def claim_feishu_workspace_and_ingest(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        state: dict[str, Any],
+        expected_revision: int,
+        expected_message_id: str,
+        expected_operation_id: str,
+        envelope: InboundEnvelope,
+        runtime_fence: RuntimeFence,
+        new_conversation_action: dict[str, Any] | None = None,
+    ) -> bool:
+        ...
+
+    def has_active_inbound(
+        self,
+        account_id: str,
+        order_key: str,
+    ) -> bool:
         ...
 
     def patch_feishu_workspace_state(
@@ -85,8 +100,22 @@ class FeishuWorkspaceRepository(Protocol):
         account_id: str,
         external_address_hash: str,
         message_id: str,
-    ) -> None:
+        operation_id: str,
+        expected_message_id: str,
+        expected_revision: int | None = None,
+        *,
+        advance_revision: bool = True,
+    ) -> dict[str, Any]:
         ...
+
+
+class FeishuRuntimeRepository(
+    ReceiverRepository,
+    NavigationRepository,
+    FeishuWorkspaceRepository,
+    Protocol,
+):
+    pass
 
 
 class FeishuAccountRepository(Protocol):
@@ -333,15 +362,6 @@ class FeishuOutboundClient(Protocol):
     ) -> str:
         ...
 
-    def send_markdown_to_user(
-        self,
-        *,
-        open_id: str,
-        text: str,
-        idempotency_key: str,
-    ) -> str:
-        ...
-
     def send_card_to_user(
         self,
         *,
@@ -452,7 +472,7 @@ class FeishuOutboundFactory(Protocol):
         ...
 
 
-class FeishuTaskOutboxRepository(FeishuWorkspaceRepository, Protocol):
+class FeishuTaskOutboxRepository(Protocol):
     def list_sent_task_outbounds(
         self,
         *,
@@ -461,11 +481,22 @@ class FeishuTaskOutboxRepository(FeishuWorkspaceRepository, Protocol):
     ) -> list[ClaimedOutbound]:
         ...
 
-    def save_sent_outbound_part_state(
+    def sync_task_artifact_outbounds(
+        self,
+        *,
+        parent: ClaimedOutbound,
+        part_index: int,
+        artifacts: list[dict[str, str]],
+    ) -> dict[str, int]:
+        ...
+
+    def compare_and_save_sent_task_monitor_state(
         self,
         *,
         outbox_id: str,
         part_index: int,
+        expected_revision: int,
         state: dict[str, Any],
-    ) -> bool:
+        complete: bool,
+    ) -> dict[str, Any] | None:
         ...

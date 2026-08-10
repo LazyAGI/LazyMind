@@ -223,7 +223,7 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		return
 	}
 	if len(mentioned.WorkflowRefs) > 1 {
-		common.ReplyErr(w, "at most one plugin mention is allowed per turn", http.StatusBadRequest)
+		common.ReplyErr(w, "at most one workflow mention is allowed per turn", http.StatusBadRequest)
 		return
 	}
 	disabled, err := listDisabledToolNames(r.Context(), db, userID)
@@ -313,7 +313,7 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		workflowEnabled, false,
 	)
 	if bindingErr != nil {
-		common.ReplyErr(w, "resolve conversation plugin binding failed", http.StatusInternalServerError)
+		common.ReplyErr(w, "resolve conversation workflow binding failed", http.StatusInternalServerError)
 		return
 	}
 	if err := applyWorkflowSelection(

@@ -25,38 +25,6 @@ class NavigationRepository(
     ) -> dict[str, Any] | None:
         ...
 
-    def get_feishu_workspace_state(
-        self,
-        account_id: str,
-        external_address_hash: str,
-    ) -> dict[str, Any]:
-        ...
-
-    def save_feishu_workspace_state(
-        self,
-        account_id: str,
-        external_address_hash: str,
-        state: dict[str, Any],
-    ) -> None:
-        ...
-
-    def patch_feishu_workspace_state(
-        self,
-        account_id: str,
-        external_address_hash: str,
-        patch: dict[str, Any],
-        operation_id: str = '',
-    ) -> dict[str, Any]:
-        ...
-
-    def save_feishu_workspace_message(
-        self,
-        account_id: str,
-        external_address_hash: str,
-        message_id: str,
-    ) -> None:
-        ...
-
     def begin_new_conversation(
         self,
         account_id: str,

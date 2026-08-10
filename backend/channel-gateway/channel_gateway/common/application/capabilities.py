@@ -11,6 +11,8 @@ from channel_gateway.common.domain.chat import (
 from channel_gateway.common.domain.commands import (
     CommandEnvelope,
     ConversationSettingChange,
+    PreparedConversationTarget,
+    RESOLVED_RESOURCE_SELECTIONS_KEY,
     ResourceChange,
     SelectionContinuation,
 )
@@ -23,12 +25,12 @@ from channel_gateway.common.ports.repository import NavigationRepository
 
 
 _LIST_LIMIT = 10
+_PRESENTATION_LIST_LIMIT = 100
+_IDENTIFIER_LIMIT = 512
 _SNAPSHOT_TTL = dt.timedelta(minutes=10)
-_RESOLVED_RESOURCES_KEY = '_channel_gateway_resolved_resources'
 _CAPABILITY_LABELS = {
     'knowledge_base': '知识库',
     'skill': 'Skill',
-    'plugin': 'Workflow',
     'tool': '工具',
     'prompt': 'Prompt',
     'conversation': '会话',
@@ -37,16 +39,19 @@ _CAPABILITY_LABELS = {
 }
 
 ResolvedChanges = list[tuple[ResourceChange, list[dict[str, Any]]]]
-SettingsSection = Literal[
-    'overview',
-    'knowledge_base',
-    'plugin',
-    'subagent',
-    'skill',
-    'tool',
-    'personalization',
-    'workflow',
-]
+
+
+def _selection_items(
+    items: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            'id': str(item.get('id') or '')[:_IDENTIFIER_LIMIT],
+            'name': str(item.get('name') or '')[:200],
+            'can_disable': bool(item.get('can_disable', True)),
+        }
+        for item in items[:_LIST_LIMIT]
+    ]
 
 
 class ActionMessage(RuntimeError):
@@ -68,9 +73,6 @@ class CapabilityActions:
     def conversation_settings(
         self,
         *,
-        section: SettingsSection,
-        catalog: dict[str, Any],
-        features: ChannelFeatureProfile,
         account_id: str,
         external_address_hash: str,
         owner_user_id: str,
@@ -90,44 +92,6 @@ class CapabilityActions:
             conversation_id=conversation_id,
             request_id=f'{request_id}_conversation_settings',
         )
-        selected_dataset_ids = set(
-            self._dataset_ids_from_detail(detail)
-        )
-        raw_datasets = catalog.get('knowledge_base')
-        datasets = [
-            {
-                'id': str(item.get('id') or ''),
-                'name': str(item.get('name') or '未命名知识库'),
-                'enabled': str(item.get('id') or '')
-                in selected_dataset_ids,
-            }
-            for item in (
-                raw_datasets
-                if isinstance(raw_datasets, list)
-                else []
-            )
-            if isinstance(item, dict) and item.get('id')
-        ]
-        skills = self._settings_items(
-            catalog,
-            'skill',
-            id_key='id',
-        )
-        tools = self._settings_items(
-            catalog,
-            'tool',
-            id_key='id',
-        )
-        workflows = self._settings_items(
-            catalog,
-            'workflow',
-            id_key='id',
-        )
-        personalization = self._settings_items(
-            catalog,
-            'personalization',
-            id_key='id',
-        )
         workflow_enabled = bool(
             detail.get('enable_workflow')
             if detail.get('enable_workflow') is not None
@@ -145,6 +109,19 @@ class CapabilityActions:
             else True
         )
         title = str(detail.get('display_name') or '未命名会话')
+        search_config = detail.get('search_config')
+        dataset_list = (
+            search_config.get('dataset_list')
+            if isinstance(search_config, dict)
+            else []
+        )
+        dataset_ids = tuple(dict.fromkeys(
+            str(item.get('id') or '')[:_IDENTIFIER_LIMIT]
+            for item in (
+                dataset_list if isinstance(dataset_list, list) else []
+            )[:100]
+            if isinstance(item, dict) and str(item.get('id') or '')
+        ))
         text = (
             f'当前会话“{title}”的设置已保存。'
             if updated
@@ -154,24 +131,10 @@ class CapabilityActions:
             text,
             ConversationSettingsPresentation(
                 kind='conversation_settings',
-                conversation_id=conversation_id,
-                section=section,
-                knowledge_bases=tuple(datasets),
+                dataset_ids=dataset_ids,
                 workflow_enabled=workflow_enabled,
                 workflow_mode=workflow_mode,
                 subagent_enabled=subagent_enabled,
-                skills=tuple(skills),
-                tools=tuple(tools),
-                personalization_enabled=bool(
-                    personalization[0].get('enabled', True)
-                    if personalization
-                    else True
-                ),
-                workflows=tuple(workflows),
-                channel_features=tuple(
-                    features.enabled_feature_labels
-                ),
-                updated=updated,
             ),
         )
 
@@ -179,8 +142,8 @@ class CapabilityActions:
         self,
         *,
         change: ConversationSettingChange,
+        expected_conversation_id: str | None = None,
         catalog: dict[str, Any],
-        features: ChannelFeatureProfile,
         account_id: str,
         external_address_hash: str,
         owner_user_id: str,
@@ -190,6 +153,13 @@ class CapabilityActions:
             account_id,
             external_address_hash,
         )
+        if (
+            expected_conversation_id
+            and conversation_id != expected_conversation_id
+        ):
+            raise ActionMessage(
+                '会话已切换，这张设置卡已经过期。'
+            )
         if not conversation_id:
             raise ActionMessage(
                 '当前还没有可设置的会话，请先新建或切换到一个会话。'
@@ -233,20 +203,16 @@ class CapabilityActions:
                 request_id=f'{request_id}_save_kb',
                 dataset_ids=dataset_ids,
             )
-            section: SettingsSection = 'knowledge_base'
-        elif change.setting in ('plugin', 'workflow_mode', 'subagent'):
-            if change.setting == 'plugin':
+        elif change.setting in ('workflow_enabled', 'workflow_mode', 'subagent'):
+            if change.setting == 'workflow_enabled':
                 settings = {'enable_workflow': change.enabled}
-                section = 'plugin'
             elif change.setting == 'workflow_mode':
                 settings = {
                     'enable_workflow': True,
                     'workflow_mode': change.mode,
                 }
-                section = 'plugin'
             else:
                 settings = {'enable_subagent': change.enabled}
-                section = 'subagent'
             self._client.update_conversation_agent_settings(
                 owner_user_id=owner_user_id,
                 conversation_id=conversation_id,
@@ -271,7 +237,6 @@ class CapabilityActions:
                 change.skill_id,
                 change.enabled,
             )
-            section = 'skill'
         elif change.setting == 'tool':
             tool = self._require_setting_item(
                 catalog,
@@ -295,7 +260,6 @@ class CapabilityActions:
                 change.tool_name,
                 change.enabled,
             )
-            section = 'tool'
         elif change.setting == 'personalization':
             self._client.set_personalization_enabled(
                 owner_user_id=owner_user_id,
@@ -308,7 +272,6 @@ class CapabilityActions:
                 'personalization',
                 change.enabled,
             )
-            section = 'personalization'
         else:
             self._require_setting_item(
                 catalog,
@@ -327,47 +290,17 @@ class CapabilityActions:
                 change.workflow_ref,
                 change.enabled,
             )
-            section = 'workflow'
         self._store.clear_selection_snapshot(
             account_id,
             external_address_hash,
         )
         return self.conversation_settings(
-            section=section,
-            catalog=catalog,
-            features=features,
             account_id=account_id,
             external_address_hash=external_address_hash,
             owner_user_id=owner_user_id,
             request_id=f'{request_id}_verify',
             updated=True,
         )
-
-    @staticmethod
-    def _settings_items(
-        catalog: dict[str, Any],
-        kind: str,
-        *,
-        id_key: str,
-    ) -> list[dict[str, Any]]:
-        values = catalog.get(kind)
-        return [
-            {
-                **item,
-                'id': str(item.get(id_key) or ''),
-                'name': str(
-                    item.get('name')
-                    or item.get('display_name')
-                    or item.get(id_key)
-                    or '未命名能力'
-                ),
-                'enabled': bool(item.get('enabled', True)),
-            }
-            for item in (
-                values if isinstance(values, list) else []
-            )
-            if isinstance(item, dict) and item.get(id_key)
-        ]
 
     @staticmethod
     def _require_setting_item(
@@ -403,22 +336,6 @@ class CapabilityActions:
             ):
                 item['enabled'] = enabled
 
-    @staticmethod
-    def _dataset_ids_from_detail(
-        detail: dict[str, Any],
-    ) -> list[str]:
-        search = detail.get('search_config')
-        if not isinstance(search, dict):
-            return []
-        values = search.get('dataset_list')
-        if not isinstance(values, list):
-            return []
-        return [
-            str(item.get('id') or '')
-            for item in values
-            if isinstance(item, dict) and item.get('id')
-        ]
-
     def list_capabilities(
         self,
         *,
@@ -427,9 +344,14 @@ class CapabilityActions:
         account_id: str,
         external_address_hash: str,
         features: ChannelFeatureProfile,
+        save_selection: bool = True,
     ) -> tuple[str, CapabilityPresentation]:
         kinds = list(dict.fromkeys(kinds))
-        self._store.clear_selection_snapshot(account_id, external_address_hash)
+        if save_selection:
+            self._store.clear_selection_snapshot(
+                account_id,
+                external_address_hash,
+            )
         lines = ['当前渠道可用能力：']
         groups: list[dict[str, Any]] = []
         for kind in kinds:
@@ -439,7 +361,6 @@ class CapabilityActions:
                 if isinstance(items, list)
                 else []
             )
-            presented_items: list[dict[str, str]] = []
             lines.append(f'\n【{_CAPABILITY_LABELS[kind]}】')
             if not values:
                 if kind == 'skill':
@@ -465,19 +386,16 @@ class CapabilityActions:
                         )
                     name = str(item.get('name') or '未命名')
                     lines.append(f'{index}. {name}（{status}）')
-                    presented_items.append(
-                        {
-                            'id': str(item.get('id') or ''),
-                            'name': name,
-                            'status': status,
-                            'description': str(
-                                item.get('description') or ''
-                            )[:300],
-                            'content': str(
-                                item.get('content') or ''
-                            )[:4000],
-                        }
-                    )
+            presented_items = []
+            for item in values[:_PRESENTATION_LIST_LIMIT]:
+                presented = {
+                    'id': str(item.get('id') or '')[:_IDENTIFIER_LIMIT],
+                    'name': str(item.get('name') or '未命名')[:200],
+                    'enabled': bool(item.get('enabled', True)),
+                }
+                if kind == 'prompt' and str(item.get('content') or '').strip():
+                    presented['content'] = str(item['content']).strip()[:4000]
+                presented_items.append(presented)
             groups.append(
                 {
                     'resource_type': kind,
@@ -488,6 +406,7 @@ class CapabilityActions:
             )
             if (
                 len(kinds) == 1
+                and save_selection
                 and values
                 and kind in {
                     'knowledge_base',
@@ -500,7 +419,7 @@ class CapabilityActions:
                     account_id,
                     external_address_hash,
                     kind,
-                    values[:_LIST_LIMIT],
+                    _selection_items(values),
                     dt.datetime.now(dt.timezone.utc) + _SNAPSHOT_TTL,
                 )
         lines.extend(
@@ -525,7 +444,6 @@ class CapabilityActions:
             CapabilityPresentation(
                 kind='capability',
                 groups=tuple(groups),
-                enabled_features=features.enabled_feature_labels,
             ),
         )
 
@@ -671,43 +589,54 @@ class CapabilityActions:
         external_address_hash: str,
         source_command: CommandEnvelope | None = None,
         source_messages: Sequence[str] = (),
-        continuation_catalog: dict[str, Any] | None = None,
+        prepared_conversation_target: PreparedConversationTarget | None = None,
     ) -> ResolvedChanges:
         resolved: ResolvedChanges = []
-        saved_resolved = catalog.get(_RESOLVED_RESOURCES_KEY)
+        saved_resolved = catalog.get(RESOLVED_RESOURCE_SELECTIONS_KEY)
         saved_by_position = (
             saved_resolved
             if isinstance(saved_resolved, dict)
             else {}
         )
         for position, change in enumerate(changes):
-            saved = saved_by_position.get(str(position))
-            if (
-                isinstance(saved, dict)
-                and saved.get('resource_type') == change.resource_type
-                and isinstance(saved.get('items'), list)
-            ):
-                resolved.append(
-                    (
-                        change,
-                        [
-                            item
-                            for item in saved['items']
-                            if isinstance(item, dict)
-                        ],
-                    )
-                )
-                continue
-            if change.resource_type == 'skill' and change.operation != 'use':
-                raise ActionMessage(
-                    '当前渠道只支持本轮指定 Skill，不支持在渠道中关闭 Skill。'
-                )
             values = catalog.get(change.resource_type)
             items = (
                 [item for item in values if isinstance(item, dict)]
                 if isinstance(values, list)
                 else []
             )
+            saved = saved_by_position.get(str(position))
+            if (
+                isinstance(saved, dict)
+                and saved.get('resource_type') == change.resource_type
+                and isinstance(saved.get('items'), list)
+            ):
+                saved_items = [
+                    item
+                    for item in saved['items']
+                    if isinstance(item, dict)
+                ]
+                saved_id = (
+                    str(saved_items[0].get('id') or '')
+                    if len(saved_items) == 1
+                    else ''
+                )
+                fresh = next(
+                    (
+                        item
+                        for item in items
+                        if str(item.get('id') or '') == saved_id
+                    ),
+                    None,
+                )
+                if fresh is None:
+                    raise ActionMessage('能力目录已变化，请重新选择。')
+                resolved.append((change, [fresh]))
+                continue
+            if change.resource_type == 'skill' and change.operation != 'use':
+                raise ActionMessage(
+                    '当前渠道只支持本轮指定 Skill，不支持在渠道中关闭 Skill。'
+                )
             if change.operation == 'clear':
                 resolved.append((change, items))
                 continue
@@ -730,7 +659,18 @@ class CapabilityActions:
                         f'没有可用的{_CAPABILITY_LABELS[change.resource_type]}编号列表，'
                         '请先查看该类能力。'
                     )
-                selected = [snapshot[index - 1]]
+                selected_id = str(snapshot[index - 1].get('id') or '')
+                fresh = next(
+                    (
+                        item
+                        for item in items
+                        if str(item.get('id') or '') == selected_id
+                    ),
+                    None,
+                )
+                if fresh is None:
+                    raise ActionMessage('能力目录已变化，请重新选择。')
+                selected = [fresh]
             else:
                 wanted = self._normalize(selector.value)
                 exact = [
@@ -749,7 +689,7 @@ class CapabilityActions:
                     account_id,
                     external_address_hash,
                     change.resource_type,
-                    selected[:_LIST_LIMIT],
+                    _selection_items(selected),
                     dt.datetime.now(dt.timezone.utc) + _SNAPSHOT_TTL,
                     continuation=(
                         SelectionContinuation(
@@ -757,8 +697,11 @@ class CapabilityActions:
                             command=source_command.model_dump(mode='json'),
                             grounding_messages=list(source_messages),
                             resource_change_index=position,
-                            prepared_catalog=self._continuation_catalog(
-                                continuation_catalog or catalog,
+                            prepared_conversation_target=(
+                                prepared_conversation_target
+                            ),
+                            prepared_resources=self._continuation_resources(
+                                catalog,
                                 resolved,
                             ),
                         ).model_dump(mode='json')
@@ -784,25 +727,36 @@ class CapabilityActions:
         return resolved
 
     @staticmethod
-    def _continuation_catalog(
+    def _continuation_resources(
         catalog: dict[str, Any],
         resolved: ResolvedChanges,
     ) -> dict[str, Any]:
-        prepared = dict(catalog)
-        saved_value = prepared.get(_RESOLVED_RESOURCES_KEY)
+        saved_value = catalog.get(RESOLVED_RESOURCE_SELECTIONS_KEY)
         saved = (
             dict(saved_value)
             if isinstance(saved_value, dict)
             else {}
         )
         for position, (change, items) in enumerate(resolved):
+            if len(items) != 1 or not isinstance(items[0], dict):
+                continue
+            item = _selection_items(items)[0]
+            resource_id = str(item.get('id') or '').strip()
+            if not resource_id:
+                continue
             saved[str(position)] = {
                 'resource_type': change.resource_type,
-                'items': [dict(item) for item in items],
+                'item': {
+                    'id': resource_id,
+                    'name': str(item.get('name') or '').strip(),
+                    'can_disable': bool(item.get('can_disable', True)),
+                },
             }
-        if saved:
-            prepared[_RESOLVED_RESOURCES_KEY] = saved
-        return prepared
+        return {
+            key: value
+            for key, value in saved.items()
+            if key in {str(position) for position in range(8)}
+        }
 
     def apply_persistent_changes(
         self,
@@ -1049,6 +1003,16 @@ class CapabilityActions:
         return ChatOptions(
             search_config=search_config,
             mentions=list(mentions.values()),
+            workflow_mode=(
+                override.workflow_mode
+                if override.workflow_mode is not None
+                else base.workflow_mode
+            ),
+            enable_workflow=(
+                override.enable_workflow
+                if override.enable_workflow is not None
+                else base.enable_workflow
+            ),
             use_memory=(
                 override.use_memory
                 if override.use_memory is not None
@@ -1063,6 +1027,8 @@ class CapabilityActions:
         return {
             'search_config': options.search_config,
             'mentions': options.mentions,
+            'workflow_mode': options.workflow_mode,
+            'enable_workflow': options.enable_workflow,
             'use_memory': options.use_memory,
             'disabled_tools': options.disabled_tools,
             'filters': options.filters,
@@ -1074,12 +1040,23 @@ class CapabilityActions:
         mentions = value.get('mentions')
         disabled_tools = value.get('disabled_tools')
         filters = value.get('filters')
+        workflow_mode = value.get('workflow_mode')
         return ChatOptions(
             search_config=search_config if isinstance(search_config, dict) else None,
             mentions=(
                 [dict(item) for item in mentions if isinstance(item, dict)]
                 if isinstance(mentions, list)
                 else []
+            ),
+            workflow_mode=(
+                workflow_mode
+                if workflow_mode in {'auto', 'dynamic'}
+                else None
+            ),
+            enable_workflow=(
+                value.get('enable_workflow')
+                if isinstance(value.get('enable_workflow'), bool)
+                else None
             ),
             use_memory=(
                 value.get('use_memory')

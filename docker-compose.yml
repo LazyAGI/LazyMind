@@ -360,9 +360,14 @@ services:
       - ./skills:/skills:ro
     expose:
       - "8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       <<: *core-env
       MIGRATIONS_DIR: /migrations
+      LAZYMIND_CODEX_APP_SERVER_URL: ${LAZYMIND_CODEX_APP_SERVER_URL:-ws://host.docker.internal:14501}
+      LAZYMIND_CODEX_APP_SERVER_TOKEN: ${LAZYMIND_CODEX_APP_SERVER_TOKEN:-}
+      LAZYMIND_CODEX_DEFAULT_CWD: ${LAZYMIND_CODEX_DEFAULT_CWD:-${PWD}}
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
       LAZYMIND_SUBAGENT_DB_DSN: ${ACL_DB_DSN}
