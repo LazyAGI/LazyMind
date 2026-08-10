@@ -1,5 +1,6 @@
 import pytest
 from types import SimpleNamespace
+from typing import get_type_hints
 
 import lazyllm
 from lazyllm import init_session, locals as lazyllm_locals
@@ -44,6 +45,7 @@ def test_kb_citations_are_added_by_tool_boundary_wrappers():
 
     assert toolkit.kb_search('knowledge')['result']['items'][0]['ref'] == '[[1.1]]'
     assert temp_search('temporary')['result']['items'][0]['ref'] == '[[2.1]]'
+    assert get_type_hints(temp_search, temp_search.__globals__) == get_type_hints(temp_search.__wrapped__)
     assert len(state[CITATION_REFS_KEY]) == 2
 
 

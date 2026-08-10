@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from functools import wraps
-from typing import Any
+from typing import Any, get_type_hints
 
 import lazyllm
 
@@ -118,6 +118,7 @@ def _wrap_function(func, handler):
     def wrapped(*args, **kwargs):
         return handler(func(*args, **kwargs))
 
+    wrapped.__annotations__ = get_type_hints(func)
     return wrapped
 
 
