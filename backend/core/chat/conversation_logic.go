@@ -17,11 +17,11 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/log"
-	"lazymind/core/plugin"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/workflow"
 )
 
 const (
@@ -29,7 +29,15 @@ const (
 	maxConversationDisplayNameLength = 255
 	maxTopK                          = 10
 	defaultTopK                      = 3
+	routerTrafficAttemptsExtKey      = "router_traffic_attempts"
 )
+
+type routerTrafficAttempt struct {
+	AlgorithmID string    `json:"algorithm_id"`
+	FeedBack    int       `json:"feed_back"`
+	Reason      string    `json:"reason,omitempty"`
+	CreateTime  time.Time `json:"create_time"`
+}
 
 func shouldEmitStreamFrame(delta string, sources []any) bool {
 	return delta != "" || len(sources) > 0
@@ -158,7 +166,7 @@ func conversationIDFromName(name string) string {
 }
 
 // ensureConversation textCreatetextUsertextConversation，textConversation、text history text seq、error
-func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, pluginSettings map[string]any) (*orm.Conversation, int, error) {
+func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, workflowSettings map[string]any) (*orm.Conversation, int, error) {
 	now := time.Now()
 	var c orm.Conversation
 	err := db.Where("id = ? AND create_user_id = ?", convID, userID).First(&c).Error
@@ -200,12 +208,12 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 		},
 	}
 	// Resolve plugin settings for the new conversation.
-	// Priority: caller-supplied pluginSettings > user_chat_settings defaults.
-	// All three fields are always written so conversations.enable_plugin / plugin_mode /
+	// Priority: caller-supplied workflowSettings > user_chat_settings defaults.
+	// All three fields are always written so conversations.enable_workflow / workflow_mode /
 	// enable_subagent are never NULL — no per-request fallback query needed.
-	resolvedPS := resolveInitialPluginSettings(ctx, db, userID, pluginSettings)
-	c.EnablePlugin = &resolvedPS.enablePlugin
-	c.PluginMode = &resolvedPS.pluginMode
+	resolvedPS := resolveInitialWorkflowSettings(ctx, db, userID, workflowSettings)
+	c.EnableWorkflow = &resolvedPS.enableWorkflow
+	c.WorkflowMode = &resolvedPS.workflowMode
 	c.EnableSubagent = &resolvedPS.enableSubagent
 	if err := db.Create(&c).Error; err != nil {
 		return nil, 0, err
@@ -213,40 +221,40 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 	return &c, 1, nil
 }
 
-type resolvedPluginSettings struct {
-	enablePlugin   bool
-	pluginMode     string
+type resolvedWorkflowSettings struct {
+	enableWorkflow bool
+	workflowMode   string
 	enableSubagent bool
 }
 
-// resolveInitialPluginSettings merges caller-supplied overrides with the user's
-// global defaults from user_chat_settings. Fields present in pluginSettings take
+// resolveInitialWorkflowSettings merges caller-supplied overrides with the user's
+// global defaults from user_chat_settings. Fields present in workflowSettings take
 // priority; missing fields fall back to the DB defaults (or hardcoded values if
 // the user has no row yet).
-func resolveInitialPluginSettings(ctx context.Context, db *gorm.DB, userID string, pluginSettings map[string]any) resolvedPluginSettings {
+func resolveInitialWorkflowSettings(ctx context.Context, db *gorm.DB, userID string, workflowSettings map[string]any) resolvedWorkflowSettings {
 	// Start from hardcoded fallbacks (matches user_chat_settings DB defaults).
-	out := resolvedPluginSettings{
-		enablePlugin:   true,
-		pluginMode:     "dynamic",
+	out := resolvedWorkflowSettings{
+		enableWorkflow: true,
+		workflowMode:   "dynamic",
 		enableSubagent: true,
 	}
 	// Load user-level defaults.
 	if db != nil {
 		var s orm.UserChatSettings
 		if err := db.WithContext(ctx).Where("user_id = ?", userID).First(&s).Error; err == nil {
-			out.enablePlugin = s.EnablePlugin
-			out.pluginMode = s.PluginMode
+			out.enableWorkflow = s.EnableWorkflow
+			out.workflowMode = s.WorkflowMode
 			out.enableSubagent = s.EnableSubagent
 		}
 	}
 	// Apply caller-supplied overrides.
-	if v, ok := pluginSettings["enable_plugin"].(bool); ok {
-		out.enablePlugin = v
+	if v, ok := workflowSettings["enable_workflow"].(bool); ok {
+		out.enableWorkflow = v
 	}
-	if v, ok := pluginSettings["plugin_mode"].(string); ok && (v == "dynamic" || v == "auto") {
-		out.pluginMode = v
+	if v, ok := workflowSettings["workflow_mode"].(string); ok && (v == "dynamic" || v == "auto") {
+		out.workflowMode = v
 	}
-	if v, ok := pluginSettings["enable_subagent"].(bool); ok {
+	if v, ok := workflowSettings["enable_subagent"].(bool); ok {
 		out.enableSubagent = v
 	}
 	return out
@@ -535,6 +543,193 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 	return b
 }
 
+// buildChatHistoryExtWithTrail extends the existing history metadata only when
+// the request explicitly used the citation/reference action. Relationship
+// inference from question text is intentionally excluded from this path.
+func buildChatHistoryExtWithTrail(
+	raw map[string]any,
+	query string,
+	histories []orm.ChatHistory,
+	target chatPersistTarget,
+) json.RawMessage {
+	base := buildChatHistoryExt(raw, query)
+	ext := map[string]any{}
+	if len(base) > 0 {
+		_ = json.Unmarshal(base, &ext)
+	}
+
+	if target.IsRegeneration && target.Existing != nil {
+		var previous struct {
+			Trail json.RawMessage `json:"trail"`
+		}
+		if json.Unmarshal(target.Existing.Ext, &previous) == nil && len(previous.Trail) > 0 {
+			ext["trail"] = json.RawMessage(previous.Trail)
+		}
+	}
+	// Regeneration reuses the existing user turn. A citation tag embedded in
+	// its stored input is not a new reference action; only an explicit source
+	// ID can change the relationship during regeneration/editing.
+	if target.IsRegeneration && len(referencedHistoryIDs(raw)) == 0 {
+		return marshalChatHistoryExt(ext)
+	}
+
+	if !hasExplicitConversationReference(raw) {
+		return marshalChatHistoryExt(ext)
+	}
+
+	referenceHistoryIDs := referencedHistoryIDs(raw)
+	trail := conversationTrailMetadata{
+		Source:              "reference",
+		ReferenceHistoryIDs: referenceHistoryIDs,
+	}
+	parentID := firstExistingHistoryID(referenceHistoryIDs, histories, target)
+	if parentID == "" && len(referenceHistoryIDs) == 0 {
+		// Keep legacy clients that send only <cite_message> usable. New clients
+		// always send the source ID and must not silently attach to another turn
+		// when that ID is stale or belongs to a different conversation.
+		parentID = latestReferenceableHistoryID(histories, target)
+	}
+	trail.ParentHistoryID = parentID
+	if parentID != "" {
+		for _, history := range histories {
+			if history.ID != parentID {
+				continue
+			}
+			parent := conversationTrailMetadataFromExt(history.Ext)
+			trail.Depth = parent.Depth + 1
+			break
+		}
+	}
+	if trail.Depth > maxConversationTrailDepth {
+		trail.Depth = maxConversationTrailDepth
+	}
+	ext["trail"] = trail
+	return marshalChatHistoryExt(ext)
+}
+
+func marshalChatHistoryExt(ext map[string]any) json.RawMessage {
+	if len(ext) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(ext)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// archiveRegeneratedTrafficAttempt keeps the minimal traffic fields for the
+// answer that a regeneration replaces. The visible history row remains the
+// latest answer, while statistics can still count every generated answer.
+func archiveRegeneratedTrafficAttempt(historyExt json.RawMessage, target chatPersistTarget) json.RawMessage {
+	if !target.IsRegeneration || target.Existing == nil || strings.TrimSpace(target.Existing.AlgorithmID) == "" {
+		return historyExt
+	}
+
+	ext := map[string]any{}
+	if len(historyExt) > 0 {
+		_ = json.Unmarshal(historyExt, &ext)
+	}
+	var previous struct {
+		Attempts []routerTrafficAttempt `json:"router_traffic_attempts"`
+	}
+	if json.Unmarshal(target.Existing.Ext, &previous) == nil && len(previous.Attempts) > 0 {
+		ext[routerTrafficAttemptsExtKey] = previous.Attempts
+	}
+	attempts, _ := ext[routerTrafficAttemptsExtKey].([]routerTrafficAttempt)
+	attempts = append(attempts, routerTrafficAttempt{
+		AlgorithmID: strings.TrimSpace(target.Existing.AlgorithmID),
+		FeedBack:    target.Existing.FeedBack,
+		Reason:      strings.TrimSpace(target.Existing.Reason),
+		CreateTime:  target.Existing.CreateTime.UTC(),
+	})
+	ext[routerTrafficAttemptsExtKey] = attempts
+	return marshalChatHistoryExt(ext)
+}
+
+func hasExplicitConversationReference(raw map[string]any) bool {
+	if len(referencedHistoryIDs(raw)) > 0 {
+		return true
+	}
+	if value, ok := raw["query"].(string); ok && strings.Contains(strings.ToLower(value), "<cite_message>") {
+		return true
+	}
+	if value, ok := raw["content"].(string); ok && strings.Contains(strings.ToLower(value), "<cite_message>") {
+		return true
+	}
+	input, _ := raw["input"].([]any)
+	for _, item := range input {
+		entry, _ := item.(map[string]any)
+		text, _ := entry["text"].(string)
+		if strings.Contains(strings.ToLower(text), "<cite_message>") {
+			return true
+		}
+	}
+	return false
+}
+
+func referencedHistoryIDs(raw map[string]any) []string {
+	value, ok := raw["cite_history_ids"]
+	if !ok {
+		return nil
+	}
+	var values []string
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			if id, ok := item.(string); ok && strings.TrimSpace(id) != "" {
+				values = append(values, strings.TrimSpace(id))
+			}
+		}
+	case []string:
+		for _, id := range typed {
+			if strings.TrimSpace(id) != "" {
+				values = append(values, strings.TrimSpace(id))
+			}
+		}
+	}
+	return uniqueStrings(values)
+}
+
+func firstExistingHistoryID(ids []string, histories []orm.ChatHistory, target chatPersistTarget) string {
+	allowed := make(map[string]struct{}, len(histories))
+	for _, history := range histories {
+		if target.IsRegeneration && target.Existing != nil && history.ID == target.Existing.ID {
+			continue
+		}
+		allowed[history.ID] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := allowed[id]; ok {
+			return id
+		}
+	}
+	return ""
+}
+
+func latestReferenceableHistoryID(histories []orm.ChatHistory, target chatPersistTarget) string {
+	for index := len(histories) - 1; index >= 0; index-- {
+		if target.IsRegeneration && target.Existing != nil && histories[index].ID == target.Existing.ID {
+			continue
+		}
+		return histories[index].ID
+	}
+	return ""
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
 func chatHistoryInput(raw map[string]any, query string) any {
 	in, hasInput := raw["input"].([]any)
 	if displayQuery, ok := raw["display_query"].(string); ok && strings.TrimSpace(displayQuery) != "" {
@@ -752,15 +947,15 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	if environmentContext, ok := raw["environment_context"].(map[string]any); ok {
 		body["environment_context"] = environmentContext
 	}
-	// Propagate plugin_context so Python ChatAgent receives the active session info.
-	// Merge plugin_ui_state (focused_tab, focused_sort_order) from the request body.
+	// Propagate workflow_context so Python ChatAgent receives the active session info.
+	// Merge workflow_ui_state (focused_tab, focused_sort_order) from the request body.
 	// Python reads artifact state directly from the DB via _build_session_artifact_section.
-	if pc, ok := raw["plugin_context"].(map[string]any); ok && len(pc) > 0 {
+	if pc, ok := raw["workflow_context"].(map[string]any); ok && len(pc) > 0 {
 		mergedPC := make(map[string]any, len(pc)+4)
 		for k, v := range pc {
 			mergedPC[k] = v
 		}
-		if uis, ok := raw["plugin_ui_state"].(map[string]any); ok {
+		if uis, ok := raw["workflow_ui_state"].(map[string]any); ok {
 			if ft, ok := uis["focused_tab"]; ok {
 				mergedPC["focused_tab"] = ft
 			}
@@ -768,17 +963,13 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 				mergedPC["focused_sort_order"] = fso
 			}
 		}
-		body["plugin_context"] = mergedPC
+		body["workflow_context"] = mergedPC
 	}
 	if resourceContext != nil {
 		body["disabled_tools"] = mergeDisabledToolNames(
 			requestDisabledTools, resourceContext.DisabledTools,
 		)
 		body["available_skills"] = resourceContext.AvailableSkills
-		if useMemory {
-			body["memory"] = resourceContext.Memory
-			body["user_preference"] = resourceContext.UserPreference
-		}
 	}
 	if body["filters"] == nil {
 		conv, _ := raw["conversation"].(map[string]any)
@@ -823,11 +1014,11 @@ func filtersFromSearchConfig(sc map[string]any) map[string]any {
 	return filters
 }
 
-// resolvePluginMode determines the effective plugin_mode for this request.
+// resolveWorkflowMode determines the effective workflow_mode for this request.
 // Priority: request body > "dynamic" default.
 // Valid values: "auto", "dynamic". Anything else is normalised to "dynamic".
-func resolvePluginMode(raw map[string]any) string {
-	if v, ok := raw["plugin_mode"].(string); ok {
+func resolveWorkflowMode(raw map[string]any) string {
+	if v, ok := raw["workflow_mode"].(string); ok {
 		v = strings.TrimSpace(v)
 		if v == "auto" || v == "dynamic" {
 			return v
@@ -836,29 +1027,29 @@ func resolvePluginMode(raw map[string]any) string {
 	return "dynamic"
 }
 
-// resolvePluginModeWithFallback determines the effective plugin_mode with full priority chain:
+// resolveWorkflowModeWithFallback determines the effective workflow_mode with full priority chain:
 //
 //	request body > DB-resolved agentic_config (loaded via applyChatRuntimeConfigs) > "dynamic"
 //
 // reqBody must have already been populated by applyChatRuntimeConfigs so that
-// reqBody["agentic_config"]["plugin_mode"] reflects the DB value.
-func resolvePluginModeWithFallback(raw map[string]any, reqBody map[string]any) string {
+// reqBody["agentic_config"]["workflow_mode"] reflects the DB value.
+func resolveWorkflowModeWithFallback(raw map[string]any, reqBody map[string]any) string {
 	// Highest priority: explicit value in the original request body.
-	if v, ok := raw["plugin_mode"].(string); ok {
+	if v, ok := raw["workflow_mode"].(string); ok {
 		v = strings.TrimSpace(v)
 		if v == "auto" || v == "dynamic" {
 			return v
 		}
 	}
-	return pluginModeFromReqBody(reqBody)
+	return workflowModeFromReqBody(reqBody)
 }
 
-// pluginModeFromReqBody reads the resolved plugin_mode from a fully-built chat request body.
-// Priority: plugin_context > agentic_config > "dynamic".
-// Used when persisting plugin_step task params so OnSubAgentDone can branch on auto vs dynamic.
-func pluginModeFromReqBody(reqBody map[string]any) string {
-	if pc, ok := reqBody["plugin_context"].(map[string]any); ok {
-		if v, ok := pc["plugin_mode"].(string); ok {
+// workflowModeFromReqBody reads the resolved workflow_mode from a fully-built chat request body.
+// Priority: workflow_context > agentic_config > "dynamic".
+// Used when persisting workflow_step task params so OnSubAgentDone can branch on auto vs dynamic.
+func workflowModeFromReqBody(reqBody map[string]any) string {
+	if pc, ok := reqBody["workflow_context"].(map[string]any); ok {
+		if v, ok := pc["workflow_mode"].(string); ok {
 			v = strings.TrimSpace(v)
 			if v == "auto" || v == "dynamic" {
 				return v
@@ -866,7 +1057,7 @@ func pluginModeFromReqBody(reqBody map[string]any) string {
 		}
 	}
 	if ac, ok := reqBody["agentic_config"].(map[string]any); ok {
-		if v, ok := ac["plugin_mode"].(string); ok {
+		if v, ok := ac["workflow_mode"].(string); ok {
 			v = strings.TrimSpace(v)
 			if v == "auto" || v == "dynamic" {
 				return v
@@ -961,6 +1152,7 @@ func handleNonStreamChat(
 	target chatPersistTarget,
 	historyExt json.RawMessage,
 ) {
+	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
 	pyBody, _ := json.Marshal(reqBody)
 	upstreamURL := common.JoinURL(baseURL, "/api/chat")
 	respBytes, _, err := common.HTTPPost(reqCtx, upstreamURL, "application/json", pyBody)
@@ -1028,7 +1220,6 @@ func handleNonStreamChat(
 		TimeMixin:       orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
 	if target.IsRegeneration && target.Existing != nil {
-		hist.TimeMixin.CreateTime = target.Existing.CreateTime
 		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
 			"seq":              target.Seq,
 			"raw_content":      query,
@@ -1040,6 +1231,7 @@ func handleNonStreamChat(
 			"reason":           "",
 			"expected_answer":  "",
 			"ext":              historyExt,
+			"create_time":      now,
 			"update_time":      now,
 		}).Error; err != nil {
 			common.ReplyErr(w, "failed to update history", http.StatusInternalServerError)
@@ -1058,7 +1250,7 @@ func handleNonStreamChat(
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
-	recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, answer, now)
+	recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, answer, now)
 	common.ReplyOK(w, map[string]any{
 		"conversation_id": convID,
 		"seq":             target.Seq,
@@ -1145,8 +1337,9 @@ func streamSingleAnswer(
 	target chatPersistTarget,
 	historyExt json.RawMessage,
 ) {
+	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
 	seq := target.Seq
-	ch, err := StreamChatUpstream(chatCtx, baseURL, reqBody)
+	ch, algorithmID, err := StreamChatUpstream(chatCtx, baseURL, reqBody)
 	if err != nil {
 		if stateStore != nil {
 			_ = setChatStatus(chatCtx, stateStore, convID, historyID, "failed", "")
@@ -1183,6 +1376,7 @@ func streamSingleAnswer(
 			partialResult += "<think>" + pendingThink + "</think>"
 		}
 		values := map[string]any{
+			"algorithm_id":        algorithmID,
 			"seq":                 seq,
 			"raw_content":         query,
 			"content":             query,
@@ -1199,7 +1393,7 @@ func streamSingleAnswer(
 		}
 		now := time.Now()
 		if err := db.Create(&orm.ChatHistory{
-			ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query,
+			ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, AlgorithmID: algorithmID,
 			Result: partialResult, ThinkingDurationS: thinkingDurationS, Ext: historyExt,
 			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 		}).Error; err != nil {
@@ -1231,12 +1425,12 @@ func streamSingleAnswer(
 		}
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
-			pluginModeForTask := pluginModeFromReqBody(reqBody)
-			notice, taskErr := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody), pluginModeForTask)
+			workflowModeForTask := workflowModeFromReqBody(reqBody)
+			notice, taskErr := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody), workflowModeForTask)
 			if taskErr != nil {
 				failurePrefix := "TASK_START_FAILED: "
-				if d.TaskCreated.AgentType == "plugin_step" {
-					failurePrefix = "PLUGIN_START_FAILED: "
+				if d.TaskCreated.AgentType == "workflow_step" {
+					failurePrefix = "WORKFLOW_START_FAILED: "
 				}
 				failure := failurePrefix + taskErr.Error()
 				fullText += failure
@@ -1327,8 +1521,8 @@ func streamSingleAnswer(
 			}
 			continue
 		}
-		if d.PluginPreflightUpdated != nil {
-			handlePluginPreflightUpdated(chatCtx, db, convID, d.PluginPreflightUpdated)
+		if d.WorkflowPreflightUpdated != nil {
+			handleWorkflowPreflightUpdated(chatCtx, db, convID, d.WorkflowPreflightUpdated)
 			continue
 		}
 		if d.Heartbeat {
@@ -1430,6 +1624,7 @@ func streamSingleAnswer(
 	persisted := false
 	if target.IsRegeneration && target.Existing != nil {
 		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
+			"algorithm_id":        algorithmID,
 			"seq":                 seq,
 			"raw_content":         query,
 			"content":             query,
@@ -1441,6 +1636,7 @@ func streamSingleAnswer(
 			"reason":              "",
 			"expected_answer":     "",
 			"ext":                 historyExt,
+			"create_time":         now,
 			"update_time":         now,
 		}).Error; err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to update stream chat history")
@@ -1449,7 +1645,7 @@ func streamSingleAnswer(
 		}
 	} else if progressRowCreated {
 		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
-			"seq": seq, "raw_content": query, "content": query, "result": fullResult,
+			"algorithm_id": algorithmID, "seq": seq, "raw_content": query, "content": query, "result": fullResult,
 			"tool_call_turns": toolCallTurns, "thinking_duration_s": thinkingDurationS,
 			"retrieval_result": retrievalResult, "ext": historyExt, "update_time": now,
 		}).Error; err != nil {
@@ -1462,6 +1658,7 @@ func streamSingleAnswer(
 			ID:                historyID,
 			Seq:               seq,
 			ConversationID:    convID,
+			AlgorithmID:       algorithmID,
 			RawContent:        query,
 			RetrievalResult:   retrievalResult,
 			Content:           query,
@@ -1494,7 +1691,7 @@ func streamSingleAnswer(
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
 	if persisted {
-		recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(fullText), now)
+		recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(fullText), now)
 	}
 	if reqCtx.Err() == nil {
 		// text：message text，finish_reason text STOP
@@ -1574,7 +1771,7 @@ func streamDualAnswer(
 	historyExt json.RawMessage,
 ) {
 	seq := target.Seq
-	primaryCh, err1 := StreamChatUpstream(chatCtx, baseURL, reqBody)
+	primaryCh, _, err1 := StreamChatUpstream(chatCtx, baseURL, reqBody)
 	secondaryReq := make(map[string]any)
 	for k, v := range reqBody {
 		secondaryReq[k] = v
@@ -1582,7 +1779,7 @@ func streamDualAnswer(
 	if sc, ok := secondaryReq["filters"].(map[string]any); ok {
 		sc["kb_id"] = nil
 	}
-	secondaryCh, err2 := StreamChatUpstream(chatCtx, baseURL, secondaryReq)
+	secondaryCh, _, err2 := StreamChatUpstream(chatCtx, baseURL, secondaryReq)
 	if err1 != nil && err2 != nil {
 		if stateStore != nil {
 			_ = setChatStatus(chatCtx, stateStore, convID, historyID, "failed", "")
@@ -1852,7 +2049,7 @@ dualPersist:
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
-	recordSkillEditorConversationActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(primaryText), now)
+	recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(primaryText), now)
 	if reqCtx.Err() == nil {
 		writeSSEChunk(w, flusher, map[string]any{
 			"finish_reason":       "FINISH_REASON_STOP",
@@ -1871,14 +2068,14 @@ dualPersist:
 	}
 }
 
-func recordSkillEditorConversationActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
+func recordConversationIdleActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
 	if db == nil || stateStore == nil || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(historyID) == "" {
 		return
 	}
 	_ = resourceupdate.RecordConversationIdleMessage(ctx, db, stateStore, resourceupdate.ConversationIdleRecord{
-		SessionID:      conversationID,
+		ConversationID: conversationID,
 		UserID:         userID,
-		LastMessageID:  historyID,
+		LastHistoryID:  historyID,
 		LastActivityAt: now,
 		UserContent:    userContent,
 		AssistantText:  assistantText,
@@ -1896,15 +2093,15 @@ func handleTaskCreated(
 	ev *TaskCreatedEvent,
 	llmConfig map[string]any,
 	toolConfig map[string]any,
-	pluginMode string,
+	workflowMode string,
 ) (*TaskCreatedNotice, error) {
 	if ev == nil || strings.TrimSpace(ev.TaskID) == "" {
 		return nil, fmt.Errorf("task_created event is missing task_id")
 	}
 
-	// Plugin Step path — handled separately.
-	if ev.AgentType == "plugin_step" {
-		return handlePluginStepCreated(chatCtx, db, stateStore, convID, historyID, userID, ev, llmConfig, toolConfig, pluginMode)
+	// Workflow Step path — handled separately.
+	if ev.AgentType == "workflow_step" {
+		return handleWorkflowStepCreated(chatCtx, db, stateStore, convID, historyID, userID, ev, llmConfig, toolConfig, workflowMode)
 	}
 	mode := ev.Mode
 	if mode != "auto" && mode != "manual" {
@@ -1991,9 +2188,9 @@ func handleTaskCreated(
 	}, nil
 }
 
-// handlePluginStepCreated processes a task_created event for agent_type='plugin_step'.
+// handleWorkflowStepCreated processes a task_created event for agent_type='workflow_step'.
 // It delegates to the plugin package EventLoop to manage session/step lifecycle.
-func handlePluginStepCreated(
+func handleWorkflowStepCreated(
 	ctx context.Context,
 	db *gorm.DB,
 	stateStore state.Store,
@@ -2001,22 +2198,22 @@ func handlePluginStepCreated(
 	ev *TaskCreatedEvent,
 	llmConfig map[string]any,
 	toolConfig map[string]any,
-	pluginMode string,
+	workflowMode string,
 ) (*TaskCreatedNotice, error) {
-	params := pluginStepParamsFromEventParams(ev.Params)
-	// Carry the resolved plugin_mode into params so it is persisted with the task
-	// and available when OnSubAgentDone reconstructs PluginChatContext from DB.
-	if pluginMode == "auto" || pluginMode == "dynamic" {
-		params.PluginMode = pluginMode
+	params := workflowStepParamsFromEventParams(ev.Params)
+	// Carry the resolved workflow_mode into params so it is persisted with the task
+	// and available when OnSubAgentDone reconstructs WorkflowChatContext from DB.
+	if workflowMode == "auto" || workflowMode == "dynamic" {
+		params.WorkflowMode = workflowMode
 	} else {
-		params.PluginMode = "dynamic"
+		params.WorkflowMode = "dynamic"
 	}
-	if params.PluginID == "" || params.StepID == "" {
-		fmt.Println("[Core] [PLUGIN_STEP_INVALID_PARAMS] plugin_id or step_id missing")
-		return nil, fmt.Errorf("plugin_id or step_id missing")
+	if params.WorkflowID == "" || params.StepID == "" {
+		fmt.Println("[Core] [WORKFLOW_STEP_INVALID_PARAMS] workflow_id or step_id missing")
+		return nil, fmt.Errorf("workflow_id or step_id missing")
 	}
 
-	sessionID, taskID, pluginCompleted, err := plugin.HandlePluginStepCreated(
+	sessionID, taskID, workflowCompleted, err := workflow.HandleWorkflowStepCreated(
 		ctx, db, stateStore, convID, historyID, userID,
 		ev.TaskID, ev.Title, ev.Objective,
 		params,
@@ -2024,18 +2221,18 @@ func handlePluginStepCreated(
 		llmConfig, toolConfig,
 	)
 	if err != nil {
-		fmt.Printf("[Core] [PLUGIN_STEP_FAILED] err=%v\n", err)
+		fmt.Printf("[Core] [WORKFLOW_STEP_FAILED] err=%v\n", err)
 		return nil, err
 	}
 
-	// When ChatAgent signals plugin completion via __end__, emit plugin_completed
+	// When ChatAgent signals plugin completion via __end__, emit workflow_completed
 	// to the conversation event stream so the frontend can close the plugin panel.
-	if pluginCompleted {
+	if workflowCompleted {
 		_ = AppendConvEvent(ctx, stateStore, convID, &ConvEvent{
-			Type: "plugin_completed",
+			Type: "workflow_completed",
 			Payload: map[string]any{
-				"session_id": sessionID,
-				"plugin_id":  params.PluginID,
+				"session_id":  sessionID,
+				"workflow_id": params.WorkflowID,
 			},
 		})
 		return nil, nil
@@ -2044,31 +2241,31 @@ func handlePluginStepCreated(
 	// Fetch the created task for the notice.
 	task, getErr := subagent.GetTask(ctx, db, taskID)
 	if getErr != nil {
-		fmt.Printf("[Core] [PLUGIN_STEP_GET_TASK_FAILED] err=%v\n", getErr)
+		fmt.Printf("[Core] [WORKFLOW_STEP_GET_TASK_FAILED] err=%v\n", getErr)
 		return nil, fmt.Errorf("plugin step was accepted but task lookup failed: %w", getErr)
 	}
 	return &TaskCreatedNotice{
 		TaskID:            task.ID,
 		TriggerHistoryID:  task.TriggerHistoryID,
 		Title:             task.Title,
-		AgentType:         "plugin_step",
+		AgentType:         "workflow_step",
 		Mode:              "manual",
 		Status:            task.Status,
 		SeqInConversation: task.SeqInConversation,
-		PluginSessionID:   sessionID,
+		WorkflowSessionID: sessionID,
 	}, nil
 }
 
-func pluginStepParamsFromEventParams(raw map[string]any) plugin.PluginStepParams {
-	var params plugin.PluginStepParams
+func workflowStepParamsFromEventParams(raw map[string]any) workflow.WorkflowStepParams {
+	var params workflow.WorkflowStepParams
 	if raw == nil {
 		return params
 	}
-	if pid, ok := raw["plugin_id"].(string); ok {
-		params.PluginID = pid
+	if pid, ok := raw["workflow_id"].(string); ok {
+		params.WorkflowID = pid
 	}
-	if v, ok := raw["plugin_ref"].(string); ok {
-		params.PluginRef = v
+	if v, ok := raw["workflow_ref"].(string); ok {
+		params.WorkflowRef = v
 	}
 	if v, ok := raw["revision_id"].(string); ok {
 		params.RevisionID = v
@@ -2150,13 +2347,13 @@ func pluginStepParamsFromEventParams(raw map[string]any) plugin.PluginStepParams
 	return params
 }
 
-// handlePluginPreflightUpdated stores the latest trigger context outside chat history,
+// handleWorkflowPreflightUpdated stores the latest trigger context outside chat history,
 // so long clarification sequences are not lost to agent history compaction.
-func handlePluginPreflightUpdated(
+func handleWorkflowPreflightUpdated(
 	ctx context.Context,
 	db *gorm.DB,
 	convID string,
-	ev *PluginPreflightUpdatedEvent,
+	ev *WorkflowPreflightUpdatedEvent,
 ) {
 	if db == nil || ev == nil || strings.TrimSpace(convID) == "" {
 		return
@@ -2170,15 +2367,15 @@ func handlePluginPreflightUpdated(
 		_ = json.Unmarshal(conv.Ext, &ext)
 	}
 	if ev.Clear {
-		delete(ext, "plugin_preflight")
+		delete(ext, "workflow_preflight")
 	} else if len(ev.Snapshot) > 0 {
-		ext["plugin_preflight"] = ev.Snapshot
+		ext["workflow_preflight"] = ev.Snapshot
 	}
 	raw, _ := json.Marshal(ext)
 	_ = db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
 }
 
-func loadPluginPreflightContext(ctx context.Context, db *gorm.DB, convID string) map[string]any {
+func loadWorkflowPreflightContext(ctx context.Context, db *gorm.DB, convID string) map[string]any {
 	if db == nil || strings.TrimSpace(convID) == "" {
 		return nil
 	}
@@ -2190,7 +2387,7 @@ func loadPluginPreflightContext(ctx context.Context, db *gorm.DB, convID string)
 	if json.Unmarshal(conv.Ext, &ext) != nil {
 		return nil
 	}
-	preflight, _ := ext["plugin_preflight"].(map[string]any)
+	preflight, _ := ext["workflow_preflight"].(map[string]any)
 	return preflight
 }
 
@@ -2338,19 +2535,19 @@ func handleIntentUpdated(ctx context.Context, db *gorm.DB, stateStore state.Stor
 					}
 				}
 			}
-		} else if ev.Scope == "plugin_session" && ev.SessionID != "" {
-			var session orm.PluginSession
+		} else if ev.Scope == "workflow_session" && ev.SessionID != "" {
+			var session orm.WorkflowSession
 			if db.WithContext(ctx).Select("intent_context").Where("id = ?", ev.SessionID).First(&session).Error == nil {
 				doc := map[string]any{}
 				_ = json.Unmarshal([]byte(session.IntentContext), &doc)
 				if updated, err := applyIntentOperations(doc, ev.Operations); err == nil {
 					payload, _ := json.Marshal(updated)
-					_ = db.WithContext(ctx).Model(&orm.PluginSession{}).Where("id = ?", ev.SessionID).
+					_ = db.WithContext(ctx).Model(&orm.WorkflowSession{}).Where("id = ?", ev.SessionID).
 						Updates(map[string]any{"intent_context": string(payload), "updated_at": now}).Error
 				}
 			}
-		} else if ev.Scope == "plugin_step" && ev.SessionID != "" && ev.StepID != "" {
-			var existing orm.PluginStepIntent
+		} else if ev.Scope == "workflow_step" && ev.SessionID != "" && ev.StepID != "" {
+			var existing orm.WorkflowStepIntent
 			doc := map[string]any{}
 			if db.WithContext(ctx).Where("session_id = ? AND step_id = ?", ev.SessionID, ev.StepID).
 				First(&existing).Error == nil {

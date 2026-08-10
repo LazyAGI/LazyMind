@@ -316,6 +316,12 @@ export function useChatConversation({
         result.conversation_id || currentConversationIdRef.current || "";
       const tc = result.task_created;
       const taskStore = useTaskCenterStore.getState();
+      const existingTask = taskStore.getTasks(convId).find(
+        (task) => task.task_id === tc.task_id,
+      );
+      const terminal = existingTask && [
+        "succeeded", "failed", "interrupted", "canceled",
+      ].includes(existingTask.status);
       taskStore.upsertTask(convId, {
         task_id: tc.task_id,
         trigger_history_id: tc.trigger_history_id || result.history_id,
@@ -323,12 +329,12 @@ export function useChatConversation({
         title: tc.title,
         agent_type: tc.agent_type,
         mode: tc.mode,
-        status: tc.status || "pending",
+        ...(terminal ? {} : { status: tc.status || "pending" }),
       });
-      taskStore.subscribeTask(convId, tc.task_id);
-      if (tc.agent_type === "plugin_step" && tc.plugin_session_id) {
-        import("@/modules/chat/store/pluginPanel").then(({ usePluginStore }) => {
-          usePluginStore.getState().loadActiveSession(convId);
+      if (!terminal) taskStore.subscribeTask(convId, tc.task_id);
+      if (tc.agent_type === "workflow_step" && tc.workflow_session_id) {
+        import("@/modules/chat/store/workflowPanel").then(({ useWorkflowStore }) => {
+          useWorkflowStore.getState().loadActiveSession(convId);
         });
       }
     }
@@ -472,6 +478,19 @@ export function useChatConversation({
 
     const updateMessageListInternal = (list: any[]) => {
       const newList = [...list];
+      if (result.history_id) {
+        const lastUserIndex = newList.findLastIndex(
+          (item) => item?.role === RoleTypes.USER,
+        );
+        const lastUser = newList[lastUserIndex];
+        if (lastUserIndex >= 0 && lastUser && !lastUser.history_id) {
+          newList[lastUserIndex] = {
+            ...lastUser,
+            history_id: result.history_id,
+            seq: result.seq,
+          };
+        }
+      }
       let assistantMessage =
         newList.length > 0 ? newList[newList.length - 1] : null;
 
@@ -760,6 +779,14 @@ export function useChatConversation({
         if (detail.conversationId !== currentConversationIdRef.current) {
           return;
         }
+        // Conversation-level events (notably ask_pending) are emitted alongside
+        // the active chat stream. Reopening that same stream here disconnects it
+        // and replays the in-flight assistant turn, which renders the response
+        // twice. A resume is only needed when no chat stream is currently open
+        // (for example, a background auto-chat reaching a user boundary).
+        if (streamManager.hasActiveStream(detail.conversationId)) {
+          return;
+        }
         void syncGeneratingHistory(detail.conversationId).finally(() => {
           void openResumeSSE(detail.conversationId);
         });
@@ -776,6 +803,7 @@ export function useChatConversation({
       text,
       citeMessage: paramsCiteMessage,
       citeMessages: paramsCiteMessages,
+      citeHistoryIds: paramsCiteHistoryIds,
       clearInput = true,
       create_time,
     } = params;
@@ -848,6 +876,9 @@ export function useChatConversation({
       display_delta: normalizedText,
       cite_message: normalizedCiteMessages.join("\n\n"),
       cite_messages: normalizedCiteMessages,
+      cite_history_ids: paramsCiteHistoryIds?.filter(
+        (historyId): historyId is string => Boolean(historyId?.trim()),
+      ),
       role: RoleTypes.USER,
       images: tempGroup?.image,
       files: tempGroup?.file,
@@ -885,6 +916,13 @@ export function useChatConversation({
         ? { thinking_depth: params.thinking_depth }
         : {}),
       ...(params.mentions?.length ? { mentions: params.mentions } : {}),
+      ...(paramsCiteHistoryIds?.length
+        ? {
+            cite_history_ids: paramsCiteHistoryIds.filter(
+              (historyId): historyId is string => Boolean(historyId?.trim()),
+            ),
+          }
+        : {}),
     });
 
     const currentId = currentConversationIdRef.current;
@@ -931,8 +969,8 @@ export function useChatConversation({
     currentConversationIdRef.current = id;
 
     if (id) {
-      import("@/modules/chat/store/pluginPanel").then(({ usePluginStore }) => {
-        usePluginStore.getState().loadActiveSession(id);
+      import("@/modules/chat/store/workflowPanel").then(({ useWorkflowStore }) => {
+        useWorkflowStore.getState().loadActiveSession(id);
       });
     }
 

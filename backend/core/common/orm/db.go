@@ -2,12 +2,17 @@ package orm
 
 import (
 	"fmt"
+	"io"
+	stdlog "log"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 
 	"lazymind/core/log"
 )
@@ -37,7 +42,7 @@ func Connect(driver, dsn string) (*DB, error) {
 	default:
 		return nil, fmt.Errorf("unsupported driver: %s (use postgres, sqlite, mysql)", driver)
 	}
-	db, err := gorm.Open(dialector, &gorm.Config{})
+	db, err := gorm.Open(dialector, &gorm.Config{Logger: newGORMLogger(os.Stdout)})
 	if err != nil {
 		return nil, err
 	}
@@ -59,6 +64,16 @@ func Connect(driver, dsn string) (*DB, error) {
 		}
 	}
 	return &DB{DB: db}, nil
+}
+
+func newGORMLogger(out io.Writer) gormlogger.Interface {
+	return gormlogger.New(stdlog.New(out, "\r\n", stdlog.LstdFlags), gormlogger.Config{
+		SlowThreshold:             200 * time.Millisecond,
+		LogLevel:                  gormlogger.Warn,
+		IgnoreRecordNotFoundError: true,
+		ParameterizedQueries:      true,
+		Colorful:                  true,
+	})
 }
 
 // MustConnect text，Failedtext Fatal Logtext，text main text。

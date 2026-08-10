@@ -1,12 +1,19 @@
-import { CheckOutlined, CopyOutlined, FullscreenOutlined, LoadingOutlined } from "@ant-design/icons";
-import { Modal, Tooltip, message } from "antd";
+import {
+  CheckOutlined,
+  CloseOutlined,
+  CodeOutlined,
+  CopyOutlined,
+  DownloadOutlined,
+  FileTextOutlined,
+  FullscreenOutlined,
+  PlayCircleOutlined,
+} from "@ant-design/icons";
+import { Tooltip, message } from "antd";
 import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
-import {
-  DEVELOPER_ACTIVE_EVENT,
-  isDeveloperModeActive,
-} from "@/utils/developerMode";
+import { downloadStream } from "@/modules/chat/utils/download";
 import { highlightCode } from "./syntaxHighlight";
 
 type HtmlView = "preview" | "source";
@@ -103,62 +110,6 @@ function hasRenderableHtml(code: string) {
   );
 }
 
-function stripBodyBackgroundFromHtml(html: string) {
-  let result = html.replace(/<body\b([^>]*)>/gi, (_match, attrs: string) => {
-    const cleanedAttrs = attrs.replace(
-      /\sstyle\s*=\s*(["'])([\s\S]*?)\1/i,
-      (_styleAttr: string, quote: string, style: string) => {
-        const cleanedStyle = style
-          .replace(
-            /\bbackground(?:-image|-color|-size|-position|-repeat|-attachment)?\s*:[^;]+;?/gi,
-            "",
-          )
-          .trim()
-          .replace(/;\s*;/g, ";");
-        return cleanedStyle ? ` style=${quote}${cleanedStyle}${quote}` : "";
-      },
-    );
-    return `<body${cleanedAttrs}>`;
-  });
-
-  result = result.replace(
-    /<style\b([^>]*)>([\s\S]*?)<\/style>/gi,
-    (_match, attrs: string, css: string) => {
-      const cleanedCss = css.replace(
-        /body\s*\{([^}]*)\}/gi,
-        (_bodyRule: string, declarations: string) => {
-          const cleanedDeclarations = declarations
-            .replace(
-              /\bbackground(?:-image|-color|-size|-position|-repeat|-attachment)?\s*:[^;]+;?/gi,
-              "",
-            )
-            .trim()
-            .replace(/;\s*;/g, ";");
-          return cleanedDeclarations
-            ? `body { ${cleanedDeclarations} }`
-            : "body {}";
-        },
-      );
-      return `<style${attrs}>${cleanedCss}</style>`;
-    },
-  );
-
-  return result;
-}
-
-const PREVIEW_BODY_BG_RESET =
-  '<style data-lazymind-preview-reset>html,body{background:transparent!important;background-image:none!important;}</style>';
-
-function injectPreviewBodyBackgroundReset(html: string) {
-  if (/<\/head>/i.test(html)) {
-    return html.replace(/<\/head>/i, `${PREVIEW_BODY_BG_RESET}</head>`);
-  }
-  if (/<body\b/i.test(html)) {
-    return html.replace(/<body\b/i, `${PREVIEW_BODY_BG_RESET}<body`);
-  }
-  return `${PREVIEW_BODY_BG_RESET}${html}`;
-}
-
 function buildPreviewDocument(code: string) {
   const trimmed = code.trim();
   if (!trimmed) {
@@ -170,9 +121,11 @@ function buildPreviewDocument(code: string) {
     documentHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>${trimmed}</body></html>`;
   }
 
-  documentHtml = stripBodyBackgroundFromHtml(documentHtml);
-  return injectPreviewBodyBackgroundReset(documentHtml);
+  return documentHtml;
 }
+
+const INLINE_PREVIEW_MIN_HEIGHT = 240;
+const INLINE_PREVIEW_MAX_HEIGHT = 560;
 
 function resizeHtmlPreview(iframe: HTMLIFrameElement) {
   try {
@@ -181,15 +134,53 @@ function resizeHtmlPreview(iframe: HTMLIFrameElement) {
       return;
     }
 
-    const height = Math.max(
+    const contentHeight = Math.max(
       doc.documentElement.scrollHeight,
       doc.body?.scrollHeight ?? 0,
-      160,
+      INLINE_PREVIEW_MIN_HEIGHT,
     );
-    iframe.style.height = `${height}px`;
+    iframe.style.height = `${Math.min(contentHeight, INLINE_PREVIEW_MAX_HEIGHT)}px`;
   } catch {
     iframe.style.height = "240px";
   }
+}
+
+function observeHtmlPreviewSize(iframe: HTMLIFrameElement) {
+  const doc = iframe.contentDocument;
+  if (!doc?.documentElement) {
+    return () => undefined;
+  }
+
+  const handleContentLoad = () => resizeHtmlPreview(iframe);
+  resizeHtmlPreview(iframe);
+  doc.addEventListener("load", handleContentLoad, true);
+
+  if (typeof ResizeObserver === "undefined") {
+    return () => doc.removeEventListener("load", handleContentLoad, true);
+  }
+
+  const observer = new ResizeObserver(handleContentLoad);
+  observer.observe(doc.documentElement);
+  if (doc.body) {
+    observer.observe(doc.body);
+  }
+
+  return () => {
+    observer.disconnect();
+    doc.removeEventListener("load", handleContentLoad, true);
+  };
+}
+
+function getHtmlFilename(code: string) {
+  const rawTitle = code.match(/<title\b[^>]*>([^<]+)<\/title>/i)?.[1]?.trim();
+  const safeTitle = rawTitle
+    ?.replace(/[\\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+
+  return `${safeTitle || "preview"}.html`;
 }
 
 const HtmlSource = ({ code }: { code: string }) => {
@@ -212,11 +203,9 @@ const HtmlSource = ({ code }: { code: string }) => {
 const HtmlPreview = ({
   code,
   iframeRef,
-  inline = false,
 }: {
   code: string;
   iframeRef: RefObject<HTMLIFrameElement>;
-  inline?: boolean;
 }) => {
   const { t } = useTranslation();
   const previewDocument = useMemo(() => buildPreviewDocument(code), [code]);
@@ -227,16 +216,24 @@ const HtmlPreview = ({
       return;
     }
 
+    let stopObserving: () => void = () => undefined;
     const handleLoad = () => {
-      resizeHtmlPreview(iframe);
+      stopObserving();
+      stopObserving = observeHtmlPreviewSize(iframe);
     };
 
     iframe.addEventListener("load", handleLoad);
-    return () => iframe.removeEventListener("load", handleLoad);
+    if (iframe.contentDocument?.readyState === "complete") {
+      handleLoad();
+    }
+    return () => {
+      stopObserving();
+      iframe.removeEventListener("load", handleLoad);
+    };
   }, [previewDocument, iframeRef]);
 
   return (
-    <div className={`md-html-preview${inline ? " md-html-preview--inline" : ""}`}>
+    <div className="md-html-preview">
       <iframe
         ref={iframeRef}
         className="md-html-preview-iframe"
@@ -258,48 +255,21 @@ const HtmlBlockComponent = ({
   const { t } = useTranslation();
   const [activeView, setActiveView] = useState<HtmlView>("preview");
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
+  const [workspaceHost, setWorkspaceHost] = useState<HTMLElement | null>(null);
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
-  const modalIframeRef = useRef<HTMLIFrameElement>(null);
+  const fullscreenTriggerRef = useRef<HTMLButtonElement>(null);
+  const workspaceRef = useRef<HTMLElement>(null);
+  const workspaceCloseButtonRef = useRef<HTMLButtonElement>(null);
   const copyResetTimerRef = useRef<number | null>(null);
 
   const canShowPreview = hasRenderableHtml(code);
-  const isGenerating =
-    !canShowPreview && (isStreaming || Boolean(code.trim()));
   const canCopySource = Boolean(code.trim());
+  const canDownload = canCopySource && !isStreaming;
   const previewDocument = useMemo(() => buildPreviewDocument(code), [code]);
-
-  useEffect(() => {
-    const syncDeveloperActive = () => {
-      setDeveloperActive(isDeveloperModeActive());
-    };
-
-    const handleDeveloperActiveChange = (event: Event) => {
-      const nextActive = (event as CustomEvent<{ active?: boolean }>).detail
-        ?.active;
-      setDeveloperActive(
-        typeof nextActive === "boolean" ? nextActive : isDeveloperModeActive(),
-      );
-    };
-
-    window.addEventListener("storage", syncDeveloperActive);
-    window.addEventListener(DEVELOPER_ACTIVE_EVENT, handleDeveloperActiveChange);
-
-    return () => {
-      window.removeEventListener("storage", syncDeveloperActive);
-      window.removeEventListener(
-        DEVELOPER_ACTIVE_EVENT,
-        handleDeveloperActiveChange,
-      );
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!developerActive && activeView === "source") {
-      setActiveView("preview");
-    }
-  }, [activeView, developerActive]);
+  const filename = useMemo(
+    () => getHtmlFilename(isStreaming ? "" : code),
+    [code, isStreaming],
+  );
 
   useEffect(() => {
     setCopyStatus("idle");
@@ -312,6 +282,72 @@ const HtmlBlockComponent = ({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!workspaceHost) {
+      return;
+    }
+
+    const activeBeforeOpen =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    workspaceCloseButtonRef.current?.focus();
+
+    const workspaceElement = workspaceRef.current;
+    const siblingStates = Array.from(workspaceHost.children)
+      .filter((element): element is HTMLElement =>
+        element instanceof HTMLElement && element !== workspaceElement,
+      )
+      .map((element) => ({
+        element,
+        hadInert: element.hasAttribute("inert"),
+        previousAriaHidden: element.getAttribute("aria-hidden"),
+      }));
+
+    siblingStates.forEach(({ element }) => {
+      element.setAttribute("inert", "");
+      element.setAttribute("aria-hidden", "true");
+    });
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      setWorkspaceHost(null);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      siblingStates.forEach(
+        ({ element, hadInert, previousAriaHidden }) => {
+          if (!hadInert) {
+            element.removeAttribute("inert");
+          }
+          if (previousAriaHidden === null) {
+            element.removeAttribute("aria-hidden");
+          } else {
+            element.setAttribute("aria-hidden", previousAriaHidden);
+          }
+        },
+      );
+
+      const focusTarget = fullscreenTriggerRef.current?.isConnected
+        ? fullscreenTriggerRef.current
+        : activeBeforeOpen?.isConnected
+          ? activeBeforeOpen
+          : null;
+      focusTarget?.focus();
+    };
+  }, [workspaceHost]);
+
+  useEffect(() => {
+    if (isStreaming || !canShowPreview) {
+      setWorkspaceHost(null);
+    }
+  }, [canShowPreview, isStreaming]);
 
   const resetCopyStatusLater = () => {
     if (copyResetTimerRef.current) {
@@ -341,132 +377,256 @@ const HtmlBlockComponent = ({
     }
   };
 
+  const handleDownload = () => {
+    if (!canDownload) {
+      return;
+    }
+    downloadStream(
+      new Blob([code], { type: "text/html;charset=utf-8" }),
+      filename,
+    );
+  };
+
+  const handleOpenWorkspace = () => {
+    const mainContent = fullscreenTriggerRef.current?.closest(
+      ".main-layout-body",
+    );
+    setWorkspaceHost(
+      mainContent instanceof HTMLElement ? mainContent : document.body,
+    );
+  };
+
   const renderContent = () => {
-    if (developerActive && activeView === "source") {
+    if (activeView === "source") {
       return <HtmlSource code={code} />;
     }
-    if (canShowPreview) {
+    if (isStreaming) {
       return (
-        <HtmlPreview
-          code={code}
-          iframeRef={previewIframeRef}
-          inline={!developerActive}
-        />
-      );
-    }
-    if (isGenerating) {
-      return (
-        <div
-          className={
-            developerActive
-              ? "md-html-generating md-html-generating--card"
-              : "md-html-generating"
-          }
-          aria-live="polite"
-        >
-          <LoadingOutlined spin className="md-html-generating-icon" />
-          <span>{t("chat.markdownHtmlGenerating")}</span>
+        <div className="md-html-generating" aria-live="polite">
+          <FileTextOutlined className="md-html-generating-icon" />
+          <div className="md-html-generating-content">
+            <span>{t("chat.markdownHtmlGenerating")}</span>
+            <div className="md-html-skeleton" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </div>
+          </div>
         </div>
       );
     }
-    return null;
+    if (canShowPreview) {
+      return <HtmlPreview code={code} iframeRef={previewIframeRef} />;
+    }
+    return (
+      <div className="md-html-empty" role="status">
+        <CodeOutlined />
+        <span>{t("chat.markdownHtmlPreviewUnavailable")}</span>
+      </div>
+    );
   };
 
   return (
-    <div
-      className={`md-html-block${
-        developerActive ? "" : " md-html-block--inline"
-      }`}
-    >
-      {developerActive && (
-        <div className="md-mermaid-toolbar">
-          <div className="md-mermaid-tabs" role="tablist" aria-label={t("chat.markdownHtmlDisplay")}>
+    <section className="md-html-block" aria-label={t("chat.markdownHtmlDisplay")}>
+      <div className="md-html-toolbar">
+        <div className="md-html-file" title={filename}>
+          <FileTextOutlined className="md-html-file-icon" aria-hidden="true" />
+          <span className="md-html-file-name">{filename}</span>
+          <span className="md-html-file-type">HTML</span>
+        </div>
+
+        <div
+          className="md-html-actions"
+          role="group"
+          aria-label={t("chat.markdownHtmlActions")}
+        >
+          <Tooltip title={t("chat.markdownRender")}>
             <button
-              aria-selected={activeView === "preview"}
+              aria-label={t("chat.markdownRender")}
+              aria-pressed={activeView === "preview"}
               className={activeView === "preview" ? "active" : ""}
-              disabled={!canShowPreview && !isStreaming}
-              role="tab"
+              disabled={isStreaming || !canShowPreview}
               type="button"
               onClick={() => setActiveView("preview")}
             >
-              {t("chat.markdownRender")}
+              <PlayCircleOutlined />
             </button>
+          </Tooltip>
+          <Tooltip title={t("chat.markdownSource")}>
             <button
-              aria-selected={activeView === "source"}
+              aria-label={t("chat.markdownSource")}
+              aria-pressed={activeView === "source"}
               className={activeView === "source" ? "active" : ""}
-              role="tab"
+              disabled={!canCopySource}
               type="button"
               onClick={() => setActiveView("source")}
             >
-              {t("chat.markdownSource")}
+              <CodeOutlined />
             </button>
-          </div>
-          <div className="md-mermaid-actions">
-            {canShowPreview && activeView === "preview" && (
+          </Tooltip>
+          {activeView === "source" && (
+            <Tooltip title={t(getCopyTooltip(copyStatus))}>
               <button
-                aria-label={t("chat.markdownEnlargePreview")}
-                className="md-mermaid-icon-button"
+                aria-label={t("chat.markdownCopySource")}
+                className={copyStatus === "copied" ? "copied" : ""}
+                disabled={!canCopySource || copyStatus === "copying"}
                 type="button"
-                onClick={() => setIsModalOpen(true)}
+                onClick={handleCopySource}
               >
-                <FullscreenOutlined />
+                {copyStatus === "copied" ? (
+                  <CheckOutlined />
+                ) : (
+                  <CopyOutlined />
+                )}
               </button>
-            )}
-            {activeView === "source" && (
-              <Tooltip title={t(getCopyTooltip(copyStatus))}>
-                <button
-                  aria-label={t("chat.markdownCopySource")}
-                  className={`md-mermaid-icon-button ${
-                    copyStatus === "copied" ? "copied" : ""
-                  }`}
-                  disabled={!canCopySource || copyStatus === "copying"}
-                  type="button"
-                  onClick={handleCopySource}
-                >
-                  {copyStatus === "copied" ? (
-                    <CheckOutlined />
-                  ) : (
-                    <CopyOutlined />
-                  )}
-                </button>
-              </Tooltip>
-            )}
-            <span className="md-mermaid-copy-status" aria-live="polite">
-              {getCopyAnnouncement(copyStatus) ? t(getCopyAnnouncement(copyStatus)) : ""}
-            </span>
-          </div>
+            </Tooltip>
+          )}
+          <Tooltip title={t("chat.markdownHtmlDownload")}>
+            <button
+              aria-label={t("chat.markdownHtmlDownload")}
+              disabled={!canDownload}
+              type="button"
+              onClick={handleDownload}
+            >
+              <DownloadOutlined />
+            </button>
+          </Tooltip>
+          <Tooltip title={t("chat.markdownEnlargePreview")}>
+            <button
+              ref={fullscreenTriggerRef}
+              aria-label={t("chat.markdownEnlargePreview")}
+              disabled={isStreaming || !canShowPreview}
+              type="button"
+              onClick={handleOpenWorkspace}
+            >
+              <FullscreenOutlined />
+            </button>
+          </Tooltip>
+          <span className="md-mermaid-copy-status" aria-live="polite">
+            {getCopyAnnouncement(copyStatus)
+              ? t(getCopyAnnouncement(copyStatus))
+              : ""}
+          </span>
         </div>
-      )}
+      </div>
 
       {renderContent()}
 
-      <Modal
-        centered
-        className="md-html-modal"
-        footer={null}
-        open={isModalOpen}
-        title={t("chat.markdownHtmlPreview")}
-        width="80vw"
-        onCancel={() => setIsModalOpen(false)}
-      >
-        {canShowPreview && (
-          <div className="md-html-modal-content">
-            <iframe
-              ref={modalIframeRef}
-              className="md-html-preview-iframe"
-              sandbox="allow-same-origin"
-              srcDoc={previewDocument}
-              title={t("chat.markdownHtmlFullscreenPreview")}
-              onLoad={() => {
-                if (modalIframeRef.current) {
-                  resizeHtmlPreview(modalIframeRef.current);
-                }
-              }}
-            />
-          </div>
+      {workspaceHost &&
+        createPortal(
+          <section
+            ref={workspaceRef}
+            aria-label={`${t("chat.markdownHtmlFullscreenPreview")}: ${filename}`}
+            aria-modal="false"
+            className={`rag-markdown md-html-workspace${
+              workspaceHost.tagName === "BODY"
+                ? " md-html-workspace--viewport"
+                : ""
+            }`}
+            role="dialog"
+          >
+            <header className="md-html-workspace-header">
+              <div className="md-html-workspace-primary-actions">
+                <Tooltip title={t("chat.markdownCloseFullscreen")}>
+                  <button
+                    ref={workspaceCloseButtonRef}
+                    aria-label={t("chat.markdownCloseFullscreen")}
+                    className="md-html-workspace-icon-button"
+                    type="button"
+                    onClick={() => setWorkspaceHost(null)}
+                  >
+                    <CloseOutlined />
+                  </button>
+                </Tooltip>
+                <span className="md-html-workspace-divider" aria-hidden="true" />
+                <button
+                  aria-label={
+                    activeView === "preview"
+                      ? t("chat.markdownShowSource")
+                      : t("chat.markdownShowPreview")
+                  }
+                  className="md-html-workspace-view-button"
+                  type="button"
+                  onClick={() =>
+                    setActiveView((view) =>
+                      view === "preview" ? "source" : "preview",
+                    )
+                  }
+                >
+                  {activeView === "preview" ? (
+                    <CodeOutlined />
+                  ) : (
+                    <PlayCircleOutlined />
+                  )}
+                  <span>
+                    {activeView === "preview"
+                      ? t("chat.markdownShowSource")
+                      : t("chat.markdownShowPreview")}
+                  </span>
+                </button>
+              </div>
+
+              <div
+                className="md-html-workspace-secondary-actions"
+                role="group"
+                aria-label={t("chat.markdownHtmlFullscreenActions")}
+              >
+                <Tooltip title={t(getCopyTooltip(copyStatus))}>
+                  <button
+                    aria-label={t("chat.markdownCopySource")}
+                    className={`md-html-workspace-icon-button${
+                      copyStatus === "copied" ? " copied" : ""
+                    }`}
+                    disabled={!canCopySource || copyStatus === "copying"}
+                    type="button"
+                    onClick={handleCopySource}
+                  >
+                    {copyStatus === "copied" ? (
+                      <CheckOutlined />
+                    ) : (
+                      <CopyOutlined />
+                    )}
+                  </button>
+                </Tooltip>
+                <Tooltip title={t("chat.markdownHtmlDownload")}>
+                  <button
+                    aria-label={t("chat.markdownHtmlDownload")}
+                    className="md-html-workspace-icon-button"
+                    disabled={!canDownload}
+                    type="button"
+                    onClick={handleDownload}
+                  >
+                    <DownloadOutlined />
+                  </button>
+                </Tooltip>
+                <span className="md-mermaid-copy-status" aria-live="polite">
+                  {getCopyAnnouncement(copyStatus)
+                    ? t(getCopyAnnouncement(copyStatus))
+                    : ""}
+                </span>
+              </div>
+            </header>
+
+            <div className="md-html-workspace-content">
+              {activeView === "source" ? (
+                <div className="md-html-workspace-source">
+                  <HtmlSource code={code} />
+                </div>
+              ) : (
+                <div className="md-html-workspace-preview-shell">
+                  <iframe
+                    className="md-html-preview-iframe"
+                    sandbox="allow-same-origin"
+                    srcDoc={previewDocument}
+                    title={t("chat.markdownHtmlFullscreenPreview")}
+                  />
+                </div>
+              )}
+            </div>
+          </section>,
+          workspaceHost,
         )}
-      </Modal>
-    </div>
+    </section>
   );
 };
 

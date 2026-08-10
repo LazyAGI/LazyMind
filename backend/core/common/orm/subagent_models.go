@@ -61,10 +61,10 @@ type SubAgentArtifact struct {
 
 func (SubAgentArtifact) TableName() string { return "sub_agent_artifacts" }
 
-// PluginHumanArtifact stores content written by human edits to plugin slots.
+// WorkflowHumanArtifact stores content written by human edits to plugin slots.
 // Structure mirrors SubAgentArtifact but scoped to a session rather than a task.
 // Value format is identical to SubAgentArtifact.Value.
-type PluginHumanArtifact struct {
+type WorkflowHumanArtifact struct {
 	ID          string          `gorm:"column:id;type:varchar(36);primaryKey"`
 	SessionID   string          `gorm:"column:session_id;type:varchar(36);not null"`
 	Slot        string          `gorm:"column:slot;type:varchar(64);not null"`
@@ -74,4 +74,4 @@ type PluginHumanArtifact struct {
 	CreatedAt   time.Time       `gorm:"column:created_at;not null"`
 }
 
-func (PluginHumanArtifact) TableName() string { return "plugin_human_artifacts" }
+func (WorkflowHumanArtifact) TableName() string { return "plugin_human_artifacts" }

@@ -8,7 +8,7 @@ DIST_ROOT="${ROOT}/desktop/dist"
 APP_ICON="${ROOT}/desktop/electron/assets/LazyMind.icns"
 PACKAGE_KIND="${LAZYMIND_DESKTOP_PACKAGE_KIND:-zip}"
 SIGNING_MODE="${LAZYMIND_DESKTOP_SIGNING_MODE:-adhoc}"
-LAZYLLM_VERSION="${LAZYMIND_LAZYLLM_VERSION:-1.2.0a3}"
+LAZYLLM_VERSION="${LAZYMIND_LAZYLLM_VERSION:-1.2.2}"
 RELEASE_BUILD="${LAZYMIND_RELEASE_BUILD:-false}"
 
 GO_BIN="${GO:-go}"
@@ -223,8 +223,14 @@ rsync -a --delete \
 
 prune_runtime_app "${RUNTIME_ROOT}/app"
 assert_desktop_runtime_app "${RUNTIME_ROOT}/app"
+TRUSTED_LOCAL_MODE=false
+if [[ "${LAZYMIND_TRUSTED_LOCAL_MODE:-}" == "true" ]]; then
+  TRUSTED_LOCAL_MODE=true
+  echo "==> Trusted local mode enabled for this desktop package"
+fi
 node "${ROOT}/desktop/scripts/write-runtime-manifest.mjs" \
-  "${RUNTIME_ROOT}" --platform darwin --arch arm64
+  "${RUNTIME_ROOT}" --platform darwin --arch arm64 \
+  --trusted-local-mode "${TRUSTED_LOCAL_MODE}"
 
 echo "==> Packaging Electron app"
 if [[ ! -f "${APP_ICON}" ]]; then

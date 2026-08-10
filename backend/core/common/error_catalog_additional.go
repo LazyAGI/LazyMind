@@ -10,6 +10,13 @@ import (
 )
 
 func init() {
+	registerAdditionalError("executor unauthorized", http.StatusUnauthorized, 2001596)
+	registerAdditionalError("model config unavailable", http.StatusServiceUnavailable, 2001597)
+	registerAdditionalError("invalid task event", http.StatusBadRequest, 2001598)
+	registerAdditionalError("persist task event failed", http.StatusServiceUnavailable, 2001599)
+	registerAdditionalError("required output missing", http.StatusUnprocessableEntity, 2001600)
+	registerAdditionalError("artifact sink requires a database, attempt and slot", http.StatusInternalServerError, 2001993)
+	registerAdditionalError("tool config unavailable", http.StatusServiceUnavailable, 2001994)
 	registerAdditionalError("advance, retry, and rewind require exactly one target", http.StatusUnprocessableEntity, 2001305)
 	registerAdditionalError("algorithm service unavailable", http.StatusBadGateway, 2001306)
 	registerAdditionalError("algorithm_id required", http.StatusBadRequest, 2001307)
@@ -24,7 +31,7 @@ func init() {
 	registerAdditionalError("base_url is required", http.StatusBadRequest, 2001316)
 	registerAdditionalError("build upstream request failed", http.StatusInternalServerError, 2001317)
 	registerAdditionalError("build xlsx template failed", http.StatusInternalServerError, 2001318)
-	registerAdditionalError("built-in plugins cannot be modified", http.StatusForbidden, 2001319)
+	registerAdditionalError("built-in workflows cannot be modified", http.StatusForbidden, 2001319)
 	registerAdditionalError("builtin skill not found", http.StatusNotFound, 2001320)
 	registerAdditionalError("cancel running thread failed", http.StatusBadGateway, 2001321)
 	registerAdditionalError("candidate not found", http.StatusBadRequest, 2001322)
@@ -155,10 +162,10 @@ func init() {
 	registerAdditionalError("plugin id already exists for this user", http.StatusConflict, 2001447)
 	registerAdditionalError("plugin not found", http.StatusNotFound, 2001448)
 	registerAdditionalError("plugin validation failed", http.StatusUnprocessableEntity, 2001449)
-	registerAdditionalError("plugin.yaml id required", http.StatusBadRequest, 2001450)
-	registerAdditionalError("plugin_id is required", http.StatusUnprocessableEntity, 2001451)
-	registerAdditionalErrorAlias("plugin_id required", "plugin_id is required", http.StatusBadRequest, 2001451)
-	registerAdditionalError("plugin_mode must be 'auto' or 'dynamic'", http.StatusBadRequest, 2001453)
+	registerAdditionalError("workflow.yaml id required", http.StatusBadRequest, 2001450)
+	registerAdditionalError("workflow_id is required", http.StatusUnprocessableEntity, 2001451)
+	registerAdditionalErrorAlias("workflow_id required", "workflow_id is required", http.StatusBadRequest, 2001451)
+	registerAdditionalError("workflow_mode must be 'auto' or 'dynamic'", http.StatusBadRequest, 2001453)
 	registerAdditionalError("polish failed", http.StatusInternalServerError, 2001454)
 	registerAdditionalError("post thread action failed", http.StatusBadGateway, 2001455)
 	registerAdditionalError("prepare chat attachments failed", http.StatusBadGateway, 2001456)
@@ -301,6 +308,9 @@ func init() {
 	registerAdditionalError("unsupported ffmpeg archive format", http.StatusBadRequest, 2001591)
 	registerAdditionalErrorPattern("bundled ffmpeg install is not supported on %s/%s", "bundled ffmpeg install is not supported on this platform", http.StatusBadRequest, 2001592)
 	registerAdditionalErrorPattern("downloaded %s binary could not run", "downloaded ffmpeg binary could not run", http.StatusInternalServerError, 2001593)
+	registerAdditionalError("ffmpeg download checksum mismatch", http.StatusBadGateway, 2001594)
+	registerAdditionalError("workflow session has no pinned public revision", http.StatusUnprocessableEntity, 2001595)
+
 }
 
 func registerAdditionalError(message string, status, code int) {

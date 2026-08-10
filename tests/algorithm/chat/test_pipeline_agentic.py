@@ -1,10 +1,21 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 from fastapi.responses import StreamingResponse
 
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.service import chat_service
+
+
+def test_old_request_cleanup_does_not_unregister_newer_chat_session():
+    chat_service._active_sessions['conversation-race'] = 'new-session'
+
+    chat_service._unregister_active_session('conversation-race', 'old-session')
+
+    assert chat_service._active_sessions['conversation-race'] == 'new-session'
+    chat_service._unregister_active_session('conversation-race', 'new-session')
+    assert 'conversation-race' not in chat_service._active_sessions
 
 
 async def _collect_streaming_response(response):
@@ -40,11 +51,33 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
 
     monkeypatch.setattr(chat_service, 'AutoModel', lambda model, config=False: f'{model}:{config}')
     monkeypatch.setattr(chat_service.lazyllm.tools.agent, 'ReactAgent', FakeAgent)
+    monkeypatch.setattr(
+        chat_service,
+        'get_episode_store',
+        lambda: SimpleNamespace(
+            search=lambda *_args, **_kwargs: [],
+            list_recent=lambda *_args, **_kwargs: [],
+            render=lambda _episode: '',
+        ),
+    )
+    monkeypatch.setattr(
+        chat_service,
+        'load_memory_context',
+        lambda: SimpleNamespace(
+            soul='identity:\n  name: LazyMind',
+            profile='identity:\n  preferred_name: null',
+            preference='preferences: []',
+        ),
+    )
 
     async def drive():
         response = await chat_service.handle_chat(ChatRequest(
             message={'query': 'hello', 'history': []},
-            conversation={'session_id': 'sid-1'},
+            conversation={
+                'session_id': 'sid-1',
+                'conversation_id': 'conversation-1',
+                'user_id': 'user-1',
+            },
             retrieval={'filters': {}},
             runtime={'llm_config': {}},
             personalization={'use_memory': True},
@@ -67,7 +100,7 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
                 'available_skills': ['skill-a'],
                 'enable_subagent': False,
             },
-            plugin={'enable_plugin': False},
+            workflow={'enable_workflow': False},
         ))
         return await _collect_streaming_response(response)
 
@@ -77,7 +110,13 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
     assert agent_calls[0]['llm'].startswith('llm:')
     assert agent_calls[0]['tools']
     assert agent_calls[0]['kwargs']['skills'] is False
+    assert callable(agent_calls[0]['kwargs']['extra_stop_condition'])
     assert agent_calls[0]['kwargs']['stream'] is True
+    tool_names = {getattr(tool, '__name__', '') for tool in agent_calls[0]['tools']}
+    assert {'read_file', 'write_file', 'list_dir'} <= tool_names
+    workspace = chat_service.chat_agent_workspace('user-1', 'conversation-1')
+    assert agent_calls[0]['kwargs']['workspace'] == workspace
+    assert f'Use `{workspace}` as the single working directory' in agent_calls[0]['kwargs']['prompt']
     assert '## Attached Files' not in agent_calls[0]['kwargs']['prompt']
     assert '### User Instruction\n\nhello\n\nATTENTION — `ask_user`' in agent_queries[0]
     assert 'answer:### Runtime Context' in body
@@ -127,7 +166,7 @@ def test_task_profile_review_emits_ephemeral_pseudo_stream(monkeypatch):
         runtime={'llm_config': {}, 'thinking_depth': 'medium'},
         personalization={'use_memory': True},
         agent={'enable_subagent': False},
-        plugin={'enable_plugin': False},
+        workflow={'enable_workflow': False},
     )
     original_history = list(request.message.history)
     sensitive_checks = []
@@ -244,7 +283,7 @@ def test_context_prompt_export_and_driver_skip_sensitive_detection(monkeypatch):
         ChatRequest(
             message={'query': '你是傻逼', 'history': []},
             conversation={'session_id': 'sid-driver'},
-            plugin={'plugin_context': {'synthetic_source': 'driver'}},
+            workflow={'workflow_context': {'synthetic_source': 'driver'}},
         ),
     )
 

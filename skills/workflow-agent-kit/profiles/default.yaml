@@ -1,0 +1,11 @@
+version: workflow.v1
+profile: default
+workflow_tools: [workflow_connection_status, list_workflows, get_workflow, list_workflow_inputs, get_workflow_state, get_ready_steps, advance_step, list_artifacts, read_artifact, patch_artifact, list_skills, get_skill_conversion_context, create_workflow_draft, list_workflow_drafts, select_workflow_draft, get_workflow_draft, update_workflow_draft_file, validate_workflow_draft, get_workflow_diagnostics, publish_workflow, list_workflow_versions]
+advance_tools: [advance_step]
+parallel_ready_steps: true
+approval: platform
+handoff: false
+driver: false
+synthetic_turn: false
+shadow_authority: shared
+write_tools: true

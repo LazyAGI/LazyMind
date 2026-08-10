@@ -664,7 +664,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
         </div>
       ),
       dataIndex: "display_name",
-      width: 300,
+      width: 260,
       render: (text: string, record: TreeNode) => {
         const isFolder = record.type === DocTypeEnum.Folder;
         const isExpanded = expandedRowKeys.includes(record.document_id || "");
@@ -758,7 +758,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     {
       title: t("knowledge.tags"),
       dataIndex: "tags",
-      width: 120,
+      width: 110,
       render: (tags: string[], record: TreeNode) => {
         if (record.type === DocTypeEnum.Folder) {
           return <span>-</span>;
@@ -830,7 +830,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     {
       title: t("knowledge.directory"),
       dataIndex: "rel_path",
-      width: 120,
+      width: 140,
       render: (rel_path: string) => {
         const kbName = detail.display_name || "-";
         if (!rel_path?.length) {
@@ -847,7 +847,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     {
       title: t("knowledge.parseStatus"),
       dataIndex: "document_stage",
-      width: 120,
+      width: 100,
       render: (document_stage: string) => {
         const text =
           (DocumentStageEnum[document_stage as keyof typeof DocumentStageEnum]
@@ -869,7 +869,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     {
       title: t("knowledge.docType"),
       dataIndex: "type",
-      width: 120,
+      width: 90,
       render: (type: string, record: TreeNode) => {
         if (type === DocTypeEnum.Folder) {
           return t("knowledge.folder");
@@ -880,7 +880,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     {
       title: t("knowledge.size"),
       dataIndex: "document_size",
-      width: 120,
+      width: 90,
       render: (_: number, record: TreeNode) => {
         return FileUtils.formatFileSize(record.document_size);
       },
@@ -888,18 +888,18 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     {
       title: t("knowledge.updateDate"),
       dataIndex: "update_time",
-      width: 180,
+      width: 155,
       render: (text: string) => moment(text).format(TIME_FORMAT),
     },
     {
       title: t("knowledge.updater"),
       dataIndex: "creator",
-      width: 120,
+      width: 100,
     },
     {
       title: t("common.actions"),
       key: "action",
-      width: 140,
+      width: 110,
       fixed: "right",
       render: (record: TreeNode) => {
         const canDownload =
@@ -1370,7 +1370,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
         }, t)}
         onChange={onTableChange}
         rowKey="document_id"
-        scroll={{ x: 1600, y: "calc(100vh - 380px)" }}
+        scroll={{ x: 1155, y: "calc(100vh - 300px)" }}
         expandable={{
           expandedRowKeys,
           onExpand: (expanded, record) => handleExpand(expanded, record),

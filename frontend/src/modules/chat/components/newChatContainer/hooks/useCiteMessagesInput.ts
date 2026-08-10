@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { message } from "antd";
 import { useTranslation } from "react-i18next";
 import type { RefObject } from "react";
@@ -10,26 +10,37 @@ export function useCiteMessagesInput(
 ) {
   const { t } = useTranslation();
   const [citeMessages, setCiteMessages] = useState<string[]>([]);
+  const [citeHistoryIds, setCiteHistoryIds] = useState<(string | undefined)[]>(
+    [],
+  );
+  const citeMessagesRef = useRef(citeMessages);
+  citeMessagesRef.current = citeMessages;
 
   const handleAddCiteMessage = useCallback(
-    (text: string) => {
+    (text: string, historyId?: string) => {
       const normalizedText = text.trim();
       if (!normalizedText) {
         return;
       }
 
-      setCiteMessages((prev) => {
-        if (prev.length >= MAX_CITE_MESSAGE_COUNT) {
-          message.warning(
-            t("chat.maxCitationsWarning", {
-              count: MAX_CITE_MESSAGE_COUNT,
-            }),
-          );
-          return prev;
-        }
+      // Keep setState pure: warn outside the updater so the tip always surfaces.
+      if (citeMessagesRef.current.length >= MAX_CITE_MESSAGE_COUNT) {
+        message.warning(
+          t("chat.maxCitationsWarning", {
+            count: MAX_CITE_MESSAGE_COUNT,
+          }),
+        );
+        return;
+      }
 
-        return [...prev, normalizedText];
-      });
+      setCiteHistoryIds((prev) =>
+        prev.length >= MAX_CITE_MESSAGE_COUNT
+          ? prev
+          : [...prev, historyId?.trim() || undefined],
+      );
+      setCiteMessages((prev) =>
+        prev.length >= MAX_CITE_MESSAGE_COUNT ? prev : [...prev, normalizedText],
+      );
       requestAnimationFrame(() => {
         chatInputRef.current?.focus();
       });
@@ -39,14 +50,17 @@ export function useCiteMessagesInput(
 
   const handleRemoveCiteMessage = useCallback((index: number) => {
     setCiteMessages((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+    setCiteHistoryIds((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
   }, []);
 
   const clearCiteMessages = useCallback(() => {
     setCiteMessages([]);
+    setCiteHistoryIds([]);
   }, []);
 
   return {
     citeMessages,
+    citeHistoryIds,
     setCiteMessages,
     handleAddCiteMessage,
     handleRemoveCiteMessage,

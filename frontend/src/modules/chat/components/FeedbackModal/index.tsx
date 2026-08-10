@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ChangeEvent } from "react";
 import { Modal, Button, Input, Space, message } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -10,7 +10,8 @@ interface FeedbackModalProps {
   visible: boolean;
   onCancel: () => void;
   onSubmit: (reason: string[], comment: string) => void;
-  
+  initialReason?: string;
+  initialComment?: string;
   submitLoading?: boolean;
 }
 
@@ -29,6 +30,8 @@ const FeedbackModal = ({
   visible,
   onCancel,
   onSubmit,
+  initialReason = "",
+  initialComment = "",
   submitLoading = false,
 }: FeedbackModalProps) => {
   const { t } = useTranslation();
@@ -40,11 +43,16 @@ const FeedbackModal = ({
   const [comment, setComment] = useState("");
 
   useEffect(() => {
-    if (!visible) {
-      setSelectedReasons([]);
-      setComment("");
+    if (visible) {
+      setSelectedReasons(
+        initialReason.split(",").map((value) => value.trim()).filter(Boolean),
+      );
+      setComment(initialComment);
+      return;
     }
-  }, [visible]);
+    setSelectedReasons([]);
+    setComment("");
+  }, [initialComment, initialReason, visible]);
 
   const handleReasonClick = (value: string) => {
     if (selectedReasons.includes(value)) {
@@ -100,11 +108,15 @@ const FeedbackModal = ({
           <TextArea
             placeholder={t("chat.expectedAnswer")}
             value={comment}
-            onChange={(e) => setComment(e.target.value)}
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => (
+              setComment(event.target.value)
+            )}
             rows={6}
             maxLength={200}
             showCount={{
-              formatter: ({ count, maxLength }) => `${count}/${maxLength}`,
+              formatter: ({ count, maxLength }: { count: number; maxLength?: number }) => (
+                `${count}/${maxLength ?? 200}`
+              ),
             }}
           />
         </div>

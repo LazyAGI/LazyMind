@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -16,6 +18,7 @@ from lazymind.model_config import inject_model_config
 
 _MAX_COMMAND_REGISTRY_BYTES = 48 << 10
 _MAX_OUTPUT_SCHEMA_BYTES = 40 << 10
+_logger = logging.getLogger(__name__)
 
 
 class ChannelCommandDescription(BaseModel):
@@ -105,20 +108,19 @@ def classify_channel_intent(request: ChannelIntentRequest) -> ChannelCommandEnve
             ) from exc
         validator = _output_validator(request.command_registry.output_schema)
         prompt = _classification_prompt(request)
-        retry_prompt = (
-            f'{prompt}\n\n'
-            'The previous output did not satisfy output_schema. '
-            'Return a corrected JSON object only.'
-        )
+        attempt_prompt = prompt
         last_failure = 'model'
         last_model_error: Exception | None = None
 
         for attempt in range(2):
             try:
                 raw = model(
-                    prompt if attempt == 0 else retry_prompt,
+                    attempt_prompt,
                     response_format={'type': 'json_object'},
-                    stream_output=False,
+                    # Some configured reasoning models (for example qwq-plus)
+                    # reject non-streaming requests. LazyLLM still merges the
+                    # streamed chunks and returns the final response here.
+                    stream_output=True,
                     temperature=0,
                     timeout=30,
                 )
@@ -131,8 +133,26 @@ def classify_channel_intent(request: ChannelIntentRequest) -> ChannelCommandEnve
                 envelope = ChannelCommandEnvelope.model_validate(_json_object(raw))
                 _validate_envelope(envelope, request.command_registry, validator)
                 return envelope
-            except (JSONSchemaValidationError, TypeError, ValidationError, ValueError):
+            except (
+                JSONSchemaValidationError,
+                TypeError,
+                ValidationError,
+                ValueError,
+            ) as exc:
+                _logger.warning(
+                    'channel_intent_validation_failed attempt=%s '
+                    'error_type=%s',
+                    attempt + 1,
+                    type(exc).__name__,
+                )
                 last_failure = 'output'
+                attempt_prompt = (
+                    f'{prompt}\n\n'
+                    'The previous output did not satisfy output_schema. '
+                    'Correct it using this validator feedback:\n'
+                    f'{_validation_feedback(exc)}\n'
+                    'Return the corrected JSON object only.'
+                )
 
         if last_failure == 'output':
             raise ChannelIntentOutputError(
@@ -213,9 +233,53 @@ def _json_object(raw: Any) -> dict[str, Any]:
     elif isinstance(raw, dict):
         value = raw
     elif isinstance(raw, (str, bytes, bytearray)):
-        value = json.loads(raw)
+        text = (
+            raw.decode('utf-8', errors='replace')
+            if isinstance(raw, (bytes, bytearray))
+            else raw
+        )
+        value = _decode_model_json(text)
     else:
         raise ValueError('model output is not a JSON object')
     if not isinstance(value, dict):
         raise ValueError('model output is not a JSON object')
     return value
+
+
+def _validation_feedback(exc: Exception) -> str:
+    if isinstance(exc, ValidationError):
+        feedback = json.dumps(
+            exc.errors(include_input=False, include_url=False),
+            ensure_ascii=False,
+        )
+    elif isinstance(exc, JSONSchemaValidationError):
+        path = '.'.join(str(item) for item in exc.absolute_path)
+        feedback = f'{path or "<root>"}: {exc.message}'
+    else:
+        feedback = str(exc) or type(exc).__name__
+    return feedback[:2000]
+
+
+def _decode_model_json(text: str) -> dict[str, Any]:
+    """Extract the final command object from JSON or reasoning-model output."""
+
+    cleaned = re.sub(
+        r'<think\b[^>]*>.*?</think>',
+        '',
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    ).strip()
+    fenced = re.findall(
+        r'```(?:json)?\s*(.*?)\s*```',
+        cleaned,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    candidates = [*reversed(fenced), cleaned]
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+    raise ValueError('model output does not contain a JSON command object')

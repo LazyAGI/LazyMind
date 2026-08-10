@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -66,6 +68,30 @@ func CancelSchedule(ctx context.Context, db *gorm.DB, userID, id string) error {
 	return db.WithContext(ctx).Model(&orm.UserSchedule{}).
 		Where("id = ? AND user_id = ?", id, userID).
 		Updates(map[string]any{"enabled": false}).Error
+}
+
+// DeleteSchedule permanently removes a schedule rule and its dependency edges.
+// Historical task-center runs are intentionally kept; they are independent
+// execution records and can still be removed from the task center separately.
+func DeleteSchedule(ctx context.Context, db *gorm.DB, userID, id string) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var schedule orm.UserSchedule
+		if err := tx.Where("id = ? AND user_id = ?", id, userID).First(&schedule).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ? AND (source_schedule_id = ? OR target_schedule_id = ?)", userID, id, id).
+			Delete(&orm.ScheduleDependency{}).Error; err != nil {
+			return err
+		}
+		result := tx.Where("id = ? AND user_id = ?", id, userID).Delete(&orm.UserSchedule{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
 }
 
 // nextCronTime parses a cron expression and returns the next fire time.
@@ -397,22 +423,22 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 }
 
 // createTaskConversation creates a new conversation flagged as is_task_conv=true.
-// Plugin and subagent are explicitly enabled so scheduled tasks always run regardless
+// Workflow and subagent are explicitly enabled so scheduled tasks always run regardless
 // of the user's global chat settings.
 // Returns the new conversation ID, or "" on failure.
 func createTaskConversation(ctx context.Context, db *gorm.DB, userID, promptTemplate string) string {
 	displayName := truncateRunes(promptTemplate, 40, "...")
 	now := time.Now().UTC()
-	enablePlugin := true
-	pluginMode := "auto"
+	enableWorkflow := true
+	workflowMode := "auto"
 	enableSubagent := true
 	conv := orm.Conversation{
 		ID:             common.GeneratePrefixedID("conv_", 36),
 		DisplayName:    displayName,
 		ChannelID:      "default",
 		IsTaskConv:     true,
-		EnablePlugin:   &enablePlugin,
-		PluginMode:     &pluginMode,
+		EnableWorkflow: &enableWorkflow,
+		WorkflowMode:   &workflowMode,
 		EnableSubagent: &enableSubagent,
 		BaseModel: orm.BaseModel{
 			CreateUserID: userID,
@@ -438,16 +464,20 @@ func renderPromptTemplate(tpl string, t time.Time) string {
 }
 
 // sendScheduledChatRequest fires a chat request for a scheduled task in a background
-// goroutine. Status is no longer written here; resolveTaskStatus derives it on read
-// from chat_histories (present = completed, absent + old = failed).
+// goroutine and persists either the finalized output or a concrete failure reason.
 func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBody map[string]any) {
 	coreURL := common.CoreSelfEndpoint() + "/conversations:chat"
-	body, _ := json.Marshal(reqBody)
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		failScheduledTask(db, taskID, "创建任务请求失败："+err.Error())
+		return
+	}
 	reqCtx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, coreURL, bytes.NewReader(body))
 	if err != nil {
 		fmt.Printf("[Scheduler] sendScheduledChatRequest: build request failed for task %s: %v\n", taskID, err)
+		failScheduledTask(db, taskID, "创建任务请求失败："+err.Error())
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -456,19 +486,39 @@ func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBod
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		fmt.Printf("[Scheduler] sendScheduledChatRequest: HTTP error for task %s: %v\n", taskID, err)
+		failScheduledTask(db, taskID, scheduledRequestFailureReason(err))
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		failScheduledTask(db, taskID, fmt.Sprintf("任务请求失败：服务返回 HTTP %d", resp.StatusCode))
 		return
 	}
 	// Drain the response body so the upstream goroutines can finish writing to
-	// Redis and DB before we exit. We do not use the status code to set task
-	// status — resolveTaskStatus handles that on read.
-	buf := make([]byte, 4096)
-	for {
-		if _, err := resp.Body.Read(buf); err != nil {
-			break
-		}
+	// Redis and DB before the task output is finalized.
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		fmt.Printf("[Scheduler] sendScheduledChatRequest: response stream failed for task %s: %v\n", taskID, err)
+		failScheduledTask(db, taskID, scheduledRequestFailureReason(err))
+		return
 	}
-	resp.Body.Close()
 	finalizeTaskOutput(context.Background(), db, taskID, convID)
+}
+
+func scheduledRequestFailureReason(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "任务执行超时（超过2小时）"
+	case errors.Is(err, context.Canceled):
+		return "任务执行被中断"
+	default:
+		return "任务请求失败：" + err.Error()
+	}
+}
+
+func failScheduledTask(db *gorm.DB, taskID, reason string) {
+	if err := taskcenter.UpdateTaskFailure(context.Background(), db, taskID, reason); err != nil {
+		fmt.Printf("[Scheduler] failed to persist failure reason for task %s: %v\n", taskID, err)
+	}
 }
 
 // ── API handlers ──────────────────────────────────────────────────────────────
@@ -627,6 +677,31 @@ func CancelScheduleHandler(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	if err := CancelSchedule(r.Context(), db, userID, id); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, nil)
+}
+
+// DeleteScheduleHandler handles DELETE /schedules/{schedule_id}.
+func DeleteScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "user not found", http.StatusUnauthorized)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/schedules/")
+	if id == "" {
+		common.ReplyErr(w, "schedule_id required", http.StatusBadRequest)
+		return
+	}
+
+	err := DeleteSchedule(r.Context(), store.DB(), userID, id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		common.ReplyErr(w, "schedule not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -155,6 +155,60 @@ def _append_pending_assistant(
     pending_tool_calls.clear()
 
 
+def _drop_incomplete_tool_exchanges(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep only provider-valid assistant tool-call/result groups."""
+    cleaned: list[dict[str, Any]] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        if message.get('role') == 'tool':
+            index += 1
+            continue
+
+        tool_calls = message.get('tool_calls') if message.get('role') == 'assistant' else None
+        if not isinstance(tool_calls, list) or not tool_calls:
+            cleaned.append(message)
+            index += 1
+            continue
+
+        call_ids = [
+            str(tool_call.get('id') or '')
+            for tool_call in tool_calls
+            if isinstance(tool_call, dict)
+        ]
+        expected_ids = set(call_ids)
+        cursor = index + 1
+        results_by_id: dict[str, dict[str, Any]] = {}
+        while cursor < len(messages) and messages[cursor].get('role') == 'tool':
+            result = messages[cursor]
+            result_id = str(result.get('tool_call_id') or '')
+            if result_id in expected_ids and result_id not in results_by_id:
+                results_by_id[result_id] = result
+            cursor += 1
+
+        complete = (
+            bool(expected_ids)
+            and len(call_ids) == len(expected_ids)
+            and set(results_by_id) == expected_ids
+        )
+        if complete:
+            cleaned.append(message)
+            cleaned.extend(results_by_id[call_id] for call_id in call_ids)
+        else:
+            assistant_without_calls = {
+                key: value for key, value in message.items() if key != 'tool_calls'
+            }
+            if (
+                str(assistant_without_calls.get('content') or '').strip()
+                or str(assistant_without_calls.get('reasoning_content') or '').strip()
+            ):
+                cleaned.append(assistant_without_calls)
+        index = cursor
+    return cleaned
+
+
 def normalize_history_for_agent(
     history: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -237,4 +291,4 @@ def normalize_history_for_agent(
         content = _history_message_content(message)
         if content:
             normalized.append({'role': role or 'assistant', 'content': content})
-    return normalized
+    return _drop_incomplete_tool_exchanges(normalized)

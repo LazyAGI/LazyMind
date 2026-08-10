@@ -3,8 +3,8 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from lazymind.common.skill_document import require_valid_skill_document
-from lazymind.common.skill_storage_key import parse_skill_storage_key
+from lazymind.common.skill.document import require_valid_skill_document
+from lazymind.common.skill.storage_key import parse_skill_storage_key
 from lazymind.review.skill_organize.config import MAX_SKILL_ORGANIZE_LIMIT
 from lazymind.review.skill_organize.schemas import (
     SkillFsDraft,

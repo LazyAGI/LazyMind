@@ -30,6 +30,7 @@ func buildOpenAPISpecFromRouter(r *mux.Router) ([]byte, error) {
 	overlayOpenAPISpec(spec, operationSpec)
 	pruneUnregisteredOpenAPIPaths(spec, registeredRoutes)
 	removeAgentLegacyOpenAPISchemas(spec)
+	removePrivateOpenAPISchemas(spec)
 	paths := getOrCreateObject(spec, "paths")
 
 	err = r.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
@@ -112,7 +113,10 @@ func collectOpenAPIRouteMethods(r *mux.Router) (map[string]map[string]struct{}, 
 }
 
 func skipOpenAPIRoute(path string) bool {
-	return strings.HasPrefix(path, "/openapi") || path == "/docs"
+	return strings.HasPrefix(path, "/openapi") ||
+		path == "/docs" ||
+		strings.HasPrefix(path, "/internal/") ||
+		strings.HasPrefix(path, "/remote-fs/")
 }
 
 func pruneUnregisteredOpenAPIPaths(spec map[string]any, registeredRoutes map[string]map[string]struct{}) {
@@ -199,6 +203,22 @@ func removeAgentLegacyOpenAPISchemas(spec map[string]any) {
 		"agentTraceSummaryOpenAPIResponse",
 	} {
 		delete(schemas, name)
+	}
+}
+
+func removePrivateOpenAPISchemas(spec map[string]any) {
+	components, ok := spec["components"].(map[string]any)
+	if !ok {
+		return
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		return
+	}
+	for name := range schemas {
+		if strings.HasPrefix(strings.ToLower(name), "remotefs") {
+			delete(schemas, name)
+		}
 	}
 }
 

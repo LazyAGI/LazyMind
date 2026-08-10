@@ -1,8 +1,19 @@
 import json
+import os
 from pathlib import Path
 
 from lazymind.chat.engine.tools import multimodal
 from lazymind.common import ffmpeg_deps
+
+
+def _fake_binary_names():
+    return ('ffmpeg.exe', 'ffprobe.exe') if os.name == 'nt' else ('ffmpeg', 'ffprobe')
+
+
+def test_windows_ffmpeg_binary_names_can_be_checked_cross_platform(monkeypatch):
+    monkeypatch.setattr(ffmpeg_deps.os, 'name', 'nt')
+
+    assert ffmpeg_deps._binary_names() == ('ffmpeg.exe', 'ffprobe.exe')
 
 
 def test_video_to_gif_returns_dependency_error_when_ffmpeg_is_missing(monkeypatch):
@@ -26,8 +37,9 @@ def test_resolve_ffmpeg_binaries_reads_bundled_install_without_path(monkeypatch,
     upload_root.mkdir(parents=True)
     bin_dir = runtime_root / 'deps' / 'ffmpeg' / 'bin'
     bin_dir.mkdir(parents=True)
-    ffmpeg = bin_dir / 'ffmpeg'
-    ffprobe = bin_dir / 'ffprobe'
+    ffmpeg_name, ffprobe_name = _fake_binary_names()
+    ffmpeg = bin_dir / ffmpeg_name
+    ffprobe = bin_dir / ffprobe_name
     ffmpeg.write_text('#!/bin/sh\n')
     ffprobe.write_text('#!/bin/sh\n')
     ffmpeg.chmod(0o755)
@@ -61,8 +73,9 @@ def test_resolve_ffmpeg_binaries_prefers_custom_path(monkeypatch, tmp_path):
     upload_root.mkdir(parents=True)
     custom_dir = runtime_root / 'custom'
     custom_dir.mkdir()
-    ffmpeg = custom_dir / 'ffmpeg'
-    ffprobe = custom_dir / 'ffprobe'
+    ffmpeg_name, ffprobe_name = _fake_binary_names()
+    ffmpeg = custom_dir / ffmpeg_name
+    ffprobe = custom_dir / ffprobe_name
     ffmpeg.write_text('#!/bin/sh\n')
     ffprobe.write_text('#!/bin/sh\n')
     ffmpeg.chmod(0o755)

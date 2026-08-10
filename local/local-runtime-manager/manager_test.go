@@ -48,6 +48,13 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func sameDirectory(t *testing.T, left, right string) bool {
+	t.Helper()
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
+}
+
 func TestRuntimeConfigUsesPlatformUserPathsByDefault(t *testing.T) {
 	repo := t.TempDir()
 	home := filepath.Join(t.TempDir(), "home")
@@ -245,12 +252,9 @@ func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	if paths.FileWatcherBaseRoot != filepath.Join(runtimeRoot, "data", "stores", "scan", "file-watcher") {
 		t.Fatalf("file watcher base root = %q", paths.FileWatcherBaseRoot)
 	}
-	wantLogSuffix := filepath.Join("LazyMind")
-	if runtime.GOOS == "windows" {
-		wantLogSuffix = filepath.Join("LazyMind", "Logs")
-	}
-	if !strings.HasSuffix(paths.LogsDir, wantLogSuffix) {
-		t.Fatalf("desktop logs dir should use platform log root, got %q", paths.LogsDir)
+	wantLogsDir := defaultRuntimePathLayout().LogsRoot
+	if paths.LogsDir != wantLogsDir {
+		t.Fatalf("desktop logs dir = %q, want platform log root %q", paths.LogsDir, wantLogsDir)
 	}
 	if strings.HasPrefix(paths.FileWatcherBaseRoot, repo+string(os.PathSeparator)) {
 		t.Fatalf("desktop file watcher base root must not be under bundled repo root: %q", paths.FileWatcherBaseRoot)
@@ -564,7 +568,7 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 	}
 }
 
-func TestInstallerWarmupGeneratesReducedProcessGraph(t *testing.T) {
+func TestInstallerWarmupGeneratesCompleteProcessGraph(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
@@ -590,19 +594,17 @@ func TestInstallerWarmupGeneratesReducedProcessGraph(t *testing.T) {
 		channelGatewayProcessName,
 		coreProcessName,
 		frontendProcessName,
+		scanControlPlaneProcessName,
+		fileWatcherProcessName,
 		milvusLiteProcessName,
 		processorServerProcessName,
+		processorWorkerProcessName,
 		algoProcessName,
 		docServerProcessName,
 		chatProcessName,
 	} {
 		if _, ok := parsed.Processes[name]; !ok {
 			t.Fatalf("warmup graph missing process %s", name)
-		}
-	}
-	for _, name := range []string{fileWatcherProcessName, scanControlPlaneProcessName, processorWorkerProcessName} {
-		if _, ok := parsed.Processes[name]; ok {
-			t.Fatalf("warmup graph unexpectedly contains process %s", name)
 		}
 	}
 	for name, process := range parsed.Processes {
@@ -614,7 +616,7 @@ func TestInstallerWarmupGeneratesReducedProcessGraph(t *testing.T) {
 	}
 }
 
-func TestInstallerWarmupDoesNotCreateFileWatcherImportDirectory(t *testing.T) {
+func TestInstallerWarmupCreatesFileWatcherImportDirectory(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
@@ -629,8 +631,8 @@ func TestInstallerWarmupDoesNotCreateFileWatcherImportDirectory(t *testing.T) {
 	if err := ensureRuntimeDirs(cfg, paths); err != nil {
 		t.Fatalf("ensure runtime dirs: %v", err)
 	}
-	if _, err := os.Stat(cfg.FileWatcher.WatchHostDir); !os.IsNotExist(err) {
-		t.Fatalf("warmup touched file watcher import directory %q: %v", cfg.FileWatcher.WatchHostDir, err)
+	if info, err := os.Stat(cfg.FileWatcher.WatchHostDir); err != nil || !info.IsDir() {
+		t.Fatalf("warmup did not create file watcher import directory %q: %v", cfg.FileWatcher.WatchHostDir, err)
 	}
 }
 
@@ -1188,7 +1190,7 @@ func TestPrepareFrontendNodeModulesLinksSourceTreeToRuntimeRoot(t *testing.T) {
 	if !ok {
 		t.Fatalf("node_modules should be a symlink into runtime root")
 	}
-	if target != frontendRuntimeNodeModules(paths) {
+	if !sameDirectory(t, target, frontendRuntimeNodeModules(paths)) {
 		t.Fatalf("node_modules symlink = %q, want %q", target, frontendRuntimeNodeModules(paths))
 	}
 }
@@ -1230,7 +1232,7 @@ func TestPrepareFrontendNodeModulesKeepsRuntimeRootSymlink(t *testing.T) {
 		t.Fatalf("prepare frontend node_modules: %v", err)
 	}
 	target, ok := directoryLinkTarget(nodeModules)
-	if !ok || target != runtimeNodeModules {
+	if !ok || !sameDirectory(t, target, runtimeNodeModules) {
 		t.Fatalf("node_modules symlink = %q ok=%v, want %q", target, ok, runtimeNodeModules)
 	}
 	if ready, reason, err := frontendNodeModulesReady(paths, frontendDir); err != nil || !ready {

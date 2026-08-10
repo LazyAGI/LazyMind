@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"gorm.io/gorm"
-
-	"lazymind/core/common/orm"
 )
 
 // TestParseSkillFrontmatter_OK parses valid frontmatter with name, description and body.
@@ -73,117 +71,6 @@ func TestParseSkillFrontmatter_InvalidYAML(t *testing.T) {
 	_, err := parseSkillFrontmatter(content)
 	if err == nil {
 		t.Fatal("expected error for invalid yaml")
-	}
-}
-
-// TestNormalizeReviewTarget maps known resource types correctly.
-func TestNormalizeReviewTarget(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{orm.ResourceUpdateResourceTypeMemory, orm.ResourceUpdateResourceTypeMemory},
-		{orm.ResourceUpdateResourceTypeUserPreference, orm.ResourceUpdateResourceTypeUserPreference},
-		{"  memory  ", orm.ResourceUpdateResourceTypeMemory},
-		{"  user_preference  ", orm.ResourceUpdateResourceTypeUserPreference},
-		{"unknown_type", "unknown_type"},
-		{"", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			if got := normalizeReviewTarget(tt.input); got != tt.want {
-				t.Fatalf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestIsAutoApplyActiveStatus checks statuses that allow auto-apply.
-func TestIsAutoApplyActiveStatus(t *testing.T) {
-	tests := []struct {
-		status string
-		want   bool
-	}{
-		{orm.ResourceUpdateTaskStatusPending, true},
-		{orm.ResourceUpdateTaskStatusRunning, true},
-		{orm.ResourceUpdateTaskStatusDone, false},
-		{"unknown", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.status, func(t *testing.T) {
-			if got := isAutoApplyActiveStatus(tt.status); got != tt.want {
-				t.Fatalf("got %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestNullableString returns nil for empty/whitespace and pointer for non-empty.
-func TestNullableString(t *testing.T) {
-	tests := []struct {
-		input string
-		isNil bool
-	}{
-		{"hello", false},
-		{"", true},
-		{"  ", true},
-		{"  value  ", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := nullableString(tt.input)
-			if tt.isNil && got != nil {
-				t.Fatalf("got %q, want nil", *got)
-			}
-			if !tt.isNil && got == nil {
-				t.Fatal("got nil, want non-nil")
-			}
-			if got != nil && *got != "value" && tt.input == "  value  " {
-				t.Fatalf("got %q, want \"value\"", *got)
-			}
-		})
-	}
-}
-
-// TestPersonalResourcePath returns correct path for each resource type.
-func TestPersonalResourcePath(t *testing.T) {
-	tests := []struct {
-		target string
-		want   string
-	}{
-		{orm.ResourceUpdateResourceTypeMemory, "memory/memory.md"},
-		{orm.ResourceUpdateResourceTypeUserPreference, "memory/user.md"},
-		{"unknown", "memory/memory.md"},
-		{"", "memory/memory.md"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.target, func(t *testing.T) {
-			if got := personalResourcePath(tt.target); got != tt.want {
-				t.Fatalf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestTaskReviewResultID uses ReviewResultID when available.
-func TestTaskReviewResultID(t *testing.T) {
-	// Prefer ReviewResultID
-	task := orm.ResourceUpdateTask{ReviewResultID: "review-1", TriggerID: "trigger-1"}
-	if got := taskReviewResultID(task); got != "review-1" {
-		t.Fatalf("got %q, want review-1", got)
-	}
-
-	// Fallback to TriggerID
-	task2 := orm.ResourceUpdateTask{ReviewResultID: "", TriggerID: "trigger-2"}
-	if got := taskReviewResultID(task2); got != "trigger-2" {
-		t.Fatalf("got %q, want trigger-2", got)
-	}
-
-	// Both empty/whitespace
-	task3 := orm.ResourceUpdateTask{ReviewResultID: "  ", TriggerID: "  "}
-	if got := taskReviewResultID(task3); got != "" {
-		t.Fatalf("got %q, want empty", got)
 	}
 }
 

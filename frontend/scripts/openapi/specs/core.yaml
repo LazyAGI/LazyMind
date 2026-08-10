@@ -495,26 +495,6 @@ components:
                         type: string
                     type: array
             type: object
-        CommitResponse:
-            properties:
-                content:
-                    type: string
-                path:
-                    type: string
-                ref:
-                    $ref: '#/components/schemas/ResourceRef'
-                revision_id:
-                    type: string
-                revision_no:
-                    format: int64
-                    type: integer
-            required:
-                - content
-                - path
-                - ref
-                - revision_id
-                - revision_no
-            type: object
         CompleteUploadRequest:
             properties:
                 auto_start:
@@ -743,6 +723,41 @@ components:
         ConversationSwitchStatusResponse:
             properties:
                 status:
+                    type: integer
+            type: object
+        ConversationTrailItem:
+            properties:
+                create_time:
+                    type: string
+                depth:
+                    type: integer
+                history_id:
+                    type: string
+                parent_history_id:
+                    type: string
+                question:
+                    type: string
+                seq:
+                    type: integer
+                source:
+                    type: string
+                summary:
+                    type: string
+            type: object
+        ConversationTrailListResponse:
+            properties:
+                conversation_id:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/ConversationTrailItem'
+                    type: array
+                name:
+                    type: string
+                next_page_token:
+                    type: string
+                total_size:
+                    format: int64
                     type: integer
             type: object
         CreateEvalSetByImportRequest:
@@ -998,6 +1013,364 @@ components:
                 - id
                 - word
             type: object
+        CurrentMemoryAvatarData:
+            properties:
+                content_type:
+                    enum:
+                        - image/png
+                        - image/jpeg
+                        - image/webp
+                    type: string
+                kind:
+                    enum:
+                        - soul
+                        - profile
+                    type: string
+                size:
+                    format: int64
+                    type: integer
+                updated_at:
+                    format: int64
+                    type: integer
+            required:
+                - kind
+                - content_type
+                - size
+                - updated_at
+            type: object
+        CurrentMemoryAvatarResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CurrentMemoryAvatarData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CurrentMemoryConflictData:
+            properties:
+                current_etag:
+                    type: string
+            type: object
+        CurrentMemoryDocument:
+            additionalProperties:
+                oneOf:
+                    - nullable: true
+                      type: string
+                    - items:
+                        type: string
+                      type: array
+                    - $ref: '#/components/schemas/CurrentMemoryDocument'
+            type: object
+        CurrentMemoryErrorResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CurrentMemoryConflictData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
+        CurrentMemoryLocalizedText:
+            additionalProperties:
+                type: string
+            type: object
+        CurrentMemoryOperation:
+            properties:
+                op:
+                    enum:
+                        - set
+                        - clear
+                        - add
+                        - remove
+                    type: string
+                path:
+                    type: string
+                value:
+                    type: string
+            required:
+                - op
+                - path
+            type: object
+        CurrentMemoryOperationsRequest:
+            properties:
+                operations:
+                    items:
+                        $ref: '#/components/schemas/CurrentMemoryOperation'
+                    type: array
+            required:
+                - operations
+            type: object
+        CurrentMemoryPreferenceDetailData:
+            properties:
+                item:
+                    $ref: '#/components/schemas/CurrentMemoryPreferenceItem'
+                reference:
+                    allOf:
+                        - $ref: '#/components/schemas/CurrentMemoryReference'
+                    nullable: true
+                reference_status:
+                    enum:
+                        - available
+                        - missing
+                    type: string
+            required:
+                - item
+                - reference_status
+                - reference
+            type: object
+        CurrentMemoryPreferenceDetailResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CurrentMemoryPreferenceDetailData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CurrentMemoryPreferenceItem:
+            properties:
+                created_at:
+                    format: date-time
+                    type: string
+                name:
+                    type: string
+                summary:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - name
+                - summary
+                - created_at
+                - updated_at
+            type: object
+        CurrentMemoryPreferenceListData:
+            properties:
+                etag:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/CurrentMemoryPreferenceItem'
+                    type: array
+                resident_index_usage:
+                    $ref: '#/components/schemas/CurrentMemoryPreferenceResidentIndexUsage'
+                total_size:
+                    format: int64
+                    type: integer
+                updated_at:
+                    format: int64
+                    type: integer
+            required:
+                - items
+                - total_size
+                - resident_index_usage
+                - etag
+                - updated_at
+            type: object
+        CurrentMemoryPreferenceListResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CurrentMemoryPreferenceListData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CurrentMemoryPreferenceOrderRequest:
+            properties:
+                expected_etag:
+                    type: string
+                ordered_names:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - ordered_names
+                - expected_etag
+            type: object
+        CurrentMemoryPreferenceResidentIndexUsage:
+            properties:
+                max_items:
+                    format: int64
+                    type: integer
+                over_limit:
+                    type: boolean
+                used_items:
+                    format: int64
+                    type: integer
+            required:
+                - used_items
+                - max_items
+                - over_limit
+            type: object
+        CurrentMemoryPresentation:
+            properties:
+                fallbacks:
+                    additionalProperties:
+                        $ref: '#/components/schemas/CurrentMemoryLocalizedText'
+                    type: object
+                sections:
+                    items:
+                        $ref: '#/components/schemas/CurrentMemoryPresentationSection'
+                    type: array
+            required:
+                - fallbacks
+                - sections
+            type: object
+        CurrentMemoryPresentationField:
+            properties:
+                labels:
+                    $ref: '#/components/schemas/CurrentMemoryLocalizedText'
+                path:
+                    type: string
+                summary_role:
+                    enum:
+                        - title
+                        - subtitle
+                        - description
+                        - tag
+                        - none
+                    type: string
+            required:
+                - path
+                - labels
+                - summary_role
+            type: object
+        CurrentMemoryPresentationSection:
+            properties:
+                fields:
+                    items:
+                        $ref: '#/components/schemas/CurrentMemoryPresentationField'
+                    type: array
+                labels:
+                    $ref: '#/components/schemas/CurrentMemoryLocalizedText'
+                path:
+                    type: string
+            required:
+                - path
+                - labels
+                - fields
+            type: object
+        CurrentMemoryProfileData:
+            properties:
+                document:
+                    $ref: '#/components/schemas/CurrentMemoryDocument'
+                presentation:
+                    $ref: '#/components/schemas/CurrentMemoryPresentation'
+                template_version:
+                    type: integer
+                updated_at:
+                    format: int64
+                    type: integer
+            required:
+                - document
+                - template_version
+                - presentation
+                - updated_at
+            type: object
+        CurrentMemoryProfileResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CurrentMemoryProfileData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CurrentMemoryReference:
+            properties:
+                application_scenarios:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                name:
+                    type: string
+                preference_details:
+                    type: string
+                reason:
+                    type: string
+                source:
+                    $ref: '#/components/schemas/CurrentMemoryReferenceSource'
+                summary:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - name
+                - summary
+                - created_at
+                - updated_at
+                - source
+                - application_scenarios
+                - preference_details
+                - reason
+            type: object
+        CurrentMemoryReferenceSource:
+            properties:
+                conversation_id:
+                    type: string
+                kind:
+                    enum:
+                        - memory_review
+                        - chat_explicit
+                    type: string
+            required:
+                - kind
+                - conversation_id
+            type: object
+        CurrentMemorySoulData:
+            properties:
+                document:
+                    $ref: '#/components/schemas/CurrentMemoryDocument'
+                presentation:
+                    $ref: '#/components/schemas/CurrentMemoryPresentation'
+                template_version:
+                    type: integer
+                updated_at:
+                    format: int64
+                    type: integer
+            required:
+                - document
+                - template_version
+                - presentation
+                - updated_at
+            type: object
+        CurrentMemorySoulResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CurrentMemorySoulData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
         DatabaseConnectionRequest:
             properties:
                 database_name:
@@ -1246,39 +1619,6 @@ components:
                 - deleted_rows
                 - group_id
             type: object
-        DiffEntryLine:
-            properties:
-                decision:
-                    type: string
-                display_no_new_line_warning:
-                    type: boolean
-                html:
-                    type: string
-                hunk_id:
-                    type: string
-                new_line:
-                    type: integer
-                new_lines:
-                    type: integer
-                new_start:
-                    type: integer
-                old_line:
-                    type: integer
-                old_lines:
-                    type: integer
-                old_start:
-                    type: integer
-                text:
-                    type: string
-                type:
-                    type: string
-            required:
-                - html
-                - new_line
-                - old_line
-                - text
-                - type
-            type: object
         DiscoverResponse:
             properties:
                 success:
@@ -1421,84 +1761,90 @@ components:
                         type: string
                     type: array
             type: object
-        DraftPreviewResponse:
-            properties:
-                accepted_count:
-                    type: integer
-                base_revision_id:
-                    type: string
-                can_undo:
-                    type: boolean
-                draft_content:
-                    type: string
-                draft_status:
-                    type: string
-                draft_version:
-                    format: int64
-                    type: integer
-                file_diff:
-                    $ref: '#/components/schemas/FileDiff'
-                head_content:
-                    type: string
-                path:
-                    type: string
-                pending_count:
-                    type: integer
-                ref:
-                    $ref: '#/components/schemas/ResourceRef'
-                rejected_count:
-                    type: integer
-                resource_type:
-                    type: string
-                review_id:
-                    type: string
-                review_version:
-                    format: int64
-                    type: integer
-            required:
-                - accepted_count
-                - can_undo
-                - draft_content
-                - draft_status
-                - draft_version
-                - file_diff
-                - head_content
-                - path
-                - pending_count
-                - ref
-                - rejected_count
-                - resource_type
-            type: object
-        DraftResponse:
-            properties:
-                base_revision_id:
-                    type: string
-                blob_hash:
-                    type: string
-                content_hash:
-                    type: string
-                draft_status:
-                    type: string
-                draft_updated_at:
-                    format: date-time
-                    type: string
-                draft_version:
-                    format: int64
-                    type: integer
-                path:
-                    type: string
-                ref:
-                    $ref: '#/components/schemas/ResourceRef'
-            required:
-                - blob_hash
-                - content_hash
-                - draft_status
-                - draft_version
-                - path
-                - ref
-            type: object
         EmptyObject:
             properties: {}
+            type: object
+        EpisodeMemory:
+            properties:
+                conversation_id:
+                    type: string
+                episode_type:
+                    enum:
+                        - decision
+                        - progress
+                        - result
+                        - blocker
+                        - event
+                    type: string
+                hit_count:
+                    format: int64
+                    type: integer
+                id:
+                    type: string
+                occurred_at_ms:
+                    format: int64
+                    type: integer
+                recorded_at_ms:
+                    format: int64
+                    type: integer
+                source_kind:
+                    enum:
+                        - chat_explicit
+                        - memory_review
+                    type: string
+                summary:
+                    type: string
+            required:
+                - id
+                - conversation_id
+                - source_kind
+                - episode_type
+                - summary
+                - occurred_at_ms
+                - recorded_at_ms
+                - hit_count
+            type: object
+        EpisodeMemoryDetailResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/EpisodeMemory'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        EpisodeMemoryListData:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/EpisodeMemory'
+                    type: array
+                next_page_token:
+                    type: string
+                total_size:
+                    format: int64
+                    type: integer
+            required:
+                - items
+                - total_size
+                - next_page_token
+            type: object
+        EpisodeMemoryListResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/EpisodeMemoryListData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
             type: object
         ErrorResponse:
             properties:
@@ -1733,84 +2079,6 @@ components:
                     items:
                         type: string
                     type: array
-            type: object
-        FileDiff:
-            properties:
-                binary:
-                    type: boolean
-                diff_entry_lines:
-                    items:
-                        $ref: '#/components/schemas/DiffEntryLine'
-                    type: array
-                editable_text:
-                    type: boolean
-                hunk_count:
-                    type: integer
-                path:
-                    type: string
-                status:
-                    type: string
-                supported:
-                    type: boolean
-                too_large:
-                    type: boolean
-                unsupported_reason:
-                    type: string
-            required:
-                - binary
-                - editable_text
-                - hunk_count
-                - path
-                - status
-                - supported
-                - too_large
-            type: object
-        FileResponse:
-            properties:
-                agent_persona:
-                    type: string
-                binary:
-                    type: boolean
-                blob_hash:
-                    type: string
-                content:
-                    type: string
-                content_hash:
-                    type: string
-                draft_status:
-                    type: string
-                draft_version:
-                    format: int64
-                    type: integer
-                file_type:
-                    type: string
-                mime:
-                    type: string
-                path:
-                    type: string
-                preferred_name:
-                    type: string
-                resource_type:
-                    type: string
-                response_style:
-                    type: string
-                revision_id:
-                    type: string
-                revision_no:
-                    format: int64
-                    type: integer
-                size:
-                    format: int64
-                    type: integer
-            required:
-                - binary
-                - blob_hash
-                - content_hash
-                - file_type
-                - mime
-                - path
-                - resource_type
-                - size
             type: object
         GetKBAuthorizationResponse:
             properties:
@@ -2228,46 +2496,6 @@ components:
                 - description
                 - term
             type: object
-        MetadataResponse:
-            properties:
-                agent_persona:
-                    type: string
-                auto_evo:
-                    type: boolean
-                auto_evo_apply_status:
-                    type: string
-                auto_evo_error:
-                    type: string
-                auto_evo_generation:
-                    format: int64
-                    type: integer
-                enabled_from_off:
-                    type: boolean
-                preferred_name:
-                    type: string
-                ref:
-                    $ref: '#/components/schemas/ResourceRef'
-                resource_id:
-                    type: string
-                response_style:
-                    type: string
-                updated_at:
-                    format: date-time
-                    type: string
-                updated_by:
-                    type: string
-                updated_by_name:
-                    type: string
-            required:
-                - auto_evo
-                - auto_evo_apply_status
-                - auto_evo_error
-                - auto_evo_generation
-                - enabled_from_off
-                - ref
-                - resource_id
-                - updated_at
-            type: object
         ModelFeaturesResponse:
             properties:
                 image_embed_enabled:
@@ -2466,16 +2694,6 @@ components:
                         $ref: '#/components/schemas/QuestionTypeOption'
                     type: array
             type: object
-        ResourceRef:
-            properties:
-                resource_type:
-                    type: string
-                user_id:
-                    type: string
-            required:
-                - resource_type
-                - user_id
-            type: object
         ResumeTaskRequest:
             properties:
                 task_id:
@@ -2651,6 +2869,138 @@ components:
                 - revision_id
                 - revision_no
             type: object
+        RouterAlgorithmTraffic:
+            properties:
+                actual_ratio:
+                    format: double
+                    type: number
+                algorithm_id:
+                    type: string
+                answer_count:
+                    format: int64
+                    type: integer
+                conversation_count:
+                    type: integer
+                dislike_count:
+                    format: int64
+                    type: integer
+                feedback_rate:
+                    format: double
+                    type: number
+                like_count:
+                    format: int64
+                    type: integer
+                positive_rate:
+                    format: double
+                    nullable: true
+                    type: number
+                user_count:
+                    type: integer
+            required:
+                - actual_ratio
+                - algorithm_id
+                - answer_count
+                - conversation_count
+                - dislike_count
+                - feedback_rate
+                - like_count
+                - positive_rate
+                - user_count
+            type: object
+        RouterDislikeReason:
+            properties:
+                algorithm_id:
+                    type: string
+                count:
+                    format: int64
+                    type: integer
+                ratio:
+                    format: double
+                    type: number
+                reason:
+                    type: string
+            required:
+                - algorithm_id
+                - count
+                - ratio
+                - reason
+            type: object
+        RouterTrafficPoint:
+            properties:
+                counts:
+                    additionalProperties:
+                        format: int64
+                        type: integer
+                    type: object
+                time:
+                    type: string
+            required:
+                - counts
+                - time
+            type: object
+        RouterTrafficRange:
+            properties:
+                end_time:
+                    type: string
+                granularity:
+                    enum:
+                        - hour
+                        - day
+                    type: string
+                start_time:
+                    type: string
+            required:
+                - end_time
+                - granularity
+                - start_time
+            type: object
+        RouterTrafficStatsResponse:
+            properties:
+                algorithms:
+                    items:
+                        $ref: '#/components/schemas/RouterAlgorithmTraffic'
+                    type: array
+                dislike_reasons:
+                    items:
+                        $ref: '#/components/schemas/RouterDislikeReason'
+                    type: array
+                range:
+                    $ref: '#/components/schemas/RouterTrafficRange'
+                summary:
+                    $ref: '#/components/schemas/RouterTrafficSummary'
+                trend:
+                    items:
+                        $ref: '#/components/schemas/RouterTrafficPoint'
+                    type: array
+            required:
+                - algorithms
+                - dislike_reasons
+                - range
+                - summary
+                - trend
+            type: object
+        RouterTrafficSummary:
+            properties:
+                answer_count:
+                    format: int64
+                    type: integer
+                conversation_count:
+                    type: integer
+                feedback_count:
+                    format: int64
+                    type: integer
+                feedback_rate:
+                    format: double
+                    type: number
+                user_count:
+                    type: integer
+            required:
+                - answer_count
+                - conversation_count
+                - feedback_count
+                - feedback_rate
+                - user_count
+            type: object
         SearchDatasetMemberRequest:
             properties:
                 is_all:
@@ -2790,6 +3140,116 @@ components:
                     items:
                         $ref: '#/components/schemas/AuthorizationSubjectGrant'
                     type: array
+            type: object
+        ShowcaseCase:
+            properties:
+                attachment_hint:
+                    type: string
+                category:
+                    type: string
+                description:
+                    type: string
+                id:
+                    type: string
+                image_url:
+                    type: string
+                output_label:
+                    type: string
+                output_type:
+                    type: string
+                primary_category:
+                    type: string
+                prompt:
+                    type: string
+                prompt_short:
+                    type: string
+                result_highlights:
+                    items:
+                        type: string
+                    type: array
+                result_summary:
+                    type: string
+                secondary_options:
+                    items:
+                        $ref: '#/components/schemas/ShowcaseCaseOption'
+                    type: array
+                steps:
+                    items:
+                        $ref: '#/components/schemas/ShowcaseCaseStep'
+                    type: array
+                tasks:
+                    items:
+                        $ref: '#/components/schemas/ShowcaseCaseTask'
+                    type: array
+                title:
+                    type: string
+            required:
+                - category
+                - description
+                - id
+                - image_url
+                - output_label
+                - output_type
+                - prompt
+                - prompt_short
+                - result_summary
+                - title
+            type: object
+        ShowcaseCaseListResponse:
+            properties:
+                cases:
+                    items:
+                        $ref: '#/components/schemas/ShowcaseCase'
+                    type: array
+                categories:
+                    items:
+                        type: string
+                    type: array
+                total:
+                    type: integer
+            required:
+                - total
+            type: object
+        ShowcaseCaseOption:
+            properties:
+                description:
+                    type: string
+                id:
+                    type: string
+                label:
+                    type: string
+                prompt:
+                    type: string
+            required:
+                - id
+                - label
+            type: object
+        ShowcaseCaseStep:
+            properties:
+                description:
+                    type: string
+                title:
+                    type: string
+            required:
+                - description
+                - title
+            type: object
+        ShowcaseCaseTask:
+            properties:
+                description:
+                    type: string
+                id:
+                    type: string
+                output_label:
+                    type: string
+                prompt:
+                    type: string
+                title:
+                    type: string
+            required:
+                - description
+                - id
+                - title
             type: object
         StartTaskRequest:
             properties:
@@ -3739,6 +4199,69 @@ components:
                 - installed
                 - name
             type: object
+        channelCommandOpenAPI:
+            properties:
+                description:
+                    type: string
+                name:
+                    type: string
+            required:
+                - description
+                - name
+            type: object
+        channelCommandRegistryOpenAPI:
+            properties:
+                commands:
+                    items:
+                        $ref: '#/components/schemas/channelCommandOpenAPI'
+                    type: array
+                output_schema:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                schema_version:
+                    type: string
+                selection_rules:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - schema_version
+            type: object
+        channelIntentOpenAPIRequest:
+            properties:
+                command_registry:
+                    $ref: '#/components/schemas/channelCommandRegistryOpenAPI'
+                message:
+                    type: string
+                provider:
+                    type: string
+                state:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+            required:
+                - command_registry
+                - message
+                - provider
+            type: object
+        channelIntentOpenAPIResponse:
+            properties:
+                command:
+                    type: string
+                parameters:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                schema_version:
+                    type: string
+            required:
+                - command
+                - schema_version
+            type: object
         checkModelProviderOpenAPIRequest:
             properties:
                 api_key:
@@ -3754,6 +4277,25 @@ components:
                 - base_url
                 - dry_run
                 - provider_name
+            type: object
+        conversationSearchConfigOpenAPIRequest:
+            properties:
+                dataset_ids:
+                    items:
+                        type: string
+                    type: array
+            type: object
+        conversationSearchConfigOpenAPIResponse:
+            properties:
+                conversation_id:
+                    type: string
+                search_config:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+            required:
+                - conversation_id
             type: object
         createModelProviderGroupOpenAPIRequest:
             properties:
@@ -3952,8 +4494,11 @@ components:
                     type: string
                 is_default:
                     type: boolean
+                is_editable:
+                    description: Whether this option supports image editing
+                    type: boolean
                 max_input_tokens:
-                    description: Maximum catalog LLM or VLM input context window, for example 128K or 1M; null for other, custom, or unknown models
+                    description: Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
                     nullable: true
                     type: string
                 model_type:
@@ -3971,6 +4516,7 @@ components:
                 - group_name
                 - id
                 - is_default
+                - is_editable
                 - model_type
                 - name
                 - provider_name
@@ -4038,62 +4584,18 @@ components:
             required:
                 - enabled
             type: object
-        managedStateListOpenAPIResponse:
+        marketDeleteOpenAPIResponse:
             properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/managedStateOpenAPIResponse'
-                    type: array
-            type: object
-        managedStateOpenAPIResponse:
-            properties:
-                agent_persona:
-                    type: string
-                auto_evo:
+                deleted:
                     type: boolean
-                auto_evo_apply_status:
+                market_item_id:
                     type: string
-                auto_evo_error:
+                source_skill_id:
                     type: string
-                auto_evo_generation:
-                    format: int64
-                    type: integer
-                content:
-                    type: string
-                content_summary:
-                    type: string
-                has_pending_review_result:
-                    type: boolean
-                latest_version_change:
-                    $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
-                preferred_name:
-                    type: string
-                resource_id:
-                    type: string
-                resource_type:
-                    type: string
-                response_style:
-                    type: string
-                review_status:
-                    type: string
-                title:
-                    type: string
-                version:
-                    format: int64
-                    type: integer
             required:
-                - auto_evo
-                - auto_evo_apply_status
-                - auto_evo_error
-                - auto_evo_generation
-                - content
-                - content_summary
-                - has_pending_review_result
-                - resource_id
-                - resource_type
-                - review_status
-                - title
-                - version
+                - deleted
+                - market_item_id
+                - source_skill_id
             type: object
         marketEditOpenAPIRequest:
             properties:
@@ -4220,95 +4722,6 @@ components:
             required:
                 - ok
             type: object
-        personalResourceCommitOpenAPIRequest:
-            properties:
-                expected_draft_version:
-                    format: int64
-                    type: integer
-                expected_head_revision_id:
-                    type: string
-                message:
-                    type: string
-                source_ref_id:
-                    type: string
-                source_ref_type:
-                    type: string
-            type: object
-        personalResourceGenerateOpenAPIRequest:
-            properties:
-                user_instruct:
-                    type: string
-            required:
-                - user_instruct
-            type: object
-        personalResourceGenerateOpenAPIResponse:
-            properties:
-                draft_content:
-                    type: string
-                draft_source_version:
-                    format: int64
-                    type: integer
-                draft_status:
-                    type: string
-                draft_version:
-                    format: int64
-                    type: integer
-            required:
-                - draft_content
-                - draft_source_version
-                - draft_status
-                - draft_version
-            type: object
-        personalResourcePatchOpenAPIRequest:
-            properties:
-                agent_persona:
-                    type: string
-                auto_evo:
-                    type: boolean
-                preferred_name:
-                    type: string
-                response_style:
-                    type: string
-            type: object
-        personalResourceReviewActionOpenAPIRequest:
-            properties:
-                expected_review_version:
-                    format: int64
-                    type: integer
-                items:
-                    items:
-                        $ref: '#/components/schemas/ReviewActionItem'
-                    type: array
-            type: object
-        personalResourceReviewUndoOpenAPIRequest:
-            properties:
-                expected_review_version:
-                    format: int64
-                    type: integer
-            type: object
-        personalResourceRollbackOpenAPIRequest:
-            properties:
-                expected_head_revision_id:
-                    type: string
-                message:
-                    type: string
-                revision_id:
-                    type: string
-            required:
-                - revision_id
-            type: object
-        personalResourceWriteDraftOpenAPIRequest:
-            properties:
-                content:
-                    type: string
-                conversation_id:
-                    type: string
-                expected_draft_version:
-                    format: int64
-                    type: integer
-                task_id:
-                    type: string
-            type: object
         personalizationSettingOpenAPIRequest:
             properties:
                 enabled:
@@ -4322,32 +4735,6 @@ components:
                     type: boolean
             required:
                 - enabled
-            type: object
-        pluginRepairPreviewOpenAPIRequest:
-            properties:
-                mode:
-                    type: string
-                target:
-                    type: string
-            required:
-                - mode
-                - target
-            type: object
-        pluginWorkflowConfirmOpenAPIRequest:
-            properties:
-                analysis_id:
-                    type: string
-                candidate_id:
-                    type: string
-                draft_version:
-                    type: integer
-                source_skill_revision_id:
-                    type: string
-            required:
-                - analysis_id
-                - candidate_id
-                - draft_version
-                - source_skill_revision_id
             type: object
         promptCategoryCreateOpenAPIRequest:
             properties:
@@ -4507,101 +4894,6 @@ components:
                 - is_favorite
                 - usage_count
             type: object
-        remoteFSCopyOpenAPIRequest:
-            properties:
-                from:
-                    type: string
-                overwrite:
-                    type: boolean
-                to:
-                    type: string
-            required:
-                - from
-                - overwrite
-                - to
-            type: object
-        remoteFSDirOpenAPIRequest:
-            properties:
-                path:
-                    type: string
-                recursive:
-                    type: boolean
-            required:
-                - path
-                - recursive
-            type: object
-        remoteFSExistsOpenAPIResponse:
-            properties:
-                exists:
-                    type: boolean
-            required:
-                - exists
-            type: object
-        remoteFSInfoOpenAPIResponse:
-            properties:
-                binary:
-                    type: boolean
-                file_type:
-                    type: string
-                mime:
-                    type: string
-                path:
-                    type: string
-                size:
-                    format: int64
-                    type: integer
-                type:
-                    type: string
-            required:
-                - path
-                - type
-            type: object
-        remoteFSItemOpenAPIResponse:
-            properties:
-                binary:
-                    type: boolean
-                file_type:
-                    type: string
-                mime:
-                    type: string
-                name:
-                    type: string
-                path:
-                    type: string
-                size:
-                    format: int64
-                    type: integer
-                type:
-                    type: string
-            required:
-                - name
-                - path
-                - type
-            type: object
-        remoteFSListOpenAPIResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/remoteFSItemOpenAPIResponse'
-                    type: array
-            type: object
-        remoteFSMoveOpenAPIRequest:
-            properties:
-                from:
-                    type: string
-                to:
-                    type: string
-            required:
-                - from
-                - to
-            type: object
-        remoteFSTrashOpenAPIRequest:
-            properties:
-                path:
-                    type: string
-            required:
-                - path
-            type: object
         resourceUpdateTaskOpenAPIResponse:
             properties:
                 attempt_count:
@@ -4660,8 +4952,11 @@ components:
                     type: string
                 group_name:
                     type: string
+                is_editable:
+                    description: Whether the selected model supports image editing
+                    type: boolean
                 max_input_tokens:
-                    description: Maximum selected catalog LLM or VLM input context window, for example 128K or 1M; null for other, custom, or unknown models
+                    description: Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
                     nullable: true
                     type: string
                 model_id:
@@ -4679,6 +4974,7 @@ components:
             required:
                 - base_url
                 - group_name
+                - is_editable
                 - model_id
                 - model_key
                 - name
@@ -5850,6 +6146,23 @@ components:
             required:
                 - ready
             type: object
+        writerDocumentSyncOpenAPIRequest:
+            properties:
+                base_revision:
+                    type: integer
+                revised_document:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                source_document:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+            required:
+                - base_revision
+            type: object
 info:
     description: LazyMind Go backend core API - proxies to algorithm services. text Kong text /api/core。
     title: Backend Core API
@@ -5887,6 +6200,23 @@ paths:
             tags:
                 - skill-market
     /api/core/admin/skill-market/{market_item_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: market_item_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/marketDeleteOpenAPIResponse'
+                    description: Deleted market skill
+            summary: Permanently delete market skill item
+            tags:
+                - skill-market
         patch:
             parameters:
                 - in: path
@@ -6221,6 +6551,40 @@ paths:
             summary: Get Evo router status
             tags:
                 - agent
+    /api/core/agent/router/traffic-stats:
+        get:
+            description: Aggregates persisted single-answer chat histories by the final Router algorithm, excluding task conversations and unattributed legacy rows.
+            parameters:
+                - description: Inclusive UTC RFC3339 start time.
+                  in: query
+                  name: start_time
+                  required: true
+                  schema:
+                    type: string
+                - description: Exclusive UTC RFC3339 end time.
+                  in: query
+                  name: end_time
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: granularity
+                  required: true
+                  schema:
+                    enum:
+                        - hour
+                        - day
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RouterTrafficStatsResponse'
+                    description: Router traffic statistics
+            summary: Get Router traffic statistics
+            tags:
+                - agent
     /api/core/agent/threads:
         get:
             description: List the current user's Core thread index entries. Core refreshes status from Evo when available.
@@ -6538,51 +6902,6 @@ paths:
             summary: List AB test case details for a gate version
             tags:
                 - agent
-    /api/core/agent/threads/{thread_id}/gates/eval/versions/{version}/bad-cases:
-        get:
-            description: Proxies Evo GET /threads/{thread_id}/gates/eval/versions/{version}/bad-cases.
-            parameters:
-                - in: path
-                  name: thread_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: version
-                  required: true
-                  schema:
-                    type: integer
-                - in: query
-                  name: page_size
-                  required: false
-                  schema:
-                    type: integer
-                - in: query
-                  name: page_token
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: keyword
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: failure_type
-                  required: false
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Evo eval bad case page
-            summary: List eval bad cases for a gate version
-            tags:
-                - agent
     /api/core/agent/threads/{thread_id}/messages:
         get:
             description: Proxies Evo GET /threads/{thread_id}/messages.
@@ -6794,6 +7113,35 @@ paths:
             summary: List agent thread steps
             tags:
                 - agent
+    /api/core/automation-groups:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /automation-groups
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /automation-groups
+    /api/core/automation-groups/{group_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /automation-groups/{group_id}
+    /api/core/automation-groups:batch-create:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /automation-groups:batch-create
     /api/core/builtin-skills:
         get:
             description: Lists immutable built-in templates and their installation state for the current user.
@@ -6825,30 +7173,49 @@ paths:
             summary: Enable builtin directory skill
             tags:
                 - skills
+    /api/core/channel-intents:classify:
+        post:
+            description: Classifies an external-channel message against the caller-provided command registry and parameter schemas.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/channelIntentOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/channelIntentOpenAPIResponse'
+                    description: Classified channel command
+            summary: Classify a channel message
+            tags:
+                - channels
     /api/core/chat:
         post:
             responses:
                 "200":
                     description: OK
             summary: POST /chat
-    /api/core/chat/settings/plugins:
+    /api/core/chat/settings/workflows:
         get:
             responses:
                 "200":
                     description: OK
-            summary: GET /chat/settings/plugins
-    /api/core/chat/settings/plugins/{plugin_ref:.+}:
+            summary: GET /chat/settings/workflows
+    /api/core/chat/settings/workflows/{workflow_ref:.+}:
         patch:
             parameters:
                 - in: path
-                  name: plugin_ref:.+
+                  name: workflow_ref:.+
                   required: true
                   schema:
                     type: string
             responses:
                 "200":
                     description: OK
-            summary: PATCH /chat/settings/plugins/{plugin_ref:.+}
+            summary: PATCH /chat/settings/workflows/{workflow_ref:.+}
     /api/core/conversation:export:
         post:
             requestBody:
@@ -6949,7 +7316,7 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/artifacts
-    /api/core/conversations/{conversation_id}/dismissed-plugin-sessions:
+    /api/core/conversations/{conversation_id}/dismissed-workflow-sessions:
         get:
             parameters:
                 - in: path
@@ -6960,7 +7327,7 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: GET /conversations/{conversation_id}/dismissed-plugin-sessions
+            summary: GET /conversations/{conversation_id}/dismissed-workflow-sessions
     /api/core/conversations/{conversation_id}/events:
         get:
             parameters:
@@ -6973,54 +7340,6 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/events
-    /api/core/conversations/{conversation_id}/plugin-sessions:
-        get:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /conversations/{conversation_id}/plugin-sessions
-    /api/core/conversations/{conversation_id}/plugin-sessions:active:
-        get:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /conversations/{conversation_id}/plugin-sessions:active
-    /api/core/conversations/{conversation_id}/plugin-sessions:latest:
-        get:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /conversations/{conversation_id}/plugin-sessions:latest
-    /api/core/conversations/{conversation_id}/plugin-settings:
-        patch:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: PATCH /conversations/{conversation_id}/plugin-settings
     /api/core/conversations/{conversation_id}/tasks:
         get:
             parameters:
@@ -7033,6 +7352,54 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/tasks
+    /api/core/conversations/{conversation_id}/workflow-sessions:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/workflow-sessions
+    /api/core/conversations/{conversation_id}/workflow-sessions:active:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/workflow-sessions:active
+    /api/core/conversations/{conversation_id}/workflow-sessions:latest:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/workflow-sessions:latest
+    /api/core/conversations/{conversation_id}/workflow-settings:
+        patch:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /conversations/{conversation_id}/workflow-settings
     /api/core/conversations/{conversation_id}:status:
         get:
             parameters:
@@ -7061,6 +7428,22 @@ paths:
                 "200":
                     description: OK
             summary: POST /conversations/{conversation_id}:stop
+    /api/core/conversations/{conversation_id}:toolLimitDecision:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Decision forwarded
+            summary: Choose whether to continue after the tool-round limit
     /api/core/conversations/{name}:
         delete:
             parameters:
@@ -7149,6 +7532,60 @@ paths:
                                 $ref: '#/components/schemas/ConversationHistoryListResponse'
                     description: Chat history page ordered by seq descending; may include in-flight turns from Redis
             summary: List conversation history (paginated)
+    /api/core/conversations/{name}:search-config:
+        patch:
+            description: Replaces the knowledge bases on an existing conversation while preserving its other search settings.
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/conversationSearchConfigOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/conversationSearchConfigOpenAPIResponse'
+                    description: Updated conversation search config
+            summary: Update conversation knowledge bases
+            tags:
+                - conversations
+    /api/core/conversations/{name}:trail:
+        get:
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    description: Conversation ID or resource name (e.g. conv-1 or conversations/conv-1; :trail suffix is stripped)
+                    type: string
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    description: Page size (default 20, max 100)
+                    type: integer
+                - in: query
+                  name: page_token
+                  required: false
+                  schema:
+                    description: Pagination offset token from a previous response next_page_token
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationTrailListResponse'
+                    description: Conversation navigation metadata ordered by seq ascending
+            summary: List conversation trail metadata (paginated)
     /api/core/conversations:batchDelete:
         post:
             requestBody:
@@ -7171,6 +7608,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /conversations:chat
+    /api/core/conversations:estimateContextUsage:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /conversations:estimateContextUsage
+    /api/core/conversations:exportContextPrompt:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /conversations:exportContextPrompt
     /api/core/conversations:feedBackChatHistory:
         post:
             requestBody:
@@ -7448,6 +7897,15 @@ paths:
                     items:
                         type: string
                     type: array
+                - description: Filter datasets by creation source.
+                  in: query
+                  name: source
+                  required: false
+                  schema:
+                    enum:
+                        - manual
+                        - cloud
+                    type: string
             responses:
                 "200":
                     content:
@@ -9064,78 +9522,6 @@ paths:
             summary: 'Internal: apply word-group actions in batch (algorithm → core)'
             tags:
                 - word_group
-    /api/core/internal/plugin-sessions/{session_id}/projection:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /internal/plugin-sessions/{session_id}/projection
-    /api/core/internal/plugin-sessions/{session_id}:transition:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /internal/plugin-sessions/{session_id}:transition
-    /api/core/internal/plugin-sessions:plan-start:
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /internal/plugin-sessions:plan-start
-    /api/core/internal/plugin-sessions:start:
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /internal/plugin-sessions:start
-    /api/core/internal/plugin-transition-commands/{command_id}:
-        get:
-            parameters:
-                - in: path
-                  name: command_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /internal/plugin-transition-commands/{command_id}
-    /api/core/internal/subagent/tasks/{task_id}:
-        get:
-            parameters:
-                - in: path
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /internal/subagent/tasks/{task_id}
-    /api/core/internal/subagent/tasks/{task_id}/events:
-        get:
-            parameters:
-                - in: path
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /internal/subagent/tasks/{task_id}/events
     /api/core/kb/{kb_id}/acl:
         get:
             parameters:
@@ -9621,6 +10007,582 @@ paths:
             summary: Discover MCP server tools
             tags:
                 - mcp_servers
+    /api/core/memory/episodes:
+        get:
+            parameters:
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_token
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EpisodeMemoryListResponse'
+                    description: Episode Memory page
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid page size or cursor
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Episode Memory list is unavailable
+            summary: List current user's Episode Memory
+    /api/core/memory/episodes/{episode_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: episode_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: Deleted or already absent
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Episode Memory deletion failed
+            summary: Delete an Episode Memory item
+        get:
+            parameters:
+                - in: path
+                  name: episode_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EpisodeMemoryDetailResponse'
+                    description: Episode Memory item
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Episode Memory item does not exist for this user
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Episode Memory detail is unavailable
+            summary: Get an Episode Memory item
+    /api/core/memory/preferences:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryPreferenceListResponse'
+                    description: Current ordered Preference items
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference index is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Preference index is invalid or unavailable
+            summary: List current user's Preference memory
+    /api/core/memory/preferences/{name}:
+        delete:
+            description: Atomically removes the item and its now-unreferenced reference file. Missing items, including other users' items, are idempotent success.
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: Deleted or already absent
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Preference index is invalid or unavailable
+            summary: Delete a current Preference item
+        get:
+            description: A missing reference file is represented by HTTP 200 with reference_status=missing and reference=null.
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryPreferenceDetailResponse'
+                    description: Preference item detail
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference item is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Preference or reference document is invalid
+            summary: Get a current Preference item and its reference detail
+    /api/core/memory/preferences:order:
+        put:
+            description: ordered_names must be an exact, unnormalized permutation of every current Preference name. expected_etag must equal the list response etag.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CurrentMemoryPreferenceOrderRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryPreferenceListResponse'
+                    description: Reordered Preference items
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: ordered_names is not an exact permutation
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference index is missing
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Preference etag conflict; data.current_etag contains the latest etag
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Preference index is invalid or unavailable
+            summary: Replace the order of current user's Preference items
+    /api/core/memory/profile:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryProfileResponse'
+                    description: Current Profile document
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Profile document is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Profile document is invalid or unavailable
+            summary: Get current user's Profile memory
+        patch:
+            description: Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CurrentMemoryOperationsRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryProfileResponse'
+                    description: Updated Profile document
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Invalid partial Profile document
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Profile document is missing
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Profile document kept changing during the update
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Profile document is invalid or unavailable
+            summary: Apply operations to current user's Profile memory
+    /api/core/memory/profile/avatar:
+        delete:
+            responses:
+                "204":
+                    description: Deleted or already absent
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar deletion failed
+            summary: Delete current user's Profile avatar
+        get:
+            responses:
+                "200":
+                    content:
+                        image/jpeg:
+                            schema:
+                                format: binary
+                                type: string
+                        image/png:
+                            schema:
+                                format: binary
+                                type: string
+                        image/webp:
+                            schema:
+                                format: binary
+                                type: string
+                    description: Profile avatar
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Profile avatar is not configured
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored avatar is invalid or unavailable
+            summary: Get current user's Profile avatar
+        put:
+            requestBody:
+                content:
+                    multipart/form-data:
+                        schema:
+                            properties:
+                                file:
+                                    format: binary
+                                    type: string
+                            required:
+                                - file
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryAvatarResponse'
+                    description: Uploaded avatar metadata
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar file is invalid or unsupported
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar file exceeds 2 MiB
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar upload failed
+            summary: Upload current user's Profile avatar
+    /api/core/memory/soul:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemorySoulResponse'
+                    description: Current Soul document
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Soul document is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Soul document is invalid or unavailable
+            summary: Get current user's Soul memory
+        patch:
+            description: Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CurrentMemoryOperationsRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemorySoulResponse'
+                    description: Updated Soul document
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Invalid partial Soul document
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Soul document is missing
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Soul document kept changing during the update
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored Soul document is invalid or unavailable
+            summary: Apply operations to current user's Soul memory
+    /api/core/memory/soul/avatar:
+        delete:
+            responses:
+                "204":
+                    description: Deleted or already absent
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar deletion failed
+            summary: Delete current user's Soul avatar
+        get:
+            responses:
+                "200":
+                    content:
+                        image/jpeg:
+                            schema:
+                                format: binary
+                                type: string
+                        image/png:
+                            schema:
+                                format: binary
+                                type: string
+                        image/webp:
+                            schema:
+                                format: binary
+                                type: string
+                    description: Soul avatar
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Soul avatar is not configured
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Stored avatar is invalid or unavailable
+            summary: Get current user's Soul avatar
+        put:
+            requestBody:
+                content:
+                    multipart/form-data:
+                        schema:
+                            properties:
+                                file:
+                                    format: binary
+                                    type: string
+                            required:
+                                - file
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryAvatarResponse'
+                    description: Uploaded avatar metadata
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar file is invalid or unsupported
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Gateway user identity is missing
+                "413":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar file exceeds 2 MiB
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CurrentMemoryErrorResponse'
+                    description: Avatar upload failed
+            summary: Upload current user's Soul avatar
     /api/core/model_providers:
         get:
             description: Per-user model provider list. Missing catalog rows are synced from default_model_providers on each request. Query parameter category filters by provider category (default model when category and exclude_category are both omitted). Query parameter exclude_category excludes a category (e.g. exclude_category=model returns ocr and search providers). Query parameter keyword filters by provider name case-insensitively.
@@ -9787,7 +10749,7 @@ paths:
             summary: POST /model_providers/{model_provider_id}/groups/{group_id}/keys
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models:
         get:
-            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog LLM or VLM model's maximum input context window expressed as a string such as 128K or 1M. Other, custom, or unknown models return null.
+            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -9912,7 +10874,7 @@ paths:
                 - model_providers
     /api/core/model_providers/models:
         get:
-            description: Requires query model_type (e.g. llm or vlm). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog LLM or VLM model's maximum input context window expressed as a string such as 128K or 1M; other, custom, or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
+            description: Requires query model_type (e.g. llm, vlm, or embed). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
             parameters:
                 - in: query
                   name: model_type
@@ -9956,7 +10918,7 @@ paths:
                 - model_providers
     /api/core/model_providers/selected_models:
         get:
-            description: Returns the current user's selected model for each model_type. Each selection includes nullable max_input_tokens, the selected catalog LLM or VLM model's maximum input context window expressed as a string such as 128K or 1M; other, custom, or unknown models return null.
+            description: Returns the current user's selected model for each model_type. Each selection includes nullable max_input_tokens, the selected catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null.
             responses:
                 "200":
                     content:
@@ -10080,324 +11042,6 @@ paths:
             summary: List user model providers that have groups
             tags:
                 - model_providers
-    /api/core/personal-resource/{resource_type}:
-        patch:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourcePatchOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/MetadataResponse'
-                    description: Personal resource metadata
-            summary: Update personal resource metadata
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}/draft-review/{review_id}/actions:
-        post:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: review_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceReviewActionOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ReviewActionResponse'
-                    description: Personal resource review action
-            summary: Apply personal resource review actions
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}/draft-review/{review_id}:undo:
-        post:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: review_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceReviewUndoOpenAPIRequest'
-                required: false
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ReviewUndoResponse'
-                    description: Personal resource review undo
-            summary: Undo personal resource review action batch
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}/revisions:
-        get:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/RevisionListResponse'
-                    description: Personal resource revisions
-            summary: List personal resource revisions
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}/revisions/{revision_id}:
-        get:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: revision_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/RevisionDetailResponse'
-                    description: Personal resource revision
-            summary: Get personal resource revision
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:commit:
-        post:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceCommitOpenAPIRequest'
-                required: false
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/CommitResponse'
-                    description: Personal resource commit
-            summary: Commit personal resource draft
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:discard:
-        post:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/DraftResponse'
-                    description: Personal resource draft
-            summary: Discard personal resource draft
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:draft:
-        put:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceWriteDraftOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/DraftResponse'
-                    description: Personal resource draft
-            summary: Write personal resource draft
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:draft-preview:
-        get:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/DraftPreviewResponse'
-                    description: Personal resource draft preview
-            summary: Preview personal resource draft diff
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:file:
-        get:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-                - in: query
-                  name: ref
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: revision_id
-                  required: false
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/FileResponse'
-                    description: Personal resource file
-            summary: Read personal resource file
-            tags:
-                - personal-resource
-        put:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceWriteDraftOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/DraftResponse'
-                    description: Personal resource draft
-            summary: Write personal resource draft file
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:generate:
-        post:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceGenerateOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/personalResourceGenerateOpenAPIResponse'
-                    description: Generated personal resource draft
-            summary: Generate personal resource draft
-            tags:
-                - personal-resource
-    /api/core/personal-resource/{resource_type}:rollback:
-        post:
-            parameters:
-                - in: path
-                  name: resource_type
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/personalResourceRollbackOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/RollbackResponse'
-                    description: Personal resource rollback
-            summary: Rollback personal resource
-            tags:
-                - personal-resource
-    /api/core/personalization-items:
-        get:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/managedStateListOpenAPIResponse'
-                    description: Managed personalization items
-            summary: List managed memory and preference items
-            tags:
-                - personalization
     /api/core/personalization-setting:
         get:
             responses:
@@ -10427,501 +11071,6 @@ paths:
             summary: Set personalization setting
             tags:
                 - personalization
-    /api/core/plugin-drafts:
-        get:
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-drafts
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts
-    /api/core/plugin-drafts/{draft_id}:
-        delete:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: DELETE /plugin-drafts/{draft_id}
-        get:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-drafts/{draft_id}
-    /api/core/plugin-drafts/{draft_id}/generation-analysis:
-        get:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Generation analysis
-            summary: Get Plugin generation analysis
-            tags:
-                - plugin
-    /api/core/plugin-drafts/{draft_id}/repair-runs/{repair_id}:
-        get:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: repair_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Repair run
-            summary: Get Plugin repair run
-            tags:
-                - plugin
-    /api/core/plugin-drafts/{draft_id}:ai-generate:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts/{draft_id}:ai-generate
-    /api/core/plugin-drafts/{draft_id}:ai-repair:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts/{draft_id}:ai-repair
-    /api/core/plugin-drafts/{draft_id}:confirm-workflow:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/pluginWorkflowConfirmOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Confirmation result
-            summary: Confirm Skill workflow candidate
-            tags:
-                - plugin
-    /api/core/plugin-drafts/{draft_id}:publish:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts/{draft_id}:publish
-    /api/core/plugin-drafts/{draft_id}:repair-preview:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/pluginRepairPreviewOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Repair preview
-            summary: Preview Plugin repair
-            tags:
-                - plugin
-    /api/core/plugin-drafts/{draft_id}:save:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts/{draft_id}:save
-    /api/core/plugin-drafts/{draft_id}:validate:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts/{draft_id}:validate
-    /api/core/plugin-drafts:polish-info:
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts:polish-info
-    /api/core/plugin-sessions/{session_id}:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}
-    /api/core/plugin-sessions/{session_id}/artifacts:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-sessions/{session_id}/artifacts
-    /api/core/plugin-sessions/{session_id}/projection:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}/projection
-    /api/core/plugin-sessions/{session_id}/slots:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}/slots
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}:
-        patch:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-sessions/{session_id}/slots/{slot_id}/items
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:
-        delete:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: list_index
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: DELETE /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
-        patch:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: list_index
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption:
-        patch:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: list_index
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: list_index
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: list_index
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/order:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}/slots/{slot_id}/order
-        patch:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}/order
-    /api/core/plugin-sessions/{session_id}/state-graph:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}/state-graph
-    /api/core/plugin-sessions/{session_id}/steps:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}/steps
-    /api/core/plugin-sessions/{session_id}:dismiss:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-sessions/{session_id}:dismiss
-    /api/core/plugin-sessions/{session_id}:restore:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-sessions/{session_id}:restore
-    /api/core/plugin-sessions/{session_id}:sync-search-config:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-sessions/{session_id}:sync-search-config
-    /api/core/plugins:
-        get:
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugins
-    /api/core/plugins/{plugin_id}:
-        get:
-            parameters:
-                - in: path
-                  name: plugin_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugins/{plugin_id}
     /api/core/prompt_categories:
         get:
             responses:
@@ -11169,23 +11318,23 @@ paths:
             summary: Polish prompt
             tags:
                 - prompts
-    /api/core/published-plugins/{plugin_ref:.+}/versions:
+    /api/core/published-workflows/{workflow_ref:.+}/versions:
         get:
             parameters:
                 - in: path
-                  name: plugin_ref:.+
+                  name: workflow_ref:.+
                   required: true
                   schema:
                     type: string
             responses:
                 "200":
                     description: OK
-            summary: GET /published-plugins/{plugin_ref:.+}/versions
-    /api/core/published-plugins/{plugin_ref:.+}/versions/{revision_id}:
+            summary: GET /published-workflows/{workflow_ref:.+}/versions
+    /api/core/published-workflows/{workflow_ref:.+}/versions/{revision_id}:
         get:
             parameters:
                 - in: path
-                  name: plugin_ref:.+
+                  name: workflow_ref:.+
                   required: true
                   schema:
                     type: string
@@ -11197,12 +11346,12 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: GET /published-plugins/{plugin_ref:.+}/versions/{revision_id}
-    /api/core/published-plugins/{plugin_ref:.+}/versions/{revision_id}:edit:
+            summary: GET /published-workflows/{workflow_ref:.+}/versions/{revision_id}
+    /api/core/published-workflows/{workflow_ref:.+}/versions/{revision_id}:edit:
         post:
             parameters:
                 - in: path
-                  name: plugin_ref:.+
+                  name: workflow_ref:.+
                   required: true
                   schema:
                     type: string
@@ -11214,467 +11363,43 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: POST /published-plugins/{plugin_ref:.+}/versions/{revision_id}:edit
-    /api/core/published-plugins/{plugin_ref:.+}:archive:
+            summary: POST /published-workflows/{workflow_ref:.+}/versions/{revision_id}:edit
+    /api/core/published-workflows/{workflow_ref:.+}:archive:
         post:
             parameters:
                 - in: path
-                  name: plugin_ref:.+
+                  name: workflow_ref:.+
                   required: true
                   schema:
                     type: string
             responses:
                 "200":
                     description: OK
-            summary: POST /published-plugins/{plugin_ref:.+}:archive
-    /api/core/published-plugins/{plugin_ref:.+}:rollback:
+            summary: POST /published-workflows/{workflow_ref:.+}:archive
+    /api/core/published-workflows/{workflow_ref:.+}:restore:
         post:
             parameters:
                 - in: path
-                  name: plugin_ref:.+
+                  name: workflow_ref:.+
                   required: true
                   schema:
                     type: string
             responses:
                 "200":
                     description: OK
-            summary: POST /published-plugins/{plugin_ref:.+}:rollback
-    /api/core/remote-fs/content:
-        get:
-            description: 'Reads package content using task_id semantics: review_ sees existing draft, org_ and editor session ids see publish unless they own the current draft.'
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: 'RemoteFS package path: skills/<category>/<skill_name>[/rel_path].'
-                  in: query
-                  name: path
-                  required: true
-                  schema:
-                    type: string
-                - description: Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Optional content encoding for GET /remote-fs/content.
-                  in: query
-                  name: encoding,omitempty
-                  required: false
-                  schema:
-                    enum:
-                        - raw
-                        - base64
-                    type: string
-                - description: Conversation mode.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/octet-stream:
-                            schema:
-                                format: binary
-                                type: string
-                    description: Remote filesystem raw content
-            summary: Read remote skill filesystem content
-            tags:
-                - remote-fs
-        put:
-            description: Writes raw body bytes into the task draft. review_ may write an existing draft without changing draft ownership; org_ and editor session ids conflict with another task draft.
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: 'RemoteFS package path: skills/<category>/<skill_name>[/rel_path].'
-                  in: query
-                  name: path
-                  required: true
-                  schema:
-                    type: string
-                - description: Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Optional content encoding for GET /remote-fs/content.
-                  in: query
-                  name: encoding,omitempty
-                  required: false
-                  schema:
-                    enum:
-                        - raw
-                        - base64
-                    type: string
-                - description: Conversation mode.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            requestBody:
-                content:
-                    application/octet-stream:
-                        schema:
-                            format: binary
-                            type: string
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/okOpenAPIResponse'
-                    description: Remote filesystem write result
-            summary: Write remote skill filesystem content
-            tags:
-                - remote-fs
-    /api/core/remote-fs/copy:
+            summary: POST /published-workflows/{workflow_ref:.+}:restore
+    /api/core/published-workflows/{workflow_ref:.+}:rollback:
         post:
             parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
+                - in: path
+                  name: workflow_ref:.+
                   required: true
                   schema:
-                    type: string
-                - description: Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/remoteFSCopyOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/okOpenAPIResponse'
-                    description: Remote filesystem copy result
-            summary: Copy remote skill filesystem path
-            tags:
-                - remote-fs
-    /api/core/remote-fs/dir:
-        post:
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/remoteFSDirOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/okOpenAPIResponse'
-                    description: Remote filesystem mkdir result
-            summary: Create remote skill filesystem directory or empty package
-            tags:
-                - remote-fs
-    /api/core/remote-fs/exists:
-        get:
-            description: Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: 'RemoteFS package path: skills/<category>/<skill_name>[/rel_path].'
-                  in: query
-                  name: path
-                  required: true
-                  schema:
-                    type: string
-                - description: Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Optional content encoding for GET /remote-fs/content.
-                  in: query
-                  name: encoding,omitempty
-                  required: false
-                  schema:
-                    enum:
-                        - raw
-                        - base64
-                    type: string
-                - description: Conversation mode.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
                     type: string
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/remoteFSExistsOpenAPIResponse'
-                    description: Remote filesystem exists
-            summary: Check remote skill filesystem path exists
-            tags:
-                - remote-fs
-    /api/core/remote-fs/info:
-        get:
-            description: Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: 'RemoteFS package path: skills/<category>/<skill_name>[/rel_path].'
-                  in: query
-                  name: path
-                  required: true
-                  schema:
-                    type: string
-                - description: Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Optional content encoding for GET /remote-fs/content.
-                  in: query
-                  name: encoding,omitempty
-                  required: false
-                  schema:
-                    enum:
-                        - raw
-                        - base64
-                    type: string
-                - description: Conversation mode.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/remoteFSInfoOpenAPIResponse'
-                    description: Remote filesystem info
-            summary: Get remote skill filesystem path info
-            tags:
-                - remote-fs
-    /api/core/remote-fs/list:
-        get:
-            description: List skills root/category without task_id, or list package content with task-aware view selection.
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: RemoteFS path. Use skills for categories, skills/<category> for package list, or skills/<category>/<skill_name>[/rel_path] for package content.
-                  in: query
-                  name: path
-                  required: true
-                  schema:
-                    type: string
-                - description: Optional for skills root/category list; required when path enters a package. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id,omitempty
-                  required: false
-                  schema:
-                    type: string
-                - description: Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/remoteFSListOpenAPIResponse'
-                    description: Remote filesystem list
-            summary: List remote skill filesystem path
-            tags:
-                - remote-fs
-    /api/core/remote-fs/move:
-        post:
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-                  in: query
-                  name: task_id
-                  required: true
-                  schema:
-                    type: string
-                - description: Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-                  in: query
-                  name: mode
-                  required: false
-                  schema:
-                    enum:
-                        - auto
-                        - manual
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/remoteFSMoveOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/okOpenAPIResponse'
-                    description: Remote filesystem move result
-            summary: Move remote skill filesystem path
-            tags:
-                - remote-fs
-    /api/core/remote-fs/path:
-        delete:
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-                - description: RemoteFS path to delete.
-                  in: query
-                  name: path
-                  required: true
-                  schema:
-                    type: string
-                - description: Required for package-internal delete; not required for confirmed permanent package purge.
-                  in: query
-                  name: task_id,omitempty
-                  required: false
-                  schema:
-                    type: string
-                - description: Required true for package root physical purge.
-                  in: query
-                  name: permanent,omitempty
-                  required: false
-                  schema:
-                    type: boolean
-                - description: Required true for package root physical purge.
-                  in: query
-                  name: confirm,omitempty
-                  required: false
-                  schema:
-                    type: boolean
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/okOpenAPIResponse'
-                    description: Remote filesystem delete result
-            summary: Delete remote skill filesystem path
-            tags:
-                - remote-fs
-    /api/core/remote-fs/trash:
-        post:
-            parameters:
-                - description: Required. Target user id used to resolve skills owned by the user.
-                  in: query
-                  name: user_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/remoteFSTrashOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/okOpenAPIResponse'
-                    description: Remote filesystem trash result
-            summary: Trash remote skill package
-            tags:
-                - remote-fs
+                    description: OK
+            summary: POST /published-workflows/{workflow_ref:.+}:rollback
     /api/core/schedules:
         get:
             responses:
@@ -11687,6 +11412,17 @@ paths:
                     description: OK
             summary: POST /schedules
     /api/core/schedules/{schedule_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /schedules/{schedule_id}
         put:
             parameters:
                 - in: path
@@ -11722,6 +11458,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /schedules/{schedule_id}:enable
+    /api/core/schedules/{schedule_id}:move:
+        post:
+            parameters:
+                - in: path
+                  name: schedule_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /schedules/{schedule_id}:move
     /api/core/schedules/{schedule_id}:run-now:
         post:
             parameters:
@@ -11734,6 +11482,59 @@ paths:
                 "200":
                     description: OK
             summary: POST /schedules/{schedule_id}:run-now
+    /api/core/showcase/cases:
+        get:
+            parameters:
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    type: string
+                - description: Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
+                  in: header
+                  name: Accept-Language
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ShowcaseCaseListResponse'
+                    description: Showcase case list
+            summary: Showcase case list
+            tags:
+                - showcase
+    /api/core/showcase/cases/{case_id}:
+        get:
+            parameters:
+                - in: path
+                  name: case_id
+                  required: true
+                  schema:
+                    type: string
+                - description: Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
+                  in: header
+                  name: Accept-Language
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ShowcaseCase'
+                    description: Showcase case details
+            summary: Showcase case details
+            tags:
+                - showcase
     /api/core/skill-diff/file:
         post:
             requestBody:
@@ -11865,6 +11666,23 @@ paths:
             tags:
                 - skill-market
     /api/core/skill-market/admin/items/{market_item_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: market_item_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/marketDeleteOpenAPIResponse'
+                    description: Deleted market skill
+            summary: Permanently delete market skill item
+            tags:
+                - skill-market
         patch:
             parameters:
                 - in: path
@@ -13102,6 +12920,29 @@ paths:
                 "200":
                     description: OK
             summary: POST /static-files:sign
+    /api/core/system-dependencies/ffmpeg:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /system-dependencies/ffmpeg
+        put:
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /system-dependencies/ffmpeg
+    /api/core/system-dependencies/ffmpeg:check:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /system-dependencies/ffmpeg:check
+    /api/core/system-dependencies/ffmpeg:install:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /system-dependencies/ffmpeg:install
     /api/core/system-query/documents:aggregate:
         post:
             requestBody:
@@ -13138,11 +12979,6 @@ paths:
                 "200":
                     description: OK
             summary: GET /task-center/tasks
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /task-center/tasks
     /api/core/task-center/tasks/{task_id}:
         get:
             parameters:
@@ -13711,6 +13547,745 @@ paths:
             summary: Merge word groups from merges list, add word into group_ids, resolve conflict
             tags:
                 - word_group
+    /api/core/workflow-artifacts/{artifact_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /workflow-artifacts/{artifact_id}
+        get:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-artifacts/{artifact_id}
+        patch:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /workflow-artifacts/{artifact_id}
+    /api/core/workflow-authoring/v1/drafts:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-authoring/v1/drafts
+    /api/core/workflow-authoring/v1/drafts/{draft_id}/diagnostics:
+        get:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-authoring/v1/drafts/{draft_id}/diagnostics
+    /api/core/workflow-authoring/v1/drafts/{draft_id}/files:
+        put:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /workflow-authoring/v1/drafts/{draft_id}/files
+    /api/core/workflow-authoring/v1/drafts/{draft_id}:publish:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-authoring/v1/drafts/{draft_id}:publish
+    /api/core/workflow-authoring/v1/fixture:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-authoring/v1/fixture
+    /api/core/workflow-authoring/v1/skill-context:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-authoring/v1/skill-context
+    /api/core/workflow-commands/{command_id}:
+        get:
+            parameters:
+                - in: path
+                  name: command_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-commands/{command_id}
+    /api/core/workflow-drafts:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-drafts
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts
+    /api/core/workflow-drafts/{draft_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /workflow-drafts/{draft_id}
+        get:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-drafts/{draft_id}
+    /api/core/workflow-drafts/{draft_id}/generation-analysis:
+        get:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-drafts/{draft_id}/generation-analysis
+    /api/core/workflow-drafts/{draft_id}/repair-runs/{repair_id}:
+        get:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: repair_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-drafts/{draft_id}/repair-runs/{repair_id}
+    /api/core/workflow-drafts/{draft_id}:ai-generate:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:ai-generate
+    /api/core/workflow-drafts/{draft_id}:ai-repair:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:ai-repair
+    /api/core/workflow-drafts/{draft_id}:confirm-workflow:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:confirm-workflow
+    /api/core/workflow-drafts/{draft_id}:publish:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:publish
+    /api/core/workflow-drafts/{draft_id}:repair-preview:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:repair-preview
+    /api/core/workflow-drafts/{draft_id}:save:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:save
+    /api/core/workflow-drafts/{draft_id}:validate:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:validate
+    /api/core/workflow-drafts:polish-info:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts:polish-info
+    /api/core/workflow-input-resources:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-input-resources
+    /api/core/workflow-input-resources/{resource_id}:
+        get:
+            parameters:
+                - in: path
+                  name: resource_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-input-resources/{resource_id}
+    /api/core/workflow-preparations:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-preparations
+    /api/core/workflow-preparations/{preparation_id}:consume:
+        post:
+            parameters:
+                - in: path
+                  name: preparation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-preparations/{preparation_id}:consume
+    /api/core/workflow-runtime/v1/workflows:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-runtime/v1/workflows
+    /api/core/workflow-runtime/v1/workflows/{workflow_id}:
+        get:
+            parameters:
+                - in: path
+                  name: workflow_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-runtime/v1/workflows/{workflow_id}
+    /api/core/workflow-sessions/{session_id}:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}
+    /api/core/workflow-sessions/{session_id}/artifacts:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/artifacts
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/artifacts
+    /api/core/workflow-sessions/{session_id}/events:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/events
+    /api/core/workflow-sessions/{session_id}/input-bindings:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/input-bindings
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/input-bindings
+    /api/core/workflow-sessions/{session_id}/projection:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/projection
+    /api/core/workflow-sessions/{session_id}/slots:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/slots
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}:
+        patch:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /workflow-sessions/{session_id}/slots/{slot_id}
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/slots/{slot_id}/items
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:
+        delete:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+        patch:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption:
+        patch:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: integer
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/writerDocumentSyncOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: WriterDocument sync result
+            summary: Sync an edited WriterDocument to Feishu
+            tags:
+                - plugin
+                - writer
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/order:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/slots/{slot_id}/order
+        patch:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /workflow-sessions/{session_id}/slots/{slot_id}/order
+    /api/core/workflow-sessions/{session_id}/state-graph:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/state-graph
+    /api/core/workflow-sessions/{session_id}/steps:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/steps
+    /api/core/workflow-sessions/{session_id}:advance-step:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:advance-step
+    /api/core/workflow-sessions/{session_id}:advance-step-and-hand-off:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:advance-step-and-hand-off
+    /api/core/workflow-sessions/{session_id}:dismiss:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:dismiss
+    /api/core/workflow-sessions/{session_id}:restore:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:restore
+    /api/core/workflow-sessions/{session_id}:resume:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:resume
+    /api/core/workflow-sessions/{session_id}:stop:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:stop
+    /api/core/workflow-sessions/{session_id}:sync-search-config:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:sync-search-config
+    /api/core/workflows:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflows
+    /api/core/workflows/{workflow_id}:
+        get:
+            parameters:
+                - in: path
+                  name: workflow_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflows/{workflow_id}
 servers:
     - description: same origin; see paths with /api/core prefix
       url: /

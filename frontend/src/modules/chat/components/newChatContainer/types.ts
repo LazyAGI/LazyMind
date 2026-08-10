@@ -52,11 +52,11 @@ export interface ChatContainerProps {
   disabledReason?: string;
   disabledDescription?: ReactNode;
   disabledAction?: ReactNode;
-  onPluginSettingsChange?: (
-    settings: import("@/modules/chat/utils/request").ConversationPluginSettings,
+  onWorkflowSettingsChange?: (
+    settings: import("@/modules/chat/utils/request").ConversationWorkflowSettings,
   ) => void;
-  initialPluginSettings?: import("@/modules/chat/utils/request").ConversationPluginSettings;
-  hasPluginSession?: boolean;
+  initialWorkflowSettings?: import("@/modules/chat/utils/request").ConversationWorkflowSettings;
+  hasWorkflowSession?: boolean;
 }
 
 export interface ChatMessage {
@@ -94,6 +94,13 @@ export interface ChatMessage {
   display_delta?: string;
   cite_message?: string;
   cite_messages?: string[];
+  cite_history_ids?: string[];
+  seq?: number;
+  trail_depth?: number;
+  trail_parent_history_id?: string;
+  trail_source?: string;
+  trail_summary?: string;
+  trail_question?: string;
   tool_call_turns?: number;
   tool_limit_pending?: {
     decision_id: string;

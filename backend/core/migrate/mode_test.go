@@ -20,11 +20,11 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load repository migration catalog: %v", err)
 	}
-	if len(catalog.VersionMigrations) != 2 {
-		t.Fatalf("version migration count=%d, want 2", len(catalog.VersionMigrations))
+	if len(catalog.VersionMigrations) != 3 {
+		t.Fatalf("version migration count=%d, want 3", len(catalog.VersionMigrations))
 	}
-	if len(catalog.Modes) != 2 {
-		t.Fatalf("mode count=%d, want 2", len(catalog.Modes))
+	if len(catalog.Modes) != 3 {
+		t.Fatalf("mode count=%d, want 3", len(catalog.Modes))
 	}
 	v01 := catalog.Modes[0]
 	if v01.Name != "v0_1" || v01.ModeVersion != 1 ||
@@ -48,11 +48,17 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if !containsVersion(mode.Aggregate.Supersedes, 20260703130000) {
 		t.Fatal("v0_2 aggregate Supersedes is missing create_plugin_step_intents")
 	}
-	if len(mode.Aggregate.Supersedes) != len(mode.Dev)-3 {
+	preAggregate := 0
+	for _, migration := range mode.Dev {
+		if migration.FileVersion <= mode.Aggregate.Version {
+			preAggregate++
+		}
+	}
+	if len(mode.Aggregate.Supersedes) != preAggregate {
 		t.Fatalf(
 			"v0_2 aggregate Supersedes count=%d, pre-aggregate dev migration count=%d",
 			len(mode.Aggregate.Supersedes),
-			len(mode.Dev)-3,
+			preAggregate,
 		)
 	}
 	for _, migration := range mode.Dev {
@@ -94,6 +100,29 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if !strings.Contains(string(down), `DROP COLUMN "api_key_ciphertext"`) ||
 		!strings.Contains(string(down), `DROP COLUMN "credential_version"`) {
 		t.Fatal("v0_2 aggregate down is missing encrypted provider credential rollback")
+	}
+
+	v03 := catalog.Modes[2]
+	if v03.Name != "v0_3" || v03.ModeVersion != 3 ||
+		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
+		t.Fatalf("unexpected v0_3 mode: %#v", v03)
+	}
+	if len(v03.Dev) != 11 {
+		t.Fatalf("v0_3 dev migration count=%d, want 11", len(v03.Dev))
+	}
+	for _, version := range []uint64{20260730100000, 20260803120000, 20260803150000, 20260803160000, 20260803220000, 20260804090000, 20260805100000, 20260805120000, 20260805121000, 20260806173000, 20260807160000} {
+		if !containsMigrationFileVersion(v03.Dev, version) {
+			t.Fatalf("v0_3 dev migrations are missing %d", version)
+		}
+	}
+	v03Up, err := os.ReadFile(v03.Aggregate.UpPath)
+	if err != nil {
+		t.Fatalf("read v0_3 aggregate up: %v", err)
+	}
+	for _, token := range []string{"workflow_preparations", "workflow_outbox", "workflow_input_resources", "driver_content"} {
+		if !strings.Contains(string(v03Up), token) {
+			t.Fatalf("v0_3 aggregate up is missing %s", token)
+		}
 	}
 }
 

@@ -81,7 +81,11 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 		Progress: t.ProgressPct, CurrentPhase: t.CurrentPhase, EstimatedSec: t.EstimatedSec,
 	})
 	steps, _ := LoadSteps(ctx, db, taskID)
+	lastStepSeq := -1
 	for i := range steps {
+		if steps[i].Seq > lastStepSeq {
+			lastStepSeq = steps[i].Seq
+		}
 		ev := stepToTaskEvent(taskID, &steps[i])
 		if ev != nil {
 			writeTaskSSE(w, flusher, *ev)
@@ -113,7 +117,7 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 	// 3. Still running: tail Redis from current end; fall back to DB polling if key missing.
 	exists, _ := StreamExists(ctx, stateStore, taskID)
 	if stateStore == nil || !exists {
-		pollDBUntilTerminal(ctx, db, w, flusher, taskID)
+		pollDBUntilTerminal(ctx, db, w, flusher, taskID, lastStepSeq)
 		return
 	}
 	tailRedisStream(ctx, db, stateStore, w, flusher, taskID)
@@ -202,7 +206,14 @@ func tailRedisStream(ctx context.Context, db *gorm.DB, stateStore state.Store, w
 		}
 		events, err := StreamEventsFrom(ctx, stateStore, taskID, from)
 		if err != nil {
-			pollDBUntilTerminal(ctx, db, w, flusher, taskID)
+			steps, _ := LoadSteps(ctx, db, taskID)
+			lastStepSeq := -1
+			for i := range steps {
+				if steps[i].Seq > lastStepSeq {
+					lastStepSeq = steps[i].Seq
+				}
+			}
+			pollDBUntilTerminal(ctx, db, w, flusher, taskID, lastStepSeq)
 			return
 		}
 		for _, raw := range events {
@@ -234,7 +245,14 @@ func tailRedisStream(ctx context.Context, db *gorm.DB, stateStore state.Store, w
 }
 
 // pollDBUntilTerminal polls the DB row, emitting progress/artifact diffs until terminal.
-func pollDBUntilTerminal(ctx context.Context, db *gorm.DB, w http.ResponseWriter, flusher http.Flusher, taskID string) {
+func pollDBUntilTerminal(
+	ctx context.Context,
+	db *gorm.DB,
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	taskID string,
+	lastStepSeq int,
+) {
 	lastProgress := -1
 	sentArtifacts := map[string]bool{}
 	for {
@@ -253,6 +271,16 @@ func pollDBUntilTerminal(ctx context.Context, db *gorm.DB, w http.ResponseWriter
 				Progress: t.ProgressPct, CurrentPhase: t.CurrentPhase, EstimatedSec: t.EstimatedSec,
 			})
 			lastProgress = t.ProgressPct
+		}
+		steps, _ := LoadSteps(ctx, db, taskID)
+		for i := range steps {
+			if steps[i].Seq <= lastStepSeq {
+				continue
+			}
+			if ev := stepToTaskEvent(taskID, &steps[i]); ev != nil {
+				writeTaskSSE(w, flusher, *ev)
+			}
+			lastStepSeq = steps[i].Seq
 		}
 		arts, _ := LoadArtifacts(ctx, db, taskID)
 		for i := range arts {

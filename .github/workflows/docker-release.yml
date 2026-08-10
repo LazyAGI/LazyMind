@@ -39,6 +39,9 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # Use the canonical index for release builds so newly published packages are
+  # available immediately instead of waiting for a third-party mirror to sync.
+  PIP_INDEX_URL: https://pypi.org/simple
   # DockerHub container registry host, defaults to docker.io
   REGISTRY_DOCKERHUB: ${{ vars.REGISTRY_DOCKERHUB || 'docker.io' }}
   # Namespace/repository path in DockerHub registry (group/project)
@@ -64,7 +67,7 @@ jobs:
             image: lazymind-auth-service
           - service: core
             dockerfile: backend/core/Dockerfile
-            context: backend
+            context: .
             image: lazymind-core
           - service: office-convert-service
             dockerfile: backend/office-convert-service/Dockerfile
@@ -209,6 +212,7 @@ jobs:
           target: ${{ matrix.target }}
           build-args: |
             LAZYLLM_BUNDLE_SOURCE=${{ (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch') && '0' || '1' }}
+            PIP_INDEX_URL=${{ env.PIP_INDEX_URL }}
           push: true
           provenance: false
           platforms: linux/amd64
@@ -229,6 +233,7 @@ jobs:
           target: ${{ matrix.target }}
           build-args: |
             LAZYLLM_BUNDLE_SOURCE=${{ (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch') && '0' || '1' }}
+            PIP_INDEX_URL=${{ env.PIP_INDEX_URL }}
           push: true
           provenance: false
           platforms: linux/arm64

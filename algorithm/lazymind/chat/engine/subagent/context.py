@@ -9,8 +9,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import lazyllm
 
-from .db import SubAgentDB
-
 # Key under which the SubAgent execution context is stored in lazyllm.globals.
 _CTX_KEY = 'subagent_ctx'
 
@@ -33,7 +31,7 @@ class SubAgentContext:
     workspace_path: str
     input_slots: List[str]
     output_slots: List[str]
-    db: SubAgentDB
+    db: Any
     emit: Callable[[Dict[str, Any]], None]
     # artifact seq counters and local cache (Go persists to DB; this serves intra-task reads).
     _artifact_counts: Dict[str, int] = field(default_factory=dict)

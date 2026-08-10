@@ -1,6 +1,9 @@
 name: macOS Desktop Installer
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       git_ref:
@@ -81,7 +84,7 @@ jobs:
 
       - name: Initialize development submodules
         if: steps.release.outputs.is_tag != 'true'
-        run: git submodule update --init --recursive
+        run: git submodule update --init algorithm/lazyllm
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -89,32 +92,17 @@ jobs:
           node-version: "20"
           package-manager-cache: false
 
-      - name: Set desktop version from release tag
+      - name: Validate tag and set desktop version
         if: steps.release.outputs.is_tag == 'true'
         id: version
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-
-          node <<'NODE'
-          const fs = require("fs");
-          const packagePath = "desktop/electron/package.json";
-          const tag = process.env.RELEASE_TAG.replace(/^v/, "");
-          const pythonPrerelease = tag.match(/^(\d+\.\d+\.\d+)(a|b|rc)(\d+)$/);
-          const prereleaseNames = { a: "alpha", b: "beta", rc: "rc" };
-          const version = pythonPrerelease
-            ? `${pythonPrerelease[1]}-${prereleaseNames[pythonPrerelease[2]]}.${pythonPrerelease[3]}`
-            : tag;
-          if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
-            throw new Error(`Release tag ${process.env.RELEASE_TAG} cannot be converted to a valid desktop SemVer`);
-          }
-          const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
-          packageJson.version = version;
-          fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `package_version=${version}\n`);
-          console.log(`Desktop package version: ${version} (release tag: ${process.env.RELEASE_TAG})`);
-          NODE
+          node desktop/scripts/resolve-release-version.mjs \
+            --tag "${RELEASE_TAG}" \
+            --package desktop/electron/package.json \
+            --github-output "${GITHUB_OUTPUT}"
 
       - name: Enable pnpm
         run: |
@@ -210,11 +198,7 @@ jobs:
 
       - name: Run Desktop tests
         run: |
-          node --test \
-            desktop/scripts/desktop-build.test.mjs \
-            desktop/scripts/desktop-paths.test.mjs \
-            desktop/scripts/installer-warmup.test.mjs \
-            desktop/scripts/runtime-status.test.mjs
+          node --test desktop/scripts/*.test.mjs
 
       - name: Build and sign app ZIP
         id: build
@@ -247,6 +231,18 @@ jobs:
           duration_seconds="$(( $(date +%s) - started_at ))"
           echo "duration_seconds=${duration_seconds}" >> "${GITHUB_OUTPUT}"
 
+      - name: Launch and verify packaged application
+        id: packaged_smoke
+        run: |
+          set -euo pipefail
+          smoke_root="${RUNNER_TEMP}/lazymind-packaged-smoke"
+          LAZYMIND_DESKTOP_RUNTIME_ROOT="${smoke_root}" node desktop/scripts/packaged-app-smoke.mjs \
+            --app "${GITHUB_WORKSPACE}/desktop/dist/mac-arm64/LazyMind.app" \
+            --runtime-root "${smoke_root}" \
+            --platform darwin \
+            --timeout-ms 300000 \
+            --leave-running true
+
       - name: Submit app ZIP for notarization
         if: steps.release.outputs.is_tag == 'true'
         id: zip_submission
@@ -273,6 +269,36 @@ jobs:
             ' zip-notarization-submission.json
           )"
           echo "submission_id=${submission_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Start asynchronous packaged runtime cleanup
+        if: steps.packaged_smoke.outcome == 'success' && (steps.release.outputs.is_tag != 'true' || steps.zip_submission.outcome == 'success')
+        run: |
+          set -euo pipefail
+          smoke_root="${RUNNER_TEMP}/lazymind-packaged-smoke"
+          app_path="${GITHUB_WORKSPACE}/desktop/dist/mac-arm64/LazyMind.app"
+          app_executable="${app_path}/Contents/MacOS/LazyMind"
+          resources_root="${app_path}/Contents/Resources/runtime"
+          manager="${resources_root}/bin/local-runtime-manager"
+          state_file="${smoke_root}/state/runtime-state.json"
+          cleanup_log="${RUNNER_TEMP}/lazymind-packaged-cleanup.log"
+          cleanup_pid_file="${RUNNER_TEMP}/lazymind-packaged-cleanup.pid"
+          owner_token="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).ownerToken' "${state_file}")"
+
+          pkill -9 -f "${app_executable}" 2>/dev/null || true
+          nohup env \
+            LAZYMIND_LOCAL_DOWN_TIMEOUT=180s \
+            LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT=150s \
+            "${manager}" down \
+              --profile desktop \
+              --owner-token "${owner_token}" \
+              --runtime-root "${smoke_root}" \
+              --resources-root "${resources_root}" \
+              --repo-root "${resources_root}/app" \
+              > "${cleanup_log}" 2>&1 < /dev/null &
+          cleanup_pid="$!"
+          echo "${cleanup_pid}" > "${cleanup_pid_file}"
+          disown "${cleanup_pid}" 2>/dev/null || true
+          echo "Started packaged runtime cleanup as pid ${cleanup_pid}; notarization continues without waiting."
 
       - name: Wait up to 30 minutes for app ZIP notarization
         if: steps.release.outputs.is_tag == 'true'
@@ -524,6 +550,81 @@ jobs:
               echo "- Run **Finalize macOS Notarization** with source run ID \`${GITHUB_RUN_ID}\`."
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Verify packaged runtime cleanup after artifact upload
+        if: always() && steps.packaged_smoke.outcome == 'success'
+        run: |
+          set -euo pipefail
+          smoke_root="${RUNNER_TEMP}/lazymind-packaged-smoke"
+          app_path="${GITHUB_WORKSPACE}/desktop/dist/mac-arm64/LazyMind.app"
+          app_executable="${app_path}/Contents/MacOS/LazyMind"
+          resources_root="${app_path}/Contents/Resources/runtime"
+          manager="${resources_root}/bin/local-runtime-manager"
+          state_file="${smoke_root}/state/runtime-state.json"
+          cleanup_log="${RUNNER_TEMP}/lazymind-packaged-cleanup.log"
+          cleanup_pid_file="${RUNNER_TEMP}/lazymind-packaged-cleanup.pid"
+          owner_token="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).ownerToken' "${state_file}")"
+
+          runtime_stopped() {
+            local status_file="${RUNNER_TEMP}/lazymind-packaged-status.json"
+            if ! "${manager}" status \
+              --profile desktop \
+              --owner-token "${owner_token}" \
+              --runtime-root "${smoke_root}" \
+              --resources-root "${resources_root}" \
+              --repo-root "${resources_root}/app" \
+              --json > "${status_file}"; then
+              return 1
+            fi
+            node - "${status_file}" <<'NODE'
+          const fs = require("fs");
+          const status = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const active = new Set(["ready", "running", "starting", "stale"]);
+          const servicesStopped = Object.values(status.services || {})
+            .every((service) => !active.has(service?.status));
+          process.exit(!active.has(status.overallStatus) && servicesStopped ? 0 : 1);
+          NODE
+          }
+
+          if runtime_stopped; then
+            echo "Asynchronous packaged runtime cleanup completed."
+            test ! -f "${cleanup_log}" || tail -n 80 "${cleanup_log}"
+            exit 0
+          fi
+
+          echo "::warning::Asynchronous packaged runtime cleanup is incomplete; forcing a second bounded cleanup."
+          if [[ -f "${cleanup_pid_file}" ]]; then
+            cleanup_pid="$(tr -d '[:space:]' < "${cleanup_pid_file}")"
+            if [[ "${cleanup_pid}" =~ ^[0-9]+$ ]] && kill -0 "${cleanup_pid}" 2>/dev/null; then
+              kill -9 "${cleanup_pid}" 2>/dev/null || true
+            fi
+          fi
+          pkill -9 -f "${app_executable}" 2>/dev/null || true
+          supervisor_pid_file="${smoke_root}/run/process-compose.pid"
+          if [[ -f "${supervisor_pid_file}" ]]; then
+            supervisor_pid="$(tr -d '[:space:]' < "${supervisor_pid_file}")"
+            if [[ "${supervisor_pid}" =~ ^[0-9]+$ ]] && kill -0 "${supervisor_pid}" 2>/dev/null; then
+              kill -9 -- "-${supervisor_pid}" 2>/dev/null || kill -9 "${supervisor_pid}" 2>/dev/null || true
+            fi
+          fi
+
+          env \
+            LAZYMIND_LOCAL_DOWN_TIMEOUT=120s \
+            LAZYMIND_PROCESS_COMPOSE_DOWN_TIMEOUT=1s \
+            "${manager}" down \
+              --profile desktop \
+              --owner-token "${owner_token}" \
+              --runtime-root "${smoke_root}" \
+              --resources-root "${resources_root}" \
+              --repo-root "${resources_root}/app" || true
+
+          if runtime_stopped; then
+            echo "Second forced packaged runtime cleanup completed."
+            exit 0
+          fi
+          test ! -f "${cleanup_log}" || tail -n 120 "${cleanup_log}"
+          echo "::error::Packaged runtime cleanup remains incomplete after the second forced attempt; installer artifacts were uploaded before this check."
+          exit 1
 
       - name: Show final disk usage
         if: always()

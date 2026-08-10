@@ -4,7 +4,7 @@
 
 ## Article 1 Please Read Carefully
 
-Welcome to LazyMind. LazyMind is an AI Skill Runtime for knowledge-intensive work. On supported devices or team environments, it may provide knowledge bases, document processing, retrieval, model calls, Skills/Plugins, task orchestration, Agent tool calls, content generation, and related capabilities.
+Welcome to LazyMind. LazyMind is an AI Skill Runtime for knowledge-intensive work. On supported devices or team environments, it may provide knowledge bases, document processing, retrieval, model calls, Skills/Workflows, task orchestration, Agent tool calls, content generation, and related capabilities.
 
 Please read this agreement package in full before installing, registering for, enabling, or using LazyMind. Matters that materially affect your rights—including personal information processing, third-party services, Agent external actions, AI output limitations, disclaimers and liability limits, service suspension or termination, and dispute resolution—will be highlighted through bold text, dialogs, dedicated pages, or other conspicuous means. You may ask the operator to explain relevant terms.
 
@@ -18,7 +18,7 @@ This agreement package consists of:
 
 - the LazyMind User Agreement;
 - the LazyMind Privacy Policy;
-- the LazyMind AI/Agent and Skill/Plugin Safety Rules;
+- the LazyMind AI/Agent and Skill/Workflow Safety Rules;
 - the LazyMind Third-Party Services and Open-Source Software Notice; and
 - rules or special terms separately shown in installation screens, feature pages, permission dialogs, and specific services.
 
