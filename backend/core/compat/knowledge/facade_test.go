@@ -21,6 +21,9 @@ type fakeCatalogPort struct {
 }
 
 type fakeDocumentPort struct {
+	documentCallCtx contract.CallContext
+	documentInput   GetDocumentInput
+	documentCalls   int
 	metadataCallCtx contract.CallContext
 	metadataInput   GetDocumentMetadataInput
 	contentCallCtx  contract.CallContext
@@ -36,6 +39,31 @@ type fakeDocumentPort struct {
 	metadataErr     error
 	contentErr      error
 	chunksErr       error
+}
+
+func (p *fakeDocumentPort) GetDocument(ctx context.Context, callCtx contract.CallContext, input GetDocumentInput) (GetDocumentResult, error) {
+	p.documentCalls++
+	p.documentCallCtx = callCtx
+	p.documentInput = input
+	if p.metadataErr != nil {
+		return GetDocumentResult{}, p.metadataErr
+	}
+	if input.IncludeContent && p.contentErr != nil {
+		return GetDocumentResult{}, p.contentErr
+	}
+	if input.IncludeChunks && p.chunksErr != nil {
+		return GetDocumentResult{}, p.chunksErr
+	}
+	detail := p.metadataResult
+	result := GetDocumentResult{Document: detail}
+	if input.IncludeContent {
+		result.Document.Content = &p.contentResult
+	}
+	if input.IncludeChunks {
+		result.Document.Chunks = p.chunksResult.Chunks
+		result.Document.ChunksPage = &p.chunksResult.Page
+	}
+	return result, nil
 }
 
 type fakeSearchPort struct {
@@ -214,11 +242,11 @@ func TestFacadeGetDocumentMetadataOnly(t *testing.T) {
 	if result.Document.ID != "doc-1" || result.Document.Content != nil || result.Document.ChunksPage != nil {
 		t.Fatalf("unexpected result: %#v", result)
 	}
-	if port.metadataCalls != 1 || port.contentCalls != 0 || port.chunksCalls != 0 {
-		t.Fatalf("calls metadata=%d content=%d chunks=%d", port.metadataCalls, port.contentCalls, port.chunksCalls)
+	if port.documentCalls != 1 || port.metadataCalls != 0 || port.contentCalls != 0 || port.chunksCalls != 0 {
+		t.Fatalf("calls document=%d metadata=%d content=%d chunks=%d", port.documentCalls, port.metadataCalls, port.contentCalls, port.chunksCalls)
 	}
-	if port.metadataCallCtx.UserID != "user" || port.metadataInput.KnowledgeID != "ds-1" || port.metadataInput.DocumentID != "doc-1" {
-		t.Fatalf("unexpected metadata call ctx=%#v input=%#v", port.metadataCallCtx, port.metadataInput)
+	if port.documentCallCtx.UserID != "user" || port.documentInput.KnowledgeID != "ds-1" || port.documentInput.DocumentID != "doc-1" {
+		t.Fatalf("unexpected document call ctx=%#v input=%#v", port.documentCallCtx, port.documentInput)
 	}
 }
 
@@ -249,11 +277,42 @@ func TestFacadeGetDocumentIncludesContentAndChunks(t *testing.T) {
 	if len(result.Document.Chunks) != 1 || result.Document.Chunks[0].ID != "chunk-1" || result.Document.ChunksPage == nil || result.Document.ChunksPage.NextPageToken != "next" {
 		t.Fatalf("unexpected chunks: %#v page=%#v", result.Document.Chunks, result.Document.ChunksPage)
 	}
-	if port.chunksInput.Page.PageSize != contract.MaxPageSize || port.chunksInput.Page.PageToken != "tok" {
-		t.Fatalf("chunks page = %#v, want max page size and token", port.chunksInput.Page)
+	if port.documentInput.ChunksPage.PageSize != contract.MaxPageSize || port.documentInput.ChunksPage.PageToken != "tok" {
+		t.Fatalf("chunks page = %#v, want max page size and token", port.documentInput.ChunksPage)
 	}
-	if port.contentCalls != 1 || port.chunksCalls != 1 {
-		t.Fatalf("content calls=%d chunks calls=%d", port.contentCalls, port.chunksCalls)
+	if port.documentCalls != 1 || port.contentCalls != 0 || port.chunksCalls != 0 {
+		t.Fatalf("document calls=%d legacy content calls=%d chunks calls=%d", port.documentCalls, port.contentCalls, port.chunksCalls)
+	}
+}
+
+func TestFacadeGetDocumentPassesOnlyRequestedExpansions(t *testing.T) {
+	cases := []struct {
+		name           string
+		includeContent bool
+		includeChunks  bool
+	}{
+		{name: "metadata only"},
+		{name: "content only", includeContent: true},
+		{name: "chunks only", includeChunks: true},
+		{name: "content and chunks", includeContent: true, includeChunks: true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			port := &fakeDocumentPort{metadataResult: DocumentDetail{ID: "doc-1"}}
+			facade := mustKnowledgeFacadeWithDeps(t, FacadeDeps{Catalog: &fakeCatalogPort{}, Document: port})
+			_, err := facade.GetDocument(context.Background(), contract.CallContext{UserID: "user"}, GetDocumentInput{
+				KnowledgeID:    "ds-1",
+				DocumentID:     "doc-1",
+				IncludeContent: tt.includeContent,
+				IncludeChunks:  tt.includeChunks,
+			})
+			if err != nil {
+				t.Fatalf("GetDocument: %v", err)
+			}
+			if port.documentCalls != 1 || port.documentInput.IncludeContent != tt.includeContent || port.documentInput.IncludeChunks != tt.includeChunks {
+				t.Fatalf("aggregate call = %d, input=%#v", port.documentCalls, port.documentInput)
+			}
+		})
 	}
 }
 
@@ -268,8 +327,8 @@ func TestFacadeGetDocumentDefaultChunkPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDocument returned error: %v", err)
 	}
-	if port.chunksInput.Page.PageSize != contract.DefaultPageSize {
-		t.Fatalf("PageSize = %d, want default %d", port.chunksInput.Page.PageSize, contract.DefaultPageSize)
+	if port.documentInput.ChunksPage.PageSize != contract.DefaultPageSize {
+		t.Fatalf("PageSize = %d, want default %d", port.documentInput.ChunksPage.PageSize, contract.DefaultPageSize)
 	}
 }
 
@@ -312,8 +371,8 @@ func TestFacadeGetDocumentMetadataErrorStopsOptionalCalls(t *testing.T) {
 	if !errors.Is(err, want) {
 		t.Fatalf("metadata err = %v, want %v", err, want)
 	}
-	if port.contentCalls != 0 || port.chunksCalls != 0 {
-		t.Fatalf("content calls=%d chunks calls=%d, want 0 after metadata failure", port.contentCalls, port.chunksCalls)
+	if port.documentCalls != 1 || port.contentCalls != 0 || port.chunksCalls != 0 {
+		t.Fatalf("document calls=%d content calls=%d chunks calls=%d, want one aggregate call", port.documentCalls, port.contentCalls, port.chunksCalls)
 	}
 }
 

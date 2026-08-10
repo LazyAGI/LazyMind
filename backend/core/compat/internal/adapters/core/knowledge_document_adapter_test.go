@@ -18,6 +18,9 @@ import (
 )
 
 type fakeDocumentService struct {
+	documentReq doc.DocumentReadRequest
+	documentRes doc.DocumentReadResult
+	documentErr error
 	metadataReq doc.DocumentGetRequest
 	contentReq  doc.DocumentContentRequest
 	chunksReq   doc.DocumentChunksRequest
@@ -27,6 +30,14 @@ type fakeDocumentService struct {
 	metadataErr error
 	contentErr  error
 	chunksErr   error
+}
+
+func (s *fakeDocumentService) GetDocument(ctx context.Context, req doc.DocumentReadRequest) (doc.DocumentReadResult, error) {
+	s.documentReq = req
+	if s.documentErr != nil {
+		return doc.DocumentReadResult{}, s.documentErr
+	}
+	return s.documentRes, nil
 }
 
 func (s *fakeDocumentService) GetDocumentMetadata(ctx context.Context, req doc.DocumentGetRequest) (doc.DocumentMetadata, error) {
@@ -97,6 +108,35 @@ func TestKnowledgeDocumentAdapterMapsMetadata(t *testing.T) {
 		if strings.Contains(string(raw), forbidden) {
 			t.Fatalf("metadata leaks forbidden field %q: %s", forbidden, raw)
 		}
+	}
+}
+
+func TestKnowledgeDocumentAdapterAggregatesDocumentRead(t *testing.T) {
+	total := int32(2)
+	service := &fakeDocumentService{documentRes: doc.DocumentReadResult{
+		Metadata: doc.DocumentMetadata{ID: "doc-1", DatasetID: "ds-1", Name: "Spec"},
+		Content:  &doc.DocumentContent{MIMEType: "text/plain", Text: "hello", Truncated: true},
+		Chunks:   &doc.DocumentChunksResult{Chunks: []doc.DocumentChunk{{ID: "chunk-1", Text: "part", Number: 1}}, TotalSize: total, NextPageToken: "next"},
+	}}
+	adapter := mustKnowledgeDocumentAdapter(t, service)
+	got, err := adapter.GetDocument(context.Background(), contract.CallContext{UserID: " user-1 "}, compatknowledge.GetDocumentInput{
+		KnowledgeID:    " ds-1 ",
+		DocumentID:     " doc-1 ",
+		IncludeContent: true,
+		IncludeChunks:  true,
+		ChunksPage:     contract.PageRequest{PageSize: 500, PageToken: "tok"},
+	})
+	if err != nil {
+		t.Fatalf("GetDocument returned error: %v", err)
+	}
+	if service.documentReq.UserID != "user-1" || service.documentReq.DatasetID != "ds-1" || service.documentReq.DocumentID != "doc-1" || !service.documentReq.IncludeContent || !service.documentReq.IncludeChunks {
+		t.Fatalf("unexpected aggregate request: %#v", service.documentReq)
+	}
+	if service.documentReq.PageSize != contract.MaxPageSize || service.documentReq.PageToken != "tok" {
+		t.Fatalf("unexpected aggregate page: %#v", service.documentReq)
+	}
+	if got.Document.Content == nil || got.Document.Content.Text != "hello" || len(got.Document.Chunks) != 1 || got.Document.ChunksPage == nil || got.Document.ChunksPage.NextPageToken != "next" {
+		t.Fatalf("unexpected aggregate mapping: %#v", got.Document)
 	}
 }
 

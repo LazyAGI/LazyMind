@@ -387,6 +387,68 @@ func TestDocumentServiceListDocumentChunksUsesDatasetKBIDAndResolvedChunkGroup(t
 	}
 }
 
+func TestDocumentServiceGetDocumentLoadsRecordOnceForEveryExpansionCombination(t *testing.T) {
+	db := newDocumentTestDB(t)
+	installDocumentServiceTransport(t, func(r *http.Request) (int, string) {
+		if r.URL.Path == "/v1/chunks" {
+			return http.StatusOK, `{"items":[{"chunk_id":"chunk-1","content":"part","number":1}],"total":1}`
+		}
+		return http.StatusNotFound, `{"message":"not found"}`
+	})
+	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	path := filepath.Join(root, "doc.txt")
+	if err := os.WriteFile(path, []byte("document text"), 0o600); err != nil {
+		t.Fatalf("write document: %v", err)
+	}
+	now := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	seedDocumentServiceDataset(t, db, "ds-core", "user-1", now)
+	seedDocumentServiceDocument(t, db, "ds-core", "doc-1", "user-1", documentExt{
+		StoredPath:       path,
+		OriginalFilename: "doc.txt",
+		ContentType:      "text/plain",
+	})
+	if err := db.Model(&orm.Document{}).Where("id = ?", "doc-1").Update("lazyllm_doc_id", "lazy-doc-1").Error; err != nil {
+		t.Fatalf("set lazy document id: %v", err)
+	}
+	service := mustDocumentService(t, db)
+	var loadCount int
+	service.loadRecordCounter = &loadCount
+
+	cases := []struct {
+		name           string
+		includeContent bool
+		includeChunks  bool
+	}{
+		{name: "metadata only"},
+		{name: "content only", includeContent: true},
+		{name: "chunks only", includeChunks: true},
+		{name: "content and chunks", includeContent: true, includeChunks: true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			loadCount = 0
+			result, err := service.GetDocument(context.Background(), DocumentReadRequest{
+				UserID:         "user-1",
+				DatasetID:      "ds-core",
+				DocumentID:     "doc-1",
+				IncludeContent: tt.includeContent,
+				IncludeChunks:  tt.includeChunks,
+			})
+			if err != nil {
+				t.Fatalf("GetDocument: %v", err)
+			}
+			if loadCount != 1 {
+				t.Fatalf("loadRecord calls = %d, want 1", loadCount)
+			}
+			if (result.Content != nil) != tt.includeContent || (result.Chunks != nil) != tt.includeChunks {
+				t.Fatalf("optional result presence = content:%v chunks:%v, want content:%v chunks:%v", result.Content != nil, result.Chunks != nil, tt.includeContent, tt.includeChunks)
+			}
+		})
+	}
+}
+
 func TestDocumentServiceListDocumentChunksSecondPageLastPageAndNoDuplicate(t *testing.T) {
 	db := newDocumentTestDB(t)
 	installDocumentServiceTransport(t, func(r *http.Request) (int, string) {

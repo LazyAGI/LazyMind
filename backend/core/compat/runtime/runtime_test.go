@@ -36,6 +36,10 @@ func (stubKnowledgeCatalogPort) Get(context.Context, contract.CallContext, knowl
 
 type stubKnowledgeDocumentPort struct{}
 
+func (stubKnowledgeDocumentPort) GetDocument(context.Context, contract.CallContext, knowledge.GetDocumentInput) (knowledge.GetDocumentResult, error) {
+	return knowledge.GetDocumentResult{Document: knowledge.DocumentDetail{ID: "doc-1", KnowledgeID: "ds-1"}}, nil
+}
+
 func (stubKnowledgeDocumentPort) GetDocumentMetadata(context.Context, contract.CallContext, knowledge.GetDocumentMetadataInput) (knowledge.DocumentDetail, error) {
 	return knowledge.DocumentDetail{ID: "doc-1", KnowledgeID: "ds-1"}, nil
 }

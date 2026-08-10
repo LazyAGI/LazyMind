@@ -13,6 +13,7 @@ import (
 )
 
 type DocumentService interface {
+	GetDocument(ctx context.Context, req doc.DocumentReadRequest) (doc.DocumentReadResult, error)
 	GetDocumentMetadata(ctx context.Context, req doc.DocumentGetRequest) (doc.DocumentMetadata, error)
 	ReadDocumentContent(ctx context.Context, req doc.DocumentContentRequest) (doc.DocumentContent, error)
 	ListDocumentChunks(ctx context.Context, req doc.DocumentChunksRequest) (doc.DocumentChunksResult, error)
@@ -20,6 +21,41 @@ type DocumentService interface {
 
 type KnowledgeDocumentAdapter struct {
 	service DocumentService
+}
+
+func (a *KnowledgeDocumentAdapter) GetDocument(ctx context.Context, callCtx contract.CallContext, input compatknowledge.GetDocumentInput) (compatknowledge.GetDocumentResult, error) {
+	userID, datasetID, documentID, err := validateDocumentRequest(callCtx, input.KnowledgeID, input.DocumentID)
+	if err != nil {
+		return compatknowledge.GetDocumentResult{}, err
+	}
+	page := input.ChunksPage
+	if input.IncludeChunks {
+		page = page.Normalize()
+	}
+	resp, err := a.service.GetDocument(ctx, doc.DocumentReadRequest{
+		UserID:         userID,
+		DatasetID:      datasetID,
+		DocumentID:     documentID,
+		IncludeContent: input.IncludeContent,
+		IncludeChunks:  input.IncludeChunks,
+		PageToken:      page.PageToken,
+		PageSize:       page.PageSize,
+		Caller:         doc.DatasetCatalogCaller{UserID: userID},
+	})
+	if err != nil {
+		return compatknowledge.GetDocumentResult{}, mapDocumentServiceError("knowledge.document.get", err)
+	}
+	detail := mapDocumentMetadata(resp.Metadata)
+	if resp.Content != nil {
+		content := compatknowledge.DocumentContent{MIMEType: resp.Content.MIMEType, Text: resp.Content.Text, Truncated: resp.Content.Truncated}
+		detail.Content = &content
+	}
+	if resp.Chunks != nil {
+		detail.Chunks = mapDocumentChunks(resp.Chunks.Chunks)
+		total := int64(resp.Chunks.TotalSize)
+		detail.ChunksPage = &contract.PageResult{NextPageToken: resp.Chunks.NextPageToken, Total: &total}
+	}
+	return compatknowledge.GetDocumentResult{Document: detail}, nil
 }
 
 func NewKnowledgeDocumentAdapter(service DocumentService) (*KnowledgeDocumentAdapter, error) {
@@ -51,17 +87,9 @@ func NewKnowledgeDocumentAdapterForDBs(coreDB, lazyDB *gorm.DB) (*KnowledgeDocum
 }
 
 func (a *KnowledgeDocumentAdapter) GetDocumentMetadata(ctx context.Context, callCtx contract.CallContext, input compatknowledge.GetDocumentMetadataInput) (compatknowledge.DocumentDetail, error) {
-	userID := strings.TrimSpace(callCtx.UserID)
-	if userID == "" {
-		return compatknowledge.DocumentDetail{}, contract.InvalidArgumentError("knowledge.document.get", "user_id is required")
-	}
-	datasetID := strings.TrimSpace(input.KnowledgeID)
-	if datasetID == "" {
-		return compatknowledge.DocumentDetail{}, contract.InvalidArgumentError("knowledge.document.get", "knowledge_id is required")
-	}
-	documentID := strings.TrimSpace(input.DocumentID)
-	if documentID == "" {
-		return compatknowledge.DocumentDetail{}, contract.InvalidArgumentError("knowledge.document.get", "document_id is required")
+	userID, datasetID, documentID, err := validateDocumentRequest(callCtx, input.KnowledgeID, input.DocumentID)
+	if err != nil {
+		return compatknowledge.DocumentDetail{}, err
 	}
 	resp, err := a.service.GetDocumentMetadata(ctx, doc.DocumentGetRequest{
 		UserID:     userID,
@@ -76,17 +104,9 @@ func (a *KnowledgeDocumentAdapter) GetDocumentMetadata(ctx context.Context, call
 }
 
 func (a *KnowledgeDocumentAdapter) ReadDocumentContent(ctx context.Context, callCtx contract.CallContext, input compatknowledge.ReadDocumentContentInput) (compatknowledge.DocumentContent, error) {
-	userID := strings.TrimSpace(callCtx.UserID)
-	if userID == "" {
-		return compatknowledge.DocumentContent{}, contract.InvalidArgumentError("knowledge.document.get", "user_id is required")
-	}
-	datasetID := strings.TrimSpace(input.KnowledgeID)
-	if datasetID == "" {
-		return compatknowledge.DocumentContent{}, contract.InvalidArgumentError("knowledge.document.get", "knowledge_id is required")
-	}
-	documentID := strings.TrimSpace(input.DocumentID)
-	if documentID == "" {
-		return compatknowledge.DocumentContent{}, contract.InvalidArgumentError("knowledge.document.get", "document_id is required")
+	userID, datasetID, documentID, err := validateDocumentRequest(callCtx, input.KnowledgeID, input.DocumentID)
+	if err != nil {
+		return compatknowledge.DocumentContent{}, err
 	}
 	resp, err := a.service.ReadDocumentContent(ctx, doc.DocumentContentRequest{
 		UserID:     userID,
@@ -101,17 +121,9 @@ func (a *KnowledgeDocumentAdapter) ReadDocumentContent(ctx context.Context, call
 }
 
 func (a *KnowledgeDocumentAdapter) ListDocumentChunks(ctx context.Context, callCtx contract.CallContext, input compatknowledge.ListDocumentChunksInput) (compatknowledge.ListDocumentChunksResult, error) {
-	userID := strings.TrimSpace(callCtx.UserID)
-	if userID == "" {
-		return compatknowledge.ListDocumentChunksResult{}, contract.InvalidArgumentError("knowledge.document.get", "user_id is required")
-	}
-	datasetID := strings.TrimSpace(input.KnowledgeID)
-	if datasetID == "" {
-		return compatknowledge.ListDocumentChunksResult{}, contract.InvalidArgumentError("knowledge.document.get", "knowledge_id is required")
-	}
-	documentID := strings.TrimSpace(input.DocumentID)
-	if documentID == "" {
-		return compatknowledge.ListDocumentChunksResult{}, contract.InvalidArgumentError("knowledge.document.get", "document_id is required")
+	userID, datasetID, documentID, err := validateDocumentRequest(callCtx, input.KnowledgeID, input.DocumentID)
+	if err != nil {
+		return compatknowledge.ListDocumentChunksResult{}, err
 	}
 	page := input.Page.Normalize()
 	resp, err := a.service.ListDocumentChunks(ctx, doc.DocumentChunksRequest{
@@ -130,6 +142,22 @@ func (a *KnowledgeDocumentAdapter) ListDocumentChunks(ctx context.Context, callC
 		Chunks: mapDocumentChunks(resp.Chunks),
 		Page:   contract.PageResult{NextPageToken: resp.NextPageToken, Total: &total},
 	}, nil
+}
+
+func validateDocumentRequest(callCtx contract.CallContext, knowledgeID, documentID string) (string, string, string, error) {
+	userID := strings.TrimSpace(callCtx.UserID)
+	if userID == "" {
+		return "", "", "", contract.InvalidArgumentError("knowledge.document.get", "user_id is required")
+	}
+	datasetID := strings.TrimSpace(knowledgeID)
+	if datasetID == "" {
+		return "", "", "", contract.InvalidArgumentError("knowledge.document.get", "knowledge_id is required")
+	}
+	documentID = strings.TrimSpace(documentID)
+	if documentID == "" {
+		return "", "", "", contract.InvalidArgumentError("knowledge.document.get", "document_id is required")
+	}
+	return userID, datasetID, documentID, nil
 }
 
 func mapDocumentMetadata(item doc.DocumentMetadata) compatknowledge.DocumentDetail {

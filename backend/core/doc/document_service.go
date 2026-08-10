@@ -61,8 +61,9 @@ type DocumentServiceDeps struct {
 }
 
 type DocumentService struct {
-	db     *gorm.DB
-	lazyDB *gorm.DB
+	db                *gorm.DB
+	lazyDB            *gorm.DB
+	loadRecordCounter *int
 }
 
 func NewDocumentService(deps DocumentServiceDeps) (*DocumentService, error) {
@@ -97,6 +98,25 @@ type DocumentChunksRequest struct {
 	PageToken  string
 	PageSize   int
 	Caller     DatasetCatalogCaller
+}
+
+// DocumentReadRequest describes one document read and its optional expansions.
+// The individual public methods below remain available for existing callers.
+type DocumentReadRequest struct {
+	UserID         string
+	DatasetID      string
+	DocumentID     string
+	IncludeContent bool
+	IncludeChunks  bool
+	PageToken      string
+	PageSize       int
+	Caller         DatasetCatalogCaller
+}
+
+type DocumentReadResult struct {
+	Metadata DocumentMetadata
+	Content  *DocumentContent
+	Chunks   *DocumentChunksResult
 }
 
 type DocumentMetadata struct {
@@ -159,6 +179,43 @@ func (s *DocumentService) ReadDocumentContent(ctx context.Context, req DocumentC
 	if err != nil {
 		return DocumentContent{}, err
 	}
+	return readDocumentContentFromRecord(rec)
+}
+
+func (s *DocumentService) ListDocumentChunks(ctx context.Context, req DocumentChunksRequest) (DocumentChunksResult, error) {
+	rec, err := s.loadRecord(ctx, req.UserID, req.DatasetID, req.DocumentID, req.Caller)
+	if err != nil {
+		return DocumentChunksResult{}, err
+	}
+	return listDocumentChunksFromRecord(ctx, rec, req.DatasetID, req.DocumentID, req.PageToken, req.PageSize)
+}
+
+// GetDocument loads and authorizes the document once, then evaluates only the
+// optional expansions requested by the caller.
+func (s *DocumentService) GetDocument(ctx context.Context, req DocumentReadRequest) (DocumentReadResult, error) {
+	rec, err := s.loadRecord(ctx, req.UserID, req.DatasetID, req.DocumentID, req.Caller)
+	if err != nil {
+		return DocumentReadResult{}, err
+	}
+	result := DocumentReadResult{Metadata: rec.metadata()}
+	if req.IncludeContent {
+		content, err := readDocumentContentFromRecord(rec)
+		if err != nil {
+			return DocumentReadResult{}, err
+		}
+		result.Content = &content
+	}
+	if req.IncludeChunks {
+		chunks, err := listDocumentChunksFromRecord(ctx, rec, req.DatasetID, req.DocumentID, req.PageToken, req.PageSize)
+		if err != nil {
+			return DocumentReadResult{}, err
+		}
+		result.Chunks = &chunks
+	}
+	return result, nil
+}
+
+func readDocumentContentFromRecord(rec documentServiceRecord) (DocumentContent, error) {
 	storedPath := previewPathForContent(rec.ext)
 	mimeType := previewContentTypeForContent(rec.ext)
 	filename := previewFilenameForContent(rec.ext)
@@ -181,17 +238,13 @@ func (s *DocumentService) ReadDocumentContent(ctx context.Context, req DocumentC
 	return DocumentContent{Text: text, MIMEType: mimeType, Truncated: truncated}, nil
 }
 
-func (s *DocumentService) ListDocumentChunks(ctx context.Context, req DocumentChunksRequest) (DocumentChunksResult, error) {
-	rec, err := s.loadRecord(ctx, req.UserID, req.DatasetID, req.DocumentID, req.Caller)
-	if err != nil {
-		return DocumentChunksResult{}, err
-	}
+func listDocumentChunksFromRecord(ctx context.Context, rec documentServiceRecord, datasetID, documentID, pageToken string, requestedPageSize int) (DocumentChunksResult, error) {
 	lazyDocID := strings.TrimSpace(rec.row.LazyllmDocID)
 	if lazyDocID == "" {
 		return DocumentChunksResult{Chunks: []DocumentChunk{}, TotalSize: 0}, nil
 	}
-	pageSize := normalizeDocumentChunkPageSize(req.PageSize)
-	offset, err := parseDatasetPageToken(req.PageToken)
+	pageSize := normalizeDocumentChunkPageSize(requestedPageSize)
+	offset, err := parseDatasetPageToken(pageToken)
 	if err != nil {
 		return DocumentChunksResult{}, &DocumentServiceError{Code: DocumentServiceInvalidArgument, Message: "invalid page_token", Err: err}
 	}
@@ -215,7 +268,7 @@ func (s *DocumentService) ListDocumentChunks(ctx context.Context, req DocumentCh
 		}
 		raw = fallbackRaw
 	}
-	segments, total, next := parseChunkSearchResponse(req.DatasetID, req.DocumentID, raw, page, pageSize)
+	segments, total, next := parseChunkSearchResponse(datasetID, documentID, raw, page, pageSize)
 	chunks := make([]DocumentChunk, 0, len(segments))
 	for _, segment := range segments {
 		chunks = append(chunks, DocumentChunk{ID: segment.SegmentID, Text: segment.Text, Number: segment.Number})
@@ -224,6 +277,9 @@ func (s *DocumentService) ListDocumentChunks(ctx context.Context, req DocumentCh
 }
 
 func (s *DocumentService) loadRecord(ctx context.Context, userID, datasetID, documentID string, caller DatasetCatalogCaller) (documentServiceRecord, error) {
+	if s != nil && s.loadRecordCounter != nil {
+		*s.loadRecordCounter = *s.loadRecordCounter + 1
+	}
 	if s == nil || s.db == nil {
 		return documentServiceRecord{}, &DocumentServiceError{Code: DocumentServiceInternal, Message: "document service is not configured"}
 	}

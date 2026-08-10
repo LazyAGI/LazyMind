@@ -83,37 +83,10 @@ func (f *Facade) GetDocument(ctx context.Context, callCtx contract.CallContext, 
 		return GetDocumentResult{}, contract.NewError(contract.Unsupported, "knowledge.document.get", "knowledge document is not configured", false, nil)
 	}
 
-	detail, err := f.document.GetDocumentMetadata(ctx, callCtx, GetDocumentMetadataInput{
-		KnowledgeID: input.KnowledgeID,
-		DocumentID:  input.DocumentID,
-	})
-	if err != nil {
-		return GetDocumentResult{}, err
-	}
-	if input.IncludeContent {
-		content, err := f.document.ReadDocumentContent(ctx, callCtx, ReadDocumentContentInput{
-			KnowledgeID: input.KnowledgeID,
-			DocumentID:  input.DocumentID,
-		})
-		if err != nil {
-			return GetDocumentResult{}, err
-		}
-		detail.Content = &content
-	}
 	if input.IncludeChunks {
-		page := input.ChunksPage.Normalize()
-		chunks, err := f.document.ListDocumentChunks(ctx, callCtx, ListDocumentChunksInput{
-			KnowledgeID: input.KnowledgeID,
-			DocumentID:  input.DocumentID,
-			Page:        page,
-		})
-		if err != nil {
-			return GetDocumentResult{}, err
-		}
-		detail.Chunks = chunks.Chunks
-		detail.ChunksPage = &chunks.Page
+		input.ChunksPage = input.ChunksPage.Normalize()
 	}
-	return GetDocumentResult{Document: detail}, nil
+	return f.document.GetDocument(ctx, callCtx, input)
 }
 
 func (f *Facade) Search(ctx context.Context, callCtx contract.CallContext, input SearchInput) (SearchResult, error) {

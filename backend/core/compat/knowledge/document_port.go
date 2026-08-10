@@ -7,9 +7,7 @@ import (
 )
 
 type DocumentPort interface {
-	GetDocumentMetadata(ctx context.Context, callCtx contract.CallContext, input GetDocumentMetadataInput) (DocumentDetail, error)
-	ReadDocumentContent(ctx context.Context, callCtx contract.CallContext, input ReadDocumentContentInput) (DocumentContent, error)
-	ListDocumentChunks(ctx context.Context, callCtx contract.CallContext, input ListDocumentChunksInput) (ListDocumentChunksResult, error)
+	GetDocument(ctx context.Context, callCtx contract.CallContext, input GetDocumentInput) (GetDocumentResult, error)
 }
 
 type GetDocumentMetadataInput struct {
