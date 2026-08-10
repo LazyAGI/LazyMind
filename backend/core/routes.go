@@ -17,7 +17,6 @@ import (
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
 	"lazymind/core/file"
-	"lazymind/core/knowledge_market"
 	"lazymind/core/mcp"
 	"lazymind/core/modelprovider"
 	"lazymind/core/remotefs"
@@ -513,16 +512,6 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/skill-market/admin/items/{market_item_id}", []string{"user.admin"}, skillv2handler.MarketEdit)
 	handleAPI(r, "DELETE", "/skill-market/admin/items/{market_item_id}", []string{"user.admin"}, skillv2handler.MarketDelete)
 	handleAPI(r, "POST", "/skill-market/admin/items/{market_item_id}:unpublish", []string{"user.admin"}, skillv2handler.MarketUnpublish)
-	// ----- Knowledge market (read-only) -----
-	handleAPI(r, "GET", "/knowledge-market", []string{"qa.read"}, knowledge_market.MarketList)
-	handleAPI(r, "GET", "/knowledge-market/domains", []string{"qa.read"}, knowledge_market.MarketDomains)
-	handleAPI(r, "GET", "/knowledge-market/items/{market_item_id}", []string{"qa.read"}, knowledge_market.MarketGet)
-	handleAPI(r, "POST", "/knowledge-market/items/{market_item_id}:install", []string{"qa.write"}, knowledge_market.MarketInstall)
-	handleAPI(r, "POST", "/knowledge-market/items/{market_item_id}:update", []string{"qa.write"}, knowledge_market.MarketUpdate)
-	handleAPI(r, "POST", "/knowledge-market:update-all", []string{"qa.write"}, knowledge_market.MarketUpdateAll)
-	handleAPI(r, "GET", "/knowledge-market/tasks", []string{"qa.read"}, knowledge_market.MarketListInstallTasks)
-	handleAPI(r, "GET", "/knowledge-market/tasks/{job_id}", []string{"qa.read"}, knowledge_market.MarketGetInstallTask)
-	handleAPI(r, "GET", "/knowledge-market/installs", []string{"qa.read"}, knowledge_market.MarketListInstalls)
 	handleAPI(r, "GET", "/skill-review:summary", []string{"qa.read"}, resourceupdate.GetSkillReviewSummary)
 	handleAPI(r, "POST", "/skill-review:run", []string{"qa.write"}, resourceupdate.RunSkillReview)
 	handleAPI(r, "GET", "/skill-review/tasks", []string{"qa.read"}, resourceupdate.ListSkillReviewTasks)

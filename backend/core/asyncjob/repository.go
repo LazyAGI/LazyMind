@@ -23,24 +23,6 @@ var reusableStatuses = []string{
 	string(StatusSucceeded),
 }
 
-// activeReusableStatuses is reusableStatuses minus succeeded: pending and
-// running jobs are always deduplicated, but succeeded jobs are only reused
-// unless the caller opts out (SkipSucceeded). One-click batches that must
-// re-run on every invocation pass SkipSucceeded=true so a new job is created
-// instead of replaying the old result.
-var activeReusableStatuses = []string{
-	string(StatusPending),
-	string(StatusRunning),
-}
-
-// staleStatuses are terminal job states that occupy the unique
-// (job_type, idempotency_key) index but can be reset and reused when the same
-// job is enqueued again (e.g. retry an install after it failed).
-var staleStatuses = []string{
-	string(StatusFailed),
-	string(StatusCanceled),
-}
-
 func Enqueue(ctx context.Context, db *gorm.DB, req EnqueueRequest) (*orm.AsyncJob, error) {
 	req.JobType = strings.TrimSpace(req.JobType)
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
@@ -66,45 +48,12 @@ func Enqueue(ctx context.Context, db *gorm.DB, req EnqueueRequest) (*orm.AsyncJo
 	var created *orm.AsyncJob
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if req.IdempotencyKey != "" {
-			existing, err := findReusableJob(ctx, tx, req.JobType, req.IdempotencyKey, true, req.SkipSucceeded)
+			existing, err := findReusableJob(ctx, tx, req.JobType, req.IdempotencyKey, true)
 			if err != nil {
 				return err
 			}
 			if existing != nil {
 				created = existing
-				return nil
-			}
-
-			// SkipSucceeded retires a previously succeeded job so the history row
-			// is kept but its idempotency key is released (the table has a unique
-			// index on job_type+idempotency_key) and a fresh job can be created.
-			if req.SkipSucceeded {
-				retired, err := findSucceededJob(ctx, tx, req.JobType, req.IdempotencyKey, true)
-				if err != nil {
-					return err
-				}
-				if retired != nil {
-					newKey := req.IdempotencyKey + ":done:" + retired.ID
-					if err := tx.Model(&orm.AsyncJob{}).
-						Where("id = ?", retired.ID).
-						Update("idempotency_key", newKey).Error; err != nil {
-						return err
-					}
-				}
-			}
-
-			// No active/reusable job: a stale failed/canceled row still holds
-			// the unique index, so reset it in place instead of inserting a new
-			// row (which would violate the unique constraint).
-			stale, err := findStaleJob(ctx, tx, req.JobType, req.IdempotencyKey, true)
-			if err != nil {
-				return err
-			}
-			if stale != nil {
-				if err := resetJobForReuse(tx, stale, req, payload, now); err != nil {
-					return err
-				}
-				created = stale
 				return nil
 			}
 		}
@@ -131,7 +80,7 @@ func Enqueue(ctx context.Context, db *gorm.DB, req EnqueueRequest) (*orm.AsyncJo
 		return nil
 	})
 	if err != nil && req.IdempotencyKey != "" && isUniqueConflict(err) {
-		existing, findErr := findReusableJob(ctx, db, req.JobType, req.IdempotencyKey, false, req.SkipSucceeded)
+		existing, findErr := findReusableJob(ctx, db, req.JobType, req.IdempotencyKey, false)
 		if findErr == nil && existing != nil {
 			return existing, nil
 		}
@@ -150,13 +99,9 @@ func Get(ctx context.Context, db *gorm.DB, id string) (*orm.AsyncJob, error) {
 	return &row, nil
 }
 
-func findReusableJob(ctx context.Context, db *gorm.DB, jobType, idempotencyKey string, lock, skipSucceeded bool) (*orm.AsyncJob, error) {
-	statuses := reusableStatuses
-	if skipSucceeded {
-		statuses = activeReusableStatuses
-	}
+func findReusableJob(ctx context.Context, db *gorm.DB, jobType, idempotencyKey string, lock bool) (*orm.AsyncJob, error) {
 	q := db.WithContext(ctx).
-		Where("job_type = ? AND idempotency_key = ? AND status IN ?", jobType, idempotencyKey, statuses).
+		Where("job_type = ? AND idempotency_key = ? AND status IN ?", jobType, idempotencyKey, reusableStatuses).
 		Order("created_at ASC")
 	if lock {
 		q = withUpdateLock(q)
@@ -170,73 +115,6 @@ func findReusableJob(ctx context.Context, db *gorm.DB, jobType, idempotencyKey s
 		return nil, err
 	}
 	return &row, nil
-}
-
-// findSucceededJob looks up the previously succeeded job holding the given
-// idempotency key so SkipSucceeded callers can retire it and free the key.
-func findSucceededJob(ctx context.Context, db *gorm.DB, jobType, idempotencyKey string, lock bool) (*orm.AsyncJob, error) {
-	q := db.WithContext(ctx).
-		Where("job_type = ? AND idempotency_key = ? AND status = ?", jobType, idempotencyKey, string(StatusSucceeded)).
-		Order("created_at ASC")
-	if lock {
-		q = withUpdateLock(q)
-	}
-
-	var row orm.AsyncJob
-	if err := q.First(&row).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &row, nil
-}
-
-func findStaleJob(ctx context.Context, db *gorm.DB, jobType, idempotencyKey string, lock bool) (*orm.AsyncJob, error) {
-	q := db.WithContext(ctx).
-		Where("job_type = ? AND idempotency_key = ? AND status IN ?", jobType, idempotencyKey, staleStatuses).
-		Order("created_at ASC")
-	if lock {
-		q = withUpdateLock(q)
-	}
-
-	var row orm.AsyncJob
-	if err := q.First(&row).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &row, nil
-}
-
-// resetJobForReuse clears a terminal job row so the runner can pick it up again
-// as a fresh pending job. The job id and created_at are preserved so callers
-// polling the same job id keep working across retries.
-func resetJobForReuse(db *gorm.DB, row *orm.AsyncJob, req EnqueueRequest, payload json.RawMessage, now time.Time) error {
-	return db.Model(row).Updates(map[string]any{
-		"status":             string(StatusPending),
-		"resource_type":      req.ResourceType,
-		"resource_id":        req.ResourceID,
-		"payload_json":       json.RawMessage(payload),
-		"max_attempts":       req.MaxAttempts,
-		"next_run_at":        req.RunAt,
-		"attempt_count":      0,
-		"error_code":         "",
-		"error_message":      "",
-		"error_details_json": nil,
-		"result_json":        nil,
-		"progress_current":   0,
-		"progress_total":     0,
-		"locked_by":          "",
-		"lock_until":         nil,
-		"started_at":         nil,
-		"finished_at":        nil,
-		"heartbeat_at":       nil,
-		"create_user_id":     req.CreateUserID,
-		"create_user_name":   req.CreateUserName,
-		"updated_at":         now,
-	}).Error
 }
 
 func withUpdateLock(db *gorm.DB) *gorm.DB {

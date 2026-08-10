@@ -1748,7 +1748,7 @@ func buildTaskResponse(r *http.Request, row orm.Task) TaskResponse {
 		resp.TaskInfo.FailedDocumentSize = resp.TaskInfo.TotalDocumentSize
 		resp.TaskInfo.FailedDocumentCount = resp.TaskInfo.TotalDocumentCount
 	}
-	resp.TaskState = NormalizeTaskStateForUI(resp.TaskState)
+	resp.TaskState = normalizeTaskStateForUI(resp.TaskState)
 	if resp.TaskState == "FAILED" {
 		if resp.ErrMsg == "" {
 			resp.ErrMsg = resp.ConvertError
@@ -1903,10 +1903,9 @@ func isSuccessState(state string) bool {
 	return s == string(TaskStateSucceeded) || s == "SUCCEEDED" || s == "SUCCESS"
 }
 
-// NormalizeTaskStateForUI maps core/lazyllm task states to the values expected
-// by the knowledge import-task panel and progress aggregation
-// (WAITING / WORKING / SUCCESS / FAILED / CANCELED).
-func NormalizeTaskStateForUI(state string) string {
+// normalizeTaskStateForUI maps core/lazyllm task states to the values expected by the
+// knowledge import-task panel (WAITING / WORKING / SUCCESS / FAILED / CANCELED).
+func normalizeTaskStateForUI(state string) string {
 	s := strings.ToUpper(strings.TrimSpace(state))
 	switch s {
 	case string(TaskStateCreating), string(TaskStateUploading), string(TaskStateUploaded):

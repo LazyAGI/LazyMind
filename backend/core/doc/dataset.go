@@ -64,20 +64,7 @@ type Dataset struct {
 	Tags                []string       `json:"tags"`
 	DefaultDataset      bool           `json:"default_dataset"`
 	CreatedByDataSource *bool          `json:"created_by_data_source,omitempty"`
-	SourceType          string         `json:"source_type,omitempty"`
 }
-
-// Dataset source types. They are derived per dataset and deliberately use the
-// same values as the `source` query filter of ListDatasets, so the response
-// `source_type` always matches the requested source: a dataset is
-// "official_installed" when it is linked to the current user's official
-// knowledge base install, otherwise "cloud" when the scan control plane
-// reports a data source, otherwise "manual".
-const (
-	datasetSourceManual            = "manual"
-	datasetSourceCloud             = "cloud"
-	datasetSourceOfficialInstalled = "official_installed"
-)
 
 type ListAlgosResponse struct {
 	Algos []Algo `json:"algos"`
@@ -496,59 +483,30 @@ func AllDatasetTags(w http.ResponseWriter, r *http.Request) {
 func filterAndCountCandidates(
 	candidates []orm.Dataset,
 	sourceFilter string,
-	sourceTypeMap map[string]string,
+	sourceMap map[string]bool,
 	offset int,
 	pageSize int,
 	total int,
 	page []orm.Dataset,
-	pageSourceTypeMap map[string]string,
+	pageSourceMap map[string]bool,
 	collectPage bool,
 ) (int, []orm.Dataset) {
 	for _, c := range candidates {
 		// Apply source filter.
-		if !datasetMatchesSourceFilter(sourceFilter, sourceTypeMap[c.ID]) {
+		if sourceFilter == "cloud" && !sourceMap[c.ID] {
+			continue
+		}
+		if sourceFilter == "manual" && sourceMap[c.ID] {
 			continue
 		}
 		// Collect into page only during Phase 1.
 		if collectPage && total >= offset && len(page) < pageSize {
 			page = append(page, c)
-			pageSourceTypeMap[c.ID] = sourceTypeMap[c.ID]
+			pageSourceMap[c.ID] = sourceMap[c.ID]
 		}
 		total++
 	}
 	return total, page
-}
-
-// datasetMatchesSourceFilter reports whether a dataset with the given derived
-// source type satisfies the `source` query filter. An empty sourceFilter
-// matches every dataset.
-func datasetMatchesSourceFilter(sourceFilter, sourceType string) bool {
-	switch sourceFilter {
-	case "cloud":
-		return sourceType == datasetSourceCloud
-	case "manual":
-		return sourceType == datasetSourceManual
-	case "official_installed":
-		return sourceType == datasetSourceOfficialInstalled
-	}
-	return true
-}
-
-// buildDatasetSourceTypeMap derives the source type for a batch of datasets:
-// official install link wins, then cloud data source, otherwise local upload.
-func buildDatasetSourceTypeMap(datasetIDs []string, cloudSourceMap, installedMap map[string]bool) map[string]string {
-	sourceTypeMap := make(map[string]string, len(datasetIDs))
-	for _, id := range datasetIDs {
-		switch {
-		case installedMap[id]:
-			sourceTypeMap[id] = datasetSourceOfficialInstalled
-		case cloudSourceMap[id]:
-			sourceTypeMap[id] = datasetSourceCloud
-		default:
-			sourceTypeMap[id] = datasetSourceManual
-		}
-	}
-	return sourceTypeMap
 }
 
 func ListDatasets(w http.ResponseWriter, r *http.Request) {
@@ -565,7 +523,7 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	keyword := strings.TrimSpace(q.Get("keyword"))
 	rawTags := q["tags"]
 	sourceFilter := strings.ToLower(strings.TrimSpace(q.Get("source")))
-	if sourceFilter != "cloud" && sourceFilter != "manual" && sourceFilter != "official_installed" {
+	if sourceFilter != "cloud" && sourceFilter != "manual" {
 		sourceFilter = ""
 	}
 
@@ -630,7 +588,7 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	scanOffset := 0
 	hasMoreRows := true
 	candidates := make([]orm.Dataset, 0, pageSize)
-	pageSourceTypeMap := make(map[string]string, pageSize)
+	pageSourceMap := make(map[string]bool, pageSize)
 
 	// ------------------------------------------------------------------
 	// Phase 1: collect the current page while counting candidates.
@@ -676,16 +634,12 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 			for i, c := range candidates {
 				candidateIDs[i] = c.ID
 			}
-			sourceTypeMap := buildDatasetSourceTypeMap(
-				candidateIDs,
-				batchCheckDatasetsHaveSource(r.Context(), candidateIDs),
-				batchCheckInstalledMarketDatasets(r.Context(), userID, candidateIDs),
-			)
+			sourceMap := batchCheckDatasetsHaveSource(r.Context(), candidateIDs)
 
 			// Delegate source filtering + page collection + counting.
 			total, page = filterAndCountCandidates(
-				candidates, sourceFilter, sourceTypeMap,
-				offset, pageSize, total, page, pageSourceTypeMap,
+				candidates, sourceFilter, sourceMap,
+				offset, pageSize, total, page, pageSourceMap,
 				true, // collectPage: collect page items
 			)
 
@@ -738,16 +692,12 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 				for i, c := range candidates {
 					candidateIDs[i] = c.ID
 				}
-				sourceTypeMap := buildDatasetSourceTypeMap(
-					candidateIDs,
-					batchCheckDatasetsHaveSource(r.Context(), candidateIDs),
-					batchCheckInstalledMarketDatasets(r.Context(), userID, candidateIDs),
-				)
+				sourceMap := batchCheckDatasetsHaveSource(r.Context(), candidateIDs)
 
 				// Count only — do not collect page items.
 				total, page = filterAndCountCandidates(
-					candidates, sourceFilter, sourceTypeMap,
-					offset, pageSize, total, page, pageSourceTypeMap,
+					candidates, sourceFilter, sourceMap,
+					offset, pageSize, total, page, pageSourceMap,
 					false, // collectPage: count only, skip page collection
 				)
 
@@ -776,8 +726,7 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 		}
 		parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), liveParsers)
 		stats := statsMap[ds.ID]
-		sourceType := pageSourceTypeMap[ds.ID]
-		createdByDataSource := sourceType == datasetSourceCloud
+		createdByDataSource := pageSourceMap[ds.ID]
 
 		out = append(out, Dataset{
 			Name:                "datasets/" + ds.ID,
@@ -803,7 +752,6 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 			Tags:                parseDatasetTags(ds.Ext),
 			DefaultDataset:      isDefaultDatasetForUser(r.Context(), userID, ds.ID),
 			CreatedByDataSource: &createdByDataSource,
-			SourceType:          sourceType,
 		})
 	}
 
@@ -1309,145 +1257,65 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Official knowledge base installs use a dedicated delete path (uninstall):
-	// deletion is refused while the install is in flight, and the install
-	// record plus its install jobs are cleared atomically with the dataset row.
-	install, isOfficial, err := findMarketInstallByDataset(r.Context(), corestore.DB(), userID, datasetID)
-	if err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query market install failed", err), http.StatusInternalServerError)
-		return
-	}
-	if isOfficial {
-		deleteOfficialInstalledDataset(w, r, &ds, userID, install)
-		return
-	}
-	deleteRegularDataset(w, r, &ds, userID)
-}
-
-// deleteOfficialInstalledDataset deletes an official knowledge base dataset
-// (uninstall): it refuses while the install is still running, deletes the KB
-// on the algo service and soft-deletes the dataset row, then clears the market
-// install record and its install jobs in the same transaction. Official
-// installs never have a scan source, so the scan source delete step is skipped.
-func deleteOfficialInstalledDataset(w http.ResponseWriter, r *http.Request, ds *orm.Dataset, userID string, install *orm.KnowledgeMarketInstall) {
-	// Refuse the uninstall only while a real background job is in flight
-	// (install/update/update-all). A stale install_state left by an external
-	// failure never blocks the delete: with no active job the item is safe to
-	// remove and reinstall, and resetMarketInstallInTx clears the leftover
-	// install row plus its install/update jobs in the same transaction.
-	active, err := HasActiveMarketJob(r.Context(), corestore.DB(), userID, install.MarketItemID)
-	if err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query active market jobs failed", err), http.StatusInternalServerError)
-		return
-	}
-	if active {
-		common.ReplyErr(w, "knowledge base task is running, retry later", http.StatusConflict)
-		return
-	}
-	if err := deleteDatasetAlgoKB(r.Context(), ds, userID); err != nil {
-		common.ReplyErr(w, "external delete failed", http.StatusBadGateway)
-		return
-	}
-
-	now := time.Now().UTC()
-	if err := corestore.DB().Transaction(func(tx *gorm.DB) error {
-		if err := softDeleteDataset(r.Context(), tx, ds, userID, now); err != nil {
-			return err
-		}
-		if install != nil {
-			return resetMarketInstallInTx(r.Context(), tx, userID, install.MarketItemID)
-		}
-		return nil
-	}); err != nil {
+	if err := deleteScanSourceForDataset(r.Context(), datasetID); err != nil {
 		log.Logger.Error().
 			Err(err).
-			Str("dataset_id", ds.ID).
-			Str("user_id", userID).
-			Msg("delete official installed dataset failed")
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "delete dataset failed", err), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
-
-// deleteRegularDataset keeps the original delete flow for local upload and
-// cloud-synced datasets: scan source first, then the KB on the algo service,
-// then the soft delete in a transaction.
-func deleteRegularDataset(w http.ResponseWriter, r *http.Request, ds *orm.Dataset, userID string) {
-	if err := deleteScanSourceForDataset(r.Context(), ds.ID); err != nil {
-		log.Logger.Error().
-			Err(err).
-			Str("dataset_id", ds.ID).
+			Str("dataset_id", datasetID).
 			Str("user_id", userID).
 			Msg("scan source delete failed")
 		common.ReplyErr(w, "delete scan source failed", http.StatusBadGateway)
 		return
 	}
-	if err := deleteDatasetAlgoKB(r.Context(), ds, userID); err != nil {
-		common.ReplyErr(w, "external delete failed", http.StatusBadGateway)
-		return
-	}
 
-	now := time.Now().UTC()
-	if err := corestore.DB().Transaction(func(tx *gorm.DB) error {
-		return softDeleteDataset(r.Context(), tx, ds, userID, now)
-	}); err != nil {
-		log.Logger.Error().
-			Err(err).
-			Str("dataset_id", ds.ID).
-			Str("user_id", userID).
-			Msg("delete dataset failed")
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "delete dataset failed", err), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
-
-// deleteDatasetAlgoKB deletes the KB on the algo service and logs the result.
-func deleteDatasetAlgoKB(ctx context.Context, ds *orm.Dataset, userID string) error {
-	kbID := strings.TrimSpace(ds.KbID)
-	if kbID == "" {
+	// 1) text DELETE /v1/kbs/{kb_id}
+	kbID := ds.KbID
+	if strings.TrimSpace(kbID) == "" {
 		kbID = ds.ID
 	}
 	kbURL := common.JoinURL(common.AlgoServiceEndpoint(), "/v1/kbs/"+kbID)
 	kbTimeout := 10 * time.Second
 	kbStart := time.Now()
-	if err := common.ApiDelete(ctx, kbURL, nil, nil, kbTimeout); err != nil {
+	if err := common.ApiDelete(r.Context(), kbURL, nil, nil, kbTimeout); err != nil {
 		log.Logger.Error().
 			Err(err).
 			Str("kb_url", kbURL).
 			Str("kb_id", kbID).
-			Str("dataset_id", ds.ID).
+			Str("dataset_id", datasetID).
 			Str("user_id", userID).
 			Dur("timeout", kbTimeout).
 			Dur("elapsed", time.Since(kbStart)).
 			Msg("kb service delete failed")
-		return err
+		common.ReplyErr(w, "external delete failed", http.StatusBadGateway)
+		return
 	}
 	log.Logger.Info().
 		Str("kb_url", kbURL).
 		Str("kb_id", kbID).
-		Str("dataset_id", ds.ID).
+		Str("dataset_id", datasetID).
 		Str("user_id", userID).
 		Dur("elapsed", time.Since(kbStart)).
 		Msg("kb service delete ok")
-	return nil
-}
 
-// softDeleteDataset soft-deletes the dataset row and cleans up its eval set
-// and default dataset references inside the caller's transaction.
-func softDeleteDataset(ctx context.Context, tx *gorm.DB, ds *orm.Dataset, userID string, now time.Time) error {
-	ds.DeletedAt = &now
-	ds.UpdatedAt = now
-	if err := tx.Save(ds).Error; err != nil {
-		return err
+	// 2) text datasets
+	now := time.Now().UTC()
+	if err := corestore.DB().Transaction(func(tx *gorm.DB) error {
+		ds.DeletedAt = &now
+		ds.UpdatedAt = now
+		if err := tx.Save(&ds).Error; err != nil {
+			return err
+		}
+		if err := cleanupEvalSetDatasetReferences(r.Context(), tx, datasetID, now); err != nil {
+			return err
+		}
+		return tx.
+			Where("create_user_id = ? AND dataset_id = ?", userID, datasetID).
+			Delete(&orm.DefaultDataset{}).Error
+	}); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "delete dataset failed", err), http.StatusInternalServerError)
+		return
 	}
-	if err := cleanupEvalSetDatasetReferences(ctx, tx, ds.ID, now); err != nil {
-		return err
-	}
-	return tx.
-		Where("create_user_id = ? AND dataset_id = ?", userID, ds.ID).
-		Delete(&orm.DefaultDataset{}).Error
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func deleteScanSourceForDataset(ctx context.Context, datasetID string) error {
