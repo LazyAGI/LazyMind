@@ -93,8 +93,8 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Attached file rules\n'
         'Attachments are listed for reference only — do NOT parse or read them automatically.\n'
-        '- `find_user_attachment(filename, turn=N)`: get path/url to pass to image tools, workflows, '
-        '`vision_extractor`, or `save_plugin_artifact`. Prefer this for images when the task is '
+        '- `find_user_attachment(filename, turn=N)`: get path/url to pass to image tools, '
+        '`vision_extractor`, or a Host attachment importer. Prefer this for images when the task is '
         'visual (edit, generate, workflow) or you only need the file location.\n'
         '- `read_user_attachment(filename, turn=N)`: extract TEXT — direct read for plain-text files, '
         'local structured extraction for docx (with OCR fallback), OCR for pdf/doc/pptx, or a '

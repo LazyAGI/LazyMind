@@ -287,7 +287,7 @@ describe("mergeConversationTrailIntoMessageList", () => {
 });
 
 describe("mergeChatMessageLists", () => {
-  it("prefers the cached list when it has content", () => {
+  it("prefers the cached list when it has content and no persisted overlap", () => {
     const api = [{ id: "api-1" }];
     const cached = [{ id: "cache-1" }];
     expect(mergeChatMessageLists(api, cached)).toBe(cached);
@@ -301,5 +301,56 @@ describe("mergeChatMessageLists", () => {
 
   it("defaults to an empty array when both inputs are missing", () => {
     expect(mergeChatMessageLists(undefined, undefined)).toEqual([]);
+  });
+
+  it("deduplicates persisted ask_user turns while keeping unpersisted tail messages", () => {
+    const api = [
+      { role: RoleTypes.USER, history_id: "h1", delta: "run workflow" },
+      {
+        role: RoleTypes.ASSISTANT,
+        history_id: "h1",
+        delta: "need approval",
+        ask_pending: { question: "approve?" },
+      },
+    ];
+    const cached = [
+      { role: RoleTypes.USER, history_id: "h1", delta: "run workflow" },
+      {
+        role: RoleTypes.ASSISTANT,
+        history_id: "h1",
+        delta: "need approval",
+        ask_pending: { question: "approve?" },
+      },
+      { role: RoleTypes.USER, delta: "draft answer" },
+    ];
+
+    expect(mergeChatMessageLists(api, cached)).toEqual([
+      ...api,
+      { role: RoleTypes.USER, delta: "draft answer" },
+    ]);
+  });
+
+  it("drops unkeyed cached duplicates once the same turn is present in api history", () => {
+    const api = [
+      { role: RoleTypes.USER, history_id: "h1", delta: "run workflow" },
+      {
+        role: RoleTypes.ASSISTANT,
+        history_id: "h1",
+        delta: "need approval",
+        ask_pending: { question: "approve?" },
+      },
+    ];
+    const cached = [
+      { role: RoleTypes.USER, history_id: "h1", delta: "run workflow" },
+      { role: RoleTypes.ASSISTANT, history_id: "h1", delta: "need approval" },
+      { role: RoleTypes.USER, delta: "run workflow" },
+      {
+        role: RoleTypes.ASSISTANT,
+        delta: "need approval",
+        ask_pending: { question: "approve?" },
+      },
+    ];
+
+    expect(mergeChatMessageLists(api, cached)).toEqual(api);
   });
 });

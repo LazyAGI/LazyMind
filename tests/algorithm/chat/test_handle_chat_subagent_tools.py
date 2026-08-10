@@ -36,3 +36,9 @@ def test_build_subagent_chat_tools_query_tools_are_correct_functions():
     assert sct.get_subagent_status in tool_set
     assert sct.list_subagent_artifacts in tool_set
     assert sct.get_subagent_artifacts in tool_set
+
+
+def test_explicit_workflow_selection_suppresses_generic_subagent_tools():
+    assert cs._should_register_subagent_tools(True, [])
+    assert not cs._should_register_subagent_tools(False, [])
+    assert not cs._should_register_subagent_tools(True, ['builtin:test-workflow'])

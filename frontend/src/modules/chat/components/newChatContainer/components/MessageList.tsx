@@ -23,7 +23,7 @@ import { IdentityAvatar } from "@/modules/identityAvatar";
 const MENTION_ICONS = {
   knowledge_base: <DatabaseOutlined />,
   skill: <ThunderboltOutlined />,
-  plugin: <AppstoreOutlined />,
+  workflow: <AppstoreOutlined />,
   tool: <ThunderboltOutlined />,
   conversation: <CommentOutlined />,
 };
@@ -35,10 +35,10 @@ function mentionHref(mention: ChatMention) {
       return `/lib/knowledge/detail/${id}`;
     case "skill":
       return `/memory-management/skills/${id}`;
-    case "plugin":
+    case "workflow":
       return mention.resource_id.startsWith("builtin:")
-        ? `/memory-management/plugins/builtin/${encodeURIComponent(mention.resource_id.slice(8))}`
-        : `/memory-management/plugins/${id}`;
+        ? `/memory-management/workflows/builtin/${encodeURIComponent(mention.resource_id.slice(8))}`
+        : `/memory-management/workflows/${id}`;
     case "tool":
       return "/model-providers/tools";
     case "conversation":

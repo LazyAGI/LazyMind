@@ -114,7 +114,7 @@ def test_stream_parallel_requests_see_isolated_config(monkeypatch):
                 'available_skills': params['available_skills'],
                 'enable_subagent': False,
             },
-            plugin={'enable_plugin': False},
+            workflow={'enable_workflow': False},
         ))
         body = await _drain_response(response)
         outer = chat_service.lazyllm.globals.get('agentic_config')
@@ -166,7 +166,7 @@ def test_stream_response_keeps_session_after_route_context_exits(monkeypatch):
                     'available_skills': ['route_skill'],
                     'enable_subagent': False,
                 },
-                plugin={'enable_plugin': False},
+                workflow={'enable_workflow': False},
             ))
         return await _drain_response(response)
 

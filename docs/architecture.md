@@ -97,7 +97,7 @@ Frontend
    │      Login / register → auth-service returns JWT → frontend stores token
    │
    └─► 2. Kong (RBAC)
-          API request with JWT → Kong rbac-auth plugin → auth-service /api/auth/authorize
+          API request with JWT → Kong rbac-auth workflow → auth-service /api/auth/authorize
           → validates JWT and route permission → forwards if allowed
           │
           ▼

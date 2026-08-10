@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Input, message, Modal, Select, Tooltip } from "antd";
 import { AppstoreOutlined, SearchOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
-import PluginInstalledView from "./PluginInstalledView";
+import WorkflowInstalledView from "./WorkflowInstalledView";
 import { AgentAppsAuth } from "@/components/auth";
 import { localizeErrorCode } from "@/components/request";
 import { isAdminRole } from "@/modules/dataSource/utils/role";
@@ -36,7 +36,7 @@ import {
   mapSkillAssetRecordToStructuredAsset,
 } from "./skillHelpers";
 import { mapMarketSkillRecordToAsset } from "./skillMarketMockData";
-import NewPluginModal from "@/modules/plugin/components/NewPluginModal";
+import NewWorkflowModal from "@/modules/workflow/components/NewWorkflowModal";
 import { shouldShowSkillMessageCenter } from "./collaborationVisibility";
 import { renderSkillCategoryIcon } from "./skillCategoryIcon";
 import "./index.scss";
@@ -48,7 +48,7 @@ export default function SkillManagementSection() {
   const marketRequestIdRef = useRef(0);
   const organizePollingControllerRef = useRef<AbortController | null>(null);
   const navigate = useNavigate();
-  const [newPluginOpen, setNewPluginOpen] = useState(false);
+  const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
   const [organizeMode, setOrganizeMode] = useState(false);
   const [organizeSubmitting, setOrganizeSubmitting] = useState(false);
   const [organizeStatus, setOrganizeStatus] = useState<SkillOrganizeStatus>("idle");
@@ -329,7 +329,7 @@ export default function SkillManagementSection() {
   useEffect(() => {
     if (
       skillView !== "installed" &&
-      skillView !== "plugins" &&
+      skillView !== "workflows" &&
       skillView !== "trash"
     ) {
       return undefined;
@@ -532,7 +532,7 @@ export default function SkillManagementSection() {
   };
 
   const handleSkillViewChange = (
-    nextView: SkillViewMode | "plugins",
+    nextView: SkillViewMode | "workflows",
   ) => {
     if (nextView !== "installed") {
       cancelSkillOrganize();
@@ -866,7 +866,7 @@ export default function SkillManagementSection() {
         isAdmin={isAdmin}
         marketFilters={marketFilters}
         onAdminPublish={() => setAdminPublishOpen(true)}
-        onNewPlugin={() => setNewPluginOpen(true)}
+        onNewWorkflow={() => setNewWorkflowOpen(true)}
       />
 
       {skillView === "installed" ? (
@@ -974,21 +974,21 @@ export default function SkillManagementSection() {
         tagsLoading={marketTagsLoading}
       />
 
-      {skillView === "plugins" ? (
-        <PluginInstalledView
+      {skillView === "workflows" ? (
+        <WorkflowInstalledView
           t={t}
-          onNewPlugin={() => setNewPluginOpen(true)}
+          onNewWorkflow={() => setNewWorkflowOpen(true)}
           tableScroll={tableScroll}
           listContentRef={listContentRef}
         />
       ) : null}
 
-      <NewPluginModal
-        open={newPluginOpen}
-        onCancel={() => setNewPluginOpen(false)}
+      <NewWorkflowModal
+        open={newWorkflowOpen}
+        onCancel={() => setNewWorkflowOpen(false)}
         onCreated={(draftId) => {
-          setNewPluginOpen(false);
-          navigate(`/memory-management/plugins/${draftId}`);
+          setNewWorkflowOpen(false);
+          navigate(`/memory-management/workflows/${draftId}`);
         }}
       />
     </div>

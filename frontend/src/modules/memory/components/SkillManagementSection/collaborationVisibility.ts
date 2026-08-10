@@ -2,7 +2,7 @@ export function shouldShowSkillMessageCenter({
   skillView,
   hideUserGroupSurfaces,
 }: {
-  skillView: "installed" | "market" | "plugins";
+  skillView: "installed" | "market" | "workflows";
   hideUserGroupSurfaces: boolean;
 }) {
   return skillView === "installed" && !hideUserGroupSurfaces;

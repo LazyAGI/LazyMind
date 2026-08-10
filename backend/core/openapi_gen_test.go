@@ -239,7 +239,7 @@ func TestOpenAPICurrentMemoryContractAndPrivateRouteIsolation(t *testing.T) {
 		}
 	}
 	for _, privatePath := range []string{
-		"/api/core/internal/plugin-sessions/{session_id}/projection",
+		"/api/core/internal/workflow-sessions/{session_id}/projection",
 		"/api/core/internal/memory/episodes",
 		"/api/core/remote-fs/list",
 		"/api/core/remote-fs/content",

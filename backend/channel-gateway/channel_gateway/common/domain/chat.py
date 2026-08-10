@@ -5,7 +5,7 @@ from typing import Any, Literal
 @dataclass(frozen=True, slots=True)
 class ChannelFeatureProfile:
     enable_ask: bool = False
-    enable_plugin: bool = False
+    enable_workflow: bool = False
     enable_skill: bool = False
     enable_subagent: bool = False
     enable_tasks: bool = False
@@ -14,7 +14,7 @@ class ChannelFeatureProfile:
     def basic_chat_only(self) -> bool:
         return not (
             self.enable_ask
-            or self.enable_plugin
+            or self.enable_workflow
             or self.enable_skill
             or self.enable_subagent
             or self.enable_tasks
@@ -25,8 +25,8 @@ class ChannelFeatureProfile:
         labels: list[str] = []
         if self.enable_skill:
             labels.append('Skill')
-        if self.enable_plugin:
-            labels.append('Plugin')
+        if self.enable_workflow:
+            labels.append('Workflow')
         if self.enable_subagent:
             labels.append('SubAgent')
         if self.enable_ask:
@@ -40,7 +40,7 @@ class ChannelFeatureProfile:
         tools: list[str] = []
         if not self.enable_ask:
             tools.append('ask_user')
-        if not self.enable_plugin:
+        if not self.enable_workflow:
             tools.append('plugin')
         if not self.enable_subagent:
             tools.append('subagent')
@@ -58,7 +58,7 @@ BASIC_CHAT_FEATURES = ChannelFeatureProfile()
 class ChatOptions:
     search_config: dict[str, Any] | None = None
     mentions: list[dict[str, str]] = field(default_factory=list)
-    plugin_mode: Literal['auto', 'dynamic'] | None = None
+    workflow_mode: Literal['auto', 'dynamic'] | None = None
     use_memory: bool | None = None
     disabled_tools: list[str] = field(default_factory=list)
     filters: dict[str, Any] | None = None

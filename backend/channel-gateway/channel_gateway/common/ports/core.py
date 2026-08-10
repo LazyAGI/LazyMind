@@ -74,7 +74,7 @@ class ConversationClient(Protocol):
     ) -> dict[str, Any]:
         ...
 
-    def dismiss_terminal_plugin_session(
+    def dismiss_terminal_workflow_session(
         self,
         *,
         owner_user_id: str,

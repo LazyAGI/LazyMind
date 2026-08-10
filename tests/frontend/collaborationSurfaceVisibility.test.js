@@ -28,7 +28,7 @@ describe('skill collaboration surface visibility', () => {
   it('does not show the message center outside the installed view', () => {
     expect(
       shouldShowSkillMessageCenter({
-        skillView: 'plugins',
+        skillView: 'workflows',
         hideUserGroupSurfaces: false,
       }),
     ).toBe(false);

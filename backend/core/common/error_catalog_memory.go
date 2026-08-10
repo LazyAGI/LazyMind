@@ -64,6 +64,7 @@ func init() {
 
 	for _, source := range []string{
 		"revision/plugin views are read-only",
+		"revision/workflow views are read-only",
 		"copy across skill and memory mounts is not allowed",
 		"move across skill and memory mounts is not allowed",
 		"memory mount is protected",

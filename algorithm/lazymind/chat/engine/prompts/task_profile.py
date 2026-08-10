@@ -69,7 +69,7 @@ class RequestAssessment:
 
 @dataclass(frozen=True)
 class ResourceMention:
-    resource_type: Literal['skill', 'knowledge_base', 'plugin']
+    resource_type: Literal['skill', 'knowledge_base', 'workflow']
     resource_ref: str
     display_name: str = ''
 
@@ -78,7 +78,7 @@ class ResourceMention:
 class ExplicitResourceBindings:
     skill_names: tuple[str, ...] = ()
     knowledge_base_ids: tuple[str, ...] = ()
-    plugin_refs: tuple[str, ...] = ()
+    workflow_refs: tuple[str, ...] = ()
     mentions: tuple[ResourceMention, ...] = ()
 
 
@@ -589,7 +589,7 @@ def _normalize_explicit_resources(value: Any) -> ExplicitResourceBindings:
             continue
         resource_type = str(item.get('resource_type') or '').strip()
         resource_ref = str(item.get('resource_ref') or '').strip()
-        if resource_type in {'skill', 'knowledge_base', 'plugin'} and resource_ref:
+        if resource_type in {'skill', 'knowledge_base', 'workflow'} and resource_ref:
             mentions.append(ResourceMention(
                 resource_type=resource_type,
                 resource_ref=resource_ref[:240],
@@ -598,7 +598,7 @@ def _normalize_explicit_resources(value: Any) -> ExplicitResourceBindings:
     return ExplicitResourceBindings(
         skill_names=strings('skill_names'),
         knowledge_base_ids=strings('knowledge_base_ids'),
-        plugin_refs=strings('plugin_refs'),
+        workflow_refs=strings('workflow_refs'),
         mentions=tuple(mentions),
     )
 
@@ -622,7 +622,7 @@ def _resource_usage_policy(
     query: str, resources: ExplicitResourceBindings,
 ) -> tuple[ExplicitResourceBindings, ExplicitResourceBindings, bool]:
     """Split current-turn mentions into usable/excluded sets; return whether intent is ambiguous."""
-    excluded: dict[str, set[str]] = {'skill': set(), 'knowledge_base': set(), 'plugin': set()}
+    excluded: dict[str, set[str]] = {'skill': set(), 'knowledge_base': set(), 'workflow': set()}
     ambiguous = False
     for mention in resources.mentions:
         labels = [label for label in (mention.display_name, mention.resource_ref) if label]
@@ -654,7 +654,7 @@ def _resource_usage_policy(
     active = ExplicitResourceBindings(
         skill_names=remaining(resources.skill_names, 'skill'),
         knowledge_base_ids=remaining(resources.knowledge_base_ids, 'knowledge_base'),
-        plugin_refs=remaining(resources.plugin_refs, 'plugin'),
+        workflow_refs=remaining(resources.workflow_refs, 'workflow'),
         mentions=active_mentions,
     )
     denied = ExplicitResourceBindings(
@@ -662,7 +662,7 @@ def _resource_usage_policy(
         knowledge_base_ids=tuple(
             value for value in resources.knowledge_base_ids if value in excluded['knowledge_base']
         ),
-        plugin_refs=tuple(value for value in resources.plugin_refs if value in excluded['plugin']),
+        workflow_refs=tuple(value for value in resources.workflow_refs if value in excluded['workflow']),
         mentions=excluded_mentions,
     )
     return active, denied, ambiguous
@@ -679,13 +679,13 @@ def _apply_explicit_resources(
         all_resources = ExplicitResourceBindings(
             skill_names=resources.skill_names + excluded.skill_names,
             knowledge_base_ids=resources.knowledge_base_ids + excluded.knowledge_base_ids,
-            plugin_refs=resources.plugin_refs + excluded.plugin_refs,
+            workflow_refs=resources.workflow_refs + excluded.workflow_refs,
             mentions=resources.mentions + excluded.mentions,
         )
         allowed_refs = {
             *all_resources.skill_names,
             *all_resources.knowledge_base_ids,
-            *all_resources.plugin_refs,
+            *all_resources.workflow_refs,
         }
         denied_refs = set(model_excluded_refs)
         if not denied_refs.issubset(allowed_refs):
@@ -693,13 +693,13 @@ def _apply_explicit_resources(
         resources = ExplicitResourceBindings(
             skill_names=tuple(x for x in all_resources.skill_names if x not in denied_refs),
             knowledge_base_ids=tuple(x for x in all_resources.knowledge_base_ids if x not in denied_refs),
-            plugin_refs=tuple(x for x in all_resources.plugin_refs if x not in denied_refs),
+            workflow_refs=tuple(x for x in all_resources.workflow_refs if x not in denied_refs),
             mentions=tuple(x for x in all_resources.mentions if x.resource_ref not in denied_refs),
         )
         excluded = ExplicitResourceBindings(
             skill_names=tuple(x for x in all_resources.skill_names if x in denied_refs),
             knowledge_base_ids=tuple(x for x in all_resources.knowledge_base_ids if x in denied_refs),
-            plugin_refs=tuple(x for x in all_resources.plugin_refs if x in denied_refs),
+            workflow_refs=tuple(x for x in all_resources.workflow_refs if x in denied_refs),
             mentions=tuple(x for x in all_resources.mentions if x.resource_ref in denied_refs),
         )
     updates: dict[str, Any] = {
@@ -717,8 +717,8 @@ def _apply_explicit_resources(
         reasons.append('explicit knowledge-base selection')
     elif excluded.knowledge_base_ids:
         updates['source_strategy'] = 'web' if _EXPLICIT_WEB.search(query) else 'model_knowledge'
-    if resources.plugin_refs:
-        reasons.extend(('explicit plugin selection', 'explicit workflow selection'))
+    if resources.workflow_refs:
+        reasons.extend(('explicit workflow selection', 'explicit workflow selection'))
     assessment = profile.request_assessment
     issues = list(assessment.issues)
     questions = list(assessment.clarification_questions)
@@ -908,7 +908,7 @@ def resolve_task_profile(
     stripped_query = str(query or '').strip()
     has_explicit_resources = bool(
         resources.skill_names or resources.knowledge_base_ids
-        or resources.plugin_refs or resources.mentions
+        or resources.workflow_refs or resources.mentions
     )
     trivial_input = (
         not has_attachments
