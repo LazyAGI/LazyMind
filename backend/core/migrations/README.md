@@ -19,17 +19,17 @@ migrations/
         └── ...
 ```
 
-`version_mode/v0_N` contains the stable aggregate for release `v0_N` and must
-contain exactly one matching up/down pair. `dev_mode/v0_N` contains the SQL files
-accumulated while developing that release. Matching directory names are the
-mapping, so no separate mapping file is required. The numeric suffix `N` is the
-internal mode version.
+`version_mode/v0_N` contains the complete aggregate for release `v0_N` and must
+contain exactly one matching up/down pair. Its SQL is maintained as the release
+changes, while its migration ID stays unchanged. `dev_mode/v0_N` contains the
+SQL files accumulated while developing that release. Matching directory names
+are the mapping, so no separate mapping file is required. The numeric suffix `N`
+is the internal mode version.
 
 Existing migration IDs and filenames stay unchanged when a file is moved into a
-release directory. The aggregate does not need a `Supersedes` directive for the
-dev files in its matching directory; the directory association performs that
-canonicalization. `Supersedes` remains supported for legacy history
-compatibility.
+release directory. `Supersedes` remains available for compatibility with legacy
+flat-layout squash histories. Structured release execution uses the aggregate
+version itself as the compatibility cutoff.
 
 ## History rules
 
@@ -45,34 +45,59 @@ full_version = N * 100000000000000 + file_timestamp
 
 For example, `dev_mode/v0_2/20260915100000_create_projects.up.sql` is recorded as
 `220260915100000`. This gives every dev migration a single complete ID and avoids
-collisions between releases. A sealed release is represented only by its
-aggregate migration ID.
+collisions between releases. History records what actually executed: the
+aggregate path has an aggregate row, while the dev path retains its individual
+dev rows.
 
 For each release, the runner applies these rules:
 
-1. If the aggregate version is already recorded, skip the release. Dev records
-   for the same release are an error.
-2. If some dev migrations are recorded, continue only the missing dev files.
-3. Once all current dev files are recorded and an aggregate directory exists,
-   atomically replace all full dev history rows with the aggregate history row.
-   The aggregate SQL is not executed.
-4. If neither path has started and an aggregate directory exists, execute the
-   aggregate SQL.
-5. Otherwise execute the dev files in timestamp order.
+1. If the aggregate version is already recorded, skip every dev migration whose
+   file timestamp is less than or equal to the aggregate version. Execute only
+   missing dev migrations with a greater file timestamp.
+2. Otherwise, if the release contains dev migrations, execute only the missing
+   dev files in timestamp order. This is also the path for a new database when
+   both aggregate and dev files exist.
+3. Do not execute or record the aggregate after the dev path has started or
+   completed, and do not replace or delete individual dev history rows.
+4. Execute the aggregate only when the release contains no dev migration files.
+
+The aggregate cutoff applies to every release that may have been executed by an
+older runner. A local deployment may contain only an aggregate history row
+because it executed the aggregate directly or because the older runner
+canonicalized and deleted its dev history. A late-merged migration with an older
+timestamp is therefore treated as already covered. If its change must reach
+those databases, keep the original migration unchanged and add an idempotent
+repair migration whose timestamp is greater than the aggregate version.
 
 Different releases may use different paths. For example, `v0_1` may have one
 aggregate history row while `v0_2` still has full dev history rows.
 
-Old `Supersedes` squash migrations are canonicalized automatically when all
-declared source versions are present. `MIGRATION_FAKE_VERSIONS` is not used.
+`Supersedes` remains only for old flat-layout squash-history compatibility. It
+is not the structured release's dev migration inventory.
+`MIGRATION_FAKE_VERSIONS` is not used.
 
 ## Deleting dev SQL
 
-Do not delete dev files while a database can still contain only part of that
-release's dev history. If a recorded full dev version no longer has a matching
-file, the runner stops before executing any aggregate SQL. Dev files can be
-removed after the release is sealed and every maintained database has
-canonicalized that release to its aggregate history row.
+Do not modify, rename, or individually delete a committed dev migration. An old
+release's entire dev directory may be archived only after the release is closed,
+its aggregate SQL represents the complete release, and the dev path has shipped
+for a full release cycle.
+
+When an archived release has no dev directory, the runner uses the combined
+history version's release prefix:
+
+1. no dev history for the release: execute the aggregate;
+2. any dev history for the release: keep the dev histories and skip the
+   aggregate, because the database used the dev path.
+
+Without the archived SQL files or a separate inventory, the runner cannot tell
+a complete dev path from a partially applied one. Archiving a partially migrated
+release is therefore outside the supported release process. Restore the original
+unchanged dev directory to repair or roll back such a database; the runner cannot
+reconstruct missing up or down statements from history alone.
+
+Adding a dev migration to a retained release requires updating its aggregate SQL
+in the same change.
 
 Create a new dev migration with:
 
@@ -96,11 +121,12 @@ mixed-history recovery and post-aggregate dev upgrades.
 
 PostgreSQL and SQLite use the same catalog, version/dev directories, history
 tables, ordering, and runner. SQLite never runs `AutoMigrate` at application
-startup. A fresh database executes the explicit v0.1, v0.2, and v0.3 release migrations;
-an unversioned v0.1 Desktop database executes the same idempotent v0.1 baseline
-and then the explicit v0.2 and v0.3 migrations. Rename, drop, constraints,
-indexes, seed data, and preserved columns are therefore part of reviewed migration
-files rather than being inferred from the ORM at user startup.
+startup. With the current catalog, a fresh database executes the v0.1 aggregate
+and then the v0.2/v0.3 dev migrations; an unversioned v0.1 Desktop database
+executes the same idempotent v0.1 baseline and then the explicit dev
+table-rebuild/data migrations. Rename, drop, constraints, indexes, seed data, and
+preserved columns are therefore part of reviewed migration files rather than
+being inferred from the ORM at user startup.
 
 SQL that works unchanged on both engines is written normally. When the engines
 need different syntax, keep both implementations in the same migration file:

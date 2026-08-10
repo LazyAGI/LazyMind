@@ -64,7 +64,13 @@ func PreviewWorkflowRepair(w http.ResponseWriter, r *http.Request) {
 	if diagnostics == nil {
 		diagnostics = []repairDiagnostic{}
 	}
-	files := map[string][]string{"statemachine": {"workflow.yaml", "scenario/state.yml"}, "ui": {"workflow.yaml", "scenario/state.yml"}, "scenario": {"scenario/scenario.md"}, "scripts": {"workflow.yaml", "scenario/state.yml", "scripts/*"}, "full": {"workflow.yaml", "scenario/state.yml", "scenario/scenario.md", "scripts/*"}}
+	files := map[string][]string{
+		"statemachine": {"workflow.yaml.steps", "workflow.yaml.slots", "scenario/state.yml"},
+		"ui":           {"workflow.yaml.ui", "workflow.yaml.slots"},
+		"scenario":     {"scenario/scenario.md"},
+		"scripts":      {"scripts/*", "workflow.yaml.tools", "scenario/state.yml.steps"},
+		"full":         {"workflow.yaml", "scenario/state.yml", "scenario/scenario.md", "scripts/*"},
+	}
 	common.ReplyOK(w, map[string]any{"target": body.Target, "mode": body.Mode, "draft_version": draft.Version, "diagnostics": diagnostics, "planned_files": files[body.Target]})
 }
 

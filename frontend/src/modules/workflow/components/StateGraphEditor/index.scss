@@ -328,6 +328,15 @@
   }
 }
 
+.sge-code-folder-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  color: #595959;
+  user-select: none;
+}
+
 .sge-code-file-icon {
   font-size: 12px;
   color: #8c8c8c;
