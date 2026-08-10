@@ -129,16 +129,30 @@ const ImageComponent = (props: any) => {
     };
   }, [props.src]);
 
-  if (imageLoadError || !resolvedSrc) {
-    return null;
-  }
-
   const { node: _node, src: _src, ...imageProps } = props;
+  const fallbackHref =
+    resolvedSrc.startsWith("/") || /^https?:\/\//i.test(resolvedSrc)
+      ? resolvedSrc
+      : "";
+
+  if (imageLoadError || !resolvedSrc) {
+    return (
+      <span className="md-image-fallback" role="status">
+        <span>{t("chat.imageLoadFailed")}</span>
+        {fallbackHref && (
+          <a href={fallbackHref} target="_blank" rel="noopener noreferrer">
+            {t("chat.openOriginalImage")}
+          </a>
+        )}
+      </span>
+    );
+  }
 
   return (
     <Image
       {...imageProps}
       src={resolvedSrc}
+      referrerPolicy="no-referrer"
       preview={{
         visible: previewVisible,
         onVisibleChange: setPreviewVisible,

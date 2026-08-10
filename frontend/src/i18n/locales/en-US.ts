@@ -1737,6 +1737,8 @@ const enUS = {
     },
     promptGridView: "Grid view",
     previewImage: "Preview image",
+    imageLoadFailed: "Image failed to load",
+    openOriginalImage: "Open original",
     promptListView: "List view",
     promptSortLabel: "Sort phrases",
     promptSortUpdated: "Last updated",

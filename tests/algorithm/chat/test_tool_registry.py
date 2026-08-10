@@ -225,19 +225,6 @@ def test_external_retrieval_tools_share_the_citation_output_contract():
     assert any('get_content' in item for item in collected['tool_policy'])
 
 
-def test_wrapped_search_providers_keep_their_runtime_tool_names():
-    from lazyllm.tools.agent.toolsManager import ToolManager
-
-    lazyllm.globals.config['dynamic_tool_auth'] = {'tavily': 'tavily-token'}
-    web_config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'web_search')
-    manager = ToolManager([web_config.tool])
-    names = set(manager._tools[0].get_flat_tools())
-
-    assert 'TavilySearch_search' in names
-    assert 'TavilySearch_get_content' in names
-    assert not any('Citation' in name or 'Adapter' in name for name in names)
-
-
 def test_prompt_appendix_deduplication_normalizes_whitespace():
     first = ToolConfig(
         name='first', label='first', description='first', tool=lambda: None, module='utility',

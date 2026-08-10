@@ -3,11 +3,11 @@ from __future__ import annotations
 from .citations import (
     annotate_citations,
     build_stream_citation_scanner,
+    materialize_source_views,
+    register_existing_sources,
     register_image_url,
     reset_citation_state,
     rewrite_citations,
-    registered_search_sources,
-    merge_source_views,
 )
 from .sensitive_filter import SensitiveFilter, SensitiveMatch
 from .static_file_url import (
@@ -33,14 +33,14 @@ __all__ = [
     'build_stream_citation_scanner',
     'local_path_from_static_file_url',
     'log_and_emit_frame',
-    'merge_source_views',
+    'materialize_source_views',
+    'register_existing_sources',
     'register_image_url',
     'reset_citation_state',
     'response_payload',
     'resolve_local_image_path',
     'rewrite_citations',
     'rewrite_markdown_image_urls',
-    'registered_search_sources',
     'single_event_stream_response',
     'sse_line',
     'static_file_url_from_any',

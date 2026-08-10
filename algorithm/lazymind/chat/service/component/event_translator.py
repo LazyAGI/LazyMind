@@ -6,11 +6,11 @@ from typing import Any, Optional
 from lazymind.config import config as _cfg
 from lazymind.chat.service.utils import (
     build_stream_citation_scanner,
-    merge_source_views,
+    materialize_source_views,
+    register_existing_sources,
     reset_citation_state,
     rewrite_markdown_image_urls,
     rewrite_citations,
-    registered_search_sources,
 )
 from lazymind.chat.service.component.tool_rendering import (
     _preview_language,
@@ -193,9 +193,12 @@ class AgentEventFrameTranslator:
             for chunk in _iter_text_chunks(final_text, chunk_size):
                 frames.append(_stream_frame(text=chunk))
 
-        sources = merge_source_views(
-            output.get('sources') or self._collect_sources(),
-            registered_search_sources(self.citation_state),
+        sources = materialize_source_views(
+            self.citation_state,
+            [
+                *(output.get('source_views') or []),
+                *(self._collect_sources() or []),
+            ],
         )
         if sources:
             frames.append(_stream_frame(text='', sources=sources))
@@ -230,35 +233,6 @@ def _split_think_and_body(raw_text: str, existing_think: Any = '') -> tuple[str,
     return think.strip(), body
 
 
-def _merge_sources(
-    cited_sources: list[dict[str, Any]],
-    existing_sources: Any,
-) -> list[dict[str, Any]]:
-    merged: list[dict[str, Any]] = []
-    seen: set[str] = set()
-
-    def _push(source: Any) -> None:
-        if not isinstance(source, dict):
-            return
-        key = str(
-            source.get('index')
-            or source.get('segement_id')
-            or source.get('document_id')
-            or id(source)
-        )
-        if key in seen:
-            return
-        seen.add(key)
-        merged.append(source)
-
-    for source in cited_sources or []:
-        _push(source)
-    if isinstance(existing_sources, list):
-        for source in existing_sources:
-            _push(source)
-    return merged
-
-
 def _format_final_result(result: Any, config: dict) -> dict[str, Any]:
     if isinstance(result, dict):
         raw_text = str(result.get('text') or result.get('message') or '')
@@ -269,11 +243,15 @@ def _format_final_result(result: Any, config: dict) -> dict[str, Any]:
         existing_think = ''
         existing_sources = None
 
+    register_existing_sources(config, existing_sources)
     think, body = _split_think_and_body(raw_text, existing_think)
     body = rewrite_markdown_image_urls(body, config=config)
     text, cited_sources = rewrite_citations(body, config)
     return {
         'think': think,
         'text': text.strip(),
-        'sources': _merge_sources(cited_sources, existing_sources),
+        'source_views': [
+            *(existing_sources if isinstance(existing_sources, list) else []),
+            *cited_sources,
+        ],
     }

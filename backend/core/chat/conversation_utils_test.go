@@ -81,11 +81,12 @@ func TestMergeChunksToFirstChunk_PreservesLastNonEmptySources(t *testing.T) {
 
 func TestRetrievalSourcesPreservesExternalSource(t *testing.T) {
 	sources := []any{map[string]any{
-		"source_type": "external",
-		"index":       "2.1",
-		"title":       "External source",
-		"url":         "https://example.com/article",
-		"content":     "Evidence",
+		"source_type":  "external",
+		"index":        "2.1",
+		"title":        "External source",
+		"url":          "https://example.com/article",
+		"content":      "Evidence",
+		"source_roles": []any{"cited", "searched"},
 	}}
 	got := retrievalSources(marshalRetrievalResult(sources))
 	if len(got) != 1 {
@@ -94,6 +95,10 @@ func TestRetrievalSourcesPreservesExternalSource(t *testing.T) {
 	source := got[0].(map[string]any)
 	if source["source_type"] != "external" || source["index"] != "2.1" {
 		t.Fatalf("unexpected source: %#v", source)
+	}
+	roles, ok := source["source_roles"].([]any)
+	if !ok || len(roles) != 2 || roles[0] != "cited" || roles[1] != "searched" {
+		t.Fatalf("source roles were not preserved: %#v", source["source_roles"])
 	}
 }
 

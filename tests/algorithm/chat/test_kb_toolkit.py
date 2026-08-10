@@ -1,12 +1,11 @@
 import pytest
 from types import SimpleNamespace
-from typing import get_type_hints
-
 import lazyllm
 from lazyllm import init_session, locals as lazyllm_locals
 from lazyllm.tools.agent.toolsManager import ToolManager
 from lazymind.chat.engine.tools.kb import KBToolkit
-from lazymind.chat.engine.tools.infra import enable_search_result_citations
+from lazymind.chat.engine.tools.infra import CitationResultMiddleware
+from lazymind.chat.engine.tools.lazy_kb import KBToolkit as LazyKBToolkit
 from lazymind.chat.service.utils.citations import CITATION_REFS_KEY, reset_citation_state
 
 
@@ -22,30 +21,36 @@ def _kb_tool_names(manager):
     return {item['function']['name'] for item in manager.tools_description}
 
 
-def test_kb_citations_are_added_by_tool_boundary_wrappers():
+def test_kb_citations_are_added_by_tool_result_middleware():
     state = {}
     reset_citation_state(state)
     lazyllm.globals['agentic_config'] = {'citation_state': state}
 
-    class FakeKnowledgeSearch:
-        __public_apis__ = ['kb_search']
-
+    class FakeKnowledgeSearch(LazyKBToolkit):
         def kb_search(self, query: str):
             return {'success': True, 'result': {'items': [{
                 'uid': 'node-1', 'docid': 'doc-1', 'content': query,
             }]}}
 
-    toolkit = enable_search_result_citations(FakeKnowledgeSearch(), source_type='knowledge_base')
-    temp_search = enable_search_result_citations(
-        lambda query: {'success': True, 'result': {'items': [{
-            'uid': 'node-2', 'docid': 'doc-2', 'content': query,
-        }]}},
-        source_type='knowledge_base',
-    )
+    def temp_search(query: str):
+        """Search temporary documents.
 
-    assert toolkit.kb_search('knowledge')['result']['items'][0]['ref'] == '[[1.1]]'
-    assert temp_search('temporary')['result']['items'][0]['ref'] == '[[2.1]]'
-    assert get_type_hints(temp_search, temp_search.__globals__) == get_type_hints(temp_search.__wrapped__)
+        Args:
+            query: Search query.
+        """
+        return {'success': True, 'result': {'items': [{
+            'uid': 'node-2', 'docid': 'doc-2', 'content': query,
+        }]}}
+
+    temp_search.__name__ = 'kb_tmp_search'
+    manager = CitationResultMiddleware(ToolManager([FakeKnowledgeSearch(), temp_search]))
+    results = manager([
+        {'function': {'name': 'FakeKnowledgeSearch_kb_search', 'arguments': {'query': 'knowledge'}}},
+        {'function': {'name': 'kb_tmp_search', 'arguments': {'query': 'temporary'}}},
+    ])
+
+    assert results[0]['value']['result']['items'][0]['ref'] == '[[1.1]]'
+    assert results[1]['value']['result']['items'][0]['ref'] == '[[2.1]]'
     assert len(state[CITATION_REFS_KEY]) == 2
 
 

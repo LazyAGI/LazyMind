@@ -1,14 +1,15 @@
-import json
+import threading
 from copy import deepcopy
 
 import lazyllm
 import pytest
-from lazyllm.tools.tools.search import ArxivSearch, BingSearch, BochaSearch, GoogleSearch, WikipediaSearch
+from lazyllm.tools.agent.toolsManager import ToolManager
 
 from lazymind.chat.engine.tools import web_search as web_search_mod
-from lazymind.chat.engine.tools.infra import enable_search_result_citations
+from lazymind.chat.engine.tools.infra import CitationResultMiddleware
 from lazymind.chat.service.utils.citations import (
     CITATION_REFS_KEY,
+    materialize_source_views,
     register_external_search_result,
     reset_citation_state,
 )
@@ -26,35 +27,41 @@ def reset_web_tool_state():
         lazyllm.globals['agentic_config'] = previous or {}
 
 
-def test_lazyllm_search_public_apis_are_provider_specific():
-    base_apis = ['search', 'get_content', 'get_contents']
-    assert WikipediaSearch.__public_apis__ == base_apis
-    assert ArxivSearch.__public_apis__ == base_apis
-    assert GoogleSearch.__public_apis__ == base_apis
-    assert BingSearch.__public_apis__ == base_apis
-    assert BochaSearch.__public_apis__ == base_apis
+def test_url_fetch_batches_network_only_in_workers_and_registers_pages_in_order(
+    monkeypatch, reset_web_tool_state,
+):
+    fetch_threads = []
+    register_threads = []
 
-
-def test_lazymind_web_search_url_fetch_exists():
-    import inspect
-    assert inspect.isfunction(web_search_mod.url_fetch)
-    assert web_search_mod.url_fetch.__name__ == 'url_fetch'
-
-
-def test_url_fetch_batches_multiple_urls_and_preserves_partial_failures(monkeypatch):
     def fake_fetch(url):
+        fetch_threads.append(threading.get_ident())
         if url.endswith('/bad'):
             raise RuntimeError('unavailable')
         return {'final_url': url, 'content': f'content:{url}'}
 
-    monkeypatch.setattr(web_search_mod, 'fetch_url_content', fake_fetch)
+    original_register_page = web_search_mod._register_page
 
-    payload = web_search_mod.url_fetch(urls=[
-        'https://example.test/one',
-        'https://example.test/bad',
-        'https://example.test/one',
-        'https://example.test/two',
-    ])
+    def track_register_page(page):
+        register_threads.append(threading.get_ident())
+        return original_register_page(page)
+
+    monkeypatch.setattr(web_search_mod, 'fetch_url_content', fake_fetch)
+    monkeypatch.setattr(web_search_mod, '_register_page', track_register_page)
+
+    manager = CitationResultMiddleware(ToolManager([web_search_mod.url_fetch]))
+    execution = manager({
+        'function': {
+            'name': 'url_fetch',
+            'arguments': {'urls': [
+                'https://example.test/one',
+                'https://example.test/bad',
+                'https://example.test/one',
+                'https://example.test/two',
+            ]},
+        },
+    })[0]
+    assert execution['ok'] is True
+    payload = execution['value']
 
     result = payload['result']
     assert result['total'] == 3
@@ -67,6 +74,11 @@ def test_url_fetch_batches_multiple_urls_and_preserves_partial_failures(monkeypa
     ]
     assert result['results'][1]['success'] is False
     assert all(item['result']['page_ref'] for item in result['results'] if item['success'])
+    assert len(set(register_threads)) == 1
+    assert set(register_threads).isdisjoint(fetch_threads)
+    assert [source['url'] for source in materialize_source_views(reset_web_tool_state)] == [
+        'https://example.test/one', 'https://example.test/two',
+    ]
 
 
 def test_url_fetch_registers_sources_and_follows_page_links(monkeypatch, reset_web_tool_state):
@@ -93,53 +105,41 @@ def test_url_fetch_registers_sources_and_follows_page_links(monkeypatch, reset_w
         return page
 
     monkeypatch.setattr(web_search_mod, 'fetch_url_content', fake_fetch)
-    url_fetch = enable_search_result_citations(web_search_mod.url_fetch)
-    root = url_fetch(url='https://example.test/root')['result']
-    child = url_fetch(page_ref=root['page_ref'], link_id=1)['result']
+    manager = CitationResultMiddleware(ToolManager([web_search_mod.url_fetch]))
+
+    def fetch(**arguments):
+        result = manager({
+            'function': {'name': 'url_fetch', 'arguments': arguments},
+        })[0]
+        assert result['ok'] is True
+        return result['value']['result']
+
+    root = fetch(url='https://example.test/root')
+    child = fetch(page_ref=root['page_ref'], link_id=1)
 
     assert root['citation_index'] == search['citation_index'] == '1.1'
-    assert root['source_action'] == 'supplemented_source'
     assert child['citation_index'] == '2.1'
-    assert child['source_action'] == 'new_source'
-    assert child['parent_page_ref'] == root['page_ref']
-    assert child['depth'] == 1
     assert len(reset_web_tool_state[CITATION_REFS_KEY]) == 2
-    with pytest.raises(ValueError, match='navigation_cycle'):
-        web_search_mod.url_fetch(page_ref=child['page_ref'], link_id=1)
+    assert [source['source_roles'] for source in materialize_source_views(reset_web_tool_state)] == [
+        ['searched'], ['searched'],
+    ]
 
 
-def test_restore_web_navigation_state_supports_cross_turn_click(monkeypatch):
-    history = [{
-        'role': 'tool',
-        'name': 'url_fetch',
-        'content': json.dumps({
-            'success': True,
-            'tool': 'url_fetch',
-            'result': {
-                'url': 'https://example.test/root',
-                'final_url': 'https://example.test/root',
-                'page_ref': 'page_previous',
-                'parent_page_ref': None,
-                'via_link_id': None,
-                'depth': 0,
-                'links': [{'id': 1, 'target_url': 'https://example.test/child'}],
-            },
-        }),
-    }]
-    lazyllm.globals['agentic_config']['web_navigation_state'] = (
-        web_search_mod.restore_web_navigation_state(history)
-    )
+def test_page_ref_expires_with_request_state_and_exact_url_can_be_refetched(monkeypatch):
     monkeypatch.setattr(web_search_mod, 'fetch_url_content', lambda url: {
         'status': 'ok',
         'source_status': 'ok',
         'url': url,
         'final_url': url,
-        'content': 'Child content',
-        'links': [],
+        'content': f'Content for {url}',
+        'links': [{'id': 1, 'target_url': 'https://example.test/child'}],
     })
 
-    child = web_search_mod.url_fetch(page_ref='page_previous', link_id=1)['result']
+    root = web_search_mod.url_fetch(url='https://example.test/root')['result']
+    lazyllm.globals['agentic_config']['web_navigation_state'] = {}
 
+    with pytest.raises(ValueError, match='page_ref is invalid or expired'):
+        web_search_mod.url_fetch(page_ref=root['page_ref'], link_id=1)
+
+    child = web_search_mod.url_fetch(url='https://example.test/child')['result']
     assert child['final_url'] == 'https://example.test/child'
-    assert child['parent_page_ref'] == 'page_previous'
-    assert child['depth'] == 1

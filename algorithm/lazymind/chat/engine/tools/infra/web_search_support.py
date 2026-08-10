@@ -132,7 +132,7 @@ def fetch_public_url(
     raise ValueError('too many redirects while fetching url')
 
 
-def _extract_readable_text(soup: BeautifulSoup) -> tuple[str, dict[str, Any]]:
+def _extract_readable_text(soup: BeautifulSoup) -> str:
     content_root = (
         soup.find('article')
         or soup.find('main')
@@ -140,12 +140,9 @@ def _extract_readable_text(soup: BeautifulSoup) -> tuple[str, dict[str, Any]]:
         or soup.body
         or soup
     )
-    selected_root = getattr(content_root, 'name', '') or 'document'
-    removed_nodes = 0
     for tag in content_root.find_all(['script', 'style', 'noscript', 'nav', 'header', 'footer', 'aside',
                                       'form', 'button', 'iframe']):
         tag.decompose()
-        removed_nodes += 1
     for tag in content_root.find_all(True):
         if tag.parent is None or tag.attrs is None:
             continue
@@ -158,7 +155,6 @@ def _extract_readable_text(soup: BeautifulSoup) -> tuple[str, dict[str, Any]]:
         ])
         if marker.strip() and _LOW_VALUE_REGION_PATTERN.search(marker):
             tag.decompose()
-            removed_nodes += 1
 
     lines: List[str] = []
     for node in content_root.find_all(['h1', 'h2', 'h3', 'p', 'li', 'table', 'blockquote', 'pre', 'code']):
@@ -179,17 +175,11 @@ def _extract_readable_text(soup: BeautifulSoup) -> tuple[str, dict[str, Any]]:
             continue
         seen.add(line)
         deduped_lines.append(line)
-    content = '\n'.join(deduped_lines)
-    return content, {
-        'selected_root': selected_root,
-        'removed_nodes': removed_nodes,
-        'content_chars': len(content),
-    }
+    return '\n'.join(deduped_lines)
 
 
 def extract_web_page_text(html: str) -> str:
-    content, _ = _extract_readable_text(BeautifulSoup(html, 'html.parser'))
-    return content
+    return _extract_readable_text(BeautifulSoup(html, 'html.parser'))
 
 
 def extract_web_page_title(soup: BeautifulSoup) -> str:
@@ -312,6 +302,31 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
     content_type = str(response.headers.get('Content-Type') or '').lower()
     raw_bytes = int(getattr(response, '_lazymind_raw_bytes', len(response.content)))
     response_truncated = bool(getattr(response, '_lazymind_response_truncated', False))
+    final_url = response.url or normalized_url
+    if content_type.startswith('image/'):
+        return {
+            'status': 'ok',
+            'source_status': 'image',
+            'url': normalized_url,
+            'final_url': final_url,
+            'status_code': response.status_code,
+            'content_type': content_type,
+            'raw_bytes': raw_bytes,
+            'response_bytes_truncated': response_truncated,
+            'title': (urlparse(final_url).path.rsplit('/', 1)[-1] or 'Image')[:300],
+            'description': '',
+            'content': f'Image resource ({content_type.split(";", 1)[0]})',
+            'content_chars': 0,
+            'returned_content_chars': 0,
+            'content_max_chars': text_limit,
+            'content_truncated': False,
+            'truncation_strategy': 'none',
+            'links': [],
+            'metadata': {
+                'domain': (urlparse(final_url).hostname or '').lower(),
+                'image_urls': [{'url': final_url, 'alt': '', 'source_url': final_url}],
+            },
+        }
     response_text = decode_response_text(response)
     if 'text/html' not in content_type and 'application/xhtml+xml' not in content_type:
         raw_text = response_text.strip()
@@ -338,14 +353,12 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
         }
 
     soup = BeautifulSoup(response_text, 'html.parser')
-    final_url = response.url or normalized_url
     title = extract_web_page_title(soup)
     description = extract_web_page_description(soup)
     links = _extract_page_links(soup, final_url)
     metadata = _extract_page_metadata(soup, final_url)
-    readable_content, extraction_stats = _extract_readable_text(soup)
+    readable_content = _extract_readable_text(soup)
     content, content_truncated = _truncate_page_content(readable_content, text_limit)
-    metadata['extraction_stats'] = extraction_stats
     return {
         'status': 'ok',
         'source_status': 'ok',

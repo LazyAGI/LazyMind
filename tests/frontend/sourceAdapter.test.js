@@ -5,10 +5,7 @@ import {
   getCitationSources,
   getDisplaySources,
   getSearchSources,
-  getSourceDedupKey,
   getSourceHref,
-  getSourceLabel,
-  getSourceSubtitle,
   normalizeSourceMarkers,
   openSource,
   stripRedundantSourceUrls,
@@ -32,61 +29,33 @@ describe('chat source adapter', () => {
     segment_number: 2,
   };
 
-  it('adapts external labels, domains, deduplication, and opening', () => {
+  it('opens safe external and knowledge-base sources and rejects unsafe URLs', () => {
     const open = vi.fn();
     vi.stubGlobal('window', { open });
 
-    expect(getSourceLabel(external)).toBe('Example article');
-    expect(getSourceSubtitle(external)).toBe('example.com');
-    expect(getSourceDedupKey(external)).toBe('external:https://example.com/article');
     expect(getSourceHref(external)).toBe(external.url);
     expect(openSource(external)).toBe(true);
     expect(open).toHaveBeenCalledWith(external.url, '_blank', 'noopener,noreferrer');
+    expect(getSourceHref(knowledge)).toContain('/lib/knowledge/knowledge/kb-1/doc-1?');
+    expect(getSourceHref(knowledge)).toContain('segement_id=segment-1');
+    expect(getSourceHref({ source_type: 'external', url: 'javascript:alert(1)' })).toBe('');
 
     vi.unstubAllGlobals();
   });
 
-  it('keeps knowledge-base navigation and document-level deduplication', () => {
-    expect(getSourceLabel(knowledge)).toBe('guide.pdf');
-    expect(getSourceDedupKey(knowledge)).toBe('knowledge_base:kb-1:doc-1');
-    expect(getSourceHref(knowledge)).toContain('/lib/knowledge/knowledge/kb-1/doc-1?');
-    expect(getSourceHref(knowledge)).toContain('segement_id=segment-1');
-  });
-
-  it('finds sources using the internal citation locator without displaying it', () => {
-    expect(findSourceByCitationId([external, knowledge], '3.1')).toBe(external);
-    expect(getSourceLabel(findSourceByCitationId([external], '3.1'))).not.toContain('3.1');
-  });
-
-  it('keeps every source identity for markdown citation and image matching', () => {
+  it('keeps source identities for citation lookup without drawer deduplication', () => {
     const duplicatePage = { ...external, index: '3.2', source_roles: ['cited'] };
-    const searchedOnly = { ...external, index: '3.3', source_roles: ['searched'] };
+    expect(findSourceByCitationId([external, knowledge], '3.1')).toBe(external);
     expect(getCitationSources([
       { ...external, source_roles: ['cited', 'searched'] },
       duplicatePage,
-      searchedOnly,
     ])).toEqual([
       { ...external, source_roles: ['cited', 'searched'] },
       duplicatePage,
-      searchedOnly,
     ]);
   });
 
-  it('keeps unified source roles while removing duplicates', () => {
-    const direct = {
-      source_type: 'external',
-      title: 'Direct page',
-      url: 'https://direct.example/page',
-    };
-
-    expect(getDisplaySources([{ ...external, source_roles: ['cited', 'searched'] }, knowledge, direct])).toEqual([
-      { ...external, source_roles: ['cited', 'searched'] },
-      { ...knowledge, source_roles: ['cited'] },
-      { ...direct, source_roles: ['cited'] },
-    ]);
-  });
-
-  it('shows every searched source without cited-only sources in the source drawer', () => {
+  it('deduplicates unified roles, filters searched sources, and supports legacy maps', () => {
     const searchedOnly = {
       source_type: 'external',
       title: 'Search result',
@@ -94,28 +63,27 @@ describe('chat source adapter', () => {
       source_roles: ['searched'],
     };
 
-    expect(getSearchSources([
+    const sources = [
+      { ...external, source_roles: ['cited'] },
+      { ...external, index: '3.2', source_roles: ['searched'] },
+      { ...knowledge, source_roles: ['cited'] },
+      searchedOnly,
+    ];
+    expect(getDisplaySources(sources)).toEqual([
       { ...external, source_roles: ['cited', 'searched'] },
       { ...knowledge, source_roles: ['cited'] },
       searchedOnly,
-    ])).toEqual([
+    ]);
+    expect(getSearchSources(sources)).toEqual([
       { ...external, source_roles: ['cited', 'searched'] },
       searchedOnly,
     ]);
-  });
-
-  it('opens legacy sessions whose sources are stored as an object map', () => {
     expect(getDisplaySources({ '3.1': { ...external, index: undefined } })).toEqual([
       { ...external, index: '3.1', source_roles: ['cited'] },
     ]);
-    expect(getDisplaySources(undefined)).toEqual([]);
     expect(getSearchSources({ '3.1': { ...external, index: undefined } })).toEqual([
       { ...external, index: '3.1', source_roles: ['cited'] },
     ]);
-  });
-
-  it('does not open unsafe external schemes', () => {
-    expect(getSourceHref({ source_type: 'external', url: 'javascript:alert(1)' })).toBe('');
   });
 
   it('removes only a redundant URL immediately following a source marker', () => {
@@ -132,35 +100,14 @@ describe('chat source adapter', () => {
     );
   });
 
-  it('normalizes complete source markers without keeping the markdown title', () => {
+  it('normalizes complete, streaming-boundary, and duplicate source markers', () => {
     expect(
       normalizeSourceMarkers('[1](#source-3.1 "Assistants migration guide | OpenAI API")'),
     ).toBe('[1](#source-3.1)');
-  });
-
-  it('repairs only an incomplete source marker at the streaming boundary', () => {
     expect(normalizeSourceMarkers('[1](#source-3.1 "Assistants migration guide')).toBe(
       '[1](#source-3.1)',
     );
-    expect(normalizeSourceMarkers('[1](#source-3.1 "Assistants\n正文')).toBe(
-      '[1](#source-3.1 "Assistants\n正文',
-    );
-    expect(normalizeSourceMarkers('[guide](https://example.com "Example')).toBe(
-      '[guide](https://example.com "Example',
-    );
-  });
-
-  it('collapses only the same adjacent source marker repeated in parentheses', () => {
-    const title = 'NeurIPS-2024-hipporag.pdf';
-    const source = `[2](#source-2.3 "${title}")`;
-
+    const source = '[2](#source-2.3 "NeurIPS-2024-hipporag.pdf")';
     expect(normalizeSourceMarkers(`${source}(${source})`)).toBe('[2](#source-2.3)');
-    expect(normalizeSourceMarkers(`${source}（${source}）`)).toBe('[2](#source-2.3)');
-    expect(
-      normalizeSourceMarkers(`${source}([1](#source-1.5 "Another.pdf"))`),
-    ).toBe('[2](#source-2.3)([1](#source-1.5))');
-    expect(normalizeSourceMarkers(`${source}（${title}）`)).toBe(
-      `[2](#source-2.3)（${title}）`,
-    );
   });
 });

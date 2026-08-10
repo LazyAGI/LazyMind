@@ -33,13 +33,13 @@ from lazymind.chat.engine.tools import (
     list_data_sources,
     build_schedule_toolkit,
     url_fetch,
-    enable_search_result_citations,
     video_generator,
     video_to_gif,
     vision_extractor,
     vocab_learn,
 )
 from lazymind.chat.engine.tools.memory import MemoryTools
+from lazymind.chat.engine.tools.infra import SearchProviderTools
 from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
 from lazymind.model_config import is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
@@ -103,7 +103,8 @@ EXTERNAL_SEARCH_CONTENT_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# External Search Content Rules\n'
         'Search results are registered with stable refs. When a paper or Wikipedia snippet is insufficient, pass '
-        'the unchanged result item to `get_content` or `get_contents`; cite the ref returned with the added content.',
+        'the unchanged result item to `get_content` or `get_contents`; these methods keep their provider return '
+        'types, so cite the ref already present on the corresponding search result item.',
     ),
     'output_contract': EXTERNAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }
@@ -215,8 +216,10 @@ URL_FETCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Web Page Fetch Rules\n'
         'Use only a URL supplied by the user or returned by a tool. To follow a fetched page link, copy the exact '
-        '`page_ref` and page-local `link_id` returned by url_fetch; never guess either value. A clicked page returns '
-        'a new page_ref for its own links. Listed links are navigation candidates, not read or citable sources. '
+        '`page_ref` and page-local `link_id` returned by url_fetch in the current Agent run; never guess either value. '
+        'These handles expire after the run. For a URL retained in conversation history, call `url_fetch(url=...)` '
+        'again using the exact `target_url` or `final_url`. A clicked page returns a new page_ref for its own links. '
+        'Listed links are navigation candidates, not read or citable sources. '
         'When `content_truncated=true`, treat the page text as incomplete and do not conclude that omitted content '
         'is absent.',
     ),
@@ -307,15 +310,15 @@ class ToolConfig:
 
 
 _WEB_SEARCH_ENGINE_INSTANCES: list = [
-    enable_search_result_citations(GoogleSearch()),
-    enable_search_result_citations(BingSearch()),
-    enable_search_result_citations(BochaSearch()),
-    enable_search_result_citations(TavilySearch()),
+    SearchProviderTools(GoogleSearch()),
+    SearchProviderTools(BingSearch()),
+    SearchProviderTools(BochaSearch()),
+    SearchProviderTools(TavilySearch()),
 ]
 
 _ACADEMIC_SEARCH_ENGINE_INSTANCES: list = [
-    enable_search_result_citations(SciverseSearch()),
-    enable_search_result_citations(ArxivSearch(skip_auth=True)),
+    SearchProviderTools(SciverseSearch()),
+    SearchProviderTools(ArxivSearch(skip_auth=True)),
 ]
 
 
@@ -431,7 +434,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         name='kb',
         label='知识库',
         description='发现知识库、查询文档与统计，并进行语义、关键词和上下文检索',
-        tool=enable_search_result_citations(KBToolkit(), source_type='knowledge_base'), module='retrieval',
+        tool=KBToolkit(), module='retrieval',
         label_en='Knowledge Base',
         description_en='Discover knowledge bases, inspect documents and statistics, and retrieve their content.',
         capability_id='knowledge_base_search',
@@ -443,7 +446,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         label='临时文件检索',
         description='从用户上传的临时文件中搜索相关内容',
         tool=(
-            enable_search_result_citations(kb_tmp_search, source_type='knowledge_base'),
+            kb_tmp_search,
             _temp_kb_key_source,
         ), module='retrieval',
         label_en='Temporary File Search',
@@ -492,7 +495,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         name='wikipedia',
         label='Wikipedia 搜索',
         description='查询 Wikipedia 中稳定的百科背景和明确词条；不用于新闻、时效信息或开放网页搜索',
-        tool=enable_search_result_citations(WikipediaToolkit(skip_auth=True)), module='retrieval',
+        tool=SearchProviderTools(WikipediaToolkit(skip_auth=True)), module='retrieval',
         label_en='Wikipedia Search',
         description_en=(
             'Look up stable encyclopedic background and named Wikipedia entries; not for news, '
@@ -553,7 +556,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         name='url_fetch',
         label='网页抓取',
         description='获取并解析公开网页的可读内容',
-        tool=enable_search_result_citations(url_fetch), module='retrieval',
+        tool=url_fetch, module='retrieval',
         label_en='Web Page Fetch',
         description_en='Fetch and parse readable content from public web pages.',
         appendix_system_prompt=URL_FETCH_TOOL_POLICY_APPENDIX,
@@ -695,10 +698,11 @@ def _extract_methods(instance: Any) -> list[dict]:
 def _extract_group_methods(instances: list) -> list[dict]:
     methods = []
     for inst in instances:
+        target = getattr(inst, 'provider', inst)
         methods.append({
-            'name': inst.__class__.__name__,
-            'summary': _tool_summary(inst),
-            'active': _instance_is_active(inst),
+            'name': target.__class__.__name__,
+            'summary': _tool_summary(target),
+            'active': _instance_is_active(target),
         })
     return methods
 
@@ -711,6 +715,7 @@ _SKILL_METHODS = [
 
 
 def _instance_is_active(instance: Any) -> bool:
+    instance = getattr(instance, 'provider', instance)
     key_source = getattr(instance, '__key_source__', None)
     if key_source is None:
         return True

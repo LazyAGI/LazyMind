@@ -90,12 +90,43 @@ def test_translator_merges_searched_and_cited_sources_with_roles():
         'url': 'https://example.test/second',
     }, translator.citation_state)
 
-    frames = translator.finish(f'Use {first["ref"]}.')
+    frames = translator.finish({
+        'text': f'Use {first["ref"]}.',
+        'sources': [{
+            'index': '9.1',
+            'source_type': 'external',
+            'title': 'Unused existing source',
+            'url': 'https://example.test/unused',
+        }],
+    })
     assert [(source['title'], source['source_roles']) for source in frames[-1]['sources']] == [
         ('First', ['cited', 'searched']),
         ('Second', ['searched']),
     ]
     assert 'searched_sources' not in frames[-1]
+
+
+def test_final_sources_merge_explicit_roles_by_normalized_url():
+    translator = AgentEventFrameTranslator(query='q')
+    register_external_search_result({
+        'title': 'Search result',
+        'url': 'https://example.test/shared#search',
+    }, translator.citation_state)
+
+    frames = translator.finish({
+        'text': 'Use [[9.1]].',
+        'sources': [{
+            'index': '9.1',
+            'source_type': 'external',
+            'title': 'Existing source',
+            'url': 'https://example.test/shared',
+            'content': 'Existing evidence',
+        }],
+    })
+
+    assert len(frames[-1]['sources']) == 1
+    assert frames[-1]['sources'][0]['index'] == '9.1'
+    assert frames[-1]['sources'][0]['source_roles'] == ['cited', 'searched']
 
 
 def test_translator_counts_tool_call_turns_not_individual_calls():

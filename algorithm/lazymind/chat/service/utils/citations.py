@@ -24,6 +24,7 @@ CITATION_NEXT_DOC_KEY = '_citation_next_doc_index'
 CITATION_DOC_CHUNK_NEXT_KEY = '_citation_next_chunk_index_map'
 EXTERNAL_SOURCE_KEY_MAP_KEY = '_external_source_key_map'
 SEARCHED_SOURCE_INDICES_KEY = '_searched_source_indices'
+CITED_SOURCE_INDICES_KEY = '_cited_source_indices'
 CITATION_INDEX_PATTERN = r'\d+\.\d+'
 CITATION_PATTERN = re.compile(r'\[\[(' + CITATION_INDEX_PATTERN + r')\]\]')
 SOURCE_LINK_PATTERN = re.compile(r'\[(\d+)\]\(#source-(' + CITATION_INDEX_PATTERN + r')(?:\s+"[^"]*")?\)')
@@ -31,6 +32,11 @@ SOURCE_REF_PATTERN = re.compile(r'\[\[(' + CITATION_INDEX_PATTERN + r')\]\]')
 _TRACKING_QUERY_KEYS = {
     'dclid', 'fbclid', 'gclid', 'igshid', 'mc_cid', 'mc_eid', 'msclkid', 'mkt_tok',
 }
+_SOURCE_ROLE_KEYS = {
+    'cited': CITED_SOURCE_INDICES_KEY,
+    'searched': SEARCHED_SOURCE_INDICES_KEY,
+}
+_SOURCE_ROLE_ORDER = ('cited', 'searched')
 
 
 def register_image_url(config: dict[str, Any], path_or_url: str) -> None:
@@ -183,24 +189,66 @@ def _attach_external_ref(item: dict[str, Any], index: str) -> dict[str, Any]:
     return item
 
 
-def register_external_search_result(item: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+def mark_source_roles(
+    config: dict[str, Any],
+    index: Any,
+    roles: Any,
+) -> None:
+    normalized_index = str(index or '').strip()
+    if not normalized_index:
+        return
+    role_values = (roles,) if isinstance(roles, str) else tuple(roles or ())
+    unknown = set(role_values).difference(_SOURCE_ROLE_KEYS)
+    if unknown:
+        raise ValueError(f'unsupported source roles: {sorted(unknown)}')
+    for role in _SOURCE_ROLE_ORDER:
+        if role not in role_values:
+            continue
+        indices = config.setdefault(_SOURCE_ROLE_KEYS[role], [])
+        if normalized_index not in indices:
+            indices.append(normalized_index)
+
+
+def source_roles(config: dict[str, Any], index: Any) -> list[str]:
+    normalized_index = str(index or '').strip()
+    return [
+        role
+        for role in _SOURCE_ROLE_ORDER
+        if normalized_index in (config.get(_SOURCE_ROLE_KEYS[role]) or [])
+    ]
+
+
+def _external_image_urls(item: dict[str, Any]) -> list[str]:
+    extra = item.get('extra') if isinstance(item.get('extra'), dict) else {}
+    candidates = [
+        *(item.get('image_urls') or []),
+        *(item.get('images') or []),
+        *(extra.get('images') or []),
+    ]
+    urls: list[str] = []
+    for image in candidates:
+        image_url = str(image.get('url') if isinstance(image, dict) else image).strip()
+        if image_url and image_url not in urls:
+            urls.append(image_url)
+    return urls
+
+
+def register_external_search_result(
+    item: dict[str, Any],
+    config: dict[str, Any],
+    roles: Any = ('searched',),
+) -> dict[str, Any]:
     url = str(item.get('url') or '').strip()
     if not normalize_external_url(url):
         doi = _external_doi(item)
         url = f'https://doi.org/{doi}' if doi else ''
-    if not url:
-        return item
     keys = _external_source_keys(item)
     if not keys:
         return item
 
     refs = config.setdefault(CITATION_REFS_KEY, {})
     key_map = config.setdefault(EXTERNAL_SOURCE_KEY_MAP_KEY, {})
-    image_urls = [
-        str(image.get('url') if isinstance(image, dict) else image).strip()
-        for image in item.get('image_urls') or []
-        if str(image.get('url') if isinstance(image, dict) else image).strip()
-    ]
+    image_urls = _external_image_urls(item)
     index = next((key_map[key] for key in keys if key_map.get(key) in refs), None)
     source = refs.get(index) if index is not None else None
     if not isinstance(source, dict):
@@ -223,46 +271,119 @@ def register_external_search_result(item: dict[str, Any], config: dict[str, Any]
         source['image_urls'] = list(dict.fromkeys(image_urls))
     for key in keys:
         key_map[key] = index
-    searched_indices = config.setdefault(SEARCHED_SOURCE_INDICES_KEY, [])
-    if index not in searched_indices:
-        searched_indices.append(index)
+    mark_source_roles(config, index, roles)
     return _attach_external_ref(item, index)
 
 
-def registered_search_sources(config: dict[str, Any]) -> list[dict[str, Any]]:
-    refs = config.get(CITATION_REFS_KEY) or {}
-    return [
-        {**refs[index], 'index': index}
-        for index in config.get(SEARCHED_SOURCE_INDICES_KEY) or []
-        if isinstance(refs.get(index), dict)
-    ]
+def supplement_external_search_result(
+    item: dict[str, Any],
+    content: Any,
+    config: dict[str, Any],
+    roles: Any = ('searched',),
+) -> dict[str, Any]:
+    text = str(content or '').strip()
+    if not text:
+        return item
+    index = str(item.get('citation_index') or '').strip()
+    refs = config.setdefault(CITATION_REFS_KEY, {})
+    if not isinstance(refs.get(index), dict):
+        candidate = dict(item)
+        candidate['snippet'] = text
+        register_external_search_result(candidate, config, roles=roles)
+        index = str(candidate.get('citation_index') or '').strip()
+    source = refs.get(index)
+    if not isinstance(source, dict):
+        return item
+    source['content'] = text
+    mark_source_roles(config, index, roles)
+    return _attach_external_ref(item, index)
 
 
-def merge_source_views(
-    cited_sources: list[dict[str, Any]],
-    searched: list[dict[str, Any]],
+def register_existing_sources(
+    config: dict[str, Any],
+    sources: Any,
+) -> None:
+    if not isinstance(sources, list):
+        return
+    refs = config.setdefault(CITATION_REFS_KEY, {})
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        index = str(source.get('index') or source.get('citation_id') or '').strip()
+        if not index:
+            continue
+        candidate = {
+            key: value
+            for key, value in source.items()
+            if key not in {'source_roles', 'display_index'}
+        }
+        current = refs.get(index)
+        if isinstance(current, dict):
+            for key, value in candidate.items():
+                if key not in current or current[key] in (None, '', [], {}):
+                    current[key] = value
+        else:
+            refs[index] = candidate
+
+
+def materialize_source_views(
+    config: dict[str, Any],
+    source_views: Any = None,
 ) -> list[dict[str, Any]]:
-    merged: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    refs = config.get(CITATION_REFS_KEY) or {}
+    views: dict[str, dict[str, Any]] = {}
+    for source in source_views or []:
+        if not isinstance(source, dict):
+            continue
+        index = str(source.get('index') or source.get('citation_id') or '').strip()
+        if index:
+            views[index] = source
 
-    def add(source: dict[str, Any], role: str) -> None:
-        index = str(source.get('index') or source.get('citation_id') or '')
-        key = index or _external_url_key(source.get('url')) or repr(source)
-        current = merged.setdefault(key, dict(source))
-        roles = list(current.get('source_roles') or [])
-        if role not in roles:
-            roles.append(role)
-        current['source_roles'] = roles
+    ordered_indices: list[str] = []
+    for role in _SOURCE_ROLE_ORDER:
+        for index in config.get(_SOURCE_ROLE_KEYS[role]) or []:
+            normalized_index = str(index)
+            if normalized_index not in ordered_indices:
+                ordered_indices.append(normalized_index)
 
-    for source in cited_sources or []:
-        if isinstance(source, dict):
-            add(source, 'cited')
-    for source in searched or []:
-        if isinstance(source, dict):
-            add(source, 'searched')
-    return list(merged.values())
+    result: list[dict[str, Any]] = []
+    identity_positions: dict[str, int] = {}
+    for index in ordered_indices:
+        source = refs.get(index)
+        if not isinstance(source, dict):
+            continue
+        view = {**source, **views.get(index, {}), 'index': index}
+        view['source_roles'] = source_roles(config, index)
+        identities = [f'index:{index}']
+        url_key = _external_url_key(view.get('url'))
+        if url_key:
+            identities.append(url_key)
+        existing_position = next(
+            (identity_positions[key] for key in identities if key in identity_positions),
+            None,
+        )
+        if existing_position is None:
+            existing_position = len(result)
+            result.append(view)
+        else:
+            current = result[existing_position]
+            merged_roles = set(current.get('source_roles') or []) | set(view['source_roles'])
+            current['source_roles'] = [
+                role for role in _SOURCE_ROLE_ORDER if role in merged_roles
+            ]
+            for key, value in view.items():
+                if key not in current or current[key] in (None, '', [], {}):
+                    current[key] = value
+        for key in identities:
+            identity_positions[key] = existing_position
+    return result
 
 
-def upsert_external_source(page: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+def upsert_external_source(
+    page: dict[str, Any],
+    config: dict[str, Any],
+    roles: Any = (),
+) -> dict[str, Any]:
     content = str(page.get('content') or '').strip()
     urls = _external_page_urls(page)
     if not content or not urls:
@@ -273,7 +394,6 @@ def upsert_external_source(page: dict[str, Any], config: dict[str, Any]) -> dict
     keys = [_external_url_key(url) for url in urls]
     index = next((key_map[key] for key in keys if key_map.get(key) in refs), None)
     source = refs.get(index) if index is not None else None
-    source_action = 'supplemented_source' if isinstance(source, dict) else 'new_source'
     best_url = urls[0]
     metadata = page.get('metadata') if isinstance(page.get('metadata'), dict) else {}
     favicon_url = str(metadata.get('favicon_url') or '').strip()
@@ -304,7 +424,7 @@ def upsert_external_source(page: dict[str, Any], config: dict[str, Any]) -> dict
 
     for key in keys:
         key_map[key] = index
-    page['source_action'] = source_action
+    mark_source_roles(config, index, roles)
     return _attach_external_ref(page, index)
 
 
@@ -444,6 +564,7 @@ def reset_citation_state(config: dict[str, Any]) -> None:
     config[CITATION_DOC_CHUNK_NEXT_KEY] = {}
     config[EXTERNAL_SOURCE_KEY_MAP_KEY] = {}
     config[SEARCHED_SOURCE_INDICES_KEY] = []
+    config[CITED_SOURCE_INDICES_KEY] = []
     config[IMAGE_URL_REGISTRY_KEY] = {}
 
 
@@ -489,6 +610,7 @@ def rewrite_citations(text: str, config: dict[str, Any]) -> tuple[str, list[dict
     display_mapper = CitationDisplayMapper()
 
     def _collect(index: str, source: dict[str, Any]) -> dict[str, Any]:
+        mark_source_roles(config, index, 'cited')
         mapped_source = display_mapper.source_with_display_index(index, source)
         collected.setdefault(index, mapped_source)
         return mapped_source
@@ -527,6 +649,7 @@ class ConfigCitationPlugin(BasePlugin):
         self._display_mapper = CitationDisplayMapper()
 
     def _collect(self, index: str, source: dict[str, Any]) -> dict[str, Any]:
+        mark_source_roles(self._config, index, 'cited')
         mapped_source = self._display_mapper.source_with_display_index(index, source)
         self._collected.setdefault(index, mapped_source)
         return mapped_source

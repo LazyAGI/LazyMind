@@ -1694,6 +1694,8 @@ const zhCN = {
     },
     promptGridView: "网格视图",
     previewImage: "预览图片",
+    imageLoadFailed: "图片加载失败",
+    openOriginalImage: "打开原图",
     promptListView: "列表视图",
     promptSortLabel: "话术排序",
     promptSortUpdated: "按更新时间",

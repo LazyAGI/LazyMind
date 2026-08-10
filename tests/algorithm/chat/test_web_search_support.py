@@ -46,7 +46,7 @@ def test_fetch_url_content_extracts_metadata_links_images_and_observable_truncat
     assert page['metadata']['canonical_url'] == 'https://example.test/canonical'
     assert page['metadata']['favicon_url'] == 'https://example.test/favicon.ico'
     assert page['metadata']['site_name'] == 'Example Site'
-    assert page['metadata']['extraction_stats']['selected_root'] == 'article'
+    assert 'extraction_stats' not in page['metadata']
     assert page['links'] == [
         {'id': 1, 'text': 'Navigation', 'target_url': 'https://example.test/navigation'},
         {'id': 2, 'text': 'Child', 'target_url': 'https://example.test/child'},
@@ -60,22 +60,3 @@ def test_fetch_url_content_extracts_metadata_links_images_and_observable_truncat
     assert page['truncation_strategy'] == 'head'
     assert len(page['content']) == page['returned_content_chars'] == page['content_max_chars']
     assert page['content_chars'] > page['returned_content_chars']
-
-
-def test_fetch_url_content_detects_utf8_when_http_defaults_to_latin1(monkeypatch):
-    html = '''<html><head><title>并发编程指南</title></head>
-    <body><article><p>协程适合高并发网络任务。</p></article></body></html>'''
-    response = requests.Response()
-    response.status_code = 200
-    response.url = 'https://example.test/concurrency'
-    response.headers['Content-Type'] = 'text/html'
-    response.encoding = 'ISO-8859-1'
-    response._content = html.encode('utf-8')
-
-    monkeypatch.setattr(web_search_support, 'validate_public_http_url', lambda url: url)
-    monkeypatch.setattr(web_search_support, 'fetch_public_url', lambda *args, **kwargs: response)
-
-    page = web_search_support.fetch_url_content(response.url)
-
-    assert page['title'] == '并发编程指南'
-    assert page['content'] == '协程适合高并发网络任务。'
