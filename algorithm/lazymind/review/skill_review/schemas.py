@@ -4,8 +4,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from lazymind.common.skill_document import require_valid_skill_document
-from lazymind.common.skill_storage_key import parse_skill_storage_key
+from lazymind.common.skill.document import require_valid_skill_document
+from lazymind.common.skill.storage_key import parse_skill_storage_key
 
 
 class SkillReviewRequest(BaseModel):

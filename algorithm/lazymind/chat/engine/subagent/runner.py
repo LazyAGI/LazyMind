@@ -4,7 +4,8 @@ import json
 import os
 import re
 import time
-from asyncio import CancelledError
+import base64
+import types
 from typing import Any, Dict, List, Optional
 
 import lazyllm
@@ -20,6 +21,7 @@ from lazymind.chat.engine.agent_runtime import (
     PromptBuilder,
     normalize_attachments,
     render_attachment_content,
+    make_cancel_stop_condition,
 )
 from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
@@ -35,7 +37,7 @@ from lazymind.chat.service.component.tool_registry import (
 from lazyllm.tools.tool_config_inject import inject_tool_config
 
 from .context import SubAgentContext, set_context, LARGE_TOOL_RESULT_THRESHOLD
-from .db import SubAgentDB
+from .db import MemorySubAgentStore, SubAgentDB
 from . import tools as subagent_tools
 from . import SUBAGENT_ATTACHMENT_CONTEXT_KEY, SUBAGENT_CORE_TOOL_NAMES
 
@@ -47,65 +49,115 @@ def _build_artifact_context_section(
 
     Returns an empty list when there are no input artifacts.
 
-    Plugin scenario (params contains session_id):
-      Reads from plugin_slot_revisions with sort_order from plugin_slot_order.
-      Resolves human vs AI revision for each row, then builds per-key ordered summaries.
+    Workflow scenario (params contains session_id):
+      Reads the public Artifact projection supplied by the Workflow runtime.
 
-    Ordinary SubAgent (no session_id, but has input_slots):
-      Reads from sub_agent_artifacts of succeeded steps in the same session.
-      sort_order = seq within the same slot group.
+    Ordinary SubAgents receive their attachment context through params and do not
+    participate in Workflow resource resolution.
     """
     params = ctx.params
     session_id: str = params.get('session_id', '')
 
     if session_id:
-        return db.format_plugin_session_artifacts(session_id)
-
-    if ctx.input_slots:
-        steps = db.load_plugin_session_steps(session_id) if session_id else []
-        succeeded_task_ids = [
-            s['task_id'] for s in steps
-            if s.get('status') == 'succeeded' and s.get('task_id')
-        ]
-        if not succeeded_task_ids:
+        try:
+            import httpx
+            from lazymind.config import config
+            from lazymind.workflow_sdk import WorkflowClient
+            response = WorkflowClient(
+                str(config['core_api_url']).rstrip('/'),
+                str(params.get('user_id') or ''), host='lazymind', transport=httpx,
+            ).list_artifacts(session_id).result
+            artifacts = response.get('artifacts') if isinstance(response, dict) else []
+            if not artifacts:
+                return []
+            return [
+                '## Workflow inputs and artifacts [AUTHORITATIVE public runtime]',
+                json.dumps(artifacts, ensure_ascii=False, default=str),
+            ]
+        except Exception as exc:
+            LOG.warning('[SubAgent] public Workflow Artifact read failed: %s', exc)
             return []
-        return db.format_task_artifacts(succeeded_task_ids)
 
     return []
 
 
-def _resolve_plugin_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
-    """Resolve the tool list for a plugin_step task from plugin_loader.
-
-    Returns None if the plugin or step cannot be resolved (falls back to caller default).
-    """
-    try:
-        from lazymind.chat.plugin import plugin_loader as _loader
-        plugin_id: str = params.get('plugin_id', '')
-        step_id: str = params.get('step_id', '')
-        if not plugin_id or not step_id:
-            return None
-        step_config = _loader.get_step_config(plugin_id, step_id)
-        if not step_config and not plugin_id:
-            return None
-        # If the plugin itself doesn't exist, get_step_config returns {}.
-        # Distinguish "step exists but has no tools" from "plugin not found"
-        # by checking whether the plugin is registered.
-        if _loader.get_plugin(plugin_id) is None:
-            return None
-        declared: List[str] = step_config.get('tools', [])
-        return list(declared)
-    except Exception as exc:
-        LOG.warning(f'[SubAgent] _resolve_plugin_step_tools failed: {exc}')
+def _resolve_workflow_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
+    """Use the immutable tool names supplied by public Attempt Context."""
+    declared = params.get('legacy_tools') or params.get('tools') or []
+    if not isinstance(declared, list):
         return None
+    return list(dict.fromkeys([*SUBAGENT_CORE_TOOL_NAMES, *map(str, declared)]))
 
 
-def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[str] = None) -> List[Any]:
+def _workflow_package_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, Any]:
+    """Load declared callables from the exact published Workflow revision.
+
+    Core is authoritative for both the pinned revision and the compiled
+    ``legacy_tools`` list.  The model only sees the resulting callables; it
+    cannot choose a package, revision, script, or extra function.
+    """
+    workflow_id = str(params.get('workflow_id') or '').strip()
+    revision_id = str(params.get('revision_id') or '').strip()
+    if not workflow_id or not revision_id or not names:
+        return {}
+    try:
+        import httpx
+        from lazymind.config import config
+        from lazymind.workflow_sdk import WorkflowClient
+
+        package = WorkflowClient(
+            str(config['core_api_url']).rstrip('/'),
+            str(params.get('user_id') or ''), host='lazymind', transport=httpx,
+        ).get_workflow(workflow_id, revision_id).result
+        if str(package.get('revision_id') or '') != revision_id:
+            raise RuntimeError('Core returned a different Workflow revision')
+        expected_hash = str(params.get('tree_hash') or '').strip()
+        if expected_hash and str(package.get('tree_hash') or '') != expected_hash:
+            raise RuntimeError('Core returned a Workflow package with a different tree hash')
+        files = package.get('files') if isinstance(package.get('files'), dict) else {}
+        remaining = set(names)
+        resolved: Dict[str, Any] = {}
+        for path in sorted(files):
+            if not path.startswith('scripts/') or not path.endswith('.py'):
+                continue
+            encoded = files[path]
+            raw_source = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
+            source = raw_source.decode('utf-8')
+            module = types.ModuleType(
+                f'_lazymind_workflow_{revision_id.replace("-", "_")}_{len(resolved)}'
+            )
+            module.__file__ = f'{workflow_id}@{revision_id}/{path}'
+            exec(compile(source, module.__file__, 'exec'), module.__dict__)
+            for name in tuple(remaining):
+                candidate = module.__dict__.get(name)
+                if callable(candidate):
+                    # Published Workflow scripts can predate the tool runtime's
+                    # docstring requirement. Their callable name, signature and
+                    # annotations are already pinned by the immutable revision;
+                    # provide a stable description so legacy revisions remain
+                    # executable instead of failing before the first tool call.
+                    if not str(getattr(candidate, '__doc__', '') or '').strip():
+                        candidate.__doc__ = f'Execute the published Workflow tool {name}.'
+                    resolved[name] = candidate
+                    remaining.remove(name)
+        if remaining:
+            LOG.warning(
+                '[SubAgent] Workflow revision %s does not provide declared tools %s',
+                revision_id, sorted(remaining),
+            )
+        return resolved
+    except Exception as exc:
+        LOG.warning('[SubAgent] failed to load pinned Workflow script tools: %s', exc)
+        return {}
+
+
+def _resolve_runtime_tools(
+    explicit: Optional[List[str]], params: Optional[Dict[str, Any]] = None,
+) -> List[Any]:
     """Build the runtime tool list for a SubAgent.
 
     If explicit tool names are provided, each name is resolved in order:
-      1. Plugin script tools (loaded from the plugin's tool_scripts declarations).
-      2. DEFAULT_TOOLS registry (framework / global tools).
+      1. DEFAULT_TOOLS registry (framework / global tools).
     If a name is not found in either source it is silently skipped and a warning is logged.
 
     When explicit is None/empty, fall back to all DEFAULT_TOOLS.
@@ -120,28 +172,19 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
             name for item in explicit
             if (name := str(item).strip()) and name not in core_tool_names
         ]
-        # Build lookup from DEFAULT_TOOLS
+        # Published Workflow script functions are resolved from the exact
+        # revision before falling back to framework/global tools.
+        package_by_name = _workflow_package_tools(params or {}, name_list)
+        # Build lookup from DEFAULT_TOOLS.
         default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
-        # Build lookup from plugin script tools
-        script_by_name: Dict[str, Any] = {}
-        if plugin_id:
-            try:
-                from lazymind.chat.plugin import plugin_loader as _loader
-                for fn_name in _loader.list_script_tool_names(plugin_id):
-                    fn = _loader.get_script_tool(plugin_id, fn_name)
-                    if fn is not None:
-                        script_by_name[fn_name] = fn
-            except Exception as exc:
-                LOG.warning('[SubAgent] failed to load script tools for plugin=%s: %s', plugin_id, exc)
-
         result = []
         for name in name_list:
-            if name in script_by_name:
-                result.append(script_by_name[name])
+            if name in package_by_name:
+                result.append(package_by_name[name])
             elif name in default_by_name:
                 result.append(default_by_name[name].tool)
             else:
-                LOG.warning('[SubAgent] tool %r not found in plugin scripts or DEFAULT_TOOLS — skipped', name)
+                LOG.warning('[SubAgent] public Attempt tool %r is unavailable on LazyMind Host', name)
         return result
     return [cfg.tool for cfg in filter_tools(DEFAULT_TOOLS)]
 
@@ -179,81 +222,50 @@ def _tool_configs_for_runtime_tools(runtime_tools: List[Any]) -> list:
 
 
 def _build_partial_sort_order_hints(
-    db: 'SubAgentDB',
-    session_id: str,
     partial_indices: 'Dict[str, List[int]]',
 ) -> str:
     """Translate partial_indices (0-based list_index) into sort_order guidance for the AI.
 
-    Resolves each list_index to its current 1-based sort_order, then returns a
-    concise instruction block the AI can act on directly.
-    Returns an empty string on any error or when translation is unnecessary.
+    Attempt Context list indexes are stable and zero-based; display order is one-based.
     """
-    try:
-        hints: List[str] = []
-        for slot, list_indexes in partial_indices.items():
-            order_list = db.load_slot_order_list(session_id, slot)
-            if not order_list:
-                continue
-            # Build list_index → sort_order map.
-            li_to_so = {li: (pos + 1) for pos, li in enumerate(order_list)}
-            sort_orders = [li_to_so[li] for li in list_indexes if li in li_to_so]
-            if sort_orders:
-                so_str = ', '.join(str(s) for s in sort_orders)
-                hints.append(
-                    f'For slot "{slot}": overwrite the item(s) at '
-                    f'sort_order={so_str} in the corresponding save_artifacts entry '
-                    f'so that only those position(s) are replaced.'
-                )
-        if not hints:
-            return ''
-        return (
-            '## Partial retry instruction (AUTHORITATIVE)\n'
-            'This is a partial re-run. You must overwrite specific items rather than appending new ones.\n'
-            + '\n'.join(hints)
-            + '\nDo NOT omit sort_order for these items, and do NOT overwrite other positions.'
-        )
-    except Exception:
+    hints: List[str] = []
+    for slot, list_indexes in partial_indices.items():
+        sort_orders = [index + 1 for index in list_indexes if index >= 0]
+        if sort_orders:
+            hints.append(
+                f'For slot "{slot}": overwrite sort_order='
+                + ', '.join(str(value) for value in sort_orders)
+                + '.'
+            )
+    if not hints:
         return ''
+    return '## Partial retry instruction (AUTHORITATIVE Attempt Context)\n' + '\n'.join(hints)
 
 
-def _build_intent_context_section(db: 'SubAgentDB', conversation_id: str,
-                                  session_id: str, step_id: str = '') -> List[str]:
-    """Read conversation + plugin-session + current-step intent from DB.
-
-    Returns an empty list if there are no intent constraints to inject.
-    """
-    try:
-        lines: List[str] = []
-        conversation_intent: Optional[str] = db.get_conversation_intent(conversation_id)
-        session_intent: Optional[str] = db.get_session_intent(session_id) if session_id else None
-        step_intent: Optional[str] = db.get_step_intent(session_id, step_id) if session_id and step_id else None
-
-        if not conversation_intent and not session_intent and not step_intent:
-            return []
-
-        lines.append('')
-        lines.append('## Effective Execution Intent')
-        lines.append('The following constraints were specified by the user and MUST be respected:')
-        if conversation_intent:
-            lines.append(f'Conversation intent: {conversation_intent}')
-        if session_intent:
-            lines.append(f'Global constraints: {session_intent}')
-        if step_intent:
-            lines.append(f'Step-specific constraints: {step_intent}')
-        return lines
-    except Exception:
+def _build_intent_context_section(params: Dict[str, Any]) -> List[str]:
+    """Render immutable instructions already present in public Attempt Context."""
+    instruction = str(params.get('runtime_instruction') or '').strip()
+    if not instruction:
         return []
+    return ['', '## Effective Execution Intent', instruction]
 
 
 _STRUCTURED_PARAM_KEYS = {
     # These values are rendered by dedicated sections below. Excluding only these
     # avoids duplicating large/internal representations while preserving arbitrary
-    # task parameters supplied by plugin and ordinary SubAgent callers.
+    # task parameters supplied by workflow and ordinary SubAgent callers.
     'history_files_per_turn',
     SUBAGENT_ATTACHMENT_CONTEXT_KEY,
     'partial_indices',
     'required_output_artifact_keys',
+    # Framework-owned Workflow routing/concurrency metadata. The effective
+    # objective and dedicated artifact sections already contain everything the
+    # SubAgent should act on; showing these fields invites it to re-interpret or
+    # re-run the parent Workflow instead of completing its one assigned step.
+    'workflow_id', 'workflow_ref', 'revision_id', 'revision_no', 'tree_hash',
+    'remote_root', 'step_id', 'session_id', 'user_input', 'hand_off',
+    'chat_session_id', 'workflow_mode', 'user_id', 'preflight_id',
+    'legacy_tools', 'parent_agentic_config', 'filters',
 }
 
 
@@ -306,17 +318,17 @@ def _build_agentic_config(
             params.get('_thinking_depth') or agentic_config.get('thinking_depth') or 'medium'
         ),
     })
-    if effective_agent_type == 'plugin_step':
+    if effective_agent_type == 'workflow_step':
         agentic_config.update({
-            'plugin_id': params.get('plugin_id', ''),
-            'plugin_session_id': params.get('session_id', ''),
-            'plugin_step': params.get('step_id', ''),
+            'workflow_id': params.get('workflow_id', ''),
+            'workflow_session_id': params.get('session_id', ''),
+            'workflow_step': params.get('step_id', ''),
         })
-    # Prefer the launched plugin session id whenever present so artifact tools work
-    # even if parent_agentic_config carried a stale empty plugin_session_id.
+    # Prefer the launched workflow session id whenever present so artifact tools work
+    # even if parent_agentic_config carried a stale empty workflow_session_id.
     launched_session_id = str(params.get('session_id') or '').strip()
     if launched_session_id:
-        agentic_config['plugin_session_id'] = launched_session_id
+        agentic_config['workflow_session_id'] = launched_session_id
     return agentic_config
 
 
@@ -341,6 +353,10 @@ def _build_subagent_plan(
         'subagent_role', 'SubAgent Role', (
             'You are an autonomous SubAgent. Complete the task objective using only the '
             'available tools. You may not spawn, create, or delegate to other agents.\n'
+            'You cannot interact with the user and must never ask the user a question or '
+            'request clarification. Use the authoritative task context as provided. If a '
+            'required input is genuinely absent, report that as a task failure rather than '
+            'phrasing it as a question.\n'
             'Use the selected user-visible language for progress and the final summary. '
             'Artifact content must follow the language required by the task objective or '
             'the output slot contract; do not translate an artifact when its required '
@@ -360,10 +376,9 @@ def _build_subagent_plan(
         'task.params', priority=10, content_kind='reference',
     )
 
-    # Inject artifact context: plugin session reads from slot revisions with sort_order;
+    # Inject artifact context: workflow session reads from slot revisions with sort_order;
     # ordinary SubAgent reads from sub_agent_artifacts of prior succeeded steps.
     session_id: str = ctx.params.get('session_id', '')
-    step_id: str = ctx.params.get('step_id', '')
     if session_id or ctx.input_slots:
         artifact_section = _build_artifact_context_section(ctx, db) if db else []
         if artifact_section:
@@ -380,9 +395,9 @@ def _build_subagent_plan(
                 priority=20,
                 content_kind='reference',
             )
-    # Inject intent/constraints from the plugin session so SubAgent respects user preferences.
+    # Inject intent/constraints from the workflow session so SubAgent respects user preferences.
     if db:
-        intent_lines = _build_intent_context_section(db, ctx.conversation_id, session_id, step_id)
+        intent_lines = _build_intent_context_section(ctx.params)
         if intent_lines:
             builder.runtime(
                 'subagent_intent', 'Effective Execution Intent',
@@ -404,10 +419,8 @@ def _build_subagent_plan(
     # Translate partial_indices (internal 0-based list_index) into sort_order guidance.
     # This tells the AI exactly which display position(s) to overwrite instead of append.
     partial_indices: Dict[str, List[int]] = ctx.params.get('partial_indices') or {}
-    if partial_indices and session_id and db:
-        sort_order_hints = _build_partial_sort_order_hints(
-            db, session_id, partial_indices,
-        )
+    if partial_indices and session_id:
+        sort_order_hints = _build_partial_sort_order_hints(partial_indices)
         if sort_order_hints:
             builder.runtime(
                 'subagent_partial_retry', 'Partial Retry', sort_order_hints, 'task.retry',
@@ -417,7 +430,7 @@ def _build_subagent_plan(
             )
     if ctx.params.get('required_output_artifact_keys') is not None:
         required_keys = _coerce_str_list(ctx.params.get('required_output_artifact_keys'))
-    elif str(ctx.agent_type or '') == 'plugin_step':
+    elif str(ctx.agent_type or '') == 'workflow_step':
         required_keys = []
     else:
         required_keys = list(ctx.output_slots)
@@ -477,7 +490,7 @@ def _build_subagent_plan(
         tools=tools,
         force_summarize_context=ctx.objective,
         execution_options=AgentExecutionOptions(
-            extra_stop_condition=_make_cancel_stop_condition(),
+            extra_stop_condition=make_cancel_stop_condition(),
             max_retries=max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
         ),
     )
@@ -512,6 +525,43 @@ def _truncate_tool_result(ctx: SubAgentContext, result: Any, tool_name: str) -> 
         return truncated + f'\n... [truncated — original {len(encoded) // 1024} KB]'
 
 
+def _commit_prompt_only_text_output(
+    ctx: SubAgentContext,
+    required_output_keys: List[str],
+    saved_keys: set[str],
+    final_result: Any,
+) -> bool:
+    """Commit the final text for a prompt-only Workflow step.
+
+    A model may satisfy a one-output prompt step by returning the requested text
+    directly instead of calling ``save_artifacts``.  When the Workflow declares no
+    script tools and exactly one required output, that final text is the step's
+    unambiguous material value, so persist it deterministically at the execution
+    boundary.  Tool-backed and multi-output steps still require explicit artifact
+    calls and keep the strict completeness check below.
+    """
+    if str(ctx.agent_type or '') != 'workflow_step':
+        return False
+    if _coerce_str_list((ctx.params or {}).get('legacy_tools')):
+        return False
+    missing = [key for key in required_output_keys if key not in saved_keys]
+    if len(missing) != 1:
+        return False
+    content = str(final_result or '').strip()
+    if not content:
+        return False
+    key = missing[0]
+    seq = ctx.next_artifact_seq(key)
+    value = {'text': content}
+    ctx.record_local_artifact(key, 'text', value, seq)
+    ctx.emit({
+        'type': 'artifact', 'slot': key, 'content_type': 'text',
+        'seq': seq, 'value': value,
+    })
+    LOG.info('[SubAgent] committed prompt-only output key=%r for task=%s', key, ctx.task_id)
+    return True
+
+
 def _persist_step(ctx: SubAgentContext, seq: int, event: Dict[str, Any]) -> None:
     tag = event.get('tag')
     if tag == 'tool_calls':
@@ -542,12 +592,14 @@ def _persist_step(ctx: SubAgentContext, seq: int, event: Dict[str, Any]) -> None
 
 async def run_subagent_stream(
     task_id: str,
-    db_dsn: str,
+    db_dsn: str = '',
     resume: bool = False,
     model_config: Optional[Dict[str, Any]] = None,
     tool_config: Optional[Dict[str, Any]] = None,
     agent_type: Optional[str] = None,
     tools: Optional[List[str]] = None,
+    task_spec: Optional[Dict[str, Any]] = None,
+    initial_steps: Optional[List[Dict[str, Any]]] = None,
 ):
     """Async generator yielding Task SSE lines.
 
@@ -566,7 +618,8 @@ async def run_subagent_stream(
         return 'data: ' + json.dumps(ev, ensure_ascii=False, default=str) + '\n\n'
 
     try:
-        db = SubAgentDB(db_dsn)
+        db = (MemorySubAgentStore(task_spec, initial_steps)
+              if task_spec is not None else SubAgentDB(db_dsn))
         task = db.load_task(task_id)
         if not task:
             yield _sse({'type': 'error', 'status': 'failed', 'message': f'task {task_id} not found'})
@@ -593,7 +646,7 @@ async def run_subagent_stream(
         effective_agent_type = str(task.get('agent_type') or agent_type or '')
         if params.get('required_output_artifact_keys') is not None:
             required_output_keys = _coerce_str_list(params.get('required_output_artifact_keys'))
-        elif effective_agent_type == 'plugin_step':
+        elif effective_agent_type == 'workflow_step':
             # Do not treat every declared output as mandatory when Go omits empty lists.
             required_output_keys = []
         else:
@@ -613,24 +666,35 @@ async def run_subagent_stream(
         )
         ctx.ensure_workspace()
 
-        # For plugin_step tasks: remove {{slot}} placeholders from the objective
+        # For workflow_step tasks: remove {{slot}} placeholders from the objective
         # (artifact context is now injected as a summary section in _objective_prompt instead).
-        # Also resolve tools from plugin_loader when no explicit list was provided.
-        # Go no longer forwards the tools list for plugin_step tasks.
-        if effective_agent_type == 'plugin_step':
+        # The public Host Attempt contains the immutable tool declaration.
+        if effective_agent_type == 'workflow_step':
             # Strip any remaining {{slot}} placeholders so they don't confuse the LLM.
             ctx.objective = re.sub(r'\{\{[^}]+\}\}', '', ctx.objective).strip()
             if not tools:
-                tools = _resolve_plugin_step_tools(params)
+                tools = _resolve_workflow_step_tools(params)
 
         sid = task_id
         lazyllm.globals._init_sid(sid=sid)
         lazyllm.locals._init_sid(sid=sid)
         lazyllm.set_trace_context({
-            'session_id': params.get('session_id') or params.get('chat_session_id') or None,
-            'sampled': True,
-            'module_trace': {'default': True},
-            'request_tags': ['subagent'],
+            'trace_id': params.get('trace_id') or None,
+            'parent_span_id': params.get('parent_span_id') or None,
+            'session_id': (
+                params.get('session_id') or params.get('chat_session_id')
+                or lazyllm.get_trace_context().session_id
+            ),
+            'sampled': True, 'request_tags': ['subagent'],
+            'module_trace': {
+                'by_class': {
+                    'FunctionCall': False, 'ToolManager': False,
+                    'Pipeline': False, 'Diverter': False,
+                },
+                'by_name': {
+                    '_build_history': False, '_post_action': False, '_safe_call': False,
+                },
+            }
         })
         inject_model_config(model_config)
         inject_tool_config(tool_config)
@@ -644,15 +708,15 @@ async def run_subagent_stream(
         yield _sse({'type': 'task_start', 'task_id': task_id})
 
         llm = AutoModel(model='llm')
-        runtime_tools = _resolve_runtime_tools(tools, plugin_id=params.get('plugin_id') or None)
-        # Plugin steps often need find_user_attachment even when the current synthetic
+        runtime_tools = _resolve_runtime_tools(tools, params)
+        # Workflow steps often need find_user_attachment even when the current synthetic
         # chat turn has no files; keep the tools available and let the tool report empty.
         attachment_configs = (
             [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
             if (
                 agentic_config.get('files')
                 or agentic_config.get('history_files_per_turn')
-                or effective_agent_type == 'plugin_step'
+                or effective_agent_type == 'workflow_step'
             )
             else []
         )
@@ -775,14 +839,22 @@ async def run_subagent_stream(
                         'think': frame.get('think'), 'text': frame.get('text')})
 
         # Flush required drafts before checking graph material guarantees.
-        if effective_agent_type == 'plugin_step' and required_output_keys:
+        if effective_agent_type == 'workflow_step' and required_output_keys:
             _auto_flush_drafts(ctx, db)
 
         # Completeness check: every required output key must have at least one artifact.
         saved = set(ctx.saved_keys())
+        if _commit_prompt_only_text_output(
+            ctx, required_output_keys, saved, final_result,
+        ):
+            while emitted:
+                ev = emitted.pop(0)
+                ev['task_id'] = task_id
+                yield _sse(ev)
+            saved = set(ctx.saved_keys())
         missing = [k for k in required_output_keys if k not in saved]
         if missing:
-            if effective_agent_type == 'plugin_step':
+            if effective_agent_type == 'workflow_step':
                 cost = round(time.time() - start_time, 3)
                 message = f'缺少必需产出素材: {", ".join(missing)}'
                 yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
@@ -847,31 +919,6 @@ async def run_subagent_stream(
             pass
         if db is not None:
             db.dispose()
-
-
-def _make_cancel_stop_condition():
-    """Return a stop_condition function that raises CancelledError when a cancel signal is detected.
-
-    Called once per task run. Each ReAct iteration, the condition polls the cancel queue
-    (FileSystemQueue klass='cancel'). If a message with tag='cancel' is found, it raises
-    CancelledError so the runner follows the interrupted path.
-    """
-    def _check(output) -> bool:
-        try:
-            from lazyllm.common.queue import FileSystemQueue
-            msgs = FileSystemQueue(klass='cancel').dequeue() or []
-            for raw in msgs:
-                try:
-                    if json.loads(raw).get('tag') == 'cancel':
-                        raise CancelledError('stopped by user')
-                except (ValueError, TypeError):
-                    pass
-        except CancelledError:
-            raise
-        except Exception:
-            pass
-        return False
-    return _check
 
 
 def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:

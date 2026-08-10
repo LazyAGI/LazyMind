@@ -3,7 +3,6 @@ package resourceupdate
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -83,9 +82,9 @@ func TestIdleRecorderSupersedesWaitingEvent(t *testing.T) {
 	recorder.clock = func() time.Time { return now }
 
 	if err := recorder.RecordConversationMessage(ctx, ConversationIdleRecord{
-		SessionID:      "session-1",
+		ConversationID: "session-1",
 		UserID:         "user-1",
-		LastMessageID:  "h1",
+		LastHistoryID:  "h1",
 		LastActivityAt: now,
 		UserContent:    "hello",
 		AssistantText:  "hi",
@@ -93,9 +92,9 @@ func TestIdleRecorderSupersedesWaitingEvent(t *testing.T) {
 		t.Fatalf("record first message: %v", err)
 	}
 	if err := recorder.RecordConversationMessage(ctx, ConversationIdleRecord{
-		SessionID:      "session-1",
+		ConversationID: "session-1",
 		UserID:         "user-1",
-		LastMessageID:  "h2",
+		LastHistoryID:  "h2",
 		LastActivityAt: now.Add(time.Minute),
 		UserContent:    "next",
 		AssistantText:  "ok",
@@ -149,9 +148,9 @@ func TestIdleRecorderTrimsHistorySnapshot(t *testing.T) {
 
 	for i, msg := range []string{"u1", "u2", "u3"} {
 		if err := recorder.RecordConversationMessage(ctx, ConversationIdleRecord{
-			SessionID:      "session-trim",
+			ConversationID: "session-trim",
 			UserID:         "user-1",
-			LastMessageID:  "h" + msg,
+			LastHistoryID:  "h" + msg,
 			LastActivityAt: now.Add(time.Duration(i) * time.Minute),
 			UserContent:    msg,
 			AssistantText:  "a" + msg,
@@ -175,7 +174,6 @@ func TestIdleProcessorSkipsWhenNoUserMessage(t *testing.T) {
 	store := newFakeIdleStore()
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
-	insertIdleResources(t, db, "user-1", now)
 	insertIdleEvent(t, db, "session-empty:h1", "session-empty", "user-1", "h1", now.Add(-time.Hour), now.Add(-time.Minute))
 	store.history[conversationIdleHistoryKey("session-empty")] = []idleHistoryMessage{{Role: "assistant", Content: "only assistant"}}
 
@@ -209,7 +207,6 @@ func TestIdleProcessorIsIdempotentForSameEvent(t *testing.T) {
 	store := newFakeIdleStore()
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
-	insertIdleResources(t, db, "user-1", now)
 	insertIdleEvent(t, db, "session-idem:h1", "session-idem", "user-1", "h1", now.Add(-time.Hour), now.Add(-time.Minute))
 	store.history[conversationIdleHistoryKey("session-idem")] = []idleHistoryMessage{
 		{Role: "user", Content: "remember this"},
@@ -237,7 +234,7 @@ func TestIdleProcessorIsIdempotentForSameEvent(t *testing.T) {
 	if err := db.First(&event, "event_id = ?", "session-idem:h1").Error; err != nil {
 		t.Fatalf("read event: %v", err)
 	}
-	if event.Status != orm.ConversationIdleEventStatusTriggered || event.MemoryTaskID == "" || event.UserPreferenceTaskID == "" {
+	if event.Status != orm.ConversationIdleEventStatusTriggered || event.MemoryTaskID == "" {
 		t.Fatalf("unexpected event after idempotent processing: %#v", event)
 	}
 }
@@ -247,7 +244,6 @@ func TestIdleFallbackCreatesCombinedMemoryReviewTaskWithoutSensitiveRequestField
 	store := newFakeIdleStore()
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
-	insertIdleResources(t, db, "user-1", now)
 	insertIdleEvent(t, db, "session-fallback:h1", "session-fallback", "user-1", "h1", now.Add(-time.Hour), now.Add(-time.Minute))
 	store.history[conversationIdleHistoryKey("session-fallback")] = []idleHistoryMessage{
 		{Role: "user", Content: "please remember I like concise answers"},
@@ -285,19 +281,15 @@ func TestIdleFallbackCreatesCombinedMemoryReviewTaskWithoutSensitiveRequestField
 			t.Fatalf("unexpected trigger id: %s", task.TriggerID)
 		}
 		assertRequestJSONHasNoSensitiveFields(t, task.RequestJSON)
-		var request memoryGenerateRequestJSON
+		var request memoryReviewRequestJSON
 		if err := json.Unmarshal(task.RequestJSON, &request); err != nil {
 			t.Fatalf("unmarshal request: %v", err)
 		}
-		if request.SessionID != "session-fallback" || len(request.History) == 0 {
+		if request.ConversationID != "session-fallback" || len(request.History) == 0 {
 			t.Fatalf("unexpected request json: %#v", request)
 		}
-		if request.Memory != "current memory" {
-			t.Fatalf("expected memory content in request, got %q", request.Memory)
-		}
-		wantUser := "---\nagent_persona: |-\n 当前角色\npreferred_name: |-\n 当前称谓\nresponse_style: |-\n 当前风格\n---\n\ncurrent preference"
-		if request.User != wantUser {
-			t.Fatalf("expected formatted user_preference in request, got %q", request.User)
+		if request.ConversationLastActiveAtMS != now.Add(-time.Hour).UnixMilli() {
+			t.Fatalf("unexpected last-active timestamp: %#v", request)
 		}
 		if strings.Contains(string(task.RequestJSON), "api_key") || strings.Contains(string(task.RequestJSON), "model_configs") || strings.Contains(string(task.RequestJSON), "llm_config") {
 			t.Fatalf("request_json contains sensitive field: %s", string(task.RequestJSON))
@@ -305,66 +297,6 @@ func TestIdleFallbackCreatesCombinedMemoryReviewTaskWithoutSensitiveRequestField
 	}
 	if _, ok := store.history[conversationIdleHistoryKey("session-fallback")]; ok {
 		t.Fatal("expected idle history to be cleaned after triggered event")
-	}
-}
-
-func TestIdleFallbackUsesPendingMemoryReviewDraftContent(t *testing.T) {
-	db := newIdleTestDB(t)
-	store := newFakeIdleStore()
-	ctx := context.Background()
-	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
-	insertIdleResources(t, db, "user-1", now)
-	insertMemoryReviewResult(t, db, MemoryReviewResult{
-		ID:           "pending-memory",
-		UserID:       "user-1",
-		Target:       orm.ResourceUpdateResourceTypeMemory,
-		Content:      "draft memory",
-		Operations:   json.RawMessage(`[]`),
-		State:        memoryReviewStateSuccess,
-		ReviewStatus: reviewStatusPending,
-		Time:         now.Add(-2 * time.Minute),
-	})
-	insertMemoryReviewResult(t, db, MemoryReviewResult{
-		ID:           "pending-preference",
-		UserID:       "user-1",
-		Target:       orm.ResourceUpdateResourceTypeUserPreference,
-		Content:      "draft preference",
-		Operations:   json.RawMessage(`[]`),
-		State:        memoryReviewStateSuccess,
-		ReviewStatus: reviewStatusPending,
-		Time:         now.Add(-time.Minute),
-	})
-	insertIdleEvent(t, db, "session-draft:h1", "session-draft", "user-1", "h1", now.Add(-time.Hour), now.Add(-time.Minute))
-	store.history[conversationIdleHistoryKey("session-draft")] = []idleHistoryMessage{
-		{Role: "user", Content: "please remember another thing"},
-	}
-
-	processor := newIdleProcessorWithStore(db, store, Config{
-		WorkerLockTTL:                     time.Minute,
-		ConversationIdleFallbackBatchSize: 10,
-	}, "idle-test")
-	processor.clock = func() time.Time { return now }
-	result, err := processor.RunFallbackOnce(ctx)
-	if err != nil {
-		t.Fatalf("fallback run: %v", err)
-	}
-	if result.Found != 1 || result.Triggered != 1 {
-		t.Fatalf("unexpected fallback result: %#v", result)
-	}
-
-	var task orm.ResourceUpdateTask
-	if err := db.Take(&task).Error; err != nil {
-		t.Fatalf("read task: %v", err)
-	}
-	var request memoryGenerateRequestJSON
-	if err := json.Unmarshal(task.RequestJSON, &request); err != nil {
-		t.Fatalf("unmarshal request: %v", err)
-	}
-	if request.Memory != "draft memory" {
-		t.Fatalf("expected pending memory draft in request, got %q", request.Memory)
-	}
-	if request.User != "draft preference" {
-		t.Fatalf("expected pending user_preference draft in request, got %q", request.User)
 	}
 }
 
@@ -390,52 +322,10 @@ func TestIdleCleanupKeepsHistoryForNewerEvent(t *testing.T) {
 
 func newIdleTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "idle.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(
+	return orm.MigrateTestDB(t,
 		&orm.ResourceUpdateTask{},
 		&orm.ConversationIdleEvent{},
-		&orm.PersonalResource{},
-		&orm.PersonalResourceBlob{},
-		&orm.PersonalResourceRevision{},
-		&orm.PersonalResourceDraft{},
-		&orm.PersonalResourceReviewSession{},
-		&orm.PersonalResourceReviewActionBatch{},
-		&orm.PersonalResourceReviewActionItem{},
-		&orm.MemoryReviewResult{},
-	); err != nil {
-		t.Fatalf("auto migrate idle models: %v", err)
-	}
-	return db.DB
-}
-
-func insertIdleResources(t *testing.T, db *gorm.DB, userID string, now time.Time) {
-	t.Helper()
-	insertMemoryResource(t, db, orm.SystemMemory{
-		ID:          "memory-" + userID,
-		UserID:      userID,
-		Content:     "current memory",
-		ContentHash: "memory-hash",
-		Version:     1,
-		AutoEvo:     true,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	})
-	insertPreferenceResource(t, db, orm.SystemUserPreference{
-		ID:            "preference-" + userID,
-		UserID:        userID,
-		Content:       "current preference",
-		AgentPersona:  "当前角色",
-		PreferredName: "当前称谓",
-		ResponseStyle: "当前风格",
-		ContentHash:   "preference-hash",
-		Version:       1,
-		AutoEvo:       true,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	})
+	).DB
 }
 
 func insertIdleEvent(t *testing.T, db *gorm.DB, eventID, sessionID, userID, messageID string, lastActivityAt, dueAt time.Time) {
@@ -444,9 +334,9 @@ func insertIdleEvent(t *testing.T, db *gorm.DB, eventID, sessionID, userID, mess
 	if err := db.Create(&orm.ConversationIdleEvent{
 		ID:             "event-" + strings.ReplaceAll(eventID, ":", "-"),
 		EventID:        eventID,
-		SessionID:      sessionID,
+		ConversationID: sessionID,
 		UserID:         userID,
-		LastMessageID:  messageID,
+		LastHistoryID:  messageID,
 		LastActivityAt: lastActivityAt,
 		DueAt:          dueAt,
 		Status:         orm.ConversationIdleEventStatusWaiting,

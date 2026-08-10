@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-from lazymind.common.postgres import normalize_postgres_sqlalchemy_url
+from lazymind.common.database.postgres import normalize_postgres_sqlalchemy_url
 from lazymind.config import config as _cfg
 from lazymind.review.skill_review.db import SKILL_REVIEW_RUN_STATS_TABLE
 
@@ -32,7 +32,9 @@ def insert_skill_organize_result(
     status = str(organize_result.get('status') or 'completed').strip()
     if not status:
         status = 'completed'
-    with _get_app_conn().begin() as conn:
+    engine = _get_app_conn()
+    summary_value = _summary_value_sql(engine)
+    with engine.begin() as conn:
         conn.execute(
             text(
                 f"""INSERT INTO {SKILL_REVIEW_RUN_STATS_TABLE}
@@ -40,7 +42,7 @@ def insert_skill_organize_result(
                         summary)
                     VALUES
                        (:id, :requestid, :userid, :status, :started_at,
-                        :duration_ms, CAST(:summary AS JSONB))
+                        :duration_ms, {summary_value})
                     ON CONFLICT (id) DO UPDATE SET
                        requestid = EXCLUDED.requestid,
                        userid = EXCLUDED.userid,
@@ -60,6 +62,12 @@ def insert_skill_organize_result(
             },
         )
     return 1
+
+
+def _summary_value_sql(engine: Engine) -> str:
+    if engine.dialect.name == 'postgresql':
+        return 'CAST(:summary AS JSONB)'
+    return ':summary'
 
 
 def _get_app_conn() -> Engine:

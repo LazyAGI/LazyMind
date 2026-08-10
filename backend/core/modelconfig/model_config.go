@@ -163,6 +163,63 @@ func LoadOCRConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 	return config, nil
 }
 
+// LoadSearchToolConfig returns the selected web-search credential in the
+// dynamic tool-auth shape consumed by the algorithm service. Workflow attempts
+// use this alongside LoadLLMConfig because their durable/public Attempt context
+// intentionally does not persist Host-private credentials.
+func LoadSearchToolConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
+	row, err := loadSelectedProviderConfig(ctx, db, strings.TrimSpace(userID), "search", false)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		row, err = loadSelectedProviderConfig(ctx, db, "", "search", true)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if row == nil {
+		return nil, nil
+	}
+	toolName := normalizeSearchToolName(row.ProviderName)
+	if toolName == "" {
+		return nil, nil
+	}
+	keys := splitOCRAuthKeys(row.APIKey)
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	var value any = keys[0]
+	if len(keys) > 1 {
+		value = keys
+	}
+	return map[string]any{toolName: value}, nil
+}
+
+func normalizeSearchToolName(providerName string) string {
+	normalized := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			return r
+		}
+		if r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return -1
+	}, providerName)
+	switch normalized {
+	case "google", "googlesearch", "googlecustomsearch":
+		return "google"
+	case "bocha", "bochasearch":
+		return "bocha"
+	case "bing", "bingsearch":
+		return "bing"
+	case "tavily":
+		return "tavily"
+	default:
+		return ""
+	}
+}
+
 func normalizeOCRAuthValue(raw string) any {
 	keys := splitOCRAuthKeys(raw)
 	if len(keys) == 0 {

@@ -36,6 +36,9 @@ VALUES ('legacy-model','provider','Provider','Legacy','VLM','',CURRENT_TIMESTAMP
 	execMigrationFileForDriver(t, releaseDB, catalog.Modes[1].Aggregate.UpPath, "sqlite")
 	for _, migration := range catalog.Modes[1].Dev {
 		execMigrationFileForDriver(t, devDB, migration.UpPath, "sqlite")
+		if migration.FileVersion > catalog.Modes[1].Aggregate.Version {
+			execMigrationFileForDriver(t, releaseDB, migration.UpPath, "sqlite")
+		}
 	}
 
 	if release, dev := sqliteSchemaFingerprint(t, releaseDB), sqliteSchemaFingerprint(t, devDB); release != dev {
@@ -330,8 +333,8 @@ func assertSQLiteRepairIndexes(t *testing.T, db *gorm.DB) {
 	}{
 		{&orm.SkillMarketInstall{}, "idx_skill_market_installs_user"},
 		{&orm.SkillMarketInstall{}, "idx_skill_market_installs_skill"},
-		{&orm.PluginGenerationAnalysis{}, "idx_plugin_generation_analyses_draft"},
-		{&orm.PluginRepairRun{}, "idx_plugin_repair_runs_draft"},
+		{&orm.WorkflowGenerationAnalysis{}, "idx_plugin_generation_analyses_draft"},
+		{&orm.WorkflowRepairRun{}, "idx_plugin_repair_runs_draft"},
 	} {
 		if !db.Migrator().HasIndex(check.model, check.index) {
 			t.Fatalf("SQLite migration is missing index %s", check.index)

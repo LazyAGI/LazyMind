@@ -6,7 +6,7 @@ from lazymind.chat.engine.tools.infra.github_skill_installer import (
     GitHubSkillInstaller,
     GitHubSkillSource,
 )
-from lazymind.common.skill_document import require_valid_skill_document
+from lazymind.common.skill.document import require_valid_skill_document
 
 
 class _FixtureInstaller(GitHubSkillInstaller):

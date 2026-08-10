@@ -1,0 +1,15 @@
+version: workflow.v1
+profile: lazymind
+workflow_tools: [workflow_connection_status, list_workflows, get_workflow, list_workflow_inputs, get_workflow_state, get_ready_steps, advance_step, advance_step_and_hand_off, resume_workflow, list_artifacts, read_artifact, patch_artifact, list_skills, get_skill_conversion_context, create_workflow_draft, list_workflow_drafts, select_workflow_draft, get_workflow_draft, update_workflow_draft_file, validate_workflow_draft, get_workflow_diagnostics, publish_workflow, list_workflow_versions]
+advance_tools: [advance_step, advance_step_and_hand_off]
+parallel_ready_steps: true
+approval: ask_user
+handoff: true
+handoff_requires_durable_supervisor: true
+driver: true
+stop_tool: true
+synthetic_turn: true
+shadow_authority: shared
+write_tools: true
+executor: lazymind
+advance_mode: profile_policy

@@ -1,0 +1,80 @@
+schema_version: 2
+document:
+  identity:
+    preferred_name: null
+    aliases: []
+  locale:
+    languages: []
+    residence: null
+  professional:
+    occupations: []
+    organizations: []
+    industries: []
+    expertise_domains: []
+presentation:
+  fallbacks:
+    title:
+      zh-CN: 用户
+      en-US: User
+    subtitle:
+      zh-CN: 稳定用户画像
+      en-US: Stable user profile
+    description:
+      zh-CN: 尚未配置地区或语言
+      en-US: Locale and language not configured
+  sections:
+    - path: identity
+      labels:
+        zh-CN: 身份
+        en-US: Identity
+      fields:
+        - path: identity.preferred_name
+          labels:
+            zh-CN: 偏好称呼
+            en-US: Preferred name
+          summary_role: title
+        - path: identity.aliases
+          labels:
+            zh-CN: 别名
+            en-US: Aliases
+          summary_role: tag
+    - path: locale
+      labels:
+        zh-CN: 地区与语言
+        en-US: Locale
+      fields:
+        - path: locale.languages
+          labels:
+            zh-CN: 常用语言
+            en-US: Languages
+          summary_role: description
+        - path: locale.residence
+          labels:
+            zh-CN: 居住地
+            en-US: Residence
+          summary_role: description
+    - path: professional
+      labels:
+        zh-CN: 职业信息
+        en-US: Professional
+      fields:
+        - path: professional.occupations
+          labels:
+            zh-CN: 职业
+            en-US: Occupations
+          summary_role: subtitle
+        - path: professional.organizations
+          labels:
+            zh-CN: 组织
+            en-US: Organizations
+          summary_role: tag
+        - path: professional.industries
+          labels:
+            zh-CN: 行业
+            en-US: Industries
+          summary_role: subtitle
+        - path: professional.expertise_domains
+          labels:
+            zh-CN: 专业领域
+            en-US: Expertise domains
+          summary_role: tag

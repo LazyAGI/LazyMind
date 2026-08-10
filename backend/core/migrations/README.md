@@ -6,13 +6,16 @@ migrations/
 │   ├── v0_1/
 │   │   ├── 20260321131500_init.up.sql
 │   │   └── 20260321131500_init.down.sql
-│   └── v0_2/
-│       ├── 20260723183515_squash_post_init.up.sql
-│       └── 20260723183515_squash_post_init.down.sql
+│   ├── v0_2/
+│   │   ├── 20260723183515_squash_post_init.up.sql
+│   │   └── 20260723183515_squash_post_init.down.sql
+│   └── v0_3/
+│       ├── 20260805000000_workflow_runtime_release.up.sql
+│       └── 20260805000000_workflow_runtime_release.down.sql
 └── dev_mode/
-    └── v0_2/
-        ├── 20260506120000_seed_default_model_catalog.up.sql
-        ├── 20260703130000_create_plugin_step_intents.up.sql
+    └── v0_3/
+        ├── 20260803120000_expand_workflow_host_refs.up.sql
+        ├── 20260803150000_create_workflow_facade_tables.up.sql
         └── ...
 ```
 
@@ -99,7 +102,7 @@ in the same change.
 Create a new dev migration with:
 
 ```sh
-go run ./cmd/dbmigrate create -name create_users -version v0_2
+go run ./cmd/dbmigrate create -name create_users -version v0_3
 ```
 
 ## Required verification
@@ -138,8 +141,8 @@ ALTER TABLE items ADD COLUMN payload text;
 A file containing dialect directives must contain a matching block for every
 supported database on which it will run. The same rule applies to its down file.
 CI exercises SQLite from an empty database, upgrades a legacy database while
-preserving and transforming data, compares the v0.1→v0.2 aggregate path with the
-v0.1→all-v0.2-dev path, checks every ORM table and column, migrates legacy
+preserving and transforming data, compares the aggregate path through v0.3 with the
+matching development-migration path, checks every ORM table and column, migrates legacy
 plaintext credentials, and repeats upgrades for idempotency. With
 `MIGRATION_TEST_POSTGRES_DSN` set, CI also builds and compares the PostgreSQL
 aggregate and dev paths.

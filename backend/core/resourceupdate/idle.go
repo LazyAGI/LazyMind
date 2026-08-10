@@ -14,7 +14,6 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/evolution"
 )
 
 const (
@@ -27,9 +26,9 @@ const (
 )
 
 type ConversationIdleRecord struct {
-	SessionID      string
+	ConversationID string
 	UserID         string
-	LastMessageID  string
+	LastHistoryID  string
 	LastActivityAt time.Time
 	UserContent    string
 	AssistantText  string
@@ -166,23 +165,23 @@ func (r *IdleRecorder) RecordConversationMessage(ctx context.Context, record Con
 	if r.store == nil {
 		return errors.New("idle recorder state store is nil")
 	}
-	record.SessionID = strings.TrimSpace(record.SessionID)
+	record.ConversationID = strings.TrimSpace(record.ConversationID)
 	record.UserID = strings.TrimSpace(record.UserID)
-	record.LastMessageID = strings.TrimSpace(record.LastMessageID)
-	if record.SessionID == "" || record.UserID == "" || record.LastMessageID == "" {
-		return errors.New("session_id, user_id, and last_message_id are required")
+	record.LastHistoryID = strings.TrimSpace(record.LastHistoryID)
+	if record.ConversationID == "" || record.UserID == "" || record.LastHistoryID == "" {
+		return errors.New("conversation_id, user_id, and last_history_id are required")
 	}
 	now := r.clock().UTC()
 	lastActivityAt := record.LastActivityAt.UTC()
 	if lastActivityAt.IsZero() {
 		lastActivityAt = now
 	}
-	eventID := idleEventID(record.SessionID, record.LastMessageID)
+	eventID := idleEventID(record.ConversationID, record.LastHistoryID)
 	dueAt := lastActivityAt.Add(r.cfg.ConversationIdleSeconds)
 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&orm.ConversationIdleEvent{}).
-			Where("session_id = ? AND status = ? AND event_id <> ?", record.SessionID, orm.ConversationIdleEventStatusWaiting, eventID).
+			Where("session_id = ? AND status = ? AND event_id <> ?", record.ConversationID, orm.ConversationIdleEventStatusWaiting, eventID).
 			Updates(map[string]any{
 				"status":      orm.ConversationIdleEventStatusSkipped,
 				"skip_reason": conversationIdleSkipSuperseded,
@@ -193,9 +192,9 @@ func (r *IdleRecorder) RecordConversationMessage(ctx context.Context, record Con
 		event := orm.ConversationIdleEvent{
 			ID:             common.GenerateID(),
 			EventID:        eventID,
-			SessionID:      record.SessionID,
+			ConversationID: record.ConversationID,
 			UserID:         record.UserID,
-			LastMessageID:  record.LastMessageID,
+			LastHistoryID:  record.LastHistoryID,
 			LastActivityAt: lastActivityAt,
 			DueAt:          dueAt,
 			Status:         orm.ConversationIdleEventStatusWaiting,
@@ -212,17 +211,17 @@ func (r *IdleRecorder) RecordConversationMessage(ctx context.Context, record Con
 		{Role: "user", Content: record.UserContent},
 		{Role: "assistant", Content: record.AssistantText},
 	}
-	if err := r.store.SetTTLKey(ctx, conversationIdleTTLKey(record.SessionID), eventID, r.cfg.ConversationIdleSeconds); err != nil {
+	if err := r.store.SetTTLKey(ctx, conversationIdleTTLKey(record.ConversationID), eventID, r.cfg.ConversationIdleSeconds); err != nil {
 		return err
 	}
-	if err := r.store.AppendHistory(ctx, conversationIdleHistoryKey(record.SessionID), messages, r.cfg.ConversationIdleHistoryMaxMessages, r.cfg.ConversationIdleHistoryTTL); err != nil {
+	if err := r.store.AppendHistory(ctx, conversationIdleHistoryKey(record.ConversationID), messages, r.cfg.ConversationIdleHistoryMaxMessages, r.cfg.ConversationIdleHistoryTTL); err != nil {
 		return err
 	}
 	resourceUpdateInfo(logEventIdleEventRecorded).
 		Str("event_id", eventID).
-		Str("session_id", record.SessionID).
+		Str("conversation_id", record.ConversationID).
 		Str("user_id", record.UserID).
-		Str("last_message_id", record.LastMessageID).
+		Str("last_history_id", record.LastHistoryID).
 		Time("due_at", dueAt).
 		Msg(logEventIdleEventRecorded)
 	return nil
@@ -254,17 +253,17 @@ func newIdleProcessorWithStore(db *gorm.DB, store idleStateStore, cfg Config, wo
 	}
 }
 
-func (p *IdleProcessor) ProcessLatestWaitingSession(ctx context.Context, sessionID string) error {
+func (p *IdleProcessor) ProcessLatestWaitingConversation(ctx context.Context, conversationID string) error {
 	if p == nil || p.db == nil {
 		return errors.New("idle processor db is nil")
 	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
 		return nil
 	}
 	var event orm.ConversationIdleEvent
 	err := p.db.WithContext(ctx).
-		Where("session_id = ? AND status = ?", sessionID, orm.ConversationIdleEventStatusWaiting).
+		Where("session_id = ? AND status = ?", conversationID, orm.ConversationIdleEventStatusWaiting).
 		Order("due_at DESC, created_at DESC").
 		Take(&event).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -344,7 +343,7 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 		return nil
 	}
 	now := p.clock().UTC()
-	cleanupSessionID := ""
+	cleanupConversationID := ""
 	err = p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var event orm.ConversationIdleEvent
 		if err := withUpdateLock(tx).Where("event_id = ?", eventID).Take(&event).Error; err != nil {
@@ -360,7 +359,7 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 		if event.Status != orm.ConversationIdleEventStatusWaiting {
 			resourceUpdateInfo(logEventIdleEventSkipped).
 				Str("event_id", event.EventID).
-				Str("session_id", event.SessionID).
+				Str("conversation_id", event.ConversationID).
 				Str("user_id", event.UserID).
 				Str("status", event.Status).
 				Str("reason", "event_not_waiting").
@@ -370,7 +369,7 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 		if now.Before(event.DueAt) {
 			resourceUpdateInfo(logEventIdleEventSkipped).
 				Str("event_id", event.EventID).
-				Str("session_id", event.SessionID).
+				Str("conversation_id", event.ConversationID).
 				Str("user_id", event.UserID).
 				Time("due_at", event.DueAt).
 				Str("reason", "event_not_due").
@@ -384,88 +383,70 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 			return err
 		}
 
-		history, err := p.store.ReadHistory(ctx, conversationIdleHistoryKey(event.SessionID))
+		history, err := p.store.ReadHistory(ctx, conversationIdleHistoryKey(event.ConversationID))
 		if err != nil {
-			cleanupSessionID = event.SessionID
+			cleanupConversationID = event.ConversationID
 			return p.markEventFailed(tx, event.ID, now, "read_history_failed", err.Error())
 		}
 		if !historyHasNonEmptyUserMessage(history) {
-			cleanupSessionID = event.SessionID
+			cleanupConversationID = event.ConversationID
 			return p.markEventSkipped(tx, event.ID, now, conversationIdleSkipNoUserMessage)
 		}
 		historyJSON, err := json.Marshal(history)
 		if err != nil {
-			cleanupSessionID = event.SessionID
+			cleanupConversationID = event.ConversationID
 			return p.markEventFailed(tx, event.ID, now, "marshal_history_failed", err.Error())
 		}
 
-		memory, err := evolution.EnsurePersonalResourceContent(ctx, tx, event.UserID, orm.ResourceUpdateResourceTypeMemory)
+		memoryTaskID, err := createIdleGenerateTask(ctx, tx, event, historyJSON, now)
 		if err != nil {
-			cleanupSessionID = event.SessionID
-			return p.markEventFailed(tx, event.ID, now, "load_memory_failed", err.Error())
-		}
-		preference, err := evolution.EnsurePersonalResourceContent(ctx, tx, event.UserID, orm.ResourceUpdateResourceTypeUserPreference)
-		if err != nil {
-			cleanupSessionID = event.SessionID
-			return p.markEventFailed(tx, event.ID, now, "load_user_preference_failed", err.Error())
-		}
-
-		memoryContent, err := memoryReviewContentWithPendingDraft(ctx, tx, event.UserID, orm.ResourceUpdateResourceTypeMemory, memory.Content)
-		if err != nil {
-			cleanupSessionID = event.SessionID
-			return p.markEventFailed(tx, event.ID, now, "load_pending_memory_review_failed", err.Error())
-		}
-		userContent, err := memoryReviewContentWithPendingDraft(ctx, tx, event.UserID, orm.ResourceUpdateResourceTypeUserPreference, preference.Content)
-		if err != nil {
-			cleanupSessionID = event.SessionID
-			return p.markEventFailed(tx, event.ID, now, "load_pending_user_preference_review_failed", err.Error())
-		}
-		memoryTaskID, err := createIdleGenerateTask(ctx, tx, event, memory.ResourceID, memoryContent, userContent, historyJSON, now)
-		if err != nil {
-			cleanupSessionID = event.SessionID
+			cleanupConversationID = event.ConversationID
 			return p.markEventFailed(tx, event.ID, now, "create_memory_task_failed", err.Error())
 		}
 		resourceUpdateInfo(logEventIdleEventTriggered).
 			Str("event_id", event.EventID).
-			Str("session_id", event.SessionID).
+			Str("conversation_id", event.ConversationID).
 			Str("user_id", event.UserID).
 			Str("memory_task_id", memoryTaskID).
-			Str("user_preference_task_id", memoryTaskID).
 			Int("history_message_count", len(history)).
 			Msg(logEventIdleEventTriggered)
 		triggeredAt := now
-		cleanupSessionID = event.SessionID
+		cleanupConversationID = event.ConversationID
 		return tx.Model(&orm.ConversationIdleEvent{}).Where("id = ?", event.ID).Updates(map[string]any{
-			"status":                  orm.ConversationIdleEventStatusTriggered,
-			"error_code":              "",
-			"error_message":           "",
-			"memory_task_id":          memoryTaskID,
-			"user_preference_task_id": memoryTaskID,
-			"triggered_at":            &triggeredAt,
-			"updated_at":              now,
+			"status":         orm.ConversationIdleEventStatusTriggered,
+			"error_code":     "",
+			"error_message":  "",
+			"memory_task_id": memoryTaskID,
+			"triggered_at":   &triggeredAt,
+			"updated_at":     now,
 		}).Error
 	})
-	if err == nil && cleanupSessionID != "" {
-		if cleanupErr := p.cleanupIdleStateKeys(ctx, cleanupSessionID, eventID); cleanupErr != nil {
+	if err == nil && cleanupConversationID != "" {
+		if cleanupErr := p.cleanupIdleStateKeys(ctx, cleanupConversationID, eventID); cleanupErr != nil {
 			resourceUpdateWarn(logEventIdleStateCleanupFailed, cleanupErr).
 				Str("event_id", eventID).
-				Str("session_id", cleanupSessionID).
+				Str("conversation_id", cleanupConversationID).
 				Msg(logEventIdleStateCleanupFailed)
 		}
 	}
 	return err
 }
 
-func (p *IdleProcessor) cleanupIdleStateKeys(ctx context.Context, sessionID, eventID string) error {
+func (p *IdleProcessor) cleanupIdleStateKeys(ctx context.Context, conversationID, eventID string) error {
 	if p == nil || p.store == nil {
 		return nil
 	}
-	sessionID = strings.TrimSpace(sessionID)
+	conversationID = strings.TrimSpace(conversationID)
 	eventID = strings.TrimSpace(eventID)
-	if sessionID == "" || eventID == "" {
+	if conversationID == "" || eventID == "" {
 		return nil
 	}
-	_, err := p.store.CleanupIdleKeys(ctx, conversationIdleTTLKey(sessionID), eventID, conversationIdleHistoryKey(sessionID))
+	_, err := p.store.CleanupIdleKeys(
+		ctx,
+		conversationIdleTTLKey(conversationID),
+		eventID,
+		conversationIdleHistoryKey(conversationID),
+	)
 	return err
 }
 
@@ -503,24 +484,12 @@ func (p *IdleProcessor) markEventFailed(tx *gorm.DB, id string, now time.Time, c
 	}).Error
 }
 
-func memoryReviewContentWithPendingDraft(ctx context.Context, db *gorm.DB, userID, target, currentContent string) (string, error) {
-	result, err := LatestPendingMemoryReviewResult(ctx, db, userID, target)
-	if err == nil {
-		return result.Content, nil
-	}
-	if errors.Is(err, errReviewNotFound) {
-		return currentContent, nil
-	}
-	return "", err
-}
-
-func createIdleGenerateTask(ctx context.Context, db *gorm.DB, event orm.ConversationIdleEvent, resourceID, memoryContent, userContent string, historyJSON json.RawMessage, now time.Time) (string, error) {
+func createIdleGenerateTask(ctx context.Context, db *gorm.DB, event orm.ConversationIdleEvent, historyJSON json.RawMessage, now time.Time) (string, error) {
 	triggerID := fmt.Sprintf("%s:%s", strings.TrimSpace(event.EventID), "memory_review")
-	request := memoryGenerateRequestJSON{
-		SessionID: strings.TrimSpace(event.SessionID),
-		History:   historyJSON,
-		Memory:    memoryContent,
-		User:      userContent,
+	request := memoryReviewRequestJSON{
+		ConversationID:             strings.TrimSpace(event.ConversationID),
+		ConversationLastActiveAtMS: event.LastActivityAt.UnixMilli(),
+		History:                    historyJSON,
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -531,7 +500,7 @@ func createIdleGenerateTask(ctx context.Context, db *gorm.DB, event orm.Conversa
 		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
 		ResourceType: orm.ResourceUpdateResourceTypeMemory,
 		UserID:       strings.TrimSpace(event.UserID),
-		ResourceID:   strings.TrimSpace(resourceID),
+		ResourceID:   strings.TrimSpace(event.ConversationID),
 		TriggerType:  orm.ResourceUpdateTriggerTypeConversationIdle,
 		TriggerID:    triggerID,
 		Status:       orm.ResourceUpdateTaskStatusPending,
@@ -567,16 +536,16 @@ func historyHasNonEmptyUserMessage(history []idleHistoryMessage) bool {
 	return false
 }
 
-func idleEventID(sessionID, messageID string) string {
-	return strings.TrimSpace(sessionID) + ":" + strings.TrimSpace(messageID)
+func idleEventID(conversationID, historyID string) string {
+	return strings.TrimSpace(conversationID) + ":" + strings.TrimSpace(historyID)
 }
 
-func conversationIdleTTLKey(sessionID string) string {
-	return conversationIdleTTLKeyPrefix + strings.TrimSpace(sessionID)
+func conversationIdleTTLKey(conversationID string) string {
+	return conversationIdleTTLKeyPrefix + strings.TrimSpace(conversationID)
 }
 
-func conversationIdleHistoryKey(sessionID string) string {
-	return conversationIdleHistoryKeyPrefix + strings.TrimSpace(sessionID)
+func conversationIdleHistoryKey(conversationID string) string {
+	return conversationIdleHistoryKeyPrefix + strings.TrimSpace(conversationID)
 }
 
 func conversationIdleProcessingKey(eventID string) string {
@@ -587,8 +556,8 @@ func parseConversationIdleTTLKey(key string) (string, bool) {
 	if !strings.HasPrefix(key, conversationIdleTTLKeyPrefix) {
 		return "", false
 	}
-	sessionID := strings.TrimSpace(strings.TrimPrefix(key, conversationIdleTTLKeyPrefix))
-	return sessionID, sessionID != ""
+	conversationID := strings.TrimSpace(strings.TrimPrefix(key, conversationIdleTTLKeyPrefix))
+	return conversationID, conversationID != ""
 }
 
 func runIdleFallbackLoop(ctx context.Context, processor *IdleProcessor, interval time.Duration) {
@@ -613,13 +582,13 @@ func runIdleExpiredKeyNotifyLoop(ctx context.Context, store state.Store, process
 		return
 	}
 	notifier.SubscribeExpiredKeys(ctx, func(key string) error {
-		sessionID, ok := parseConversationIdleTTLKey(key)
+		conversationID, ok := parseConversationIdleTTLKey(key)
 		if !ok {
 			return nil
 		}
-		if err := processor.ProcessLatestWaitingSession(ctx, sessionID); err != nil {
+		if err := processor.ProcessLatestWaitingConversation(ctx, conversationID); err != nil {
 			resourceUpdateWarn(logEventIdleExpiredKeyNotifyFailed, err).
-				Str("session_id", sessionID).
+				Str("conversation_id", conversationID).
 				Msg(logEventIdleExpiredKeyNotifyFailed)
 			return err
 		}

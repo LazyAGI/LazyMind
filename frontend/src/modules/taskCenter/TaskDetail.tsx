@@ -20,13 +20,11 @@ type PlannedStep = { step_id: string; status: string };
 export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGraph, onDelete }: TaskDetailProps) {
   const { t } = useTranslation();
   const [plannedSteps, setPlannedSteps] = useState<PlannedStep[] | null>(null);
-  const [deleting, setDeleting] = useState(false);
   useEffect(() => {
     setPlannedSteps(null);
-    setDeleting(false);
-    if (!task?.plugin_session_id) return;
+    if (!task?.workflow_session_id) return;
     let active = true;
-    axiosInstance.get(`${BASE_URL}/api/core/plugin-sessions/${encodeURIComponent(task.plugin_session_id)}/projection`, { silentError: true } as never)
+    axiosInstance.get(`${BASE_URL}/api/core/workflow-sessions/${encodeURIComponent(task.workflow_session_id)}/projection`, { silentError: true } as never)
       .then((response) => {
         if (!active) return;
         const payload = response.data?.data ?? response.data;
@@ -43,15 +41,6 @@ export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGr
   }, [task]);
   const steps = useMemo(() => plannedSteps ?? task?.steps ?? [], [plannedSteps, task]);
   const completed = steps.filter((step) => isDone(step.status)).length;
-  const handleDelete = async () => {
-    if (!task || !onDelete || deleting) return;
-    setDeleting(true);
-    try {
-      await onDelete(task);
-    } finally {
-      setDeleting(false);
-    }
-  };
 
   return (
     <Drawer
@@ -63,7 +52,7 @@ export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGr
       closeIcon={<CloseOutlined />}
       footer={task ? (
         <Space.Compact block>
-          {onDelete ? <Popconfirm title={t('taskCenter.taskRemoveConfirmTitle')} description={t('taskCenter.taskRemoveConfirmContent')} okText={t('taskCenter.taskRemoveConfirmOk')} cancelText={t('taskCenter.taskRemoveConfirmCancel')} okButtonProps={{ danger: true, loading: deleting, disabled: deleting }} onConfirm={handleDelete}><Button danger size='large' loading={deleting} disabled={deleting} icon={<DeleteOutlined />}>{t('taskCenter.taskRemoveBtn')}</Button></Popconfirm> : null}
+          {onDelete ? <Popconfirm title='删除这条任务记录？' description='等待中或执行中的任务将同时停止。' okText='删除' cancelText='取消' okButtonProps={{ danger: true }} onConfirm={() => onDelete(task)}><Button danger size='large' icon={<DeleteOutlined />}>删除任务</Button></Popconfirm> : null}
           <Tooltip title={!task.conversation_id ? '尚未创建关联对话，依赖就绪后才可打开' : undefined}>
             <Button type='primary' block size='large' disabled={!task.conversation_id} onClick={() => task.conversation_id && onOpenConversation(task.conversation_id)}>
               {t('taskCenter.openConversation')}
@@ -80,7 +69,7 @@ export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGr
               <h2>{task.conversation_title || task.title || t('taskCenter.noTitle')}</h2>
               <span>{formatDate(task.created_at)}</span>
             </div>
-            <StatusTag status={task.status} onClick={task.plugin_session_id && onOpenGraph ? () => onOpenGraph(task.plugin_session_id!) : undefined} />
+            <StatusTag status={task.status} onClick={task.workflow_session_id && onOpenGraph ? () => onOpenGraph(task.workflow_session_id!) : undefined} />
           </div>
 
           <section className='task-detail-section task-detail-description'>
@@ -123,7 +112,7 @@ export function StatusTag({ status, onClick }: { status: string; onClick?: () =>
   const { t } = useTranslation();
   const color = isDone(status) ? 'success' : status === 'failed' ? 'error' : status === 'running' ? 'processing' : 'warning';
   const key = status === 'succeeded' ? 'Completed' : status === 'waiting_inputs' ? 'WaitingInputs' : `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
-  return <Tag className={onClick ? 'clickable-status' : undefined} color={color} onClick={(event: React.MouseEvent<HTMLElement>) => { event.stopPropagation(); onClick?.(); }}>{t(`taskCenter.status${key}`, { defaultValue: status })}</Tag>;
+  return <Tag className={onClick ? 'clickable-status' : undefined} color={color} onClick={(event) => { event.stopPropagation(); onClick?.(); }}>{t(`taskCenter.status${key}`, { defaultValue: status })}</Tag>;
 }
 
 export function formatDate(value?: string) {

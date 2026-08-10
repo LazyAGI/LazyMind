@@ -3,7 +3,6 @@ package taskcenter
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,14 +11,7 @@ import (
 
 func newTestTaskDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "tasks.db"))
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.TaskCenterTask{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	return orm.MigrateTestDB(t, &orm.TaskCenterTask{})
 }
 
 // ──────────────────────────────────────────────
@@ -33,7 +25,7 @@ func TestCreateTask_And_CancelTask(t *testing.T) {
 	task := &orm.TaskCenterTask{
 		UserID:         "user-1",
 		ConversationID: "conv-1",
-		TaskType:       "plugin_run",
+		TaskType:       "workflow_run",
 		Status:         "running",
 	}
 	if err := CreateTask(ctx, db.DB, task); err != nil {
@@ -67,9 +59,9 @@ func TestListTasks_FilterByStatus(t *testing.T) {
 	ctx := context.Background()
 
 	rows := []orm.TaskCenterTask{
-		{UserID: "user-2", ConversationID: "conv-2", TaskType: "plugin_run", Status: "running"},
-		{UserID: "user-2", ConversationID: "conv-2", TaskType: "plugin_run", Status: "succeeded"},
-		{UserID: "user-2", ConversationID: "conv-2", TaskType: "plugin_run", Status: "failed"},
+		{UserID: "user-2", ConversationID: "conv-2", TaskType: "workflow_run", Status: "running"},
+		{UserID: "user-2", ConversationID: "conv-2", TaskType: "workflow_run", Status: "succeeded"},
+		{UserID: "user-2", ConversationID: "conv-2", TaskType: "workflow_run", Status: "failed"},
 	}
 	for i := range rows {
 		if err := CreateTask(ctx, db.DB, &rows[i]); err != nil {
@@ -141,7 +133,7 @@ func TestArchiveTaskRunPreservesNonTaskConversationAndStopsLateUpdates(t *testin
 		t.Fatal(err)
 	}
 	sessionID := "session-remove"
-	task := orm.TaskCenterTask{ID: "plugin-remove", UserID: "user-1", ConversationID: conversation.ID, PluginSessionID: &sessionID, TaskType: "plugin_run", Status: "running", CreatedAt: now, UpdatedAt: now}
+	task := orm.TaskCenterTask{ID: "workflow-remove", UserID: "user-1", ConversationID: conversation.ID, WorkflowSessionID: &sessionID, TaskType: "workflow_run", Status: "running", CreatedAt: now, UpdatedAt: now}
 	if err := db.Create(&task).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +256,7 @@ func TestUpdateTaskFailurePersistsReasonAndTerminalState(t *testing.T) {
 
 func TestLoadStepsIncludesNaturalStatusContext(t *testing.T) {
 	db := newTestTaskDB(t)
-	if err := db.AutoMigrate(&orm.SubAgentTask{}, &orm.PluginSessionStep{}, &orm.SubAgentArtifact{}); err != nil {
+	if err := db.AutoMigrate(&orm.SubAgentTask{}, &orm.WorkflowSessionStep{}, &orm.SubAgentArtifact{}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
@@ -272,7 +264,7 @@ func TestLoadStepsIncludesNaturalStatusContext(t *testing.T) {
 		ID:                "sub-task-1",
 		ConversationID:    "conv-1",
 		SeqInConversation: 1,
-		AgentType:         "plugin_step",
+		AgentType:         "workflow_step",
 		Title:             "生成图片",
 		Params:            json.RawMessage(`{}`),
 		Mode:              "auto",
@@ -288,7 +280,7 @@ func TestLoadStepsIncludesNaturalStatusContext(t *testing.T) {
 	if err := db.Create(&subTask).Error; err != nil {
 		t.Fatal(err)
 	}
-	sessionStep := orm.PluginSessionStep{
+	sessionStep := orm.WorkflowSessionStep{
 		ID:        "session-step-1",
 		SessionID: "session-1",
 		StepID:    "generate_image",
@@ -303,13 +295,13 @@ func TestLoadStepsIncludesNaturalStatusContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pluginSteps := loadStepsForPluginSession(context.Background(), db.DB, sessionStep.SessionID)
-	if len(pluginSteps) != 1 {
-		t.Fatalf("expected one plugin step, got %d", len(pluginSteps))
+	workflowSteps := loadStepsForWorkflowSession(context.Background(), db.DB, sessionStep.SessionID)
+	if len(workflowSteps) != 1 {
+		t.Fatalf("expected one workflow step, got %d", len(workflowSteps))
 	}
-	got := pluginSteps[0]
+	got := workflowSteps[0]
 	if got.Title != subTask.Title || got.CurrentPhase != subTask.CurrentPhase || got.Summary != subTask.Summary {
-		t.Fatalf("plugin step lost natural status context: %#v", got)
+		t.Fatalf("workflow step lost natural status context: %#v", got)
 	}
 
 	conversationSteps := loadStepsForConversation(context.Background(), db.DB, subTask.ConversationID)

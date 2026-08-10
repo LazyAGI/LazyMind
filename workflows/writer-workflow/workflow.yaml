@@ -1,0 +1,250 @@
+id: writer-workflow
+name: AI Writer
+description: >
+  Read source documents and knowledge, create or reuse an outline, draft a
+  structured document, revise either the outline or full text, and deliver it
+  as Markdown or publish it to Feishu through one WriterDocument-based workflow.
+
+when_to_use: >
+  Always use this workflow when the user's primary request is to create a complete
+  article, report, or other long-form document, including writing from supplied
+  materials or knowledge-base evidence. Such a direct writing request matches
+  this workflow even when the user does not know or name AI Writer; do not
+  generate the requested full document directly in chat. Also use it for
+  continuing from a supplied outline, revising an existing Feishu document, or
+  publishing a generated document to Feishu. Do not require the
+  user to choose between creation and revision workflows; select the applicable
+  reachable step from the user's request and the available artifacts. When
+  triggering after clarification or a cloud-file read, request_context must
+  preserve every user-supplied source and destination URL verbatim, including
+  URLs supplied through ask_user; a document-content summary never replaces
+  its locator.
+
+tool_scripts:
+  - path: scripts/tools.py
+    functions:
+      - writer_build_writing_task
+      - writer_load_document
+      - writer_profile_resources
+      - writer_create_writing_context
+      - writer_prepare_outline
+      - writer_generate_outline
+      - writer_generate_section_instructions
+      - writer_generate_draft_blocks
+      - writer_generate_draft_blocks_markdown
+      - writer_generate_draft_document
+      - writer_generate_draft_document_markdown
+      - writer_update_writing_context
+      - writer_generate_final_document
+      - writer_export_markdown
+      - writer_build_revision_task
+      - writer_locate_revision_target
+      - writer_generate_modify_plan
+      - writer_generate_patch_set
+      - writer_apply_revision
+      - writer_create_document
+      - writer_publish_revision
+      - writer_replace_document
+      - writer_append_document
+
+steps:
+  - id: prepare
+  - id: outline
+  - id: write_document
+  - id: publish
+
+slots:
+  - id: writing_task
+    label: Writing Task
+    type: file
+    cardinality: single
+  - id: resource_profiles
+    label: Resource Profiles
+    type: file
+    cardinality: single
+  - id: writing_context
+    label: Writing Context
+    type: file
+    cardinality: single
+  - id: source_ir
+    label: Source Document
+    type: file
+    cardinality: single
+  - id: target_document
+    label: Cloud Document Target
+    type: file
+    cardinality: single
+
+  - id: outline_ir
+    label: Outline
+    type: file
+    cardinality: single
+  - id: writing_context_after_outline
+    label: Writing Context After Outline
+    type: file
+    cardinality: single
+
+  - id: outline_revision_task
+    label: Outline Revision Task
+    type: file
+    cardinality: single
+  - id: outline_locate_result
+    label: Outline Located Blocks
+    type: file
+    cardinality: single
+  - id: outline_modify_plan
+    label: Outline Modification Plan
+    type: file
+    cardinality: single
+  - id: outline_patch_set
+    label: Outline Patch Set
+    type: file
+    cardinality: single
+  - id: outline_patch_result
+    label: Outline Patch Result
+    type: file
+    cardinality: single
+  - id: outline_write_result
+    label: Outline Cloud Sync Result
+    type: file
+    cardinality: single
+
+  - id: section_instructions
+    label: Section Instructions
+    type: file
+    cardinality: single
+  - id: section_plan_ir
+    label: Section Plan Result
+    type: file
+    cardinality: single
+  - id: draft_blocks
+    label: Draft Blocks
+    type: file
+    cardinality: list
+    ordered: true
+  - id: draft_document
+    label: Full Draft
+    type: file
+    cardinality: single
+  - id: draft_document_md
+    label: Full Draft Markdown
+    type: file
+    cardinality: single
+  - id: writing_context_after_draft
+    label: Writing Context After Draft
+    type: file
+    cardinality: single
+  - id: final_document
+    label: Final Document
+    type: file
+    cardinality: single
+  - id: final_document_md
+    label: Final Document Markdown
+    type: file
+    cardinality: single
+
+  - id: document_revision_task
+    label: Document Revision Task
+    type: file
+    cardinality: single
+  - id: document_locate_result
+    label: Document Located Blocks
+    type: file
+    cardinality: single
+  - id: document_modify_plan
+    label: Document Modification Plan
+    type: file
+    cardinality: single
+  - id: document_patch_set
+    label: Document Patch Set
+    type: file
+    cardinality: single
+  - id: document_patch_result
+    label: Document Patch Result
+    type: file
+    cardinality: single
+  - id: delivered_markdown
+    label: Delivered Markdown
+    type: file
+    cardinality: single
+  - id: publish_result
+    label: Publish Result
+    type: file
+    cardinality: single
+  - id: publish_target_document
+    label: Created Publish Target
+    type: file
+    cardinality: single
+  - id: published_document
+    label: Published Document
+    type: file
+    cardinality: single
+  - id: published_link
+    label: Published Document Link
+    type: text
+    cardinality: single
+
+ui:
+  tabs:
+    - id: prepare
+      step_id: prepare
+      label: Preparation
+      layout: list
+      slots:
+        - id: source_ir
+
+    - id: outline
+      step_id: outline
+      label: Outline
+      layout: list
+      slots:
+        - id: outline_ir
+
+    - id: result
+      step_id: write_document
+      label: Final Document
+      layout: list
+      slots:
+        - id: final_document
+
+    - id: publish
+      step_id: publish
+      label: 交付文稿
+      layout: list
+      slots:
+        - id: delivered_markdown
+        - id: published_link
+        - id: published_document
+
+i18n:
+  zh-CN:
+    name: AI 写作
+    steps:
+      prepare: {label: 写作准备}
+      outline: {label: 大纲}
+      write_document: {label: 成稿}
+      publish: {label: 交付文稿}
+    tabs:
+      prepare: {label: 写作准备}
+      outline: {label: 大纲}
+      result: {label: 成稿}
+      publish: {label: 交付文稿}
+    slots:
+      writing_task: {label: 写作任务}
+      resource_profiles: {label: 资源画像}
+      writing_context: {label: 写作上下文}
+      source_ir: {label: 资源文档}
+      target_document: {label: 云文档目标}
+      outline_ir: {label: 大纲}
+      section_instructions: {label: 章节规划}
+      section_plan_ir: {label: 章节规划结果}
+      draft_blocks: {label: 章节草稿}
+      draft_document: {label: 完整初稿}
+      draft_document_md: {label: 完整初稿 Markdown}
+      final_document: {label: 最终正文}
+      final_document_md: {label: 最终正文 Markdown}
+      delivered_markdown: {label: Markdown 文稿}
+      publish_result: {label: 发布结果}
+      publish_target_document: {label: 新建发布目标}
+      published_document: {label: 已发布飞书文档}
+      published_link: {label: 飞书文档链接}

@@ -609,12 +609,12 @@ class FeishuPresentationRenderer:
         section_title = {
             'overview': '⚙️ 会话设置',
             'knowledge_base': '📚 会话知识库',
-            'plugin': '🧩 Plugin 执行策略',
+            'workflow_mode': '🧩 Workflow 执行策略',
             'subagent': '🧠 SubAgent',
             'skill': '🪄 Skill',
             'tool': '🧰 工具',
             'personalization': '🧭 个人习惯',
-            'workflow': '🧩 可用 Plugin',
+            'workflow': '🧩 可用 Workflow',
         }.get(section, '⚙️ 会话设置')
         title = (
             '✅ 会话设置已保存'
@@ -665,11 +665,11 @@ class FeishuPresentationRenderer:
             )
             if str(label)
         ]
-        plugin_enabled = bool(
-            payload.get('plugin_enabled', True)
+        workflow_enabled = bool(
+            payload.get('workflow_enabled', True)
         )
-        plugin_mode = str(
-            payload.get('plugin_mode') or 'dynamic'
+        workflow_mode = str(
+            payload.get('workflow_mode') or 'dynamic'
         )
         subagent_enabled = bool(
             payload.get('subagent_enabled', True)
@@ -682,12 +682,12 @@ class FeishuPresentationRenderer:
                 bool(item.get('enabled'))
                 for item in knowledge_bases
             )
-            plugin_status = (
+            workflow_status = (
                 '自动执行'
-                if plugin_enabled and plugin_mode == 'auto'
+                if workflow_enabled and workflow_mode == 'auto'
                 else (
                     '执行前确认'
-                    if plugin_enabled
+                    if workflow_enabled
                     else '已关闭'
                 )
             )
@@ -695,23 +695,23 @@ class FeishuPresentationRenderer:
                 '**当前配置**\n'
                 f'知识库：{enabled_kb_count} / '
                 f'{len(knowledge_bases)} 个已启用\n'
-                f'Plugin 执行策略：{plugin_status}\n'
+                f'Workflow 执行策略：{workflow_status}\n'
                 f'SubAgent：'
                 f'{"已启用" if subagent_enabled else "已关闭"}\n'
                 f'Skill：{_enabled_count(skills)} / {len(skills)} 个启用\n'
                 f'工具：{_enabled_count(tools)} / {len(tools)} 个启用\n'
-                f'可用 Plugin：{_enabled_count(workflows)} / '
+                f'可用 Workflow：{_enabled_count(workflows)} / '
                 f'{len(workflows)} 个启用\n'
                 f'个人习惯：'
                 f'{"已启用" if personalization_enabled else "已关闭"}'
             )
             actions = (
                 ('📚 知识库', 'knowledge_base'),
-                ('🧩 Plugin 策略', 'plugin'),
+                ('🧩 Workflow 策略', 'workflow_mode'),
                 ('🧠 SubAgent', 'subagent'),
                 ('🪄 Skill', 'skill'),
                 ('🧰 工具', 'tool'),
-                ('🧩 可用 Plugin', 'workflow'),
+                ('🧩 可用 Workflow', 'workflow'),
                 ('🧭 个人习惯', 'personalization'),
             )
             for start in range(0, len(actions), 2):
@@ -792,32 +792,32 @@ class FeishuPresentationRenderer:
                             for item in knowledge_bases[start:start + 2]
                         ],
                     )
-        elif section == 'plugin':
+        elif section == 'workflow_mode':
             builder.markdown(
-                '设置当前会话调用 Plugin 时的执行方式。'
+                '设置当前会话调用 Workflow 时的执行方式。'
             )
             options = (
                 (
                     '自动执行',
-                    plugin_enabled and plugin_mode == 'auto',
+                    workflow_enabled and workflow_mode == 'auto',
                     {
-                        'setting': 'plugin_mode',
+                        'setting': 'workflow_mode',
                         'mode': 'auto',
                     },
                 ),
                 (
                     '执行前确认',
-                    plugin_enabled and plugin_mode == 'dynamic',
+                    workflow_enabled and workflow_mode == 'dynamic',
                     {
-                        'setting': 'plugin_mode',
+                        'setting': 'workflow_mode',
                         'mode': 'dynamic',
                     },
                 ),
                 (
                     '关闭',
-                    not plugin_enabled,
+                    not workflow_enabled,
                     {
-                        'setting': 'plugin',
+                        'setting': 'workflow',
                         'enabled': False,
                     },
                 ),
@@ -838,7 +838,7 @@ class FeishuPresentationRenderer:
                             'action': (
                                 _conversation_setting_update_action(
                                     change,
-                                    f'Plugin {label}',
+                                    f'Workflow {label}',
                                     provider_context,
                                 )
                             ),
@@ -907,15 +907,15 @@ class FeishuPresentationRenderer:
             )
         elif section == 'workflow':
             builder.markdown(
-                '选择当前会话可使用的 Plugin；执行时仍受 '
-                'Plugin 执行策略控制。'
+                '选择当前会话可使用的 Workflow；执行时仍受 '
+                'Workflow 执行策略控制。'
             )
             _add_account_setting_buttons(
                 builder,
                 items=workflows,
                 setting='workflow',
                 id_field='workflow_ref',
-                empty_text='当前账号没有可配置 Plugin。',
+                empty_text='当前账号没有可配置 Workflow。',
                 provider_context=provider_context,
             )
         elif section == 'personalization':
@@ -1222,7 +1222,7 @@ class FeishuPresentationRenderer:
         status = str(payload.get('status') or 'pending')
         status_label, template = _task_status(status)
         agent_type = str(payload.get('agent_type') or '')
-        if agent_type.lower() == 'plugin_step':
+        if agent_type.lower() == 'workflow_step':
             return FeishuPresentationRenderer.task_workflow_card(
                 [
                     {
@@ -1762,12 +1762,12 @@ def _conversation_settings_action(
     label = {
         'overview': '会话设置',
         'knowledge_base': '会话知识库',
-        'plugin': 'Plugin 执行方式',
+        'workflow_mode': 'Workflow 执行方式',
         'subagent': 'SubAgent 设置',
         'skill': 'Skill 设置',
         'tool': '工具设置',
         'personalization': '个人习惯设置',
-        'workflow': '可用 Plugin 设置',
+        'workflow': '可用 Workflow 设置',
     }.get(section, '会话设置')
     return {
         'lazymind_action': 'command',
@@ -2169,7 +2169,7 @@ def _task_status(status: str) -> tuple[str, str]:
 
 def _task_agent_label(agent_type: str) -> str:
     return {
-        'plugin_step': '工作流',
+        'workflow_step': '工作流',
         'subagent': '智能任务',
         'task': '后台任务',
     }.get(agent_type.lower(), agent_type)
@@ -2178,8 +2178,8 @@ def _task_agent_label(agent_type: str) -> str:
 def _workflow_title(task_title: str) -> str:
     plugin = task_title.split(':', 1)[0].strip().lower()
     return {
-        'writer-plugin': 'AI Writer 写作工作流',
-        'image-plugin': 'AI 绘图工作流',
+        'writer-workflow': 'AI Writer 写作工作流',
+        'image-workflow': 'AI 绘图工作流',
         'ppt-plugin': 'AI PPT 工作流',
     }.get(
         plugin,

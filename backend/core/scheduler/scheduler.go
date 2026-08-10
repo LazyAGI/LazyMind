@@ -423,22 +423,22 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 }
 
 // createTaskConversation creates a new conversation flagged as is_task_conv=true.
-// Plugin and subagent are explicitly enabled so scheduled tasks always run regardless
+// Workflow and subagent are explicitly enabled so scheduled tasks always run regardless
 // of the user's global chat settings.
 // Returns the new conversation ID, or "" on failure.
 func createTaskConversation(ctx context.Context, db *gorm.DB, userID, promptTemplate string) string {
 	displayName := truncateRunes(promptTemplate, 40, "...")
 	now := time.Now().UTC()
-	enablePlugin := true
-	pluginMode := "auto"
+	enableWorkflow := true
+	workflowMode := "auto"
 	enableSubagent := true
 	conv := orm.Conversation{
 		ID:             common.GeneratePrefixedID("conv_", 36),
 		DisplayName:    displayName,
 		ChannelID:      "default",
 		IsTaskConv:     true,
-		EnablePlugin:   &enablePlugin,
-		PluginMode:     &pluginMode,
+		EnableWorkflow: &enableWorkflow,
+		WorkflowMode:   &workflowMode,
 		EnableSubagent: &enableSubagent,
 		BaseModel: orm.BaseModel{
 			CreateUserID: userID,

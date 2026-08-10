@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from asyncio import CancelledError
 from unittest.mock import MagicMock
+
+import pytest
 
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
@@ -9,6 +13,7 @@ from lazymind.chat.engine.agent_runtime import (
     AgentRole,
     AgentRunPlan,
     PromptBuilder,
+    make_cancel_stop_condition,
 )
 from lazymind.chat.engine.agent_runtime import executor as executor_mod
 
@@ -44,6 +49,37 @@ def test_executor_creates_agent_with_shared_defaults(monkeypatch) -> None:
     agent.set_stop_tools.assert_called_once_with(['stop'])
 
 
+def test_executor_passes_cancel_condition_to_chat_agent(monkeypatch) -> None:
+    agent = MagicMock()
+    constructor = MagicMock(return_value=agent)
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+    stop_condition = make_cancel_stop_condition()
+
+    AgentExecutor().create_agent('llm', _plan(extra_stop_condition=stop_condition))
+
+    assert constructor.call_args.kwargs['extra_stop_condition'] is stop_condition
+
+
+def test_tool_guard_checks_cancellation_before_dispatch(monkeypatch) -> None:
+    manager = MagicMock(return_value=[{'ok': True}])
+    cancel_check = MagicMock(side_effect=CancelledError('stopped by user'))
+    guard = executor_mod.ToolCallGuard(manager, cancel_check=cancel_check)
+
+    with pytest.raises(CancelledError, match='stopped by user'):
+        guard([{'function': {'name': 'prepare_workflow', 'arguments': '{}'}}])
+
+    manager.assert_not_called()
+
+
+def test_cancel_condition_stops_the_sid_scoped_agent(monkeypatch) -> None:
+    queue = MagicMock()
+    queue.dequeue.return_value = [json.dumps({'tag': 'cancel'})]
+    monkeypatch.setattr('lazyllm.common.queue.FileSystemQueue', lambda **_kwargs: queue)
+
+    with pytest.raises(CancelledError, match='stopped by user'):
+        make_cancel_stop_condition()(None)
+
+
 def test_executor_does_not_pause_subagent_on_round_limit(monkeypatch) -> None:
     agent = MagicMock()
     constructor = MagicMock(return_value=agent)
@@ -54,6 +90,17 @@ def test_executor_does_not_pause_subagent_on_round_limit(monkeypatch) -> None:
     AgentExecutor().create_agent('llm', plan)
 
     assert constructor.call_args.kwargs['on_max_retries'] is None
+
+
+def test_executor_enables_builtin_tools_in_trusted_local_mode(monkeypatch) -> None:
+    agent = MagicMock()
+    constructor = MagicMock(return_value=agent)
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+
+    with executor_mod._cfg.temp('trusted_local_mode', True):
+        AgentExecutor().create_agent('llm', _plan())
+
+    assert constructor.call_args.kwargs['enable_builtin_tools'] is True
 
 
 def test_executor_auto_expands_after_plugin_or_subagent_tool(monkeypatch) -> None:

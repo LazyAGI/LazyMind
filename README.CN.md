@@ -14,7 +14,7 @@ LazyMind 是面向知识密集型工作的 **AI Skill Runtime**。它在同一�
 
 你不必反复上传资料、调 Prompt 或全程盯着 Agent：选择一次知识与工作流，LazyMind 会继续规划、执行、展示中间结果，并把经过确认的反馈带到下一次任务中。既可以通过 **Desktop Mode** 在本机使用，也可以部署为团队共享的企业服务。
 
-**[快速开始](#快速开始)** · **[产品架构](docs/architecture.md)** · **[构建工作流](docs/plugin-format.md)** · **[桌面模式](desktop/README.md)**
+**[快速开始](#快速开始)** · **[产品架构](docs/architecture.md)** · **[构建工作流](docs/workflow-format.md)** · **[桌面模式](desktop/README.md)**
 
 ---
 
@@ -53,7 +53,7 @@ flowchart LR
 
 ### 1. 交付结果，而不只是回复消息
 
-选择知识与 Skill 后，LazyMind 会从资料整理继续推进到规划、生成、审阅与交付。Plugin 用状态机定义步骤、工具、输入输出和流转条件，Artifact 则保留可编辑结果与版本历史。
+选择知识与 Skill 后，LazyMind 会从资料整理继续推进到规划、生成、审阅与交付。Workflow 用状态机定义步骤、工具、输入输出和流转条件，Artifact 则保留可编辑结果与版本历史。
 
 长任务的每一步都保持可见；用户可以在关键节点审批、直接修改 Artifact，或者从失败步骤重新执行，而不必推倒重来。
 
@@ -89,7 +89,7 @@ flowchart LR
 
 ### 3. 把专家经验封装成可复用工作流
 
-调研方法、写作流程与行业标准可以作为 Skill 管理，并转换为可执行 Plugin。团队可以诊断、修复、发布、版本化和回滚，而不必反复从 Prompt 与脚本重新搭建。开发方式见[插件格式规范](docs/plugin-format.md)。
+调研方法、写作流程与行业标准可以作为 Skill 管理，并转换为可执行 Workflow。团队可以诊断、修复、发布、版本化和回滚，而不必反复从 Prompt 与脚本重新搭建。开发方式见[插件格式规范](docs/workflow-format.md)。
 
 <table>
   <tr>
@@ -208,8 +208,8 @@ Docker/Colima 配置见 [Colima 配置说明](docs/quick_start.CN.md#macos使用
 |------|----------|
 | 知识库 | 多数据源、OCR、向量化、混合检索、重排、同步管理 |
 | Agent | RAG 对话、工具调用、子任务、Artifact、任务中心 |
-| Plugin | 状态机、动态路由、自动验收、重试/回退、可视化执行、版本化产物 |
-| Skill | 安装、组织、审核、版本、回滚、Skill → Plugin |
+| Workflow | 状态机、动态路由、自动验收、重试/回退、可视化执行、版本化产物 |
+| Skill | 安装、组织、审核、版本、回滚、Skill → Workflow |
 | 自进化 | 评测集、评测、badcase 分析、修复、部署、A/B Test |
 | 本地体验 | macOS/Windows 本地运行时、Desktop 构建、平台规范数据目录 |
 | 企业能力 | Kong、JWT/RBAC、ACL、OAuth 数据源、可选外部存储 |
@@ -220,7 +220,7 @@ Docker/Colima 配置见 [Colima 配置说明](docs/quick_start.CN.md#macos使用
 
 ## Roadmap
 
-LazyMind 接下来的重点不是继续堆叠孤立功能，而是让知识库、Skill、Plugin 和自进化能力在真实任务中形成完整闭环。
+LazyMind 接下来的重点不是继续堆叠孤立功能，而是让知识库、Skill、Workflow 和自进化能力在真实任务中形成完整闭环。
 
 ### 近期：打磨可直接体验的旗舰场景
 
@@ -232,7 +232,7 @@ LazyMind 接下来的重点不是继续堆叠孤立功能，而是让知识库�
 
 ### 中期：建设知识与能力分发网络
 
-- **知识库与 Skill/Plugin 广场**：支持精选内容发现、一键安装、版本更新、依赖检查和可信来源展示。
+- **知识库与 Skill/Workflow 广场**：支持精选内容发现、一键安装、版本更新、依赖检查和可信来源展示。
 - **可复用场景模板**：将流程、知识包、审阅规则和输出格式组合成可安装的行业方案。
 - **外部 Agent 接入**：通过 MCP、CLI、OpenAPI 和 SDK，让 Codex、Cursor、Hermes Agent、OpenClaw 等使用 LazyMind 的知识与工作流能力。
 - **更多数据连接器**：围绕周报、调研和内容生产，逐步接入协作、邮件、日历、代码和任务系统。
@@ -241,7 +241,7 @@ LazyMind 接下来的重点不是继续堆叠孤立功能，而是让知识库�
 ### 长期：从执行工作流走向自进化工作系统
 
 - 根据用户修改、步骤重跑、知识引用和最终采纳结果，自动发现流程与知识缺口。
-- 对检索策略、Prompt、模型、工具和 Plugin 版本进行持续评测与 A/B Test。
+- 对检索策略、Prompt、模型、工具和 Workflow 版本进行持续评测与 A/B Test。
 - 将成功经验沉淀为可复用的 Skill、模板和组织记忆，并保留完整来源与版本记录。
 - 通过“横向任务模板 + 纵向行业知识包”覆盖更多行业，而不是为每个行业重复开发产品。
 
@@ -256,11 +256,11 @@ LazyMind/
 ├── frontend/                   # Web UI 与桌面前端
 ├── backend/
 │   ├── auth-service/           # 鉴权、OAuth 与用户服务
-│   ├── core/                   # 数据、任务、检索、Plugin 与 ACL
+│   ├── core/                   # 数据、任务、检索、Workflow 与 ACL
 │   └── scan-control-plane/     # 数据源扫描与同步控制
 ├── algorithm/
 │   └── lazymind/               # 对话、解析、检索与 Agent 运行时
-├── plugins/                    # 内置 Plugin
+├── workflows/                    # 内置 Workflow
 ├── skills/                     # 内置及精选 Skill
 ├── evo/                        # 自进化与评测闭环
 ├── desktop/                    # Electron 桌面应用与打包

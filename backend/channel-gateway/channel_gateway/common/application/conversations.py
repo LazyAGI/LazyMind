@@ -82,7 +82,7 @@ class ConversationActions:
         conversation_id_override: str | None = None,
         ask_answers_structured: dict[str, Any] | None = None,
         mentions: Sequence[dict[str, str]] = (),
-        plugin_mode: str | None = None,
+        workflow_mode: str | None = None,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> ConversationResult:
         conversation_id = (
@@ -187,7 +187,7 @@ class ConversationActions:
             options.features = features
             options.ask_answers_structured = ask_answers_structured
             options.mentions.extend(dict(item) for item in mentions)
-            options.plugin_mode = plugin_mode
+            options.workflow_mode = workflow_mode
             turn = self._client.chat(
                 owner_user_id=owner_user_id,
                 text=message,
@@ -849,7 +849,7 @@ class ConversationActions:
         if not enabled:
             return (
                 '当前渠道只执行基础聊天，不会推进原有 '
-                'Plugin、Task、SubAgent 或 Ask 流程。'
+                'Workflow、Task、SubAgent 或 Ask 流程。'
             )
         return (
             f'当前渠道已开放：{"、".join(enabled)}。'

@@ -2,9 +2,37 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import get_args, get_type_hints
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_save_chat_artifact_declares_exact_content_type_choices():
+    from lazymind.chat.engine.tools.chat_artifact import save_chat_artifact
+
+    annotation = get_type_hints(save_chat_artifact)['content_type']
+
+    assert get_args(annotation) == ('text', 'json', 'file')
+
+
+def test_postponed_tool_annotations_are_resolved_before_registration():
+    namespace = {}
+    exec(
+        'from __future__ import annotations\n'
+        'from typing import Optional\n'
+        'def tool(value: Optional[str] = None) -> Optional[str]:\n'
+        '    """A test tool."""\n'
+        '    return value\n',
+        namespace,
+    )
+    tool = namespace['tool']
+    assert isinstance(tool.__annotations__['value'], str)
+
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+    ensure_lazyllm_tool_docs([tool])
+
+    assert not isinstance(tool.__annotations__['value'], str)
 
 
 def test_googledrive_docs_are_loaded_on_demand_without_loading_all_docs():

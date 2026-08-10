@@ -450,7 +450,6 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   const [batchGroupName, setBatchGroupName] = useState('');
   const [batchTasks, setBatchTasks] = useState<BatchScheduleDraft[]>([]);
   const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null);
-  const [scheduleNameInput, setScheduleNameInput] = useState('');
   // Filter state
   const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled'>('enabled');
   const [keyword, setKeyword] = useState('');
@@ -578,6 +577,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   const handleOpenEdit = (record: Schedule) => {
     setEditTarget(record);
     form.setFieldsValue({
+      name: record.name || '',
       prompt_template: record.prompt_template,
       remark: record.remark,
       cron_expr: record.cron_expr,
@@ -585,7 +585,6 @@ export default function ScheduleList({ active }: ScheduleListProps) {
       group_id: record.group_id,
       source_schedule_ids: record.dependencies?.map((dependency) => dependency.source_schedule_id) ?? [],
     });
-    setScheduleNameInput(record.name || '');
     setFileList([]);
     setUploadedPaths(record.file_ids ?? []);
     setModalKey((k) => k + 1);
@@ -601,7 +600,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         .map((schedule) => schedule.id);
       const sourceScheduleIDs = Array.from(new Set<string>([...(values.source_schedule_ids ?? []), ...mentionedSourceIDs]));
       const payload = {
-        name: scheduleNameInput.trim(),
+        name: values.name?.trim() || '',
         remark: values.remark ?? '',
         cron_expr: values.cron_expr || buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)),
         prompt_template: values.prompt_template,
@@ -627,7 +626,6 @@ export default function ScheduleList({ active }: ScheduleListProps) {
       setModalOpen(false);
       setEditTarget(null);
       form.resetFields();
-      setScheduleNameInput('');
       setFileList([]);
       setUploadedPaths([]);
       void fetchSchedules();
@@ -644,7 +642,6 @@ export default function ScheduleList({ active }: ScheduleListProps) {
     form.setFieldValue('cron_expr', buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)));
     setFileList([]);
     setUploadedPaths([]);
-    setScheduleNameInput('');
     setCreationType('task');
     setModalKey((k) => k + 1);
     setModalOpen(true);
@@ -825,7 +822,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           ) : <Empty className='schedule-empty' description={t('taskCenter.empty')} />}
         </section>
       </Spin>
-      <Drawer className='schedule-detail-drawer' width={460} open={Boolean(selectedSchedule)} onClose={() => setSelectedSchedule(null)} title={selectedSchedule?.name || t('taskCenter.scheduleName')} footer={selectedSchedule ? <Button type='primary' block size='large' onClick={() => handleOpenEdit(selectedSchedule)}>{t('taskCenter.scheduleEdit')}</Button> : null}>
+      <Drawer className='schedule-detail-drawer' width={460} open={Boolean(selectedSchedule)} onClose={() => setSelectedSchedule(null)} title={selectedSchedule?.name || t('taskCenter.scheduleName')} footer={selectedSchedule ? <div className='schedule-detail-actions'><Button danger size='large' disabled={Boolean(deletingScheduleId)} onClick={() => setDeleteTarget(selectedSchedule)}>{t('taskCenter.scheduleDelete')}</Button><Button type='primary' size='large' onClick={() => handleOpenEdit(selectedSchedule)}>{t('taskCenter.scheduleEdit')}</Button></div> : null}>
         {selectedSchedule && <div className='schedule-detail-content'>
           <section><h3>{t('taskCenter.scheduleDescription')}</h3><p>{selectedSchedule.prompt_template}</p></section>
           <section><h3>{t('taskCenter.scheduleTriggerPeriod')}</h3><p>{describeCron(selectedSchedule.cron_expr, t)} · {selectedSchedule.timezone}</p></section>
@@ -859,23 +856,14 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         <p>{t('taskCenter.groupDeleteConfirmContent')}</p>
       </Modal>
       <Modal
-        title={editTarget ? (
-          <Input
-            value={scheduleNameInput}
-            onChange={(e) => setScheduleNameInput(e.target.value)}
-            placeholder={editTarget ? t('taskCenter.scheduleNameInputLabel') : t('taskCenter.scheduleNewTitle')}
-            variant='borderless'
-            style={{ fontWeight: 600, fontSize: 16, padding: 0, width: '100%' }}
-            maxLength={100}
-          />
-        ) : '新建任务'}
+        title={editTarget?.name || t('taskCenter.scheduleNewTitle')}
         open={modalOpen}
+        zIndex={1100}
         onOk={() => void (creationType === 'group' ? handleBatchCreate() : handleCreate())}
         onCancel={() => {
           setModalOpen(false);
           setEditTarget(null);
           form.resetFields();
-          setScheduleNameInput('');
           setFileList([]);
           setUploadedPaths([]);
         }}
@@ -889,8 +877,10 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           <button type='button' className={creationType === 'group' ? 'is-selected' : ''} onClick={openBatchModal}><span><AppstoreOutlined /></span><div><strong>任务组</strong><small>创建任务组，并可同时添加任务</small></div>{creationType === 'group' ? <CheckCircleFilled /> : null}</button>
         </div> : null}
         {creationType === 'task' || editTarget ? <>
-        {!editTarget ? <CreateFieldRow label='任务名称' required><Input value={scheduleNameInput} onChange={(event) => setScheduleNameInput(event.target.value)} placeholder='请输入任务名称' maxLength={100} /></CreateFieldRow> : null}
         <Form key={modalKey} form={form} layout='horizontal' labelCol={{ flex: '145px' }} wrapperCol={{ flex: 1 }} labelAlign='left' colon={false} size='small'>
+          <Form.Item name='name' label={<FieldLabel>{t('taskCenter.scheduleNameInputLabel')}</FieldLabel>}>
+            <Input placeholder='请输入任务名称' maxLength={100} />
+          </Form.Item>
           <Form.Item name='prompt_template' label={<FieldLabel>{t('taskCenter.scheduleDescription')}</FieldLabel>} rules={[{ required: true, message: t('taskCenter.scheduleDescriptionRequired') }]}>
             <Input.TextArea rows={3} maxLength={500} showCount placeholder={t('taskCenter.scheduleDescriptionPlaceholder')} />
           </Form.Item>

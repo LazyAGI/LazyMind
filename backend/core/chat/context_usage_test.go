@@ -1,11 +1,6 @@
 package chat
 
-import (
-	"path/filepath"
-	"testing"
-
-	"lazymind/core/common/orm"
-)
+import "testing"
 
 func TestParseMaxInputTokens(t *testing.T) {
 	tests := map[string]int64{
@@ -39,26 +34,19 @@ func TestPreviewQueryReadsTextInput(t *testing.T) {
 	}
 }
 
-func TestMentionedBuiltinPluginReplacesDefaultCatalog(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "plugin-settings.db"))
-	if err != nil {
-		t.Fatalf("connect SQLite database: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.UserPluginSetting{}); err != nil {
-		t.Fatalf("migrate plugin settings: %v", err)
-	}
-	catalog := []map[string]any{{"plugin_ref": "plugin:default", "plugin_id": "default"}}
-	selected, builtins, err := mergeMentionedPlugins(
-		t.Context(), db.DB, "user-1", []string{"builtin:image-plugin"}, catalog,
+func TestMentionedBuiltinWorkflowReplacesDefaultCatalog(t *testing.T) {
+	catalog := []map[string]any{{"workflow_ref": "plugin:default", "workflow_id": "default"}}
+	selected, builtins, err := mergeMentionedWorkflows(
+		t.Context(), nil, "user-1", []string{"builtin:image-workflow"}, catalog,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(selected) != 0 {
-		t.Fatalf("selected catalog = %#v, want no default plugins", selected)
+		t.Fatalf("selected catalog = %#v, want no default workflows", selected)
 	}
-	if len(builtins) != 1 || builtins[0] != "image-plugin" {
-		t.Fatalf("builtins = %#v, want image-plugin", builtins)
+	if len(builtins) != 1 || builtins[0] != "image-workflow" {
+		t.Fatalf("builtins = %#v, want image-workflow", builtins)
 	}
 }
 

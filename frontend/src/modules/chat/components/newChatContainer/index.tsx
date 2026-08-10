@@ -106,9 +106,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       disabledReason,
       disabledDescription,
       disabledAction,
-      onPluginSettingsChange,
-      initialPluginSettings,
-      hasPluginSession,
+      onWorkflowSettingsChange,
+      initialWorkflowSettings,
+      hasWorkflowSession,
     } = props;
 
     const { clearPendingMessage: clearStorePendingMessage } =
@@ -398,9 +398,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
                 : undefined
             }
             onSkillDeposit={handleSkillDeposit}
-            onPluginSettingsChange={onPluginSettingsChange}
-            initialPluginSettings={initialPluginSettings}
-            hasPluginSession={hasPluginSession}
+            onWorkflowSettingsChange={onWorkflowSettingsChange}
+            initialWorkflowSettings={initialWorkflowSettings}
+            hasWorkflowSession={hasWorkflowSession}
           />
         </div>
         <ConversationTrail

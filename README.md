@@ -14,7 +14,7 @@ LazyMind is an **AI Skill Runtime** for knowledge-intensive work. It connects re
 
 Instead of repeatedly uploading context, tuning prompts, and supervising every agent step, you choose the knowledge and workflow once. LazyMind then plans, executes, exposes intermediate results, and carries accepted feedback into the next run. Use it locally in **Desktop Mode** or deploy it as a shared enterprise service.
 
-**[Quick start](#quick-start)** · **[Product architecture](docs/architecture.md)** · **[Build a workflow](docs/plugin-format.md)** · **[Desktop mode](desktop/README.md)**
+**[Quick start](#quick-start)** · **[Product architecture](docs/architecture.md)** · **[Build a workflow](docs/workflow-format.md)** · **[Desktop mode](desktop/README.md)**
 
 ---
 
@@ -53,7 +53,7 @@ This loop is built from three connected systems:
 
 ### 1. Deliver outcomes, not chat messages
 
-Choose knowledge and a Skill; LazyMind continues from source organization through planning, generation, review, and delivery. Plugins define steps, tools, inputs, outputs, and transitions as state machines, while artifacts preserve editable results and revision history.
+Choose knowledge and a Skill; LazyMind continues from source organization through planning, generation, review, and delivery. Workflows define steps, tools, inputs, outputs, and transitions as state machines, while artifacts preserve editable results and revision history.
 
 For long-running work, each step remains visible. Users can approve checkpoints, edit an artifact, or rerun from the failed step instead of restarting the whole task.
 
@@ -89,7 +89,7 @@ Local directories, object storage, Feishu, Notion, and other sources feed a unif
 
 ### 3. Package expert practice into reusable workflows
 
-Research methods, writing processes, and domain standards can be managed as Skills and converted into executable Plugins. Teams can diagnose, repair, publish, version, and roll them back instead of rebuilding the same setup from prompts and scripts. See the [Plugin format specification](docs/plugin-format.md).
+Research methods, writing processes, and domain standards can be managed as Skills and converted into executable Workflows. Teams can diagnose, repair, publish, version, and roll them back instead of rebuilding the same setup from prompts and scripts. See the [Workflow format specification](docs/workflow-format.md).
 
 <table>
   <tr>
@@ -208,8 +208,8 @@ See the [Colima setup guide](docs/quick_start.md#macos-use-colima-instead-of-doc
 |------|----------------------|
 | Knowledge base | Multiple sources, OCR, vectorization, hybrid retrieval, reranking, sync management |
 | Agents | RAG chat, tool calls, subtasks, artifacts, task center |
-| Plugins | State machines, dynamic routing, automatic review, retry/rewind, visual execution, versioned artifacts |
-| Skills | Installation, organization, review, revisions, rollback, Skill → Plugin |
+| Workflows | State machines, dynamic routing, automatic review, retry/rewind, visual execution, versioned artifacts |
+| Skills | Installation, organization, review, revisions, rollback, Skill → Workflow |
 | Self-evolution | Eval-set generation, evaluation, bad-case analysis, repair, deployment, A/B testing |
 | Local experience | macOS/Windows local runtime, desktop builds, platform-standard data paths |
 | Enterprise | Kong, JWT/RBAC, ACL, OAuth sources, optional external storage |
@@ -220,7 +220,7 @@ This table describes capabilities implemented in the repository today, not a fut
 
 ## Roadmap
 
-LazyMind's next phase is not about adding more isolated features. The goal is to make knowledge bases, Skills, Plugins, and self-evolution work together in complete, real-world task loops.
+LazyMind's next phase is not about adding more isolated features. The goal is to make knowledge bases, Skills, Workflows, and self-evolution work together in complete, real-world task loops.
 
 ### Near term: flagship workflows people can try immediately
 
@@ -232,7 +232,7 @@ LazyMind's next phase is not about adding more isolated features. The goal is to
 
 ### Mid term: a distribution network for knowledge and capabilities
 
-- **Knowledge and Skill/Plugin marketplace**: curated discovery, one-click installation, updates, dependency checks, and trusted-source information.
+- **Knowledge and Skill/Workflow marketplace**: curated discovery, one-click installation, updates, dependency checks, and trusted-source information.
 - **Reusable scenario packages**: combine workflows, knowledge packs, review rules, and output formats into installable industry solutions.
 - **External agent access**: expose LazyMind knowledge and workflows to Codex, Cursor, Hermes Agent, OpenClaw, and others through MCP, CLI, OpenAPI, and SDKs.
 - **More connectors**: progressively connect collaboration, email, calendar, code, and task systems for weekly reports, research, and content workflows.
@@ -241,7 +241,7 @@ LazyMind's next phase is not about adding more isolated features. The goal is to
 ### Long term: from executable workflows to a self-evolving work system
 
 - Detect workflow and knowledge gaps from user edits, reruns, citations, and final acceptance signals.
-- Continuously evaluate and A/B test retrieval strategies, prompts, models, tools, and Plugin revisions.
+- Continuously evaluate and A/B test retrieval strategies, prompts, models, tools, and Workflow revisions.
 - Turn successful execution patterns into reusable Skills, templates, and organizational memory with full provenance and version history.
 - Expand across industries through horizontal task templates plus vertical knowledge packs instead of rebuilding the product for every industry.
 
@@ -256,11 +256,11 @@ LazyMind/
 ├── frontend/                   # Web UI and desktop frontend
 ├── backend/
 │   ├── auth-service/           # Authentication, OAuth, and users
-│   ├── core/                   # Data, tasks, retrieval, Plugins, and ACL
+│   ├── core/                   # Data, tasks, retrieval, Workflows, and ACL
 │   └── scan-control-plane/     # Source scanning and synchronization
 ├── algorithm/
 │   └── lazymind/               # Chat, parsing, retrieval, and agent runtime
-├── plugins/                    # Built-in Plugins
+├── workflows/                    # Built-in Workflows
 ├── skills/                     # Built-in and curated Skills
 ├── evo/                        # Self-evolution and evaluation loop
 ├── desktop/                    # Electron desktop application and packaging

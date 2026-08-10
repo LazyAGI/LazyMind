@@ -12,6 +12,7 @@ from .models import (
     ContextUsageItem,
     ContextUsageReport,
 )
+from .cancellation import make_cancel_stop_condition
 from .prompt_builder import PromptBuilder
 from .context_estimator import (
     estimate_context_usage,
@@ -38,4 +39,5 @@ __all__ = [
     'AttachmentRef',
     'normalize_attachments',
     'render_attachment_content',
+    'make_cancel_stop_condition',
 ]
