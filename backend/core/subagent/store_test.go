@@ -168,11 +168,46 @@ func TestMarkInterrupted(t *testing.T) {
 	}
 }
 
+func TestInterruptConversationStopsOnlyActiveTasks(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	for _, input := range []CreateTaskInput{
+		{TaskID: "pending", ConversationID: "conv", AgentType: "research", Title: "pending"},
+		{TaskID: "running", ConversationID: "conv", AgentType: "research", Title: "running"},
+		{TaskID: "other", ConversationID: "other-conv", AgentType: "research", Title: "other"},
+	} {
+		if _, err := CreateTask(ctx, db.DB, input); err != nil {
+			t.Fatalf("create %s: %v", input.TaskID, err)
+		}
+	}
+	if err := UpdateStatus(ctx, db.DB, "running", StatusRunning); err != nil {
+		t.Fatalf("start running task: %v", err)
+	}
+
+	ids, err := InterruptConversation(ctx, db.DB, "conv", "stopped by user")
+	if err != nil {
+		t.Fatalf("interrupt conversation: %v", err)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("interrupted IDs: got %#v, want two", ids)
+	}
+	for _, taskID := range []string{"pending", "running"} {
+		task, _ := GetTask(ctx, db.DB, taskID)
+		if task.Status != StatusInterrupted || task.Summary != "stopped by user" {
+			t.Fatalf("task %s not interrupted: status=%q summary=%q", taskID, task.Status, task.Summary)
+		}
+	}
+	other, _ := GetTask(ctx, db.DB, "other")
+	if other.Status != StatusPending {
+		t.Fatalf("other conversation task changed: %q", other.Status)
+	}
+}
+
 func TestLateRunnerEventsDoNotReviveInterruptedTask(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	if _, err := CreateTask(ctx, db.DB, CreateTaskInput{
-		TaskID: "stopped", ConversationID: "conv", AgentType: "plugin_step", Title: "stopped",
+		TaskID: "stopped", ConversationID: "conv", AgentType: "workflow_step", Title: "stopped",
 	}); err != nil {
 		t.Fatalf("create: %v", err)
 	}

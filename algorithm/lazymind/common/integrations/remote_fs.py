@@ -96,7 +96,7 @@ class RemoteFS(LazyLLMFSBase):
         parts = [part for part in normalized.split('/') if part]
         if len(parts) >= 3 and parts[0] == 'skills':
             return '/'.join(parts[:3])
-        if len(parts) >= 3 and parts[0] == 'plugins':
+        if len(parts) >= 3 and parts[0] == 'workflows':
             return '/'.join(parts[:3])
         return normalized
 

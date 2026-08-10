@@ -29,7 +29,7 @@ import {
 export type MentionType =
   | "knowledge_base"
   | "skill"
-  | "plugin"
+  | "workflow"
   | "tool"
   | "conversation";
 
@@ -75,7 +75,7 @@ const groups: Array<{
 }> = [
   { type: "knowledge_base", shortcut: "kb", labelKey: "chat.mentionKnowledgeBase", icon: <DatabaseOutlined /> },
   { type: "skill", shortcut: "skill", labelKey: "chat.mentionSkill", icon: <BulbOutlined /> },
-  { type: "plugin", shortcut: "workflow", labelKey: "chat.mentionPlugin", icon: <AppstoreOutlined /> },
+  { type: "workflow", shortcut: "workflow", labelKey: "chat.mentionWorkflow", icon: <AppstoreOutlined /> },
   { type: "tool", shortcut: "tool", labelKey: "chat.mentionTool", icon: <ThunderboltOutlined /> },
   { type: "prompt", shortcut: "prompt", labelKey: "chat.mentionPrompt", icon: <BookOutlined /> },
   { type: "conversation", shortcut: "chat", labelKey: "chat.mentionConversation", icon: <CommentOutlined /> },
@@ -185,12 +185,12 @@ async function loadCandidates(type: CandidateType, keyword: string): Promise<Can
     const response = await listToolAssetsPage({ keyword, silentError: true });
     return response.records.map((item) => ({ id: item.id, type, name: item.name, description: item.description }));
   }
-  if (type === "plugin") {
-    const response = await axiosInstance.get(`${BASE_URL}/api/core/chat/settings/plugins`, { params: { keyword } });
-    const payload = unwrap<{ plugins?: Array<Record<string, unknown>> }>(response.data);
-    return (payload.plugins || [])
+  if (type === "workflow") {
+    const response = await axiosInstance.get(`${BASE_URL}/api/core/chat/settings/workflows`, { params: { keyword } });
+    const payload = unwrap<{ workflows?: Array<Record<string, unknown>> }>(response.data);
+    return (payload.workflows || [])
       .filter((item) => !keyword || `${item.name || ""} ${item.description || ""}`.toLowerCase().includes(keyword.toLowerCase()))
-      .map((item) => ({ id: String(item.plugin_ref || item.plugin_id || ""), type, name: String(item.name || item.plugin_id || ""), description: String(item.description || "") }));
+      .map((item) => ({ id: String(item.workflow_ref || item.workflow_id || ""), type, name: String(item.name || item.workflow_id || ""), description: String(item.description || "") }));
   }
   if (type === "prompt") {
     const response = await PromptServiceApi().listPrompts({ keyword, pageSize: 100 });
@@ -382,10 +382,10 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     const currentQuery = queryRef.current;
     if (!editor || !currentQuery) return;
     if (
-      candidate.type === "plugin" &&
-      serializeEditor(editor).mentions.some((mention) => mention.type === "plugin")
+      candidate.type === "workflow" &&
+      serializeEditor(editor).mentions.some((mention) => mention.type === "workflow")
     ) {
-      message.warning(t("chat.mentionSinglePluginOnly"));
+      message.warning(t("chat.mentionSingleWorkflowOnly"));
       return;
     }
     const selection = window.getSelection();

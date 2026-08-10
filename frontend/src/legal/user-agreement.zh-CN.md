@@ -4,7 +4,7 @@
 
 ## 第一条 请您特别阅读
 
-欢迎使用 LazyMind。LazyMind 是面向知识密集型工作的 AI Skill Runtime，可在支持的设备或团队环境中提供知识库、文档处理、检索、模型调用、Skill/Plugin、任务编排、Agent 工具调用和内容生成等能力。
+欢迎使用 LazyMind。LazyMind 是面向知识密集型工作的 AI Skill Runtime，可在支持的设备或团队环境中提供知识库、文档处理、检索、模型调用、Skill/Workflow、任务编排、Agent 工具调用和内容生成等能力。
 
 请您在安装、注册、启用或使用 LazyMind 前完整阅读本协议包。与您的权益有重大关系的内容，包括个人信息处理、第三方服务、Agent 外部动作、AI 输出局限、免责与责任限制、服务暂停终止、争议解决等，将通过加粗、弹窗、单独页面或其他显著方式提示。您有权要求运营主体解释相关条款。
 
@@ -18,7 +18,7 @@
 
 - 《LazyMind 用户协议》；
 - 《LazyMind 隐私政策》；
-- 《LazyMind AI/Agent 与 Skill/Plugin 安全使用规则》；
+- 《LazyMind AI/Agent 与 Skill/Workflow 安全使用规则》；
 - 《LazyMind 第三方服务与开源软件说明》；
 - 安装界面、功能页面、权限弹窗和特定服务另行展示的规则或特别条款。
 

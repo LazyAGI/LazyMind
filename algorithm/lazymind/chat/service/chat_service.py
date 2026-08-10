@@ -50,6 +50,7 @@ from lazymind.chat.engine.agent_runtime import (
     AgentExecutor,
     AgentRole,
     AgentRunPlan,
+    make_cancel_stop_condition,
     PromptBuilder,
     normalize_attachments,
     estimate_context_usage,
@@ -90,6 +91,14 @@ sensitive_filter = SensitiveFilter(
 # Maps conversation_id → session_id for active chat sessions.
 # Used by task-cancel endpoint to cancel ChatAgent by conversation_id.
 _active_sessions: dict[str, str] = {}
+
+
+def _unregister_active_session(conversation_id: str, session_id: str) -> None:
+    """Remove only the request that registered this exact ChatAgent session."""
+    if _active_sessions.get(conversation_id) == session_id:
+        _active_sessions.pop(conversation_id, None)
+
+
 _CITE_MESSAGE_PATTERN = re.compile(
     r'<cite_message>([\s\S]*?)</cite_message>\s*',
     re.IGNORECASE,
@@ -250,6 +259,18 @@ def check_sensitive_content(query: str) -> Optional[SensitiveMatch]:
     return sensitive_filter.evaluate(query)
 
 
+def _should_skip_sensitive_filter(query: str, workflow_context: Optional[Dict[str, Any]]) -> bool:
+    """Bypass user-input filtering only for trusted Workflow synthetic turns."""
+    if not isinstance(workflow_context, dict):
+        return False
+    if not workflow_context.get('workflow_id') or not workflow_context.get('session_id'):
+        return False
+    if workflow_context.get('synthetic_source') == 'driver':
+        return True
+    normalized = query.strip().lower()
+    return normalized.startswith('step ') and ' completed.' in normalized
+
+
 def _mcp_server_cache_key(server: Dict[str, Any]) -> str:
     encoded = json.dumps(server, ensure_ascii=False, sort_keys=True, default=str).encode()
     return hashlib.sha256(encoded).hexdigest()
@@ -308,6 +329,12 @@ def _build_subagent_chat_tools() -> list:
     ]
 
 
+def _should_register_subagent_tools(enable_subagent: Any, workflow_refs: Any) -> bool:
+    """Keep explicit Workflow execution on its bound trigger path."""
+    refs = workflow_refs if isinstance(workflow_refs, list) else []
+    return bool(enable_subagent) and not any(str(ref).strip() for ref in refs)
+
+
 def _build_chat_artifact_tools() -> list:
     """Workspace and artifact tools for the main ChatAgent."""
     from lazymind.chat.engine.tools.chat_artifact import (
@@ -344,12 +371,12 @@ def _should_register_ask_user(
     agentic_config: Dict[str, Any],
     disabled_tools: set[str] | None = None,
 ) -> bool:
-    """Respect explicit non-interactive requests and legacy auto plugin sessions."""
+    """Respect explicit non-interactive requests and legacy auto workflow sessions."""
     if 'ask_user' in (disabled_tools or set()):
         return False
     return not (
-        agentic_config.get('enable_plugin', True)
-        and agentic_config.get('plugin_mode') == 'auto'
+        agentic_config.get('enable_workflow', True)
+        and agentic_config.get('workflow_mode') == 'auto'
     )
 
 
@@ -362,11 +389,11 @@ def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
         explicit_resources['knowledge_base_ids'] = (
             selected_kb_ids if isinstance(selected_kb_ids, list) else [selected_kb_ids]
         )
-    active_plugin_ref = str(
-        (request.plugin.plugin_context or {}).get('plugin_ref') or ''
+    active_workflow_ref = str(
+        (request.workflow.workflow_context or {}).get('workflow_ref') or ''
     ).strip()
-    if active_plugin_ref and not explicit_resources['plugin_refs']:
-        explicit_resources['plugin_refs'] = [active_plugin_ref]
+    if active_workflow_ref and not explicit_resources['workflow_refs']:
+        explicit_resources['workflow_refs'] = [active_workflow_ref]
     thinking_depth = (
         request.runtime.thinking_depth
         if request.runtime.thinking_depth in ('low', 'medium', 'high', 'max') else 'medium'
@@ -411,12 +438,11 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     if not provisional.routing_review_required:
         return await _handle_chat_impl(request, task_profile_override=provisional)
 
-    from lazymind.chat.plugin.plugin_manager import is_plugin_driver_turn
     raw_query = str(request.message.query or '')
     filter_query, _ = _normalize_cite_message_query_for_agent(raw_query)
     skip_sensitive_filter = (
         request.runtime.skip_sensitive_filter
-        or is_plugin_driver_turn(request.plugin.plugin_context)
+        or _should_skip_sensitive_filter(filter_query, request.workflow.workflow_context)
         or request.runtime.context_usage_preview
         or request.runtime.context_prompt_export
     )
@@ -484,14 +510,12 @@ async def _handle_chat_impl(
     runtime = request.runtime
     personalization = request.personalization
     agent = request.agent
-    plugin = request.plugin
+    workflow = request.workflow
     explicit_resources = request.explicit_resource_bindings
-    from lazymind.chat.plugin.plugin_manager import (
-        _active_plugin_context_allowed,
+    from lazymind.chat.workflow.workflow_manager import (
         _build_chat_agent_task_context,
-        guard_plugin_agent_stream,
-        is_plugin_driver_turn,
-        resolve_plugin_injection,
+        guard_workflow_agent_stream,
+        resolve_workflow_injection,
         update_intentwriter,
     )
 
@@ -502,7 +526,8 @@ async def _handle_chat_impl(
         f'[{summarize_model_config_for_log(runtime.llm_config)}]'
     )
     LOG.info(
-        f'[ChatServer] [PLUGIN_CONTEXT] [sid={conversation.session_id}] [plugin_context={plugin.plugin_context!r}]'
+        f'[ChatServer] [WORKFLOW_CONTEXT] [sid={conversation.session_id}] '
+        f'[workflow_context={workflow.workflow_context!r}]'
     )
     LOG.info(
         f'[ChatServer] [TURN_SEQ] [sid={conversation.session_id}] '
@@ -518,7 +543,7 @@ async def _handle_chat_impl(
     if user_cited_context:
         cited_message_context = user_cited_context
     language_query = user_input.strip()
-    is_driver_turn = is_plugin_driver_turn(plugin.plugin_context)
+    is_driver_turn = _should_skip_sensitive_filter(query, workflow.workflow_context)
     skip_sensitive_filter = (
         runtime.skip_sensitive_filter
         or is_driver_turn
@@ -562,9 +587,9 @@ async def _handle_chat_impl(
         explicit_resource_payload['knowledge_base_ids'] = (
             selected_kb_ids if isinstance(selected_kb_ids, list) else [selected_kb_ids]
         )
-    active_plugin_ref = str((plugin.plugin_context or {}).get('plugin_ref') or '').strip()
-    if active_plugin_ref and not explicit_resource_payload['plugin_refs']:
-        explicit_resource_payload['plugin_refs'] = [active_plugin_ref]
+    active_workflow_ref = str((workflow.workflow_context or {}).get('workflow_ref') or '').strip()
+    if active_workflow_ref and not explicit_resource_payload['workflow_refs']:
+        explicit_resource_payload['workflow_refs'] = [active_workflow_ref]
 
     raw_history = list(message.history) if isinstance(message.history, list) else []
     agent_history = normalize_history_for_agent(raw_history)
@@ -597,15 +622,19 @@ async def _handle_chat_impl(
         'conversation_id': conversation_id,
         'query': query or '',
     }
-    # Inject per-conversation plugin flags from Go (resolved from conversations table).
-    # enable_plugin=None means "not set"; default to True so behaviour is unchanged
+    # Inject per-conversation workflow flags from Go (resolved from conversations table).
+    # enable_workflow=None means "not set"; default to True so behaviour is unchanged
     # for callers that do not yet pass the field.
-    if plugin.enable_plugin is not None:
-        agentic_config['enable_plugin'] = bool(plugin.enable_plugin)
+    if workflow.enable_workflow is not None:
+        agentic_config['enable_workflow'] = bool(workflow.enable_workflow)
     if agent.enable_subagent is not None:
         agentic_config['enable_subagent'] = bool(agent.enable_subagent)
-    # plugin_mode is consumed directly from plugin_context by resolve_plugin_injection
-    # (where it is only meaningful when enable_plugin=true); no need to store it in
+    # This flag is derived by the Host from the actual user turn. It is not a
+    # model parameter: explicit user recovery never consumes the AI retry budget.
+    if bool((workflow.workflow_context or {}).get('user_authorized_retry')):
+        agentic_config['user_authorized_workflow_retry'] = True
+    # workflow_mode is consumed directly from workflow_context by resolve_workflow_injection
+    # (where it is only meaningful when enable_workflow=true); no need to store it in
     # agentic_config separately.
 
     # Use the authoritative current_turn_seq from Go; fall back to max(keys) only as a
@@ -621,10 +650,22 @@ async def _handle_chat_impl(
 
     # Register the active session so the cancel endpoint can find it by conversation_id.
     _conv_id_key = conversation_id  # already stripped above
-    if _conv_id_key and not runtime.context_usage_preview and not runtime.context_prompt_export:
+    is_context_inspection = runtime.context_usage_preview or runtime.context_prompt_export
+    if _conv_id_key and not is_context_inspection:
         _active_sessions[_conv_id_key] = conversation.session_id
-    lazyllm.globals._init_sid(sid=conversation.session_id)
-    lazyllm.locals._init_sid(sid=conversation.session_id)
+    lazyllm_session_id = conversation.session_id
+    if is_context_inspection:
+        lazyllm_session_id = (
+            f'{conversation.session_id}:context-inspection:'
+            f'{time.time_ns()}:{threading.get_ident()}'
+        )
+    lazyllm.globals._init_sid(sid=lazyllm_session_id)
+    lazyllm.locals._init_sid(sid=lazyllm_session_id)
+    if is_context_inspection:
+        lazyllm.globals.clear()
+        lazyllm.locals.clear()
+        lazyllm.globals._init_sid(sid=lazyllm_session_id)
+        lazyllm.locals._init_sid(sid=lazyllm_session_id)
     inject_model_config(runtime.llm_config)
     inject_tool_config(runtime.tool_config)
     _inject_reader_config(runtime.ocr_config)
@@ -686,63 +727,59 @@ async def _handle_chat_impl(
             )
             agentic_config['filters'] = effective_filters
 
-    excluded_plugin_refs = set(
-        task_profile.excluded_resources.plugin_refs if task_profile else ()
+    excluded_workflow_refs = set(
+        task_profile.excluded_resources.workflow_refs if task_profile else ()
     )
-    effective_plugin_context = plugin.plugin_context
-    if not _active_plugin_context_allowed(
-        effective_plugin_context, plugin.catalog, plugin.disabled_builtin_plugins,
-    ):
-        effective_plugin_context = None
-    if str((effective_plugin_context or {}).get('plugin_ref') or '') in excluded_plugin_refs:
-        effective_plugin_context = None
-    effective_plugin_catalog = [
-        item for item in plugin.catalog
-        if str(item.get('plugin_ref') or '') not in excluded_plugin_refs
+    effective_workflow_context = workflow.workflow_context
+    if str((effective_workflow_context or {}).get('workflow_ref') or '') in excluded_workflow_refs:
+        effective_workflow_context = None
+    effective_workflow_catalog = [
+        item for item in workflow.catalog
+        if str(item.get('workflow_ref') or '') not in excluded_workflow_refs
     ]
-    effective_allowed_plugin_refs = [
-        ref for ref in plugin.allowed_plugin_refs if ref not in excluded_plugin_refs
+    effective_allowed_workflow_refs = [
+        ref for ref in workflow.allowed_workflow_refs if ref not in excluded_workflow_refs
     ]
-    effective_disabled_builtin_plugins = list(plugin.disabled_builtin_plugins)
-    effective_disabled_builtin_plugins.extend(
-        ref.removeprefix('builtin:') for ref in excluded_plugin_refs
+    effective_disabled_builtin_workflows = list(workflow.disabled_builtin_workflows)
+    effective_disabled_builtin_workflows.extend(
+        ref.removeprefix('builtin:') for ref in excluded_workflow_refs
         if ref.startswith('builtin:')
     )
-    effective_manual_builtin_plugins = [
-        plugin_id for plugin_id in plugin.manual_builtin_plugins
-        if f'builtin:{plugin_id}' not in excluded_plugin_refs
-    ]
 
-    plugin_contribution = resolve_plugin_injection(
-        effective_plugin_context,
+    workflow_contribution = resolve_workflow_injection(
+        effective_workflow_context,
         conversation_id=conversation_id,
-        plugin_catalog=effective_plugin_catalog,
-        disabled_builtin_plugins=list(dict.fromkeys(effective_disabled_builtin_plugins)),
-        manual_builtin_plugins=list(dict.fromkeys(effective_manual_builtin_plugins)),
-        allowed_plugin_refs=effective_allowed_plugin_refs,
+        # The raw query may contain the internal <mentioned_resources> envelope.
+        # Workflow request_context/user_input must receive only the user's actual
+        # instruction, otherwise {{user_input}} is populated with host metadata.
+        current_query=language_query,
+        workflow_catalog=effective_workflow_catalog,
+        disabled_builtin_workflows=list(dict.fromkeys(effective_disabled_builtin_workflows)),
+        allowed_workflow_refs=effective_allowed_workflow_refs,
+        workflow_activations=workflow.activations,
     )
-    plugin_tools = plugin_contribution.tools
-    agentic_config.update(plugin_contribution.agentic_config_patch)
+    workflow_tools = workflow_contribution.tools
+    agentic_config.update(workflow_contribution.agentic_config_patch)
 
     intentwriter = build_intentwrite_tool(
         conversation_id=conversation_id,
         current_query=query,
         current_intent=conversation.intent_context,
     )
-    intentwriter = update_intentwriter(intentwriter, effective_plugin_context)
+    intentwriter = update_intentwriter(intentwriter, workflow.workflow_context)
 
-    # Inject SubAgent task context into the system prompt independently of plugin state.
-    # Injected when either plugin or subagent is enabled so the model knows about ongoing tasks.
+    # Inject SubAgent task context into the system prompt independently of workflow state.
+    # Injected when either workflow or subagent is enabled so the model knows about ongoing tasks.
     # When both are disabled, the task context is suppressed (pure QA mode).
-    _enable_plugin = agentic_config.get('enable_plugin', True)
+    _enable_workflow = agentic_config.get('enable_workflow', True)
     _enable_subagent = agentic_config.get('enable_subagent', True)
     LOG.info(
-        f'[ChatServer] [PLUGIN_FLAGS] [sid={conversation.session_id}] '
-        f'[enable_plugin={_enable_plugin!r}] [enable_subagent={_enable_subagent!r}] '
-        f'[plugin_tools={[getattr(t, "__name__", str(t)) for t in plugin_tools]!r}]'
+        f'[ChatServer] [WORKFLOW_FLAGS] [sid={conversation.session_id}] '
+        f'[enable_workflow={_enable_workflow!r}] [enable_subagent={_enable_subagent!r}] '
+        f'[workflow_tools={[getattr(t, "__name__", str(t)) for t in workflow_tools]!r}]'
     )
     task_ctx = ''
-    if _enable_plugin or _enable_subagent:
+    if _enable_workflow or _enable_subagent:
         task_ctx = _build_chat_agent_task_context((conversation_id or '').strip())
     conversation_intent_section = render_intent_section(
         'Conversation Intent', conversation.intent_context,
@@ -761,9 +798,17 @@ async def _handle_chat_impl(
     if not personalization.use_memory:
         active_configs = [cfg for cfg in active_configs if cfg.name != 'memory']
     agent_tools = [cfg.tool for cfg in active_configs]
-    # Respect enable_subagent flag: when false, suppress create_subagent and related tools.
+    # A bound Workflow trigger is the only valid entry point for an explicit
+    # Workflow selection. Hide generic SubAgent tools so the model cannot route
+    # around that trigger with create_subagent(agent_type='workflow').
     enable_subagent = agentic_config.get('enable_subagent', True)
-    subagent_tools = _build_subagent_chat_tools() if enable_subagent else []
+    subagent_tools = (
+        _build_subagent_chat_tools()
+        if _should_register_subagent_tools(
+            enable_subagent, explicit_resource_payload.get('workflow_refs'),
+        )
+        else []
+    )
     mcp_tools = await _build_mcp_tools(runtime.mcp_config) if runtime.mcp_config else []
     # User attachment tools are only meaningful when the user has uploaded files.
     attachment_tools = _build_user_attachment_tools(bool(files_map))
@@ -773,7 +818,7 @@ async def _handle_chat_impl(
     )
     # ask_user is a ChatAgent-only stop-tool. It is NOT in DEFAULT_TOOLS so SubAgents
     # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.
-    # Auto plugin mode is non-interactive by contract: ask_user must be absent,
+    # Auto workflow mode is non-interactive by contract: ask_user must be absent,
     # not merely discouraged by prompt text.
     allow_ask_user = _should_register_ask_user(agentic_config, disabled)
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
@@ -782,7 +827,7 @@ async def _handle_chat_impl(
     workspace = chat_agent_workspace(user_id or '0', conversation_id)
     skill_listing_tools = [build_list_skills_tool(agent.available_skills)]
     all_tools = ([intentwriter] + agent_tools + artifact_tools + subagent_tools + attachment_tools
-                 + skill_listing_tools + ask_user_tools + plugin_tools + mcp_tools)
+                 + skill_listing_tools + ask_user_tools + workflow_tools + mcp_tools)
     skill_config = agent.available_skills
     selected_skills = agent.available_skills
     if task_profile is not None:
@@ -792,6 +837,12 @@ async def _handle_chat_impl(
             *(selected_skills or []),
         ]))
         skill_config = selected_skills or False
+    workflow_skill_dir = ''
+    if agentic_config.get('enable_workflow', True):
+        from lazymind.workflow_toolkit import WORKFLOW_SKILL_NAME, workflow_skills_dir
+        selected_skills = list(dict.fromkeys([*(selected_skills or []), WORKFLOW_SKILL_NAME]))
+        skill_config = selected_skills
+        workflow_skill_dir = workflow_skills_dir()
     set_trace_context({
         'trace_id': conversation.session_id, 'session_id': conversation.session_id, 'sampled': True,
         'module_trace': {
@@ -923,14 +974,9 @@ async def _handle_chat_impl(
         'agent.workspace',
         priority=70,
     )
-    # Plugin policy historically followed the common system prompt.
-    prompt_builder.system(
-        'chat_plugin_policy', 'Plugin Policy', plugin_contribution.system_prompt,
-        'plugin.scenario', priority=80,
-    )
     prompt_builder.runtime(
-        'chat_plugin_runtime', 'Plugin State', plugin_contribution.runtime_context,
-        'plugin.runtime', priority=10, authoritative=True, content_kind='state',
+        'chat_workflow_runtime', 'Workflow State', workflow_contribution.runtime_context,
+        'workflow.runtime', priority=10, authoritative=True, content_kind='state',
     )
     prompt_builder.runtime(
         'chat_tasks', 'SubAgent Tasks', task_ctx, 'database.tasks',
@@ -1009,8 +1055,8 @@ async def _handle_chat_impl(
 
     llm = AutoModel(model='llm')
 
-    # ask_user is always a stop-tool for ChatAgent regardless of plugin state.
-    stop_tools = list(plugin_contribution.stop_tools)
+    # ask_user is always a stop-tool for ChatAgent regardless of workflow state.
+    stop_tools = list(workflow_contribution.stop_tools)
     if allow_ask_user and 'ask_user' not in stop_tools:
         stop_tools.append('ask_user')
 
@@ -1026,7 +1072,7 @@ async def _handle_chat_impl(
             workspace=workspace,
             keep_full_turns=_cfg['agentic_keep_full_turns'],
             fs=FS,
-            skills_dir=_cfg['skill_fs_url'],
+            skills_dir=','.join(filter(None, [_cfg['skill_fs_url'], workflow_skill_dir])),
             max_retries={
                 'low': _cfg['agentic_max_rounds_low'],
                 'medium': _cfg['agentic_max_rounds_medium'],
@@ -1041,41 +1087,48 @@ async def _handle_chat_impl(
                 'list_knowledge_base_documents': 2,
                 'aggregate_knowledge_base_documents': 2,
             },
+            extra_stop_condition=make_cancel_stop_condition(),
         ),
     )
     executor = AgentExecutor()
     react_agent = executor.create_agent(llm, plan)
-    if runtime.context_usage_preview or runtime.context_prompt_export:
-        agent_context = await asyncio.to_thread(
-            react_agent.describe_context, agent_history, language_query,
-        )
-        if runtime.context_prompt_export:
-            prompt_markdown = render_context_markdown(plan, agent_context)
-            if task_profile and task_profile.routing_review_required:
-                prompt_markdown = '\n'.join([
-                    '> ⚠️ This is a rule-only prompt preview and may be inaccurate.',
-                    f'> Reason: {task_profile.routing_review_reason}',
-                    '> ChatAgent will resolve this uncertainty when the request executes.',
-                    '',
-                    prompt_markdown,
-                ])
-            return {'prompt_markdown': prompt_markdown}
-        report = await estimate_context_usage(plan, agent_context)
-        report_data = report_to_dict(report)
-        llm_enhanced = runtime.context_preview_allow_llm_routing
-        requires_llm = bool(
-            not llm_enhanced and task_profile and task_profile.routing_review_required
-        )
-        report_data.update({
-            'preview_accuracy': (
-                'llm_enhanced' if llm_enhanced
-                else 'rule_only' if requires_llm
-                else 'deterministic'
-            ),
-            'requires_llm': requires_llm,
-            'llm_reason': task_profile.routing_review_reason if requires_llm else '',
-        })
-        return report_data
+    if is_context_inspection:
+        try:
+            agent_context = await asyncio.to_thread(
+                react_agent.describe_context, agent_history, language_query,
+            )
+            if runtime.context_prompt_export:
+                prompt_markdown = render_context_markdown(plan, agent_context)
+                if task_profile and task_profile.routing_review_required:
+                    prompt_markdown = '\n'.join([
+                        '> ⚠️ This is a rule-only prompt preview and may be inaccurate.',
+                        f'> Reason: {task_profile.routing_review_reason}',
+                        '> ChatAgent will resolve this uncertainty when the request executes.',
+                        '',
+                        prompt_markdown,
+                    ])
+                return {'prompt_markdown': prompt_markdown}
+            report = await estimate_context_usage(plan, agent_context)
+            report_data = report_to_dict(report)
+            llm_enhanced = runtime.context_preview_allow_llm_routing
+            requires_llm = bool(
+                not llm_enhanced and task_profile and task_profile.routing_review_required
+            )
+            report_data.update({
+                'preview_accuracy': (
+                    'llm_enhanced' if llm_enhanced
+                    else 'rule_only' if requires_llm
+                    else 'deterministic'
+                ),
+                'requires_llm': requires_llm,
+                'llm_reason': task_profile.routing_review_reason if requires_llm else '',
+            })
+            return report_data
+        finally:
+            lazyllm.globals._init_sid(sid=lazyllm_session_id)
+            lazyllm.locals._init_sid(sid=lazyllm_session_id)
+            lazyllm.globals.clear()
+            lazyllm.locals.clear()
 
     async def event_stream() -> Any:
         final_result: Any = None
@@ -1083,7 +1136,7 @@ async def _handle_chat_impl(
         try:
             async with rag_sem:
                 initial_agent_stream = executor.stream_agent(react_agent, plan)
-                guarded_agent_stream = guard_plugin_agent_stream(
+                guarded_agent_stream = guard_workflow_agent_stream(
                     initial_agent_stream,
                     all_tools=all_tools,
                     query=query,
@@ -1145,7 +1198,7 @@ async def _handle_chat_impl(
         finally:
             # Unregister the active session so the cancel endpoint no longer targets it.
             if _conv_id_key:
-                _active_sessions.pop(_conv_id_key, None)
+                _unregister_active_session(_conv_id_key, conversation.session_id)
 
         cost = round(time.time() - start_time, 3)
         final_resp['cost'] = cost

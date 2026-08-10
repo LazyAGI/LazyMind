@@ -1,6 +1,6 @@
 {
   "name": "lazymind-desktop",
-  "version": "0.2.0-alpha.10",
+  "version": "0.3.0-dev",
   "description": "Production-ready enterprise knowledge-base and RAG chat platform with automated RAG quality optimization.",
   "author": "LazyAGI",
   "private": true,

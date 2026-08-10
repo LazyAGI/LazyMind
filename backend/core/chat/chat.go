@@ -58,14 +58,14 @@ type LazyChatRequest struct {
 	Runtime           ChatRuntimeOptions         `json:"runtime,omitempty"`
 	Personalization   ChatPersonalizationOptions `json:"personalization,omitempty"`
 	Agent             ChatAgentOptions           `json:"agent,omitempty"`
-	Plugin            ChatPluginOptions          `json:"plugin,omitempty"`
+	Workflow          ChatWorkflowOptions        `json:"workflow,omitempty"`
 	ExplicitResources ExplicitResourceBindings   `json:"explicit_resource_bindings,omitempty"`
 }
 
 type ExplicitResourceBindings struct {
 	SkillNames       []string            `json:"skill_names,omitempty"`
 	KnowledgeBaseIDs []string            `json:"knowledge_base_ids,omitempty"`
-	PluginRefs       []string            `json:"plugin_refs,omitempty"`
+	WorkflowRefs     []string            `json:"workflow_refs,omitempty"`
 	Mentions         []map[string]string `json:"mentions,omitempty"`
 }
 
@@ -120,29 +120,29 @@ type ChatAgentOptions struct {
 	EnableSubagent  *bool    `json:"enable_subagent,omitempty"`
 }
 
-type ChatPluginOptions struct {
-	EnablePlugin           *bool            `json:"enable_plugin,omitempty"`
-	PluginContext          map[string]any   `json:"plugin_context,omitempty"`
-	Catalog                []map[string]any `json:"catalog,omitempty"`
-	DisabledBuiltinPlugins []string         `json:"disabled_builtin_plugins,omitempty"`
-	ManualBuiltinPlugins   []string         `json:"manual_builtin_plugins,omitempty"`
-	AllowedPluginRefs      []string         `json:"allowed_plugin_refs,omitempty"`
+type ChatWorkflowOptions struct {
+	EnableWorkflow           *bool            `json:"enable_workflow,omitempty"`
+	WorkflowContext          map[string]any   `json:"workflow_context,omitempty"`
+	Catalog                  []map[string]any `json:"catalog,omitempty"`
+	DisabledBuiltinWorkflows []string         `json:"disabled_builtin_workflows,omitempty"`
+	AllowedWorkflowRefs      []string         `json:"allowed_workflow_refs,omitempty"`
+	Activations              []map[string]any `json:"activations,omitempty"`
 }
 
 // LazyChatData text data text。
 type LazyChatData struct {
-	Text                   string                       `json:"text"`
-	Sources                []any                        `json:"sources"`
-	Status                 string                       `json:"status"`
-	ReasoningText          string                       `json:"think"`
-	TaskCreated            *TaskCreatedEvent            `json:"task_created,omitempty"`
-	ArtifactCreated        *ArtifactCreatedEvent        `json:"artifact_created,omitempty"`
-	AskPending             *AskPendingEvent             `json:"ask_pending,omitempty"`
-	ToolLimitPending       *ToolLimitPendingEvent       `json:"tool_limit_pending,omitempty"`
-	IntentUpdated          *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
-	PluginPreflightUpdated *PluginPreflightUpdatedEvent `json:"plugin_preflight_updated,omitempty"`
-	Heartbeat              bool                         `json:"heartbeat,omitempty"`
-	ToolCallTurns          int64                        `json:"tool_call_turns"`
+	Text                     string                         `json:"text"`
+	Sources                  []any                          `json:"sources"`
+	Status                   string                         `json:"status"`
+	ReasoningText            string                         `json:"think"`
+	TaskCreated              *TaskCreatedEvent              `json:"task_created,omitempty"`
+	ArtifactCreated          *ArtifactCreatedEvent          `json:"artifact_created,omitempty"`
+	AskPending               *AskPendingEvent               `json:"ask_pending,omitempty"`
+	ToolLimitPending         *ToolLimitPendingEvent         `json:"tool_limit_pending,omitempty"`
+	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
+	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
+	Heartbeat                bool                           `json:"heartbeat,omitempty"`
+	ToolCallTurns            int64                          `json:"tool_call_turns"`
 }
 
 // TaskCreatedEvent is emitted by create_subagent (via translator) on the main SSE.
@@ -214,8 +214,8 @@ type IntentOperation struct {
 	Evidence string `json:"evidence"`
 }
 
-// PluginPreflightUpdatedEvent persists a side-effect-free trigger decision on the conversation.
-type PluginPreflightUpdatedEvent struct {
+// WorkflowPreflightUpdatedEvent persists a side-effect-free trigger decision on the conversation.
+type WorkflowPreflightUpdatedEvent struct {
 	Clear    bool           `json:"clear"`
 	Snapshot map[string]any `json:"snapshot,omitempty"`
 }
@@ -307,10 +307,10 @@ func (c *ChatService) Chat(ctx context.Context, req *LazyChatRequest) (*LazyChat
 }
 
 // StreamChat text /api/chat_stream，text channel；ctx Unsettext channel text。
-func (c *ChatService) StreamChat(ctx context.Context, req *LazyChatRequest) (<-chan *LazyStreamData, error) {
+func (c *ChatService) StreamChat(ctx context.Context, req *LazyChatRequest) (<-chan *LazyStreamData, string, error) {
 	bodyBytes, err := json.Marshal(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	fmt.Printf(
 		"[Core] [CHAT_UPSTREAM_REQUEST] [stream=true] [url=%s] [session_id=%s] [user_id=%s] [reasoning=%v] [%s]\n",
@@ -319,22 +319,22 @@ func (c *ChatService) StreamChat(ctx context.Context, req *LazyChatRequest) (<-c
 	)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.streamChatURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
 		fmt.Println("[Core] [CHAT_UPSTREAM_FAILED] url=", c.streamChatURL, " err=", err)
-		return nil, err
+		return nil, "", err
 	}
 	fmt.Println("[Core] [CHAT_UPSTREAM_RESPONSE] url=", c.streamChatURL, " status=", resp.StatusCode)
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		return nil, errors.New("upstream /api/chat_stream returned non-200")
+		return nil, "", errors.New("upstream /api/chat_stream returned non-200")
 	}
 
-	return lazyStreamHandler(ctx, resp), nil
+	return lazyStreamHandler(ctx, resp), strings.TrimSpace(resp.Header.Get("X-Algorithm-Id")), nil
 }
 
 func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStreamData {
@@ -371,19 +371,19 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 
 // UpstreamStreamChunk text ChatConversations text，text LazyChatResponse.Data。
 type UpstreamStreamChunk struct {
-	Text                   string                       `json:"text"`
-	Think                  string                       `json:"think"`
-	Status                 string                       `json:"status"`
-	Sources                []any                        `json:"sources"`
-	ReasoningText          string                       `json:"reasoning_text"` // text think
-	TaskCreated            *TaskCreatedEvent            `json:"task_created,omitempty"`
-	ArtifactCreated        *ArtifactCreatedEvent        `json:"artifact_created,omitempty"`
-	AskPending             *AskPendingEvent             `json:"ask_pending,omitempty"`
-	ToolLimitPending       *ToolLimitPendingEvent       `json:"tool_limit_pending,omitempty"`
-	IntentUpdated          *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
-	PluginPreflightUpdated *PluginPreflightUpdatedEvent `json:"plugin_preflight_updated,omitempty"`
-	Heartbeat              bool                         `json:"heartbeat,omitempty"`
-	ToolCallTurns          int64                        `json:"tool_call_turns"`
+	Text                     string                         `json:"text"`
+	Think                    string                         `json:"think"`
+	Status                   string                         `json:"status"`
+	Sources                  []any                          `json:"sources"`
+	ReasoningText            string                         `json:"reasoning_text"` // text think
+	TaskCreated              *TaskCreatedEvent              `json:"task_created,omitempty"`
+	ArtifactCreated          *ArtifactCreatedEvent          `json:"artifact_created,omitempty"`
+	AskPending               *AskPendingEvent               `json:"ask_pending,omitempty"`
+	ToolLimitPending         *ToolLimitPendingEvent         `json:"tool_limit_pending,omitempty"`
+	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
+	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
+	Heartbeat                bool                           `json:"heartbeat,omitempty"`
+	ToolCallTurns            int64                          `json:"tool_call_turns"`
 }
 
 type upstreamStreamLine struct {
@@ -518,26 +518,26 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 			req.Runtime.MCPConfig = append(req.Runtime.MCPConfig, item)
 		}
 	}
-	if pluginContext, ok := body["plugin_context"].(map[string]any); ok && len(pluginContext) > 0 {
-		req.Plugin.PluginContext = pluginContext
+	if workflowContext, ok := body["workflow_context"].(map[string]any); ok && len(workflowContext) > 0 {
+		req.Workflow.WorkflowContext = workflowContext
 	}
-	if catalog, ok := body["plugin_catalog"].([]map[string]any); ok {
-		req.Plugin.Catalog = catalog
+	if catalog, ok := body["workflow_catalog"].([]map[string]any); ok {
+		req.Workflow.Catalog = catalog
 	}
-	if ids, ok := body["disabled_builtin_plugins"].([]string); ok {
-		req.Plugin.DisabledBuiltinPlugins = ids
+	if ids, ok := body["disabled_builtin_workflows"].([]string); ok {
+		req.Workflow.DisabledBuiltinWorkflows = ids
 	}
-	if ids, ok := body["manual_builtin_plugins"].([]string); ok {
-		req.Plugin.ManualBuiltinPlugins = ids
+	if refs, ok := body["allowed_workflow_refs"].([]string); ok {
+		req.Workflow.AllowedWorkflowRefs = refs
 	}
-	if refs, ok := body["allowed_plugin_refs"].([]string); ok {
-		req.Plugin.AllowedPluginRefs = refs
+	if activations, ok := body["workflow_activations"].([]map[string]any); ok {
+		req.Workflow.Activations = activations
 	}
 	if bindings, ok := body["explicit_resource_bindings"].(map[string]any); ok {
 		req.ExplicitResources = ExplicitResourceBindings{
 			SkillNames:       stringSlice(bindings["skill_names"]),
 			KnowledgeBaseIDs: stringSlice(bindings["knowledge_base_ids"]),
-			PluginRefs:       stringSlice(bindings["plugin_refs"]),
+			WorkflowRefs:     stringSlice(bindings["workflow_refs"]),
 			Mentions:         stringMapSlice(bindings["mentions"]),
 		}
 	}
@@ -550,8 +550,8 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	case float64:
 		req.Message.CurrentTurnSeq = int(v)
 	}
-	if v, ok := body["enable_plugin"].(bool); ok {
-		req.Plugin.EnablePlugin = &v
+	if v, ok := body["enable_workflow"].(bool); ok {
+		req.Workflow.EnableWorkflow = &v
 	}
 	if v, ok := body["enable_subagent"].(bool); ok {
 		req.Agent.EnableSubagent = &v
@@ -797,13 +797,13 @@ func summarizeSecretMapForLog(v any) map[string]string {
 
 // StreamChatUpstream text：text ChatConversations text，text ChatService.StreamChat text。
 // body textRequest JSON text map text，baseURL text endpoint（text /api/...）。
-func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any) (<-chan UpstreamStreamChunk, error) {
+func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any) (<-chan UpstreamStreamChunk, string, error) {
 	service := NewChatServiceWithEndpoint(baseURL)
 	req := buildLazyChatRequest(body)
 
-	streamChan, err := service.StreamChat(ctx, req)
+	streamChan, algorithmID, err := service.StreamChat(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	out := make(chan UpstreamStreamChunk, 1)
@@ -825,23 +825,23 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 			}
 		}
 	}()
-	return out, nil
+	return out, algorithmID, nil
 }
 
 func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 	return UpstreamStreamChunk{
-		Text:                   data.Text,
-		Think:                  data.ReasoningText,
-		Status:                 data.Status,
-		Sources:                data.Sources,
-		ReasoningText:          data.ReasoningText,
-		TaskCreated:            data.TaskCreated,
-		ArtifactCreated:        data.ArtifactCreated,
-		AskPending:             data.AskPending,
-		ToolLimitPending:       data.ToolLimitPending,
-		IntentUpdated:          data.IntentUpdated,
-		PluginPreflightUpdated: data.PluginPreflightUpdated,
-		Heartbeat:              data.Heartbeat,
-		ToolCallTurns:          data.ToolCallTurns,
+		Text:                     data.Text,
+		Think:                    data.ReasoningText,
+		Status:                   data.Status,
+		Sources:                  data.Sources,
+		ReasoningText:            data.ReasoningText,
+		TaskCreated:              data.TaskCreated,
+		ArtifactCreated:          data.ArtifactCreated,
+		AskPending:               data.AskPending,
+		ToolLimitPending:         data.ToolLimitPending,
+		IntentUpdated:            data.IntentUpdated,
+		WorkflowPreflightUpdated: data.WorkflowPreflightUpdated,
+		Heartbeat:                data.Heartbeat,
+		ToolCallTurns:            data.ToolCallTurns,
 	}
 }

@@ -3,6 +3,42 @@ import { describe, expect, it } from 'vitest';
 import { isGoogleOAuthRedirectUriSupported } from '../../frontend/src/modules/dataSource/oauth/redirectUri.ts';
 
 describe('Google Drive cloud-document placement', () => {
+  it('defines every cloud-document capability key in both locales', () => {
+    const capabilityConfig = readFileSync(
+      new URL(
+        '../../frontend/src/modules/modelProvider/constants/cloudProviderCapabilities.ts',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const providerPanel = readFileSync(
+      new URL(
+        '../../frontend/src/modules/modelProvider/components/CloudDocumentProviderPanel.tsx',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const locales = ['zh-CN', 'en-US'].map((locale) => readFileSync(
+      new URL(`../../frontend/src/i18n/locales/${locale}.ts`, import.meta.url),
+      'utf8',
+    ));
+    const referencedKeys = new Set(
+      [...capabilityConfig.matchAll(/modelProvider\.cloudDocuments\.([A-Za-z0-9_]+)/g)]
+        .map((match) => match[1]),
+    );
+    for (const match of providerPanel.matchAll(/modelProvider\.cloudDocuments\.([A-Za-z0-9_]+)/g)) {
+      referencedKeys.add(match[1]);
+    }
+
+    for (const locale of locales) {
+      for (const key of referencedKeys) {
+        expect(locale, `missing cloudDocuments.${key}`).toMatch(
+          new RegExp(`\\n\\s+${key}:`),
+        );
+      }
+    }
+  });
+
   it('keeps authorization under cloud documents rather than system tools', () => {
     const cloudPanel = readFileSync(
       new URL('../../frontend/src/modules/modelProvider/components/CloudDocumentProviderPanel.tsx', import.meta.url),

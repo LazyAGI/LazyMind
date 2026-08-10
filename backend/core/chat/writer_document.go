@@ -9,8 +9,8 @@ import (
 	"lazymind/core/algo"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/plugin"
 	"lazymind/core/store"
+	"lazymind/core/workflow"
 )
 
 type writerDocumentSyncBody struct {
@@ -57,7 +57,7 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 	if listIndex >= 0 {
 		index = &listIndex
 	}
-	var current orm.PluginSlotRevision
+	var current orm.WorkflowSlotRevision
 	query := db.WithContext(ctx).Where(
 		"session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true,
 	)
@@ -122,9 +122,9 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var revision *orm.PluginSlotRevision
+	var revision *orm.WorkflowSlotRevision
 	if mode == "draft" {
-		updated, ok, updateErr := plugin.UpdateSelectedHumanArtifactValue(
+		updated, ok, updateErr := workflow.UpdateSelectedHumanArtifactValue(
 			ctx, db, sessionID, slotID, index, "json", artifact, nil,
 		)
 		if updateErr != nil {
@@ -143,7 +143,7 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 		if current.ListIndex != nil {
 			cardinality = "list"
 		}
-		created, createErr := plugin.WriteSlotRevisionWithHumanArtifact(
+		created, createErr := workflow.WriteSlotRevisionWithHumanArtifact(
 			ctx, db, sessionID, slotID, current.Slot, current.StepID, current.Attempt,
 			cardinality, index, "json", artifact, nil,
 		)
@@ -156,7 +156,7 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 		}
 		revision = created
 	}
-	plugin.NotifyPluginArtifactUpdated(
+	workflow.NotifyWorkflowArtifactUpdated(
 		ctx, db, sessionID, revision.StepID, revision.SlotID, revision.Slot,
 		revision.Revision, revision.ListIndex, "human",
 	)

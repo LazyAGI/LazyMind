@@ -25,12 +25,13 @@ import (
 	"lazymind/core/log"
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
-	"lazymind/core/plugin"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/workflow"
+	workflowexecutor "lazymind/core/workflow/executor"
 
 	"github.com/gorilla/mux"
 	"gopkg.in/yaml.v3"
@@ -231,8 +232,16 @@ func main() {
 
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
 	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
+	if err := workflow.SeedBuiltinWorkflows(context.Background(), store.DB()); err != nil {
+		log.Logger.Fatal().Err(err).Msg("seed built-in Workflows failed")
+	}
 	evalset.RegisterAsyncJobs()
-	plugin.RegisterPluginDraftGenerateJob()
+	workflow.RegisterWorkflowDraftGenerateJob()
+	workflowHosts := workflowexecutor.DefaultHostRegistry
+	workflowHosts.RegisterHost("lazymind", workflowexecutor.HostRegistration{
+		AllowAllCapabilities: true,
+		AllowLegacyTools:     true,
+	})
 	startBackgroundJobs := backgroundJobsEnabled()
 	if !startBackgroundJobs {
 		log.Logger.Info().Msg("core background jobs are disabled")
@@ -260,7 +269,7 @@ func main() {
 	}
 
 	// Register plugin lifecycle hooks into the subagent EventHooks.
-	plugin.RegisterSubAgentHooks()
+	workflow.RegisterSubAgentHooks()
 	// Wire the conversation SSE hook so plugin events reach the frontend via the
 	// conversation-level events channel (history-independent real-time push).
 	subagent.EventHooks.RegisterConversationEventHook(
@@ -279,7 +288,6 @@ func main() {
 			})
 		},
 	)
-	plugin.RecoverPendingPluginRuns()
 	log.Logger.Info().Msg("plugin subagent hooks registered")
 
 	// Start the schedule ticker.

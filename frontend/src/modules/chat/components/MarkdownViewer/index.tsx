@@ -51,8 +51,8 @@ const BARE_URL_PATTERN = /(?<!\(|\[)(https?:\/\/[^\s<>[\]"'`（）。，、；�
 // Fullwidth and CJK punctuation that should never be treated as part of a URL.
 const TRAILING_FULLWIDTH_PUNCT = /[（）。，、；：！？…—\u3000-\u303F\uFF00-\uFFEF]+$/;
 
-const markdownRemarkPlugins = [[remarkGfm, { singleTilde: false }], remarkMath];
-const markdownRehypePlugins = [
+const markdownRemarkWorkflows = [[remarkGfm, { singleTilde: false }], remarkMath];
+const markdownRehypeWorkflows = [
   rehypeRaw,
   rehypeKatex,
   [rehypeSanitize, customSchema],
@@ -461,8 +461,8 @@ const MarkdownViewer = memo((props: any) => {
       <MarkdownRenderContext.Provider value={renderContextValue}>
         <Markdown
           {...markdownProps}
-          remarkPlugins={markdownRemarkPlugins}
-          rehypePlugins={markdownRehypePlugins}
+          remarkPlugins={markdownRemarkWorkflows}
+          rehypePlugins={markdownRehypeWorkflows}
           components={markdownComponents}
         >
           {normalizedChildren || ""}

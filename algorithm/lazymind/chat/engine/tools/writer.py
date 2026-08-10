@@ -224,7 +224,7 @@ class WriterToolkitBase:
         source_document_json: str = '',
         knowledge_text: str = '',
     ) -> str:
-        """Build normalized InputResource data from plugin runtime inputs."""
+        """Build normalized InputResource data from workflow runtime inputs."""
         file_paths = _json_loads(file_paths_json, [])
         if not isinstance(file_paths, list):
             raise TypeError('file_paths_json must be a JSON array.')

@@ -86,7 +86,7 @@ def test_coerce_dict_accepts_sqlite_blob_params():
     config = runner._build_agentic_config(
         {'conversation_id': 'conversation-1', 'objective': 'use dog.jpg'},
         params,
-        'plugin_step',
+        'workflow_step',
     )
     assert config['history_files_per_turn'] == {'1': ['/uploads/dog.jpg']}
     assert config['files'] == ['/uploads/dog.jpg']

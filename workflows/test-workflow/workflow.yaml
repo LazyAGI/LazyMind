@@ -1,0 +1,122 @@
+id: test-workflow
+name: Workflow Runtime End-to-End Self-Test
+description: >
+  A fast multi-stage workflow that exercises prompts, local script tools,
+  typed artifacts, single-slot revisions, list artifacts, and final validation.
+
+when_to_use: >
+  Use only when the user explicitly asks to test, smoke-test, or verify the
+  Workflow runtime, for example "运行测试工作流" or "smoke test workflow".
+  Do not select this workflow for normal writing, image, or research requests.
+
+tool_scripts:
+  - path: scripts/tools.py
+    functions:
+      - build_test_metadata
+      - create_typed_fixtures
+      - create_rewrite_fixture
+      - rewrite_fixture
+      - create_list_fixtures
+      - verify_fixtures
+
+steps:
+  - id: prompt
+    label: Prompt
+  - id: script
+    label: Script Tool
+  - id: typed_artifacts
+    label: Typed Artifacts
+  - id: rewrite
+    label: Rewrite Artifact
+  - id: list_artifacts
+    label: List Artifacts
+  - id: verify
+    label: Verify
+
+slots:
+  - id: prompt_result
+    label: Prompt Result
+    type: text
+    cardinality: single
+  - id: metadata_json
+    label: JSON Metadata
+    type: text
+    cardinality: single
+  - id: text_attachment
+    label: Text Attachment
+    type: file
+    cardinality: single
+  - id: image_attachment
+    label: Image Attachment
+    type: image
+    cardinality: single
+  - id: rewritten_attachment
+    label: Rewritten Attachment
+    type: file
+    cardinality: single
+  - id: list_attachments
+    label: List Attachments
+    type: file
+    cardinality: list
+    ordered: true
+  - id: verification_report
+    label: Verification Report
+    type: file
+    cardinality: single
+  - id: test_status
+    label: Test Status
+    type: text
+    cardinality: single
+
+ui:
+  tabs:
+    - id: prompt
+      step_id: prompt
+      label: Prompt
+      layout: list
+      slots: [{id: prompt_result}]
+    - id: script
+      step_id: script
+      label: Script
+      layout: list
+      slots: [{id: metadata_json}]
+    - id: attachments
+      label: Attachments
+      layout: grid
+      slots:
+        - id: text_attachment
+        - id: image_attachment
+        - id: rewritten_attachment
+        - id: list_attachments
+    - id: result
+      step_id: verify
+      label: Result
+      layout: list
+      slots:
+        - id: test_status
+        - id: verification_report
+
+i18n:
+  zh-CN:
+    name: Workflow 运行时端到端自检
+    steps:
+      prompt: {label: 提示词}
+      script: {label: 脚本工具}
+      typed_artifacts: {label: 多类型附件}
+      rewrite: {label: 附件重写}
+      list_artifacts: {label: 列表附件}
+      verify: {label: 验证结果}
+    tabs:
+      prompt: {label: 提示词}
+      script: {label: 脚本}
+      attachments: {label: 附件}
+      result: {label: 结果}
+    slots:
+      prompt_result: {label: 提示词结果}
+      metadata_json: {label: JSON 元数据}
+      text_attachment: {label: 文本附件}
+      image_attachment: {label: 图片附件}
+      rewritten_attachment: {label: 重写附件}
+      list_attachments: {label: 列表附件}
+      verification_report: {label: 验证报告}
+      test_status: {label: 测试状态}

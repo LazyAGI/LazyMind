@@ -67,7 +67,7 @@ jobs:
             image: lazymind-auth-service
           - service: core
             dockerfile: backend/core/Dockerfile
-            context: backend
+            context: .
             image: lazymind-core
           - service: office-convert-service
             dockerfile: backend/office-convert-service/Dockerfile

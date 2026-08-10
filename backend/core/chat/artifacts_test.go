@@ -275,7 +275,11 @@ func TestCanonicalConversationFileValueAcceptsLegacyScopeHash(t *testing.T) {
 	if err := json.Unmarshal(canonical, &value); err != nil {
 		t.Fatalf("decode canonical legacy artifact: %v", err)
 	}
-	if value["size"] != float64(len("legacy")) || value["path"] != path {
+	expectedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("resolve expected legacy artifact path: %v", err)
+	}
+	if value["size"] != float64(len("legacy")) || value["path"] != expectedPath {
 		t.Fatalf("unexpected canonical legacy artifact: %#v", value)
 	}
 }

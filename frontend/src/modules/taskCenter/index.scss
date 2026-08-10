@@ -310,7 +310,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   font-size: 17px;
 
   &.task-type-scheduled { color: $blue; background: $blue-soft; }
-  &.task-type-plugin_run { color: $orange; background: $orange-soft; }
+  &.task-type-workflow_run { color: $orange; background: $orange-soft; }
 }
 
 .running-task-head {

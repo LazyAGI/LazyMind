@@ -118,6 +118,22 @@ func TestAlgorithmServiceEnvPinsLocalRouterHost(t *testing.T) {
 	env := algorithmServiceEnv(cfg, paths, chatProcessName)
 
 	assertEnvContains(t, env, "LAZYMIND_ROUTER_HOST=127.0.0.1")
+	assertEnvContains(t, env, "LAZYMIND_WORKFLOW_EXECUTOR_TOKEN=dev-workflow-executor-token")
+	assertEnvContains(t, env, "LAZYMIND_WORKFLOWS_DIR="+filepath.Join(repo, "workflows"))
+}
+
+func TestWorkflowExecutorTokenMatchesCoreAndAlgorithmOverride(t *testing.T) {
+	t.Setenv("LAZYMIND_WORKFLOW_EXECUTOR_TOKEN", "custom-workflow-secret")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEnvContains(t, algorithmServiceEnv(cfg, paths, chatProcessName),
+		"LAZYMIND_WORKFLOW_EXECUTOR_TOKEN=custom-workflow-secret")
+	assertEnvContains(t, coreServiceEnv(cfg, paths),
+		"LAZYMIND_WORKFLOW_EXECUTOR_TOKEN=custom-workflow-secret")
 }
 
 func TestAlgorithmServiceEnvTrustedLocalMode(t *testing.T) {

@@ -48,6 +48,7 @@ import DefaultServicesPage from "@/modules/modelProvider/pages/DefaultServicesPa
 import {
   SelfEvolutionAlgorithmManagementPage,
   SelfEvolutionRoutingStrategyPage,
+  SelfEvolutionTrafficStatsPage,
   SelfEvolutionHomePage,
   SelfEvolutionDetailPage,
   SelfEvolutionObservationPage,
@@ -57,8 +58,8 @@ import { runtimeFeatures } from "@/runtime/features";
 import { isLocalSessionEnabled } from "@/runtime/localSession";
 import UserAgreementPage from "@/pages/UserAgreementPage";
 
-const PluginDetailPage = lazy(() => import("@/modules/plugin/pages/detail"));
-const BuiltinPluginDetailPage = lazy(() => import("@/modules/plugin/pages/builtin-detail"));
+const WorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/detail"));
+const BuiltinWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/builtin-detail"));
 
 export default function AppRouter() {
   const { i18n } = useTranslation();
@@ -244,9 +245,9 @@ export default function AppRouter() {
             />
             <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>
-          <Route path="memory-management/plugins" element={<Navigate to="/memory-management/skills?skillView=plugins" replace />} />
-          <Route path="memory-management/plugins/builtin/:pluginId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><BuiltinPluginDetailPage /></Suspense>} />
-          <Route path="memory-management/plugins/:pluginId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><PluginDetailPage /></Suspense>} />
+          <Route path="memory-management/workflows" element={<Navigate to="/memory-management/skills?skillView=workflows" replace />} />
+          <Route path="memory-management/workflows/builtin/:workflowId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><BuiltinWorkflowDetailPage /></Suspense>} />
+          <Route path="memory-management/workflows/:workflowId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><WorkflowDetailPage /></Suspense>} />
           {runtimeFeatures.hideEvo ? (
             <Route
               path="self-evolution/*"
@@ -265,6 +266,10 @@ export default function AppRouter() {
               <Route
                 path="self-evolution/algorithms/routing-strategy"
                 element={<SelfEvolutionRoutingStrategyPage />}
+              />
+              <Route
+                path="self-evolution/algorithms/traffic-stats"
+                element={<SelfEvolutionTrafficStatsPage />}
               />
               <Route
                 path="self-evolution/detail/:threadId/observation/:kind"

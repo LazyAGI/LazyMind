@@ -74,7 +74,7 @@ async def chat(
         Body(
             description=(
                 'Structured chat request grouped by message, conversation, retrieval, '
-                'runtime, personalization, agent, and plugin options.'
+                'runtime, personalization, agent, and workflow options.'
             )
         ),
     ],

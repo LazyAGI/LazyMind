@@ -108,8 +108,8 @@ func requireInternalServiceToken(w http.ResponseWriter, r *http.Request) bool {
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	pathValue := normalizeRemoteFSPath(r.URL.Query().Get("path"))
-	if isPluginPath(pathValue) {
-		h.pluginList(w, r, pathValue)
+	if isWorkflowPath(pathValue) {
+		h.workflowList(w, r, pathValue)
 		return
 	}
 	if isSkillPath(pathValue) {
@@ -125,8 +125,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Info(w http.ResponseWriter, r *http.Request) {
 	pathValue := normalizeRemoteFSPath(r.URL.Query().Get("path"))
-	if isPluginPath(pathValue) {
-		h.pluginInfo(w, r, pathValue)
+	if isWorkflowPath(pathValue) {
+		h.workflowInfo(w, r, pathValue)
 		return
 	}
 	if isSkillPath(pathValue) {
@@ -142,8 +142,8 @@ func (h *Handler) Info(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Exists(w http.ResponseWriter, r *http.Request) {
 	pathValue := normalizeRemoteFSPath(r.URL.Query().Get("path"))
-	if isPluginPath(pathValue) {
-		_, _, _, err := h.pluginFiles(r, pathValue)
+	if isWorkflowPath(pathValue) {
+		_, _, _, err := h.workflowFiles(r, pathValue)
 		writeJSON(w, http.StatusOK, map[string]any{"exists": err == nil})
 		return
 	}
@@ -160,8 +160,8 @@ func (h *Handler) Exists(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Content(w http.ResponseWriter, r *http.Request) {
 	pathValue := normalizeRemoteFSPath(r.URL.Query().Get("path"))
-	if isPluginPath(pathValue) {
-		h.pluginContent(w, r, pathValue)
+	if isWorkflowPath(pathValue) {
+		h.workflowContent(w, r, pathValue)
 		return
 	}
 	if isSkillPath(pathValue) {
@@ -181,8 +181,8 @@ func (h *Handler) Dir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Body = io.NopCloser(strings.NewReader(string(data)))
-	if isPluginPath(pathValue) {
-		skillhttperr.Reply(w, "revision/plugin views are read-only", http.StatusBadRequest)
+	if isWorkflowPath(pathValue) {
+		skillhttperr.Reply(w, "revision/workflow views are read-only", http.StatusBadRequest)
 		return
 	}
 	if isSkillPath(pathValue) {
@@ -198,8 +198,8 @@ func (h *Handler) Dir(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	pathValue := normalizeRemoteFSPath(r.URL.Query().Get("path"))
-	if isPluginPath(pathValue) {
-		skillhttperr.Reply(w, "revision/plugin views are read-only", http.StatusBadRequest)
+	if isWorkflowPath(pathValue) {
+		skillhttperr.Reply(w, "revision/workflow views are read-only", http.StatusBadRequest)
 		return
 	}
 	if isSkillPath(pathValue) {
@@ -219,8 +219,8 @@ func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Body = io.NopCloser(strings.NewReader(string(data)))
-	if isPluginPath(from) || isPluginPath(to) {
-		skillhttperr.Reply(w, "revision/plugin views are read-only", http.StatusBadRequest)
+	if isWorkflowPath(from) || isWorkflowPath(to) {
+		skillhttperr.Reply(w, "revision/workflow views are read-only", http.StatusBadRequest)
 		return
 	}
 	fromSkill, toSkill := isSkillPath(from), isSkillPath(to)
@@ -246,8 +246,8 @@ func (h *Handler) Move(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Body = io.NopCloser(strings.NewReader(string(data)))
-	if isPluginPath(from) || isPluginPath(to) {
-		skillhttperr.Reply(w, "revision/plugin views are read-only", http.StatusBadRequest)
+	if isWorkflowPath(from) || isWorkflowPath(to) {
+		skillhttperr.Reply(w, "revision/workflow views are read-only", http.StatusBadRequest)
 		return
 	}
 	fromSkill, toSkill := isSkillPath(from), isSkillPath(to)

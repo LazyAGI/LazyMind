@@ -21,7 +21,7 @@ import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProv
 import { AgentAppsAuth } from "@/components/auth";
 import { localizeErrorCode } from "@/components/request";
 import PreferenceConfigNotice from "@/modules/chat/components/PreferenceConfigNotice";
-import type { ConversationPluginSettings } from "@/modules/chat/utils/request";
+import type { ConversationWorkflowSettings } from "@/modules/chat/utils/request";
 import { RightOutlined, ScheduleOutlined } from "@ant-design/icons";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import FeaturedCases from "@/modules/showcase/FeaturedCases";
@@ -43,10 +43,10 @@ function persistRunInBackgroundMode(enabled: boolean) {
   }
 }
 
-function getInitialPluginSettings(
+function getInitialWorkflowSettings(
   runInBackground: boolean,
-): ConversationPluginSettings | null {
-  return runInBackground ? null : { enable_plugin: false };
+): ConversationWorkflowSettings | null {
+  return runInBackground ? null : { enable_workflow: false };
 }
 
 function getShowcasePrompt(
@@ -81,10 +81,10 @@ const NewChatPage = () => {
   const [welcomeKnowledgeRefreshKey, setWelcomeKnowledgeRefreshKey] =
     useState(0);
   const newChatInputRef = useRef<ChatInputImperativeProps>(null);
-  // Stash plugin settings changed in the welcome-screen ChatInput before a conversation is created.
-  const [pendingPluginSettings, setPendingPluginSettings] =
-    useState<ConversationPluginSettings | null>(() =>
-      getInitialPluginSettings(readRunInBackgroundMode()),
+  // Stash workflow settings changed in the welcome-screen ChatInput before a conversation is created.
+  const [pendingWorkflowSettings, setPendingWorkflowSettings] =
+    useState<ConversationWorkflowSettings | null>(() =>
+      getInitialWorkflowSettings(readRunInBackgroundMode()),
     );
 
   const [isDragging, setIsDragging] = useState(false);
@@ -214,7 +214,7 @@ const NewChatPage = () => {
       setRunInBackground(nextRunInBackground);
       setWelcomeKnowledgeRefreshKey((key) => key + 1);
       // Reset pending settings and KB config so a fresh new conversation starts clean.
-      setPendingPluginSettings(getInitialPluginSettings(nextRunInBackground));
+      setPendingWorkflowSettings(getInitialWorkflowSettings(nextRunInBackground));
       setChatConfig({});
       setSearchParams({}, { replace: true });
     }
@@ -248,8 +248,8 @@ const NewChatPage = () => {
         setWelcomeKnowledgeRefreshKey((key) => key + 1);
         setIsChatContent(false);
         setChatConfig({});
-        setPendingPluginSettings(
-          getInitialPluginSettings(nextRunInBackground),
+        setPendingWorkflowSettings(
+          getInitialWorkflowSettings(nextRunInBackground),
         );
         return;
       }
@@ -282,7 +282,7 @@ const NewChatPage = () => {
     if (isWelcomeInputDisabled) {
       return;
     }
-    // Ignore internal DOM drag-and-drop (e.g. plugin panel card sorting).
+    // Ignore internal DOM drag-and-drop (e.g. workflow panel card sorting).
     if (!Array.from(e.dataTransfer.types).includes('Files')) {
       return;
     }
@@ -367,7 +367,7 @@ const NewChatPage = () => {
             chatDisabledReason={inputDisabledReason}
             chatDisabledDescription={inputDisabledDescription}
             chatDisabledAction={inputDisabledAction}
-            initPendingPluginSettings={pendingPluginSettings}
+            initPendingWorkflowSettings={pendingWorkflowSettings}
           />
         </div>
       )}
@@ -507,10 +507,10 @@ const NewChatPage = () => {
                         ? t("chat.taskInputPlaceholder")
                         : undefined
                     }
-                    onPluginSettingsChange={(settings) => {
-                      setPendingPluginSettings(settings);
+                    onWorkflowSettingsChange={(settings) => {
+                      setPendingWorkflowSettings(settings);
                     }}
-                    initialPluginSettings={pendingPluginSettings ?? undefined}
+                    initialWorkflowSettings={pendingWorkflowSettings ?? undefined}
                     runInBackground={runInBackground}
                     showcaseSelection={showcaseSelection}
                   />

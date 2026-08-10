@@ -46,6 +46,7 @@ func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
 	assertEnvContains(t, env, "ACL_DB_DRIVER=sqlite")
 	assertEnvContains(t, env, "ACL_DB_DSN="+sqliteDSN(paths.CoreDBPath))
 	assertEnvContains(t, env, "LAZYMIND_CORE_DATABASE_URL="+sqliteURL(paths.CoreDBPath))
+	assertEnvContains(t, env, "LAZYMIND_WORKFLOW_EXECUTOR_TOKEN=dev-workflow-executor-token")
 	assertEnvContains(t, env, "LAZYMIND_AUTH_SERVICE_URL=http://127.0.0.1:"+strconv.Itoa(cfg.AuthService.Port)+"/api/authservice")
 	assertEnvContains(t, env, "LAZYMIND_DOCUMENT_SERVICE_URL=http://127.0.0.1:"+strconv.Itoa(cfg.Algorithm.DocPort))
 	assertEnvContains(t, env, "LAZYMIND_PARSING_SERVICE_URL=http://127.0.0.1:"+strconv.Itoa(cfg.Algorithm.ProcessorPort))

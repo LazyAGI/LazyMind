@@ -9,9 +9,9 @@ export const CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT =
   "lazymind:chat-ffmpeg-dependency-missing";
 export const CHAT_CONVERSATION_ACTIVITY_EVENT =
   "lazymind:chat-conversation-activity";
-export const PLUGIN_PANEL_EXPANDED_EVENT = "lazymind:plugin-panel-expanded";
-export const PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX =
-  "lazymind:plugin-panel-expanded:";
+export const WORKFLOW_PANEL_EXPANDED_EVENT = "lazymind:workflow-panel-expanded";
+export const WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX =
+  "lazymind:workflow-panel-expanded:";
 
 export type ChatConversationFilter = "normal" | "task";
 
