@@ -234,6 +234,49 @@ export interface WriteBackWriterDocumentResult {
   document: Record<string, unknown>;
 }
 
+export interface WriteBackWriterDocumentRequest {
+  base_revision: number;
+  source_document: Record<string, unknown>;
+  revised_document: Record<string, unknown>;
+}
+
+export type RewriteSelection =
+  | { type: 'ir'; node_id: string }
+  | { type: 'markdown'; selected_text: string };
+
+export interface RewriteSelectionPreviewRequest {
+  action: 'rewrite_selection';
+  base_revision: number;
+  input: {
+    instruction: string;
+    selection: RewriteSelection;
+  };
+}
+
+export interface RewriteSelectionPreview {
+  status: 'ready';
+  action: 'rewrite_selection';
+  base_revision: number;
+  representation: 'ir' | 'markdown';
+  target: {
+    type: 'block';
+    block_type: string;
+    node_id?: string;
+  };
+  preview: {
+    old_text: string;
+    new_text: string;
+  };
+  patch: {
+    type: 'writer_ir_patch' | 'string_replace_set';
+    payload: Record<string, unknown>;
+  };
+  artifact: {
+    content_type: string;
+    value: Record<string, unknown>;
+  };
+}
+
 // Workflow Session API.
 export function WorkflowSessionApi() {
   return {
@@ -305,6 +348,7 @@ export function WorkflowSessionApi() {
       value: any,
       contentType?: string,
       mode?: SlotSaveMode,
+      baseRevision?: number,
       options?: RawAxiosRequestConfig,
     ) {
       return axiosInstance.patch(
@@ -313,7 +357,25 @@ export function WorkflowSessionApi() {
           value,
           ...(contentType ? { content_type: contentType } : {}),
           ...(mode ? { mode } : {}),
+          ...(baseRevision !== undefined ? { base_revision: baseRevision } : {}),
         },
+        options,
+      );
+    },
+    previewRewriteSelection(
+      sessionId: string,
+      slotId: string,
+      listIndex: number,
+      payload: RewriteSelectionPreviewRequest,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post<{
+        code: number;
+        message: string;
+        data: RewriteSelectionPreview;
+      }>(
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}:action-preview`,
+        payload,
         options,
       );
     },

@@ -60,7 +60,10 @@ import {
   type WriterSpan,
   type WriterSpanColorField,
 } from './writerIR';
+import { ArtifactRewriteInlineDiff } from './ArtifactRewriteDialog';
 import { highlightCode } from '../MarkdownViewer/syntaxHighlight';
+import type { RewriteSelectionPreview } from '@/modules/chat/utils/request';
+import { resolveMarkdownImageUrlAsync } from '@/modules/knowledge/utils/imageUrl';
 
 const WRITER_CODE_LANGUAGES = [
   ['text', 'Plain text'],
@@ -85,6 +88,17 @@ const WRITER_CODE_LANGUAGES = [
   ['docker', 'Dockerfile'],
 ] as const;
 
+function imageReferencePath(block: WriterBlock): string {
+  const reference = block.references?.find((item) => item.type === 'media_asset');
+  const value = reference?.url ?? reference?.path;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export interface WriterIRRewriteSelection {
+  nodeId: string;
+  selectedText: string;
+}
+
 interface WriterIRDocumentEditorProps {
   document: WriterDocument;
   ariaLabel: string;
@@ -92,6 +106,18 @@ interface WriterIRDocumentEditorProps {
   onFocus: () => void;
   onBlur: () => void;
   disabled?: boolean;
+  onRewriteSelection?: (selection: WriterIRRewriteSelection) => void;
+  rewritePreview?: WriterIRRewritePreview | null;
+  onRewritePreviewApplied?: (revision?: number) => void;
+  onRewritePreviewRejected?: () => void;
+}
+
+export interface WriterIRRewritePreview {
+  nodeId: string;
+  sessionId: string;
+  slotId: string;
+  listIndex: number;
+  preview: RewriteSelectionPreview;
 }
 
 function escapeHtml(value: string): string {
@@ -479,6 +505,16 @@ function renderBlock(
   }
   if (block.type === 'list_item') {
     return `<li ${attributes}>${dragHandle}<span data-writer-block-content="true">${text}</span>${children}</li>`;
+  }
+  if (block.type === 'image') {
+    const source = imageReferencePath(block);
+    const image = source
+      ? `<img data-writer-image="true" data-writer-image-source="${escapeHtmlAttribute(source)}" alt="${escapeHtmlAttribute(block.content ?? '')}">`
+      : '<div class="writer-ir__image-placeholder" aria-hidden="true"></div>';
+    const caption = block.content?.trim()
+      ? `<figcaption data-writer-block-content="true">${text}</figcaption>`
+      : '<figcaption data-writer-block-content="true"></figcaption>';
+    return `<div ${attributes}>${dragHandle}<figure class="writer-ir__image" contenteditable="false">${image}${caption}</figure>${children}</div>`;
   }
   return `<div ${attributes}>${dragHandle}<div data-writer-block-content="true" class="writer-ir__fallback">${text}</div>${children}</div>`;
 }
@@ -992,11 +1028,17 @@ export function WriterIRDocumentEditor({
   onFocus,
   onBlur,
   disabled = false,
+  onRewriteSelection,
+  rewritePreview,
+  onRewritePreviewApplied,
+  onRewritePreviewRejected,
 }: WriterIRDocumentEditorProps) {
   const { t } = useTranslation();
   const shellRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLElement | null>(null);
   const formatToolbarRef = useRef<HTMLDivElement | null>(null);
+  const [rewriteLayer, setRewriteLayer] = useState<HTMLDivElement | null>(null);
+  const [rewriteTarget, setRewriteTarget] = useState<HTMLElement | null>(null);
   const lastEmittedDocumentRef = useRef<WriterDocument>();
   const lastRenderedDocumentRef = useRef<WriterDocument | undefined>(undefined);
   const savedSelectionRef = useRef<WriterEditorSelection | null>(null);
@@ -1067,6 +1109,35 @@ export function WriterIRDocumentEditor({
       });
     }
   }, [collapseVersion, document, dragLabel, foldLabels]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return undefined;
+    let cancelled = false;
+    editor.querySelectorAll<HTMLImageElement>('img[data-writer-image-source]').forEach((image) => {
+      const source = image.dataset.writerImageSource ?? '';
+      if (!source) return;
+      resolveMarkdownImageUrlAsync(source)
+        .then((resolved) => {
+          if (!cancelled && resolved) image.src = resolved;
+        })
+        .catch(() => {
+          // Keep the caption visible when an individual image cannot be resolved.
+        });
+    });
+    return () => { cancelled = true; };
+  }, [collapseVersion, document]);
+
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !rewritePreview) {
+      setRewriteTarget(null);
+      return;
+    }
+    const block = Array.from(editor.querySelectorAll<HTMLElement>('[data-writer-block][data-node-id]'))
+      .find((element) => element.dataset.nodeId === rewritePreview.nodeId);
+    setRewriteTarget(block ? blockContentElement(block) : null);
+  }, [document, rewritePreview]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -2009,6 +2080,19 @@ export function WriterIRDocumentEditor({
     recordSelection();
   };
 
+  const requestRewriteSelection = useCallback(() => {
+    const selection = savedSelectionRef.current;
+    if (!selection || selection.end <= selection.start || !onRewriteSelection) return;
+    const block = findWriterBlock(document.blocks, selection.nodeId);
+    if (!block) return;
+    const selectedText = Array.from(block.content ?? '')
+      .slice(selection.start, selection.end)
+      .join('')
+      .trim();
+    if (!selectedText) return;
+    onRewriteSelection({ nodeId: block.node_id, selectedText });
+  }, [document.blocks, onRewriteSelection]);
+
   return (
     <div
       className='writer-ir__editor-shell'
@@ -2257,6 +2341,22 @@ export function WriterIRDocumentEditor({
               </div>
             )}
           </div>
+          {onRewriteSelection && (
+            <>
+              <span className='writer-ir__format-divider' aria-hidden='true' />
+              <button
+                type='button'
+                className='writer-ir__format-button writer-ir__format-button--rewrite'
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={requestRewriteSelection}
+                disabled={disabled || !hasTextSelection}
+                aria-label={t('chat.artifactRewrite.action')}
+                title={t('chat.artifactRewrite.action')}
+              >
+                {t('chat.artifactRewrite.action')}
+              </button>
+            </>
+          )}
         </div>
       )}
       <article
@@ -2285,6 +2385,19 @@ export function WriterIRDocumentEditor({
         onMouseUp={recordSelection}
         onKeyUp={handleKeyUp}
       />
+      <div className='writer-ir__rewrite-layer' ref={setRewriteLayer} />
+      {rewritePreview && rewriteTarget && rewriteLayer && onRewritePreviewApplied && onRewritePreviewRejected && (
+        <ArtifactRewriteInlineDiff
+          target={rewriteTarget}
+          layer={rewriteLayer}
+          sessionId={rewritePreview.sessionId}
+          slotId={rewritePreview.slotId}
+          listIndex={rewritePreview.listIndex}
+          preview={rewritePreview.preview}
+          onApplied={onRewritePreviewApplied}
+          onReject={onRewritePreviewRejected}
+        />
+      )}
     </div>
   );
 }

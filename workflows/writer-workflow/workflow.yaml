@@ -67,7 +67,7 @@ tool_scripts:
 
 artifact_actions:
   rewrite_selection:
-    slots: [draft_document]
+    slots: [outline_document, draft_document]
     preview_tool: writer_preview_selection_rewrite
   sync_document:
     slots: [draft_document]

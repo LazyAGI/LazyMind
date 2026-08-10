@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -296,9 +297,7 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "invalid current WriterDocument: "+normalizeErr.Error(), http.StatusBadRequest)
 			return
 		}
-		baseline, baselineErr := loadLatestSyncedWriterArtifact(
-			ctx, db, sessionID, draft.Revision.Revision,
-		)
+		baseline, baselineErr := loadWriterWriteBackBaseline(ctx, db, sessionID, draft.Revision.Revision)
 		if baselineErr != nil {
 			common.ReplyErrWithData(w, "initial Feishu write-back has not completed", map[string]any{
 				"status": "baseline_not_found", "current_revision": draft.Revision.Revision,
@@ -474,6 +473,22 @@ func loadLatestSyncedWriterArtifact(
 		}
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+
+// loadWriterWriteBackBaseline prefers the latest provider-confirmed draft.  The
+// first manual write-back has no such draft yet, so its source_document is the
+// authoritative Feishu baseline instead.
+func loadWriterWriteBackBaseline(
+	ctx context.Context,
+	db *gorm.DB,
+	sessionID string,
+	beforeRevision int,
+) (*selectedWriterArtifact, error) {
+	baseline, err := loadLatestSyncedWriterArtifact(ctx, db, sessionID, beforeRevision)
+	if err == nil || !errors.Is(err, gorm.ErrRecordNotFound) {
+		return baseline, err
+	}
+	return loadSelectedWriterArtifact(ctx, db, sessionID, "source_document")
 }
 
 type writerDocumentIdentity struct {

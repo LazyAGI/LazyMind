@@ -14,3 +14,10 @@ export const SlotEditingContext = createContext<SlotEditingContextValue>({
   setEditing: () => {},
   registerFlush: () => () => {},
 });
+
+export interface MarkdownWorkflowAction {
+  label: string;
+  onProceed: () => void;
+}
+
+export const MarkdownWorkflowActionContext = createContext<MarkdownWorkflowAction | null>(null);

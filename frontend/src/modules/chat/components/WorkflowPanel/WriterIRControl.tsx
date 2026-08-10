@@ -19,7 +19,16 @@ import {
   type WriterDocument,
   type WriterSpan,
 } from './writerIR';
-import { WriterIRDocumentEditor } from './WriterIRDocumentEditor';
+import {
+  WriterIRDocumentEditor,
+  type WriterIRRewritePreview,
+  type WriterIRRewriteSelection,
+} from './WriterIRDocumentEditor';
+import { ArtifactRewriteSelectionAction } from './ArtifactRewriteSelectionAction';
+import {
+  selectionActionAnchor,
+  type SelectionActionAnchor,
+} from './artifactRewriteSelection';
 import { highlightCode } from '../MarkdownViewer/syntaxHighlight';
 import { SlotEditingContext } from './slotEditingContext';
 import './WriterIRControl.scss';
@@ -47,6 +56,10 @@ export interface WriterIRControlProps {
     mode?: WriterIRSaveMode,
   ) => Promise<WriterIRSaveResult | void>;
   onEditingChange?: (editing: boolean) => void;
+  onRewriteSelection?: (selection: WriterIRRewriteSelection) => void;
+  rewritePreview?: WriterIRRewritePreview | null;
+  onRewritePreviewApplied?: (revision?: number) => void;
+  onRewritePreviewRejected?: () => void;
 }
 
 export interface WriterIRSaveResult {
@@ -221,6 +234,10 @@ export function WriterIRControl({
   editingKey,
   onSave,
   onEditingChange,
+  onRewriteSelection,
+  rewritePreview,
+  onRewritePreviewApplied,
+  onRewritePreviewRejected,
 }: WriterIRControlProps) {
   const { t } = useTranslation();
   const { registerFlush } = useContext(SlotEditingContext);
@@ -232,6 +249,9 @@ export function WriterIRControl({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string>();
   const [externalUpdate, setExternalUpdate] = useState(false);
+  const [readOnlySelection, setReadOnlySelection] = useState<
+    (WriterIRRewriteSelection & { anchor: SelectionActionAnchor }) | null
+  >(null);
   const textEditStartRef = useRef<WriterDocument | null>(null);
   const pendingExternalDocumentRef = useRef<{
     document: WriterDocument;
@@ -730,6 +750,41 @@ export function WriterIRControl({
     requestCheckpointSave();
   };
 
+  const recordReadOnlySelection = useCallback(() => {
+    const root = rootRef.current;
+    const selection = globalThis.getSelection();
+    if (!root || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      setReadOnlySelection(null);
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) {
+      setReadOnlySelection(null);
+      return;
+    }
+    const elementFor = (node: Node) => node instanceof HTMLElement ? node : node.parentElement;
+    const startBlock = elementFor(range.startContainer)?.closest<HTMLElement>('[data-node-id]');
+    const endBlock = elementFor(range.endContainer)?.closest<HTMLElement>('[data-node-id]');
+    const selectedText = selection.toString().trim();
+    if (!startBlock || startBlock !== endBlock || !selectedText) {
+      setReadOnlySelection(null);
+      return;
+    }
+    const nodeId = startBlock.dataset.nodeId;
+    const anchor = selectionActionAnchor(range);
+    if (!nodeId || !anchor) {
+      setReadOnlySelection(null);
+      return;
+    }
+    setReadOnlySelection({ nodeId, selectedText, anchor });
+  }, []);
+
+  useEffect(() => {
+    if (!documentReadOnly || !onRewriteSelection) return undefined;
+    globalThis.document.addEventListener('selectionchange', recordReadOnlySelection);
+    return () => globalThis.document.removeEventListener('selectionchange', recordReadOnlySelection);
+  }, [documentReadOnly, onRewriteSelection, recordReadOnlySelection]);
+
   return (
     <section
       className='writer-ir'
@@ -756,16 +811,31 @@ export function WriterIRControl({
       )}
 
       {documentReadOnly ? (
-        <article className='writer-ir__document'>
-          <h1 className='writer-ir__title'>{draft.title}</h1>
-          {draft.blocks.length > 0 ? (
-            <BlockSequence blocks={draft.blocks} />
-          ) : (
-            <div className='writer-ir__empty' role='status'>
-              {t('chat.writerIR.emptyDocument')}
-            </div>
+        <>
+          <article
+            className='writer-ir__document'
+            onMouseUp={recordReadOnlySelection}
+            onKeyUp={recordReadOnlySelection}
+            tabIndex={onRewriteSelection ? 0 : undefined}
+          >
+            <h1 className='writer-ir__title'>{draft.title}</h1>
+            {draft.blocks.length > 0 ? (
+              <BlockSequence blocks={draft.blocks} />
+            ) : (
+              <div className='writer-ir__empty' role='status'>
+                {t('chat.writerIR.emptyDocument')}
+              </div>
+            )}
+          </article>
+          {onRewriteSelection && readOnlySelection && (
+            <ArtifactRewriteSelectionAction
+              anchor={readOnlySelection.anchor}
+              label={t('chat.artifactRewrite.action')}
+              onActivate={() => onRewriteSelection(readOnlySelection)}
+              onDismiss={() => setReadOnlySelection(null)}
+            />
           )}
-        </article>
+        </>
       ) : (
         <WriterIRDocumentEditor
           document={draft}
@@ -773,6 +843,12 @@ export function WriterIRControl({
           onChange={handleDocumentChange}
           onFocus={beginTextEdit}
           onBlur={handleTextBlur}
+          onRewriteSelection={
+            !dirty && !saving && !externalUpdate ? onRewriteSelection : undefined
+          }
+          rewritePreview={rewritePreview}
+          onRewritePreviewApplied={onRewritePreviewApplied}
+          onRewritePreviewRejected={onRewritePreviewRejected}
         />
       )}
     </section>

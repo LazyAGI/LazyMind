@@ -1,0 +1,222 @@
+.artifact-rewrite-dialog {
+  position: fixed;
+  z-index: 1200;
+  display: flex;
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(540px, calc(100vh - 32px));
+  flex-direction: column;
+  border: 1px solid #dbe3ee;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.18);
+  color: #1e293b;
+  transform: translateX(-50%);
+}
+
+.artifact-rewrite-dialog__header,
+.artifact-rewrite-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+}
+
+.artifact-rewrite-dialog__header {
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.artifact-rewrite-dialog__header h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.artifact-rewrite-dialog__header button,
+.artifact-rewrite-dialog__footer button {
+  min-height: 32px;
+  padding: 5px 11px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+}
+
+.artifact-rewrite-dialog__header button {
+  width: 32px;
+  padding: 0;
+  font-size: 18px;
+}
+
+.artifact-rewrite-dialog__header button:focus-visible,
+.artifact-rewrite-dialog__footer button:focus-visible,
+.artifact-rewrite-dialog__instruction textarea:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.artifact-rewrite-dialog__footer {
+  justify-content: flex-end;
+  border-top: 1px solid #e2e8f0;
+}
+
+.artifact-rewrite-dialog__primary {
+  border-color: #2563eb !important;
+  background: #2563eb !important;
+  color: #fff !important;
+}
+
+.artifact-rewrite-dialog__body {
+  overflow: auto;
+  padding: 16px 18px;
+}
+
+.artifact-rewrite-dialog__instruction {
+  display: grid;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.artifact-rewrite-dialog__instruction textarea {
+  min-height: 112px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  color: #1e293b;
+  font: inherit;
+  font-weight: 400;
+}
+
+.artifact-rewrite-dialog__diff {
+  display: grid;
+  gap: 10px;
+}
+
+.artifact-rewrite-dialog__diff-summary {
+  display: flex;
+  gap: 8px;
+}
+
+.artifact-rewrite-dialog__diff-label {
+  padding: 3px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.artifact-rewrite-dialog__diff-label--before {
+  color: #b42318;
+  background: #fef3f2;
+}
+
+.artifact-rewrite-dialog__diff-label--after {
+  color: #067647;
+  background: #ecfdf3;
+}
+
+.artifact-rewrite-dialog__diff-content {
+  padding: 12px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  color: #334155;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.artifact-rewrite-dialog__diff-removal {
+  color: #b42318;
+  background: #fee4e2;
+  text-decoration: line-through;
+}
+
+.artifact-rewrite-dialog__diff-addition {
+  color: #067647;
+  background: #d1fadf;
+}
+
+.artifact-rewrite-dialog__error {
+  margin: 12px 0 0;
+  color: #b42318;
+  font-size: 13px;
+}
+
+.artifact-rewrite-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.artifact-rewrite-inline-diff {
+  margin-block: 0;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: #f8fafc;
+}
+
+.artifact-rewrite-inline-diff__overlay {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.artifact-rewrite-inline-diff__content {
+  min-height: 1.5em;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: #f8fafc;
+  color: #1e293b;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.artifact-rewrite-inline-diff__removed {
+  color: #b42318;
+  background: #fee4e2;
+  text-decoration: line-through;
+}
+
+.artifact-rewrite-inline-diff__added {
+  color: #067647;
+  background: #d1fadf;
+}
+
+.artifact-rewrite-inline-diff__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 8px 0 14px;
+}
+
+.artifact-rewrite-inline-diff__actions button {
+  min-height: 32px;
+  padding: 5px 11px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+}
+
+.artifact-rewrite-inline-diff__actions button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.artifact-rewrite-inline-diff__apply {
+  border-color: #2563eb !important;
+  background: #2563eb !important;
+  color: #fff !important;
+}
+
+.artifact-rewrite-inline-diff__actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.artifact-rewrite-inline-diff__error {
+  margin: 0 auto 0 0;
+  color: #b42318;
+  font-size: 13px;
+}

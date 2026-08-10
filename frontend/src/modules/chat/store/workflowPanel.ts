@@ -44,6 +44,12 @@ const DRAFT_LS_PREFIX = 'slotDraft:';
 
 const _drafts = new Map<string, DraftEntry>();
 
+// A write-back can finish while a session request that started earlier is still
+// in flight. Do not discard the refresh in that case: queue one follow-up load
+// so the selected artifact eventually converges to the new provider_sync revision.
+const _activeSessionLoads = new Map<string, Promise<void>>();
+const _queuedActiveSessionLoads = new Map<string, { silentError?: boolean }>();
+
 function _draftKey(sessionId: string, slotId: string, listIndex: number): string {
   return `${sessionId}:${slotId}:${listIndex}`;
 }
@@ -378,6 +384,7 @@ interface WorkflowStore {
     value: any,
     contentType?: string,
     mode?: 'draft' | 'checkpoint',
+    baseRevision?: number,
   ) => Promise<number | undefined>;
   reorderSlotItems: (sessionId: string, slotId: string, newSortOrderSeq: number[], version: number) => Promise<void>;
   getSlotVersions: (sessionId: string, slotId: string, listIndex: number) => Promise<SlotVersionEntry[]>;
@@ -474,54 +481,80 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
 
   loadActiveSession: async (conversationId, options) => {
     if (!conversationId) return;
-    // Deduplicate concurrent calls for the same conversation.
-    if (get().loadingByConversation[conversationId]) return;
-    set((s) => ({
-      loadingByConversation: { ...s.loadingByConversation, [conversationId]: true },
-    }));
-    try {
-      const requestOptions = options?.silentError
-        ? ({ silentError: true } as never)
-        : undefined;
-      const res = await WorkflowSessionApi().getLatestSession(
-        conversationId,
-        requestOptions,
-      );
-      const session: WorkflowSession | null = res?.data?.data?.session ?? null;
-      // Runtime controls and rollback candidates come from Go's projection.
-      // Steps are attempt history only; they never define Past/Ready locally.
-      if (session?.session_id) {
-        try {
-          const [stepsRes, projectionRes] = await Promise.all([
-            WorkflowSessionApi().getSteps(session.session_id, requestOptions),
-            WorkflowSessionApi().getProjection(
-              session.session_id,
-              { silentError: true } as never,
-            ),
-          ]);
-          const rawSteps = stepsRes?.data?.data?.steps ?? [];
-          session.steps = rawSteps.filter((s: WorkflowSessionStep) => s.step_id !== '__end__');
-          session.projection = projectionRes?.data?.data?.projection ?? {};
-          session.status = reconcileWorkflowSessionStatus(session.status, session.projection);
-        } catch (error) {
-          session.steps = [];
-          session.projection = {};
-          const errorCode = extractErrorCode(error);
-          if (errorCode === "WORKFLOW_DEFINITION_CHANGED") {
-            session.runtime_error_code = errorCode;
-            session.runtime_error_message = getLocalizedErrorMessage(error);
+    const activeLoad = _activeSessionLoads.get(conversationId);
+    if (activeLoad) {
+      const queuedOptions = _queuedActiveSessionLoads.get(conversationId);
+      _queuedActiveSessionLoads.set(conversationId, {
+        silentError: queuedOptions
+          ? Boolean(queuedOptions.silentError && options?.silentError)
+          : options?.silentError,
+      });
+      await activeLoad;
+      return;
+    }
+
+    const load = (async () => {
+      set((s) => ({
+        loadingByConversation: { ...s.loadingByConversation, [conversationId]: true },
+      }));
+      try {
+        const requestOptions = options?.silentError
+          ? ({ silentError: true } as never)
+          : undefined;
+        const res = await WorkflowSessionApi().getLatestSession(
+          conversationId,
+          requestOptions,
+        );
+        const session: WorkflowSession | null = res?.data?.data?.session ?? null;
+        // Runtime controls and rollback candidates come from Go's projection.
+        // Steps are attempt history only; they never define Past/Ready locally.
+        if (session?.session_id) {
+          try {
+            const [stepsRes, projectionRes] = await Promise.all([
+              WorkflowSessionApi().getSteps(session.session_id, requestOptions),
+              WorkflowSessionApi().getProjection(
+                session.session_id,
+                { silentError: true } as never,
+              ),
+            ]);
+            const rawSteps = stepsRes?.data?.data?.steps ?? [];
+            session.steps = rawSteps.filter((s: WorkflowSessionStep) => s.step_id !== '__end__');
+            session.projection = projectionRes?.data?.data?.projection ?? {};
+            session.status = reconcileWorkflowSessionStatus(session.status, session.projection);
+          } catch (error) {
+            session.steps = [];
+            session.projection = {};
+            const errorCode = extractErrorCode(error);
+            if (errorCode === "WORKFLOW_DEFINITION_CHANGED") {
+              session.runtime_error_code = errorCode;
+              session.runtime_error_message = getLocalizedErrorMessage(error);
+            }
           }
         }
+        get().setSession(conversationId, session);
+        // Also refresh dismissed sessions so the restore button appears immediately on load.
+        get().fetchDismissedSessions(conversationId);
+      } catch {
+        // ignore
+      } finally {
+        set((s) => ({
+          loadingByConversation: { ...s.loadingByConversation, [conversationId]: false },
+        }));
       }
-      get().setSession(conversationId, session);
-      // Also refresh dismissed sessions so the restore button appears immediately on load.
-      get().fetchDismissedSessions(conversationId);
-    } catch {
-      // ignore
+    })();
+
+    _activeSessionLoads.set(conversationId, load);
+    try {
+      await load;
     } finally {
-      set((s) => ({
-        loadingByConversation: { ...s.loadingByConversation, [conversationId]: false },
-      }));
+      if (_activeSessionLoads.get(conversationId) === load) {
+        _activeSessionLoads.delete(conversationId);
+      }
+      const queuedOptions = _queuedActiveSessionLoads.get(conversationId);
+      if (queuedOptions) {
+        _queuedActiveSessionLoads.delete(conversationId);
+        await get().loadActiveSession(conversationId, queuedOptions);
+      }
     }
   },
 
@@ -591,9 +624,9 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     await WorkflowSessionApi().deleteSlotItem(sessionId, slotId, listIndex, orderVersion);
   },
 
-  patchSlotItemValue: async (sessionId, slotId, listIndex, value, contentType, mode) => {
+  patchSlotItemValue: async (sessionId, slotId, listIndex, value, contentType, mode, baseRevision) => {
     const res = await WorkflowSessionApi().patchSlotItem(
-      sessionId, slotId, listIndex, value, contentType, mode,
+      sessionId, slotId, listIndex, value, contentType, mode, baseRevision,
     );
     const revision = res?.data?.data?.revision;
     return typeof revision === 'number' ? revision : undefined;

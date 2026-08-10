@@ -31,6 +31,7 @@ from lazyllm.tools.writer.tools.revision_tools import apply_patch_to_ir
 from lazyllm.tools.writer.utils import (
     load_artifact_json,
     parse_document_markdown,
+    render_document_markdown,
     save_artifact_json,
 )
 from lazymind.chat.engine.subagent.context import require_context
@@ -203,6 +204,26 @@ def _save_writer_document(
         name, content, WriterToolkitBase.WRITER_IR_SCHEMA, directory=directory,
         extra_meta=extra_meta,
     )
+
+
+def _emit_draft_markdown_preview(document_path: str) -> None:
+    """Publish a saved writer document through the draft Markdown stream."""
+    try:
+        document = _read_json_file(document_path)
+        markdown = (
+            document
+            if isinstance(document, str)
+            else render_document_markdown(WriterDocument.model_validate(document))
+        )
+    except Exception:
+        return
+    if not markdown:
+        return
+
+    events = DraftMarkdownStreamEventEmitter(require_context().emit)
+    for offset in range(0, len(markdown), 8192):
+        events.feed(markdown[offset:offset + 8192])
+    events.end()
 
 
 def _markdown_filename(title: str) -> str:

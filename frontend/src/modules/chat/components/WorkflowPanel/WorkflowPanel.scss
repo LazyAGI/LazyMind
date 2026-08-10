@@ -9,18 +9,94 @@
   transition: border-color 0.2s;
 
   &--expanded {
+    // Keep the expanded panel inside the viewport. Individual artifact content
+    // owns scrolling so the middle workspace never becomes a scroll container.
     position: absolute;
-    inset: 16px calc(clamp(320px, 27vw, 440px) + 16px) 16px 16px;
+    top: 16px;
+    left: 16px;
+    right: calc(clamp(320px, 27vw, 440px) + 16px);
+    bottom: 16px;
+    min-height: 0;
     z-index: 100;
     border-color: #dbe4f0;
     border-radius: 12px;
     box-shadow: 0 8px 28px rgba(15, 23, 42, 0.1);
 
+    .workflow-panel__header,
+    .workflow-panel__tabs,
+    .workflow-panel__footer {
+      flex-shrink: 0;
+    }
+
     .workflow-panel__body {
-      flex: 1;
+      display: flex;
+      flex: 1 1 0;
+      flex-direction: column;
+      min-height: 0;
+      max-height: none;
+      overflow: hidden;
+    }
+
+    .workflow-panel__body > [role='tabpanel']:not([hidden]),
+    .workflow-panel__tab-content {
+      display: flex;
+      flex: 1 1 0;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .workflow-panel__tab-content--list > .workflow-panel__named-slot {
+      flex: 1 1 0;
+      min-height: 0;
+    }
+
+    .workflow-panel__tab-content--list
+      > .workflow-panel__named-slot
+      > [role='button'] {
+      display: flex;
+      flex: 1 1 0;
+      min-height: 0;
+    }
+
+    .workflow-panel__tab-content--list
+      > .workflow-panel__named-slot
+      > [role='button']
+      > .workflow-slot--artifact:not(.workflow-slot--pending):not(.workflow-slot--error) {
+      flex: 1 1 0;
+      min-height: 0;
+    }
+
+    // Stream previews are rendered directly in the named slot instead of
+    // through SlotRenderer's clickable wrapper, so they need the same height
+    // contract as a persisted artifact.
+    .workflow-panel__tab-content--list
+      > .workflow-panel__named-slot
+      > .workflow-slot--artifact-stream {
+      flex: 1 1 0;
+      min-height: 0;
+    }
+
+    .workflow-panel__tab-content--list
+      > .workflow-panel__named-slot
+      .workflow-slot__artifact-body {
+      flex: 1 1 0;
       min-height: 0;
       max-height: none;
       overflow: auto;
+      overscroll-behavior: contain;
+    }
+
+    .writer-markdown-editor {
+      flex: 1 1 0;
+      min-height: 0;
+      max-height: none;
+    }
+
+    .writer-markdown-editor__surface {
+      flex: 1 1 0;
+      min-height: 0;
+      max-height: none;
     }
   }
 
@@ -2132,6 +2208,37 @@
   &::-webkit-scrollbar-thumb {
     background: #dbe2ea;
     border-radius: 999px;
+  }
+}
+
+.workflow-slot__artifact-body--markdown {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.workflow-slot--artifact-stream {
+  min-height: 72px;
+}
+
+.workflow-slot__artifact-stream-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.workflow-slot__artifact-stream-cursor {
+  width: 6px;
+  height: 14px;
+  background: #2563eb;
+  animation: workflow-artifact-stream-cursor 0.9s steps(2, start) infinite;
+}
+
+@keyframes workflow-artifact-stream-cursor {
+  50% {
+    opacity: 0;
   }
 }
 

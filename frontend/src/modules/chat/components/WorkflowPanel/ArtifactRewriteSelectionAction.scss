@@ -1,0 +1,36 @@
+.artifact-rewrite-selection-action {
+  position: fixed;
+  z-index: 1100;
+  min-height: 32px;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #1d4ed8;
+  box-shadow: 0 6px 18px rgba(30, 64, 175, 0.28);
+  color: #fff;
+  font: 600 13px/1.2 inherit;
+  cursor: pointer;
+}
+
+.artifact-rewrite-selection-action--above {
+  transform: translate(-50%, -100%);
+}
+
+.artifact-rewrite-selection-action--below {
+  transform: translateX(-50%);
+}
+
+.artifact-rewrite-selection-action:hover {
+  background: #1e40af;
+}
+
+.artifact-rewrite-selection-action:disabled {
+  background: #64748b;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.artifact-rewrite-selection-action:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
