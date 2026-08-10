@@ -330,6 +330,47 @@ func TestLocalFSRecommendationsUseConfiguredDirectoryName(t *testing.T) {
 		page.Items[0].Children[0].Children[0].ObjectKey != "/workspace/Downloads/MyBaiduDownload" {
 		t.Fatalf("recommendations should preserve the full path tree, got %+v", page.Items)
 	}
+
+	flatPage, err := engine.RecommendList(context.Background(), TargetTreeRecommendationRequest{AgentID: "agent-1"})
+	if err != nil {
+		t.Fatalf("list recommended local paths: %v", err)
+	}
+	if len(flatPage.Items) != 1 ||
+		flatPage.Items[0].ObjectKey != "/workspace/Downloads/MyBaiduDownload" ||
+		len(flatPage.Items[0].Children) != 0 {
+		t.Fatalf("recommendation list should contain only flat matched nodes, got %+v", flatPage.Items)
+	}
+}
+
+func TestFlattenRecommendedTreeNodesReturnsAllMatchesWithoutAncestors(t *testing.T) {
+	t.Parallel()
+
+	nodes := []TreeNode{{
+		ObjectKey:     "/workspace",
+		DisplayName:   "workspace",
+		ConnectorType: "local_fs",
+		Children: []TreeNode{
+			{ObjectKey: "/workspace/MyBaiduDownload", DisplayName: "MyBaiduDownload", ConnectorType: "local_fs"},
+			{
+				ObjectKey:     "/workspace/archive",
+				DisplayName:   "archive",
+				ConnectorType: "local_fs",
+				Children: []TreeNode{
+					{ObjectKey: "/workspace/archive/BaiduDownloadBackup", DisplayName: "BaiduDownloadBackup", ConnectorType: "local_fs"},
+				},
+			},
+		},
+	}}
+
+	items := flattenRecommendedTreeNodes(nodes, []RecommendedLocalPathRule{{Pattern: "BaiduDownload"}})
+	if len(items) != 2 || items[0].ObjectKey != "/workspace/MyBaiduDownload" || items[1].ObjectKey != "/workspace/archive/BaiduDownloadBackup" {
+		t.Fatalf("expected all matched nodes in traversal order, got %+v", items)
+	}
+	for _, item := range items {
+		if len(item.Children) != 0 {
+			t.Fatalf("flat recommendation item must not contain children, got %+v", item)
+		}
+	}
 }
 
 func TestLocalFSRecommendationsMatchMultiLevelPathByExactSegments(t *testing.T) {

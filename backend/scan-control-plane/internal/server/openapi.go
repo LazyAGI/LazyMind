@@ -83,6 +83,9 @@ func openAPIPaths() map[string]any {
 		"/api/scan/binding-targets/tree/recommendations": map[string]any{
 			"post": operation("recommendBindingTargets", "BindingTargetRecommendationRequest", "TreeNodePage"),
 		},
+		"/api/scan/binding-targets/tree/recommendations-list": map[string]any{
+			"post": operation("listRecommendedBindingTargets", "BindingTargetRecommendationRequest", "TreeNodePage"),
+		},
 		"/api/scan/binding-targets/validate": map[string]any{
 			"post": operation("validateBindingTarget", "ValidateBindingTargetRequest", "ValidateBindingTargetResponse"),
 		},

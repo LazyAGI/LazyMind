@@ -66,6 +66,14 @@ func (h *Handler) searchBindingTargets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) recommendBindingTargets(w http.ResponseWriter, r *http.Request) {
+	h.handleRecommendBindingTargets(w, r, false)
+}
+
+func (h *Handler) listRecommendedBindingTargets(w http.ResponseWriter, r *http.Request) {
+	h.handleRecommendBindingTargets(w, r, true)
+}
+
+func (h *Handler) handleRecommendBindingTargets(w http.ResponseWriter, r *http.Request, flatten bool) {
 	if h.targetTree == nil {
 		writeError(w, missingDependency("target tree engine"))
 		return
@@ -85,7 +93,12 @@ func (h *Handler) recommendBindingTargets(w http.ResponseWriter, r *http.Request
 		return
 	}
 	req.ProviderOptions = withActorProviderOptions(req.ProviderOptions, actor)
-	page, err := h.targetTree.Recommend(r.Context(), req)
+	var page tree.TreeNodePage
+	if flatten {
+		page, err = h.targetTree.RecommendList(r.Context(), req)
+	} else {
+		page, err = h.targetTree.Recommend(r.Context(), req)
+	}
 	if err != nil {
 		writeError(w, err)
 		return

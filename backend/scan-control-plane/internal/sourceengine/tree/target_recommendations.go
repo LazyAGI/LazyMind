@@ -27,6 +27,15 @@ func (e *DefaultTargetTreeEngine) Recommend(ctx context.Context, req TargetTreeR
 	return e.recommendLocalPaths(ctx, req, RecommendedLocalPathRules)
 }
 
+func (e *DefaultTargetTreeEngine) RecommendList(ctx context.Context, req TargetTreeRecommendationRequest) (TreeNodePage, error) {
+	page, err := e.Recommend(ctx, req)
+	if err != nil {
+		return TreeNodePage{}, err
+	}
+	page.Items = flattenRecommendedTreeNodes(page.Items, RecommendedLocalPathRules)
+	return page, nil
+}
+
 func (e *DefaultTargetTreeEngine) recommendLocalPaths(ctx context.Context, req TargetTreeRecommendationRequest, rules []RecommendedLocalPathRule) (TreeNodePage, error) {
 	result := TreeNodePage{
 		Items:         []TreeNode{},
@@ -140,4 +149,31 @@ func mergeRecommendedTreeChildren(parent *searchPathNode, children []TreeNode) {
 		}
 		mergeRecommendedTreeChildren(child, childNode.Children)
 	}
+}
+
+func flattenRecommendedTreeNodes(nodes []TreeNode, rules []RecommendedLocalPathRule) []TreeNode {
+	items := make([]TreeNode, 0)
+	seen := make(map[string]struct{})
+	var visit func([]TreeNode)
+	visit = func(current []TreeNode) {
+		for _, node := range current {
+			for _, rule := range rules {
+				pattern := strings.TrimSpace(rule.Pattern)
+				if pattern == "" || !treeNodeSearchMatches(node, pattern) {
+					continue
+				}
+				key := treeNodeIdentity(node)
+				if _, ok := seen[key]; !ok && key != "" {
+					seen[key] = struct{}{}
+					item := node
+					item.Children = nil
+					items = append(items, item)
+				}
+				break
+			}
+			visit(node.Children)
+		}
+	}
+	visit(nodes)
+	return items
 }

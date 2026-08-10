@@ -187,6 +187,7 @@ type TargetTreeEngine interface {
 	ListChildren(ctx context.Context, req TargetTreeChildrenRequest) (TreeNodePage, error)
 	Search(ctx context.Context, req TargetTreeSearchRequest) (TreeNodePage, error)
 	Recommend(ctx context.Context, req TargetTreeRecommendationRequest) (TreeNodePage, error)
+	RecommendList(ctx context.Context, req TargetTreeRecommendationRequest) (TreeNodePage, error)
 }
 
 type SourceTreeQueryEngine interface {
