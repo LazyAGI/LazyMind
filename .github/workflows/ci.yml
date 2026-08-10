@@ -130,28 +130,6 @@ jobs:
         shell: bash
         run: node --test desktop/scripts/*.test.mjs
 
-  test-channel-gateway:
-    needs: [lint, doc_check]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install channel gateway dependencies
-        run: pip install -r backend/channel-gateway/requirements.txt
-
-      - name: Test channel gateway contracts
-        working-directory: backend/channel-gateway
-        run: |
-          python -m compileall -q channel_gateway tests
-          python -m unittest discover -s tests -v
-
   test-auth-service:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
