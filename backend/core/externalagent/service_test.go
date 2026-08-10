@@ -1742,6 +1742,69 @@ func TestExecutionCancelRemovesSubscriber(t *testing.T) {
 	}
 }
 
+func TestTurnStartCommitFailureRemainsControlled(t *testing.T) {
+	db := testDB(t)
+	now := time.Now()
+	record := orm.ExternalAgentRun{
+		ID: "run-start-commit-failure", RequestID: "request-start-commit-failure",
+		ConversationID: "conversation-start-commit-failure", HistoryID: "history-start-commit-failure",
+		Provider: ProviderCodex, ProviderThreadID: "thread-start-commit-failure",
+		ActorUserID: "user-start-commit-failure", Action: "start",
+		Status: runStatusStarting, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&record).Error; err != nil {
+		t.Fatal(err)
+	}
+	const callbackName = "test:fail-turn-start-commit"
+	if err := db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "external_agent_runs" {
+			tx.AddError(errors.New("injected turn/start commit failure"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(callbackName) })
+
+	transport := newScriptedTransport(map[string][]any{
+		"turn/start": {map[string]any{"turn": map[string]any{"id": "turn-started-remotely"}}},
+	})
+	client := clientForTransport(transport)
+	run := newManagedRun(record, "query", 1)
+	events := run.subscribe()
+	service := &Service{
+		db: db, client: client,
+		byThread: map[string]*managedRun{record.ProviderThreadID: run},
+		byRequest: map[string]*managedRun{
+			ProviderCodex + "\x00" + record.RequestID: run,
+		},
+		requests: map[string]*pendingRequest{},
+		loaded:   map[string]int64{record.ProviderThreadID: client.Generation()},
+	}
+
+	service.startRun(run)
+	event := <-events
+	if event.Type != "control_error" || event.Terminal {
+		t.Fatalf("unexpected event after commit failure: %#v", event)
+	}
+	current, _, _, _ := run.snapshot()
+	if current.Status != runStatusStarting || current.ProviderTurnID != "" {
+		t.Fatalf("in-memory run escaped fail-closed state: %#v", current)
+	}
+	var persisted orm.ExternalAgentRun
+	if err := db.First(&persisted, "id = ?", record.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != runStatusStarting || persisted.ProviderTurnID != "" {
+		t.Fatalf("persisted run escaped fail-closed state: %#v", persisted)
+	}
+	service.mu.Lock()
+	controlled := service.byThread[record.ProviderThreadID] == run
+	service.mu.Unlock()
+	if !controlled {
+		t.Fatal("turn/start commit failure released the controlled thread")
+	}
+}
+
 func TestManagedRunSubscribeReplaysBuffer(t *testing.T) {
 	run := newManagedRun(orm.ExternalAgentRun{ID: "r1", HistoryID: "h1"}, "q", 1)
 	if got := run.appendAnswer("hello "); got != "hello " {
