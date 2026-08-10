@@ -11,6 +11,7 @@ from lazymind.chat.api import (
     agent_control_routes,
     chat_routes,
     health_routes,
+    llm_task_routes,
     model_check_routes,
     model_features_routes,
     workflow_routes,
@@ -49,6 +50,7 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
         app.include_router(skill_review_routes.router)
         app.include_router(model_features_routes.router)
         app.include_router(model_check_routes.router)
+        app.include_router(llm_task_routes.router)
     return app
 
 
