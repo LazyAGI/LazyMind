@@ -177,3 +177,30 @@ the important findings, and produces the final result material for the user.
 		t.Fatalf("expected substantive scenario content to pass: %v", err)
 	}
 }
+
+func TestReusableSkillScriptsKeepsOnlyOriginalScriptFiles(t *testing.T) {
+	pkg := map[string]any{
+		"files": []any{
+			map[string]any{"path": "scripts/tools/check.py", "content": "def check():\n    return True\n"},
+			map[string]any{"path": "scripts/helpers/format.py", "content": "def format_value(v):\n    return str(v)\n"},
+			map[string]any{"path": "SKILL.md", "content": "# Skill"},
+		},
+	}
+	report := map[string]any{
+		"scripts/tools/check.py": map[string]any{"classification": "importable_tool"},
+		"scripts/helpers/format.py": map[string]any{
+			"classification": "wrappable_command",
+		},
+		"synthesis_checklist": "function runSynthesisCheck() { return true; }",
+	}
+	scripts := reusableSkillScripts(pkg, report)
+	if scripts["scripts/tools/check.py"] == "" {
+		t.Fatalf("expected original script path to be preserved: %#v", scripts)
+	}
+	if scripts["scripts/helpers/format.py"] == "" {
+		t.Fatalf("expected nested script path to be preserved: %#v", scripts)
+	}
+	if _, ok := scripts["scripts/generated/synthesis_checklist.js"]; ok {
+		t.Fatalf("inline analysis code should not be stored as an original script: %#v", scripts)
+	}
+}

@@ -100,7 +100,12 @@ function parseGenerationDiagnostics(raw: string): { summary: string; diagnostics
 }
 
 function describeRepairFile(path: string): string {
+  if (path === 'workflow.yaml.ui') return '界面展示配置';
+  if (path === 'workflow.yaml.tools') return '工具声明';
+  if (path === 'workflow.yaml.slots') return '素材定义';
+  if (path === 'workflow.yaml.steps') return '步骤定义';
   if (path === 'workflow.yaml') return '基础结构与素材定义';
+  if (path === 'scenario/state.yml.steps') return '步骤执行配置';
   if (path === 'scenario/state.yml') return '执行流程与步骤配置';
   if (path === 'scenario/scenario.md') return '说明文档';
   if (path === 'scripts' || path === 'scripts/*' || path.startsWith('scripts/')) return '脚本与工具代码';
@@ -108,8 +113,42 @@ function describeRepairFile(path: string): string {
   return path;
 }
 
+function repairScopeForTarget(target: RepairTarget, plannedFiles: string[]) {
+  const planned = [...new Set(plannedFiles.map(describeRepairFile))];
+  switch (target) {
+    case 'ui':
+      return {
+        primary: ['界面展示配置'],
+        linked: planned.filter((item) => item !== '界面展示配置'),
+      };
+    case 'statemachine':
+      return {
+        primary: planned.filter((item) => item !== '说明文档' && item !== '脚本与工具代码'),
+        linked: [] as string[],
+      };
+    case 'scenario':
+      return {
+        primary: ['说明文档'],
+        linked: [] as string[],
+      };
+    case 'scripts':
+      return {
+        primary: planned.filter((item) => item === '脚本与工具代码' || item === '工具声明'),
+        linked: planned.filter((item) => item !== '脚本与工具代码' && item !== '工具声明'),
+      };
+    case 'full':
+      return {
+        primary: planned,
+        linked: [] as string[],
+      };
+    default:
+      return { primary: planned, linked: [] as string[] };
+  }
+}
+
 function describeDiagnosticLocation(path: string): string {
   if (path.startsWith('workflow.yaml.ui')) return '界面展示配置';
+  if (path.startsWith('workflow.yaml.tools')) return '工具声明';
   if (path.startsWith('workflow.yaml.slots')) return '素材定义';
   if (path.startsWith('workflow.yaml.steps')) return '步骤定义';
   if (path.startsWith('scenario/state.yml.transitions')) return '步骤流转关系';
@@ -276,7 +315,7 @@ export default function WorkflowDetailPage() {
     return (
       <div className="workflow-generation-issue-details">
         <div className="workflow-generation-issue-phase">
-          {raw.startsWith('[修复失败]') ? '失败位置：AI 修复阶段' : '需要关注的部分：'}
+          {raw.startsWith('[修复失败]') ? '失败位置：AI 修复阶段' : '可选优化建议：不处理也可以发布和试运行'}
         </div>
         <ul className="workflow-generation-issue-list">
           {lines.slice(0, 8).map((line, index) => <li key={`${line}:${index}`}>{line}</li>)}
@@ -683,14 +722,14 @@ export default function WorkflowDetailPage() {
     setRegenerateModalOpen(true);
   };
   const repairTargetOptions: Array<{ value: RepairTarget; label: string; description: string }> = [
-    { value: 'statemachine', label: '执行流程', description: '修复步骤顺序、连线、输入输出依赖；必要时会同步基础结构。' },
-    { value: 'ui', label: '界面展示', description: '修复素材在界面里的展示方式；必要时会同步素材定义。' },
-    { value: 'scenario', label: '说明文档', description: '补全或修正每个步骤的说明，不改执行流程。' },
-    { value: 'scripts', label: '脚本与工具', description: '修复工具脚本及其声明；可能同步执行流程和说明文档。' },
-    { value: 'full', label: '完整修复', description: '从基础结构、执行流程、说明文档到脚本做整体修复。' },
+    { value: 'statemachine', label: '执行流程', description: '修复步骤顺序、连线、输入输出依赖，以及这些内容需要的素材定义。' },
+    { value: 'ui', label: '界面展示', description: '修复素材在界面里的展示方式；只在引用不一致时同步相关素材。' },
+    { value: 'scenario', label: '说明文档', description: '补全或修正每个步骤的说明，不主动改执行流程。' },
+    { value: 'scripts', label: '脚本与工具', description: '修复工具脚本及工具声明；只在调用关系不一致时同步相关步骤配置。' },
+    { value: 'full', label: '完整修复', description: '整体修复结构、执行流程、说明文档、脚本与界面展示。' },
   ];
   const repairTargetMeta = repairTargetOptions.find((option) => option.value === repairTarget) ?? repairTargetOptions[0];
-  const repairPreviewFiles = [...new Set((repairPreview?.planned_files ?? []).map(describeRepairFile))];
+  const repairScope = repairScopeForTarget(repairTarget, repairPreview?.planned_files ?? []);
 
   // Determine which YAML content to use
   // state_layout_content stores x-layout JSON separately; merge it into stateYaml
@@ -1009,8 +1048,11 @@ export default function WorkflowDetailPage() {
                 message={t('selfEvolutionRun.workflowRepairPreview')}
                 description={(
                   <div className="workflow-repair-preview">
-                    {repairPreviewFiles.length > 0 && (
-                      <div>可能影响：{repairPreviewFiles.join('、')}</div>
+                    {repairScope.primary.length > 0 && (
+                      <div>主要修改：{repairScope.primary.join('、')}</div>
+                    )}
+                    {repairScope.linked.length > 0 && (
+                      <div>必要时同步：{repairScope.linked.join('、')}</div>
                     )}
                     {(repairPreview.diagnostics ?? []).length > 0 && (
                       <ul className="workflow-repair-preview-diagnostics">

@@ -328,8 +328,15 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 
 	// Encode scripts map as JSON string for storage.
 	scriptsJSON := "{}"
-	if len(scenarioResp.Scripts) > 0 {
-		if b, jerr := json.Marshal(scenarioResp.Scripts); jerr == nil {
+	finalScripts := map[string]string{}
+	for path, content := range payload.ReusableScripts {
+		finalScripts[path] = content
+	}
+	for path, content := range scenarioResp.Scripts {
+		finalScripts[path] = content
+	}
+	if len(finalScripts) > 0 {
+		if b, jerr := json.Marshal(finalScripts); jerr == nil {
 			scriptsJSON = string(b)
 		}
 	}

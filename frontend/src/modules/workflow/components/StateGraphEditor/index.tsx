@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Button, Tooltip } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import { useTranslation } from 'react-i18next';
@@ -10,6 +11,7 @@ import {
   AppstoreOutlined,
   SettingOutlined,
   FileOutlined,
+  FolderOutlined,
   ToolOutlined,
 } from '@ant-design/icons';
 import type { GraphModel } from './core/model';
@@ -48,6 +50,7 @@ export interface SkillConversionReport {
 
 // code file derived from tab
 type CodeFile = 'workflow.yaml' | 'state.yml' | 'scenario.md' | string;
+type ScriptTreeNode = { name: string; path: string; children: ScriptTreeNode[]; filePath?: string };
 
 // Map content tab to its default code file
 function codeFileForTab(tab: ContentTab): CodeFile {
@@ -110,9 +113,55 @@ interface Props {
 function parseScriptFiles(raw: string): Record<string, string> {
   try {
     const parsed = JSON.parse(raw || '{}');
-    if (typeof parsed === 'object' && parsed !== null) return parsed as Record<string, string>;
+    if (typeof parsed === 'string') return parseScriptFiles(parsed);
+    if (typeof parsed === 'object' && parsed !== null) {
+      const files: Record<string, string> = {};
+      Object.entries(parsed as Record<string, unknown>).forEach(([path, content]) => {
+        if (typeof content === 'string') files[path] = content;
+      });
+      return files;
+    }
   } catch {}
   return {};
+}
+
+function scriptDisplayPath(path: string): string[] {
+  return path.replace(/^scripts\//, '').split('/').filter(Boolean);
+}
+
+function buildScriptTree(paths: string[]): ScriptTreeNode[] {
+  const root: ScriptTreeNode[] = [];
+  const ensureDir = (nodes: ScriptTreeNode[], name: string, path: string): ScriptTreeNode => {
+    let node = nodes.find((item) => item.name === name && !item.filePath);
+    if (!node) {
+      node = { name, path, children: [] };
+      nodes.push(node);
+    }
+    return node;
+  };
+  [...paths].sort((a, b) => a.localeCompare(b)).forEach((filePath) => {
+    const parts = scriptDisplayPath(filePath);
+    let nodes = root;
+    let prefix = '';
+    parts.forEach((part, index) => {
+      prefix = prefix ? `${prefix}/${part}` : part;
+      if (index === parts.length - 1) {
+        nodes.push({ name: part, path: prefix, children: [], filePath });
+      } else {
+        const dir = ensureDir(nodes, part, prefix);
+        nodes = dir.children;
+      }
+    });
+  });
+  const sortNodes = (nodes: ScriptTreeNode[]) => {
+    nodes.sort((a, b) => {
+      if (Boolean(a.filePath) !== Boolean(b.filePath)) return a.filePath ? 1 : -1;
+      return a.name.localeCompare(b.name);
+    });
+    nodes.forEach((node) => sortNodes(node.children));
+  };
+  sortNodes(root);
+  return root;
 }
 
 function validationTargetNode(error: ValidationError, model: GraphModel): string | null {
@@ -239,6 +288,7 @@ export default function StateGraphEditor({
 
   // scripts content (JSON string: { "path": "content" })
   const [scriptsContent, setScriptsContent] = useState(initialScriptsContent ?? '{}');
+  const lastInitialScriptsContentRef = useRef(initialScriptsContent ?? '{}');
 
   // Undo history
   const historyRef = useRef<GraphModel[]>([]);
@@ -316,6 +366,13 @@ export default function StateGraphEditor({
   scenarioDataRef.current = scenarioData;
   const scriptsContentRef = useRef(scriptsContent);
   scriptsContentRef.current = scriptsContent;
+  useEffect(() => {
+    const next = initialScriptsContent ?? '{}';
+    if (next === lastInitialScriptsContentRef.current) return;
+    lastInitialScriptsContentRef.current = next;
+    setScriptsContent(next);
+    scriptsContentRef.current = next;
+  }, [initialScriptsContent]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -535,6 +592,7 @@ export default function StateGraphEditor({
   // All files available in the file tree (code mode)
   const coreFiles: CodeFile[] = ['state.yml', 'workflow.yaml', 'scenario.md'];
   const scriptFilePaths = Object.keys(scriptFiles);
+  const scriptTree = buildScriptTree(scriptFilePaths);
   const devMode = isDeveloperModeActive();
 
   const getCodeFileContent = (file: CodeFile): string => {
@@ -544,6 +602,33 @@ export default function StateGraphEditor({
     if (file === 'layout.json') return JSON.stringify(JSON.parse(serializeLayout(model)), null, 2);
     return scriptFiles[file] ?? '';
   };
+
+  const renderScriptTree = (nodes: ScriptTreeNode[], depth = 0): ReactNode => nodes.map((node) => {
+    if (!node.filePath) {
+      return (
+        <div key={`dir:${node.path}`}>
+          <div className="sge-code-folder-item" style={{ paddingLeft: 12 + depth * 14 }}>
+            <FolderOutlined className="sge-code-file-icon" />
+            <span className="sge-code-file-name">{node.name}</span>
+          </div>
+          {renderScriptTree(node.children, depth + 1)}
+        </div>
+      );
+    }
+    return (
+      <div
+        key={node.filePath}
+        className={`sge-code-file-item${activeCodeFile === node.filePath ? ' sge-code-file-item--active' : ''}`}
+        style={{ paddingLeft: 12 + depth * 14 }}
+        onClick={() => setActiveCodeFile(node.filePath!)}
+      >
+        <FileOutlined className="sge-code-file-icon" />
+        <Tooltip title={node.filePath}>
+          <span className="sge-code-file-name">{node.name}</span>
+        </Tooltip>
+      </div>
+    );
+  });
 
 
   return (
@@ -754,19 +839,8 @@ export default function StateGraphEditor({
               </div>
               {scriptFilePaths.length > 0 && (
                 <div className="sge-code-sidebar-section">
-                <span className="sge-code-sidebar-label">{t('selfEvolutionRun.sgeCodeSidebarScript')}</span>
-                  {scriptFilePaths.map((path) => (
-                    <div
-                      key={path}
-                      className={`sge-code-file-item${activeCodeFile === path ? ' sge-code-file-item--active' : ''}`}
-                      onClick={() => setActiveCodeFile(path)}
-                    >
-                      <FileOutlined className="sge-code-file-icon" />
-                      <Tooltip title={path}>
-                        <span className="sge-code-file-name">{path.replace('scripts/', '')}</span>
-                      </Tooltip>
-                    </div>
-                  ))}
+                  <span className="sge-code-sidebar-label">{t('selfEvolutionRun.sgeCodeSidebarScript')}</span>
+                  {renderScriptTree(scriptTree)}
                 </div>
               )}
               {devMode && (
