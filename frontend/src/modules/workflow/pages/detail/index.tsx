@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { localizeErrorCode } from '@/components/request';
 import { getWorkflowDraft, listWorkflowDrafts, updateWorkflowDraftContent, aiGenerateWorkflowDraft, repairWorkflowDraft, publishWorkflowDraft, listWorkflowVersions, getWorkflowVersion, editWorkflowVersion, getWorkflowGenerationAnalysis, confirmWorkflowWorkflow, previewWorkflowRepair, getWorkflowRepairRun, validateWorkflowDraft } from '../../workflowDraftApi';
 import type { WorkflowDraftRecord } from '../../workflowDraftApi';
-import type { WorkflowVersionSummary, WorkflowVersionContent, WorkflowGenerationAnalysis, RepairPreview } from '../../workflowDraftApi';
+import type { WorkflowVersionSummary, WorkflowVersionContent, WorkflowGenerationAnalysis, RepairPreview, WorkflowGenerateStartPhase } from '../../workflowDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
 import type { SavePayload, RepairTarget } from '../../components/StateGraphEditor';
 import type { ValidationError } from '../../components/StateGraphEditor/core/validator';
@@ -22,6 +22,103 @@ const GENERATING_STATUSES = new Set(['analyzing', 'generating', 'brief_done', 's
 const EDITOR_READY_STATUSES = new Set(['state_done', 'done']);
 
 type GeneratePhase = 'brief' | 'skeleton' | 'scenario_scripts' | 'repairing' | 'done' | 'failed' | 'idle';
+
+const GENERATE_START_PHASES: WorkflowGenerateStartPhase[] = ['design_brief', 'skeleton', 'state_machine', 'scenario_scripts'];
+
+type RegeneratePhaseOption = {
+  value: WorkflowGenerateStartPhase;
+  label: string;
+  description: string;
+  done: boolean;
+  disabled: boolean;
+  statusLabel: string;
+};
+
+type GenerationDiagnostic = {
+  code?: string;
+  path?: string;
+  message?: string;
+  severity?: string;
+};
+
+function generationPhaseLabel(raw: string): string {
+  if (/phase-?1 analysis/i.test(raw)) return '技能分析阶段';
+  if (/phase0 design_brief/i.test(raw)) return '需求理解阶段';
+  if (/phase1 skeleton|phase1 skeleton invalid/i.test(raw)) return '工作流结构阶段';
+  if (/phase2 state_machine|phase2 workflow|state_machine validation/i.test(raw)) return '执行流程阶段';
+  if (/phase3 scenario_scripts/i.test(raw)) return '说明与调试材料阶段';
+  if (/generation validation failed/i.test(raw)) return '最终校验阶段';
+  if (/resume point invalid/i.test(raw)) return '断点续跑检查';
+  return '生成过程';
+}
+
+function stripGenerationPrefix(raw: string): string {
+  return raw
+    .replace(/^phase-?1 analysis:\s*/i, '')
+    .replace(/^phase0 design_brief:\s*/i, '')
+    .replace(/^phase1 skeleton(?: invalid)?:\s*/i, '')
+    .replace(/^phase2 (?:state_machine|workflow)(?: validation failed)?:\s*/i, '')
+    .replace(/^phase3 scenario_scripts failed:\s*/i, '')
+    .replace(/^generation validation failed:\s*/i, '')
+    .replace(/^resume point invalid:\s*/i, '')
+    .trim();
+}
+
+function splitGenerationLines(raw: string): string[] {
+  return raw
+    .split(/\n+|;\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseGenerationDiagnostics(raw: string): { summary: string; diagnostics: GenerationDiagnostic[] } {
+  const compact = stripGenerationPrefix(raw);
+  const jsonStart = compact.indexOf('[');
+  if (jsonStart >= 0) {
+    const before = compact.slice(0, jsonStart).replace(/:\s*$/, '').trim();
+    const jsonText = compact.slice(jsonStart).trim();
+    try {
+      const parsed = JSON.parse(jsonText);
+      if (Array.isArray(parsed)) {
+        return {
+          summary: before,
+          diagnostics: parsed
+            .map((item) => item as Record<string, unknown>)
+            .map((item) => ({
+              code: String(item.code ?? item.Code ?? ''),
+              path: String(item.path ?? item.Path ?? ''),
+              message: String(item.message ?? item.Message ?? ''),
+              severity: String(item.severity ?? item.Severity ?? ''),
+            })),
+        };
+      }
+    } catch {
+      // Fall through to text rendering when the backend payload is not JSON.
+    }
+  }
+  return { summary: compact, diagnostics: [] };
+}
+
+function describeRepairFile(path: string): string {
+  if (path === 'workflow.yaml') return '基础结构与素材定义';
+  if (path === 'scenario/state.yml') return '执行流程与步骤配置';
+  if (path === 'scenario/scenario.md') return '说明文档';
+  if (path === 'scripts' || path === 'scripts/*' || path.startsWith('scripts/')) return '脚本与工具代码';
+  if (path === 'layout.json' || path === 'scenario/layout.json') return '调试布局';
+  return path;
+}
+
+function describeDiagnosticLocation(path: string): string {
+  if (path.startsWith('workflow.yaml.ui')) return '界面展示配置';
+  if (path.startsWith('workflow.yaml.slots')) return '素材定义';
+  if (path.startsWith('workflow.yaml.steps')) return '步骤定义';
+  if (path.startsWith('scenario/state.yml.transitions')) return '步骤流转关系';
+  if (path.startsWith('scenario/state.yml.steps')) return '步骤执行配置';
+  if (path.startsWith('scenario/state.yml')) return '执行流程';
+  if (path.startsWith('scenario/scenario.md')) return '说明文档';
+  if (path.startsWith('scripts')) return '脚本与工具代码';
+  return describeRepairFile(path);
+}
 
 function resolvePhase(status: string): GeneratePhase {
   switch (status) {
@@ -85,6 +182,8 @@ export default function WorkflowDetailPage() {
   const showArtifactsRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [regenerateModalOpen, setRegenerateModalOpen] = useState(false);
+  const [regenerateStartPhase, setRegenerateStartPhase] = useState<WorkflowGenerateStartPhase>('design_brief');
   const [repairModalOpen, setRepairModalOpen] = useState(false);
   // True while the :ai-repair API call is in-flight (keeps Modal open with a spinner).
   const [repairSubmitting, setRepairSubmitting] = useState(false);
@@ -137,6 +236,56 @@ export default function WorkflowDetailPage() {
     let h = 5381;
     for (let i = 0; i < content.length; i++) h = ((h << 5) + h) ^ content.charCodeAt(i);
     return (h >>> 0).toString(36);
+  }, []);
+  const renderGenerationErrorDetails = useCallback((raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return localizeErrorCode('2000509');
+    const parsed = parseGenerationDiagnostics(trimmed);
+    const diagnosticItems = parsed.diagnostics.filter((item) => item.severity !== 'warning');
+    const textLines = diagnosticItems.length > 0 ? [] : splitGenerationLines(parsed.summary || trimmed);
+    return (
+      <div className="workflow-generation-issue-details">
+        <div className="workflow-generation-issue-phase">失败位置：{generationPhaseLabel(trimmed)}</div>
+        {parsed.summary && diagnosticItems.length > 0 && (
+          <div className="workflow-generation-issue-summary">{parsed.summary}</div>
+        )}
+        {(diagnosticItems.length > 0 || textLines.length > 0) && (
+          <ul className="workflow-generation-issue-list">
+            {diagnosticItems.slice(0, 8).map((item, index) => {
+              const localized = item.code ? localizeErrorCode(item.code, item.message || item.code) : '';
+              const messageText = item.message || localized || item.code || localizeErrorCode('2000509');
+              return (
+                <li key={`${item.code}:${item.path}:${index}`}>
+                  {item.path ? <strong>{item.path}：</strong> : null}
+                  {messageText}
+                </li>
+              );
+            })}
+            {textLines.slice(0, 8).map((line, index) => <li key={`${line}:${index}`}>{line}</li>)}
+          </ul>
+        )}
+        {diagnosticItems.length > 8 && (
+          <div className="workflow-generation-issue-more">还有 {diagnosticItems.length - 8} 条诊断，请在“日志”或“AI 修复”里查看完整信息。</div>
+        )}
+      </div>
+    );
+  }, []);
+  const renderGenerationWarningDetails = useCallback((raw: string, repairDetails: string[] = []) => {
+    const lines = repairDetails.length > 0 ? repairDetails : splitGenerationLines(raw.replace(/^\[修复失败\]\s*/, ''));
+    if (lines.length === 0) return localizeErrorCode('2000509');
+    return (
+      <div className="workflow-generation-issue-details">
+        <div className="workflow-generation-issue-phase">
+          {raw.startsWith('[修复失败]') ? '失败位置：AI 修复阶段' : '需要关注的部分：'}
+        </div>
+        <ul className="workflow-generation-issue-list">
+          {lines.slice(0, 8).map((line, index) => <li key={`${line}:${index}`}>{line}</li>)}
+        </ul>
+        {lines.length > 8 && (
+          <div className="workflow-generation-issue-more">还有 {lines.length - 8} 条，请在“日志”里查看完整信息。</div>
+        )}
+      </div>
+    );
   }, []);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
@@ -250,14 +399,16 @@ export default function WorkflowDetailPage() {
     }
   }, [draft?.generate_status, startPolling]);
 
-  const handleRegenerate = useCallback(async () => {
+  const handleRegenerate = useCallback(async (startPhase?: WorkflowGenerateStartPhase) => {
     if (!workflowId || !draft) return;
     setIsRegenerating(true);
     try {
       const updated = await aiGenerateWorkflowDraft(workflowId, {
         description: draft.content || draft.name,
+        start_phase: startPhase ?? regenerateStartPhase,
       });
       setDraft(updated);
+      setRegenerateModalOpen(false);
       // Clear all dismissed banners so the new generation result is fully visible.
       setDismissedBanners(new Set());
       if (workflowId) {
@@ -269,7 +420,7 @@ export default function WorkflowDetailPage() {
     } finally {
       setIsRegenerating(false);
     }
-  }, [workflowId, draft, startPolling]);
+  }, [workflowId, draft, regenerateStartPhase, startPolling]);
 
   const handleRepair = useCallback(async () => {
     if (!workflowId) return;
@@ -492,6 +643,54 @@ export default function WorkflowDetailPage() {
   const isFailed = draft.generate_status === 'failed';
   const isPhase3Running = draft.generate_status === 'state_done';
   const viewingHistory = selectedRevision !== 'draft' && versionContent !== null;
+  const regeneratePhaseLabels: Record<WorkflowGenerateStartPhase, string> = {
+    design_brief: '重新理解需求',
+    skeleton: '重新生成工作流结构',
+    state_machine: '重新生成执行流程',
+    scenario_scripts: '重新生成说明与调试材料',
+  };
+  const regeneratePhaseDescriptions: Record<WorkflowGenerateStartPhase, string> = {
+    design_brief: '适合需求描述或技能理解不准确时使用，会重新完成全部生成步骤。',
+    skeleton: '适合输入、输出或步骤设计不合理时使用，会保留已理解的需求。',
+    state_machine: '适合步骤已有但执行顺序、依赖关系或分支逻辑不正确时使用。',
+    scenario_scripts: '适合核心结构和执行流程已可用，只需要补齐说明、脚本和最终校验时使用。',
+  };
+  const regeneratePhaseDone: Record<WorkflowGenerateStartPhase, boolean> = {
+    design_brief: Boolean(draft.design_brief_content?.trim()),
+    skeleton: Boolean(draft.workflow_yaml_content?.trim()),
+    state_machine: Boolean(draft.state_yaml_content?.trim()),
+    scenario_scripts: draft.generate_status === 'done' || Boolean(draft.scenario_content?.trim()),
+  };
+  const firstIncompletePhase = GENERATE_START_PHASES.find((phase) => !regeneratePhaseDone[phase]);
+  const regeneratePhaseOptions: RegeneratePhaseOption[] = GENERATE_START_PHASES.map((phase) => {
+    const done = regeneratePhaseDone[phase];
+    const isFirstIncomplete = firstIncompletePhase === phase;
+    return {
+      value: phase,
+      label: regeneratePhaseLabels[phase],
+      description: regeneratePhaseDescriptions[phase],
+      done,
+      disabled: !done && !isFirstIncomplete,
+      statusLabel: done ? '已完成' : isFirstIncomplete ? '未完成，可从这里继续' : '未完成，需先完成前序阶段',
+    };
+  });
+  const openRegenerateModal = () => {
+    const selectableOptions = regeneratePhaseOptions.filter((option) => !option.disabled);
+    const recommended = firstIncompletePhase
+      ?? selectableOptions[selectableOptions.length - 1]?.value
+      ?? 'design_brief';
+    setRegenerateStartPhase(recommended);
+    setRegenerateModalOpen(true);
+  };
+  const repairTargetOptions: Array<{ value: RepairTarget; label: string; description: string }> = [
+    { value: 'statemachine', label: '执行流程', description: '修复步骤顺序、连线、输入输出依赖；必要时会同步基础结构。' },
+    { value: 'ui', label: '界面展示', description: '修复素材在界面里的展示方式；必要时会同步素材定义。' },
+    { value: 'scenario', label: '说明文档', description: '补全或修正每个步骤的说明，不改执行流程。' },
+    { value: 'scripts', label: '脚本与工具', description: '修复工具脚本及其声明；可能同步执行流程和说明文档。' },
+    { value: 'full', label: '完整修复', description: '从基础结构、执行流程、说明文档到脚本做整体修复。' },
+  ];
+  const repairTargetMeta = repairTargetOptions.find((option) => option.value === repairTarget) ?? repairTargetOptions[0];
+  const repairPreviewFiles = [...new Set((repairPreview?.planned_files ?? []).map(describeRepairFile))];
 
   // Determine which YAML content to use
   // state_layout_content stores x-layout JSON separately; merge it into stateYaml
@@ -554,9 +753,9 @@ export default function WorkflowDetailPage() {
           closable
           onClose={() => dismissBanner('failed')}
           message={t('selfEvolutionRun.workflowDetailFailedBanner')}
-          description={localizeErrorCode('2000509')}
+          description={renderGenerationErrorDetails(draft.generate_error)}
           action={
-            <Button size="small" loading={isRegenerating} disabled={isRepairing} onClick={handleRegenerate}>
+            <Button size="small" loading={isRegenerating} disabled={isRepairing} onClick={openRegenerateModal}>
               {t('selfEvolutionRun.workflowDetailRegenerate')}
             </Button>
           }
@@ -571,7 +770,7 @@ export default function WorkflowDetailPage() {
           closable
           onClose={() => dismissBanner('generate_error')}
           message={t('selfEvolutionRun.workflowDetailGenerateWarningBanner')}
-          description={localizeErrorCode('2000509')}
+          description={renderGenerationErrorDetails(draft.generate_error)}
         />
       )}
 
@@ -583,9 +782,7 @@ export default function WorkflowDetailPage() {
           closable
           onClose={() => dismissBanner(`generate_warning:${contentKey(draft.generate_warning)}`)}
           message={draft.generate_warning.startsWith('[修复失败]') ? t('selfEvolutionRun.workflowDetailRepairFailedBanner') : t('selfEvolutionRun.workflowDetailPartialContentBanner')}
-          description={repairFailureDetails.length > 0
-            ? <ul>{repairFailureDetails.map((detail) => <li key={detail}>{detail}</li>)}</ul>
-            : localizeErrorCode('2000509')}
+          description={renderGenerationWarningDetails(draft.generate_warning, repairFailureDetails)}
         />
       )}
 
@@ -709,6 +906,45 @@ export default function WorkflowDetailPage() {
             showEmptyHint={showEmptyHint}
           />
         </div>
+      <Modal
+        open={regenerateModalOpen}
+        title="选择重新生成起点"
+        onCancel={() => setRegenerateModalOpen(false)}
+        confirmLoading={isRegenerating}
+        okText="开始生成"
+        cancelText="取消"
+        onOk={() => void handleRegenerate()}
+      >
+        <p style={{ marginBottom: 8, color: 'var(--color-text-secondary, #666)' }}>
+          系统会复用所选起点之前已成功的内容，并从这里继续完成后续生成。
+        </p>
+        <div className="workflow-regenerate-options">
+          {regeneratePhaseOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`workflow-regenerate-option${regenerateStartPhase === option.value ? ' selected' : ''}${option.disabled ? ' disabled' : ''}`}
+              disabled={option.disabled}
+              onClick={() => {
+                if (!option.disabled) {
+                  setRegenerateStartPhase(option.value);
+                }
+              }}
+            >
+              <span className="workflow-regenerate-option-radio" />
+              <span className="workflow-regenerate-option-copy">
+                <span className="workflow-regenerate-option-heading">
+                  <span className="workflow-regenerate-option-title">{option.label}</span>
+                  <span className={`workflow-regenerate-option-status${option.done ? ' done' : ''}`}>
+                    {option.statusLabel}
+                  </span>
+                </span>
+                <span className="workflow-regenerate-option-description">{option.description}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </Modal>
       {/* AI Repair Modal */}
       <Modal
         open={repairModalOpen}
@@ -740,7 +976,16 @@ export default function WorkflowDetailPage() {
           </div>
         ) : (
           <>
-            <Select value={repairTarget} onChange={(value)=>setRepairTarget(value)} style={{width:'100%',marginBottom:12}} options={[{value:'statemachine',label:t('selfEvolutionRun.workflowDetailRepairTargetStatemachine')},{value:'ui',label:t('selfEvolutionRun.workflowDetailRepairTargetUi')},{value:'scenario',label:t('selfEvolutionRun.workflowDetailRepairTargetScenario')},{value:'scripts',label:t('selfEvolutionRun.workflowDetailRepairTargetScripts')},{value:'full',label:t('selfEvolutionRun.workflowDetailRepairTargetFull')}]} />
+            <Select
+              value={repairTarget}
+              onChange={(value) => setRepairTarget(value)}
+              style={{ width: '100%', marginBottom: 12 }}
+              options={repairTargetOptions.map((option) => ({ value: option.value, label: option.label }))}
+            />
+            <div className="workflow-repair-target-summary">
+              <div className="workflow-repair-target-title">{repairTargetMeta.label}</div>
+              <div className="workflow-repair-target-description">{repairTargetMeta.description}</div>
+            </div>
             {(repairTarget === 'statemachine' || repairTarget === 'full') && repairValidationErrors.length > 0 && (
               <>
                 <p style={{ marginBottom: 6 }}>{t('selfEvolutionRun.workflowDetailRepairValidationBasis')}</p>
@@ -757,7 +1002,33 @@ export default function WorkflowDetailPage() {
                 </ul>
               </>
             )}
-            {repairPreview && <Alert type="info" showIcon message={t('selfEvolutionRun.workflowRepairPreview')} description={<><div>{(repairPreview.planned_files ?? []).join(', ')}</div>{(repairPreview.diagnostics ?? []).map(item=><div key={`${item.code}:${item.path}`}>{(item.severity || 'error').toUpperCase()} {item.path}: {localizeErrorCode(item.code, localizeErrorCode('2000509'))}</div>)}</>} />}
+            {repairPreview && (
+              <Alert
+                type="info"
+                showIcon
+                message={t('selfEvolutionRun.workflowRepairPreview')}
+                description={(
+                  <div className="workflow-repair-preview">
+                    {repairPreviewFiles.length > 0 && (
+                      <div>可能影响：{repairPreviewFiles.join('、')}</div>
+                    )}
+                    {(repairPreview.diagnostics ?? []).length > 0 && (
+                      <ul className="workflow-repair-preview-diagnostics">
+                        {(repairPreview.diagnostics ?? []).map((item) => (
+                          <li key={`${item.code}:${item.path}`}>
+                            <strong>{describeDiagnosticLocation(item.path)}：</strong>
+                            {item.message || localizeErrorCode(item.code, localizeErrorCode('2000509'))}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {(repairPreview.diagnostics ?? []).length === 0 && (
+                      <div>当前没有发现该范围内的阻塞问题，可以根据你的补充说明尝试修复。</div>
+                    )}
+                  </div>
+                )}
+              />
+            )}
             <p style={{ marginBottom: 8 }}>{t('selfEvolutionRun.workflowDetailRepairHintLabel')}</p>
             <Input.TextArea
               placeholder={repairTarget === 'scenario' ? t('selfEvolutionRun.workflowDetailRepairScenarioPlaceholder') : t('selfEvolutionRun.workflowDetailRepairStatePlaceholder')}

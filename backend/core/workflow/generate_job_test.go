@@ -1,0 +1,179 @@
+package workflow
+
+import (
+	"testing"
+
+	"lazymind/core/common/orm"
+	"lazymind/core/workflow/graphengine"
+)
+
+func TestValidateGeneratedWorkflowSkeletonRejectsPlaceholderOutput(t *testing.T) {
+	err := validateGeneratedWorkflowSkeleton(`
+id: ""
+name: ""
+slots:
+  - id: research_topic
+steps: []
+`)
+	if err == nil {
+		t.Fatal("expected placeholder skeleton to be rejected")
+	}
+}
+
+func TestValidateGeneratedWorkflowSkeletonAcceptsConcreteOutput(t *testing.T) {
+	err := validateGeneratedWorkflowSkeleton(`
+id: deep_research
+name: Deep Research
+slots:
+  - id: research_topic
+    type: text
+    external: true
+  - id: final_report
+    type: text
+steps:
+  - id: synthesize_report
+    label: Synthesize report
+`)
+	if err != nil {
+		t.Fatalf("expected concrete skeleton to pass: %v", err)
+	}
+}
+
+func TestValidateGenerateResumePointRequiresPriorArtifacts(t *testing.T) {
+	if err := validateGenerateResumePoint(orm.WorkflowDraft{}, generatePhaseDesignBrief); err != nil {
+		t.Fatalf("design_brief start should always be allowed: %v", err)
+	}
+	if err := validateGenerateResumePoint(orm.WorkflowDraft{}, generatePhaseSkeleton); err == nil {
+		t.Fatal("skeleton start should require design brief")
+	}
+	workflowYAML := `
+id: demo
+name: Demo
+slots:
+  - id: user_input
+    external: true
+  - id: result
+steps:
+  - id: summarize
+`
+	stateYAML := `
+transitions:
+  __start__: [{to: summarize}]
+  summarize: [{to: __end__}]
+steps:
+  summarize:
+    inputs: [{slot: user_input, required: true}]
+    outputs: [result]
+`
+	draft := orm.WorkflowDraft{
+		DesignBriefContent:  "brief",
+		WorkflowYAMLContent: workflowYAML,
+		StateYAMLContent:    stateYAML,
+	}
+	if err := validateGenerateResumePoint(draft, generatePhaseSkeleton); err != nil {
+		t.Fatalf("skeleton start should accept design brief: %v", err)
+	}
+	if err := validateGenerateResumePoint(draft, generatePhaseStateMachine); err != nil {
+		t.Fatalf("state_machine start should accept workflow yaml: %v", err)
+	}
+	if err := validateGenerateResumePoint(draft, generatePhaseScenarioScripts); err != nil {
+		t.Fatalf("scenario_scripts start should accept valid workflow+state: %v; diagnostics=%#v", err, diagnoseWorkflowWithProfile(workflowYAML, stateYAML, "", "{}", graphengine.ProfileGenerationPhase))
+	}
+}
+
+func TestValidateGenerateResumePointAllowsScenarioResumeWithOnlyUIErrors(t *testing.T) {
+	workflowYAML := `
+id: demo
+name: Demo
+slots:
+  - id: user_input
+    external: true
+  - id: result
+    exposed: true
+steps:
+  - id: summarize
+ui:
+  tabs:
+    - key: result
+      label: Result
+      contents:
+        - slot: result
+`
+	stateYAML := `
+transitions:
+  __start__:
+    - to: summarize
+  summarize:
+    - to: __end__
+steps:
+  summarize:
+    inputs:
+      - slot: user_input
+        required: true
+    outputs:
+      - result
+`
+	draft := orm.WorkflowDraft{
+		WorkflowYAMLContent: workflowYAML,
+		StateYAMLContent:    stateYAML,
+	}
+	diagnostics := diagnoseWorkflowWithProfile(workflowYAML, stateYAML, "", "{}", graphengine.ProfileGenerationPhase)
+	if !hasDiagnosticErrorsForTarget(diagnostics, "ui") {
+		t.Fatalf("fixture should have UI errors: %#v", diagnostics)
+	}
+	if hasDiagnosticErrorsForTarget(diagnostics, "statemachine") {
+		t.Fatalf("fixture should not have state machine errors: %#v", diagnostics)
+	}
+	if err := validateGenerateResumePoint(draft, generatePhaseScenarioScripts); err != nil {
+		t.Fatalf("scenario_scripts resume should not be blocked by UI-only errors: %v", err)
+	}
+}
+
+func TestValidateGeneratedScenarioContentRejectsPlaceholders(t *testing.T) {
+	stateYAML := `
+steps:
+  summarize:
+    outputs:
+      - result
+transitions:
+  __start__:
+    - to: summarize
+  summarize:
+    - to: __end__
+`
+	scenarioMD := `
+# Scenario
+
+### summarize (summarize)
+
+（暂无描述）
+`
+	if err := validateGeneratedScenarioContent(scenarioMD, stateYAML); err == nil {
+		t.Fatal("expected placeholder scenario content to be rejected")
+	}
+}
+
+func TestValidateGeneratedScenarioContentAcceptsSubstantiveSections(t *testing.T) {
+	stateYAML := `
+steps:
+  summarize:
+    outputs:
+      - result
+transitions:
+  __start__:
+    - to: summarize
+  summarize:
+    - to: __end__
+`
+	scenarioMD := `
+# Scenario
+
+### summarize (summarize)
+
+The summarize step reads the user input and upstream source material, identifies
+the important findings, and produces the final result material for the user.
+`
+	if err := validateGeneratedScenarioContent(scenarioMD, stateYAML); err != nil {
+		t.Fatalf("expected substantive scenario content to pass: %v", err)
+	}
+}

@@ -1,6 +1,9 @@
 package algo
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -89,5 +92,52 @@ func TestExtractScripts(t *testing.T) {
 	// Nil
 	if got := extractScripts(nil); got != nil {
 		t.Fatalf("nil got %v, want nil", got)
+	}
+}
+
+func TestRepairStateMachineUsesLLMTaskRunWithPatchTool(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != llmTaskRunPath {
+			t.Fatalf("path = %s, want %s", r.URL.Path, llmTaskRunPath)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":  "succeeded",
+			"task_id": "task-1",
+			"output": map[string]any{
+				"state_yaml":         "steps: {}\n",
+				"remaining_warnings": []string{},
+			},
+		})
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+
+	resp, err := RepairStateMachine(t.Context(), RepairStateMachineRequest{
+		WorkflowYAML: "id: demo\n",
+		StateYAML:    "steps: []\n",
+		Target:       "statemachine",
+		LLMConfig:    map[string]any{"llm": map[string]any{"model": "x"}},
+	})
+	if err != nil {
+		t.Fatalf("RepairStateMachine error: %v", err)
+	}
+	if resp.StateYAML != "steps: {}\n" {
+		t.Fatalf("state_yaml = %q", resp.StateYAML)
+	}
+	if captured["task_type"] != "workflow.repair" || captured["mode"] != "agent" {
+		t.Fatalf("unexpected task envelope: %#v", captured)
+	}
+	tools, _ := captured["tools"].([]any)
+	if len(tools) != 1 || tools[0].(map[string]any)["name"] != "str_replace" {
+		t.Fatalf("tools = %#v", captured["tools"])
+	}
+	input := captured["input"].(map[string]any)
+	files := input["files"].([]any)
+	if len(files) < 2 || files[0].(map[string]any)["path"] != "workflow.yaml" {
+		t.Fatalf("files = %#v", files)
 	}
 }

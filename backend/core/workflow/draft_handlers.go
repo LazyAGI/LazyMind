@@ -443,6 +443,7 @@ func AIGenerateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Description string `json:"description"`
 		SkillID     string `json:"skill_id"`
+		StartPhase  string `json:"start_phase"`
 		Reanalyze   bool   `json:"reanalyze"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -451,6 +452,11 @@ func AIGenerateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	body.Description = strings.TrimSpace(body.Description)
 	body.SkillID = strings.TrimSpace(body.SkillID)
+	body.StartPhase = normalizeGenerateStartPhase(body.StartPhase)
+	if body.StartPhase == "" {
+		common.ReplyErr(w, "invalid start_phase", http.StatusBadRequest)
+		return
+	}
 	if body.Description == "" && body.SkillID == "" {
 		common.ReplyErr(w, "description or skill_id is required", http.StatusBadRequest)
 		return
@@ -460,6 +466,10 @@ func AIGenerateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	var draft orm.WorkflowDraft
 	if err := db.Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
 		common.ReplyErr(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err := validateGenerateResumePoint(draft, body.StartPhase); err != nil {
+		common.ReplyErr(w, "invalid generation resume point: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -482,10 +492,10 @@ func AIGenerateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sourceUpdates := map[string]any{
-		"generate_status": generateStatusGenerating,
+		"generate_status": generateStatusForStartPhase(body.StartPhase),
 		"updated_at":      time.Now().UTC(),
 	}
-	if body.SkillID != "" {
+	if body.SkillID != "" && body.StartPhase == generatePhaseDesignBrief {
 		sourceUpdates["generate_status"] = generateStatusAnalyzing
 	}
 	// Set source_type on first generation (don't overwrite if already set by CreateWorkflowDraft).
@@ -513,8 +523,8 @@ func AIGenerateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "update failed", http.StatusInternalServerError)
 		return
 	}
-	draft.GenerateStatus = generateStatusGenerating
-	if body.SkillID != "" {
+	draft.GenerateStatus = generateStatusForStartPhase(body.StartPhase)
+	if body.SkillID != "" && body.StartPhase == generatePhaseDesignBrief {
 		draft.GenerateStatus = generateStatusAnalyzing
 	}
 	if st, ok := sourceUpdates["source_type"].(string); ok {
@@ -535,7 +545,7 @@ func AIGenerateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	selectedCandidateJSON := ""
 	reusableScripts := map[string]string(nil)
-	if body.SkillID != "" && !body.Reanalyze {
+	if body.SkillID != "" && body.StartPhase == generatePhaseDesignBrief && !body.Reanalyze {
 		var cached orm.WorkflowGenerationAnalysis
 		// Only a positive analysis is a reusable generated artifact. Re-run rejected
 		// and confirmation-required results so analyzer improvements cannot leave a
@@ -574,6 +584,7 @@ func AIGenerateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 			DraftID:               draftID,
 			Name:                  draft.Name,
 			Description:           body.Description,
+			StartPhase:            body.StartPhase,
 			SkillContent:          skillContent,
 			SkillPackage:          skillPackage,
 			SourceSkillRevisionID: skillSnapshot.RevisionID,

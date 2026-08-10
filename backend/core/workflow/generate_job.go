@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
 	"lazymind/core/algo"
@@ -19,6 +20,17 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/workflow/graphengine"
 )
+
+type generatedWorkflowSkeleton struct {
+	ID    string `yaml:"id"`
+	Name  string `yaml:"name"`
+	Slots []struct {
+		ID string `yaml:"id"`
+	} `yaml:"slots"`
+	Steps []struct {
+		ID string `yaml:"id"`
+	} `yaml:"steps"`
+}
 
 func repairDiagnosticsPayload(items []repairDiagnostic) []map[string]any {
 	payload := make([]map[string]any, 0, len(items))
@@ -54,10 +66,18 @@ const (
 	generateErrSaveFailed     = "save_failed"
 )
 
+const (
+	generatePhaseDesignBrief     = "design_brief"
+	generatePhaseSkeleton        = "skeleton"
+	generatePhaseStateMachine    = "state_machine"
+	generatePhaseScenarioScripts = "scenario_scripts"
+)
+
 type workflowDraftGeneratePayload struct {
 	DraftID               string            `json:"draft_id"`
 	Name                  string            `json:"name"`
 	Description           string            `json:"description,omitempty"`
+	StartPhase            string            `json:"start_phase,omitempty"`
 	SkillContent          string            `json:"skill_content,omitempty"`
 	SkillPackage          map[string]any    `json:"skill_package,omitempty"`
 	SourceSkillRevisionID string            `json:"source_skill_revision_id,omitempty"`
@@ -101,12 +121,17 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 	if err := db.WithContext(ctx).Where("id = ? AND created_by = ?", payload.DraftID, payload.UserID).First(&draft).Error; err != nil {
 		return asyncjob.Result{ErrorCode: generateErrDraftNotFound}, fmt.Errorf("draft not found: %w", err)
 	}
+	startPhase := normalizeGenerateStartPhase(payload.StartPhase)
+	if err := validateGenerateResumePoint(draft, startPhase); err != nil {
+		_ = markGenerateFailed(db, payload.DraftID, fmt.Sprintf("resume point invalid: %s", err))
+		return asyncjob.Result{ErrorCode: "generation_resume_invalid"}, fmt.Errorf("resume point invalid: %w", err)
+	}
 	llmConfig, err := modelconfig.LoadLLMConfig(ctx, db, payload.UserID)
 	if err != nil {
 		llmConfig = map[string]any{}
 	}
 
-	if len(payload.SkillPackage) > 0 && payload.SelectedCandidateJSON == "" {
+	if startPhase == generatePhaseDesignBrief && len(payload.SkillPackage) > 0 && payload.SelectedCandidateJSON == "" {
 		analysisResp, analysisErr := algo.AnalyzeSkill(ctx, algo.AnalyzeSkillRequest{Name: draft.Name, SkillPackage: payload.SkillPackage, LLMConfig: llmConfig})
 		if analysisErr != nil {
 			_ = markGenerateFailed(db, payload.DraftID, fmt.Sprintf("phase-1 analysis: %s", analysisErr))
@@ -157,65 +182,79 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 	// Subsequent phases receive this brief as an authoritative reference so that
 	// slot IDs remain consistent across phases.
 	// On failure we fall back gracefully (brief stays empty) so existing drafts are unaffected.
-	designBrief := ""
-	briefResp, briefErr := algo.DesignBrief(ctx, algo.DesignBriefRequest{
-		Name:             draft.Name,
-		Description:      payload.Description,
-		SkillContent:     payload.SkillContent,
-		SkillPackage:     payload.SkillPackage,
-		WorkflowAnalysis: payload.SelectedCandidateJSON,
-		LLMConfig:        llmConfig,
-	})
-	if briefErr != nil {
-		// Non-fatal: log and continue without a brief.
-		_ = db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
-			"generate_warning": fmt.Sprintf("phase0 design_brief: %s", briefErr),
-			"updated_at":       time.Now().UTC(),
-		}).Error
-	} else {
-		designBrief = briefResp.DesignBrief
-		if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
-			"design_brief_content": designBrief,
-			"generate_status":      generateStatusBriefDone,
-			"updated_at":           time.Now().UTC(),
-		}).Error; err != nil {
-			return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save design_brief: %w", err)
+	designBrief := draft.DesignBriefContent
+	if shouldRunGeneratePhase(startPhase, generatePhaseDesignBrief) {
+		briefResp, briefErr := algo.DesignBrief(ctx, algo.DesignBriefRequest{
+			Name:             draft.Name,
+			Description:      payload.Description,
+			SkillContent:     payload.SkillContent,
+			SkillPackage:     payload.SkillPackage,
+			WorkflowAnalysis: payload.SelectedCandidateJSON,
+			LLMConfig:        llmConfig,
+		})
+		if briefErr != nil {
+			// Non-fatal: log and continue without a brief.
+			_ = db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
+				"generate_warning": fmt.Sprintf("phase0 design_brief: %s", briefErr),
+				"updated_at":       time.Now().UTC(),
+			}).Error
+		} else {
+			designBrief = briefResp.DesignBrief
+			if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(map[string]any{
+				"design_brief_content": designBrief,
+				"generate_status":      generateStatusBriefDone,
+				"updated_at":           time.Now().UTC(),
+			}).Error; err != nil {
+				return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save design_brief: %w", err)
+			}
 		}
 	}
 	// ── Phase 1: Skeleton ────────────────────────────────────────────────────
-	skeletonResp, err := algo.GenerateSkeleton(ctx, algo.GenerateSkeletonRequest{
-		Name:             draft.Name,
-		Description:      payload.Description,
-		SkillContent:     payload.SkillContent,
-		SkillPackage:     payload.SkillPackage,
-		WorkflowAnalysis: payload.SelectedCandidateJSON,
-		DesignBrief:      designBrief,
-		LLMConfig:        llmConfig,
-	})
-	if err != nil {
-		_ = markGenerateFailed(db, payload.DraftID, fmt.Sprintf("phase1 skeleton: %s", err))
-		return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("phase1 skeleton: %w", err)
-	}
-	skeletonUpdates := map[string]any{
-		"generate_status": generateStatusSkeletonDone,
-		"updated_at":      time.Now().UTC(),
-	}
-	setWorkflowYAMLUpdate(skeletonUpdates, skeletonResp.WorkflowYAML)
-	if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(skeletonUpdates).Error; err != nil {
-		return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save skeleton: %w", err)
+	skeletonResp := &algo.GenerateSkeletonResponse{WorkflowYAML: draft.WorkflowYAMLContent}
+	if shouldRunGeneratePhase(startPhase, generatePhaseSkeleton) {
+		var err error
+		skeletonResp, err = algo.GenerateSkeleton(ctx, algo.GenerateSkeletonRequest{
+			Name:             draft.Name,
+			Description:      payload.Description,
+			SkillContent:     payload.SkillContent,
+			SkillPackage:     payload.SkillPackage,
+			WorkflowAnalysis: payload.SelectedCandidateJSON,
+			DesignBrief:      designBrief,
+			LLMConfig:        llmConfig,
+		})
+		if err != nil {
+			_ = markGenerateFailed(db, payload.DraftID, fmt.Sprintf("phase1 skeleton: %s", err))
+			return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("phase1 skeleton: %w", err)
+		}
+		if err := validateGeneratedWorkflowSkeleton(skeletonResp.WorkflowYAML); err != nil {
+			_ = markGenerateFailed(db, payload.DraftID, fmt.Sprintf("phase1 skeleton invalid: %s", err))
+			return asyncjob.Result{ErrorCode: "generation_skeleton_invalid"}, fmt.Errorf("phase1 skeleton invalid: %w", err)
+		}
+		skeletonUpdates := map[string]any{
+			"generate_status": generateStatusSkeletonDone,
+			"updated_at":      time.Now().UTC(),
+		}
+		setWorkflowYAMLUpdate(skeletonUpdates, skeletonResp.WorkflowYAML)
+		if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(skeletonUpdates).Error; err != nil {
+			return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save skeleton: %w", err)
+		}
 	}
 
 	// ── Phase 2: State Machine ───────────────────────────────────────────────
-	stateResp, err := algo.GenerateStateMachine(ctx, algo.GenerateStateMachineRequest{
-		Name:             draft.Name,
-		WorkflowYAML:     skeletonResp.WorkflowYAML,
-		DesignBrief:      designBrief,
-		WorkflowAnalysis: payload.SelectedCandidateJSON,
-		LLMConfig:        llmConfig,
-	})
-	if err != nil {
-		_ = markGenerateFailed(db, payload.DraftID, fmt.Sprintf("phase2 state_machine: %s", err))
-		return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("phase2 state_machine: %w", err)
+	stateResp := &algo.GenerateStateMachineResponse{StateYAML: draft.StateYAMLContent}
+	if shouldRunGeneratePhase(startPhase, generatePhaseStateMachine) {
+		var err error
+		stateResp, err = algo.GenerateStateMachine(ctx, algo.GenerateStateMachineRequest{
+			Name:             draft.Name,
+			WorkflowYAML:     skeletonResp.WorkflowYAML,
+			DesignBrief:      designBrief,
+			WorkflowAnalysis: payload.SelectedCandidateJSON,
+			LLMConfig:        llmConfig,
+		})
+		if err != nil {
+			_ = markGenerateFailed(db, payload.DraftID, fmt.Sprintf("phase2 state_machine: %s", err))
+			return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("phase2 state_machine: %w", err)
+		}
 	}
 	// Use the (possibly slot-repaired) workflow_yaml returned by Phase 2.
 	// Falls back to Phase 1 output when Phase 2 did not modify it.
@@ -223,17 +262,48 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 	if stateResp.WorkflowYAML != "" {
 		finalWorkflowYAML = stateResp.WorkflowYAML
 	}
-	stateUpdates := map[string]any{
-		"state_yaml_content": stateResp.StateYAML,
-		"generate_status":    generateStatusStateDone,
-		"updated_at":         time.Now().UTC(),
+	if err := validateGeneratedWorkflowSkeleton(finalWorkflowYAML); err != nil {
+		_ = markGenerateFailed(db, payload.DraftID, fmt.Sprintf("phase2 workflow invalid: %s", err))
+		return asyncjob.Result{ErrorCode: "generation_skeleton_invalid"}, fmt.Errorf("phase2 workflow invalid: %w", err)
 	}
-	setWorkflowYAMLUpdate(stateUpdates, finalWorkflowYAML)
-	if len(stateResp.Warnings) > 0 {
-		stateUpdates["generate_warning"] = strings.Join(stateResp.Warnings, "; ")
+	stateDiagnostics := diagnoseWorkflowWithProfile(finalWorkflowYAML, stateResp.StateYAML, "", "{}", graphengine.ProfileGenerationPhase)
+	if hasDiagnosticErrorsForTarget(stateDiagnostics, "statemachine") {
+		repairResp, repairErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{
+			WorkflowYAML: finalWorkflowYAML,
+			StateYAML:    stateResp.StateYAML,
+			RepairHint:   "Fix the generated workflow.yaml and scenario/state.yml so the graph compiler has no errors. Return complete final YAML.",
+			Diagnostics:  repairDiagnosticsPayload(stateDiagnostics),
+			Target:       "statemachine",
+			LLMConfig:    llmConfig,
+		})
+		if repairErr == nil {
+			if repairResp.WorkflowYAML != "" {
+				finalWorkflowYAML = repairResp.WorkflowYAML
+			}
+			if repairResp.StateYAML != "" {
+				stateResp.StateYAML = repairResp.StateYAML
+			}
+			stateDiagnostics = diagnoseWorkflowWithProfile(finalWorkflowYAML, stateResp.StateYAML, "", "{}", graphengine.ProfileGenerationPhase)
+		}
 	}
-	if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(stateUpdates).Error; err != nil {
-		return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save state_machine: %w", err)
+	if hasDiagnosticErrorsForTarget(stateDiagnostics, "statemachine") {
+		message := "phase2 state_machine validation failed: " + diagnosticsJSON(stateDiagnostics)
+		_ = markGenerateFailed(db, payload.DraftID, message)
+		return asyncjob.Result{ErrorCode: "generation_state_invalid"}, fmt.Errorf("%s", message)
+	}
+	if shouldRunGeneratePhase(startPhase, generatePhaseStateMachine) {
+		stateUpdates := map[string]any{
+			"state_yaml_content": stateResp.StateYAML,
+			"generate_status":    generateStatusStateDone,
+			"updated_at":         time.Now().UTC(),
+		}
+		setWorkflowYAMLUpdate(stateUpdates, finalWorkflowYAML)
+		if len(stateResp.Warnings) > 0 {
+			stateUpdates["generate_warning"] = strings.Join(stateResp.Warnings, "; ")
+		}
+		if err := db.WithContext(ctx).Model(&orm.WorkflowDraft{}).Where("id = ?", payload.DraftID).Updates(stateUpdates).Error; err != nil {
+			return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("save state_machine: %w", err)
+		}
 	}
 
 	// ── Phase 3: Scenario + Scripts ──────────────────────────────────────────
@@ -249,6 +319,11 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 		message := fmt.Sprintf("phase3 scenario_scripts failed: %s", err)
 		_ = markGenerateFailed(db, payload.DraftID, message)
 		return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("%s", message)
+	}
+	if err := validateGeneratedScenarioContent(scenarioResp.ScenarioMD, stateResp.StateYAML); err != nil {
+		message := fmt.Sprintf("phase3 scenario_scripts invalid: %s", err)
+		_ = markGenerateFailed(db, payload.DraftID, message)
+		return asyncjob.Result{ErrorCode: "generation_scenario_invalid"}, fmt.Errorf("%s", message)
 	}
 
 	// Encode scripts map as JSON string for storage.
@@ -364,6 +439,171 @@ func mergeWarnings(existing, added string) string {
 	}
 	return existing + "; " + added
 }
+
+func validateGeneratedWorkflowSkeleton(workflowYAML string) error {
+	if strings.TrimSpace(workflowYAML) == "" {
+		return fmt.Errorf("workflow_yaml is empty")
+	}
+	var doc generatedWorkflowSkeleton
+	if err := yaml.Unmarshal([]byte(workflowYAML), &doc); err != nil {
+		return fmt.Errorf("workflow_yaml invalid: %w", err)
+	}
+	if strings.TrimSpace(doc.ID) == "" {
+		return fmt.Errorf("workflow id is required")
+	}
+	if strings.TrimSpace(doc.Name) == "" {
+		return fmt.Errorf("workflow name is required")
+	}
+	if len(doc.Slots) == 0 {
+		return fmt.Errorf("at least one slot is required")
+	}
+	for index, slot := range doc.Slots {
+		if strings.TrimSpace(slot.ID) == "" {
+			return fmt.Errorf("slots[%d].id is required", index)
+		}
+	}
+	if len(doc.Steps) == 0 {
+		return fmt.Errorf("at least one step is required")
+	}
+	for index, step := range doc.Steps {
+		if strings.TrimSpace(step.ID) == "" {
+			return fmt.Errorf("steps[%d].id is required", index)
+		}
+	}
+	return nil
+}
+
+func validateGeneratedScenarioContent(scenarioMD, stateYAML string) error {
+	content := strings.TrimSpace(scenarioMD)
+	if content == "" {
+		return fmt.Errorf("scenario.md is empty")
+	}
+	placeholderPatterns := []string{
+		"暂无描述",
+		"待补充",
+		"todo",
+		"tbd",
+		"no description",
+		"placeholder",
+	}
+	lowerContent := strings.ToLower(content)
+	for _, pattern := range placeholderPatterns {
+		if strings.Contains(lowerContent, strings.ToLower(pattern)) {
+			return fmt.Errorf("scenario.md contains placeholder text: %s", pattern)
+		}
+	}
+	var stateDoc struct {
+		Steps map[string]any `yaml:"steps"`
+	}
+	if err := yaml.Unmarshal([]byte(stateYAML), &stateDoc); err != nil {
+		return fmt.Errorf("state_yaml invalid while checking scenario.md: %w", err)
+	}
+	for stepID := range stateDoc.Steps {
+		if strings.TrimSpace(stepID) == "" {
+			continue
+		}
+		index := strings.Index(content, stepID)
+		if index < 0 {
+			return fmt.Errorf("scenario.md does not document step %s", stepID)
+		}
+		after := strings.TrimSpace(content[index+len(stepID):])
+		if after == "" {
+			return fmt.Errorf("scenario.md has no description after step %s", stepID)
+		}
+		nextHeading := strings.Index(after, "\n### ")
+		section := after
+		if nextHeading >= 0 {
+			section = after[:nextHeading]
+		}
+		section = strings.TrimSpace(strings.Trim(section, "()[]#- \t\r\n"))
+		if len([]rune(section)) < 24 {
+			return fmt.Errorf("scenario.md description for step %s is too short", stepID)
+		}
+	}
+	return nil
+}
+
+func normalizeGenerateStartPhase(phase string) string {
+	switch strings.TrimSpace(strings.ToLower(phase)) {
+	case "", "brief", "design", "design_brief":
+		return generatePhaseDesignBrief
+	case "workflow", "workflow_yaml", "skeleton":
+		return generatePhaseSkeleton
+	case "state", "state_yaml", "state_machine":
+		return generatePhaseStateMachine
+	case "scenario", "scenario_md", "scripts", "scenario_scripts":
+		return generatePhaseScenarioScripts
+	default:
+		return ""
+	}
+}
+
+func generatePhaseRank(phase string) int {
+	switch phase {
+	case generatePhaseDesignBrief:
+		return 0
+	case generatePhaseSkeleton:
+		return 1
+	case generatePhaseStateMachine:
+		return 2
+	case generatePhaseScenarioScripts:
+		return 3
+	default:
+		return -1
+	}
+}
+
+func shouldRunGeneratePhase(startPhase, phase string) bool {
+	return generatePhaseRank(phase) >= generatePhaseRank(startPhase)
+}
+
+func generateStatusForStartPhase(phase string) string {
+	switch phase {
+	case generatePhaseSkeleton:
+		return generateStatusBriefDone
+	case generatePhaseStateMachine:
+		return generateStatusSkeletonDone
+	case generatePhaseScenarioScripts:
+		return generateStatusStateDone
+	default:
+		return generateStatusGenerating
+	}
+}
+
+func validateGenerateResumePoint(draft orm.WorkflowDraft, startPhase string) error {
+	if startPhase == "" {
+		return fmt.Errorf("invalid start_phase")
+	}
+	switch startPhase {
+	case generatePhaseDesignBrief:
+		return nil
+	case generatePhaseSkeleton:
+		if strings.TrimSpace(draft.DesignBriefContent) == "" {
+			return fmt.Errorf("design brief is not available")
+		}
+		return nil
+	case generatePhaseStateMachine:
+		return validateGeneratedWorkflowSkeleton(draft.WorkflowYAMLContent)
+	case generatePhaseScenarioScripts:
+		if err := validateGeneratedWorkflowSkeleton(draft.WorkflowYAMLContent); err != nil {
+			return err
+		}
+		diagnostics := diagnoseWorkflowWithProfile(
+			draft.WorkflowYAMLContent,
+			draft.StateYAMLContent,
+			"",
+			"{}",
+			graphengine.ProfileGenerationPhase,
+		)
+		if hasDiagnosticErrorsForTarget(diagnostics, "statemachine") {
+			return fmt.Errorf("state machine is not valid")
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid start_phase")
+	}
+}
+
 func currentGenerateWarning(db *gorm.DB, draftID string) string {
 	var draft orm.WorkflowDraft
 	if db.Select("generate_warning").Where("id=?", draftID).First(&draft).Error != nil {
@@ -466,7 +706,10 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 				restoreStatus(callErr.Error())
 				return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, callErr
 			}
-			scenarioMD = scenarioResp.StateYAML
+			scenarioMD = scenarioResp.ScenarioMD
+			if scenarioMD == "" {
+				scenarioMD = scenarioResp.StateYAML
+			}
 		}
 		scriptResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{WorkflowYAML: workflowYAML, StateYAML: stateYAML, ScenarioMD: scenarioMD, Scripts: scripts, RepairHint: payload.RepairHint, Target: "scripts", LLMConfig: llmConfig})
 		if callErr != nil {
@@ -531,7 +774,15 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 			return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("repair scenario: %w", err)
 		}
 		log.Printf("[repair_job/scenario] algo returned scenario_md_len=%d (in state_yaml field)", len(resp.StateYAML))
-		afterDiagnostics := diagnoseWorkflow(draft.WorkflowYAMLContent, draft.StateYAMLContent, resp.StateYAML, draft.ScriptsContent)
+		scenarioMD := resp.ScenarioMD
+		if scenarioMD == "" {
+			scenarioMD = resp.StateYAML
+		}
+		if err := validateGeneratedScenarioContent(scenarioMD, draft.StateYAMLContent); err != nil {
+			restoreStatus("repair validation failed: " + err.Error())
+			return asyncjob.Result{ErrorCode: "repair_validation_failed"}, fmt.Errorf("repair validation failed: %w", err)
+		}
+		afterDiagnostics := diagnoseWorkflow(draft.WorkflowYAMLContent, draft.StateYAMLContent, scenarioMD, draft.ScriptsContent)
 		if payload.RepairRunID != "" {
 			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
 		}
@@ -540,7 +791,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 			return asyncjob.Result{ErrorCode: "repair_validation_failed"}, fmt.Errorf("repair validation failed")
 		}
 		updates := map[string]any{
-			"scenario_content": resp.StateYAML,
+			"scenario_content": scenarioMD,
 			"generate_status":  payload.PrevStatus,
 			"generate_warning": "", // clear any previous warning on success
 			"version":          draft.Version + 1,
