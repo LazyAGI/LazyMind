@@ -334,14 +334,15 @@ class FeishuPresentationRenderer:
                 and message.metadata.get('streamed_text') is True
             ):
                 return non_text_parts
-            rendered = [{
+            rendered = [
+                {
                     'kind': 'card',
                     'card': FeishuWorkspaceRenderer.render(
                         provider_context=message.provider_context,
                         presentations=presentations,
                     ),
                     'workspace': True,
-                }
+                },
             ]
             if workspace_surface == 'assistant':
                 rendered.extend(non_text_parts)

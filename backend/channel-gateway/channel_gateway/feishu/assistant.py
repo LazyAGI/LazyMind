@@ -5,6 +5,8 @@ from typing import Any
 
 
 _ASSISTANT_UI_STATUSES = {'ready', 'error', 'dispatching', 'cancelling'}
+
+
 def project_name(cwd: str) -> str:
     normalized = str(cwd or '').rstrip('/\\')
     if not normalized:

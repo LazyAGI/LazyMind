@@ -148,6 +148,7 @@ class ChannelExecutionContext:
             ),
         }
 
+
 @dataclass
 class ChatOptions:
     inputs: list[dict[str, str]] = field(default_factory=list)

@@ -40,7 +40,7 @@ class RuntimeLeaseLostError(RuntimeError):
 class RetryableProviderSideEffectError(RuntimeError):
     """A provider may have accepted an idempotent side effect without a reply."""
 
-    def __init__(
+    def __init__(  # noqa: B042 - retry metadata is intentionally keyword-only.
         self,
         message: str,
         *,
