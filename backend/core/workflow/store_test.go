@@ -2,15 +2,21 @@ package workflow
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"lazymind/core/common/orm"
 )
 
+var workflowTestDBSequence atomic.Uint64
+
 // newTestDB creates an in-memory SQLite database and auto-migrates all plugin tables.
 func newTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	return orm.MigrateTestDB(t,
+	models := []any{
 		&orm.SubAgentTask{},
 		&orm.SubAgentStep{},
 		&orm.SubAgentArtifact{},
@@ -22,7 +28,25 @@ func newTestDB(t *testing.T) *orm.DB {
 		&orm.WorkflowOutbox{},
 		&orm.WorkflowSlotOrder{},
 		&orm.WorkflowStepIntent{},
-	)
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("TEST_DB_DRIVER")), orm.DriverPostgres) {
+		return orm.MigrateTestDB(t, models...)
+	}
+
+	dsn := fmt.Sprintf("file:workflow_test_%d?mode=memory&cache=shared", workflowTestDBSequence.Add(1))
+	db, err := orm.Connect(orm.DriverSQLite, dsn)
+	if err != nil {
+		t.Fatalf("connect sqlite: %v", err)
+	}
+	sqlDB, err := db.DB.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := db.AutoMigrate(models...); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	return db
 }
 
 // ──────────────────────────────────────────────
