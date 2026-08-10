@@ -71,7 +71,7 @@ func projectCommandRequest(
 	additionalPermissions, additionalProvided, additionalValid := boundedOptionalJSON(
 		body, "additionalPermissions", 2000,
 	)
-	policy := map[string]json.RawMessage{}
+	policyContext := map[string]json.RawMessage{}
 	for _, key := range []string{
 		"networkApprovalContext",
 		"environmentId",
@@ -81,14 +81,14 @@ func projectCommandRequest(
 		"proposedNetworkPolicyAmendments",
 	} {
 		if raw, ok := body[key]; ok && len(raw) > 0 && string(raw) != "null" {
-			policy[key] = raw
+			policyContext[key] = raw
 		}
 	}
-	_, networkProvided := policy["networkApprovalContext"]
+	_, networkProvided := policyContext["networkApprovalContext"]
 	networkValid := true
 	if networkProvided {
 		var network map[string]any
-		raw := policy["networkApprovalContext"]
+		raw := policyContext["networkApprovalContext"]
 		networkValid = json.Unmarshal(raw, &network) == nil && len(network) > 0
 	}
 	if (strings.TrimSpace(command) == "" && !networkProvided) ||
@@ -104,17 +104,13 @@ func projectCommandRequest(
 	if additionalProvided {
 		appendField(view, "additional_permissions", additionalPermissions, "json")
 	}
-	if len(policy) > 0 {
-		encoded, err := json.Marshal(policy)
+	if len(policyContext) > 0 {
+		encoded, err := json.Marshal(policyContext)
 		if err != nil || len(encoded) > 3000 {
 			view.Error = "Codex command policy context is too large."
 			view.Fields = nil
 			projectCommandDeny(view, responses, payload)
 			return
-		} else {
-			view.Fields = append(view.Fields, ExternalRequestField{
-				Kind: "policy", Value: string(encoded), Language: "json",
-			})
 		}
 	}
 	available, err := commandAvailableDecisions(payload)
@@ -133,23 +129,18 @@ func projectCommandRequest(
 		}
 		if kind == "policy" {
 			policyIndex++
-			label = boundedRunes(
-				fmt.Sprintf("策略 %d · %s", policyIndex, label),
-				200,
-			)
-			encoded, marshalErr := json.Marshal(decision)
-			if marshalErr != nil || len(encoded) > 3000 {
-				view.Error = "Codex command policy amendment is too large."
-				view.Actions = nil
-				clear(responses)
-				projectCommandDeny(view, responses, payload)
-				return
-			}
 			appendField(
 				view,
-				label,
-				string(encoded),
-				"json",
+				"policy_amendment",
+				boundedRunes(
+					fmt.Sprintf("策略 %d：%s", policyIndex, label),
+					1000,
+				),
+				"",
+			)
+			label = boundedRunes(
+				fmt.Sprintf("应用策略 %d", policyIndex),
+				200,
 			)
 		}
 		addRequestAction(view, responses, kind, label, map[string]any{

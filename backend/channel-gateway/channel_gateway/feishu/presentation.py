@@ -73,20 +73,12 @@ class FeishuReplyRenderer:
         provider_context: dict[str, Any],
         text: str,
         status: str = '✅ **回答完成**',
-        thinking: str = '分析与处理已完成。',
         streaming: bool = False,
         extra_elements: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         state = provider_context.get('workspace_state')
         state = state if isinstance(state, dict) else {}
         language = str(state.get('output_language') or 'zh')
-        show_process = bool(state.get('show_process', True))
-        collapse_process = bool(
-            state.get('auto_collapse_process', True)
-        )
-        process_title = (
-            'Execution summary' if language == 'en' else '执行摘要'
-        )
         answer = text or (
             '<font color="grey">Preparing the answer…</font>'
             if language == 'en'
@@ -99,26 +91,6 @@ class FeishuReplyRenderer:
                 'content': status,
             }
         ]
-        if show_process:
-            elements.append(
-                {
-                    'tag': 'collapsible_panel',
-                    'expanded': streaming or not collapse_process,
-                    'header': {
-                        'title': {
-                            'tag': 'plain_text',
-                            'content': process_title,
-                        }
-                    },
-                    'elements': [
-                        {
-                            'tag': 'markdown',
-                            'element_id': 'lazymind_thinking',
-                            'content': thinking,
-                        }
-                    ],
-                }
-            )
         elements.append(
             {
                 'tag': 'markdown',
@@ -309,11 +281,6 @@ def streaming_reply_card(
             if language == 'en'
             else '⏳ **正在理解你的问题**'
         ),
-        thinking=(
-            'Analyzing the request…'
-            if language == 'en'
-            else '正在分析问题…'
-        ),
         streaming=True,
     )
 
@@ -418,11 +385,6 @@ class FeishuPresentationRenderer:
                     else '✅ **Answer complete**'
                     if language == 'en'
                     else '✅ **回答完成**'
-                ),
-                thinking=(
-                    'Analysis and processing complete.'
-                    if language == 'en'
-                    else '分析与处理已完成。'
                 ),
                 extra_elements=extra_elements,
             ),
@@ -534,12 +496,12 @@ class FeishuPresentationRenderer:
             )
         elif waiting_for_next_step:
             builder.footer(
-                '当前步骤已完成，正在等待 Workflow 进入下一步。'
+                '当前步骤已完成，正在等待你审批结果；'
+                '发送“继续”后进入下一步。'
             )
         elif _task_terminal(status):
             builder.footer(
-                'Workflow 已经结束；最终图片或文件会继续以'
-                '飞书原生消息发送。'
+                'Workflow 已经结束；最终图片会继续以飞书原生消息发送。'
             )
         else:
             builder.footer('状态会在这张卡片中自动更新。')
@@ -791,6 +753,41 @@ def _workflow_progress(
             tasks[-1].get('progress'),
         )
     )
+
+
+def workflow_progress_text(tasks: list[dict[str, Any]]) -> str:
+    """Compact live Workflow state for the in-flight answer card."""
+    ordered = sorted(
+        tasks[-20:],
+        key=lambda task: int(task.get('seq_in_conversation') or 0),
+    )
+    if not ordered:
+        return ''
+    attempts: dict[str, int] = {}
+    lines = ['**Workflow 进度**']
+    for index, task in enumerate(ordered, start=1):
+        step = _workflow_step_key(task)
+        attempts[step] = attempts.get(step, 0) + 1
+        lines.append(
+            _workflow_step_line(
+                index,
+                task,
+                attempt=attempts[step],
+            )
+        )
+    current = ordered[-1]
+    progress = _workflow_progress(ordered)
+    phase = presentable_feishu_text(
+        str(current.get('current_phase') or '')
+    )
+    detail = []
+    if progress is not None:
+        detail.append(f'{progress}%')
+    if phase and phase not in {'执行中...', '执行中…'}:
+        detail.append(phase[:200])
+    if detail:
+        lines.append(f'<font color="grey">当前：{" · ".join(detail)}</font>')
+    return '\n'.join(lines)[:3500]
 
 
 def _presentable_task_summary(value: str) -> str:

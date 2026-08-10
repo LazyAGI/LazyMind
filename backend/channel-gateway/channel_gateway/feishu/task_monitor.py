@@ -113,7 +113,6 @@ class FeishuTaskCardMonitor:
         )
         owner_user_id = str(account['owner_user_id'])
         for part_index, anchor_task_id, conversation_id in bindings:
-            part = outbound.rendered_parts[part_index]
             saved_state = dict(
                 outbound.provider_state.get(str(part_index)) or {}
             )
@@ -137,7 +136,7 @@ class FeishuTaskCardMonitor:
                     f'{outbound.outbox_id[-16:]}_{part_index}'
                 ),
             )
-            workflow = _workflow_tasks(tasks, anchor_task_id)
+            workflow = workflow_tasks(tasks, anchor_task_id)
             if not workflow:
                 continue
             visible_workflow = workflow[-_MAX_WORKFLOW_TASKS:]
@@ -317,12 +316,6 @@ def _task_bindings(
     ]
 
 
-def _task_images(
-    task: dict[str, Any],
-) -> list[tuple[str, str, str]]:
-    return _task_image_projection(task)[0]
-
-
 def _task_image_projection(
     task: dict[str, Any],
 ) -> tuple[list[tuple[str, str, str]], int]:
@@ -406,7 +399,7 @@ def _is_lazymind_static_file(source: str) -> bool:
     return urlsplit(source).path.startswith('/static-files/')
 
 
-def _workflow_tasks(
+def workflow_tasks(
     tasks: list[dict[str, Any]],
     anchor_task_id: str,
 ) -> list[dict[str, Any]]:

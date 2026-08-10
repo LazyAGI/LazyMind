@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -145,6 +146,11 @@ func BindExternalAgentConversation(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		nameContext, cancelName := context.WithTimeout(context.Background(), 2*time.Second)
+		if nameErr := service.NameThread(nameContext, thread.ID, displayName); nameErr != nil {
+			log.Printf("external agent thread name update failed: %v", nameErr)
+		}
+		cancelName()
 	}
 	common.ReplyOK(w, response)
 }

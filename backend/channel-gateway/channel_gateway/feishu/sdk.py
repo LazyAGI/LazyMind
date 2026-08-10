@@ -69,7 +69,6 @@ from channel_gateway.feishu.domain import (
 )
 from channel_gateway.feishu.presentation import (
     parse_ask_form_submission,
-    presentable_feishu_text,
     streamable_feishu_text,
 )
 from channel_gateway.feishu.workspace import is_feishu_image_key
@@ -78,6 +77,7 @@ from channel_gateway.feishu.workspace import is_feishu_image_key
 _logger = logging.getLogger(__name__)
 _STREAM_ABORT = object()
 _STREAM_FINISH = object()
+_STREAM_PAUSE_FOR_INTERACTION = object()
 _STREAM_PROVIDER_TIMEOUT_SECONDS = 60
 _STREAM_FINISH_TIMEOUT_SECONDS = 120
 _STREAM_MESSAGE_UPDATE_INTERVAL_SECONDS = 0.4
@@ -550,7 +550,6 @@ class _LarkCardReplyStream(ReplyStream):
         timeout_seconds: float,
         message_id: str = '',
         should_render: Callable[[], bool] | None = None,
-        collapse_process: bool = True,
         render_card: Callable[
             [CoreStreamUpdate, bool, bool],
             dict[str, Any],
@@ -559,14 +558,9 @@ class _LarkCardReplyStream(ReplyStream):
         self._channel = channel
         self._chat_id = chat_id
         self._initial_card = initial_card
-        self._has_thinking_element = _card_element_exists(
-            initial_card,
-            'lazymind_thinking',
-        )
         self._timeout_seconds = timeout_seconds
         self.message_id = message_id
         self._should_render = should_render or (lambda: True)
-        self._collapse_process = collapse_process
         self._render_card = render_card
         self._updates: queue.Queue[tuple[object, object]] = queue.Queue()
         self._future = None
@@ -588,6 +582,18 @@ class _LarkCardReplyStream(ReplyStream):
                     self._log_background_failure
                 )
             self._updates.put(('snapshot', snapshot))
+
+    def pause_for_interaction(self) -> None:
+        """Close CardKit streaming so buttons can emit action callbacks."""
+        with self._lock:
+            if self._closed:
+                return
+            if self._future is None:
+                self._future = self._channel.schedule(self._run())
+                self._future.add_done_callback(
+                    self._log_background_failure
+                )
+            self._updates.put((_STREAM_PAUSE_FOR_INTERACTION, ''))
 
     def finish(self, final_text: str) -> bool:
         with self._lock:
@@ -651,6 +657,7 @@ class _LarkCardReplyStream(ReplyStream):
                 )
                 latest_snapshot = None
                 terminal = None
+                pause_for_interaction = False
                 while True:
                     if (
                         kind == 'snapshot'
@@ -660,6 +667,8 @@ class _LarkCardReplyStream(ReplyStream):
                     elif kind in {_STREAM_ABORT, _STREAM_FINISH}:
                         terminal = (kind, value)
                         break
+                    elif kind is _STREAM_PAUSE_FOR_INTERACTION:
+                        pause_for_interaction = True
                     try:
                         kind, value = self._updates.get_nowait()
                     except queue.Empty:
@@ -713,6 +722,7 @@ class _LarkCardReplyStream(ReplyStream):
                         thinking=snapshot.thinking,
                         answer=final_text,
                         thinking_seconds=snapshot.thinking_seconds,
+                        workflow_progress=snapshot.workflow_progress,
                     )
                     sequence = await self._render_snapshot(
                         card_id,
@@ -739,6 +749,18 @@ class _LarkCardReplyStream(ReplyStream):
                         sequence,
                     )
                     return result
+                if pause_for_interaction:
+                    await self._finish_streaming_card(
+                        card_id,
+                        sequence + 1,
+                    )
+                    if self._should_render():
+                        card = self._message_snapshot_card(snapshot)
+                        await self._replace_message_card(
+                            result.message_id,
+                            self._message_update_card(card),
+                        )
+                    continue
                 if not isinstance(value, CoreStreamUpdate):
                     if latest_snapshot is None:
                         continue
@@ -795,7 +817,7 @@ class _LarkCardReplyStream(ReplyStream):
         *,
         finished: bool = False,
     ) -> int:
-        status, thinking, answer = self._snapshot_values(
+        status, answer = self._snapshot_values(
             snapshot,
             finished=finished,
         )
@@ -806,16 +828,6 @@ class _LarkCardReplyStream(ReplyStream):
             sequence,
             rendered,
         )
-        if self._has_thinking_element and (
-            finished or not snapshot.answer
-        ):
-            sequence = await self._update_element(
-                card_id,
-                'lazymind_thinking',
-                thinking or '正在分析问题…',
-                sequence,
-                rendered,
-            )
         return await self._update_element(
             card_id,
             'lazymind_answer',
@@ -840,12 +852,15 @@ class _LarkCardReplyStream(ReplyStream):
             kind, value = await asyncio.to_thread(self._updates.get)
             latest_snapshot = None
             terminal = None
+            pause_for_interaction = False
             while True:
                 if kind == 'snapshot' and isinstance(value, CoreStreamUpdate):
                     latest_snapshot = value
                 elif kind in {_STREAM_ABORT, _STREAM_FINISH}:
                     terminal = (kind, value)
                     break
+                elif kind is _STREAM_PAUSE_FOR_INTERACTION:
+                    pause_for_interaction = True
                 try:
                     kind, value = self._updates.get_nowait()
                 except queue.Empty:
@@ -872,6 +887,7 @@ class _LarkCardReplyStream(ReplyStream):
                     thinking=snapshot.thinking,
                     answer=str(value or snapshot.answer),
                     thinking_seconds=snapshot.thinking_seconds,
+                    workflow_progress=snapshot.workflow_progress,
                 )
                 if self._should_render():
                     card = self._message_snapshot_card(
@@ -884,6 +900,15 @@ class _LarkCardReplyStream(ReplyStream):
                     )
                     await self._finish_message_stream()
                 return result
+            if pause_for_interaction:
+                await self._finish_message_stream()
+                if self._should_render():
+                    card = self._message_snapshot_card(snapshot)
+                    await self._replace_message_card(
+                        self.message_id,
+                        self._message_update_card(card),
+                    )
+                continue
             if latest_snapshot is None and not isinstance(
                 value,
                 CoreStreamUpdate,
@@ -972,7 +997,7 @@ class _LarkCardReplyStream(ReplyStream):
     ) -> dict[str, Any]:
         if self._render_card is not None:
             return self._render_card(snapshot, finished, aborted)
-        status, thinking, answer = self._snapshot_values(
+        status, answer = self._snapshot_values(
             snapshot,
             finished=finished,
         )
@@ -986,13 +1011,8 @@ class _LarkCardReplyStream(ReplyStream):
                 config.pop('streaming_config', None)
         if finished:
             _remove_card_element(card, name='cancel_generation')
-            _set_collapsible_expanded(
-                card,
-                expanded=not self._collapse_process,
-            )
         replacements = {
             'lazymind_status': status,
-            'lazymind_thinking': thinking or '正在分析问题…',
             'lazymind_answer': answer or (
                 '本次没有生成可展示的回答。'
                 if finished
@@ -1007,7 +1027,7 @@ class _LarkCardReplyStream(ReplyStream):
         snapshot: CoreStreamUpdate,
         *,
         finished: bool,
-    ) -> tuple[str, str, str]:
+    ) -> tuple[str, str]:
         if finished:
             status = '✅ **回答完成**'
         elif snapshot.answer:
@@ -1016,14 +1036,11 @@ class _LarkCardReplyStream(ReplyStream):
             status = '⏳ **正在理解你的问题**'
         if snapshot.thinking_seconds is not None:
             status += f' · {snapshot.thinking_seconds} 秒'
-        thinking = presentable_feishu_text(snapshot.thinking)
-        if finished and thinking in {
-            '',
-            '正在分析问题...',
-            '正在分析问题…',
-        }:
-            thinking = '分析与处理已完成。'
-        return status, thinking, streamable_feishu_text(snapshot.answer)
+        answer = streamable_feishu_text(snapshot.answer)
+        progress = streamable_feishu_text(snapshot.workflow_progress)
+        if progress:
+            answer = f'{answer}\n\n---\n{progress}'.strip()
+        return status, answer
 
     async def _update_element(
         self,
@@ -1447,7 +1464,6 @@ class LarkChannelClient:
         initial_card: dict[str, Any],
         message_id: str = '',
         should_render: Callable[[], bool] | None = None,
-        collapse_process: bool = True,
         render_card: Callable[
             [CoreStreamUpdate, bool, bool],
             dict[str, Any],
@@ -1463,7 +1479,6 @@ class LarkChannelClient:
             ),
             message_id=message_id,
             should_render=should_render,
-            collapse_process=collapse_process,
             render_card=render_card,
         )
 
@@ -1547,21 +1562,6 @@ def _replace_card_element_content(
         _replace_card_element_content(child, replacements)
 
 
-def _card_element_exists(value: Any, element_id: str) -> bool:
-    if isinstance(value, list):
-        return any(
-            _card_element_exists(item, element_id) for item in value
-        )
-    if not isinstance(value, dict):
-        return False
-    if str(value.get('element_id') or '') == element_id:
-        return True
-    return any(
-        _card_element_exists(child, element_id)
-        for child in value.values()
-    )
-
-
 def _remove_card_element(value: Any, *, name: str) -> None:
     if isinstance(value, list):
         value[:] = [
@@ -1579,16 +1579,3 @@ def _remove_card_element(value: Any, *, name: str) -> None:
         return
     for child in value.values():
         _remove_card_element(child, name=name)
-
-
-def _set_collapsible_expanded(value: Any, *, expanded: bool) -> None:
-    if isinstance(value, list):
-        for item in value:
-            _set_collapsible_expanded(item, expanded=expanded)
-        return
-    if not isinstance(value, dict):
-        return
-    if value.get('tag') == 'collapsible_panel':
-        value['expanded'] = expanded
-    for child in value.values():
-        _set_collapsible_expanded(child, expanded=expanded)

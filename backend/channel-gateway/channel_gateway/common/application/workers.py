@@ -199,7 +199,7 @@ class MessageWorker:
                     external_address_hash=inbound.external_address_hash,
                     owner_user_id=inbound.owner_user_id,
                     text=inbound.text,
-                    request_id=f'channel_{inbound.message_key[:24]}',
+                    request_id=f'channel_{inbound.message_key}',
                     surface=str(
                         inbound.provider_context.get('surface')
                         or 'direct'

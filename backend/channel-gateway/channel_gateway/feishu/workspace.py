@@ -34,7 +34,6 @@ _RESOURCE_TYPES = (
     'skill',
     'workflow',
     'tool',
-    'conversation',
 )
 _CAPABILITY_OVERVIEW_TYPES = (
     'knowledge_base',
@@ -42,7 +41,13 @@ _CAPABILITY_OVERVIEW_TYPES = (
     'workflow',
     'tool',
 )
-_CAPABILITY_CATEGORIES = (*_RESOURCE_TYPES, 'prompt')
+_CAPABILITY_CATEGORIES = (
+    'knowledge_base',
+    'skill',
+    'workflow',
+    'tool',
+    'prompt',
+)
 _MAX_WORKSPACE_IMAGES = 6
 _MAX_CAPABILITY_ITEMS_PER_GROUP = 6
 _CAPABILITY_PAGE_SIZE = 10
@@ -55,7 +60,6 @@ _CAPABILITY_LABELS = {
     'workflow': 'Workflow',
     'tool': 'Tool',
     'prompt': 'Prompt',
-    'conversation': '会话',
 }
 
 
@@ -67,21 +71,18 @@ def _markdown_code(value: Any, language: str = '') -> str:
     )
     fence = '`' * max(3, longest + 1)
     return f'{fence}{language}\n{text}\n{fence}'
-_TAB_COMMANDS = {
-    'chat': {
-        'schema_version': '1',
-        'command': 'conversation.current',
-        'parameters': {'evidence': ['查看对话']},
-    },
-    'capabilities': {
+
+
+def _capability_command() -> dict[str, Any]:
+    return {
         'schema_version': '1',
         'command': 'capability.list',
         'parameters': {
             'capabilities': list(_CAPABILITY_OVERVIEW_TYPES),
-            'evidence': ['查看能力'],
         },
-    },
-}
+    }
+
+
 MENU_EVENT_VIEWS = {
     'lazymind_capabilities': 'capabilities',
     'lazymind_conversations': 'conversations',
@@ -90,19 +91,19 @@ MENU_EVENT_VIEWS = {
 }
 
 
-def _history_command(evidence: str) -> dict[str, Any]:
+def _history_command() -> dict[str, Any]:
     return {
         'schema_version': '1',
         'command': 'conversation.list',
-        'parameters': {'evidence': [evidence]},
+        'parameters': {},
     }
 
 
 def menu_command(view: str) -> dict[str, Any] | None:
     if view == 'capabilities':
-        return dict(_TAB_COMMANDS['capabilities'])
+        return _capability_command()
     if view == 'conversations':
-        return _history_command('切换会话')
+        return _history_command()
     return None
 
 
@@ -123,68 +124,6 @@ def is_feishu_image_key(value: Any) -> bool:
     )
 
 
-@dataclass(frozen=True, slots=True)
-class WorkspaceResource:
-    type: str
-    id: str
-    name: str
-
-    @classmethod
-    def from_dict(cls, value: Any) -> WorkspaceResource | None:
-        if not isinstance(value, dict):
-            return None
-        resource_type = value.get('type')
-        resource_id = value.get('id')
-        name = value.get('name')
-        if (
-            not isinstance(resource_type, str)
-            or resource_type not in _RESOURCE_TYPES
-            or not isinstance(resource_id, str)
-            or not resource_id.strip()
-            or len(resource_id) > 512
-            or not isinstance(name, str)
-            or not name.strip()
-        ):
-            return None
-        return cls(resource_type, resource_id.strip(), name.strip()[:200])
-
-    def to_dict(self) -> dict[str, str]:
-        return {'type': self.type, 'id': self.id, 'name': self.name}
-
-
-def new_conversation_resources(
-    draft: dict[str, Any],
-) -> list[WorkspaceResource]:
-    resources: dict[tuple[str, str], WorkspaceResource] = {}
-    search_config = draft.get('search_config')
-    dataset_list = (
-        search_config.get('dataset_list')
-        if isinstance(search_config, dict)
-        else []
-    )
-    for item in dataset_list if isinstance(dataset_list, list) else []:
-        dataset_id = str(item.get('id') or '') if isinstance(item, dict) else ''
-        resource = WorkspaceResource.from_dict({
-            'type': 'knowledge_base',
-            'id': dataset_id,
-            'name': dataset_id,
-        })
-        if resource is not None:
-            resources[(resource.type, resource.id)] = resource
-    mentions = draft.get('mentions')
-    for item in mentions if isinstance(mentions, list) else []:
-        if not isinstance(item, dict):
-            continue
-        resource = WorkspaceResource.from_dict({
-            'type': item.get('type'),
-            'id': item.get('resource_id'),
-            'name': item.get('display_name') or item.get('resource_id'),
-        })
-        if resource is not None:
-            resources[(resource.type, resource.id)] = resource
-    return list(resources.values())[:100]
-
-
 @dataclass(slots=True)
 class FeishuWorkspaceState:
     view: WorkspaceView = 'chat'
@@ -192,10 +131,9 @@ class FeishuWorkspaceState:
     revision: int = 0
     capability_category: str = ''
     capability_page: int = 0
+    pending_workflow_mode: str = 'dynamic'
     thinking_depth: str = 'medium'
     output_language: str = 'zh'
-    show_process: bool = True
-    auto_collapse_process: bool = True
     show_sources: bool = True
     new_session_open: bool = False
     active_operation_id: str = ''
@@ -237,6 +175,11 @@ class FeishuWorkspaceState:
                 else ''
             ),
             capability_page=max(0, _integer(raw.get('capability_page'))),
+            pending_workflow_mode=(
+                str(raw.get('pending_workflow_mode'))
+                if str(raw.get('pending_workflow_mode')) in {'auto', 'dynamic'}
+                else 'dynamic'
+            ),
             thinking_depth=(
                 str(raw.get('thinking_depth'))
                 if str(raw.get('thinking_depth'))
@@ -247,10 +190,6 @@ class FeishuWorkspaceState:
                 str(raw.get('output_language'))
                 if str(raw.get('output_language')) in {'zh', 'en'}
                 else 'zh'
-            ),
-            show_process=bool(raw.get('show_process', True)),
-            auto_collapse_process=bool(
-                raw.get('auto_collapse_process', True)
             ),
             show_sources=bool(raw.get('show_sources', True)),
             new_session_open=bool(raw.get('new_session_open', False)),
@@ -318,10 +257,9 @@ class FeishuWorkspaceState:
             'revision': self.revision,
             'capability_category': self.capability_category,
             'capability_page': self.capability_page,
+            'pending_workflow_mode': self.pending_workflow_mode,
             'thinking_depth': self.thinking_depth,
             'output_language': self.output_language,
-            'show_process': self.show_process,
-            'auto_collapse_process': self.auto_collapse_process,
             'show_sources': self.show_sources,
             'new_session_open': self.new_session_open,
             'active_operation_id': self.active_operation_id,
@@ -385,19 +323,14 @@ class FeishuWorkspaceState:
         self.new_session_open = True
 
     def prepare_new_session(self) -> None:
-        self.clear_chat()
+        self.images = []
         self.new_session_open = False
         self.view = 'conversations'
 
     def reset_preferences(self) -> None:
         self.thinking_depth = 'medium'
         self.output_language = 'zh'
-        self.show_process = True
-        self.auto_collapse_process = True
         self.show_sources = True
-
-    def clear_chat(self) -> None:
-        self.images = []
 
     def add_image(
         self,
@@ -483,25 +416,6 @@ class FeishuWorkspaceRenderer:
                         provider_context.get('new_conversation_pending')
                         is True
                     ),
-                    pending_workflow_mode=(
-                        str(
-                            provider_context.get('pending_workflow_mode')
-                            or 'dynamic'
-                        )
-                        if str(
-                            provider_context.get('pending_workflow_mode')
-                            or 'dynamic'
-                        ) in {'auto', 'dynamic'}
-                        else 'dynamic'
-                    ),
-                    pending_resources=(
-                        provider_context.get('pending_capability_resources')
-                        if isinstance(
-                            provider_context.get('pending_capability_resources'),
-                            list,
-                        )
-                        else []
-                    ),
                     result_complete=result_complete,
                 )
             )
@@ -570,21 +484,14 @@ class FeishuWorkspaceRenderer:
         *,
         conversation_id: str,
         new_conversation_pending: bool,
-        pending_workflow_mode: str,
-        pending_resources: list[dict[str, Any]],
         result_complete: bool,
     ) -> list[dict[str, Any]]:
         has_conversation = bool(conversation_id)
-        if (
-            not has_conversation
-            and new_conversation_pending
-            and state.capability_category
-        ):
+        if state.capability_category:
             return FeishuWorkspaceRenderer._capability_catalog(
                 state,
                 presentations,
                 chat_id,
-                pending_resources=pending_resources,
                 result_complete=result_complete,
             )
         groups = _capability_groups(presentations)
@@ -596,8 +503,23 @@ class FeishuWorkspaceRenderer:
             ),
             {},
         )
-        selected = (
-            {
+        selected = {
+            (str(group.get('resource_type') or ''), str(item.get('id') or ''))
+            for group in groups
+            for item in (
+                group.get('items')
+                if isinstance(group.get('items'), list)
+                else []
+            )
+            if isinstance(item, dict)
+            and item.get('id')
+            and item.get('enabled') is True
+        }
+        if has_conversation:
+            selected = {
+                value for value in selected if value[0] != 'knowledge_base'
+            }
+            selected.update({
                 ('knowledge_base', str(item))
                 for item in (
                     settings.get('dataset_ids')
@@ -605,62 +527,94 @@ class FeishuWorkspaceRenderer:
                     else []
                 )
                 if str(item)
-            }
+            })
+        workflow_count = sum(
+            item_type == 'workflow' for item_type, _ in selected
+        )
+        workflow_mode = (
+            str(settings.get('workflow_mode') or 'dynamic')
             if has_conversation
-            else {
-                (item.type, item.id)
-                for value in pending_resources
-                for item in [WorkspaceResource.from_dict(value)]
-                if item is not None
-            }
+            else state.pending_workflow_mode
+        )
+        subagent_enabled = bool(settings.get('subagent_enabled', True))
+        workflow_action = (
+            _setting_action(
+                chat_id,
+                {
+                    'setting': 'workflow_mode',
+                    'mode': 'dynamic' if workflow_mode == 'auto' else 'auto',
+                },
+                '切换 Workflow 运行方式',
+                view='capabilities',
+                expected_revision=state.revision,
+                expected_operation_id=state.active_operation_id,
+                expected_conversation_id=conversation_id,
+            )
+            if has_conversation
+            else _command_action(
+                chat_id=chat_id,
+                text='切换 Workflow 运行方式',
+                command=_capability_command(),
+                workspace_action={
+                    'kind': 'new_session.workflow_mode',
+                    'mode': (
+                        'dynamic' if workflow_mode == 'auto' else 'auto'
+                    ),
+                    'expected_mode': workflow_mode,
+                    'expected_view': state.view,
+                    'expected_revision': state.revision,
+                    'expected_operation_id': state.active_operation_id,
+                },
+            )
         )
         selection_scope_note = _localized(
             state,
             (
-                '知识库来自 Core；飞书仅显示会话级配置'
+                '知识库按本会话生效；其他能力按账号生效'
                 if has_conversation
-                else '这些选择仅用于即将开始的会话'
+                else '知识库作为新会话默认；其他能力按账号生效'
             ),
             (
-                'Knowledge bases come from Core; Feishu only shows conversation settings'
+                'Knowledge bases apply to this conversation; other capabilities apply to the account'
                 if has_conversation
-                else 'These selections apply only to the upcoming conversation'
+                else 'Knowledge bases become the new-conversation default; other capabilities apply to the account'
             ),
         )
         elements: list[dict[str, Any]] = [
             _heading_action(
                 title=(
-                    _localized(state, '本会话设置', 'Conversation settings')
+                    _localized(state, '会话与能力', 'Conversation and capabilities')
                     if has_conversation
                     else _localized(state, '新会话能力', 'New conversation capabilities')
                 ),
                 description=(
                     _localized(
                         state,
-                        '显示 Core 当前配置；知识库在飞书中只读。',
-                        'Shows current Core settings; knowledge bases are read-only in Feishu.',
+                        '知识库只影响本会话；Skill、Workflow 和 Tool 是账号能力。',
+                        'Knowledge bases affect this conversation; Skills, '
+                        'Workflows and Tools are account capabilities.',
                     )
                     if has_conversation
                     else _localized(
                         state,
-                        '选择后用于即将开始的会话；发送首条消息后自动绑定。',
-                        'Selections bind after the first message in the new conversation.',
+                        '选择知识库和执行能力；新会话会直接继承。',
+                        'Choose knowledge bases and execution capabilities for new conversations.',
                     )
                 ),
                 button={
                     'label': (
-                        _localized(state, '刷新 Core 配置', 'Refresh')
+                        _localized(state, '刷新列表', 'Refresh')
                         if has_conversation
                         else _localized(
                             state,
-                            '选择会自动保存',
-                            'Selections save automatically',
+                            '设置会自动保存',
+                            'Settings save automatically',
                         )
                         if new_conversation_pending
                         else _localized(
                             state,
-                            '先新建会话',
-                            'Create a conversation first',
+                            '刷新列表',
+                            'Refresh',
                         )
                     ),
                     'style': 'default',
@@ -668,7 +622,7 @@ class FeishuWorkspaceRenderer:
                         _command_action(
                             chat_id=chat_id,
                             text='刷新能力配置',
-                            command=_TAB_COMMANDS['capabilities'],
+                            command=_capability_command(),
                             workspace_action={
                                 'kind': 'navigate',
                                 'view': 'capabilities',
@@ -678,20 +632,13 @@ class FeishuWorkspaceRenderer:
                             },
                         )
                         if has_conversation
-                        else _local_action(
+                        else _command_action(
                             chat_id=chat_id,
-                            text=(
-                                '返回对话'
-                                if new_conversation_pending
-                                else '先新建会话'
-                            ),
+                            text='刷新能力列表',
+                            command=_capability_command(),
                             workspace_action={
                                 'kind': 'navigate',
-                                'view': (
-                                    'chat'
-                                    if new_conversation_pending
-                                    else 'conversations'
-                                ),
+                                'view': 'capabilities',
                                 'expected_view': state.view,
                                 'expected_revision': state.revision,
                                 'expected_operation_id': state.active_operation_id,
@@ -703,22 +650,22 @@ class FeishuWorkspaceRenderer:
             {
                 'tag': 'markdown',
                 'content': (
-                    f'<font color="blue">{len(selected)} '
-                    f'{_localized(state, "项已选", "selected")}</font>　'
                     f'<font color="grey">{selection_scope_note}</font>'
                 ),
             },
-        ]
-        if not has_conversation and not new_conversation_pending:
-            elements.append({
+            {
                 'tag': 'markdown',
                 'content': _localized(
                     state,
-                    '<font color="grey">先新建会话，再选择首轮能力。</font>',
-                    '<font color="grey">Create a conversation before choosing first-turn capabilities.</font>',
+                    '**会话资源**　<font color="grey">只影响当前会话</font>'
+                    if has_conversation
+                    else '**新会话默认**　<font color="grey">首条消息会使用这些资源</font>',
+                    '**Conversation resources**　<font color="grey">Only affects this conversation</font>'
+                    if has_conversation
+                    else '**New-conversation defaults**　<font color="grey">Used by the first message</font>',
                 ),
-            })
-            return elements
+            },
+        ]
         if not groups:
             elements.append(
                 {
@@ -738,34 +685,36 @@ class FeishuWorkspaceRenderer:
                     ),
                 }
             )
+        account_section_added = False
         for group in groups:
             items = group.get('items')
             values = items if isinstance(items, list) else []
             resource_type = str(group.get('resource_type') or '')
-            if has_conversation and resource_type != 'knowledge_base':
-                continue
+            if resource_type != 'knowledge_base' and not account_section_added:
+                elements.extend([
+                    {'tag': 'hr'},
+                    {
+                        'tag': 'markdown',
+                        'content': _localized(
+                            state,
+                            '**账号能力**　<font color="grey">在所有会话中可用</font>',
+                            '**Account capabilities**　<font color="grey">Available in all conversations</font>',
+                        ),
+                    },
+                ])
+                account_section_added = True
             label = _localized(
                 state,
                 str(group.get('label') or '能力'),
                 {
-                    'knowledge_base': 'Knowledge bases',
-                    'skill': 'Skills',
-                    'workflow': 'Workflows',
-                    'tool': 'Tools',
-                    'conversation': 'Conversations',
+                    'knowledge_base': 'Conversation knowledge bases',
+                    'skill': 'Available Skills',
+                    'workflow': 'Available Workflows',
+                    'tool': 'Available Tools',
                 }.get(resource_type, 'Capabilities'),
             )
             option_elements: list[dict[str, Any]] = []
-            if has_conversation:
-                visible_values = [
-                    item
-                    for item in values
-                    if isinstance(item, dict)
-                    and ('knowledge_base', str(item.get('id') or ''))
-                    in selected
-                ][:_MAX_CAPABILITY_ITEMS_PER_GROUP]
-            else:
-                visible_values = values[:_MAX_CAPABILITY_ITEMS_PER_GROUP]
+            visible_values = values[:_MAX_CAPABILITY_ITEMS_PER_GROUP]
             for start in range(0, len(visible_values), 2):
                 buttons: list[dict[str, Any]] = []
                 for item in visible_values[start:start + 2]:
@@ -773,29 +722,16 @@ class FeishuWorkspaceRenderer:
                         continue
                     item_id = str(item.get('id') or '')
                     is_selected = (resource_type, item_id) in selected
-                    if has_conversation and resource_type == 'knowledge_base':
-                        action = _command_action(
-                            chat_id=chat_id,
-                            text='刷新能力配置',
-                            command=_TAB_COMMANDS['capabilities'],
-                            workspace_action={
-                                'kind': 'navigate',
-                                'view': 'capabilities',
-                                'expected_view': state.view,
-                                'expected_revision': state.revision,
-                                'expected_operation_id': state.active_operation_id,
-                            },
-                        )
-                    else:
-                        action = _resource_toggle_action(
-                            chat_id=chat_id,
-                            kind='capability.toggle',
-                            category=resource_type,
-                            item=item,
-                            expected_revision=state.revision,
-                            expected_operation_id=state.active_operation_id,
-                            catalog_only=False,
-                        )
+                    action = _resource_toggle_action(
+                        chat_id=chat_id,
+                        kind='capability.toggle',
+                        category=resource_type,
+                        item=item,
+                        enabled=not is_selected,
+                        expected_revision=state.revision,
+                        expected_operation_id=state.active_operation_id,
+                        catalog_only=False,
+                    )
                     buttons.append({
                         'label': (
                             f'{"✓" if is_selected else "＋"} '
@@ -840,202 +776,170 @@ class FeishuWorkspaceRenderer:
                     ),
                 ]
             )
-        if not has_conversation:
-            elements.extend([
-                {
-                    'tag': 'markdown',
-                    'content': _localized(
+            if resource_type == 'workflow':
+                workflow_note = (
+                    _localized(
                         state,
-                        '<font color="grey">目录页可浏览全部六类能力与 Prompt。</font>',
-                        '<font color="grey">Open the catalog to browse all six capability and prompt categories.</font>',
+                        (
+                            f'已选择 {workflow_count} 个 Workflow，即为启用；'
+                            '清空选择即关闭。'
+                        ),
+                        (
+                            f'{workflow_count} Workflow(s) selected; '
+                            'clear the selection to disable Workflow.'
+                        ),
+                    )
+                    if workflow_count
+                    else _localized(
+                        state,
+                        '未选择 Workflow，当前为关闭状态。',
+                        'No Workflow is selected, so Workflow is disabled.',
+                    )
+                )
+                elements.append({
+                    'tag': 'markdown',
+                    'content': f'<font color="grey">{workflow_note}</font>',
+                })
+                if workflow_count and (has_conversation or new_conversation_pending):
+                    elements.extend([
+                        {
+                            'tag': 'markdown',
+                            'content': _localized(
+                                state,
+                                '**Workflow 运行方式**',
+                                '**Workflow execution mode**',
+                            ),
+                        },
+                        _button_row([
+                            {
+                                'label': _localized(
+                                    state,
+                                    '自动连续运行'
+                                    if workflow_mode == 'auto'
+                                    else '每步完成后等待',
+                                    'Run continuously'
+                                    if workflow_mode == 'auto'
+                                    else 'Wait after each step',
+                                ),
+                                'style': (
+                                    'primary'
+                                    if workflow_mode == 'auto'
+                                    else 'default'
+                                ),
+                                'action': workflow_action,
+                            }
+                        ]),
+                        {
+                            'tag': 'markdown',
+                            'content': _localized(
+                                state,
+                                (
+                                    '<font color="grey">每步等待会在当前步骤完成后暂停，'
+                                    '由你的下一条消息继续；自动运行会连续执行后续步骤。</font>'
+                                ),
+                                (
+                                    '<font color="grey">Wait mode pauses after each step; '
+                                    'continuous mode proceeds automatically.</font>'
+                                ),
+                            ),
+                        },
+                    ])
+                elif workflow_count:
+                    elements.append({
+                        'tag': 'markdown',
+                        'content': _localized(
+                            state,
+                            '<font color="grey">新建会话后可设置运行方式。</font>',
+                            '<font color="grey">Create a conversation to set the execution mode.</font>',
+                        ),
+                    })
+        elements.extend([
+            {'tag': 'hr'},
+            {
+                'tag': 'markdown',
+                'content': _localized(
+                    state,
+                    (
+                        '**自主子任务（SubAgent）**\n'
+                        '<font color="grey">Workflow 是你选择的固定流程；'
+                        '自主子任务让模型临时拆分并委派任务。两者相互独立，'
+                        '启用 Workflow 不会自动启用自主子任务。</font>'
                     ),
-                },
+                    (
+                        '**Autonomous subtasks (SubAgent)**\n'
+                        '<font color="grey">Workflows are selected reusable flows; '
+                        'SubAgent lets the model split and delegate tasks. They are '
+                        'independent, so enabling Workflow does not enable SubAgent.</font>'
+                    ),
+                ),
+            },
+        ])
+        if has_conversation:
+            elements.append(
                 _button_row([
                     {
                         'label': _localized(
                             state,
-                            '管理全部能力',
-                            'Manage all capabilities',
+                            '自主子任务：已开启'
+                            if subagent_enabled
+                            else '自主子任务：已关闭',
+                            'Autonomous subtasks: on'
+                            if subagent_enabled
+                            else 'Autonomous subtasks: off',
                         ),
-                        'style': 'default',
-                        'action': _capability_catalog_action(
+                        'style': 'primary' if subagent_enabled else 'default',
+                        'action': _setting_action(
                             chat_id,
-                            state,
-                            kind='capability.open',
-                            category='knowledge_base',
+                            {
+                                'setting': 'subagent',
+                                'enabled': not subagent_enabled,
+                            },
+                            '切换自主子任务',
+                            view='capabilities',
+                            expected_revision=state.revision,
+                            expected_operation_id=state.active_operation_id,
+                            expected_conversation_id=conversation_id,
                         ),
                     }
-                ]),
-            ])
-        workflow_enabled = (
-            bool(settings.get('workflow_enabled', True))
-            if has_conversation
-            else any(item_type == 'workflow' for item_type, _ in selected)
-        )
-        subagent_enabled = bool(settings.get('subagent_enabled', True))
-        workflow_mode = (
-            str(settings.get('workflow_mode') or 'dynamic')
-            if has_conversation
-            else pending_workflow_mode
-        )
-        workflow_action = (
-            _setting_action(
-                chat_id,
-                {
-                    'setting': 'workflow_mode',
-                    'mode': (
-                        'dynamic'
-                        if workflow_mode == 'auto'
-                        else 'auto'
-                    ),
-                },
-                '切换 Workflow 执行方式',
-                view='capabilities',
-                expected_revision=state.revision,
-                expected_operation_id=state.active_operation_id,
-                expected_conversation_id=conversation_id,
+                ])
             )
-            if has_conversation
-            else _command_action(
-                chat_id=chat_id,
-                text='切换 Workflow 执行方式',
-                command=_TAB_COMMANDS['capabilities'],
-                    workspace_action={
-                        'kind': 'new_session.workflow_mode',
-                    'mode': (
-                        'dynamic'
-                        if workflow_mode == 'auto'
-                        else 'auto'
-                    ),
-                        'expected_mode': workflow_mode,
-                        'expected_view': state.view,
-                        'expected_revision': state.revision,
-                    'expected_operation_id': state.active_operation_id,
-                },
-            )
-            if new_conversation_pending
-            else _command_action(
-                chat_id=chat_id,
-                text='先新建会话',
-                command=_history_command('先新建会话'),
-                workspace_action={
-                    'kind': 'navigate',
-                    'view': 'conversations',
-                    'expected_view': state.view,
-                    'expected_revision': state.revision,
-                    'expected_operation_id': state.active_operation_id,
-                },
-            )
-        )
-        execution_buttons = []
-        if has_conversation:
-            execution_buttons.append({
-                'label': (
-                    '✓ Workflow 已启用'
-                    if workflow_enabled
-                    else '○ Workflow 已关闭'
-                ),
-                'style': 'primary' if workflow_enabled else 'default',
-                'action': _setting_action(
-                    chat_id,
-                    {
-                        'setting': 'workflow_enabled',
-                        'enabled': not workflow_enabled,
-                    },
-                    '切换会话 Workflow',
-                    view='capabilities',
-                    expected_revision=state.revision,
-                    expected_operation_id=state.active_operation_id,
-                    expected_conversation_id=conversation_id,
+        else:
+            elements.append({
+                'tag': 'markdown',
+                'content': _localized(
+                    state,
+                    '<font color="grey">新会话会沿用 Core 中的账号默认设置。</font>',
+                    '<font color="grey">New conversations use the account default from Core.</font>',
                 ),
             })
-        if not has_conversation or workflow_enabled:
-            execution_buttons.append({
-                'label': (
-                    _localized(
-                        state,
-                        '✓ Workflow 自动执行',
-                        '✓ Workflow auto-run',
-                    )
-                    if workflow_mode == 'auto'
-                    else _localized(
-                        state,
-                        '○ Workflow 分步确认',
-                        '○ Confirm after each Workflow step',
-                    )
-                    if has_conversation or new_conversation_pending
-                    else _localized(
-                        state,
-                        '先新建会话后设置 Workflow',
-                        'Create a conversation to configure Workflow',
-                    )
+        elements.extend([
+            {'tag': 'hr'},
+            {
+                'tag': 'markdown',
+                'content': _localized(
+                    state,
+                    '<font color="grey">目录页可浏览完整账号能力与 Prompt。</font>',
+                    '<font color="grey">Open the catalog to browse all '
+                    'account capabilities and prompts.</font>',
                 ),
-                'style': 'primary' if workflow_mode == 'auto' else 'default',
-                'action': workflow_action,
-            })
-        if has_conversation:
-            execution_buttons.append(
+            },
+            _button_row([
                 {
-                    'label': (
-                        '✓ SubAgent'
-                        if subagent_enabled
-                        else '○ SubAgent'
+                    'label': _localized(
+                        state,
+                        '管理全部能力',
+                        'Manage all capabilities',
                     ),
-                    'style': (
-                        'primary' if subagent_enabled else 'default'
-                    ),
-                    'action': _setting_action(
+                    'style': 'default',
+                    'action': _capability_catalog_action(
                         chat_id,
-                        {
-                            'setting': 'subagent',
-                            'enabled': not subagent_enabled,
-                        },
-                        '切换 SubAgent',
-                        view='capabilities',
-                        expected_revision=state.revision,
-                        expected_operation_id=state.active_operation_id,
-                        expected_conversation_id=conversation_id,
+                        state,
+                        kind='capability.open',
+                        category='knowledge_base',
                     ),
                 }
-            )
-        elements.extend(
-            [
-                {
-                    'tag': 'markdown',
-                    'content': _localized(
-                        state,
-                        '**执行能力**　<font color="grey">点击即可切换</font>',
-                        '**Execution**　<font color="grey">Click to toggle</font>',
-                    ),
-                },
-                _button_row(execution_buttons),
-                {
-                    'tag': 'markdown',
-                    'content': _localized(
-                        state,
-                        (
-                            '<font color="grey">尚未选择 Workflow；'
-                            '选择后将使用当前执行方式。</font>'
-                            if not has_conversation and not workflow_enabled
-                            else
-                            '<font color="grey">分步确认会先执行当前步骤，'
-                            '步骤完成后暂停，再由你的下一条消息继续；'
-                            '它不会在首步执行前弹出确认。</font>'
-                        ),
-                        (
-                            '<font color="grey">No Workflow is selected; '
-                            'the chosen execution mode applies after one is selected.</font>'
-                            if not has_conversation and not workflow_enabled
-                            else
-                            '<font color="grey">Step confirmation pauses after '
-                            'the current step completes and continues with your '
-                            'next message; it does not confirm before the first '
-                            'step.</font>'
-                        ),
-                    ),
-                },
-            ]
-        )
+            ]),
+        ])
         return elements
 
     @staticmethod
@@ -1168,8 +1072,9 @@ class FeishuWorkspaceRenderer:
                         'tag': 'markdown',
                         'content': _localized(
                             state,
-                            '<font color="grey">创建空白会话；能力配置由 Core 在首轮接管。</font>',
-                            '<font color="grey">Creates a blank conversation; Core owns its capability configuration.</font>',
+                            '<font color="grey">创建空白会话；发送第一条消息后正式建立。</font>',
+                            '<font color="grey">Creates a blank conversation; '
+                            'it becomes active after your first message.</font>',
                         ),
                     },
                     _button_row(
@@ -1288,11 +1193,11 @@ class FeishuWorkspaceRenderer:
                                 if state.thinking_depth == value
                                 else 'default'
                             ),
-                        'action': _preference_action(
-                            chat_id,
-                            state,
-                            'thinking_depth',
-                            value,
+                            'action': _preference_action(
+                                chat_id,
+                                state,
+                                'thinking_depth',
+                                value,
                             ),
                         }
                         for label, value in row
@@ -1349,42 +1254,6 @@ class FeishuWorkspaceRenderer:
                     '**Presentation and notifications**',
                 ),
             },
-            _button_row(
-                [
-                    {
-                        'label': (
-                            _localized(state, '✓ 显示执行摘要', '✓ Show execution summary')
-                            if state.show_process
-                            else _localized(state, '＋ 显示执行摘要', '＋ Show execution summary')
-                        ),
-                        'style': 'primary' if state.show_process else 'default',
-                        'action': _preference_action(
-                            chat_id,
-                            state,
-                            'show_process',
-                            not state.show_process,
-                        ),
-                    },
-                    {
-                        'label': (
-                            _localized(state, '✓ 完成后折叠进度', '✓ Collapse progress on completion')
-                            if state.auto_collapse_process
-                            else _localized(state, '＋ 完成后折叠进度', '＋ Collapse progress on completion')
-                        ),
-                        'style': (
-                            'primary'
-                            if state.auto_collapse_process
-                            else 'default'
-                        ),
-                        'action': _preference_action(
-                            chat_id,
-                            state,
-                            'auto_collapse_process',
-                            not state.auto_collapse_process,
-                        ),
-                    },
-                ]
-            ),
             _button_row(
                 [
                     {
@@ -1481,19 +1350,13 @@ class FeishuWorkspaceRenderer:
         presentations: list[dict[str, Any]],
         chat_id: str,
         *,
-        pending_resources: list[dict[str, Any]],
         result_complete: bool,
     ) -> list[dict[str, Any]]:
-        selected_resources = [
-            item
-            for value in pending_resources
-            for item in [WorkspaceResource.from_dict(value)]
-            if item is not None
-        ]
+        selected = _selected_capabilities(presentations)
         selected_summary = _localized(
             state,
-            f'{len(selected_resources)} 项已选',
-            f'{len(selected_resources)} selected',
+            f'{len(selected)} 项已选',
+            f'{len(selected)} selected',
         )
         elements: list[dict[str, Any]] = [
             {
@@ -1501,14 +1364,14 @@ class FeishuWorkspaceRenderer:
                 'content': (
                     _localized(
                         state,
-                        '**管理新会话能力**　',
-                        '**Manage new-conversation capabilities**　',
+                        '**管理能力**　',
+                        '**Manage capabilities**　',
                     )
                     + f'<font color="blue">{selected_summary}</font>\n'
                     + _localized(
                         state,
-                        '<font color="grey">点击选项切换；更改会自动保存到新会话草稿。</font>',
-                        '<font color="grey">Toggle items below. Changes are saved automatically to the new-conversation draft.</font>',
+                        '<font color="grey">点击选项切换，设置会自动保存。</font>',
+                        '<font color="grey">Toggle an item below; settings save automatically.</font>',
                     )
                 ),
             },
@@ -1525,7 +1388,6 @@ class FeishuWorkspaceRenderer:
                         'skill': 'Skills',
                         'workflow': 'Workflows',
                         'tool': 'Tools',
-                        'conversation': 'Conversations',
                         'prompt': 'Prompts',
                     }[category],
                 ),
@@ -1574,10 +1436,6 @@ class FeishuWorkspaceRenderer:
         page_values = values[
             page_start:page_start + _CAPABILITY_PAGE_SIZE
         ]
-        selected = {
-            (item.type, item.id)
-            for item in selected_resources
-        }
         elements.append({'tag': 'hr'})
         if state.capability_category == 'prompt':
             elements.append(
@@ -1616,11 +1474,33 @@ class FeishuWorkspaceRenderer:
                         [
                             {
                                 'label': (
-                                    f'▶ {str(item.get("name") or _localized(state, "未命名", "Untitled"))[:32]}'
+                                    '▶ '
+                                    + str(
+                                        item.get('name')
+                                        or _localized(
+                                            state,
+                                            '未命名',
+                                            'Untitled',
+                                        )
+                                    )[:32]
                                     if state.capability_category == 'prompt'
                                     else (
-                                        f'{"✓" if (state.capability_category, str(item.get("id") or "")) in selected else "＋"} '
-                                        f'{str(item.get("name") or _localized(state, "未命名", "Untitled"))[:32]}'
+                                        (
+                                            '✓ '
+                                            if (
+                                                state.capability_category,
+                                                str(item.get('id') or ''),
+                                            ) in selected
+                                            else '＋ '
+                                        )
+                                        + str(
+                                            item.get('name')
+                                            or _localized(
+                                                state,
+                                                '未命名',
+                                                'Untitled',
+                                            )
+                                        )[:32]
                                     )
                                 ),
                                 'style': (
@@ -1642,6 +1522,13 @@ class FeishuWorkspaceRenderer:
                                         chat_id,
                                         state,
                                         item,
+                                        enabled=(
+                                            (
+                                                state.capability_category,
+                                                str(item.get('id') or ''),
+                                            )
+                                            not in selected
+                                        ),
                                     )
                                 ),
                             }
@@ -1696,14 +1583,14 @@ class FeishuWorkspaceRenderer:
                 _button_row([{
                     'label': _localized(
                         state,
-                        f'返回 · 已自动保存 {len(selected_resources)} 项',
-                        f'Back · {len(selected_resources)} auto-saved',
+                        f'返回 · 已保存 {len(selected)} 项',
+                        f'Back · {len(selected)} saved',
                     ),
                     'style': 'primary',
                     'action': _command_action(
                         chat_id=chat_id,
                         text='返回能力',
-                        command=_TAB_COMMANDS['capabilities'],
+                        command=_capability_command(),
                         workspace_action={
                             'kind': 'navigate',
                             'view': 'capabilities',
@@ -1741,22 +1628,23 @@ class FeishuWorkspaceRenderer:
         values = options if isinstance(options, list) else []
         elements: list[dict[str, Any]] = []
         for start in range(0, len(values), 2):
+            row = values[start:start + 2]
             elements.append(
                 _button_row(
                     [
                         {
                             'label': (
-                                f'{"⏳" if loading else "✓"} {str(option.get("value") or "")}. '
+                                f'{"⏳" if loading else "✓"} {start + offset + 1}. '
                                 f'{str(option.get("label") or "")}'
-                                if str(option.get('value') or '') == selected_value
+                                if str(start + offset + 1) == selected_value
                                 else (
-                                    f'{str(option.get("value") or "")}. '
+                                    f'{start + offset + 1}. '
                                     f'{str(option.get("label") or "")}'
                                 )
                             )[:40],
                             'style': (
                                 'primary'
-                                if str(option.get('value') or '') == selected_value
+                                if str(start + offset + 1) == selected_value
                                 else 'default'
                             ),
                             'disabled': loading,
@@ -1765,19 +1653,33 @@ class FeishuWorkspaceRenderer:
                                 'selection_id': str(
                                     selection.get('selection_id') or ''
                                 ),
-                                'selection': str(option.get('value') or ''),
-                                'text': str(option.get('value') or ''),
+                                'selection': str(start + offset + 1),
+                                'text': str(start + offset + 1),
                                 'intended_chat_id': chat_id,
-                                'workspace_action': dict(
-                                    workspace_action
-                                    or {
-                                        'kind': 'navigate',
-                                        'view': 'chat',
-                                    }
-                                ),
+                                'workspace_action': {
+                                    **dict(
+                                        workspace_action
+                                        or {
+                                            'kind': 'navigate',
+                                            'view': 'chat',
+                                        }
+                                    ),
+                                    **(
+                                        {
+                                            'target_conversation_id': str(
+                                                option.get('value') or ''
+                                            )[:512]
+                                        }
+                                        if (
+                                            (workspace_action or {}).get('kind')
+                                            == 'history.switch'
+                                        )
+                                        else {}
+                                    ),
+                                },
                             },
                         }
-                        for option in values[start:start + 2]
+                        for offset, option in enumerate(row)
                         if isinstance(option, dict)
                     ]
                 )
@@ -2036,6 +1938,30 @@ def _projects(
     ui_status = assistant_ui_status(assistant_view)
     projects = assistant_view.get('projects')
     projects = projects if isinstance(projects, list) else []
+    unique_projects: list[dict[str, Any]] = []
+    seen_cwds: set[str] = set()
+    for project in projects:
+        if not isinstance(project, dict):
+            continue
+        cwd = str(project.get('cwd') or '').rstrip('/\\')
+        identity = cwd.casefold()
+        if not cwd or identity in seen_cwds:
+            continue
+        seen_cwds.add(identity)
+        unique_projects.append(project)
+    projects = unique_projects
+    project_names = [
+        str(project.get('name') or project_name(str(project.get('cwd') or '')))
+        for project in projects
+    ]
+    duplicate_names = {
+        name.casefold()
+        for name in project_names
+        if sum(
+            candidate.casefold() == name.casefold()
+            for candidate in project_names
+        ) > 1
+    }
     total = max(0, _integer(assistant_view.get('total')))
     page_count = max(
         1,
@@ -2098,11 +2024,18 @@ def _projects(
     for project in projects:
         cwd = str(project.get('cwd') or '')
         count = int(project.get('thread_count') or 0)
+        name = str(project.get('name') or project_name(cwd))
+        parent_name = PurePath(cwd.rstrip('/\\')).parent.name
+        display_name = (
+            f'{name} · {parent_name}'
+            if name.casefold() in duplicate_names
+            else name
+        )
         elements.extend([
             {
                 'tag': 'markdown',
                 'content': (
-                    f'**{project.get("name") or project_name(cwd)}**\n'
+                    f'**{display_name}**\n'
                     f'<font color="grey">{_project_location(cwd)}</font>\n'
                     f'<font color="grey">{count} 个会话 · '
                     f'{_time_label(project.get("updated_at"))}</font>'
@@ -2113,7 +2046,7 @@ def _projects(
                 'action': _action(
                     chat_id,
                     'assistant.project',
-                    f'打开 Codex 项目 {project.get("name") or cwd}',
+                    f'打开 Codex 项目 {display_name}',
                     project_cwd=cwd,
                     expected_projects_cursor=state.assistant_projects_cursor,
                     expected_project_page=state.assistant_project_page,
@@ -2261,6 +2194,9 @@ def _sessions(
             if created_by_lazymind
             else _localized(state, '运行中·只读', 'Running · read-only')
         )
+        source = _source_label(
+            'appServer' if created_by_lazymind else thread.get('source')
+        )
         elements.extend([
             {
                 'tag': 'markdown',
@@ -2269,7 +2205,7 @@ def _sessions(
                     f'<font color="{"blue" if available else "orange"}">'
                     f'{thread_status}</font>\n'
                     f'<font color="grey">{thread.get("preview") or ""}</font>\n'
-                    f'<font color="grey">{_source_label("appServer" if created_by_lazymind else thread.get("source"))} · '
+                    f'<font color="grey">{source} · '
                     f'{thread.get("cwd") or "—"} · '
                     f'{_time_label(thread.get("updatedAt"))}</font>'
                 ),
@@ -2564,8 +2500,8 @@ def _detail(
     if dispatching:
         footer = _localized(
             state,
-            '<font color="grey">任务正在提交；Core 确认接收前暂不接收新消息。</font>',
-            '<font color="grey">The task is being submitted; new messages are paused until Core accepts it.</font>',
+            '<font color="grey">任务正在提交，完成前暂不接收新消息。</font>',
+            '<font color="grey">The task is being submitted; new messages are paused until it is accepted.</font>',
         )
     elif running and not cancelling:
         run_id = str(snapshot.get('run_id') or '')
@@ -2773,13 +2709,29 @@ def _assistant_request_elements(
 ) -> list[dict[str, Any]]:
     request_id = str(request.get('request_id') or '')
     kind = str(request.get('kind') or 'request')
-    summary = str(request.get('summary') or kind)
+    summary = str(request.get('summary') or '')
+    request_titles = {
+        'command_approval': ('命令执行审批', 'Command approval'),
+        'file_change_approval': ('文件变更审批', 'File change approval'),
+        'permissions_approval': ('权限审批', 'Permission approval'),
+        'user_input': ('需要补充信息', 'Input required'),
+    }
+    chinese_title, english_title = request_titles.get(
+        kind,
+        ('需要你的操作', 'Action required'),
+    )
+    title = _localized(state, chinese_title, english_title)
     elements: list[dict[str, Any]] = [
         {
             'tag': 'markdown',
-            'content': f'**需要你的操作**\n{_markdown_code(summary)}',
+            'content': f'**{title}**',
         }
     ]
+    if kind not in request_titles and summary:
+        elements.append({
+            'tag': 'markdown',
+            'content': _markdown_code(summary),
+        })
     error = str(request.get('error') or '')
     if error:
         elements.append({
@@ -2800,8 +2752,7 @@ def _assistant_request_elements(
         'cwd': '工作目录',
         'reason': '原因',
         'additional_permissions': '附加权限',
-        'policy': '网络与策略上下文',
-        'decision_policy': '将应用的审批策略',
+        'policy_amendment': '可选的持久执行规则',
         'permissions': '申请的权限范围',
         'environmentId': 'Environment',
         'itemId': 'Item',
@@ -2811,16 +2762,19 @@ def _assistant_request_elements(
         'diff': 'Diff',
     }
     detail_lines = []
-    for field in request.get('fields') or []:
-        if not isinstance(field, dict):
+    for detail_field in request.get('fields') or []:
+        if not isinstance(detail_field, dict):
             continue
-        value = str(field.get('value') or '')
+        value = str(detail_field.get('value') or '')
         if not value:
             continue
-        field_kind = str(field.get('kind') or 'detail')
+        field_kind = str(detail_field.get('kind') or 'detail')
         detail_lines.append(
             f'**{field_labels.get(field_kind, field_kind)}**\n'
-            + _markdown_code(value, str(field.get('language') or ''))
+            + _markdown_code(
+                value,
+                str(detail_field.get('language') or ''),
+            )
         )
     if detail_lines:
         elements.append({'tag': 'markdown', 'content': '\n\n'.join(detail_lines)})
@@ -2920,7 +2874,7 @@ def _history_refresh_action(
     return _command_action(
         chat_id=chat_id,
         text='同步历史会话',
-        command=_history_command('同步历史会话'),
+        command=_history_command(),
         workspace_action={
             'kind': 'history.open',
             'expected_view': state.view,
@@ -2955,7 +2909,6 @@ def _capability_catalog_action(
             'command': 'capability.list',
             'parameters': {
                 'capabilities': [category],
-                'evidence': [f'查看{_CAPABILITY_LABELS.get(category, "知识库")}'],
             },
         },
         workspace_action=workspace_action,
@@ -2966,12 +2919,15 @@ def _capability_toggle_action(
     chat_id: str,
     state: FeishuWorkspaceState,
     item: dict[str, Any],
+    *,
+    enabled: bool,
 ) -> dict[str, Any]:
     return _resource_toggle_action(
         chat_id=chat_id,
         kind='capability.toggle',
         category=state.capability_category,
         item=item,
+        enabled=enabled,
         expected_revision=state.revision,
         expected_operation_id=state.active_operation_id,
         catalog_only=True,
@@ -2999,6 +2955,7 @@ def _resource_toggle_action(
     kind: str,
     category: str,
     item: dict[str, Any],
+    enabled: bool,
     expected_revision: int,
     expected_operation_id: str,
     catalog_only: bool,
@@ -3015,9 +2972,6 @@ def _resource_toggle_action(
                     if catalog_only
                     else list(_CAPABILITY_OVERVIEW_TYPES)
                 ),
-                'evidence': [
-                    f'切换{_CAPABILITY_LABELS.get(category, "资源")}'
-                ],
             },
         },
         workspace_action={
@@ -3030,6 +2984,7 @@ def _resource_toggle_action(
                 'type': category,
                 'id': str(item.get('id') or ''),
                 'name': str(item.get('name') or '')[:100],
+                'enabled': enabled,
             },
         },
     )
@@ -3046,7 +3001,7 @@ def _new_session_action(
         return _command_action(
             chat_id=chat_id,
             text='设置新会话起点',
-            command=_history_command('设置新会话起点'),
+            command=_history_command(),
             workspace_action={
                 'kind': kind,
                 'expected_view': state.view,
@@ -3062,8 +3017,6 @@ def _new_session_action(
             'command': 'conversation.new',
             'parameters': {
                 'message': '',
-                'resource_changes': [],
-                'evidence': ['创建会话'],
             },
         },
         workspace_action={
@@ -3101,8 +3054,6 @@ def _maintenance_action(
             'command': 'conversation.new',
             'parameters': {
                 'message': '',
-                'resource_changes': [],
-                'evidence': ['清空当前会话上下文'],
             },
         },
         workspace_action={
@@ -3132,7 +3083,6 @@ def _prompt_action(
             'command': 'chat',
             'parameters': {
                 'message': content,
-                'resource_changes': [],
             },
         },
         workspace_action={
@@ -3183,7 +3133,6 @@ def _setting_action(
             'parameters': {
                 'change': change,
                 'expected_conversation_id': expected_conversation_id,
-                'evidence': [text],
             },
         },
         workspace_action={
@@ -3214,3 +3163,41 @@ def _capability_groups(
         for group in (groups if isinstance(groups, list) else [])
         if isinstance(group, dict)
     ]
+
+
+def _selected_capabilities(
+    presentations: list[dict[str, Any]],
+) -> set[tuple[str, str]]:
+    selected = {
+        (resource_type, resource_id)
+        for group in _capability_groups(presentations)
+        if (resource_type := str(group.get('resource_type') or ''))
+        in _RESOURCE_TYPES
+        for value in (
+            group.get('items')
+            if isinstance(group.get('items'), list)
+            else []
+        )[:100]
+        if isinstance(value, dict) and value.get('enabled') is True
+        if (resource_id := str(value.get('id') or '').strip())
+        and len(resource_id) <= 512
+    }
+    settings = next(
+        (
+            item
+            for item in presentations
+            if item.get('kind') == 'conversation_settings'
+        ),
+        {},
+    )
+    dataset_ids = settings.get('dataset_ids')
+    if isinstance(dataset_ids, list):
+        selected = {
+            value for value in selected if value[0] != 'knowledge_base'
+        }
+        selected.update(
+            ('knowledge_base', str(value)[:512])
+            for value in dataset_ids[:100]
+            if str(value)
+        )
+    return selected

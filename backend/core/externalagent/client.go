@@ -124,7 +124,7 @@ type stdioTransport struct {
 }
 
 func startStdio(binary string) (messageTransport, error) {
-	cmd := exec.Command(binary, "app-server")
+	cmd := exec.Command(binary, "app-server", "--enable", "code_mode_host")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

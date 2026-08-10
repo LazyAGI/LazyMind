@@ -744,10 +744,17 @@ def resolve_workflow_injection(
         )
         if trigger_entry_tools:
             # Discovery mode: expose triggers directly so the model can route
-            # from the injected catalog without a gateway hop. Execution tools
-            # remain hidden until a Workflow is selected or active.
+            # from the injected catalog without a gateway hop. A ChatAgent tool
+            # set is fixed for one model turn, so Session tools must already be
+            # present when a trigger creates the Session. They resolve the id
+            # lazily and therefore remain unusable before the trigger runs.
             tools = [
                 *trigger_entry_tools,
+                *_safe_session_tools(
+                    toolkit,
+                    lambda: session_holder.get('session_id', ''),
+                ),
+                _handoff_tool(lambda: session_holder.get('session_id', '')),
                 authoring_group,
             ]
         else:

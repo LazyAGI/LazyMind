@@ -53,7 +53,6 @@ class CapabilityPresentation:
 class ConversationSettingsPresentation:
     kind: Literal['conversation_settings']
     dataset_ids: tuple[str, ...]
-    workflow_enabled: bool
     workflow_mode: Literal['auto', 'dynamic']
     subagent_enabled: bool
 
@@ -61,7 +60,6 @@ class ConversationSettingsPresentation:
         return {
             'kind': self.kind,
             'dataset_ids': list(self.dataset_ids),
-            'workflow_enabled': self.workflow_enabled,
             'workflow_mode': self.workflow_mode,
             'subagent_enabled': self.subagent_enabled,
         }

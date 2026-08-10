@@ -188,6 +188,8 @@ class CoreStreamUpdate:
     conversation_id: str = ''
     history_id: str = ''
     external_event: dict[str, Any] | None = None
+    task_created: dict[str, Any] | None = None
+    workflow_progress: str = ''
 
 
 @dataclass(frozen=True, slots=True)

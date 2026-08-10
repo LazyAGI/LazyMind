@@ -82,6 +82,7 @@ class TaskClient(Protocol):
         owner_user_id: str,
         conversation_id: str,
         request_id: str,
+        summary_only: bool = False,
     ) -> list[dict[str, Any]]:
         ...
 

@@ -700,7 +700,6 @@ class FeishuConnectionService:
                     },
                     text=f'**👋 欢迎使用 LazyMind**\n\n{WELCOME_MESSAGE}',
                     status='✅ **连接完成**',
-                    thinking='请直接使用飞书输入框对话；底部菜单用于能力、会话与设置。',
                 ),
                 idempotency_key=(
                     f'feishu-welcome:{account_id}'

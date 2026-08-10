@@ -707,7 +707,12 @@ class SQLiteGatewayStore(GatewayStore):
                     )
                 )
                 AND account.status = 'connected'
-                AND NOT EXISTS (
+                AND (
+                  json_extract(
+                      inbox.provider_context,
+                      '$._parallel_inbound'
+                  ) = 1
+                  OR NOT EXISTS (
                     SELECT 1
                     FROM channel_inbox AS earlier
                     WHERE earlier.account_id = inbox.account_id
@@ -716,6 +721,7 @@ class SQLiteGatewayStore(GatewayStore):
                           'completed', 'ignored', 'dead'
                       )
                       AND earlier.ingest_sequence < inbox.ingest_sequence
+                  )
                 )
                 ORDER BY inbox.ingest_sequence
                 LIMIT 1
@@ -802,6 +808,8 @@ class SQLiteGatewayStore(GatewayStore):
         external_address_hash: str,
         state: dict[str, Any],
         expected_revision: int,
+        *,
+        preserve_current_message: bool = True,
     ) -> bool:
         with self._connect() as connection:
             row = connection.execute(
@@ -836,12 +844,13 @@ class SQLiteGatewayStore(GatewayStore):
             if int(workspace.get('revision') or 0) != expected_revision:
                 return False
             next_state = dict(state)
-            next_state['message_id'] = str(
-                workspace.get('message_id')
-                or next_state.get('message_id')
-                or ''
-            )
-            value['feishu_workspace'] = next_state
+            if preserve_current_message:
+                next_state['message_id'] = str(
+                    workspace.get('message_id')
+                    or next_state.get('message_id')
+                    or ''
+                )
+            value = {'feishu_workspace': next_state}
             result = connection.execute(
                 """
                 UPDATE channel_navigation_states
@@ -888,7 +897,7 @@ class SQLiteGatewayStore(GatewayStore):
             )
             workspace.update(patch)
             workspace['revision'] = current_revision + 1
-            value['feishu_workspace'] = workspace
+            value = {'feishu_workspace': workspace}
             connection.execute(
                 """
                 INSERT INTO channel_navigation_states(
@@ -948,7 +957,7 @@ class SQLiteGatewayStore(GatewayStore):
                     0,
                     int(workspace.get('revision') or 0),
                 ) + 1
-            value['feishu_workspace'] = workspace
+            value = {'feishu_workspace': workspace}
             connection.execute(
                 """
                 INSERT INTO channel_navigation_states(

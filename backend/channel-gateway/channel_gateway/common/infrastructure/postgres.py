@@ -30,103 +30,6 @@ def _snapshot(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
-def _toggle_new_conversation_resource(
-    value: Any,
-    resource: dict[str, Any],
-) -> dict[str, Any] | None:
-    resource_type = resource.get('type')
-    resource_id = resource.get('id')
-    if (
-        resource_type not in {
-            'knowledge_base',
-            'skill',
-            'workflow',
-            'tool',
-            'conversation',
-        }
-        or not isinstance(resource_id, str)
-        or not resource_id.strip()
-        or len(resource_id) > 512
-    ):
-        return None
-    resource_id = resource_id.strip()
-    draft = dict(value) if isinstance(value, dict) else {}
-    if resource_type == 'knowledge_base':
-        search_config = draft.get('search_config')
-        search_config = (
-            dict(search_config) if isinstance(search_config, dict) else {}
-        )
-        dataset_list = search_config.get('dataset_list')
-        dataset_ids = [
-            str(item.get('id') or '')
-            for item in (
-                dataset_list if isinstance(dataset_list, list) else []
-            )
-            if isinstance(item, dict) and str(item.get('id') or '')
-        ][:100]
-        if resource_id in dataset_ids:
-            dataset_ids = [item for item in dataset_ids if item != resource_id]
-        elif len(dataset_ids) < 100:
-            dataset_ids.append(resource_id)
-        search_config['dataset_list'] = [
-            {'id': item} for item in dict.fromkeys(dataset_ids)
-        ]
-        draft['search_config'] = search_config
-        return draft
-    mentions = draft.get('mentions')
-    mentions = [
-        dict(item)
-        for item in (mentions if isinstance(mentions, list) else [])
-        if isinstance(item, dict)
-        and isinstance(item.get('type'), str)
-        and isinstance(item.get('resource_id'), str)
-    ][:100]
-    key = (resource_type, resource_id)
-    existing = {
-        (str(item.get('type') or ''), str(item.get('resource_id') or ''))
-        for item in mentions
-    }
-    if key in existing:
-        mentions = [
-            item
-            for item in mentions
-            if (
-                str(item.get('type') or ''),
-                str(item.get('resource_id') or ''),
-            ) != key
-        ]
-    elif (
-        len(mentions) < 100
-        and not (
-            resource_type == 'conversation'
-            and sum(item.get('type') == 'conversation' for item in mentions)
-            >= 3
-        )
-    ):
-        if resource_type == 'workflow':
-            mentions = [
-                item for item in mentions if item.get('type') != 'workflow'
-            ]
-        name = resource.get('name')
-        mentions.append({
-            'mention_id': f'feishu_{resource_type}_{resource_id}',
-            'type': resource_type,
-            'resource_id': resource_id,
-            'display_name': (
-                str(name).strip()[:200]
-                if isinstance(name, str) and name.strip()
-                else resource_id
-            ),
-        })
-    elif key not in existing:
-        return None
-    draft['mentions'] = mentions
-    draft['enable_workflow'] = any(
-        item.get('type') == 'workflow' for item in mentions
-    )
-    return draft
-
-
 class PostgresRuntimeLease:
     """Renewable database lease with a generation used to fence stale owners."""
 
@@ -1709,7 +1612,9 @@ class GatewayStore:
                         )
                     )
                     AND account.status = 'connected'
-                    AND NOT EXISTS (
+                    AND (
+                      inbox.provider_context ->> '_parallel_inbound' = 'true'
+                      OR NOT EXISTS (
                         SELECT 1
                         FROM channel_inbox AS earlier
                         WHERE earlier.account_id = inbox.account_id
@@ -1721,6 +1626,7 @@ class GatewayStore:
                               earlier.ingest_sequence
                                   < inbox.ingest_sequence
                           )
+                      )
                     )
                     ORDER BY inbox.ingest_sequence
                     FOR UPDATE SKIP LOCKED
@@ -2470,6 +2376,8 @@ class GatewayStore:
         external_address_hash: str,
         state: dict[str, Any],
         expected_revision: int,
+        *,
+        preserve_current_message: bool = True,
     ) -> bool:
         value = json.dumps(
             state,
@@ -2499,29 +2407,29 @@ class GatewayStore:
             row = connection.execute(
                 """
                 UPDATE channel_navigation_states
-                SET snapshot_json = jsonb_set(
-                        CASE
-                            WHEN jsonb_typeof(snapshot_json) = 'object'
-                                THEN snapshot_json
-                            ELSE '{}'::jsonb
-                        END,
-                        '{feishu_workspace}',
+                SET snapshot_json = jsonb_build_object(
+                        'feishu_workspace',
                         jsonb_set(
                             %s::jsonb,
                             '{message_id}',
-                            COALESCE(
-                                to_jsonb(NULLIF(
-                                    snapshot_json
-                                        -> 'feishu_workspace'
-                                        ->> 'message_id',
-                                    ''
-                                )),
-                                %s::jsonb -> 'message_id',
-                                '""'::jsonb
-                            ),
+                            CASE
+                                WHEN %s THEN COALESCE(
+                                    to_jsonb(NULLIF(
+                                        snapshot_json
+                                            -> 'feishu_workspace'
+                                            ->> 'message_id',
+                                        ''
+                                    )),
+                                    %s::jsonb -> 'message_id',
+                                    '""'::jsonb
+                                )
+                                ELSE COALESCE(
+                                    %s::jsonb -> 'message_id',
+                                    '""'::jsonb
+                                )
+                            END,
                             true
-                        ),
-                        true
+                        )
                     ),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE account_id = %s
@@ -2533,6 +2441,8 @@ class GatewayStore:
                 RETURNING 1 AS saved
                 """,
                 (
+                    value,
+                    preserve_current_message,
                     value,
                     value,
                     account_id,
@@ -2552,7 +2462,6 @@ class GatewayStore:
         expected_operation_id: str,
         envelope: InboundEnvelope,
         runtime_fence: RuntimeFence,
-        new_conversation_action: dict[str, Any] | None = None,
     ) -> bool:
         with self._connect() as connection:
             self._lock_runtime_fence(connection, runtime_fence)
@@ -2581,21 +2490,22 @@ class GatewayStore:
             ).fetchone()
             if existing:
                 return False
-            active = connection.execute(
-                """
-                SELECT 1 AS present
-                FROM channel_inbox
-                WHERE account_id = %s AND order_key = %s
-                  AND status NOT IN ('completed', 'ignored', 'dead')
-                LIMIT 1
-                """,
-                (account_id, envelope.order_key),
-            ).fetchone()
-            if active:
-                return False
+            if envelope.provider_context.get('_parallel_inbound') is not True:
+                active = connection.execute(
+                    """
+                    SELECT 1 AS present
+                    FROM channel_inbox
+                    WHERE account_id = %s AND order_key = %s
+                      AND status NOT IN ('completed', 'ignored', 'dead')
+                    LIMIT 1
+                    """,
+                    (account_id, envelope.order_key),
+                ).fetchone()
+                if active:
+                    return False
             row = connection.execute(
                 """
-                SELECT mode, snapshot_json
+                SELECT snapshot_json
                 FROM channel_navigation_states
                 WHERE account_id = %s AND external_address_hash = %s
                 FOR UPDATE
@@ -2619,53 +2529,7 @@ class GatewayStore:
                 != expected_operation_id
             ):
                 return False
-            action = (
-                dict(new_conversation_action)
-                if isinstance(new_conversation_action, dict)
-                else {}
-            )
-            if action:
-                route = connection.execute(
-                    """
-                    SELECT 1 AS present
-                    FROM channel_routes
-                    WHERE account_id = %s AND external_address_hash = %s
-                    """,
-                    (account_id, external_address_hash),
-                ).fetchone()
-                if row.get('mode') != 'new_pending' or route:
-                    return False
-                draft = snapshot.get('new_conversation')
-                kind = str(action.get('kind') or '')
-                if kind == 'workflow_mode':
-                    expected_mode = str(action.get('expected_mode') or '')
-                    workflow_mode = str(action.get('mode') or '')
-                    current_mode = str(
-                        (draft if isinstance(draft, dict) else {}).get(
-                            'workflow_mode'
-                        )
-                        or 'dynamic'
-                    )
-                    if (
-                        expected_mode not in {'auto', 'dynamic'}
-                        or workflow_mode not in {'auto', 'dynamic'}
-                        or current_mode != expected_mode
-                    ):
-                        return False
-                    draft = dict(draft) if isinstance(draft, dict) else {}
-                    draft['workflow_mode'] = workflow_mode
-                elif kind == 'resource_toggle':
-                    draft = _toggle_new_conversation_resource(
-                        draft,
-                        dict(action.get('resource') or {}),
-                    )
-                    if draft is None:
-                        return False
-                else:
-                    return False
-                snapshot['new_conversation'] = draft
-            snapshot['feishu_workspace'] = state
-            snapshot_json = self._json(snapshot)
+            snapshot_json = self._json({'feishu_workspace': state})
             connection.execute(
                 """
                 INSERT INTO channel_navigation_states(
@@ -2773,9 +2637,8 @@ class GatewayStore:
             )
             workspace = {**workspace, **patch}
             workspace['revision'] = current_revision + 1
-            snapshot['feishu_workspace'] = workspace
             value = json.dumps(
-                snapshot,
+                {'feishu_workspace': workspace},
                 ensure_ascii=False,
                 separators=(',', ':'),
             )
@@ -2858,17 +2721,8 @@ class GatewayStore:
                     )
                 )
                 ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
-                    snapshot_json = jsonb_set(
-                        CASE
-                            WHEN jsonb_typeof(
-                                channel_navigation_states.snapshot_json
-                            ) = 'object'
-                                THEN channel_navigation_states.snapshot_json
-                            ELSE '{}'::jsonb
-                        END,
-                        '{feishu_workspace}',
-                        %s::jsonb,
-                        true
+                    snapshot_json = jsonb_build_object(
+                        'feishu_workspace', %s::jsonb
                     ),
                     updated_at = CURRENT_TIMESTAMP
                 """,

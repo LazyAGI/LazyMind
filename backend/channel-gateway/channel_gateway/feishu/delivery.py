@@ -1,6 +1,6 @@
 import hashlib
 import logging
-import math
+import threading
 import time
 from dataclasses import replace
 from typing import Any
@@ -19,7 +19,6 @@ from channel_gateway.common.domain.outbound import (
 )
 from channel_gateway.common.errors import (
     InvalidStaticAssetError,
-    RetryableProviderSideEffectError,
 )
 from channel_gateway.common.ports.core import StaticAssetClient
 from channel_gateway.common.ports.providers import RuntimeCredentialStore
@@ -44,19 +43,19 @@ from channel_gateway.feishu.presentation import (
     media_free_feishu_text,
     streamable_feishu_text,
     streaming_reply_card,
+    workflow_progress_text,
 )
+from channel_gateway.feishu.task_monitor import workflow_tasks
 from channel_gateway.feishu.workspace import (
     FeishuWorkspaceRenderer,
     FeishuWorkspaceState,
-    new_conversation_resources,
 )
 
 
 _MAX_FEISHU_IMAGE_BYTES = 10 * 1024 * 1024
 _MAX_FEISHU_FILE_BYTES = 30 * 1024 * 1024
 _STREAM_STATE_CHECK_SECONDS = 1.0
-_WORKSPACE_TOMBSTONE_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
-_WORKSPACE_TOMBSTONE_RETRY_BUDGET_SECONDS = 30.0
+_LIVE_TASK_POLL_SECONDS = 1.5
 
 
 _logger = logging.getLogger(__name__)
@@ -68,52 +67,9 @@ def _expire_workspace_card(
     message_id: str,
     workspace: dict[str, Any],
 ) -> None:
-    language = 'en' if workspace.get('output_language') == 'en' else 'zh'
-    card = FeishuReplyRenderer.render(
-        provider_context={'workspace_state': workspace},
-        text=(
-            'Use the latest Codex card.'
-            if language == 'en'
-            else '请使用最新的 Codex 卡片。'
-        ),
-        status=(
-            '⚠️ **Message expired**'
-            if language == 'en'
-            else '⚠️ **消息已过期**'
-        ),
-        thinking='',
-    )
-    deadline = (
-        time.monotonic() + _WORKSPACE_TOMBSTONE_RETRY_BUDGET_SECONDS
-    )
-    for attempt in range(len(_WORKSPACE_TOMBSTONE_RETRY_DELAYS) + 1):
-        try:
-            sender.update_card(message_id=message_id, card=card)
-            return
-        except RetryableProviderSideEffectError as exc:
-            if workspace_card_expired(exc):
-                return
-            if attempt == len(_WORKSPACE_TOMBSTONE_RETRY_DELAYS):
-                break
-            retry_after = exc.retry_after_seconds
-            delay = _WORKSPACE_TOMBSTONE_RETRY_DELAYS[attempt]
-            if (
-                isinstance(retry_after, (int, float))
-                and math.isfinite(retry_after)
-                and retry_after >= 0
-            ):
-                delay = max(delay, float(retry_after))
-            if delay > max(0.0, deadline - time.monotonic()):
-                break
-            time.sleep(delay)
-        except Exception as exc:
-            if workspace_card_expired(exc):
-                return
-            break
-    _logger.warning(
-        'feishu_workspace_card_expire_failed message_id=%s',
-        message_id,
-    )
+    # Stale CardKit actions are fenced by message/revision/operation.  Do not
+    # create a second user-visible replacement card for an already stale card.
+    del sender, message_id, workspace
 
 
 def _external_agent_conversation_id(
@@ -147,6 +103,12 @@ class _ManagedReplyStream:
         self._owner_user_id = owner_user_id
         self._conversation_id = ''
         self._state_access_failed = False
+        self._interaction_ready = False
+        self._latest_snapshot = CoreStreamUpdate()
+        self._snapshot_lock = threading.Lock()
+        self._task_stop = threading.Event()
+        self._task_thread: threading.Thread | None = None
+        self._task_anchor_id = ''
 
     def update(self, snapshot: CoreStreamUpdate) -> None:
         assistant = bool(
@@ -157,6 +119,23 @@ class _ManagedReplyStream:
             and snapshot.conversation_id != self._conversation_id
         ):
             self._activate_conversation(snapshot.conversation_id)
+        with self._snapshot_lock:
+            if (
+                not snapshot.workflow_progress
+                and self._latest_snapshot.workflow_progress
+            ):
+                snapshot = replace(
+                    snapshot,
+                    workflow_progress=(
+                        self._latest_snapshot.workflow_progress
+                    ),
+                )
+            self._latest_snapshot = snapshot
+        if not assistant and snapshot.task_created:
+            self._start_task_progress(
+                snapshot.task_created,
+                snapshot.conversation_id,
+            )
         if assistant:
             workspace = FeishuWorkspaceState.from_dict(
                 self._provider_context.get('workspace_state')
@@ -184,6 +163,92 @@ class _ManagedReplyStream:
                 except Exception:
                     self._log_state_failure('thread_rebind')
         self._stream.update(snapshot)
+        if assistant and not self._interaction_ready:
+            view = self._provider_context.get('assistant_view')
+            canonical = (
+                view.get('snapshot')
+                if isinstance(view, dict)
+                else None
+            )
+            pending = (
+                canonical.get('pending_request')
+                if isinstance(canonical, dict)
+                else None
+            )
+            if isinstance(pending, dict) and pending.get('request_id'):
+                pause = getattr(
+                    self._stream,
+                    'pause_for_interaction',
+                    None,
+                )
+                if callable(pause):
+                    pause()
+                    self._interaction_ready = True
+
+    def _start_task_progress(
+        self,
+        task: dict[str, Any],
+        conversation_id: str,
+    ) -> None:
+        task_id = str(task.get('task_id') or '')[:512]
+        if (
+            not task_id
+            or not conversation_id
+            or not self._owner_user_id
+            or not callable(
+                getattr(self._core, 'list_conversation_tasks', None)
+            )
+            or self._task_thread is not None
+        ):
+            return
+        self._task_anchor_id = task_id
+        self._task_stop.clear()
+        self._task_thread = threading.Thread(
+            target=self._poll_task_progress,
+            args=(conversation_id,),
+            name='feishu-live-workflow',
+            daemon=True,
+        )
+        self._task_thread.start()
+
+    def _poll_task_progress(self, conversation_id: str) -> None:
+        request_id = str(
+            self._provider_context.get('workspace_operation_id')
+            or self._task_anchor_id
+        )
+        while not self._task_stop.is_set():
+            try:
+                tasks = self._core.list_conversation_tasks(
+                    owner_user_id=self._owner_user_id,
+                    conversation_id=conversation_id,
+                    request_id=f'{request_id}_live_tasks',
+                    summary_only=True,
+                )
+                progress = workflow_progress_text(
+                    workflow_tasks(tasks, self._task_anchor_id)
+                )
+                if progress:
+                    with self._snapshot_lock:
+                        snapshot = replace(
+                            self._latest_snapshot,
+                            task_created=None,
+                            workflow_progress=progress,
+                        )
+                        self._latest_snapshot = snapshot
+                    self._stream.update(snapshot)
+            except Exception:
+                _logger.warning(
+                    'feishu_live_workflow_refresh_failed task_id=%s',
+                    self._task_anchor_id,
+                    exc_info=True,
+                )
+            self._task_stop.wait(_LIVE_TASK_POLL_SECONDS)
+
+    def _stop_task_progress(self) -> None:
+        self._task_stop.set()
+        if self._task_thread is not None:
+            self._task_thread.join(timeout=2)
+            self._task_thread = None
 
     def _apply_external_thread_rebind(
         self,
@@ -212,7 +277,6 @@ class _ManagedReplyStream:
                 self._account_id,
                 self._address_hash,
                 conversation_id,
-                consume_pending_turn=True,
             )
         except Exception:
             self._log_state_failure('activate')
@@ -243,6 +307,7 @@ class _ManagedReplyStream:
 
     def finish(self, final_text: str) -> bool:
         try:
+            self._stop_task_progress()
             operation_id = str(
                 self._provider_context.get('workspace_operation_id') or ''
             )
@@ -390,6 +455,7 @@ class _ManagedReplyStream:
 
     def abort(self) -> None:
         try:
+            self._stop_task_progress()
             if _external_agent_conversation_id(self._provider_context):
                 self._refresh_external_detail()
             self._stream.abort()
@@ -475,12 +541,6 @@ class FeishuDeliveryProvider:
                     ))
                     if management
                     else None
-                ),
-                collapse_process=bool(
-                    (
-                        message.provider_context.get('workspace_state')
-                        or {}
-                    ).get('auto_collapse_process', True)
                 ),
                 render_card=(
                     (lambda snapshot, finished, aborted:
@@ -790,19 +850,6 @@ class FeishuDeliveryProvider:
         context['workspace_conversation_id'] = active_conversation_id
         context['workspace_message_id'] = state.message_id
         context['_workspace_result_complete'] = True
-        if not active_conversation_id:
-            draft = self._store.get_new_conversation_draft(
-                message.account_id,
-                message.order_key,
-            )
-            mode = str(draft.get('workflow_mode') or 'dynamic')
-            context['pending_workflow_mode'] = (
-                mode if mode in {'auto', 'dynamic'} else 'dynamic'
-            )
-            context['pending_capability_resources'] = [
-                item.to_dict()
-                for item in new_conversation_resources(draft)
-            ]
         if not presentations and message.text:
             context['_workspace_notice'] = str(message.text)[:2000]
         return replace(message, provider_context=context)
@@ -944,13 +991,7 @@ class FeishuDeliveryProvider:
                     )
                     or ''
                 )
-                if assistant_surface and part.get('workspace') is True:
-                    message_id = sender.send_card(
-                        chat_id=chat_id,
-                        card=card,
-                        idempotency_key=idempotency_key,
-                    )
-                elif target_message_id:
+                if target_message_id:
                     try:
                         sender.update_card(
                             message_id=target_message_id,
@@ -1315,11 +1356,6 @@ class FeishuDeliveryProvider:
                             '✅ **Answer complete**'
                             if language == 'en'
                             else '✅ **回答完成**'
-                        ),
-                        thinking=(
-                            'Analysis and processing complete.'
-                            if language == 'en'
-                            else '分析与处理已完成。'
                         ),
                     )
                 )

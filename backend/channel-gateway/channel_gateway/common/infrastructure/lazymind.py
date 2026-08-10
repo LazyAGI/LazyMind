@@ -396,6 +396,7 @@ class LazyMindClient:
                         )
                     else:
                         external_event = None
+                    task_created = None
                     for event_type in _CHAT_EVENT_FIELDS:
                         event_payload = result.get(event_type)
                         if event_payload:
@@ -411,6 +412,11 @@ class LazyMindClient:
                                     ),
                                 )
                             )
+                            if (
+                                event_type == 'task_created'
+                                and isinstance(event_payload, dict)
+                            ):
+                                task_created = dict(event_payload)
                             if (
                                 event_type == 'tool_limit_pending'
                                 and isinstance(event_payload, dict)
@@ -451,6 +457,7 @@ class LazyMindClient:
                             conversation_id=state.conversation_id,
                             history_id=state.history_id,
                             external_event=external_event,
+                            task_created=task_created,
                         )
                         if update != state.last_stream_update:
                             on_stream(update)
@@ -631,6 +638,7 @@ class LazyMindClient:
         conversation_id: str = '',
         history_id: str = '',
         external_event: dict[str, Any] | None = None,
+        task_created: dict[str, Any] | None = None,
     ) -> CoreStreamUpdate:
         text = _strip_tool_payloads(raw_text)
         boundary = _last_thinking_boundary(text)
@@ -650,6 +658,7 @@ class LazyMindClient:
             conversation_id=conversation_id,
             history_id=history_id,
             external_event=external_event,
+            task_created=task_created,
         )
 
     def _complete_chat_turn(
@@ -826,12 +835,14 @@ class LazyMindClient:
         owner_user_id: str,
         conversation_id: str,
         request_id: str,
+        summary_only: bool = False,
     ) -> list[dict[str, Any]]:
+        query = '?summary_only=true' if summary_only else ''
         payload = self._request_json(
             'GET',
             (
                 f'{self._base_url}/conversations/'
-                f'{quote(conversation_id, safe="")}/tasks'
+                f'{quote(conversation_id, safe="")}/tasks{query}'
             ),
             owner_user_id=owner_user_id,
             request_id=request_id,
@@ -860,11 +871,13 @@ class LazyMindClient:
         owner_user_id: str,
         conversation_id: str,
         request_id: str,
+        summary_only: bool = False,
     ) -> list[dict[str, Any]]:
         return self._conversation_tasks(
             owner_user_id=owner_user_id,
             conversation_id=conversation_id,
             request_id=request_id,
+            summary_only=summary_only,
         )
 
     def _turn_artifacts(

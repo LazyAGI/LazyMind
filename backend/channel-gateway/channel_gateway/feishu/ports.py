@@ -37,22 +37,11 @@ class FeishuWorkspaceRepository(Protocol):
     ) -> dict[str, Any]:
         ...
 
-    def get_new_conversation_draft(
-        self,
-        account_id: str,
-        external_address_hash: str,
-    ) -> dict[str, Any]:
-        ...
-
     def activate_conversation(
         self,
         account_id: str,
         external_address_hash: str,
         conversation_id: str,
-        history_next_page_token: str | None = None,
-        *,
-        consume_pending_turn: bool = False,
-        preserve_selection: bool = False,
     ) -> None:
         ...
 
@@ -62,6 +51,8 @@ class FeishuWorkspaceRepository(Protocol):
         external_address_hash: str,
         state: dict[str, Any],
         expected_revision: int,
+        *,
+        preserve_current_message: bool = True,
     ) -> bool:
         ...
 
@@ -75,7 +66,6 @@ class FeishuWorkspaceRepository(Protocol):
         expected_operation_id: str,
         envelope: InboundEnvelope,
         runtime_fence: RuntimeFence,
-        new_conversation_action: dict[str, Any] | None = None,
     ) -> bool:
         ...
 
@@ -435,7 +425,6 @@ class FeishuOutboundClient(Protocol):
         initial_card: dict[str, Any],
         message_id: str = '',
         should_render: Callable[[], bool] | None = None,
-        collapse_process: bool = True,
         render_card: Callable[
             [CoreStreamUpdate, bool, bool],
             dict[str, Any],

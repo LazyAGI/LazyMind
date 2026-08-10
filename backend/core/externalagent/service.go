@@ -768,6 +768,7 @@ func (s *Service) StartThread(ctx context.Context, input StartThreadInput) (Thre
 	if err := s.client.Call(ctx, "thread/start", map[string]any{
 		"cwd":               cwd,
 		"serviceName":       "lazymind",
+		"threadSource":      "user",
 		"approvalPolicy":    "on-request",
 		"approvalsReviewer": "user",
 		"sandbox":           "workspace-write",
@@ -785,6 +786,21 @@ func (s *Service) StartThread(ctx context.Context, input StartThreadInput) (Thre
 	s.loaded[response.Thread.ID] = s.client.Generation()
 	s.mu.Unlock()
 	return response.Thread, nil
+}
+
+func (s *Service) NameThread(ctx context.Context, threadID, name string) error {
+	threadID = strings.TrimSpace(threadID)
+	name = strings.TrimSpace(name)
+	if threadID == "" || name == "" {
+		return errors.New("thread id and name are required")
+	}
+	if len([]rune(name)) > 200 {
+		name = string([]rune(name)[:200])
+	}
+	return s.client.Call(ctx, "thread/name/set", map[string]any{
+		"threadId": threadID,
+		"name":     name,
+	}, &struct{}{})
 }
 
 func (s *Service) Bind(ctx context.Context, input BindInput) (orm.ExternalAgentBinding, error) {
@@ -2169,17 +2185,13 @@ func fileChangeApprovalPayload(run *managedRun, raw json.RawMessage) json.RawMes
 
 func requestSummary(kind string, params json.RawMessage) string {
 	var details struct {
-		Command   string `json:"command"`
 		Reason    string `json:"reason"`
 		Questions []struct {
 			Question string `json:"question"`
 		} `json:"questions"`
 	}
 	_ = json.Unmarshal(params, &details)
-	if kind == "command_approval" && details.Command != "" {
-		return boundedRequestSummary("Codex 请求执行命令：" + details.Command)
-	}
-	if details.Reason != "" {
+	if kind != "command_approval" && details.Reason != "" {
 		return boundedRequestSummary(details.Reason)
 	}
 	switch kind {
