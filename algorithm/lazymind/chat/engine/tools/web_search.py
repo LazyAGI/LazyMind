@@ -11,7 +11,7 @@ from lazymind.chat.engine.tools.infra import (
     fetch_url_content,
     tool_success,
 )
-from lazymind.chat.service.utils.citations import normalize_external_url, upsert_external_source
+from lazymind.chat.service.utils.citations import normalize_external_url
 
 
 def _agentic_config() -> Dict[str, Any]:
@@ -113,12 +113,7 @@ def _fetch_page(
     page = fetch_url_content(url)
     if ancestor_source_keys and set(_page_source_keys(page)) & ancestor_source_keys:
         raise ValueError('navigation_cycle')
-    config = _agentic_config()
-    citation_state = config.get('citation_state')
-    if isinstance(citation_state, dict) and page.get('source_status') in (None, 'ok'):
-        upsert_external_source(page, citation_state)
-
-    navigation = config.setdefault('web_navigation_state', {})
+    navigation = _agentic_config().setdefault('web_navigation_state', {})
     page_ref = f'page_{secrets.token_hex(6)}'
     while page_ref in navigation:
         page_ref = f'page_{secrets.token_hex(6)}'

@@ -5,6 +5,8 @@ import lazyllm
 from lazyllm import init_session, locals as lazyllm_locals
 from lazyllm.tools.agent.toolsManager import ToolManager
 from lazymind.chat.engine.tools.kb import KBToolkit
+from lazymind.chat.engine.tools.infra import enable_search_result_citations
+from lazymind.chat.service.utils.citations import CITATION_REFS_KEY, reset_citation_state
 
 
 def test_kb_toolkit_is_available_without_selected_kb():
@@ -17,6 +19,32 @@ def test_kb_toolkit_is_available_without_selected_kb():
 
 def _kb_tool_names(manager):
     return {item['function']['name'] for item in manager.tools_description}
+
+
+def test_kb_citations_are_added_by_tool_boundary_wrappers():
+    state = {}
+    reset_citation_state(state)
+    lazyllm.globals['agentic_config'] = {'citation_state': state}
+
+    class FakeKnowledgeSearch:
+        __public_apis__ = ['kb_search']
+
+        def kb_search(self, query: str):
+            return {'success': True, 'result': {'items': [{
+                'uid': 'node-1', 'docid': 'doc-1', 'content': query,
+            }]}}
+
+    toolkit = enable_search_result_citations(FakeKnowledgeSearch(), source_type='knowledge_base')
+    temp_search = enable_search_result_citations(
+        lambda query: {'success': True, 'result': {'items': [{
+            'uid': 'node-2', 'docid': 'doc-2', 'content': query,
+        }]}},
+        source_type='knowledge_base',
+    )
+
+    assert toolkit.kb_search('knowledge')['result']['items'][0]['ref'] == '[[1.1]]'
+    assert temp_search('temporary')['result']['items'][0]['ref'] == '[[2.1]]'
+    assert len(state[CITATION_REFS_KEY]) == 2
 
 
 def test_selected_knowledge_base_exposes_concrete_tools_directly():

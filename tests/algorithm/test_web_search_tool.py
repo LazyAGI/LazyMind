@@ -6,6 +6,7 @@ import pytest
 from lazyllm.tools.tools.search import ArxivSearch, BingSearch, BochaSearch, GoogleSearch, WikipediaSearch
 
 from lazymind.chat.engine.tools import web_search as web_search_mod
+from lazymind.chat.engine.tools.infra import enable_search_result_citations
 from lazymind.chat.service.utils.citations import (
     CITATION_REFS_KEY,
     register_external_search_result,
@@ -92,8 +93,9 @@ def test_url_fetch_registers_sources_and_follows_page_links(monkeypatch, reset_w
         return page
 
     monkeypatch.setattr(web_search_mod, 'fetch_url_content', fake_fetch)
-    root = web_search_mod.url_fetch(url='https://example.test/root')['result']
-    child = web_search_mod.url_fetch(page_ref=root['page_ref'], link_id=1)['result']
+    url_fetch = enable_search_result_citations(web_search_mod.url_fetch)
+    root = url_fetch(url='https://example.test/root')['result']
+    child = url_fetch(page_ref=root['page_ref'], link_id=1)['result']
 
     assert root['citation_index'] == search['citation_index'] == '1.1'
     assert root['source_action'] == 'supplemented_source'

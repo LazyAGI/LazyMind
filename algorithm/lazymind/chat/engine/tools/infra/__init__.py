@@ -8,7 +8,7 @@ import importlib
 _MODULE_EXPORTS = {
     '.core_api_client': ('get_core_api', 'post_core_api'),
     '.calculator_eval': ('safe_evaluate_expression',),
-    '.external_search': ('enable_search_result_citations',),
+    '.search_result_citations': ('enable_search_result_citations',),
     '.web_search_support': ('fetch_url_content',),
     '.kb_opensearch_client': ('opensearch_search', 'resolve_index', 'term_filter'),
     '.github_skill_installer': ('GitHubSkillInstaller',),
