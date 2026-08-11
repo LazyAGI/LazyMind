@@ -734,43 +734,21 @@ def resolve_workflow_injection(
     elif not session_id:
         trigger_entry_tools = [tool for tool in tools if _is_bound_workflow_trigger(tool.__name__)]
         authoring_tools = _safe_authoring_tools(toolkit)
-        authoring_desc = (
-            'Create, edit, validate, diagnose, or publish Workflow drafts. '
-            'Use only when the user explicitly asks to author or modify a Workflow.'
-        )
         authoring_group = _workflow_tool_group(
             'workflow_authoring',
-            authoring_desc,
+            (
+                'Create, edit, validate, diagnose, or publish Workflow drafts. '
+                'Use only when the user explicitly asks to author or modify a Workflow.'
+            ),
             authoring_tools,
         )
         if trigger_entry_tools:
             # Discovery mode: expose triggers directly so the model can route
-            # from the injected catalog without a gateway hop. Session tools stay
-            # hidden until a trigger creates the Session; ToolManager re-evaluates
-            # this phase projection before the next model round.
-            phase_group = {
-                **authoring_group,
-                'pick_first_valid': True,
-                'tools': [
-                    ({
-                        'name': 'workflow_session',
-                        'desc': 'Continue the Workflow Session initialized in this turn.',
-                        'lazy': False,
-                        'prefix': False,
-                        'tools': [
-                            *_safe_session_tools(
-                                toolkit,
-                                lambda: session_holder.get('session_id', ''),
-                            ),
-                            _handoff_tool(lambda: session_holder.get('session_id', '')),
-                        ],
-                    }, lambda: session_holder.get('session_id', '')),
-                    authoring_group,
-                ],
-            }
+            # from the injected catalog without a gateway hop. Execution tools
+            # remain hidden until a Workflow is selected or active.
             tools = [
                 *trigger_entry_tools,
-                phase_group,
+                authoring_group,
             ]
         else:
             tools = [authoring_group]
