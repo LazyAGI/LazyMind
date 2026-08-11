@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -103,6 +104,20 @@ func dialWebsocket(endpoint, token string) (messageTransport, error) {
 	return &websocketTransport{conn: conn}, nil
 }
 
+func dialUnixWebsocket(socketPath string) (messageTransport, error) {
+	dialer := *websocket.DefaultDialer
+	dialer.HandshakeTimeout = 10 * time.Second
+	dialer.NetDialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var networkDialer net.Dialer
+		return networkDialer.DialContext(ctx, "unix", socketPath)
+	}
+	conn, _, err := dialer.Dial("ws://localhost/", nil)
+	if err != nil {
+		return nil, err
+	}
+	return &websocketTransport{conn: conn}, nil
+}
+
 func (t *websocketTransport) ReadMessage() ([]byte, error) {
 	_, payload, err := t.conn.ReadMessage()
 	return payload, err
@@ -169,6 +184,31 @@ func (t *stdioTransport) Close() error {
 	return t.cmd.Wait()
 }
 
+func dialTCPBridge(address, token string) (messageTransport, error) {
+	if token == "" {
+		return nil, errors.New("Codex TCP bridge token is required")
+	}
+	dialer := *websocket.DefaultDialer
+	dialer.HandshakeTimeout = 10 * time.Second
+	dialer.NetDialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var networkDialer net.Dialer
+		conn, err := networkDialer.DialContext(ctx, "tcp", address)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := conn.Write([]byte("AUTH " + token + "\n")); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		return conn, nil
+	}
+	conn, _, err := dialer.Dial("ws://"+address+"/", nil)
+	if err != nil {
+		return nil, err
+	}
+	return &websocketTransport{conn: conn}, nil
+}
+
 type CodexClient struct {
 	factory    func() (messageTransport, error)
 	events     chan rpcMessage
@@ -182,7 +222,13 @@ type CodexClient struct {
 
 func NewCodexClient() *CodexClient {
 	endpoint := strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_APP_SERVER_URL"))
+	socketPath := strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_APP_SERVER_SOCKET"))
 	token := strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_APP_SERVER_TOKEN"))
+	if tokenFile := strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_APP_SERVER_TOKEN_FILE")); tokenFile != "" {
+		if value, err := os.ReadFile(tokenFile); err == nil {
+			token = strings.TrimSpace(string(value))
+		}
+	}
 	binaryName := strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_BIN"))
 	if binaryName == "" {
 		binaryName = "codex"
@@ -190,12 +236,18 @@ func NewCodexClient() *CodexClient {
 	factory := func() (messageTransport, error) {
 		if endpoint != "" {
 			parsed, err := url.Parse(endpoint)
-			if err != nil || parsed.Host == "" || (parsed.Scheme != "ws" && parsed.Scheme != "wss") {
+			if err != nil || parsed.Host == "" || (parsed.Scheme != "ws" && parsed.Scheme != "wss" && parsed.Scheme != "tcp") {
 				return nil, &codexConfigurationError{
 					cause: fmt.Errorf("invalid LAZYMIND_CODEX_APP_SERVER_URL %q", endpoint),
 				}
 			}
+			if parsed.Scheme == "tcp" {
+				return dialTCPBridge(parsed.Host, token)
+			}
 			return dialWebsocket(endpoint, token)
+		}
+		if socketPath != "" {
+			return dialUnixWebsocket(socketPath)
 		}
 		binary, err := exec.LookPath(binaryName)
 		if err != nil {

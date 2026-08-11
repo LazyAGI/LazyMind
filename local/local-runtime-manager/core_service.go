@@ -202,7 +202,9 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_EVO_SERVICE_URL=" + endpoints.Host.EvoBaseURL,
 		"LAZYMIND_CORE_SELF_URL=" + endpoints.Host.CoreBaseURL,
 		"LAZYMIND_CODEX_APP_SERVER_URL=" + envText("LAZYMIND_CODEX_APP_SERVER_URL", ""),
+		"LAZYMIND_CODEX_APP_SERVER_SOCKET=" + localCodexAppServerSocket(),
 		"LAZYMIND_CODEX_APP_SERVER_TOKEN=" + envText("LAZYMIND_CODEX_APP_SERVER_TOKEN", ""),
+		"LAZYMIND_CODEX_APP_SERVER_TOKEN_FILE=" + envText("LAZYMIND_CODEX_APP_SERVER_TOKEN_FILE", ""),
 		"LAZYMIND_CODEX_BIN=" + localCodexBinary(),
 		"LAZYMIND_CODEX_DEFAULT_CWD=" + envText("LAZYMIND_CODEX_DEFAULT_CWD", paths.RepoRoot),
 		"SHELL=" + localCodexShell(),
@@ -223,6 +225,25 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_MODEL_PROVIDER_SECRET_KEY=" + envText("LAZYMIND_MODEL_PROVIDER_SECRET_KEY", "lazymind-core-model-provider-default-secret"),
 		"LAZYMIND_MCP_SECRET_KEY=" + envText("LAZYMIND_MCP_SECRET_KEY", "lazymind-core-mcp-default-secret"),
 	}
+}
+
+func localCodexAppServerSocket() string {
+	if configured := strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_APP_SERVER_SOCKET")); configured != "" {
+		return configured
+	}
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	path := filepath.Join(home, ".codex", "app-server-control", "app-server-control.sock")
+	info, err := os.Stat(path)
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		return ""
+	}
+	return path
 }
 
 func localCodexBinary() string {

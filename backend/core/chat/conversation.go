@@ -1374,19 +1374,7 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		userID = "0"
 	}
 	db := store.DB()
-	now := time.Now().UTC()
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&orm.Conversation{}).
-			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).
-			Updates(map[string]any{"deleted_at": now, "updated_at": now})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, []string{convID}, now)
-	}); errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := archiveConversation(r.Context(), db, convID, userID, false); errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 		return
 	} else if err != nil {
@@ -1394,6 +1382,44 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
+}
+
+func archiveConversation(
+	ctx context.Context,
+	db *gorm.DB,
+	conversationID string,
+	userID string,
+	deleteExternalBinding bool,
+) error {
+	now := time.Now().UTC()
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&orm.Conversation{}).
+			Where(
+				"id = ? AND create_user_id = ? AND deleted_at IS NULL",
+				conversationID,
+				userID,
+			).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		if err := taskcenter.ArchiveTasksForConversations(
+			ctx, tx, userID, []string{conversationID}, now,
+		); err != nil {
+			return err
+		}
+		if deleteExternalBinding {
+			return tx.Where(
+				"conversation_id = ? AND created_by_user_id = ?",
+				conversationID,
+				userID,
+			).Delete(&orm.ExternalAgentBinding{}).Error
+		}
+		return nil
+	})
 }
 
 // BatchDeleteConversations text POST /api/v1/conversations:batchDelete

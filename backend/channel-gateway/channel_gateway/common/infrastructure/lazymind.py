@@ -1218,6 +1218,24 @@ class LazyMindClient:
             error_label='external agent release',
         )
 
+    def delete_external_conversation(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        conversation_id: str,
+    ) -> None:
+        self._request_json(
+            'DELETE',
+            (
+                f'{self._base_url}/external-agent-conversations/'
+                f'{quote(conversation_id, safe="")}'
+            ),
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            error_label='external agent deletion',
+        )
+
     def respond_external_request(
         self,
         *,
