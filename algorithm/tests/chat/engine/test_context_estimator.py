@@ -25,7 +25,7 @@ def test_context_report_groups_plan_and_exposes_model_facing_content() -> None:
         PromptBuilder.for_role(AgentRole.CHAT)
         .system('identity', '', 'secret system text', 'platform')
         .runtime(
-            'state', 'Plugin State', 'secret runtime text', 'plugin',
+            'state', 'Workflow State', 'secret runtime text', 'workflow',
             authoritative=True, content_kind='state',
         )
         .input('secret user text', source='user')

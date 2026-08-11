@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -61,6 +62,23 @@ func (m *LocalProxyManager) Down(ctx context.Context, cfg RuntimeConfig, paths R
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
+	if runtime.GOOS == "windows" {
+		records, err := scanLocalRuntimeProcesses(paths)
+		if err != nil {
+			return fmt.Errorf("scan local-proxy processes: %w", err)
+		}
+		proxyRecords := make([]LocalProcessRecord, 0, len(records))
+		for _, record := range records {
+			if record.Service == localProxyProcessName && record.PID != os.Getpid() {
+				proxyRecords = append(proxyRecords, record)
+			}
+		}
+		if err := stopLocalProcessRecords(ctx, proxyRecords); err != nil {
+			return fmt.Errorf("stop local-proxy failed: %w", err)
+		}
+		cleanupLocalProcessRecords(paths, proxyRecords)
+		return nil
+	}
 	stop := Command{
 		Name: paths.LocalProxyStopScript,
 		Dir:  paths.RepoRoot,
@@ -102,6 +120,7 @@ func localRuntimeEnv(cfg RuntimeConfig) []string {
 		localProxyCoreHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		localProxyChatHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.ChatHostPort),
 		localProxyScanHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.ScanHostPort),
+		localProxyChannelHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.ChannelHostPort),
 		localProxyEvoHostPortEnvVar + "=" + strconv.Itoa(cfg.LocalProxy.EvoHostPort),
 	}
 }

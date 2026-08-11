@@ -8,10 +8,7 @@ import (
 )
 
 func TestLocalFSChatSettingDefaultsAndUpdates(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/localfs-setting.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
+	db := orm.OpenTestDB(t)
 	if err := db.AutoMigrate(&orm.LocalFSChatSetting{}); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}

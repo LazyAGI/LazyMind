@@ -147,6 +147,28 @@ func TestParseCommandOptions(t *testing.T) {
 	if _, err := parseCommandOptions([]string{"force-stop", "--unknown"}); err == nil {
 		t.Fatal("unknown argument was accepted")
 	}
+	preflight, err := parseCommandOptions([]string{
+		"preflight",
+		"--install-dir", installDir,
+		"--temp-dir", `C:\Users\test\AppData\Local\Temp`,
+		"--minimum-free-space-mb", "4096",
+		"--maximum-relative-path-length", "180",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preflight.MinimumFreeSpaceMB != 4096 || preflight.MaximumRelativeLength != 180 {
+		t.Fatalf("preflight options = %#v", preflight)
+	}
+	if _, err := parseCommandOptions([]string{"preflight", "--install-dir", installDir}); err == nil {
+		t.Fatal("incomplete preflight options were accepted")
+	}
+}
+
+func TestWindowsPathLengthCountsUTF16CodeUnits(t *testing.T) {
+	if got := windowsPathLength(`C:\用户\LazyMind`); got != 14 {
+		t.Fatalf("windowsPathLength = %d, want 14", got)
+	}
 }
 
 func TestMatchLazyMindProcessMatchesExecutableUnderInstallDir(t *testing.T) {

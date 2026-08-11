@@ -1,18 +1,24 @@
+import asyncio
+import importlib
+
 from typing import Annotated, Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Body, Header, Response
 from lazymind.chat.service.chat_request import ChatRequest
-from lazymind.chat.service.chat_service import check_sensitive_content, handle_chat
-from lazymind.chat.service.component import get_all_tool_groups, normalize_tool_locale
-from lazymind.model_config import inject_model_config
-from lazyllm.tools.tool_config_inject import inject_tool_config
+from lazymind.chat.runtime_loader import ensure_chat_runtime
 
 router = APIRouter()
 
 
+async def _chat_service():
+    await asyncio.to_thread(ensure_chat_runtime)
+    return importlib.import_module('lazymind.chat.service.chat_service')
+
+
 @router.post('/api/chat/sensitive-check', summary='Check text against the configured sensitive-word list')
 async def sensitive_check(payload: Annotated[Dict[str, Any], Body()]):
-    matched_word = check_sensitive_content(str(payload.get('text') or ''))
+    service = await _chat_service()
+    matched_word = service.check_sensitive_content(str(payload.get('text') or ''))
     return {'passed': matched_word is None, 'matched_word': matched_word}
 
 
@@ -49,6 +55,10 @@ async def list_chat_tools(
         ),
     ] = None,
 ):
+    from lazymind.chat.service.component import get_all_tool_groups, normalize_tool_locale
+    from lazymind.model_config import inject_model_config
+    from lazyllm.tools.tool_config_inject import inject_tool_config
+
     inject_model_config(llm_config)
     inject_tool_config(tool_config)
     locale = normalize_tool_locale(accept_language)
@@ -64,12 +74,13 @@ async def chat(
         Body(
             description=(
                 'Structured chat request grouped by message, conversation, retrieval, '
-                'runtime, personalization, agent, and plugin options.'
+                'runtime, personalization, agent, and workflow options.'
             )
         ),
     ],
 ):
-    return await handle_chat(request)
+    service = await _chat_service()
+    return await service.handle_chat(request)
 
 
 @router.post('/api/chat/context-usage', summary='Estimate next-request ChatAgent context usage')
@@ -77,7 +88,8 @@ async def context_usage(
     request: Annotated[ChatRequest, Body(description='Same structured request as chat preview.')],
 ):
     request.runtime.context_usage_preview = True
-    return await handle_chat(request)
+    service = await _chat_service()
+    return await service.handle_chat(request)
 
 
 @router.post('/api/chat/context-prompt', summary='Export next-request ChatAgent context')
@@ -85,4 +97,5 @@ async def context_prompt(
     request: Annotated[ChatRequest, Body(description='Same structured request as chat preview.')],
 ):
     request.runtime.context_prompt_export = True
-    return await handle_chat(request)
+    service = await _chat_service()
+    return await service.handle_chat(request)

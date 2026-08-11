@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from lazymind.common.skill_storage_key import (
+from lazymind.common.skill.storage_key import (
     EXTERNAL_SKILL_CATEGORY,
     INTERNAL_SKILL_CATEGORY,
     SkillStorageCategory,

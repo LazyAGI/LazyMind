@@ -44,6 +44,7 @@ type AgentStore interface {
 	CreateAgentCommand(ctx context.Context, command store.AgentCommand) error
 	ListPendingAgentCommands(ctx context.Context, agentID string, now time.Time, limit int) ([]store.AgentCommand, error)
 	AckAgentCommand(ctx context.Context, ack store.AgentCommandAck) error
+	EnqueueBindingReconcile(ctx context.Context, req store.ReconcileRequest) (store.ReconcileResult, error)
 }
 
 type WatchEventScheduler interface {

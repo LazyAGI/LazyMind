@@ -80,10 +80,8 @@ def test_wikipedia_remains_available_without_web_provider():
 
 
 def test_registry_key_source_activates_function_tool():
-    from lazymind.chat.engine.tools import kb_tmp_search
     from lazyllm.tools.agent.toolsManager import ToolManager
 
-    assert not hasattr(kb_tmp_search, '__key_source__')
     assert 'temp_kb' not in _active_tool_names()
     assert _tool_group('temp_kb')['active'] is False
 
@@ -117,6 +115,40 @@ def test_catalog_exposes_modules_without_registering_module_gateways():
     names = {item['function']['name'] for item in manager.tools_description}
     assert names == {'calculator'}
     assert not any('utility' in name for name in names)
+
+
+def test_memory_tools_are_registered_as_one_eager_group():
+    from lazyllm.tools.agent.toolsManager import ToolManager
+
+    configs = [
+        cfg for cfg in DEFAULT_TOOLS
+        if cfg.name in {'memory', 'read_memory', 'episode_create'}
+    ]
+
+    assert [cfg.name for cfg in configs] == ['memory']
+    config = configs[0]
+    assert [method['name'] for method in _tool_group('memory')['methods']] == [
+        'read_memory',
+        'read_memory_reference',
+        'soul_editor',
+        'profile_editor',
+        'preference_editor',
+        'episode_create',
+    ]
+    manager = ToolManager([config.tool])
+    assert {item['function']['name'] for item in manager.tools_description} == {
+        'MemoryTools_read_memory',
+        'MemoryTools_read_memory_reference',
+        'MemoryTools_soul_editor',
+        'MemoryTools_profile_editor',
+        'MemoryTools_preference_editor',
+        'MemoryTools_episode_create',
+    }
+    assert not hasattr(config.tool, 'memory_editor')
+    memory_policy = '\n'.join(config.appendix_system_prompt['tool_policy'])
+    assert 'Never claim that information was saved unless' in memory_policy
+    assert 'MemoryTools_episode_create' in memory_policy
+    assert 'preference_editor' in memory_policy
 
 
 def test_shared_prompt_appendix_is_reused_and_deduplicated():
@@ -197,8 +229,10 @@ def test_prompt_appendix_deduplication_normalizes_whitespace():
 
 def test_cloud_files_use_nested_supplier_toolkits():
     from lazyllm.tools.agent.toolsManager import ToolManager
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
 
     config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'cloud_files')
+    ensure_lazyllm_tool_docs([config.tool])
     manager = ToolManager([config.tool])
     names = {item['function']['name'] for item in manager.tools_description}
     assert names == {'get_CloudFileToolkit_methods'}

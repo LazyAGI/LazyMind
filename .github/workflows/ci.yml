@@ -1,14 +1,8 @@
-# CI: run lint, documentation checks, and tests for pushes and pull requests.
+# CI: run lint, documentation checks, and tests for pull requests.
 name: CI
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main, master, 'dev/*']
-    paths-ignore:
-      - "**.md"
-      - ".git*"
-      - "docs/**"
   pull_request:
     branches: [main, master, 'dev/*']
     paths-ignore:
@@ -17,7 +11,7 @@ on:
       - "docs/**"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -93,6 +87,49 @@ jobs:
           cd tests/frontend
           npx c8 check-coverage --lines 10 --functions 10 --branches 10
 
+  test-local-runtime:
+    needs: [lint, doc_check]
+    name: Test local runtime (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-2025]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.11'
+      - name: Test Local Proxy
+        working-directory: local/local-proxy
+        run: go test ./... -v
+      - name: Test Local Runtime Manager
+        working-directory: local/local-runtime-manager
+        run: go test ./... -v
+
+  test-desktop-shell:
+    needs: [lint, doc_check]
+    name: Test desktop shell (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Test Desktop shell
+        shell: bash
+        run: node --test desktop/scripts/*.test.mjs
+
   test-auth-service:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
@@ -166,7 +203,13 @@ jobs:
           MIGRATION_TEST_POSTGRES_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
         run: cd backend/core && go test ./migrate -v
 
-      - name: Test backend core
+      - name: Test backend core (SQLite)
+        run: cd backend/core && go test ./... -v
+
+      - name: Test backend core (PostgreSQL)
+        env:
+          TEST_DB_DRIVER: postgres
+          TEST_DB_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
         run: cd backend/core && go test ./... -v
 
       - name: Test backend core integration module
@@ -256,8 +299,13 @@ jobs:
 
   test-algorithm:
     needs: [lint, doc_check]
-    runs-on: ubuntu-latest
+    name: Test algorithm (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-2025]
     permissions:
       contents: read
     steps:
@@ -271,11 +319,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps + coverage tools
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: '3.5'
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq cmake
           pip install scikit-build-core pybind11 coverage diff-cover
-          CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install --no-cache-dir algorithm/lazyllm
-          cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
+          pip install --no-cache-dir algorithm/lazyllm
+          python -c "import lazyllm, pathlib, shutil; shutil.copy2('algorithm/lazyllm/pyproject.toml', pathlib.Path(lazyllm.__path__[0]) / 'pyproject.toml')"
           pip install -r algorithm/requirements.txt
           pip install -r tests/algorithm/requirements-test.txt
 
@@ -296,7 +345,7 @@ jobs:
       - name: Upload HTML report
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-algorithm
+          name: coverage-algorithm-${{ matrix.os }}
           path: htmlcov-algorithm
 
       - name: Check total coverage ≥10%

@@ -1,6 +1,8 @@
 import time
+import socket
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 
 import requests
 
@@ -28,6 +30,43 @@ def _wait_for_http_ok(url: str, label: str, timeout: float, interval: float) -> 
         time.sleep(interval)
 
 
+def _wait_for_tcp_endpoint(endpoint: str, label: str, timeout: float, interval: float) -> None:
+    parsed = urlparse(endpoint if '://' in endpoint else f'//{endpoint}')
+    host = parsed.hostname
+    port = parsed.port
+    if not host or not port:
+        raise ValueError(f'invalid {label} endpoint: {endpoint!r}')
+    deadline = time.time() + timeout if timeout > 0 else None
+    while True:
+        try:
+            with socket.create_connection((host, port), timeout=3):
+                return
+        except OSError:
+            pass
+        if deadline is not None and time.time() >= deadline:
+            raise RuntimeError(f'timed out waiting for {label}: {endpoint}')
+        time.sleep(interval)
+
+
+def _is_tcp_endpoint(endpoint: str) -> bool:
+    try:
+        parsed = urlparse(endpoint if '://' in endpoint else f'//{endpoint}')
+        return bool(parsed.hostname and parsed.port)
+    except ValueError:
+        return False
+
+
+def _wait_for_stores(timeout: float, interval: float) -> None:
+    milvus_uri = _cfg['milvus_uri']
+    if milvus_uri and _is_tcp_endpoint(milvus_uri):
+        _wait_for_tcp_endpoint(milvus_uri, 'Milvus', timeout, interval)
+
+    if _cfg['segment_store_type'] == 'opensearch':
+        segment_store_uri = _cfg['segment_store_uri_or_path']
+        if segment_store_uri and _is_tcp_endpoint(segment_store_uri):
+            _wait_for_tcp_endpoint(segment_store_uri, 'OpenSearch', timeout, interval)
+
+
 def _wait_for_algorithm_registration(processor_url: str, algo_id: str, timeout: float, interval: float) -> None:
     deadline = time.time() + timeout if timeout > 0 else None
     algo_list_url = f'{processor_url.rstrip("/")}/algo/list'
@@ -50,7 +89,8 @@ def main() -> None:
     retry_interval = float(_cfg['startup_retry_interval'])
     startup_timeout = float(_cfg['startup_timeout'])
 
-    _wait_for_http_ok(f'{processor_url}/health', 'DocumentProcessor', startup_timeout, retry_interval)
+    _wait_for_http_ok(f'{processor_url}/ready', 'DocumentProcessor', startup_timeout, retry_interval)
+    _wait_for_stores(startup_timeout, retry_interval)
 
     if _cfg['reset_algo_on_startup']:
         drop_lazyllm_tables()

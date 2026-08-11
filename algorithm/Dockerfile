@@ -4,11 +4,14 @@
 ARG DOCKER_MIRROR=docker.m.daocloud.io/library/
 ARG BASE_LAZYLLM_IMAGE=base_env
 ARG BASE_LAZYMIND_IMAGE=base_code
+ARG LAZYLLM_VERSION=1.2.2
+ARG LAZYLLM_BUNDLE_SOURCE=1
 
 # Stage: base_env - pure environment, NO business code copied.
 # Rebuilt only when upgrading lazyllm version or changing requirements.txt.
 FROM ${DOCKER_MIRROR}python:3.11-slim AS base_env
 WORKDIR /app
+ARG LAZYLLM_VERSION
 
 ARG APT_MIRROR=http://mirrors.aliyun.com/debian
 ARG APT_SECURITY_MIRROR=http://mirrors.aliyun.com/debian-security
@@ -29,22 +32,17 @@ RUN set -eu; \
         "$f"; \
     done; \
     apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl ffmpeg build-essential gcc \
+        ca-certificates curl git ffmpeg build-essential gcc \
         libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libxcb1 \
         python3-dev ripgrep \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install lazyllm (from PyPI) to get the CLI, then run `lazyllm install rag`
-# to pull all RAG dependencies.  The .pth + shim are then rewritten so that
-# /opt/lazyllm (the volume-mount path) is used at runtime instead.
-RUN pip install --no-cache-dir lazyllm && lazyllm install rag; \
-    site_packages="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"; \
-    printf '/opt/lazyllm\n' > "${site_packages}/lazyllm-main.pth"; \
-    printf '%s\n' '#!/usr/bin/env sh' \
-      'PYTHONPATH="/opt/lazyllm:${PYTHONPATH:-}" exec python -m lazyllm.cli.main "$@"' \
-      > /usr/local/bin/lazyllm; \
-    chmod 0755 /usr/local/bin/lazyllm
+# Release images always use the pinned PyPI package. Keeping LazyLLM out of
+# PYTHONPATH avoids scanning its source checkout and docs during each import.
+RUN pip install --no-cache-dir "lazyllm==${LAZYLLM_VERSION}" \
+    && python -c "import importlib.metadata as m; assert m.version('lazyllm') == '${LAZYLLM_VERSION}'" \
+    && lazyllm install rag
 
 # Copy only the dependency manifest so this layer is invalidated only when
 # requirements change, not when LazyMind source code changes.
@@ -77,9 +75,14 @@ LABEL org.opencontainers.image.revision="${LAZYMIND_GIT_SHA}"
 LABEL io.lazymind.lazymind_git_sha="${LAZYMIND_GIT_SHA}"
 LABEL io.lazymind.lazyllm_git_sha="${LAZYLLM_GIT_SHA}"
 
-COPY algorithm/lazyllm /opt/lazyllm
+ARG LAZYLLM_BUNDLE_SOURCE
 COPY algorithm/ /app/algorithm/
-RUN rm -rf /app/algorithm/lazyllm
+RUN if [ "${LAZYLLM_BUNDLE_SOURCE}" = "1" ]; then \
+      test -d /app/algorithm/lazyllm/lazyllm; \
+      mv /app/algorithm/lazyllm /opt/lazyllm; \
+    else \
+      rm -rf /app/algorithm/lazyllm; \
+    fi
 
 
 # Stage: algorithm - env + code + runtime config. Used by most services.
@@ -209,9 +212,14 @@ RUN pip install --no-cache-dir "mineru[${MINERU_PACKAGE_VARIANT}]==${MINERU_VERS
 RUN if [ -n "$MINERU_NUMPY_VERSION" ]; then \
         pip install --no-cache-dir "numpy==${MINERU_NUMPY_VERSION}"; \
     fi
-COPY algorithm/lazyllm /opt/lazyllm
+ARG LAZYLLM_BUNDLE_SOURCE
 COPY algorithm/ /app/algorithm/
-RUN rm -rf /app/algorithm/lazyllm
+RUN if [ "${LAZYLLM_BUNDLE_SOURCE}" = "1" ]; then \
+      test -d /app/algorithm/lazyllm/lazyllm; \
+      mv /app/algorithm/lazyllm /opt/lazyllm; \
+    else \
+      rm -rf /app/algorithm/lazyllm; \
+    fi
 ENV PYTHONPATH=/opt/lazyllm:/app/algorithm
 WORKDIR /app/algorithm
 CMD ["python", "parsing/mineru.py"]

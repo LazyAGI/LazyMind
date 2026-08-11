@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
 
 LOCAL_CONFIG_ENV ?= local/config.env
@@ -193,7 +193,7 @@ help:
 	@echo "  make local-up - Build/start local LazyMind without containers"
 	@echo "  make local-up-lan - Build/start local LazyMind for LAN access with local admin auto-login enabled"
 	@echo "  make desktop-darwin-arm64 - Build Darwin arm64 Desktop app"
-	@echo "  make desktop-darwin-arm64-dmg - Build signed/notarized Darwin arm64 DMG"
+	@echo "  make desktop-darwin-arm64-dmg - Build a Developer ID-signed Darwin arm64 DMG"
 	@echo "  make desktop-darwin-arm64-clean - Remove Darwin arm64 Desktop build outputs"
 	@echo "  make desktop-windows-x64 - Build Windows x64 Desktop portable ZIP"
 	@echo "  make desktop-windows-x64-installer - Build Windows x64 per-user installer"
@@ -273,7 +273,13 @@ lint-state-backend-boundary: install-golangci-lint
 	done
 	@echo "✅ State backend boundary OK."
 
-lint: lint-python lint-go lint-state-backend-boundary
+lint-workflow-naming:
+	@python3 scripts/check_workflow_naming.py
+
+lint-migration-immutability:
+	@python3 scripts/check_migration_immutability.py
+
+lint: lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability
 
 test:
 	@./tests/run-all.sh
@@ -312,7 +318,7 @@ _COMPOSE_BIND_CRITICAL_READ_PATHS := \
 	backend/file-watcher/configs \
 	db-init \
 	kong/plugins \
-	plugins \
+	workflows \
 	scripts/db-bootstrap.sh \
 	kong.yml \
 	redis-users.acl
@@ -445,7 +451,6 @@ desktop-darwin-arm64:
 desktop-darwin-arm64-dmg:
 	@LAZYMIND_DESKTOP_PACKAGE_KIND=dmg \
 		LAZYMIND_DESKTOP_SIGNING_MODE=developer-id \
-		LAZYMIND_DESKTOP_NOTARIZE="$${LAZYMIND_DESKTOP_NOTARIZE:-true}" \
 		bash desktop/scripts/build-darwin-arm64.sh
 
 desktop-darwin-arm64-clean:

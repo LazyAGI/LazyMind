@@ -9,13 +9,6 @@ from lazyllm import ThreadPoolExecutor
 
 from lazymind.review.skill_review.config import DEFAULT_BACKGROUND_WORKERS
 from lazymind.review.skill_review.schemas import SkillReviewRequest
-from lazymind.review.service.skill_review import (
-    build_skill_review_taskid,
-    record_skill_review_failed,
-    record_skill_review_pending,
-    run_skill_review,
-)
-
 router = APIRouter()
 background_executor = ThreadPoolExecutor(max_workers=DEFAULT_BACKGROUND_WORKERS)
 
@@ -27,6 +20,13 @@ def shutdown_background_executor() -> None:
 
 @router.post('/api/chat/skill_review', summary='Run skill review for selected sessions')
 async def skill_review(payload: SkillReviewRequest):
+    from lazymind.review.service.skill_review import (
+        build_skill_review_taskid,
+        record_skill_review_failed,
+        record_skill_review_pending,
+        run_skill_review,
+    )
+
     loop = asyncio.get_running_loop()
     taskid = build_skill_review_taskid(payload.requestid)
     try:

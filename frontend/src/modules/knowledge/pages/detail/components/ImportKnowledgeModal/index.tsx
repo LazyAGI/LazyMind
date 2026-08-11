@@ -5,6 +5,7 @@ import {
   Ref,
   useEffect,
   useImperativeHandle,
+  useRef,
   useState,
 } from "react";
 
@@ -15,6 +16,10 @@ import { buildUploadTaskItems } from "@/modules/knowledge/utils/uploadByHash";
 import TagSelect from "@/modules/knowledge/components/TagSelect";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import { localizeErrorCode } from "@/components/request";
+import {
+  RuntimeReadinessError,
+  waitForRuntimeCapability,
+} from "@/runtime/readiness";
 
 const SINGLE_FILE_MAX_SIZE = 500 * 1024 * 1024;
 const TOTAL_FILE_MAX_SIZE = 1 * 1024 * 1024 * 1024;
@@ -55,8 +60,10 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   const [data, setData] = useState<IData>(InitData);
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [runtimeWaiting, setRuntimeWaiting] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const [hasZipError, setHasZipError] = useState(false);
+  const runtimeWaitAbortRef = useRef<AbortController | null>(null);
   const hasOnlyReadPermission = useDatasetPermissionStore((state) =>
     state.hasOnlyReadPermission(),
   );
@@ -79,6 +86,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
 
   useEffect(() => {
     getTags();
+    return () => runtimeWaitAbortRef.current?.abort();
   }, []);
 
   function getTags() {
@@ -103,10 +111,13 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   const isZipMode = importMode === "zip";
 
   function handleClose() {
+    runtimeWaitAbortRef.current?.abort();
+    runtimeWaitAbortRef.current = null;
     form.resetFields();
     setData(InitData);
     setVisible(false);
     setLoading(false);
+    setRuntimeWaiting(false);
     setHasZipError(false);
   }
 
@@ -128,31 +139,48 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
         : undefined;
 
     try {
+      const controller = new AbortController();
+      runtimeWaitAbortRef.current = controller;
+      await waitForRuntimeCapability("parser", {
+        signal: controller.signal,
+        onWaiting: () => setRuntimeWaiting(true),
+      });
+      setRuntimeWaiting(false);
+
       await submitWithHashReuse(fileItems, values.tags, startMode);
       message.success(t("knowledge.uploadCompleteParsingStarted"));
       handleClose();
       onOk({ pId: data.p_id });
     } catch (err) {
+      if ((err as Error)?.name === "AbortError") {
+        return;
+      }
       console.error(err);
-      message.error(localizeErrorCode("2000509"));
+      message.error(
+        err instanceof RuntimeReadinessError
+          ? t("runtime.initializationFailed")
+          : localizeErrorCode("2000509"),
+      );
     } finally {
+      runtimeWaitAbortRef.current = null;
+      setRuntimeWaiting(false);
       setLoading(false);
     }
   }
 
-  function startTasksAfterUpload(taskIds: string[], startMode: string | undefined) {
+  async function startTasksAfterUpload(
+    taskIds: string[],
+    startMode: string | undefined,
+  ) {
     onParsingStart?.();
-    TaskServiceApi()
-      .startTasks(data.dataset_id, {
+    try {
+      await TaskServiceApi().startTasks(data.dataset_id, {
         task_ids: taskIds,
         ...(startMode ? { start_mode: startMode } : {}),
-      })
-      .catch((err) => {
-        console.error("Start parsing tasks failed:", err);
-      })
-      .finally(() => {
-        onParsingSettled?.();
       });
+    } finally {
+      onParsingSettled?.();
+    }
   }
 
   /**
@@ -188,7 +216,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
       throw new Error(localizeErrorCode("2000509"));
     }
 
-    startTasksAfterUpload(taskIds, startMode);
+    await startTasksAfterUpload(taskIds, startMode);
   }
 
   return (
@@ -220,8 +248,12 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
     >
       {loading && (
         <Alert
-          message={t("knowledge.documentParsingKeepTabOpen")}
-          type="warning"
+          message={
+            runtimeWaiting
+              ? t("runtime.aiServiceInitializingDocument")
+              : t("knowledge.documentParsingKeepTabOpen")
+          }
+          type={runtimeWaiting ? "info" : "warning"}
           showIcon
           style={{ marginBottom: 16 }}
         />

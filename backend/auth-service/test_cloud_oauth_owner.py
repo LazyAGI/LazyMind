@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 os.environ.setdefault('LAZYMIND_AUTH_CLOUD_SECRET_KEY', 'test-secret-key')
 
 from core import database as database_module  # noqa: E402
+from core.errors import AppException  # noqa: E402
 from models import Base, CloudAuthConnection  # noqa: E402
 from services.cloud_oauth_provider import CloudAccountProfile, CloudProviderError, CloudTokenPayload  # noqa: E402
 from services.cloud_oauth_service import CloudOAuthService  # noqa: E402
@@ -345,7 +346,7 @@ class CloudOAuthOwnerTest(unittest.TestCase):
         other = self.service.list_connections(owner_user_id='user-2', provider='feishu')
         self.assertEqual(other['items'], [])
 
-    def test_oauth_callback_reuses_existing_provider_account_connection(self) -> None:
+    def test_authorize_url_rejects_duplicate_active_app(self) -> None:
         first = self.service.create_authorize_url(
             provider='feishu',
             tenant_id='',
@@ -365,26 +366,21 @@ class CloudOAuthOwnerTest(unittest.TestCase):
             state='state-1',
         )
 
-        second = self.service.create_authorize_url(
-            provider='feishu',
-            tenant_id='',
-            owner_user_id='user-1',
-            auth_mode='oauth_user',
-            client_id='client',
-            client_secret='secret',
-            redirect_uri='https://example.test/callback',
-            state='state-2',
-        )
-        second_callback = self.service.oauth_callback(
-            provider='feishu',
-            tenant_id='',
-            owner_user_id='user-1',
-            connection_id=second['connection_id'],
-            code='code-2',
-            state='state-2',
-        )
+        with self.assertRaises(AppException) as raised:
+            self.service.create_authorize_url(
+                provider='feishu',
+                tenant_id='',
+                owner_user_id='user-1',
+                auth_mode='oauth_user',
+                client_id='client',
+                client_secret='secret',
+                redirect_uri='https://example.test/callback',
+                state='state-2',
+            )
 
-        self.assertEqual(second_callback['connection_id'], first_callback['connection_id'])
+        self.assertEqual(raised.exception.code, 1000814)
+        detail = self.service.get_connection(first_callback['connection_id'], user_id='user-1')
+        self.assertEqual(detail['status'], 'ACTIVE')
 
     def test_get_access_token_recovers_when_concurrent_refresh_already_succeeded(self) -> None:
         created = self.service.create_authorize_url(

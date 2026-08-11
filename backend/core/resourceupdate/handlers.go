@@ -343,8 +343,8 @@ func (w *Worker) saveFrozenSkillRequest(ctx context.Context, task orm.ResourceUp
 	return taskOutcome{}
 }
 
-func (w *Worker) handleMemoryGenerate(ctx context.Context, task orm.ResourceUpdateTask) taskOutcome {
-	var request memoryGenerateRequestJSON
+func (w *Worker) handleMemoryReview(ctx context.Context, task orm.ResourceUpdateTask) taskOutcome {
+	var request memoryReviewRequestJSON
 	if len(task.RequestJSON) == 0 {
 		return permanentOutcome("missing_request_json", "request_json required")
 	}
@@ -355,9 +355,9 @@ func (w *Worker) handleMemoryGenerate(ctx context.Context, task orm.ResourceUpda
 	if userID == "" {
 		return permanentOutcome("missing_user_id", "user_id required")
 	}
-	sessionID := strings.TrimSpace(request.SessionID)
-	if sessionID == "" {
-		return permanentOutcome("missing_session_id", "session_id required")
+	conversationID := strings.TrimSpace(request.ConversationID)
+	if conversationID == "" {
+		return permanentOutcome("missing_conversation_id", "conversation_id required")
 	}
 	llmConfig, err := w.loadLLMConfig(ctx, w.db, userID)
 	if err != nil {
@@ -369,20 +369,22 @@ func (w *Worker) handleMemoryGenerate(ctx context.Context, task orm.ResourceUpda
 		Str("user_id", userID).
 		Str("resource_type", task.ResourceType).
 		Str("resource_id", task.ResourceID).
-		Str("session_id", sessionID).
+		Str("conversation_id", conversationID).
 		Msg(logEventMemoryReviewCallStart)
 	resp, status, err := w.callers.Memory(ctx, algo.MemoryReviewRequest{
-		TaskID:    reviewTaskID,
-		UserID:    userID,
-		History:   decodeHistory(request.History),
-		LLMConfig: llmConfig,
+		TaskID:                     reviewTaskID,
+		UserID:                     userID,
+		ConversationID:             conversationID,
+		ConversationLastActiveAtMS: request.ConversationLastActiveAtMS,
+		History:                    decodeHistory(request.History),
+		LLMConfig:                  llmConfig,
 	})
 	if err != nil {
 		resourceUpdateWarn(logEventMemoryReviewCallFailed, err).
 			Str("task_id", task.ID).
 			Str("user_id", userID).
 			Str("resource_type", task.ResourceType).
-			Str("session_id", sessionID).
+			Str("conversation_id", conversationID).
 			Int("http_status", status).
 			Str("reason", "request_failed").
 			Msg(logEventMemoryReviewCallFailed)
@@ -392,12 +394,12 @@ func (w *Worker) handleMemoryGenerate(ctx context.Context, task orm.ResourceUpda
 		}
 		return retryableOutcome("memory_review_call_failed", fmt.Errorf("http_status=%d: %w", status, err))
 	}
-	if status != http.StatusOK || resp == nil || strings.TrimSpace(resp.Status) != "success" || strings.TrimSpace(resp.TaskID) != reviewTaskID {
+	if status != http.StatusOK || resp == nil || strings.TrimSpace(resp.TaskID) != reviewTaskID {
 		resourceUpdateWarn(logEventMemoryReviewCallFailed, nil).
 			Str("task_id", task.ID).
 			Str("user_id", userID).
 			Str("resource_type", task.ResourceType).
-			Str("session_id", sessionID).
+			Str("conversation_id", conversationID).
 			Int("http_status", status).
 			Str("response_status", safeMemoryStatus(resp)).
 			Str("response_task_id", safeMemoryTaskID(resp)).
@@ -405,11 +407,32 @@ func (w *Worker) handleMemoryGenerate(ctx context.Context, task orm.ResourceUpda
 			Msg(logEventMemoryReviewCallFailed)
 		return retryableOutcome("memory_review_unexpected_response", fmt.Errorf("http_status=%d status=%q task_id=%q", status, safeMemoryStatus(resp), safeMemoryTaskID(resp)))
 	}
+	outcome := strings.TrimSpace(resp.Outcome)
+	if strings.TrimSpace(resp.Status) != "success" || (outcome != "saved" && outcome != "no_changes") {
+		code := "memory_review_failed"
+		message := "Memory Review failed"
+		if resp.Error != nil {
+			if strings.TrimSpace(resp.Error.Code) != "" {
+				code = strings.TrimSpace(resp.Error.Code)
+			}
+			if strings.TrimSpace(resp.Error.Message) != "" {
+				message = strings.TrimSpace(resp.Error.Message)
+			}
+		}
+		if outcome == "partial" {
+			code = "memory_review_partial"
+		}
+		if resp.Retryable {
+			return retryableOutcome(code, fmt.Errorf("memory review failed: %s", message))
+		}
+		return permanentOutcome(code, message)
+	}
 	resourceUpdateInfo(logEventMemoryReviewCallDone).
 		Str("task_id", task.ID).
 		Str("user_id", userID).
 		Str("resource_type", task.ResourceType).
-		Str("session_id", sessionID).
+		Str("conversation_id", conversationID).
+		Str("outcome", outcome).
 		Int("http_status", status).
 		Msg(logEventMemoryReviewCallDone)
 	return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone, ResultID: reviewTaskID}

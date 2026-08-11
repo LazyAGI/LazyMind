@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 from typing import Any
 
-from json_repair import repair_json
-
-from evo.llm import LazyLLMClient
+from evo.llm import LazyLLMClient, parse_json_object
 
 from .schemas import TurnPlan
 
@@ -63,11 +60,10 @@ def plan_next_turn(context: Mapping[str, Any],
         )
         try:
             raw = client(prompt, stream=False, response_format={'type': 'json_object'})
-            return TurnPlan.model_validate(_json_object(raw))
+            return TurnPlan.model_validate(parse_json_object(raw))
         except Exception as exc:
             error = str(exc)
-    snippet = re.sub(r'\s+', ' ', str(raw or '')).strip()[:500]
-    raise StructuredPlanError(f'{error}; response={snippet}')
+    raise StructuredPlanError(error or 'LLM did not return a valid turn plan')
 
 
 def answer_query(context: Mapping[str, Any], result: object,
@@ -89,23 +85,6 @@ def answer_query(context: Mapping[str, Any], result: object,
 def _json(value: object) -> str:
     text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
     return text if len(text) <= 12000 else text[:12000]
-
-
-def _json_object(raw: Any) -> Mapping[str, Any]:
-    if isinstance(raw, Mapping):
-        return raw
-    text = re.sub(r'<think>.*?</think>', '', str(raw), flags=re.S).strip()
-    fenced = re.search(r'```(?:json)?\s*(\{.*\})\s*```', text, re.S)
-    if fenced:
-        text = fenced.group(1)
-    else:
-        start, end = text.find('{'), text.rfind('}')
-        if start >= 0 and end > start:
-            text = text[start:end + 1]
-    value = repair_json(text, return_objects=True)
-    if not isinstance(value, Mapping):
-        raise ValueError(f'LLM response must be an object, got {type(value).__name__}')
-    return value
 
 
 __all__ = ['StructuredPlanError', 'answer_query', 'plan_next_turn']

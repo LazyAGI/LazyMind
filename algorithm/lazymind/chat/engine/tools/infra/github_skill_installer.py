@@ -11,7 +11,7 @@ from urllib.parse import quote, unquote, urlparse
 
 import requests
 
-from lazymind.common.skill_document import require_valid_skill_document
+from lazymind.common.skill.document import require_valid_skill_document
 
 
 _GITHUB_API = 'https://api.github.com'

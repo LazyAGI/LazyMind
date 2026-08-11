@@ -65,6 +65,9 @@ func validateKnownAppliedHistory(catalog migrationCatalog, applied []historyReco
 			continue
 		}
 		if _, ok := allowedSuperseded[record.Version]; !ok {
+			if isArchivedDevHistory(catalog.Modes, record.Version) {
+				continue
+			}
 			return fmt.Errorf(
 				"applied migration version %d has no migration file or release directory; refusing to execute SQL",
 				record.Version,
@@ -72,6 +75,30 @@ func validateKnownAppliedHistory(catalog migrationCatalog, applied []historyReco
 		}
 	}
 	return nil
+}
+
+func isArchivedDevHistory(modes []modeMigration, version uint64) bool {
+	if version < devVersionBase || version%devVersionBase == 0 {
+		return false
+	}
+	modeVersion := version / devVersionBase
+	for _, mode := range modes {
+		if mode.ModeVersion == modeVersion && mode.Aggregate != nil && !mode.DevDirectory {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDevHistoryForMode(mode modeMigration, applied []historyRecord) bool {
+	for _, record := range applied {
+		if record.Version >= devVersionBase &&
+			record.Version%devVersionBase != 0 &&
+			record.Version/devVersionBase == mode.ModeVersion {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Runner) applyUpMigrationAutomatic(
@@ -175,18 +202,6 @@ func (r *Runner) normalizeCanonicalHistory(
 			return applied, err
 		}
 	}
-	for _, mode := range catalog.Modes {
-		if mode.Aggregate == nil || historyContains(applied, mode.Aggregate.Version) {
-			continue
-		}
-		if len(mode.Dev) == 0 || appliedDevVersions(mode, applied) != len(mode.Dev) {
-			continue
-		}
-		applied, _, err = r.canonicalizeHistory(*mode.Aggregate, migrationVersions(mode.Dev), applied)
-		if err != nil {
-			return applied, err
-		}
-	}
 	return applied, nil
 }
 
@@ -257,11 +272,22 @@ func postAggregateDevMigrations(mode modeMigration) []migrationFile {
 	}
 	out := make([]migrationFile, 0)
 	for _, migration := range mode.Dev {
-		if migration.FileVersion > mode.Aggregate.Version {
+		if !aggregateIncludesDevMigration(mode, migration) {
 			out = append(out, migration)
 		}
 	}
 	return out
+}
+
+// aggregateIncludesDevMigration reports whether a dev migration is covered by
+// an already-applied aggregate. The aggregate version is a hard compatibility
+// cutoff because older databases may contain only the aggregate history row
+// after executing the aggregate directly or canonicalizing their dev history.
+func aggregateIncludesDevMigration(mode modeMigration, migration migrationFile) bool {
+	if mode.Aggregate == nil {
+		return false
+	}
+	return migration.FileVersion <= mode.Aggregate.Version
 }
 
 func appliedPreAggregateDevVersions(mode modeMigration, applied []historyRecord) int {
@@ -270,7 +296,7 @@ func appliedPreAggregateDevVersions(mode modeMigration, applied []historyRecord)
 	}
 	count := 0
 	for _, migration := range mode.Dev {
-		if migration.FileVersion <= mode.Aggregate.Version && historyContains(applied, migration.Version) {
+		if aggregateIncludesDevMigration(mode, migration) && historyContains(applied, migration.Version) {
 			count++
 		}
 	}

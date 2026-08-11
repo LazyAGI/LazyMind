@@ -1,11 +1,12 @@
 .detail-container {
   position: relative;
 
-  height: calc(99vh);
+  height: 100%;
+  min-height: 0;
   width: 100%;
 
   display: flex;
-  align-items: center;
+  align-items: stretch;
   overflow: hidden;
 
   .chat-conversation-pane {
@@ -13,9 +14,13 @@
     min-width: 0;
     height: 100%;
     flex: 1;
+
+    &--task-restore-visible .conversation-trail {
+      left: 4px;
+    }
   }
 
-  &--plugin-expanded {
+  &--workflow-expanded {
     padding-top: 49px;
 
     .chat-conversation-pane,
@@ -245,7 +250,7 @@
 
   // Keep this after the base .right-box rule: equal-specificity declarations in
   // that rule otherwise reset the expanded tab back to relative positioning.
-  &--plugin-expanded > .right-box.right-box--expanded-tab {
+  &--workflow-expanded > .right-box.right-box--expanded-tab {
     position: absolute;
     top: 49px;
     right: 0;
@@ -271,7 +276,7 @@
     }
   }
 
-  &--plugin-expanded > .right-box.right-box--expanded-tab.right-box--tab-hidden {
+  &--workflow-expanded > .right-box.right-box--expanded-tab.right-box--tab-hidden {
     display: none;
   }
 

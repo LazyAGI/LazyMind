@@ -115,7 +115,7 @@ func TestCompareContentSeparatesLocalAndWholeLineReplacementGroups(t *testing.T)
 		"- 3333333333333333333333",
 		"- 修改完成后运行测试",
 	}
-	diff := compareText(t, "memory/user.md", oldLines, newLines)
+	diff := compareText(t, "memory/users/preference.yaml", oldLines, newLines)
 
 	hunks := hunkLines(diff.DiffEntryLines)
 	if len(hunks) != 3 {
@@ -184,5 +184,86 @@ func assertDiffLineTypes(t *testing.T, lines []DiffEntryLine, want ...string) {
 		if line.Type != want[index] {
 			t.Fatalf("line %d type = %s, want %s; lines = %#v", index, line.Type, want[index], lines)
 		}
+	}
+}
+
+// TestFormatHunkRange formats single-line and multi-line ranges correctly.
+func TestFormatHunkRange(t *testing.T) {
+	if got := formatHunkRange(10, 1); got != "10" {
+		t.Fatalf("got %q, want 10", got)
+	}
+	if got := formatHunkRange(10, 3); got != "10,3" {
+		t.Fatalf("got %q, want 10,3", got)
+	}
+}
+
+// TestFormatHunkHeader formats standard unified diff hunk headers.
+func TestFormatHunkHeader(t *testing.T) {
+	got := formatHunkHeader(1, 3, 1, 5)
+	want := "@@ -1,3 +1,5 @@"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	// Single-line hunk
+	if got := formatHunkHeader(5, 1, 5, 1); got != "@@ -5 +5 @@" {
+		t.Fatalf("single-line got %q, want @@ -5 +5 @@", got)
+	}
+}
+
+// TestInjectedContextText extracts a slice of lines from text.
+func TestInjectedContextText(t *testing.T) {
+	text := "line1\nline2\nline3\nline4\nline5"
+	// Extract lines starting from NewStart=3, Lines=2
+	if got := injectedContextText(text, Options{NewStart: 3, Lines: 2}); got != "line3\nline4" {
+		t.Fatalf("got %q, want line3\\nline4", got)
+	}
+	// Start beyond length
+	if got := injectedContextText(text, Options{NewStart: 10, Lines: 2}); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+	// Zero start defaults to 1
+	if got := injectedContextText(text, Options{NewStart: 0, Lines: 1}); got != "line1" {
+		t.Fatalf("got %q, want line1", got)
+	}
+	// Empty text
+	if got := injectedContextText("", Options{NewStart: 1, Lines: 1}); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+	// Clamp end to text length
+	if got := injectedContextText(text, Options{NewStart: 4, Lines: 10}); got != "line4\nline5" {
+		t.Fatalf("got %q, want line4\\nline5", got)
+	}
+}
+
+// TestCountHunks counts HUNK-type lines in diff output.
+func TestCountHunks(t *testing.T) {
+	lines := []DiffEntryLine{
+		{Type: "HUNK"},
+		{Type: "CONTEXT"},
+		{Type: "HUNK"},
+		{Type: "ADDITION"},
+		{Type: "HUNK"},
+	}
+	if got := countHunks(lines); got != 3 {
+		t.Fatalf("got %d, want 3", got)
+	}
+	if got := countHunks(nil); got != 0 {
+		t.Fatalf("nil got %d, want 0", got)
+	}
+}
+
+// TestFirstNonEmpty returns the first non-empty string.
+func TestFirstNonEmpty(t *testing.T) {
+	if got := firstNonEmpty("", "  ", "hello", "world"); got != "hello" {
+		t.Fatalf("got %q, want hello", got)
+	}
+	if got := firstNonEmpty("", "  "); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+	if got := firstNonEmpty("first"); got != "first" {
+		t.Fatalf("got %q, want first", got)
+	}
+	if got := firstNonEmpty(); got != "" {
+		t.Fatalf("no args got %q, want empty", got)
 	}
 }

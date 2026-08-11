@@ -9,6 +9,7 @@
 scripts/openapi/specs/auth-openapi.yaml
 scripts/openapi/specs/core.yaml
 scripts/openapi/specs/scan.yaml
+scripts/openapi/specs/channel-gateway.yaml
 ```
 
 
@@ -17,6 +18,7 @@ scripts/openapi/specs/scan.yaml
 src/api/generated/auth-client/
 src/api/generated/core-client/
 src/api/generated/scan-client/
+src/api/generated/channel-gateway-client/
 ```
 
 
@@ -40,6 +42,7 @@ npm run gen:auth
 npm run gen:openapi auth
 npm run gen:openapi core
 npm run gen:openapi scan
+npm run gen:openapi channel-gateway
 
 npm run gen:openapi
 
@@ -51,7 +54,7 @@ npm run gen:openapi:check
 
 
 1. 将新的 OpenAPI YAML 文件放到 `scripts/openapi/specs/` 目录
-2. 修改 `scripts/openapi/generate-api.mjs`，添加新的 API 配置：
+2. 修改 `scripts/openapi/openapi-manifest.mjs`，添加新的 API 配置：
 
 ```javascript
 const apis = [

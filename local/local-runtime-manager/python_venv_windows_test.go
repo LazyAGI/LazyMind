@@ -15,9 +15,10 @@ import (
 func TestRelocateDesktopPythonVenvs(t *testing.T) {
 	root := t.TempDir()
 	paths := RuntimePaths{
-		PythonRuntimeDir:   filepath.Join(root, "runtimes", "python"),
-		AuthServiceVenvDir: filepath.Join(root, "deps", "python", "auth-service"),
-		AlgorithmVenv:      filepath.Join(root, "deps", "python", "algorithm"),
+		PythonRuntimeDir:      filepath.Join(root, "runtimes", "python"),
+		AuthServiceVenvDir:    filepath.Join(root, "deps", "python", "auth-service"),
+		ChannelGatewayVenvDir: filepath.Join(root, "deps", "python", "channel-gateway"),
+		AlgorithmVenv:         filepath.Join(root, "deps", "python", "algorithm"),
 	}
 	homeName := "cpython-3.11-windows-x86_64-none"
 	home := filepath.Join(paths.PythonRuntimeDir, homeName)
@@ -27,7 +28,7 @@ func TestRelocateDesktopPythonVenvs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "python.exe"), []byte("bundled-python"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, venv := range []string{paths.AuthServiceVenvDir, paths.AlgorithmVenv} {
+	for _, venv := range []string{paths.AuthServiceVenvDir, paths.ChannelGatewayVenvDir, paths.AlgorithmVenv} {
 		if err := os.MkdirAll(venv, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -44,7 +45,7 @@ func TestRelocateDesktopPythonVenvs(t *testing.T) {
 	if err := relocateDesktopPythonVenvs(RuntimeConfig{Profile: "desktop"}, paths); err != nil {
 		t.Fatal(err)
 	}
-	for _, venv := range []string{paths.AuthServiceVenvDir, paths.AlgorithmVenv} {
+	for _, venv := range []string{paths.AuthServiceVenvDir, paths.ChannelGatewayVenvDir, paths.AlgorithmVenv} {
 		raw, err := os.ReadFile(filepath.Join(venv, "pyvenv.cfg"))
 		if err != nil {
 			t.Fatal(err)
@@ -65,9 +66,10 @@ func TestRelocateDesktopPythonVenvs(t *testing.T) {
 func TestRelocateDesktopPythonVenvsSkipsUnchangedReadOnlyFiles(t *testing.T) {
 	root := t.TempDir()
 	paths := RuntimePaths{
-		PythonRuntimeDir:   filepath.Join(root, "runtimes", "python"),
-		AuthServiceVenvDir: filepath.Join(root, "deps", "python", "auth-service"),
-		AlgorithmVenv:      filepath.Join(root, "deps", "python", "algorithm-missing"),
+		PythonRuntimeDir:      filepath.Join(root, "runtimes", "python"),
+		AuthServiceVenvDir:    filepath.Join(root, "deps", "python", "auth-service"),
+		ChannelGatewayVenvDir: filepath.Join(root, "deps", "python", "channel-gateway-missing"),
+		AlgorithmVenv:         filepath.Join(root, "deps", "python", "algorithm-missing"),
 	}
 	homeName := "cpython-3.11-windows-x86_64-none"
 	home := filepath.Join(paths.PythonRuntimeDir, homeName)

@@ -588,6 +588,10 @@
   position: relative;
 }
 
+.main-layout-content.is-chat-page .sub-app-container {
+  overflow: hidden;
+}
+
 .main-layout-content.is-sidebar-collapsed {
   .knowledge-list-page .knowledge-title,
   .dataset-page .dataset-page-header,
@@ -683,31 +687,31 @@
     font-size: 16px;
     color: inherit;
   }
+}
 
-  .language-item {
-    .language-switcher {
-      flex: 1;
-      min-width: 0;
-    }
+.settings-popover-overlay {
+  .ant-popover-inner {
+    padding: 6px;
+    border-radius: 10px;
   }
 }
 
 .settings-popover {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
   min-width: 156px;
-  padding: 4px;
+  padding: 0;
 
   .settings-popover-button.ant-btn {
     width: 100%;
-    height: 40px;
+    height: 28px;
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 10px;
-    padding: 0 12px;
-    border-radius: 10px;
+    gap: 6px;
+    padding: 0 6px;
+    border-radius: 6px;
     color: #323c47;
 
     &:hover {
@@ -720,11 +724,15 @@
       align-items: center;
     }
 
+    .settings-popover-label {
+      min-width: 0;
+    }
+
     .settings-active-badge {
       margin-left: auto;
-      padding: 2px 8px;
+      padding: 1px 5px;
       border-radius: 999px;
-      font-size: 12px;
+      font-size: 11px;
       color: #0958d9;
       background: #dbeafe;
       border: 1px solid #bfdbfe;
@@ -738,6 +746,37 @@
 
   .settings-popover-icon {
     font-size: 16px;
+  }
+
+  .settings-popover-accessory {
+    margin-left: auto;
+    color: #7b8491;
+    font-size: 12px;
+  }
+
+  .settings-popover-language {
+    height: 28px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 6px;
+    border-radius: 6px;
+    color: #323c47;
+
+    &:hover {
+      background: #f3f7fd;
+      color: #006ae6;
+    }
+
+    .language-switcher {
+      flex: 1;
+      width: 100%;
+      min-width: 0;
+
+      .ant-select-arrow {
+        inset-inline-end: 0;
+      }
+    }
   }
 }
 

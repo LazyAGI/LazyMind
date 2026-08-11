@@ -37,6 +37,7 @@ type RuntimeConfigSnapshot struct {
 	NetworkProfile     string                    `json:"networkProfile,omitempty"`
 	LocalProxy         LocalProxyConfig          `json:"localProxy,omitempty"`
 	AuthService        AuthServiceConfig         `json:"authService,omitempty"`
+	ChannelGateway     ChannelGatewayConfig      `json:"channelGateway,omitempty"`
 	Algorithm          AlgorithmConfig           `json:"algorithm,omitempty"`
 	FileWatcher        FileWatcherConfigSnapshot `json:"fileWatcher,omitempty"`
 	ProcessComposePort int                       `json:"processComposePort,omitempty"`
@@ -123,6 +124,7 @@ func snapshotRuntimeConfig(cfg RuntimeConfig) RuntimeConfigSnapshot {
 		NetworkProfile:  cfg.NetworkProfile,
 		LocalProxy:      cfg.LocalProxy,
 		AuthService:     cfg.AuthService,
+		ChannelGateway:  cfg.ChannelGateway,
 		Algorithm:       cfg.Algorithm,
 		FileWatcher: FileWatcherConfigSnapshot{
 			Port:          cfg.FileWatcher.Port,
@@ -152,6 +154,9 @@ func applyStateConfig(cfg RuntimeConfig, state RuntimeState) RuntimeConfig {
 	}
 	if state.Config.AuthService.Port > 0 {
 		cfg.AuthService = state.Config.AuthService
+	}
+	if state.Config.ChannelGateway.Port > 0 {
+		cfg.ChannelGateway = state.Config.ChannelGateway
 	}
 	if state.Config.Algorithm.DocPort > 0 {
 		cfg.Algorithm = state.Config.Algorithm

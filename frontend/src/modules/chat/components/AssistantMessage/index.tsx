@@ -1,6 +1,6 @@
-import { Avatar, Button, Divider, Flex, message, Spin, Tooltip } from "antd";
+import { Button, Divider, Flex, message, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
-import { useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -20,19 +20,16 @@ import {
   Source,
 } from "@/api/generated/chatbot-client";
 import { AgentAppsAuth } from "@/components/auth";
+import { isAskPendingReadOnly } from "@/modules/chat/utils/message";
 import { ChatServiceApi, decideToolLimit } from "@/modules/chat/utils/request";
-import { usePluginStore } from "@/modules/chat/store/pluginPanel";
-import { PluginPanel } from "@/modules/chat/components/PluginPanel";
+import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
+import { WorkflowPanel } from "@/modules/chat/components/WorkflowPanel";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
-
-const BotAvatarIcon = new URL(
-  "../../assets/images/bot_avatar.png",
-  import.meta.url,
-).href;
+import { IdentityAvatar } from "@/modules/identityAvatar";
 
 async function copyTextToClipboard(text: string) {
   const normalizedText = text.trim();
@@ -207,6 +204,8 @@ const AssistantMessage = (props: any) => {
   } = props;
   const citeButtonRef = useRef<HTMLButtonElement | null>(null);
   const citeSelectionTextRef = useRef("");
+  const onCiteMessageRef = useRef(onCiteMessage);
+  onCiteMessageRef.current = onCiteMessage;
   // Debounced backend persistence for ask-card answers. Created once per component
   // instance with useRef so it is stable across re-renders.
   const persistAskAnswersRef = useRef(
@@ -222,8 +221,8 @@ const AssistantMessage = (props: any) => {
     targetHistoryId: undefined,
   });
 
-  const loadActiveSession = usePluginStore((s) => s.loadActiveSession);
-  // Eagerly load the plugin session so the panel appears without waiting for component mount.
+  const loadActiveSession = useWorkflowStore((s) => s.loadActiveSession);
+  // Eagerly load the workflow session so the panel appears without waiting for component mount.
   const isLast = index === length - 1;
   useEffect(() => {
     if (isLast && sessionId) {
@@ -231,7 +230,7 @@ const AssistantMessage = (props: any) => {
     }
   }, [isLast, sessionId, loadActiveSession]);
 
-  const pluginSession = usePluginStore((s) =>
+  const workflowSession = useWorkflowStore((s) =>
     sessionId ? s.sessionByConversation[sessionId] ?? null : null,
   );
 
@@ -252,46 +251,78 @@ const AssistantMessage = (props: any) => {
     }
   };
 
-  const hideCiteButton = () => {
+  const hideCiteButton = useCallback(() => {
     citeButtonRef.current?.remove();
     citeButtonRef.current = null;
     citeSelectionTextRef.current = "";
-  };
-
-  useEffect(() => {
-    return hideCiteButton;
   }, []);
 
-  const handleCiteSelectedText = () => {
+  const handleCiteSelectedText = useCallback(() => {
     const selectedText = citeSelectionTextRef.current.trim();
     if (!selectedText) {
       hideCiteButton();
       return;
     }
-    onCiteMessage?.(selectedText);
+    onCiteMessageRef.current?.(selectedText);
     window.getSelection()?.removeAllRanges();
     hideCiteButton();
-  };
+  }, [hideCiteButton]);
 
-  const showCiteButton = (text: string, top: number, left: number) => {
-    let button = citeButtonRef.current;
-    if (!button) {
-      button = document.createElement("button");
-      button.type = "button";
-      button.className = "chat-cite-selection-btn";
-      button.addEventListener("mousedown", (event) => {
-        event.preventDefault();
-      });
-      button.addEventListener("click", handleCiteSelectedText);
-      document.body.appendChild(button);
-      citeButtonRef.current = button;
-    }
+  const handleCiteSelectedTextRef = useRef(handleCiteSelectedText);
+  handleCiteSelectedTextRef.current = handleCiteSelectedText;
 
-    citeSelectionTextRef.current = text;
-    button.textContent = t("chat.cite");
-    button.style.top = `${top}px`;
-    button.style.left = `${left}px`;
-  };
+  const showCiteButton = useCallback(
+    (text: string, top: number, left: number) => {
+      let button = citeButtonRef.current;
+      if (!button) {
+        button = document.createElement("button");
+        button.type = "button";
+        button.className = "chat-cite-selection-btn";
+        // Keep selection while clicking the cite button.
+        button.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        });
+        button.addEventListener("pointerdown", (event) => {
+          event.stopPropagation();
+        });
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          handleCiteSelectedTextRef.current();
+        });
+        document.body.appendChild(button);
+        citeButtonRef.current = button;
+      }
+
+      citeSelectionTextRef.current = text;
+      button.textContent = t("chat.cite");
+      button.style.top = `${top}px`;
+      button.style.left = `${left}px`;
+    },
+    [t],
+  );
+
+  // Dismiss cite float on any outside click (capture), so it closes even when
+  // the click lands outside this message's onMouseUp handler.
+  useEffect(() => {
+    const dismissOnPointerDown = (event: PointerEvent) => {
+      const button = citeButtonRef.current;
+      if (!button) {
+        return;
+      }
+      if (event.target instanceof Node && button.contains(event.target)) {
+        return;
+      }
+      window.getSelection()?.removeAllRanges();
+      hideCiteButton();
+    };
+
+    document.addEventListener("pointerdown", dismissOnPointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOnPointerDown, true);
+      hideCiteButton();
+    };
+  }, [hideCiteButton]);
 
   const handleMouseUp = (event: MouseEvent<HTMLDivElement>) => {
     const selection = window.getSelection();
@@ -314,16 +345,27 @@ const AssistantMessage = (props: any) => {
       return;
     }
 
-    const rect = range.getBoundingClientRect();
-    if (rect.width <= 0 && rect.height <= 0) {
+    // Prefer line boxes from getClientRects(): cross-block / wrapped selections
+    // make getBoundingClientRect() as wide as the container, pushing the button right.
+    const lineRects = Array.from(range.getClientRects()).filter(
+      (lineRect) => lineRect.width > 0 && lineRect.height > 0,
+    );
+    if (lineRects.length === 0) {
       hideCiteButton();
       return;
     }
-    showCiteButton(
-      selectedText,
-      Math.max(8, rect.top - 42),
-      rect.left + rect.width / 2,
+
+    const top = Math.min(...lineRects.map((lineRect) => lineRect.top));
+    const left = Math.min(...lineRects.map((lineRect) => lineRect.left));
+    const right = Math.max(...lineRects.map((lineRect) => lineRect.right));
+    const centerX = (left + right) / 2;
+    // Keep the fixed button inside the viewport (button ~ translateX(-50%)).
+    const clampedLeft = Math.min(
+      Math.max(centerX, 28),
+      window.innerWidth - 28,
     );
+
+    showCiteButton(selectedText, Math.max(8, top - 42), clampedLeft);
   };
 
   function renderLoading() {
@@ -464,9 +506,23 @@ const AssistantMessage = (props: any) => {
     return undefined;
   }
 
+  function getFeedbackRecord(historyId?: string) {
+    const resolvedHistoryId = historyId || item?.history_id;
+    if (resolvedHistoryId && item?.answers) {
+      const answer = item.answers.find(
+        (candidate: any) => candidate.history_id === resolvedHistoryId,
+      );
+      if (answer) {
+        return answer;
+      }
+    }
+    return item;
+  }
+
   const createUpdatedItem = (
     feedbackType: FeedBackChatHistoryRequestTypeEnum | undefined,
     targetHistoryId?: string,
+    details?: { reason?: string; expectedAnswer?: string },
   ) => {
     const resolvedHistoryId = targetHistoryId || item?.history_id;
 
@@ -475,7 +531,12 @@ const AssistantMessage = (props: any) => {
       nextFeedBack: FeedBackChatHistoryRequestTypeEnum | undefined,
     ) => {
       if (nextFeedBack !== undefined) {
-        return { ...record, feed_back: nextFeedBack };
+        return {
+          ...record,
+          feed_back: nextFeedBack,
+          reason: details?.reason,
+          expected_answer: details?.expectedAnswer,
+        };
       }
       return {
         ...record,
@@ -492,7 +553,7 @@ const AssistantMessage = (props: any) => {
       const updatedAnswers = item.answers.map((ans: any) =>
         ans.history_id === resolvedHistoryId
           ? applyFeedbackFields(ans, feedbackType)
-          : { ...ans, feed_back: undefined },
+          : ans,
       );
       const itemLevelFeedback =
         resolvedHistoryId === item?.history_id || !hasTargetAnswer
@@ -506,7 +567,6 @@ const AssistantMessage = (props: any) => {
     return applyFeedbackFields(item, feedbackType);
   };
 
-  
   function onFeedBack(
     type: FeedBackChatHistoryRequestTypeEnum,
     historyId?: string,
@@ -552,24 +612,12 @@ const AssistantMessage = (props: any) => {
       });
   }
 
-  
   function handleDislikeClick(historyId?: string) {
     if (feedbackState.isSubmitting) {
       return;
     }
 
-    const currentFeedBack = getCurrentFeedback(historyId);
     const targetHistoryId = historyId || item?.history_id;
-
-    if (
-      currentFeedBack === FeedBackChatHistoryRequestTypeEnum.FeedBackTypeUnlike
-    ) {
-      onFeedBack(
-        FeedBackChatHistoryRequestTypeEnum.FeedBackTypeUnlike,
-        historyId,
-      );
-      return;
-    }
 
     if (!targetHistoryId) {
       message.error(t("chat.historyIdMissingFeedback"));
@@ -587,7 +635,6 @@ const AssistantMessage = (props: any) => {
     );
   }
 
-  
   function handleFeedbackSubmit(_reasons: string[], _comment: string) {
     const targetHistoryId = feedbackState.targetHistoryId || item?.history_id;
     if (!targetHistoryId) {
@@ -615,6 +662,7 @@ const AssistantMessage = (props: any) => {
         const updatedItem = createUpdatedItem(
           FeedBackChatHistoryRequestTypeEnum.FeedBackTypeUnlike,
           targetHistoryId,
+          { reason: _reasons.join(","), expectedAnswer: _comment },
         );
         updateMessage(updatedItem);
 
@@ -882,7 +930,10 @@ const AssistantMessage = (props: any) => {
     // Render ask_pending card if present
     if (item.ask_pending) {
       const askPending = item.ask_pending;
-      const isReadOnly = !!item.is_history || !!item.ask_answered;
+      const isReadOnly = isAskPendingReadOnly(
+        item.ask_answered,
+        index === length - 1,
+      );
       return (
         <AskCard
           key={askPending.ask_id}
@@ -962,6 +1013,7 @@ const AssistantMessage = (props: any) => {
     hasMultipleAnswers &&
     (item.selected_answer_index === undefined ||
       item.selected_answer_index === null);
+  const modalFeedbackRecord = getFeedbackRecord(feedbackState.targetHistoryId);
 
   if (shouldUseMultiAnswerStyle) {
     return (
@@ -969,10 +1021,10 @@ const AssistantMessage = (props: any) => {
         className="chat-assistant-msg-multi-answer-wrap"
         onMouseUp={handleMouseUp}
       >
-        <Avatar
+        <IdentityAvatar
           className="chat-avatar"
-          size={"small"}
-          icon={<img src={BotAvatarIcon} />}
+          kind="soul"
+          size={32}
         />
         <div className="chat-bot-box-multi">
           <div className="chat-bot">
@@ -1033,8 +1085,8 @@ const AssistantMessage = (props: any) => {
             />
           </div>
           {(item.ask_pending || index === length - 1) && renderBottom()}
-          {index === length - 1 && pluginSession && sessionId && (
-            <PluginPanel
+          {index === length - 1 && workflowSession && sessionId && (
+            <WorkflowPanel
               key={sessionId}
               conversationId={sessionId}
               onSendMessage={(text) => props.sendMessage?.(text)}
@@ -1047,6 +1099,8 @@ const AssistantMessage = (props: any) => {
           onCancel={() => dispatch({ type: "CLOSE_MODAL" })}
           onSubmit={handleFeedbackSubmit}
           submitLoading={feedbackState.isSubmitting}
+          initialReason={modalFeedbackRecord?.reason}
+          initialComment={modalFeedbackRecord?.expected_answer}
         />
       </div>
     );
@@ -1057,10 +1111,10 @@ const AssistantMessage = (props: any) => {
       className="chat-assistant-msg-single-answer-wrap"
       onMouseUp={handleMouseUp}
     >
-      <Avatar
+      <IdentityAvatar
         className="chat-avatar"
-        size={"small"}
-        icon={<img src={BotAvatarIcon} />}
+        kind="soul"
+        size={32}
       />
       <div className="chat-bot-box-single">
         <div className="chat-bot">
@@ -1086,8 +1140,8 @@ const AssistantMessage = (props: any) => {
             renderFooter()}
         </div>
         {(item.ask_pending || index === length - 1) && renderBottom()}
-        {index === length - 1 && pluginSession && sessionId && (
-          <PluginPanel
+        {index === length - 1 && workflowSession && sessionId && (
+          <WorkflowPanel
             key={sessionId}
             conversationId={sessionId}
             onSendMessage={(text) => props.sendMessage?.(text)}
@@ -1100,6 +1154,8 @@ const AssistantMessage = (props: any) => {
         onCancel={() => dispatch({ type: "CLOSE_MODAL" })}
         onSubmit={handleFeedbackSubmit}
         submitLoading={feedbackState.isSubmitting}
+        initialReason={modalFeedbackRecord?.reason}
+        initialComment={modalFeedbackRecord?.expected_answer}
       />
     </div>
   );

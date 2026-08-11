@@ -12,6 +12,8 @@ import {
   isImageEmbedRequired,
   MODEL_FEATURES_CHANGED_EVENT,
 } from "@/hooks/useModelFeatures";
+import { isDesktopRuntime } from "@/runtime/mode";
+import { waitForRuntimeCapability } from "@/runtime/readiness";
 
 type ApiEnvelope<T> = {
   data?: T;
@@ -24,6 +26,7 @@ interface ModelReadyResponse {
 
 export type ChatModelProviderStatus =
   | "idle"
+  | "initializing"
   | "loading"
   | "ready"
   | "missing"
@@ -70,10 +73,60 @@ function unwrapResponse<T>(payload: ApiEnvelope<T> | T): T {
   return payload as T;
 }
 
+function createAbortError() {
+  const error = new Error("Configuration readiness check was cancelled");
+  error.name = "AbortError";
+  return error;
+}
+
+function waitBeforeRetry(signal: AbortSignal, delayMs = 750) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(createAbortError());
+      return;
+    }
+
+    const handleAbort = () => {
+      clearTimeout(timer);
+      reject(createAbortError());
+    };
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener("abort", handleAbort);
+      resolve();
+    }, delayMs);
+    signal.addEventListener("abort", handleAbort, { once: true });
+  });
+}
+
+async function requestWithStartupRetry<T>(
+  request: () => Promise<T>,
+  retry: boolean,
+  signal: AbortSignal,
+  isStale: () => boolean,
+) {
+  while (true) {
+    if (signal.aborted || isStale()) {
+      throw createAbortError();
+    }
+
+    try {
+      return await request();
+    } catch (error) {
+      if (!retry) {
+        throw error;
+      }
+      await waitBeforeRetry(signal);
+    }
+  }
+}
+
 export function useChatModelProviderGuard() {
-  const initialSnapshot = getCachedSnapshot();
+  const desktopRuntime = isDesktopRuntime();
+  const initialSnapshot = desktopRuntime ? null : getCachedSnapshot();
   const [status, setStatus] = useState<ChatModelProviderStatus>(
-    () => initialSnapshot?.status ?? "loading",
+    () =>
+      initialSnapshot?.status ??
+      (desktopRuntime ? "initializing" : "loading"),
   );
   const [requiresModelProviderConfig, setRequiresModelProviderConfig] =
     useState<boolean | null>(() => {
@@ -95,29 +148,70 @@ export function useChatModelProviderGuard() {
   const [vlmReady, setVlmReady] = useState<boolean | null>(
     () => initialSnapshot?.vlmReady ?? null,
   );
+  const [configurationRuntimeReady, setConfigurationRuntimeReady] =
+    useState(!desktopRuntime);
+  const [chatRuntimeReady, setChatRuntimeReady] = useState(!desktopRuntime);
   const requestIdRef = useRef(0);
+  const configurationRuntimeReadyRef = useRef(!desktopRuntime);
+  const runtimeWaitAbortRef = useRef<AbortController | null>(null);
 
   const runCheck = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    const isStale = () => requestIdRef.current !== requestId;
+    const controller = new AbortController();
+    runtimeWaitAbortRef.current?.abort();
+    runtimeWaitAbortRef.current = controller;
+
+    if (desktopRuntime && !configurationRuntimeReadyRef.current) {
+      setStatus("initializing");
+    } else if (!getCachedSnapshot()) {
+      setStatus("loading");
+    }
+
+    try {
+      await waitForRuntimeCapability("configuration", {
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if ((error as Error)?.name === "AbortError" || isStale()) {
+        return false;
+      }
+      setStatus(desktopRuntime ? "initializing" : "error");
+      return false;
+    }
+
+    if (isStale()) {
+      return false;
+    }
+    if (desktopRuntime) {
+      configurationRuntimeReadyRef.current = true;
+      setConfigurationRuntimeReady(true);
+    }
     if (!getCachedSnapshot()) {
       setStatus("loading");
     }
 
-    const isStale = () => requestIdRef.current !== requestId;
-
     let shouldCheckModelProvider = false;
 
     try {
-      const currentUser = await fetchCurrentUser();
+      const currentUser = await requestWithStartupRetry(
+        fetchCurrentUser,
+        desktopRuntime,
+        controller.signal,
+        isStale,
+      );
       if (isStale()) {
         return false;
       }
       shouldCheckModelProvider = currentUser.dynamic === true;
       setRequiresModelProviderConfig(shouldCheckModelProvider);
-    } catch {
+    } catch (error) {
+      if ((error as Error)?.name === "AbortError" || isStale()) {
+        return false;
+      }
       if (!isStale()) {
-        setStatus("error");
+        setStatus(desktopRuntime ? "loading" : "error");
       }
       return false;
     }
@@ -142,14 +236,25 @@ export function useChatModelProviderGuard() {
     }
 
     try {
-      const features = await fetchModelFeatures(true);
+      const features = await requestWithStartupRetry(
+        () => fetchModelFeatures(true),
+        desktopRuntime,
+        controller.signal,
+        isStale,
+      );
       const imageEmbedRequired = isImageEmbedRequired(features);
       const silentRequestOptions = { silentError: true } as never;
 
       const [chatReadyResp, embeddingResp, multimodalEmbeddingResp, rerankResp, vlmResp] = await Promise.all([
-        axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
-          `${BASE_URL}/api/core/model_providers/models/ready?model_type=llm`,
-          silentRequestOptions,
+        requestWithStartupRetry(
+          () =>
+            axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
+              `${BASE_URL}/api/core/model_providers/models/ready?model_type=llm`,
+              silentRequestOptions,
+            ),
+          desktopRuntime,
+          controller.signal,
+          isStale,
         ).catch(() => null),
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
           `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`,
@@ -176,7 +281,7 @@ export function useChatModelProviderGuard() {
       }
 
       if (!chatReadyResp) {
-        setStatus("error");
+        setStatus(desktopRuntime ? "loading" : "error");
         setEmbeddingReady(null);
         setMultimodalEmbeddingReady(null);
         setRerankReady(null);
@@ -189,10 +294,12 @@ export function useChatModelProviderGuard() {
           rerankReady: null,
           vlmReady: null,
         });
-        message.error({
-          key: "api-request-error",
-          content: localizeErrorCode("2000509"),
-        });
+        if (!desktopRuntime) {
+          message.error({
+            key: "api-request-error",
+            content: localizeErrorCode("2000509"),
+          });
+        }
         return false;
       }
 
@@ -226,13 +333,16 @@ export function useChatModelProviderGuard() {
       });
 
       return ready;
-    } catch {
+    } catch (error) {
+      if ((error as Error)?.name === "AbortError" || isStale()) {
+        return false;
+      }
       if (!isStale()) {
-        setStatus("error");
+        setStatus(desktopRuntime ? "loading" : "error");
       }
       return false;
     }
-  }, []);
+  }, [desktopRuntime]);
 
   const refresh = useCallback(() => {
     void runCheck();
@@ -257,6 +367,29 @@ export function useChatModelProviderGuard() {
   }, []);
 
   useEffect(() => {
+    if (!desktopRuntime) {
+      setChatRuntimeReady(true);
+      return;
+    }
+
+    const controller = new AbortController();
+    setChatRuntimeReady(false);
+    void waitForRuntimeCapability("chat", { signal: controller.signal })
+      .then(() => {
+        setChatRuntimeReady(true);
+      })
+      .catch((error) => {
+        if ((error as Error)?.name !== "AbortError") {
+          setChatRuntimeReady(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [desktopRuntime]);
+
+  useEffect(() => {
     void runCheck();
 
     const onFeaturesChanged = () => {
@@ -271,16 +404,21 @@ export function useChatModelProviderGuard() {
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
+      runtimeWaitAbortRef.current?.abort();
       window.removeEventListener(MODEL_FEATURES_CHANGED_EVENT, onFeaturesChanged);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       // Invalidate in-flight work from a previous mount (e.g. React Strict Mode).
       requestIdRef.current += 1;
     };
-  }, [runCheck]);
+  }, [desktopRuntime, runCheck]);
+
+  const isRuntimeInitializing = desktopRuntime && !chatRuntimeReady;
 
   return {
-    canChat: status === "ready",
-    isChecking: status === "loading",
+    canChat: status === "ready" && chatRuntimeReady,
+    isChecking: status === "loading" || status === "initializing",
+    isRuntimeInitializing,
+    isConfigurationReady: configurationRuntimeReady,
     needsModelProviderConfig: status === "missing",
     requiresModelProviderConfig: requiresModelProviderConfig === true,
     embeddingReady,

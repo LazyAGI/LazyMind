@@ -64,7 +64,7 @@
   "1000811": { "en-US": "reauthorized account does not match target connection", "zh-CN": "重新授权的账号与目标连接不匹配" },
   "1000812": { "en-US": "reauthorized tenant does not match target connection", "zh-CN": "重新授权的租户与目标连接不匹配" },
   "1000813": { "en-US": "reauthorize target account changed", "zh-CN": "重新授权目标账号已发生变化" },
-  "1000814": { "en-US": "a connection with this client_id already exists", "zh-CN": "使用该 client_id 的连接已存在" },
+  "1000814": { "en-US": "This account has already been added", "zh-CN": "该账号已添加，请勿重复添加" },
   "1000815": { "en-US": "oauth_user connections must use oauth/authorize-url", "zh-CN": "oauth_user 连接必须使用 oauth/authorize-url" },
   "1000816": { "en-US": "authorize-url only supports oauth_user", "zh-CN": "authorize-url 仅支持 oauth_user" },
   "1000817": { "en-US": "callback only supports oauth_user", "zh-CN": "回调接口仅支持 oauth_user" },

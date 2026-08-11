@@ -22,9 +22,9 @@ export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGr
   const [plannedSteps, setPlannedSteps] = useState<PlannedStep[] | null>(null);
   useEffect(() => {
     setPlannedSteps(null);
-    if (!task?.plugin_session_id) return;
+    if (!task?.workflow_session_id) return;
     let active = true;
-    axiosInstance.get(`${BASE_URL}/api/core/plugin-sessions/${encodeURIComponent(task.plugin_session_id)}/projection`, { silentError: true } as never)
+    axiosInstance.get(`${BASE_URL}/api/core/workflow-sessions/${encodeURIComponent(task.workflow_session_id)}/projection`, { silentError: true } as never)
       .then((response) => {
         if (!active) return;
         const payload = response.data?.data ?? response.data;
@@ -69,7 +69,7 @@ export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGr
               <h2>{task.conversation_title || task.title || t('taskCenter.noTitle')}</h2>
               <span>{formatDate(task.created_at)}</span>
             </div>
-            <StatusTag status={task.status} onClick={task.plugin_session_id && onOpenGraph ? () => onOpenGraph(task.plugin_session_id!) : undefined} />
+            <StatusTag status={task.status} onClick={task.workflow_session_id && onOpenGraph ? () => onOpenGraph(task.workflow_session_id!) : undefined} />
           </div>
 
           <section className='task-detail-section task-detail-description'>

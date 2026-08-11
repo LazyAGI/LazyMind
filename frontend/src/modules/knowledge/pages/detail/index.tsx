@@ -7,7 +7,6 @@ import {
   Dropdown,
   Tooltip,
   Input,
-  Tag,
   Space,
 } from "antd";
 import { axiosInstance, BASE_URL } from "@/components/request";
@@ -434,7 +433,13 @@ const Detail = () => {
       }}
     >
       <DetailPageHeader
-        title={detail?.display_name}
+        className="knowledge-detail-header"
+        title={
+          <span className="knowledge-detail-title-copy">
+            <strong>{detail?.display_name}</strong>
+            {detail?.desc ? <small>{detail.desc}</small> : null}
+          </span>
+        }
         titleExtra={
           developerActive ? (
             <>
@@ -463,81 +468,51 @@ const Detail = () => {
         settingsMenu={
           detail?.acl?.includes(DatasetAclEnum.DatasetWrite) && (
             <div>
-              <Tooltip title={t("common.edit")}>
-                <Button
-                  icon={<EditOutlined />}
-                  style={{ marginLeft: "12px", width: "24px", height: "24px" }}
-                  onClick={() => {
-                    createUpdateRef.current?.onOpen(detail);
-                  }}
-                />
-              </Tooltip>
+              <Button
+                icon={<EditOutlined />}
+                onClick={() => {
+                  createUpdateRef.current?.onOpen(detail);
+                }}
+              >
+                {t("common.edit")}
+              </Button>
               {!runtimeFeatures.hideUserGroupSurfaces && (
-                <Tooltip title={t("knowledge.authorize")}>
-                  <Button
-                    icon={<SettingOutlined />}
-                    style={{
-                      marginLeft: "12px",
-                      width: "24px",
-                      height: "24px",
-                    }}
-                    onClick={() =>
-                      navigate({
-                        pathname: `/lib/knowledge/auth/${id}`,
-                      })
-                    }
-                  />
-                </Tooltip>
-              )}
-              <Tooltip title={t("common.delete")}>
                 <Button
-                  icon={<DeleteOutlined />}
-                  style={{ marginLeft: "12px", width: "24px", height: "24px" }}
-                  onClick={() => {
-                    const knowledgeName = detail?.display_name || id;
-                    confirmRef.current?.onOpen({
-                      id,
-                      title: t("knowledge.deleteTitle", {
-                        name: knowledgeName,
-                      }),
-                      content: t("knowledge.deleteContent"),
-                      confirmText: t("knowledge.deleteConfirmText", {
-                        name: knowledgeName,
-                      }),
-                    });
-                  }}
-                />
-              </Tooltip>
+                  icon={<SettingOutlined />}
+                  onClick={() =>
+                    navigate({
+                      pathname: `/lib/knowledge/auth/${id}`,
+                    })
+                  }
+                >
+                  {t("knowledge.authorize")}
+                </Button>
+              )}
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => {
+                  const knowledgeName = detail?.display_name || id;
+                  confirmRef.current?.onOpen({
+                    id,
+                    title: t("knowledge.deleteTitle", {
+                      name: knowledgeName,
+                    }),
+                    content: t("knowledge.deleteContent"),
+                    confirmText: t("knowledge.deleteConfirmText", {
+                      name: knowledgeName,
+                    }),
+                  });
+                }}
+              >
+                {t("common.delete")}
+              </Button>
             </div>
           )
         }
         breadcrumbs={[
           { title: t("layout.knowledgeBase"), href: "/lib/knowledge/list" },
           { title: detail?.display_name },
-        ]}
-        description={detail?.desc}
-        extraContent={[
-          {
-            label: t("knowledge.tags"),
-            value:
-              detail?.tags && detail?.tags.length > 0
-                ? detail.tags.map((tag) => (
-                    <Tooltip key={tag} title={tag}>
-                      <Tag
-                        style={{
-                          marginLeft: "8px",
-                          maxWidth: "240px",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {tag}
-                      </Tag>
-                    </Tooltip>
-                  ))
-                : "-",
-          },
         ]}
         onBack={() => {
           const bool = ["aiwrite", "aireview", "chat"].includes(

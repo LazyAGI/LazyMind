@@ -3,9 +3,12 @@ import { AgentAppsAuth } from "@/components/auth";
 import { Method, SSE } from "@/modules/chat/utils/sse";
 import { TaskServiceApi, taskStreamUrl, convEventsUrl } from "@/modules/chat/utils/request";
 import UIUtils from "@/modules/chat/utils/ui";
-import { PLUGIN_GRAPH_REFRESH_EVENT } from "@/components/StateGraphModal";
+import { WORKFLOW_GRAPH_REFRESH_EVENT } from "@/components/StateGraphModal";
 import { localizeErrorCode } from "@/components/request";
 import { CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT } from "@/modules/chat/constants/chat";
+
+const taskReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const convReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export type TaskStatus =
   | "pending"
@@ -269,7 +272,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           break;
         case "error":
           task.status = (event.status as TaskStatus) ?? "failed";
-          task.summary = localizeErrorCode(
+          task.summary = event.message || localizeErrorCode(
             event.error_code ?? event.errorCode ?? event.code,
             localizeErrorCode("2000509"),
           );
@@ -382,7 +385,35 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           }
         },
         error: () => {
-          get().unsubscribeTask(taskId);
+          const stream = get()._streams[taskId];
+          try { stream?.close(); } catch { /* ignore */ }
+          set((state) => {
+            const next = { ...state._streams };
+            delete next[taskId];
+            const tasks = state.tasksByConversation[conversationId] ?? [];
+            return {
+              _streams: next,
+              // A reconnect starts with a complete DB snapshot. Clear replayed
+              // collections first so historic log/artifact events are replaced
+              // instead of appended a second time.
+              tasksByConversation: {
+                ...state.tasksByConversation,
+                [conversationId]: tasks.map((task) => task.task_id === taskId
+                  ? { ...task, execution_log: [], artifacts: [] }
+                  : task),
+              },
+            };
+          });
+          // Re-read the authoritative snapshot before reconnecting. StreamTask
+          // itself starts with a DB snapshot, so a transient disconnect cannot
+          // leave the card permanently running.
+          void get().loadConversationTasks(conversationId);
+          if (!taskReconnectTimers.has(taskId)) {
+            taskReconnectTimers.set(taskId, setTimeout(() => {
+              taskReconnectTimers.delete(taskId);
+              get().subscribeTask(conversationId, taskId);
+            }, 1000));
+          }
         },
       },
     });
@@ -390,6 +421,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   },
 
   unsubscribeTask: (taskId) => {
+    const retryTimer = taskReconnectTimers.get(taskId);
+    if (retryTimer) clearTimeout(retryTimer);
+    taskReconnectTimers.delete(taskId);
     const sse = get()._streams[taskId];
     if (sse) {
       try {
@@ -495,6 +529,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           const event = UIUtils.jsonParser(raw);
           if (!event || !event.type) return;
           const { type, payload } = event;
+          const replayed = event.replayed === true;
           if (type === 'task_created' && payload?.task_id) {
             // Check the existing task state BEFORE upsert — the replay payload carries
             // the creation-time status ('pending'/'running'), not the terminal status.
@@ -534,14 +569,19 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               // to appear duplicated.
               get().subscribeTask(conversationId, payload.task_id);
             }
-            if (payload.agent_type === 'plugin_step' && payload.plugin_session_id) {
-              import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
-                usePluginStore.getState().loadActiveSession(conversationId);
+            if (payload.agent_type === 'workflow_step' && payload.workflow_session_id) {
+              import('@/modules/chat/store/workflowPanel').then(({ useWorkflowStore }) => {
+                const workflowState = useWorkflowStore.getState();
+                // Discovery only: once a session exists its dedicated Workflow Stream is authoritative.
+                if (!workflowState.sessionByConversation[conversationId]) {
+                  workflowState.loadActiveSession(conversationId);
+                }
               });
             }
           } else if (type === 'artifact_created' && payload?.artifact_id) {
             get().upsertConversationArtifact(conversationId, payload as ConversationArtifact);
           } else if (type === 'driver_input') {
+            if (replayed) return;
             const driverMessage = payload.message || '';
             import('@/modules/chat/constants/chat').then(({ CHAT_AUTO_ADVANCE_EVENT }) => {
               window.dispatchEvent(new CustomEvent(CHAT_AUTO_ADVANCE_EVENT, {
@@ -552,39 +592,59 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
                 },
               }));
             });
-            import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
-              usePluginStore.getState().setAutoRunning(conversationId, true);
-              usePluginStore.getState().loadActiveSession(conversationId);
+            import('@/modules/chat/store/workflowPanel').then(({ useWorkflowStore }) => {
+              useWorkflowStore.getState().setAutoRunning(conversationId, true);
             });
           } else if (
+			type === 'workflow_runtime_updated' ||
             type === 'step_waiting' ||
-            type === 'plugin_completed' ||
-            type === 'plugin_error'
+            type === 'workflow_completed' ||
+            type === 'workflow_error'
           ) {
             get().loadConversationTasks(conversationId);
             window.dispatchEvent(
-              new CustomEvent(PLUGIN_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
+              new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
             );
-            import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
-              usePluginStore.getState().loadActiveSession(conversationId);
-              usePluginStore.getState().setAutoRunning(conversationId, false);
+            import('@/modules/chat/store/workflowPanel').then(({ useWorkflowStore }) => {
+              const workflowState = useWorkflowStore.getState();
+              workflowState.setAutoRunning(conversationId, false);
+              // Conversation events are the prompt terminal signal. Reload the
+              // authoritative session immediately so failed/waiting/completed is
+              // visible without requiring a page refresh.
+              void workflowState.loadActiveSession(conversationId);
             });
           } else if (type === 'step_partial_done') {
             window.dispatchEvent(
-              new CustomEvent(PLUGIN_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
+              new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
             );
-            import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
-              usePluginStore.getState().loadActiveSession(conversationId);
-            });
           } else if (type === 'intent_updated') {
-            // An update_intent call completed — refresh the session so the
-            // intent badge in the plugin panel updates without a page reload.
-            import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
-              usePluginStore.getState().loadActiveSession(conversationId);
+            // Workflow state changes arrive through the dedicated Workflow Stream.
+          } else if (type === 'workflow_artifact_updated') {
+            window.dispatchEvent(
+              new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
+            );
+            import('@/modules/chat/store/workflowPanel').then(({ useWorkflowStore }) => {
+              void useWorkflowStore.getState().loadActiveSession(conversationId);
+            });
+          } else if (type === 'ask_pending') {
+            if (replayed) return;
+            // ask_pending is persisted in chat history. Resuming the chat turn
+            // reuses the normal message reducer and renders the AskCard.
+            import('@/modules/chat/constants/chat').then(({ CHAT_AUTO_ADVANCE_EVENT }) => {
+              window.dispatchEvent(new CustomEvent(CHAT_AUTO_ADVANCE_EVENT, {
+                detail: { conversationId, driverMessage: '', phase: 'resume' },
+              }));
+            });
+          } else if (type === 'max_retries_exceeded' || type === 'driver_fallback') {
+            import('@/modules/chat/store/workflowPanel').then(({ useWorkflowStore }) => {
+              const workflowState = useWorkflowStore.getState();
+              workflowState.setAutoRunning(conversationId, false);
+              void workflowState.loadActiveSession(conversationId);
             });
           } else if (type === 'auto_chat_started') {
-            import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
-              usePluginStore.getState().setAutoRunning(conversationId, true);
+            if (replayed) return;
+            import('@/modules/chat/store/workflowPanel').then(({ useWorkflowStore }) => {
+              useWorkflowStore.getState().setAutoRunning(conversationId, true);
             });
             import('@/modules/chat/constants/chat').then(({ CHAT_AUTO_ADVANCE_EVENT }) => {
               window.dispatchEvent(new CustomEvent(CHAT_AUTO_ADVANCE_EVENT, {
@@ -598,7 +658,23 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           }
         },
         error: () => {
-          get().unsubscribeConvEvents(conversationId);
+          const stream = get()._convStreams[conversationId];
+          try { stream?.close(); } catch { /* ignore */ }
+          set((state) => {
+            const next = { ...state._convStreams };
+            delete next[conversationId];
+            return { _convStreams: next };
+          });
+          void get().loadConversationTasks(conversationId);
+          import('@/modules/chat/store/workflowPanel').then(({ useWorkflowStore }) => {
+            void useWorkflowStore.getState().loadActiveSession(conversationId);
+          });
+          if (!convReconnectTimers.has(conversationId)) {
+            convReconnectTimers.set(conversationId, setTimeout(() => {
+              convReconnectTimers.delete(conversationId);
+              get().subscribeConvEvents(conversationId);
+            }, 1000));
+          }
         },
       },
     });
@@ -606,6 +682,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   },
 
   unsubscribeConvEvents: (conversationId) => {
+    const retryTimer = convReconnectTimers.get(conversationId);
+    if (retryTimer) clearTimeout(retryTimer);
+    convReconnectTimers.delete(conversationId);
     const sse = get()._convStreams[conversationId];
     if (sse) {
       try { sse.close(); } catch { /* ignore */ }

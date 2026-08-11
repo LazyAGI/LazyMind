@@ -42,22 +42,13 @@ def compare_abtest(
         failures.append('candidate service is not ready')
     if not origin['cases']:
         failures.append('abtest has no cases')
-    if origin['scored_case_num'] < 0:
-        failures.append('baseline summary lacks scored case count')
-    elif origin['scored_case_num'] != len(origin['cases']):
-        failures.append('baseline evaluation has unscored cases')
-    if after['scored_case_num'] < 0:
-        failures.append('candidate summary lacks scored case count')
-    elif after['scored_case_num'] != len(after['cases']):
-        failures.append('candidate evaluation has unscored cases')
     if {row['case_id'] for row in origin['cases']} != {row['case_id'] for row in after['cases']}:
         failures.append('baseline and candidate case sets differ')
     reasons = list(failures)
-    if delta['overall'] < 0:
-        reasons.append('candidate overall regressed')
-    if delta['correct_rate'] < 0:
-        reasons.append('candidate correct_rate regressed')
-    verdict = 'reject' if reasons else 'accept'
+    improved = delta['overall'] > 0
+    if not improved:
+        reasons.append('candidate overall did not improve')
+    verdict = 'accept' if not failures and improved else 'reject'
     return dump_contract(AbtestComparison, {
         'run_id': str(run_id),
         'algo_id': str(baseline_summary.get('algo_id') or ''),

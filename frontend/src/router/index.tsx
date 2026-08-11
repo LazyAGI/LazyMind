@@ -9,6 +9,8 @@ import SigninDashboard from "@/modules/signin/pages/dashboard";
 import LoginTransition from "@/modules/signin/pages/loginTransition";
 import ChatApp from "@/modules/chat/ChatApp";
 import Home from "@/modules/chat/pages/home";
+import ShowcaseGalleryPage from "@/modules/showcase/GalleryPage";
+import ShowcaseDetailPage from "@/modules/showcase/DetailPage";
 import KnowledgeApp from "@/modules/knowledge/KnowledgeApp";
 import KnowledgeList from "@/modules/knowledge/pages/list";
 import KnowledgeAuth from "@/modules/knowledge/pages/auth";
@@ -30,13 +32,14 @@ import FeishuSetupGuide from "@/modules/modelProvider/pages/FeishuSetupGuide";
 import NotionSetupGuide from "@/modules/modelProvider/pages/NotionSetupGuide";
 import DatasetListPage from "@/modules/datasetManagement/pages/list";
 import DatasetDetailPage from "@/modules/datasetManagement/pages/detail";
-import { WechatConnectionPage } from "@/modules/channelGateway";
+import {
+  TerminalConnectionPage,
+} from "@/modules/channelGateway";
 import MemoryManagement from "@/modules/memory";
 import MemoryManagementListPage from "@/modules/memory/pages/list";
 import MemoryReviewPage from "@/modules/memory/pages/review";
 import MemoryGlossaryDetailPage from "@/modules/memory/pages/glossaryDetail";
 import MemorySkillDetailPage from "@/modules/memory/pages/skillDetail";
-import MemoryExperienceDetailPage from "@/modules/memory/pages/experienceDetail";
 import ModelProviderPage from "@/modules/modelProvider";
 import CloudDocumentsLayout from "@/modules/modelProvider/CloudDocumentsLayout";
 import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
@@ -45,6 +48,7 @@ import DefaultServicesPage from "@/modules/modelProvider/pages/DefaultServicesPa
 import {
   SelfEvolutionAlgorithmManagementPage,
   SelfEvolutionRoutingStrategyPage,
+  SelfEvolutionTrafficStatsPage,
   SelfEvolutionHomePage,
   SelfEvolutionDetailPage,
   SelfEvolutionObservationPage,
@@ -54,8 +58,8 @@ import { runtimeFeatures } from "@/runtime/features";
 import { isLocalSessionEnabled } from "@/runtime/localSession";
 import UserAgreementPage from "@/pages/UserAgreementPage";
 
-const PluginDetailPage = lazy(() => import("@/modules/plugin/pages/detail"));
-const BuiltinPluginDetailPage = lazy(() => import("@/modules/plugin/pages/builtin-detail"));
+const WorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/detail"));
+const BuiltinWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/builtin-detail"));
 
 export default function AppRouter() {
   const { i18n } = useTranslation();
@@ -127,6 +131,8 @@ export default function AppRouter() {
           <Route path="agent/chat" element={<ChatApp />}>
             <Route index element={<Navigate to="home" replace />} />
             <Route path="home" element={<Home />} />
+            <Route path="cases" element={<ShowcaseGalleryPage />} />
+            <Route path="cases/:caseId" element={<ShowcaseDetailPage />} />
           </Route>
           <Route path="lib/knowledge" element={<KnowledgeApp />}>
             <Route index element={<Navigate to="list" replace />} />
@@ -151,7 +157,15 @@ export default function AppRouter() {
             element={<DatasetDetailPage />}
           />
           <Route path="databases" element={<DatabaseConnectionsPage />} />
-          <Route path="channels/wechat" element={<WechatConnectionPage />} />
+          <Route path="channels" element={<TerminalConnectionPage />} />
+          <Route
+            path="channels/wechat"
+            element={<Navigate to="/channels?provider=wechat" replace />}
+          />
+          <Route
+            path="channels/feishu"
+            element={<Navigate to="/channels?provider=feishu" replace />}
+          />
           <Route path="cloud-documents" element={<CloudDocumentsLayout />}>
             <Route index element={<CloudDocumentsPage />} />
             <Route path="local" element={<LocalDataSourcePage />} />
@@ -214,18 +228,26 @@ export default function AppRouter() {
             <Route path="experience" element={<MemoryManagementListPage />} />
             <Route
               path="experience/:itemId"
-              element={<MemoryExperienceDetailPage />}
+              element={
+                <Navigate to="/memory-management/experience" replace />
+              }
             />
             <Route path="glossary" element={<MemoryManagementListPage />} />
             <Route
               path="glossary/:itemId"
               element={<MemoryGlossaryDetailPage />}
             />
+            <Route
+              path="review/experience/:itemId"
+              element={
+                <Navigate to="/memory-management/experience" replace />
+              }
+            />
             <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>
-          <Route path="memory-management/plugins" element={<Navigate to="/memory-management/skills?skillView=plugins" replace />} />
-          <Route path="memory-management/plugins/builtin/:pluginId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><BuiltinPluginDetailPage /></Suspense>} />
-          <Route path="memory-management/plugins/:pluginId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><PluginDetailPage /></Suspense>} />
+          <Route path="memory-management/workflows" element={<Navigate to="/memory-management/skills?skillView=workflows" replace />} />
+          <Route path="memory-management/workflows/builtin/:workflowId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><BuiltinWorkflowDetailPage /></Suspense>} />
+          <Route path="memory-management/workflows/:workflowId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><WorkflowDetailPage /></Suspense>} />
           {runtimeFeatures.hideEvo ? (
             <Route
               path="self-evolution/*"
@@ -244,6 +266,10 @@ export default function AppRouter() {
               <Route
                 path="self-evolution/algorithms/routing-strategy"
                 element={<SelfEvolutionRoutingStrategyPage />}
+              />
+              <Route
+                path="self-evolution/algorithms/traffic-stats"
+                element={<SelfEvolutionTrafficStatsPage />}
               />
               <Route
                 path="self-evolution/detail/:threadId/observation/:kind"

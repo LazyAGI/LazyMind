@@ -14,7 +14,7 @@ type Dataset struct {
 	KbID string `gorm:"column:kb_id;type:varchar(255);not null;index:idx_datasets_kb_id"`
 
 	DisplayName string `gorm:"column:display_name;type:varchar(255);not null"`
-	Desc        string `gorm:"column:desc;type:longtext;not null"`
+	Desc        string `gorm:"column:desc;type:text;not null"`
 	CoverImage  string `gorm:"column:cover_image;type:varchar(255);not null"`
 
 	ResourceUID string `gorm:"column:resource_uid;type:varchar(36);not null;index:idx_resource_uid"`
