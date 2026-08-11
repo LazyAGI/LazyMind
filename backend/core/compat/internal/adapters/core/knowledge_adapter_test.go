@@ -95,7 +95,7 @@ func TestKnowledgeAdapterListPassesUserFiltersAndPaging(t *testing.T) {
 		},
 	}
 	adapter := mustKnowledgeAdapter(t, service)
-	result, err := adapter.List(context.Background(), contract.CallContext{UserID: " user-1 "}, compatknowledge.ListInput{
+	result, err := adapter.List(context.Background(), contract.CallContext{UserID: " user-1 ", TenantID: " tenant-a "}, compatknowledge.ListInput{
 		Keyword: " docs ",
 		Tags:    []string{"api"},
 		Page:    contract.PageRequest{PageSize: 20, PageToken: contract.EncodeOffsetPageToken(22)},
@@ -103,8 +103,8 @@ func TestKnowledgeAdapterListPassesUserFiltersAndPaging(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List returned error: %v", err)
 	}
-	if service.listReq.UserID != "user-1" || service.listReq.Caller.UserID != "user-1" {
-		t.Fatalf("List user = %q caller=%q, want user-1", service.listReq.UserID, service.listReq.Caller.UserID)
+	if service.listReq.UserID != "user-1" || service.listReq.Caller.UserID != "user-1" || service.listReq.Caller.TenantID != "tenant-a" {
+		t.Fatalf("List user = %q caller=%q tenant=%q, want user-1/tenant-a", service.listReq.UserID, service.listReq.Caller.UserID, service.listReq.Caller.TenantID)
 	}
 	if service.listReq.Keyword != "docs" || service.listReq.Offset != 22 || service.listReq.Limit != 20 {
 		t.Fatalf("List req = %#v, want compat filters and offset", service.listReq)
@@ -170,11 +170,11 @@ func TestKnowledgeAdapterGetPassesDatasetIDAndMapsFields(t *testing.T) {
 		},
 	}
 	adapter := mustKnowledgeAdapter(t, service)
-	result, err := adapter.Get(context.Background(), contract.CallContext{UserID: " user-1 "}, compatknowledge.GetInput{KnowledgeID: " ds-owned "})
+	result, err := adapter.Get(context.Background(), contract.CallContext{UserID: " user-1 ", TenantID: " tenant-a "}, compatknowledge.GetInput{KnowledgeID: " ds-owned "})
 	if err != nil {
 		t.Fatalf("Get returned error: %v", err)
 	}
-	if service.getReq.UserID != "user-1" || service.getReq.DatasetID != "ds-owned" {
+	if service.getReq.UserID != "user-1" || service.getReq.DatasetID != "ds-owned" || service.getReq.Caller.TenantID != "tenant-a" {
 		t.Fatalf("Get req = %#v, want user/dataset", service.getReq)
 	}
 	got := result.Knowledge
@@ -183,6 +183,26 @@ func TestKnowledgeAdapterGetPassesDatasetIDAndMapsFields(t *testing.T) {
 	}
 	if got.DocumentCount != 1 || got.DocumentSizeBytes != 12 || !got.UpdatedAt.Equal(now) {
 		t.Fatalf("stats/time = %#v, want mapped values", got)
+	}
+}
+
+func TestKnowledgeAdapterForwardsTenantIDToScan(t *testing.T) {
+	db := newKnowledgeAdapterTestDB(t)
+	var gotTenantID string
+	installKnowledgeAdapterScanTransportWithAssertion(t, func(r *http.Request) {
+		gotTenantID = r.Header.Get("X-Tenant-ID")
+	})
+	seedKnowledgeAdapterDataset(t, db, "ds-tenant", "user-1", "Tenant Dataset", time.Now().UTC())
+	service, err := doc.NewDatasetCatalogService(doc.DatasetCatalogServiceDeps{DB: db.DB})
+	if err != nil {
+		t.Fatalf("NewDatasetCatalogService: %v", err)
+	}
+	adapter := mustKnowledgeAdapter(t, service)
+	if _, err := adapter.Get(context.Background(), contract.CallContext{UserID: "user-1", TenantID: "tenant-a"}, compatknowledge.GetInput{KnowledgeID: "ds-tenant"}); err != nil {
+		t.Fatalf("Get returned error: %v", err)
+	}
+	if gotTenantID != "tenant-a" {
+		t.Fatalf("scan X-Tenant-ID = %q, want tenant-a", gotTenantID)
 	}
 }
 
@@ -289,13 +309,23 @@ func newKnowledgeAdapterTestDB(t *testing.T) *orm.DB {
 }
 
 func installKnowledgeAdapterScanTransport(t *testing.T) {
+	installKnowledgeAdapterScanTransportWithAssertion(t, nil)
+}
+
+func installKnowledgeAdapterScanTransportWithAssertion(t *testing.T, assertRequest func(*http.Request)) {
 	t.Helper()
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = knowledgeAdapterRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {
 		case "/api/scan/internal/source-access/by-dataset:batch":
+			if assertRequest != nil {
+				assertRequest(r)
+			}
 			return knowledgeAdapterJSONResponse(http.StatusOK, `{"items":[]}`), nil
 		case "/api/scan/internal/sources/by-datasets":
+			if assertRequest != nil {
+				assertRequest(r)
+			}
 			return knowledgeAdapterJSONResponse(http.StatusOK, `{"source_map":{}}`), nil
 		default:
 			return knowledgeAdapterJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil

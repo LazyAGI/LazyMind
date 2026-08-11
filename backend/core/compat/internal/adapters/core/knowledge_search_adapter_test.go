@@ -21,16 +21,18 @@ import (
 )
 
 type fakeDatasetSearchResolver struct {
-	userID string
-	ids    []string
-	scope  DatasetSearchScope
-	err    error
-	calls  int
+	userID   string
+	tenantID string
+	ids      []string
+	scope    DatasetSearchScope
+	err      error
+	calls    int
 }
 
-func (r *fakeDatasetSearchResolver) ResolveSearchDatasets(ctx context.Context, userID string, datasetIDs []string) (DatasetSearchScope, error) {
+func (r *fakeDatasetSearchResolver) ResolveSearchDatasets(ctx context.Context, userID, tenantID string, datasetIDs []string) (DatasetSearchScope, error) {
 	r.calls++
 	r.userID = userID
+	r.tenantID = tenantID
 	r.ids = append([]string(nil), datasetIDs...)
 	if r.err != nil {
 		return DatasetSearchScope{}, r.err
@@ -100,7 +102,7 @@ func TestKnowledgeSearchAdapterUsesKBIDsAndMapsHits(t *testing.T) {
 	}}
 	adapter := mustPureSearchAdapter(t, resolver, client, mapper)
 
-	got, err := adapter.Search(context.Background(), contract.CallContext{UserID: " user-1 "}, compatknowledge.SearchInput{
+	got, err := adapter.Search(context.Background(), contract.CallContext{UserID: " user-1 ", TenantID: " tenant-a "}, compatknowledge.SearchInput{
 		Query:        " q ",
 		KnowledgeIDs: []string{"ds_core_001", "ds_core_002"},
 		TopK:         7,
@@ -108,7 +110,7 @@ func TestKnowledgeSearchAdapterUsesKBIDsAndMapsHits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
 	}
-	if resolver.userID != "user-1" || len(resolver.ids) != 2 || resolver.ids[0] != "ds_core_001" {
+	if resolver.userID != "user-1" || resolver.tenantID != "tenant-a" || len(resolver.ids) != 2 || resolver.ids[0] != "ds_core_001" {
 		t.Fatalf("unexpected resolver call: user=%q ids=%#v", resolver.userID, resolver.ids)
 	}
 	if client.req.UserID != "user-1" || client.req.Query != "q" || client.req.TopK != 7 || strings.Join(client.req.KBIDs, ",") != "kb_backend_901,kb_backend_902" {
@@ -232,7 +234,7 @@ func TestDBBackedDatasetSearchResolverUsesDatasetIDAndKBID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDBBackedDatasetSearchResolver: %v", err)
 	}
-	scope, err := resolver.ResolveSearchDatasets(context.Background(), "user-1", []string{"ds_core_001"})
+	scope, err := resolver.ResolveSearchDatasets(context.Background(), "user-1", "tenant-a", []string{"ds_core_001"})
 	if err != nil {
 		t.Fatalf("ResolveSearchDatasets: %v", err)
 	}
@@ -269,7 +271,7 @@ func TestDBBackedDatasetSearchResolverErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := resolver.ResolveSearchDatasets(context.Background(), "user-1", tt.ids)
+			_, err := resolver.ResolveSearchDatasets(context.Background(), "user-1", "tenant-a", tt.ids)
 			if code, ok := contract.CodeOf(err); !ok || code != tt.want {
 				t.Fatalf("code = %v ok=%v want %s err=%v", code, ok, tt.want, err)
 			}
@@ -325,7 +327,7 @@ func TestDBBackedDatasetSearchResolverDBErrorAfterACL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDBBackedDatasetSearchResolver: %v", err)
 	}
-	_, err = resolver.ResolveSearchDatasets(context.Background(), "user-1", []string{"ds_core_001"})
+	_, err = resolver.ResolveSearchDatasets(context.Background(), "user-1", "tenant-a", []string{"ds_core_001"})
 	if code, ok := contract.CodeOf(err); !ok || code != contract.BackendUnavailable {
 		t.Fatalf("code = %v ok=%v want BACKEND_UNAVAILABLE err=%v", code, ok, err)
 	}

@@ -40,7 +40,7 @@ func (a *KnowledgeDocumentAdapter) GetDocument(ctx context.Context, callCtx cont
 		IncludeChunks:  input.IncludeChunks,
 		PageToken:      page.PageToken,
 		PageSize:       page.PageSize,
-		Caller:         doc.DatasetCatalogCaller{UserID: userID},
+		Caller:         doc.DatasetCatalogCaller{UserID: userID, TenantID: strings.TrimSpace(callCtx.TenantID)},
 	})
 	if err != nil {
 		return compatknowledge.GetDocumentResult{}, mapDocumentServiceError("knowledge.document.get", err)
@@ -95,7 +95,7 @@ func (a *KnowledgeDocumentAdapter) GetDocumentMetadata(ctx context.Context, call
 		UserID:     userID,
 		DatasetID:  datasetID,
 		DocumentID: documentID,
-		Caller:     doc.DatasetCatalogCaller{UserID: userID},
+		Caller:     doc.DatasetCatalogCaller{UserID: userID, TenantID: strings.TrimSpace(callCtx.TenantID)},
 	})
 	if err != nil {
 		return compatknowledge.DocumentDetail{}, mapDocumentServiceError("knowledge.document.get", err)
@@ -112,7 +112,7 @@ func (a *KnowledgeDocumentAdapter) ReadDocumentContent(ctx context.Context, call
 		UserID:     userID,
 		DatasetID:  datasetID,
 		DocumentID: documentID,
-		Caller:     doc.DatasetCatalogCaller{UserID: userID},
+		Caller:     doc.DatasetCatalogCaller{UserID: userID, TenantID: strings.TrimSpace(callCtx.TenantID)},
 	})
 	if err != nil {
 		return compatknowledge.DocumentContent{}, mapDocumentServiceError("knowledge.document.get", err)
@@ -132,7 +132,7 @@ func (a *KnowledgeDocumentAdapter) ListDocumentChunks(ctx context.Context, callC
 		DocumentID: documentID,
 		PageToken:  page.PageToken,
 		PageSize:   page.PageSize,
-		Caller:     doc.DatasetCatalogCaller{UserID: userID},
+		Caller:     doc.DatasetCatalogCaller{UserID: userID, TenantID: strings.TrimSpace(callCtx.TenantID)},
 	})
 	if err != nil {
 		return compatknowledge.ListDocumentChunksResult{}, mapDocumentServiceError("knowledge.document.get", err)

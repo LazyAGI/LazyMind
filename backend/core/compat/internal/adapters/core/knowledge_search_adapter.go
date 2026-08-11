@@ -34,7 +34,7 @@ type DatasetGetter interface {
 }
 
 type DatasetSearchResolver interface {
-	ResolveSearchDatasets(ctx context.Context, userID string, datasetIDs []string) (DatasetSearchScope, error)
+	ResolveSearchDatasets(ctx context.Context, userID, tenantID string, datasetIDs []string) (DatasetSearchScope, error)
 }
 
 type DatasetSearchScope struct {
@@ -57,8 +57,9 @@ func NewDBBackedDatasetSearchResolver(db *gorm.DB, datasets DatasetGetter) (*DBB
 	return &DBBackedDatasetSearchResolver{db: db, datasets: datasets}, nil
 }
 
-func (r *DBBackedDatasetSearchResolver) ResolveSearchDatasets(ctx context.Context, userID string, datasetIDs []string) (DatasetSearchScope, error) {
+func (r *DBBackedDatasetSearchResolver) ResolveSearchDatasets(ctx context.Context, userID, tenantID string, datasetIDs []string) (DatasetSearchScope, error) {
 	userID = strings.TrimSpace(userID)
+	tenantID = strings.TrimSpace(tenantID)
 	if userID == "" || len(datasetIDs) == 0 {
 		return DatasetSearchScope{}, contract.InvalidArgumentError("knowledge.search.resolve", "user_id and knowledge_ids are required")
 	}
@@ -67,7 +68,7 @@ func (r *DBBackedDatasetSearchResolver) ResolveSearchDatasets(ctx context.Contex
 		if _, err := r.datasets.GetDataset(ctx, doc.DatasetGetRequest{
 			UserID:    userID,
 			DatasetID: datasetID,
-			Caller:    doc.DatasetCatalogCaller{UserID: userID},
+			Caller:    doc.DatasetCatalogCaller{UserID: userID, TenantID: tenantID},
 		}); err != nil {
 			return DatasetSearchScope{}, mapDatasetSearchError("knowledge.search.resolve", err)
 		}
@@ -305,7 +306,7 @@ func (a *KnowledgeSearchAdapter) Search(ctx context.Context, callCtx contract.Ca
 	if userID == "" {
 		return compatknowledge.SearchResult{}, contract.InvalidArgumentError("knowledge.search", "user_id is required")
 	}
-	scope, err := a.datasets.ResolveSearchDatasets(ctx, userID, input.KnowledgeIDs)
+	scope, err := a.datasets.ResolveSearchDatasets(ctx, userID, strings.TrimSpace(callCtx.TenantID), input.KnowledgeIDs)
 	if err != nil {
 		return compatknowledge.SearchResult{}, err
 	}

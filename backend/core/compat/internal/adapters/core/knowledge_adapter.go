@@ -55,7 +55,7 @@ func (a *KnowledgeCatalogAdapter) List(ctx context.Context, callCtx contract.Cal
 		Tags:    append([]string(nil), input.Tags...),
 		Offset:  offset,
 		Limit:   page.PageSize,
-		Caller:  doc.DatasetCatalogCaller{UserID: userID},
+		Caller:  doc.DatasetCatalogCaller{UserID: userID, TenantID: strings.TrimSpace(callCtx.TenantID)},
 	})
 	if err != nil {
 		return compatknowledge.ListResult{}, mapDatasetServiceError("knowledge.list", err)
@@ -83,7 +83,7 @@ func (a *KnowledgeCatalogAdapter) Get(ctx context.Context, callCtx contract.Call
 	resp, err := a.service.GetDataset(ctx, doc.DatasetGetRequest{
 		UserID:    userID,
 		DatasetID: datasetID,
-		Caller:    doc.DatasetCatalogCaller{UserID: userID},
+		Caller:    doc.DatasetCatalogCaller{UserID: userID, TenantID: strings.TrimSpace(callCtx.TenantID)},
 	})
 	if err != nil {
 		return compatknowledge.GetResult{}, mapDatasetServiceError("knowledge.get", err)

@@ -84,14 +84,14 @@ func TestKnowledgeDocumentAdapterMapsMetadata(t *testing.T) {
 		},
 	}}
 	adapter := mustKnowledgeDocumentAdapter(t, service)
-	got, err := adapter.GetDocumentMetadata(context.Background(), contract.CallContext{UserID: " user-1 "}, compatknowledge.GetDocumentMetadataInput{
+	got, err := adapter.GetDocumentMetadata(context.Background(), contract.CallContext{UserID: " user-1 ", TenantID: " tenant-a "}, compatknowledge.GetDocumentMetadataInput{
 		KnowledgeID: " ds-1 ",
 		DocumentID:  " doc-1 ",
 	})
 	if err != nil {
 		t.Fatalf("GetDocumentMetadata returned error: %v", err)
 	}
-	if service.metadataReq.UserID != "user-1" || service.metadataReq.DatasetID != "ds-1" || service.metadataReq.DocumentID != "doc-1" || service.metadataReq.Caller.UserID != "user-1" {
+	if service.metadataReq.UserID != "user-1" || service.metadataReq.DatasetID != "ds-1" || service.metadataReq.DocumentID != "doc-1" || service.metadataReq.Caller.UserID != "user-1" || service.metadataReq.Caller.TenantID != "tenant-a" {
 		t.Fatalf("unexpected service req: %#v", service.metadataReq)
 	}
 	if got.ID != "doc-1" || got.KnowledgeID != "ds-1" || got.Name != "Spec" || got.Source != "LOCAL_FILE" {
@@ -119,7 +119,7 @@ func TestKnowledgeDocumentAdapterAggregatesDocumentRead(t *testing.T) {
 		Chunks:   &doc.DocumentChunksResult{Chunks: []doc.DocumentChunk{{ID: "chunk-1", Text: "part", Number: 1}}, TotalSize: total, NextPageToken: "next"},
 	}}
 	adapter := mustKnowledgeDocumentAdapter(t, service)
-	got, err := adapter.GetDocument(context.Background(), contract.CallContext{UserID: " user-1 "}, compatknowledge.GetDocumentInput{
+	got, err := adapter.GetDocument(context.Background(), contract.CallContext{UserID: " user-1 ", TenantID: " tenant-a "}, compatknowledge.GetDocumentInput{
 		KnowledgeID:    " ds-1 ",
 		DocumentID:     " doc-1 ",
 		IncludeContent: true,
@@ -129,7 +129,7 @@ func TestKnowledgeDocumentAdapterAggregatesDocumentRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDocument returned error: %v", err)
 	}
-	if service.documentReq.UserID != "user-1" || service.documentReq.DatasetID != "ds-1" || service.documentReq.DocumentID != "doc-1" || !service.documentReq.IncludeContent || !service.documentReq.IncludeChunks {
+	if service.documentReq.UserID != "user-1" || service.documentReq.DatasetID != "ds-1" || service.documentReq.DocumentID != "doc-1" || service.documentReq.Caller.TenantID != "tenant-a" || !service.documentReq.IncludeContent || !service.documentReq.IncludeChunks {
 		t.Fatalf("unexpected aggregate request: %#v", service.documentReq)
 	}
 	if service.documentReq.PageSize != contract.MaxPageSize || service.documentReq.PageToken != "tok" {
