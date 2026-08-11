@@ -161,6 +161,17 @@ type taskDTO struct {
 	Steps            []stepDTO       `json:"steps,omitempty"`
 }
 
+type taskProgressDTO struct {
+	TaskID       string    `json:"task_id"`
+	Seq          int       `json:"seq_in_conversation"`
+	AgentType    string    `json:"agent_type"`
+	Title        string    `json:"title"`
+	Status       string    `json:"status"`
+	Progress     int       `json:"progress_pct"`
+	CurrentPhase string    `json:"current_phase"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
 type stepDTO struct {
 	Seq     int             `json:"seq"`
 	Role    string          `json:"role"`
@@ -234,6 +245,24 @@ func ListConversationTasks(w http.ResponseWriter, r *http.Request) {
 	tasks, err := ListTasksByConversationForUser(ctx, db, convID, userID)
 	if err != nil {
 		common.ReplyErr(w, "query tasks failed", http.StatusInternalServerError)
+		return
+	}
+	summaryOnly := r.URL.Query().Get("summary_only") == "true"
+	if summaryOnly {
+		out := make([]taskProgressDTO, 0, len(tasks))
+		for i := range tasks {
+			out = append(out, taskProgressDTO{
+				TaskID:       tasks[i].ID,
+				Seq:          tasks[i].SeqInConversation,
+				AgentType:    tasks[i].AgentType,
+				Title:        tasks[i].Title,
+				Status:       tasks[i].Status,
+				Progress:     tasks[i].ProgressPct,
+				CurrentPhase: tasks[i].CurrentPhase,
+				UpdatedAt:    tasks[i].UpdatedAt,
+			})
+		}
+		common.ReplyOK(w, map[string]any{"tasks": out})
 		return
 	}
 	out := make([]taskDTO, 0, len(tasks))

@@ -1,5 +1,8 @@
 -- +migrate Dialect postgres
 ALTER TABLE plugin_transition_commands DROP COLUMN IF EXISTS retry_origin;
+DROP TABLE IF EXISTS external_agent_operations;
+DROP TABLE IF EXISTS external_agent_runs;
+DROP TABLE IF EXISTS external_agent_bindings;
 DROP TABLE IF EXISTS public.episode_memories;
 DROP TABLE IF EXISTS public.memory_current_entries;
 DROP INDEX IF EXISTS public.idx_chat_histories_algorithm_create_time;
@@ -61,6 +64,9 @@ END $$;
 
 -- +migrate Dialect sqlite
 ALTER TABLE plugin_transition_commands DROP COLUMN retry_origin;
+DROP TABLE IF EXISTS external_agent_operations;
+DROP TABLE IF EXISTS external_agent_runs;
+DROP TABLE IF EXISTS external_agent_bindings;
 DROP TABLE IF EXISTS episode_memories;
 DROP TABLE IF EXISTS memory_current_entries;
 DROP INDEX IF EXISTS idx_chat_histories_algorithm_create_time;

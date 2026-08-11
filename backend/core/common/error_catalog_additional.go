@@ -311,6 +311,36 @@ func init() {
 	registerAdditionalError("ffmpeg download checksum mismatch", http.StatusBadGateway, 2001594)
 	registerAdditionalError("workflow session has no pinned public revision", http.StatusUnprocessableEntity, 2001595)
 
+	// Workflow and external-agent errors.
+	registerAdditionalError("at most one workflow mention is allowed per turn", http.StatusBadRequest, 2002022)
+	registerAdditionalError("resolve conversation workflow binding failed", http.StatusInternalServerError, 2002023)
+	registerAdditionalError("another workflow session is active; finish or close it before mentioning a different workflow", http.StatusConflict, 2002024)
+	registerAdditionalError("invalid operation receipt", http.StatusInternalServerError, 2002025)
+	registerAdditionalErrorPattern("invalid lazymind_codex_app_server_url %q", "Invalid Codex app-server URL", http.StatusServiceUnavailable, 2002026)
+	registerAdditionalError("external agent operation outcome is pending", http.StatusConflict, 2002027)
+	registerAdditionalError("external agent operation request mismatch", http.StatusConflict, 2002028)
+	registerAdditionalError("invalid external agent operation identity", http.StatusBadRequest, 2002029)
+	registerAdditionalError("external agent operation request is too large", http.StatusRequestEntityTooLarge, 2002030)
+	registerAdditionalError("external agent operation result is too large", http.StatusInternalServerError, 2002031)
+	registerAdditionalError("codex thread/list returned a repeated cursor", http.StatusBadGateway, 2002032)
+	registerAdditionalError("codex thread projection exceeded 100 provider pages", http.StatusBadGateway, 2002033)
+	registerAdditionalError("thread/read with turns failed", http.StatusBadGateway, 2002034)
+	registerAdditionalError("codex thread/start returned invalid thread", http.StatusBadGateway, 2002035)
+	registerAdditionalError("thread id and name are required", http.StatusBadGateway, 2002036)
+	registerAdditionalError("recover external agent ownership", http.StatusInternalServerError, 2002037)
+	registerAdditionalError("codex turn/start returned no turn id", http.StatusBadGateway, 2002038)
+	registerAdditionalError("external agent run changed before turn/start commit", http.StatusConflict, 2002039)
+	registerAdditionalErrorPattern("unexpected thread/unsubscribe status %q", "Unexpected external-agent release status", http.StatusBadGateway, 2002040)
+	registerAdditionalError("unknown command decision", http.StatusBadRequest, 2002041)
+	registerAdditionalError("invalid command amendment", http.StatusBadRequest, 2002042)
+	registerAdditionalError("invalid execpolicy amendment", http.StatusBadRequest, 2002043)
+	registerAdditionalError("invalid network policy amendment", http.StatusBadRequest, 2002044)
+	registerAdditionalError("unknown command amendment", http.StatusBadRequest, 2002045)
+	registerAdditionalError("invalid external agent thread cursor", http.StatusBadRequest, 2002046)
+	registerAdditionalError("external agent thread not found", http.StatusNotFound, 2002047)
+	registerAdditionalError("external agent control release is already pending", http.StatusConflict, 2002048)
+	registerAdditionalError("task is terminal", http.StatusConflict, 2002049)
+
 }
 
 func registerAdditionalError(message string, status, code int) {

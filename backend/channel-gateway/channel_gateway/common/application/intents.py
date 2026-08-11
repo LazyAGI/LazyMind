@@ -9,6 +9,8 @@ from pydantic import ValidationError
 from channel_gateway.common.domain.commands import (
     COMMAND_ADAPTER,
     RESOURCE_CHANGE_ADAPTER,
+    RESOLVED_CONVERSATION_TARGET_KEY,
+    RESOLVED_RESOURCE_SELECTIONS_KEY,
     SCHEMA_VERSION,
     ActionKind,
     CapabilityConfigureCommand,
@@ -118,15 +120,7 @@ class ExactShortcutParser:
         if resumed is not None:
             return resumed
         raw_change: dict[str, Any]
-        if (
-            isinstance(continuation, dict)
-            and continuation.get('command') == 'capability.configure'
-            and isinstance(continuation.get('resource_change'), dict)
-        ):
-            raw_change = dict(continuation['resource_change'])
-            raw_change['selector'] = {'kind': 'index', 'value': index}
-            raw_change['evidence'] = evidence
-        elif kind == 'personalization':
+        if kind == 'personalization':
             raw_change = {
                 'resource_type': 'personalization',
                 'operation': 'use',
@@ -178,8 +172,10 @@ def _resume_continuation(
     index: str,
     evidence: str,
 ) -> ShortcutMatch | None:
-    if not isinstance(raw, dict) or 'selection_field' not in raw:
+    if raw is None:
         return None
+    if not isinstance(raw, dict):
+        raise LazyMindError('Saved channel selection is invalid')
     try:
         continuation = SelectionContinuation.model_validate(raw)
         command = COMMAND_ADAPTER.validate_python(continuation.command)
@@ -218,10 +214,23 @@ def _resume_continuation(
     )
     if len(grounding_messages) > 10:
         grounding_messages = [grounding_messages[0], *grounding_messages[-9:]]
+    prepared_catalog: dict[str, Any] = {}
+    if continuation.prepared_resources:
+        prepared_catalog[RESOLVED_RESOURCE_SELECTIONS_KEY] = {
+            position: {
+                'resource_type': selection.resource_type,
+                'items': [selection.item.model_dump(mode='json')],
+            }
+            for position, selection in continuation.prepared_resources.items()
+        }
+    if continuation.prepared_conversation_target is not None:
+        prepared_catalog[RESOLVED_CONVERSATION_TARGET_KEY] = (
+            continuation.prepared_conversation_target.model_dump(mode='json')
+        )
     return ShortcutMatch(
         command=resumed,
         grounding_messages=tuple(grounding_messages),
-        prepared_catalog=dict(continuation.prepared_catalog),
+        prepared_catalog=prepared_catalog,
     )
 
 
