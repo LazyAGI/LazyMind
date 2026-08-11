@@ -91,7 +91,9 @@ func TestKnowledgeRuntimeWithRealPostgreSQLDocumentGet(t *testing.T) {
 	userID := seed + "_user"
 	otherUserID := seed + "_other_user"
 	datasetID := seed + "_ds"
+	kbID := seed + "_kb"
 	otherDatasetID := seed + "_other_ds"
+	otherKBID := seed + "_other_kb"
 	documentID := seed + "_doc"
 	otherDocumentID := seed + "_other_doc"
 	largeDocumentID := seed + "_large_doc"
@@ -117,8 +119,8 @@ func TestKnowledgeRuntimeWithRealPostgreSQLDocumentGet(t *testing.T) {
 		t.Fatalf("write binary file: %v", err)
 	}
 
-	insertDataset(t, coreTx, datasetID, userID, now)
-	insertDataset(t, coreTx, otherDatasetID, userID, now)
+	insertDataset(t, coreTx, datasetID, kbID, userID, now)
+	insertDataset(t, coreTx, otherDatasetID, otherKBID, userID, now)
 	insertDocument(t, coreTx, datasetID, documentID, lazyDocID, userID, "core display should lose to lazy", textPath, "text/plain; charset=utf-8", now)
 	insertDocument(t, coreTx, otherDatasetID, otherDocumentID, seed+"_other_lazy", userID, "other doc", textPath, "text/plain; charset=utf-8", now)
 	insertDocument(t, coreTx, datasetID, largeDocumentID, lazyLargeDocID, userID, "large doc", largePath, "text/plain; charset=utf-8", now)
@@ -255,8 +257,8 @@ func TestKnowledgeRuntimeWithRealPostgreSQLDocumentGet(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetDocument chunks: %v", err)
 		}
-		if gotKBID != datasetID || gotDocID != lazyDocID {
-			t.Fatalf("chunk backend got kb_id=%q doc_id=%q, want dataset/lazy doc", gotKBID, gotDocID)
+		if gotKBID != kbID || gotDocID != lazyDocID {
+			t.Fatalf("chunk backend got kb_id=%q doc_id=%q, want %q/lazy doc", gotKBID, gotDocID, kbID)
 		}
 		if len(got.Document.Chunks) != 1 || got.Document.Chunks[0].ID != "chunk-1" || got.Document.Chunks[0].Text != "chunk text" ||
 			got.Document.ChunksPage == nil || got.Document.ChunksPage.NextPageToken == "" || got.Document.ChunksPage.Total == nil || *got.Document.ChunksPage.Total != 2 {
@@ -304,11 +306,11 @@ func readonlyDBConfigFromCoreEnv(t *testing.T) (string, string) {
 	return driver, dsn
 }
 
-func insertDataset(t *testing.T, db *gorm.DB, datasetID, userID string, now time.Time) {
+func insertDataset(t *testing.T, db *gorm.DB, datasetID, kbID, userID string, now time.Time) {
 	t.Helper()
 	if err := db.Create(&orm.Dataset{
 		ID:           datasetID,
-		KbID:         "kb-" + datasetID,
+		KbID:         kbID,
 		DisplayName:  "Dataset " + datasetID,
 		Desc:         "compat document integration",
 		DatasetState: 0,
