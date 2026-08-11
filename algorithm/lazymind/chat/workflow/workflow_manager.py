@@ -734,28 +734,43 @@ def resolve_workflow_injection(
     elif not session_id:
         trigger_entry_tools = [tool for tool in tools if _is_bound_workflow_trigger(tool.__name__)]
         authoring_tools = _safe_authoring_tools(toolkit)
+        authoring_desc = (
+            'Create, edit, validate, diagnose, or publish Workflow drafts. '
+            'Use only when the user explicitly asks to author or modify a Workflow.'
+        )
         authoring_group = _workflow_tool_group(
             'workflow_authoring',
-            (
-                'Create, edit, validate, diagnose, or publish Workflow drafts. '
-                'Use only when the user explicitly asks to author or modify a Workflow.'
-            ),
+            authoring_desc,
             authoring_tools,
         )
         if trigger_entry_tools:
             # Discovery mode: expose triggers directly so the model can route
-            # from the injected catalog without a gateway hop. A ChatAgent tool
-            # set is fixed for one model turn, so Session tools must already be
-            # present when a trigger creates the Session. They resolve the id
-            # lazily and therefore remain unusable before the trigger runs.
+            # from the injected catalog without a gateway hop. Session tools stay
+            # hidden until a trigger creates the Session; ToolManager re-evaluates
+            # this phase projection before the next model round.
+            phase_group = {
+                **authoring_group,
+                'pick_first_valid': True,
+                'tools': [
+                    ({
+                        'name': 'workflow_session',
+                        'desc': 'Continue the Workflow Session initialized in this turn.',
+                        'lazy': False,
+                        'prefix': False,
+                        'tools': [
+                            *_safe_session_tools(
+                                toolkit,
+                                lambda: session_holder.get('session_id', ''),
+                            ),
+                            _handoff_tool(lambda: session_holder.get('session_id', '')),
+                        ],
+                    }, lambda: session_holder.get('session_id', '')),
+                    authoring_group,
+                ],
+            }
             tools = [
                 *trigger_entry_tools,
-                *_safe_session_tools(
-                    toolkit,
-                    lambda: session_holder.get('session_id', ''),
-                ),
-                _handoff_tool(lambda: session_holder.get('session_id', '')),
-                authoring_group,
+                phase_group,
             ]
         else:
             tools = [authoring_group]
