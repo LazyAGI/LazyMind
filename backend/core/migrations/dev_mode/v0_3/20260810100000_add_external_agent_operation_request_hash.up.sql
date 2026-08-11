@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS external_agent_operations (
 ALTER TABLE external_agent_operations
     ADD COLUMN IF NOT EXISTS request_hash VARCHAR(64) NOT NULL DEFAULT '';
 
+ALTER TABLE external_agent_operations
+    ALTER COLUMN request_hash DROP DEFAULT;
+
 -- +migrate Dialect sqlite
 CREATE TABLE external_agent_operations_next (
     id VARCHAR(36) PRIMARY KEY,
