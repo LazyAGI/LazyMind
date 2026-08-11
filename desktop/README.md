@@ -35,25 +35,24 @@ desktop/dist/LazyMind-windows-x64-installer-<version>-yyyyMMdd-HHmmss-<commit>.e
 
 ## macOS signed DMG
 
-The distribution build requires a `Developer ID Application` identity in the
-login keychain and Apple notarization credentials:
+The local distribution build requires a `Developer ID Application` identity in
+the login keychain:
 
 ```bash
-export APPLE_ID="developer@example.com"
-export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
-export APPLE_TEAM_ID="ABCDE12345"
 make desktop-darwin-arm64-dmg
 ```
 
 `electron-builder` discovers the local Developer ID identity automatically.
-The build signs the app with Hardened Runtime, submits the app and final DMG to
-Apple's `notarytool` service, staples the tickets to both, and verifies both
-Gatekeeper assessments before returning.
+The local target signs the app and DMG but does not submit them to Apple.
 
-For CI, provide the same notarization variables plus `CSC_LINK` and
-`CSC_KEY_PASSWORD`. `.github/workflows/macos-installer.yml` maps those values
-from `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`,
+For CI, provide `CSC_LINK`, `CSC_KEY_PASSWORD`, and the Apple notarization
+credentials. `.github/workflows/macos-installer.yml` maps those values from
+`MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`,
 `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` repository secrets.
+Release builds submit a ZIP first, staple the accepted app ticket when
+available, then package and submit the DMG. A ZIP timeout falls through to DMG
+packaging; a DMG timeout uploads the pending DMG and submission record for the
+manual finalizer.
 
 A DMG drag-install cannot run a post-install script. To provide the same cache
 and runtime preparation as the Windows NSIS installer, the packaged macOS app
@@ -64,6 +63,19 @@ launch.
 Windows Desktop supports Windows 10/11 x64, runs as the current user, and does not require MinGW, administrator rights, or Developer Mode. Installer builds are unsigned unless standard electron-builder signing variables such as `CSC_LINK` are supplied.
 
 The assisted installer supports in-place upgrades, blocks downgrades, and warms the bundled Python, Node, and local services before completing. On a fresh or repair install, existing `%LOCALAPPDATA%\LazyMind` data can be retained (the default) or cleared. Upgrades always retain it. The uninstaller similarly defaults to removing the program only and can optionally clear Local AppData. Neither workflow reads, deletes, or moves `%USERPROFILE%\Documents\LazyMind`.
+
+## Trusted local mode
+
+Desktop packages restrict agent file writes to the per-conversation workspace and disable local command tools by default. For a trusted, single-user package, set `LAZYMIND_TRUSTED_LOCAL_MODE=true` when building:
+
+```powershell
+$env:LAZYMIND_TRUSTED_LOCAL_MODE = 'true'
+make desktop-windows-x64-installer
+```
+
+The build records the feature in the packaged runtime manifest, so the installed app keeps the setting without requiring the user to configure an environment variable. In this mode, agents may read and write user-requested absolute host paths and can use LazyLLM's local command tool. Existing overwrite, delete, move, and dangerous-command approval checks still apply. Do not enable this mode in packages distributed to untrusted or multi-user environments.
+
+For source-based Local runs, setting the same environment variable before `make local-win-up` or `make local-up` enables the mode for that process without changing a desktop package.
 
 ## Runtime behavior
 

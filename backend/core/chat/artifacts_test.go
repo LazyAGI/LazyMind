@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -13,14 +14,24 @@ import (
 
 func newArtifactTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "artifacts.db"))
-	if err != nil {
-		t.Fatalf("connect artifact test db: %v", err)
+	return orm.MigrateTestDB(t, &orm.ConversationArtifact{})
+}
+
+// assertStoredArtifactValue compares the value read back from the database
+// semantically. PostgreSQL normalizes jsonb formatting, so byte-level
+// comparison against a compact literal is driver-dependent.
+func assertStoredArtifactValue(t *testing.T, got json.RawMessage, want string) {
+	t.Helper()
+	var gotV, wantV map[string]any
+	if err := json.Unmarshal(got, &gotV); err != nil {
+		t.Fatalf("decode stored value: %v", err)
 	}
-	if err := db.AutoMigrate(&orm.ConversationArtifact{}); err != nil {
-		t.Fatalf("migrate artifact test db: %v", err)
+	if err := json.Unmarshal([]byte(want), &wantV); err != nil {
+		t.Fatalf("decode want value: %v", err)
 	}
-	return db
+	if !reflect.DeepEqual(gotV, wantV) {
+		t.Fatalf("stored value = %s, want %s", got, want)
+	}
 }
 
 func TestPersistConversationArtifactBindsAuthoritativeTurn(t *testing.T) {
@@ -117,9 +128,7 @@ func TestPersistConversationArtifactReplacesSameTurnArtifactWhenRequested(t *tes
 	if err := db.First(&stored, "id = ?", artifactID).Error; err != nil {
 		t.Fatalf("load replaced artifact: %v", err)
 	}
-	if string(stored.Value) != `{"text":"second"}` {
-		t.Fatalf("stored replacement value = %s", stored.Value)
-	}
+	assertStoredArtifactValue(t, stored.Value, `{"text":"second"}`)
 }
 
 func TestPersistConversationArtifactReplacesAcrossTurns(t *testing.T) {
@@ -149,9 +158,10 @@ func TestPersistConversationArtifactReplacesAcrossTurns(t *testing.T) {
 	if err := db.First(&stored, "id = ?", event.ArtifactID).Error; err != nil {
 		t.Fatalf("load replaced artifact: %v", err)
 	}
-	if stored.HistoryID != "history-1" || string(stored.Value) != `{"text":"other turn"}` {
+	if stored.HistoryID != "history-1" {
 		t.Fatalf("stored replacement = history %q, value %s", stored.HistoryID, stored.Value)
 	}
+	assertStoredArtifactValue(t, stored.Value, `{"text":"other turn"}`)
 	if _, err := persistConversationArtifact(
 		context.Background(), db.DB, "conversation-2", "history-3", "user-1", event,
 	); err == nil || !strings.Contains(err.Error(), "scope mismatch") {
@@ -224,6 +234,90 @@ func TestPersistConversationFileArtifactValidatesSharedWorkspace(t *testing.T) {
 	}
 	if storedValue["size"] != float64(4) || storedValue["path"] != expectedStoredPath {
 		t.Fatalf("file metadata was not canonicalized: %#v", storedValue)
+	}
+}
+
+func TestArtifactScopeHashMatchesAlgorithmContract(t *testing.T) {
+	got := artifactScopeHash("user-1")
+	const want = "c6c289e49e9c05b2145860387b73bcb1"
+	if got != want {
+		t.Fatalf("artifact scope hash mismatch: got %q, want %q", got, want)
+	}
+	const legacyWant = "c6c289e49e9c05b2145860387b73bcb18df43fb09a1e4a4a9713c76c88bb541b"
+	if legacy := legacyArtifactScopeHash("user-1"); legacy != legacyWant {
+		t.Fatalf("legacy artifact scope hash mismatch: got %q, want %q", legacy, legacyWant)
+	}
+}
+
+func TestCanonicalConversationFileValueAcceptsLegacyScopeHash(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", workspace)
+	artifactID := "da41e7e1-c085-447b-af51-6f89490c393a"
+	root := legacyConversationArtifactFileRoot("user-1", "conversation-1", artifactID)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("create legacy artifact directory: %v", err)
+	}
+	path := filepath.Join(root, "legacy.docx")
+	if err := os.WriteFile(path, []byte("legacy"), 0o644); err != nil {
+		t.Fatalf("write legacy artifact: %v", err)
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"filename": "legacy.docx", "path": path, "size": 999,
+	})
+
+	canonical, err := canonicalConversationFileValue(
+		"user-1", "conversation-1", artifactID, "legacy.docx", raw,
+	)
+	if err != nil {
+		t.Fatalf("canonicalize legacy artifact: %v", err)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(canonical, &value); err != nil {
+		t.Fatalf("decode canonical legacy artifact: %v", err)
+	}
+	expectedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("resolve expected legacy artifact path: %v", err)
+	}
+	if value["size"] != float64(len("legacy")) || value["path"] != expectedPath {
+		t.Fatalf("unexpected canonical legacy artifact: %#v", value)
+	}
+}
+
+func TestConversationArtifactResponseValueSignsLegacyScopeHash(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", workspace)
+	t.Setenv("LAZYMIND_FILE_URL_SIGN_SECRET", "artifact-test-secret")
+	artifactID := "da41e7e1-c085-447b-af51-6f89490c393a"
+	root := legacyConversationArtifactFileRoot("user-1", "conversation-1", artifactID)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("create legacy artifact directory: %v", err)
+	}
+	path := filepath.Join(root, "legacy.docx")
+	if err := os.WriteFile(path, []byte("legacy"), 0o644); err != nil {
+		t.Fatalf("write legacy artifact: %v", err)
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"filename": "legacy.docx", "path": path, "size": len("legacy"),
+	})
+	artifact := orm.ConversationArtifact{
+		ID: artifactID, Filename: "legacy.docx", ContentType: "file", Value: raw,
+	}
+
+	signed := conversationArtifactResponseValue("user-1", "conversation-1", artifact)
+	var value map[string]any
+	if err := json.Unmarshal(signed, &value); err != nil {
+		t.Fatalf("decode signed legacy artifact: %v", err)
+	}
+	if _, exposed := value["path"]; exposed {
+		t.Fatalf("legacy server path must not be exposed: %#v", value)
+	}
+	url, _ := value["url"].(string)
+	wantPrefix := "/static-files/subagent/chat-artifacts/" +
+		legacyArtifactScopeHash("user-1") + "/" +
+		legacyArtifactScopeHash("conversation-1") + "/" + artifactID + "/legacy.docx?"
+	if !strings.HasPrefix(url, wantPrefix) {
+		t.Fatalf("legacy artifact URL = %q, want prefix %q", url, wantPrefix)
 	}
 }
 

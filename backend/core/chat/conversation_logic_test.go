@@ -18,7 +18,7 @@ import (
 )
 
 func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{}, nil, "", 1)
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{}, nil, "", 1)
 	sessionID, ok := body["session_id"].(string)
 	if !ok {
 		t.Fatalf("expected session_id string, got %T", body["session_id"])
@@ -35,8 +35,26 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 	}
 }
 
+func TestPromoteAgentRuntimeFlagsPrefersExplicitRequest(t *testing.T) {
+	body := map[string]any{
+		"agentic_config": map[string]any{
+			"enable_workflow": true,
+			"enable_subagent": false,
+		},
+	}
+	promoteAgentRuntimeFlags(map[string]any{
+		"enable_workflow": false,
+	}, body)
+	if enabled, _ := body["enable_workflow"].(bool); enabled {
+		t.Fatalf("explicit enable_workflow=false was overwritten: %#v", body)
+	}
+	if enabled, _ := body["enable_subagent"].(bool); enabled {
+		t.Fatalf("expected persisted enable_subagent=false: %#v", body)
+	}
+}
+
 func TestBuildChatRequestBodyPropagatesSensitiveFilterBypass(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{"skip_sensitive_filter": true}, nil, "", 1)
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{"skip_sensitive_filter": true}, nil, "", 1)
 	if skip, _ := body["skip_sensitive_filter"].(bool); !skip {
 		t.Fatalf("expected skip_sensitive_filter=true, got %#v", body["skip_sensitive_filter"])
 	}
@@ -123,9 +141,9 @@ func TestBuildLazyChatRequestIncludesConversationIntent(t *testing.T) {
 	}
 }
 
-func TestPluginStepParamsFromEventParamsPreservesChatSessionID(t *testing.T) {
-	params := pluginStepParamsFromEventParams(map[string]any{
-		"plugin_id":              "writer-plugin",
+func TestWorkflowStepParamsFromEventParamsPreservesChatSessionID(t *testing.T) {
+	params := workflowStepParamsFromEventParams(map[string]any{
+		"workflow_id":            "writer-workflow",
 		"step_id":                "generate_outline",
 		"session_id":             "ps-1",
 		"chat_session_id":        "conv-1_123",
@@ -138,7 +156,7 @@ func TestPluginStepParamsFromEventParamsPreservesChatSessionID(t *testing.T) {
 		"user_id":                "user-1",
 	})
 
-	if params.PluginID != "writer-plugin" || params.StepID != "generate_outline" || params.SessionID != "ps-1" {
+	if params.WorkflowID != "writer-workflow" || params.StepID != "generate_outline" || params.SessionID != "ps-1" {
 		t.Fatalf("unexpected basic params: %+v", params)
 	}
 	if params.ChatSessionID != "conv-1_123" {
@@ -156,7 +174,7 @@ func TestPluginStepParamsFromEventParamsPreservesChatSessionID(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyUsesDatasetListFilters(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"conversation": map[string]any{
 			"search_config": map[string]any{
 				"dataset_list": []any{
@@ -200,7 +218,7 @@ func TestBuildChatRequestBodyUsesDatasetListFilters(t *testing.T) {
 }
 
 func TestBuildLazyChatRequestPreservesDatasetListFilters(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"conversation": map[string]any{
 			"search_config": map[string]any{
 				"dataset_list": []any{
@@ -218,13 +236,7 @@ func TestBuildLazyChatRequestPreservesDatasetListFilters(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyLoadsFiltersFromConversationDB(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-filters.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.Conversation{})
 	now := time.Now()
 	searchConfig := json.RawMessage(`{"dataset_list":[{"id":"ds_db_1"},{"id":"ds_db_2"}],"creators":["u1"]}`)
 	if err := db.Create(&orm.Conversation{
@@ -254,7 +266,7 @@ func TestBuildChatRequestBodyLoadsFiltersFromConversationDB(t *testing.T) {
 
 func TestBuildChatRequestBodyKeepsExistingFilters(t *testing.T) {
 	existing := map[string]any{"kb_id": []string{"manual"}}
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"filters": existing,
 		"conversation": map[string]any{
 			"search_config": map[string]any{
@@ -277,16 +289,13 @@ func TestBuildChatRequestBodyKeepsExistingFilters(t *testing.T) {
 	}
 }
 
-func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
-	memoryContent := "---\nagent_persona: |-\n 严谨助手\npreferred_name: |-\n 老师\nresponse_style: |-\n 简洁\n---\n\nmemory-content"
+func TestBuildChatRequestBodyAddsResourceContextWithoutLegacyMemory(t *testing.T) {
 	ctx := &evolution.ChatResourceContext{
 		DisabledTools:      []string{"bing"},
 		AvailableSkills:    []string{"coding/git-workflow"},
-		Memory:             memoryContent,
-		UserPreference:     "preference-content",
 		UsePersonalization: true,
 	}
-	body := buildChatRequestBody(nil, nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "user-1", 1)
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "user-1", 1)
 
 	if got := body["session_id"]; got != "session-1" {
 		t.Fatalf("expected session_id to be preserved, got %#v", got)
@@ -303,11 +312,11 @@ func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 	if _, ok := body["skill_fs_url"]; ok {
 		t.Fatalf("expected skill_fs_url to be omitted")
 	}
-	if got := body["memory"]; got != memoryContent {
-		t.Fatalf("unexpected memory: %#v", got)
+	if _, ok := body["memory"]; ok {
+		t.Fatalf("legacy memory content must not be sent")
 	}
-	if got := body["user_preference"]; got != "preference-content" {
-		t.Fatalf("unexpected user_preference: %#v", got)
+	if _, ok := body["user_preference"]; ok {
+		t.Fatalf("legacy user_preference content must not be sent")
 	}
 	if got, ok := body["use_memory"].(bool); !ok || !got {
 		t.Fatalf("expected use_memory default true, got %#v", body["use_memory"])
@@ -320,7 +329,7 @@ func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 func TestBuildChatRequestBodyMergesRequestDisabledTools(t *testing.T) {
 	ctx := &evolution.ChatResourceContext{DisabledTools: []string{"bing"}}
 	body := buildChatRequestBody(
-		nil, nil, "conv-1", "session-1", "hello", nil,
+		context.TODO(), nil, "conv-1", "session-1", "hello", nil,
 		map[string]any{"disabled_tools": []any{"ask_user"}}, ctx, "user-1", 1,
 	)
 
@@ -346,11 +355,9 @@ func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled
 	ctx := &evolution.ChatResourceContext{
 		DisabledTools:      []string{},
 		AvailableSkills:    []string{"coding/git-workflow"},
-		Memory:             "memory-content",
-		UserPreference:     "preference-content",
 		UsePersonalization: false,
 	}
-	body := buildChatRequestBody(nil, nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "", 1)
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "", 1)
 
 	if got, ok := body["use_memory"].(bool); !ok || got {
 		t.Fatalf("expected use_memory false, got %#v", body["use_memory"])
@@ -364,7 +371,7 @@ func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled
 }
 
 func TestBuildChatRequestBodyPreservesExplicitReasoningFalse(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"reasoning": false,
 	}, nil, "", 1)
 
@@ -374,7 +381,7 @@ func TestBuildChatRequestBodyPreservesExplicitReasoningFalse(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyForwardsThinkingDepth(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"thinking_depth": "low",
 	}, nil, "", 1)
 
@@ -388,7 +395,7 @@ func TestBuildChatRequestBodyForwardsThinkingDepth(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyDefaultsInvalidThinkingDepth(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"thinking_depth": "turbo",
 	}, nil, "", 1)
 	if got := body["thinking_depth"]; got != "medium" {
@@ -397,7 +404,7 @@ func TestBuildChatRequestBodyDefaultsInvalidThinkingDepth(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyAcceptsMaxThinkingDepth(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{
 		"thinking_depth": "MAX",
 	}, nil, "", 1)
 	if got := body["thinking_depth"]; got != "max" {
@@ -463,13 +470,7 @@ func TestBuildChatHistoryExtUsesDisplayQueryForAutomatedContext(t *testing.T) {
 }
 
 func TestCollectedInputsForConversationReturnsSnapshotAndSummary(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/collected-inputs.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.AutoMigrate(&orm.TaskCenterTask{}, &orm.TaskRunInput{}, &orm.TaskRunOutput{}); err != nil {
-		t.Fatal(err)
-	}
+	db := orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.TaskRunInput{}, &orm.TaskRunOutput{})
 	now := time.Now().UTC()
 	if err := db.Create(&orm.TaskCenterTask{ID: "downstream", UserID: "u", ConversationID: "weekly-conv", TaskType: "scheduled", Status: "succeeded", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -488,13 +489,7 @@ func TestCollectedInputsForConversationReturnsSnapshotAndSummary(t *testing.T) {
 }
 
 func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-detail.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -622,13 +617,7 @@ func TestElapsedThinkingSecondsRoundsUp(t *testing.T) {
 }
 
 func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-detail-datasets.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -712,13 +701,7 @@ func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
 }
 
 func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-history.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -803,7 +786,7 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyMergesInputURIsIntoFiles(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "sid", "what animal", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "sid", "what animal", nil, map[string]any{
 		"input": []any{
 			map[string]any{"input_type": "text", "text": "hello"},
 			map[string]any{"input_type": "image", "uri": "/var/lib/lazymind/uploads/tmp/u1/a.png"},
@@ -825,7 +808,7 @@ func TestBuildChatRequestBodyMergesInputURIsIntoFiles(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyFilesMergeDedupesAndSkipsHTTP(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "sid", "q", nil, map[string]any{
+	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "sid", "q", nil, map[string]any{
 		"files": []any{"/data/x.jpg"},
 		"input": []any{
 			map[string]any{"input_type": "image", "uri": "https://cdn.example.com/p.png"},
@@ -873,9 +856,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 		"available_skills": []any{
 			"coding/git-workflow",
 		},
-		"memory":          "memory-content",
-		"user_preference": "preference-content",
-		"use_memory":      true,
+		"use_memory": true,
 		"environment_context": map[string]any{
 			"time": map[string]any{
 				"now":      "2026-05-11T11:48:00.000Z",
@@ -907,10 +888,10 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 			},
 		},
 		"has_subagents":   true,
-		"enable_plugin":   true,
+		"enable_workflow": true,
 		"enable_subagent": false,
-		"plugin_context": map[string]any{
-			"session_id": "plugin-session-1",
+		"workflow_context": map[string]any{
+			"session_id": "workflow-session-1",
 		},
 	})
 
@@ -953,9 +934,6 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	if !req.Agent.HasSubagents || req.Agent.EnableSubagent == nil || *req.Agent.EnableSubagent {
 		t.Fatalf("unexpected agent flags: %#v", req.Agent)
 	}
-	if req.Personalization.Memory != "memory-content" || req.Personalization.UserPreference != "preference-content" {
-		t.Fatalf("unexpected memory context: %+v", req)
-	}
 	if !req.Personalization.UseMemory {
 		t.Fatalf("expected use_memory to be true")
 	}
@@ -978,8 +956,8 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	if len(req.Runtime.MCPConfig) != 1 {
 		t.Fatalf("expected mcp_config to be forwarded, got %#v", req.Runtime.MCPConfig)
 	}
-	if req.Plugin.EnablePlugin == nil || !*req.Plugin.EnablePlugin || req.Plugin.PluginContext["session_id"] != "plugin-session-1" {
-		t.Fatalf("unexpected plugin options: %#v", req.Plugin)
+	if req.Workflow.EnableWorkflow == nil || !*req.Workflow.EnableWorkflow || req.Workflow.WorkflowContext["session_id"] != "workflow-session-1" {
+		t.Fatalf("unexpected workflow options: %#v", req.Workflow)
 	}
 
 	payload, err := json.Marshal(req)
@@ -990,12 +968,12 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		t.Fatalf("unmarshal request: %v", err)
 	}
-	for _, key := range []string{"message", "conversation", "retrieval", "runtime", "personalization", "agent", "plugin"} {
+	for _, key := range []string{"message", "conversation", "retrieval", "runtime", "personalization", "agent", "workflow"} {
 		if _, ok := raw[key]; !ok {
 			t.Fatalf("expected grouped key %q in payload: %s", key, payload)
 		}
 	}
-	for _, key := range []string{"query", "history", "session_id", "filters", "llm_config", "plugin_context", "enable_thinking"} {
+	for _, key := range []string{"query", "history", "session_id", "filters", "llm_config", "workflow_context", "enable_thinking"} {
 		if _, ok := raw[key]; ok {
 			t.Fatalf("unexpected top-level key %q in payload: %s", key, payload)
 		}
@@ -1060,13 +1038,7 @@ func TestShouldEmitStreamFrame(t *testing.T) {
 }
 
 func TestFeedBackChatHistoryCancelsFeedback(t *testing.T) {
-	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/feedback.db")
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.ChatHistory{}); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t, &orm.ChatHistory{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -1110,24 +1082,78 @@ func TestFeedBackChatHistoryCancelsFeedback(t *testing.T) {
 	}
 }
 
-func TestPluginModeFromReqBody(t *testing.T) {
+func TestFeedBackChatHistoryReplacesOnlyTargetFeedback(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/feedback-update.db")
+	if err != nil {
+		t.Fatalf("connect db: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.ChatHistory{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	for _, history := range []orm.ChatHistory{
+		{
+			ID: "h_1", Seq: 1, ConversationID: "conv-1", RawContent: "question", Content: "question", Result: "answer",
+			FeedBack: 2, Reason: "old reason", ExpectedAnswer: "old expected answer",
+			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+		},
+		{
+			ID: "h_2", Seq: 1, ConversationID: "conv-1", RawContent: "question", Content: "question", Result: "another answer",
+			FeedBack: 1, TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+		},
+	} {
+		if err := db.Create(&history).Error; err != nil {
+			t.Fatalf("create history: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/core/conversations:feedBackChatHistory",
+		strings.NewReader(`{"history_id":"h_1","type":"FEED_BACK_TYPE_UNLIKE","reason":"new reason","expected_answer":"new expected answer"}`),
+	)
+	rec := httptest.NewRecorder()
+	FeedBackChatHistory(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var target, sibling orm.ChatHistory
+	if err := db.Where("id = ?", "h_1").First(&target).Error; err != nil {
+		t.Fatalf("load target: %v", err)
+	}
+	if target.FeedBack != 2 || target.Reason != "new reason" || target.ExpectedAnswer != "new expected answer" {
+		t.Fatalf("target feedback was not replaced: %#v", target)
+	}
+	if err := db.Where("id = ?", "h_2").First(&sibling).Error; err != nil {
+		t.Fatalf("load sibling: %v", err)
+	}
+	if sibling.FeedBack != 1 {
+		t.Fatalf("sibling feedback was unexpectedly reset: %#v", sibling)
+	}
+}
+
+func TestWorkflowModeFromReqBody(t *testing.T) {
 	tests := []struct {
 		name string
 		body map[string]any
 		want string
 	}{
 		{
-			name: "plugin_context auto wins",
+			name: "workflow_context auto wins",
 			body: map[string]any{
-				"plugin_context": map[string]any{"plugin_mode": "auto"},
-				"agentic_config": map[string]any{"plugin_mode": "dynamic"},
+				"workflow_context": map[string]any{"workflow_mode": "auto"},
+				"agentic_config":   map[string]any{"workflow_mode": "dynamic"},
 			},
 			want: "auto",
 		},
 		{
 			name: "agentic_config fallback",
 			body: map[string]any{
-				"agentic_config": map[string]any{"plugin_mode": "auto"},
+				"agentic_config": map[string]any{"workflow_mode": "auto"},
 			},
 			want: "auto",
 		},
@@ -1139,29 +1165,42 @@ func TestPluginModeFromReqBody(t *testing.T) {
 		{
 			name: "invalid value defaults to dynamic",
 			body: map[string]any{
-				"plugin_context": map[string]any{"plugin_mode": "invalid"},
+				"workflow_context": map[string]any{"workflow_mode": "invalid"},
 			},
 			want: "dynamic",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := pluginModeFromReqBody(tc.body); got != tc.want {
-				t.Fatalf("pluginModeFromReqBody() = %q, want %q", got, tc.want)
+			if got := workflowModeFromReqBody(tc.body); got != tc.want {
+				t.Fatalf("workflowModeFromReqBody() = %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestResolvePluginModeWithFallback(t *testing.T) {
-	raw := map[string]any{"plugin_mode": "auto"}
+func TestResolveWorkflowModeWithFallback(t *testing.T) {
+	raw := map[string]any{"workflow_mode": "auto"}
 	reqBody := map[string]any{
-		"agentic_config": map[string]any{"plugin_mode": "dynamic"},
+		"agentic_config": map[string]any{"workflow_mode": "dynamic"},
 	}
-	if got := resolvePluginModeWithFallback(raw, reqBody); got != "auto" {
+	if got := resolveWorkflowModeWithFallback(raw, reqBody); got != "auto" {
 		t.Fatalf("expected raw body to win, got %q", got)
 	}
-	if got := resolvePluginModeWithFallback(map[string]any{}, reqBody); got != "dynamic" {
+	if got := resolveWorkflowModeWithFallback(map[string]any{}, reqBody); got != "dynamic" {
 		t.Fatalf("expected agentic_config fallback, got %q", got)
+	}
+}
+
+func TestUserExplicitlyRequestedWorkflowRetry(t *testing.T) {
+	for _, query := range []string{"重试", "帮我重试这个失败步骤", "retry the failed step", "try again"} {
+		if !userExplicitlyRequestedWorkflowRetry(query) {
+			t.Errorf("expected explicit retry for %q", query)
+		}
+	}
+	for _, query := range []string{"继续", "不要重试", "do not retry", "分析为什么重试失败"} {
+		if userExplicitlyRequestedWorkflowRetry(query) {
+			t.Errorf("unexpected retry authorization for %q", query)
+		}
 	}
 }

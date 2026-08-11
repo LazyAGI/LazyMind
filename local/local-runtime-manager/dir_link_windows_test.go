@@ -19,7 +19,7 @@ func TestCreateDirectoryLinkSupportsSpaces(t *testing.T) {
 		t.Fatalf("create junction with spaces: %v", err)
 	}
 	got, ok := directoryLinkTarget(link)
-	if !ok || got != target {
+	if !ok || !sameDirectory(t, got, target) {
 		t.Fatalf("junction target = %q ok=%v, want %q", got, ok, target)
 	}
 }

@@ -18,14 +18,6 @@ const macSigningMode = process.env.LAZYMIND_DESKTOP_SIGNING_MODE || "adhoc";
 if (!["adhoc", "developer-id", "none"].includes(macSigningMode)) {
   throw new Error(`Unsupported LAZYMIND_DESKTOP_SIGNING_MODE: ${macSigningMode}`);
 }
-const notarizeMac = process.env.LAZYMIND_DESKTOP_NOTARIZE === "true";
-if (notarizeMac && macSigningMode !== "developer-id") {
-  throw new Error("LAZYMIND_DESKTOP_NOTARIZE=true requires LAZYMIND_DESKTOP_SIGNING_MODE=developer-id");
-}
-if (notarizeMac && !process.env.APPLE_TEAM_ID) {
-  throw new Error("APPLE_TEAM_ID is required for notarytool notarization");
-}
-
 const extraResources = [
   {
     from: runtimeStage,
@@ -185,7 +177,7 @@ async function adhocSignAppBundle(appPath) {
 }
 
 async function signAndStageEmbeddedRuntime(context) {
-  if (macSigningMode === "none") {
+  if (context.electronPlatformName !== "darwin" || macSigningMode === "none") {
     return;
   }
 
@@ -237,7 +229,7 @@ async function signAndStageEmbeddedRuntime(context) {
 }
 
 async function restoreRuntimeAndFinalizeSignature(context) {
-  if (macSigningMode !== "developer-id") {
+  if (context.electronPlatformName !== "darwin" || macSigningMode !== "developer-id") {
     return;
   }
 
@@ -289,7 +281,8 @@ module.exports = {
     category: "public.app-category.productivity",
     icon: "assets/LazyMind.icns",
     target: ["dir"],
-    // electron-builder 24 does not treat "-" as ad-hoc; ad-hoc signing is done in afterPack.
+    // electron-builder 24 treats "-" as a keychain identity instead of ad-hoc.
+    // Ad-hoc local signing runs explicitly in afterPack.
     identity: macSigningMode === "developer-id" ? undefined : null,
     hardenedRuntime: macSigningMode === "developer-id",
     entitlements: "assets/entitlements.mac.plist",
@@ -305,19 +298,18 @@ module.exports = {
     icon: process.env.LAZYMIND_DESKTOP_WINDOWS_ICON || "assets/LazyMind.ico",
     target: ["zip"],
     requestedExecutionLevel: "asInvoker",
-    signAndEditExecutable: Boolean(process.env.CSC_LINK),
   },
   nsis: {
     oneClick: false,
     perMachine: false,
     allowElevation: false,
+    uninstallDisplayName: "LazyMind",
     allowToChangeInstallationDirectory: false,
     installerLanguages: ["en_US", "zh_CN"],
     displayLanguageSelector: false,
     include: path.join(__dirname, "..", "installer", "installer.nsh"),
     artifactName: "LazyMind-windows-x64-installer.${ext}",
     differentialPackage: false,
-    useZip: true,
     runAfterFinish: true,
   },
   afterPack: signAndStageEmbeddedRuntime,

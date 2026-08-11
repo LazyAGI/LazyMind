@@ -1,8 +1,8 @@
 /**
- * StateGraphModal — Modal container for the plugin workflow StateGraph.
+ * StateGraphModal — Modal container for the workflow workflow StateGraph.
  *
  * - Fetches Go's authoritative session projection on open.
- * - When liveRefresh=true, listens for plugin state-change events dispatched
+ * - When liveRefresh=true, listens for workflow state-change events dispatched
  *   by the task-center SSE handler and re-fetches on each relevant event.
  * - Dagre layout is cached; only node statuses are replaced on refresh.
  */
@@ -13,12 +13,12 @@ import { localizeErrorCode } from '@/components/request';
 import StateGraphView, { type StateGraphData } from './StateGraphView';
 import './index.scss';
 
-export const PLUGIN_GRAPH_REFRESH_EVENT = 'plugin:graph:refresh';
+export const WORKFLOW_GRAPH_REFRESH_EVENT = 'workflow:graph:refresh';
 
 /** Dispatch this event from the SSE handler to trigger a live graph refresh. */
 export function dispatchGraphRefresh(conversationId: string) {
   window.dispatchEvent(
-    new CustomEvent(PLUGIN_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
+    new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
   );
 }
 
@@ -26,7 +26,7 @@ export interface StateGraphModalProps {
   open: boolean;
   onClose: () => void;
   sessionId: string;
-  pluginId: string;
+  workflowId: string;
   liveRefresh?: boolean;
   conversationId?: string;
   fallbackSteps?: { step_id: string; status: string }[];
@@ -135,7 +135,7 @@ export default function StateGraphModal({
     setLoading((prev) => !prev ? true : prev);
     try {
       const resp = await axiosInstance.get(
-        `${coreApiBase}/plugin-sessions/${encodeURIComponent(sessionId)}/projection`,
+        `${coreApiBase}/workflow-sessions/${encodeURIComponent(sessionId)}/projection`,
         { silentError: true } as never,
       );
       // ReplyOK wraps the payload as { code, message, data: {...} }.
@@ -201,8 +201,8 @@ export default function StateGraphModal({
       if (!detail || detail.conversationId !== conversationId) return;
       void fetchGraph();
     }
-    window.addEventListener(PLUGIN_GRAPH_REFRESH_EVENT, handler);
-    return () => window.removeEventListener(PLUGIN_GRAPH_REFRESH_EVENT, handler);
+    window.addEventListener(WORKFLOW_GRAPH_REFRESH_EVENT, handler);
+    return () => window.removeEventListener(WORKFLOW_GRAPH_REFRESH_EVENT, handler);
   }, [open, liveRefresh, conversationId, fetchGraph]);
 
   // Compute Modal width based on node count: more nodes → wider modal.

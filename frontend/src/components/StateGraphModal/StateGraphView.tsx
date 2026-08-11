@@ -1,5 +1,5 @@
 /**
- * StateGraphView — Plugin workflow graph renderer.
+ * StateGraphView — Workflow workflow graph renderer.
  *
  * Layout: dagre LR. Nodes rendered via SVG foreignObject.
  * Edge types (server-computed):

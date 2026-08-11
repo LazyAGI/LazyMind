@@ -10,7 +10,7 @@ import (
 )
 
 func TestAuthServicePreparePythonEnvUsesUV(t *testing.T) {
-	t.Setenv("UV", "uv")
+	installFakeUVOnPath(t)
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	requirements := filepath.Join(repo, authServiceSourceDirName, "requirements.txt")
@@ -60,8 +60,28 @@ func TestAuthServicePreparePythonEnvUsesUV(t *testing.T) {
 	runner.assertCommandCount(4)
 }
 
-func TestAuthServiceInstallRequirementsUsesUVOnly(t *testing.T) {
+func TestUVCommandFallsBackToUserInstallForUnresolvedConfiguredName(t *testing.T) {
+	home := t.TempDir()
+	userUV := filepath.Join(home, ".local", "bin", "uv")
+	if err := os.MkdirAll(filepath.Dir(userUV), 0o755); err != nil {
+		t.Fatalf("mkdir user uv dir: %v", err)
+	}
+	if err := os.WriteFile(userUV, []byte("fake uv"), 0o755); err != nil {
+		t.Fatalf("write user uv: %v", err)
+	}
+	t.Setenv(localHostHomeEnvVar, home)
+	t.Setenv("PATH", "")
+	t.Setenv(authServiceUVEnvVar, "uv")
 	t.Setenv("UV", "uv")
+
+	got, ok := uvCommand()
+	if !ok || got != userUV {
+		t.Fatalf("uvCommand() = %q, %v; want %q, true", got, ok, userUV)
+	}
+}
+
+func TestAuthServiceInstallRequirementsUsesUVOnly(t *testing.T) {
+	installFakeUVOnPath(t)
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	requirements := filepath.Join(repo, authServiceSourceDirName, "requirements.txt")
@@ -138,6 +158,7 @@ func TestAuthServiceGenerateAPIPermissionsUsesRuntimeOutput(t *testing.T) {
 			"--exclude", "scripts,core,vendor",
 			filepath.Join(repo, "backend", "core"),
 			filepath.Join(repo, "backend", "auth-service"),
+			filepath.Join(repo, "backend", "channel-gateway"),
 			filepath.Join(repo, "backend", "scan-control-plane"),
 		)
 		if err := os.WriteFile(output, []byte("[]\n"), 0o600); err != nil {

@@ -42,9 +42,9 @@ type artifactManifestItem struct {
 	Revision     int    `json:"revision"`
 }
 
-func finalizeTaskOutput(ctx context.Context, db *gorm.DB, taskID, convID string) {
+func finalizeTaskOutput(ctx context.Context, db *gorm.DB, taskID, convID string) string {
 	if db == nil {
-		return
+		return ""
 	}
 	var history orm.ChatHistory
 	_ = db.WithContext(ctx).Where("conversation_id = ?", convID).Order("seq DESC").First(&history).Error
@@ -89,7 +89,12 @@ func finalizeTaskOutput(ctx context.Context, db *gorm.DB, taskID, convID string)
 	} else {
 		_ = db.WithContext(ctx).Create(&out).Error
 	}
-	_ = taskcenter.UpdateTaskStatus(ctx, db, taskID, map[bool]string{true: "succeeded", false: "failed"}[status == "ready"])
+	if status == "ready" {
+		_ = taskcenter.UpdateTaskStatus(ctx, db, taskID, "succeeded")
+	} else {
+		_ = taskcenter.UpdateTaskFailure(ctx, db, taskID, "聊天服务未生成可用结果")
+	}
+	return status
 }
 
 func createWaitingScheduledTask(ctx context.Context, db *gorm.DB, s orm.UserSchedule, start, end time.Time, triggerType string) string {

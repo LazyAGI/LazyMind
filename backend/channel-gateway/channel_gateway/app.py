@@ -1,85 +1,129 @@
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import Annotated, Callable, Literal
 
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field
 
-from channel_gateway.common.channel_actions import ChannelActionExecutor
-from channel_gateway.common.channel_message import ChannelMessageService
-from channel_gateway.common.database import GatewayStore
-from channel_gateway.common.inbound import InboundMessageProcessor
-from channel_gateway.common.intent_router import (
-    ChannelIntentClassifier,
-    ExactShortcutParser,
+from channel_gateway.bootstrap import GatewayComponents, build_components
+from channel_gateway.common.application.providers import (
+    AccountApplicationService,
+    ConnectionApplicationService,
 )
-from channel_gateway.common.lazymind import LazyMindClient
-from channel_gateway.common.models import (
-    AccountListView,
-    ConnectionChallengeSubmit,
-    ConnectionSessionCreate,
-    ConnectionSessionView,
-)
-from channel_gateway.common.rbac import permission_required
-from channel_gateway.common.security import JsonCipher
-from channel_gateway.settings import Settings
-from channel_gateway.wechat.runtime import WeChatRuntime
-from channel_gateway.wechat.service import GatewayError, WeChatConnectionService
+from channel_gateway.common.errors import GatewayError
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
 logging.getLogger('httpx').setLevel(logging.WARNING)
 _logger = logging.getLogger(__name__)
 
-settings = Settings()
-store = GatewayStore(settings.database_dsn)
-cipher = JsonCipher(settings.credential_key_path)
-lazymind = LazyMindClient(
-    settings.core_base_url,
-    settings.core_chat_timeout_seconds,
-)
-messages = ChannelMessageService(
-    store=store,
-    shortcuts=ExactShortcutParser(store),
-    classifier=ChannelIntentClassifier(lazymind),
-    executor=ChannelActionExecutor(store=store, client=lazymind),
-)
-inbound = InboundMessageProcessor(store=store, messages=messages)
-runtime = WeChatRuntime(
-    settings=settings,
-    store=store,
-    cipher=cipher,
-    inbound=inbound,
-    lazymind=lazymind,
-)
-service = WeChatConnectionService(
-    settings=settings,
-    store=store,
-    cipher=cipher,
-    on_account_connected=runtime.start_account,
-    on_account_disconnected=runtime.stop_account,
-)
+
+class ConnectionSessionCreate(BaseModel):
+    provider: str = Field(min_length=1, max_length=32)
+
+
+class ConnectionChallengeSubmit(BaseModel):
+    type: str = Field(default='numeric_code', max_length=32)
+    value: str = Field(min_length=1, max_length=12)
+
+
+class QRCodeView(BaseModel):
+    payload: str
+    version: int
+    expires_at: str
+
+
+class ChallengeView(BaseModel):
+    type: str
+    prompt: str
+    input_mode: str
+
+
+class AccountView(BaseModel):
+    id: str
+    provider: str
+    label: str
+    status: Literal['provisioning', 'connected', 'disconnected']
+    runtime_status: Literal[
+        'stopped',
+        'starting',
+        'running',
+        'degraded',
+        'failed',
+    ]
+    connected_at: str | None
+    last_poll_at: str | None
+    last_message_at: str | None
+    last_error: str | None
+    updated_at: str
+
+
+class SessionErrorView(BaseModel):
+    code: str
+    message: str
+    retryable: bool
+
+
+class ConnectionSessionView(BaseModel):
+    id: str
+    provider: str
+    mode: Literal['qr_code']
+    status: Literal[
+        'preparing',
+        'waiting_scan',
+        'scanned',
+        'verification_required',
+        'confirming',
+        'connected',
+        'expired',
+        'canceled',
+        'failed',
+    ]
+    revision: int
+    message: str
+    qr: QRCodeView | None
+    challenge: ChallengeView | None
+    poll_after_ms: int
+    allowed_actions: list[
+        Literal['cancel', 'submit_challenge', 'refresh']
+    ]
+    account: AccountView | None
+    error: SessionErrorView | None
+
+
+class AccountListView(BaseModel):
+    items: list[AccountView]
+
+
+def permission_required(*permissions: str):
+    """Static marker consumed by backend/scripts/extract_api_permissions.py."""
+
+    def decorator(function: Callable):
+        function.__required_permissions__ = set(permissions)
+        return function
+
+    return decorator
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    components = build_components()
     try:
-        service.start()
-        runtime.start()
-        application.state.connection_service = service
+        components.start()
+        application.state.components = components
         _logger.info('channel_gateway_started')
         yield
     finally:
-        runtime.stop()
-        service.stop()
+        components.stop()
         _logger.info('channel_gateway_stopped')
 
 
 app = FastAPI(
     title='LazyMind Channel Gateway',
-    description='Unified channel connection and authorization gateway.',
+    description='Unified external chat channel gateway.',
     version='0.1.0',
     docs_url='/api/channel-gateway/v1/docs',
     redoc_url=None,
@@ -95,8 +139,16 @@ def current_owner(request: Request) -> str:
     return value
 
 
-def connection_service(request: Request) -> WeChatConnectionService:
-    return request.app.state.connection_service
+def components(request: Request) -> GatewayComponents:
+    return request.app.state.components
+
+
+def connection_service(request: Request) -> ConnectionApplicationService:
+    return components(request).connections
+
+
+def account_service(request: Request) -> AccountApplicationService:
+    return components(request).accounts
 
 
 @app.middleware('http')
@@ -149,8 +201,8 @@ def healthz():
 
 
 @app.get('/readyz')
-def readyz():
-    store.ping()
+def readyz(request: Request):
+    components(request).store.ping()
     return {'status': 'ready'}
 
 
@@ -162,7 +214,7 @@ def readyz():
 def list_channel_accounts(
     provider: Annotated[str, Query(min_length=1, max_length=32)],
     owner_user_id: Annotated[str, Depends(current_owner)],
-    gateway: Annotated[WeChatConnectionService, Depends(connection_service)],
+    gateway: Annotated[AccountApplicationService, Depends(account_service)],
 ):
     return gateway.list_accounts(owner_user_id, provider)
 
@@ -175,7 +227,7 @@ def list_channel_accounts(
 def disconnect_channel_account(
     account_id: str,
     owner_user_id: Annotated[str, Depends(current_owner)],
-    gateway: Annotated[WeChatConnectionService, Depends(connection_service)],
+    gateway: Annotated[AccountApplicationService, Depends(account_service)],
 ):
     gateway.disconnect_account(owner_user_id, account_id)
     return Response(status_code=204)
@@ -190,7 +242,10 @@ def disconnect_channel_account(
 def create_connection_session(
     payload: ConnectionSessionCreate,
     owner_user_id: Annotated[str, Depends(current_owner)],
-    gateway: Annotated[WeChatConnectionService, Depends(connection_service)],
+    gateway: Annotated[
+        ConnectionApplicationService,
+        Depends(connection_service),
+    ],
     idempotency_key: Annotated[str | None, Header(alias='Idempotency-Key')] = None,
 ):
     return gateway.create_session(
@@ -208,7 +263,10 @@ def create_connection_session(
 def get_connection_session(
     session_id: str,
     owner_user_id: Annotated[str, Depends(current_owner)],
-    gateway: Annotated[WeChatConnectionService, Depends(connection_service)],
+    gateway: Annotated[
+        ConnectionApplicationService,
+        Depends(connection_service),
+    ],
 ):
     return gateway.get_session(owner_user_id, session_id)
 
@@ -222,7 +280,10 @@ def submit_connection_challenge(
     session_id: str,
     payload: ConnectionChallengeSubmit,
     owner_user_id: Annotated[str, Depends(current_owner)],
-    gateway: Annotated[WeChatConnectionService, Depends(connection_service)],
+    gateway: Annotated[
+        ConnectionApplicationService,
+        Depends(connection_service),
+    ],
 ):
     return gateway.submit_challenge(
         owner_user_id=owner_user_id,
@@ -240,7 +301,10 @@ def submit_connection_challenge(
 def refresh_connection_session(
     session_id: str,
     owner_user_id: Annotated[str, Depends(current_owner)],
-    gateway: Annotated[WeChatConnectionService, Depends(connection_service)],
+    gateway: Annotated[
+        ConnectionApplicationService,
+        Depends(connection_service),
+    ],
 ):
     return gateway.refresh_session(owner_user_id, session_id)
 
@@ -253,7 +317,10 @@ def refresh_connection_session(
 def cancel_connection_session(
     session_id: str,
     owner_user_id: Annotated[str, Depends(current_owner)],
-    gateway: Annotated[WeChatConnectionService, Depends(connection_service)],
+    gateway: Annotated[
+        ConnectionApplicationService,
+        Depends(connection_service),
+    ],
 ):
     gateway.cancel_session(owner_user_id, session_id)
     return Response(status_code=204)

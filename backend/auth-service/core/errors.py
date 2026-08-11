@@ -95,7 +95,7 @@ class ErrorCodes:
         'reauthorized tenant does not match target connection',
     )
     CLOUD_REAUTHORIZE_ACCOUNT_CHANGED: ErrorTuple = (409, 1000813, 'reauthorize target account changed')
-    CLOUD_CLIENT_ID_ALREADY_EXISTS: ErrorTuple = (409, 1000814, 'a connection with this client_id already exists')
+    CLOUD_CLIENT_ID_ALREADY_EXISTS: ErrorTuple = (409, 1000814, 'This account has already been added')
     CLOUD_OAUTH_AUTHORIZE_MODE_REQUIRED: ErrorTuple = (
         400,
         1000815,

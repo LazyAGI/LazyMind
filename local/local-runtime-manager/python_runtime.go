@@ -82,11 +82,22 @@ func pythonRuntimeEnv(paths RuntimePaths) []string {
 }
 
 func uvCommand() (string, bool) {
-	if uv := strings.TrimSpace(os.Getenv(authServiceUVEnvVar)); uv != "" {
-		return uv, true
-	}
-	if uv := strings.TrimSpace(os.Getenv("UV")); uv != "" {
-		return uv, true
+	for _, configured := range []string{
+		strings.TrimSpace(os.Getenv(authServiceUVEnvVar)),
+		strings.TrimSpace(os.Getenv("UV")),
+	} {
+		if configured == "" {
+			continue
+		}
+		if strings.ContainsRune(configured, os.PathSeparator) || filepath.IsAbs(configured) {
+			if info, err := os.Stat(configured); err == nil && !info.IsDir() {
+				return configured, true
+			}
+			return "", false
+		}
+		if _, err := exec.LookPath(configured); err == nil {
+			return configured, true
+		}
 	}
 	if uv, err := exec.LookPath("uv"); err == nil {
 		return uv, true

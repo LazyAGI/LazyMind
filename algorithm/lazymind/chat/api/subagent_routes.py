@@ -5,8 +5,6 @@ from typing import Annotated, Any, Dict, List, Optional
 from fastapi import APIRouter, Body
 from fastapi.responses import StreamingResponse
 
-from lazymind.chat.engine.subagent.runner import run_subagent_stream
-
 router = APIRouter()
 
 
@@ -31,6 +29,8 @@ async def run_subagent(
     llm_config: Annotated[Optional[Dict[str, Any]], Body(description='Per-request model config')] = None,
     tool_config: Annotated[Optional[Dict[str, Any]], Body(description='Per-request tool credentials (API keys)')] = None,
 ):
+    from lazymind.chat.engine.subagent.runner import run_subagent_stream
+
     return StreamingResponse(
         run_subagent_stream(
             task_id=task_id,

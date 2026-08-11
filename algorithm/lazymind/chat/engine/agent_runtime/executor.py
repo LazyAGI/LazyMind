@@ -12,14 +12,38 @@ from .models import AgentRole, AgentRunPlan
 from .tool_limit_control import tool_limit_decision_coordinator
 
 
+_EXPANDED_BUDGET_TOOLS = {
+    'advance_step',
+    'advance_step_and_hand_off',
+    'create_workflow_draft',
+    'create_subagent',
+}
+
+
+def _requires_expanded_budget(tool_name: str) -> bool:
+    """Return whether invoking this tool starts workflow or SubAgent work."""
+    return tool_name in _EXPANDED_BUDGET_TOOLS or tool_name.startswith('trigger_')
+
+
 class ToolCallGuard:
     """Stop selected tools from looping after failures without limiting successful work."""
 
-    def __init__(self, manager: Any, failure_limits: dict[str, int] | None = None):
+    def __init__(
+        self,
+        manager: Any,
+        failure_limits: dict[str, int] | None = None,
+        expanded_round_limit: int | None = None,
+        repeated_call_limit: int = 3,
+        cancel_check: Any = None,
+    ):
         self._manager = manager
         self._failure_limits = dict(failure_limits or {})
         self._failed_signatures: set[str] = set()
         self._consecutive_failures: dict[str, int] = {}
+        self._expanded_round_limit = expanded_round_limit
+        self._repeated_call_limit = max(2, int(repeated_call_limit))
+        self._signature_calls: dict[str, int] = {}
+        self._cancel_check = cancel_check
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
@@ -67,7 +91,17 @@ class ToolCallGuard:
             'msg': f'[Repeated Tool Failure] {name}: {message}',
         }
 
+    @staticmethod
+    def _loop_blocked(name: str, message: str) -> dict[str, Any]:
+        return {
+            'ok': False,
+            'value': None,
+            'msg': f'[Repeated Tool Call] {name}: {message}',
+        }
+
     def __call__(self, tools: Any, verbose: bool = False) -> Any:
+        if self._cancel_check is not None:
+            self._cancel_check(None)
         tool_calls = [tools] if isinstance(tools, dict) else list(tools or [])
         results: list[Any] = [None] * len(tool_calls)
         pending: list[dict[str, Any]] = []
@@ -77,7 +111,31 @@ class ToolCallGuard:
         for index, tool_call in enumerate(tool_calls):
             function = tool_call.get('function') or {}
             name = str(function.get('name') or '')
+            if _requires_expanded_budget(name):
+                workspace = lazyllm.locals.get('_lazyllm_agent', {}).get('workspace')
+                if (
+                    isinstance(workspace, dict)
+                    and self._expanded_round_limit is not None
+                    and workspace.get('_react_round_limit') != self._expanded_round_limit
+                ):
+                    workspace['_react_round_limit'] = self._expanded_round_limit
+                    lazyllm.LOG.info(
+                        f'ChatAgent used tool={name}; automatically expanding '
+                        f'tool round limit to {self._expanded_round_limit}.'
+                    )
             signature = self._signature(tool_call)
+            signature_calls = self._signature_calls.get(signature, 0) + 1
+            self._signature_calls[signature] = signature_calls
+            if signature_calls > self._repeated_call_limit:
+                results[index] = self._loop_blocked(
+                    name,
+                    f'the exact same call was already made {self._repeated_call_limit} times; '
+                    'stop retrying it and synthesize from existing results or choose another tool.',
+                )
+                lazyllm.LOG.warning(
+                    f'[ToolCallGuard] blocked no-progress repeated call: {name}'
+                )
+                continue
             guarded = name in self._failure_limits
             if guarded and signature in self._failed_signatures:
                 results[index] = self._blocked(
@@ -148,11 +206,13 @@ class AgentExecutor:
     """Create and drive ReactAgent instances from a fully assembled run plan."""
 
     def create_agent(self, llm: Any, plan: AgentRunPlan) -> Any:
+        from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+
         options = plan.execution_options
         kwargs = {
             'stream': True,
             'max_retries': options.max_retries or _cfg['max_retries'],
-            'enable_builtin_tools': False,
+            'enable_builtin_tools': bool(_cfg['trusted_local_mode']),
             'force_summarize': True,
             'force_summarize_context': plan.force_summarize_context,
             'on_max_retries': (
@@ -169,14 +229,19 @@ class AgentExecutor:
             'extra_stop_condition': options.extra_stop_condition,
         }
         kwargs.update({key: value for key, value in optional.items() if value is not None})
+        tools = _deduplicate_tools(plan.tools)
+        ensure_lazyllm_tool_docs(tools)
         agent = _agent_mod.ReactAgent(
             llm=llm,
-            tools=_deduplicate_tools(plan.tools),
+            tools=tools,
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
         agent._tools_manager = ToolCallGuard(
-            agent._tools_manager, options.tool_failure_limits,
+            agent._tools_manager,
+            options.tool_failure_limits,
+            max(2, int(_cfg['agentic_expanded_max_rounds'])),
+            cancel_check=options.extra_stop_condition,
         )
         # Restore lazy Toolkit activation before the streaming helper takes over.
         # Relying only on ReactAgent._pre_process makes restoration dependent on

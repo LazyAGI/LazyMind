@@ -34,10 +34,49 @@ def test_config_reads_custom_environment_values(monkeypatch):
 def test_config_falls_back_to_defaults(monkeypatch):
     monkeypatch.delenv('LAZYMIND_LLM_PRIORITY', raising=False)
     monkeypatch.delenv('LAZYMIND_RAG_MODE', raising=False)
+    monkeypatch.delenv('LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS', raising=False)
+    monkeypatch.delenv('LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS', raising=False)
+    monkeypatch.delenv(
+        'LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK',
+        raising=False,
+    )
 
     from lazymind.config import config as _cfg
     assert _cfg['llm_priority'] == 0
     assert _cfg['rag_mode'] is True
+    assert _cfg['preference_index_max_items'] == 100
+    assert _cfg['preference_context_max_chars'] == 5000
+    assert _cfg['episode_recent_progress_inject_topk'] == 3
+
+
+def test_preference_limit_environment_values_must_be_positive():
+    from lazymind.config import _parse_positive_integer_env
+
+    for env_name in (
+        'LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS',
+        'LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS',
+    ):
+        for value in ('', '0', '-1', 'invalid'):
+            with pytest.raises(ValueError, match=env_name):
+                _parse_positive_integer_env(env_name, value)
+
+
+def test_recent_progress_inject_limit_must_be_between_zero_and_three():
+    from lazymind.config import _require_integer_range_config_value
+
+    validate = _require_integer_range_config_value(
+        'LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK',
+        0,
+        3,
+    )
+    for value in (0, 1, 3):
+        validate(value)
+    for value in (-1, 4, True, '3'):
+        with pytest.raises(
+            ValueError,
+            match='LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK',
+        ):
+            validate(value)
 
 
 def test_chat_config_bootstraps_canonical_config_module(monkeypatch):

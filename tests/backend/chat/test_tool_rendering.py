@@ -166,7 +166,7 @@ def test_plugin_preflight_result_renders_outcome_and_reason_in_chinese():
     result_text = _tool_result_frame_text(
         {
             'id': 'call-writer',
-            'name': 'trigger_writer_plugin',
+            'name': 'trigger_writer_workflow',
             'result': json.dumps({
                 'outcome': 'not_applicable',
                 'reason': reason,
@@ -175,7 +175,7 @@ def test_plugin_preflight_result_renders_outcome_and_reason_in_chinese():
         'zh',
     )
 
-    assert '工作流启动检查已完成，结果是 **not_applicable**' in result_text
+    assert '工作流初始化已完成，结果是 **not_applicable**' in result_text
     assert f'原因是 **{reason}**' in result_text
 
 
@@ -210,7 +210,7 @@ def test_plugin_preflight_result_supports_ready_status_payload():
     result_text = _tool_result_frame_text(
         {
             'id': 'call-writer',
-            'name': 'trigger_writer_plugin',
+            'name': 'trigger_writer_workflow',
             'result': {
                 'status': 'ready',
                 'outcome': 'ready',
@@ -220,5 +220,20 @@ def test_plugin_preflight_result_supports_ready_status_payload():
         'en',
     )
 
-    assert 'Plugin preflight completed. Result: **ready**.' in result_text
+    assert 'Workflow initialization completed. Result: **ready**.' in result_text
     assert 'Reason: **The user explicitly requested this plugin.**' in result_text
+
+
+def test_workflow_failure_template_handles_plain_tool_error_without_crashing():
+    error = '[Tool Error] ModuleExecutionError: workflow or revision was not found'
+    result_text = _tool_result_frame_text(
+        {
+            'id': 'call-workflow',
+            'name': 'trigger_test_workflow',
+            'result': error,
+        },
+        'zh',
+    )
+
+    assert '工作流初始化失败，结果是 **failed**' in result_text
+    assert 'workflow or revision was not found' in result_text

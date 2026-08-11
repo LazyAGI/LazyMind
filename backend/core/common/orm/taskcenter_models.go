@@ -11,8 +11,8 @@ type TaskCenterTask struct {
 	ID                string     `gorm:"column:id;type:varchar(36);primaryKey"`
 	UserID            string     `gorm:"column:user_id;type:varchar(255);not null;index:idx_tct_user_status,priority:1"`
 	ConversationID    string     `gorm:"column:conversation_id;type:varchar(36);not null"`
-	PluginSessionID   *string    `gorm:"column:plugin_session_id;type:varchar(36)"`
-	TaskType          string     `gorm:"column:task_type;type:varchar(32);not null"` // plugin_run | background_chat | scheduled
+	WorkflowSessionID *string    `gorm:"column:plugin_session_id;type:varchar(36)"`
+	TaskType          string     `gorm:"column:task_type;type:varchar(32);not null"` // workflow_run | background_chat | scheduled
 	Title             *string    `gorm:"column:title;type:text"`
 	Status            string     `gorm:"column:status;type:varchar(16);not null;default:pending;index:idx_tct_user_status,priority:2"` // pending|running|waiting|succeeded|failed|canceled
 	ScheduleID        *string    `gorm:"column:schedule_id;type:varchar(36)"`                                                          // FK → user_schedules.id; non-null when task_type=scheduled

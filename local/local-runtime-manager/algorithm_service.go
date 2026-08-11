@@ -19,6 +19,8 @@ import (
 
 const (
 	algorithmHealthTimeout = 15 * time.Minute
+	defaultLazyLLMVersion  = "1.2.2"
+	tiktokenReadyFileName  = "tiktoken-gpt2.ready"
 )
 
 type AlgorithmServiceSpec struct {
@@ -38,11 +40,11 @@ func NewAlgorithmServiceManager(r CommandRunner) *AlgorithmServiceManager {
 
 func algorithmProcessSpecs(cfg AlgorithmConfig) []AlgorithmServiceSpec {
 	specs := []AlgorithmServiceSpec{
-		{Name: processorServerProcessName, Module: []string{"-m", "lazymind.processor.service.server"}, Port: cfg.ProcessorPort, HealthPath: "/health"},
-		{Name: processorWorkerProcessName, Module: []string{"-m", "lazymind.processor.service.worker"}, Port: cfg.WorkerPort, HealthPath: "/health"},
+		{Name: processorServerProcessName, Module: []string{"-m", "lazymind.processor.service.server"}, Port: cfg.ProcessorPort, HealthPath: "/ready"},
+		{Name: processorWorkerProcessName, Module: []string{"-m", "lazymind.processor.service.worker"}, Port: cfg.WorkerPort, HealthPath: "/ready"},
 		{Name: algoProcessName, Module: []string{"-m", "lazymind.parsing.app"}, Port: cfg.AlgoPort, HealthPath: "/docs"},
-		{Name: docServerProcessName, Module: []string{filepath.Join("backend", "core", "doc", "doc_server.py"), "--port", strconv.Itoa(cfg.DocPort), "--parser-url", fmt.Sprintf("http://127.0.0.1:%d", cfg.ProcessorPort)}, Port: cfg.DocPort, HealthPath: "/v1/health"},
-		{Name: chatProcessName, Module: []string{"-m", "lazymind.router.app", "--host", "0.0.0.0", "--port", strconv.Itoa(cfg.ChatPort)}, Port: cfg.ChatPort, HealthPath: "/health"},
+		{Name: docServerProcessName, Module: []string{filepath.Join("backend", "core", "doc", "doc_server.py"), "--port", strconv.Itoa(cfg.DocPort), "--parser-url", fmt.Sprintf("http://127.0.0.1:%d", cfg.ProcessorPort)}, Port: cfg.DocPort, HealthPath: "/v1/ready"},
+		{Name: chatProcessName, Module: []string{"-m", "lazymind.chat.app", "--host", "0.0.0.0", "--port", strconv.Itoa(cfg.ChatPort)}, Port: cfg.ChatPort, HealthPath: "/health"},
 	}
 	if cfg.EnableEvo {
 		specs = append(specs, AlgorithmServiceSpec{
@@ -95,6 +97,9 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 		return err
 	}
 	if err := m.preparePython(ctx, cfg, paths, cfg.Algorithm.EnableEvo); err != nil {
+		return err
+	}
+	if err := m.ensureTiktokenCache(ctx, paths); err != nil {
 		return err
 	}
 	if err := m.waitForDependencies(ctx, cfg, spec.Name); err != nil {
@@ -258,6 +263,75 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, cfg Runtime
 	return os.WriteFile(stamp, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644)
 }
 
+func tiktokenCacheDir(paths RuntimePaths) string {
+	return filepath.Join(paths.LazyLLMHome, "tiktoken")
+}
+
+func tiktokenCacheHasFile(paths RuntimePaths) bool {
+	entries, err := os.ReadDir(tiktokenCacheDir(paths))
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if info, err := entry.Info(); err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func tiktokenCacheReady(paths RuntimePaths) bool {
+	if _, err := os.Stat(filepath.Join(paths.PythonStateDir, tiktokenReadyFileName)); err != nil {
+		return false
+	}
+	return tiktokenCacheHasFile(paths)
+}
+
+func (m *AlgorithmServiceManager) ensureTiktokenCache(ctx context.Context, paths RuntimePaths) error {
+	readyFile := filepath.Join(paths.PythonStateDir, tiktokenReadyFileName)
+	if tiktokenCacheReady(paths) {
+		return nil
+	}
+
+	release, err := acquireAlgorithmPythonLock(ctx, paths)
+	if err != nil {
+		return fmt.Errorf("acquire tiktoken cache lock: %w", err)
+	}
+	defer release()
+	if tiktokenCacheReady(paths) {
+		return nil
+	}
+
+	cacheDir := tiktokenCacheDir(paths)
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return fmt.Errorf("create tiktoken cache directory: %w", err)
+	}
+	command := Command{
+		Name: paths.AlgorithmPython,
+		Args: []string{"-c", "import tiktoken; tiktoken.get_encoding('gpt2')"},
+		Dir:  paths.RepoRoot,
+		Env:  []string{"TIKTOKEN_CACHE_DIR=" + cacheDir},
+	}
+	result, err := m.runner.Run(ctx, command)
+	if err != nil {
+		detail := strings.TrimSpace(result.Stderr)
+		if detail == "" {
+			detail = strings.TrimSpace(result.Stdout)
+		}
+		return fmt.Errorf("pre-warm tiktoken gpt2 cache failed: %w (%s)", err, detail)
+	}
+	if !tiktokenCacheHasFile(paths) {
+		return fmt.Errorf("pre-warm tiktoken gpt2 cache produced no cache file in %s", cacheDir)
+	}
+	if err := os.MkdirAll(paths.PythonStateDir, 0o755); err != nil {
+		return fmt.Errorf("create Python state directory: %w", err)
+	}
+	if err := os.WriteFile(readyFile, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644); err != nil {
+		return fmt.Errorf("write tiktoken cache ready marker: %w", err)
+	}
+	return nil
+}
+
 func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context, paths RuntimePaths, includeEvo bool) error {
 	lazyllm := venvExecutable(paths.AlgorithmVenv, "lazyllm")
 	uv, ok := uvCommand()
@@ -266,7 +340,7 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 	}
 	installSteps := []Command{
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "setuptools<81"), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
-		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "lazyllm"), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
+		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "lazyllm=="+envText("LAZYMIND_LAZYLLM_VERSION", defaultLazyLLMVersion)), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 		{Name: lazyllm, Args: []string{"install", "rag"}, Dir: paths.RepoRoot, Env: pythonDependencyCacheEnv(paths)},
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements-local.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
@@ -285,6 +359,8 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 
 func algorithmReadyStamp(paths RuntimePaths, includeEvo bool) (string, error) {
 	hash := sha256.New()
+	_, _ = hash.Write([]byte("lazyllm==" + envText("LAZYMIND_LAZYLLM_VERSION", defaultLazyLLMVersion)))
+	_, _ = hash.Write([]byte{0})
 	files := []string{
 		filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt"),
 		filepath.Join(paths.RepoRoot, "algorithm", "requirements-local.txt"),
@@ -365,35 +441,43 @@ func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg R
 	case processorServerProcessName:
 		return nil
 	case processorWorkerProcessName:
-		return waitForHTTPOnly(ctx, cfg.Algorithm.ProcessorPort, "/health", "processor-server", 3*time.Minute)
+		return nil
 	case algoProcessName:
-		if err := waitForHTTPOnly(ctx, cfg.Algorithm.ProcessorPort, "/health", "processor-server", 3*time.Minute); err != nil {
-			return err
-		}
-		if cfg.ModeProfile.VectorStore.ManagedProcess {
-			if err := waitForTCP(ctx, "127.0.0.1", cfg.ModeProfile.VectorStore.Port, "Milvus", 5*time.Minute); err != nil {
-				return err
-			}
-		}
-		if localSegmentStoreUsesBuiltInOpenSearch() {
-			if err := waitForTCP(ctx, "127.0.0.1", cfg.Algorithm.OpenSearchPort, "OpenSearch", 5*time.Minute); err != nil {
-				return err
-			}
-		}
+		return nil
 	case docServerProcessName:
-		return waitForHTTPOnly(ctx, cfg.Algorithm.ProcessorPort, "/health", "processor-server", 3*time.Minute)
+		return nil
 	case chatProcessName:
-		if err := waitForHTTPOnly(ctx, cfg.Algorithm.AlgoPort, "/docs", "lazyllm-algo", 5*time.Minute); err != nil {
+		if err := waitForHTTPOnly(ctx, cfg.LocalProxy.CoreHostPort, "/health", "core", 5*time.Minute); err != nil {
 			return err
 		}
-		if err := waitForAlgorithmRegistration(ctx, cfg.Algorithm.ProcessorPort, 5*time.Minute); err != nil {
-			return err
-		}
-		return waitForHTTPOnly(ctx, cfg.LocalProxy.CoreHostPort, "/health", "core", 5*time.Minute)
+		return waitForRAGReadiness(ctx, cfg, 15*time.Minute)
 	case evoProcessName:
 		return waitForHTTPOnly(ctx, cfg.Algorithm.ChatPort, "/health", "chat", 5*time.Minute)
 	}
 	return nil
+}
+
+func waitForRAGReadiness(ctx context.Context, cfg RuntimeConfig, timeout time.Duration) error {
+	checks := []struct {
+		port  int
+		path  string
+		label string
+	}{
+		{cfg.Algorithm.ProcessorPort, "/ready", "processor-server"},
+		{cfg.Algorithm.DocPort, "/v1/ready", "doc-server"},
+		{cfg.Algorithm.AlgoPort, "/docs", "algo"},
+	}
+	checks = append(checks, struct {
+		port  int
+		path  string
+		label string
+	}{cfg.Algorithm.WorkerPort, "/ready", "processor-worker"})
+	for _, check := range checks {
+		if err := waitForHTTPOnly(ctx, check.port, check.path, check.label, timeout); err != nil {
+			return err
+		}
+	}
+	return waitForAlgorithmRegistration(ctx, cfg.Algorithm.ProcessorPort, timeout)
 }
 
 func localSegmentStorePath(paths RuntimePaths) string {
@@ -415,6 +499,7 @@ func ensureAlgorithmDataDirs(paths RuntimePaths) error {
 		paths.TracesDir,
 		paths.SubagentDataDir,
 		paths.LazyLLMHome,
+		tiktokenCacheDir(paths),
 		paths.EvoDataDir,
 		filepath.Join(paths.AlgorithmHome, "agent_workspace"),
 		filepath.Join(paths.AlgorithmHome, "sqlite"),
@@ -447,32 +532,36 @@ func ensureLazyLLMSubmodule(ctx context.Context, runner CommandRunner, repoRoot 
 }
 
 func ensureLazyLLMSource(ctx context.Context, runner CommandRunner, repoRoot string, profile string) error {
+	if profile == "desktop" {
+		return nil
+	}
 	required := filepath.Join(repoRoot, "algorithm", "lazyllm", "lazyllm")
 	if info, err := os.Stat(required); err == nil && info.IsDir() {
 		return nil
-	}
-	if profile == "desktop" {
-		return fmt.Errorf("desktop runtime is missing bundled algorithm/lazyllm source; rebuild the app with algorithm/lazyllm submodule initialized")
 	}
 	return ensureLazyLLMSubmodule(ctx, runner, repoRoot)
 }
 
 func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) []string {
-	pythonPath := strings.Join([]string{
-		filepath.Join(paths.RepoRoot, "algorithm", "lazyllm"),
-		filepath.Join(paths.RepoRoot, "algorithm"),
-		paths.RepoRoot,
-	}, string(os.PathListSeparator))
+	pythonPaths := []string{filepath.Join(paths.RepoRoot, "algorithm"), paths.RepoRoot}
+	lazyLLMSource := filepath.Join(paths.RepoRoot, "algorithm", "lazyllm")
+	if info, err := os.Stat(filepath.Join(lazyLLMSource, "lazyllm")); err == nil && info.IsDir() {
+		pythonPaths = append([]string{lazyLLMSource}, pythonPaths...)
+	}
+	pythonPath := strings.Join(pythonPaths, string(os.PathListSeparator))
 	lazyLLMDBURL := sqliteURL(paths.LazyLLMDBPath)
 	coreDBURL := sqliteURL(paths.CoreDBPath)
 	noProxy := envText("no_proxy", "127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")
 	noProxyUpper := envText("NO_PROXY", noProxy)
 	routerPoolStart, routerPoolEnd := localRouterPortPool(cfg)
+	trustedLocalMode := paths.TrustedLocalMode || envBool("LAZYMIND_TRUSTED_LOCAL_MODE", false)
 	env := []string{
 		"LAZYMIND_RUNTIME_MODE=local",
+		"LAZYMIND_TRUSTED_LOCAL_MODE=" + strconv.FormatBool(trustedLocalMode),
 		"PYTHONPATH=" + pythonPath,
 		"LAZYMIND_HOME=" + paths.AlgorithmHome,
 		"LAZYLLM_HOME=" + paths.LazyLLMHome,
+		"TIKTOKEN_CACHE_DIR=" + tiktokenCacheDir(paths),
 		"LAZYMIND_DATABASE_URL=" + lazyLLMDBURL,
 		"LAZYMIND_CORE_DATABASE_URL=" + coreDBURL,
 		"LAZYMIND_ACL_DB_DSN=" + coreDBURL,
@@ -519,7 +608,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYLLM_MINERU_BACKEND=" + envText("LAZYLLM_MINERU_BACKEND", envText("LAZYMIND_MINERU_BACKEND", "pipeline")),
 		"LAZYLLM_MINERU_API_KEY=" + envText("LAZYLLM_MINERU_API_KEY", ""),
 		"LAZYLLM_PADDLE_API_KEY=" + envText("LAZYLLM_PADDLE_API_KEY", ""),
-		"LAZYLLM_INIT_DOC=True",
+		"LAZYLLM_INIT_DOC=False",
 		"LAZYLLM_EXPECTED_LOG_MODULES=all",
 		"LAZYMIND_MODEL_CONFIG_PATH=" + envText("LAZYMIND_MODEL_CONFIG_PATH", "dynamic"),
 		"LAZYMIND_DOCUMENT_PROCESSOR_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.Algorithm.ProcessorPort),
@@ -533,7 +622,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_DOCUMENT_WORKER_POLL_MODE=" + envText("LAZYMIND_DOCUMENT_WORKER_POLL_MODE", "direct"),
 		"LAZYMIND_DOCUMENT_SERVICE_PORT=" + strconv.Itoa(cfg.Algorithm.DocPort),
 		"LAZYMIND_ALGO_SERVER_PORT=" + strconv.Itoa(cfg.Algorithm.AlgoPort),
-		"LAZYLLM_ALGO_REGISTER_POLICY=" + envText("LAZYLLM_ALGO_REGISTER_POLICY", "force"),
+		"LAZYLLM_ALGO_REGISTER_POLICY=" + algorithmRegisterPolicy(cfg, paths),
 		"LAZYMIND_USE_INNER_MODEL=true",
 		"LAZYMIND_RESET_ALGO_ON_STARTUP=" + envText("LAZYMIND_RESET_ALGO_ON_STARTUP", "false"),
 		"LAZYMIND_RESET_ALL_ON_STARTUP=" + envText("LAZYMIND_RESET_ALL_ON_STARTUP", "false"),
@@ -551,6 +640,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_CORE_API_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.LocalProxy.CoreHostPort),
 		"LAZYMIND_CORE_SERVICE_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.LocalProxy.CoreHostPort),
 		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + envText("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "dev-internal-service-token"),
+		"LAZYMIND_WORKFLOW_EXECUTOR_TOKEN=" + envText("LAZYMIND_WORKFLOW_EXECUTOR_TOKEN", "dev-workflow-executor-token"),
 		"LAZYMIND_FILE_URL_SIGN_SECRET=" + envText("LAZYMIND_FILE_URL_SIGN_SECRET", "changeme-in-production"),
 		"LAZYMIND_FILE_URL_EXPIRE_SECONDS=" + envText("LAZYMIND_FILE_URL_EXPIRE_SECONDS", "3600"),
 		"LAZYMIND_MAX_RETRIES=" + envText("LAZYMIND_MAX_RETRIES", "20"),
@@ -561,14 +651,14 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_SKILL_REVIEW_DEBUG=" + envText("LAZYMIND_SKILL_REVIEW_DEBUG", "false"),
 		"LAZYMIND_MAX_CONCURRENCY=" + envText("LAZYMIND_MAX_CONCURRENCY", "10"),
 		"LAZYMIND_LLM_PRIORITY=" + envText("LAZYMIND_LLM_PRIORITY", "0"),
-		"LAZYMIND_ENABLE_ROUTER=" + envText("LAZYMIND_ENABLE_ROUTER", "true"),
+		"LAZYMIND_ENABLE_ROUTER=false",
 		"LAZYMIND_ROUTER_HOST=" + envText("LAZYMIND_ROUTER_HOST", "127.0.0.1"),
 		routerPortPoolStartEnvVar + "=" + strconv.Itoa(routerPoolStart),
 		routerPortPoolEndEnvVar + "=" + strconv.Itoa(routerPoolEnd),
 		routerPortsPerInstanceEnvVar + "=" + strconv.Itoa(defaultRouterPortsPerInstance),
 		"LAZYMIND_ROUTER_DEFAULT_ALGO_PATH=" + filepath.Join(paths.RepoRoot, "algorithm", "lazymind", "chat"),
 		"LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT=1",
-		"LAZYMIND_PLUGINS_DIR=" + filepath.Join(paths.RepoRoot, "plugins"),
+		"LAZYMIND_WORKFLOWS_DIR=" + filepath.Join(paths.RepoRoot, "workflows"),
 		"LAZYMIND_AGENTIC_WORKSPACE=" + filepath.Join(paths.AlgorithmHome, "agent_workspace"),
 		"LAZYMIND_SUBAGENT_WORKSPACE=" + paths.SubagentDataDir,
 		"LAZYMIND_EVO_API_PORT=" + strconv.Itoa(cfg.Algorithm.EvoPort),
@@ -581,13 +671,52 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_EVO_ROUTER_CHAT_URL=" + fmt.Sprintf("http://127.0.0.1:%d/api/chat/stream", cfg.Algorithm.ChatPort),
 		"LAZYMIND_WORD_GROUP_APPLY_URL=" + envText("LAZYMIND_WORD_GROUP_APPLY_URL", ""),
 	}
-	if runtime.GOOS == "windows" && cfg.Profile == "desktop" {
+	// RelayServer serializes Python callables into command-line arguments. The
+	// payload can exceed CreateProcess' command-line limit on Windows in both
+	// packaged Desktop and source/local profiles, so always spill it to files.
+	if runtime.GOOS == "windows" {
 		env = append(env, "LAZYLLM_PASS_ARGS_BY_FILE=1")
 	}
 	if service == docServerProcessName {
 		env = append(env, "LAZYMIND_DOCUMENT_SERVICE_CALLBACK_URL=http://127.0.0.1:"+strconv.Itoa(cfg.Algorithm.DocPort)+"/v1/internal/callbacks/tasks")
 	}
 	return env
+}
+
+func algorithmRegisterPolicy(cfg RuntimeConfig, paths RuntimePaths) string {
+	if policy := strings.TrimSpace(os.Getenv("LAZYLLM_ALGO_REGISTER_POLICY")); policy != "" {
+		return policy
+	}
+	if cfg.Profile != "desktop" {
+		return "update"
+	}
+
+	appVersion := strings.TrimSpace(os.Getenv(desktopAppVersionEnvVar))
+	if appVersion == "" {
+		// Development and legacy launchers do not provide an install version. Avoid
+		// treating every ordinary restart as an upgrade in that case.
+		return "update"
+	}
+	registeredVersion, err := os.ReadFile(filepath.Join(paths.StateDir, algoRegistrationVersionFileName))
+	if err == nil && strings.TrimSpace(string(registeredVersion)) == appVersion {
+		return "update"
+	}
+	return "force"
+}
+
+func markAlgorithmRegistrationVersion(cfg RuntimeConfig, paths RuntimePaths) error {
+	if cfg.Profile != "desktop" {
+		return nil
+	}
+	appVersion := strings.TrimSpace(os.Getenv(desktopAppVersionEnvVar))
+	if appVersion == "" {
+		return nil
+	}
+	return os.WriteFile(
+		filepath.Join(paths.StateDir, algoRegistrationVersionFileName),
+		[]byte(appVersion+"\n"),
+		0o644,
+	)
 }
 
 func localRouterPortPool(cfg RuntimeConfig) (int, int) {

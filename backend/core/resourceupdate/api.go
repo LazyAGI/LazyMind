@@ -14,7 +14,6 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
-	"lazymind/core/resourcechange"
 	skilldiff "lazymind/core/skillv2/diff"
 	"lazymind/core/store"
 )
@@ -121,21 +120,6 @@ type skillReviewStatsResponse struct {
 	SkippedCount int64           `json:"skipped_count"`
 	FailedCount  int64           `json:"failed_count"`
 	Summary      json.RawMessage `json:"summary"`
-}
-
-type memoryReviewResultResponse struct {
-	ID             string          `json:"id"`
-	UserID         string          `json:"user_id"`
-	Target         string          `json:"target"`
-	SessionID      string          `json:"session_id"`
-	SourceContent  string          `json:"source_content"`
-	Content        string          `json:"content"`
-	CurrentContent string          `json:"current_content,omitempty"`
-	Diff           string          `json:"diff,omitempty"`
-	Operations     json.RawMessage `json:"operations,omitempty"`
-	State          string          `json:"state"`
-	ReviewStatus   string          `json:"review_status"`
-	Time           time.Time       `json:"time"`
 }
 
 func ListTasks(w http.ResponseWriter, r *http.Request) {
@@ -594,117 +578,6 @@ func RejectSkillReviewResult(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, skillResultToResponse(row))
 }
 
-func ListMemoryReviewResults(w http.ResponseWriter, r *http.Request) {
-	db, userID, ok := requestDBAndUser(w, r)
-	if !ok {
-		return
-	}
-	page := parsePositiveQueryInt(r.URL.Query().Get("page"), 1, 0)
-	pageSize := parsePositiveQueryInt(r.URL.Query().Get("page_size"), 20, 100)
-	query := memoryResultSelect(db.WithContext(r.Context())).Where("user_id = ?", userID)
-	if status := strings.TrimSpace(r.URL.Query().Get("review_status")); status != "" {
-		query = query.Where("review_status = ?", status)
-	}
-	if target := strings.TrimSpace(r.URL.Query().Get("target")); target != "" {
-		query = query.Where("target = ?", target)
-	}
-	var rows []MemoryReviewResult
-	if err := query.Order("time DESC, id DESC").
-		Find(&rows).Error; err != nil {
-		common.ReplyErr(w, "query memory review results failed", http.StatusInternalServerError)
-		return
-	}
-	mappedRows := make([]MemoryReviewResult, 0, len(rows))
-	for _, row := range rows {
-		if !memoryReviewResultMapped(r.Context(), db, row) {
-			continue
-		}
-		mappedRows = append(mappedRows, row)
-	}
-	total := len(mappedRows)
-	start := (page - 1) * pageSize
-	if start > total {
-		start = total
-	}
-	end := start + pageSize
-	if end > total {
-		end = total
-	}
-	items := make([]memoryReviewResultResponse, 0, end-start)
-	for _, row := range mappedRows[start:end] {
-		items = append(items, memoryResultToResponse(row))
-	}
-	common.ReplyOK(w, map[string]any{"items": items, "page": page, "page_size": pageSize, "total": total})
-}
-
-func GetMemoryReviewResult(w http.ResponseWriter, r *http.Request) {
-	db, userID, ok := requestDBAndUser(w, r)
-	if !ok {
-		return
-	}
-	resultID := common.PathVar(r, "review_result_id")
-	var row MemoryReviewResult
-	err := memoryResultSelect(db.WithContext(r.Context())).Where("id = ? AND user_id = ?", resultID, userID).Take(&row).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			common.ReplyErr(w, "memory review result not found", http.StatusNotFound)
-			return
-		}
-		common.ReplyErr(w, "query memory review result failed", http.StatusInternalServerError)
-		return
-	}
-	if !memoryReviewResultMapped(r.Context(), db, row) {
-		common.ReplyErr(w, "memory review result not found", http.StatusNotFound)
-		return
-	}
-	resp, err := memoryResultDetailResponse(r.Context(), db, row)
-	if err != nil {
-		mapReviewError(w, err, "query memory review result")
-		return
-	}
-	common.ReplyOK(w, resp)
-}
-
-func AcceptMemoryReviewResult(w http.ResponseWriter, r *http.Request) {
-	db, userID, ok := requestDBAndUser(w, r)
-	if !ok {
-		return
-	}
-	resultID := common.PathVar(r, "review_result_id")
-	row, err := acceptMemoryReviewResult(r.Context(), db, userID, resultID)
-	if err != nil {
-		mapReviewError(w, err, "accept memory review result")
-		return
-	}
-	resourceUpdateInfo(logEventReviewAccepted).
-		Str("resource_type", normalizeReviewTarget(row.Target)).
-		Str("review_result_id", row.ID).
-		Str("user_id", row.UserID).
-		Str("target", row.Target).
-		Msg(logEventReviewAccepted)
-	common.ReplyOK(w, memoryResultToResponse(row))
-}
-
-func RejectMemoryReviewResult(w http.ResponseWriter, r *http.Request) {
-	db, userID, ok := requestDBAndUser(w, r)
-	if !ok {
-		return
-	}
-	resultID := common.PathVar(r, "review_result_id")
-	row, err := rejectMemoryReviewResult(r.Context(), db, userID, resultID)
-	if err != nil {
-		mapReviewError(w, err, "reject memory review result")
-		return
-	}
-	resourceUpdateInfo(logEventReviewRejected).
-		Str("resource_type", normalizeReviewTarget(row.Target)).
-		Str("review_result_id", row.ID).
-		Str("user_id", row.UserID).
-		Str("target", row.Target).
-		Msg(logEventReviewRejected)
-	common.ReplyOK(w, memoryResultToResponse(row))
-}
-
 func acceptSkillReviewResult(ctx context.Context, db *gorm.DB, userID, userName, resultID string) (SkillReviewResult, error) {
 	var out SkillReviewResult
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -773,91 +646,6 @@ func RejectSkillReviewResultByID(ctx context.Context, db *gorm.DB, userID, resul
 	return rejectSkillReviewResult(ctx, db, userID, resultID)
 }
 
-func acceptMemoryReviewResult(ctx context.Context, db *gorm.DB, userID, resultID string) (MemoryReviewResult, error) {
-	now := time.Now().UTC()
-	var out MemoryReviewResult
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		row, err := lockMemoryReviewResultForUser(ctx, tx, resultID, userID)
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(row.ReviewStatus) != reviewStatusPending {
-			return errReviewConflict
-		}
-		if strings.TrimSpace(row.State) != memoryReviewStateSuccess {
-			return errReviewInvalid
-		}
-		switch normalizeReviewTarget(row.Target) {
-		case orm.ResourceUpdateResourceTypeMemory:
-			resource, err := mapMemoryReviewResultToPersonalResource(withUpdateLock(tx).WithContext(ctx), orm.ResourceUpdateResourceTypeMemory, row)
-			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return errReviewNotFound
-				}
-				return err
-			}
-			if err := applyPersonalResourceReviewResult(ctx, tx, orm.ResourceUpdateResourceTypeMemory, row, resource, now, false, resourcechange.Source{
-				ChangeSource:  resourcechange.ChangeSourceReviewAccept,
-				SourceRefType: resourcechange.SourceRefTypeMemoryReview,
-				SourceRefID:   row.ID,
-				ChangedAt:     now,
-			}); err != nil {
-				return err
-			}
-		case orm.ResourceUpdateResourceTypeUserPreference:
-			resource, err := mapMemoryReviewResultToPersonalResource(withUpdateLock(tx).WithContext(ctx), orm.ResourceUpdateResourceTypeUserPreference, row)
-			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return errReviewNotFound
-				}
-				return err
-			}
-			if err := applyPersonalResourceReviewResult(ctx, tx, orm.ResourceUpdateResourceTypeUserPreference, row, resource, now, false, resourcechange.Source{
-				ChangeSource:  resourcechange.ChangeSourceReviewAccept,
-				SourceRefType: resourcechange.SourceRefTypeMemoryReview,
-				SourceRefID:   row.ID,
-				ChangedAt:     now,
-			}); err != nil {
-				return err
-			}
-		default:
-			return errReviewInvalid
-		}
-		row.ReviewStatus = reviewStatusAccepted
-		out = row
-		return nil
-	})
-	return out, err
-}
-
-func AcceptMemoryReviewResultByID(ctx context.Context, db *gorm.DB, userID, resultID string) (MemoryReviewResult, error) {
-	return acceptMemoryReviewResult(ctx, db, userID, resultID)
-}
-
-func rejectMemoryReviewResult(ctx context.Context, db *gorm.DB, userID, resultID string) (MemoryReviewResult, error) {
-	var out MemoryReviewResult
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		row, err := lockMemoryReviewResultForUser(ctx, tx, resultID, userID)
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(row.ReviewStatus) != reviewStatusPending {
-			return errReviewConflict
-		}
-		if err := updateMemoryReviewStatus(ctx, tx, row.ID, reviewStatusRejected); err != nil {
-			return err
-		}
-		row.ReviewStatus = reviewStatusRejected
-		out = row
-		return nil
-	})
-	return out, err
-}
-
-func RejectMemoryReviewResultByID(ctx context.Context, db *gorm.DB, userID, resultID string) (MemoryReviewResult, error) {
-	return rejectMemoryReviewResult(ctx, db, userID, resultID)
-}
-
 func LatestPendingSkillPatchReviewResult(ctx context.Context, db *gorm.DB, userID, skillName string) (SkillReviewResult, error) {
 	var rows []SkillReviewResult
 	err := skillResultSelect(db.WithContext(ctx)).
@@ -883,44 +671,6 @@ func LatestPendingSkillPatchReviewResult(ctx context.Context, db *gorm.DB, userI
 		}
 	}
 	return SkillReviewResult{}, errReviewNotFound
-}
-
-func LatestPendingMemoryReviewResult(ctx context.Context, db *gorm.DB, userID, target string) (MemoryReviewResult, error) {
-	var rows []MemoryReviewResult
-	target = normalizeReviewTarget(target)
-	err := memoryResultSelect(db.WithContext(ctx)).
-		Where("user_id = ? AND target = ? AND state = ? AND review_status = ?",
-			strings.TrimSpace(userID),
-			target,
-			memoryReviewStateSuccess,
-			reviewStatusPending,
-		).
-		Order("time DESC, id DESC").
-		Find(&rows).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return MemoryReviewResult{}, errReviewNotFound
-	}
-	if err != nil {
-		return MemoryReviewResult{}, err
-	}
-	for _, row := range rows {
-		var err error
-		switch target {
-		case orm.ResourceUpdateResourceTypeMemory:
-			_, err = mapMemoryReviewResultToPersonalResource(db.WithContext(ctx), orm.ResourceUpdateResourceTypeMemory, row)
-		case orm.ResourceUpdateResourceTypeUserPreference:
-			_, err = mapMemoryReviewResultToPersonalResource(db.WithContext(ctx), orm.ResourceUpdateResourceTypeUserPreference, row)
-		default:
-			return MemoryReviewResult{}, errReviewInvalid
-		}
-		if err == nil {
-			return row, nil
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return MemoryReviewResult{}, err
-		}
-	}
-	return MemoryReviewResult{}, errReviewNotFound
 }
 
 func ReplyReviewError(w http.ResponseWriter, err error, fallback string) {
@@ -1055,78 +805,6 @@ func (fs reviewSingleFileFS) ReadFile(context.Context, string) ([]byte, error) {
 	return []byte(fs.content), nil
 }
 
-func memoryResultToResponse(row MemoryReviewResult) memoryReviewResultResponse {
-	return memoryReviewResultResponse{
-		ID:             row.ID,
-		UserID:         row.UserID,
-		Target:         row.Target,
-		SessionID:      row.SessionID,
-		SourceContent:  row.SourceContent,
-		Content:        row.Content,
-		CurrentContent: "",
-		Diff:           "",
-		Operations:     row.Operations,
-		State:          row.State,
-		ReviewStatus:   row.ReviewStatus,
-		Time:           row.Time,
-	}
-}
-
-func memoryResultDetailResponse(ctx context.Context, db *gorm.DB, row MemoryReviewResult) (memoryReviewResultResponse, error) {
-	resp := memoryResultToResponse(row)
-	var currentContent string
-	switch normalizeReviewTarget(row.Target) {
-	case orm.ResourceUpdateResourceTypeMemory:
-		resource, err := mapMemoryReviewResultToPersonalResource(db.WithContext(ctx), orm.ResourceUpdateResourceTypeMemory, row)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return memoryReviewResultResponse{}, errReviewNotFound
-			}
-			return memoryReviewResultResponse{}, err
-		}
-		content, _, err := personalResourceHeadContent(ctx, db, resource)
-		if err != nil {
-			return memoryReviewResultResponse{}, err
-		}
-		currentContent = content
-	case orm.ResourceUpdateResourceTypeUserPreference:
-		resource, err := mapMemoryReviewResultToPersonalResource(db.WithContext(ctx), orm.ResourceUpdateResourceTypeUserPreference, row)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return memoryReviewResultResponse{}, errReviewNotFound
-			}
-			return memoryReviewResultResponse{}, err
-		}
-		content, _, err := personalResourceHeadContent(ctx, db, resource)
-		if err != nil {
-			return memoryReviewResultResponse{}, err
-		}
-		currentContent = content
-	default:
-		return memoryReviewResultResponse{}, errReviewInvalid
-	}
-	resp.CurrentContent = currentContent
-	diff, err := evolution.BuildContentDiff(currentContent, row.Content)
-	if err != nil {
-		return memoryReviewResultResponse{}, err
-	}
-	resp.Diff = diff
-	return resp, nil
-}
-
-func memoryReviewResultMapped(ctx context.Context, db *gorm.DB, row MemoryReviewResult) bool {
-	var err error
-	switch normalizeReviewTarget(row.Target) {
-	case orm.ResourceUpdateResourceTypeMemory:
-		_, err = mapMemoryReviewResultToPersonalResource(db.WithContext(ctx), orm.ResourceUpdateResourceTypeMemory, row)
-	case orm.ResourceUpdateResourceTypeUserPreference:
-		_, err = mapMemoryReviewResultToPersonalResource(db.WithContext(ctx), orm.ResourceUpdateResourceTypeUserPreference, row)
-	default:
-		return false
-	}
-	return err == nil
-}
-
 func lockSkillReviewResultForUser(ctx context.Context, tx *gorm.DB, id, userID string) (SkillReviewResult, error) {
 	var row SkillReviewResult
 	err := skillResultSelect(withUpdateLock(tx).WithContext(ctx)).
@@ -1138,34 +816,9 @@ func lockSkillReviewResultForUser(ctx context.Context, tx *gorm.DB, id, userID s
 	return row, err
 }
 
-func lockMemoryReviewResultForUser(ctx context.Context, tx *gorm.DB, id, userID string) (MemoryReviewResult, error) {
-	var row MemoryReviewResult
-	err := memoryResultSelect(withUpdateLock(tx).WithContext(ctx)).
-		Where("id = ? AND user_id = ?", strings.TrimSpace(id), strings.TrimSpace(userID)).
-		Take(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return MemoryReviewResult{}, errReviewNotFound
-	}
-	return row, err
-}
-
 func updateSkillReviewStatus(ctx context.Context, tx *gorm.DB, id, status string) error {
 	result := tx.WithContext(ctx).
 		Table("skill_review_results").
-		Where("id = ? AND review_status = ?", id, reviewStatusPending).
-		Update("review_status", status)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return errReviewConflict
-	}
-	return nil
-}
-
-func updateMemoryReviewStatus(ctx context.Context, tx *gorm.DB, id, status string) error {
-	result := tx.WithContext(ctx).
-		Table("memory_review").
 		Where("id = ? AND review_status = ?", id, reviewStatusPending).
 		Update("review_status", status)
 	if result.Error != nil {

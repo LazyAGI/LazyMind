@@ -13,7 +13,10 @@ import (
 	"time"
 )
 
-const windowsProcessScanTimeout = 10 * time.Second
+// CIM process enumeration can take longer while Windows Defender is scanning
+// a freshly extracted desktop runtime. Keep the scan bounded, but allow enough
+// time for slower supported Windows runner and user machines.
+const windowsProcessScanTimeout = 30 * time.Second
 const desktopOwnerPIDEnvVar = "LAZYMIND_DESKTOP_OWNER_PID"
 
 type windowsProcessInfo struct {
@@ -27,7 +30,7 @@ type windowsProcessInfo struct {
 // Windows inventory API and lets the orphan scanner match Python/Node children
 // whose executable itself lives outside the LazyMind runtime tree.
 func scanLocalRuntimeProcesses(paths RuntimePaths) ([]LocalProcessRecord, error) {
-	command := "$p=@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine); ConvertTo-Json -InputObject $p -Compress"
+	command := "$p=@(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,ExecutablePath,CommandLine); ConvertTo-Json -InputObject $p -Compress"
 	ctx, cancel := context.WithTimeout(context.Background(), windowsProcessScanTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command)

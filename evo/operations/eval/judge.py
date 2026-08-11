@@ -5,8 +5,9 @@ import math
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from json_repair import repair_json
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from evo.llm import LazyLLMClient, parse_json_object
 
 QualityLabel = Literal['good', 'partial', 'bad', 'infra_failure']
 FailureType = Literal[
@@ -98,17 +99,22 @@ def judge_answer(case: Mapping[str, Any], rag_answer: Mapping[str, Any], policy:
         return _failure(base, failure, f'{error.get("type")}: {reason}' if error.get('type') else reason)
 
     try:
-        from evo.llm import LazyLLMClient
-
         llm_config = policy.get('judge_llm_config') if isinstance(policy.get('judge_llm_config'), Mapping) else {}
         if not isinstance(llm_config.get('evo_llm'), Mapping):
             raise ValueError('eval.policy.judge_llm_config.evo_llm missing; eval must use core model-config injection')
         client = LazyLLMClient(llm_config=llm_config, model='evo_llm')
-        raw = str(client(_prompt(case, rag_answer, policy), stream=False))
-        repaired = repair_json(raw, return_objects=True)
-        if not isinstance(repaired, Mapping):
-            raise ValueError('judge did not return a JSON object')
-        scores = JudgeScores.model_validate(repaired)
+        prompt = _prompt(case, rag_answer, policy)
+        error: Exception | None = None
+        for structured_attempt in range(2):
+            try:
+                scores = JudgeScores.model_validate(parse_json_object(client(prompt, stream=False)))
+                break
+            except Exception as exc:
+                error = exc
+                if structured_attempt == 0:
+                    prompt += '\nThe previous response was invalid. Return exactly one complete JSON object.'
+        else:
+            raise ValueError(f'judge did not return valid scores: {error}') from error
     except Exception as exc:
         return judge_contract_error(case, rag_answer, policy, str(exc))
 

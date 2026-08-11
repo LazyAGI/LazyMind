@@ -20,18 +20,18 @@ import {
   CHAT_RESUME_STREAM_URL,
   CHAT_STREAM_URL,
   ChatServiceApi,
-  parseConversationPluginSettings,
-  type ConversationPluginSettings,
+  parseConversationWorkflowSettings,
+  type ConversationWorkflowSettings,
 } from "@/modules/chat/utils/request";
-import { draftStore, buildPluginSearchConfig, usePluginStore } from "@/modules/chat/store/pluginPanel";
+import { draftStore, buildWorkflowSearchConfig, useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { isDeveloperModeActive } from "@/utils/developerMode";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
-  PLUGIN_PANEL_EXPANDED_EVENT,
-  PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX,
+  WORKFLOW_PANEL_EXPANDED_EVENT,
+  WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX,
 } from "@/modules/chat/constants/chat";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
@@ -45,6 +45,25 @@ import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 // selector on every render, which (with useSyncExternalStore) would trigger an
 // infinite re-render loop (React error #185).
 const EMPTY_TASKS: SubAgentTask[] = [];
+const CONVERSATION_HISTORY_RETRY_DELAYS_MS = [0, 500, 1500];
+
+async function loadConversationHistory(conversationId: string) {
+  let lastError: unknown;
+  for (const delayMs of CONVERSATION_HISTORY_RETRY_DELAYS_MS) {
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    try {
+      return await ChatServiceApi()
+        .conversationServiceGetConversationHistory({
+          name: conversationId,
+        });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
 
 interface IChatLayoutProps {
   setIsChatContent: (isChatContent: boolean) => void;
@@ -55,10 +74,10 @@ interface IChatLayoutProps {
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   chatDisabledReason?: string;
-  chatDisabledDescription?: string;
+  chatDisabledDescription?: ReactNode;
   chatDisabledAction?: ReactNode;
-  /** Plugin settings selected on the welcome screen before the first message is sent. */
-  initPendingPluginSettings?: ConversationPluginSettings | null;
+  /** Workflow settings selected on the welcome screen before the first message is sent. */
+  initPendingWorkflowSettings?: ConversationWorkflowSettings | null;
 }
 
 const ChatLayout: FC<IChatLayoutProps> = (props) => {
@@ -74,60 +93,60 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     chatDisabledReason,
     chatDisabledDescription,
     chatDisabledAction,
-    initPendingPluginSettings,
+    initPendingWorkflowSettings,
   } = props;
   const [sessionId, setSessionId] = useState("");
   const [chatConfig, setChatConfig] = useState<ChatConfig>(
     initchatConfig || {},
   );
-  // Pending plugin settings from the chat config popover before a conversation is created.
-  // Initialised from the welcome-screen selection (initPendingPluginSettings) when provided.
-  const pendingPluginSettingsRef = useRef<ConversationPluginSettings | null>(
-    initPendingPluginSettings ?? null,
+  // Pending workflow settings from the chat config popover before a conversation is created.
+  // Initialised from the welcome-screen selection (initPendingWorkflowSettings) when provided.
+  const pendingWorkflowSettingsRef = useRef<ConversationWorkflowSettings | null>(
+    initPendingWorkflowSettings ?? null,
   );
-  // Plugin settings loaded from conversation detail (for existing conversations).
-  const [conversationPluginSettings, setConversationPluginSettings] = useState<ConversationPluginSettings | undefined>(undefined);
+  // Workflow settings loaded from conversation detail (for existing conversations).
+  const [conversationWorkflowSettings, setConversationWorkflowSettings] = useState<ConversationWorkflowSettings | undefined>(undefined);
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
   const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
-  const [pluginPanelExpanded, setPluginPanelExpanded] = useState(false);
+  const [workflowPanelExpanded, setWorkflowPanelExpanded] = useState(false);
   const [expandedRailTab, setExpandedRailTab] = useState<"chat" | "tasks">("chat");
 
   useEffect(() => {
     let restoredExpanded = false;
     try {
       restoredExpanded = localStorage.getItem(
-        `${PLUGIN_PANEL_EXPANDED_STORAGE_PREFIX}${sessionId}`,
+        `${WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX}${sessionId}`,
       ) === "true";
     } catch {
       // Keep the default compact layout when browser storage is unavailable.
     }
-    setPluginPanelExpanded(restoredExpanded);
+    setWorkflowPanelExpanded(restoredExpanded);
     if (restoredExpanded) setExpandedRailTab("chat");
 
     const handleExpandedChange = (event: Event) => {
       const detail = (event as CustomEvent<{ conversationId: string; expanded: boolean }>).detail;
       if (detail.conversationId === sessionId) {
-        setPluginPanelExpanded(detail.expanded);
+        setWorkflowPanelExpanded(detail.expanded);
         if (detail.expanded) setExpandedRailTab("chat");
       }
     };
-    window.addEventListener(PLUGIN_PANEL_EXPANDED_EVENT, handleExpandedChange);
-    return () => window.removeEventListener(PLUGIN_PANEL_EXPANDED_EVENT, handleExpandedChange);
+    window.addEventListener(WORKFLOW_PANEL_EXPANDED_EVENT, handleExpandedChange);
+    return () => window.removeEventListener(WORKFLOW_PANEL_EXPANDED_EVENT, handleExpandedChange);
   }, [sessionId]);
 
-  // Keep pendingPluginSettingsRef in sync with the welcome screen while no conversation is active.
+  // Keep pendingWorkflowSettingsRef in sync with the welcome screen while no conversation is active.
   useEffect(() => {
     if (!sessionId) {
-      pendingPluginSettingsRef.current = initPendingPluginSettings ?? null;
+      pendingWorkflowSettingsRef.current = initPendingWorkflowSettings ?? null;
     }
-  }, [initPendingPluginSettings, sessionId]);
+  }, [initPendingWorkflowSettings, sessionId]);
 
-  // Load persisted plugin settings once a real conversation id is available.
+  // Load persisted workflow settings once a real conversation id is available.
   useEffect(() => {
     if (!sessionId || sessionId.startsWith('temp_')) {
       if (!sessionId) {
-        setConversationPluginSettings(undefined);
+        setConversationWorkflowSettings(undefined);
       }
       return;
     }
@@ -138,8 +157,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         if (cancelled) {
           return;
         }
-        setConversationPluginSettings(
-          parseConversationPluginSettings(detailRes.data.conversation),
+        setConversationWorkflowSettings(
+          parseConversationWorkflowSettings(detailRes.data.conversation),
         );
       })
       .catch(() => {});
@@ -180,21 +199,21 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   const chatRef = useRef<ChatImperativeProps>(null);
 
-  const autoRunning = usePluginStore((s) =>
+  const autoRunning = useWorkflowStore((s) =>
     sessionId ? (s.autoRunningByConversation[sessionId] ?? false) : false,
   );
-  const hasPluginSession = usePluginStore((s) =>
+  const hasWorkflowSession = useWorkflowStore((s) =>
     sessionId ? (s.sessionByConversation[sessionId] ?? null) !== null : false,
   );
-  const pluginDefinitionChanged = usePluginStore((s) =>
+  const workflowDefinitionChanged = useWorkflowStore((s) =>
     sessionId
       ? s.sessionByConversation[sessionId]?.runtime_error_code ===
-        "PLUGIN_DEFINITION_CHANGED"
+        "WORKFLOW_DEFINITION_CHANGED"
       : false,
   );
-  const chatEnabled = canChat && !pluginDefinitionChanged;
+  const chatEnabled = canChat && !workflowDefinitionChanged;
 
-  // When the user changes KB selection during an active plugin session, persist it on the
+  // When the user changes KB selection during an active workflow session, persist it on the
   // conversation so analyze_subject KB prefetch inherits filters.kb_id.
   const kbSyncInitializedRef = useRef(false);
   useEffect(() => {
@@ -208,15 +227,15 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       kbSyncInitializedRef.current = true;
       return;
     }
-    const session = usePluginStore.getState().sessionByConversation[sessionId];
+    const session = useWorkflowStore.getState().sessionByConversation[sessionId];
     if (!session?.session_id) {
       return;
     }
     if (session.status !== 'active' && session.status !== 'waiting') {
       return;
     }
-    const searchConfig = buildPluginSearchConfig(chatConfig);
-    void usePluginStore.getState().syncSessionSearchConfig(
+    const searchConfig = buildWorkflowSearchConfig(chatConfig);
+    void useWorkflowStore.getState().syncSessionSearchConfig(
       sessionId,
       session.session_id,
       searchConfig,
@@ -272,15 +291,15 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     }
   }, [tasks.length]);
 
-  // Also auto-expand when a plugin session first appears (even with no tasks yet).
-  const prevHasPluginSessionRef = useRef(false);
+  // Also auto-expand when a workflow session first appears (even with no tasks yet).
+  const prevHasWorkflowSessionRef = useRef(false);
   useEffect(() => {
-    const prev = prevHasPluginSessionRef.current;
-    prevHasPluginSessionRef.current = hasPluginSession;
-    if (!prev && hasPluginSession && isDeveloperModeActive()) {
+    const prev = prevHasWorkflowSessionRef.current;
+    prevHasWorkflowSessionRef.current = hasWorkflowSession;
+    if (!prev && hasWorkflowSession && isDeveloperModeActive()) {
       setIsTaskPanelCollapsed(false);
     }
-  }, [hasPluginSession]);
+  }, [hasWorkflowSession]);
 
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
@@ -291,7 +310,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   }, [initchatConfig]);
 
   useEffect(() => {
-    if (pendingMessage) {
+    if (pendingMessage && chatEnabled) {
       const timer = setTimeout(() => {
         chatRef.current?.sendMessage(pendingMessage);
         clearPendingMessage();
@@ -300,7 +319,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       return () => clearTimeout(timer);
     }
     return undefined;
-  }, [pendingMessage, clearPendingMessage]);
+  }, [pendingMessage, chatEnabled, clearPendingMessage]);
 
   useEffect(() => {
     const conversationId = sessionStorage.getItem(CHAT_RESUME_CONVERSATION_KEY);
@@ -342,16 +361,12 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             conversation: resolvedId,
           })
           .then((detailRes) =>
-            ChatServiceApi()
-              .conversationServiceGetConversationHistory({
-                name: resolvedId,
-              })
-              .then((historyRes) => ({
-                detailRes,
-                historyRes,
-                resolvedId,
-                isGenerating,
-              })),
+            loadConversationHistory(resolvedId).then((historyRes) => ({
+              detailRes,
+              historyRes,
+              resolvedId,
+              isGenerating,
+            })),
           );
       })
       .then(({ detailRes, historyRes, resolvedId, isGenerating }) => {
@@ -382,8 +397,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setIsRestoringConversation(false);
       })
       .catch(() => {
-        sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
         setIsRestoringConversation(false);
+        setIsChatContent(false);
+        message.error(localizeErrorCode("2000509"));
       });
   }, []);
 
@@ -394,10 +410,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     extras?: Record<string, unknown>,
   ) {
     // Flush any pending slot drafts before sending so the AI sees the latest content.
-    // Draft keys use the plugin session_id (not the conversation_id), so pass the
-    // plugin session_id when one is active; fall back to conversationId otherwise.
-    const activePluginSession = usePluginStore.getState().sessionByConversation[sessionId];
-    const draftSessionId = activePluginSession?.session_id ?? sessionId;
+    // Draft keys use the workflow session_id (not the conversation_id), so pass the
+    // workflow session_id when one is active; fall back to conversationId otherwise.
+    const activeWorkflowSession = useWorkflowStore.getState().sessionByConversation[sessionId];
+    const draftSessionId = activeWorkflowSession?.session_id ?? sessionId;
     await draftStore.flushAllDrafts(draftSessionId);
 
     const hasUploadedFiles = input?.some(
@@ -408,24 +424,26 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         ? []
         : chatConfig.knowledgeBaseId.map((k) => ({ id: k }));
 
-    // Attach active plugin session context so Go/Python can inject advance_step
+    // Attach active workflow session context so Go/Python can inject advance_step
     // instead of cold-start trigger tools on follow-up messages.
-    const activeSession = usePluginStore.getState().sessionByConversation[sessionId];
-    const pluginContext =
-      activeSession?.status === "active" || activeSession?.status === "waiting"
+    const activeSession = useWorkflowStore.getState().sessionByConversation[sessionId];
+    const workflowContext =
+      activeSession?.status === "active" ||
+      activeSession?.status === "waiting" ||
+      activeSession?.status === "failed"
         ? {
             session_id: activeSession.session_id,
-            plugin_id: activeSession.plugin_id,
+            workflow_id: activeSession.workflow_id,
             current_step: activeSession.current_step_id,
           }
         : undefined;
 
     // Attach focused_tab and focused_sort_order so the AI knows what the user is looking at.
     const { focusedTabByConversation, focusedSortOrderByConversation } =
-      usePluginStore.getState();
+      useWorkflowStore.getState();
     const focusedTab = focusedTabByConversation[sessionId];
     const focusedSortOrder = focusedSortOrderByConversation[sessionId];
-    const pluginUIState =
+    const workflowUIState =
       focusedTab || focusedSortOrder !== undefined
         ? {
             focused_tab: focusedTab,
@@ -471,25 +489,28 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         environment_context: buildEnvironmentContext(
           i18n.resolvedLanguage || i18n.language,
         ),
-        ...(pluginContext ? { plugin_context: pluginContext } : {}),
-        ...(pluginUIState ? { plugin_ui_state: pluginUIState } : {}),
+        ...(workflowContext ? { workflow_context: workflowContext } : {}),
+        ...(workflowUIState ? { workflow_ui_state: workflowUIState } : {}),
         ...(artifactRefs.length > 0 ? { artifact_refs: artifactRefs } : {}),
         ...(extras?.run_in_background ? { run_in_background: true } : {}),
         ...(Array.isArray(extras?.mentions) && extras.mentions.length > 0
           ? { mentions: extras.mentions }
           : {}),
-        // If the user changed plugin settings before a conversation was created,
+        ...(Array.isArray(extras?.cite_history_ids) && extras.cite_history_ids.length > 0
+          ? { cite_history_ids: extras.cite_history_ids }
+          : {}),
+        // If the user changed workflow settings before a conversation was created,
         // carry them in the first request so Go can persist them on ensureConversation.
         // Only send the three known fields to avoid polluting the payload with API response leftovers.
         ...(() => {
-          const pending = pendingPluginSettingsRef.current;
+          const pending = pendingWorkflowSettingsRef.current;
           if (!sessionId && pending) {
-            pendingPluginSettingsRef.current = null;
+            pendingWorkflowSettingsRef.current = null;
             const clean: Record<string, unknown> = {};
-            if (pending.enable_plugin != null) clean.enable_plugin = pending.enable_plugin;
+            if (pending.enable_workflow != null) clean.enable_workflow = pending.enable_workflow;
             if (pending.enable_subagent != null) clean.enable_subagent = pending.enable_subagent;
-            if (pending.plugin_mode != null) clean.plugin_mode = pending.plugin_mode;
-            return { initial_plugin_settings: clean };
+            if (pending.workflow_mode != null) clean.workflow_mode = pending.workflow_mode;
+            return { initial_workflow_settings: clean };
           }
           return {};
         })(),
@@ -543,16 +564,12 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             conversation: resolvedId,
           })
           .then((detailRes) =>
-            ChatServiceApi()
-              .conversationServiceGetConversationHistory({
-                name: resolvedId,
-              })
-              .then((historyRes) => ({
-                detailRes,
-                historyRes,
-                resolvedId,
-                isGenerating,
-              })),
+            loadConversationHistory(resolvedId).then((historyRes) => ({
+              detailRes,
+              historyRes,
+              resolvedId,
+              isGenerating,
+            })),
           ),
       )
       .then(({ detailRes, historyRes, resolvedId, isGenerating }) => {
@@ -569,8 +586,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setChatConfigFn(tempData);
         setKnowledgeRefreshKey((key) => key + 1);
 
-        setConversationPluginSettings(
-          parseConversationPluginSettings(conversation),
+        setConversationWorkflowSettings(
+          parseConversationWorkflowSettings(conversation),
         );
 
         setConversationId(resolvedId);
@@ -585,10 +602,14 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           chatRef.current?.openResumeSSE?.(resolvedId);
         }
       })
+      .catch(() => {
+        setIsChatContent(false);
+        message.error(localizeErrorCode("2000509"));
+      })
       .finally(() => {
         setIsRestoringConversation(false);
       });
-  }, [setConversationId, setChatConfigFn]);
+  }, [setConversationId, setChatConfigFn, setIsChatContent]);
 
   useEffect(() => {
     const handleConversationSelect = (event: Event) => {
@@ -606,7 +627,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           });
         }
         setIsRestoringConversation(false);
-        setConversationPluginSettings(undefined);
+        setConversationWorkflowSettings(undefined);
         setChatConfig({});
         setChatConfigFn({});
         chatRef.current?.createNewChat();
@@ -655,7 +676,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     if (!canChat) {
       return;
     }
-    // Ignore internal DOM drag-and-drop (e.g. plugin panel card sorting).
+    // Ignore internal DOM drag-and-drop (e.g. workflow panel card sorting).
     if (!Array.from(e.dataTransfer.types).includes('Files')) {
       return;
     }
@@ -708,9 +729,12 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     (chatRef.current as any)?.uploadFiles?.(files);
   };
 
+  const isTaskPanelRestoreVisible =
+    !workflowPanelExpanded && tasks.length > 0 && isTaskPanelCollapsed;
+
   return (
     <div
-      className={`detail-container${pluginPanelExpanded ? " detail-container--plugin-expanded" : ""}`}
+      className={`detail-container${workflowPanelExpanded ? " detail-container--workflow-expanded" : ""}`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -726,13 +750,13 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           </div>
         </div>
       )}
-      {pluginPanelExpanded && (
+      {workflowPanelExpanded && (
         <div className="expanded-rail-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={expandedRailTab === "chat"} className={expandedRailTab === "chat" ? "active" : ""} onClick={() => setExpandedRailTab("chat")}>{t("chat.pluginRailConversation")}</button>
+          <button type="button" role="tab" aria-selected={expandedRailTab === "chat"} className={expandedRailTab === "chat" ? "active" : ""} onClick={() => setExpandedRailTab("chat")}>{t("chat.workflowRailConversation")}</button>
           <button type="button" role="tab" aria-selected={expandedRailTab === "tasks"} className={expandedRailTab === "tasks" ? "active" : ""} onClick={() => setExpandedRailTab("tasks")}>{t("taskCenter.panelTitle")} {tasks.length > 0 && <span>{tasks.length}</span>}</button>
         </div>
       )}
-      <div className={`chat-conversation-pane${pluginPanelExpanded && expandedRailTab !== "chat" ? " chat-conversation-pane--hidden" : ""}`}>
+      <div className={`chat-conversation-pane${workflowPanelExpanded && expandedRailTab !== "chat" ? " chat-conversation-pane--hidden" : ""}${isTaskPanelRestoreVisible ? " chat-conversation-pane--task-restore-visible" : ""}`}>
       <ChatContainerComponent
         ref={chatRef}
         canChat={chatEnabled}
@@ -747,35 +771,35 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         chatConfig={chatConfig}
         setChatConfig={setChatConfig}
         setChatConfigFn={setChatConfigFn}
-        onPluginSettingsChange={(settings) => {
+        onWorkflowSettingsChange={(settings) => {
           if (!sessionId) {
-            pendingPluginSettingsRef.current = settings;
+            pendingWorkflowSettingsRef.current = settings;
           } else {
-            setConversationPluginSettings(settings);
+            setConversationWorkflowSettings(settings);
           }
         }}
-        initialPluginSettings={conversationPluginSettings}
-        hasPluginSession={hasPluginSession}
+        initialWorkflowSettings={conversationWorkflowSettings}
+        hasWorkflowSession={hasWorkflowSession}
         knowledgeRefreshKey={knowledgeRefreshKey}
         embeddingReady={embeddingReady}
         multimodalEmbeddingReady={multimodalEmbeddingReady}
         rerankReady={rerankReady}
         disabledReason={
-          pluginDefinitionChanged
-            ? t("chat.pluginDefinitionChanged")
+          workflowDefinitionChanged
+            ? t("chat.workflowDefinitionChanged")
             : autoRunning
               ? t("chat.autoAdvanceRunning")
               : chatDisabledReason
         }
         disabledDescription={
-          autoRunning || pluginDefinitionChanged ? undefined : chatDisabledDescription
+          autoRunning || workflowDefinitionChanged ? undefined : chatDisabledDescription
         }
         disabledAction={
-          autoRunning || pluginDefinitionChanged ? undefined : chatDisabledAction
+          autoRunning || workflowDefinitionChanged ? undefined : chatDisabledAction
         }
       />
       </div>
-      {!pluginPanelExpanded && tasks.length > 0 && isTaskPanelCollapsed && (
+      {isTaskPanelRestoreVisible && (
         <button
           type="button"
           className="task-panel-restore-btn"
@@ -786,17 +810,17 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           <span className="task-panel-restore-label">{t("taskCenter.panelTitle")} ({tasks.length})</span>
         </button>
       )}
-      {((tasks.length > 0 && !pluginPanelExpanded && !isTaskPanelCollapsed) || pluginPanelExpanded) && (
+      {((tasks.length > 0 && !workflowPanelExpanded && !isTaskPanelCollapsed) || workflowPanelExpanded) && (
         <div
-          className={`right-box${pluginPanelExpanded ? " right-box--expanded-tab" : ""}${pluginPanelExpanded && expandedRailTab !== "tasks" ? " right-box--tab-hidden" : ""}`}
-          style={!pluginPanelExpanded && panelWidth ? { width: panelWidth, minWidth: panelWidth } : undefined}
-          aria-hidden={pluginPanelExpanded && expandedRailTab !== "tasks"}
+          className={`right-box${workflowPanelExpanded ? " right-box--expanded-tab" : ""}${workflowPanelExpanded && expandedRailTab !== "tasks" ? " right-box--tab-hidden" : ""}`}
+          style={!workflowPanelExpanded && panelWidth ? { width: panelWidth, minWidth: panelWidth } : undefined}
+          aria-hidden={workflowPanelExpanded && expandedRailTab !== "tasks"}
         >
           <div className="right-box-resize-handle" onMouseDown={onPanelResizeStart} />
           <TaskCenter
             sessionId={sessionId}
-            onClose={pluginPanelExpanded ? undefined : () => setIsTaskPanelCollapsed(true)}
-            showHeader={!pluginPanelExpanded}
+            onClose={workflowPanelExpanded ? undefined : () => setIsTaskPanelCollapsed(true)}
+            showHeader={!workflowPanelExpanded}
           />
         </div>
       )}

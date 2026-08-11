@@ -48,8 +48,6 @@ class ChatRuntimeOptions(BaseModel):
 
 class ChatPersonalizationOptions(BaseModel):
     use_memory: Optional[bool] = True
-    memory: Optional[str] = None
-    user_preference: Optional[str] = None
 
 
 class ChatAgentOptions(BaseModel):
@@ -59,18 +57,19 @@ class ChatAgentOptions(BaseModel):
     enable_subagent: Optional[bool] = None
 
 
-class ChatPluginOptions(BaseModel):
-    enable_plugin: Optional[bool] = None
-    plugin_context: Optional[Dict[str, Any]] = None
+class ChatWorkflowOptions(BaseModel):
+    enable_workflow: Optional[bool] = None
+    workflow_context: Optional[Dict[str, Any]] = None
     catalog: List[Dict[str, Any]] = Field(default_factory=list)
-    disabled_builtin_plugins: List[str] = Field(default_factory=list)
-    allowed_plugin_refs: List[str] = Field(default_factory=list)
+    disabled_builtin_workflows: List[str] = Field(default_factory=list)
+    allowed_workflow_refs: List[str] = Field(default_factory=list)
+    activations: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ExplicitResourceBindingsOptions(BaseModel):
     skill_names: List[str] = Field(default_factory=list)
     knowledge_base_ids: List[str] = Field(default_factory=list)
-    plugin_refs: List[str] = Field(default_factory=list)
+    workflow_refs: List[str] = Field(default_factory=list)
     mentions: List[Dict[str, str]] = Field(default_factory=list)
 
 
@@ -81,7 +80,7 @@ class ChatRequest(BaseModel):
     runtime: ChatRuntimeOptions = Field(default_factory=ChatRuntimeOptions)
     personalization: ChatPersonalizationOptions = Field(default_factory=ChatPersonalizationOptions)
     agent: ChatAgentOptions = Field(default_factory=ChatAgentOptions)
-    plugin: ChatPluginOptions = Field(default_factory=ChatPluginOptions)
+    workflow: ChatWorkflowOptions = Field(default_factory=ChatWorkflowOptions)
     explicit_resource_bindings: ExplicitResourceBindingsOptions = Field(
         default_factory=ExplicitResourceBindingsOptions,
     )

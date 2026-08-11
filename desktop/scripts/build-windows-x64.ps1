@@ -52,8 +52,8 @@ function New-WindowsInstallerFileName {
         throw 'Could not resolve the Git commit for the Windows Desktop installer name.'
     }
     $package = Get-Content -LiteralPath (Join-Path $electronRoot 'package.json') -Raw | ConvertFrom-Json
-    if ([string]$package.version -notmatch '^\d+\.\d+\.\d+$') {
-        throw 'Windows installer package version must use MAJOR.MINOR.PATCH.'
+    if ([string]$package.version -notmatch '^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$') {
+        throw 'Windows installer package version must use SemVer (including alpha.N, beta.N, or rc.N).'
     }
     $timestamp = (Get-Date).ToString('yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture)
     return "LazyMind-windows-x64-installer-$($package.version)-$timestamp-$commit.exe"
@@ -94,6 +94,12 @@ function Initialize-Environment {
     $env:LAZYMIND_DESKTOP_OUTPUT_DIR = $distRoot
     $env:LAZYMIND_DESKTOP_WINDOWS_ICON = Join-Path $targetRoot 'LazyMind.ico'
     $env:LAZYMIND_DESKTOP_INSTALLER_RESOURCES = $installerResourcesRoot
+    if (-not $env:ELECTRON_CACHE) {
+        $env:ELECTRON_CACHE = Join-Path $repoRoot 'desktop\cache\electron'
+    }
+    if (-not $env:ELECTRON_BUILDER_CACHE) {
+        $env:ELECTRON_BUILDER_CACHE = Join-Path $repoRoot 'desktop\cache\electron-builder'
+    }
 }
 
 function Assert-Command([string]$Name, [string]$Hint) {
@@ -126,13 +132,56 @@ function Invoke-Native([string]$Command, [string[]]$Arguments, [string]$WorkingD
     }
 }
 
+function Invoke-NativeWithRetry(
+    [string]$Operation,
+    [string]$Command,
+    [string[]]$Arguments,
+    [string]$WorkingDirectory = $repoRoot,
+    [int]$MaximumAttempts = 3
+) {
+    for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
+        try {
+            Invoke-Native $Command $Arguments $WorkingDirectory
+            return
+        } catch {
+            if ($attempt -eq $MaximumAttempts) {
+                throw
+            }
+            $delaySeconds = 5 * $attempt
+            Write-Warning "$Operation attempt $attempt/$MaximumAttempts failed: $($_.Exception.Message)"
+            Write-Host "Retrying $Operation in $delaySeconds seconds."
+            Start-Sleep -Seconds $delaySeconds
+        }
+    }
+}
+
+function Invoke-WindowsPackagingWithRetry([string]$PackageScript) {
+    $maximumAttempts = 3
+    for ($attempt = 1; $attempt -le $maximumAttempts; $attempt++) {
+        try {
+            Invoke-Native 'pnpm.cmd' @('run', $PackageScript) $electronRoot
+            return
+        } catch {
+            if ($attempt -eq $maximumAttempts) {
+                throw
+            }
+            $delaySeconds = 10 * $attempt
+            Write-Warning "Windows packaging attempt $attempt/$maximumAttempts failed: $($_.Exception.Message)"
+            Write-Host "Retrying Windows packaging in $delaySeconds seconds; completed Electron and builder downloads remain cached."
+            Remove-GeneratedPath (Join-Path $distRoot 'win-unpacked')
+            Remove-GeneratedPath (Join-Path $distRoot 'LazyMind-windows-x64-installer.exe')
+            Start-Sleep -Seconds $delaySeconds
+        }
+    }
+}
+
 function Build-GoBinary([string]$Directory, [string]$Output, [string[]]$Package = @('.'), [switch]$WindowsGUI) {
     New-Item -ItemType Directory -Force -Path (Split-Path $Output) | Out-Null
     $buildArgs = $goBuildArgs
     if ($WindowsGUI) {
         $buildArgs = @('-trimpath', '-buildvcs=false', '-ldflags=-s -w -H=windowsgui')
     }
-    Invoke-Native 'go.exe' (@('build') + $buildArgs + @('-o', $Output) + $Package) $Directory
+    Invoke-NativeWithRetry 'Go module download/build' 'go.exe' (@('build') + $buildArgs + @('-o', $Output) + $Package) $Directory
 }
 
 function Assert-WindowsGUISubsystem([string]$Path) {
@@ -151,7 +200,7 @@ function Assert-WindowsGUISubsystem([string]$Path) {
 
 function Install-GoTool([string]$Package) {
     $env:GOBIN = Join-Path $runtimeRoot 'bin'
-    Invoke-Native 'go.exe' (@('install', '-trimpath', '-ldflags=-s -w', $Package))
+    Invoke-NativeWithRetry "Go tool install ($Package)" 'go.exe' (@('install', '-trimpath', '-ldflags=-s -w', $Package))
 }
 
 function Prune-PythonTree([string]$Root) {
@@ -197,11 +246,12 @@ function Copy-RuntimeApp {
         (Join-Path $repoRoot 'frontend\src'),
         (Join-Path $repoRoot 'frontend\public'),
         (Join-Path $repoRoot 'frontend\scripts'),
-        (Join-Path $repoRoot 'algorithm\lazyllm\docs'),
         (Join-Path $repoRoot '.codex-gocache'),
         (Join-Path $repoRoot '.codex-gomodcache'),
         (Join-Path $repoRoot '.pnpm-store')
     )
+    $releaseBuild = $env:LAZYMIND_RELEASE_BUILD -eq 'true'
+    if ($releaseBuild) { $excludedDirs += (Join-Path $repoRoot 'algorithm\lazyllm') }
     & robocopy.exe $repoRoot $appRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD @excludedDirs /XF '*.pyc' '*.pyo' '.DS_Store' '.env' 'config.env' 'config.win.env'
     if ($LASTEXITCODE -gt 7) { throw "robocopy runtime app staging failed with code $LASTEXITCODE" }
     $coreDevBinary = Join-Path $appRoot 'backend\core\core.exe'
@@ -209,8 +259,8 @@ function Copy-RuntimeApp {
     if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'frontend\dist\index.html') -PathType Leaf)) {
         throw 'Desktop frontend dist is missing from staged runtime app.'
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
-        throw 'Bundled LazyLLM source is missing from staged runtime app.'
+    if (-not $releaseBuild -and -not (Test-Path -LiteralPath (Join-Path $appRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
+        throw 'Bundled LazyLLM source is missing from local desktop runtime app.'
     }
 }
 
@@ -222,19 +272,31 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
 
     Write-Host '==> Staging runtime application files'
     Copy-RuntimeApp
-    Invoke-Native 'node.exe' @((Join-Path $repoRoot 'desktop\scripts\write-runtime-manifest.mjs'), $runtimeRoot, '--platform', 'windows', '--arch', 'amd64')
+    $trustedLocalMode = if ($env:LAZYMIND_TRUSTED_LOCAL_MODE -eq 'true') { 'true' } else { 'false' }
+    if ($trustedLocalMode -eq 'true') {
+        Write-Host '==> Trusted local mode enabled for this desktop package'
+    }
+    Invoke-Native 'node.exe' @(
+        (Join-Path $repoRoot 'desktop\scripts\write-runtime-manifest.mjs'),
+        $runtimeRoot,
+        '--platform', 'windows',
+        '--arch', 'amd64',
+        '--trusted-local-mode', $trustedLocalMode
+    )
     $reparse = @(Get-ChildItem -LiteralPath $runtimeRoot -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
     if ($reparse.Count -gt 0) {
         throw "Desktop runtime contains non-portable reparse points; first path: $($reparse[0].FullName)"
     }
 
     Write-Host '==> Packaging Electron Windows x64 application'
+    New-Item -ItemType Directory -Force -Path $env:ELECTRON_CACHE | Out-Null
+    New-Item -ItemType Directory -Force -Path $env:ELECTRON_BUILDER_CACHE | Out-Null
     Invoke-Native 'node.exe' @(
         (Join-Path $repoRoot 'desktop\scripts\generate-windows-icon.mjs'),
         (Join-Path $electronRoot 'assets\LazyMind.icns'),
         $env:LAZYMIND_DESKTOP_WINDOWS_ICON
     )
-    Invoke-Native 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') $electronRoot
+    Invoke-NativeWithRetry 'Electron dependency install' 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') $electronRoot
     Remove-GeneratedPath (Join-Path $distRoot 'win-unpacked')
     Remove-GeneratedPath (Join-Path $distRoot 'LazyMind-win-x64.zip')
     Remove-GeneratedPath (Join-Path $distRoot 'LazyMind-windows-x64.zip')
@@ -242,8 +304,22 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
     if ($PackageKind -eq 'installer') {
         Remove-GeneratedPath $installerResourcesRoot
         New-Item -ItemType Directory -Force -Path $installerResourcesRoot | Out-Null
+        $longestRuntimeRelativePath = Get-ChildItem -LiteralPath $runtimeRoot -Recurse -File |
+            ForEach-Object { "resources\runtime\$($_.FullName.Substring($runtimeRoot.Length).TrimStart('\'))" } |
+            Sort-Object Length -Descending |
+            Select-Object -First 1
+        if (-not $longestRuntimeRelativePath) {
+            throw 'Cannot calculate the longest packaged runtime path.'
+        }
+        $installerMetadata = @(
+            "; Generated by build-windows-x64.ps1."
+            "!define LAZYMIND_MAX_RELATIVE_PATH_LENGTH $($longestRuntimeRelativePath.Length)"
+            '!define LAZYMIND_MIN_FREE_SPACE_MB 4096'
+            ''
+        ) -join "`r`n"
+        Set-Content -LiteralPath (Join-Path $installerResourcesRoot 'lazymind-installer-metadata.nsh') -Value $installerMetadata -NoNewline
         Build-GoBinary (Join-Path $repoRoot 'local\local-runtime-manager') (Join-Path $installerResourcesRoot 'lazymind-installer-maintenance.exe') @('.\cmd\installer-maintenance')
-        Invoke-Native 'pnpm.cmd' @('run', 'pack:win:x64:installer') $electronRoot
+        Invoke-WindowsPackagingWithRetry 'pack:win:x64:installer'
         $builderInstaller = Join-Path $distRoot 'LazyMind-windows-x64-installer.exe'
         $finalInstaller = Join-Path $distRoot (New-WindowsInstallerFileName)
         if (-not (Test-Path -LiteralPath $builderInstaller -PathType Leaf)) {
@@ -253,7 +329,7 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
         Write-Host "Windows installer: $finalInstaller"
         return
     }
-    Invoke-Native 'pnpm.cmd' @('run', 'pack:win:x64') $electronRoot
+    Invoke-WindowsPackagingWithRetry 'pack:win:x64'
     $builderZip = Join-Path $distRoot 'LazyMind-win-x64.zip'
     $finalZip = Join-Path $distRoot $finalZipName
     if (-not (Test-Path -LiteralPath (Join-Path $distRoot 'win-unpacked\LazyMind.exe') -PathType Leaf)) {
@@ -287,30 +363,36 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
 
     Write-Host '==> Building frontend desktop dist'
     $env:VITE_LAZYMIND_MODE = 'desktop'
-    Invoke-Native 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') (Join-Path $repoRoot 'frontend')
+    Invoke-NativeWithRetry 'Frontend dependency install' 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') (Join-Path $repoRoot 'frontend')
     Invoke-Native 'pnpm.cmd' @('build') (Join-Path $repoRoot 'frontend')
 
-    Write-Host '==> Ensuring LazyLLM submodule source'
-    if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
-        Invoke-Native 'git.exe' @('submodule', 'update', '--init', 'algorithm/lazyllm')
+    if ($env:LAZYMIND_RELEASE_BUILD -ne 'true' -and -not (Test-Path -LiteralPath (Join-Path $repoRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
+        Write-Host '==> Ensuring LazyLLM submodule source'
+        Invoke-NativeWithRetry 'LazyLLM submodule checkout' 'git.exe' @('submodule', 'update', '--init', 'algorithm/lazyllm')
     }
 
     Write-Host '==> Preparing bundled Python runtime and venvs'
-    Invoke-Native 'uv.exe' @('python', 'install', '--install-dir', (Join-Path $runtimeRoot 'runtimes\python'), $pythonVersion)
+    Invoke-NativeWithRetry 'Python runtime download' 'uv.exe' @('python', 'install', '--install-dir', (Join-Path $runtimeRoot 'runtimes\python'), $pythonVersion)
     $python = (& uv.exe python find --managed-python --no-python-downloads --resolve-links $pythonVersion).Trim()
     if ($LASTEXITCODE -ne 0) { throw "uv python find exited with code $LASTEXITCODE" }
     if (-not $python) { throw 'uv python find returned an empty path' }
     $authVenv = Join-Path $runtimeRoot 'deps\python\auth-service'
+    $channelGatewayVenv = Join-Path $runtimeRoot 'deps\python\channel-gateway'
     $algorithmVenv = Join-Path $runtimeRoot 'deps\python\algorithm'
     Invoke-Native 'uv.exe' @('venv', '--managed-python', '--no-python-downloads', '--relocatable', '--seed', '--link-mode', 'copy', '--python', $python, $authVenv)
     $authPython = Join-Path $authVenv 'Scripts\python.exe'
-    Invoke-Native 'uv.exe' @('pip', 'install', '--python', $authPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'backend\auth-service\requirements.txt'))
+    Invoke-NativeWithRetry 'Auth service Python dependencies' 'uv.exe' @('pip', 'install', '--python', $authPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'backend\auth-service\requirements.txt'))
+    Invoke-Native 'uv.exe' @('venv', '--managed-python', '--no-python-downloads', '--relocatable', '--seed', '--link-mode', 'copy', '--python', $python, $channelGatewayVenv)
+    $channelGatewayPython = Join-Path $channelGatewayVenv 'Scripts\python.exe'
+    Invoke-NativeWithRetry 'Channel gateway Python dependencies' 'uv.exe' @('pip', 'install', '--python', $channelGatewayPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'backend\channel-gateway\requirements.txt'))
     Invoke-Native 'uv.exe' @('venv', '--managed-python', '--no-python-downloads', '--relocatable', '--seed', '--link-mode', 'copy', '--python', $python, $algorithmVenv)
     $algorithmPython = Join-Path $algorithmVenv 'Scripts\python.exe'
-    Invoke-Native 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', 'setuptools<81', 'lazyllm')
-    Invoke-Native (Join-Path $algorithmVenv 'Scripts\lazyllm.exe') @('install', 'rag')
-    Invoke-Native 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'algorithm\requirements.txt'))
-    Invoke-Native 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'algorithm\requirements-local.txt'))
+    $lazyLLMVersion = if ($env:LAZYMIND_LAZYLLM_VERSION) { $env:LAZYMIND_LAZYLLM_VERSION } else { '1.2.2' }
+    Invoke-NativeWithRetry 'LazyLLM package install' 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', 'setuptools<81', "lazyllm==$lazyLLMVersion")
+    Invoke-Native $algorithmPython @('-c', "import importlib.metadata as m; assert m.version('lazyllm') == '$lazyLLMVersion'")
+    Invoke-NativeWithRetry 'LazyLLM RAG dependencies' (Join-Path $algorithmVenv 'Scripts\lazyllm.exe') @('install', 'rag')
+    Invoke-NativeWithRetry 'Algorithm Python dependencies' 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'algorithm\requirements.txt'))
+    Invoke-NativeWithRetry 'Algorithm local Python dependencies' 'uv.exe' @('pip', 'install', '--python', $algorithmPython, '--link-mode', 'copy', '--strict', '-r', (Join-Path $repoRoot 'algorithm\requirements-local.txt'))
     Finalize-Desktop $PackageKind
 }
 

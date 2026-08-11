@@ -10,9 +10,10 @@ from uuid import UUID
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.sql import bindparam
 
 from lazymind.chat.service.component.history import normalize_history_for_agent
-from lazymind.common.postgres import normalize_postgres_sqlalchemy_url
+from lazymind.common.database.postgres import normalize_postgres_sqlalchemy_url
 from lazymind.review.skill_review.schemas import SkillReviewRunStat
 from lazymind.config import config as _cfg
 
@@ -34,19 +35,19 @@ def read_session(
         return []
     normalized_user_ids = [str(item).strip() for item in (user_ids or []) if str(item).strip()]
 
-    params: dict[str, Any] = {'session_ids': normalized_session_ids}
+    params: dict[str, Any] = {'session_ids': tuple(normalized_session_ids)}
 
     user_filter = ''
     if normalized_user_ids:
-        user_filter = 'AND c.create_user_id = ANY(:user_ids)'
-        params['user_ids'] = normalized_user_ids
+        user_filter = 'AND c.create_user_id IN :user_ids'
+        params['user_ids'] = tuple(normalized_user_ids)
 
     query = text(
         f"""
         WITH selected_sessions AS (
             SELECT c.id AS conversation_id, c.create_user_id
             FROM conversations c
-            WHERE c.id = ANY(:session_ids)
+            WHERE c.id IN :session_ids
               {user_filter}
         )
         SELECT ch.*, ss.create_user_id
@@ -54,7 +55,9 @@ def read_session(
         JOIN selected_sessions ss ON ch.conversation_id = ss.conversation_id
         ORDER BY ch.conversation_id ASC, ch.create_time ASC
         """
-    )
+    ).bindparams(bindparam('session_ids', expanding=True))
+    if normalized_user_ids:
+        query = query.bindparams(bindparam('user_ids', expanding=True))
 
     with _get_app_conn().connect() as conn:
         rows = conn.execute(query, params).mappings().all()
@@ -80,7 +83,9 @@ def insert_skill_review_run_stats(
         }
         for item in normalized
     ]
-    with _get_app_conn().begin() as conn:
+    engine = _get_app_conn()
+    summary_value = _summary_value_sql(engine)
+    with engine.begin() as conn:
         conn.execute(
             text(
                 f"""INSERT INTO {SKILL_REVIEW_RUN_STATS_TABLE}
@@ -88,7 +93,7 @@ def insert_skill_review_run_stats(
                         summary)
                     VALUES
                        (:id, :requestid, :userid, :status, :started_at, :duration_ms,
-                        CAST(:summary AS JSONB))
+                        {summary_value})
                     ON CONFLICT (id) DO UPDATE SET
                        requestid = EXCLUDED.requestid,
                        userid = EXCLUDED.userid,
@@ -100,6 +105,12 @@ def insert_skill_review_run_stats(
             payload,
         )
     return len(payload)
+
+
+def _summary_value_sql(engine: Engine) -> str:
+    if engine.dialect.name == 'postgresql':
+        return 'CAST(:summary AS JSONB)'
+    return ':summary'
 
 
 def _convert_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

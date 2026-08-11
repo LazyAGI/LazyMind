@@ -7,21 +7,12 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
-	"lazymind/core/resourcefs"
 )
 
 func newTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db, err := orm.Connect(orm.DriverSQLite, dbPath)
-	if err != nil {
-		t.Fatalf("connect db: %v", err)
-	}
-	if err := db.AutoMigrate(orm.AllModelsForDDL()...); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	return orm.MigrateAllModelsForTest(t)
 }
 
 func createPublishedV2Skill(t *testing.T, db *orm.DB, id, userID, userName, category, skillName, content string) {
@@ -86,37 +77,6 @@ func createPublishedV2Skill(t *testing.T, db *orm.DB, id, userID, userName, cate
 	}
 }
 
-func commitTestPersonalResource(t *testing.T, db *orm.DB, userID string, resourceType resourcefs.ResourceType, content string) {
-	t.Helper()
-	ctx := context.Background()
-	service := resourcefs.NewService(resourcefs.ServiceDeps{DB: db.DB})
-	ref := resourcefs.ResourceRef{UserID: userID, ResourceType: resourceType}
-	if _, err := service.EnsureResource(ctx, ref, ""); err != nil {
-		t.Fatalf("ensure personal resource: %v", err)
-	}
-	draft, err := service.ReadFile(ctx, resourcefs.ReadFileRequest{Ref: ref, RefType: resourcefs.FileRefDraft})
-	if err != nil {
-		t.Fatalf("read personal resource draft: %v", err)
-	}
-	written, err := service.WriteDraft(ctx, resourcefs.WriteDraftRequest{
-		Ref:                  ref,
-		Content:              content,
-		ExpectedDraftVersion: draft.DraftVersion,
-		UpdatedBy:            userID,
-	})
-	if err != nil {
-		t.Fatalf("write personal resource draft: %v", err)
-	}
-	if _, err := service.CommitDraft(ctx, resourcefs.CommitDraftRequest{
-		Ref:                  ref,
-		Message:              "test commit",
-		ExpectedDraftVersion: written.DraftVersion,
-		CreatedBy:            userID,
-	}); err != nil {
-		t.Fatalf("commit personal resource draft: %v", err)
-	}
-}
-
 func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.T) {
 	db := newTestDB(t)
 
@@ -134,9 +94,6 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 	if len(ctx.AvailableSkills) != 1 || ctx.AvailableSkills[0] != "coding/git-workflow" {
 		t.Fatalf("unexpected available_skills: %#v", ctx.AvailableSkills)
 	}
-	if ctx.Memory != FormatSystemMemoryForChat(orm.SystemMemory{}) || ctx.UserPreference != FormatSystemUserPreferenceForChat(orm.SystemUserPreference{}) {
-		t.Fatalf("expected empty user-scoped content, got memory=%q preference=%q", ctx.Memory, ctx.UserPreference)
-	}
 	if !ctx.UsePersonalization {
 		t.Fatalf("expected personalization enabled by default")
 	}
@@ -145,27 +102,16 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 	if err != nil {
 		t.Fatalf("build second chat resource context: %v", err)
 	}
-	if secondCtx.Memory != FormatSystemMemoryForChat(orm.SystemMemory{}) || secondCtx.UserPreference != FormatSystemUserPreferenceForChat(orm.SystemUserPreference{}) {
-		t.Fatalf("expected empty second user-scoped content, got memory=%q preference=%q", secondCtx.Memory, secondCtx.UserPreference)
-	}
 	if !secondCtx.UsePersonalization {
 		t.Fatalf("expected second user personalization enabled by default")
-	}
-
-	var personalResourceCount int64
-	if err := db.Model(&orm.PersonalResource{}).Count(&personalResourceCount).Error; err != nil {
-		t.Fatalf("count personal resources: %v", err)
-	}
-	if personalResourceCount != 4 {
-		t.Fatalf("expected 4 personal resource rows, got %d", personalResourceCount)
 	}
 
 	var snapshotCount int64
 	if err := db.Model(&orm.ResourceSessionSnapshot{}).Where("session_id = ?", "session-1").Count(&snapshotCount).Error; err != nil {
 		t.Fatalf("count snapshots: %v", err)
 	}
-	if snapshotCount != 3 {
-		t.Fatalf("expected 3 snapshots, got %d", snapshotCount)
+	if snapshotCount != 1 {
+		t.Fatalf("expected only the skill snapshot, got %d", snapshotCount)
 	}
 	var skillSnapshot orm.ResourceSessionSnapshot
 	if err := db.Where("session_id = ? AND resource_type = ?", "session-1", ResourceTypeSkill).Take(&skillSnapshot).Error; err != nil {
@@ -178,13 +124,6 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 		t.Fatalf("expected skill snapshot relative_path %q, got %q", relativePath, skillSnapshot.RelativePath)
 	}
 
-	var resources []orm.PersonalResource
-	if err := db.Order("user_id ASC, resource_type ASC").Find(&resources).Error; err != nil {
-		t.Fatalf("list personal resources: %v", err)
-	}
-	if len(resources) != 4 || resources[0].UserID != "u1" || resources[2].UserID != "u2" {
-		t.Fatalf("expected per-user personal resource rows for u1/u2, got %#v", resources)
-	}
 }
 
 func TestBuildChatResourceContextSkipsInvalidEnabledV2Skill(t *testing.T) {
@@ -299,54 +238,6 @@ func TestBuildChatResourceContextSkipsInvalidEnabledV2Skill(t *testing.T) {
 	}
 }
 
-func TestBuildChatResourceContextFormatsUserPreferenceForChat(t *testing.T) {
-	db := newTestDB(t)
-
-	preference := orm.SystemUserPreference{
-		Content:       "记住用户偏好简洁回答",
-		AgentPersona:  "资深研究助理",
-		PreferredName: "老师",
-		ResponseStyle: "先结论后解释",
-	}
-	want := FormatSystemUserPreferenceForChat(preference)
-	commitTestPersonalResource(t, db, "u1", resourcefs.ResourceTypeMemory, "memory-content")
-	commitTestPersonalResource(t, db, "u1", resourcefs.ResourceTypeUserPreference, want)
-
-	ctx, err := BuildChatResourceContext(context.Background(), db.DB, "u1", "User 1", "session-memory")
-	if err != nil {
-		t.Fatalf("build chat resource context: %v", err)
-	}
-
-	if ctx.Memory != "memory-content" {
-		t.Fatalf("unexpected memory context: %q", ctx.Memory)
-	}
-	if ctx.UserPreference != want {
-		t.Fatalf("unexpected formatted preference:\n%s", ctx.UserPreference)
-	}
-
-	var snapshot orm.ResourceSessionSnapshot
-	if err := db.Where("session_id = ? AND resource_type = ?", "session-memory", ResourceTypeUserPreference).Take(&snapshot).Error; err != nil {
-		t.Fatalf("query preference snapshot: %v", err)
-	}
-	if snapshot.SnapshotHash != HashContent(want) {
-		t.Fatalf("expected snapshot hash to use formatted preference, got %q want %q", snapshot.SnapshotHash, HashContent(want))
-	}
-}
-
-func TestParseSystemUserPreferenceContentRequiresFrontmatterFields(t *testing.T) {
-	parsed, err := ParseSystemUserPreferenceContent("---\nagent_persona: 角色\npreferred_name: 用户称谓\nresponse_style: 回复风格\n---\n")
-	if err != nil {
-		t.Fatalf("parse metadata-only preference: %v", err)
-	}
-	if parsed.Content != "" || parsed.AgentPersona != "角色" || parsed.PreferredName != "用户称谓" || parsed.ResponseStyle != "回复风格" {
-		t.Fatalf("unexpected parsed preference: %#v", parsed)
-	}
-
-	if _, err := ParseSystemUserPreferenceContent("---\nagent_persona: 角色\npreferred_name: 用户称谓\n---\n正文"); err == nil {
-		t.Fatal("expected missing response_style to fail")
-	}
-}
-
 func TestResolveRequestUserIgnoresFallbackAndUsesSessionSnapshot(t *testing.T) {
 	db := newTestDB(t)
 
@@ -355,8 +246,8 @@ func TestResolveRequestUserIgnoresFallbackAndUsesSessionSnapshot(t *testing.T) {
 		ID:           "snapshot-1",
 		SessionID:    "session-1",
 		UserID:       "session-user",
-		ResourceType: ResourceTypeMemory,
-		ResourceKey:  SystemResourceKey(ResourceTypeMemory),
+		ResourceType: "memory",
+		ResourceKey:  "memory",
 		SnapshotHash: HashContent(""),
 		CreatedAt:    now,
 	}

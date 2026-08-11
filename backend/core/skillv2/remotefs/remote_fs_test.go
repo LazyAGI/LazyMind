@@ -2,6 +2,7 @@ package remotefs
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -168,6 +169,25 @@ func TestRemoteFSWriteBinaryThenTextStoresCurrentBlobInPostgres(t *testing.T) {
 	handler.Content(rawRec, httptest.NewRequest(http.MethodGet, remoteContentURL(path, "user_001", "task1", "raw"), nil))
 	if rawRec.Code != http.StatusOK || !bytes.Equal(rawRec.Body.Bytes(), text) {
 		t.Fatalf("raw text read status=%d body=%q", rawRec.Code, rawRec.Body.String())
+	}
+}
+
+func TestBlobDataReadsLocalObjectFileURI(t *testing.T) {
+	objects := NewLocalObjectStore(t.TempDir())
+	blobs := NewBlobStore(nil, objects)
+	handler := NewHandler(HandlerDeps{BlobStore: blobs})
+	key := "skillv2/ab/blob"
+	want := []byte("binary skill resource")
+	if err := objects.service.Put(context.Background(), key, want); err != nil {
+		t.Fatalf("put local object: %v", err)
+	}
+
+	got, err := handler.blobData(skillBlobRow{Binary: true, StorageKey: &key})
+	if err != nil {
+		t.Fatalf("read local object: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("read local object = %q, want %q", got, want)
 	}
 }
 

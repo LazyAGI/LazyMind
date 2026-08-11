@@ -2,8 +2,6 @@ package source
 
 import (
 	"context"
-	"hash/fnv"
-	"strconv"
 	"strings"
 	"time"
 
@@ -79,9 +77,10 @@ func (e *DefaultEngine) queueLocalWatcherTransition(ctx context.Context, src sto
 
 func (e *DefaultEngine) queueLocalWatcherCommand(ctx context.Context, src store.Source, binding store.Binding, commandType string, now time.Time) error {
 	command := store.AgentCommand{
-		CommandID:   numericCommandID(e.newID("agent-command")),
-		AgentID:     binding.AgentID,
-		CommandType: commandType,
+		CommandID:       store.WatcherCommandID(binding.AgentID, binding, commandType),
+		AgentID:         binding.AgentID,
+		QueueGeneration: store.AgentCommandQueueGeneration,
+		CommandType:     commandType,
 		Payload: store.JSON{
 			"type":       commandType,
 			"tenant_id":  src.TenantID,
@@ -127,14 +126,4 @@ func localWatcherCommandError(binding store.Binding, commandType string, err err
 			"command_type": commandType,
 		},
 	}
-}
-
-func numericCommandID(seed string) string {
-	hash := fnv.New64a()
-	_, _ = hash.Write([]byte(seed))
-	value := hash.Sum64() & ((uint64(1) << 63) - 1)
-	if value == 0 {
-		value = 1
-	}
-	return strconv.FormatUint(value, 10)
 }

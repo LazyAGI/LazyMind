@@ -3,8 +3,10 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from evo.llm import parse_json_object
+
 from .csv_loader import DIFFICULTIES, GENERATED_CASE_FIELDS, QUESTION_TYPES, as_list, as_text
-from .csv_loader import json_object, norm_text, normalize_eval_case
+from .csv_loader import norm_text, normalize_eval_case
 
 QUESTION_RETRY_COUNT = 3
 
@@ -202,12 +204,20 @@ def _complete_case(config: Mapping[str, Any], prep: Mapping[str, Any], complete:
             'Generate a question that is not semantically equivalent to any item in avoid_questions_json. '
             f'avoid_questions_json: {json.dumps(avoid, ensure_ascii=False)}'
         )
-    data = json_object(complete(prompt), message='LLM did not return a JSON object')
-    if missing := [field for field in GENERATED_CASE_FIELDS if not data.get(field)]:
-        raise ValueError(f'generated case missing fields: {", ".join(missing)}')
-    if not isinstance(steps := data.get('reasoning_steps'), list) or not all(as_text(step) for step in steps):
-        raise ValueError('generated case reasoning_steps must be a non-empty list of strings')
-    return data
+    error: Exception | None = None
+    for structured_attempt in range(2):
+        try:
+            data = parse_json_object(complete(prompt))
+            if missing := [field for field in GENERATED_CASE_FIELDS if not data.get(field)]:
+                raise ValueError(f'generated case missing fields: {", ".join(missing)}')
+            if not isinstance(steps := data.get('reasoning_steps'), list) or not all(as_text(step) for step in steps):
+                raise ValueError('generated case reasoning_steps must be a non-empty list of strings')
+            return dict(data)
+        except Exception as exc:
+            error = exc
+            if structured_attempt == 0:
+                prompt += '\nThe previous response was invalid. Return exactly one complete JSON object.'
+    raise ValueError(f'LLM did not return a valid dataset case: {error}') from error
 
 
 def _unique_texts(values: Iterable[object]) -> list[str]:

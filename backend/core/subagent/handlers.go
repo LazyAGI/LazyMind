@@ -1,15 +1,142 @@
 package subagent
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 )
+
+func authorizeWorkflowExecutor(w http.ResponseWriter, r *http.Request) bool {
+	expected := strings.TrimSpace(os.Getenv("LAZYMIND_WORKFLOW_EXECUTOR_TOKEN"))
+	if expected == "" {
+		return strings.HasPrefix(r.RemoteAddr, "127.0.0.1:") ||
+			strings.HasPrefix(r.RemoteAddr, "[::1]:") || r.RemoteAddr == ""
+	}
+	provided := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if len(provided) == len(expected) && subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1 {
+		return true
+	}
+	common.ReplyErr(w, "executor unauthorized", http.StatusUnauthorized)
+	return false
+}
+
+// InternalGetExecutionSpec returns LazyMind Host-private configuration to the
+// authenticated remote LazyMind Executor. Workflow Runtime never stores this
+// data in Attempt Context or sends it to another Host.
+func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
+	taskID := common.PathVar(r, "task_id")
+	if !authorizeWorkflowExecutorTask(w, r, taskID) {
+		return
+	}
+	task, err := GetTask(r.Context(), store.DB(), taskID)
+	if err != nil {
+		common.ReplyErr(w, "task not found", http.StatusNotFound)
+		return
+	}
+	config, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), task.CreateUserID)
+	if err != nil {
+		common.ReplyErr(w, "model config unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	toolConfig, err := modelconfig.LoadSearchToolConfig(r.Context(), store.DB(), task.CreateUserID)
+	if err != nil {
+		common.ReplyErr(w, "tool config unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	steps, _ := LoadSteps(r.Context(), store.DB(), taskID)
+	stepDTOs := make([]stepDTO, 0, len(steps))
+	for i := range steps {
+		stepDTOs = append(stepDTOs, toStepDTO(&steps[i]))
+	}
+	common.ReplyOK(w, map[string]any{"task": toTaskDTO(task), "params": task.Params,
+		"steps": stepDTOs, "create_user_id": task.CreateUserID, "llm_config": config,
+		"tool_config": toolConfig})
+}
+
+// InternalIngestTaskEvent preserves the ordinary LazyMind SubAgent task stream
+// when the Workflow Executor runs outside Core. Non-Workflow SubAgents keep
+// using the same routeEvent function directly.
+func InternalIngestTaskEvent(w http.ResponseWriter, r *http.Request) {
+	taskID := common.PathVar(r, "task_id")
+	if !authorizeWorkflowExecutorTask(w, r, taskID) {
+		return
+	}
+	var event TaskEvent
+	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+		common.ReplyErr(w, "invalid task event", http.StatusBadRequest)
+		return
+	}
+	event.TaskID = taskID
+	if role, content := remoteStepContent(event); role != "" {
+		if err := AppendRemoteStep(r.Context(), store.DB(), taskID, role, content); err != nil {
+			common.ReplyErr(w, "persist task event failed", http.StatusServiceUnavailable)
+			return
+		}
+	}
+	// Artifacts are committed through the fenced remote Workflow API. Terminal
+	// hooks remain enabled after Runtime terminal commit so LazyMind conversation
+	// handoff/synthetic-turn behavior remains identical to the in-process path.
+	if err := routeEventWithWorkflowHooks(r.Context(), store.DB(), store.State(), event, false, true); err != nil {
+		common.ReplyErr(w, "persist task event failed", http.StatusServiceUnavailable)
+		return
+	}
+	if task, err := GetTask(r.Context(), store.DB(), taskID); err == nil && EventHooks != nil &&
+		(event.Type == "task_start" || event.Type == "progress" || event.Type == "artifact" ||
+			event.Type == "done" || event.Type == "error") {
+		EventHooks.CallConversationEvent(r.Context(), store.State(), task.ConversationID, "",
+			"workflow_runtime_updated", map[string]any{"task_id": taskID, "change": event.Type})
+	}
+	common.ReplyOK(w, map[string]any{"accepted": true})
+}
+
+func authorizeWorkflowExecutorTask(w http.ResponseWriter, r *http.Request, taskID string) bool {
+	if !authorizeWorkflowExecutor(w, r) {
+		return false
+	}
+	lease := strings.TrimSpace(r.Header.Get("X-Workflow-Lease-Token"))
+	if lease == "" {
+		common.ReplyErr(w, "executor unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	var row orm.WorkflowSessionStep
+	if err := store.DB().WithContext(r.Context()).Where("task_id = ? AND lease_token = ?", taskID, lease).
+		Where("(lease_expires_at >= ? AND status IN ?) OR status IN ?", time.Now().UTC(),
+			[]string{"claimed", "running"}, []string{"succeeded", "failed", "cancelled", "interrupted"}).
+		First(&row).Error; err != nil {
+		common.ReplyErr(w, "executor unauthorized", http.StatusConflict)
+		return false
+	}
+	return true
+}
+
+func remoteStepContent(event TaskEvent) (string, json.RawMessage) {
+	var value any
+	role := ""
+	switch event.Type {
+	case "text":
+		role, value = "text", map[string]any{"content": event.Text}
+	case "think":
+		role, value = "think", map[string]any{"content": event.Think}
+	case "tool_calls":
+		role, value = "assistant", map[string]any{"tool_calls": event.ToolCalls}
+	case "tool_results":
+		role, value = "tool", map[string]any{"tool_results": event.ToolResults}
+	}
+	if role == "" {
+		return "", nil
+	}
+	raw, _ := json.Marshal(value)
+	return role, raw
+}
 
 // taskDTO is the JSON shape returned to the frontend for a task.
 type taskDTO struct {
@@ -32,6 +159,17 @@ type taskDTO struct {
 	UpdatedAt        time.Time       `json:"updated_at"`
 	Artifacts        []artifactDTO   `json:"artifacts,omitempty"`
 	Steps            []stepDTO       `json:"steps,omitempty"`
+}
+
+type taskProgressDTO struct {
+	TaskID       string    `json:"task_id"`
+	Seq          int       `json:"seq_in_conversation"`
+	AgentType    string    `json:"agent_type"`
+	Title        string    `json:"title"`
+	Status       string    `json:"status"`
+	Progress     int       `json:"progress_pct"`
+	CurrentPhase string    `json:"current_phase"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type stepDTO struct {
@@ -107,6 +245,24 @@ func ListConversationTasks(w http.ResponseWriter, r *http.Request) {
 	tasks, err := ListTasksByConversationForUser(ctx, db, convID, userID)
 	if err != nil {
 		common.ReplyErr(w, "query tasks failed", http.StatusInternalServerError)
+		return
+	}
+	summaryOnly := r.URL.Query().Get("summary_only") == "true"
+	if summaryOnly {
+		out := make([]taskProgressDTO, 0, len(tasks))
+		for i := range tasks {
+			out = append(out, taskProgressDTO{
+				TaskID:       tasks[i].ID,
+				Seq:          tasks[i].SeqInConversation,
+				AgentType:    tasks[i].AgentType,
+				Title:        tasks[i].Title,
+				Status:       tasks[i].Status,
+				Progress:     tasks[i].ProgressPct,
+				CurrentPhase: tasks[i].CurrentPhase,
+				UpdatedAt:    tasks[i].UpdatedAt,
+			})
+		}
+		common.ReplyOK(w, map[string]any{"tasks": out})
 		return
 	}
 	out := make([]taskDTO, 0, len(tasks))

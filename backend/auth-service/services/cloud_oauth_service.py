@@ -845,10 +845,7 @@ class CloudOAuthService:
                     if self._extract_app_key(r)[3] == normalized_client_id
                 ]
                 if active_same_app:
-                    raise_error(
-                        ErrorCodes.CLOUD_CREDENTIAL_INVALID,
-                        extra_msg='an active connection already exists for this app',
-                    )
+                    raise_error(ErrorCodes.CLOUD_CLIENT_ID_ALREADY_EXISTS)
                 # Scope incomplete rows to the same client_id so App Y's
                 # "new account" flow never reuses App X's PENDING/ERROR.
                 same_app_rows = [

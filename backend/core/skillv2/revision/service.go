@@ -3,6 +3,7 @@ package revision
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -465,7 +466,15 @@ func (s *LocalObjectStore) URL(key string) string {
 	if s == nil {
 		return ""
 	}
-	return "file://" + filepath.Join(s.root, filepath.FromSlash(key))
+	localPath := filepath.Join(s.root, filepath.FromSlash(key))
+	if absolutePath, err := filepath.Abs(localPath); err == nil {
+		localPath = absolutePath
+	}
+	uriPath := filepath.ToSlash(localPath)
+	if filepath.VolumeName(localPath) != "" && !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	return (&url.URL{Scheme: "file", Path: uriPath}).String()
 }
 
 type dbBlobStore struct {

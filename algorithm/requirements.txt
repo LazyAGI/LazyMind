@@ -9,7 +9,6 @@ setuptools<81
 
 
 beautifulsoup4
-ragas
 openpyxl==3.1.5
 python-docx
 pillow
@@ -31,12 +30,15 @@ rapidfuzz==3.14.3
 regex>=2024.0.0
 json-repair==0.54.3
 jsonschema>=4
+jieba>=0.42.1,<1
 pandas==2.3.3
 opentelemetry-sdk>=1.27.0,<2.0.0
 opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0
 psycopg[binary]>=3,<4
 greenlet==3.2.2
 aiosqlite>=0.20.0,<1.0.0
+sqlalchemy>=2.0.34,<3.0.0
+fsspec
 
 dashscope>=1.20.0
 volcengine-python-sdk[ark]>=4.0.6

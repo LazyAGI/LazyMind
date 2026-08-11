@@ -1,0 +1,98 @@
+initial: __start__
+
+transitions:
+  __start__: [{to: prompt}]
+  prompt: [{to: script}]
+  script: [{to: typed_artifacts}]
+  typed_artifacts: [{to: rewrite}]
+  rewrite: [{to: list_artifacts}]
+  list_artifacts: [{to: verify}]
+  verify: [{to: __end__}]
+
+steps:
+  prompt:
+    label: Prompt
+    mode: auto
+    prompt: |
+      Summarize {{user_input}} in one short sentence in the user's language.
+      Save it as prompt_result with content_type="text". Do nothing else.
+    outputs: [{material: prompt_result, required: true}]
+    acceptance_criteria: prompt_result is present and non-empty.
+
+  script:
+    label: Script Tool
+    mode: human
+    prompt: |
+      Read prompt_result. Call build_test_metadata(summary=<prompt_result>).
+      Save the returned object directly as metadata_json with
+      content_type="json". Do nothing else.
+    tools: [build_test_metadata]
+    inputs: [{material: prompt_result, required: true}]
+    outputs: [{material: metadata_json, required: true}]
+    acceptance_criteria: metadata_json is valid JSON with smoke_test=true.
+
+  typed_artifacts:
+    label: Typed Artifacts
+    mode: auto
+    prompt: |
+      Read prompt_result. Call create_typed_fixtures(summary=<prompt_result>).
+      Save text_path as text_attachment with content_type="file" and image_url
+      as image_attachment with content_type="image", in one save_artifacts call.
+    tools: [create_typed_fixtures]
+    inputs:
+      - {material: prompt_result, required: true}
+      - {material: metadata_json, required: true}
+    outputs:
+      - {material: text_attachment, required: true}
+      - {material: image_attachment, required: true}
+    acceptance_criteria: >
+      text_attachment is readable and image_attachment is an HTTPS mock image URL.
+
+  rewrite:
+    label: Rewrite Artifact
+    mode: human
+    prompt: |
+      Read prompt_result. Call create_rewrite_fixture(summary=<prompt_result>)
+      and save its path as rewritten_attachment with content_type="file".
+      Then call rewrite_fixture(path=<same path>, marker="revision-2") and save
+      the returned path to the SAME rewritten_attachment slot again. Use two
+      sequential save_artifacts calls so the single slot has two revisions.
+    tools: [create_rewrite_fixture, rewrite_fixture]
+    inputs: [{material: prompt_result, required: true}]
+    outputs: [{material: rewritten_attachment, required: true}]
+    acceptance_criteria: >
+      rewritten_attachment is selected at revision 2 and contains revision-2.
+
+  list_artifacts:
+    label: List Artifacts
+    mode: auto
+    prompt: |
+      Call create_list_fixtures(). It returns exactly two paths. Save each path
+      to list_attachments with content_type="file" and captions "item-1" and
+      "item-2". Omit sort_order so the list appends in that order.
+    tools: [create_list_fixtures]
+    outputs: [{material: list_attachments, required: true}]
+    acceptance_criteria: list_attachments contains exactly two ordered files.
+
+  verify:
+    label: Verify
+    mode: human
+    prompt: |
+      Read prompt_result, metadata_json, text_attachment, image_attachment,
+      rewritten_attachment, and every list_attachments item. Call
+      verify_fixtures(text_path=<text attachment>, image_url=<image attachment>,
+      rewritten_path=<rewritten attachment>, list_paths=<ordered list paths>).
+      Save report_path as verification_report with content_type="file" and save
+      status as test_status with content_type="text" in one call.
+    tools: [verify_fixtures]
+    inputs:
+      - {material: prompt_result, required: true}
+      - {material: metadata_json, required: true}
+      - {material: text_attachment, required: true}
+      - {material: image_attachment, required: true}
+      - {material: rewritten_attachment, required: true}
+      - {material: list_attachments, required: true}
+    outputs:
+      - {material: verification_report, required: true}
+      - {material: test_status, required: true}
+    acceptance_criteria: test_status equals Workflow smoke test passed.

@@ -12,6 +12,7 @@ import {
 import { RcFile } from "antd/es/upload";
 import { Button, message, Select, Spin, Tooltip } from "antd";
 import {
+  AppstoreOutlined,
   BookOutlined,
   BulbOutlined,
   CloseOutlined,
@@ -44,9 +45,9 @@ import ChatSelector, { type ChatSelectorImperativeProps } from "../ChatSelector"
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import { appendPromptToDraft } from "../PromptModal/promptLibrary";
 import ChatConfigModal from "./ChatConfigModal";
-import type { ConversationPluginSettings } from "../../utils/request";
-import { PluginSessionApi } from "../../utils/request";
-import { usePluginStore } from "@/modules/chat/store/pluginPanel";
+import type { ConversationWorkflowSettings } from "../../utils/request";
+import { WorkflowSessionApi } from "../../utils/request";
+import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import BatchChatComponent, { BatchChatImperativeProps } from "../BatchChat";
 import MentionEditor, {
   type ChatMention,
@@ -57,7 +58,7 @@ import { buildCitedMessageText } from "../newChatContainer/utils/citeMessage";
 
 // Stable empty array reference — must NOT be inline `?? []` in a zustand selector
 // because a new array on every call triggers useSyncExternalStore to fire React error #185.
-const EMPTY_DISMISSED: Array<{ session_id: string; plugin_id: string }> = [];
+const EMPTY_DISMISSED: Array<{ session_id: string; workflow_id: string }> = [];
 import ShowChatFileList from "../ShowChatFileList";
 import { formatFileSize } from "@/modules/chat/utils";
 import {
@@ -70,11 +71,11 @@ import { PromptServiceApi } from "@/modules/chat/utils/request";
 import { Popover, Tag } from "antd";
 
 /**
- * Shows a button in the toolbar when there are dismissed plugin sessions.
+ * Shows a button in the toolbar when there are dismissed workflow sessions.
  * Clicking it opens a popover listing dismissed sessions with restore buttons.
- * Dismissed sessions are cached in pluginPanel store so the button survives component remounts.
+ * Dismissed sessions are cached in workflowPanel store so the button survives component remounts.
  */
-function DismissedPluginRestoreButton({
+function DismissedWorkflowRestoreButton({
   conversationId,
 }: {
   conversationId: string;
@@ -82,19 +83,19 @@ function DismissedPluginRestoreButton({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
-  const bumpDismissedRefresh = usePluginStore((s) => s.bumpDismissedRefresh);
-  const fetchDismissedSessions = usePluginStore(
+  const bumpDismissedRefresh = useWorkflowStore((s) => s.bumpDismissedRefresh);
+  const fetchDismissedSessions = useWorkflowStore(
     (s) => s.fetchDismissedSessions,
   );
   // Read the array reference from store; fall back to undefined and handle below.
   // IMPORTANT: do NOT use `?? []` inline — a fresh array on every selector call
   // causes useSyncExternalStore to detect a state change on every render, leading
   // to an infinite re-render loop (React error #185).
-  const dismissedSessionsFromStore = usePluginStore(
+  const dismissedSessionsFromStore = useWorkflowStore(
     (s) => s.dismissedSessionsByConversation[conversationId],
   );
   const dismissedSessions = dismissedSessionsFromStore ?? EMPTY_DISMISSED;
-  const dismissedRefreshTrigger = usePluginStore(
+  const dismissedRefreshTrigger = useWorkflowStore(
     (s) => s.dismissedRefreshTrigger[conversationId] ?? 0,
   );
 
@@ -112,10 +113,10 @@ function DismissedPluginRestoreButton({
   const handleRestore = async (sessionId: string) => {
     setRestoring(sessionId);
     try {
-      await PluginSessionApi().restoreSession(sessionId);
+      await WorkflowSessionApi().restoreSession(sessionId);
       bumpDismissedRefresh(conversationId);
-      // Reload active session so PluginPanel re-appears immediately without needing a page refresh.
-      usePluginStore.getState().loadActiveSession(conversationId);
+      // Reload active session so WorkflowPanel re-appears immediately without needing a page refresh.
+      useWorkflowStore.getState().loadActiveSession(conversationId);
       setOpen(false);
     } catch {
       // API errors are reported by the shared request interceptor.
@@ -139,13 +140,13 @@ function DismissedPluginRestoreButton({
               marginBottom: 6,
             }}
           >
-            <Tag style={{ flex: 1 }}>{s.plugin_id}</Tag>
+            <Tag style={{ flex: 1 }}>{s.workflow_id}</Tag>
             <Button
               size="small"
               loading={restoring === s.session_id}
               onClick={() => handleRestore(s.session_id)}
             >
-              {t("chat.pluginRestoreBtn")}
+              {t("chat.workflowRestoreBtn")}
             </Button>
           </li>
         ))}
@@ -159,13 +160,13 @@ function DismissedPluginRestoreButton({
       onOpenChange={handleOpenChange}
       trigger="click"
       content={content}
-      title={t("chat.pluginDismissedTitle")}
+      title={t("chat.workflowDismissedTitle")}
     >
-      <Tooltip title={t("chat.pluginDismissedTitle")}>
+      <Tooltip title={t("chat.workflowDismissedTitle")}>
         <button
           type="button"
           className="input-bottom-actions-left-item input-bottom-actions-left-item--icon-only"
-          aria-label={t("chat.pluginDismissedTitle")}
+          aria-label={t("chat.workflowDismissedTitle")}
         >
           {/* Trash / recycle-bin icon */}
           <svg
@@ -338,6 +339,7 @@ export interface SendMessageParams {
   mentions?: ChatMention[];
   citeMessage?: string;
   citeMessages?: string[];
+  citeHistoryIds?: (string | undefined)[];
   clearInput?: boolean;
   fileList?: ChatFileList[];
   fileListRef?: React.RefObject<ImageUploadImperativeProps | null>;
@@ -373,12 +375,14 @@ interface ChatInputProps {
   isStreaming?: boolean;
   onStopGeneration?: () => void;
   embeddingReady?: boolean | null;
-  /** Called when plugin settings change (e.g. from the chat config popover). */
-  onPluginSettingsChange?: (settings: ConversationPluginSettings) => void;
-  /** Initial plugin settings to pre-populate the config popover. */
-  initialPluginSettings?: ConversationPluginSettings;
-  /** When true, the allow-plugin toggle in config is locked (plugin session is active). */
-  hasPluginSession?: boolean;
+  /** Called when workflow settings change (e.g. from the chat config popover). */
+  onWorkflowSettingsChange?: (settings: ConversationWorkflowSettings) => void;
+  /** Initial workflow settings to pre-populate the config popover. */
+  initialWorkflowSettings?: ConversationWorkflowSettings;
+  /** When true, the allow-workflow toggle in config is locked (workflow session is active). */
+  hasWorkflowSession?: boolean;
+  /** Optional case-driven category selectors shown in the welcome composer. */
+  showcaseSelection?: ShowcaseSelection;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   disabled?: boolean;
@@ -387,6 +391,7 @@ interface ChatInputProps {
   disabledAction?: ReactNode;
   citeMessage?: string;
   citeMessages?: string[];
+  citeHistoryIds?: (string | undefined)[];
   onRemoveCiteMessage?: (index: number) => void;
   onClearCiteMessage?: () => void;
   skillDepositStats?: SkillDepositStats;
@@ -396,10 +401,29 @@ interface ChatInputProps {
   runInBackground?: boolean;
 }
 
+export interface ShowcaseSelectionOption {
+  value: string;
+  label: string;
+  description?: string;
+  prompt?: string;
+}
+
+export interface ShowcaseSelection {
+  primaryValue: string;
+  primaryLabel: string;
+  primaryAriaLabel: string;
+  secondaryValue?: string;
+  secondaryOptions?: ShowcaseSelectionOption[];
+  secondaryAriaLabel: string;
+  onSecondaryChange?: (value: string) => void;
+}
+
 export interface ChatFileList {
   uid: string;
   name: string;
   base64: string;
+  /** Local object URL or data URL for preview / open. */
+  previewUrl?: string;
   suffix: string;
   size: string;
 }
@@ -487,14 +511,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       disabledAction,
       citeMessage,
       citeMessages,
+      citeHistoryIds,
       onRemoveCiteMessage,
       onClearCiteMessage,
       skillDepositStats,
       skillDepositDisabledReason,
       onSkillDeposit,
-      onPluginSettingsChange,
-      initialPluginSettings,
-      hasPluginSession,
+      onWorkflowSettingsChange,
+      initialWorkflowSettings,
+      hasWorkflowSession,
+      showcaseSelection,
       runInBackground = false,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
@@ -513,7 +539,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const { t } = useTranslation();
     const [text, setText] = useState("");
     const [mentions, setMentions] = useState<ChatMention[]>([]);
-    const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialPluginSettings);
+    const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialWorkflowSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
     const disabledNoticeId = useId();
@@ -521,8 +547,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const hasSentMessageRef = useRef(false);
 
     useEffect(() => {
-      setContextRuntimeSettings(initialPluginSettings);
-    }, [initialPluginSettings]);
+      setContextRuntimeSettings(initialWorkflowSettings);
+    }, [initialWorkflowSettings]);
 
     const [fileList, setFileList] = useState<ChatFileList[]>([]);
     const { setPendingMessage, clearPendingMessage } = useChatMessageStore();
@@ -542,7 +568,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     );
 
     const clearMultiData = useCallback(() => {
-      setFileList([]);
+      setFileList((prev) => {
+        prev.forEach((item) => {
+          if (item.previewUrl?.startsWith("blob:")) {
+            URL.revokeObjectURL(item.previewUrl);
+          }
+        });
+        return [];
+      });
       fileListRef.current?.clear();
       setTimeout(() => onHeightChange?.(), 0);
     }, [onHeightChange]);
@@ -661,29 +694,49 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           .toLowerCase();
 
         const tempImgData = allowedImageTypes.includes(suffix);
-        const obj = {
+        const obj: ChatFileList = {
           name: list[i].name,
           uid: list[i].uid,
           suffix,
           size: formatFileSize(list[i].size),
           base64: "",
+          previewUrl: "",
         };
         if (tempImgData) {
           const res = await fileToBase64(list[i]);
-          obj["base64"] = res as string;
+          obj.base64 = res as string;
+          obj.previewUrl = obj.base64;
         } else {
-          obj["base64"] = "";
+          obj.base64 = "";
+          // Object URL lets users open/preview non-image attachments on click.
+          obj.previewUrl = URL.createObjectURL(list[i]);
         }
         data.push(obj);
       }
-      setFileList(data);
+      setFileList((prev) => {
+        prev.forEach((item) => {
+          if (
+            item.previewUrl &&
+            item.previewUrl.startsWith("blob:") &&
+            !data.some((next) => next.previewUrl === item.previewUrl)
+          ) {
+            URL.revokeObjectURL(item.previewUrl);
+          }
+        });
+        return data;
+      });
       setTimeout(() => onHeightChange?.(), 0);
     };
 
     const removeImage = (uid: string) => {
       fileListRef.current?.removeFile(uid);
-      const list = [...fileList].filter((item) => item.uid !== uid);
-      setFileList(list);
+      setFileList((prev) => {
+        const target = prev.find((item) => item.uid === uid);
+        if (target?.previewUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(target.previewUrl);
+        }
+        return prev.filter((item) => item.uid !== uid);
+      });
       setTimeout(() => onHeightChange?.(), 0);
     };
 
@@ -801,6 +854,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         mentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
         citeMessages: normalizedCiteMessages,
+        citeHistoryIds: citeHistoryIds?.filter(
+          (historyId): historyId is string => Boolean(historyId?.trim()),
+        ),
         fileList,
         fileListRef,
         files: fileListRef.current?.getFiles(),
@@ -855,7 +911,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setPolishingSuggestionKey(suggestion.key);
       try {
         const response = await PromptServiceApi().promptServicePolishPrompt({
-          promptPolishRequest: {
+          promptPolishOpenAPIRequest: {
             content: normalizedPrompt,
             user_instruct: t(suggestion.templateKey, { prompt: "" }).trim(),
           },
@@ -1105,8 +1161,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           <button
                             type="button"
                             onClick={() => {
-                              setAddMenuOpen(false);
+                              if (fileList.length >= MAX_UPLOAD_FILES) {
+                                message.warning(t("chat.maxFilesWarning"));
+                                setAddMenuOpen(false);
+                                return;
+                              }
+                              // Open the file picker while still inside the
+                              // user gesture, then close the popover.
                               fileListRef.current?.openFileDialog();
+                              setAddMenuOpen(false);
                             }}
                           >
                             <PaperClipOutlined />
@@ -1172,6 +1235,52 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       />
                     </div>
                   </div>
+                  {showcaseSelection ? (
+                    <div className="chat-showcase-selection" data-testid="showcase-selection">
+                      <span className="chat-showcase-control chat-showcase-primary-control">
+                        <AppstoreOutlined
+                          className="chat-showcase-control-icon"
+                          aria-hidden="true"
+                        />
+                        <Select
+                          aria-label={showcaseSelection.primaryAriaLabel}
+                          className="chat-showcase-category-select"
+                          size="small"
+                          value={showcaseSelection.primaryValue}
+                          disabled={disabled || isStreaming}
+                          options={[
+                            {
+                              value: showcaseSelection.primaryValue,
+                              label: showcaseSelection.primaryLabel,
+                            },
+                          ]}
+                        />
+                      </span>
+                      {showcaseSelection.secondaryOptions?.length ? (
+                        <span className="chat-showcase-control chat-showcase-scene-control">
+                          <span className="chat-showcase-scene-icon" aria-hidden="true">
+                            <i />
+                            <i />
+                            <i />
+                            <i />
+                          </span>
+                          <Select
+                            aria-label={showcaseSelection.secondaryAriaLabel}
+                            className="chat-showcase-category-select chat-showcase-subcategory-select"
+                            size="small"
+                            value={showcaseSelection.secondaryValue}
+                            disabled={disabled || isStreaming}
+                            onChange={showcaseSelection.onSecondaryChange}
+                            options={showcaseSelection.secondaryOptions.map((option) => ({
+                              value: option.value,
+                              label: option.label,
+                              title: option.description,
+                            }))}
+                          />
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <Select
                     aria-label={t("chat.thinkingDepth")}
                     className="chat-thinking-depth-select"
@@ -1233,15 +1342,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         ? sessionId
                         : undefined
                     }
-                    initialSettings={initialPluginSettings}
-                    hasPluginSession={hasPluginSession}
+                    initialSettings={initialWorkflowSettings}
+                    hasWorkflowSession={hasWorkflowSession}
                     onSave={(settings) => {
                       setContextRuntimeSettings(settings);
-                      onPluginSettingsChange?.(settings);
+                      onWorkflowSettingsChange?.(settings);
                     }}
                   />
                   {sessionId && !sessionId.startsWith("temp_") && (
-                    <DismissedPluginRestoreButton conversationId={sessionId} />
+                    <DismissedWorkflowRestoreButton conversationId={sessionId} />
                   )}
                 </div>
 

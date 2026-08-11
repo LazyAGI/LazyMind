@@ -19,10 +19,11 @@ const (
 var releaseVersionPattern = regexp.MustCompile(`^v0_([1-9]\d*)$`)
 
 type modeMigration struct {
-	Name        string
-	ModeVersion uint64
-	Aggregate   *migrationFile
-	Dev         []migrationFile
+	Name         string
+	ModeVersion  uint64
+	Aggregate    *migrationFile
+	Dev          []migrationFile
+	DevDirectory bool
 }
 
 type migrationCatalog struct {
@@ -87,6 +88,7 @@ func (r *Runner) loadCatalog() (migrationCatalog, error) {
 				return migrationCatalog{}, err
 			}
 			mode := ensureMode(modeByNumber, release, modeVersion)
+			mode.DevDirectory = true
 			devMigrations, err := loadMigrationDir(filepath.Join(devDir, release), release, modeVersion)
 			if err != nil {
 				return migrationCatalog{}, fmt.Errorf("load %s/%s: %w", devModeDirName, release, err)

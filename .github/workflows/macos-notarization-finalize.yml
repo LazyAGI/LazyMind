@@ -62,7 +62,7 @@ jobs:
       - name: Download pending DMG
         uses: actions/download-artifact@v8
         with:
-          pattern: "*.pending.dmg"
+          pattern: "LazyMind-macos-arm64-pending"
           merge-multiple: true
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
@@ -71,7 +71,7 @@ jobs:
       - name: Download notarization submission record
         uses: actions/download-artifact@v8
         with:
-          pattern: "*.notarization.json"
+          pattern: "LazyMind-macos-notarization-submission"
           merge-multiple: true
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
@@ -94,16 +95,27 @@ func (c *LocalFSConnector) ensureScanTempURI(ctx context.Context, exported Expor
 }
 
 func fileURIPath(uri string) (string, error) {
+	return fileURIPathForOS(uri, runtime.GOOS)
+}
+
+func fileURIPathForOS(uri, goos string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(uri))
 	if err != nil {
 		return "", err
 	}
-	if parsed.Scheme != "file" || parsed.Host != "" || parsed.Path == "" {
+	if parsed.Scheme != "file" || (parsed.Host != "" && !strings.EqualFold(parsed.Host, "localhost")) || parsed.Path == "" {
 		return "", connector.NewError(connector.ErrorCodeInvalidArgument, "file uri must be local")
 	}
 	path, err := url.PathUnescape(parsed.Path)
 	if err != nil {
 		return "", err
+	}
+	if goos == "windows" {
+		if len(path) >= 3 && path[0] == '/' && path[2] == ':' &&
+			((path[1] >= 'A' && path[1] <= 'Z') || (path[1] >= 'a' && path[1] <= 'z')) {
+			path = path[1:]
+		}
+		path = strings.ReplaceAll(path, "/", `\`)
 	}
 	return path, nil
 }

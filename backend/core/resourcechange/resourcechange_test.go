@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -110,14 +109,7 @@ func TestListAndGetVersionsAreUserScoped(t *testing.T) {
 
 func newResourceChangeTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := orm.Connect(orm.DriverSQLite, filepath.Join(t.TempDir(), "resourcechange.db"))
-	if err != nil {
-		t.Fatalf("connect sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&orm.ResourceVersion{}); err != nil {
-		t.Fatalf("auto migrate resource versions: %v", err)
-	}
-	return db.DB
+	return orm.MigrateTestDB(t, &orm.ResourceVersion{}).DB
 }
 
 func testContentChange(resourceID, beforeContent, afterContent string, changedAt time.Time) ContentChange {
@@ -149,4 +141,238 @@ func assertVersionCount(t *testing.T, db *gorm.DB, resourceID string, want int64
 	if got != want {
 		t.Fatalf("expected %d resource versions, got %d", want, got)
 	}
+}
+
+// TestBuildContentDiffIdentical returns empty diff for identical content.
+func TestBuildContentDiffIdentical(t *testing.T) {
+	diff, err := buildContentDiff("hello\nworld\n", "hello\nworld\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if diff != "" {
+		t.Fatalf("expected empty diff, got %q", diff)
+	}
+}
+
+// TestBuildContentDiffEmptyBefore renders diff with only new content.
+func TestBuildContentDiffEmptyBefore(t *testing.T) {
+	diff, err := buildContentDiff("", "new content")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(diff) == 0 {
+		t.Fatal("expected non-empty diff")
+	}
+}
+
+// TestBuildContentDiffEmptyAfter renders diff with only old content.
+func TestBuildContentDiffEmptyAfter(t *testing.T) {
+	diff, err := buildContentDiff("old content", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(diff) == 0 {
+		t.Fatal("expected non-empty diff")
+	}
+}
+
+// TestLatestSummaryForResource returns the latest version summary.
+func TestLatestSummaryForResource(t *testing.T) {
+	db := newResourceChangeTestDB(t)
+	ctx := context.Background()
+	now := time.Now()
+	// Insert two versions, the later one should be returned
+	for i, bs := range []string{"before-v1", "before-v2"} {
+		if err := RecordContentChange(ctx, db, ContentChange{
+			ResourceType:  "memory",
+			ResourceID:    "res-summary",
+			UserID:        "user-1",
+			FromVersion:   int64(i),
+			ToVersion:     int64(i + 1),
+			BeforeContent: bs,
+			AfterContent:  "after-" + string(rune('a'+i)),
+			Source: Source{
+				ChangeSource: ChangeSourceDirectSave,
+				ChangedAt:    now.Add(time.Duration(i) * time.Minute),
+			},
+		}); err != nil {
+			t.Fatalf("record version %d: %v", i, err)
+		}
+	}
+
+	summary, err := LatestSummaryForResource(ctx, db, "user-1", "memory", "res-summary")
+	if err != nil {
+		t.Fatalf("latest summary: %v", err)
+	}
+	if summary == nil {
+		t.Fatal("expected non-nil summary")
+	}
+	if summary.ChangeSource != ChangeSourceDirectSave {
+		t.Fatalf("change_source = %q", summary.ChangeSource)
+	}
+}
+
+// TestLatestSummaryForResourceNotFound returns nil for nonexistent resource.
+func TestLatestSummaryForResourceNotFound(t *testing.T) {
+	db := newResourceChangeTestDB(t)
+	summary, err := LatestSummaryForResource(context.Background(), db, "user-1", "memory", "nonexistent")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if summary != nil {
+		t.Fatalf("expected nil summary, got %#v", summary)
+	}
+}
+
+// TestLatestSummariesForResources batches multiple resource lookups.
+func TestLatestSummariesForResources(t *testing.T) {
+	db := newResourceChangeTestDB(t)
+	ctx := context.Background()
+	now := time.Now()
+	for _, entry := range []struct{ rid, src string }{
+		{"res-a", ChangeSourceDirectSave},
+		{"res-b", ChangeSourceDraftConfirm},
+	} {
+		if err := RecordContentChange(ctx, db, testContentChangeForUser(entry.rid, "user-1", "before", "after", now)); err != nil {
+			t.Fatalf("record %s: %v", entry.rid, err)
+		}
+	}
+
+	summaries, err := LatestSummariesForResources(ctx, db, "user-1", "memory", []string{"res-a", "res-b", "res-c"})
+	if err != nil {
+		t.Fatalf("latest summaries: %v", err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("got %d summaries, want 2", len(summaries))
+	}
+	if _, ok := summaries["res-a"]; !ok {
+		t.Fatal("res-a missing from summaries")
+	}
+	if _, ok := summaries["res-b"]; !ok {
+		t.Fatal("res-b missing from summaries")
+	}
+}
+
+// TestLatestSummariesForResourcesNilDB returns empty map.
+func TestLatestSummariesForResourcesNilDB(t *testing.T) {
+	summaries, err := LatestSummariesForResources(context.Background(), nil, "user-1", "memory", []string{"a"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(summaries) != 0 {
+		t.Fatalf("expected empty map, got %d entries", len(summaries))
+	}
+}
+
+// TestUpdateModel updates a row and records the content change.
+func TestUpdateModel(t *testing.T) {
+	db := newResourceChangeTestDB(t)
+	ctx := context.Background()
+
+	// Insert a seed row
+	row := seedResourceVersion(t, db, "res-update", "before", "user-1")
+
+	affected, err := UpdateModel(ctx, db, &orm.ResourceVersion{},
+		func(q *gorm.DB) *gorm.DB { return q.Where("id = ?", row.ID) },
+		map[string]any{"before_content": "after"},
+		testContentChangeForUser("res-update", "user-1", "before", "after", time.Now()),
+	)
+	if err != nil {
+		t.Fatalf("update model: %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("affected = %d, want 1", affected)
+	}
+
+	// Verify the row was updated
+	var updated orm.ResourceVersion
+	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {
+		t.Fatalf("find updated row: %v", err)
+	}
+	if updated.BeforeContent != "after" {
+		t.Fatalf("before_content = %q, want after", updated.BeforeContent)
+	}
+}
+
+// TestUpdateModelNoRowsAffected returns 0 without error when nothing matches.
+func TestUpdateModelNoRowsAffected(t *testing.T) {
+	db := newResourceChangeTestDB(t)
+	ctx := context.Background()
+
+	affected, err := UpdateModel(ctx, db, &orm.ResourceVersion{},
+		func(q *gorm.DB) *gorm.DB { return q.Where("id = ?", "nonexistent") },
+		map[string]any{"before_content": "after"},
+		testContentChangeForUser("res-none", "user-1", "before", "after", time.Now()),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if affected != 0 {
+		t.Fatalf("affected = %d, want 0", affected)
+	}
+}
+
+// TestDeleteModel deletes a row and records the content change.
+func TestDeleteModel(t *testing.T) {
+	db := newResourceChangeTestDB(t)
+	ctx := context.Background()
+
+	row := seedResourceVersion(t, db, "res-delete", "content", "user-1")
+
+	affected, err := DeleteModel(ctx, db, &orm.ResourceVersion{},
+		func(q *gorm.DB) *gorm.DB { return q.Where("id = ?", row.ID) },
+		testContentChangeForUser("res-delete", "user-1", "content", "", time.Now()),
+	)
+	if err != nil {
+		t.Fatalf("delete model: %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("affected = %d, want 1", affected)
+	}
+
+	// Verify the row is gone
+	var result orm.ResourceVersion
+	err = db.Where("id = ?", row.ID).Take(&result).Error
+	if err == nil {
+		t.Fatal("expected record not found after delete")
+	}
+}
+
+// TestDeleteModelNoRowsAffected returns 0 when nothing matches.
+func TestDeleteModelNoRowsAffected(t *testing.T) {
+	db := newResourceChangeTestDB(t)
+	ctx := context.Background()
+
+	affected, err := DeleteModel(ctx, db, &orm.ResourceVersion{},
+		func(q *gorm.DB) *gorm.DB { return q.Where("id = ?", "nonexistent") },
+		testContentChangeForUser("res-none", "user-1", "content", "", time.Now()),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if affected != 0 {
+		t.Fatalf("affected = %d, want 0", affected)
+	}
+}
+
+// seedResourceVersion inserts a ResourceVersion row for testing Update/Delete.
+func seedResourceVersion(t *testing.T, db *gorm.DB, resourceID, content, userID string) orm.ResourceVersion {
+	t.Helper()
+	row := orm.ResourceVersion{
+		ID:            resourceID + "-id",
+		ResourceType:  "memory",
+		ResourceID:    resourceID,
+		UserID:        userID,
+		ChangeSource:  ChangeSourceDirectSave,
+		FromVersion:   1,
+		ToVersion:     2,
+		BeforeContent: content,
+		AfterContent:  content,
+		Diff:          "",
+		CreatedAt:     time.Now(),
+	}
+	if err := db.Create(&row).Error; err != nil {
+		t.Fatalf("seed version %s: %v", resourceID, err)
+	}
+	return row
 }
