@@ -186,7 +186,9 @@ func (t *stdioTransport) Close() error {
 
 func dialTCPBridge(address, token string) (messageTransport, error) {
 	if token == "" {
-		return nil, errors.New("Codex TCP bridge token is required")
+		return nil, &codexConfigurationError{
+			cause: errors.New("Codex TCP bridge token is required"),
+		}
 	}
 	dialer := *websocket.DefaultDialer
 	dialer.HandshakeTimeout = 10 * time.Second
