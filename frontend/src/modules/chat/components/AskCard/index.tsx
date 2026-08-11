@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Checkbox, Input, Progress, Radio } from "antd";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -157,6 +157,12 @@ export default function AskCard({
     () =>
       Object.fromEntries(questions.map((q, i) => [i, [...(q.choices ?? [])]])),
   );
+
+  useEffect(() => {
+    setAnswers((prev) =>
+      questions.map((q, i) => savedAnswers?.[i] ?? prev[i] ?? initAnswer(q)),
+    );
+  }, [askPending.ask_id, savedAnswers]);
 
   const currentQ = questions[currentIndex]!;
   const currentAns = answers[currentIndex]!;

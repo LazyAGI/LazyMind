@@ -29,8 +29,9 @@ export function stripAskUserReceipt(text: string | undefined, hasAskPending: boo
 export function isAskPendingReadOnly(
   askAnswered: boolean | undefined,
   isLatestMessage: boolean,
+  hasLaterUserMessage = false,
 ) {
-  return !!askAnswered || !isLatestMessage;
+  return !!askAnswered || (!isLatestMessage && hasLaterUserMessage);
 }
 
 interface ChatUserMessageLike {
