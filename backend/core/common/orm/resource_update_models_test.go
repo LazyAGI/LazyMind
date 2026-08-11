@@ -17,8 +17,6 @@ func TestDeprecatedResourceUpdateModelsNotRegisteredForDDL(t *testing.T) {
 	models := AllModelsForDDL()
 	for _, deprecated := range []any{
 		&SkillResource{},
-		&SystemMemory{},
-		&SystemUserPreference{},
 		&ResourceVersion{},
 		&ResourceSuggestion{},
 	} {
@@ -32,11 +30,10 @@ func TestDeprecatedResourceUpdateModelsNotRegisteredForDDL(t *testing.T) {
 		names[name] = true
 	}
 	for _, deprecated := range []string{
+		"memory_review",
 		"resource_versions",
 		"resource_suggestions",
 		"skill_resources",
-		"system_memories",
-		"system_user_preferences",
 	} {
 		if names[deprecated] {
 			t.Fatalf("deprecated table %s still registered in TableNamesForDDL", deprecated)

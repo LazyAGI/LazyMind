@@ -15,7 +15,7 @@ ACTIVE_CONNECTION_SESSION_STATUSES = (
     'confirming',
 )
 
-WELCOME_MESSAGE = """我是 LazyMind，你的个人 AI 助手。这里与 LazyMind 网页端使用同一账号、普通会话和历史记录。
+WELCOME_MESSAGE = """我是 LazyMind，你的个人 AI 助手。这里与 LazyMind 使用同一账号、普通会话和历史记录。
 
 你可以直接用自然语言：
 1. “帮我创建一个新会话，并整理今天的周报”

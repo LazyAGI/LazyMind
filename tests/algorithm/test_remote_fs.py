@@ -82,6 +82,35 @@ def test_remote_fs_omits_session_id_when_not_available(monkeypatch):
     ]
 
 
+def test_remote_fs_keeps_absolute_memory_list_paths(monkeypatch):
+    def fake_request(method, url, params, timeout, **kwargs):
+        assert method == 'GET'
+        assert url.endswith('/remote-fs/list')
+        return _Response({
+            'items': [
+                {
+                    'name': 'references',
+                    'path': 'memory/users/references',
+                    'type': 'dir',
+                },
+            ],
+        })
+
+    monkeypatch.setattr('lazymind.common.integrations.remote_fs.requests.request', fake_request)
+    monkeypatch.setattr(
+        'lazymind.common.integrations.remote_fs.lazyllm.globals',
+        {'agentic_config': {'user_id': 'user-1'}},
+    )
+
+    result = RemoteFS(base_url='http://core:8000').ls('memory/users')
+
+    assert result == [{
+        'name': 'remote://memory/users/references',
+        'path': 'memory/users/references',
+        'type': 'dir',
+    }]
+
+
 def test_remote_fs_write_mkdir_rm_and_trash_use_core_api(monkeypatch):
     calls = []
 

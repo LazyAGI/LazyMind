@@ -3,11 +3,11 @@ from __future__ import annotations
 import re
 from typing import Callable, Optional
 
-from lazymind.common.skill_document import (
+from lazymind.common.skill.document import (
     SkillDocumentError,
     require_valid_skill_document,
 )
-from lazymind.common.skill_paths import normalize_skill_package_path
+from lazymind.common.skill.paths import normalize_skill_package_path
 
 
 _UNICODE_MAP = {

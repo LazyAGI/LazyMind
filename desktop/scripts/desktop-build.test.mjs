@@ -61,6 +61,7 @@ for (const target of [
       const manifest = JSON.parse(readFileSync(path.join(root, "manifest.json"), "utf8"));
       assert.equal(manifest.platform, target.platform);
       assert.equal(manifest.arch, target.arch);
+      assert.deepEqual(manifest.features, { trustedLocalMode: false });
       assert.equal(manifest.binaries.core, `bin/core${target.suffix}`);
       assert.ok(manifest.checksums[`bin/core${target.suffix}`]);
       assert.equal(Object.keys(manifest.checksums).some((key) => key.includes("\\")), false);
@@ -69,6 +70,23 @@ for (const target of [
     }
   });
 }
+
+test("writes trusted local mode into the desktop runtime manifest", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "lazymind-manifest-trusted-"));
+  try {
+    execFileSync(process.execPath, [
+      manifestScript,
+      root,
+      "--platform", "windows",
+      "--arch", "amd64",
+      "--trusted-local-mode", "true",
+    ]);
+    const manifest = JSON.parse(readFileSync(path.join(root, "manifest.json"), "utf8"));
+    assert.deepEqual(manifest.features, { trustedLocalMode: true });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("generates a multi-resolution Windows ICO from the macOS icon", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "lazymind-icon-"));
@@ -212,6 +230,8 @@ test("Windows NSIS installer uses electron-builder's default LZMA payload", () =
   assert.match(buildScript, /maximumAttempts = 3/);
   assert.match(buildScript, /ELECTRON_CACHE/);
   assert.match(buildScript, /ELECTRON_BUILDER_CACHE/);
+  assert.match(buildScript, /LAZYMIND_TRUSTED_LOCAL_MODE/);
+  assert.match(buildScript, /--trusted-local-mode', \$trustedLocalMode/);
   assert.match(workflow, /Cache Electron and electron-builder downloads/);
   assert.match(workflow, /Submodule checkout attempt \$attempt\/3 failed/);
   assert.match(workflow, /pnpm activation attempt \$attempt\/3 failed/);
@@ -228,6 +248,8 @@ test("macOS distribution build signs packages while CI owns notarization sequenc
   assert.doesNotMatch(workflow, /pythonPrerelease|prereleaseNames/);
   assert.match(source, /PACKAGE_KIND=.*zip/);
   assert.match(source, /SIGNING_MODE=.*adhoc/);
+  assert.match(source, /LAZYMIND_TRUSTED_LOCAL_MODE/);
+  assert.match(source, /--trusted-local-mode "\$\{TRUSTED_LOCAL_MODE\}"/);
   assert.doesNotMatch(source, /notarytool submit/);
   assert.match(source, /Authority=Developer ID Application:/);
   assert.match(source, /signature_info="\$\(codesign -dv --verbose=4/);

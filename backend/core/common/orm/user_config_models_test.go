@@ -19,8 +19,8 @@ func TestUserConfigModelsAutoMigrate(t *testing.T) {
 	if !db.Migrator().HasColumn(&UserChatSettings{}, "user_id") {
 		t.Fatal("expected user_chat_settings.user_id column")
 	}
-	if !db.Migrator().HasColumn(&UserChatSettings{}, "enable_plugin") {
-		t.Fatal("expected user_chat_settings.enable_plugin column")
+	if !db.Migrator().HasColumn(&UserChatSettings{}, "enable_workflow") {
+		t.Fatal("expected user_chat_settings.enable_workflow column")
 	}
 	if !db.Migrator().HasColumn(&UserChatSettings{}, "enable_subagent") {
 		t.Fatal("expected user_chat_settings.enable_subagent column")

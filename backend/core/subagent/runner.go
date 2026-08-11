@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -22,13 +23,24 @@ const runPath = "/api/subagent/run"
 // subagentRunTimeout bounds a single SubAgent execution. Long tasks rely on ctx, not this ceiling.
 const subagentRunTimeout = 2 * time.Hour
 
+var activeRunCancels sync.Map
+
+// CancelRuns interrupts the HTTP streams driving the requested SubAgent tasks.
+func CancelRuns(taskIDs []string) {
+	for _, taskID := range taskIDs {
+		if value, ok := activeRunCancels.Load(taskID); ok {
+			value.(context.CancelFunc)()
+		}
+	}
+}
+
 // RunRequest is the body posted to the algorithm layer /api/subagent/run.
 // task_id doubles as the request sid (independent FileSystemQueue bucket).
 //
 // objective, input_slots, and output_slots are intentionally
 // omitted: the Python runner reads those from the sub_agent_tasks DB record.
-// tools is still forwarded for non-plugin_step agent types; plugin_step tasks
-// resolve their tools from plugin_loader at execution time.
+// tools is still forwarded for non-workflow_step agent types; workflow_step tasks
+// resolve their tools from the immutable public Host Attempt context.
 type RunRequest struct {
 	TaskID        string         `json:"task_id"`
 	AgentType     string         `json:"agent_type"`
@@ -71,7 +83,17 @@ func algoServiceURL() string {
 // Run posts to /api/subagent/run, consumes the SSE stream, and routes each event to DB + Redis.
 // It blocks until the stream ends (terminal event or connection close).
 func Run(ctx context.Context, db *gorm.DB, stateStore state.Store, req RunRequest) error {
+	return RunObserved(ctx, db, stateStore, req, nil)
+}
+
+// RunObserved is Run with a read-only copy of every accepted wire event.  The
+// observer is deliberately called before legacy projections are updated so a
+// workflow Executor can drive its own fenced Attempt lifecycle without parsing
+// the SSE stream a second time.
+func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req RunRequest, observe func(TaskEvent) error) error {
 	runCtx, cancel := context.WithTimeout(ctx, subagentRunTimeout)
+	activeRunCancels.Store(req.TaskID, context.CancelFunc(cancel))
+	defer activeRunCancels.Delete(req.TaskID)
 	defer cancel()
 
 	bodyBytes, err := json.Marshal(req)
@@ -115,6 +137,11 @@ func Run(ctx context.Context, db *gorm.DB, stateStore state.Store, req RunReques
 			continue
 		}
 		ev.TaskID = req.TaskID
+		if observe != nil {
+			if err := observe(ev); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+		}
 		if err := routeEvent(runCtx, db, stateStore, ev); err != nil {
 			message := fmt.Sprintf("persist subagent %s event failed: %v", ev.Type, err)
 			routeError(runCtx, db, stateStore, req.TaskID, message)
@@ -130,6 +157,10 @@ func Run(ctx context.Context, db *gorm.DB, stateStore state.Store, req RunReques
 
 // routeEvent persists a SubAgent event to DB (authoritative), then appends to Redis (live tail).
 func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev TaskEvent) error {
+	return routeEventWithWorkflowHooks(ctx, db, stateStore, ev, true, true)
+}
+
+func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore state.Store, ev TaskEvent, artifactHook, terminalHook bool) error {
 	switch ev.Type {
 	case "task_start":
 		accepted, _ := AcceptTaskStart(ctx, db, ev.TaskID)
@@ -137,8 +168,10 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 			return nil
 		}
 		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{"status": StatusRunning, "progress": 0})
-		// Mirror running status into plugin_session_steps if this is a plugin_step task.
-		routePluginStepStatus(ctx, db, stateStore, ev.TaskID, StatusRunning, "")
+		// Mirror running status into workflow_session_steps if this is a workflow_step task.
+		if terminalHook {
+			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, StatusRunning, "")
+		}
 	case "progress":
 		_ = UpdateProgress(ctx, db, ev.TaskID, ev.Progress, ev.CurrentPhase, ev.EstimatedSec)
 		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{
@@ -152,10 +185,12 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 		if err := SaveArtifact(ctx, db, ev.TaskID, ev.ArtifactKey, ev.ContentType, ev.Value, seq); err != nil {
 			return fmt.Errorf("save artifact task=%s slot=%s seq=%d: %w", ev.TaskID, ev.ArtifactKey, seq, err)
 		}
-		// Write slot revision if this is a plugin_step task with a slot binding.
+		// Write slot revision if this is a workflow_step task with a slot binding.
 		// list_index for partial retry is embedded inside the artifact JSON value and
 		// extracted by the plugin hook via extractListIndex — no need to pass it here.
-		routePluginArtifact(ctx, db, stateStore, ev.TaskID, ev.ArtifactKey)
+		if artifactHook {
+			routeWorkflowArtifact(ctx, db, stateStore, ev.TaskID, ev.ArtifactKey)
+		}
 	case "done":
 		status := ev.Status
 		if status == "" {
@@ -169,7 +204,9 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 			"status": status, "progress": 100, "summary": ev.Summary,
 		})
 		// Handle plugin step completion (auto-advance or step_waiting).
-		routePluginStepStatus(ctx, db, stateStore, ev.TaskID, status, ev.Summary)
+		if terminalHook {
+			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, status, ev.Summary)
+		}
 	case "error":
 		status := ev.Status
 		if status == "" {
@@ -180,7 +217,9 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 			return nil
 		}
 		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{"status": status, "summary": ev.Message})
-		routePluginStepStatus(ctx, db, stateStore, ev.TaskID, status, ev.Message)
+		if terminalHook {
+			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, status, ev.Message)
+		}
 	}
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)
 	return nil
@@ -196,7 +235,7 @@ func routeError(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID
 	}
 	_ = WriteStatus(ctx, stateStore, taskID, map[string]any{"status": StatusFailed, "summary": message})
 	_ = AppendStreamEvent(ctx, stateStore, taskID, ev)
-	routePluginStepStatus(ctx, db, stateStore, taskID, StatusFailed, message)
+	routeWorkflowStepStatus(ctx, db, stateStore, taskID, StatusFailed, message)
 }
 
 // EventHooks allows external packages (e.g. plugin) to register callbacks for SubAgent events.
@@ -208,7 +247,7 @@ type eventHooks struct {
 	onTerminalStatus func(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, status, message string)
 	// onConversationEvent is called when a plugin lifecycle event should be pushed to the
 	// main conversation SSE stream. convID and historyID identify the target stream;
-	// eventType is one of "step_waiting", "plugin_completed", "plugin_error".
+	// eventType is one of "step_waiting", "workflow_completed", "workflow_error".
 	onConversationEvent func(ctx context.Context, stateStore state.Store, convID, historyID, eventType string, payload map[string]any)
 }
 
@@ -235,13 +274,13 @@ func (h *eventHooks) CallConversationEvent(ctx context.Context, stateStore state
 	}
 }
 
-func routePluginStepStatus(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, status, message string) {
+func routeWorkflowStepStatus(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, status, message string) {
 	if EventHooks.onTerminalStatus != nil {
 		EventHooks.onTerminalStatus(ctx, db, stateStore, taskID, status, message)
 	}
 }
 
-func routePluginArtifact(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, slot string) {
+func routeWorkflowArtifact(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, slot string) {
 	if EventHooks.onArtifact != nil {
 		EventHooks.onArtifact(ctx, db, stateStore, taskID, slot)
 	}

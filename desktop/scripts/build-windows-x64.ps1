@@ -272,7 +272,17 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
 
     Write-Host '==> Staging runtime application files'
     Copy-RuntimeApp
-    Invoke-Native 'node.exe' @((Join-Path $repoRoot 'desktop\scripts\write-runtime-manifest.mjs'), $runtimeRoot, '--platform', 'windows', '--arch', 'amd64')
+    $trustedLocalMode = if ($env:LAZYMIND_TRUSTED_LOCAL_MODE -eq 'true') { 'true' } else { 'false' }
+    if ($trustedLocalMode -eq 'true') {
+        Write-Host '==> Trusted local mode enabled for this desktop package'
+    }
+    Invoke-Native 'node.exe' @(
+        (Join-Path $repoRoot 'desktop\scripts\write-runtime-manifest.mjs'),
+        $runtimeRoot,
+        '--platform', 'windows',
+        '--arch', 'amd64',
+        '--trusted-local-mode', $trustedLocalMode
+    )
     $reparse = @(Get-ChildItem -LiteralPath $runtimeRoot -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
     if ($reparse.Count -gt 0) {
         throw "Desktop runtime contains non-portable reparse points; first path: $($reparse[0].FullName)"

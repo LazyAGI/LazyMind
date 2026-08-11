@@ -1,14 +1,8 @@
-# CI: run lint, documentation checks, and tests for pushes and pull requests.
+# CI: run lint, documentation checks, and tests for pull requests.
 name: CI
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main, master, 'dev/*']
-    paths-ignore:
-      - "**.md"
-      - ".git*"
-      - "docs/**"
   pull_request:
     branches: [main, master, 'dev/*']
     paths-ignore:
@@ -17,7 +11,7 @@ on:
       - "docs/**"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

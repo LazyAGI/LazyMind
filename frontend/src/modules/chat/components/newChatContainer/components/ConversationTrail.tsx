@@ -15,6 +15,7 @@ const TRAIL_COLORS = ["#5f6670", "#858b93", "#a8adb4", "#c5c9ce", "#d9dce0"];
 const TRAIL_MAX_WIDTH = 28;
 const TRAIL_MIN_WIDTH = 4;
 const TRAIL_WIDTH_DECAY = 4;
+const MIN_CONVERSATION_TRAIL_ITEMS = 3;
 
 interface ConversationTrailProps {
   items: ConversationTrailRecord[];
@@ -190,7 +191,7 @@ export default function ConversationTrail({
     onLocate?.(historyId);
   };
 
-  if (!loading && !error && items.length === 0) {
+  if (items.length < MIN_CONVERSATION_TRAIL_ITEMS) {
     return null;
   }
 

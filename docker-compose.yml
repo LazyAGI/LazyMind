@@ -41,6 +41,7 @@ x-proxy-env: &proxy-env
 x-core-env: &core-env
   ACL_DB_DRIVER: postgres
   ACL_DB_DSN: "host=db user=root password=123456 dbname=core port=5432 sslmode=disable TimeZone=UTC"
+  LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS: ${LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS:-100}
   LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
   LAZYMIND_UPLOAD_ROOT: /var/lib/lazymind/uploads
   LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED: ${LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED:-true}
@@ -347,8 +348,8 @@ services:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-core:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
-      context: ./backend
-      dockerfile: core/Dockerfile
+      context: .
+      dockerfile: backend/core/Dockerfile
       args:
         <<: *mirror-args
     volumes:
@@ -359,9 +360,14 @@ services:
       - ./skills:/skills:ro
     expose:
       - "8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       <<: *core-env
       MIGRATIONS_DIR: /migrations
+      LAZYMIND_CODEX_APP_SERVER_URL: ${LAZYMIND_CODEX_APP_SERVER_URL:-ws://host.docker.internal:14501}
+      LAZYMIND_CODEX_APP_SERVER_TOKEN: ${LAZYMIND_CODEX_APP_SERVER_TOKEN:-}
+      LAZYMIND_CODEX_DEFAULT_CWD: ${LAZYMIND_CODEX_DEFAULT_CWD:-${PWD}}
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
       LAZYMIND_SUBAGENT_DB_DSN: ${ACL_DB_DSN}
@@ -377,6 +383,7 @@ services:
       LAZYMIND_RESOURCE_UPDATE_ENABLED: "true"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
       LAZYMIND_OFFICE_CONVERT_WORKERS: "4"
+      LAZYMIND_WORKFLOW_EXECUTOR_TOKEN: ${LAZYMIND_WORKFLOW_EXECUTOR_TOKEN:-dev-workflow-executor-token}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
       interval: 10s
@@ -425,7 +432,7 @@ services:
     expose:
       - "80"
     volumes:
-      - ./plugins:/usr/share/nginx/html/plugins:ro
+      - ./workflows:/usr/share/nginx/html/workflows:ro
     depends_on:
       kong:
         condition: service_started
@@ -725,8 +732,8 @@ services:
       - *lazyllm-src-mount
       # Router mode: mount algorithm source so child processes can load different versions.
       - ./algorithm/lazymind:/opt/lazymind
-      - ./plugins:/app/plugins:ro
-      - ./docs/plugin-format.md:/app/docs/plugin-format.md:ro
+      - ./workflows:/app/workflows:ro
+      - ./docs/workflow-format.md:/app/docs/workflow-format.md:ro
       - type: bind
         source: *file-watcher-watch-host-dir
         target: *file-watcher-watch-host-dir
@@ -743,6 +750,8 @@ services:
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_SEGMENT_STORE_TYPE: ${LAZYMIND_SEGMENT_STORE_TYPE:-opensearch}
       LAZYMIND_SEGMENT_STORE_URI_OR_PATH: ${LAZYMIND_SEGMENT_STORE_URI_OR_PATH:-https://opensearch:9200}
+      LAZYMIND_SEGMENT_STORE_USER: ${LAZYMIND_SEGMENT_STORE_USER:-admin}
+      LAZYMIND_SEGMENT_STORE_PASSWORD: ${LAZYMIND_SEGMENT_STORE_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
       LAZYMIND_AGENTIC_WORKSPACE: /tmp/.lazyllm_rag/agent_workspace
@@ -752,6 +761,9 @@ services:
       LAZYMIND_LLM_PRIORITY: ${LAZYMIND_LLM_PRIORITY:-0}
       LAZYMIND_DEFAULT_CHAT_DATASET: algo
       LAZYMIND_CORE_API_URL: http://core:8000
+      LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS: ${LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS:-100}
+      LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS: ${LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS:-5000}
+      LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK: ${LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK:-3}
       LAZYMIND_FILE_URL_SIGN_SECRET: changeme-in-production
       LAZYMIND_FILE_URL_EXPIRE_SECONDS: "3600"
       LAZYMIND_MAX_RETRIES: "20"
@@ -760,6 +772,7 @@ services:
       LAZYMIND_REVIEW_MAX_RETRIES: "5"
       LAZYMIND_SKILL_REVIEW_DEBUG: "false"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
+      LAZYMIND_WORKFLOW_EXECUTOR_TOKEN: ${LAZYMIND_WORKFLOW_EXECUTOR_TOKEN:-dev-workflow-executor-token}
       LAZYLLM_INIT_DOC: "False"
       # Chat uses the shared model config selector. Default dynamic mode enables
       # per-user model/API-key selection from core; set LAZYMIND_MODEL_CONFIG_PATH=online
@@ -773,7 +786,7 @@ services:
       LAZYMIND_ROUTER_PORTS_PER_INSTANCE: 100
       LAZYMIND_ROUTER_DEFAULT_ALGO_PATH: /opt/lazymind/chat
       LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT: 1
-      LAZYMIND_PLUGINS_DIR: /app/plugins
+      LAZYMIND_WORKFLOWS_DIR: /app/workflows
       <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *core-db-conn, *llm-api-keys, *upload-paths, *ocr-env, *cache-env]
     command: ["python", "-m", "lazymind.router.app", "--port", "8046"]
     depends_on:

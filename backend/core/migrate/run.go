@@ -220,8 +220,34 @@ func (r *Runner) Up(limit int) error {
 			continue
 		}
 
-		devApplied := appliedDevVersions(mode, applied)
-		if devApplied == 0 && mode.Aggregate != nil {
+		if len(mode.Dev) > 0 {
+			for _, mig := range mode.Dev {
+				if historyContains(applied, mig.Version) {
+					continue
+				}
+				if limit > 0 && executed >= limit {
+					return nil
+				}
+				if err := r.applyUpMigration(mig, currentMax); err != nil {
+					return err
+				}
+				applied = addHistoryRecord(applied, mig)
+				currentMax = highestAppliedVersion(applied)
+				executed++
+			}
+			continue
+		}
+
+		if mode.Aggregate != nil && !mode.DevDirectory && hasDevHistoryForMode(mode, applied) {
+			// Once a release's entire dev directory is archived, the catalog no
+			// longer knows how many dev migrations existed. Any retained combined
+			// history proves that this database used the dev path, so do not run the
+			// aggregate over it. Archiving a partially migrated release is forbidden
+			// by the release process and requires restoring the original dev files.
+			continue
+		}
+
+		if mode.Aggregate != nil {
 			if limit > 0 && executed >= limit {
 				return nil
 			}
@@ -232,45 +258,8 @@ func (r *Runner) Up(limit int) error {
 			}
 			if ranSQL {
 				executed++
-				// Post-aggregate migrations are not part of the squash snapshot.
-				// They must execute (idempotent CREATE/ALTER) instead of being
-				// recorded as applied without SQL; otherwise fresh Desktop/SQLite
-				// installs can miss later columns such as accepted_user_agreement_version.
-				for _, included := range postAggregateDevMigrations(mode) {
-					if limit > 0 && executed >= limit {
-						return nil
-					}
-					if err := r.applyUpMigration(included, currentMax); err != nil {
-						return err
-					}
-					applied = addHistoryRecord(applied, included)
-					currentMax = highestAppliedVersion(applied)
-					executed++
-				}
 			}
 			continue
-		}
-		for _, mig := range mode.Dev {
-			if historyContains(applied, mig.Version) {
-				continue
-			}
-			if limit > 0 && executed >= limit {
-				return nil
-			}
-			if err := r.applyUpMigration(mig, currentMax); err != nil {
-				return err
-			}
-			applied = addHistoryRecord(applied, mig)
-			currentMax = highestAppliedVersion(applied)
-			executed++
-			devApplied++
-		}
-		if mode.Aggregate != nil && len(mode.Dev) > 0 && devApplied == len(mode.Dev) {
-			sources := migrationVersions(mode.Dev)
-			applied, currentMax, err = r.canonicalizeHistory(*mode.Aggregate, sources, applied)
-			if err != nil {
-				return err
-			}
 		}
 	}
 	return nil

@@ -205,7 +205,6 @@ func TestCoreErrorConstructorsAreCatalogued(t *testing.T) {
 		if !strings.HasSuffix(file, ".go") || strings.HasSuffix(file, "_test.go") || strings.Contains(file, "error_catalog") {
 			return nil
 		}
-
 		parsed, parseErr := parser.ParseFile(fset, file, nil, 0)
 		if parseErr != nil {
 			return parseErr

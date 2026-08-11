@@ -1,8 +1,6 @@
 package userprefs
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +9,6 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
-	"lazymind/core/preferencefile"
 	"lazymind/core/store"
 )
 
@@ -62,7 +59,13 @@ func TestGetUIPreferencesDefaultsAndDerivedPreferenceStatus(t *testing.T) {
 		t.Fatalf("expected all default booleans false, got %#v", resp.Data)
 	}
 
-	seedUserPreferenceFile(t, db, "u1", preferencefile.BuildInitialFileContent(orm.SystemUserPreference{AgentPersona: "严谨助手"}))
+	seedUserPreferenceFile(t, db, "u1", `preferences:
+  - name: pref.response.concise
+    summary: Keep answers concise.
+    ref: references/response-concise.md
+    created_at: "2026-07-24T00:00:00Z"
+    updated_at: "2026-07-24T00:00:00Z"
+`)
 
 	req = httptest.NewRequest(http.MethodGet, "/api/core/user/ui-preferences", nil)
 	req.Header.Set("X-User-Id", "u1")
@@ -83,49 +86,19 @@ func seedUserPreferenceFile(t *testing.T, db *orm.DB, userID, content string) {
 	t.Helper()
 
 	now := time.Now()
-	sum := sha256.Sum256([]byte(content))
-	hash := hex.EncodeToString(sum[:])
-	revisionID := "pref-rev-" + userID
-	head := revisionID
-	if err := db.Create(&orm.PersonalResourceBlob{
-		Hash:           hash,
-		Size:           int64(len([]byte(content))),
-		Mime:           "text/markdown; charset=utf-8",
-		FileType:       "markdown",
-		Binary:         false,
-		StorageBackend: "postgres",
-		Content:        []byte(content),
-		CreatedAt:      now,
+	if err := db.Create(&orm.MemoryCurrentEntry{
+		UserID:    userID,
+		Path:      "memory/users/preference.yaml",
+		EntryType: "file",
+		Content:   []byte(content),
+		Size:      int64(len([]byte(content))),
+		Mime:      "application/yaml; charset=utf-8",
+		FileType:  "yaml",
+		Binary:    false,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}).Error; err != nil {
-		t.Fatalf("create preference blob: %v", err)
-	}
-	if err := db.Create(&orm.PersonalResource{
-		ID:             "pref-resource-" + userID,
-		UserID:         userID,
-		ResourceType:   "user_preference",
-		HeadRevisionID: &head,
-		Version:        1,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	}).Error; err != nil {
-		t.Fatalf("create preference resource: %v", err)
-	}
-	if err := db.Create(&orm.PersonalResourceRevision{
-		ID:           revisionID,
-		ResourceID:   "pref-resource-" + userID,
-		RevisionNo:   1,
-		Path:         "memory/user.md",
-		BlobHash:     hash,
-		ContentHash:  hash,
-		Size:         int64(len([]byte(content))),
-		Mime:         "text/markdown; charset=utf-8",
-		FileType:     "markdown",
-		Binary:       false,
-		Message:      "seed",
-		ChangeSource: "test",
-		CreatedAt:    now,
-	}).Error; err != nil {
-		t.Fatalf("create preference revision: %v", err)
+		t.Fatalf("create current preference file: %v", err)
 	}
 }
 

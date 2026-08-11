@@ -10,7 +10,8 @@
   .chat-avatar {
     background: transparent;
     flex-shrink: 0;
-    width: 32px; 
+    width: 32px;
+    height: 32px;
   }
 
   .chat-bot-box-single {
@@ -43,7 +44,8 @@
   .chat-avatar {
     background: transparent;
     flex-shrink: 0;
-    width: 32px; 
+    width: 32px;
+    height: 32px;
   }
 
   .chat-bot-box-multi {
@@ -151,6 +153,15 @@
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .chat-avatar {
+    --identity-avatar-size: 28px !important;
+    width: 28px !important;
+    height: 28px !important;
+    flex-basis: 28px !important;
+  }
 }
 
 .chat-assistant-msg-knowledge-info {

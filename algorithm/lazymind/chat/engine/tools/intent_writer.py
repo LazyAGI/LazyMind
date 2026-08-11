@@ -54,13 +54,13 @@ def render_intent_section(title: str, value: Any) -> str:
     )
 
 
-def _description(plugin_enabled: bool) -> str:
+def _description(workflow_enabled: bool) -> str:
     scopes = (
         '- conversation: persists for later turns in this conversation.\n'
-        if not plugin_enabled else
+        if not workflow_enabled else
         '- conversation: persists after the current workflow run ends.\n'
-        '- plugin_session: applies only to the active workflow run.\n'
-        '- plugin_step: applies only to one canonical step_id from the authoritative workflow context.\n'
+        '- workflow_session: applies only to the active workflow run.\n'
+        '- workflow_step: applies only to one canonical step_id from the authoritative workflow context.\n'
     )
     return f'''Update durable user intent by applying a minimal patch.
 
@@ -81,7 +81,7 @@ Args:
         op (set/add/remove/supersede), field, value, and a short evidence excerpt copied
         from the current user request. Use set only for goal, deliverable, or
         execution_mode. Use add/remove/supersede for list fields.
-    step_id (str, optional): Required only for plugin_step; use a canonical id already
+    step_id (str, optional): Required only for workflow_step; use a canonical id already
         present in the authoritative workflow context.
 
 Returns:
@@ -96,8 +96,8 @@ def build_intentwrite_tool(
         'conversation_id': conversation_id,
         'current_query': current_query,
         'current_intent': normalize_intent_document(current_intent),
-        'plugin_session_id': '',
-        'plugin_id': '',
+        'workflow_session_id': '',
+        'workflow_id': '',
         'valid_step_ids': set(),
     }
 
@@ -129,19 +129,19 @@ def build_intentwrite_tool(
             clean.append({'op': op, 'field': field, 'value': value, 'evidence': evidence})
 
         allowed = {'conversation'}
-        if config['plugin_session_id']:
-            allowed.update({'plugin_session', 'plugin_step'})
+        if config['workflow_session_id']:
+            allowed.update({'workflow_session', 'workflow_step'})
         if scope not in allowed:
             raise ValueError(f'unknown scope {scope!r}; available scopes: {sorted(allowed)}.')
-        if scope == 'plugin_step':
+        if scope == 'workflow_step':
             if not step_id:
-                raise ValueError('step_id is required for plugin_step.')
+                raise ValueError('step_id is required for workflow_step.')
             if step_id not in config['valid_step_ids']:
-                raise ValueError(f'unknown step_id {step_id!r} for the active plugin.')
+                raise ValueError(f'unknown step_id {step_id!r} for the active workflow.')
 
         _write_agent_data('intent_updated', **{
             'conversation_id': config['conversation_id'],
-            'session_id': config['plugin_session_id'] if scope != 'conversation' else '',
+            'session_id': config['workflow_session_id'] if scope != 'conversation' else '',
             'scope': scope,
             'operations': clean,
             'step_id': step_id or '',
@@ -159,19 +159,19 @@ def build_intentwrite_tool(
     return intentwrite
 
 
-def enable_plugin_intent_scopes(tool: Any, *, session_id: str, plugin_id: str,
-                                valid_step_ids: List[str]) -> Any:
+def enable_workflow_intent_scopes(tool: Any, *, session_id: str, workflow_id: str,
+                                  valid_step_ids: List[str]) -> Any:
     config = getattr(tool, '_intentwriter_config', None)
-    if not isinstance(config, dict) or not session_id or not plugin_id:
+    if not isinstance(config, dict) or not session_id or not workflow_id:
         return tool
     config.update({
-        'plugin_session_id': session_id,
-        'plugin_id': plugin_id,
+        'workflow_session_id': session_id,
+        'workflow_id': workflow_id,
         'valid_step_ids': set(valid_step_ids),
     })
     tool.__doc__ = _description(True)
     tool.__annotations__ = {
-        'scope': Literal['conversation', 'plugin_session', 'plugin_step'],
+        'scope': Literal['conversation', 'workflow_session', 'workflow_step'],
         'operations': List[Dict[str, str]],
         'step_id': Optional[str],
         'return': str,

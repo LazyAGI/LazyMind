@@ -240,12 +240,12 @@ KNOWLEDGE_BASE_MENTION_SCENARIOS = [
     for outcome in OUTCOME_NAMES
     for variant in range(2)
 ]
-PLUGIN_MENTION_SCENARIOS = [
+WORKFLOW_MENTION_SCENARIOS = [
     {
-        'id': f'mention-plugin-{outcome}-{variant}',
+        'id': f'mention-workflow-{outcome}-{variant}',
         'query': _chain(outcome, variant=variant),
-        'bindings': {'plugin_refs': [f'plugin/{outcome}']},
-        'expected_plugin_refs': (f'plugin/{outcome}',),
+        'bindings': {'workflow_refs': [f'workflow/{outcome}']},
+        'expected_workflow_refs': (f'workflow/{outcome}',),
         'expected_primary': outcome,
     }
     for outcome in OUTCOME_NAMES
@@ -253,8 +253,8 @@ PLUGIN_MENTION_SCENARIOS = [
 ]
 RESOURCE_PAIR_KINDS = (
     {'skill_names': ['review/selected'], 'knowledge_base_ids': ['kb-selected']},
-    {'skill_names': ['review/selected'], 'plugin_refs': ['plugin/selected']},
-    {'knowledge_base_ids': ['kb-selected'], 'plugin_refs': ['plugin/selected']},
+    {'skill_names': ['review/selected'], 'workflow_refs': ['workflow/selected']},
+    {'knowledge_base_ids': ['kb-selected'], 'workflow_refs': ['workflow/selected']},
 )
 RESOURCE_PAIR_SCENARIOS = [
     {
@@ -272,7 +272,7 @@ RESOURCE_TRIPLE_SCENARIOS = [
         'bindings': {
             'skill_names': ['review/selected'],
             'knowledge_base_ids': ['kb-selected'],
-            'plugin_refs': ['plugin/selected'],
+            'workflow_refs': ['workflow/selected'],
         },
     }
     for variant in range(8)
@@ -310,16 +310,16 @@ RESOURCE_CONFLICT_SCENARIOS = [
     ],
     *[
         {
-            'id': f'mention-conflict-plugin-{variant}',
-            'query': f'解释一下这个主题，但不要启动这个Plugin，变体{variant}',
+            'id': f'mention-conflict-workflow-{variant}',
+            'query': f'解释一下这个主题，但不要启动这个Workflow，变体{variant}',
             'bindings': {
-                'plugin_refs': ['plugin/selected'],
+                'workflow_refs': ['workflow/selected'],
                 'mentions': [{
-                    'resource_type': 'plugin', 'resource_ref': 'plugin/selected',
-                    'display_name': '这个Plugin',
+                    'resource_type': 'workflow', 'resource_ref': 'workflow/selected',
+                    'display_name': '这个Workflow',
                 }],
             },
-            'expected_excluded': ('plugin/selected',),
+            'expected_excluded': ('workflow/selected',),
         }
         for variant in range(5)
     ],
@@ -349,7 +349,7 @@ RESOURCE_CURRENT_VS_DEFAULT_SCENARIOS = [
 RESOURCE_BINDING_SCENARIOS = (
     SKILL_MENTION_SCENARIOS
     + KNOWLEDGE_BASE_MENTION_SCENARIOS
-    + PLUGIN_MENTION_SCENARIOS
+    + WORKFLOW_MENTION_SCENARIOS
     + RESOURCE_PAIR_SCENARIOS
     + RESOURCE_TRIPLE_SCENARIOS
     + RESOURCE_CONFLICT_SCENARIOS
@@ -425,19 +425,19 @@ def test_explicit_resource_binding_scenarios(scenario: dict) -> None:
     if bindings.get('knowledge_base_ids') and not scenario.get('expected_excluded'):
         assert profile.source_strategy == 'knowledge_base'
         assert profile.explicit_resources.knowledge_base_ids == tuple(bindings['knowledge_base_ids'])
-    if bindings.get('plugin_refs') and not scenario.get('expected_excluded'):
-        assert profile.explicit_resources.plugin_refs == tuple(bindings['plugin_refs'])
+    if bindings.get('workflow_refs') and not scenario.get('expected_excluded'):
+        assert profile.explicit_resources.workflow_refs == tuple(bindings['workflow_refs'])
     if 'expected_primary' in scenario:
         assert profile.primary_outcome == scenario['expected_primary']
     if 'expected_skill_mode' in scenario:
         assert profile.skill_mode == scenario['expected_skill_mode']
     if 'expected_source_strategy' in scenario:
         assert profile.source_strategy == scenario['expected_source_strategy']
-    if 'expected_plugin_refs' in scenario:
-        assert profile.explicit_resources.plugin_refs == scenario['expected_plugin_refs']
+    if 'expected_workflow_refs' in scenario:
+        assert profile.explicit_resources.workflow_refs == scenario['expected_workflow_refs']
     if scenario.get('expected_excluded'):
         excluded = profile.excluded_resources
-        actual = excluded.skill_names + excluded.knowledge_base_ids + excluded.plugin_refs
+        actual = excluded.skill_names + excluded.knowledge_base_ids + excluded.workflow_refs
         assert actual == scenario['expected_excluded']
         assert profile.request_assessment.status == 'ready'
     if scenario.get('expected_not_explicit'):
@@ -676,15 +676,15 @@ def test_explicit_knowledge_base_and_explicit_web_request_use_mixed_sources() ->
     assert profile.source_strategy == 'mixed'
 
 
-def test_explicit_plugin_binding_preserves_user_outcome() -> None:
+def test_explicit_workflow_binding_preserves_user_outcome() -> None:
     profile = resolve_task_profile(
         '帮我制定发布计划',
         enable_llm_fallback=False,
-        explicit_resources={'plugin_refs': ['marketing/campaign']},
+        explicit_resources={'workflow_refs': ['marketing/campaign']},
     )
     assert profile.primary_outcome == 'plan'
-    assert profile.explicit_resources.plugin_refs == ('marketing/campaign',)
-    assert 'explicit plugin selection' in profile.reasons
+    assert profile.explicit_resources.workflow_refs == ('marketing/campaign',)
+    assert 'explicit workflow selection' in profile.reasons
 
 
 def test_mixed_resource_allow_and_deny_keeps_only_allowed_mentions() -> None:
@@ -940,10 +940,10 @@ def test_llm_classification_cannot_override_explicit_resources() -> None:
         explicit_resources={
             'skill_names': ['video/ai-production'],
             'knowledge_base_ids': ['kb-video'],
-            'plugin_refs': ['video/workflow'],
+            'workflow_refs': ['video/workflow'],
         },
     )
     assert profile.skill_mode == 'explicit'
     assert profile.source_strategy == 'knowledge_base'
     assert profile.explicit_resources.skill_names == ('video/ai-production',)
-    assert profile.explicit_resources.plugin_refs == ('video/workflow',)
+    assert profile.explicit_resources.workflow_refs == ('video/workflow',)

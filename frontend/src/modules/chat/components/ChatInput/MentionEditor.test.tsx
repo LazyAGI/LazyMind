@@ -18,7 +18,7 @@ vi.mock("@ant-design/icons", () => ({
 }));
 
 vi.mock("@/components/request", () => ({
-  axiosInstance: { get: vi.fn().mockResolvedValue({ data: { plugins: [] } }) },
+  axiosInstance: { get: vi.fn().mockResolvedValue({ data: { workflows: [] } }) },
   BASE_URL: "",
 }));
 

@@ -52,11 +52,11 @@ export interface ChatContainerProps {
   disabledReason?: string;
   disabledDescription?: ReactNode;
   disabledAction?: ReactNode;
-  onPluginSettingsChange?: (
-    settings: import("@/modules/chat/utils/request").ConversationPluginSettings,
+  onWorkflowSettingsChange?: (
+    settings: import("@/modules/chat/utils/request").ConversationWorkflowSettings,
   ) => void;
-  initialPluginSettings?: import("@/modules/chat/utils/request").ConversationPluginSettings;
-  hasPluginSession?: boolean;
+  initialWorkflowSettings?: import("@/modules/chat/utils/request").ConversationWorkflowSettings;
+  hasWorkflowSession?: boolean;
 }
 
 export interface ChatMessage {
@@ -136,5 +136,4 @@ export interface ChatMessage {
   };
   ask_answered?: boolean;
   ask_saved_answers?: Record<number, unknown>;
-  is_history?: boolean;
 }
