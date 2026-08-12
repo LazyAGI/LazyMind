@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Modal, Select, message } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import type {
   ListModelProviderGroupModelsOpenAPIItem,
   SelectedModelOpenAPIItem,
@@ -21,15 +22,6 @@ interface QuickModelSettingsProps {
   onSaved?: () => void | Promise<void>;
 }
 
-const capabilities: Array<{
-  description: string;
-  key: QuickModelCapability;
-  title: string;
-}> = [
-  { key: "llm", title: "大模型（对话）", description: "用于对话与核心推理" },
-  { key: "embed_main", title: "向量模型", description: "用于知识库检索召回" },
-];
-
 function modelValue(model: {
   id?: string;
   model_id?: string;
@@ -49,12 +41,18 @@ function modelLabel(model: { group_name: string; name: string; provider_name: st
 }
 
 export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: QuickModelSettingsProps) {
+  const { t } = useTranslation();
   const [selected, setSelected] = useState<Partial<Record<QuickModelCapability, string>>>({});
   const [shared, setShared] = useState<Partial<Record<QuickModelCapability, boolean>>>({});
   const [options, setOptions] = useState<Partial<Record<QuickModelCapability, Array<{ label: string; value: string }>>>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState<QuickModelCapability | null>(null);
+
+  const capabilities = useMemo(() => [
+    { key: "llm" as const, title: t("settingsPage.models.llmTitle"), description: t("settingsPage.models.llmDesc") },
+    { key: "embed_main" as const, title: t("settingsPage.models.embedTitle"), description: t("settingsPage.models.embedDesc") },
+  ], [t]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,7 +72,7 @@ export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: Q
       const nextShared: Partial<Record<QuickModelCapability, boolean>> = {};
       const nextOptions: Partial<Record<QuickModelCapability, Array<{ label: string; value: string }>>> = {};
 
-      capabilities.forEach(({ key }) => {
+      (["llm", "embed_main"] as QuickModelCapability[]).forEach((key) => {
         const current = selectedItems.find((item) => item.model_key === key);
         const available = modelLists[key].map((item) => ({
           label: modelLabel(item),
@@ -116,10 +114,10 @@ export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: Q
         },
       });
       await onSaved?.();
-      message.success(capability === "llm" ? "对话模型已更新" : "向量模型已更新");
+      message.success(capability === "llm" ? t("settingsPage.models.llmUpdated") : t("settingsPage.models.embedUpdated"));
     } catch {
       setSelected((current) => ({ ...current, [capability]: previous }));
-      message.error("模型保存失败，已恢复原选择");
+      message.error(t("settingsPage.models.saveFailed"));
     } finally {
       setSaving(null);
     }
@@ -128,10 +126,10 @@ export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: Q
   const requestChange = (capability: QuickModelCapability, value: string) => {
     if (capability === "embed_main" && selected.embed_main && selected.embed_main !== value && shared.embed_main) {
       Modal.confirm({
-        title: "切换共享向量模型",
-        content: "当前向量模型已被组织共享。切换后，使用该共享配置的知识库检索可能受到影响。",
-        okText: "确认切换",
-        cancelText: "取消",
+        title: t("settingsPage.models.switchSharedTitle"),
+        content: t("settingsPage.models.switchSharedContent"),
+        okText: t("settingsPage.models.confirmSwitch"),
+        cancelText: t("settingsPage.cancel"),
         okButtonProps: { danger: true },
         onOk: () => save(capability, value),
       });
@@ -142,18 +140,18 @@ export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: Q
 
   return <>
     {capabilities.map(({ key, title, description }) => <div className="settings-dashboard-config-row" key={key}>
-      <div className="settings-dashboard-copy"><span>模型与服务</span><strong>{title}</strong><p>{description}</p></div>
+      <div className="settings-dashboard-copy"><span>{t("settingsPage.models.moduleLabel")}</span><strong>{title}</strong><p>{description}</p></div>
       <div className="settings-dashboard-control settings-dashboard-model-control">
-        {loadError ? <Button size="small" icon={<ReloadOutlined />} onClick={() => void load()}>重试</Button> : <Select
-          aria-label={`${title}快速配置`}
+        {loadError ? <Button size="small" icon={<ReloadOutlined />} onClick={() => void load()}>{t("settingsPage.retry")}</Button> : <Select
+          aria-label={t("settingsPage.models.quickConfigAria", { title })}
           className="settings-dashboard-quick-select"
           disabled={saving !== null || (key === "embed_main" && !canConfigureEmbedding)}
           loading={loading || saving === key}
-          notFoundContent="暂无可用模型"
-          onChange={(value) => requestChange(key, value)}
+          notFoundContent={t("settingsPage.models.noModels")}
+          onChange={(value: string) => requestChange(key, value)}
           optionFilterProp="label"
           options={options[key] || []}
-          placeholder={key === "embed_main" && !canConfigureEmbedding ? "仅管理员可配置" : "请选择模型"}
+          placeholder={key === "embed_main" && !canConfigureEmbedding ? t("settingsPage.models.adminOnly") : t("settingsPage.models.selectModel")}
           showSearch
           value={selected[key]}
         />}

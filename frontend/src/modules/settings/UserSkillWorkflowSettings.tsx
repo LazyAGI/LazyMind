@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { Alert, Empty, Pagination, Skeleton, Switch, Tag, message } from "antd";
 import { ApartmentOutlined, AppstoreOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import {
   listSkillAssetsPage,
   patchSkillAsset,
@@ -52,7 +53,12 @@ function ResourceRow({
   icon,
   onChange,
 }: ResourceRowProps) {
-  const status = !controlEnabled ? `${controlLabel}开关已关闭` : enabled ? "已启用" : "已停用";
+  const { t } = useTranslation();
+  const status = !controlEnabled
+    ? t("settingsPage.skills.masterOff", { label: controlLabel })
+    : enabled
+      ? t("settingsPage.enabled")
+      : t("settingsPage.disabled");
   const statusClass = !controlEnabled
     ? " is-suspended"
     : enabled
@@ -64,7 +70,7 @@ function ResourceRow({
       <span className="settings-skill-resource-icon" aria-hidden="true">{icon}</span>
       <div className="settings-skill-resource-copy">
         <h2>{title}</h2>
-        <p>{description || "暂无描述"}</p>
+        <p>{description || t("settingsPage.skills.noDescription")}</p>
         <span className="settings-skill-resource-meta">{meta}</span>
         {error ? <span className="settings-skill-resource-error" role="alert">{error}</span> : null}
       </div>
@@ -77,11 +83,14 @@ function ResourceRow({
         loading={loading}
         disabled={!controlEnabled || loading}
         onChange={onChange}
-        aria-label={`${enabled ? "停用" : "启用"}${title}`}
+        aria-label={t("settingsPage.skills.toggleAria", {
+          action: enabled ? t("settingsPage.confirm.disableState") : t("settingsPage.confirm.enableState"),
+          title,
+        })}
         aria-describedby={`${id}-resource-state`}
       />
       <span id={`${id}-resource-state`} className="settings-screenreader-status">
-        {controlEnabled ? status : `${status}，当前资源已停用`}
+        {controlEnabled ? status : t("settingsPage.skills.resourceSuspended", { status })}
       </span>
     </div>
   );
@@ -96,6 +105,7 @@ export default function UserSkillWorkflowSettings({
   headingRef,
   onChanged,
 }: UserSkillWorkflowSettingsProps) {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<ResourceTab>("skills");
   const [pageByTab, setPageByTab] = useState<Record<ResourceTab, number>>({ skills: 1, workflows: 1 });
   const [pageSize, setPageSize] = useState(6);
@@ -130,10 +140,10 @@ export default function UserSkillWorkflowSettings({
   const enabledSkillCount = useMemo(() => skills.filter((item) => item.isEnabled).length, [skills]);
   const enabledWorkflowCount = useMemo(() => workflows.filter((item) => item.enabled).length, [workflows]);
   const groupStatus = (controlEnabled: boolean, enabledCount: number, total: number) => {
-    if (!controlEnabled) return `0 / ${total} 全部停用`;
-    if (total > 0 && enabledCount === total) return `${enabledCount} / ${total} 全部启用`;
-    if (enabledCount > 0) return `${enabledCount} / ${total} 部分启用`;
-    return `0 / ${total} 全部停用`;
+    if (!controlEnabled) return t("settingsPage.skills.allDisabled", { total });
+    if (total > 0 && enabledCount === total) return t("settingsPage.skills.allEnabled", { enabled: enabledCount, total });
+    if (enabledCount > 0) return t("settingsPage.skills.partialEnabled", { enabled: enabledCount, total });
+    return t("settingsPage.skills.allDisabled", { total });
   };
 
   const beginSaving = (key: string) => {
@@ -160,10 +170,10 @@ export default function UserSkillWorkflowSettings({
     try {
       await patchSkillAsset(skill.id, { is_enabled: enabled });
       await onChanged?.();
-      message.success(enabled ? "技能已启用" : "技能已停用");
+      message.success(enabled ? t("settingsPage.skills.skillEnabled") : t("settingsPage.skills.skillDisabled"));
     } catch {
       setSkills((current) => current.map((item) => item.id === skill.id ? { ...item, isEnabled: skill.isEnabled } : item));
-      setRowErrors((current) => ({ ...current, [key]: "保存失败，已恢复原状态，请重试。" }));
+      setRowErrors((current) => ({ ...current, [key]: t("settingsPage.skills.saveFailed") }));
     } finally {
       finishSaving(key);
     }
@@ -176,10 +186,10 @@ export default function UserSkillWorkflowSettings({
     try {
       await setUserWorkflowEnabled(workflow.workflow_ref, enabled);
       await onChanged?.();
-      message.success(enabled ? "工作流已启用" : "工作流已停用");
+      message.success(enabled ? t("settingsPage.skills.workflowEnabled") : t("settingsPage.skills.workflowDisabled"));
     } catch {
       setWorkflows((current) => current.map((item) => item.workflow_ref === workflow.workflow_ref ? { ...item, enabled: workflow.enabled } : item));
-      setRowErrors((current) => ({ ...current, [key]: "保存失败，已恢复原状态，请重试。" }));
+      setRowErrors((current) => ({ ...current, [key]: t("settingsPage.skills.saveFailed") }));
     } finally {
       finishSaving(key);
     }
@@ -190,7 +200,7 @@ export default function UserSkillWorkflowSettings({
   const activeGroupSaving = groupSaving === activeTab;
   const activeGroupTotal = activeTab === "skills" ? skills.length : workflows.length;
   const activeGroupEnabledCount = activeTab === "skills" ? enabledSkillCount : enabledWorkflowCount;
-  const activeGroupLabel = activeTab === "skills" ? "我的技能" : "我的工作流";
+  const activeGroupLabel = activeTab === "skills" ? t("settingsPage.skills.mySkills") : t("settingsPage.skills.myWorkflows");
   const activePage = pageByTab[activeTab];
   const pageStart = (activePage - 1) * pageSize;
   const visibleResources = activeResources.slice(pageStart, pageStart + pageSize);
@@ -211,10 +221,10 @@ export default function UserSkillWorkflowSettings({
             id={key}
             title={skill.name}
             description={skill.description}
-            meta={skill.category || "个人技能"}
+            meta={skill.category || t("settingsPage.skills.personalSkill")}
             enabled={skill.isEnabled}
             controlEnabled={skillsEnabled}
-            controlLabel="我的技能"
+            controlLabel={t("settingsPage.skills.mySkills")}
             loading={saving.has(key)}
             error={rowErrors[key]}
             icon={<AppstoreOutlined />}
@@ -230,10 +240,10 @@ export default function UserSkillWorkflowSettings({
             id={key}
             title={workflow.name}
             description={workflow.description || workflow.when_to_use}
-            meta={`我的工作流 · v${workflow.revision_no}`}
+            meta={t("settingsPage.skills.workflowMeta", { revision: workflow.revision_no })}
             enabled={workflow.enabled}
             controlEnabled={workflowsEnabled}
-            controlLabel="我的工作流"
+            controlLabel={t("settingsPage.skills.myWorkflows")}
             loading={saving.has(key)}
             error={rowErrors[key]}
             icon={<ApartmentOutlined />}
@@ -247,8 +257,8 @@ export default function UserSkillWorkflowSettings({
       <header className="settings-skill-resources-head">
         <span className="settings-skill-resources-title-icon" aria-hidden="true"><AppstoreOutlined /></span>
         <div>
-          <h1 ref={headingRef} tabIndex={-1}>技能与插件</h1>
-          <p>管理我的技能和我的工作流运行状态；这里只支持启用或停用。</p>
+          <h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.skills.title")}</h1>
+          <p>{t("settingsPage.skills.description")}</p>
         </div>
         <div className="settings-skill-group-controls">
           <div className="settings-skill-master">
@@ -261,8 +271,8 @@ export default function UserSkillWorkflowSettings({
               checked={activeGroupEnabled}
               loading={activeGroupSaving}
               disabled={controlsDisabled || activeGroupTotal === 0}
-              onChange={(enabled) => onGroupChange(activeTab, enabled, activeGroupEnabledCount)}
-              aria-label={`批量启用${activeGroupLabel}`}
+              onChange={(enabled: boolean) => onGroupChange(activeTab, enabled, activeGroupEnabledCount)}
+              aria-label={t("settingsPage.skills.bulkEnableAria", { label: activeGroupLabel })}
             />
           </div>
         </div>
@@ -270,32 +280,32 @@ export default function UserSkillWorkflowSettings({
 
       {activeTab === "skills" && !skillsEnabled ? (
         <div className="settings-skill-master-notice" role="status" aria-live="polite">
-          我的技能开关已关闭，所有技能均已停用；重新开启会统一启用全部技能。
+          {t("settingsPage.skills.masterOffSkillNotice")}
         </div>
       ) : activeTab === "workflows" && !workflowsEnabled ? (
         <div className="settings-skill-master-notice" role="status" aria-live="polite">
-          我的工作流开关已关闭，所有工作流均已停用；重新开启会统一启用全部工作流。
+          {t("settingsPage.skills.masterOffWorkflowNotice")}
         </div>
       ) : null}
 
-      <nav className="settings-skill-resource-tabs" aria-label="技能与工作流">
+      <nav className="settings-skill-resource-tabs" aria-label={t("settingsPage.skills.tabsAria")}>
         <button type="button" className={activeTab === "skills" ? "is-active" : ""} onClick={() => setActiveTab("skills")}>
-          我的技能 <span>{skills.length}</span>
+          {t("settingsPage.skills.mySkills")} <span>{skills.length}</span>
         </button>
         <button type="button" className={activeTab === "workflows" ? "is-active" : ""} onClick={() => setActiveTab("workflows")}>
-          我的工作流 <span>{workflows.length}</span>
+          {t("settingsPage.skills.myWorkflows")} <span>{workflows.length}</span>
         </button>
       </nav>
 
       {loading ? (
-        <div className="settings-skill-resource-loading" aria-label="正在加载技能与工作流"><Skeleton active paragraph={{ rows: 5 }} /></div>
+        <div className="settings-skill-resource-loading" aria-label={t("settingsPage.skills.loadingAria")}><Skeleton active paragraph={{ rows: 5 }} /></div>
       ) : loadError ? (
         <Alert
           type="error"
           showIcon
-          message="无法加载技能与工作流"
-          description="请检查网络后重试。"
-          action={<button type="button" className="settings-skill-retry" onClick={() => void loadResources()}>重试</button>}
+          message={t("settingsPage.skills.loadFailed")}
+          description={t("settingsPage.skills.loadFailedDesc")}
+          action={<button type="button" className="settings-skill-retry" onClick={() => void loadResources()}>{t("settingsPage.retry")}</button>}
         />
       ) : rows.length ? (
         <>
@@ -307,7 +317,7 @@ export default function UserSkillWorkflowSettings({
               total={activeResources.length}
               pageSizeOptions={[6, 12, 20, 50]}
               showSizeChanger
-              showTotal={(total: number) => `共 ${total} 条`}
+              showTotal={(total: number) => t("settingsPage.skills.totalItems", { total })}
               onChange={(page: number) => setPageByTab((current) => ({ ...current, [activeTab]: page }))}
               onShowSizeChange={(_page: number, nextPageSize: number) => {
                 setPageSize(nextPageSize);
@@ -318,7 +328,10 @@ export default function UserSkillWorkflowSettings({
         </>
       ) : (
         <div className="settings-skill-resource-empty">
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={activeTab === "skills" ? "暂无可管理的个人技能" : "暂无可管理的个人工作流"} />
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={activeTab === "skills" ? t("settingsPage.skills.emptySkills") : t("settingsPage.skills.emptyWorkflows")}
+          />
         </div>
       )}
     </section>

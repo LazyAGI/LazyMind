@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { Alert, Button, Empty, Input, Modal, Skeleton, Switch, Tag, message } from "antd";
 import {
   ApiOutlined,
@@ -19,8 +19,11 @@ import {
   UnorderedListOutlined,
   WarningFilled,
 } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
+import GroupManagement from "@/modules/admin/pages/group";
+import UserManagement from "@/modules/admin/pages/user";
 import { TerminalConnectionPage } from "@/modules/channelGateway";
 import { listChannelAccounts } from "@/modules/channelGateway/api";
 import { setAllMcpServersEnabled } from "@/modules/memory/toolApi";
@@ -45,6 +48,7 @@ import {
   type SettingsOverviewSection,
 } from "./api";
 import "@/modules/knowledge/style.css";
+import "@/modules/admin/index.scss";
 import "@/modules/modelProvider/index.scss";
 import "./index.scss";
 
@@ -62,6 +66,7 @@ type SectionID =
   | "organization"
   | "developer";
 type MasterSetting = "task_center_enabled" | "skills_enabled" | "workflows_enabled" | "mcp_enabled" | "document_parsing_enabled";
+type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 interface NavigationItem {
   id: SectionID;
@@ -83,84 +88,92 @@ interface DiagnosticConnectionState {
   dependencyMessage: string;
 }
 
-const controlCopy: Record<MasterSetting, { title: string; summary: string; section: SectionID }> = {
-  task_center_enabled: { title: "任务中心", summary: "统一暂停后续调度与立即执行", section: "tasks" },
-  skills_enabled: { title: "我的技能", summary: "统一启用或停用全部个人技能", section: "skills" },
-  workflows_enabled: { title: "我的工作流", summary: "统一启用或停用全部可用工作流", section: "skills" },
-  mcp_enabled: { title: "MCP 工具", summary: "统一启用或停用当前用户的 MCP 服务", section: "mcp" },
-  document_parsing_enabled: { title: "文档解析", summary: "暂停新的文档解析与重新解析", section: "knowledge" },
-};
+function controlCopy(t: Translate): Record<MasterSetting, { title: string; summary: string; section: SectionID }> {
+  return {
+    task_center_enabled: { title: t("settingsPage.controls.taskCenter.title"), summary: t("settingsPage.controls.taskCenter.summary"), section: "tasks" },
+    skills_enabled: { title: t("settingsPage.controls.skills.title"), summary: t("settingsPage.controls.skills.summary"), section: "skills" },
+    workflows_enabled: { title: t("settingsPage.controls.workflows.title"), summary: t("settingsPage.controls.workflows.summary"), section: "skills" },
+    mcp_enabled: { title: t("settingsPage.controls.mcp.title"), summary: t("settingsPage.controls.mcp.summary"), section: "mcp" },
+    document_parsing_enabled: { title: t("settingsPage.controls.documentParsing.title"), summary: t("settingsPage.controls.documentParsing.summary"), section: "knowledge" },
+  };
+}
 
 function isAdminRole(role?: string) {
   const value = (role || "").trim().toLowerCase();
   return value === "admin" || value === "system-admin" || value === "system_admin" || value.endsWith(".admin");
 }
 
-function baseNavigation(isAdmin: boolean): NavigationGroup[] {
+function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
   const groups: NavigationGroup[] = [
     {
-      title: "开始使用",
+      title: t("settingsPage.navGroups.gettingStarted"),
       items: [
-        { id: "models", label: "模型与服务", keywords: "模型 服务 系统默认设置 供应商", icon: <ApiOutlined />, status: "已就绪" },
-        { id: "overview", label: "设置概览", keywords: "设置 概览 仪表盘 关键配置", icon: <SettingOutlined />, status: "已同步" },
+        { id: "models", label: t("settingsPage.sections.models"), keywords: t("settingsPage.sectionKeywords.models"), icon: <ApiOutlined />, status: t("settingsPage.sectionStatus.ready") },
+        { id: "overview", label: t("settingsPage.sections.overview"), keywords: t("settingsPage.sectionKeywords.overview"), icon: <SettingOutlined />, status: t("settingsPage.sectionStatus.synced") },
       ],
     },
     {
-      title: "对话与知识",
+      title: t("settingsPage.navGroups.chatKnowledge"),
       items: [
-        { id: "tasks", label: "对话与子任务", keywords: "对话 任务 定时任务 自动化 计划", icon: <RobotOutlined /> },
-        { id: "knowledge", label: "知识与数据", keywords: "知识 数据 本地文件 云文件", icon: <DatabaseOutlined /> },
-        { id: "memory", label: "记忆与自进化", keywords: "记忆 自进化 跨会话", icon: <ExperimentOutlined /> },
+        { id: "tasks", label: t("settingsPage.sections.tasks"), keywords: t("settingsPage.sectionKeywords.tasks"), icon: <RobotOutlined /> },
+        { id: "knowledge", label: t("settingsPage.sections.knowledge"), keywords: t("settingsPage.sectionKeywords.knowledge"), icon: <DatabaseOutlined /> },
+        { id: "memory", label: t("settingsPage.sections.memory"), keywords: t("settingsPage.sectionKeywords.memory"), icon: <ExperimentOutlined /> },
       ],
     },
     {
-      title: "能力与集成",
+      title: t("settingsPage.navGroups.capabilities"),
       items: [
-        { id: "skills", label: "技能与插件", keywords: "技能 插件 工作流", icon: <RobotOutlined /> },
-        { id: "system_tools", label: "系统工具", keywords: "系统工具 依赖 FFmpeg", icon: <ToolOutlined /> },
-        { id: "mcp", label: "MCP 工具", keywords: "MCP 服务 连接 验证 权限", icon: <ToolOutlined /> },
-        { id: "channels", label: "终端连接", keywords: "终端 微信 飞书 渠道", icon: <LinkOutlined />, status: "连接" },
+        { id: "skills", label: t("settingsPage.sections.skills"), keywords: t("settingsPage.sectionKeywords.skills"), icon: <RobotOutlined /> },
+        { id: "system_tools", label: t("settingsPage.sections.systemTools"), keywords: t("settingsPage.sectionKeywords.systemTools"), icon: <ToolOutlined /> },
+        { id: "mcp", label: t("settingsPage.sections.mcp"), keywords: t("settingsPage.sectionKeywords.mcp"), icon: <ToolOutlined /> },
+        { id: "channels", label: t("settingsPage.sections.channels"), keywords: t("settingsPage.sectionKeywords.channels"), icon: <LinkOutlined />, status: t("settingsPage.sectionStatus.connect") },
       ],
     },
     {
-      title: "管理",
+      title: t("settingsPage.navGroups.management"),
       items: [
-        ...(isAdmin ? [{ id: "organization" as const, label: "组织与共享", keywords: "组织 共享 系统管理 用户 用户组", icon: <TeamOutlined /> }] : []),
-        { id: "diagnostics", label: "同步与查验", keywords: "同步 查验 模型 MCP 渠道 诊断", icon: <CheckCircleFilled /> },
-        ...(isAdmin ? [{ id: "developer" as const, label: "开发者", keywords: "开发者 调试 开发者模式", icon: <CodeOutlined />, status: "已激活" }] : []),
+        ...(isAdmin ? [{ id: "organization" as const, label: t("settingsPage.sections.organization"), keywords: t("settingsPage.sectionKeywords.organization"), icon: <TeamOutlined /> }] : []),
+        { id: "diagnostics", label: t("settingsPage.sections.diagnostics"), keywords: t("settingsPage.sectionKeywords.diagnostics"), icon: <CheckCircleFilled /> },
+        ...(isAdmin ? [{ id: "developer" as const, label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") }] : []),
       ],
     },
   ];
   return groups.filter((group) => group.items.length > 0);
 }
 
-function sectionFallback(section: SectionID): SettingsOverviewSection {
-  const item = baseNavigation(true).flatMap((group) => group.items).find((entry) => entry.id === section);
+function sectionFallback(section: SectionID, t: Translate): SettingsOverviewSection {
+  const item = baseNavigation(true, t).flatMap((group) => group.items).find((entry) => entry.id === section);
   return {
     id: section,
-    title: item?.label || "设置",
+    title: item?.label || t("settingsPage.title"),
     route: "/agent/chat/home",
     counts: { total: 0, enabled: 0, verified: 0, runnable: 0, configured: 0 },
     status: "ready",
-    detail: "集中查看现有配置和运行状态。",
+    detail: t("settingsPage.fallbackDetail"),
   };
 }
 
-function formatCount(section: SettingsOverviewSection) {
-  if (section.id === "models") return section.counts.configured ? `已配置 ${section.counts.configured} 项` : "待配置";
-  if (section.id === "tasks") return `${section.counts.enabled} 个自动化计划`;
-  if (section.id === "skills") return `${section.counts.enabled} 个已启用资源`;
-  if (section.id === "mcp") return `${section.counts.runnable} 个服务可运行`;
+function formatCount(section: SettingsOverviewSection, t: Translate) {
+  if (section.id === "models") {
+    return section.counts.configured
+      ? t("settingsPage.counts.configuredItems", { count: section.counts.configured })
+      : t("settingsPage.counts.pendingConfig");
+  }
+  if (section.id === "tasks") return t("settingsPage.counts.automationPlans", { count: section.counts.enabled });
+  if (section.id === "skills") return t("settingsPage.counts.enabledResources", { count: section.counts.enabled });
+  if (section.id === "mcp") return t("settingsPage.counts.runnableServices", { count: section.counts.runnable });
   return section.detail;
 }
 
 export default function SettingsPage() {
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const isAdmin = isAdminRole(AgentAppsAuth.getUserInfo()?.role);
   const hasLocalDependencies = isLocalRuntime() || isDesktopRuntime();
-  const navigationGroups = useMemo(() => baseNavigation(isAdmin), [isAdmin]);
+  const navigationGroups = useMemo(() => baseNavigation(isAdmin, t), [isAdmin, t, i18n.language]);
   const navigationItems = useMemo(() => navigationGroups.flatMap((group) => group.items), [navigationGroups]);
+  const controls = useMemo(() => controlCopy(t), [t, i18n.language]);
   const candidate = searchParams.get("section") as SectionID | null;
   const section = navigationItems.some((item) => item.id === candidate) ? candidate! : "overview";
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -178,10 +191,11 @@ export default function SettingsPage() {
     wechatConnected: null,
     wechatRunning: null,
     dependencyInstalled: hasLocalDependencies ? null : true,
-    dependencyMessage: hasLocalDependencies ? "正在读取本地依赖状态" : "当前为云端运行环境，依赖由平台统一维护",
+    dependencyMessage: hasLocalDependencies ? t("settingsPage.diagnostics.readingDeps") : t("settingsPage.diagnostics.cloudDeps"),
   });
   const [keyword, setKeyword] = useState("");
   const [modelView, setModelView] = useState<"defaults" | "providers">("defaults");
+  const [organizationView, setOrganizationView] = useState<"users" | "groups">("users");
   const [mcpRefreshToken, setMcpRefreshToken] = useState(0);
 
   const refresh = useCallback(async () => {
@@ -214,7 +228,7 @@ export default function SettingsPage() {
   }, [keyword, navigationGroups]);
 
   const selectSection = (next: SectionID) => setSearchParams({ section: next });
-  const selectedSection = overview?.sections.find((item) => item.id === section) || sectionFallback(section);
+  const selectedSection = overview?.sections.find((item) => item.id === section) || sectionFallback(section, t);
 
   const syncOverview = useCallback(async () => {
     try {
@@ -241,49 +255,65 @@ export default function SettingsPage() {
       }
       if (!hasLocalDependencies) {
         next.dependencyInstalled = true;
-        next.dependencyMessage = "当前为云端运行环境，依赖由平台统一维护";
+        next.dependencyMessage = t("settingsPage.diagnostics.cloudDeps");
       } else if (dependencyResult.status === "fulfilled" && dependencyResult.value) {
         next.dependencyInstalled = dependencyResult.value.installed;
-        next.dependencyMessage = dependencyResult.value.message || (dependencyResult.value.installed ? "FFmpeg 本地依赖可用" : "FFmpeg 本地依赖尚未配置");
+        next.dependencyMessage = dependencyResult.value.message || (
+          dependencyResult.value.installed
+            ? t("settingsPage.diagnostics.ffmpegAvailable")
+            : t("settingsPage.diagnostics.ffmpegMissing")
+        );
       } else {
         next.dependencyInstalled = null;
-        next.dependencyMessage = "无法读取本地依赖状态";
+        next.dependencyMessage = t("settingsPage.diagnostics.depsReadFailed");
       }
       return next;
     });
     setDiagnosticLoading(false);
-  }, [hasLocalDependencies]);
+  }, [hasLocalDependencies, t]);
 
   useEffect(() => {
     if (section === "diagnostics") void refreshDiagnosticConnections();
   }, [refreshDiagnosticConnections, section]);
 
   const requestMasterChange = (key: MasterSetting, enabled: boolean, enabledCountOverride?: number) => {
-    const target = controlCopy[key];
+    const target = controls[key];
     const sectionInfo = overview?.sections.find((item) => item.id === target.section);
     const enabledCount = enabledCountOverride ?? sectionInfo?.counts.enabled ?? 0;
     const resourceLabel = key === "task_center_enabled"
-      ? `已启用定时任务 ${enabledCount} 个`
+      ? t("settingsPage.confirm.enabledSchedules", { count: enabledCount })
       : key === "document_parsing_enabled"
-        ? "已配置的解析服务和历史文档会被保留"
+        ? t("settingsPage.confirm.parsingKept")
       : key === "skills_enabled"
-        ? `已启用技能 ${enabledCount} 个`
+        ? t("settingsPage.confirm.enabledSkills", { count: enabledCount })
         : key === "workflows_enabled"
-          ? `已启用工作流 ${enabledCount} 个`
-          : `已启用服务 ${enabledCount} 个`;
+          ? t("settingsPage.confirm.enabledWorkflows", { count: enabledCount })
+          : t("settingsPage.confirm.enabledServices", { count: enabledCount });
     const isResourceBulkChange = key === "skills_enabled" || key === "workflows_enabled" || key === "mcp_enabled";
+    const stateLabel = enabled ? t("settingsPage.confirm.enableState") : t("settingsPage.confirm.disableState");
     const resourceChangeText = key === "mcp_enabled"
-      ? `${resourceLabel}；本次操作会将当前用户的 MCP 服务统一设为${enabled ? "启用" : "停用"}，开启时未验证服务仍保持停用。`
-      : `${resourceLabel}；本次操作只会将${target.title}的子项统一设为${enabled ? "启用" : "停用"}。`;
+      ? t("settingsPage.confirm.mcpBulk", { resource: resourceLabel, state: stateLabel })
+      : t("settingsPage.confirm.resourceBulk", { resource: resourceLabel, title: target.title, state: stateLabel });
     Modal.confirm({
-      title: `${enabled ? "开启" : "关闭"}${target.title}`,
+      title: t("settingsPage.confirm.title", {
+        action: enabled ? t("settingsPage.enable") : t("settingsPage.disable"),
+        title: target.title,
+      }),
       content: <div className="settings-ref-confirm">
-        <p>立即生效：{target.summary}。</p>
-        <p>{isResourceBulkChange ? resourceChangeText : key === "document_parsing_enabled" ? resourceLabel : `${resourceLabel}；子项原始开关会被保留。`}</p>
-        <p>{key === "task_center_enabled" ? "已开始执行的任务不会被强制终止。重新开启后仅从当前时间计算下一次任务。" : key === "document_parsing_enabled" ? "已经开始的解析任务不会被强制终止；关闭后拒绝新的解析和重新解析。" : key === "mcp_enabled" ? "已经发起的 MCP 调用不会被强制终止；他人共享的 MCP 服务不受影响。" : isResourceBulkChange ? `已经发起的${target.title}调用不会被强制终止，另一组资源不受影响。` : "已经发起的调用不会被强制终止。重新开启后恢复子项选择。"}</p>
+        <p>{t("settingsPage.confirm.effectiveNow", { summary: target.summary })}</p>
+        <p>{isResourceBulkChange ? resourceChangeText : key === "document_parsing_enabled" ? resourceLabel : t("settingsPage.confirm.keepChildState", { resource: resourceLabel })}</p>
+        <p>{key === "task_center_enabled"
+          ? t("settingsPage.confirm.taskConsequence")
+          : key === "document_parsing_enabled"
+            ? t("settingsPage.confirm.parsingConsequence")
+            : key === "mcp_enabled"
+              ? t("settingsPage.confirm.mcpConsequence")
+              : isResourceBulkChange
+                ? t("settingsPage.confirm.resourceConsequence", { title: target.title })
+                : t("settingsPage.confirm.defaultConsequence")}</p>
       </div>,
-      okText: enabled ? "确认开启" : "确认关闭",
-      cancelText: "取消",
+      okText: enabled ? t("settingsPage.confirmEnable") : t("settingsPage.confirmDisable"),
+      cancelText: t("settingsPage.cancel"),
       okButtonProps: enabled ? undefined : { danger: true },
       onOk: async () => {
         setSaving(key);
@@ -293,9 +323,15 @@ export default function SettingsPage() {
             setMcpRefreshToken((value) => value + 1);
             await refresh();
             if (enabled && result.skippedUnverifiedCount > 0) {
-              message.warning(`已启用 ${result.updatedCount} 个服务，${result.skippedUnverifiedCount} 个未验证服务保持停用`);
+              message.warning(t("settingsPage.confirm.mcpEnabledToast", {
+                updated: result.updatedCount,
+                skipped: result.skippedUnverifiedCount,
+              }));
             } else {
-              message.success(`已${enabled ? "启用" : "停用"} ${result.updatedCount} 个 MCP 服务`);
+              message.success(t("settingsPage.confirm.mcpToggledToast", {
+                state: stateLabel,
+                count: result.updatedCount,
+              }));
             }
           } else {
             await patchUserUiPreferences({ [key]: enabled });
@@ -305,9 +341,9 @@ export default function SettingsPage() {
           } else if (key !== "mcp_enabled") {
             await refresh();
           }
-          if (key !== "mcp_enabled") message.success("设置已保存");
+          if (key !== "mcp_enabled") message.success(t("settingsPage.saved"));
         } catch {
-          message.error("保存失败，已保留原设置");
+          message.error(t("settingsPage.saveFailed"));
         } finally {
           setSaving(null);
         }
@@ -317,10 +353,12 @@ export default function SettingsPage() {
 
   const requestDeveloperChange = (enabled: boolean) => {
     Modal.confirm({
-      title: `${enabled ? "开启" : "关闭"}开发者模式`,
-      content: "该模式只对管理员可见。关闭后不会删除已有的自进化数据。",
-      okText: enabled ? "确认开启" : "确认关闭",
-      cancelText: "取消",
+      title: t("settingsPage.confirm.developerTitle", {
+        action: enabled ? t("settingsPage.enable") : t("settingsPage.disable"),
+      }),
+      content: t("settingsPage.confirm.developerContent"),
+      okText: enabled ? t("settingsPage.confirmEnable") : t("settingsPage.confirmDisable"),
+      cancelText: t("settingsPage.cancel"),
       okButtonProps: enabled ? undefined : { danger: true },
       onOk: async () => {
         setSaving("developer");
@@ -328,9 +366,9 @@ export default function SettingsPage() {
           await patchUserUiPreferences({ developer_mode_active: enabled });
           setDeveloperModeActive(enabled);
           await refresh();
-          message.success("设置已保存");
+          message.success(t("settingsPage.saved"));
         } catch {
-          message.error("保存失败，已保留原设置");
+          message.error(t("settingsPage.saveFailed"));
         } finally {
           setSaving(null);
         }
@@ -346,13 +384,22 @@ export default function SettingsPage() {
       setLastCheckedAt(response.finished_at);
       await Promise.all([syncOverview(), refreshDiagnosticConnections()]);
     } catch {
-      message.error("检查未完成，请重试");
+      message.error(t("settingsPage.checkFailed"));
     } finally {
       setChecking(false);
     }
   };
 
-  const switchControl = (key: MasterSetting) => <Switch className="settings-ref-switch" checked={Boolean(overview?.controls[key])} loading={saving === key} disabled={saving !== null} onChange={(checked) => requestMasterChange(key, checked)} aria-label={controlCopy[key].title} />;
+  const switchControl = (key: MasterSetting) => (
+    <Switch
+      className="settings-ref-switch"
+      checked={Boolean(overview?.controls[key])}
+      loading={saving === key}
+      disabled={saving !== null}
+      onChange={(checked: boolean) => requestMasterChange(key, checked)}
+      aria-label={controls[key].title}
+    />
+  );
 
   const dashboardRow = (module: string, title: string, description: string, control: ReactNode) => (
     <div className="settings-dashboard-config-row" key={`${module}-${title}`}>
@@ -365,54 +412,64 @@ export default function SettingsPage() {
     <section className="settings-dashboard-card" key={target}>
       <div className="settings-dashboard-card-head"><span className="settings-section-icon">{icon}</span><div><h2>{title}</h2><p>{description}</p></div></div>
       <div className="settings-dashboard-card-body">{rows}</div>
-      <div className="settings-dashboard-card-foot"><button type="button" onClick={() => selectSection(target)} aria-label={`前往${title}详细配置`}>跳转至详细配置 <RightOutlined /></button></div>
+      <div className="settings-dashboard-card-foot">
+        <button type="button" onClick={() => selectSection(target)} aria-label={t("settingsPage.goToDetailAria", { title })}>
+          {t("settingsPage.goToDetail")} <RightOutlined />
+        </button>
+      </div>
     </section>
   );
 
   const renderDashboard = () => {
     const sections = overview?.sections || [];
-    const get = (id: string) => sections.find((item) => item.id === id) || sectionFallback(id as SectionID);
+    const get = (id: string) => sections.find((item) => item.id === id) || sectionFallback(id as SectionID, t);
     const tasks = get("tasks");
     const skills = get("skills");
     const mcp = get("mcp");
     return <section className="settings-dashboard">
-      <div className="settings-page-heading"><div><h1 ref={headingRef} tabIndex={-1}>设置概览</h1><p>集中查看和修改各模块的关键配置；这里与详细配置页使用同一份状态。</p></div><Tag className="settings-sync-tag">配置实时同步</Tag></div>
-      {overview?.issues.length ? <div className="settings-ref-issues" role="status" aria-live="polite">{overview.issues.map((issue) => <Alert key={issue.id} type={issue.severity === "warning" ? "warning" : "info"} showIcon message={issue.message} action={<Button type="link" size="small" onClick={() => selectSection(issue.section as SectionID)}>查看</Button>} />)}</div> : null}
+      <div className="settings-page-heading">
+        <div>
+          <h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.overview.title")}</h1>
+          <p>{t("settingsPage.overview.description")}</p>
+        </div>
+        <Tag className="settings-sync-tag">{t("settingsPage.syncRealtime")}</Tag>
+      </div>
+      {overview?.issues.length ? <div className="settings-ref-issues" role="status" aria-live="polite">{overview.issues.map((issue) => <Alert key={issue.id} type={issue.severity === "warning" ? "warning" : "info"} showIcon message={issue.message} action={<Button type="link" size="small" onClick={() => selectSection(issue.section as SectionID)}>{t("settingsPage.view")}</Button>} />)}</div> : null}
       <div className="settings-dashboard-grid">
-        {dashboardCard("models", <ApiOutlined />, "模型与服务", "默认模型与供应商连接", [
+        {dashboardCard("models", <ApiOutlined />, t("settingsPage.sections.models"), t("settingsPage.overview.modelsDesc"), [
           <QuickModelSettings canConfigureEmbedding={isAdmin} key="quick-models" onSaved={syncOverview} />,
         ])}
-        {dashboardCard("knowledge", <DatabaseOutlined />, "知识与数据", "文件访问与知识处理服务", [
-          dashboardRow("知识与数据", "文档解析", "控制新的文档解析与重新解析", switchControl("document_parsing_enabled")),
-          dashboardRow("知识与数据", "检索与数据连接", "管理知识库、搜索服务、云文件和数据库连接", <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("knowledge")}>快速配置</Button>),
+        {dashboardCard("knowledge", <DatabaseOutlined />, t("settingsPage.sections.knowledge"), t("settingsPage.overview.knowledgeDesc"), [
+          dashboardRow(t("settingsPage.sections.knowledge"), t("settingsPage.controls.documentParsing.title"), t("settingsPage.overview.documentParsingDesc"), switchControl("document_parsing_enabled")),
+          dashboardRow(t("settingsPage.sections.knowledge"), t("settingsPage.overview.knowledgeRetrieval"), t("settingsPage.overview.knowledgeRetrievalDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("knowledge")}>{t("settingsPage.quickConfig")}</Button>),
         ])}
-        {dashboardCard("memory", <ExperimentOutlined />, "记忆与自进化", "跨会话记忆能力", [
-          dashboardRow("记忆与自进化", "记忆编辑", "记录和编辑跨会话的用户记忆和偏好", <MemoryEditQuickControl onSaved={syncOverview} />),
+        {dashboardCard("memory", <ExperimentOutlined />, t("settingsPage.sections.memory"), t("settingsPage.overview.memoryDesc"), [
+          dashboardRow(t("settingsPage.sections.memory"), t("settingsPage.overview.memoryEdit"), t("settingsPage.overview.memoryEditDesc"), <MemoryEditQuickControl onSaved={syncOverview} />),
         ])}
-        {dashboardCard("system_tools", <ToolOutlined />, "系统工具", "内置工具与本地运行环境依赖", [
-          dashboardRow("系统工具", "内置工具", "管理系统内置工具的启用状态", <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("system_tools")}>管理工具</Button>),
-          dashboardRow("系统工具", "本地依赖", "仅本地运行环境展示依赖安装", <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("system_tools")}>{hasLocalDependencies ? "检查依赖" : "云端托管"}</Button>),
+        {dashboardCard("system_tools", <ToolOutlined />, t("settingsPage.sections.systemTools"), t("settingsPage.overview.systemToolsDesc"), [
+          dashboardRow(t("settingsPage.sections.systemTools"), t("settingsPage.overview.builtinTools"), t("settingsPage.overview.builtinToolsDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("system_tools")}>{t("settingsPage.manageTools")}</Button>),
+          dashboardRow(t("settingsPage.sections.systemTools"), t("settingsPage.overview.localDeps"), t("settingsPage.overview.localDepsDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("system_tools")}>{hasLocalDependencies ? t("settingsPage.checkDeps") : t("settingsPage.cloudHosted")}</Button>),
         ])}
-        {dashboardCard("mcp", <ToolOutlined />, "MCP 工具", "外部服务连接与可用状态", [
-          dashboardRow("MCP 工具", "MCP 工具总开关", "统一控制全部 MCP 服务的可用状态", switchControl("mcp_enabled")),
-          dashboardRow("MCP 工具", "已验证服务", `${mcp.counts.verified} 个已验证，${mcp.counts.runnable} 个可运行`, <Tag className="settings-status-tag">{formatCount(mcp)}</Tag>),
+        {dashboardCard("mcp", <ToolOutlined />, t("settingsPage.sections.mcp"), t("settingsPage.overview.mcpDesc"), [
+          dashboardRow(t("settingsPage.sections.mcp"), t("settingsPage.overview.mcpMaster"), t("settingsPage.overview.mcpMasterDesc"), switchControl("mcp_enabled")),
+          dashboardRow(t("settingsPage.sections.mcp"), t("settingsPage.overview.verifiedServices"), t("settingsPage.overview.verifiedServicesDesc", { verified: mcp.counts.verified, runnable: mcp.counts.runnable }), <Tag className="settings-status-tag">{formatCount(mcp, t)}</Tag>),
         ])}
-        {dashboardCard("skills", <RobotOutlined />, "技能与插件", "技能能力与插件运行状态", [
-          dashboardRow("技能与插件", "我的技能", "批量控制个人技能的可用状态", switchControl("skills_enabled")),
-          dashboardRow("技能与插件", "我的工作流", "批量控制可用工作流的运行状态", switchControl("workflows_enabled")),
-          dashboardRow("技能与插件", "已启用资源", `${skills.counts.enabled} 个技能或工作流当前启用`, <Tag className="settings-status-tag">分别控制</Tag>),
+        {dashboardCard("skills", <RobotOutlined />, t("settingsPage.sections.skills"), t("settingsPage.overview.skillsDesc"), [
+          dashboardRow(t("settingsPage.sections.skills"), t("settingsPage.controls.skills.title"), t("settingsPage.overview.mySkillsDesc"), switchControl("skills_enabled")),
+          dashboardRow(t("settingsPage.sections.skills"), t("settingsPage.controls.workflows.title"), t("settingsPage.overview.myWorkflowsDesc"), switchControl("workflows_enabled")),
+          dashboardRow(t("settingsPage.sections.skills"), t("settingsPage.overview.enabledResources"), t("settingsPage.overview.enabledResourcesDesc", { count: skills.counts.enabled }), <Tag className="settings-status-tag">{t("settingsPage.separatelyControlled")}</Tag>),
         ])}
-        {dashboardCard("tasks", <UnorderedListOutlined />, "对话与子任务", "任务执行与自动化计划", [
-          dashboardRow("对话与子任务", "启用任务中心", "与主页面任务中心使用同一开关状态", switchControl("task_center_enabled")),
-          dashboardRow("对话与子任务", "定时任务", `${tasks.counts.enabled} 个自动化计划`, <Tag className="settings-status-tag">{overview?.controls.task_center_enabled ? "运行中" : "已暂停"}</Tag>),
+        {dashboardCard("tasks", <UnorderedListOutlined />, t("settingsPage.sections.tasks"), t("settingsPage.overview.tasksDesc"), [
+          dashboardRow(t("settingsPage.sections.tasks"), t("settingsPage.master.enableTaskCenter"), t("settingsPage.overview.enableTaskCenterDesc"), switchControl("task_center_enabled")),
+          dashboardRow(t("settingsPage.sections.tasks"), t("settingsPage.overview.schedules"), t("settingsPage.counts.automationPlans", { count: tasks.counts.enabled }), <Tag className="settings-status-tag">{overview?.controls.task_center_enabled ? t("settingsPage.running") : t("settingsPage.paused")}</Tag>),
         ])}
-        {dashboardCard("diagnostics", <CheckCircleFilled />, "同步与查验", "连接、权限和运行环境状态", [
-          dashboardRow("同步与查验", "检查全部", "模型、MCP 和本地依赖状态", <Button size="small" loading={checking} onClick={handleCheckAll}>检查</Button>),
-          dashboardRow("同步与查验", "最近结果", checks ? `${checks.length} 项检查结果` : "尚未运行检查", <Tag className="settings-status-tag">可查看</Tag>),
+        {dashboardCard("diagnostics", <CheckCircleFilled />, t("settingsPage.sections.diagnostics"), t("settingsPage.overview.diagnosticsDesc"), [
+          dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.checkAll"), t("settingsPage.overview.checkAllDesc"), <Button size="small" loading={checking} onClick={handleCheckAll}>{t("settingsPage.check")}</Button>),
+          dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.overview.recentResults"), checks ? t("settingsPage.overview.recentResultsReady", { count: checks.length }) : t("settingsPage.overview.recentResultsEmpty"), <Tag className="settings-status-tag">{t("settingsPage.viewable")}</Tag>),
         ])}
-        {isAdmin && dashboardCard("developer", <CodeOutlined />, "开发者", "调试能力与执行过程显示", [
-          dashboardRow("开发者", "启用开发者模式", "控制系统工具管理和调试能力", <Switch className="settings-ref-switch" checked={developerActive} loading={saving === "developer"} disabled={saving !== null} onChange={requestDeveloperChange} aria-label="启用开发者模式" />),
-          dashboardRow("开发者", "内部调试", "显示完整执行轨迹和调试信息", <Tag className="settings-status-tag">管理员</Tag>),
+        {isAdmin && dashboardCard("developer", <CodeOutlined />, t("settingsPage.sections.developer"), t("settingsPage.overview.developerDesc"), [
+          dashboardRow(t("settingsPage.sections.developer"), t("settingsPage.overview.enableDeveloper"), t("settingsPage.overview.enableDeveloperDesc"), <Switch className="settings-ref-switch" checked={developerActive} loading={saving === "developer"} disabled={saving !== null} onChange={requestDeveloperChange} aria-label={t("settingsPage.overview.enableDeveloper")} />),
+          dashboardRow(t("settingsPage.sections.developer"), t("settingsPage.overview.internalDebug"), t("settingsPage.overview.internalDebugDesc"), <Tag className="settings-status-tag">{t("settingsPage.admin")}</Tag>),
         ])}
       </div>
       {checks ? <CheckResults checks={checks} onLocate={selectSection} /> : null}
@@ -426,20 +483,20 @@ export default function SettingsPage() {
     </header>
   );
 
-  const masterControl = (key: MasterSetting, title = `${controlCopy[key].title}总开关`) => {
-    const sectionInfo = overview?.sections.find((item) => item.id === controlCopy[key].section);
+  const masterControl = (key: MasterSetting, title = t("settingsPage.masterSwitch", { title: controls[key].title })) => {
+    const sectionInfo = overview?.sections.find((item) => item.id === controls[key].section);
     const statusText = !overview?.controls[key]
-      ? "当前暂停"
+      ? t("settingsPage.master.paused")
       : sectionInfo?.effective_enabled
-        ? "当前可用"
+        ? t("settingsPage.master.available")
         : key === "mcp_enabled"
-          ? "等待服务验证"
-          : "等待子项启用";
+          ? t("settingsPage.master.waitVerify")
+          : t("settingsPage.master.waitChild");
     const consequence = key === "mcp_enabled"
-      ? "关闭后全部自有服务停用；开启时只启用已验证服务。"
-      : "关闭后保留子项原始状态。";
+      ? t("settingsPage.master.mcpConsequence")
+      : t("settingsPage.master.keepChildConsequence");
     return <section className="settings-integrated-master" aria-label={title}>
-      <div><strong>{title}</strong><p>{controlCopy[key].summary}；{consequence}</p></div>
+      <div><strong>{title}</strong><p>{t("settingsPage.master.summaryWithConsequence", { summary: controls[key].summary, consequence })}</p></div>
       <div className="settings-integrated-master-action"><Tag className="settings-status-tag">{statusText}</Tag>{switchControl(key)}</div>
     </section>;
   };
@@ -449,73 +506,88 @@ export default function SettingsPage() {
   );
 
   const renderDiagnostics = () => {
-    const models = overview?.sections.find((item) => item.id === "models") || sectionFallback("models");
-    const mcp = overview?.sections.find((item) => item.id === "mcp") || sectionFallback("mcp");
+    const models = overview?.sections.find((item) => item.id === "models") || sectionFallback("models", t);
+    const mcp = overview?.sections.find((item) => item.id === "mcp") || sectionFallback("mcp", t);
     const lastCheckedLabel = lastCheckedAt
-      ? new Date(lastCheckedAt).toLocaleString("zh-CN", { hour12: false })
-      : "尚未检查";
+      ? new Date(lastCheckedAt).toLocaleString(i18n.language === "zh-CN" ? "zh-CN" : "en-US", { hour12: false })
+      : t("settingsPage.diagnostics.neverChecked");
     const wechatStatus = diagnosticConnections.wechatConnected == null
-      ? "读取失败"
+      ? t("settingsPage.diagnostics.readFailed")
       : diagnosticConnections.wechatConnected > 0
-        ? "已连接"
-        : "未连接";
+        ? t("settingsPage.diagnostics.connected")
+        : t("settingsPage.diagnostics.notConnected");
     const dependencyStatus = diagnosticConnections.dependencyInstalled == null
-      ? "读取失败"
+      ? t("settingsPage.diagnostics.readFailed")
       : diagnosticConnections.dependencyInstalled
-        ? hasLocalDependencies ? "已配置" : "云端托管"
-        : "待配置";
+        ? hasLocalDependencies ? t("settingsPage.diagnostics.configured") : t("settingsPage.cloudHosted")
+        : t("settingsPage.diagnostics.pendingConfig");
     const rows = [
       {
         id: "models",
-        title: "模型供应商",
-        description: models.counts.configured > 0 ? `${models.counts.configured} 项模型已选择` : "尚未选择默认模型",
-        status: models.counts.configured > 0 ? "已配置" : "待配置",
+        title: t("settingsPage.diagnostics.modelProviders"),
+        description: models.counts.configured > 0
+          ? t("settingsPage.diagnostics.modelsConfigured", { count: models.counts.configured })
+          : t("settingsPage.diagnostics.modelsEmpty"),
+        status: models.counts.configured > 0 ? t("settingsPage.diagnostics.configured") : t("settingsPage.diagnostics.pendingConfig"),
         tone: models.counts.configured > 0 ? "success" : "warning",
-        action: "查看连接",
+        action: t("settingsPage.diagnostics.viewConnection"),
         onClick: () => selectSection("models"),
       },
       {
         id: "mcp",
-        title: "MCP 工具",
-        description: `${mcp.counts.verified} / ${mcp.counts.total} 个服务已验证，${mcp.counts.runnable} 个可运行`,
-        status: mcp.counts.total === 0 ? "未连接" : mcp.counts.verified < mcp.counts.total ? "待验证" : mcp.counts.runnable > 0 ? "可运行" : "已验证",
+        title: t("settingsPage.sections.mcp"),
+        description: t("settingsPage.diagnostics.mcpVerified", {
+          verified: mcp.counts.verified,
+          total: mcp.counts.total,
+          runnable: mcp.counts.runnable,
+        }),
+        status: mcp.counts.total === 0
+          ? t("settingsPage.diagnostics.notConnected")
+          : mcp.counts.verified < mcp.counts.total
+            ? t("settingsPage.diagnostics.pendingVerify")
+            : mcp.counts.runnable > 0
+              ? t("settingsPage.diagnostics.runnable")
+              : t("settingsPage.diagnostics.verified"),
         tone: mcp.counts.total > mcp.counts.verified ? "warning" : mcp.counts.runnable > 0 ? "success" : "neutral",
-        action: "查看服务",
+        action: t("settingsPage.diagnostics.viewServices"),
         onClick: () => selectSection("mcp"),
       },
       {
         id: "channels",
-        title: "微信渠道",
+        title: t("settingsPage.diagnostics.wechatChannel"),
         description: diagnosticConnections.wechatConnected == null
-          ? "微信渠道状态读取失败"
+          ? t("settingsPage.diagnostics.wechatReadFailed")
           : diagnosticConnections.wechatConnected > 0
-            ? `${diagnosticConnections.wechatConnected} 个账号已连接，${diagnosticConnections.wechatRunning} 个运行中`
-            : "尚未绑定微信账号",
+            ? t("settingsPage.diagnostics.wechatConnected", {
+              connected: diagnosticConnections.wechatConnected,
+              running: diagnosticConnections.wechatRunning,
+            })
+            : t("settingsPage.diagnostics.wechatEmpty"),
         status: wechatStatus,
         tone: diagnosticConnections.wechatConnected && diagnosticConnections.wechatConnected > 0 ? "success" : diagnosticConnections.wechatConnected == null ? "warning" : "neutral",
-        action: "查看渠道",
+        action: t("settingsPage.diagnostics.viewChannels"),
         onClick: () => selectSection("channels"),
       },
       {
         id: "system_tools",
-        title: "运行时依赖",
+        title: t("settingsPage.diagnostics.runtimeDeps"),
         description: diagnosticConnections.dependencyMessage,
         status: dependencyStatus,
         tone: diagnosticConnections.dependencyInstalled == null ? "warning" : diagnosticConnections.dependencyInstalled ? "success" : "warning",
-        action: "查看依赖",
+        action: t("settingsPage.diagnostics.viewDeps"),
         onClick: () => selectSection("system_tools"),
       },
     ];
 
     return <>
-      {integratedHeader("同步与查验", "集中查看现有连接、运行环境和检查入口。", <Button type="primary" loading={checking || diagnosticLoading} onClick={handleCheckAll}>检查全部</Button>)}
+      {integratedHeader(t("settingsPage.diagnostics.title"), t("settingsPage.diagnostics.description"), <Button type="primary" loading={checking || diagnosticLoading} onClick={handleCheckAll}>{t("settingsPage.checkAll")}</Button>)}
       <div className="settings-diagnostics-notice" role="status">
         <InfoCircleOutlined />
-        <span>查验只读取模型、连接、权限和依赖状态，不会修改已有配置。</span>
-        <em>最近检查：{lastCheckedLabel}</em>
+        <span>{t("settingsPage.diagnostics.notice")}</span>
+        <em>{t("settingsPage.diagnostics.lastChecked", { time: lastCheckedLabel })}</em>
       </div>
-      <section className="settings-diagnostics-section" aria-label="连接状态">
-        <h2>连接状态</h2>
+      <section className="settings-diagnostics-section" aria-label={t("settingsPage.diagnostics.connectionStatus")}>
+        <h2>{t("settingsPage.diagnostics.connectionStatus")}</h2>
         <div className="settings-diagnostics-list">
           {rows.map((row) => <div className="settings-diagnostics-row" key={row.id}>
             <div className="settings-diagnostics-copy"><strong>{row.title}</strong><p>{row.description}</p></div>
@@ -531,21 +603,47 @@ export default function SettingsPage() {
     let content: ReactNode;
 
     if (section === "organization") {
-      content = <><div className="settings-info-banner"><TeamOutlined />组织管理沿用现有的系统管理入口，不在设置页面重复建设。</div><div className="settings-admin-entry"><span className="settings-section-icon"><TeamOutlined /></span><div><h2>进入系统管理</h2><p>继续管理用户、用户组、数据源和其他管理员资源。</p></div><Button type="primary" onClick={() => navigate("/admin")}>打开系统管理</Button></div></>;
+      content = <>
+        {integratedHeader(t("settingsPage.organization.title"), t("settingsPage.organization.description"))}
+        <nav className="settings-organization-tabs" aria-label={t("settingsPage.organization.tabsAria")}>
+          <button
+            className={organizationView === "users" ? "is-active" : ""}
+            type="button"
+            role="tab"
+            aria-selected={organizationView === "users"}
+            onClick={() => setOrganizationView("users")}
+          >
+            {t("admin.userManagement")}
+          </button>
+          <button
+            className={organizationView === "groups" ? "is-active" : ""}
+            type="button"
+            role="tab"
+            aria-selected={organizationView === "groups"}
+            onClick={() => setOrganizationView("groups")}
+          >
+            {t("admin.groupManagement")}
+          </button>
+        </nav>
+        {integratedSurface(
+          organizationView === "users" ? <UserManagement /> : <GroupManagement embedded />,
+          "is-organization",
+        )}
+      </>;
     } else if (section === "models") {
       content = <>
-        {integratedHeader("模型与服务", selectedSection.detail)}
-        <nav className="settings-model-tabs" aria-label="模型与服务页面">
-          <button className={modelView === "defaults" ? "is-active" : ""} type="button" onClick={() => setModelView("defaults")}>系统默认设置</button>
-          <button className={modelView === "providers" ? "is-active" : ""} type="button" onClick={() => setModelView("providers")}>模型供应商</button>
+        {integratedHeader(t("settingsPage.models.title"), selectedSection.detail)}
+        <nav className="settings-model-tabs" aria-label={t("settingsPage.models.tabsAria")}>
+          <button className={modelView === "defaults" ? "is-active" : ""} type="button" onClick={() => setModelView("defaults")}>{t("settingsPage.models.defaultSettings")}</button>
+          <button className={modelView === "providers" ? "is-active" : ""} type="button" onClick={() => setModelView("providers")}>{t("settingsPage.models.providers")}</button>
         </nav>
         {integratedSurface(modelView === "defaults" ? <DefaultServicesPage /> : <ModelProvidersPage />, "is-models")}
       </>;
     } else if (section === "tasks") {
       const taskCenterEnabled = Boolean(overview?.controls.task_center_enabled);
       content = <>
-        {integratedHeader("对话与子任务", "控制任务中心与自动化计划；状态与主页面实时同步。", <Tag className="settings-sync-tag">{taskCenterEnabled ? "已开启" : "已暂停"}</Tag>)}
-        {masterControl("task_center_enabled", "启用任务中心")}
+        {integratedHeader(t("settingsPage.tasks.title"), t("settingsPage.tasks.description"), <Tag className="settings-sync-tag">{taskCenterEnabled ? t("settingsPage.open") : t("settingsPage.paused")}</Tag>)}
+        {masterControl("task_center_enabled", t("settingsPage.master.enableTaskCenter"))}
         {integratedSurface(<SettingsScheduleList masterEnabled={taskCenterEnabled} onChanged={syncOverview} />, "is-tasks")}
       </>;
     } else if (section === "knowledge") {
@@ -570,12 +668,12 @@ export default function SettingsPage() {
       />;
     } else if (section === "system_tools") {
       content = <>
-        {integratedHeader("系统工具", "管理内置系统工具及本地运行环境依赖。")}
+        {integratedHeader(t("settingsPage.systemTools.title"), t("settingsPage.systemTools.description"))}
         {integratedSurface(
           <div className={`settings-system-tools-stack${hasLocalDependencies ? " has-local-dependencies" : ""}`}>
             <ToolManagementSection
-              description="按需启用系统能力；关闭工具不会删除已有配置。"
-              title="内置工具"
+              description={t("settingsPage.systemTools.builtinDesc")}
+              title={t("settingsPage.systemTools.builtinTitle")}
               view="builtin"
             />
             <DependencyInstallSection />
@@ -584,37 +682,132 @@ export default function SettingsPage() {
         )}
       </>;
     } else if (section === "mcp") {
-      content = <>{integratedHeader("MCP 工具", selectedSection.detail)}{masterControl("mcp_enabled")}{integratedSurface(<ToolManagementSection description="管理服务连接、工具发现与调用权限。" layout="settings" refreshToken={mcpRefreshToken} title="MCP 服务" view="mcp" />, "is-mcp")}</>;
+      content = <>
+        {integratedHeader(t("settingsPage.sections.mcp"), selectedSection.detail)}
+        {masterControl("mcp_enabled")}
+        {integratedSurface(
+          <ToolManagementSection
+            description={t("settingsPage.systemTools.mcpDesc")}
+            layout="settings"
+            refreshToken={mcpRefreshToken}
+            title={t("settingsPage.systemTools.mcpTitle")}
+            view="mcp"
+          />,
+          "is-mcp",
+        )}
+      </>;
     } else if (section === "channels") {
       content = integratedSurface(<TerminalConnectionPage />, "is-channels");
     } else if (section === "diagnostics") {
       content = renderDiagnostics();
     } else {
-      content = <>{integratedHeader("开发者", selectedSection.detail, <Tag className="settings-admin-tag">管理员专属</Tag>)}<div className="settings-detail-group"><div className="settings-detail-row"><div><strong>启用开发者模式</strong><p>激活工具管理、算法跃迁、内部 ID 和完整执行过程。</p></div><Switch className="settings-ref-switch" checked={developerActive} loading={saving === "developer"} disabled={saving !== null} onChange={requestDeveloperChange} aria-label="开发者模式" /></div></div></>;
+      content = <>
+        {integratedHeader(t("settingsPage.sections.developer"), selectedSection.detail, <Tag className="settings-admin-tag">{t("settingsPage.adminOnly")}</Tag>)}
+        <div className="settings-detail-group">
+          <div className="settings-detail-row">
+            <div>
+              <strong>{t("settingsPage.developer.enableTitle")}</strong>
+              <p>{t("settingsPage.developer.enableDesc")}</p>
+            </div>
+            <Switch
+              className="settings-ref-switch"
+              checked={developerActive}
+              loading={saving === "developer"}
+              disabled={saving !== null}
+              onChange={requestDeveloperChange}
+              aria-label={t("settingsPage.developer.modeAria")}
+            />
+          </div>
+        </div>
+      </>;
     }
 
     return <section className={`settings-detail-page settings-integrated-page${section === "system_tools" ? " is-system-tools-page" : section === "mcp" ? " is-mcp-page" : ""}`}>
       {content}
-      <div className="settings-screenreader-status" role="status" aria-live="polite">{saving ? "正在保存设置" : checking ? "正在检查全部设置" : ""}</div>
+      <div className="settings-screenreader-status" role="status" aria-live="polite">
+        {saving ? t("settingsPage.savingStatus") : checking ? t("settingsPage.checkingStatus") : ""}
+      </div>
     </section>;
   };
 
-  return <main className="settings-reference" aria-label="设置">
+  return <main className="settings-reference" aria-label={t("settingsPage.title")}>
     <aside className="settings-reference-sidebar">
-      <button className="settings-back-button" type="button" onClick={() => navigate("/agent/chat/home")}><ArrowLeftOutlined />返回主页面</button>
-      <div className="settings-reference-search"><Input prefix={<SearchOutlined />} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索设置..." aria-label="搜索设置" allowClear /></div>
-      <nav className="settings-reference-nav" aria-label="设置导航">
-        {filteredGroups.map((group) => <div className="settings-reference-nav-group" key={group.title}><p>{group.title}</p>{group.items.map((item) => <button key={item.id} type="button" className={section === item.id ? "is-active" : ""} onClick={() => selectSection(item.id)}><span className="settings-reference-nav-icon">{item.icon}</span><span>{item.label}</span>{item.status ? <em>{item.id === "developer" && !developerActive ? "未激活" : item.status}</em> : null}</button>)}</div>)}
-        {filteredGroups.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的设置" /> : null}
+      <button className="settings-back-button" type="button" onClick={() => navigate("/agent/chat/home")}>
+        <ArrowLeftOutlined />{t("settingsPage.backToHome")}
+      </button>
+      <div className="settings-reference-search">
+        <Input
+          prefix={<SearchOutlined />}
+          value={keyword}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => setKeyword(event.target.value)}
+          placeholder={t("settingsPage.searchPlaceholder")}
+          aria-label={t("settingsPage.searchAria")}
+          allowClear
+        />
+      </div>
+      <nav className="settings-reference-nav" aria-label={t("settingsPage.navAria")}>
+        {filteredGroups.map((group) => (
+          <div className="settings-reference-nav-group" key={group.title}>
+            <p>{group.title}</p>
+            {group.items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={section === item.id ? "is-active" : ""}
+                onClick={() => selectSection(item.id)}
+              >
+                <span className="settings-reference-nav-icon">{item.icon}</span>
+                <span>{item.label}</span>
+                {item.status ? (
+                  <em>{item.id === "developer" && !developerActive ? t("settingsPage.sectionStatus.notActivated") : item.status}</em>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        ))}
+        {filteredGroups.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("settingsPage.noMatch")} /> : null}
       </nav>
-      <div className="settings-reference-sidebar-foot">LazyAGI/LazyMind<br />设置与详细配置实时同步</div>
+      <div className="settings-reference-sidebar-foot">LazyAGI/LazyMind<br />{t("settingsPage.sidebarFoot")}</div>
     </aside>
     <section className="settings-reference-content" aria-busy={loading}>
-      <div className="settings-reference-scroll">{loading ? <div className="settings-reference-loading"><Skeleton active paragraph={{ rows: 12 }} /></div> : loadError ? <div className="settings-reference-error"><Alert type="error" showIcon message="无法加载设置" description="请检查网络或稍后重试。" action={<Button size="small" onClick={() => void refresh()}>重试</Button>} /></div> : section === "overview" ? renderDashboard() : renderDetail()}</div>
+      <div className="settings-reference-scroll">
+        {loading ? (
+          <div className="settings-reference-loading"><Skeleton active paragraph={{ rows: 12 }} /></div>
+        ) : loadError ? (
+          <div className="settings-reference-error">
+            <Alert
+              type="error"
+              showIcon
+              message={t("settingsPage.loadFailed")}
+              description={t("settingsPage.loadFailedDesc")}
+              action={<Button size="small" onClick={() => void refresh()}>{t("settingsPage.retry")}</Button>}
+            />
+          </div>
+        ) : section === "overview" ? renderDashboard() : renderDetail()}
+      </div>
     </section>
   </main>;
 }
 
 function CheckResults({ checks, onLocate }: { checks: SettingsCheckResult[]; onLocate: (section: SectionID) => void }) {
-  return <section className="settings-check-results" role="status" aria-live="polite"><h2>最近一次检查</h2>{checks.map((result) => <div className="settings-check-result" key={result.id}><span>{result.status === "attention" ? <WarningFilled /> : <CheckCircleFilled />}</span><p>{result.message}</p><Tag className={result.status === "attention" ? "settings-check-warning" : "settings-status-tag"}>{result.status === "passed" ? "通过" : result.status === "attention" ? "需处理" : "需单独验证"}</Tag><button type="button" onClick={() => onLocate(result.section as SectionID)}>定位</button></div>)}</section>;
+  const { t } = useTranslation();
+  return (
+    <section className="settings-check-results" role="status" aria-live="polite">
+      <h2>{t("settingsPage.lastCheck")}</h2>
+      {checks.map((result) => (
+        <div className="settings-check-result" key={result.id}>
+          <span>{result.status === "attention" ? <WarningFilled /> : <CheckCircleFilled />}</span>
+          <p>{result.message}</p>
+          <Tag className={result.status === "attention" ? "settings-check-warning" : "settings-status-tag"}>
+            {result.status === "passed"
+              ? t("settingsPage.passed")
+              : result.status === "attention"
+                ? t("settingsPage.needsAttention")
+                : t("settingsPage.needsManualVerify")}
+          </Tag>
+          <button type="button" onClick={() => onLocate(result.section as SectionID)}>{t("settingsPage.locate")}</button>
+        </div>
+      ))}
+    </section>
+  );
 }

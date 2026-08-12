@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Ref } from "react";
 import { Alert, Button, Skeleton, Switch, Tag, message } from "antd";
 import { ReloadOutlined, ToolOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import {
   Configuration,
   PersonalizationApiFactory,
@@ -72,6 +73,7 @@ interface MemoryEditQuickControlProps {
 }
 
 export function MemoryEditQuickControl({ onSaved }: MemoryEditQuickControlProps) {
+  const { t } = useTranslation();
   const [enabled, setEnabled] = useState(false);
   const [personalizationEnabled, setPersonalizationEnabled] = useState(false);
   const [available, setAvailable] = useState(false);
@@ -112,31 +114,32 @@ export function MemoryEditQuickControl({ onSaved }: MemoryEditQuickControlProps)
       if (checked) await enableTool("memory");
       else await disableTool("memory");
       await onSaved?.();
-      message.success(checked ? "记忆编辑已启用" : "记忆编辑已停用");
+      message.success(checked ? t("settingsPage.memory.editEnabled") : t("settingsPage.memory.editDisabled"));
     } catch {
       setEnabled(previous);
-      message.error("保存失败，已恢复原状态");
+      message.error(t("settingsPage.memory.saveFailed"));
     } finally {
       setSaving(false);
     }
   };
 
   if (loadError) {
-    return <Button size="small" icon={<ReloadOutlined />} onClick={() => void load()}>重试</Button>;
+    return <Button size="small" icon={<ReloadOutlined />} onClick={() => void load()}>{t("settingsPage.retry")}</Button>;
   }
 
   return <Switch
-    aria-label="记忆编辑快速开关"
+    aria-label={t("settingsPage.memory.editQuickAria")}
     checked={enabled}
     className="settings-ref-switch"
     disabled={loading || saving || !available || readonly || !personalizationEnabled}
     loading={loading || saving}
-    onChange={(checked) => void update(checked)}
-    title={!personalizationEnabled ? "请先在详细配置中启用记忆读取" : undefined}
+    onChange={(checked: boolean) => void update(checked)}
+    title={!personalizationEnabled ? t("settingsPage.memory.enableReadFirst") : undefined}
   />;
 }
 
 export default function MemoryCapabilitySettings({ headingRef }: MemoryCapabilitySettingsProps) {
+  const { t } = useTranslation();
   const [state, setState] = useState<MemoryCapabilityState | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -184,10 +187,10 @@ export default function MemoryCapabilitySettings({ headingRef }: MemoryCapabilit
     return [
       {
         id: "vocabulary" as const,
-        title: "词汇学习",
-        description: "学习用户专属的词汇映射和同义词",
-        scope: "个人偏好",
-        service: "个性化服务",
+        title: t("settingsPage.memory.vocabulary.title"),
+        description: t("settingsPage.memory.vocabulary.description"),
+        scope: t("settingsPage.memory.vocabulary.scope"),
+        service: t("settingsPage.memory.vocabulary.service"),
         checked: vocabulary.enabled,
         effective: vocabulary.enabled,
         available: vocabulary.available,
@@ -195,10 +198,10 @@ export default function MemoryCapabilitySettings({ headingRef }: MemoryCapabilit
       },
       {
         id: "read" as const,
-        title: "记忆读取",
-        description: "在对话中读取并使用当前用户的记忆与偏好",
-        scope: "记忆与对话",
-        service: "记忆服务",
+        title: t("settingsPage.memory.read.title"),
+        description: t("settingsPage.memory.read.description"),
+        scope: t("settingsPage.memory.read.scope"),
+        service: t("settingsPage.memory.read.service"),
         checked: state.personalizationEnabled,
         effective: state.personalizationEnabled,
         available: true,
@@ -206,17 +209,17 @@ export default function MemoryCapabilitySettings({ headingRef }: MemoryCapabilit
       },
       {
         id: "edit" as const,
-        title: "记忆编辑",
-        description: "记录和编辑跨会话的用户记忆和偏好",
-        scope: "记忆与对话",
-        service: "记忆服务",
+        title: t("settingsPage.memory.edit.title"),
+        description: t("settingsPage.memory.edit.description"),
+        scope: t("settingsPage.memory.edit.scope"),
+        service: t("settingsPage.memory.edit.service"),
         checked: memory.enabled,
         effective: state.personalizationEnabled && memory.enabled,
         available: memory.available,
         readonly: memory.readonly,
       },
     ];
-  }, [state]);
+  }, [state, t]);
 
   const enabledCount = capabilities.filter((item) => item.effective).length;
 
@@ -247,11 +250,11 @@ export default function MemoryCapabilitySettings({ headingRef }: MemoryCapabilit
         if (enabled) await enableTool(toolID);
         else await disableTool(toolID);
       }
-      message.success(enabled ? "能力已启用" : "能力已停用");
+      message.success(enabled ? t("settingsPage.memory.enabledToast") : t("settingsPage.memory.disabledToast"));
     } catch {
       setState(previous);
       setRowError(id);
-      message.error("保存失败，已恢复原状态");
+      message.error(t("settingsPage.memory.saveFailed"));
     } finally {
       setUpdating(null);
     }
@@ -261,38 +264,38 @@ export default function MemoryCapabilitySettings({ headingRef }: MemoryCapabilit
     <header className="settings-memory-capabilities-head">
       <span className="settings-memory-capabilities-title-icon" aria-hidden="true"><ToolOutlined /></span>
       <div>
-        <h1 ref={headingRef} tabIndex={-1}>记忆与自进化</h1>
-        <p>管理个人词汇学习，以及跨会话记忆的读取、记录和编辑能力。</p>
+        <h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.memory.title")}</h1>
+        <p>{t("settingsPage.memory.description")}</p>
       </div>
-      {!loading && !loadError ? <Tag className="settings-memory-count">{enabledCount} / 3 已启用</Tag> : null}
+      {!loading && !loadError ? <Tag className="settings-memory-count">{t("settingsPage.memory.enabledCount", { count: enabledCount })}</Tag> : null}
     </header>
 
     {loading ? <div className="settings-memory-loading"><Skeleton active avatar paragraph={{ rows: 4 }} /></div> : null}
     {!loading && loadError ? <Alert
       type="error"
       showIcon
-      message="无法加载记忆能力设置"
-      description="请检查连接后重试。"
-      action={<Button size="small" icon={<ReloadOutlined />} onClick={() => void load()}>重试</Button>}
+      message={t("settingsPage.memory.loadFailed")}
+      description={t("settingsPage.memory.loadFailedDesc")}
+      action={<Button size="small" icon={<ReloadOutlined />} onClick={() => void load()}>{t("settingsPage.retry")}</Button>}
     /> : null}
     {!loading && !loadError ? <div className="settings-memory-capability-list">
       {capabilities.map((item) => {
         const suspended = item.id === "edit" && !state?.personalizationEnabled && item.checked;
         const disabled = Boolean(updating) || item.readonly || !item.available || (item.id === "edit" && !state?.personalizationEnabled);
         const statusText = !item.available
-          ? "不可用"
+          ? t("settingsPage.memory.unavailable")
           : suspended
-            ? "随记忆读取暂停"
+            ? t("settingsPage.memory.suspendedWithRead")
             : item.effective
-              ? "已启用"
-              : "已停用";
+              ? t("settingsPage.enabled")
+              : t("settingsPage.disabled");
         return <article className={`settings-memory-capability-row${item.effective ? " is-enabled" : " is-disabled"}`} key={item.id}>
           <span className="settings-memory-capability-icon" aria-hidden="true"><ToolOutlined /></span>
           <div className="settings-memory-capability-copy">
             <h2>{item.title}</h2>
             <p>{item.description}</p>
             <span className="settings-memory-capability-meta">{item.scope}<i aria-hidden="true" />{item.service}</span>
-            {rowError === item.id ? <span className="settings-memory-capability-error" role="alert">保存失败，已恢复原状态</span> : null}
+            {rowError === item.id ? <span className="settings-memory-capability-error" role="alert">{t("settingsPage.memory.saveFailed")}</span> : null}
           </div>
           <Tag className={`settings-memory-status${item.effective ? " is-enabled" : suspended ? " is-suspended" : ""}`}>{statusText}</Tag>
           <Switch
@@ -300,12 +303,12 @@ export default function MemoryCapabilitySettings({ headingRef }: MemoryCapabilit
             checked={item.checked}
             disabled={disabled}
             loading={updating === item.id}
-            onChange={(checked) => void updateCapability(item.id, checked)}
-            aria-label={`${item.title}开关`}
+            onChange={(checked: boolean) => void updateCapability(item.id, checked)}
+            aria-label={t("settingsPage.memory.switchAria", { title: item.title })}
           />
         </article>;
       })}
     </div> : null}
-    <div className="settings-screenreader-status" role="status" aria-live="polite">{updating ? "正在保存记忆能力设置" : ""}</div>
+    <div className="settings-screenreader-status" role="status" aria-live="polite">{updating ? t("settingsPage.memory.savingStatus") : ""}</div>
   </section>;
 }
