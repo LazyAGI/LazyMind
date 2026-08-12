@@ -1406,7 +1406,7 @@ export function WorkflowPanel({
       {/* Header */}
       <div className='workflow-panel__header'>
         <div className='workflow-panel__header-left'>
-          <span className='workflow-panel__title'>{session.workflow_id}</span>
+          <span className='workflow-panel__title'>{ui.name || session.workflow_id}</span>
           {typeof session.pinned_revision_no === 'number' && session.pinned_revision_no > 0 && (
             <span className='workflow-panel__revision'>
               {t('chat.pluginPinnedVersion', { version: session.pinned_revision_no })}

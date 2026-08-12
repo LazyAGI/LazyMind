@@ -346,6 +346,7 @@ export interface CompositeBehavior {
 }
 
 export interface WorkflowUI {
+  name?: string;
   tabs?: TabDef[];
   /** Global widget config keyed by slot id. */
   slots?: Record<string, Record<string, unknown>>;
@@ -631,7 +632,26 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       const res = await WorkflowInfoApi().getWorkflow(workflowId, {
         headers: lang ? { "Accept-Language": lang } : undefined,
       });
-      const ui: WorkflowUI = res?.data?.data?.ui ?? res?.data?.ui ?? {};
+      const payload = res?.data?.data ?? res?.data ?? {};
+      const declaredSlots = new Map<string, Record<string, unknown>>(
+        (Array.isArray(payload.slots) ? payload.slots : [])
+          .filter((slot: unknown): slot is Record<string, unknown> => Boolean(
+            slot && typeof slot === "object" && typeof (slot as Record<string, unknown>).id === "string",
+          ))
+          .map((slot: Record<string, unknown>) => [String(slot.id), slot]),
+      );
+      const rawUI: WorkflowUI = payload.ui ?? {};
+      const ui: WorkflowUI = {
+        ...rawUI,
+        name: typeof payload.name === "string" ? payload.name : workflowId,
+        tabs: rawUI.tabs?.map((tab) => ({
+          ...tab,
+          slots: tab.slots.map((slot) => ({
+            ...(declaredSlots.get(slot.id) ?? {}),
+            ...slot,
+          })),
+        })),
+      };
       set((state) => ({
         workflowUIByWorkflow: { ...state.workflowUIByWorkflow, [cacheKey]: ui },
       }));

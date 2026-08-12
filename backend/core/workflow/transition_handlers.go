@@ -710,6 +710,11 @@ func sessionIntentText(value string) string {
 func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, target transitionTarget,
 	node graphengine.CompiledNode, inputKeys []string, workflowMode string, now time.Time) error {
 	objective := workflowStepObjective(node.Prompt, target.Objective, target.UserInput)
+	refOrID := session.WorkflowRef
+	if refOrID == "" {
+		refOrID = session.WorkflowID
+	}
+	outputTypes := declaredWorkflowOutputTypes(ctx, tx, session.CreateUserID, refOrID, session.WorkflowRevisionID, node.Outputs)
 	var count int64
 	if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND step_id = ?", session.ID, target.TargetStepID).Count(&count).Error; err != nil {
 		return err
@@ -718,7 +723,7 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 		AttemptID: target.TaskID, StepID: target.TargetStepID, AttemptNo: int(count) + 1, Operation: "execute",
 		Objective: objective, Prompt: node.Prompt, Acceptance: node.Acceptance,
 		Instruction: target.RuntimeInstruction, PartialSelector: target.PartialIndices,
-		WorkflowRevision: session.WorkflowRevisionID, DeclaredOutputs: node.Outputs, RequiredOutputs: node.RequiredOutputs,
+		WorkflowRevision: session.WorkflowRevisionID, DeclaredOutputs: node.Outputs, DeclaredOutputTypes: outputTypes, RequiredOutputs: node.RequiredOutputs,
 		Capabilities: node.Capabilities, LegacyTools: node.LegacyTools}
 	payload, err := json.Marshal(value)
 	if err != nil {
@@ -735,6 +740,7 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 		"user_input": target.UserInput, "workflow_mode": workflowMode,
 		"retry_hint": target.RuntimeInstruction, "partial_indices": target.PartialIndices,
 		"required_output_artifact_keys": node.RequiredOutputs, "user_id": session.CreateUserID,
+		"output_slot_types": outputTypes,
 	})
 	inputs, _ := json.Marshal(inputKeys)
 	outputs, _ := json.Marshal(node.Outputs)

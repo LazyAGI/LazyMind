@@ -192,6 +192,7 @@ func TestListWorkflowVersions_NotFound(t *testing.T) {
 func TestListUserWorkflowSettings_ReturnsWorkflowContract(t *testing.T) {
 	db := newHandlerTestDB(t)
 	seedWorkflowResource(t, db, "custom-workflow", "wf-custom", "user-1")
+	seedCatalogWorkflow(t, db, "writer-workflow")
 
 	req := httptest.NewRequest(http.MethodGet, "/chat/settings/workflows", nil)
 	req.Header.Set("X-User-Id", "user-1")
@@ -213,8 +214,31 @@ func TestListUserWorkflowSettings_ReturnsWorkflowContract(t *testing.T) {
 	if err := json.Unmarshal(resp.Data["workflows"], &workflows); err != nil {
 		t.Fatalf("decode workflows: %v, body=%s", err, rec.Body.String())
 	}
-	if len(workflows) != 1 || workflows[0]["workflow_ref"] != "custom-workflow" {
+	if len(workflows) != 2 {
 		t.Fatalf("unexpected workflows: %#v", workflows)
+	}
+	for _, item := range workflows {
+		if item["workflow_ref"] == "builtin:writer-workflow" && item["enabled"] != true {
+			t.Fatalf("built-in workflow must default enabled: %#v", item)
+		}
+	}
+}
+
+func TestEnabledCatalogDefaultsBuiltinOnUnlessDisabled(t *testing.T) {
+	db := newHandlerTestDB(t)
+	seedCatalogWorkflow(t, db, "writer-workflow")
+	catalog, err := EnabledCatalog(db.DB, "user-1")
+	if err != nil || len(catalog) != 1 {
+		t.Fatalf("default catalog = %#v, err=%v", catalog, err)
+	}
+	if err := db.Create(&orm.UserWorkflowSetting{
+		UserID: "user-1", WorkflowRef: "builtin:writer-workflow", Enabled: false,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	catalog, err = EnabledCatalog(db.DB, "user-1")
+	if err != nil || len(catalog) != 0 {
+		t.Fatalf("disabled catalog = %#v, err=%v", catalog, err)
 	}
 }
 

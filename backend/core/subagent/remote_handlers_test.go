@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,11 @@ import (
 
 func remoteSubagentFixture(t *testing.T) *orm.DB {
 	t.Helper()
+	authService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"items":[]}}`))
+	}))
+	t.Cleanup(authService.Close)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", authService.URL)
 	db := newTestDB(t)
 	if err := db.AutoMigrate(
 		&orm.WorkflowSessionStep{},
@@ -48,6 +54,24 @@ func remoteSubagentFixture(t *testing.T) *orm.DB {
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	t.Setenv("LAZYMIND_WORKFLOW_EXECUTOR_TOKEN", "executor-secret")
 	return db
+}
+
+func TestRemoteArtifactEventEnforcesDeclaredFileType(t *testing.T) {
+	db := remoteSubagentFixture(t)
+	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params",
+		json.RawMessage(`{"output_slot_types":{"report":"file"}}`)).Error; err != nil {
+		t.Fatal(err)
+	}
+	rejected := postRemoteTaskEvent(t, "lease-live", map[string]any{
+		"type": "artifact", "slot": "report", "content_type": "text", "value": map[string]any{"text": "draft"},
+	})
+	if rejected.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d body=%s", rejected.Code, rejected.Body.String())
+	}
+	var count int64
+	if err := db.Model(&orm.SubAgentArtifact{}).Where("task_id = ?", "task-remote").Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
 }
 
 func postRemoteTaskEvent(t *testing.T, lease string, event map[string]any) *httptest.ResponseRecorder {
@@ -91,6 +115,19 @@ func TestRemoteTaskEventsRequireBoundAttemptLease(t *testing.T) {
 
 func TestRemoteExecutionSpecReturnsTaskParamsAndDurableSteps(t *testing.T) {
 	db := remoteSubagentFixture(t)
+	authService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/token") {
+			_, _ = w.Write([]byte(`{"data":{"access_token":"feishu-token"}}`))
+			return
+		}
+		if r.URL.Query().Get("provider") == "feishu" {
+			_, _ = w.Write([]byte(`{"data":{"items":[{"connection_id":"connection-1"}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"items":[]}}`))
+	}))
+	t.Cleanup(authService.Close)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", authService.URL)
 	seedRemoteSearchProvider(t, db)
 	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params",
 		json.RawMessage(`{"operation":"execute"}`)).Error; err != nil {
@@ -119,8 +156,11 @@ func TestRemoteExecutionSpecReturnsTaskParamsAndDurableSteps(t *testing.T) {
 	if toolConfig["tavily"] != "workflow-search-token" {
 		t.Fatalf("tool_config=%#v", toolConfig)
 	}
-	if _, exposed := data["workspace_path"]; exposed {
-		t.Fatalf("Core workspace must not be exposed: %#v", data)
+	if toolConfig["feishu"] != "feishu-token" {
+		t.Fatalf("tool_config=%#v", toolConfig)
+	}
+	if data["workspace_path"] != "/core/path/must-not-be-used" {
+		t.Fatalf("workspace_path=%#v", data["workspace_path"])
 	}
 }
 

@@ -524,6 +524,13 @@ func launchWorkflowAttempt(
 		"user_input":    params.UserInput,
 		"is_cold_start": isCold,
 	}
+	refOrID := params.WorkflowRef
+	if refOrID == "" {
+		refOrID = workflowID
+	}
+	if outputTypes := declaredWorkflowOutputTypes(ctx, db, userID, refOrID, params.RevisionID, outputKeys); len(outputTypes) > 0 {
+		rawParamsMap["output_slot_types"] = outputTypes
+	}
 	if params.RevisionID != "" {
 		rawParamsMap["revision_id"] = params.RevisionID
 	}

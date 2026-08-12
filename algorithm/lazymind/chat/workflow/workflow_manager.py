@@ -744,10 +744,13 @@ def resolve_workflow_injection(
         )
         if trigger_entry_tools:
             # Discovery mode: expose triggers directly so the model can route
-            # from the injected catalog without a gateway hop. Execution tools
-            # remain hidden until a Workflow is selected or active.
+            # from the injected catalog without a gateway hop. The tool set is
+            # fixed for the model turn, so Session tools must also be available
+            # for trigger -> advance execution in that same turn.
             tools = [
                 *trigger_entry_tools,
+                *_safe_session_tools(toolkit, lambda: session_holder.get('session_id', '')),
+                _handoff_tool(lambda: session_holder.get('session_id', '')),
                 authoring_group,
             ]
         else:

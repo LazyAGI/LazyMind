@@ -1605,6 +1605,15 @@ class WriterToolkitBase:
             meta={**target.meta, 'stage': 'final'},
         ))
         published = _set_document_editable(_primary_data(refreshed), stage='final')
+        if mode == 'replace':
+            source_images = (
+                block for block in publish_document.iter_blocks() if block.type == 'image'
+            )
+            published_images = (
+                block for block in published.iter_blocks() if block.type == 'image'
+            )
+            for source_image, published_image in zip(source_images, published_images):
+                published_image.references = deepcopy(source_image.references)
         return _json_dumps({
             'publish_result': _primary_data(write_result),
             'draft_document': published.model_dump(exclude_defaults=True),

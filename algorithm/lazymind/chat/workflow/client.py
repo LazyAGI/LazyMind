@@ -60,6 +60,12 @@ class RemoteExecutorClient:
         response.raise_for_status()
         return response
 
+    def heartbeat_sync(self, client: httpx.Client, attempt: str, lease: str) -> httpx.Response:
+        response = client.post(f'{self.base_url}/internal/workflow-attempts/{attempt}:heartbeat',
+                               headers=self.headers(lease), json={'lease_token': lease})
+        response.raise_for_status()
+        return response
+
     async def task_event(self, client: httpx.AsyncClient, task: str, lease: str,
                          event: Dict[str, Any]) -> httpx.Response:
         response = await client.post(f'{self.base_url}/internal/subagent/tasks/{task}/events',
