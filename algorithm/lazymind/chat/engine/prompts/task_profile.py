@@ -271,11 +271,15 @@ def _ordered_outcomes(text: str, *, current: bool) -> list[Outcome]:
         found.append((research_match.start(), priority['research'], 'research'))
     found.sort(key=lambda item: (item[0], item[1]))
     outcomes = list(dict.fromkeys(outcome for _, _, outcome in found))
-    # An external mutation is the enclosing outcome even when creating content is
-    # an earlier prerequisite (for example, "generate an image, then insert it into
-    # this document"). Keep create as a secondary outcome, but do not let it turn an
-    # artifact mutation into a standalone generation request.
-    if 'execute' in outcomes and outcomes[0] != 'execute':
+    # A document insertion is the enclosing outcome even when creating its content
+    # is an earlier prerequisite. Keep create as a secondary outcome without
+    # changing the normal ordering of unrelated multi-outcome requests.
+    document_insertion = re.search(
+        r'(?:插入|嵌入).{0,32}(?:成稿|文档|文章|报告|大纲|图片|配图|插图|图像)|'
+        r'\binsert\b.{0,48}\b(?:document|article|report|draft|image)\b',
+        routing_text, re.I,
+    )
+    if document_insertion and 'execute' in outcomes and outcomes[0] != 'execute':
         outcomes = ['execute', *(item for item in outcomes if item != 'execute')]
     if 'create' in outcomes and 'plan' in outcomes and re.search(
         r'(?:create|build)\s+(?:an?\s+)?(?:launch\s+|implementation\s+)?'

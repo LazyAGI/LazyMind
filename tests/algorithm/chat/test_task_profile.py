@@ -816,6 +816,14 @@ def test_explicit_final_goal_wins_over_preparatory_step() -> None:
     assert profile.secondary_outcomes == ('analyze',)
 
 
+def test_document_insertion_wins_over_generated_media_prerequisite() -> None:
+    profile = resolve_task_profile(
+        '生成一张配图，然后插入到这篇文章中', enable_llm_fallback=False,
+    )
+    assert profile.primary_outcome == 'execute'
+    assert 'create' in profile.secondary_outcomes
+
+
 def test_ordinary_skill_concept_does_not_select_runtime_skill() -> None:
     profile = resolve_task_profile('如何提升沟通技能', enable_llm_fallback=False)
     assert profile.skill_mode != 'explicit'
