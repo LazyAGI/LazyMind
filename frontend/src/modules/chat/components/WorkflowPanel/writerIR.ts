@@ -41,6 +41,74 @@ export interface WriterDocument {
   [key: string]: unknown;
 }
 
+interface WriterMediaAsset {
+  media_asset_id?: unknown;
+  source_type?: unknown;
+  uri?: unknown;
+}
+
+interface WriterMediaAssetLibrary {
+  assets?: Record<string, WriterMediaAsset>;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object'
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+/**
+ * Supplies the local path for a legacy Feishu image only when the current
+ * session has exactly one generated image. This makes existing documents
+ * renderable without writing to Feishu and never guesses between multiple
+ * media assets.
+ */
+export function restoreLegacyWriterImageReference(
+  document: WriterDocument,
+  mediaLibrary: unknown,
+): WriterDocument {
+  const library = asRecord(mediaLibrary) as WriterMediaAssetLibrary | undefined;
+  const generatedAssets = Object.values(library?.assets ?? {}).filter((asset) => {
+    const uri = typeof asset.uri === 'string' ? asset.uri.trim() : '';
+    return asset.source_type === 'image_generation' && uri !== '';
+  });
+  if (generatedAssets.length !== 1) return document;
+
+  const asset = generatedAssets[0];
+  const path = typeof asset.uri === 'string' ? asset.uri.trim() : '';
+  const assetID = typeof asset.media_asset_id === 'string' ? asset.media_asset_id : '';
+  let changed = false;
+
+  const restoreBlocks = (blocks: WriterBlock[]): WriterBlock[] => blocks.map((block) => {
+    const children = block.children?.length ? restoreBlocks(block.children) : block.children;
+    const mediaReference = block.references?.find((reference) => reference.type === 'media_asset');
+    const rawBlock = asRecord(asRecord(block.provider_payload)?.raw_block);
+    const image = asRecord(rawBlock?.image);
+    const isLegacyFeishuImage = block.type === 'image'
+      && typeof image?.token === 'string'
+      && image.token.trim() !== '';
+    const hasLocalPath = typeof mediaReference?.url === 'string'
+      ? mediaReference.url.trim() !== ''
+      : typeof mediaReference?.path === 'string' && mediaReference.path.trim() !== '';
+
+    if (!isLegacyFeishuImage || hasLocalPath) {
+      return children === block.children ? block : { ...block, children };
+    }
+    changed = true;
+    return {
+      ...block,
+      children,
+      references: [
+        ...(block.references ?? []),
+        { type: 'media_asset', id: assetID, path },
+      ],
+    };
+  });
+
+  const blocks = restoreBlocks(document.blocks);
+  return changed ? { ...document, blocks } : document;
+}
+
 export interface WriterIRParseResult {
   ok: boolean;
   document?: WriterDocument;

@@ -1,8 +1,14 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Popconfirm, Tooltip } from 'antd';
-import { FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
+import {
+  CloudUploadOutlined,
+  DownloadOutlined,
+  ExportOutlined,
+  FullscreenOutlined,
+  FullscreenExitOutlined,
+} from '@ant-design/icons';
 import { useWorkflowSession } from '@/modules/chat/hooks/useWorkflow';
 import { useWorkflowStore } from '@/modules/chat/store/workflowPanel';
 import { useTaskCenterStore, type SubAgentTask, type TaskArtifactStream } from '@/modules/chat/store/taskCenter';
@@ -29,8 +35,48 @@ import {
   SlotDownloadContext,
   SlotMarkdownStream,
 } from './SlotComponents';
-import { MarkdownWorkflowActionContext, SlotEditingContext } from './slotEditingContext';
+import { PluginPanelTabActiveContext, SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
+import { findWriterArtifactStream } from './writerArtifactStream';
 import './WorkflowPanel.scss';
+
+const DOCUMENT_FOOTER_LINK_ORDER = 20;
+const EMPTY_TASK_CENTER_TASKS: SubAgentTask[] = [];
+
+type DocumentFooterItem =
+  | { kind: 'button'; key: string; order: number; action: SlotFooterAction }
+  | { kind: 'link'; key: string; order: number; href: string; label: string };
+
+function buildDocumentFooterItems(footerActions: Map<string, SlotFooterAction>): {
+  statusMessages: Array<{ key: string; text: string; tone?: SlotFooterAction['statusTone'] }>;
+  actionItems: DocumentFooterItem[];
+} {
+  const statusMessages: Array<{ key: string; text: string; tone?: SlotFooterAction['statusTone'] }> = [];
+  const actionItems: DocumentFooterItem[] = [];
+
+  for (const [key, action] of footerActions.entries()) {
+    if (action.statusText) {
+      statusMessages.push({ key: `${key}:status`, text: action.statusText, tone: action.statusTone });
+    }
+    if (action.statusLink) {
+      actionItems.push({
+        kind: 'link',
+        key: `${key}:link`,
+        order: DOCUMENT_FOOTER_LINK_ORDER,
+        href: action.statusLink.href,
+        label: action.statusLink.label,
+      });
+    }
+    actionItems.push({
+      kind: 'button',
+      key,
+      order: action.order ?? 100,
+      action,
+    });
+  }
+
+  actionItems.sort((left, right) => left.order - right.order);
+  return { statusMessages, actionItems };
+}
 
 /** Parse a JSON intent context string and return the text field, or '' if empty/invalid. */
 function parseIntentText(raw?: string): string {
@@ -59,55 +105,6 @@ function parseSelectedSlotText(session: WorkflowSession, slotKey: string, includ
     if (obj.value !== undefined) return String(obj.value);
   }
   return String(raw);
-}
-
-function findTaskDraftStream(
-  session: WorkflowSession,
-  stepId: string | undefined,
-  slotId: string,
-  tasks: SubAgentTask[],
-): TaskArtifactStream | undefined {
-  if (slotId !== 'draft_document' || !stepId) return undefined;
-  const findStream = (task: SubAgentTask | undefined) => task?.artifact_streams
-    ?.slice()
-    .reverse()
-    .find((candidate) => candidate.slot === slotId && candidate.content_type === 'text/markdown');
-  const steps = (session.steps ?? [])
-    .filter((step) => step.step_id === stepId)
-    .slice()
-    .reverse();
-  for (const step of steps) {
-    const task = tasks.find((candidate) => candidate.task_id === step.task_id);
-    const stream = findStream(task);
-    if (stream) return stream;
-  }
-
-  // The session snapshot can briefly lag the task-created event, leaving the
-  // current step without its task_id. A single running draft stream is still
-  // unambiguous and should render instead of showing the empty-slot dash.
-  const liveStreams = tasks
-    .filter((task) => task.status === 'pending' || task.status === 'running')
-    .map(findStream)
-    .filter((stream): stream is TaskArtifactStream => Boolean(stream));
-  return liveStreams.length === 1 ? liveStreams[0] : undefined;
-}
-
-const WRITER_DRAFT_STEP_ID = 'write_document';
-
-/** Return the running task created for the writer's final-document step. */
-function findActiveWriterDraftTaskId(session: WorkflowSession | null): string | undefined {
-  if (session?.status !== 'active') {
-    return undefined;
-  }
-  return session.steps
-    ?.filter((step) => (
-      step.step_id === WRITER_DRAFT_STEP_ID
-      && step.validity !== 'stale'
-      && (step.status === 'pending' || step.status === 'running')
-      && Boolean(step.task_id)
-    ))
-    .sort((a, b) => b.attempt - a.attempt)[0]
-    ?.task_id;
 }
 
 /** IntentPopover shows global intent + per-step intent inside a floating popover. */
@@ -348,7 +345,7 @@ function getTabStepId(tab: TabDef): string | undefined {
 }
 
 /**
- * Lock slot editing only while the workflow session is actively running.
+ * Lock slot editing only while the plugin session is actively running.
  * When idle (waiting / failed / completed), ui_editable artifacts stay editable
  * so the user can revise and re-run a later step from the updated content.
  */
@@ -956,9 +953,7 @@ function NamedTabSlot({
   const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
   const isDraggable = Boolean(slotDef.ordered) && !readOnly;
   const showStream = Boolean(artifactStream && (
-    revisions.length === 0 || (
-      artifactStream.state !== 'ready' && !artifactStream.final_content_error
-    )
+    revisions.length === 0 || artifactStream.state !== 'ready'
   ));
 
   return (
@@ -1098,7 +1093,7 @@ function TabSlotGrid({
       {visibleSlots.map((slotDef) => {
         const artifactKey = slotDef.id;
         const revisions = getTabSlotRevisions(session, tab, artifactKey);
-        const artifactStream = findTaskDraftStream(
+        const artifactStream = findWriterArtifactStream(
           session,
           getTabStepId(tab),
           slotDef.id,
@@ -1164,9 +1159,10 @@ export function WorkflowPanel({
   const { t, i18n } = useTranslation();
   const { session, loading, refresh } = useWorkflowSession(conversationId);
   const taskCenterTasks = useTaskCenterStore((state) =>
-    conversationId ? state.tasksByConversation[conversationId] ?? [] : [],
+    conversationId
+      ? state.tasksByConversation[conversationId] ?? EMPTY_TASK_CENTER_TASKS
+      : EMPTY_TASK_CENTER_TASKS,
   );
-  const subscribeTask = useTaskCenterStore((state) => state.subscribeTask);
   const bumpDismissedRefresh = useWorkflowStore((s) => s.bumpDismissedRefresh);
   const autoRunning = useWorkflowStore((s) =>
     conversationId ? (s.autoRunningByConversation[conversationId] ?? false) : false,
@@ -1192,6 +1188,7 @@ export function WorkflowPanel({
   const flushFns = useRef<Map<string, () => Promise<boolean>>>(new Map());
   const [anySlotEditing, setAnySlotEditing] = useState(false);
   const [actionPending, setActionPending] = useState(false);
+  const [footerActions, setFooterActions] = useState<Map<string, SlotFooterAction>>(new Map());
 
   const setExpandedMode = useCallback((nextExpanded: boolean) => {
     if (nextExpanded) setCollapsed(false);
@@ -1251,6 +1248,23 @@ export function WorkflowPanel({
     };
   }, []);
 
+  const registerFooterAction = useCallback((key: string, action: SlotFooterAction | null) => {
+    setFooterActions((previous) => {
+      const next = new Map(previous);
+      if (action) next.set(key, action);
+      else next.delete(key);
+      return next;
+    });
+    return () => {
+      setFooterActions((previous) => {
+        if (!previous.has(key)) return previous;
+        const next = new Map(previous);
+        next.delete(key);
+        return next;
+      });
+    };
+  }, []);
+
   const flushPendingEdits = useCallback(async (): Promise<boolean> => {
     const flushers = [...flushFns.current.values()];
     if (flushers.length === 0) return true;
@@ -1261,6 +1275,7 @@ export function WorkflowPanel({
   useEffect(() => {
     editingSlots.current.clear();
     flushFns.current.clear();
+    setFooterActions(new Map());
     setAnySlotEditing(false);
     setActionPending(false);
   }, [session?.session_id]);
@@ -1290,15 +1305,6 @@ export function WorkflowPanel({
     return () => clearInterval(id);
   }, [session, refresh, pollIntervalMs]);
 
-  const writerDraftTaskId = findActiveWriterDraftTaskId(session);
-
-  // The task-created notification and the workflow-session refresh can arrive in
-  // either order. Once the writer enters its final-document step, subscribe as
-  // soon as its task ID is present so draft Markdown deltas are not missed.
-  useEffect(() => {
-    if (!conversationId || !writerDraftTaskId) return;
-    subscribeTask(conversationId, writerDraftTaskId);
-  }, [conversationId, subscribeTask, writerDraftTaskId]);
   // Track focused tab changes.
   const handleTabChange = useCallback((idx: number, tabId: string) => {
     setActiveTabIdx(idx);
@@ -1332,13 +1338,12 @@ export function WorkflowPanel({
     session.status === 'active' ||
     session.status === 'completed' ||
     session.status === 'failed';
-  const terminalSession = session.status === 'completed'
-    || session.status === 'failed'
-    || session.status === 'stopped';
-  // autoRunning is only an optimistic transport hint. A durable terminal
-  // session always wins, even if a delayed/replayed conversation event arrives.
-  const displayStatus = autoRunning && !terminalSession ? 'active' : session.status;
-  // Only block footer actions while the workflow is actually running (or flush-in-progress).
+  const documentFooter = useMemo(
+    () => buildDocumentFooterItems(footerActions),
+    [footerActions],
+  );
+  const displayStatus = autoRunning ? 'active' : session.status;
+  // Only block footer actions while the plugin is actually running (or flush-in-progress).
   // Dirty editors no longer disable retry — click flushes saves first, then proceeds.
   const sessionBusy = displayStatus === 'active' || autoRunning;
   const buttonsDisabled = sessionBusy || actionPending;
@@ -1389,24 +1394,16 @@ export function WorkflowPanel({
     void runFooterAction(() => onSendMessage?.(`${t('chat.workflowRollbackPrefix')}${stepId}`));
   }
 
-  const nextTab = tabs[activeTabIdx + 1];
-  const markdownWorkflowAction = !sessionReadOnly && onSendMessage
-    ? displayStatus === 'waiting'
-      ? {
-        label: t('chat.writerMarkdown.saveAndContinue'),
-        onProceed: handleContinue,
-      }
-      : session.status === 'completed' && nextTab
-        ? {
-          label: t('chat.writerMarkdown.saveAndReexecute', { step: nextTab.label }),
-          onProceed: () => handleRollback(getTabStepId(nextTab)),
-        }
-        : null
-    : null;
+  const continueLabel = displayStatus === 'waiting'
+    ? t('chat.pluginSaveAndContinue')
+    : t('chat.pluginContinue');
 
   const panel = (
-    <MarkdownWorkflowActionContext.Provider value={markdownWorkflowAction}>
-    <SlotEditingContext.Provider value={{ setEditing: handleSlotEditingChange, registerFlush }}>
+    <SlotEditingContext.Provider value={{
+      setEditing: handleSlotEditingChange,
+      registerFlush,
+      registerFooterAction,
+    }}>
     <div
       className={`workflow-panel workflow-panel--${displayStatus}${collapsed ? ' workflow-panel--collapsed' : ''}${expanded ? ' workflow-panel--expanded' : ''}`}
       data-session-id={session.session_id}
@@ -1416,6 +1413,18 @@ export function WorkflowPanel({
       <div className='workflow-panel__header'>
         <div className='workflow-panel__header-left'>
           <span className='workflow-panel__title'>{session.workflow_id}</span>
+          {typeof session.pinned_revision_no === 'number' && session.pinned_revision_no > 0 && (
+            <span className='workflow-panel__revision'>
+              {t('chat.pluginPinnedVersion', { version: session.pinned_revision_no })}
+            </span>
+          )}
+          {typeof session.head_revision_no === 'number'
+            && typeof session.pinned_revision_no === 'number'
+            && session.head_revision_no > session.pinned_revision_no && (
+              <span className='workflow-panel__revision workflow-panel__revision--updated'>
+                {t('chat.pluginUpdateAvailable', { version: session.head_revision_no })}
+              </span>
+            )}
           <span
             className={`workflow-panel__status workflow-panel__status--${displayStatus}`}
             aria-label={t('chat.workflowStatusAria', { status: t(STATUS_KEY[displayStatus] ?? displayStatus) })}
@@ -1589,6 +1598,7 @@ export function WorkflowPanel({
                 role='tabpanel'
                 hidden={idx !== activeTabIdx}
               >
+                <PluginPanelTabActiveContext.Provider value={idx === activeTabIdx}>
                 <SlotDownloadContext.Provider value={idx === tabs.length - 1}>
                   <TabSlotGrid
                     tab={tab}
@@ -1600,6 +1610,7 @@ export function WorkflowPanel({
                     readOnly={sessionReadOnly}
                   />
                 </SlotDownloadContext.Provider>
+                </PluginPanelTabActiveContext.Provider>
               </div>
             ))
           ) : (
@@ -1615,7 +1626,72 @@ export function WorkflowPanel({
 
       {/* Footer */}
       {!collapsed && showActions && (
-        <div className='workflow-panel__footer' role='group' aria-label={t('chat.workflowSessionControls')}>
+        <div className='workflow-panel__footer' role='group' aria-label={t('chat.pluginSessionControls')}>
+          {documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0 ? (
+            <div className='workflow-panel__footer-document'>
+              {documentFooter.statusMessages.length > 0 ? (
+                <div className='workflow-panel__footer-meta'>
+                  {documentFooter.statusMessages.map((message) => (
+                    <span
+                      key={message.key}
+                      className={
+                        message.tone === 'error'
+                          ? 'workflow-panel__footer-action-status workflow-panel__footer-action-status--error'
+                          : message.tone === 'success'
+                            ? 'workflow-panel__footer-action-status workflow-panel__footer-action-status--success'
+                            : 'workflow-panel__footer-action-status'
+                      }
+                      role={message.tone === 'error' ? 'alert' : 'status'}
+                    >
+                      {message.text}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {documentFooter.actionItems.length > 0 ? (
+                <div className='workflow-panel__footer-actions'>
+                  {documentFooter.actionItems.map((item) => {
+                    if (item.kind === 'link') {
+                      return (
+                        <a
+                          key={item.key}
+                          className='workflow-panel__action-btn workflow-panel__action-btn--secondary workflow-panel__action-btn--link'
+                          href={item.href}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                        >
+                          <ExportOutlined aria-hidden />
+                          {item.label}
+                        </a>
+                      );
+                    }
+
+                    const { action } = item;
+                    return (
+                      <button
+                        key={item.key}
+                        type='button'
+                        className={`workflow-panel__action-btn workflow-panel__action-btn--${action.tone ?? 'secondary'}`}
+                        disabled={actionPending || action.disabled}
+                        aria-disabled={actionPending || action.disabled}
+                        onClick={() => {
+                          if (action.flushBeforeAction) {
+                            void runFooterAction(action.onClick);
+                            return;
+                          }
+                          action.onClick();
+                        }}
+                      >
+                        {action.icon === 'write-back' ? <CloudUploadOutlined aria-hidden /> : null}
+                        {action.icon === 'download' ? <DownloadOutlined aria-hidden /> : null}
+                        {action.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {displayStatus === 'active' && onStop && (
             <button
               type='button'
@@ -1659,11 +1735,13 @@ export function WorkflowPanel({
                   : actionPending
                     ? t('chat.workflowSavingBeforeAction')
                     : buttonsDisabled
-                      ? t('chat.workflowBtnDisabledHint')
-                      : t('chat.workflowContinue')
+                      ? t('chat.pluginBtnDisabledHint')
+                      : anySlotEditing
+                        ? t('chat.pluginContinueFlushHint')
+                        : continueLabel
               }
             >
-              {actionPending ? t('chat.workflowSavingBeforeAction') : t('chat.workflowContinue')}
+              {actionPending ? t('chat.pluginSavingBeforeAction') : continueLabel}
             </button>
           )}
           {showStepRollback && (
@@ -1711,7 +1789,6 @@ export function WorkflowPanel({
       />
     )}
     </SlotEditingContext.Provider>
-    </MarkdownWorkflowActionContext.Provider>
   );
 
   if (expanded) {

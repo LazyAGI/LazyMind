@@ -183,8 +183,22 @@ export interface SlotRevision {
   artifact_value?: any;
   /** Human-readable description for image/file artifacts. */
   caption?: string;
-  /** change_source: 'ai' (generated) or 'human' (manually edited). */
-  change_source?: "ai" | "human";
+  /** change_source: ai / human / provider_sync (Feishu-confirmed). */
+  change_source?: "ai" | "human" | "provider_sync";
+  /** Whether this draft has a server-owned Feishu baseline. */
+  write_back_ready?: boolean;
+  /** Whether the selected draft differs from that Feishu baseline. */
+  write_back_dirty?: boolean;
+  /** Server-owned delivery state for the selected draft. */
+  write_back_state?: 'initial_delivery' | 'synced_clean' | 'synced_dirty' | 'blocked';
+  /** Public Feishu document URL resolved by the server from source_document. */
+  write_back_url?: string;
+  /** Cloud provider bound to source_document, for example "feishu". */
+  provider?: string;
+  /** Stable cloud-document identity. It is never a local revision number. */
+  provider_document_id?: string;
+  /** Most recent local revision confirmed equal to the cloud document. */
+  last_synced_revision?: number;
   /** Number of revisions for this (slot_id, list_index) — used to show version badge. */
   revision_count?: number;
 }
@@ -193,7 +207,12 @@ export interface WorkflowSession {
   session_id: string;
   conversation_id: string;
   workflow_id: string;
-  status: "active" | "completed" | "failed" | "waiting" | "stopped";
+  /** Immutable package revision selected when this session was created. */
+  pinned_revision_id?: string;
+  pinned_revision_no?: number;
+  /** Current published package revision; absent for built-ins without a resource head. */
+  head_revision_no?: number;
+  status: "active" | "completed" | "failed" | "waiting";
   current_step_id: string;
   /** Global intent/constraint for this session, JSON string e.g. {"text":"..."} */
   intent_context?: string;
@@ -334,9 +353,11 @@ export interface WorkflowUI {
 
 export interface SlotVersionEntry {
   revision: number;
-  change_source: "ai" | "human";
+  change_source: "ai" | "human" | "provider_sync";
   created_at: string;
   selected: boolean;
+  /** Whether this historical Writer revision was provider-confirmed. */
+  provider_synced?: boolean;
   content_snapshot?: any;
 }
 

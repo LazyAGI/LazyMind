@@ -61,6 +61,8 @@ import {
   type WriterSpanColorField,
 } from './writerIR';
 import { ArtifactRewriteInlineDiff } from './ArtifactRewriteDialog';
+import { ArtifactRewriteSelectionHighlight } from './ArtifactRewriteSelectionHighlight';
+import { selectionActionAnchor, type SelectionActionAnchor } from './artifactRewriteSelection';
 import { highlightCode } from '../MarkdownViewer/syntaxHighlight';
 import type { RewriteSelectionPreview } from '@/modules/chat/utils/request';
 import { resolveMarkdownImageUrlAsync } from '@/modules/knowledge/utils/imageUrl';
@@ -97,6 +99,7 @@ function imageReferencePath(block: WriterBlock): string {
 export interface WriterIRRewriteSelection {
   nodeId: string;
   selectedText: string;
+  anchor?: SelectionActionAnchor;
 }
 
 interface WriterIRDocumentEditorProps {
@@ -106,6 +109,7 @@ interface WriterIRDocumentEditorProps {
   onFocus: () => void;
   onBlur: () => void;
   disabled?: boolean;
+  rewriteDialogOpen?: boolean;
   onRewriteSelection?: (selection: WriterIRRewriteSelection) => void;
   rewritePreview?: WriterIRRewritePreview | null;
   onRewritePreviewApplied?: (revision?: number) => void;
@@ -619,6 +623,11 @@ function childElements(element: HTMLElement, selector: string): HTMLElement[] {
 
 function blockContentElement(element: HTMLElement): HTMLElement {
   if (element.matches('[data-writer-block-content]')) return element;
+  if (element.dataset.nodeType === 'image') {
+    return element.querySelector<HTMLElement>(
+      ':scope > figure > figcaption[data-writer-block-content]',
+    ) ?? element;
+  }
   return childElements(element, '[data-writer-block-content]')[0]
     ?? element.querySelector<HTMLElement>(
       ':scope > .writer-ir__code-shell > [data-writer-block-content]',
@@ -948,19 +957,28 @@ function scrollSelectionIntoView(editor: HTMLElement): void {
   }
 }
 
-function restoreEditorSelection(
+function writerEditorSelectionRange(
   editor: HTMLElement,
   savedSelection: WriterEditorSelection,
-  options?: { scrollIntoView?: boolean },
-): void {
+): Range | null {
   const block = findRenderedBlock(editor, savedSelection.nodeId);
-  if (!block) return;
+  if (!block) return null;
   const contentElement = blockContentElement(block);
   const start = textBoundaryAt(contentElement, savedSelection.start);
   const end = textBoundaryAt(contentElement, savedSelection.end);
   const range = globalThis.document.createRange();
   range.setStart(start.node, start.offset);
   range.setEnd(end.node, end.offset);
+  return range;
+}
+
+function restoreEditorSelection(
+  editor: HTMLElement,
+  savedSelection: WriterEditorSelection,
+  options?: { scrollIntoView?: boolean },
+): void {
+  const range = writerEditorSelectionRange(editor, savedSelection);
+  if (!range) return;
   const selection = globalThis.getSelection();
   selection?.removeAllRanges();
   selection?.addRange(range);
@@ -1028,6 +1046,7 @@ export function WriterIRDocumentEditor({
   onFocus,
   onBlur,
   disabled = false,
+  rewriteDialogOpen = false,
   onRewriteSelection,
   rewritePreview,
   onRewritePreviewApplied,
@@ -1047,6 +1066,10 @@ export function WriterIRDocumentEditor({
   const handledEnterKeyDownRef = useRef(false);
   const selectAllScopeRef = useRef<WriterSelectAllScope>(null);
   const [activeSelection, setActiveSelection] = useState<WriterEditorSelection | null>(null);
+  const [pinnedRewriteSelection, setPinnedRewriteSelection] = useState<WriterEditorSelection | null>(null);
+  const rewriteDialogOpenRef = useRef(rewriteDialogOpen);
+  const pinnedRewriteSelectionRef = useRef<WriterEditorSelection | null>(null);
+  rewriteDialogOpenRef.current = rewriteDialogOpen;
   const [formatToolbarStyle, setFormatToolbarStyle] = useState<CSSProperties | undefined>();
   const [colorPanelOpen, setColorPanelOpen] = useState(false);
   const [collapseVersion, setCollapseVersion] = useState(0);
@@ -1138,6 +1161,20 @@ export function WriterIRDocumentEditor({
       .find((element) => element.dataset.nodeId === rewritePreview.nodeId);
     setRewriteTarget(block ? blockContentElement(block) : null);
   }, [document, rewritePreview]);
+
+  useEffect(() => {
+    if (!rewriteDialogOpen) {
+      pinnedRewriteSelectionRef.current = null;
+      setPinnedRewriteSelection(null);
+    }
+  }, [rewriteDialogOpen]);
+
+  const getPinnedRewriteRange = useCallback((): Range | null => {
+    const editor = editorRef.current;
+    const selection = pinnedRewriteSelection ?? savedSelectionRef.current;
+    if (!editor || !selection || selection.end <= selection.start) return null;
+    return writerEditorSelectionRange(editor, selection);
+  }, [pinnedRewriteSelection]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -1379,6 +1416,10 @@ export function WriterIRDocumentEditor({
     if (!editor) return;
     const selection = readEditorSelection(editor);
     if (!selection) {
+      if ((rewriteDialogOpenRef.current || pinnedRewriteSelectionRef.current) && savedSelectionRef.current) {
+        setActiveSelection(savedSelectionRef.current);
+        return;
+      }
       savedSelectionRef.current = null;
       setActiveSelection(null);
       return;
@@ -1431,6 +1472,14 @@ export function WriterIRDocumentEditor({
       event.relatedTarget instanceof Node
       && event.currentTarget.contains(event.relatedTarget)
     ) return;
+    if (
+      event.relatedTarget instanceof Element
+      && (
+        event.relatedTarget.closest('.artifact-rewrite-form')
+        || event.relatedTarget.closest('.writer-ir__format-toolbar')
+      )
+    ) return;
+    if (rewriteDialogOpenRef.current || pinnedRewriteSelectionRef.current) return;
     selectAllScopeRef.current = null;
     savedSelectionRef.current = null;
     setActiveSelection(null);
@@ -2090,7 +2139,24 @@ export function WriterIRDocumentEditor({
       .join('')
       .trim();
     if (!selectedText) return;
-    onRewriteSelection({ nodeId: block.node_id, selectedText });
+
+    let anchor: SelectionActionAnchor | undefined;
+    const browserSelection = globalThis.getSelection();
+    if (browserSelection?.rangeCount && !browserSelection.isCollapsed) {
+      anchor = selectionActionAnchor(browserSelection.getRangeAt(0)) ?? undefined;
+    }
+    if (!anchor && formatToolbarRef.current) {
+      const toolbarRect = formatToolbarRef.current.getBoundingClientRect();
+      anchor = {
+        top: toolbarRect.bottom + 8,
+        left: toolbarRect.left + toolbarRect.width / 2,
+        placement: 'below',
+      };
+    }
+
+    setPinnedRewriteSelection(selection);
+    pinnedRewriteSelectionRef.current = selection;
+    onRewriteSelection({ nodeId: block.node_id, selectedText, anchor });
   }, [document.blocks, onRewriteSelection]);
 
   return (
@@ -2386,6 +2452,11 @@ export function WriterIRDocumentEditor({
         onKeyUp={handleKeyUp}
       />
       <div className='writer-ir__rewrite-layer' ref={setRewriteLayer} />
+      <ArtifactRewriteSelectionHighlight
+        layer={rewriteLayer}
+        getRange={getPinnedRewriteRange}
+        active={Boolean(pinnedRewriteSelection)}
+      />
       {rewritePreview && rewriteTarget && rewriteLayer && onRewritePreviewApplied && onRewritePreviewRejected && (
         <ArtifactRewriteInlineDiff
           target={rewriteTarget}

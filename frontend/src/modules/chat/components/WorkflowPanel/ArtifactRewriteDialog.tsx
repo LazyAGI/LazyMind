@@ -10,13 +10,15 @@ import {
 import ReactDOM from 'react-dom';
 import { diffWordsWithSpace } from 'diff';
 import { useTranslation } from 'react-i18next';
+import SendIcon from '../../assets/icons/send_icon.svg?react';
 import {
   WorkflowSessionApi,
   type RewriteSelection,
   type RewriteSelectionPreview,
 } from '@/modules/chat/utils/request';
-import type { SelectionActionAnchor } from './artifactRewriteSelection';
+import { selectionActionAnchor, type SelectionActionAnchor } from './artifactRewriteSelection';
 import './ArtifactRewriteDialog.scss';
+import './ArtifactRewriteSelectionHighlight.scss';
 
 export type ArtifactRewriteSelection = RewriteSelection & {
   selectedText: string;
@@ -24,6 +26,35 @@ export type ArtifactRewriteSelection = RewriteSelection & {
   paragraph?: HTMLElement;
   startOffset?: number;
 };
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function computeRewriteFormPosition(
+  anchor: SelectionActionAnchor,
+  size: { width: number; height: number },
+): CSSProperties {
+  const inset = 16;
+  const gap = 8;
+  const halfWidth = size.width / 2;
+  const left = clamp(anchor.left, inset + halfWidth, window.innerWidth - inset - halfWidth);
+
+  if (anchor.placement === 'above') {
+    const top = clamp(anchor.top - gap, inset + size.height, window.innerHeight - inset);
+    return { top, left, transform: 'translate(-50%, -100%)' };
+  }
+
+  const top = clamp(anchor.top + gap, inset, window.innerHeight - inset - size.height);
+  return { top, left, transform: 'translate(-50%, 0)' };
+}
+
+function resolveRewriteFormAnchor(selection: ArtifactRewriteSelection | null): SelectionActionAnchor | null {
+  if (selection?.anchor) return selection.anchor;
+  const browserSelection = globalThis.getSelection();
+  if (!browserSelection?.rangeCount || browserSelection.isCollapsed) return null;
+  return selectionActionAnchor(browserSelection.getRangeAt(0));
+}
 
 interface ArtifactRewriteDialogProps {
   open: boolean;
@@ -37,7 +68,7 @@ interface ArtifactRewriteDialogProps {
   onPreviewReady?: (preview: RewriteSelectionPreview) => void;
 }
 
-type DialogPhase = 'form' | 'previewing' | 'ready' | 'applying';
+type FormPhase = 'form' | 'previewing';
 
 function errorCode(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') return undefined;
@@ -64,21 +95,6 @@ function errorMessage(code: string | undefined, fallback: string): string {
   return fallback;
 }
 
-function renderDiff(oldText: string, newText: string) {
-  return diffWordsWithSpace(oldText, newText).map((part, index) => (
-    <span
-      className={part.added
-        ? 'artifact-rewrite-dialog__diff-addition'
-        : part.removed
-          ? 'artifact-rewrite-dialog__diff-removal'
-          : undefined}
-      key={`${part.value}-${index}`}
-    >
-      {part.value}
-    </span>
-  ));
-}
-
 function isReadyPreview(value: unknown): value is RewriteSelectionPreview {
   if (!value || typeof value !== 'object') return false;
   const data = value as RewriteSelectionPreview;
@@ -99,15 +115,16 @@ export function ArtifactRewriteDialog({
   baseRevision,
   selection,
   onClose,
-  onApplied,
   onPreviewReady,
 }: ArtifactRewriteDialogProps) {
   const { t } = useTranslation();
   const [instruction, setInstruction] = useState('');
-  const [preview, setPreview] = useState<RewriteSelectionPreview | null>(null);
-  const [phase, setPhase] = useState<DialogPhase>('form');
+  const [phase, setPhase] = useState<FormPhase>('form');
   const [error, setError] = useState<string>();
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [formStyle, setFormStyle] = useState<CSSProperties>();
+  const [formPlacement, setFormPlacement] = useState<SelectionActionAnchor['placement']>('below');
+  const formRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const lastFocusRef = useRef<HTMLElement | null>(null);
   const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
@@ -123,23 +140,62 @@ export function ArtifactRewriteDialog({
   useEffect(() => {
     if (!open) return;
     lastFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setInstruction(t('chat.artifactRewrite.defaultInstruction'));
-    setPreview(null);
+    setInstruction('');
     setError(undefined);
     setPhase('form');
     const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
     return () => window.clearTimeout(timer);
   }, [open, selection, t]);
 
+  const updateFormPosition = useCallback(() => {
+    const form = formRef.current;
+    if (!form) return;
+    const anchor = resolveRewriteFormAnchor(selection);
+    const { width, height } = form.getBoundingClientRect();
+    if (anchor) {
+      setFormPlacement(anchor.placement);
+      setFormStyle(computeRewriteFormPosition(anchor, { width, height }));
+      return;
+    }
+    setFormPlacement('below');
+    setFormStyle({
+      top: clamp(window.innerHeight * 0.32, 16, window.innerHeight - height - 16),
+      left: '50%',
+      transform: 'translateX(-50%)',
+    });
+  }, [selection]);
+
+  useLayoutEffect(() => {
+    if (!open || !selection) return undefined;
+    updateFormPosition();
+    window.addEventListener('resize', updateFormPosition);
+    window.addEventListener('scroll', updateFormPosition, true);
+    return () => {
+      window.removeEventListener('resize', updateFormPosition);
+      window.removeEventListener('scroll', updateFormPosition, true);
+    };
+  }, [open, selection, updateFormPosition, instruction, error, phase]);
+
   const close = useCallback(() => {
-    if (phase === 'previewing' || phase === 'applying') return;
+    if (phase === 'previewing') return;
     onClose();
     window.setTimeout(() => lastFocusRef.current?.focus(), 0);
   }, [onClose, phase]);
 
+  useEffect(() => {
+    if (!open) return undefined;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || formRef.current?.contains(target)) return;
+      close();
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [close, open]);
+
   const requestPreview = useCallback(async () => {
-    const trimmedInstruction = instruction.trim();
-    if (!selection || !trimmedInstruction || phase !== 'form') return;
+    const trimmedInstruction = instruction.trim() || t('chat.artifactRewrite.defaultInstruction');
+    if (!selection || phase !== 'form') return;
 
     const requestId = ++requestIdRef.current;
     setPhase('previewing');
@@ -168,11 +224,8 @@ export function ArtifactRewriteDialog({
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       if (onPreviewReady) {
         onPreviewReady(result);
-        onClose();
-        return;
       }
-      setPreview(result);
-      setPhase('ready');
+      onClose();
     } catch (requestError) {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setError(t(errorMessage(errorCode(requestError), 'chat.artifactRewrite.errors.previewFailed')));
@@ -180,117 +233,57 @@ export function ArtifactRewriteDialog({
     }
   }, [baseRevision, instruction, listIndex, onClose, onPreviewReady, phase, selection, sessionId, slotId, t]);
 
-  const applyPreview = useCallback(async () => {
-    if (!preview || phase !== 'ready') return;
-    const requestId = ++requestIdRef.current;
-    setPhase('applying');
-    setError(undefined);
-    try {
-      const response = await WorkflowSessionApi().patchSlotItem(
-        sessionId,
-        slotId,
-        listIndex,
-        preview.artifact.value,
-        preview.artifact.content_type,
-        'checkpoint',
-        preview.base_revision,
-        { silentError: true } as never,
-      );
-      const result = response?.data?.data;
-      if (response?.data?.code !== 0 || result?.type !== 'slot_item_patched') {
-        throw new Error('invalid patch response');
-      }
-      if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      onApplied(typeof result.revision === 'number' ? result.revision : undefined);
-      onClose();
-      window.setTimeout(() => lastFocusRef.current?.focus(), 0);
-    } catch (applyError) {
-      if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      setError(t(errorMessage(errorCode(applyError), 'chat.artifactRewrite.errors.applyFailed')));
-      setPhase('ready');
-    }
-  }, [listIndex, onApplied, onClose, phase, preview, sessionId, slotId, t]);
-
   const handleKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
       close();
+      return;
     }
-  }, [close]);
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      void requestPreview();
+    }
+  }, [close, requestPreview]);
 
   if (!open || !selection) return null;
-  const busy = phase === 'previewing' || phase === 'applying';
-  const canPreview = phase === 'form' && instruction.trim().length > 0;
-  const maxTop = Math.max(16, window.innerHeight - 320);
-  const horizontalInset = Math.min(260, Math.max(16, (window.innerWidth - 32) / 2));
-  const dialogStyle: CSSProperties = selection.anchor
-    ? {
-      top: Math.min(Math.max(16, selection.anchor.top + 10), maxTop),
-      left: Math.min(
-        Math.max(horizontalInset, selection.anchor.left),
-        window.innerWidth - horizontalInset,
-      ),
-    }
-    : { top: 24, left: '50%' };
+  const busy = phase === 'previewing';
+  const canPreview = phase === 'form';
 
   return ReactDOM.createPortal(
     <div
-      className='artifact-rewrite-dialog'
-      role='dialog'
-      aria-labelledby='artifact-rewrite-dialog-title'
-      style={dialogStyle}
+      ref={formRef}
+      className={`artifact-rewrite-form artifact-rewrite-form--${formPlacement}`}
+      style={formStyle}
       onKeyDown={handleKeyDown}
     >
-      <header className='artifact-rewrite-dialog__header'>
-        <h2 id='artifact-rewrite-dialog-title'>{t('chat.artifactRewrite.title')}</h2>
-        <button type='button' onClick={close} disabled={busy} aria-label={t('chat.artifactRewrite.close')}>×</button>
-      </header>
-
-      <div className='artifact-rewrite-dialog__body'>
-        {preview ? (
-          <div className='artifact-rewrite-dialog__diff' aria-live='polite'>
-            <div className='artifact-rewrite-dialog__diff-summary'>
-              <span className='artifact-rewrite-dialog__diff-label artifact-rewrite-dialog__diff-label--before'>
-                {t('chat.artifactRewrite.before')}
-              </span>
-              <span className='artifact-rewrite-dialog__diff-label artifact-rewrite-dialog__diff-label--after'>
-                {t('chat.artifactRewrite.after')}
-              </span>
-            </div>
-            <div className='artifact-rewrite-dialog__diff-content'>
-              {renderDiff(preview.preview.old_text, preview.preview.new_text)}
-            </div>
-          </div>
-        ) : (
-          <label className='artifact-rewrite-dialog__instruction'>
-            <span>{t('chat.artifactRewrite.instruction')}</span>
-            <textarea
-              ref={inputRef}
-              value={instruction}
-              onChange={(event) => setInstruction(event.target.value)}
-              placeholder={t('chat.artifactRewrite.instructionPlaceholder')}
-              disabled={busy}
-              aria-describedby={error ? 'artifact-rewrite-dialog-error' : undefined}
-            />
-          </label>
-        )}
-        {error && <p id='artifact-rewrite-dialog-error' className='artifact-rewrite-dialog__error' role='alert'>{error}</p>}
-      </div>
-
-      <footer className='artifact-rewrite-dialog__footer'>
-        <button type='button' onClick={close} disabled={busy}>
-          {preview ? t('chat.artifactRewrite.reject') : t('common.cancel')}
+      <div className='artifact-rewrite-form__input-shell'>
+        <input
+          ref={inputRef}
+          type='text'
+          className='artifact-rewrite-form__input'
+          value={instruction}
+          onChange={(event) => setInstruction(event.target.value)}
+          placeholder={t('chat.artifactRewrite.defaultInstruction')}
+          disabled={busy}
+          aria-label={t('chat.artifactRewrite.instruction')}
+          aria-describedby={error ? 'artifact-rewrite-form-error' : undefined}
+        />
+        <button
+          type='button'
+          className={`artifact-rewrite-form__submit${busy ? ' artifact-rewrite-form__submit--busy' : ''}`}
+          onClick={() => void requestPreview()}
+          disabled={!canPreview || busy}
+          aria-label={busy ? t('chat.artifactRewrite.previewing') : t('chat.artifactRewrite.preview')}
+          title={busy ? t('chat.artifactRewrite.previewing') : t('chat.artifactRewrite.preview')}
+        >
+          <SendIcon aria-hidden='true' />
         </button>
-        {preview ? (
-          <button type='button' className='artifact-rewrite-dialog__primary' onClick={() => void applyPreview()} disabled={busy}>
-            {phase === 'applying' ? t('chat.artifactRewrite.applying') : t('chat.artifactRewrite.apply')}
-          </button>
-        ) : (
-          <button type='button' className='artifact-rewrite-dialog__primary' onClick={() => void requestPreview()} disabled={!canPreview || busy}>
-            {phase === 'previewing' ? t('chat.artifactRewrite.previewing') : t('chat.artifactRewrite.preview')}
-          </button>
-        )}
-      </footer>
+      </div>
+      {error && (
+        <p id='artifact-rewrite-form-error' className='artifact-rewrite-form__error' role='alert'>
+          {error}
+        </p>
+      )}
     </div>,
     document.body,
   );
@@ -430,7 +423,7 @@ export function ArtifactRewriteInlineDiff({
         listIndex,
         preview.artifact.value,
         preview.artifact.content_type,
-        'checkpoint',
+        slotId === 'draft_document' ? 'draft' : 'checkpoint',
         preview.base_revision,
         { silentError: true } as never,
       );

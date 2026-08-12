@@ -314,6 +314,11 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "invalid synchronized WriterDocument baseline", http.StatusConflict)
 			return
 		}
+		revisedDocument, normalizeErr = preserveExistingWriterImageBlocks(baselineDocument, revisedDocument)
+		if normalizeErr != nil {
+			common.ReplyErr(w, "invalid current WriterDocument: "+normalizeErr.Error(), http.StatusBadRequest)
+			return
+		}
 		if pairErr := validateWriterWriteBackPair(baselineDocument, revisedDocument); pairErr != nil {
 			common.ReplyErr(w, pairErr.Error(), http.StatusConflict)
 			return
@@ -537,16 +542,90 @@ func normalizeWriterDocumentForSync(document json.RawMessage) (json.RawMessage, 
 	return json.Marshal(record)
 }
 
+// preserveExistingWriterImageBlocks keeps provider-owned image blocks byte-for-byte
+// equivalent to their synchronized baseline. The Writer revision tool accepts new
+// images, but deliberately rejects any update to an existing image block. Human
+// editor saves can otherwise add placeholder newlines or spans to an untouched
+// image caption while the user is editing surrounding text.
+func preserveExistingWriterImageBlocks(source, revised json.RawMessage) (json.RawMessage, error) {
+	var sourceDocument, revisedDocument map[string]any
+	if err := json.Unmarshal(source, &sourceDocument); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(revised, &revisedDocument); err != nil {
+		return nil, err
+	}
+	sourceBlocks, ok := sourceDocument["blocks"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("source blocks must be an array")
+	}
+	revisedBlocks, ok := revisedDocument["blocks"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("blocks must be an array")
+	}
+	baselineImages := make(map[string]map[string]any)
+	collectWriterImageBlocks(sourceBlocks, baselineImages)
+	preserveWriterImageBlocks(revisedBlocks, baselineImages)
+	return json.Marshal(revisedDocument)
+}
+
+func collectWriterImageBlocks(blocks []any, images map[string]map[string]any) {
+	for _, value := range blocks {
+		block, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		if block["type"] == "image" {
+			if nodeID, _ := block["node_id"].(string); nodeID != "" {
+				images[nodeID] = block
+			}
+		}
+		if children, ok := block["children"].([]any); ok {
+			collectWriterImageBlocks(children, images)
+		}
+	}
+}
+
+func preserveWriterImageBlocks(blocks []any, baselineImages map[string]map[string]any) {
+	for index, value := range blocks {
+		block, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		if block["type"] == "image" {
+			if nodeID, _ := block["node_id"].(string); nodeID != "" {
+				if baseline, ok := baselineImages[nodeID]; ok {
+					blocks[index] = baseline
+					continue
+				}
+			}
+		}
+		if children, ok := block["children"].([]any); ok {
+			preserveWriterImageBlocks(children, baselineImages)
+		}
+	}
+}
+
 func normalizeWriterBlockForSync(value any) {
 	block, ok := value.(map[string]any)
 	if !ok {
 		return
+	}
+	if block["type"] == "image" {
+		if content, ok := block["content"].(string); ok {
+			block["content"] = strings.TrimLeft(content, "\r\n")
+		}
 	}
 	if spans, ok := block["spans"].([]any); ok {
 		for _, value := range spans {
 			span, ok := value.(map[string]any)
 			if !ok {
 				continue
+			}
+			if block["type"] == "image" {
+				if text, ok := span["text"].(string); ok {
+					span["text"] = strings.TrimLeft(text, "\r\n")
+				}
 			}
 			style := span["style"]
 			if style == nil {

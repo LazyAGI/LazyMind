@@ -1,14 +1,10 @@
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
-  CreateLink,
-  DiffSourceToggleWrapper,
   ListsToggle,
   MDXEditor,
-  UndoRedo,
   codeBlockPlugin,
   codeMirrorPlugin,
-  diffSourcePlugin,
   frontmatterPlugin,
   headingsPlugin,
   imagePlugin,
@@ -38,7 +34,8 @@ import {
   type FloatingToolbarAnchor,
   type MarkdownSelection,
 } from './artifactRewriteSelection';
-import { MarkdownWorkflowActionContext } from './slotEditingContext';
+import { normalizeMarkdownForMdxEditor } from './mdxMarkdown';
+import { PluginPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
 import type { RewriteSelectionPreview } from '@/modules/chat/utils/request';
 import './MarkdownArtifactEditor.scss';
 
@@ -69,9 +66,13 @@ interface MarkdownArtifactEditorProps {
   markdown: string;
   sourceRevision: number;
   readOnly?: boolean;
+  /** Stable key used to register flush-before-retry/continue with PluginPanel. */
+  editingKey?: string;
   onSave: (markdown: string, baseRevision: number) => Promise<number | undefined>;
   onRefresh?: () => void;
   onDownload?: () => void;
+  /** Reports the current draft so the write-back action can compare it with its Feishu baseline. */
+  onContentChange?: (markdown: string) => void;
   onRewriteSelection?: (selection: MarkdownSelection) => void;
   rewriteUnavailableReason?: string;
   rewritePreview?: MarkdownRewritePreview | null;
@@ -85,13 +86,31 @@ function isRevisionConflict(error: unknown): boolean {
   return response?.status === 409;
 }
 
+function isMarkdownToolbarInteractionTarget(node: Node | null | undefined): boolean {
+  if (!(node instanceof Element)) return false;
+  return Boolean(
+    node.closest('.mdxeditor-toolbar')
+    || node.closest('.mdxeditor-popup-container')
+    || node.closest('.mdxeditor-select-content'),
+  );
+}
+
+function isMarkdownToolbarDropdownOpen(): boolean {
+  return Boolean(
+    document.querySelector('.mdxeditor-select-content[data-state="open"]')
+    || document.querySelector('.mdxeditor-toolbar [data-state="open"]'),
+  );
+}
+
 export function MarkdownArtifactEditor({
   markdown,
   sourceRevision,
   readOnly = false,
+  editingKey,
   onSave,
   onRefresh,
   onDownload,
+  onContentChange,
   onRewriteSelection,
   rewriteUnavailableReason,
   rewritePreview,
@@ -99,9 +118,10 @@ export function MarkdownArtifactEditor({
   onRewritePreviewRejected,
 }: MarkdownArtifactEditorProps) {
   const { t } = useTranslation();
-  const workflowAction = useContext(MarkdownWorkflowActionContext);
-  const [baseMarkdown, setBaseMarkdown] = useState(markdown);
-  const [draftMarkdown, setDraftMarkdown] = useState(markdown);
+  const tabActive = useContext(PluginPanelTabActiveContext);
+  const { setEditing, registerFlush, registerFooterAction } = useContext(SlotEditingContext);
+  const [baseMarkdown, setBaseMarkdown] = useState(() => normalizeMarkdownForMdxEditor(markdown));
+  const [draftMarkdown, setDraftMarkdown] = useState(() => normalizeMarkdownForMdxEditor(markdown));
   const [baseRevision, setBaseRevision] = useState(sourceRevision);
   const [editorKey, setEditorKey] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -114,8 +134,19 @@ export function MarkdownArtifactEditor({
   const selectionToolbarDismissedRef = useRef(false);
   const latestSourceRef = useRef({ markdown, revision: sourceRevision });
   const pendingSourceRef = useRef<{ markdown: string; revision: number }>();
+  const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
+  const conflictRef = useRef(false);
+  const saveChangesRef = useRef<() => Promise<boolean>>(async () => true);
 
   const dirty = draftMarkdown !== baseMarkdown;
+  dirtyRef.current = dirty;
+  savingRef.current = saving;
+  conflictRef.current = conflict;
+
+  useEffect(() => {
+    onContentChange?.(draftMarkdown);
+  }, [draftMarkdown, onContentChange]);
 
   const dismissSelectionToolbar = useCallback(() => {
     selectionToolbarDismissedRef.current = true;
@@ -133,23 +164,29 @@ export function MarkdownArtifactEditor({
       '.mdxeditor-root-contenteditable [contenteditable="true"]',
     );
     const toolbar = surface?.querySelector<HTMLElement>('.mdxeditor-toolbar');
+    const keepToolbarForInteraction = isMarkdownToolbarInteractionTarget(document.activeElement)
+      || isMarkdownToolbarDropdownOpen();
     const browserSelection = globalThis.getSelection();
+    const hasValidSelection = Boolean(
+      browserSelection
+      && !browserSelection.isCollapsed
+      && browserSelection.rangeCount > 0
+      && browserSelection.toString().trim()
+      && editable?.contains(browserSelection.anchorNode)
+      && editable?.contains(browserSelection.focusNode),
+    );
     if (
       !surface
       || !editable
       || !toolbar
-      || !browserSelection
-      || browserSelection.isCollapsed
-      || browserSelection.rangeCount === 0
-      || !browserSelection.toString().trim()
-      || !editable.contains(browserSelection.anchorNode)
-      || !editable.contains(browserSelection.focusNode)
+      || !hasValidSelection
     ) {
+      if (keepToolbarForInteraction) return;
       dismissSelectionToolbar();
       return;
     }
 
-    const range = browserSelection.getRangeAt(0);
+    const range = browserSelection!.getRangeAt(0);
     const selectionRect = Array.from(range.getClientRects()).find(
       (rect) => rect.width > 0 || rect.height > 0,
     ) ?? range.getBoundingClientRect();
@@ -159,6 +196,7 @@ export function MarkdownArtifactEditor({
       || selectionRect.bottom < surfaceRect.top
       || selectionRect.top > surfaceRect.bottom
     ) {
+      if (keepToolbarForInteraction) return;
       dismissSelectionToolbar();
       return;
     }
@@ -243,8 +281,9 @@ export function MarkdownArtifactEditor({
       return;
     }
 
-    setBaseMarkdown(markdown);
-    setDraftMarkdown(markdown);
+    const normalizedMarkdown = normalizeMarkdownForMdxEditor(markdown);
+    setBaseMarkdown(normalizedMarkdown);
+    setDraftMarkdown(normalizedMarkdown);
     setBaseRevision(sourceRevision);
     setSaveError(undefined);
     setConflict(false);
@@ -252,7 +291,7 @@ export function MarkdownArtifactEditor({
     setEditorKey((value) => value + 1);
   }, [dirty, markdown, sourceRevision]);
 
-  const saveChanges = async (): Promise<boolean> => {
+  const saveChanges = useCallback(async (): Promise<boolean> => {
     if (!dirty || saving || readOnly) return false;
     setSaving(true);
     setSaveError(undefined);
@@ -278,11 +317,41 @@ export function MarkdownArtifactEditor({
     } finally {
       setSaving(false);
     }
-  };
+  }, [baseRevision, dirty, draftMarkdown, onSave, readOnly, saving, t]);
 
-  const saveAndProceed = async () => {
-    if (await saveChanges()) workflowAction?.onProceed();
-  };
+  saveChangesRef.current = saveChanges;
+
+  useEffect(() => {
+    if (!editingKey || readOnly) return undefined;
+    setEditing(editingKey, dirty);
+    return () => setEditing(editingKey, false);
+  }, [dirty, editingKey, readOnly, setEditing]);
+
+  useEffect(() => {
+    if (!editingKey) return undefined;
+    return registerFlush(editingKey, async () => {
+      if (readOnly) return true;
+      while (savingRef.current) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 40);
+        });
+      }
+      if (!dirtyRef.current) return true;
+      if (conflictRef.current) return false;
+      return saveChangesRef.current();
+    });
+  }, [editingKey, readOnly, registerFlush]);
+
+  useEffect(() => {
+    if (!editingKey || !onDownload || !tabActive) return undefined;
+    return registerFooterAction(editingKey, {
+      label: t('chat.writer.downloadMarkdown'),
+      order: 10,
+      tone: 'secondary',
+      icon: 'download',
+      onClick: onDownload,
+    });
+  }, [editingKey, onDownload, registerFooterAction, t, tabActive]);
 
   const showPolishAction = Boolean(onRewriteSelection || rewriteUnavailableReason);
   const polishDisabled = !onRewriteSelection
@@ -318,7 +387,13 @@ export function MarkdownArtifactEditor({
       aria-label={t('chat.writerMarkdown.documentRegion')}
       ref={rootRef}
       style={selectionToolbarStyle}
-      onMouseUp={recordSelection}
+      onMouseDown={(event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        if (target?.closest('.mdxeditor-toolbar')) {
+          event.preventDefault();
+        }
+      }}
+      onMouseUp={() => recordSelection()}
       onKeyUp={(event) => {
         if (event.key !== 'Escape') recordSelection();
       }}
@@ -373,12 +448,10 @@ export function MarkdownArtifactEditor({
           imagePlugin(),
           codeBlockPlugin({ defaultCodeBlockLanguage: 'text' }),
           codeMirrorPlugin({ codeBlockLanguages: MARKDOWN_CODE_LANGUAGES }),
-          diffSourcePlugin({ diffMarkdown: baseMarkdown, viewMode: 'rich-text' }),
           markdownShortcutPlugin(),
           toolbarPlugin({
             toolbarContents: () => (
-              <DiffSourceToggleWrapper>
-                <UndoRedo />
+              <>
                 <BoldItalicUnderlineToggles />
                 <BlockTypeSelect />
                 {showPolishAction && (
@@ -394,8 +467,7 @@ export function MarkdownArtifactEditor({
                   </button>
                 )}
                 <ListsToggle />
-                <CreateLink />
-              </DiffSourceToggleWrapper>
+              </>
             ),
           }),
         ]}
@@ -413,28 +485,6 @@ export function MarkdownArtifactEditor({
           onApplied={onRewritePreviewApplied}
           onReject={onRewritePreviewRejected}
         />
-      )}
-
-      {!readOnly && (
-        <div className='writer-markdown-editor__actions'>
-          {onDownload && (
-            <button
-              type='button'
-              className='workflow-slot__file-action-btn'
-              onClick={onDownload}
-            >
-              {t('chat.writer.downloadMarkdown')}
-            </button>
-          )}
-          <button
-            type='button'
-            className='workflow-slot__file-action-btn writer-markdown-editor__save'
-            onClick={workflowAction ? saveAndProceed : saveChanges}
-            disabled={saving || !dirty}
-          >
-            {saving ? t('chat.writerMarkdown.saving') : workflowAction?.label ?? t('common.save')}
-          </button>
-        </div>
       )}
     </section>
   );

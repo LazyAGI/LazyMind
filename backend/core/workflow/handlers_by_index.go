@@ -313,12 +313,14 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 			"created_at":    rev.CreatedAt,
 			"selected":      rev.Selected,
 		}
+		var artifactValue json.RawMessage
 		if rev.HumanArtifactID != nil {
 			var ha orm.WorkflowHumanArtifact
 			if db.WithContext(ctx).Where("id = ?", *rev.HumanArtifactID).First(&ha).Error == nil {
 				ct := resolveContentType(ha.ContentType, ha.Value)
 				item["content_snapshot"] = enrichArtifactValue(ha.Value, ct)
 				item["content_type"] = ct
+				artifactValue = ha.Value
 			}
 		} else if rev.ArtifactSeq != nil {
 			tid := taskIDByStep[stepKey{rev.StepID, rev.Attempt}]
@@ -330,10 +332,15 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 					ct := resolveContentType(art.ContentType, art.Value)
 					item["content_snapshot"] = enrichArtifactValue(art.Value, ct)
 					item["content_type"] = ct
+					artifactValue = art.Value
 				}
 			}
 		} else if len(rev.ContentSnapshot) > 0 {
 			item["content_snapshot"] = enrichArtifactValue(rev.ContentSnapshot, "")
+			artifactValue = rev.ContentSnapshot
+		}
+		if slotID == "draft_document" && writerSlotRevisionSynced(rev.ChangeSource, artifactValue) {
+			item["provider_synced"] = true
 		}
 		out = append(out, item)
 	}

@@ -25,6 +25,7 @@ import {
   type WriterIRRewriteSelection,
 } from './WriterIRDocumentEditor';
 import { ArtifactRewriteSelectionAction } from './ArtifactRewriteSelectionAction';
+import { ArtifactRewriteSelectionHighlight } from './ArtifactRewriteSelectionHighlight';
 import {
   selectionActionAnchor,
   type SelectionActionAnchor,
@@ -49,6 +50,11 @@ export interface WriterIRControlProps {
   readOnly?: boolean;
   /** Stable key used to register flush-before-retry with WorkflowPanel. */
   editingKey?: string;
+  /**
+   * When true (draft_document), local Save / flush never create a version.
+   * Versions are created only by successful Feishu write-back.
+   */
+  feishuVersionOnly?: boolean;
   onSave?: (
     sourceDocument: WriterDocument,
     revisedDocument: WriterDocument,
@@ -56,7 +62,10 @@ export interface WriterIRControlProps {
     mode?: WriterIRSaveMode,
   ) => Promise<WriterIRSaveResult | void>;
   onEditingChange?: (editing: boolean) => void;
+  /** Reports the current draft so the write-back action can compare it with its Feishu baseline. */
+  onDocumentChange?: (document: WriterDocument) => void;
   onRewriteSelection?: (selection: WriterIRRewriteSelection) => void;
+  rewriteDialogOpen?: boolean;
   rewritePreview?: WriterIRRewritePreview | null;
   onRewritePreviewApplied?: (revision?: number) => void;
   onRewritePreviewRejected?: () => void;
@@ -232,9 +241,12 @@ export function WriterIRControl({
   sourceRevision,
   readOnly = false,
   editingKey,
+  feishuVersionOnly = false,
   onSave,
   onEditingChange,
+  onDocumentChange,
   onRewriteSelection,
+  rewriteDialogOpen = false,
   rewritePreview,
   onRewritePreviewApplied,
   onRewritePreviewRejected,
@@ -252,6 +264,9 @@ export function WriterIRControl({
   const [readOnlySelection, setReadOnlySelection] = useState<
     (WriterIRRewriteSelection & { anchor: SelectionActionAnchor }) | null
   >(null);
+  const [readOnlyRewriteLayer, setReadOnlyRewriteLayer] = useState<HTMLDivElement | null>(null);
+  const [readOnlyRewritePinned, setReadOnlyRewritePinned] = useState(false);
+  const pinnedReadOnlyRangeRef = useRef<Range | null>(null);
   const textEditStartRef = useRef<WriterDocument | null>(null);
   const pendingExternalDocumentRef = useRef<{
     document: WriterDocument;
@@ -324,7 +339,19 @@ export function WriterIRControl({
       ? sourceRevision === baseSourceRevision
       : document === baseDocument;
     if (sourceMatchesBase) {
-      if (draft !== baseDocument) {
+      const documentChanged = !sameWriterDocument(document, baseDocument)
+        && !sameWriterDocumentForSync(document, baseDocument);
+      if (documentChanged && draft === baseDocument) {
+        pendingExternalDocumentRef.current = null;
+        setBaseDocument(document);
+        baseDocumentRef.current = document;
+        lastCheckpointDocumentRef.current = document;
+        setDraft(document);
+        draftRef.current = document;
+        setHistory([]);
+        setFuture([]);
+        setExternalUpdate(false);
+      } else if (draft !== baseDocument) {
         pendingExternalDocumentRef.current = null;
         setExternalUpdate(false);
       }
@@ -391,6 +418,10 @@ export function WriterIRControl({
     // Only surface local dirty state. In-flight saves must not lock parent UI.
     onEditingChange?.(dirty);
   }, [dirty, onEditingChange]);
+
+  useEffect(() => {
+    onDocumentChange?.(draft);
+  }, [draft, onDocumentChange]);
 
   useEffect(
     () => () => onEditingChange?.(false),
@@ -532,9 +563,11 @@ export function WriterIRControl({
       baseSourceRevisionRef.current = savedSourceRevision;
       pendingExternalDocumentRef.current = null;
       setBaseSourceRevision(savedSourceRevision);
-      // Versioned save becomes the checkpoint baseline.
+      // Versioned save becomes the checkpoint baseline. For Feishu-only
+      // versioning, every successful local persist is the flush baseline.
       if (
-        saveMode === 'checkpoint'
+        feishuVersionOnly
+        || saveMode === 'checkpoint'
         || savedSourceRevision !== previousRevision
       ) {
         lastCheckpointDocumentRef.current = sameWriterDocumentForSync(snapshot, savedDocument)
@@ -577,7 +610,7 @@ export function WriterIRControl({
         scheduleFollowupSave();
       }
     }
-  }, [clearAutoSaveTimers, documentReadOnly, scheduleFollowupSave, t]);
+  }, [clearAutoSaveTimers, documentReadOnly, feishuVersionOnly, scheduleFollowupSave, t]);
 
   saveRunnerRef.current = runSave;
 
@@ -590,15 +623,15 @@ export function WriterIRControl({
 
   /** Explicit Save button: create a versioned checkpoint. */
   const requestCheckpointSave = useCallback(() => {
-    escalateSaveMode('checkpoint');
+    escalateSaveMode(feishuVersionOnly ? 'draft' : 'checkpoint');
     clearAutoSaveTimers();
     void saveRunnerRef.current();
-  }, [clearAutoSaveTimers, escalateSaveMode]);
+  }, [clearAutoSaveTimers, escalateSaveMode, feishuVersionOnly]);
 
   /** Flush before conversation actions (continue/retry → chat): version the draft. */
   const flushPendingSave = useCallback(async (): Promise<boolean> => {
     if (documentReadOnly || !onSaveRef.current) return true;
-    escalateSaveMode('checkpoint');
+    escalateSaveMode(feishuVersionOnly ? 'draft' : 'checkpoint');
     clearAutoSaveTimers();
     if (saveFollowupTimerRef.current !== undefined) {
       window.clearTimeout(saveFollowupTimerRef.current);
@@ -620,13 +653,13 @@ export function WriterIRControl({
         return true;
       }
 
-      escalateSaveMode('checkpoint');
+      escalateSaveMode(feishuVersionOnly ? 'draft' : 'checkpoint');
       const result = await runSave();
       if (result === 'error') return false;
       if (result === 'noop') return true;
     }
     return sameWriterDocumentForSync(draftRef.current, lastCheckpointDocumentRef.current);
-  }, [clearAutoSaveTimers, documentReadOnly, escalateSaveMode, runSave]);
+  }, [clearAutoSaveTimers, documentReadOnly, escalateSaveMode, feishuVersionOnly, runSave]);
 
   useEffect(() => {
     if (!editingKey) return undefined;
@@ -785,6 +818,23 @@ export function WriterIRControl({
     return () => globalThis.document.removeEventListener('selectionchange', recordReadOnlySelection);
   }, [documentReadOnly, onRewriteSelection, recordReadOnlySelection]);
 
+  useEffect(() => {
+    if (!rewriteDialogOpen) {
+      pinnedReadOnlyRangeRef.current = null;
+      setReadOnlyRewritePinned(false);
+    }
+  }, [rewriteDialogOpen]);
+
+  const getPinnedReadOnlyRange = useCallback((): Range | null => {
+    const range = pinnedReadOnlyRangeRef.current;
+    if (!range) return null;
+    try {
+      return range.cloneRange();
+    } catch {
+      return null;
+    }
+  }, []);
+
   return (
     <section
       className='writer-ir'
@@ -811,7 +861,7 @@ export function WriterIRControl({
       )}
 
       {documentReadOnly ? (
-        <>
+        <div className='writer-ir__editor-shell'>
           <article
             className='writer-ir__document'
             onMouseUp={recordReadOnlySelection}
@@ -827,15 +877,29 @@ export function WriterIRControl({
               </div>
             )}
           </article>
+          <div className='writer-ir__rewrite-layer' ref={setReadOnlyRewriteLayer} />
+          <ArtifactRewriteSelectionHighlight
+            layer={readOnlyRewriteLayer}
+            getRange={getPinnedReadOnlyRange}
+            active={readOnlyRewritePinned}
+          />
           {onRewriteSelection && readOnlySelection && (
             <ArtifactRewriteSelectionAction
               anchor={readOnlySelection.anchor}
               label={t('chat.artifactRewrite.action')}
-              onActivate={() => onRewriteSelection(readOnlySelection)}
+              onActivate={() => {
+                const browserSelection = globalThis.getSelection();
+                if (browserSelection?.rangeCount && !browserSelection.isCollapsed) {
+                  pinnedReadOnlyRangeRef.current = browserSelection.getRangeAt(0).cloneRange();
+                  setReadOnlyRewritePinned(true);
+                }
+                onRewriteSelection(readOnlySelection);
+                setReadOnlySelection(null);
+              }}
               onDismiss={() => setReadOnlySelection(null)}
             />
           )}
-        </>
+        </div>
       ) : (
         <WriterIRDocumentEditor
           document={draft}
@@ -843,6 +907,7 @@ export function WriterIRControl({
           onChange={handleDocumentChange}
           onFocus={beginTextEdit}
           onBlur={handleTextBlur}
+          rewriteDialogOpen={rewriteDialogOpen}
           onRewriteSelection={
             !dirty && !saving && !externalUpdate ? onRewriteSelection : undefined
           }

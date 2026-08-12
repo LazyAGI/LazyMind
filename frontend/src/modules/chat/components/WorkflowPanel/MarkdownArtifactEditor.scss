@@ -10,13 +10,6 @@
   background: var(--color-bg-base, #fff);
 }
 
-.writer-markdown-editor__actions {
-  display: flex;
-  align-items: center;
-  min-height: 40px;
-  padding: 0 12px;
-}
-
 .writer-markdown-editor__surface {
   position: relative;
   min-height: 0;
@@ -30,11 +23,11 @@
   position: fixed;
   top: var(--writer-markdown-selection-toolbar-top, -9999px);
   left: var(--writer-markdown-selection-toolbar-left, -9999px);
-  z-index: 3;
+  z-index: 1200;
   width: max-content;
   max-width: var(--writer-markdown-selection-toolbar-max-width, calc(100vw - 16px));
   padding: 5px;
-  overflow-x: auto;
+  overflow: visible;
   border: 1px solid var(--color-border, #d9dce3);
   border-radius: 8px;
   background: var(--color-bg-base, #fff);
@@ -48,34 +41,6 @@
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-}
-
-.writer-markdown-editor__surface .mdxeditor-toolbar .writer-markdown-editor__polish-action {
-  flex: 0 0 auto;
-  min-height: 30px;
-  margin: 0 3px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--color-primary, #245bdb);
-  color: #fff;
-  font: 600 13px/1 inherit;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.writer-markdown-editor__surface .mdxeditor-toolbar .writer-markdown-editor__polish-action:hover:not(:disabled) {
-  background: #1d4ed8;
-}
-
-.writer-markdown-editor__surface .mdxeditor-toolbar .writer-markdown-editor__polish-action:focus-visible {
-  outline: 2px solid #60a5fa;
-  outline-offset: 2px;
-}
-
-.writer-markdown-editor__surface .mdxeditor-toolbar .writer-markdown-editor__polish-action:disabled {
-  background: #94a3b8;
-  cursor: not-allowed;
 }
 
 .writer-markdown-editor__surface .mdxeditor-root-contenteditable {
@@ -117,15 +82,6 @@
   background: #fff1f0;
 }
 
-.writer-markdown-editor__actions {
-  justify-content: flex-end;
-  gap: 8px;
-  border-top: 1px solid var(--color-border, #eef0f3);
-  border-bottom: 0;
-}
-
-.writer-markdown-editor__save:not(:disabled) {
-  color: #fff;
-  border-color: var(--color-primary, #245bdb);
-  background: var(--color-primary, #245bdb);
+.mdxeditor-popup-container {
+  z-index: 1300;
 }
