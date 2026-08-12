@@ -14280,7 +14280,6 @@ paths:
                     description: WriterDocument sync result
             summary: Sync an edited WriterDocument to Feishu
             tags:
-                - plugin
                 - writer
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}/order:
         get:

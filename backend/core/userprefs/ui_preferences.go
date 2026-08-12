@@ -152,7 +152,7 @@ func setAllWorkflowsEnabled(ctx context.Context, db *gorm.DB, userID string, ena
 	if err := db.WithContext(ctx).
 		Model(&orm.WorkflowResource{}).
 		Where("status = ? AND (owner_user_id = ? OR owner_user_id = '')", "active", userID).
-		Pluck("plugin_ref", &workflowRefs).Error; err != nil {
+		Pluck("plugin_ref", &workflowRefs).Error; err != nil { // workflow-naming: persistence
 		return err
 	}
 	if len(workflowRefs) == 0 {
