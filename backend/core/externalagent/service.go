@@ -803,6 +803,43 @@ func (s *Service) NameThread(ctx context.Context, threadID, name string) error {
 	}, &struct{}{})
 }
 
+func (s *Service) ArchiveBoundThread(
+	ctx context.Context,
+	conversationID string,
+	actorUserID string,
+) error {
+	binding, err := s.BindingByConversation(ctx, conversationID, actorUserID)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	active := s.byThread[binding.ProviderThreadID]
+	s.mu.Unlock()
+	if active != nil && !active.finished() {
+		return ErrThreadBusy
+	}
+	var controlled int64
+	if err := s.db.WithContext(ctx).Model(&orm.ExternalAgentRun{}).
+		Where(
+			"conversation_id = ? AND (status IN ? OR control_release IN ?)",
+			conversationID,
+			[]string{runStatusStarting, runStatusRunning, runStatusWaiting},
+			[]string{controlReleasePending, controlReleaseFailed},
+		).
+		Count(&controlled).Error; err != nil {
+		return err
+	}
+	if controlled != 0 {
+		return ErrThreadBusy
+	}
+	if err := s.client.Call(ctx, "thread/archive", map[string]any{
+		"threadId": binding.ProviderThreadID,
+	}, &struct{}{}); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Service) Bind(ctx context.Context, input BindInput) (orm.ExternalAgentBinding, error) {
 	if err := validateProvider(input.Provider); err != nil {
 		return orm.ExternalAgentBinding{}, err

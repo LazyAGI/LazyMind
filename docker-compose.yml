@@ -357,6 +357,7 @@ services:
       - ./data/evo:/var/lib/lazymind/evo
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/subagent:/data/subagent
+      - ./data/codex-daemon-bridge:/run/lazymind/codex-daemon-bridge:ro
       - ./skills:/skills:ro
     expose:
       - "8000"
@@ -365,8 +366,9 @@ services:
     environment:
       <<: *core-env
       MIGRATIONS_DIR: /migrations
-      LAZYMIND_CODEX_APP_SERVER_URL: ${LAZYMIND_CODEX_APP_SERVER_URL:-ws://host.docker.internal:14501}
+      LAZYMIND_CODEX_APP_SERVER_URL: ${LAZYMIND_CODEX_APP_SERVER_URL:-tcp://host.docker.internal:14501}
       LAZYMIND_CODEX_APP_SERVER_TOKEN: ${LAZYMIND_CODEX_APP_SERVER_TOKEN:-}
+      LAZYMIND_CODEX_APP_SERVER_TOKEN_FILE: /run/lazymind/codex-daemon-bridge/token
       LAZYMIND_CODEX_DEFAULT_CWD: ${LAZYMIND_CODEX_DEFAULT_CWD:-${PWD}}
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent

@@ -7,6 +7,7 @@
   "scripts": {
     "predev": "bash scripts/openapi/generate-auth.sh",
     "dev": "vite --clearScreen false",
+    "prebuild": "node scripts/openapi/check-stale.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "gen:openapi": "node scripts/openapi/generate-api.mjs",

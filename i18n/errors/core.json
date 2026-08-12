@@ -1126,6 +1126,7 @@
   "2002047": { "en-US": "External-agent thread not found", "zh-CN": "未找到外部 Agent 会话" },
   "2002048": { "en-US": "External-agent control release is already pending", "zh-CN": "外部 Agent 控制权正在释放" },
   "2002049": { "en-US": "Task is already terminal", "zh-CN": "任务已结束" },
+  "2002050": { "en-US": "Codex TCP bridge token is required", "zh-CN": "缺少 Codex TCP 桥接令牌" },
   "active_task_not_found": { "en-US": "Active task not found", "zh-CN": "活跃任务不存在" },
   "algo_failed": { "en-US": "Algorithm service operation failed", "zh-CN": "算法服务操作失败" },
   "auto_apply_failed": { "en-US": "Automatic apply failed", "zh-CN": "自动应用失败" },

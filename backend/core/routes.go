@@ -264,6 +264,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/external-agent-conversations/{conversation_id}:run", []string{"qa.write"}, externalagent.RunHTTP)
 	handleAPI(r, "POST", "/external-agent-conversations/{conversation_id}:interrupt", []string{"qa.write"}, externalagent.InterruptHTTP)
 	handleAPI(r, "POST", "/external-agent-conversations/{conversation_id}:release", []string{"qa.write"}, externalagent.ReleaseHTTP)
+	handleAPI(r, "DELETE", "/external-agent-conversations/{conversation_id}", []string{"qa.write"}, chat.DeleteExternalAgentConversation)
 	handleAPI(r, "POST", "/external-agent-requests/{request_id}:respond", []string{"qa.write"}, externalagent.RespondRequestHTTP)
 	handleAPI(r, "POST", "/conversations:chat", []string{"qa.write"}, chat.ChatConversations)
 	handleAPI(r, "POST", "/conversations:estimateContextUsage", []string{"qa.read"}, chat.EstimateContextUsage)

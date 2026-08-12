@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/externalagent"
@@ -153,6 +154,48 @@ func BindExternalAgentConversation(w http.ResponseWriter, r *http.Request) {
 		cancelName()
 	}
 	common.ReplyOK(w, response)
+}
+
+func DeleteExternalAgentConversation(w http.ResponseWriter, r *http.Request) {
+	conversationID := strings.TrimSpace(mux.Vars(r)["conversation_id"])
+	if conversationID == "" {
+		common.ReplyErr(w, "invalid conversation name", http.StatusBadRequest)
+		return
+	}
+	service, err := externalagent.Default()
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	userID := store.UserID(r)
+	if userID == "" {
+		userID = "0"
+	}
+	if err := service.ArchiveBoundThread(r.Context(), conversationID, userID); err != nil {
+		status := http.StatusBadGateway
+		switch {
+		case errors.Is(err, externalagent.ErrBindingNotFound):
+			status = http.StatusNotFound
+		case errors.Is(err, externalagent.ErrThreadBusy):
+			status = http.StatusConflict
+		}
+		common.ReplyErr(w, err.Error(), status)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	if err := archiveConversation(r.Context(), db, conversationID, userID, true); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			status = http.StatusNotFound
+		}
+		common.ReplyErr(w, err.Error(), status)
+		return
+	}
+	common.ReplyOK(w, map[string]any{})
 }
 
 func bindingResponse(binding orm.ExternalAgentBinding, thread externalagent.Thread) map[string]any {
