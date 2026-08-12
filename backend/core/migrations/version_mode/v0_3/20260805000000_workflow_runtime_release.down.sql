@@ -1,4 +1,10 @@
 -- +migrate Dialect postgres
+ALTER TABLE user_ui_preferences
+    DROP COLUMN IF EXISTS document_parsing_enabled,
+    DROP COLUMN IF EXISTS workflows_enabled,
+    DROP COLUMN IF EXISTS mcp_enabled,
+    DROP COLUMN IF EXISTS skills_enabled,
+    DROP COLUMN IF EXISTS task_center_enabled;
 ALTER TABLE plugin_transition_commands DROP COLUMN IF EXISTS retry_origin;
 DROP TABLE IF EXISTS external_agent_operations;
 DROP TABLE IF EXISTS external_agent_runs;
@@ -63,6 +69,11 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+ALTER TABLE user_ui_preferences DROP COLUMN document_parsing_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN workflows_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN mcp_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN skills_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN task_center_enabled;
 ALTER TABLE plugin_transition_commands DROP COLUMN retry_origin;
 DROP TABLE IF EXISTS external_agent_operations;
 DROP TABLE IF EXISTS external_agent_runs;

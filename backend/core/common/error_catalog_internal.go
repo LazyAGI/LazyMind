@@ -492,7 +492,8 @@ func init() {
 		"synchronized baseline is not bound to a feishu document",
 		"current writerdocument feishu binding does not match baseline",
 		"task center is paused in settings",
-		"skills and plugins are paused in settings", "document parsing is paused in settings",
+		"skills and plugins are paused in settings", "workflows are paused in settings",
+		"document parsing is paused in settings",
 	} {
 		registerAdditionalErrorAlias(source, "Conflict", http.StatusConflict, 2000107)
 	}
