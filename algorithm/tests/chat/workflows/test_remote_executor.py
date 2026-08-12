@@ -80,6 +80,7 @@ async def test_remote_executor_persists_artifact_before_task_center_event(monkey
     assert runtime.uploaded == ('attempt-1', 'lease-1', 'result.png', b'png')
 
 
+=======
 @pytest.mark.asyncio
 async def test_remote_executor_materializes_fenced_inputs_in_host_workspace(tmp_path):
     worker = RemoteWorkflowExecutor()

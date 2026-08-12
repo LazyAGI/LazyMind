@@ -494,6 +494,13 @@ func init() {
 		"task center is paused in settings",
 		"skills and plugins are paused in settings", "workflows are paused in settings",
 		"document parsing is paused in settings",
+		"revision conflict; refresh and retry",
+		"current draft_document revision is already synchronized",
+		"initial feishu write-back has not completed",
+		"invalid synchronized writerdocument baseline",
+		"writerdocument identity does not match synchronized baseline",
+		"synchronized baseline is not bound to a feishu document",
+		"current writerdocument feishu binding does not match baseline",
 	} {
 		registerAdditionalErrorAlias(source, "Conflict", http.StatusConflict, 2000107)
 	}
@@ -520,6 +527,8 @@ func init() {
 		"task unavailable",
 		"query task center settings failed", "query settings controls failed",
 		"query document parsing settings failed",
+		"decode sync_document action response", "artifact sync state save failed",
+		"task unavailable",
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}

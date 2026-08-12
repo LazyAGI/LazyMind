@@ -2107,7 +2107,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document",
 			Summary:     "Sync an edited WriterDocument to Feishu",
-			Tags:        []string{"writer"},
+			Tags:        []string{"workflow", "writer"},
 			PathParams:  writerDocumentSyncPathParams{},
 			RequestBody: jsonBodyOf(writerDocumentSyncOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: evoJSONResp("WriterDocument sync result")},
