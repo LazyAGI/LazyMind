@@ -19,7 +19,7 @@ function task(taskId: string, status: SubAgentTask['status'], streams: TaskArtif
   return {
     task_id: taskId,
     title: '',
-    agent_type: 'plugin_step',
+    agent_type: 'workflow_step',
     mode: 'auto',
     status,
     progress_pct: 50,

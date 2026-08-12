@@ -212,7 +212,7 @@ export interface WorkflowSession {
   pinned_revision_no?: number;
   /** Current published package revision; absent for built-ins without a resource head. */
   head_revision_no?: number;
-  status: "active" | "completed" | "failed" | "waiting";
+  status: "active" | "completed" | "failed" | "waiting" | "stopped";
   current_step_id: string;
   /** Global intent/constraint for this session, JSON string e.g. {"text":"..."} */
   intent_context?: string;

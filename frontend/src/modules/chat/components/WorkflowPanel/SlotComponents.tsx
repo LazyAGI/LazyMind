@@ -2530,6 +2530,7 @@ function SlotJsonFile({
     const persistMode = resolvedSlotId === 'draft_document' ? 'draft' : mode;
     const revision = await patchSlotItemValue(
       sessionId, slotId, apiListIndex, nextValue, 'file', persistMode,
+      typeof sourceRevision === 'number' ? sourceRevision : undefined,
     );
     setSourceJson(serialized);
     setPayload(document);
@@ -2900,6 +2901,7 @@ function SlotInlineStructured({
     const persistMode = resolvedSlotId === 'draft_document' ? 'draft' : mode;
     const revision = await patchSlotItemValue(
       sessionId, slotId, apiListIndex, serialized, 'json', persistMode,
+      typeof sourceRevision === 'number' ? sourceRevision : undefined,
     );
     applySavedRevision(revision);
     return {

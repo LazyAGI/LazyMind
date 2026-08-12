@@ -14,7 +14,6 @@ from lazymind.chat.api import (
     llm_task_routes,
     model_check_routes,
     model_features_routes,
-    workflow_action_routes,
     workflow_routes,
     subagent_routes,
 )
@@ -37,7 +36,6 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
     # Agent control callbacks must remain available in both direct and router modes.
     app.include_router(agent_control_routes.router)
     # Workflow actions, Writer sync, and LazyMind task cancellation callbacks.
-    app.include_router(workflow_action_routes.router)
     app.include_router(workflow_routes.router)
 
     if not config['enable_router']:

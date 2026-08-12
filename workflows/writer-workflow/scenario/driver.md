@@ -17,8 +17,8 @@ value is merely a local path string does not satisfy an output and must be RETRY
 ## outline
 
 - PASS when outline_document and writing_context_after_outline exist.
-- outline_document must be Markdown, or WriterDocument IR with stage="outline". Only the
-  draft_document slot is currently UI-editable.
+- outline_document must be Markdown, or WriterDocument IR with stage="outline" and
+  ui_editable=true. Both outline_document and draft_document remain locally editable.
 - For generate/prepare mode, revision internals are not required.
 - For AI revision mode, outline_revision_task, outline_locate_result,
   outline_modify_plan, outline_revision_set, and outline_revision_result must exist.

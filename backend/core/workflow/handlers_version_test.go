@@ -14,7 +14,7 @@ func TestEnrichSessionHeadRevisionNosKeepsPinnedRevision(t *testing.T) {
 		t.Fatalf("migrate plugin versions: %v", err)
 	}
 	now := time.Now().UTC()
-	resource := orm.WorkflowResource{ID: "resource-1", WorkflowRef: "user:writer", WorkflowID: "writer-plugin", Version: 15, CreatedAt: now, UpdatedAt: now}
+	resource := orm.WorkflowResource{ID: "resource-1", WorkflowRef: "user:writer", WorkflowID: "writer-workflow", Version: 15, CreatedAt: now, UpdatedAt: now}
 	pinned := orm.WorkflowRevision{ID: "revision-12", WorkflowResourceID: resource.ID, RevisionNo: 12, TreeHash: "tree-12", CreatedAt: now}
 	if err := db.DB.Create(&resource).Error; err != nil {
 		t.Fatalf("create resource: %v", err)
@@ -22,7 +22,7 @@ func TestEnrichSessionHeadRevisionNosKeepsPinnedRevision(t *testing.T) {
 	if err := db.DB.Create(&pinned).Error; err != nil {
 		t.Fatalf("create revision: %v", err)
 	}
-	session := toSessionDTO(&orm.WorkflowSession{ID: "session-1", WorkflowID: "writer-plugin", WorkflowRevisionID: pinned.ID, WorkflowRevisionNo: pinned.RevisionNo})
+	session := toSessionDTO(&orm.WorkflowSession{ID: "session-1", WorkflowID: "writer-workflow", WorkflowRevisionID: pinned.ID, WorkflowRevisionNo: pinned.RevisionNo})
 	got := enrichSessionHeadRevisionNos(context.Background(), db.DB, []sessionDTO{session})[0]
 	if got.PinnedRevisionID != pinned.ID || got.PinnedRevisionNo != 12 {
 		t.Fatalf("pinned revision changed: id=%q no=%d", got.PinnedRevisionID, got.PinnedRevisionNo)

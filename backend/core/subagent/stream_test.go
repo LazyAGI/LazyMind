@@ -40,6 +40,27 @@ func TestArtifactDedupKey(t *testing.T) {
 	}
 }
 
+func TestIsWriterDraftStreamTaskUsesWorkflowIdentity(t *testing.T) {
+	task := &orm.SubAgentTask{
+		AgentType: "workflow_step",
+		Params:    []byte(`{"workflow_id":"writer-workflow","step_id":"write_document"}`),
+	}
+	if !isWriterDraftStreamTask(task) {
+		t.Fatal("expected Writer workflow write_document task to enable stream heartbeats")
+	}
+
+	task.Params = []byte(`{"workflow_id":"writer-workflow","step_id":"outline"}`)
+	if isWriterDraftStreamTask(task) {
+		t.Fatal("outline step must not enable Draft stream heartbeats")
+	}
+
+	task.AgentType = "plugin_step"
+	task.Params = []byte(`{"plugin_id":"writer-plugin","step_id":"write_document"}`)
+	if isWriterDraftStreamTask(task) {
+		t.Fatal("legacy plugin identity must not match the Workflow runtime")
+	}
+}
+
 // TestStepToTaskEvent maps SubAgentStep to TaskEvent by role.
 func TestStepToTaskEvent(t *testing.T) {
 	// Text role step becomes a text event with content.

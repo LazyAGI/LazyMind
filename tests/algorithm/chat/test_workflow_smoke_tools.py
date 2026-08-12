@@ -1,6 +1,8 @@
 import importlib.util
+import base64
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
@@ -158,3 +160,78 @@ def test_complete_smoke_workflow_with_fixed_model_io():
     assert artifacts.latest('test_status')['value'] == 'Workflow smoke test passed'
     report = artifacts.latest('verification_report')['value']['content']
     assert all(json.loads(report).values())
+
+
+def test_workflow_action_route_uses_pinned_definition_and_server_owned_arguments(monkeypatch):
+    from fastapi import HTTPException
+    from lazymind.chat.api import workflow_routes
+
+    definition = yaml.safe_dump({
+        'artifact_actions': {
+            'rewrite_selection': {
+                'slots': ['draft_document'],
+                'preview_tool': 'preview_rewrite',
+            },
+        },
+    }).encode()
+
+    class FakeWorkflowClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def get_workflow(self, workflow_id, revision_id):
+            assert (workflow_id, revision_id) == ('writer-workflow', 'revision-1')
+            return SimpleNamespace(result={
+                'revision_id': revision_id,
+                'tree_hash': 'tree-1',
+                'files': {'workflow.yaml': base64.b64encode(definition).decode()},
+            })
+
+    def preview_rewrite(*, artifact, artifact_store, slot, instruction):
+        return {
+            'artifact': artifact,
+            'artifact_store': artifact_store,
+            'slot': slot,
+            'instruction': instruction,
+        }
+
+    monkeypatch.setattr(workflow_routes, 'WorkflowClient', FakeWorkflowClient)
+    monkeypatch.setattr(
+        workflow_routes, '_workflow_package_tools',
+        lambda _params, names: {'preview_rewrite': preview_rewrite} if names else {},
+    )
+    monkeypatch.setattr(workflow_routes, 'inject_model_config', lambda _config: None)
+    monkeypatch.setattr(workflow_routes, 'inject_tool_config', lambda _config: None)
+
+    payload = {
+        'workflow_id': 'writer-workflow',
+        'revision_id': 'revision-1',
+        'tree_hash': 'tree-1',
+        'action': 'rewrite_selection',
+        'phase': 'preview',
+        'slot': 'draft_document',
+        'artifact': {'path': '/tmp/draft.md'},
+        'artifact_store': '/tmp/action',
+        'arguments': {'instruction': '润色'},
+    }
+
+    result = workflow_routes.invoke_workflow_action(
+        workflow_routes.WorkflowActionInvokeRequest.model_validate(payload),
+    )
+    assert result['result'] == {
+        'artifact': {'path': '/tmp/draft.md'},
+        'artifact_store': '/tmp/action',
+        'slot': 'draft_document',
+        'instruction': '润色',
+    }
+
+    payload['arguments'] = {'instruction': '润色', 'slot': 'outline_document'}
+    try:
+        workflow_routes.invoke_workflow_action(
+            workflow_routes.WorkflowActionInvokeRequest.model_validate(payload),
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert 'reserved arguments' in exc.detail
+    else:
+        raise AssertionError('reserved slot override must be rejected')

@@ -35,7 +35,6 @@ from lazyllm.tools.writer.utils import (
     save_artifact_json,
 )
 from lazymind.chat.engine.subagent.context import require_context
-from lazymind.chat.engine.prompts.writer_media import WRITER_IMAGE_ACQUISITION_PROMPT
 from lazymind.chat.engine.tools.writer import (
     DraftMarkdownStreamEventEmitter,
     WriterCreateToolkit,
@@ -44,6 +43,15 @@ from lazymind.chat.engine.tools.writer import (
     WriterToolkitBase,
     writer_schema,
 )
+
+WRITER_IMAGE_ACQUISITION_PROMPT = '''Create one professional visual for a long-form document.
+
+Visual type: {visual_type}
+The visual must communicate: {purpose}
+
+Keep the composition clear and suitable for insertion into a document. Avoid watermarks,
+brand logos, decorative filler, and small unreadable text. Return exactly one image.
+'''
 from lazymind.chat.engine.tools.multimodal import image_generator
 from lazymind.model_config import is_model_role_available
 

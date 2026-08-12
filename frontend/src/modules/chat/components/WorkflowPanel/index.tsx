@@ -1299,12 +1299,6 @@ export function WorkflowPanel({
     if (idx !== -1) setActiveTabIdx(idx);
   }, [ui.tabs, persistedFocusedTab]);
 
-  useEffect(() => {
-    if (!session || session.status !== 'active') return;
-    const id = setInterval(refresh, pollIntervalMs);
-    return () => clearInterval(id);
-  }, [session, refresh, pollIntervalMs]);
-
   // Track focused tab changes.
   const handleTabChange = useCallback((idx: number, tabId: string) => {
     setActiveTabIdx(idx);

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -17,6 +18,65 @@ import (
 
 const taskSSEHeartbeatInterval = 30 * time.Second
 const taskWriterSSEHeartbeatInterval = 2 * time.Second
+const taskLiveSubscriberBuffer = 256
+
+// taskLiveEventBroker forwards ephemeral Task events to SSE clients connected to
+// this Core process. Redis remains the replay source and cross-process fallback.
+type taskLiveEventBroker struct {
+	mu          sync.RWMutex
+	subscribers map[string]map[chan TaskEvent]struct{}
+}
+
+func newTaskLiveEventBroker() *taskLiveEventBroker {
+	return &taskLiveEventBroker{subscribers: make(map[string]map[chan TaskEvent]struct{})}
+}
+
+func (b *taskLiveEventBroker) subscribe(taskID string) (<-chan TaskEvent, func()) {
+	ch := make(chan TaskEvent, taskLiveSubscriberBuffer)
+	b.mu.Lock()
+	if b.subscribers[taskID] == nil {
+		b.subscribers[taskID] = make(map[chan TaskEvent]struct{})
+	}
+	b.subscribers[taskID][ch] = struct{}{}
+	b.mu.Unlock()
+
+	var once sync.Once
+	return ch, func() {
+		once.Do(func() {
+			b.mu.Lock()
+			delete(b.subscribers[taskID], ch)
+			if len(b.subscribers[taskID]) == 0 {
+				delete(b.subscribers, taskID)
+			}
+			b.mu.Unlock()
+		})
+	}
+}
+
+func (b *taskLiveEventBroker) publish(taskID string, event TaskEvent) {
+	b.mu.RLock()
+	channels := make([]chan TaskEvent, 0, len(b.subscribers[taskID]))
+	for ch := range b.subscribers[taskID] {
+		channels = append(channels, ch)
+	}
+	b.mu.RUnlock()
+
+	for _, ch := range channels {
+		select {
+		case ch <- event:
+		default:
+			// Redis already has the event; a slow subscriber recovers on polling.
+		}
+	}
+}
+
+func (b *taskLiveEventBroker) subscriberCount(taskID string) int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.subscribers[taskID])
+}
+
+var taskLiveEvents = newTaskLiveEventBroker()
 
 func isTerminal(status string) bool {
 	switch status {
@@ -54,15 +114,15 @@ func resetTaskHeartbeatTimer(timer *time.Timer) {
 }
 
 func isWriterDraftStreamTask(task *orm.SubAgentTask) bool {
-	if task == nil || task.AgentType != "plugin_step" {
+	if task == nil || task.AgentType != "workflow_step" {
 		return false
 	}
 	var params struct {
-		PluginID string `json:"plugin_id"`
-		StepID   string `json:"step_id"`
+		WorkflowID string `json:"workflow_id"`
+		StepID     string `json:"step_id"`
 	}
 	return json.Unmarshal(task.Params, &params) == nil &&
-		params.PluginID == "writer-plugin" && params.StepID == "write_document"
+		params.WorkflowID == "writer-workflow" && params.StepID == "write_document"
 }
 
 func writerDraftHeartbeatsEnabled(ctx context.Context, db *gorm.DB, taskID string) bool {
