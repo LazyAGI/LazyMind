@@ -761,7 +761,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             onClick={() => setExpandedRailTab("chat")}
           >
             <MessageOutlined aria-hidden />
-            <span>{t("chat.pluginRailConversation")}</span>
+            <span>{t("chat.workflowRailConversation")}</span>
           </button>
           <button
             type="button"

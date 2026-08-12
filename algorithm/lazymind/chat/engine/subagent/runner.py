@@ -74,7 +74,7 @@ async def merge_agent_and_stream_events(
                     item = agent_task.result()
                 except StopAsyncIteration:
                     agent_task = None
-                except BaseException as exc:  # noqa: BLE001 - preserve cancellation and failure.
+                except (asyncio.CancelledError, Exception) as exc:
                     agent_error = exc
                     agent_task = None
                 else:

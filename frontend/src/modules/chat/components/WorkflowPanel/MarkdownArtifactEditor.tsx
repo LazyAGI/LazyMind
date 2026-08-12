@@ -34,7 +34,7 @@ import {
   type FloatingToolbarAnchor,
   type MarkdownSelection,
 } from './artifactRewriteSelection';
-import { PluginPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
+import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
 import type { RewriteSelectionPreview } from '@/modules/chat/utils/request';
 import './MarkdownArtifactEditor.scss';
 
@@ -125,7 +125,7 @@ interface MarkdownArtifactEditorProps {
   markdown: string;
   sourceRevision: number;
   readOnly?: boolean;
-  /** Stable key used to register flush-before-retry/continue with PluginPanel. */
+  /** Stable key used to register flush-before-retry/continue with WorkflowPanel. */
   editingKey?: string;
   onSave: (markdown: string, baseRevision: number) => Promise<number | undefined>;
   onRefresh?: () => void;
@@ -177,7 +177,7 @@ export function MarkdownArtifactEditor({
   onRewritePreviewRejected,
 }: MarkdownArtifactEditorProps) {
   const { t } = useTranslation();
-  const tabActive = useContext(PluginPanelTabActiveContext);
+  const tabActive = useContext(WorkflowPanelTabActiveContext);
   const { setEditing, registerFlush, registerFooterAction } = useContext(SlotEditingContext);
   const [baseMarkdown, setBaseMarkdown] = useState(() => normalizeMarkdownForMdxEditor(markdown));
   const [draftMarkdown, setDraftMarkdown] = useState(() => normalizeMarkdownForMdxEditor(markdown));

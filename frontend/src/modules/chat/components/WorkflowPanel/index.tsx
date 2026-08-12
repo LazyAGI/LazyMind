@@ -35,7 +35,7 @@ import {
   SlotDownloadContext,
   SlotMarkdownStream,
 } from './SlotComponents';
-import { PluginPanelTabActiveContext, SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
+import { WorkflowPanelTabActiveContext, SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
 import { findWriterArtifactStream } from './writerArtifactStream';
 import './WorkflowPanel.scss';
 
@@ -1389,8 +1389,8 @@ export function WorkflowPanel({
   }
 
   const continueLabel = displayStatus === 'waiting'
-    ? t('chat.pluginSaveAndContinue')
-    : t('chat.pluginContinue');
+    ? t('chat.workflowSaveAndContinue')
+    : t('chat.workflowContinue');
 
   const panel = (
     <SlotEditingContext.Provider value={{
@@ -1409,14 +1409,14 @@ export function WorkflowPanel({
           <span className='workflow-panel__title'>{ui.name || session.workflow_id}</span>
           {typeof session.pinned_revision_no === 'number' && session.pinned_revision_no > 0 && (
             <span className='workflow-panel__revision'>
-              {t('chat.pluginPinnedVersion', { version: session.pinned_revision_no })}
+              {t('chat.workflowPinnedVersion', { version: session.pinned_revision_no })}
             </span>
           )}
           {typeof session.head_revision_no === 'number'
             && typeof session.pinned_revision_no === 'number'
             && session.head_revision_no > session.pinned_revision_no && (
               <span className='workflow-panel__revision workflow-panel__revision--updated'>
-                {t('chat.pluginUpdateAvailable', { version: session.head_revision_no })}
+                {t('chat.workflowUpdateAvailable', { version: session.head_revision_no })}
               </span>
             )}
           <span
@@ -1592,7 +1592,7 @@ export function WorkflowPanel({
                 role='tabpanel'
                 hidden={idx !== activeTabIdx}
               >
-                <PluginPanelTabActiveContext.Provider value={idx === activeTabIdx}>
+                <WorkflowPanelTabActiveContext.Provider value={idx === activeTabIdx}>
                 <SlotDownloadContext.Provider value={idx === tabs.length - 1}>
                   <TabSlotGrid
                     tab={tab}
@@ -1604,7 +1604,7 @@ export function WorkflowPanel({
                     readOnly={sessionReadOnly}
                   />
                 </SlotDownloadContext.Provider>
-                </PluginPanelTabActiveContext.Provider>
+                </WorkflowPanelTabActiveContext.Provider>
               </div>
             ))
           ) : (
@@ -1620,7 +1620,7 @@ export function WorkflowPanel({
 
       {/* Footer */}
       {!collapsed && showActions && (
-        <div className='workflow-panel__footer' role='group' aria-label={t('chat.pluginSessionControls')}>
+        <div className='workflow-panel__footer' role='group' aria-label={t('chat.workflowSessionControls')}>
           {documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0 ? (
             <div className='workflow-panel__footer-document'>
               {documentFooter.statusMessages.length > 0 ? (
@@ -1729,13 +1729,13 @@ export function WorkflowPanel({
                   : actionPending
                     ? t('chat.workflowSavingBeforeAction')
                     : buttonsDisabled
-                      ? t('chat.pluginBtnDisabledHint')
+                      ? t('chat.workflowBtnDisabledHint')
                       : anySlotEditing
-                        ? t('chat.pluginContinueFlushHint')
+                        ? t('chat.workflowContinueFlushHint')
                         : continueLabel
               }
             >
-              {actionPending ? t('chat.pluginSavingBeforeAction') : continueLabel}
+              {actionPending ? t('chat.workflowSavingBeforeAction') : continueLabel}
             </button>
           )}
           {showStepRollback && (

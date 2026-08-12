@@ -37,4 +37,4 @@ export const SlotEditingContext = createContext<SlotEditingContextValue>({
 });
 
 /** True when this slot tree is inside the currently selected plugin tab panel. */
-export const PluginPanelTabActiveContext = createContext(true);
+export const WorkflowPanelTabActiveContext = createContext(true);

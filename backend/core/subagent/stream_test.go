@@ -54,8 +54,8 @@ func TestIsWriterDraftStreamTaskUsesWorkflowIdentity(t *testing.T) {
 		t.Fatal("outline step must not enable Draft stream heartbeats")
 	}
 
-	task.AgentType = "plugin_step"
-	task.Params = []byte(`{"plugin_id":"writer-plugin","step_id":"write_document"}`)
+	task.AgentType = "plugin_step"                                                   // workflow-naming: persistence
+	task.Params = []byte(`{"plugin_id":"writer-plugin","step_id":"write_document"}`) // workflow-naming: persistence
 	if isWriterDraftStreamTask(task) {
 		t.Fatal("legacy plugin identity must not match the Workflow runtime")
 	}

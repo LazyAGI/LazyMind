@@ -29,7 +29,7 @@ import {
   type WriterBlock,
   type WriterDocument,
 } from './writerIR';
-import { PluginPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
+import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
 import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
 import i18n from '@/i18n';
 import { useTranslation } from 'react-i18next';
@@ -2200,7 +2200,7 @@ function useRegisterWriterWriteBack({
   onSuccess?: (revision: number, document: WriterDocument) => void;
   onConflict?: () => void;
 }) {
-  const tabActive = useContext(PluginPanelTabActiveContext);
+  const tabActive = useContext(WorkflowPanelTabActiveContext);
   const { registerFooterAction } = useContext(SlotEditingContext);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error' | 'conflict'>('idle');
   const writeBackUrl = serverWriteBackUrl;
@@ -2297,7 +2297,7 @@ function useRegisterArtifactDownload({
   url?: string | null;
   filename?: string;
 }) {
-  const tabActive = useContext(PluginPanelTabActiveContext);
+  const tabActive = useContext(WorkflowPanelTabActiveContext);
   const { registerFooterAction } = useContext(SlotEditingContext);
 
   useEffect(() => {
@@ -2333,8 +2333,8 @@ function SlotJsonFile({
     raw,
     `${slot.revision}:${reloadToken}`,
   );
-  const pluginStore = useWorkflowStore();
-  const { patchSlotItemValue } = pluginStore;
+  const workflowStore = useWorkflowStore();
+  const { patchSlotItemValue } = workflowStore;
   const mediaLibrary = useWriterMediaLibrary(sessionId);
   const { setEditing: notifyEditing } = useContext(SlotEditingContext);
   const [loading, setLoading] = useState(true);

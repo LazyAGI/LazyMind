@@ -91,7 +91,7 @@ function errorMessage(code: string | undefined, fallback: string): string {
   if (code === 'SELECTION_AMBIGUOUS') return 'chat.artifactRewrite.errors.ambiguous';
   if (code === 'SELECTION_STALE') return 'chat.artifactRewrite.errors.stale';
   if (code === 'SELECTION_UNSUPPORTED') return 'chat.artifactRewrite.errors.unsupported';
-  if (code === 'WORKFLOW_ACTION_FAILED') return 'chat.artifactRewrite.errors.pluginFailed';
+  if (code === 'WORKFLOW_ACTION_FAILED') return 'chat.artifactRewrite.errors.workflowFailed';
   return fallback;
 }
 

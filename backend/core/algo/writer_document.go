@@ -7,10 +7,10 @@ import (
 )
 
 type WriterDocumentSyncRequest struct {
-	WorkflowID     string          `json:"workflow_id"`
-	RevisionID     string          `json:"revision_id"`
-	TreeHash       string          `json:"tree_hash,omitempty"`
-	UserID         string          `json:"user_id,omitempty"`
+	WorkflowID      string          `json:"workflow_id"`
+	RevisionID      string          `json:"revision_id"`
+	TreeHash        string          `json:"tree_hash,omitempty"`
+	UserID          string          `json:"user_id,omitempty"`
 	SourceDocument  json.RawMessage `json:"source_document"`
 	RevisedDocument json.RawMessage `json:"revised_document"`
 	MediaAssets     json.RawMessage `json:"media_assets"`
