@@ -309,8 +309,10 @@ func TestMarketAdminPublish_AllowsSingleTopLevelDirectory(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	zipPath := filepath.Join(t.TempDir(), "wrapped.zip")
 	testutil.WriteSkillZip(t, zipPath, map[string][]byte{
-		"openclaw-openclaw-changelog-update/SKILL.md":        []byte("---\nname: openclaw-changelog\ndescription: OpenClaw changelog skill\n---\n# OpenClaw\n"),
-		"openclaw-openclaw-changelog-update/references/a.md": []byte("# A\n"),
+		"openclaw-openclaw-changelog-update/SKILL.md":            []byte("---\nname: openclaw-changelog\ndescription: OpenClaw changelog skill\n---\n# OpenClaw\n"),
+		"openclaw-openclaw-changelog-update/references/a.md":     []byte("# A\n"),
+		"__MACOSX/openclaw-openclaw-changelog-update/._SKILL.md": []byte("macOS metadata"),
+		"openclaw-openclaw-changelog-update/.DS_Store":           []byte("finder metadata"),
 	})
 	service := NewAdminService(AdminServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
@@ -359,6 +361,12 @@ func TestMarketAdminPublish_AllowsSingleTopLevelDirectory(t *testing.T) {
 	}
 	if got := testutil.CountRows(t, db, "skill_revision_entries", "revision_id = ? AND path LIKE ?", *skill.HeadRevisionID, "openclaw-openclaw-changelog-update/%"); got != 0 {
 		t.Fatalf("wrapper path entry count = %d, want 0", got)
+	}
+	if got := testutil.CountRows(t, db, "skill_revision_entries", "revision_id = ? AND path LIKE ?", *skill.HeadRevisionID, "__MACOSX/%"); got != 0 {
+		t.Fatalf("macOS metadata entry count = %d, want 0", got)
+	}
+	if got := testutil.CountRows(t, db, "skill_revision_entries", "revision_id = ? AND path = ?", *skill.HeadRevisionID, ".DS_Store"); got != 0 {
+		t.Fatalf("Finder metadata entry count = %d, want 0", got)
 	}
 	var skillMDBlob skillBlobRow
 	if err := db.Where("hash = ?", *skillMDEntry.BlobHash).Take(&skillMDBlob).Error; err != nil {

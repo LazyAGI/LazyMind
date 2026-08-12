@@ -793,6 +793,9 @@ func readZipFiles(zipPath string) (map[string][]byte, error) {
 	defer reader.Close()
 	files := map[string][]byte{}
 	for _, entry := range reader.File {
+		if isIgnoredSkillZipMetadata(entry.Name) {
+			continue
+		}
 		if entry.FileInfo().IsDir() {
 			if _, err := cleanSkillPath(strings.TrimSuffix(entry.Name, "/")); err != nil {
 				return nil, err
@@ -818,6 +821,20 @@ func readZipFiles(zipPath string) (map[string][]byte, error) {
 		files[name] = data
 	}
 	return normalizeSkillPackageRoot(files), nil
+}
+
+func isIgnoredSkillZipMetadata(name string) bool {
+	name = strings.TrimSuffix(name, "/")
+	if name == "" {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		lower := strings.ToLower(part)
+		if lower == "__macosx" || lower == ".ds_store" || lower == "thumbs.db" || lower == "desktop.ini" || strings.HasPrefix(part, "._") {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeSkillPackageRoot(files map[string][]byte) map[string][]byte {
