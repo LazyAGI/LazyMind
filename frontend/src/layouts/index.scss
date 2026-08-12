@@ -610,6 +610,10 @@
 }
 
 .main-layout-content.is-sidebar-collapsed.is-restore-safe-area-page {
+  .settings-topbar {
+    padding-left: 56px;
+  }
+
   .model-provider-shell {
     padding-left: 72px;
   }

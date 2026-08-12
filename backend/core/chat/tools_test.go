@@ -432,6 +432,22 @@ func TestChatConversationsMergesPersistedDisabledTools(t *testing.T) {
 
 	var upstreamBody map[string]any
 	baseURL := startChatToolsTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/authservice/") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{"items": []any{}},
+			})
+			return
+		}
+		if r.URL.Path == chatToolsPath {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"tool_groups": []map[string]any{
+					{"name": "bing", "label": "Bing", "can_disable": true, "active": true},
+				},
+			})
+			return
+		}
 		if r.URL.Path == "/api/scan/sources" {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}, "total": 0})
@@ -461,7 +477,7 @@ func TestChatConversationsMergesPersistedDisabledTools(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/api/core/conversations:chat",
-		strings.NewReader(`{"query":"hello","stream":false}`),
+		strings.NewReader(`{"query":"use Bing","stream":false,"mentions":[{"mention_id":"m1","type":"tool","resource_id":"bing","display_name":"Bing"}]}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "u1")

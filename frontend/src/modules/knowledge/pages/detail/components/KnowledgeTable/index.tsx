@@ -109,6 +109,7 @@ export interface BatchMoveDocument {
 
 interface Props {
   detail: Dataset;
+  documentParsingEnabled: boolean | null;
   onImportKnowledge: (data: { p_id?: string; targetPath?: string }) => void;
   getImportingTotal: () => void;
   getDetail: () => void;
@@ -157,7 +158,13 @@ const DocumentStageTagColorMap = {
 } as const;
 
 const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
-  const { detail, onImportKnowledge, getDetail, getImportingTotal } = props;
+  const {
+    detail,
+    documentParsingEnabled,
+    onImportKnowledge,
+    getDetail,
+    getImportingTotal,
+  } = props;
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [tableData, setTableData] = useState<TreeNode[]>([]);
@@ -200,6 +207,13 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
   const hasUploadPermission = useDatasetPermissionStore((state) =>
     state.hasUploadPermission(),
   );
+  const isDocumentParsingUnavailable = documentParsingEnabled !== true;
+
+  const notifyDocumentParsingPaused = () => {
+    message.warning(documentParsingEnabled === false
+      ? "文档解析已暂停，请在设置中重新启用"
+      : "正在读取文档解析状态，请稍后再试");
+  };
 
   const getAllChildrenKeys = (node: TreeNode): string[] => {
     const keys: string[] = [];
@@ -958,11 +972,13 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
             isLeftItems.push({
               key: "parse",
               label: t("knowledge.parse"),
+              disabled: isDocumentParsingUnavailable,
             });
           } else {
             isLeftItems.push({
               key: "reparse",
               label: t("knowledge.reparse"),
+              disabled: isDocumentParsingUnavailable,
             });
           }
         }
@@ -1018,6 +1034,10 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
 
   const handleMenuClick = (e: { key: string }, record: TreeNode) => {
     if (!e.key) {
+      return;
+    }
+    if ((e.key === "parse" || e.key === "reparse") && isDocumentParsingUnavailable) {
+      notifyDocumentParsingPaused();
       return;
     }
     if (e.key === "delete") {
@@ -1255,6 +1275,10 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
   };
 
   const restartCheckedKnowledge = () => {
+    if (isDocumentParsingUnavailable) {
+      notifyDocumentParsingPaused();
+      return;
+    }
     if (selectedRowKeys.length === 0) {
       message.warning(t("knowledge.selectAtLeastOneFile"));
       return;

@@ -63,6 +63,10 @@ import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
 import { DocumentServiceApi, TaskServiceApi } from "../../utils/request";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import {
+  fetchUserUiPreferences,
+  USER_UI_PREFERENCES_CHANGED_EVENT,
+} from "@/modules/user/uiPreferencesApi";
+import {
   DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
 } from "@/utils/developerMode";
@@ -133,6 +137,7 @@ const Detail = () => {
   const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<
     boolean | null
   >(null);
+  const [documentParsingEnabled, setDocumentParsingEnabled] = useState<boolean | null>(null);
   const [uploadingNoticeVisible, setUploadingNoticeVisible] = useState(false);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
 
@@ -216,6 +221,24 @@ const Detail = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getDetail, clearDataset]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadDocumentParsingState = () => fetchUserUiPreferences({ silentError: true } as never)
+      .then((preferences) => {
+        if (!cancelled) setDocumentParsingEnabled(preferences.document_parsing_enabled);
+      })
+      .catch(() => {
+        // Keep the existing backend protection authoritative when the optional
+        // preference request cannot be read.
+      });
+    void loadDocumentParsingState();
+    window.addEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, loadDocumentParsingState);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, loadDocumentParsingState);
+    };
+  }, []);
 
   useEffect(() => {
     const syncDeveloperActive = () => {
@@ -411,6 +434,16 @@ const Detail = () => {
     state.hasUploadPermission(),
   );
   const canImport = hasUploadPermission || hasWritePermission;
+  const isDocumentParsingUnavailable = documentParsingEnabled !== true;
+  const importDisabled =
+    isDocumentParsingUnavailable ||
+    embeddingReady === false ||
+    multimodalEmbeddingReady === false;
+  const importDisabledReason = isDocumentParsingUnavailable
+    ? documentParsingEnabled === false
+      ? "文档解析已暂停，请在设置中重新启用"
+      : "正在读取文档解析状态"
+    : undefined;
   const showDataSourceSync = isDatasetCreatedByDataSource(
     detail as DatasetWithDataSourceFlag | undefined,
   );
@@ -549,6 +582,7 @@ const Detail = () => {
             {showDataSourceSync && detail?.dataset_id ? (
               <KnowledgeBaseSyncNow
                 datasetId={detail.dataset_id}
+                documentParsingEnabled={documentParsingEnabled}
                 onSyncComplete={refreshKnowledgeAfterSync}
               />
             ) : null}
@@ -599,8 +633,8 @@ const Detail = () => {
               <Space.Compact>
                 <Tooltip
                   title={
-                    embeddingReady === false ||
-                    multimodalEmbeddingReady === false ? (
+                    importDisabledReason ||
+                    (embeddingReady === false || multimodalEmbeddingReady === false ? (
                       isAdmin ? (
                         <span>
                           {embeddingReady === false
@@ -628,15 +662,12 @@ const Detail = () => {
                       ) : (
                         t("knowledge.multimodalEmbeddingNotReadyBanner")
                       )
-                    ) : undefined
+                    ) : undefined)
                   }
                 >
                   <Button
                     type="primary"
-                    disabled={
-                      embeddingReady === false ||
-                      multimodalEmbeddingReady === false
-                    }
+                    disabled={importDisabled}
                     onClick={() => openImportModal({ importMode: "file" })}
                   >
                     {t("knowledge.importFile")}
@@ -648,23 +679,17 @@ const Detail = () => {
                       {
                         key: "importFile",
                         label: t("knowledge.importFile"),
-                        disabled:
-                          embeddingReady === false ||
-                          multimodalEmbeddingReady === false,
+                        disabled: importDisabled,
                       },
                       {
                         key: "importFolder",
                         label: t("knowledge.importFolder"),
-                        disabled:
-                          embeddingReady === false ||
-                          multimodalEmbeddingReady === false,
+                        disabled: importDisabled,
                       },
                       {
                         key: "importZip",
                         label: t("knowledge.importZip"),
-                        disabled:
-                          embeddingReady === false ||
-                          multimodalEmbeddingReady === false,
+                        disabled: importDisabled,
                       },
                       {
                         key: "taskManage",
@@ -745,6 +770,7 @@ const Detail = () => {
                     {
                       key: "batchReparse",
                       label: t("knowledge.batchReparse"),
+                      disabled: isDocumentParsingUnavailable,
                       onClick: () => {
                         knowledgeListRef.current?.restartCheckedKnowledge();
                       },
@@ -779,6 +805,7 @@ const Detail = () => {
         <KnowledgeTable
           ref={knowledgeListRef}
           detail={detail}
+          documentParsingEnabled={documentParsingEnabled}
           onImportKnowledge={(data) => openImportModal(data)}
           getImportingTotal={getImportingTotal}
           getDetail={getDetail}

@@ -126,6 +126,30 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 
 }
 
+func TestBuildChatResourceContextHonorsSkillsMasterSwitch(t *testing.T) {
+	db := newTestDB(t)
+	createPublishedV2Skill(t, db, "skill-paused", "u1", "User 1", "coding", "paused-skill", "---\nname: paused-skill\n---\nbody")
+	now := time.Now().UTC()
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{"user_id": "u1", "task_center_enabled": true, "skills_enabled": false, "mcp_enabled": true, "created_at": now, "updated_at": now}).Error; err != nil {
+		t.Fatalf("seed preferences: %v", err)
+	}
+
+	ctx, err := BuildChatResourceContext(context.Background(), db.DB, "u1", "User 1", "session-paused")
+	if err != nil {
+		t.Fatalf("build chat context: %v", err)
+	}
+	if len(ctx.AvailableSkills) != 0 {
+		t.Fatalf("expected master switch to hide skills, got %#v", ctx.AvailableSkills)
+	}
+	var snapshots int64
+	if err := db.Model(&orm.ResourceSessionSnapshot{}).Where("session_id = ? AND resource_type = ?", "session-paused", ResourceTypeSkill).Count(&snapshots).Error; err != nil {
+		t.Fatalf("count skill snapshots: %v", err)
+	}
+	if snapshots != 0 {
+		t.Fatalf("expected no skill snapshots while paused, got %d", snapshots)
+	}
+}
+
 func TestBuildChatResourceContextSkipsInvalidEnabledV2Skill(t *testing.T) {
 	db := newTestDB(t)
 	now := time.Now()

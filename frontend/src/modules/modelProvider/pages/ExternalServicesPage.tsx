@@ -527,7 +527,17 @@ function ExternalServiceLogo({ service }: { service: ExternalServiceConfig }) {
   );
 }
 
-export default function ExternalServicesPage() {
+interface ExternalServicesPageProps {
+  includeMcp?: boolean;
+  includeBuiltinTools?: boolean;
+  includeDependencies?: boolean;
+}
+
+export default function ExternalServicesPage({
+  includeMcp = true,
+  includeBuiltinTools = true,
+  includeDependencies = true,
+}: ExternalServicesPageProps = {}) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [form] = Form.useForm<Record<string, ExternalServiceFormValues>>();
@@ -1115,11 +1125,11 @@ export default function ExternalServicesPage() {
 
           <div className="model-provider-tools-substack">
             {renderServiceCategory("parsing")}
-            <DependencyInstallSection />
+            {includeDependencies ? <DependencyInstallSection /> : null}
             {renderServiceCategory("search")}
             {renderServiceCategory("academic")}
-            {developerActive ? <ToolManagementSection view="builtin" /> : null}
-            <ToolManagementSection view="mcp" />
+            {developerActive && includeBuiltinTools ? <ToolManagementSection view="builtin" /> : null}
+            {includeMcp ? <ToolManagementSection view="mcp" /> : null}
           </div>
         </div>
       </Spin>
