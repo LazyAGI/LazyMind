@@ -78,7 +78,7 @@ func registerAllRoutes(r *mux.Router) {
 	remoteExecutorHandler := workflowexecutor.RemoteHandler{
 		DB: corestore.DB(), Attempts: attemptHandler.Service,
 		Contexts:  workflowexecutor.DBContextLoader{DB: corestore.DB()},
-		Artifacts: workflowexecutor.DBArtifactSink{DB: corestore.DB()},
+		Artifacts: workflowexecutor.DBArtifactSink{DB: corestore.DB(), ArtifactRoot: doc.UploadRoot()},
 	}
 	handleAPI(r, "POST", "/internal/workflow-attempts:claim", nil, attemptHandler.Claim)
 	handleAPI(r, "GET", "/internal/workflow-attempts/{attempt_id}/context", nil, remoteExecutorHandler.Context)

@@ -3,6 +3,7 @@ package workflow
 import (
 	"testing"
 
+	"gopkg.in/yaml.v3"
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/graphengine"
 )
@@ -202,5 +203,48 @@ func TestReusableSkillScriptsKeepsOnlyOriginalScriptFiles(t *testing.T) {
 	}
 	if _, ok := scripts["scripts/generated/synthesis_checklist.js"]; ok {
 		t.Fatalf("inline analysis code should not be stored as an original script: %#v", scripts)
+	}
+}
+
+func TestEnsureGeneratedStepTabsExpandsSingleResultsTab(t *testing.T) {
+	input := `id: demo
+name: Demo
+slots:
+  - id: parsed
+    type: text
+    exposed: false
+  - id: result
+    type: text
+    exposed: true
+steps:
+  - id: parse
+    label: Parse
+    outputs: [parsed]
+  - id: finish
+    label: Finish
+    outputs: [result]
+ui:
+  tabs:
+    - id: results
+      label: Results
+      slots: [{id: result}]
+`
+	output := ensureGeneratedStepTabs(input)
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(output), &doc); err != nil {
+		t.Fatal(err)
+	}
+	ui := doc["ui"].(map[string]any)
+	tabs := ui["tabs"].([]any)
+	if len(tabs) != 2 {
+		t.Fatalf("tabs = %#v", tabs)
+	}
+	first := tabs[0].(map[string]any)
+	if first["id"] != "parse" || first["step_id"] != "parse" {
+		t.Fatalf("first tab = %#v", first)
+	}
+	slots := doc["slots"].([]any)
+	if slots[0].(map[string]any)["exposed"] != true {
+		t.Fatalf("intermediate output was not exposed: %#v", slots[0])
 	}
 }

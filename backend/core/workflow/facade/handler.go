@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 	"lazymind/core/common"
+	"lazymind/core/subagent"
 	workflowexecutor "lazymind/core/workflow/executor"
 	workflowstore "lazymind/core/workflow/store"
 )
@@ -244,6 +245,9 @@ func (h Handler) ListArtifacts(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "ARTIFACT_LIST_FAILED", err.Error(), true)
 		return
 	}
+	for i := range values {
+		values[i].Value = subagent.SignArtifactImageValue(values[i].ContentType, values[i].Value)
+	}
 	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{"artifacts": values}})
 }
 
@@ -265,6 +269,7 @@ func (h Handler) ReadArtifact(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "ARTIFACT_READ_FAILED", err.Error(), true)
 		return
 	}
+	value.Value = subagent.SignArtifactImageValue(value.ContentType, value.Value)
 	writeJSON(w, http.StatusOK, envelope{Data: value})
 }
 

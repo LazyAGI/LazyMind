@@ -106,7 +106,6 @@ class RemoteWorkflowExecutor:
                     return
 
         heartbeat_task = asyncio.create_task(heartbeat())
-        artifacts: list[Dict[str, Any]] = []
         summary = ''
         failure: Optional[str] = None
         terminal_event: Optional[Dict[str, Any]] = None
@@ -151,7 +150,6 @@ class RemoteWorkflowExecutor:
                     artifact['value'] = self._embed_files(
                         artifact['value'], str(artifact.get('content_type') or ''), workspace)
                     await self.runtime.artifact(client, attempt_id, lease, artifact)
-                    artifacts.append(artifact)
                 elif kind == 'done':
                     terminal_event = event
                     summary = str(event.get('summary') or '')
@@ -175,7 +173,7 @@ class RemoteWorkflowExecutor:
                     await self.runtime.fail(client, attempt_id, lease, failure)
                 else:
                     await self.runtime.complete(client, attempt_id, lease, {
-                        'summary': summary, 'executor_ref': task_id, 'artifacts': artifacts})
+                        'summary': summary, 'executor_ref': task_id})
             except httpx.HTTPStatusError as exc:
                 # A Runtime completion validation error is a terminal execution
                 # failure, not a reason to leave the Attempt running until expiry.
@@ -189,7 +187,8 @@ class RemoteWorkflowExecutor:
                 # then persisted and invokes existing Chat handoff/synthetic hooks.
                 await self.runtime.task_event(client, task_id, lease, terminal_event)
         finally:
-            shutil.rmtree(workspace, ignore_errors=True)
+            if workspace:
+                shutil.rmtree(workspace, ignore_errors=True)
 
     async def _materialize_inputs(self, client: httpx.AsyncClient, attempt: str, lease: str,
                                   context: Dict[str, Any], workspace: str) -> Dict[str, str]:
@@ -215,12 +214,14 @@ class RemoteWorkflowExecutor:
             scalar = isinstance(paths, str)
             values = [paths] if scalar else paths if isinstance(paths, list) else []
             embedded = []
+            filenames = []
             for raw in values:
                 raw_text = str(raw)
                 if raw_text.startswith((
                     'http://', 'https://', 'data:', '/static-files/', '/api/core/static-files/',
                 )):
                     embedded.append(raw_text)
+                    filenames.append('')
                     continue
                 path = pathlib.Path(raw_text)
                 if not path.is_absolute():
@@ -231,9 +232,15 @@ class RemoteWorkflowExecutor:
                     mime = mimetypes.guess_type(resolved.name)[0] or 'application/octet-stream'
                     data = base64.b64encode(resolved.read_bytes()).decode('ascii')
                     embedded.append(f'data:{mime};base64,{data}')
+                    filenames.append(resolved.name)
                 except (OSError, ValueError):
                     embedded.append('')
+                    filenames.append('')
             result[key] = embedded[0] if scalar and embedded else embedded
+            if scalar and filenames and not result.get('filename'):
+                result['filename'] = filenames[0]
+            elif not scalar and filenames and not result.get('filenames'):
+                result['filenames'] = filenames
         return result
 
     @staticmethod

@@ -79,6 +79,33 @@ func TestCompileArbitraryDAGAndProjectBlockedMerge(t *testing.T) {
 	}
 }
 
+func TestCompilePreservesMaterialCardinalitiesForArtifactSink(t *testing.T) {
+	workflow := `id: cardinality-test
+slots:
+  - {id: source, type: text, cardinality: single, external: true}
+  - {id: images, type: image, cardinality: list, exposed: true}
+steps:
+  - {id: render, inputs: [source], outputs: [images]}
+`
+	state := `start_route: all
+steps:
+  render:
+    inputs: [{slot: source, required: true}]
+    outputs: [images]
+transitions:
+  __start__: [{to: render}]
+  render: [{to: __end__}]
+`
+	compiled := Compile(workflow, state, "scenario", ProfilePublish)
+	if !compiled.Valid || compiled.Graph == nil {
+		t.Fatalf("diagnostics=%v", compiled.Diagnostics)
+	}
+	if compiled.Graph.MaterialCardinalities["source"] != "single" ||
+		compiled.Graph.MaterialCardinalities["images"] != "list" {
+		t.Fatalf("cardinalities=%v", compiled.Graph.MaterialCardinalities)
+	}
+}
+
 func TestCompileRejectsMultipleProducerAndSelfOverwrite(t *testing.T) {
 	state := `
 transitions:

@@ -1,6 +1,4 @@
 import json
-import os
-
 import httpx
 import pytest
 
@@ -24,6 +22,7 @@ def test_remote_executor_embeds_host_local_file(tmp_path):
     value = RemoteWorkflowExecutor._embed_files(
         {'path': 'report.txt', 'name': 'report.txt'}, 'file', str(tmp_path))
     assert value['path'].startswith('data:text/plain;base64,')
+    assert value['filename'] == 'report.txt'
     assert str(tmp_path) not in value['path']
 
 

@@ -399,11 +399,21 @@ function getTabSlotRevisions(
 ): SlotRevision[] {
   const slots = session.slots ?? [];
   if (tab.step_id) {
-    return slots.filter((s) => s.slot === artifactKey && s.step_id === tab.step_id);
+    const scoped = slots.filter((s) => s.slot === artifactKey && s.step_id === tab.step_id);
+    // A delivery/validation tab may intentionally present a selected artifact
+    // produced by an earlier step (for example, validate_proposal displaying
+    // final_proposal from compose_proposal_docx). Do not hide that artifact just
+    // because its producer differs from the tab's status step.
+    return scoped.length > 0
+      ? scoped
+      : slots.filter((s) => s.slot === artifactKey && s.selected);
   }
   const isStepTab = session.steps?.some((s) => s.step_id === tab.id);
   if (isStepTab) {
-    return slots.filter((s) => s.slot === artifactKey && s.step_id === tab.id);
+    const scoped = slots.filter((s) => s.slot === artifactKey && s.step_id === tab.id);
+    return scoped.length > 0
+      ? scoped
+      : slots.filter((s) => s.slot === artifactKey && s.selected);
   }
   return slots.filter((s) => s.slot === artifactKey && s.selected);
 }
@@ -449,8 +459,15 @@ function getCompositeRows(
   const orders = new Set<number>();
   const scopeStepId = tab.step_id
     ?? (session.steps?.some((s) => s.step_id === tab.id) ? tab.id : undefined);
+  const scopedMaterials = new Set(
+    (session.slots ?? [])
+      .filter((slot) => scopeStepId && slot.step_id === scopeStepId)
+      .map((slot) => slot.slot),
+  );
   for (const slot of session.slots ?? []) {
-    const matchesTabStep = scopeStepId ? slot.step_id === scopeStepId : slot.selected;
+    const matchesTabStep = scopeStepId
+      ? slot.step_id === scopeStepId || (!scopedMaterials.has(slot.slot) && slot.selected)
+      : slot.selected;
     if (matchesTabStep && participating.has(slot.slot)) {
       if (slot.sort_order !== undefined) {
         orders.add(slot.sort_order);
@@ -811,10 +828,20 @@ function SortableImageList({
   }
 
   const canDrag = isDraggable && !readOnly;
+  const gridLayout = slotDef.itemLayout === 'grid';
+  const itemHeight = Math.min(480, Math.max(140, Number(slotDef.itemHeight) || 220));
+  const itemWidth = Math.min(640, Math.max(180, Number(slotDef.itemWidth) || 360));
+  const gridColumns = Math.min(4, Math.max(1, Number(slotDef.gridMaxCols) || 2));
+  const imageListStyle = {
+    '--workflow-image-card-height': `${itemHeight}px`,
+    '--workflow-image-card-width': `${itemWidth}px`,
+    '--workflow-image-grid-cols': String(gridColumns),
+  } as React.CSSProperties;
 
   return (
     <div
-      className={`workflow-panel__image-list${canDrag ? ' workflow-panel__image-list--sortable' : ''}`}
+      className={`workflow-panel__image-list${gridLayout ? ' workflow-panel__image-list--grid' : ''}${canDrag ? ' workflow-panel__image-list--sortable' : ''}`}
+      style={imageListStyle}
       onDragLeave={canDrag ? handleContainerDragLeave : undefined}
       onDragEnter={canDrag ? handleDragEnter : undefined}
       onDragOver={canDrag ? handleContainerDragOver : undefined}
@@ -1211,6 +1238,19 @@ export function WorkflowPanel({
     if (idx !== -1) setActiveTabIdx(idx);
   }, [ui.tabs, persistedFocusedTab]);
 
+  // Until the user explicitly chooses a tab, follow the runtime frontier so a
+  // completed workflow opens on its final deliverables instead of staying on
+  // the first input/result tab for the whole run.
+  useEffect(() => {
+    const tabs: TabDef[] = ui.tabs ?? [];
+    if (!tabs.length || persistedFocusedTab) return;
+    let idx = tabs.findIndex((tab) => tab.step_id === session.current_step_id);
+    if (idx === -1 && (session.status === 'completed' || session.status === 'failed')) {
+      idx = tabs.length - 1;
+    }
+    if (idx !== -1) setActiveTabIdx(idx);
+  }, [ui.tabs, persistedFocusedTab, session.current_step_id, session.status, session.session_id]);
+
   // Track focused tab changes.
   const handleTabChange = useCallback((idx: number, tabId: string) => {
     setActiveTabIdx(idx);
@@ -1234,7 +1274,13 @@ export function WorkflowPanel({
 
   if (!session) return null;
 
-  const tabs: TabDef[] = ui.tabs ?? [];
+  const tabs: TabDef[] = (ui.tabs ?? []).map((tab) => ({
+    ...tab,
+    slots: tab.slots.map((slot) => ({
+      ...(ui.slots?.[slot.id] ?? {}),
+      ...slot,
+    } as SlotDef)),
+  }));
   const hasTabs = tabs.length > 0;
   const hasIntent = true;
   const sessionReadOnly = isWorkflowSessionReadOnly(session, autoRunning);
@@ -1485,7 +1531,9 @@ export function WorkflowPanel({
                 role='tabpanel'
                 hidden={idx !== activeTabIdx}
               >
-                <SlotDownloadContext.Provider value={idx === tabs.length - 1}>
+                <SlotDownloadContext.Provider
+                  value={idx === tabs.length - 1 || tab.slots.some((slot) => slot.type === 'file')}
+                >
                   <TabSlotGrid
                     tab={tab}
                     session={session}

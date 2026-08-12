@@ -53,6 +53,14 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 					value.Prompt, value.Acceptance = node.Prompt, node.Acceptance
 					value.DeclaredOutputs, value.RequiredOutputs = node.Outputs, node.RequiredOutputs
 					value.Capabilities, value.LegacyTools = node.Capabilities, node.LegacyTools
+					value.OutputCardinalities = map[string]string{}
+					for _, output := range node.Outputs {
+						cardinality := graph.MaterialCardinalities[output]
+						if cardinality != "list" {
+							cardinality = "single"
+						}
+						value.OutputCardinalities[output] = cardinality
+					}
 				}
 			}
 		}

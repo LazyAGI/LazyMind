@@ -21,6 +21,7 @@ from lazymind.chat.service.utils.static_file_url import (
     local_path_from_static_file_url,
     resolve_local_image_path,
 )
+from lazymind.chat.workflow.artifacts import materialize_data_image
 
 from .context import get_context, require_context, LARGE_ARTIFACT_THRESHOLD
 
@@ -42,7 +43,7 @@ def _materialize_local_path(path: str) -> str:
     raw = str(path or '').strip()
     if not raw:
         return raw
-    if raw.lower().startswith(('http://', 'https://')):
+    if raw.lower().startswith(('http://', 'https://', 'data:')):
         return raw
     resolved = resolve_local_image_path(raw) or local_path_from_static_file_url(raw)
     if resolved and (resolved == raw or os.path.exists(resolved) or not os.path.exists(raw)):
@@ -53,7 +54,7 @@ def _materialize_local_path(path: str) -> str:
 def _sign_static_file_url(path: str) -> Optional[str]:
     """Ask Go core to sign a local upload path. Returns None on any failure."""
     raw = str(path or '').strip()
-    if not raw or raw.lower().startswith(('http://', 'https://')):
+    if not raw or raw.lower().startswith(('http://', 'https://', 'data:')):
         return None
     if raw.startswith('/static-files/'):
         return raw
@@ -103,6 +104,8 @@ def _build_artifact_value(value: Any, content_type: str):
     """
     ctx = require_context()
     if content_type == 'text':
+        if isinstance(value, dict) and 'text' in value:
+            value = value['text']
         text = str(value)
         if len(text.encode('utf-8', errors='replace')) > LARGE_ARTIFACT_THRESHOLD:
             abs_path = ctx.write_large_content(text, hint='artifact_text')
@@ -156,7 +159,13 @@ def _build_artifact_value(value: Any, content_type: str):
             return image_value(dst_abs), 'image'
         return image_value(src), 'image'
     if content_type == 'file':
-        source = str(value).strip()
+        # Models commonly reuse the normalized artifact shape returned by read tools.
+        # Accept that shape as well as the documented plain path so a batch save does
+        # not write earlier text outputs and then fail on ``{"path": ...}``.
+        if isinstance(value, dict):
+            source = str(value.get('path') or '').strip()
+        else:
+            source = str(value).strip()
         if not source:
             raise ValueError('File artifact path must not be empty.')
         if os.path.isabs(source):
@@ -1413,18 +1422,39 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
     if isinstance(value.get('url'), str) and value.get('url'):
         signed_url = value['url']
 
-    path: Optional[str] = value.get('path') or value.get('url') or value.get('text')
+    path: Optional[str] = value.get('path') or value.get('url')
+    # Remote Workflow persistence may place an image data URL in either path or
+    # text. It is materialized below before any filesystem lookup. Arbitrary
+    # text artifacts are deliberately not treated as paths; callers should use
+    # get_artifact for their content instead.
+    text_value = value.get('text')
+    if not path and isinstance(text_value, str) and text_value.lower().startswith('data:image/'):
+        path = text_value
     if not path or not isinstance(path, str):
         return tool_success('find_artifact', {
             'status': 'error',
             'message': f"Artifact '{slot}' has no resolvable path.",
         })
 
-    if not path.lower().startswith(('http://', 'https://', '/static-files/')):
+    is_data_url = path.lower().startswith('data:')
+    if is_data_url:
+        try:
+            path = materialize_data_image(path, ctx.workspace_path)
+        except ValueError as exc:
+            return tool_success('find_artifact', {
+                'status': 'error',
+                'message': str(exc),
+            })
+    if not path.lower().startswith(('http://', 'https://', '/static-files/', 'data:')):
         path = _materialize_local_path(path)
 
     # Re-sign local paths when the slots API did not already provide a URL.
-    if not signed_url:
+    if is_data_url:
+        # The decoded file lives in this executor's ephemeral workspace and is
+        # intended for another local tool in the same attempt. Do not return or
+        # re-sign the original multi-hundred-KB data URL.
+        signed_url = None
+    elif not signed_url:
         signed_url = _sign_static_file_url(path)
 
     out: Dict[str, Any] = {

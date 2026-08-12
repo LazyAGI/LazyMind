@@ -105,6 +105,22 @@ func TestAuthoringFileUpdateUsesOptimisticVersion(t *testing.T) {
 	}
 }
 
+func TestApplyAuthoringFilesMergesIndividualScriptUpdates(t *testing.T) {
+	draft := orm.WorkflowDraft{ScriptsContent: `{"scripts/first.py":"def first(): return 1"}`}
+
+	applyAuthoringFiles(&draft, map[string]string{
+		"scripts/second.py": "def second(): return 2",
+	})
+
+	var scripts map[string]string
+	if err := json.Unmarshal([]byte(draft.ScriptsContent), &scripts); err != nil {
+		t.Fatal(err)
+	}
+	if len(scripts) != 2 || scripts["scripts/first.py"] == "" || scripts["scripts/second.py"] == "" {
+		t.Fatalf("script update replaced package contents: %#v", scripts)
+	}
+}
+
 func TestAuthoringSourceContainsNoModelInvocation(t *testing.T) {
 	data, err := os.ReadFile("authoring_handlers.go")
 	if err != nil {

@@ -3827,6 +3827,7 @@ const zhCN = {
     memoryWorkflowActionView: "查看工作流",
     memoryWorkflowActionEdit: "修改工作流信息",
     memoryWorkflowDeleteConfirm: "确认删除此工作流草稿？",
+    memoryWorkflowDeletePublishedConfirm: "确认删除此工作流？已发布版本也将停用。",
     memoryWorkflowDeleteOk: "删除",
     memoryWorkflowDeleteSuccess: "已删除",
     memoryWorkflowDeleteFailed: "删除失败",

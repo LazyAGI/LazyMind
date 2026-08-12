@@ -41,3 +41,20 @@ func TestDiagnosticsForTargetExcludesUnrelatedAreas(t *testing.T) {
 		t.Fatalf("unexpected statemachine diagnostics: %#v", filtered)
 	}
 }
+
+func TestDiagnoseWorkflowRejectsNonExecutableCommandsAndMissingScripts(t *testing.T) {
+	workflowYAML := "id: demo\nslots:\n  - id: result\n    type: text\nsteps:\n  - id: collect\n    command: python scripts/run.py\n"
+	stateYAML := "steps:\n  collect:\n    prompt: Run scripts/run.py\n    outputs: [result]\ntransitions:\n  __start__: [{to: collect}]\n  collect: [{to: __end__}]\n"
+	diagnostics := diagnoseWorkflow(workflowYAML, stateYAML, "### collect\nRun the collection step and save its result.", "{}")
+	want := map[string]bool{"E_STEP_COMMAND_UNSUPPORTED": false, "E_STEP_SCRIPT_REFERENCE_MISSING": false}
+	for _, item := range diagnostics {
+		if _, ok := want[item.Code]; ok {
+			want[item.Code] = true
+		}
+	}
+	for code, found := range want {
+		if !found {
+			t.Fatalf("missing %s: %#v", code, diagnostics)
+		}
+	}
+}

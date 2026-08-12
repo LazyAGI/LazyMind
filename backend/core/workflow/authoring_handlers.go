@@ -145,6 +145,9 @@ func CreateAuthoringWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 
 func applyAuthoringFiles(draft *orm.WorkflowDraft, files map[string]string) {
 	scripts := map[string]string{}
+	if strings.TrimSpace(draft.ScriptsContent) != "" {
+		_ = json.Unmarshal([]byte(draft.ScriptsContent), &scripts)
+	}
 	for path, content := range files {
 		path = filepath.ToSlash(filepath.Clean(path))
 		switch path {
@@ -164,10 +167,8 @@ func applyAuthoringFiles(draft *orm.WorkflowDraft, files map[string]string) {
 			}
 		}
 	}
-	if len(scripts) > 0 {
-		encoded, _ := json.Marshal(scripts)
-		draft.ScriptsContent = string(encoded)
-	}
+	encoded, _ := json.Marshal(scripts)
+	draft.ScriptsContent = string(encoded)
 }
 
 func validAuthoringPath(path string) bool {

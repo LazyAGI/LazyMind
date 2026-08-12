@@ -46,3 +46,12 @@ def test_image_artifact_accepts_structured_static_file_url(tmp_path):
 
     assert content_type == 'image'
     assert value == {'path': signed_url, 'caption': 'fallback result'}
+
+
+def test_text_artifact_unwraps_structured_text_value(tmp_path):
+    set_context(_context(str(tmp_path)))
+
+    value, content_type = _build_artifact_value({'text': '# Validation report'}, 'text')
+
+    assert content_type == 'text'
+    assert value == {'text': '# Validation report'}

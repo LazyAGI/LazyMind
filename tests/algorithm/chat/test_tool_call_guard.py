@@ -1,3 +1,5 @@
+import json
+
 import lazyllm
 
 from lazymind.chat.engine.agent_runtime.executor import ToolCallGuard
@@ -92,6 +94,37 @@ def test_unconfigured_stateful_tool_is_not_deduplicated():
     guard([_call('get_task_status', {'task_id': 'task-1'})])
 
     assert len(manager.calls) == 2
+
+
+def test_malformed_save_artifacts_json_is_repaired_before_execution():
+    manager = _RecordingToolManager()
+    guard = ToolCallGuard(manager)
+    malformed = (
+        '{"artifacts":[{"key":"outline","content_type":"json",'
+        '"value":{"children":[{"section_id":"1"}]}}]'
+    )
+
+    result = guard([_call('save_artifacts', malformed)])
+
+    arguments = json.loads(manager.calls[0]['function']['arguments'])
+    assert arguments == {
+        'artifacts': [{
+            'key': 'outline',
+            'content_type': 'json',
+            'value': {'children': [{'section_id': '1'}]},
+        }],
+    }
+    assert result[0]['ok'] is True
+
+
+def test_malformed_json_for_other_tools_is_not_repaired():
+    manager = _RecordingToolManager()
+    guard = ToolCallGuard(manager)
+    malformed = '{"url":"https://example.com"'
+
+    guard([_call('url_fetch', malformed)])
+
+    assert manager.calls[0]['function']['arguments'] == malformed
 
 
 def test_plugin_or_subagent_tool_immediately_updates_runtime_round_limit():

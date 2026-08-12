@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -53,7 +55,8 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 	graph := graphengine.CompiledStateGraph{SchemaVersion: graphengine.SchemaVersion,
 		Nodes: map[string]graphengine.CompiledNode{"write": {ID: "write", Prompt: "write report",
 			Acceptance: []string{"clear"}, Outputs: []string{"report", "notes"},
-			RequiredOutputs: []string{"report"}, Capabilities: []string{"web"}}}}
+			RequiredOutputs: []string{"report"}, Capabilities: []string{"web"}}},
+		MaterialCardinalities: map[string]string{"report": "single", "notes": "list"}}
 	if err := db.Create(&orm.WorkflowRevision{ID: "revision-1", WorkflowResourceID: "resource-1", RevisionNo: 1,
 		CompiledGraph: graph.JSON(), GraphSchemaVersion: graph.SchemaVersion, CreatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -83,7 +86,7 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 	}
 	if value.AttemptID != "attempt-1" || value.AttemptNo != 2 || value.Operation != "retry" ||
 		value.Prompt != "write report" || !reflect.DeepEqual(value.DeclaredOutputs, []string{"report", "notes"}) ||
-		!reflect.DeepEqual(value.RequiredOutputs, []string{"report"}) {
+		!reflect.DeepEqual(value.RequiredOutputs, []string{"report"}) || value.OutputCardinalities["notes"] != "list" {
 		t.Fatalf("context=%#v", value)
 	}
 	if value.Metadata["task_id"] != "task-1" || value.Metadata["controller_host"] != "lazymind" {
@@ -147,5 +150,76 @@ func TestDBArtifactSinkIsIdempotentAndEmitsRevisionEvents(t *testing.T) {
 	_ = db.First(&session, "id = ?", "session-1").Error
 	if session.StateVersion != 2 {
 		t.Fatalf("state version=%d", session.StateVersion)
+	}
+}
+
+func TestDBArtifactSinkPreservesEveryListArtifact(t *testing.T) {
+	db := executorComponentDB(t, &orm.WorkflowSession{}, &orm.WorkflowSlotRevision{},
+		&orm.WorkflowHumanArtifact{}, &orm.WorkflowEvent{}, &orm.WorkflowSlotOrder{})
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowSession{ID: "session-list", ConversationID: "conversation-1", WorkflowID: "workflow-1",
+		CreateUserID: "user-1", Status: "active", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	sink := DBArtifactSink{DB: db}
+	ctx := AttemptContext{AttemptID: "attempt-list", SessionID: "session-list", StepID: "render", AttemptNo: 1,
+		OutputCardinalities: map[string]string{"images": "list"}}
+	for seq, path := range []string{"/tmp/architecture.png", "/tmp/effect.png"} {
+		value, _ := json.Marshal(map[string]any{"path": path})
+		if err := sink.Save(context.Background(), ctx, Artifact{Slot: "images", ContentType: "image", Seq: seq + 1, Value: value}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var revisions []orm.WorkflowSlotRevision
+	if err := db.Where("session_id = ? AND selected = ?", "session-list", true).Order("list_index").Find(&revisions).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(revisions) != 2 || revisions[0].ListIndex == nil || *revisions[0].ListIndex != 0 ||
+		revisions[1].ListIndex == nil || *revisions[1].ListIndex != 1 {
+		t.Fatalf("revisions=%#v", revisions)
+	}
+	var order orm.WorkflowSlotOrder
+	if err := db.First(&order, "session_id = ? AND slot_id = ?", "session-list", "images").Error; err != nil {
+		t.Fatal(err)
+	}
+	if string(order.OrderList) != "[0,1]" {
+		t.Fatalf("order=%s", order.OrderList)
+	}
+}
+
+func TestDBArtifactSinkMaterializesRemoteBinaryArtifact(t *testing.T) {
+	db := executorComponentDB(t, &orm.WorkflowSession{}, &orm.WorkflowSlotRevision{},
+		&orm.WorkflowHumanArtifact{}, &orm.WorkflowEvent{})
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowSession{ID: "session-file", ConversationID: "conversation-1", WorkflowID: "workflow-1",
+		CreateUserID: "user-1", Status: "active", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	sink := DBArtifactSink{DB: db, ArtifactRoot: root}
+	ctx := AttemptContext{AttemptID: "attempt-file", SessionID: "session-file", StepID: "compose", AttemptNo: 1}
+	value := json.RawMessage(`{"path":"data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,aGVsbG8=","filename":"技术方案.docx"}`)
+	if err := sink.Save(context.Background(), ctx,
+		Artifact{Slot: "document", ContentType: "file", Seq: 1, Value: value}); err != nil {
+		t.Fatal(err)
+	}
+	var stored orm.WorkflowHumanArtifact
+	if err := db.First(&stored, "session_id = ? AND slot = ?", "session-file", "document").Error; err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(stored.Value, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	path, _ := decoded["path"].(string)
+	if filepath.Ext(path) != ".docx" || filepath.Dir(path) == root || path == "" {
+		t.Fatalf("stored path=%q", path)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "hello" || decoded["filename"] != "技术方案.docx" {
+		t.Fatalf("content=%q value=%s", content, stored.Value)
 	}
 }

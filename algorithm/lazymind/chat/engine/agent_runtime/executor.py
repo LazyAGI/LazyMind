@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator, Tuple
 import lazyllm
 import lazyllm.module.stream_helper as _sh
 import lazyllm.tools.agent as _agent_mod
+from json_repair import loads as repair_json_loads
 from lazymind.config import config as _cfg
 
 from .models import AgentRole, AgentRunPlan
@@ -23,6 +24,44 @@ _EXPANDED_BUDGET_TOOLS = {
 def _requires_expanded_budget(tool_name: str) -> bool:
     """Return whether invoking this tool starts workflow or SubAgent work."""
     return tool_name in _EXPANDED_BUDGET_TOOLS or tool_name.startswith('trigger_')
+
+
+def _repair_save_artifacts_arguments(tool_call: dict[str, Any]) -> bool:
+    """Repair malformed structured artifact payloads before LazyLLM parses them.
+
+    Large JSON artifacts are occasionally returned with one missing/extra closing
+    delimiter. LazyLLM treats that as a ToolManager execution exception, which
+    aborts the whole workflow attempt before ``save_artifacts`` can validate the
+    payload. Keep the recovery deliberately narrow: only ``save_artifacts`` calls
+    whose arguments fail strict JSON parsing and repair to the expected envelope.
+    """
+    function = tool_call.get('function') or {}
+    if function.get('name') != 'save_artifacts':
+        return False
+    arguments = function.get('arguments')
+    if not isinstance(arguments, str):
+        return False
+    try:
+        json.loads(arguments)
+        return False
+    except (TypeError, ValueError):
+        pass
+    try:
+        repaired = repair_json_loads(arguments)
+    except Exception:
+        return False
+    if not isinstance(repaired, dict) or not isinstance(repaired.get('artifacts'), list):
+        return False
+    # LazyLLM accepts either form for immediate execution, but OpenAI-compatible
+    # chat history requires function.arguments to remain a JSON *string* on the
+    # following model turn. Re-serialize the repaired object accordingly.
+    function['arguments'] = json.dumps(
+        repaired, ensure_ascii=False, separators=(',', ':'),
+    )
+    lazyllm.LOG.warning(
+        '[ToolCallGuard] repaired malformed save_artifacts JSON arguments'
+    )
+    return True
 
 
 class ToolCallGuard:
@@ -109,6 +148,7 @@ class ToolCallGuard:
         pending_signatures: dict[str, int] = {}
         duplicate_indices: dict[int, int] = {}
         for index, tool_call in enumerate(tool_calls):
+            _repair_save_artifacts_arguments(tool_call)
             function = tool_call.get('function') or {}
             name = str(function.get('name') or '')
             if _requires_expanded_budget(name):

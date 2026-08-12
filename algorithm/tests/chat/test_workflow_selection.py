@@ -128,6 +128,53 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing():
     toolkit.advance_step.assert_not_called()
 
 
+def test_dynamic_trigger_imports_literal_scalar_binding():
+    lazyllm.globals['agentic_config']['files'] = ['/safe/report.pdf']
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {
+        'status': 'needs_input', 'missing_inputs': ['source_document'],
+    }
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ), patch('lazymind.chat.engine.subagent.tools._resolve_attachment', return_value=(
+        None, 'not an attachment',
+    )), patch('lazymind.chat.workflow.workflow_manager._import_text_binding', return_value={
+        'resource_id': 'text-resource', 'revision': 1, 'content_hash': 'sha256:text',
+    }) as import_text:
+        client_factory.return_value.get_workflow.return_value.result = {
+            'workflow_id': 'report', 'revision_id': 'revision-1',
+        }
+        contribution = resolve_workflow_injection(
+            None, current_query='write about 3000 words',
+            workflow_catalog=[{
+                'workflow_ref': 'user:user-1:report', 'workflow_id': 'report',
+                'revision_id': 'revision-1',
+            }],
+            allowed_workflow_refs=['user:user-1:report'],
+            workflow_activations=[{
+                'workflow_ref': 'user:user-1:report', 'workflow_id': 'report',
+                'revision_id': 'revision-1', 'tool_name': 'trigger_report_workflow',
+            }],
+        )
+
+        result = _tool(contribution, 'trigger_report_workflow')({
+            'target_length': '3000',
+        })
+
+    import_text.assert_called_once_with('target_length', '3000')
+    toolkit.prepare_workflow.assert_called_once_with(
+        'report', input_bindings={
+            'target_length': {
+                'resource_id': 'text-resource', 'revision': 1,
+                'content_hash': 'sha256:text',
+            },
+        }, request_context='write about 3000 words',
+    )
+    assert result['status'] == 'waiting'
+    assert result['outcome'] == 'waiting_for_input'
+    assert 'literal values' in _tool(contribution, 'trigger_report_workflow').__doc__
+
+
 def test_dynamic_trigger_activates_advance_step_in_the_same_agent_turn():
     toolkit = MagicMock()
     toolkit.prepare_workflow.return_value = {

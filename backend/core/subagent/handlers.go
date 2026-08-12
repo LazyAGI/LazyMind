@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/modelconfig"
@@ -197,12 +199,18 @@ func toTaskDTO(t *orm.SubAgentTask) taskDTO {
 	}
 }
 
-func toArtifactDTO(a *orm.SubAgentArtifact, workspacePath string) artifactDTO {
-	value := normalizeJSON(a.Value, "{}")
-	value = SignArtifactValue(a.ContentType, value, workspacePath)
+func toArtifactDTO(ctx context.Context, db *gorm.DB, a *orm.SubAgentArtifact, workspacePath string) artifactDTO {
+	contentType, value, _, durable := ResolveDurableWorkflowArtifact(
+		ctx, db, a.TaskID, a.Slot, a.Seq, a.ContentType, normalizeJSON(a.Value, "{}"), a.Caption,
+	)
+	if durable {
+		value = SignArtifactImageValue(contentType, value)
+	} else {
+		value = SignArtifactValue(contentType, value, workspacePath)
+	}
 	return artifactDTO{
 		Slot:        a.Slot,
-		ContentType: a.ContentType,
+		ContentType: contentType,
 		Seq:         a.Seq,
 		Value:       value,
 		CreatedAt:   a.CreatedAt,
@@ -246,7 +254,7 @@ func ListConversationTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		for j := range arts {
 			if !arts[j].Hidden {
-				dto.Artifacts = append(dto.Artifacts, toArtifactDTO(&arts[j], tasks[i].WorkspacePath))
+				dto.Artifacts = append(dto.Artifacts, toArtifactDTO(ctx, db, &arts[j], tasks[i].WorkspacePath))
 			}
 		}
 		steps, _ := LoadSteps(ctx, db, tasks[i].ID)
@@ -322,7 +330,7 @@ func GetTaskArtifacts(w http.ResponseWriter, r *http.Request) {
 	out := make([]artifactDTO, 0, len(arts))
 	for i := range arts {
 		if !arts[i].Hidden {
-			out = append(out, toArtifactDTO(&arts[i], task.WorkspacePath))
+			out = append(out, toArtifactDTO(r.Context(), db, &arts[i], task.WorkspacePath))
 		}
 	}
 	common.ReplyOK(w, map[string]any{"artifacts": out})

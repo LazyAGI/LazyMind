@@ -9,24 +9,25 @@ import (
 // the remote Executor protocol. It never contains a model configuration, API
 // credential, Host-local path or private conversation state.
 type AttemptContext struct {
-	ContractVersion  string            `json:"contract_version"`
-	SessionID        string            `json:"session_id"`
-	AttemptID        string            `json:"attempt_id"`
-	StepID           string            `json:"step_id"`
-	AttemptNo        int               `json:"attempt_no"`
-	Operation        string            `json:"operation"`
-	Objective        string            `json:"objective,omitempty"`
-	Prompt           string            `json:"prompt,omitempty"`
-	Acceptance       []string          `json:"acceptance_criteria,omitempty"`
-	Instruction      string            `json:"instruction,omitempty"`
-	PartialSelector  map[string][]int  `json:"partial_selector,omitempty"`
-	WorkflowRevision string            `json:"workflow_revision"`
-	Inputs           map[string]any    `json:"inputs,omitempty"`
-	DeclaredOutputs  []string          `json:"declared_outputs,omitempty"`
-	RequiredOutputs  []string          `json:"required_outputs,omitempty"`
-	Capabilities     []string          `json:"capabilities,omitempty"`
-	LegacyTools      []string          `json:"legacy_tools,omitempty"`
-	Metadata         map[string]string `json:"metadata,omitempty"`
+	ContractVersion     string            `json:"contract_version"`
+	SessionID           string            `json:"session_id"`
+	AttemptID           string            `json:"attempt_id"`
+	StepID              string            `json:"step_id"`
+	AttemptNo           int               `json:"attempt_no"`
+	Operation           string            `json:"operation"`
+	Objective           string            `json:"objective,omitempty"`
+	Prompt              string            `json:"prompt,omitempty"`
+	Acceptance          []string          `json:"acceptance_criteria,omitempty"`
+	Instruction         string            `json:"instruction,omitempty"`
+	PartialSelector     map[string][]int  `json:"partial_selector,omitempty"`
+	WorkflowRevision    string            `json:"workflow_revision"`
+	Inputs              map[string]any    `json:"inputs,omitempty"`
+	DeclaredOutputs     []string          `json:"declared_outputs,omitempty"`
+	RequiredOutputs     []string          `json:"required_outputs,omitempty"`
+	OutputCardinalities map[string]string `json:"output_cardinalities,omitempty"`
+	Capabilities        []string          `json:"capabilities,omitempty"`
+	LegacyTools         []string          `json:"legacy_tools,omitempty"`
+	Metadata            map[string]string `json:"metadata,omitempty"`
 }
 
 type Artifact struct {

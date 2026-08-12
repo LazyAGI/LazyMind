@@ -218,6 +218,14 @@ def _workflow_prompt(request: LLMTaskRequest) -> str:
         'Every non-external slot must be produced exactly once. Each workflow step must have a matching state step.',
         'state.yml must include transitions.__start__ and eventually reach __end__.',
         'Allowed slot types: text, image, file, json. Use English snake_case ids.',
+        'The workflow.yaml step field "command" is descriptive legacy data and is NOT executable. Never emit it.',
+        'A packaged Python helper is executable only when workflow.yaml declares it in tool_scripts and the matching '
+        'state step declares the callable name in tools. Never instruct an agent to run scripts/path.py unless that '
+        'script and callable are included in the generated package.',
+        'Do not claim to produce DOCX, PNG, PDF, or another concrete file format unless an actually available tool '
+        'creates that format. If execution support is unavailable, redesign the output and labels as an honest '
+        'LLM/built-in-capability fallback (for example Markdown instead of DOCX).',
+        'For a multi-step pipeline, expose each step output in a corresponding UI tab; set tab.step_id to the step id.',
         _skill_context(request),
         _tool_context(request),
         _input_context(request),
@@ -225,7 +233,7 @@ def _workflow_prompt(request: LLMTaskRequest) -> str:
     schemas = {
         'workflow.analyze_skill': (
             'Return schema: {"verdict":"generatable|needs_confirmation|rejected",'
-            '"verdict_code":"string","message":"string","candidates":[object],'
+            '"verdict_code":"string","message":"string","candidates":[{"id":"unique non-empty string"}],'
             '"coverage":{},"tool_mappings":{},"scripts":{}}. Analyze whether the skill can be converted to a Workflow.'
         ),
         'workflow.design_brief': (

@@ -3999,6 +3999,7 @@ const enUS = {
     memoryWorkflowActionView: "View Workflow",
     memoryWorkflowActionEdit: "Edit Workflow Info",
     memoryWorkflowDeleteConfirm: "Delete this workflow draft?",
+    memoryWorkflowDeletePublishedConfirm: "Delete this workflow? Its published version will also be disabled.",
     memoryWorkflowDeleteOk: "Delete",
     memoryWorkflowDeleteSuccess: "Deleted",
     memoryWorkflowDeleteFailed: "Delete failed",

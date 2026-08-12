@@ -158,6 +158,21 @@ def _artifact_by_handle(toolkit: HostWorkflowToolkit, session_id: str,
     return matches[0]
 
 
+def _artifact_inventory(response: Dict[str, Any]) -> Dict[str, Any]:
+    """Return list metadata only; artifact bodies are available through read_artifact."""
+    result = dict(response)
+    values = response.get('artifacts') if isinstance(response, dict) else []
+    result['artifacts'] = [{
+        key: item[key] for key in (
+            'artifact_id', 'slot_id', 'slot', 'content_type', 'revision', 'list_index',
+            'selected', 'caption', 'created_at',
+        ) if key in item
+    } for item in (values or []) if isinstance(item, dict)]
+    result['content_omitted'] = True
+    result['read_hint'] = 'Use read_artifact with an exact slot handle only when content is needed.'
+    return result
+
+
 def _safe_session_tools(
     toolkit: HostWorkflowToolkit,
     session: Union[str, Callable[[], str]],
@@ -231,10 +246,15 @@ def _safe_session_tools(
 
     def list_artifacts() -> Dict[str, Any]:
         """List selected Artifacts for this Session."""
-        return toolkit.list_artifacts(session_id())
+        return _artifact_inventory(toolkit.list_artifacts(session_id()))
 
     def read_artifact(artifact_ref: str) -> Dict[str, Any]:
-        """Read a selected Artifact by exact slot handle such as report or images[0]."""
+        """Read a selected Artifact by exact slot handle such as report or images[0].
+
+        Workflow file/image Artifacts are already durably published. Their value contains a
+        browser-accessible signed URL: link that URL directly in the final response instead of
+        copying its server path with save_chat_artifact.
+        """
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
         return toolkit.read_artifact(str(artifact.get('artifact_id') or artifact.get('id') or ''))
 
@@ -361,6 +381,17 @@ def _import_attachment(path: str) -> Dict[str, Any]:
         str(config['core_api_url']).rstrip('/'), str(cfg.get('user_id') or ''), transport=httpx,
     ).import_attachment(path)
     return asdict(value)
+
+
+def _import_text_binding(material_id: str, value: str) -> Dict[str, Any]:
+    from lazymind.chat.workflow.file_adapter import LazyMindHostFileAdapter
+    from lazymind.config import config
+    cfg = _agentic_config()
+    safe_name = re.sub(r'[^0-9A-Za-z_.-]+', '_', material_id).strip('._') or 'input'
+    resource = LazyMindHostFileAdapter(
+        str(config['core_api_url']).rstrip('/'), str(cfg.get('user_id') or ''), transport=httpx,
+    ).import_text(f'{safe_name}.txt', value)
+    return asdict(resource)
 
 
 def _conversation_has_attachments() -> bool:
@@ -501,13 +532,14 @@ def _workflow_trigger_tools(
                 resolved_bindings: Dict[str, Any] = {}
                 for material_id, attachment_ref in (input_bindings or {}).items():
                     from lazymind.chat.engine.subagent.tools import _resolve_attachment
-                    path, error = _resolve_attachment(attachment_ref)
-                    if error or not path:
-                        raise WorkflowClientError(
-                            'ATTACHMENT_NOT_SELECTED',
-                            error or 'The referenced conversation attachment was not found.',
-                        )
-                    resolved_bindings[material_id] = _import_attachment(path)
+                    binding = str(attachment_ref or '').strip()
+                    if not binding:
+                        raise WorkflowClientError('WORKFLOW_INPUT_EMPTY', f'Input {material_id} is empty.')
+                    path, error = _resolve_attachment(binding)
+                    resolved_bindings[material_id] = (
+                        _import_attachment(path) if not error and path
+                        else _import_text_binding(str(material_id), binding)
+                    )
                 client = _client()
                 package = client.get_workflow(bound_id, bound_revision).result
                 toolkit = HostWorkflowToolkit(
@@ -610,8 +642,9 @@ def _workflow_trigger_tools(
         trigger_workflow.__name__ = name
         description = str(item.get('tool_description') or '').strip()
         attachment_guidance = (
-            ' input_bindings may map material IDs only to exact filenames listed in '
-            'the conversation attachments; omit it for generation or web-search flows.'
+            ' input_bindings maps file material IDs to exact filenames listed in the '
+            'conversation attachments, and scalar text/json material IDs to their literal '
+            'values. Never pass a filesystem path for a file material.'
             if attachments_available else
             ' No user attachments are available; start without input bindings so the '
             'Workflow can generate from text or collect images itself.'

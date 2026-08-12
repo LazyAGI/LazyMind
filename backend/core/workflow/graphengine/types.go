@@ -77,16 +77,17 @@ type CompiledBypass struct {
 }
 
 type CompiledStateGraph struct {
-	SchemaVersion     string                   `json:"schema_version"`
-	GraphHash         string                   `json:"graph_hash"`
-	StartRoute        string                   `json:"start_route"`
-	Nodes             map[string]CompiledNode  `json:"nodes"`
-	ControlEdges      []CompiledEdge           `json:"control_edges"`
-	MaterialProducers map[string]ProducerRef   `json:"material_producers"`
-	InputExpressions  map[string]Expression    `json:"input_expressions"`
-	OptionalInputs    map[string][]MaterialRef `json:"optional_inputs"`
-	SkipExpansions    []CompiledBypass         `json:"skip_expansions,omitempty"`
-	StaticOrder       []string                 `json:"static_order"`
+	SchemaVersion         string                   `json:"schema_version"`
+	GraphHash             string                   `json:"graph_hash"`
+	StartRoute            string                   `json:"start_route"`
+	Nodes                 map[string]CompiledNode  `json:"nodes"`
+	ControlEdges          []CompiledEdge           `json:"control_edges"`
+	MaterialProducers     map[string]ProducerRef   `json:"material_producers"`
+	MaterialCardinalities map[string]string        `json:"material_cardinalities,omitempty"`
+	InputExpressions      map[string]Expression    `json:"input_expressions"`
+	OptionalInputs        map[string][]MaterialRef `json:"optional_inputs"`
+	SkipExpansions        []CompiledBypass         `json:"skip_expansions,omitempty"`
+	StaticOrder           []string                 `json:"static_order"`
 }
 
 type CompileResult struct {

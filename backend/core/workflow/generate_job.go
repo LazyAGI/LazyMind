@@ -137,6 +137,7 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 			_ = markGenerateFailed(db, payload.DraftID, fmt.Sprintf("phase-1 analysis: %s", analysisErr))
 			return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, analysisErr
 		}
+		analysisResp.Candidates = normalizeWorkflowCandidates(analysisResp.Candidates)
 		analysisID := uuid.NewString()
 		candidatesJSON, _ := json.Marshal(analysisResp.Candidates)
 		coverageJSON, _ := json.Marshal(analysisResp.Coverage)
@@ -375,6 +376,10 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 			finalDiagnostics = diagnoseWorkflowWithProfile(finalWorkflowYAML, stateResp.StateYAML, scenarioResp.ScenarioMD, scriptsJSON, graphengine.ProfilePublish)
 		}
 	}
+	if draft.SourceType == "skill" {
+		finalWorkflowYAML = ensureGeneratedStepTabs(finalWorkflowYAML)
+		finalDiagnostics = diagnoseWorkflowWithProfile(finalWorkflowYAML, stateResp.StateYAML, scenarioResp.ScenarioMD, scriptsJSON, graphengine.ProfilePublish)
+	}
 	if hasDiagnosticErrors(finalDiagnostics) {
 		message := "generation validation failed: " + diagnosticsJSON(finalDiagnostics)
 		_ = markGenerateFailed(db, payload.DraftID, message)
@@ -403,6 +408,77 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, _ asy
 	}
 
 	return asyncjob.Result{}, nil
+}
+
+// ensureGeneratedStepTabs repairs the common skill-conversion failure where a
+// multi-step graph is rendered as a single "Results" tab.  Runtime execution
+// nodes already exist; this only exposes each step's produced materials and
+// binds the UI tab to the matching step status.
+func ensureGeneratedStepTabs(workflowYAML string) string {
+	var doc map[string]any
+	if yaml.Unmarshal([]byte(workflowYAML), &doc) != nil {
+		return workflowYAML
+	}
+	steps, _ := doc["steps"].([]any)
+	if len(steps) < 2 {
+		return workflowYAML
+	}
+	ui, _ := doc["ui"].(map[string]any)
+	if ui == nil {
+		ui = map[string]any{}
+		doc["ui"] = ui
+	}
+	tabs, _ := ui["tabs"].([]any)
+	if len(tabs) > 1 {
+		return workflowYAML
+	}
+	slots, _ := doc["slots"].([]any)
+	slotByID := map[string]map[string]any{}
+	for _, raw := range slots {
+		slot, _ := raw.(map[string]any)
+		if id := strings.TrimSpace(fmt.Sprint(slot["id"])); id != "" {
+			slotByID[id] = slot
+		}
+	}
+	generated := make([]any, 0, len(steps))
+	for _, raw := range steps {
+		step, _ := raw.(map[string]any)
+		id := strings.TrimSpace(fmt.Sprint(step["id"]))
+		outputs, _ := step["outputs"].([]any)
+		if id == "" || len(outputs) == 0 {
+			continue
+		}
+		refs := make([]any, 0, len(outputs))
+		for _, rawOutput := range outputs {
+			outputID := strings.TrimSpace(fmt.Sprint(rawOutput))
+			if outputID == "" {
+				continue
+			}
+			refs = append(refs, map[string]any{"id": outputID})
+			if slot := slotByID[outputID]; slot != nil {
+				slot["exposed"] = true
+			}
+		}
+		if len(refs) == 0 {
+			continue
+		}
+		label := strings.TrimSpace(fmt.Sprint(step["label"]))
+		if label == "" {
+			label = id
+		}
+		generated = append(generated, map[string]any{
+			"id": id, "step_id": id, "label": label, "layout": "vertical", "slots": refs,
+		})
+	}
+	if len(generated) < 2 {
+		return workflowYAML
+	}
+	ui["tabs"] = generated
+	body, err := yaml.Marshal(doc)
+	if err != nil {
+		return workflowYAML
+	}
+	return string(body)
 }
 
 func manifestOnlySkillPackage(pkg map[string]any) map[string]any {

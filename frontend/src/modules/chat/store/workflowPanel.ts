@@ -254,6 +254,11 @@ export interface SlotDef {
   caption_key?: string;
   /** Maximum characters shown in the artifact summary injected into the AI prompt. */
   summary_max_chars?: number;
+  /** Image-list presentation options, optionally inherited from ui.slots. */
+  itemLayout?: "grid" | "horizontal";
+  gridMaxCols?: number;
+  itemWidth?: number;
+  itemHeight?: number;
 }
 
 // composite_layout node types (recursive) — format C.

@@ -4,8 +4,6 @@ import json
 import os
 import re
 import time
-import base64
-import types
 from typing import Any, Dict, List, Optional
 
 import lazyllm
@@ -25,6 +23,8 @@ from lazymind.chat.engine.agent_runtime import (
 )
 from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
+from lazymind.chat.workflow.artifacts import build_artifact_context_section
+from lazymind.chat.workflow.script_tools import load_pinned_workflow_tools
 
 from lazymind.chat.service.component.tool_registry import (
     ATTACHMENT_EDIT_TOOL_CONFIG,
@@ -55,30 +55,8 @@ def _build_artifact_context_section(
     Ordinary SubAgents receive their attachment context through params and do not
     participate in Workflow resource resolution.
     """
-    params = ctx.params
-    session_id: str = params.get('session_id', '')
-
-    if session_id:
-        try:
-            import httpx
-            from lazymind.config import config
-            from lazymind.workflow_sdk import WorkflowClient
-            response = WorkflowClient(
-                str(config['core_api_url']).rstrip('/'),
-                str(params.get('user_id') or ''), host='lazymind', transport=httpx,
-            ).list_artifacts(session_id).result
-            artifacts = response.get('artifacts') if isinstance(response, dict) else []
-            if not artifacts:
-                return []
-            return [
-                '## Workflow inputs and artifacts [AUTHORITATIVE public runtime]',
-                json.dumps(artifacts, ensure_ascii=False, default=str),
-            ]
-        except Exception as exc:
-            LOG.warning('[SubAgent] public Workflow Artifact read failed: %s', exc)
-            return []
-
-    return []
+    _ = db
+    return build_artifact_context_section(ctx.params)
 
 
 def _resolve_workflow_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
@@ -89,75 +67,14 @@ def _resolve_workflow_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
     return list(dict.fromkeys([*SUBAGENT_CORE_TOOL_NAMES, *map(str, declared)]))
 
 
-def _workflow_package_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, Any]:
-    """Load declared callables from the exact published Workflow revision.
-
-    Core is authoritative for both the pinned revision and the compiled
-    ``legacy_tools`` list.  The model only sees the resulting callables; it
-    cannot choose a package, revision, script, or extra function.
-    """
-    workflow_id = str(params.get('workflow_id') or '').strip()
-    revision_id = str(params.get('revision_id') or '').strip()
-    if not workflow_id or not revision_id or not names:
-        return {}
-    try:
-        import httpx
-        from lazymind.config import config
-        from lazymind.workflow_sdk import WorkflowClient
-
-        package = WorkflowClient(
-            str(config['core_api_url']).rstrip('/'),
-            str(params.get('user_id') or ''), host='lazymind', transport=httpx,
-        ).get_workflow(workflow_id, revision_id).result
-        if str(package.get('revision_id') or '') != revision_id:
-            raise RuntimeError('Core returned a different Workflow revision')
-        expected_hash = str(params.get('tree_hash') or '').strip()
-        if expected_hash and str(package.get('tree_hash') or '') != expected_hash:
-            raise RuntimeError('Core returned a Workflow package with a different tree hash')
-        files = package.get('files') if isinstance(package.get('files'), dict) else {}
-        remaining = set(names)
-        resolved: Dict[str, Any] = {}
-        for path in sorted(files):
-            if not path.startswith('scripts/') or not path.endswith('.py'):
-                continue
-            encoded = files[path]
-            raw_source = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
-            source = raw_source.decode('utf-8')
-            module = types.ModuleType(
-                f'_lazymind_workflow_{revision_id.replace("-", "_")}_{len(resolved)}'
-            )
-            module.__file__ = f'{workflow_id}@{revision_id}/{path}'
-            exec(compile(source, module.__file__, 'exec'), module.__dict__)
-            for name in tuple(remaining):
-                candidate = module.__dict__.get(name)
-                if callable(candidate):
-                    # Published Workflow scripts can predate the tool runtime's
-                    # docstring requirement. Their callable name, signature and
-                    # annotations are already pinned by the immutable revision;
-                    # provide a stable description so legacy revisions remain
-                    # executable instead of failing before the first tool call.
-                    if not str(getattr(candidate, '__doc__', '') or '').strip():
-                        candidate.__doc__ = f'Execute the published Workflow tool {name}.'
-                    resolved[name] = candidate
-                    remaining.remove(name)
-        if remaining:
-            LOG.warning(
-                '[SubAgent] Workflow revision %s does not provide declared tools %s',
-                revision_id, sorted(remaining),
-            )
-        return resolved
-    except Exception as exc:
-        LOG.warning('[SubAgent] failed to load pinned Workflow script tools: %s', exc)
-        return {}
-
-
 def _resolve_runtime_tools(
     explicit: Optional[List[str]], params: Optional[Dict[str, Any]] = None,
 ) -> List[Any]:
     """Build the runtime tool list for a SubAgent.
 
     If explicit tool names are provided, each name is resolved in order:
-      1. DEFAULT_TOOLS registry (framework / global tools).
+      1. The pinned Workflow package's declared tool_scripts.
+      2. DEFAULT_TOOLS registry (framework / global tools).
     If a name is not found in either source it is silently skipped and a warning is logged.
 
     When explicit is None/empty, fall back to all DEFAULT_TOOLS.
@@ -174,7 +91,7 @@ def _resolve_runtime_tools(
         ]
         # Published Workflow script functions are resolved from the exact
         # revision before falling back to framework/global tools.
-        package_by_name = _workflow_package_tools(params or {}, name_list)
+        package_by_name = load_pinned_workflow_tools(params or {}, name_list)
         # Build lookup from DEFAULT_TOOLS.
         default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
         result = []

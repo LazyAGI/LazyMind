@@ -61,7 +61,7 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 	}
 	graph := &CompiledStateGraph{
 		SchemaVersion: SchemaVersion, StartRoute: state.StartRoute, Nodes: map[string]CompiledNode{}, MaterialProducers: map[string]ProducerRef{},
-		InputExpressions: map[string]Expression{}, OptionalInputs: map[string][]MaterialRef{},
+		MaterialCardinalities: map[string]string{}, InputExpressions: map[string]Expression{}, OptionalInputs: map[string][]MaterialRef{},
 	}
 	if graph.StartRoute == "" {
 		graph.StartRoute = "all"
@@ -83,6 +83,11 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			result.Diagnostics = append(result.Diagnostics, materialDiag("E_MATERIAL_DUPLICATE", "error", fmt.Sprintf("workflow.yaml.slots[%d].id", i), id, "material id is duplicated: "+id))
 		}
 		knownMaterials[id] = true
+		cardinality := scalar(slot["cardinality"])
+		if cardinality != "list" {
+			cardinality = "single"
+		}
+		graph.MaterialCardinalities[id] = cardinality
 		external[id] = boolValue(slot["external"]) || scalar(slot["producer"]) == "external"
 		exposed[id] = boolValue(slot["exposed"])
 	}

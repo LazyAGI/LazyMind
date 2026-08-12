@@ -215,7 +215,7 @@ func PublishWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Create(&entries).Error; err != nil {
 			return err
 		}
-		updates := map[string]any{"head_revision_id": revID, "version": next, "updated_at": now, "name": d.Name, "description": yamlScalar(d.WorkflowYAMLContent, "description"), "when_to_use": yamlScalar(d.WorkflowYAMLContent, "when_to_use"), "contains_scripts": len(files) > 3}
+		updates := map[string]any{"head_revision_id": revID, "version": next, "status": "active", "updated_at": now, "name": d.Name, "description": yamlScalar(d.WorkflowYAMLContent, "description"), "when_to_use": yamlScalar(d.WorkflowYAMLContent, "when_to_use"), "contains_scripts": len(files) > 3}
 		if err := tx.Model(&resource).Updates(updates).Error; err != nil {
 			return err
 		}

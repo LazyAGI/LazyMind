@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -19,8 +20,10 @@ func GetWorkflowGenerationAnalysis(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "generation analysis not found", http.StatusNotFound)
 		return
 	}
-	var candidates, coverage, tools, scripts any
+	var candidates []map[string]any
+	var coverage, tools, scripts any
 	_ = json.Unmarshal([]byte(row.CandidatesJSON), &candidates)
+	candidates = normalizeWorkflowCandidates(candidates)
 	_ = json.Unmarshal([]byte(row.CoverageReportJSON), &coverage)
 	_ = json.Unmarshal([]byte(row.ToolMappingReportJSON), &tools)
 	_ = json.Unmarshal([]byte(row.ScriptReportJSON), &scripts)
@@ -107,6 +110,7 @@ func ConfirmWorkflowWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	var candidates []map[string]any
 	_ = json.Unmarshal([]byte(analysis.CandidatesJSON), &candidates)
+	candidates = normalizeWorkflowCandidates(candidates)
 	var selected map[string]any
 	for _, candidate := range candidates {
 		if id, _ := candidate["id"].(string); id == body.CandidateID {
@@ -167,6 +171,7 @@ func cachedAnalysisContext(analysis orm.WorkflowGenerationAnalysis) string {
 	var candidates []map[string]any
 	var mappings, scripts any
 	_ = json.Unmarshal([]byte(analysis.CandidatesJSON), &candidates)
+	candidates = normalizeWorkflowCandidates(candidates)
 	_ = json.Unmarshal([]byte(analysis.ToolMappingReportJSON), &mappings)
 	_ = json.Unmarshal([]byte(analysis.ScriptReportJSON), &scripts)
 	var selected map[string]any
@@ -181,6 +186,30 @@ func cachedAnalysisContext(analysis orm.WorkflowGenerationAnalysis) string {
 	}
 	b, _ := json.Marshal(map[string]any{"candidate": selected, "tool_mappings": mappings, "scripts": scripts})
 	return string(b)
+}
+
+// normalizeWorkflowCandidates keeps the confirmation contract usable when an
+// LLM returns a candidate object without the requested id field. The generated
+// id is stable for persisted candidate order, so this also repairs analyses
+// that were stored before the prompt required candidate ids explicitly.
+func normalizeWorkflowCandidates(candidates []map[string]any) []map[string]any {
+	used := make(map[string]struct{}, len(candidates))
+	for index, candidate := range candidates {
+		id, _ := candidate["id"].(string)
+		id = strings.TrimSpace(id)
+		if _, duplicate := used[id]; id == "" || duplicate {
+			id = fmt.Sprintf("candidate-%d", index+1)
+			for suffix := 2; ; suffix++ {
+				if _, exists := used[id]; !exists {
+					break
+				}
+				id = fmt.Sprintf("candidate-%d-%d", index+1, suffix)
+			}
+		}
+		candidate["id"] = id
+		used[id] = struct{}{}
+	}
+	return candidates
 }
 
 func ignoredScriptWarningJSON(reportJSON string) string {

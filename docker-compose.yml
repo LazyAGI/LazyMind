@@ -701,6 +701,16 @@ services:
         condition: service_healthy
       db-bootstrap:
         condition: service_completed_successfully
+      # These stores are profile-backed. When enabled, do not start the
+      # algorithm registration process until both are actually ready; when a
+      # profile is omitted, `required: false` preserves the existing optional
+      # deployment behavior.
+      milvus:
+        condition: service_healthy
+        required: false
+      opensearch:
+        condition: service_healthy
+        required: false
     networks:
       default:
         aliases:
@@ -922,6 +932,10 @@ services:
     profiles:
       - opensearch
     image: ${OPENSEARCH_IMAGE:-opensearchproject/opensearch:2.18.0}
+    # OpenSearch 2.18 may exit once immediately after its security demo
+    # configuration is initialized on a fresh volume. The next start reuses
+    # that completed configuration and starts normally.
+    restart: on-failure
     environment:
       - cluster.name=opensearch-cluster
       - node.name=opensearch-node1
