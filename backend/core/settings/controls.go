@@ -46,7 +46,7 @@ func LoadFeatureControls(ctx context.Context, db *gorm.DB, userID string) (Featu
 	// Focused package tests and a few lightweight runtime probes use partial
 	// schemas. Missing optional preferences must preserve the upgrade-safe
 	// default instead of blocking an unrelated execution path.
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table: user_ui_preferences") {
+	if isMissingPreferencesTableError(err) {
 		return controls, nil
 	}
 	if err != nil {
@@ -59,4 +59,15 @@ func LoadFeatureControls(ctx context.Context, db *gorm.DB, userID string) (Featu
 		MCPEnabled:             preferences.MCPEnabled,
 		DocumentParsingEnabled: preferences.DocumentParsingEnabled,
 	}, nil
+}
+
+func isMissingPreferencesTableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "no such table: user_ui_preferences") {
+		return true
+	}
+	var sqlStateErr interface{ SQLState() string }
+	return errors.As(err, &sqlStateErr) && sqlStateErr.SQLState() == "42P01"
 }
