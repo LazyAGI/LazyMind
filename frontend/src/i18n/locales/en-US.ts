@@ -682,6 +682,8 @@ const enUS = {
     datasetManagement: "Datasets",
     cloudDocuments: "Cloud Documents",
     terminalConnection: "Channel Connections",
+    systemAdministrator: "System Administrator",
+    normalUser: "Regular User",
     database: "Databases",
     modelProviderManagement: "Models & Services",
     memoryManagement: "Wisdom Accumulation",
@@ -812,6 +814,14 @@ const enUS = {
       title: "Channel Connections",
       subtitle:
         "Connect LazyMind to your messaging apps and continue conversations and tasks from the same account.",
+      quickSubtitle: "Continue conversations and tasks in your messaging apps",
+      connectedCount: "{{count}} connected",
+      manageSettings: "Channel connection settings",
+      expiresAt: "Expires at {{time}}",
+      wechatQuickDescription:
+        "Connect a WeChat account by QR code to continue LazyMind conversations and receive task results.",
+      feishuQuickDescription:
+        "Create and connect a dedicated Feishu assistant to continue LazyMind conversations and tasks.",
       providerLabel: "Choose a messaging channel",
       wechatTitle: "WeChat",
       wechatHint: "Connect a WeChat account by QR code",

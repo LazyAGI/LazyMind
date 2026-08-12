@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
-import { Alert, Button, Drawer, Empty, Skeleton, Switch, Tag, message } from "antd";
+import { Alert, Button, Empty, Skeleton, Switch, Tag, message } from "antd";
 import {
   ApiOutlined,
   DatabaseOutlined,
@@ -11,11 +11,7 @@ import {
   ReloadOutlined,
   RightOutlined,
 } from "@ant-design/icons";
-import KnowledgeLayout from "@/modules/knowledge/layout";
-import KnowledgeListPage from "@/modules/knowledge/pages/list";
-import DatabaseConnectionsPage from "@/modules/dataSource/database";
-import CloudDocumentsPage from "@/modules/modelProvider/pages/CloudDocumentsPage";
-import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
+import { useNavigate } from "react-router-dom";
 import {
   disableTool,
   enableTool,
@@ -24,18 +20,12 @@ import {
 } from "@/modules/memory/toolApi";
 import type { StructuredAsset } from "@/modules/memory/shared";
 
-type ResourceTab = "knowledge" | "cloud" | "database";
-type DetailView =
-  | { type: "services"; title: string }
-  | { type: "resource"; title: string; resourceTab: ResourceTab };
-
 interface KnowledgeDataSettingsProps {
   documentParsingEnabled: boolean;
   documentParsingSaving: boolean;
   controlsDisabled: boolean;
   headingRef: RefObject<HTMLHeadingElement>;
   onDocumentParsingChange: (enabled: boolean) => void;
-  onOpenModels: () => void;
 }
 
 interface ToolDefinition {
@@ -50,8 +40,7 @@ interface ToolGroupDefinition {
   description: string;
   icon: ReactNode;
   tools: ToolDefinition[];
-  destination?: "services" | "resources" | "models";
-  resourceTab?: ResourceTab;
+  destination?: string;
 }
 
 const toolGroups: ToolGroupDefinition[] = [
@@ -60,8 +49,7 @@ const toolGroups: ToolGroupDefinition[] = [
     title: "知识检索",
     description: "知识库发现、文档查询和当前对话临时文件检索。",
     icon: <ReadOutlined />,
-    destination: "resources",
-    resourceTab: "knowledge",
+    destination: "/lib/knowledge/list",
     tools: [
       { id: "kb", name: "知识库", description: "发现知识库、查询文档与统计，并进行语义、关键词和上下文检索" },
       { id: "temp_kb", name: "临时文件检索", description: "从当前对话上传的临时文件中搜索相关内容" },
@@ -72,8 +60,7 @@ const toolGroups: ToolGroupDefinition[] = [
     title: "数据源",
     description: "查看已配置数据源，并以只读方式访问外部数据库。",
     icon: <DatabaseOutlined />,
-    destination: "resources",
-    resourceTab: "database",
+    destination: "/databases",
     tools: [
       { id: "data_sources", name: "数据源查询", description: "查询已经配置的数据源提供方" },
       { id: "external_db", name: "外部数据库查询", description: "查看数据库 schema，并执行只读 SELECT 或 WITH 查询" },
@@ -84,8 +71,7 @@ const toolGroups: ToolGroupDefinition[] = [
     title: "文件访问",
     description: "读取当前设备的授权目录和已连接的云文件系统。",
     icon: <FolderOpenOutlined />,
-    destination: "resources",
-    resourceTab: "cloud",
+    destination: "/cloud-documents",
     tools: [
       { id: "local_fs", name: "本地文件", description: "在已授权路径内搜索、读取和精确修改文件" },
       { id: "cloud_files", name: "云文件", description: "浏览、搜索和管理已连接的云文件系统" },
@@ -96,7 +82,7 @@ const toolGroups: ToolGroupDefinition[] = [
     title: "搜索引擎工具",
     description: "按任务类型调用开放网页、学术资源和稳定百科内容。",
     icon: <GlobalOutlined />,
-    destination: "services",
+    destination: "/model-providers/tools",
     tools: [
       { id: "web_search", name: "网页搜索", description: "自动选择已配置的网页搜索服务" },
       { id: "academic_search", name: "学术搜索", description: "自动选择可用的学术论文搜索服务" },
@@ -109,7 +95,7 @@ const toolGroups: ToolGroupDefinition[] = [
     title: "内容识别",
     description: "使用已选择的多模态模型识别图片内容。",
     icon: <FileSearchOutlined />,
-    destination: "models",
+    destination: "/model-providers/default-services",
     tools: [
       { id: "multimodal", name: "多模态识别", description: "从图片中提取文字和内容描述" },
     ],
@@ -124,9 +110,8 @@ export default function KnowledgeDataSettings({
   controlsDisabled,
   headingRef,
   onDocumentParsingChange,
-  onOpenModels,
 }: KnowledgeDataSettingsProps) {
-  const [detailView, setDetailView] = useState<DetailView | null>(null);
+  const navigate = useNavigate();
   const [tools, setTools] = useState<StructuredAsset[]>([]);
   const [toolsLoading, setToolsLoading] = useState(true);
   const [toolsError, setToolsError] = useState(false);
@@ -183,17 +168,7 @@ export default function KnowledgeDataSettings({
   };
 
   const openGroupDestination = (group: ToolGroupDefinition) => {
-    if (group.destination === "models") {
-      onOpenModels();
-      return;
-    }
-    if (group.destination === "resources" && group.resourceTab) {
-      setDetailView({ type: "resource", title: group.title, resourceTab: group.resourceTab });
-      return;
-    }
-    if (group.destination === "services") {
-      setDetailView({ type: "services", title: group.title });
-    }
+    if (group.destination) navigate(group.destination);
   };
 
   const renderTool = (definition: ToolDefinition, group: ToolGroupDefinition) => {
@@ -282,7 +257,7 @@ export default function KnowledgeDataSettings({
               aria-label="打开文档解析服务配置"
               className="settings-knowledge-detail-button"
               icon={<RightOutlined />}
-              onClick={() => setDetailView({ type: "services", title: "文档解析" })}
+              onClick={() => navigate("/model-providers/tools")}
               type="text"
             />
           </div>
@@ -290,25 +265,6 @@ export default function KnowledgeDataSettings({
       </section>
     </div>
   );
-
-  const detailContent = detailView?.type === "services"
-    ? <div className="settings-knowledge-services">
-      <Alert
-        message="配置说明"
-        description="文档解析、网页搜索和学术搜索在这里配置实际服务。多模态内容识别继续使用模型与服务中的多模态模型。"
-        showIcon
-        type="info"
-        action={<Button onClick={onOpenModels}>配置多模态模型</Button>}
-      />
-      <ExternalServicesPage includeBuiltinTools={false} includeDependencies={false} includeMcp={false} />
-    </div>
-    : detailView?.type === "resource"
-      ? <div className={`settings-knowledge-resource-panel is-${detailView.resourceTab}`}>
-        {detailView.resourceTab === "knowledge" ? <KnowledgeLayout><KnowledgeListPage modelSettingsPath="/settings?section=models" taskCenterPath="/settings?section=tasks" /></KnowledgeLayout> : null}
-        {detailView.resourceTab === "cloud" ? <CloudDocumentsPage /> : null}
-        {detailView.resourceTab === "database" ? <DatabaseConnectionsPage /> : null}
-      </div>
-      : null;
 
   return <section className="settings-knowledge-data">
     <header className="settings-detail-header settings-knowledge-header">
@@ -319,15 +275,5 @@ export default function KnowledgeDataSettings({
     </header>
     {capabilityContent}
     {!toolsLoading && !toolsError && managedTools.length === 0 ? <Empty description="当前后端未返回可管理的知识与数据工具" /> : null}
-    <Drawer
-      className="settings-knowledge-detail-drawer"
-      destroyOnClose
-      onClose={() => setDetailView(null)}
-      open={Boolean(detailView)}
-      title={detailView ? `${detailView.title}配置` : "配置"}
-      width="min(1120px, calc(100vw - 24px))"
-    >
-      {detailContent}
-    </Drawer>
   </section>;
 }

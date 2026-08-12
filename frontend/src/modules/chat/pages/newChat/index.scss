@@ -119,6 +119,7 @@
   }
 
   .new-chat-main {
+    box-sizing: border-box;
     position: relative;
     width: 100%;
     min-height: 100%;
@@ -126,8 +127,11 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-start;
-    padding: 64px 24px 96px;
+    justify-content: center;
+    padding:
+      clamp(28px, 5dvh, 56px)
+      clamp(16px, 3vw, 40px)
+      clamp(64px, 8dvh, 88px);
 
     // Background blur effect
     .blur-background {
@@ -143,6 +147,10 @@
     }
     .chat-content-container {
       position: relative;
+      width: min(1120px, 86%);
+      min-width: 0;
+      margin-inline: auto;
+
       // Main content
       .chat-content {
         position: relative;
@@ -150,12 +158,12 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 48px;
-        width: min(1040px, calc(100vw - 48px));
+        gap: clamp(22px, 3.6dvh, 40px);
+        width: 100%;
 
         border-radius: 12px;
         padding: 0;
-        max-height: 80vh;
+        max-height: none;
         // ChatInput renders prompt rewrite suggestions as an anchored overlay so
         // opening them does not move the vertically-centered composer. Do not
         // clip that overlay at the chat-content boundary.
@@ -249,7 +257,8 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 16px;
+      gap: clamp(8px, 1.5dvh, 16px);
+      width: 100%;
 
       .greeting-emoji {
         width: 60px;
@@ -274,9 +283,9 @@
         font-family:
           -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
           "Helvetica Neue", Arial, sans-serif;
-        font-size: 34px;
+        font-size: clamp(26px, 2.25vw, 34px);
         font-weight: 600;
-        line-height: 1.35;
+        line-height: 1.28;
         color: #323c47;
         text-align: center;
         margin: 0;
@@ -289,8 +298,38 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 16px;
+      gap: clamp(10px, 1.5dvh, 16px);
       width: 100%;
+
+      > .input-wrapper {
+        box-sizing: border-box;
+        padding: clamp(6px, 1dvh, 10px);
+      }
+
+      .showcase-featured-heading {
+        min-height: clamp(24px, 3dvh, 28px);
+        margin-bottom: clamp(10px, 1.8dvh, 18px);
+      }
+
+      .showcase-featured-grid {
+        gap: clamp(10px, 1.2vw, 18px);
+      }
+
+      .showcase-featured-grid .showcase-card {
+        height: clamp(108px, 13.5dvh, 137px);
+      }
+
+      .showcase-featured-grid .showcase-card-body {
+        height: clamp(37px, 4dvh, 41px);
+        flex-basis: clamp(37px, 4dvh, 41px);
+        padding: clamp(8px, 1.2dvh, 11px) 13px 6px;
+      }
+
+      .showcase-featured-grid .showcase-card-image-wrap {
+        min-height: 0;
+        height: auto;
+        flex: 1 1 auto;
+      }
 
         .showcase-template-banner {
           display: flex;
@@ -521,13 +560,15 @@
   // Disclaimer section - Absolutely positioned at bottom
   .disclaimer-section {
     position: absolute;
-    bottom: 20px;
+    bottom: clamp(12px, 2dvh, 20px);
     left: 50%;
     transform: translateX(-50%);
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 16px;
+    width: max-content;
+    max-width: calc(100% - 32px);
 
     .tip-box {
       display: flex;
@@ -556,6 +597,63 @@
       line-height: 1.67;
       color: #b8c3d7;
       white-space: nowrap;
+    }
+  }
+
+  @media (max-width: 1200px) {
+    .new-chat-main {
+      padding-inline: clamp(16px, 2.5vw, 28px);
+
+      .chat-content-container {
+        width: min(980px, 92%);
+      }
+    }
+  }
+
+  @media (max-width: 900px) {
+    .new-chat-main {
+      .chat-content-container {
+        width: 100%;
+      }
+
+      .chat-content-container .chat-content {
+        gap: clamp(18px, 3dvh, 28px);
+      }
+    }
+
+    .disclaimer-section {
+      flex-wrap: wrap;
+      gap: 4px 14px;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .new-chat-main {
+      padding:
+        24px
+        14px
+        76px;
+
+      .greeting-section .greeting-text {
+        font-size: clamp(23px, 7vw, 28px);
+      }
+    }
+
+    .disclaimer-section {
+      width: calc(100% - 28px);
+
+      .disclaimer-text {
+        white-space: normal;
+        text-align: center;
+      }
+    }
+  }
+
+  @media (max-height: 680px) {
+    .new-chat-main {
+      justify-content: flex-start;
+      padding-top: 24px;
+      padding-bottom: 72px;
     }
   }
 }

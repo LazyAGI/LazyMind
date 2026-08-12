@@ -8,6 +8,7 @@ import {
   CodeOutlined,
   DatabaseOutlined,
   ExperimentOutlined,
+  InfoCircleOutlined,
   LinkOutlined,
   RobotOutlined,
   RightOutlined,
@@ -21,7 +22,9 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
 import { TerminalConnectionPage } from "@/modules/channelGateway";
+import { listChannelAccounts } from "@/modules/channelGateway/api";
 import { setAllMcpServersEnabled } from "@/modules/memory/toolApi";
+import { getFFmpegDependencyStatus } from "@/modules/modelProvider/api/systemDependencies";
 import DependencyInstallSection from "@/modules/modelProvider/components/DependencyInstallSection";
 import ToolManagementSection from "@/modules/modelProvider/components/ToolManagementSection";
 import DefaultServicesPage from "@/modules/modelProvider/pages/DefaultServicesPage";
@@ -71,6 +74,13 @@ interface NavigationItem {
 interface NavigationGroup {
   title: string;
   items: NavigationItem[];
+}
+
+interface DiagnosticConnectionState {
+  wechatConnected: number | null;
+  wechatRunning: number | null;
+  dependencyInstalled: boolean | null;
+  dependencyMessage: string;
 }
 
 const controlCopy: Record<MasterSetting, { title: string; summary: string; section: SectionID }> = {
@@ -162,6 +172,14 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState<MasterSetting | "developer" | null>(null);
   const [checks, setChecks] = useState<SettingsCheckResult[] | null>(null);
   const [checking, setChecking] = useState(false);
+  const [diagnosticLoading, setDiagnosticLoading] = useState(false);
+  const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
+  const [diagnosticConnections, setDiagnosticConnections] = useState<DiagnosticConnectionState>({
+    wechatConnected: null,
+    wechatRunning: null,
+    dependencyInstalled: hasLocalDependencies ? null : true,
+    dependencyMessage: hasLocalDependencies ? "正在读取本地依赖状态" : "当前为云端运行环境，依赖由平台统一维护",
+  });
   const [keyword, setKeyword] = useState("");
   const [modelView, setModelView] = useState<"defaults" | "providers">("defaults");
   const [mcpRefreshToken, setMcpRefreshToken] = useState(0);
@@ -205,6 +223,40 @@ export default function SettingsPage() {
       // The detail view owns its visible state; the next page refresh retries the aggregate sync.
     }
   }, []);
+
+  const refreshDiagnosticConnections = useCallback(async () => {
+    setDiagnosticLoading(true);
+    const [wechatResult, dependencyResult] = await Promise.allSettled([
+      listChannelAccounts("wechat"),
+      hasLocalDependencies ? getFFmpegDependencyStatus() : Promise.resolve(null),
+    ]);
+    setDiagnosticConnections((current) => {
+      const next = { ...current };
+      if (wechatResult.status === "fulfilled") {
+        next.wechatConnected = wechatResult.value.items.filter((account) => account.status === "connected").length;
+        next.wechatRunning = wechatResult.value.items.filter((account) => account.status === "connected" && account.runtime_status === "running").length;
+      } else {
+        next.wechatConnected = null;
+        next.wechatRunning = null;
+      }
+      if (!hasLocalDependencies) {
+        next.dependencyInstalled = true;
+        next.dependencyMessage = "当前为云端运行环境，依赖由平台统一维护";
+      } else if (dependencyResult.status === "fulfilled" && dependencyResult.value) {
+        next.dependencyInstalled = dependencyResult.value.installed;
+        next.dependencyMessage = dependencyResult.value.message || (dependencyResult.value.installed ? "FFmpeg 本地依赖可用" : "FFmpeg 本地依赖尚未配置");
+      } else {
+        next.dependencyInstalled = null;
+        next.dependencyMessage = "无法读取本地依赖状态";
+      }
+      return next;
+    });
+    setDiagnosticLoading(false);
+  }, [hasLocalDependencies]);
+
+  useEffect(() => {
+    if (section === "diagnostics") void refreshDiagnosticConnections();
+  }, [refreshDiagnosticConnections, section]);
 
   const requestMasterChange = (key: MasterSetting, enabled: boolean, enabledCountOverride?: number) => {
     const target = controlCopy[key];
@@ -291,7 +343,8 @@ export default function SettingsPage() {
     try {
       const response = await runSettingsChecks();
       setChecks(response.results);
-      await refresh();
+      setLastCheckedAt(response.finished_at);
+      await Promise.all([syncOverview(), refreshDiagnosticConnections()]);
     } catch {
       message.error("检查未完成，请重试");
     } finally {
@@ -395,6 +448,85 @@ export default function SettingsPage() {
     <div className={`settings-integrated-surface ${className}`.trim()}>{content}</div>
   );
 
+  const renderDiagnostics = () => {
+    const models = overview?.sections.find((item) => item.id === "models") || sectionFallback("models");
+    const mcp = overview?.sections.find((item) => item.id === "mcp") || sectionFallback("mcp");
+    const lastCheckedLabel = lastCheckedAt
+      ? new Date(lastCheckedAt).toLocaleString("zh-CN", { hour12: false })
+      : "尚未检查";
+    const wechatStatus = diagnosticConnections.wechatConnected == null
+      ? "读取失败"
+      : diagnosticConnections.wechatConnected > 0
+        ? "已连接"
+        : "未连接";
+    const dependencyStatus = diagnosticConnections.dependencyInstalled == null
+      ? "读取失败"
+      : diagnosticConnections.dependencyInstalled
+        ? hasLocalDependencies ? "已配置" : "云端托管"
+        : "待配置";
+    const rows = [
+      {
+        id: "models",
+        title: "模型供应商",
+        description: models.counts.configured > 0 ? `${models.counts.configured} 项模型已选择` : "尚未选择默认模型",
+        status: models.counts.configured > 0 ? "已配置" : "待配置",
+        tone: models.counts.configured > 0 ? "success" : "warning",
+        action: "查看连接",
+        onClick: () => selectSection("models"),
+      },
+      {
+        id: "mcp",
+        title: "MCP 工具",
+        description: `${mcp.counts.verified} / ${mcp.counts.total} 个服务已验证，${mcp.counts.runnable} 个可运行`,
+        status: mcp.counts.total === 0 ? "未连接" : mcp.counts.verified < mcp.counts.total ? "待验证" : mcp.counts.runnable > 0 ? "可运行" : "已验证",
+        tone: mcp.counts.total > mcp.counts.verified ? "warning" : mcp.counts.runnable > 0 ? "success" : "neutral",
+        action: "查看服务",
+        onClick: () => selectSection("mcp"),
+      },
+      {
+        id: "channels",
+        title: "微信渠道",
+        description: diagnosticConnections.wechatConnected == null
+          ? "微信渠道状态读取失败"
+          : diagnosticConnections.wechatConnected > 0
+            ? `${diagnosticConnections.wechatConnected} 个账号已连接，${diagnosticConnections.wechatRunning} 个运行中`
+            : "尚未绑定微信账号",
+        status: wechatStatus,
+        tone: diagnosticConnections.wechatConnected && diagnosticConnections.wechatConnected > 0 ? "success" : diagnosticConnections.wechatConnected == null ? "warning" : "neutral",
+        action: "查看渠道",
+        onClick: () => selectSection("channels"),
+      },
+      {
+        id: "system_tools",
+        title: "运行时依赖",
+        description: diagnosticConnections.dependencyMessage,
+        status: dependencyStatus,
+        tone: diagnosticConnections.dependencyInstalled == null ? "warning" : diagnosticConnections.dependencyInstalled ? "success" : "warning",
+        action: "查看依赖",
+        onClick: () => selectSection("system_tools"),
+      },
+    ];
+
+    return <>
+      {integratedHeader("同步与查验", "集中查看现有连接、运行环境和检查入口。", <Button type="primary" loading={checking || diagnosticLoading} onClick={handleCheckAll}>检查全部</Button>)}
+      <div className="settings-diagnostics-notice" role="status">
+        <InfoCircleOutlined />
+        <span>查验只读取模型、连接、权限和依赖状态，不会修改已有配置。</span>
+        <em>最近检查：{lastCheckedLabel}</em>
+      </div>
+      <section className="settings-diagnostics-section" aria-label="连接状态">
+        <h2>连接状态</h2>
+        <div className="settings-diagnostics-list">
+          {rows.map((row) => <div className="settings-diagnostics-row" key={row.id}>
+            <div className="settings-diagnostics-copy"><strong>{row.title}</strong><p>{row.description}</p></div>
+            <Tag className={`settings-diagnostics-state is-${row.tone}`}>{row.status}</Tag>
+            <Button onClick={row.onClick}>{row.action}</Button>
+          </div>)}
+        </div>
+      </section>
+    </>;
+  };
+
   const renderDetail = () => {
     let content: ReactNode;
 
@@ -423,7 +555,6 @@ export default function SettingsPage() {
         documentParsingSaving={saving === "document_parsing_enabled"}
         headingRef={headingRef}
         onDocumentParsingChange={(enabled) => requestMasterChange("document_parsing_enabled", enabled)}
-        onOpenModels={() => selectSection("models")}
       />;
     } else if (section === "memory") {
       content = <MemoryCapabilitySettings headingRef={headingRef} />;
@@ -457,7 +588,7 @@ export default function SettingsPage() {
     } else if (section === "channels") {
       content = integratedSurface(<TerminalConnectionPage />, "is-channels");
     } else if (section === "diagnostics") {
-      content = <>{integratedHeader("同步与查验", selectedSection.detail, <Button type="primary" loading={checking} onClick={handleCheckAll}>检查全部</Button>)}{checks ? <CheckResults checks={checks} onLocate={selectSection} /> : <div className="settings-detail-group"><div className="settings-detail-row"><div><strong>尚未运行检查</strong><p>检查模型、MCP、渠道和本地依赖状态，并在这里直接定位问题。</p></div><Button loading={checking} onClick={handleCheckAll}>开始检查</Button></div></div>}</>;
+      content = renderDiagnostics();
     } else {
       content = <>{integratedHeader("开发者", selectedSection.detail, <Tag className="settings-admin-tag">管理员专属</Tag>)}<div className="settings-detail-group"><div className="settings-detail-row"><div><strong>启用开发者模式</strong><p>激活工具管理、算法跃迁、内部 ID 和完整执行过程。</p></div><Switch className="settings-ref-switch" checked={developerActive} loading={saving === "developer"} disabled={saving !== null} onChange={requestDeveloperChange} aria-label="开发者模式" /></div></div></>;
     }
@@ -470,7 +601,7 @@ export default function SettingsPage() {
 
   return <main className="settings-reference" aria-label="设置">
     <aside className="settings-reference-sidebar">
-      <button className="settings-back-button" type="button" onClick={() => navigate(-1)}><ArrowLeftOutlined />返回主页面</button>
+      <button className="settings-back-button" type="button" onClick={() => navigate("/agent/chat/home")}><ArrowLeftOutlined />返回主页面</button>
       <div className="settings-reference-search"><Input prefix={<SearchOutlined />} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索设置..." aria-label="搜索设置" allowClear /></div>
       <nav className="settings-reference-nav" aria-label="设置导航">
         {filteredGroups.map((group) => <div className="settings-reference-nav-group" key={group.title}><p>{group.title}</p>{group.items.map((item) => <button key={item.id} type="button" className={section === item.id ? "is-active" : ""} onClick={() => selectSection(item.id)}><span className="settings-reference-nav-icon">{item.icon}</span><span>{item.label}</span>{item.status ? <em>{item.id === "developer" && !developerActive ? "未激活" : item.status}</em> : null}</button>)}</div>)}
