@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"lazymind/core/agent"
 	"lazymind/core/chat"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
@@ -697,6 +698,12 @@ type agentRouterAlgorithmPathParams struct {
 type agentRouterQueryParams struct {
 	RouterAdminURL string `query:"router_admin_url" desc:"Optional Router admin origin override."`
 	RouterChatURL  string `query:"router_chat_url" desc:"Optional Router chat stream URL override."`
+}
+
+type agentRouterTrafficQueryParams struct {
+	StartTime   string `query:"start_time" required:"true" desc:"Inclusive UTC RFC3339 start time."`
+	EndTime     string `query:"end_time" required:"true" desc:"Exclusive UTC RFC3339 end time."`
+	Granularity string `query:"granularity" required:"true" enum:"hour,day"`
 }
 
 type agentRouterAlgorithmQueryParams struct {
@@ -2109,22 +2116,8 @@ type evalSetImportPreviewOpenAPIRequest struct {
 	FileType string `json:"file_type,omitempty"`
 }
 
-type pluginDraftPathParams struct {
+type workflowDraftPathParams struct {
 	DraftID string `path:"draft_id"`
-}
-type pluginRepairRunPathParams struct {
-	DraftID  string `path:"draft_id"`
-	RepairID string `path:"repair_id"`
-}
-type pluginWorkflowConfirmOpenAPIRequest struct {
-	AnalysisID            string `json:"analysis_id"`
-	CandidateID           string `json:"candidate_id"`
-	SourceSkillRevisionID string `json:"source_skill_revision_id"`
-	DraftVersion          int    `json:"draft_version"`
-}
-type pluginRepairPreviewOpenAPIRequest struct {
-	Target string `json:"target"`
-	Mode   string `json:"mode"`
 }
 
 type writerDocumentSyncPathParams struct {
@@ -2190,13 +2183,9 @@ func registeredCoreOperations() []openAPIOperation {
 		}},
 	}
 	return []openAPIOperation{
-		{Method: "GET", Path: "/plugin-drafts/{draft_id}/generation-analysis", Summary: "Get Plugin generation analysis", Tags: []string{"plugin"}, PathParams: pluginDraftPathParams{}, Responses: map[int]openAPIResponse{200: evoJSONResp("Generation analysis")}},
-		{Method: "POST", Path: "/plugin-drafts/{draft_id}:confirm-workflow", Summary: "Confirm Skill workflow candidate", Tags: []string{"plugin"}, PathParams: pluginDraftPathParams{}, RequestBody: jsonBodyOf(pluginWorkflowConfirmOpenAPIRequest{}, true), Responses: map[int]openAPIResponse{200: evoJSONResp("Confirmation result")}},
-		{Method: "POST", Path: "/plugin-drafts/{draft_id}:repair-preview", Summary: "Preview Plugin repair", Tags: []string{"plugin"}, PathParams: pluginDraftPathParams{}, RequestBody: jsonBodyOf(pluginRepairPreviewOpenAPIRequest{}, true), Responses: map[int]openAPIResponse{200: evoJSONResp("Repair preview")}},
-		{Method: "GET", Path: "/plugin-drafts/{draft_id}/repair-runs/{repair_id}", Summary: "Get Plugin repair run", Tags: []string{"plugin"}, PathParams: pluginRepairRunPathParams{}, Responses: map[int]openAPIResponse{200: evoJSONResp("Repair run")}},
 		{
 			Method:      "POST",
-			Path:        "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document",
+			Path:        "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document",
 			Summary:     "Sync an edited WriterDocument to Feishu",
 			Tags:        []string{"plugin", "writer"},
 			PathParams:  writerDocumentSyncPathParams{},
@@ -4123,6 +4112,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"agent"},
 			QueryParams: agentRouterQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Router AB strategy", agentRouterABStrategyResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/router/traffic-stats",
+			Summary:     "Get Router traffic statistics",
+			Description: "Aggregates persisted single-answer chat histories by the final Router algorithm, excluding task conversations and unattributed legacy rows.",
+			Tags:        []string{"agent"},
+			QueryParams: agentRouterTrafficQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Router traffic statistics", agent.RouterTrafficStatsResponse{})},
 		},
 		{
 			Method:      "PUT",

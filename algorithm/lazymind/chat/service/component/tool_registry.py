@@ -93,8 +93,8 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Attached file rules\n'
         'Attachments are listed for reference only — do NOT parse or read them automatically.\n'
-        '- `find_user_attachment(filename, turn=N)`: get path/url to pass to image tools, workflows, '
-        '`vision_extractor`, or `save_plugin_artifact`. Prefer this for images when the task is '
+        '- `find_user_attachment(filename, turn=N)`: get path/url to pass to image tools, '
+        '`vision_extractor`, or a Host attachment importer. Prefer this for images when the task is '
         'visual (edit, generate, workflow) or you only need the file location.\n'
         '- `read_user_attachment(filename, turn=N)`: extract TEXT — direct read for plain-text files, '
         'local structured extraction for docx (with OCR fallback), OCR for pdf/doc/pptx, or a '
@@ -135,7 +135,9 @@ ASK_USER_QUERY_APPENDIX = (
     'their opinion, or invite any reply, you MUST make an actual `ask_user` function-tool call; NEVER '
     'write that request as assistant prose. This rule applies to every kind of user-facing question or '
     'reply request, including clarification, confirmation, opinion, open-ended questions, and optional '
-    'follow-ups.'
+    'follow-ups. Exception: after you have already given the substantive answer to the user request, '
+    'do NOT call `ask_user` merely to offer optional next steps or say what the user can ask for next; '
+    'write that brief follow-up in assistant prose instead.'
 )
 KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (

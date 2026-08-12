@@ -6,7 +6,7 @@ import os
 import shutil
 import unicodedata
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 import lazyllm
 from lazyllm.tools.agent.base import _write_agent_data
@@ -133,7 +133,7 @@ def _resolve_source_file(path: str, user_id: str, conversation_id: str) -> str:
 def save_chat_artifact(
     filename: str,
     content: Any,
-    content_type: str = 'text',
+    content_type: Literal['text', 'json', 'file'] = 'text',
     caption: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Save a downloadable artifact produced in the current main-chat turn.
@@ -145,7 +145,9 @@ def save_chat_artifact(
     Args:
         filename: Download filename, for example ``notes.txt``. Directory paths are rejected.
         content: Text, a JSON-compatible value, or a workspace path for a file artifact.
-        content_type: One of ``text``, ``json``, or ``file``.
+        content_type: Exactly one of ``text``, ``json``, or ``file``. Images and
+            other binary attachments use ``file`` with a local path inside the
+            current main-Agent workspace. ``image`` is not a valid value here.
         caption: Optional short human-readable description.
     """
     normalized_type = str(content_type or 'text').strip().lower()

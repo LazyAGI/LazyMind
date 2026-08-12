@@ -21,11 +21,11 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/modelconfig"
-	"lazymind/core/plugin"
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/workflow"
 )
 
 func writeConversationJSON(w http.ResponseWriter, status int, v any) {
@@ -44,12 +44,12 @@ func applyBasicChatOnlyPolicy(reqBody map[string]any) {
 		agenticConfig = map[string]any{}
 		reqBody["agentic_config"] = agenticConfig
 	}
-	agenticConfig["enable_plugin"] = false
+	agenticConfig["enable_workflow"] = false
 	agenticConfig["enable_subagent"] = false
-	reqBody["enable_plugin"] = false
+	reqBody["enable_workflow"] = false
 	reqBody["enable_subagent"] = false
-	reqBody["plugin_context"] = map[string]any{}
-	reqBody["plugin_catalog"] = []map[string]any{}
+	reqBody["workflow_context"] = map[string]any{}
+	reqBody["workflow_catalog"] = []map[string]any{}
 	reqBody["disabled_tools"] = mergeDisabledToolNames(
 		stringSliceFromAny(reqBody["disabled_tools"]),
 		[]string{"ask_user", "schedule", "task", "task_center"},
@@ -125,8 +125,8 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, mention := range mentions {
-			if mention.Type == "plugin" {
-				common.ReplyErr(w, "basic chat does not support plugin mentions", http.StatusConflict)
+			if mention.Type == "workflow" {
+				common.ReplyErr(w, "basic chat does not support workflow mentions", http.StatusConflict)
 				return
 			}
 		}
@@ -241,13 +241,13 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Extract initial_plugin_settings from request body (only used on first message of a new conversation).
-	var initialPluginSettings map[string]any
-	if rawPS, ok := raw["initial_plugin_settings"].(map[string]any); ok {
-		initialPluginSettings = rawPS
+	// Extract initial_workflow_settings from request body (only used on first message of a new conversation).
+	var initialWorkflowSettings map[string]any
+	if rawPS, ok := raw["initial_workflow_settings"].(map[string]any); ok {
+		initialWorkflowSettings = rawPS
 	}
 
-	_, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, initialPluginSettings)
+	_, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, initialWorkflowSettings)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to ensure conversation", err), http.StatusInternalServerError)
 		return
@@ -268,13 +268,14 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	if len(mentionedResources.PluginRefs) > 1 {
-		common.ReplyErr(w, "at most one plugin mention is allowed per turn", http.StatusBadRequest)
+	if len(mentionedResources.WorkflowRefs) > 1 {
+		common.ReplyErr(w, "at most one workflow mention is allowed per turn", http.StatusBadRequest)
 		return
 	}
-	if len(mentionedResources.PluginRefs) == 1 {
-		if active, activeErr := plugin.GetLatestSession(r.Context(), db, convID); activeErr == nil && active != nil && active.PluginRef != mentionedResources.PluginRefs[0] {
-			common.ReplyErr(w, "another plugin session is active; finish or close it before mentioning a different plugin", http.StatusConflict)
+	if len(mentionedResources.WorkflowRefs) == 1 {
+		if active, activeErr := workflow.GetLatestSession(r.Context(), db, convID); activeErr == nil &&
+			!workflowSessionTerminal(active) && active.WorkflowRef != mentionedResources.WorkflowRefs[0] {
+			common.ReplyErr(w, "another workflow session is active; finish or close it before mentioning a different workflow", http.StatusConflict)
 			return
 		}
 	}
@@ -307,13 +308,13 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if cnt, err := subagent.CountByConversation(r.Context(), db, convID); err == nil && cnt > 0 {
 		reqBody["has_subagents"] = true
 	}
-	// Reconcile plugin_context with the DB-authoritative active session.
+	// Reconcile workflow_context with the DB-authoritative active session.
 	// Rules:
-	//   1. No plugin_context from frontend → inject from DB if an active session exists.
-	//   2. Frontend sent plugin_context → cross-check with DB; overwrite any stale fields
+	//   1. No workflow_context from frontend → inject from DB if an active session exists.
+	//   2. Frontend sent workflow_context → cross-check with DB; overwrite any stale fields
 	//      so Python always receives the ground-truth session_id / current_step.
 	//
-	// Resolve plugin_mode with correct priority:
+	// Resolve workflow_mode with correct priority:
 	//   request body > conversation DB (loaded via applyChatRuntimeConfigs) > global default
 	// applyChatRuntimeConfigs is called later, so we first apply it to get DB-resolved values,
 	// then override with any explicit body value.
@@ -325,57 +326,63 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if basicChatOnly {
 		applyBasicChatOnlyPolicy(reqBody)
 	} else {
-		// resolvePluginModeWithFallback determines the effective plugin_mode for this request.
-		// It is injected into plugin_context (below) so Python can use it; it is not sent
-		// as a top-level reqBody field because Python reads it exclusively from plugin_context.
-		pluginMode := resolvePluginModeWithFallback(raw, reqBody)
-		existingPluginContext, _ := reqBody["plugin_context"].(map[string]any)
-		if existingPluginContext == nil {
-			existingPluginContext = map[string]any{}
+		// resolveWorkflowModeWithFallback determines the effective workflow_mode for this request.
+		// It is injected into workflow_context (below) so Python can use it; it is not sent
+		// as a top-level reqBody field because Python reads it exclusively from workflow_context.
+		workflowMode := resolveWorkflowModeWithFallback(raw, reqBody)
+		existingWorkflowContext, _ := reqBody["workflow_context"].(map[string]any)
+		if existingWorkflowContext == nil {
+			existingWorkflowContext = map[string]any{}
 		}
-		existingPluginContext["plugin_mode"] = pluginMode
-		reqBody["plugin_context"] = existingPluginContext
-		if preflight := loadPluginPreflightContext(r.Context(), db, convID); len(preflight) > 0 {
-			existing, _ := reqBody["plugin_context"].(map[string]any)
+		// Never trust caller-provided recovery authorization; derive it below from
+		// the normalized user query for this turn.
+		delete(existingWorkflowContext, "user_authorized_retry")
+		existingWorkflowContext["workflow_mode"] = workflowMode
+		reqBody["workflow_context"] = existingWorkflowContext
+		if preflight := loadWorkflowPreflightContext(r.Context(), db, convID); len(preflight) > 0 {
+			existing, _ := reqBody["workflow_context"].(map[string]any)
 			if existing == nil {
 				existing = map[string]any{}
 			}
-			existing["plugin_mode"] = pluginMode
-			existing["plugin_preflight"] = preflight
-			reqBody["plugin_context"] = existing
+			existing["workflow_mode"] = workflowMode
+			existing["workflow_preflight"] = preflight
+			reqBody["workflow_context"] = existing
 		}
 
-		// Promote enable_plugin and enable_subagent from agentic_config to top-level
-		// so Python chat_routes can receive them as explicit parameters.
-		if ac, ok := reqBody["agentic_config"].(map[string]any); ok {
-			if v, ok := ac["enable_plugin"]; ok {
-				reqBody["enable_plugin"] = v
-			}
-			if v, ok := ac["enable_subagent"]; ok {
-				reqBody["enable_subagent"] = v
-			}
+		// Explicit per-request flags (for example a Feishu workspace selection)
+		// take precedence over persisted conversation defaults.
+		promoteAgentRuntimeFlags(raw, reqBody)
+		workflowEnabled, _ := reqBody["enable_workflow"].(bool)
+		effectiveWorkflowRefs, bindingErr := resolveConversationWorkflowBinding(
+			r.Context(), db, convID, mentionedResources.WorkflowRefs,
+			mentionedResources.ExcludedWorkflowRefs, workflowEnabled, true,
+		)
+		if bindingErr != nil {
+			common.ReplyErr(w, "resolve conversation workflow binding failed", http.StatusInternalServerError)
+			return
 		}
-		if err := applyPluginSelection(
-			r.Context(), db, userID, reqBody, mentionedResources.PluginRefs,
-			mentionedResources.ExcludedPluginRefs,
+		if err := applyWorkflowSelection(
+			r.Context(), db, userID, reqBody, effectiveWorkflowRefs,
+			mentionedResources.ExcludedWorkflowRefs,
 		); err != nil {
 			common.ReplyErr(w, err.Error(), http.StatusForbidden)
 			return
 		}
 
-		if activeSess, err := plugin.GetLatestSession(r.Context(), db, convID); err == nil && activeSess != nil {
-			existing, hasPC := reqBody["plugin_context"].(map[string]any)
+		if activeSess, err := workflow.GetLatestSession(r.Context(), db, convID); err == nil && activeSess != nil &&
+			(!workflowSessionTerminal(activeSess) || activeSess.Status == workflow.SessionStatusFailed) {
+			existing, hasPC := reqBody["workflow_context"].(map[string]any)
 			if !hasPC || existing == nil {
 				// Case 1: inject from DB.
-				reqBody["plugin_context"] = map[string]any{
-					"session_id":   activeSess.ID,
-					"plugin_id":    activeSess.PluginID,
-					"current_step": activeSess.CurrentStepID,
-					"plugin_mode":  pluginMode,
-					"plugin_ref":   activeSess.PluginRef, "revision_id": activeSess.PluginRevisionID, "revision_no": activeSess.PluginRevisionNo, "tree_hash": activeSess.PluginTreeHash, "remote_root": activeSess.PluginRemoteRoot,
+				reqBody["workflow_context"] = map[string]any{
+					"session_id":    activeSess.ID,
+					"workflow_id":   activeSess.WorkflowID,
+					"current_step":  activeSess.CurrentStepID,
+					"workflow_mode": workflowMode,
+					"workflow_ref":  activeSess.WorkflowRef, "revision_id": activeSess.WorkflowRevisionID, "revision_no": activeSess.WorkflowRevisionNo, "tree_hash": activeSess.WorkflowTreeHash, "remote_root": activeSess.WorkflowRemoteRoot,
 				}
-				fmt.Printf("[PLUGIN_CONTEXT_INJECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s plugin_mode=%s\n",
-					convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID, pluginMode)
+				fmt.Printf("[WORKFLOW_CONTEXT_INJECTED] conversation_id=%s session_id=%s workflow_id=%s current_step=%s workflow_mode=%s\n",
+					convID, activeSess.ID, activeSess.WorkflowID, activeSess.CurrentStepID, workflowMode)
 			} else {
 				// Case 2: validate/correct stale fields from frontend.
 				stale := false
@@ -383,40 +390,44 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 					existing["session_id"] = activeSess.ID
 					stale = true
 				}
-				if pid, _ := existing["plugin_id"].(string); pid != activeSess.PluginID {
-					existing["plugin_id"] = activeSess.PluginID
+				if pid, _ := existing["workflow_id"].(string); pid != activeSess.WorkflowID {
+					existing["workflow_id"] = activeSess.WorkflowID
 					stale = true
 				}
 				if cs, _ := existing["current_step"].(string); cs != activeSess.CurrentStepID {
 					existing["current_step"] = activeSess.CurrentStepID
 					stale = true
 				}
-				existing["plugin_mode"] = pluginMode
-				existing["plugin_ref"] = activeSess.PluginRef
-				existing["revision_id"] = activeSess.PluginRevisionID
-				existing["revision_no"] = activeSess.PluginRevisionNo
-				existing["tree_hash"] = activeSess.PluginTreeHash
-				existing["remote_root"] = activeSess.PluginRemoteRoot
+				existing["workflow_mode"] = workflowMode
+				existing["workflow_ref"] = activeSess.WorkflowRef
+				existing["revision_id"] = activeSess.WorkflowRevisionID
+				existing["revision_no"] = activeSess.WorkflowRevisionNo
+				existing["tree_hash"] = activeSess.WorkflowTreeHash
+				existing["remote_root"] = activeSess.WorkflowRemoteRoot
 				if stale {
-					fmt.Printf("[PLUGIN_CONTEXT_CORRECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s\n",
-						convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)
+					fmt.Printf("[WORKFLOW_CONTEXT_CORRECTED] conversation_id=%s session_id=%s workflow_id=%s current_step=%s\n",
+						convID, activeSess.ID, activeSess.WorkflowID, activeSess.CurrentStepID)
 				}
 			}
-		} else if existing, hasPC := reqBody["plugin_context"].(map[string]any); hasPC {
-			// No active session in DB but frontend sent a plugin_context — clear it to avoid
+			// Recovery authorization is derived from the real user turn by the Host.
+			// It is deliberately not exposed as a model-fillable Workflow parameter.
+			retryContext, _ := reqBody["workflow_context"].(map[string]any)
+			syntheticSource, _ := retryContext["synthetic_source"].(string)
+			if retryContext != nil && syntheticSource == "" && userExplicitlyRequestedWorkflowRetry(displayQuery) {
+				retryContext["user_authorized_retry"] = true
+				reqBody["workflow_context"] = retryContext
+			}
+		} else if existing, hasPC := reqBody["workflow_context"].(map[string]any); hasPC {
+			// No active session in DB but frontend sent a workflow_context — clear it to avoid
 			// Python entering advance-step mode with a stale/non-existent session.
-			for _, key := range []string{"session_id", "plugin_id", "current_step", "plugin_ref", "revision_id", "revision_no", "tree_hash", "remote_root"} {
+			for _, key := range []string{"session_id", "workflow_id", "current_step", "workflow_ref", "revision_id", "revision_no", "tree_hash", "remote_root"} {
 				delete(existing, key)
 			}
-			existing["plugin_mode"] = pluginMode
-			reqBody["plugin_context"] = existing
-			if _, hasPreflight := existing["plugin_preflight"]; !hasPreflight {
-				fmt.Printf("[PLUGIN_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
+			existing["workflow_mode"] = workflowMode
+			reqBody["workflow_context"] = existing
+			if _, hasPreflight := existing["workflow_preflight"]; !hasPreflight {
+				fmt.Printf("[WORKFLOW_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
 			}
-		}
-		if err := applyPluginContextCallMode(db, userID, reqBody); err != nil {
-			common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
-			return
 		}
 	}
 	historyExt := buildChatHistoryExtWithTrail(raw, displayQuery, histories, target)
@@ -466,6 +477,24 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, displayQuery, target, dualReply, historyExt)
+}
+
+func userExplicitlyRequestedWorkflowRetry(query string) bool {
+	value := strings.ToLower(strings.TrimSpace(query))
+	if value == "" {
+		return false
+	}
+	for _, denied := range []string{"不要重试", "别重试", "无需重试", "不重试", "do not retry", "don't retry"} {
+		if strings.Contains(value, denied) {
+			return false
+		}
+	}
+	for _, prefix := range []string{"重试", "再试", "重新执行", "请重试", "帮我重试", "retry", "try again", "rerun"} {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // ResumeChat text POST /api/v1/conversations:resumeChat
@@ -855,11 +884,24 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 
 	// Interrupt any active plugin session steps.
 	if db := store.DB(); db != nil {
-		plugin.StopActivePluginSession(r.Context(), db, stateStore, convID)
+		workflow.StopActiveWorkflowSession(r.Context(), db, stateStore, convID)
+		taskIDs, err := subagent.InterruptConversation(r.Context(), db, convID, "stopped by user")
+		if err == nil {
+			for _, taskID := range taskIDs {
+				_ = subagent.WriteStatus(r.Context(), stateStore, taskID, map[string]any{
+					"status": subagent.StatusInterrupted, "summary": "stopped by user",
+				})
+				_ = subagent.AppendStreamEvent(r.Context(), stateStore, taskID, subagent.TaskEvent{
+					Type: "error", TaskID: taskID, Status: subagent.StatusInterrupted,
+					Message: "stopped by user",
+				})
+			}
+			subagent.CancelRuns(taskIDs)
+		}
 	}
 
 	// Notify Python ChatAgent to cancel any active chat session for this conversation.
-	go plugin.NotifyChatCancel(convID)
+	go workflow.NotifyChatCancel(convID)
 
 	common.ReplyOK(w, nil)
 }
@@ -1266,8 +1308,8 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 			"create_time":           c.CreatedAt.UTC().Format(time.RFC3339),
 			"update_time":           c.UpdatedAt.UTC().Format(time.RFC3339),
 			"models":                models,
-			"enable_plugin":         c.EnablePlugin,
-			"plugin_mode":           c.PluginMode,
+			"enable_workflow":       c.EnableWorkflow,
+			"workflow_mode":         c.WorkflowMode,
 			"enable_subagent":       c.EnableSubagent,
 		},
 	})
@@ -1332,19 +1374,7 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		userID = "0"
 	}
 	db := store.DB()
-	now := time.Now().UTC()
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&orm.Conversation{}).
-			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).
-			Updates(map[string]any{"deleted_at": now, "updated_at": now})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, []string{convID}, now)
-	}); errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := archiveConversation(r.Context(), db, convID, userID, false); errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 		return
 	} else if err != nil {
@@ -1352,6 +1382,44 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
+}
+
+func archiveConversation(
+	ctx context.Context,
+	db *gorm.DB,
+	conversationID string,
+	userID string,
+	deleteExternalBinding bool,
+) error {
+	now := time.Now().UTC()
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&orm.Conversation{}).
+			Where(
+				"id = ? AND create_user_id = ? AND deleted_at IS NULL",
+				conversationID,
+				userID,
+			).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		if err := taskcenter.ArchiveTasksForConversations(
+			ctx, tx, userID, []string{conversationID}, now,
+		); err != nil {
+			return err
+		}
+		if deleteExternalBinding {
+			return tx.Where(
+				"conversation_id = ? AND created_by_user_id = ?",
+				conversationID,
+				userID,
+			).Delete(&orm.ExternalAgentBinding{}).Error
+		}
+		return nil
+	})
 }
 
 // BatchDeleteConversations text POST /api/v1/conversations:batchDelete
@@ -1444,6 +1512,10 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL", userID)
+	q = q.Where(
+		"NOT EXISTS (SELECT 1 FROM external_agent_bindings " +
+			"WHERE external_agent_bindings.conversation_id = conversations.id)",
+	)
 	if keyword != "" {
 		q = q.Where("display_name LIKE ?", "%"+keyword+"%")
 	}
@@ -1644,30 +1716,17 @@ func FeedBackChatHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&orm.ChatHistory{}).
-			Where("conversation_id = ? AND seq = ?", target.ConversationID, target.Seq).
-			Updates(map[string]any{
-				"feed_back":       0,
-				"reason":          "",
-				"expected_answer": "",
-				"update_time":     now,
-			}).Error; err != nil {
-			return err
-		}
-
-		updates := map[string]any{
-			"feed_back":       feedbackType,
-			"reason":          "",
-			"expected_answer": "",
-			"update_time":     now,
-		}
-		if feedbackType == 2 {
-			updates["reason"] = body.Reason
-			updates["expected_answer"] = body.ExpectedAnswer
-		}
-		return tx.Model(&orm.ChatHistory{}).Where("id = ?", body.HistoryID).Updates(updates).Error
-	}); err != nil {
+	updates := map[string]any{
+		"feed_back":       feedbackType,
+		"reason":          "",
+		"expected_answer": "",
+		"update_time":     now,
+	}
+	if feedbackType == 2 {
+		updates["reason"] = body.Reason
+		updates["expected_answer"] = body.ExpectedAnswer
+	}
+	if err := db.Model(&orm.ChatHistory{}).Where("id = ?", body.HistoryID).Updates(updates).Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "update feedback failed", err), http.StatusInternalServerError)
 		return
 	}
@@ -1731,7 +1790,7 @@ func SetMultiAnswersSwitchStatus(w http.ResponseWriter, r *http.Request) {
 // StreamConvEvents is GET /conversations/{conversation_id}/events.
 // It opens a long-lived SSE connection that replays all existing ConvEvents for the
 // conversation and then tails new ones in real time. The frontend subscribes once per
-// active conversation and uses the events to update TaskCenter and PluginPanel without
+// active conversation and uses the events to update TaskCenter and WorkflowPanel without
 // depending on any specific chat-turn history_id stream.
 func StreamConvEvents(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -1775,8 +1834,14 @@ func StreamConvEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	_ = WatchConvEvents(ctx, stateStore, convID, -1, func(ev *ConvEvent) error {
-		bs, err := json.Marshal(ev)
+	// Capture the replay boundary before opening the tail. Events already in the
+	// list restore state only; later events are live and may trigger UI commands.
+	existing, _ := stateStore.LRange(ctx, convEventsKey(convID), 0, -1)
+	replayThrough := int64(len(existing) - 1)
+	_ = WatchConvEvents(ctx, stateStore, convID, -1, func(index int64, ev *ConvEvent) error {
+		wireEvent := *ev
+		wireEvent.Replayed = index <= replayThrough
+		bs, err := json.Marshal(&wireEvent)
 		if err != nil {
 			return nil
 		}

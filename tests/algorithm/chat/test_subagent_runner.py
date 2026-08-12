@@ -6,13 +6,43 @@ drive run_subagent_stream without any real database, LLM, or network calls.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 import lazymind.chat.engine.subagent.runner as runner_mod
+
+
+def test_workflow_script_tool_is_loaded_from_pinned_revision():
+    source = 'def create_list_fixtures():\n    return ["one", "two"]\n'
+    response = MagicMock()
+    response.result = {
+        'revision_id': 'revision-1',
+        'tree_hash': 'tree-1',
+        'files': {
+            'scripts/tools.py': base64.b64encode(source.encode()).decode(),
+        },
+    }
+    client = MagicMock()
+    client.get_workflow.return_value = response
+
+    with patch('lazymind.workflow_sdk.WorkflowClient', return_value=client):
+        tools = runner_mod._resolve_runtime_tools(
+            ['create_list_fixtures'],
+            {
+                'workflow_id': 'test-workflow',
+                'revision_id': 'revision-1',
+                'tree_hash': 'tree-1',
+                'user_id': 'user-1',
+            },
+        )
+
+    assert [tool.__name__ for tool in tools] == ['create_list_fixtures']
+    assert tools[0]() == ['one', 'two']
+    client.get_workflow.assert_called_once_with('test-workflow', 'revision-1')
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +189,10 @@ def test_subagent_plan_preserves_extension_params_without_structured_duplicates(
             'history_files_per_turn': {'1': ['/tmp/input.txt']},
             'partial_indices': {'items': [0]},
             'required_output_artifact_keys': ['result'],
+            'workflow_id': 'test-workflow',
+            'session_id': 'session-1',
+            'step_id': 'prompt',
+            'user_input': 'run the whole workflow',
         },
         workspace_path=str(tmp_path),
         input_slots=[],
@@ -183,6 +217,14 @@ def test_subagent_plan_preserves_extension_params_without_structured_duplicates(
     assert 'history_files_per_turn' not in parameter_section.content
     assert 'partial_indices' not in parameter_section.content
     assert 'required_output_artifact_keys' not in parameter_section.content
+    assert 'workflow_id' not in parameter_section.content
+    assert 'session_id' not in parameter_section.content
+    assert 'user_input' not in parameter_section.content
+    role_section = next(
+        section for section in plan.prompt.sections
+        if section.section_id == 'subagent_role'
+    )
+    assert 'must never ask the user a question' in role_section.content
 
 
 @pytest.mark.parametrize('thinking_depth', ['low', 'medium', 'high', 'max'])

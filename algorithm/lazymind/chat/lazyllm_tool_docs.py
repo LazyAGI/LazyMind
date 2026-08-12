@@ -6,7 +6,7 @@ import sys
 import threading
 import types
 from pathlib import Path
-from typing import Any
+from typing import Any, get_type_hints
 
 
 _DOC_MODULE_BY_TOOL_PREFIX = (
@@ -41,11 +41,28 @@ def _ensure_tool_docs(tool: Any) -> None:
             _ensure_tool_docs(nested)
         return
 
-    missing = [value for value in _public_callables(tool) if not inspect.getdoc(value)]
+    callables = _public_callables(tool)
+    for value in callables:
+        _resolve_runtime_annotations(value)
+    missing = [value for value in callables if not inspect.getdoc(value)]
     for value in missing:
         doc_module = _doc_module_for(value)
         if doc_module:
             _load_doc_module(doc_module)
+
+
+def _resolve_runtime_annotations(value: Any) -> None:
+    """Replace postponed annotation strings before LazyLLM builds tool classes."""
+    target = getattr(value, '__func__', value)
+    annotations = getattr(target, '__annotations__', None)
+    if not annotations or not any(isinstance(item, str) for item in annotations.values()):
+        return
+    try:
+        target.__annotations__ = get_type_hints(value)
+    except (NameError, TypeError):
+        # Third-party callables can have intentionally unresolved annotations.
+        # Leave those untouched; only LazyMind-owned tools are expected to resolve.
+        return
 
 
 def _public_callables(tool: Any) -> list[Any]:

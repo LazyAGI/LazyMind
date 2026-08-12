@@ -26,6 +26,14 @@ export function stripAskUserReceipt(text: string | undefined, hasAskPending: boo
     : content;
 }
 
+export function isAskPendingReadOnly(
+  askAnswered: boolean | undefined,
+  isLatestMessage: boolean,
+  hasLaterUserMessage = false,
+) {
+  return !!askAnswered || (!isLatestMessage && hasLaterUserMessage);
+}
+
 interface ChatUserMessageLike {
   delta?: string;
   inputs?: Query[] | null;
@@ -205,7 +213,6 @@ export function buildChatMessageListFromHistory(
       thinking_time_s: record.thinking_time_s,
       tool_call_turns: record.tool_call_turns,
       intent_updated: (record as any).intent_updated,
-      is_history: true,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.
@@ -314,8 +321,53 @@ export function mergeConversationTrailIntoMessageList(
 export function mergeChatMessageLists(apiList: any[] = [], cachedList?: any[] | null) {
   const api = Array.isArray(apiList) ? apiList : [];
   const cached = Array.isArray(cachedList) ? cachedList : [];
-  if (cached.length > 0) {
+  if (cached.length === 0) {
+    return api;
+  }
+  if (api.length === 0) {
     return cached;
   }
-  return api;
+
+  const messageKey = (item: any) => item?.history_id || item?.id || "";
+  const apiKeys = new Set(api.map(messageKey).filter(Boolean));
+  const hasPersistedOverlap = cached.some((item) => apiKeys.has(messageKey(item)));
+  if (!hasPersistedOverlap) {
+    return cached;
+  }
+
+  const apiUserTexts = new Set(
+    api
+      .filter((item) => item?.role === RoleTypes.USER)
+      .map((item) => String(item?.display_delta || item?.delta || "").trim())
+      .filter(Boolean),
+  );
+  const apiAssistantTexts = new Set(
+    api
+      .filter((item) => item?.role === RoleTypes.ASSISTANT)
+      .map((item) => String(item?.raw_delta || item?.delta || "").trim())
+      .filter(Boolean),
+  );
+  const apiHasAskPending = api.some((item) => item?.role === RoleTypes.ASSISTANT && item?.ask_pending);
+
+  const unpersistedTail = cached.filter((item) => {
+    const key = messageKey(item);
+    if (key) {
+      return !apiKeys.has(key);
+    }
+    const text = String(item?.display_delta || item?.raw_delta || item?.delta || "").trim();
+    if (item?.role === RoleTypes.USER && text && apiUserTexts.has(text)) {
+      return false;
+    }
+    if (item?.role === RoleTypes.ASSISTANT) {
+      if (item?.ask_pending && apiHasAskPending) {
+        return false;
+      }
+      if (text && apiAssistantTexts.has(text)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  return [...api, ...unpersistedTail];
 }

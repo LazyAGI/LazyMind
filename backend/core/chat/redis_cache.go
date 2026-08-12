@@ -77,8 +77,8 @@ type TaskCreatedNotice struct {
 	Mode              string `json:"mode"`
 	Status            string `json:"status"`
 	SeqInConversation int    `json:"seq_in_conversation"`
-	// PluginSessionID is set when the task is a Plugin Step (agent_type='plugin_step').
-	PluginSessionID string `json:"plugin_session_id,omitempty"`
+	// WorkflowSessionID is set when the task is a Workflow Step (agent_type='workflow_step').
+	WorkflowSessionID string `json:"workflow_session_id,omitempty"`
 }
 
 func chatStatusKey(conversationID string) string {
@@ -264,8 +264,12 @@ func getMultiAnswerInfo(ctx context.Context, stateStore state.Store, conversatio
 // ConvEvent is a conversation-level notification pushed to the frontend via the
 // /conversations/{id}/events SSE endpoint. It is independent of any chat turn.
 type ConvEvent struct {
-	Type    string `json:"type"`    // task_created | plugin_artifact_updated | step_waiting | plugin_completed | plugin_error | driver_input | auto_chat_started | ask_pending
+	Type    string `json:"type"`    // task_created | workflow_artifact_updated | step_waiting | workflow_completed | workflow_error | driver_input | auto_chat_started | ask_pending
 	Payload any    `json:"payload"` // *TaskCreatedNotice or plugin lifecycle payload map
+	// Replayed is transport metadata added by StreamConvEvents. It is never
+	// persisted. Consumers must not re-run command-like side effects for replayed
+	// events (for example driver_input or auto_chat_started).
+	Replayed bool `json:"replayed,omitempty"`
 }
 
 // AppendConvEvent appends a ConvEvent to the conversation-level event LIST.
@@ -293,7 +297,7 @@ func AppendConvEvent(ctx context.Context, stateStore state.Store, conversationID
 
 // WatchConvEvents long-polls the conversation-level event LIST starting from lastIndex+1
 // and calls callback for each new ConvEvent. It returns when ctx is cancelled.
-func WatchConvEvents(ctx context.Context, stateStore state.Store, conversationID string, lastIndex int64, callback func(*ConvEvent) error) error {
+func WatchConvEvents(ctx context.Context, stateStore state.Store, conversationID string, lastIndex int64, callback func(int64, *ConvEvent) error) error {
 	if stateStore == nil {
 		return nil
 	}
@@ -313,10 +317,10 @@ func WatchConvEvents(ctx context.Context, stateStore state.Store, conversationID
 					lastIndex++
 					continue
 				}
-				if err := callback(&ev); err != nil {
+				lastIndex++
+				if err := callback(lastIndex, &ev); err != nil {
 					return err
 				}
-				lastIndex++
 			}
 			time.Sleep(200 * time.Millisecond)
 		}

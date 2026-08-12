@@ -1,0 +1,313 @@
+package facade
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/glebarez/sqlite"
+	"github.com/gorilla/mux"
+	"gorm.io/gorm"
+	"lazymind/core/common"
+	"lazymind/core/common/orm"
+	workflowstore "lazymind/core/workflow/store"
+)
+
+func TestInputResourceImportAndBindingPinsStableRevision(t *testing.T) {
+	h, db := testHandler(t)
+	if err := db.Exec(`INSERT INTO plugin_sessions(id, create_user_id) VALUES ('s1','owner')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("stable requirements")
+	sum := sha256.Sum256(content)
+	body, _ := json.Marshal(map[string]any{
+		"contract_version": ContractVersion, "name": "requirements.txt", "mime_type": "text/plain",
+		"size": len(content), "content_hash": "sha256:" + hex.EncodeToString(sum[:]),
+		"content_base64": base64.StdEncoding.EncodeToString(content),
+	})
+	w := httptest.NewRecorder()
+	h.ImportInputResource(w, request(http.MethodPost, "/workflow-input-resources", "owner", body))
+	if w.Code != http.StatusOK {
+		t.Fatalf("import=%d %s", w.Code, w.Body.String())
+	}
+	var resource struct {
+		ResourceID  string `json:"resource_id"`
+		ContentHash string `json:"content_hash"`
+		Revision    int64  `json:"revision"`
+	}
+	encoded, _ := json.Marshal(decodeEnvelope(t, w).Data)
+	if err := json.Unmarshal(encoded, &resource); err != nil {
+		t.Fatal(err)
+	}
+	bindBody, _ := json.Marshal(map[string]any{
+		"material_id": "requirements", "resource_type": "file", "resource_id": resource.ResourceID,
+		"resource_revision": resource.Revision, "content_hash": resource.ContentHash, "command_id": "cmd-bind",
+	})
+	bindRequest := mux.SetURLVars(request(http.MethodPost, "/workflow-sessions/s1/input-bindings", "owner", bindBody), map[string]string{"session_id": "s1"})
+	bound := httptest.NewRecorder()
+	h.BindInput(bound, bindRequest)
+	if bound.Code != http.StatusOK {
+		t.Fatalf("bind=%d %s", bound.Code, bound.Body.String())
+	}
+	var count int64
+	if err := db.Table("workflow_input_bindings").Where("workflow_session_id = ? AND resource_id = ?", "s1", resource.ResourceID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("binding count=%d err=%v", count, err)
+	}
+	if bytes.Contains(encoded, []byte("content_base64")) || bytes.Contains(encoded, []byte("/tmp/")) {
+		t.Fatalf("Host-private data leaked: %s", encoded)
+	}
+}
+
+func TestAdvanceStepWaitsForTerminalAttemptFromLegacyEnvelope(t *testing.T) {
+	h, db := testHandler(t)
+	if err := db.AutoMigrate(&orm.WorkflowSessionStep{}, &orm.WorkflowTransitionCommand{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO plugin_sessions(id, create_user_id) VALUES ('s1','owner')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	legacy := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		now := time.Now().UTC()
+		row := orm.WorkflowSessionStep{ID: "attempt-1", SessionID: "s1", StepID: "prompt",
+			Attempt: 1, TaskID: "task-1", Status: "running", Validity: "effective",
+			CreatedAt: now, UpdatedAt: now}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			time.Sleep(80 * time.Millisecond)
+			_ = db.Model(&orm.WorkflowSessionStep{}).Where("task_id = ?", "task-1").Updates(
+				map[string]any{"status": "succeeded", "updated_at": time.Now().UTC()}).Error
+		}()
+		common.ReplyOK(w, map[string]any{"accepted": true, "session_id": "s1",
+			"task_id": "task-1", "tasks": []map[string]any{{"step_id": "prompt", "task_id": "task-1"}}})
+	})
+	body := []byte(`{"contract_version":"workflow.v1","command_id":"wait-1","tool":"advance_step","session_id":"s1","expected_state_version":1,"steps":[{"step_id":"prompt"}]}`)
+	r := mux.SetURLVars(request(http.MethodPost, "/workflow-sessions/s1:advance-step", "owner", body),
+		map[string]string{"session_id": "s1"})
+	w := httptest.NewRecorder()
+	started := time.Now()
+	h.Command(legacy)(w, r)
+	if elapsed := time.Since(started); elapsed < 80*time.Millisecond {
+		t.Fatalf("advance_step returned before terminal attempt: %s", elapsed)
+	}
+	wrapped := decodeEnvelope(t, w)
+	encoded, _ := json.Marshal(wrapped.Data)
+	if !bytes.Contains(encoded, []byte(`"attempt_status":"succeeded"`)) ||
+		!bytes.Contains(encoded, []byte(`"step_id":"prompt"`)) {
+		t.Fatalf("terminal execution result missing: %s", encoded)
+	}
+}
+
+func testHandler(t *testing.T) (Handler, *gorm.DB) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := workflowstore.New(db)
+	if err := repo.AutoMigrate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TABLE plugin_sessions (id TEXT PRIMARY KEY, create_user_id TEXT NOT NULL)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	return Handler{Store: repo}, db
+}
+
+func request(method, path, owner string, body []byte) *http.Request {
+	r := httptest.NewRequest(method, path, bytes.NewReader(body))
+	r.Header.Set("X-User-Id", owner)
+	r.Header.Set("Workflow-Contract-Version", ContractVersion)
+	return r
+}
+
+func decodeEnvelope(t *testing.T, recorder *httptest.ResponseRecorder) envelope {
+	t.Helper()
+	var got envelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response %q: %v", recorder.Body.String(), err)
+	}
+	return got
+}
+
+func TestPrepareHTTPRejectsUnknownPublicWorkflow(t *testing.T) {
+	h, _ := testHandler(t)
+	body := []byte(`{"workflow_id":"writer","idempotency_key":"same","input_bindings":{"source":"r1"}}`)
+	recorder := httptest.NewRecorder()
+	h.Prepare(recorder, request(http.MethodPost, "/workflow-preparations", "owner", body))
+	if recorder.Code != http.StatusNotFound || decodeEnvelope(t, recorder).Error.Code != "WORKFLOW_NOT_FOUND" {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPrepareHTTPReturnsFlatPublicContractOnCreateAndReplay(t *testing.T) {
+	h, _ := testHandler(t)
+	body := []byte(`{"workflow_id":"writer","idempotency_key":"same","input_bindings":{}}`)
+	prepared, _, err := h.Store.Prepare(t.Context(), "owner", "same", "writer", ContractVersion,
+		body, json.RawMessage(`{"status":"ready","workflow_ref":"builtin:writer","workflow_revision":"rev-1","missing_inputs":[],"warnings":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		h.Prepare(w, request(http.MethodPost, "/workflow-preparations", "owner", body))
+		if w.Code != http.StatusOK {
+			t.Fatalf("prepare replay=%d body=%s", w.Code, w.Body.String())
+		}
+		encoded, _ := json.Marshal(decodeEnvelope(t, w).Data)
+		var got map[string]any
+		if err := json.Unmarshal(encoded, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got["preparation_id"] != prepared.ID || got["status"] != "ready" || got["workflow_revision"] != "rev-1" {
+			t.Fatalf("public preparation contract is not flat: %s", encoded)
+		}
+		if _, leaked := got["response"]; leaked {
+			t.Fatalf("persistence envelope leaked into public contract: %s", encoded)
+		}
+	}
+}
+
+func TestConsumeHTTPChecksOwnerAndConsumesExactlyOnce(t *testing.T) {
+	h, _ := testHandler(t)
+	p, _, err := h.Store.Prepare(t.Context(), "owner", "key", "writer", ContractVersion, json.RawMessage(`{}`), json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	consume := func(owner, session string) *httptest.ResponseRecorder {
+		r := request(http.MethodPost, "/workflow-preparations/"+p.ID+"/consume", owner, []byte(`{"session_id":"`+session+`"}`))
+		r = mux.SetURLVars(r, map[string]string{"preparation_id": p.ID})
+		w := httptest.NewRecorder()
+		h.Consume(w, r)
+		return w
+	}
+	denied := consume("other", "s1")
+	if denied.Code != http.StatusForbidden || decodeEnvelope(t, denied).Error.Code != "PERMISSION_DENIED" {
+		t.Fatalf("denied=%d %s", denied.Code, denied.Body.String())
+	}
+	if got := consume("owner", "s1"); got.Code != http.StatusNotFound {
+		t.Fatalf("consume=%d %s", got.Code, got.Body.String())
+	}
+}
+
+func TestConsumeHTTPRejectsOversizedSessionIDBeforePersistence(t *testing.T) {
+	h, _ := testHandler(t)
+	r := request(http.MethodPost, "/workflow-preparations/prep/consume", "owner",
+		[]byte(`{"session_id":"1234567890123456789012345678901234567"}`))
+	r = mux.SetURLVars(r, map[string]string{"preparation_id": "prep"})
+	w := httptest.NewRecorder()
+	h.Consume(w, r)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if got := decodeEnvelope(t, w).Error; got == nil || got.Code != "INVALID_REQUEST" {
+		t.Fatalf("unexpected error: %#v", got)
+	}
+}
+
+func TestCommandHTTPChecksVersionPermissionAndExecutesLegacyOnce(t *testing.T) {
+	h, db := testHandler(t)
+	if err := db.Exec(`INSERT INTO plugin_sessions(id, create_user_id) VALUES ('s1','owner')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	legacy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		if payload["operation"] != "advance" || payload["hand_off"] != false || len(payload["targets"].([]any)) != 1 {
+			t.Errorf("legacy adapter payload=%#v", payload)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"accepted":true,"state_version":2}`))
+	})
+	command := h.Command(legacy)
+	body := []byte(`{"contract_version":"workflow.v1","command_id":"cmd-1","tool":"advance_step","session_id":"s1","expected_state_version":1,"steps":[{"step_id":"draft"}]}`)
+	call := func(owner string, payload []byte) *httptest.ResponseRecorder {
+		r := request(http.MethodPost, "/workflow-sessions/s1/commands", owner, payload)
+		r = mux.SetURLVars(r, map[string]string{"session_id": "s1"})
+		w := httptest.NewRecorder()
+		command(w, r)
+		return w
+	}
+	denied := call("other", body)
+	if denied.Code != http.StatusForbidden || decodeEnvelope(t, denied).Error.Code != "PERMISSION_DENIED" {
+		t.Fatalf("permission=%d %s", denied.Code, denied.Body.String())
+	}
+	for i := 0; i < 2; i++ {
+		got := call("owner", body)
+		if got.Code != http.StatusAccepted {
+			t.Fatalf("legacy parity=%d %q", got.Code, got.Body.String())
+		}
+		wrapped := decodeEnvelope(t, got)
+		encoded, _ := json.Marshal(wrapped.Data)
+		if !bytes.Contains(encoded, []byte(`"state_version":2`)) || !wrapped.OK || wrapped.ContractVersion != ContractVersion {
+			t.Fatalf("contract/legacy parity lost: %s", got.Body.String())
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("idempotent command executed %d times", calls.Load())
+	}
+	conflict := call("owner", bytes.Replace(body, []byte(`"draft"`), []byte(`"review"`), 1))
+	if conflict.Code != http.StatusConflict || decodeEnvelope(t, conflict).Error.Code != "IDEMPOTENCY_CONFLICT" {
+		t.Fatalf("conflict=%d %s", conflict.Code, conflict.Body.String())
+	}
+	badVersion := request(http.MethodPost, "/workflow-sessions/s1/commands", "owner", body)
+	badVersion = mux.SetURLVars(badVersion, map[string]string{"session_id": "s1"})
+	badVersion.Header.Set("Workflow-Contract-Version", "workflow.v2")
+	w := httptest.NewRecorder()
+	command(w, badVersion)
+	if w.Code != http.StatusUnprocessableEntity || decodeEnvelope(t, w).Error.Code != "CONTRACT_VERSION_UNSUPPORTED" {
+		t.Fatalf("version=%d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCommandHTTPReportsMissingSessionInsteadOfPermissionDenied(t *testing.T) {
+	h, _ := testHandler(t)
+	command := h.Command(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("missing session must not reach transition handler")
+	}))
+	body := []byte(`{"contract_version":"workflow.v1","command_id":"cmd-1","tool":"advance_step","session_id":"missing","expected_state_version":1,"steps":[{"step_id":"prompt"}]}`)
+	r := mux.SetURLVars(request(http.MethodPost, "/workflow-sessions/missing:advance-step", "owner", body), map[string]string{"session_id": "missing"})
+	w := httptest.NewRecorder()
+	command(w, r)
+	if w.Code != http.StatusNotFound || decodeEnvelope(t, w).Error.Code != "WORKFLOW_SESSION_NOT_FOUND" {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestSessionFacadeEndpointsReportMissingSessionConsistently(t *testing.T) {
+	h, _ := testHandler(t)
+	tests := []struct {
+		name    string
+		method  string
+		path    string
+		body    string
+		handler http.HandlerFunc
+	}{
+		{"inputs", http.MethodGet, "/workflow-sessions/missing/input-bindings", "", h.ListInputs},
+		{"artifacts", http.MethodGet, "/workflow-sessions/missing/artifacts", "", h.ListArtifacts},
+		{"stop", http.MethodPost, "/workflow-sessions/missing:stop", `{"command_id":"stop-1"}`, h.StopWorkflow},
+		{"bind", http.MethodPost, "/workflow-sessions/missing/input-bindings", `{"material_id":"source","resource_id":"r1","command_id":"bind-1"}`, h.BindInput},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := mux.SetURLVars(request(tc.method, tc.path, "owner", []byte(tc.body)), map[string]string{"session_id": "missing"})
+			w := httptest.NewRecorder()
+			tc.handler(w, r)
+			if w.Code != http.StatusNotFound || decodeEnvelope(t, w).Error.Code != "WORKFLOW_SESSION_NOT_FOUND" {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}

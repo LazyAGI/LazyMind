@@ -24,7 +24,7 @@ def _subprocess_env():
         'LAZYLLM_INIT_DOC': 'False',
         'LAZYMIND_ENABLE_ROUTER': 'false',
         'LAZYMIND_BACKGROUND_JOBS_ENABLED': 'false',
-        'LAZYMIND_PLUGINS_DIR': str(_REPO_ROOT / 'plugins'),
+        'LAZYMIND_WORKFLOWS_DIR': str(_REPO_ROOT / 'workflows'),
     })
     return env
 
@@ -43,7 +43,7 @@ def _run_probe(script: str, timeout: float = 35) -> dict:
 
 
 def _fresh_loader():
-    import lazymind.chat.runtime_loader as runtime_loader
+    from lazymind.chat import runtime_loader
     return importlib.reload(runtime_loader)
 
 
@@ -61,9 +61,6 @@ def test_chat_runtime_loader_is_single_flight(monkeypatch):
         return sentinel
 
     monkeypatch.setattr(loader.importlib, 'import_module', fake_import)
-    from lazymind.chat.plugin import plugin_loader
-    monkeypatch.setattr(plugin_loader, 'ensure_loaded', lambda: None)
-
     results = []
     threads = [threading.Thread(target=lambda: results.append(loader.ensure_chat_runtime())) for _ in range(5)]
     for thread in threads:

@@ -88,8 +88,8 @@ function findLastStep(steps: StepInfo[] | undefined, predicate: (step: StepInfo)
 }
 
 function taskTypeFallback(taskType: string, t: TFunction) {
-  const key = taskType === 'plugin_run'
-    ? 'taskCenter.taskFallbackPlugin'
+  const key = taskType === 'workflow_run'
+    ? 'taskCenter.taskFallbackWorkflow'
     : taskType === 'background_chat'
       ? 'taskCenter.taskFallbackBackground'
       : taskType === 'scheduled'

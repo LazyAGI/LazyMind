@@ -314,10 +314,10 @@ export default function MemoryManagement() {
   );
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
   const [skillView, setSkillView] = useState<
-    "installed" | "market" | "plugins" | "trash"
+    "installed" | "market" | "workflows" | "trash"
   >(() => {
     const sv = new URLSearchParams(window.location.search).get("skillView");
-    if (sv === "plugins" || sv === "market" || sv === "trash") return sv;
+    if (sv === "workflows" || sv === "market" || sv === "trash") return sv;
     return "installed";
   });
   const [installedSkillSource, setInstalledSkillSource] = useState<

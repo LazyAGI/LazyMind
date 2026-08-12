@@ -11,11 +11,9 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from channel_gateway.common.domain.channel import ClaimedOutbound
-from channel_gateway.common.ports.core import (
-    StaticAssetClient,
-    TaskClient,
-)
+from channel_gateway.common.ports.core import TaskClient
 from channel_gateway.common.ports.providers import RuntimeCredentialStore
+from channel_gateway.feishu.domain import workspace_card_expired
 from channel_gateway.feishu.ports import (
     FeishuOutboundFactory,
     FeishuTaskOutboxRepository,
@@ -27,10 +25,11 @@ from channel_gateway.feishu.presentation import (
 
 _logger = logging.getLogger(__name__)
 _POLL_SECONDS = 5
-_PLUGIN_TERMINAL_GRACE_SECONDS = 180
+_WORKFLOW_TERMINAL_GRACE_SECONDS = 180
 _TASK_OUTBOX_LIMIT = 100
-_MONITOR_STATE_VERSION = 3
-_MAX_FEISHU_IMAGE_BYTES = 10 * 1024 * 1024
+_MAX_WORKFLOW_TASKS = 20
+_MAX_TASK_IMAGES = 20
+_MONITOR_STATE_VERSION = 4
 _TERMINAL_STATUSES = {
     'completed',
     'succeeded',
@@ -58,13 +57,11 @@ class FeishuTaskCardMonitor:
         credentials: RuntimeCredentialStore,
         channels: FeishuOutboundFactory,
         tasks: TaskClient,
-        assets: StaticAssetClient,
     ):
         self._store = store
         self._credentials = credentials
         self._channels = channels
         self._tasks = tasks
-        self._assets = assets
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -123,8 +120,8 @@ class FeishuTaskCardMonitor:
                 saved_state.get('task_monitor') or {}
             )
             if (
-                monitor_state.get('terminal') is True
-                and monitor_state.get('artifacts_complete') is True
+                monitor_state.get('workflow_terminal') is True
+                and monitor_state.get('delivery_settled') is True
                 and int(monitor_state.get('version') or 1)
                 >= _MONITOR_STATE_VERSION
             ):
@@ -139,146 +136,100 @@ class FeishuTaskCardMonitor:
                     f'{outbound.outbox_id[-16:]}_{part_index}'
                 ),
             )
-            workflow = _workflow_tasks(tasks, anchor_task_id)
+            workflow = workflow_tasks(tasks, anchor_task_id)
             if not workflow:
                 continue
+            visible_workflow = workflow[-_MAX_WORKFLOW_TASKS:]
             now = time.time()
             waiting, terminal, terminal_since = _workflow_state(
                 workflow,
                 monitor_state,
                 now,
             )
-            signature = _workflow_signature(
+            artifacts, omitted_artifacts = _task_artifact_manifest(
+                outbound,
+                part_index,
                 workflow,
+            )
+            delivery = self._store.sync_task_artifact_outbounds(
+                parent=outbound,
+                part_index=part_index,
+                artifacts=artifacts,
+            )
+            signature = _workflow_signature(
+                visible_workflow,
                 waiting_for_next_step=waiting,
                 terminal=terminal,
+                image_delivery=delivery,
+                omitted_images=omitted_artifacts,
             )
             message_id = str(saved_state.get('message_id') or '')
-            if signature != str(
-                monitor_state.get('signature') or ''
-            ) or not message_id:
-                card = FeishuPresentationRenderer.task_workflow_card(
-                    workflow,
-                    waiting_for_next_step=waiting,
-                )
-                message_id = self._publish_card(
+            replacement_message_id = ''
+            if (
+                signature != str(monitor_state.get('signature') or '')
+                or not message_id
+            ):
+                message_id, replacement_message_id = self._publish_card(
                     outbound=outbound,
                     account=account,
                     message_id=message_id,
-                    card=card,
+                    card=FeishuPresentationRenderer.task_workflow_card(
+                        visible_workflow,
+                        waiting_for_next_step=waiting,
+                        inflight_image_count=delivery['inflight'],
+                        failed_image_count=delivery['dead'],
+                        omitted_image_count=omitted_artifacts,
+                    ),
                     part_index=part_index,
                 )
-            delivered_artifacts = self._deliver_images(
-                outbound=outbound,
-                account=account,
-                workflow=workflow,
-                delivered=monitor_state.get('delivered_artifacts'),
-                part_index=part_index,
+            delivery_settled = terminal and delivery['inflight'] == 0
+            artifacts_complete = bool(
+                delivery_settled
+                and delivery['dead'] == 0
+                and omitted_artifacts == 0
             )
-            artifact_keys = {
-                artifact_key
-                for task in workflow
-                for artifact_key, _, _ in _task_images(task)
-            }
+            expected_revision = int(
+                monitor_state.get('monitor_revision') or 0
+            )
             next_state = {
                 **saved_state,
                 'message_id': message_id,
                 'task_monitor': {
                     'version': _MONITOR_STATE_VERSION,
                     'signature': signature,
-                    'terminal': terminal,
-                    'artifacts_complete': (
-                        terminal
-                        and artifact_keys.issubset(delivered_artifacts)
-                    ),
+                    'workflow_terminal': terminal,
+                    'delivery_settled': delivery_settled,
+                    'artifacts_complete': artifacts_complete,
+                    'failed_count': delivery['dead'],
+                    'omitted_count': omitted_artifacts,
+                    'manifest_hash': _artifact_manifest_hash(artifacts),
                     'terminal_since': terminal_since,
                     'latest_status': str(
                         workflow[-1].get('status') or ''
                     ).lower(),
-                    'task_ids': [
-                        str(task.get('task_id') or '')
-                        for task in workflow
-                    ],
-                    'delivered_artifacts': sorted(delivered_artifacts),
+                    'task_lineage': _task_lineage(workflow),
                 },
             }
-            if next_state != saved_state:
-                if not self._store.save_sent_outbound_part_state(
+            persisted = (
+                self._store.compare_and_save_sent_task_monitor_state(
                     outbox_id=outbound.outbox_id,
                     part_index=part_index,
+                    expected_revision=expected_revision,
                     state=next_state,
-                ):
-                    raise RuntimeError(
-                        'Cannot persist Feishu task card state'
-                    )
-
-    def _deliver_images(
-        self,
-        *,
-        outbound: ClaimedOutbound,
-        account: dict[str, Any],
-        workflow: list[dict[str, Any]],
-        delivered: Any,
-        part_index: int,
-    ) -> set[str]:
-        delivered_keys = {
-            str(value)
-            for value in (
-                delivered if isinstance(delivered, list) else []
+                    complete=delivery_settled,
+                )
             )
-            if value
-        }
-        pending = [
-            (artifact_key, source, caption)
-            for task in workflow
-            for artifact_key, source, caption in _task_images(task)
-            if artifact_key not in delivered_keys
-        ]
-        if not pending:
-            return delivered_keys
-        chat_id = str(
-            outbound.provider_context.get('chat_id')
-            or outbound.recipient_id
-        )
-        if not chat_id:
-            raise RuntimeError('Feishu destination chat is missing')
-        owner_user_id = str(account['owner_user_id'])
-        sender = self._channels.create_sender(account['credentials'])
-        try:
-            for artifact_key, source, caption in pending:
-                try:
-                    content = self._assets.download_static_image(
-                        source=source,
-                        owner_user_id=owner_user_id,
-                    )
-                    if len(content) > _MAX_FEISHU_IMAGE_BYTES:
-                        raise RuntimeError('飞书图片不能超过 10 MB')
-                    sender.send_image(
-                        chat_id=chat_id,
-                        content=content,
-                        caption=caption,
-                        idempotency_key=str(
-                            uuid.uuid5(
-                                uuid.NAMESPACE_URL,
-                                (
-                                    f'lazymind:{outbound.outbox_id}:'
-                                    f'task-artifact:{part_index}:'
-                                    f'{artifact_key}'
-                                ),
-                            )
-                        ),
-                    )
-                    delivered_keys.add(artifact_key)
-                except Exception:
-                    _logger.exception(
-                        'feishu_task_image_delivery_failed '
-                        'outbox_id=%s artifact_key=%s',
-                        outbound.outbox_id,
-                        artifact_key,
-                    )
-        finally:
-            sender.close()
-        return delivered_keys
+            authoritative_message_id = str(
+                (persisted or {}).get('message_id') or ''
+            )
+            if (
+                replacement_message_id
+                and authoritative_message_id != replacement_message_id
+            ):
+                self._expire_replacement_card(
+                    account=account,
+                    message_id=replacement_message_id,
+                )
 
     def _publish_card(
         self,
@@ -288,20 +239,24 @@ class FeishuTaskCardMonitor:
         message_id: str,
         card: dict[str, Any],
         part_index: int,
-    ) -> str:
+    ) -> tuple[str, str]:
         sender = self._channels.create_sender(account['credentials'])
         try:
             if message_id:
-                sender.update_card(
-                    message_id=message_id,
-                    card=card,
-                )
-                return message_id
+                try:
+                    sender.update_card(
+                        message_id=message_id,
+                        card=card,
+                    )
+                    return message_id, ''
+                except Exception as exc:
+                    if not workspace_card_expired(exc):
+                        raise
             chat_id = str(
                 outbound.provider_context.get('chat_id')
                 or outbound.recipient_id
             )
-            return sender.send_card(
+            replacement = sender.send_card(
                 chat_id=chat_id,
                 card=card,
                 idempotency_key=str(
@@ -309,11 +264,39 @@ class FeishuTaskCardMonitor:
                         uuid.NAMESPACE_URL,
                         (
                             f'lazymind:{outbound.outbox_id}:'
-                            f'task-monitor:{part_index}'
+                            f'task-monitor:{part_index}:'
+                            f'{message_id or "initial"}'
                         ),
                     )
                 ),
             )
+            if not replacement or replacement == message_id:
+                raise RuntimeError(
+                    'Feishu task card replacement was not created'
+                )
+            return replacement, replacement if message_id else ''
+        finally:
+            sender.close()
+
+    def _expire_replacement_card(
+        self,
+        *,
+        account: dict[str, Any],
+        message_id: str,
+    ) -> None:
+        sender = self._channels.create_sender(account['credentials'])
+        try:
+            sender.update_card(
+                message_id=message_id,
+                card=FeishuPresentationRenderer.task_replaced_card(),
+            )
+        except Exception as exc:
+            if not workspace_card_expired(exc):
+                _logger.warning(
+                    'feishu_task_replacement_expire_failed message_id=%s',
+                    message_id,
+                    exc_info=True,
+                )
         finally:
             sender.close()
 
@@ -321,94 +304,25 @@ class FeishuTaskCardMonitor:
 def _task_bindings(
     outbound: ClaimedOutbound,
 ) -> list[tuple[int, str, str]]:
-    presentations = [
-        dict(item)
-        for item in (
-            outbound.metadata.get('presentations')
-            if isinstance(
-                outbound.metadata.get('presentations'),
-                list,
-            )
-            else []
+    return [
+        (
+            part_index,
+            str(part.get('task_id') or ''),
+            str(part.get('conversation_id') or ''),
         )
-        if isinstance(item, dict)
-        and item.get('kind') == 'task'
-        and item.get('task_id')
+        for part_index, part in enumerate(outbound.rendered_parts)
+        if str(part.get('task_id') or '')
+        and str(part.get('conversation_id') or '')
     ]
-    event_conversations = {
-        str(event.get('payload', {}).get('task_id') or ''): str(
-            event.get('payload', {}).get('conversation_id') or ''
-        )
-        for event in (
-            outbound.metadata.get('core_events')
-            if isinstance(
-                outbound.metadata.get('core_events'),
-                list,
-            )
-            else []
-        )
-        if isinstance(event, dict)
-        and isinstance(event.get('payload'), dict)
-    }
-    bindings: list[tuple[int, str, str]] = []
-    claimed: set[str] = set()
-    for part_index, part in enumerate(outbound.rendered_parts):
-        task_id = str(part.get('task_id') or '')
-        presentation = next(
-            (
-                item
-                for item in presentations
-                if str(item.get('task_id') or '') == task_id
-            ),
-            None,
-        )
-        if not task_id:
-            title = _card_title(part)
-            presentation = next(
-                (
-                    item
-                    for item in presentations
-                    if str(item.get('task_id') or '') not in claimed
-                    and str(item.get('title') or '') == title
-                ),
-                None,
-            )
-            task_id = str(
-                presentation.get('task_id') if presentation else ''
-            )
-        if not task_id or presentation is None:
-            continue
-        conversation_id = str(
-            part.get('conversation_id')
-            or presentation.get('conversation_id')
-            or event_conversations.get(task_id)
-            or ''
-        )
-        bindings.append((part_index, task_id, conversation_id))
-        claimed.add(task_id)
-    return bindings
 
 
-def _card_title(part: dict[str, Any]) -> str:
-    card = part.get('card')
-    if not isinstance(card, dict):
-        return ''
-    header = card.get('header')
-    if not isinstance(header, dict):
-        return ''
-    title = header.get('title')
-    if not isinstance(title, dict):
-        return ''
-    return str(title.get('content') or '')
-
-
-def _task_images(
+def _task_image_projection(
     task: dict[str, Any],
-) -> list[tuple[str, str, str]]:
+) -> tuple[list[tuple[str, str, str]], int]:
     task_id = str(task.get('task_id') or '')
     if not task_id:
-        return []
-    images: list[tuple[str, str, str]] = []
+        return [], 0
+    images: dict[str, tuple[str, str, str]] = {}
     for artifact in (
         task.get('artifacts')
         if isinstance(task.get('artifacts'), list)
@@ -428,21 +342,64 @@ def _task_images(
             continue
         slot = str(artifact.get('slot') or 'image')
         sequence = str(artifact.get('seq') or 0)
-        images.append(
-            (
-                f'{task_id}:{slot}:{sequence}',
-                source,
-                str(value.get('caption') or '').strip(),
-            )
+        artifact_key = hashlib.sha256(
+            f'{task_id}\0{slot}\0{sequence}'.encode()
+        ).hexdigest()
+        images.pop(artifact_key, None)
+        images[artifact_key] = (
+            artifact_key,
+            source,
+            str(value.get('caption') or '').strip()[:300],
         )
-    return images
+    values = list(images.values())
+    return (
+        values[-_MAX_TASK_IMAGES:],
+        max(0, len(values) - _MAX_TASK_IMAGES),
+    )
+
+
+def _task_artifact_manifest(
+    outbound: ClaimedOutbound,
+    part_index: int,
+    workflow: list[dict[str, Any]],
+) -> tuple[list[dict[str, str]], int]:
+    artifacts: list[dict[str, str]] = []
+    omitted = 0
+    for task in workflow:
+        images, task_omitted = _task_image_projection(task)
+        omitted += task_omitted
+        for artifact_key, source, caption in images:
+            artifacts.append({
+                'artifact_key': artifact_key,
+                'source': source,
+                'caption': caption,
+                'delivery_id': str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        (
+                            f'lazymind:{outbound.outbox_id}:'
+                            f'task-artifact:{part_index}:{artifact_key}'
+                        ),
+                    )
+                ),
+            })
+    return artifacts, omitted
+
+
+def _artifact_manifest_hash(artifacts: list[dict[str, str]]) -> str:
+    return hashlib.sha256(
+        '\0'.join(
+            str(artifact.get('artifact_key') or '')
+            for artifact in artifacts
+        ).encode()
+    ).hexdigest()
 
 
 def _is_lazymind_static_file(source: str) -> bool:
     return urlsplit(source).path.startswith('/static-files/')
 
 
-def _workflow_tasks(
+def workflow_tasks(
     tasks: list[dict[str, Any]],
     anchor_task_id: str,
 ) -> list[dict[str, Any]]:
@@ -459,9 +416,9 @@ def _workflow_tasks(
     anchor_seq = int(anchor.get('seq_in_conversation') or 0)
     anchor_type = str(anchor.get('agent_type') or '')
     anchor_title = str(anchor.get('title') or '')
-    plugin_prefix = (
+    workflow_prefix = (
         anchor_title.split(':', 1)[0]
-        if anchor_type == 'plugin_step' and ':' in anchor_title
+        if anchor_type == 'workflow_step' and ':' in anchor_title
         else ''
     )
     candidates = sorted(
@@ -471,14 +428,14 @@ def _workflow_tasks(
             if int(task.get('seq_in_conversation') or 0) >= anchor_seq
             and (
                 (
-                    plugin_prefix
-                    and str(task.get('agent_type') or '') == 'plugin_step'
+                    workflow_prefix
+                    and str(task.get('agent_type') or '') == 'workflow_step'
                     and str(task.get('title') or '').startswith(
-                        f'{plugin_prefix}:'
+                        f'{workflow_prefix}:'
                     )
                 )
                 or (
-                    not plugin_prefix
+                    not workflow_prefix
                     and str(task.get('task_id') or '') == anchor_task_id
                 )
             )
@@ -493,7 +450,7 @@ def _workflow_tasks(
             str(workflow[-1].get('status') or '').lower()
             in _TERMINAL_STATUSES
             and _task_gap_seconds(workflow[-1], task)
-            > _PLUGIN_TERMINAL_GRACE_SECONDS
+            > _WORKFLOW_TERMINAL_GRACE_SECONDS
         ):
             break
         workflow.append(task)
@@ -537,7 +494,7 @@ def _workflow_state(
         return False, False, 0
     if status in _NON_RETRYABLE_TERMINAL_STATUSES:
         return False, True, now
-    if str(latest.get('agent_type') or '') != 'plugin_step':
+    if str(latest.get('agent_type') or '') != 'workflow_step':
         return False, True, now
     if (
         status in {'completed', 'succeeded', 'success'}
@@ -550,25 +507,30 @@ def _workflow_state(
         }
     ):
         return False, True, now
-    previous_ids = previous.get('task_ids')
-    current_ids = [
-        str(task.get('task_id') or '')
-        for task in tasks
-    ]
+    current_lineage = _task_lineage(tasks)
     terminal_since = float(
         previous.get('terminal_since') or 0
     )
     if (
-        previous_ids != current_ids
+        str(previous.get('task_lineage') or '') != current_lineage
         or str(previous.get('latest_status') or '') != status
         or terminal_since <= 0
     ):
         terminal_since = now
     waiting = (
         now - terminal_since
-        < _PLUGIN_TERMINAL_GRACE_SECONDS
+        < _WORKFLOW_TERMINAL_GRACE_SECONDS
     )
     return waiting, not waiting, terminal_since
+
+
+def _task_lineage(tasks: list[dict[str, Any]]) -> str:
+    return hashlib.sha256(
+        '\0'.join(
+            str(task.get('task_id') or '')
+            for task in tasks
+        ).encode()
+    ).hexdigest()
 
 
 def _workflow_signature(
@@ -576,10 +538,14 @@ def _workflow_signature(
     *,
     waiting_for_next_step: bool,
     terminal: bool,
+    image_delivery: dict[str, int],
+    omitted_images: int,
 ) -> str:
     payload = {
         'waiting': waiting_for_next_step,
         'terminal': terminal,
+        'image_delivery': image_delivery,
+        'omitted_images': omitted_images,
         'tasks': [
             {
                 key: task.get(key)

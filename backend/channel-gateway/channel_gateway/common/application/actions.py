@@ -34,6 +34,7 @@ from channel_gateway.common.ports.core import LazyMindCore
 from channel_gateway.common.ports.repository import NavigationRepository
 from channel_gateway.common.domain.chat import (
     BASIC_CHAT_FEATURES,
+    ChannelExecutionContext,
     ChannelFeatureProfile,
     CoreStreamUpdate,
 )
@@ -81,6 +82,9 @@ class ChannelActionExecutor:
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> ChannelReply:
         features = self._feature_resolver(provider)
+        execution = ChannelExecutionContext.from_provider_context(
+            provider_context
+        )
         context = {
             'account_id': account_id,
             'external_address_hash': external_address_hash,
@@ -91,6 +95,9 @@ class ChannelActionExecutor:
         try:
             if isinstance(command, ChatCommand):
                 parameters = command.parameters
+                assistant_conversation_id = self._external_agent_conversation(
+                    execution
+                )
                 text = self._conversations.chat(
                     message=parameters.message,
                     changes=parameters.resource_changes,
@@ -99,8 +106,15 @@ class ChannelActionExecutor:
                     catalog=catalog,
                     features=features,
                     ask_answers_structured=(
-                        self._ask_answers(provider_context)
+                        execution.ask_answers_structured
                     ),
+                    inputs=tuple(
+                        item.to_dict() for item in execution.attachments
+                    ),
+                    thinking_depth=execution.thinking_depth,
+                    conversation_id_override=assistant_conversation_id,
+                    external_agent=assistant_conversation_id is not None,
+                    activate_route=assistant_conversation_id is None,
                     on_stream=on_stream,
                     **context,
                 )
@@ -143,9 +157,35 @@ class ChannelActionExecutor:
                         account_id=account_id,
                         external_address_hash=external_address_hash,
                         features=features,
+                        save_selection=(
+                            str(
+                                (provider_context or {}).get(
+                                    'workspace_surface'
+                                )
+                                or ''
+                            )
+                            != 'management'
+                        ),
                     )
                 )
                 presentations = (capability_presentation,)
+                if execution.include_capability_settings:
+                    try:
+                        _settings_text, settings_presentation = (
+                            self._capabilities.conversation_settings(
+                                account_id=account_id,
+                                external_address_hash=external_address_hash,
+                                owner_user_id=owner_user_id,
+                                request_id=request_id,
+                            )
+                        )
+                    except ActionMessage:
+                        pass
+                    else:
+                        presentations = (
+                            capability_presentation,
+                            settings_presentation,
+                        )
             elif isinstance(command, CapabilityConfigureCommand):
                 text = self._capabilities.configure_capabilities(
                     changes=command.parameters.resource_changes,
@@ -157,9 +197,6 @@ class ChannelActionExecutor:
             elif isinstance(command, ConversationSettingsCommand):
                 text, settings_presentation = (
                     self._capabilities.conversation_settings(
-                        section=command.parameters.section,
-                        catalog=catalog,
-                        features=features,
                         account_id=account_id,
                         external_address_hash=external_address_hash,
                         owner_user_id=owner_user_id,
@@ -174,17 +211,36 @@ class ChannelActionExecutor:
                 text, settings_presentation = (
                     self._capabilities.update_conversation_setting(
                         change=command.parameters.change,
+                        expected_conversation_id=(
+                            command.parameters.expected_conversation_id
+                        ),
                         catalog=catalog,
-                        features=features,
                         account_id=account_id,
                         external_address_hash=external_address_hash,
                         owner_user_id=owner_user_id,
                         request_id=request_id,
                     )
                 )
-                presentations = (settings_presentation,)
+                _capability_text, capability_presentation = (
+                    self._capabilities.list_capabilities(
+                        kinds=[
+                            'knowledge_base',
+                            'skill',
+                            'workflow',
+                            'tool',
+                        ],
+                        catalog=catalog,
+                        account_id=account_id,
+                        external_address_hash=external_address_hash,
+                        features=features,
+                    )
+                )
+                presentations = (
+                    capability_presentation,
+                    settings_presentation,
+                )
             elif isinstance(command, WorkflowInvokeCommand):
-                if not features.enable_plugin:
+                if not features.enable_workflow:
                     raise ActionMessage(
                         '当前渠道没有开放工作流功能，配置没有改变。'
                     )
@@ -193,16 +249,6 @@ class ChannelActionExecutor:
                     parameters.workflow_ref,
                     catalog,
                 )
-                conversation_id = self._store.get_route(
-                    account_id,
-                    external_address_hash,
-                )
-                if conversation_id:
-                    self._client.dismiss_terminal_plugin_session(
-                        owner_user_id=owner_user_id,
-                        conversation_id=conversation_id,
-                        request_id=request_id,
-                    )
                 text = self._conversations.chat(
                     message=parameters.message,
                     changes=[],
@@ -210,10 +256,8 @@ class ChannelActionExecutor:
                     source_messages=grounding_messages,
                     catalog=catalog,
                     features=features,
-                    mentions=(
-                        self._client.mention('plugin', workflow),
-                    ),
-                    plugin_mode='auto',
+                    mentions=(self._client.mention('workflow', workflow),),
+                    thinking_depth=execution.thinking_depth,
                     on_stream=on_stream,
                     **context,
                 )
@@ -238,13 +282,10 @@ class ChannelActionExecutor:
         )
 
     @staticmethod
-    def _ask_answers(
-        provider_context: dict[str, Any] | None,
-    ) -> dict[str, Any] | None:
-        if not isinstance(provider_context, dict):
-            return None
-        value = provider_context.get('ask_answers_structured')
-        return dict(value) if isinstance(value, dict) else None
+    def _external_agent_conversation(
+        execution: ChannelExecutionContext,
+    ) -> str | None:
+        return execution.external_agent_conversation_id or None
 
     @staticmethod
     def _workflow(

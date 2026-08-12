@@ -129,11 +129,11 @@ config.add('audio_segment_interval', int, 15, 'AUDIO_SEGMENT_INTERVAL',
            description='Audio transcript segment merge interval in seconds.')
 config.add('default_chat_dataset', str, 'algo', 'DEFAULT_CHAT_DATASET', description='Default chat dataset.')
 config.add(
-    'plugins_dir',
+    'workflows_dir',
     str,
-    str(Path(__file__).resolve().parent.parent.parent / 'plugins'),
-    'PLUGINS_DIR',
-    description='Directory containing plugin packages. Each sub-directory is one plugin.',
+    str(Path(__file__).resolve().parent.parent.parent / 'workflows'),
+    'WORKFLOWS_DIR',
+    description='Directory containing workflow packages. Each sub-directory is one workflow.',
 )
 config.add('model_config_path', str, 'dynamic', 'MODEL_CONFIG_PATH',
            description='Runtime model config YAML path. Shorthand aliases are auto-resolved to absolute paths.',

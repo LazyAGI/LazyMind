@@ -2699,6 +2699,308 @@ components:
                 task_id:
                     type: string
             type: object
+        ReviewActionItem:
+            properties:
+                decision:
+                    type: string
+                hunk_id:
+                    type: string
+                path:
+                    type: string
+            required:
+                - decision
+                - hunk_id
+            type: object
+        ReviewActionResponse:
+            properties:
+                batch_id:
+                    type: string
+                can_undo:
+                    type: boolean
+                draft_content:
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+                items:
+                    items:
+                        $ref: '#/components/schemas/ReviewActionItem'
+                    type: array
+                ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                review_id:
+                    type: string
+                review_version:
+                    format: int64
+                    type: integer
+            required:
+                - batch_id
+                - can_undo
+                - draft_content
+                - draft_version
+                - ref
+                - review_id
+                - review_version
+            type: object
+        ReviewUndoResponse:
+            properties:
+                can_undo:
+                    type: boolean
+                draft_content:
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+                items:
+                    items:
+                        $ref: '#/components/schemas/ReviewActionItem'
+                    type: array
+                ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                review_id:
+                    type: string
+                review_version:
+                    format: int64
+                    type: integer
+                undone_batch_id:
+                    type: string
+            required:
+                - can_undo
+                - draft_content
+                - draft_version
+                - ref
+                - review_id
+                - review_version
+                - undone_batch_id
+            type: object
+        RevisionDetailResponse:
+            properties:
+                binary:
+                    type: boolean
+                blob_hash:
+                    type: string
+                content:
+                    type: string
+                file_type:
+                    type: string
+                mime:
+                    type: string
+                revisionSummary:
+                    $ref: '#/components/schemas/RevisionSummary'
+            required:
+                - binary
+                - blob_hash
+                - content
+                - file_type
+                - mime
+                - revisionSummary
+            type: object
+        RevisionListResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/RevisionSummary'
+                    type: array
+            type: object
+        RevisionSummary:
+            properties:
+                change_source:
+                    type: string
+                content_hash:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                created_by:
+                    type: string
+                id:
+                    type: string
+                is_head:
+                    type: boolean
+                message:
+                    type: string
+                parent_revision_id:
+                    type: string
+                path:
+                    type: string
+                revision_id:
+                    type: string
+                revision_no:
+                    format: int64
+                    type: integer
+                size:
+                    format: int64
+                    type: integer
+                source_ref_id:
+                    type: string
+                source_ref_type:
+                    type: string
+            required:
+                - change_source
+                - content_hash
+                - created_at
+                - id
+                - is_head
+                - message
+                - path
+                - revision_id
+                - revision_no
+                - size
+                - source_ref_id
+                - source_ref_type
+            type: object
+        RollbackResponse:
+            properties:
+                content:
+                    type: string
+                path:
+                    type: string
+                ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                revision_id:
+                    type: string
+                revision_no:
+                    format: int64
+                    type: integer
+            required:
+                - content
+                - path
+                - ref
+                - revision_id
+                - revision_no
+            type: object
+        RouterAlgorithmTraffic:
+            properties:
+                actual_ratio:
+                    format: double
+                    type: number
+                algorithm_id:
+                    type: string
+                answer_count:
+                    format: int64
+                    type: integer
+                conversation_count:
+                    type: integer
+                dislike_count:
+                    format: int64
+                    type: integer
+                feedback_rate:
+                    format: double
+                    type: number
+                like_count:
+                    format: int64
+                    type: integer
+                positive_rate:
+                    format: double
+                    nullable: true
+                    type: number
+                user_count:
+                    type: integer
+            required:
+                - actual_ratio
+                - algorithm_id
+                - answer_count
+                - conversation_count
+                - dislike_count
+                - feedback_rate
+                - like_count
+                - positive_rate
+                - user_count
+            type: object
+        RouterDislikeReason:
+            properties:
+                algorithm_id:
+                    type: string
+                count:
+                    format: int64
+                    type: integer
+                ratio:
+                    format: double
+                    type: number
+                reason:
+                    type: string
+            required:
+                - algorithm_id
+                - count
+                - ratio
+                - reason
+            type: object
+        RouterTrafficPoint:
+            properties:
+                counts:
+                    additionalProperties:
+                        format: int64
+                        type: integer
+                    type: object
+                time:
+                    type: string
+            required:
+                - counts
+                - time
+            type: object
+        RouterTrafficRange:
+            properties:
+                end_time:
+                    type: string
+                granularity:
+                    enum:
+                        - hour
+                        - day
+                    type: string
+                start_time:
+                    type: string
+            required:
+                - end_time
+                - granularity
+                - start_time
+            type: object
+        RouterTrafficStatsResponse:
+            properties:
+                algorithms:
+                    items:
+                        $ref: '#/components/schemas/RouterAlgorithmTraffic'
+                    type: array
+                dislike_reasons:
+                    items:
+                        $ref: '#/components/schemas/RouterDislikeReason'
+                    type: array
+                range:
+                    $ref: '#/components/schemas/RouterTrafficRange'
+                summary:
+                    $ref: '#/components/schemas/RouterTrafficSummary'
+                trend:
+                    items:
+                        $ref: '#/components/schemas/RouterTrafficPoint'
+                    type: array
+            required:
+                - algorithms
+                - dislike_reasons
+                - range
+                - summary
+                - trend
+            type: object
+        RouterTrafficSummary:
+            properties:
+                answer_count:
+                    format: int64
+                    type: integer
+                conversation_count:
+                    type: integer
+                feedback_count:
+                    format: int64
+                    type: integer
+                feedback_rate:
+                    format: double
+                    type: number
+                user_count:
+                    type: integer
+            required:
+                - answer_count
+                - conversation_count
+                - feedback_count
+                - feedback_rate
+                - user_count
+            type: object
         SearchDatasetMemberRequest:
             properties:
                 is_all:
@@ -4433,32 +4735,6 @@ components:
                     type: boolean
             required:
                 - enabled
-            type: object
-        pluginRepairPreviewOpenAPIRequest:
-            properties:
-                mode:
-                    type: string
-                target:
-                    type: string
-            required:
-                - mode
-                - target
-            type: object
-        pluginWorkflowConfirmOpenAPIRequest:
-            properties:
-                analysis_id:
-                    type: string
-                candidate_id:
-                    type: string
-                draft_version:
-                    type: integer
-                source_skill_revision_id:
-                    type: string
-            required:
-                - analysis_id
-                - candidate_id
-                - draft_version
-                - source_skill_revision_id
             type: object
         promptCategoryCreateOpenAPIRequest:
             properties:
@@ -6275,6 +6551,40 @@ paths:
             summary: Get Evo router status
             tags:
                 - agent
+    /api/core/agent/router/traffic-stats:
+        get:
+            description: Aggregates persisted single-answer chat histories by the final Router algorithm, excluding task conversations and unattributed legacy rows.
+            parameters:
+                - description: Inclusive UTC RFC3339 start time.
+                  in: query
+                  name: start_time
+                  required: true
+                  schema:
+                    type: string
+                - description: Exclusive UTC RFC3339 end time.
+                  in: query
+                  name: end_time
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: granularity
+                  required: true
+                  schema:
+                    enum:
+                        - hour
+                        - day
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RouterTrafficStatsResponse'
+                    description: Router traffic statistics
+            summary: Get Router traffic statistics
+            tags:
+                - agent
     /api/core/agent/threads:
         get:
             description: List the current user's Core thread index entries. Core refreshes status from Evo when available.
@@ -6888,24 +7198,24 @@ paths:
                 "200":
                     description: OK
             summary: POST /chat
-    /api/core/chat/settings/plugins:
+    /api/core/chat/settings/workflows:
         get:
             responses:
                 "200":
                     description: OK
-            summary: GET /chat/settings/plugins
-    /api/core/chat/settings/plugins/{plugin_ref:.+}:
+            summary: GET /chat/settings/workflows
+    /api/core/chat/settings/workflows/{workflow_ref:.+}:
         patch:
             parameters:
                 - in: path
-                  name: plugin_ref:.+
+                  name: workflow_ref:.+
                   required: true
                   schema:
                     type: string
             responses:
                 "200":
                     description: OK
-            summary: PATCH /chat/settings/plugins/{plugin_ref:.+}
+            summary: PATCH /chat/settings/workflows/{workflow_ref:.+}
     /api/core/conversation:export:
         post:
             requestBody:
@@ -7006,7 +7316,7 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/artifacts
-    /api/core/conversations/{conversation_id}/dismissed-plugin-sessions:
+    /api/core/conversations/{conversation_id}/dismissed-workflow-sessions:
         get:
             parameters:
                 - in: path
@@ -7017,7 +7327,7 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: GET /conversations/{conversation_id}/dismissed-plugin-sessions
+            summary: GET /conversations/{conversation_id}/dismissed-workflow-sessions
     /api/core/conversations/{conversation_id}/events:
         get:
             parameters:
@@ -7030,54 +7340,6 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/events
-    /api/core/conversations/{conversation_id}/plugin-sessions:
-        get:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /conversations/{conversation_id}/plugin-sessions
-    /api/core/conversations/{conversation_id}/plugin-sessions:active:
-        get:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /conversations/{conversation_id}/plugin-sessions:active
-    /api/core/conversations/{conversation_id}/plugin-sessions:latest:
-        get:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /conversations/{conversation_id}/plugin-sessions:latest
-    /api/core/conversations/{conversation_id}/plugin-settings:
-        patch:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: PATCH /conversations/{conversation_id}/plugin-settings
     /api/core/conversations/{conversation_id}/tasks:
         get:
             parameters:
@@ -7090,6 +7352,54 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/tasks
+    /api/core/conversations/{conversation_id}/workflow-sessions:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/workflow-sessions
+    /api/core/conversations/{conversation_id}/workflow-sessions:active:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/workflow-sessions:active
+    /api/core/conversations/{conversation_id}/workflow-sessions:latest:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/workflow-sessions:latest
+    /api/core/conversations/{conversation_id}/workflow-settings:
+        patch:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /conversations/{conversation_id}/workflow-settings
     /api/core/conversations/{conversation_id}:status:
         get:
             parameters:
@@ -10761,537 +11071,6 @@ paths:
             summary: Set personalization setting
             tags:
                 - personalization
-    /api/core/plugin-drafts:
-        get:
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-drafts
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts
-    /api/core/plugin-drafts/{draft_id}:
-        delete:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: DELETE /plugin-drafts/{draft_id}
-        get:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-drafts/{draft_id}
-    /api/core/plugin-drafts/{draft_id}/generation-analysis:
-        get:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Generation analysis
-            summary: Get Plugin generation analysis
-            tags:
-                - plugin
-    /api/core/plugin-drafts/{draft_id}/repair-runs/{repair_id}:
-        get:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: repair_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Repair run
-            summary: Get Plugin repair run
-            tags:
-                - plugin
-    /api/core/plugin-drafts/{draft_id}:ai-generate:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts/{draft_id}:ai-generate
-    /api/core/plugin-drafts/{draft_id}:ai-repair:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts/{draft_id}:ai-repair
-    /api/core/plugin-drafts/{draft_id}:confirm-workflow:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/pluginWorkflowConfirmOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Confirmation result
-            summary: Confirm Skill workflow candidate
-            tags:
-                - plugin
-    /api/core/plugin-drafts/{draft_id}:publish:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts/{draft_id}:publish
-    /api/core/plugin-drafts/{draft_id}:repair-preview:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/pluginRepairPreviewOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Repair preview
-            summary: Preview Plugin repair
-            tags:
-                - plugin
-    /api/core/plugin-drafts/{draft_id}:save:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts/{draft_id}:save
-    /api/core/plugin-drafts/{draft_id}:validate:
-        post:
-            parameters:
-                - in: path
-                  name: draft_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts/{draft_id}:validate
-    /api/core/plugin-drafts:polish-info:
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-drafts:polish-info
-    /api/core/plugin-sessions/{session_id}:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}
-    /api/core/plugin-sessions/{session_id}/artifacts:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-sessions/{session_id}/artifacts
-    /api/core/plugin-sessions/{session_id}/projection:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}/projection
-    /api/core/plugin-sessions/{session_id}/slots:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}/slots
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}:
-        patch:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-sessions/{session_id}/slots/{slot_id}/items
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:
-        delete:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: list_index
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: DELETE /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
-        patch:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: list_index
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption:
-        patch:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: list_index
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: list_index
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: list_index
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: list_index
-                  required: true
-                  schema:
-                    type: integer
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/writerDocumentSyncOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: WriterDocument sync result
-            summary: Sync an edited WriterDocument to Feishu
-            tags:
-                - plugin
-                - writer
-    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/order:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}/slots/{slot_id}/order
-        patch:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: slot_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}/order
-    /api/core/plugin-sessions/{session_id}/state-graph:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}/state-graph
-    /api/core/plugin-sessions/{session_id}/steps:
-        get:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugin-sessions/{session_id}/steps
-    /api/core/plugin-sessions/{session_id}:dismiss:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-sessions/{session_id}:dismiss
-    /api/core/plugin-sessions/{session_id}:restore:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-sessions/{session_id}:restore
-    /api/core/plugin-sessions/{session_id}:sync-search-config:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /plugin-sessions/{session_id}:sync-search-config
-    /api/core/plugins:
-        get:
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugins
-    /api/core/plugins/{plugin_id}:
-        get:
-            parameters:
-                - in: path
-                  name: plugin_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: GET /plugins/{plugin_id}
     /api/core/prompt_categories:
         get:
             responses:
@@ -11539,23 +11318,23 @@ paths:
             summary: Polish prompt
             tags:
                 - prompts
-    /api/core/published-plugins/{plugin_ref:.+}/versions:
+    /api/core/published-workflows/{workflow_ref:.+}/versions:
         get:
             parameters:
                 - in: path
-                  name: plugin_ref:.+
+                  name: workflow_ref:.+
                   required: true
                   schema:
                     type: string
             responses:
                 "200":
                     description: OK
-            summary: GET /published-plugins/{plugin_ref:.+}/versions
-    /api/core/published-plugins/{plugin_ref:.+}/versions/{revision_id}:
+            summary: GET /published-workflows/{workflow_ref:.+}/versions
+    /api/core/published-workflows/{workflow_ref:.+}/versions/{revision_id}:
         get:
             parameters:
                 - in: path
-                  name: plugin_ref:.+
+                  name: workflow_ref:.+
                   required: true
                   schema:
                     type: string
@@ -11567,12 +11346,12 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: GET /published-plugins/{plugin_ref:.+}/versions/{revision_id}
-    /api/core/published-plugins/{plugin_ref:.+}/versions/{revision_id}:edit:
+            summary: GET /published-workflows/{workflow_ref:.+}/versions/{revision_id}
+    /api/core/published-workflows/{workflow_ref:.+}/versions/{revision_id}:edit:
         post:
             parameters:
                 - in: path
-                  name: plugin_ref:.+
+                  name: workflow_ref:.+
                   required: true
                   schema:
                     type: string
@@ -11584,31 +11363,43 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: POST /published-plugins/{plugin_ref:.+}/versions/{revision_id}:edit
-    /api/core/published-plugins/{plugin_ref:.+}:archive:
+            summary: POST /published-workflows/{workflow_ref:.+}/versions/{revision_id}:edit
+    /api/core/published-workflows/{workflow_ref:.+}:archive:
         post:
             parameters:
                 - in: path
-                  name: plugin_ref:.+
+                  name: workflow_ref:.+
                   required: true
                   schema:
                     type: string
             responses:
                 "200":
                     description: OK
-            summary: POST /published-plugins/{plugin_ref:.+}:archive
-    /api/core/published-plugins/{plugin_ref:.+}:rollback:
+            summary: POST /published-workflows/{workflow_ref:.+}:archive
+    /api/core/published-workflows/{workflow_ref:.+}:restore:
         post:
             parameters:
                 - in: path
-                  name: plugin_ref:.+
+                  name: workflow_ref:.+
                   required: true
                   schema:
                     type: string
             responses:
                 "200":
                     description: OK
-            summary: POST /published-plugins/{plugin_ref:.+}:rollback
+            summary: POST /published-workflows/{workflow_ref:.+}:restore
+    /api/core/published-workflows/{workflow_ref:.+}:rollback:
+        post:
+            parameters:
+                - in: path
+                  name: workflow_ref:.+
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /published-workflows/{workflow_ref:.+}:rollback
     /api/core/schedules:
         get:
             responses:
@@ -13756,6 +13547,745 @@ paths:
             summary: Merge word groups from merges list, add word into group_ids, resolve conflict
             tags:
                 - word_group
+    /api/core/workflow-artifacts/{artifact_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /workflow-artifacts/{artifact_id}
+        get:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-artifacts/{artifact_id}
+        patch:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /workflow-artifacts/{artifact_id}
+    /api/core/workflow-authoring/v1/drafts:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-authoring/v1/drafts
+    /api/core/workflow-authoring/v1/drafts/{draft_id}/diagnostics:
+        get:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-authoring/v1/drafts/{draft_id}/diagnostics
+    /api/core/workflow-authoring/v1/drafts/{draft_id}/files:
+        put:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /workflow-authoring/v1/drafts/{draft_id}/files
+    /api/core/workflow-authoring/v1/drafts/{draft_id}:publish:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-authoring/v1/drafts/{draft_id}:publish
+    /api/core/workflow-authoring/v1/fixture:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-authoring/v1/fixture
+    /api/core/workflow-authoring/v1/skill-context:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-authoring/v1/skill-context
+    /api/core/workflow-commands/{command_id}:
+        get:
+            parameters:
+                - in: path
+                  name: command_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-commands/{command_id}
+    /api/core/workflow-drafts:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-drafts
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts
+    /api/core/workflow-drafts/{draft_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /workflow-drafts/{draft_id}
+        get:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-drafts/{draft_id}
+    /api/core/workflow-drafts/{draft_id}/generation-analysis:
+        get:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-drafts/{draft_id}/generation-analysis
+    /api/core/workflow-drafts/{draft_id}/repair-runs/{repair_id}:
+        get:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: repair_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-drafts/{draft_id}/repair-runs/{repair_id}
+    /api/core/workflow-drafts/{draft_id}:ai-generate:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:ai-generate
+    /api/core/workflow-drafts/{draft_id}:ai-repair:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:ai-repair
+    /api/core/workflow-drafts/{draft_id}:confirm-workflow:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:confirm-workflow
+    /api/core/workflow-drafts/{draft_id}:publish:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:publish
+    /api/core/workflow-drafts/{draft_id}:repair-preview:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:repair-preview
+    /api/core/workflow-drafts/{draft_id}:save:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:save
+    /api/core/workflow-drafts/{draft_id}:validate:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:validate
+    /api/core/workflow-drafts:polish-info:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts:polish-info
+    /api/core/workflow-input-resources:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-input-resources
+    /api/core/workflow-input-resources/{resource_id}:
+        get:
+            parameters:
+                - in: path
+                  name: resource_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-input-resources/{resource_id}
+    /api/core/workflow-preparations:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-preparations
+    /api/core/workflow-preparations/{preparation_id}:consume:
+        post:
+            parameters:
+                - in: path
+                  name: preparation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-preparations/{preparation_id}:consume
+    /api/core/workflow-runtime/v1/workflows:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-runtime/v1/workflows
+    /api/core/workflow-runtime/v1/workflows/{workflow_id}:
+        get:
+            parameters:
+                - in: path
+                  name: workflow_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-runtime/v1/workflows/{workflow_id}
+    /api/core/workflow-sessions/{session_id}:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}
+    /api/core/workflow-sessions/{session_id}/artifacts:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/artifacts
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/artifacts
+    /api/core/workflow-sessions/{session_id}/events:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/events
+    /api/core/workflow-sessions/{session_id}/input-bindings:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/input-bindings
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/input-bindings
+    /api/core/workflow-sessions/{session_id}/projection:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/projection
+    /api/core/workflow-sessions/{session_id}/slots:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/slots
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}:
+        patch:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /workflow-sessions/{session_id}/slots/{slot_id}
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/slots/{slot_id}/items
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:
+        delete:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+        patch:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption:
+        patch:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: integer
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/writerDocumentSyncOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: WriterDocument sync result
+            summary: Sync an edited WriterDocument to Feishu
+            tags:
+                - plugin
+                - writer
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/order:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/slots/{slot_id}/order
+        patch:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /workflow-sessions/{session_id}/slots/{slot_id}/order
+    /api/core/workflow-sessions/{session_id}/state-graph:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/state-graph
+    /api/core/workflow-sessions/{session_id}/steps:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/steps
+    /api/core/workflow-sessions/{session_id}:advance-step:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:advance-step
+    /api/core/workflow-sessions/{session_id}:advance-step-and-hand-off:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:advance-step-and-hand-off
+    /api/core/workflow-sessions/{session_id}:dismiss:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:dismiss
+    /api/core/workflow-sessions/{session_id}:restore:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:restore
+    /api/core/workflow-sessions/{session_id}:resume:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:resume
+    /api/core/workflow-sessions/{session_id}:stop:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:stop
+    /api/core/workflow-sessions/{session_id}:sync-search-config:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}:sync-search-config
+    /api/core/workflows:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflows
+    /api/core/workflows/{workflow_id}:
+        get:
+            parameters:
+                - in: path
+                  name: workflow_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflows/{workflow_id}
 servers:
     - description: same origin; see paths with /api/core prefix
       url: /

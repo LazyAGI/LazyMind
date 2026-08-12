@@ -1,0 +1,1 @@
+-- Expand-only migration. Application rollback keeps Input Resource data intact.

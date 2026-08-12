@@ -128,9 +128,9 @@ type Conversation struct {
 	Model         string          `gorm:"column:model;type:varchar(64);default:''"`
 	Models        json.RawMessage `gorm:"column:models;type:json"`
 	ChatTimes     int32           `gorm:"column:chat_times;not null;default:0"`
-	// Plugin/subagent mode overrides at conversation level (NULL falls back to user_chat_settings).
-	EnablePlugin   *bool   `gorm:"column:enable_plugin"`
-	PluginMode     *string `gorm:"column:plugin_mode;type:varchar(16)"`
+	// Workflow/subagent mode overrides at conversation level (NULL falls back to user_chat_settings).
+	EnableWorkflow *bool   `gorm:"column:enable_plugin"`
+	WorkflowMode   *string `gorm:"column:plugin_mode;type:varchar(16)"`
 	EnableSubagent *bool   `gorm:"column:enable_subagent"`
 	// IsTaskConv marks conversations created by the scheduler or task center (not user-initiated).
 	IsTaskConv bool `gorm:"column:is_task_conv;not null;default:false"`
@@ -151,6 +151,7 @@ type ChatHistory struct {
 	FeedBack          int             `gorm:"column:feed_back;default:0"`
 	Reason            string          `gorm:"column:reason;type:varchar(255)"`
 	ExpectedAnswer    string          `gorm:"column:expected_answer;type:text"`
+	AlgorithmID       string          `gorm:"column:algorithm_id;type:varchar(64)"`
 	Ext               json.RawMessage `gorm:"column:ext;type:json"`
 	Version           string          `gorm:"column:version;type:varchar(128);default:2.3"`
 	ToolCallTurns     int             `gorm:"column:tool_call_turns;not null;default:0;check:chk_chat_histories_tool_call_turns_non_negative,tool_call_turns >= 0"`

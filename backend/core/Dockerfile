@@ -7,10 +7,10 @@ ARG GOSUMDB=sum.golang.google.cn
 ENV GOPROXY=${GOPROXY} \
     GOSUMDB=${GOSUMDB}
 
-COPY core/go.mod core/go.sum ./
+COPY backend/core/go.mod backend/core/go.sum ./
 RUN go mod download
 
-COPY core/ ./
+COPY backend/core/ ./
 RUN CGO_ENABLED=0 go build -o /core .
 
 FROM ${DOCKER_MIRROR}alpine:3.19
@@ -23,5 +23,7 @@ COPY --from=build /core /core
 COPY --from=build /app/migrations /migrations
 # Model catalog YAML (seeded at startup from ./config/model_catalog.yaml)
 COPY --from=build /app/config /app/config
+# Built-in Workflow packages are imported into Core's revision store at startup.
+COPY workflows /app/workflows
 EXPOSE 8000
 CMD ["/core"]

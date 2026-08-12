@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -23,6 +24,8 @@ const (
 	StatusInterrupted = "interrupted"
 	StatusCanceled    = "canceled"
 )
+
+var ErrTaskTerminal = errors.New("task is terminal")
 
 // CreateTaskInput carries the fields needed to create a task record.
 // seq_in_conversation is allocated inside the transaction, not provided by the caller.
@@ -248,16 +251,27 @@ func AcceptFinalStatus(
 // SaveArtifact appends one artifact row for a task.
 func SaveArtifact(ctx context.Context, db *gorm.DB, taskID, key, contentType string, value json.RawMessage, seq int) error {
 	now := time.Now().UTC()
-	row := &orm.SubAgentArtifact{
-		ID:          "saa_" + common.GenerateID(),
-		TaskID:      taskID,
-		Slot:        key,
-		ContentType: contentType,
-		Value:       normalizeJSON(value, "{}"),
-		Seq:         seq,
-		CreatedAt:   now,
-	}
-	return db.WithContext(ctx).Create(row).Error
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var task orm.SubAgentTask
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "status").
+			Where("id = ?", taskID).
+			First(&task).Error; err != nil {
+			return err
+		}
+		if isTerminal(task.Status) {
+			return ErrTaskTerminal
+		}
+		return tx.Create(&orm.SubAgentArtifact{
+			ID:          "saa_" + common.GenerateID(),
+			TaskID:      taskID,
+			Slot:        key,
+			ContentType: contentType,
+			Value:       normalizeJSON(value, "{}"),
+			Seq:         seq,
+			CreatedAt:   now,
+		}).Error
+	})
 }
 
 // LoadArtifacts returns artifacts for a task ordered by (slot, seq).
@@ -297,6 +311,28 @@ func MarkInterrupted(ctx context.Context, db *gorm.DB, maxAge time.Duration) (in
 	return res.RowsAffected, res.Error
 }
 
+// InterruptConversation marks every active ordinary SubAgent task in a conversation
+// terminal and returns the task IDs whose live runner streams must be canceled.
+func InterruptConversation(ctx context.Context, db *gorm.DB, convID, summary string) ([]string, error) {
+	var taskIDs []string
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.SubAgentTask{}).
+			Where("conversation_id = ? AND status IN ?", convID, []string{StatusPending, StatusRunning}).
+			Pluck("id", &taskIDs).Error; err != nil {
+			return err
+		}
+		if len(taskIDs) == 0 {
+			return nil
+		}
+		now := time.Now().UTC()
+		return tx.Model(&orm.SubAgentTask{}).Where("id IN ?", taskIDs).Updates(map[string]any{
+			"status": StatusInterrupted, "summary": summary,
+			"last_heartbeat": now, "updated_at": now,
+		}).Error
+	})
+	return taskIDs, err
+}
+
 // IsNotFound reports whether the error is a gorm record-not-found error.
 func IsNotFound(err error) bool {
 	return errors.Is(err, gorm.ErrRecordNotFound)
@@ -310,4 +346,18 @@ func LoadSteps(ctx context.Context, db *gorm.DB, taskID string) ([]orm.SubAgentS
 		Order("seq asc").
 		Find(&steps).Error
 	return steps, err
+}
+
+// AppendRemoteStep persists streamed Host events so reconnects and lease
+// reclaims have the same durable execution history as an in-process SubAgent.
+func AppendRemoteStep(ctx context.Context, db *gorm.DB, taskID, role string, content json.RawMessage) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var maxSeq int
+		if err := tx.Model(&orm.SubAgentStep{}).Where("task_id = ?", taskID).
+			Select("COALESCE(MAX(seq), -1)").Scan(&maxSeq).Error; err != nil {
+			return err
+		}
+		return tx.Create(&orm.SubAgentStep{ID: "sas_" + common.GenerateID(), TaskID: taskID,
+			Seq: maxSeq + 1, Role: role, Content: normalizeJSON(content, "{}"), CreatedAt: time.Now().UTC()}).Error
+	})
 }

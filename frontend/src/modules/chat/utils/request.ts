@@ -182,17 +182,17 @@ export function TaskServiceApi() {
   };
 }
 
-// Plugin Info API — fetches plugin spec (including ui.tabs) from Go /api/core/plugins.
-export function PluginInfoApi() {
+// Workflow Info API — fetches workflow spec (including ui.tabs) from Go /api/core/workflows.
+export function WorkflowInfoApi() {
   return {
-    getPlugin(pluginId: string, options?: RawAxiosRequestConfig) {
+    getWorkflow(workflowId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
-        `${coreApiBaseUrl}/plugins/${encodeURIComponent(pluginId)}`,
+        `${coreApiBaseUrl}/workflows/${encodeURIComponent(workflowId)}`,
         options,
       );
     },
-    listPlugins(options?: RawAxiosRequestConfig) {
-      return axiosInstance.get(`${coreApiBaseUrl}/plugins`, options);
+    listWorkflows(options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(`${coreApiBaseUrl}/workflows`, options);
     },
   };
 }
@@ -225,48 +225,48 @@ export interface SyncWriterDocumentResult {
   document: Record<string, unknown>;
 }
 
-// Plugin Session API.
-export function PluginSessionApi() {
+// Workflow Session API.
+export function WorkflowSessionApi() {
   return {
     getLatestSession(conversationId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
-        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/plugin-sessions:latest`,
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/workflow-sessions:latest`,
         options,
       );
     },
     listSessions(conversationId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
-        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/plugin-sessions`,
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/workflow-sessions`,
         options,
       );
     },
     getSession(sessionId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}`,
         options,
       );
     },
     getSlots(sessionId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots`,
         options,
       );
     },
     getSteps(sessionId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/steps`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/steps`,
         options,
       );
     },
     getProjection(sessionId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/projection`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/projection`,
         options,
       );
     },
     patchSlot(sessionId: string, slotId: string, selectedRevision: number, options?: RawAxiosRequestConfig) {
       return axiosInstance.patch(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}`,
         { selected_revision: selectedRevision },
         options,
       );
@@ -277,7 +277,7 @@ export function PluginSessionApi() {
       options?: RawAxiosRequestConfig,
     ) {
       return axiosInstance.post(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:sync-search-config`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}:sync-search-config`,
         { search_config: searchConfig },
         options,
       );
@@ -285,7 +285,7 @@ export function PluginSessionApi() {
     // Phase 3: slot item management — addressed by stable list_index (not sort_order).
     deleteSlotItem(sessionId: string, slotId: string, listIndex: number, orderVersion?: number, options?: RawAxiosRequestConfig) {
       return axiosInstance.delete(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}`,
         { ...options, data: orderVersion !== undefined ? { order_version: orderVersion } : undefined },
       );
     },
@@ -299,7 +299,7 @@ export function PluginSessionApi() {
       options?: RawAxiosRequestConfig,
     ) {
       return axiosInstance.patch(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}`,
         {
           value,
           ...(contentType ? { content_type: contentType } : {}),
@@ -320,68 +320,68 @@ export function PluginSessionApi() {
         message: string;
         data: SyncWriterDocumentResult;
       }>(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}:sync-writer-document`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}:sync-writer-document`,
         payload,
         options,
       );
     },
     reorderSlotItems(sessionId: string, slotId: string, order: number[], version: number, options?: RawAxiosRequestConfig) {
       return axiosInstance.patch(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/order`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/order`,
         { order, version },
         options,
       );
     },
     getSlotOrder(sessionId: string, slotId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/order`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/order`,
         options,
       );
     },
     getSlotItemVersions(sessionId: string, slotId: string, listIndex: number, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}/versions`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}/versions`,
         options,
       );
     },
     rollbackSlotItem(sessionId: string, slotId: string, listIndex: number, revision: number, options?: RawAxiosRequestConfig) {
       return axiosInstance.post(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}/rollback`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}/rollback`,
         { revision },
         options,
       );
     },
     createSlotItem(sessionId: string, slotId: string, value: any, caption?: string, insertBefore?: number, contentType?: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.post(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items`,
         { value, ...(caption !== undefined ? { caption } : {}), ...(insertBefore !== undefined ? { insert_before: insertBefore } : {}), ...(contentType ? { content_type: contentType } : {}) },
         options,
       );
     },
     patchSlotCaption(sessionId: string, slotId: string, listIndex: number, caption: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.patch(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}/caption`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}/caption`,
         { caption },
         options,
       );
     },
     dismissSession(sessionId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.post(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:dismiss`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}:dismiss`,
         {},
         { headers: { 'Content-Type': 'application/json' }, ...options },
       );
     },
     restoreSession(sessionId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.post(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:restore`,
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}:restore`,
         {},
         { headers: { 'Content-Type': 'application/json' }, ...options },
       );
     },
     listDismissedSessions(conversationId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
-        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/dismissed-plugin-sessions`,
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/dismissed-workflow-sessions`,
         options,
       );
     },
@@ -813,29 +813,29 @@ export function TempUploadServiceApi() {
   };
 }
 
-export interface ConversationPluginSettings {
-  plugin_mode?: 'dynamic' | 'auto';
+export interface ConversationWorkflowSettings {
+  workflow_mode?: 'dynamic' | 'auto';
   enable_subagent?: boolean;
-  enable_plugin?: boolean;
+  enable_workflow?: boolean;
 }
 
-export function parseConversationPluginSettings(
+export function parseConversationWorkflowSettings(
   conversation?: {
-    enable_plugin?: boolean | null;
-    plugin_mode?: string | null;
+    enable_workflow?: boolean | null;
+    workflow_mode?: string | null;
     enable_subagent?: boolean | null;
   } | null,
-): ConversationPluginSettings | undefined {
+): ConversationWorkflowSettings | undefined {
   if (!conversation) {
     return undefined;
   }
-  const settings: ConversationPluginSettings = {};
-  if (conversation.enable_plugin != null) {
-    settings.enable_plugin = conversation.enable_plugin;
+  const settings: ConversationWorkflowSettings = {};
+  if (conversation.enable_workflow != null) {
+    settings.enable_workflow = conversation.enable_workflow;
   }
-  const rawMode = conversation.plugin_mode;
+  const rawMode = conversation.workflow_mode;
   if (rawMode === 'dynamic' || rawMode === 'auto') {
-    settings.plugin_mode = rawMode;
+    settings.workflow_mode = rawMode;
   }
   if (conversation.enable_subagent != null) {
     settings.enable_subagent = conversation.enable_subagent;
@@ -846,18 +846,18 @@ export function parseConversationPluginSettings(
 export function ConversationSettingsApi() {
   return {
     getChatSettings(options?: RawAxiosRequestConfig) {
-      return axiosInstance.get<ConversationPluginSettings>(
+      return axiosInstance.get<ConversationWorkflowSettings>(
         `${coreApiBaseUrl}/user/chat-settings`,
         options,
       );
     },
-    patchPluginSettings(
+    patchWorkflowSettings(
       conversationId: string,
-      settings: ConversationPluginSettings,
+      settings: ConversationWorkflowSettings,
       options?: RawAxiosRequestConfig,
     ) {
       return axiosInstance.patch(
-        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/plugin-settings`,
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/workflow-settings`,
         settings,
         options,
       );
