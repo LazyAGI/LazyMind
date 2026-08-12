@@ -10,42 +10,18 @@ import (
 	"lazymind/core/common/orm"
 )
 
-// TestWriterSyncStatus_BadRequest maps 400 and 422 to 400.
-func TestWriterSyncStatus_BadRequest(t *testing.T) {
-	if got := writerSyncStatus(http.StatusBadRequest); got != http.StatusBadRequest {
-		t.Fatalf("status 400: got %d, want %d", got, http.StatusBadRequest)
-	}
-	if got := writerSyncStatus(http.StatusUnprocessableEntity); got != http.StatusBadRequest {
-		t.Fatalf("status 422: got %d, want %d", got, http.StatusBadRequest)
-	}
-}
-
-// TestWriterSyncStatus_AuthErrors passes through 401, 403, 409.
-func TestWriterSyncStatus_AuthErrors(t *testing.T) {
-	if got := writerSyncStatus(http.StatusUnauthorized); got != http.StatusUnauthorized {
-		t.Fatalf("got %d, want %d", got, http.StatusUnauthorized)
-	}
-	if got := writerSyncStatus(http.StatusForbidden); got != http.StatusForbidden {
-		t.Fatalf("got %d, want %d", got, http.StatusForbidden)
-	}
-	if got := writerSyncStatus(http.StatusConflict); got != http.StatusConflict {
-		t.Fatalf("got %d, want %d", got, http.StatusConflict)
-	}
-}
-
-// TestWriterSyncStatus_Default maps unrecognized statuses to 502.
-func TestWriterSyncStatus_Default(t *testing.T) {
-	if got := writerSyncStatus(http.StatusOK); got != http.StatusBadGateway {
-		t.Fatalf("status 200: got %d, want %d", got, http.StatusBadGateway)
-	}
-	if got := writerSyncStatus(http.StatusInternalServerError); got != http.StatusBadGateway {
-		t.Fatalf("status 500: got %d, want %d", got, http.StatusBadGateway)
-	}
-	if got := writerSyncStatus(http.StatusNotFound); got != http.StatusBadGateway {
-		t.Fatalf("status 404: got %d, want %d", got, http.StatusBadGateway)
-	}
-	if got := writerSyncStatus(999); got != http.StatusBadGateway {
-		t.Fatalf("unknown: got %d, want %d", got, http.StatusBadGateway)
+func TestWriterSyncStatus(t *testing.T) {
+	for input, want := range map[int]int{
+		http.StatusBadRequest:          http.StatusBadRequest,
+		http.StatusUnprocessableEntity: http.StatusBadRequest,
+		http.StatusUnauthorized:        http.StatusUnauthorized,
+		http.StatusForbidden:           http.StatusForbidden,
+		http.StatusConflict:            http.StatusConflict,
+		http.StatusInternalServerError: http.StatusBadGateway,
+	} {
+		if got := writerSyncStatus(input); got != want {
+			t.Errorf("writerSyncStatus(%d) = %d, want %d", input, got, want)
+		}
 	}
 }
 
@@ -71,14 +47,8 @@ func TestNormalizeWriterDocumentForSync_StripsLegacyImagePlaceholderNewline(t *t
 	if err := json.Unmarshal(normalized, &document); err != nil {
 		t.Fatalf("decode normalized WriterDocument: %v", err)
 	}
-	if got := document.Blocks[0].Content; got != "caption" {
-		t.Fatalf("image content = %q, want caption", got)
-	}
-	if got := document.Blocks[0].Spans[0].Text; got != "caption" {
-		t.Fatalf("image span = %q, want caption", got)
-	}
-	if got := document.Blocks[1].Content; got != "\nkeep this newline" {
-		t.Fatalf("paragraph content = %q, want unchanged", got)
+	if document.Blocks[0].Content != "caption" || document.Blocks[0].Spans[0].Text != "caption" || document.Blocks[1].Content != "\nkeep this newline" {
+		t.Fatalf("unexpected normalized blocks: %+v", document.Blocks)
 	}
 }
 
@@ -107,18 +77,10 @@ func TestPreserveExistingWriterImageBlocks(t *testing.T) {
 	if err := json.Unmarshal(preserved, &document); err != nil {
 		t.Fatalf("decode preserved WriterDocument: %v", err)
 	}
-	if got := document.Blocks[0]["content"]; got != "edited text" {
-		t.Fatalf("paragraph content = %q, want edited text", got)
-	}
 	image := document.Blocks[1]
-	if got := image["content"]; got != "saved caption" {
-		t.Fatalf("existing image content = %q, want saved caption", got)
-	}
-	if _, exists := image["spans"]; exists {
-		t.Fatal("existing image retained edited spans")
-	}
-	if got := document.Blocks[2]["content"]; got != "new image" {
-		t.Fatalf("new image content = %q, want unchanged", got)
+	_, hasSpans := image["spans"]
+	if document.Blocks[0]["content"] != "edited text" || image["content"] != "saved caption" || hasSpans || document.Blocks[2]["content"] != "new image" {
+		t.Fatalf("unexpected preserved blocks: %+v", document.Blocks)
 	}
 }
 

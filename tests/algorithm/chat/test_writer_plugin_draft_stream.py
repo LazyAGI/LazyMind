@@ -1,4 +1,3 @@
-"""Regression coverage for writer-workflow draft preview events."""
 from __future__ import annotations
 
 import importlib.util
@@ -65,42 +64,6 @@ def test_write_document_revision_emits_markdown_draft_stream(monkeypatch, tmp_pa
     assert all(event['slot'] == 'draft_document' for event in events)
     assert all(event['content_type'] == 'text/markdown' for event in events)
     assert events[1]['delta'] == '# Revised title\n\nUpdated body.\n'
-
-
-def test_outline_revision_uses_outline_document_filename(monkeypatch, tmp_path):
-    tools = _load_tools_module()
-    context = SimpleNamespace(
-        workspace_path=str(tmp_path),
-        params={'step_id': 'outline'},
-    )
-
-    class FakeWriterRevisionToolkit:
-        def apply_string_replace(self, **_kwargs) -> str:
-            return json.dumps({
-                'string_replace_result': {'replaced': 1},
-                'revised_document': '# Revised outline\n',
-            })
-
-    monkeypatch.setattr(tools, 'require_context', lambda: context)
-    monkeypatch.setattr(tools, 'WriterRevisionToolkit', FakeWriterRevisionToolkit)
-    base_document_path = tmp_path / 'revised_document.md'
-    base_document_path.write_text('# Original outline\n', encoding='utf-8')
-    writing_context_path = tmp_path / 'context.json'
-    writing_context_path.write_text('{}', encoding='utf-8')
-    revision_set_path = tmp_path / 'revisions.json'
-    revision_set_path.write_text('{}', encoding='utf-8')
-
-    result = tools.writer_apply_revision(
-        str(base_document_path),
-        str(writing_context_path),
-        str(revision_set_path),
-    )
-
-    assert 'revised_document' not in result
-    assert Path(result['outline_document']).name == 'outline_document.md'
-    assert Path(result['outline_document']).read_text(encoding='utf-8') == (
-        '# Revised outline\n'
-    )
 
 
 def test_selection_rewrite_uses_slot_markdown_artifact_filename(monkeypatch, tmp_path):

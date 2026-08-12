@@ -70,12 +70,6 @@ func (b *taskLiveEventBroker) publish(taskID string, event TaskEvent) {
 	}
 }
 
-func (b *taskLiveEventBroker) subscriberCount(taskID string) int {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return len(b.subscribers[taskID])
-}
-
 var taskLiveEvents = newTaskLiveEventBroker()
 
 func isTerminal(status string) bool {

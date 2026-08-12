@@ -148,40 +148,15 @@ func loadSelectedArtifactValue(
 	if err := q.First(&revision).Error; err != nil {
 		return nil, nil, "", err
 	}
-	taskID := actionRevisionTaskID(ctx, db, revision)
-	if revision.HumanArtifactID != nil {
-		var artifact orm.WorkflowHumanArtifact
-		if err := db.WithContext(ctx).Where("id = ?", *revision.HumanArtifactID).
-			First(&artifact).Error; err != nil {
-			return nil, nil, "", err
-		}
-		return &revision, artifact.Value, taskID, nil
+	value, err := LoadSlotRevisionValue(ctx, db, revision)
+	if err != nil {
+		return nil, nil, "", err
 	}
-	if revision.ArtifactSeq != nil {
-		var artifact orm.SubAgentArtifact
-		if err := db.WithContext(ctx).Where(
-			"task_id = ? AND slot = ? AND seq = ? AND hidden = ?",
-			taskID, revision.Slot, *revision.ArtifactSeq, false,
-		).First(&artifact).Error; err != nil {
-			return nil, nil, "", err
-		}
-		return &revision, artifact.Value, taskID, nil
+	taskID, err := loadSlotRevisionTaskID(ctx, db, revision)
+	if err != nil {
+		return nil, nil, "", err
 	}
-	if len(revision.ContentSnapshot) > 0 {
-		return &revision, revision.ContentSnapshot, taskID, nil
-	}
-	return nil, nil, "", gorm.ErrRecordNotFound
-}
-
-func actionRevisionTaskID(ctx context.Context, db *gorm.DB, revision orm.WorkflowSlotRevision) string {
-	var step orm.WorkflowSessionStep
-	if db.WithContext(ctx).Where(
-		"session_id = ? AND step_id = ? AND attempt = ?",
-		revision.SessionID, revision.StepID, revision.Attempt,
-	).First(&step).Error != nil {
-		return "artifact-actions"
-	}
-	return step.TaskID
+	return &revision, value, taskID, nil
 }
 
 func replyWorkflowActionError(w http.ResponseWriter, status int, err error) {

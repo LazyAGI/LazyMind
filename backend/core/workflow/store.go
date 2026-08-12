@@ -1281,3 +1281,53 @@ func WriteSlotRevisionWithHumanArtifact(
 		First(&result).Error
 	return &result, err
 }
+
+// LoadSlotRevisionValue resolves the selected artifact representation used by a
+// Workflow revision without duplicating storage lookup rules in HTTP handlers.
+func LoadSlotRevisionValue(
+	ctx context.Context,
+	db *gorm.DB,
+	revision orm.WorkflowSlotRevision,
+) (json.RawMessage, error) {
+	if revision.HumanArtifactID != nil {
+		var artifact orm.WorkflowHumanArtifact
+		if err := db.WithContext(ctx).Where("id = ?", *revision.HumanArtifactID).
+			First(&artifact).Error; err != nil {
+			return nil, err
+		}
+		return artifact.Value, nil
+	}
+	if revision.ArtifactSeq != nil {
+		taskID, err := loadSlotRevisionTaskID(ctx, db, revision)
+		if err != nil {
+			return nil, err
+		}
+		var artifact orm.SubAgentArtifact
+		if err := db.WithContext(ctx).Where(
+			"task_id = ? AND slot = ? AND seq = ? AND hidden = ?",
+			taskID, revision.Slot, *revision.ArtifactSeq, false,
+		).First(&artifact).Error; err != nil {
+			return nil, err
+		}
+		return artifact.Value, nil
+	}
+	if len(revision.ContentSnapshot) == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return revision.ContentSnapshot, nil
+}
+
+func loadSlotRevisionTaskID(
+	ctx context.Context,
+	db *gorm.DB,
+	revision orm.WorkflowSlotRevision,
+) (string, error) {
+	var step orm.WorkflowSessionStep
+	if err := db.WithContext(ctx).Where(
+		"session_id = ? AND step_id = ? AND attempt = ?",
+		revision.SessionID, revision.StepID, revision.Attempt,
+	).First(&step).Error; err != nil {
+		return "", err
+	}
+	return step.TaskID, nil
+}

@@ -423,35 +423,11 @@ func loadWriterArtifactRevision(
 	db *gorm.DB,
 	revision orm.WorkflowSlotRevision,
 ) (*selectedWriterArtifact, error) {
-	if revision.HumanArtifactID != nil {
-		var artifact orm.WorkflowHumanArtifact
-		if err := db.WithContext(ctx).Where("id = ?", *revision.HumanArtifactID).
-			First(&artifact).Error; err != nil {
-			return nil, err
-		}
-		return &selectedWriterArtifact{Revision: revision, Value: artifact.Value}, nil
+	value, err := workflow.LoadSlotRevisionValue(ctx, db, revision)
+	if err != nil {
+		return nil, err
 	}
-	if revision.ArtifactSeq != nil {
-		var step orm.WorkflowSessionStep
-		if err := db.WithContext(ctx).
-			Where("session_id = ? AND step_id = ? AND attempt = ?",
-				revision.SessionID, revision.StepID, revision.Attempt).
-			First(&step).Error; err != nil {
-			return nil, err
-		}
-		var artifact orm.SubAgentArtifact
-		if err := db.WithContext(ctx).
-			Where("task_id = ? AND slot = ? AND seq = ? AND hidden = ?",
-				step.TaskID, revision.Slot, *revision.ArtifactSeq, false).
-			First(&artifact).Error; err != nil {
-			return nil, err
-		}
-		return &selectedWriterArtifact{Revision: revision, Value: artifact.Value}, nil
-	}
-	if len(revision.ContentSnapshot) == 0 {
-		return nil, gorm.ErrRecordNotFound
-	}
-	return &selectedWriterArtifact{Revision: revision, Value: revision.ContentSnapshot}, nil
+	return &selectedWriterArtifact{Revision: revision, Value: value}, nil
 }
 
 func loadLatestSyncedWriterArtifact(

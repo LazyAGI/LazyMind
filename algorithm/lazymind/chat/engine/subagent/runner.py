@@ -5,8 +5,6 @@ import json
 import os
 import re
 import time
-import base64
-import types
 from collections.abc import AsyncIterator
 from typing import Any, Dict, List, Optional
 
@@ -36,6 +34,7 @@ from lazymind.chat.service.component.tool_registry import (
 )
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
+from lazymind.workflow_toolkit import load_workflow_package_tools
 
 from . import SUBAGENT_ATTACHMENT_CONTEXT_KEY, SUBAGENT_CORE_TOOL_NAMES
 from . import tools as subagent_tools
@@ -144,7 +143,7 @@ def _resolve_workflow_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
     return list(dict.fromkeys([*SUBAGENT_CORE_TOOL_NAMES, *map(str, declared)]))
 
 
-def _workflow_package_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, Any]:
+def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, Any]:
     """Load declared callables from the exact published Workflow revision.
 
     Core is authoritative for both the pinned revision and the compiled
@@ -169,38 +168,7 @@ def _workflow_package_tools(params: Dict[str, Any], names: List[str]) -> Dict[st
         expected_hash = str(params.get('tree_hash') or '').strip()
         if expected_hash and str(package.get('tree_hash') or '') != expected_hash:
             raise RuntimeError('Core returned a Workflow package with a different tree hash')
-        files = package.get('files') if isinstance(package.get('files'), dict) else {}
-        remaining = set(names)
-        resolved: Dict[str, Any] = {}
-        for path in sorted(files):
-            if not path.startswith('scripts/') or not path.endswith('.py'):
-                continue
-            encoded = files[path]
-            raw_source = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
-            source = raw_source.decode('utf-8')
-            module = types.ModuleType(
-                f'_lazymind_workflow_{revision_id.replace("-", "_")}_{len(resolved)}'
-            )
-            module.__file__ = f'{workflow_id}@{revision_id}/{path}'
-            exec(compile(source, module.__file__, 'exec'), module.__dict__)
-            for name in tuple(remaining):
-                candidate = module.__dict__.get(name)
-                if callable(candidate):
-                    # Published Workflow scripts can predate the tool runtime's
-                    # docstring requirement. Their callable name, signature and
-                    # annotations are already pinned by the immutable revision;
-                    # provide a stable description so legacy revisions remain
-                    # executable instead of failing before the first tool call.
-                    if not str(getattr(candidate, '__doc__', '') or '').strip():
-                        candidate.__doc__ = f'Execute the published Workflow tool {name}.'
-                    resolved[name] = candidate
-                    remaining.remove(name)
-        if remaining:
-            LOG.warning(
-                '[SubAgent] Workflow revision %s does not provide declared tools %s',
-                revision_id, sorted(remaining),
-            )
-        return resolved
+        return load_workflow_package_tools(package, names, workflow_id, revision_id)
     except Exception as exc:
         LOG.warning('[SubAgent] failed to load pinned Workflow script tools: %s', exc)
         return {}
@@ -229,7 +197,7 @@ def _resolve_runtime_tools(
         ]
         # Published Workflow script functions are resolved from the exact
         # revision before falling back to framework/global tools.
-        package_by_name = _workflow_package_tools(params or {}, name_list)
+        package_by_name = load_workflow_tools(params or {}, name_list)
         # Build lookup from DEFAULT_TOOLS.
         default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
         result = []

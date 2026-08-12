@@ -7,6 +7,7 @@ import re
 import tempfile
 import uuid
 from collections.abc import Callable
+from copy import deepcopy
 from pathlib import Path
 from threading import RLock
 from typing import Any, ClassVar
@@ -14,7 +15,10 @@ from typing import Any, ClassVar
 from lazyllm import LOG, AutoModel
 from lazyllm.tools.writer.data_models import (
     InputResource,
+    MediaAssetLibrary,
     ModifyPlan,
+    PatchResult,
+    PatchSet,
     SectionInstruction,
     SectionInstructionList,
     TargetDocument,
@@ -183,6 +187,65 @@ def _result_data(result: dict, key: str) -> Any:
     if not path:
         raise ValueError(f'Writer tool did not return artifact {key!r}: {result!r}')
     return _read_artifact_data(path)
+
+
+def sync_writer_documents(
+    source_value: Any,
+    revised_value: Any,
+    media_assets: Any = None,
+    artifact_store: str = '',
+) -> dict[str, Any]:
+    """Persist one WriterDocument delta and return its provider-confirmed IR."""
+    source = WriterDocument.model_validate(source_value)
+    revised = WriterDocument.model_validate(revised_value)
+    if source.document_id != revised.document_id:
+        raise ValueError('WriterDocument document_id values must match.')
+    for field in ('stage', 'revision', 'provider_binding'):
+        if getattr(source, field) != getattr(revised, field):
+            raise ValueError(f'WriterDocument {field} values must match.')
+    for source_block in source.iter_blocks():
+        revised_block = revised.block_by_id(source_block.node_id)
+        if revised_block is None:
+            continue
+        revised_block.provider_binding = deepcopy(source_block.provider_binding)
+        revised_block.provider_payload = deepcopy(source_block.provider_payload)
+        revised_block.editable = source_block.editable
+
+    library = MediaAssetLibrary.model_validate(media_assets) if media_assets else None
+    root = Path(artifact_store) if artifact_store else _temp_root()
+    root.mkdir(parents=True, exist_ok=True)
+    if source.title == revised.title and source.blocks == revised.blocks:
+        patch = PatchSet(
+            patch_id=f'patch-{source.document_id}', target_doc_id=source.document_id,
+        )
+    else:
+        revision = WriterRevisionTools(llm=None, artifact_store=str(root))
+        patch = PatchSet.model_validate(_primary_data(
+            revision.build_patch_set_from_documents(source, revised, library),
+        ))
+    changed = bool(patch.hunks or patch.new_title is not None)
+    if changed:
+        output = WriterResourceTools(
+            llm=None, artifact_store=str(root),
+        ).apply_patch_to_document(patch, source, media_assets=library)
+        candidate = WriterDocument.model_validate(_result_data(output, 'persisted_document'))
+        result = PatchResult.model_validate(_result_data(output, 'patch_result'))
+    else:
+        candidate = source.model_copy(deep=True)
+        result = PatchResult(
+            patch_id=patch.patch_id,
+            success=True,
+            message='No document changes.',
+        )
+    candidate.ui_editable = True
+    return {
+        'success': result.success,
+        'changed': changed,
+        'feishu_synced': result.success,
+        'patch_set': patch.model_dump(),
+        'patch_result': result.model_dump(),
+        'persisted_document': candidate.model_dump(),
+    }
 
 
 def _feishu_url(user_input: str) -> str:

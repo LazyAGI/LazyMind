@@ -116,7 +116,7 @@ func writerWriteBackState(
 		return info
 	}
 	for _, revision := range revisions {
-		value, err := loadWriterSlotRevisionValue(ctx, db, revision)
+		value, err := LoadSlotRevisionValue(ctx, db, revision)
 		if err == nil && writerSlotRevisionSynced(revision.ChangeSource, value) {
 			if !hasBinding {
 				binding, hasBinding = writerProviderBindingFromArtifact(value)
@@ -149,7 +149,7 @@ func writerRevisionPointer(revision int) *int {
 }
 
 func loadWriterSlotDTOValue(ctx context.Context, db *gorm.DB, sessionID string, slot slotDTO) (json.RawMessage, error) {
-	return loadWriterSlotRevisionValue(ctx, db, orm.WorkflowSlotRevision{
+	return LoadSlotRevisionValue(ctx, db, orm.WorkflowSlotRevision{
 		SessionID:       sessionID,
 		ArtifactSeq:     slot.ArtifactSeq,
 		HumanArtifactID: slot.HumanArtifactID,
@@ -160,35 +160,6 @@ func loadWriterSlotDTOValue(ctx context.Context, db *gorm.DB, sessionID string, 
 	})
 }
 
-func loadWriterSlotRevisionValue(ctx context.Context, db *gorm.DB, revision orm.WorkflowSlotRevision) (json.RawMessage, error) {
-	if revision.HumanArtifactID != nil {
-		var artifact orm.WorkflowHumanArtifact
-		if err := db.WithContext(ctx).Where("id = ?", *revision.HumanArtifactID).First(&artifact).Error; err != nil {
-			return nil, err
-		}
-		return artifact.Value, nil
-	}
-	if revision.ArtifactSeq != nil {
-		var step orm.WorkflowSessionStep
-		if err := db.WithContext(ctx).
-			Where("session_id = ? AND step_id = ? AND attempt = ?", revision.SessionID, revision.StepID, revision.Attempt).
-			First(&step).Error; err != nil {
-			return nil, err
-		}
-		var artifact orm.SubAgentArtifact
-		if err := db.WithContext(ctx).
-			Where("task_id = ? AND slot = ? AND seq = ? AND hidden = ?", step.TaskID, revision.Slot, *revision.ArtifactSeq, false).
-			First(&artifact).Error; err != nil {
-			return nil, err
-		}
-		return artifact.Value, nil
-	}
-	if len(revision.ContentSnapshot) == 0 {
-		return nil, gorm.ErrRecordNotFound
-	}
-	return revision.ContentSnapshot, nil
-}
-
 func writerSlotRevisionSynced(changeSource string, value json.RawMessage) bool {
 	if changeSource == "provider_sync" {
 		return true
@@ -196,7 +167,7 @@ func writerSlotRevisionSynced(changeSource string, value json.RawMessage) bool {
 	if changeSource != "ai" {
 		return false
 	}
-	resolved, ok := resolveWriterArtifact(value, 0)
+	resolved, ok := resolveWriterArtifact(value)
 	if !ok {
 		return false
 	}
@@ -211,7 +182,7 @@ func writerSlotRevisionSynced(changeSource string, value json.RawMessage) bool {
 }
 
 func writerProviderBindingFromArtifact(value json.RawMessage) (writerProviderBinding, bool) {
-	resolved, ok := resolveWriterArtifact(value, 0)
+	resolved, ok := resolveWriterArtifact(value)
 	if !ok {
 		return writerProviderBinding{}, false
 	}
@@ -232,10 +203,7 @@ func writerProviderBindingFromArtifact(value json.RawMessage) (writerProviderBin
 	return identity.ProviderBinding, true
 }
 
-func resolveWriterArtifact(value json.RawMessage, depth int) (json.RawMessage, bool) {
-	if depth > 2 {
-		return nil, false
-	}
+func resolveWriterArtifact(value json.RawMessage) (json.RawMessage, bool) {
 	var record struct {
 		Path string `json:"path"`
 	}
@@ -250,7 +218,7 @@ func resolveWriterArtifact(value json.RawMessage, depth int) (json.RawMessage, b
 	if err != nil {
 		return nil, false
 	}
-	return resolveWriterArtifact(content, depth+1)
+	return content, true
 }
 
 func writerArtifactIsMarkdown(value json.RawMessage) bool {

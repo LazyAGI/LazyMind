@@ -10,7 +10,6 @@ import json
 import re
 import tempfile
 import uuid
-from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -19,7 +18,6 @@ from lazyllm.tools.writer.data_models import (
     ContentRef,
     ModifyInstruction,
     ModifyPlan,
-    MediaAssetLibrary,
     PatchResult,
     PatchSet,
     StringReplaceSet,
@@ -41,6 +39,7 @@ from lazymind.chat.engine.tools.writer import (
     WriterResourceToolkit,
     WriterRevisionToolkit,
     WriterToolkitBase,
+    sync_writer_documents,
     writer_schema,
 )
 
@@ -995,38 +994,12 @@ def writer_sync_document(
         )
     if source_document is None or revised_document is None:
         raise ValueError('source_document and revised_document are required for IR sync.')
-    source = WriterDocument.model_validate(source_document)
-    revised = WriterDocument.model_validate(revised_document)
-    if source.document_id != revised.document_id:
-        raise ValueError('WriterDocument document_id values must match.')
-    for source_block in source.iter_blocks():
-        revised_block = revised.block_by_id(source_block.node_id)
-        if revised_block is None:
-            continue
-        revised_block.provider_binding = deepcopy(source_block.provider_binding)
-        revised_block.provider_payload = deepcopy(source_block.provider_payload)
-        revised_block.editable = source_block.editable
-    media_library = MediaAssetLibrary.model_validate(media_assets) if media_assets else None
-    root = _action_root(artifact_store, 'sync-document')
-    revision = WriterRevisionTools(llm=None, artifact_store=str(root))
-    patch_output = revision.build_patch_set_from_documents(source, revised, media_library)
-    patch_set = load_artifact_json(_action_result_path(patch_output), PatchSet)
-    candidate, local_result = apply_patch_to_ir(source, patch_set, media_assets=media_library)
-    if not patch_set.hunks and patch_set.new_title is None:
-        candidate.ui_editable = True
-        local_result.message = 'No document changes.'
-        return _sync_document_response(False, patch_set, local_result, candidate)
-    write_output = WriterResourceTools(
-        llm=None, artifact_store=str(root),
-    ).apply_patch_to_document(patch_set, source, media_assets=media_library)
-    persisted = load_artifact_json(
-        _action_result_path(write_output, 'persisted_document'), WriterDocument,
+    return sync_writer_documents(
+        source_document,
+        revised_document,
+        media_assets,
+        str(_action_root(artifact_store, 'sync-document')),
     )
-    result = load_artifact_json(
-        _action_result_path(write_output, 'patch_result'), PatchResult,
-    )
-    persisted.ui_editable = True
-    return _sync_document_response(True, patch_set, result, persisted)
 
 
 def _sync_markdown_document(
@@ -1086,22 +1059,6 @@ def _action_result_path(result: dict, key: str | None = None) -> str:
     if not path:
         raise ValueError(f'Writer tool did not return artifact {key or "primary"!r}.')
     return path
-
-
-def _sync_document_response(
-    changed: bool,
-    patch_set: PatchSet,
-    result: PatchResult,
-    document: WriterDocument,
-) -> dict:
-    return {
-        'success': result.success,
-        'changed': changed,
-        'feishu_synced': result.success,
-        'patch_set': patch_set.model_dump(),
-        'patch_result': result.model_dump(),
-        'persisted_document': document.model_dump(),
-    }
 
 
 def writer_locate_revision_target(
