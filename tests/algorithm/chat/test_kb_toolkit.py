@@ -1,10 +1,18 @@
 import pytest
 from types import SimpleNamespace
-
 import lazyllm
 from lazyllm import init_session, locals as lazyllm_locals
 from lazyllm.tools.agent.toolsManager import ToolManager
+from lazyllm.tools.tools.search import SearchBase
 from lazymind.chat.engine.tools.kb import KBToolkit
+from lazymind.chat.engine.tools.infra import CitationResultMiddleware
+from lazymind.chat.engine.tools.lazy_kb import KBToolkit as LazyKBToolkit
+from lazymind.chat.service.utils.citations import (
+    CITATION_REFS_KEY,
+    materialize_source_views,
+    reset_citation_state,
+    rewrite_citations,
+)
 
 
 def test_kb_toolkit_is_available_without_selected_kb():
@@ -17,6 +25,89 @@ def test_kb_toolkit_is_available_without_selected_kb():
 
 def _kb_tool_names(manager):
     return {item['function']['name'] for item in manager.tools_description}
+
+
+def test_kb_citations_are_added_by_tool_result_middleware():
+    state = {}
+    reset_citation_state(state)
+    lazyllm.globals['agentic_config'] = {'citation_state': state}
+
+    class FakeKnowledgeSearch(LazyKBToolkit):
+        def kb_search(self, query: str):
+            return {'success': True, 'result': {'items': [{
+                'uid': 'node-1', 'docid': 'doc-1', 'content': query,
+            }]}}
+
+    def temp_search(query: str):
+        """Search temporary documents.
+
+        Args:
+            query: Search query.
+        """
+        return {'success': True, 'result': {'items': [{
+            'uid': 'node-2', 'docid': 'doc-2', 'content': query,
+        }]}}
+
+    temp_search.__name__ = 'kb_tmp_search'
+    manager = CitationResultMiddleware(ToolManager([FakeKnowledgeSearch(), temp_search]))
+    results = manager([
+        {'function': {'name': 'FakeKnowledgeSearch_kb_search', 'arguments': {'query': 'knowledge'}}},
+        {'function': {'name': 'kb_tmp_search', 'arguments': {'query': 'temporary'}}},
+    ])
+
+    assert results[0]['value']['result']['items'][0]['ref'] == '[[1.1]]'
+    assert results[1]['value']['result']['items'][0]['ref'] == '[[2.1]]'
+    assert len(state[CITATION_REFS_KEY]) == 2
+    assert [source['source_roles'] for source in materialize_source_views(state)] == [
+        ['searched'], ['searched'],
+    ]
+
+
+def test_mixed_web_and_kb_sources_share_searched_and_cited_role_semantics():
+    state = {}
+    reset_citation_state(state)
+    lazyllm.globals['agentic_config'] = {'citation_state': state}
+
+    class FakeWebSearch(SearchBase):
+        def __init__(self):
+            super().__init__(source_name='fake', skip_auth=True)
+
+        def search(self, query: str):
+            return [{
+                'title': 'Web result',
+                'url': 'https://example.test/web',
+                'snippet': query,
+                'source': 'fake',
+            }]
+
+    class FakeKnowledgeSearch(LazyKBToolkit):
+        def kb_search(self, query: str):
+            return {'success': True, 'result': {'items': [{
+                'uid': 'node-1',
+                'docid': 'doc-1',
+                'kb_id': 'kb-1',
+                'content': query,
+            }]}}
+
+    manager = CitationResultMiddleware(ToolManager([FakeWebSearch(), FakeKnowledgeSearch()]))
+    results = manager([
+        {'function': {'name': 'FakeWebSearch_search', 'arguments': {'query': 'web evidence'}}},
+        {'function': {'name': 'FakeKnowledgeSearch_kb_search', 'arguments': {'query': 'kb evidence'}}},
+    ])
+    web_item = results[0]['value'][0]
+    kb_item = results[1]['value']['result']['items'][0]
+
+    assert [source['source_roles'] for source in materialize_source_views(state)] == [
+        ['searched'], ['searched'],
+    ]
+
+    rewrite_citations(f'{web_item["ref"]} {kb_item["ref"]}', state)
+
+    sources = materialize_source_views(state)
+    assert [source['source_type'] for source in sources] == ['external', 'knowledge_base']
+    assert [source['source_roles'] for source in sources] == [
+        ['cited', 'searched'], ['cited', 'searched'],
+    ]
 
 
 def test_selected_knowledge_base_exposes_concrete_tools_directly():

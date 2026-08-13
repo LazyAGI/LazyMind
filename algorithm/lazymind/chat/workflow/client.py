@@ -1,5 +1,6 @@
 """LazyMind import compatibility for the public Host-neutral Workflow SDK."""
 
+import base64
 from typing import Any, Dict
 
 import httpx
@@ -87,6 +88,17 @@ class RemoteExecutorClient:
                                      headers=self.headers(lease), json=artifact)
         response.raise_for_status()
         return response
+
+    async def upload_artifact_file(self, client: httpx.AsyncClient, attempt: str, lease: str,
+                                   filename: str, content: bytes) -> str:
+        response = await client.post(
+            f'{self.base_url}/internal/workflow-attempts/{attempt}/artifact-files',
+            headers=self.headers(lease), json={
+                'filename': filename,
+                'content_base64': base64.b64encode(content).decode('ascii'),
+            })
+        value = self.data(response)
+        return str(value.get('path') or '')
 
     async def fail(self, client: httpx.AsyncClient, attempt: str, lease: str,
                    message: str) -> httpx.Response:

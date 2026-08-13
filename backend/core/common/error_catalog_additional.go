@@ -341,6 +341,8 @@ func init() {
 	registerAdditionalError("external agent control release is already pending", http.StatusConflict, 2002048)
 	registerAdditionalError("task is terminal", http.StatusConflict, 2002049)
 	registerAdditionalError("codex tcp bridge token is required", http.StatusServiceUnavailable, 2002050)
+	registerAdditionalError("parse workflow slot manifest", http.StatusBadRequest, 2002051)
+	registerAdditionalErrorPattern("artifact slot %q is not declared in workflow revision %s", "artifact slot is not declared in workflow revision", http.StatusBadRequest, 2002052)
 
 }
 

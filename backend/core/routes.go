@@ -84,6 +84,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/internal/workflow-attempts:claim", nil, attemptHandler.Claim)
 	handleAPI(r, "GET", "/internal/workflow-attempts/{attempt_id}/context", nil, remoteExecutorHandler.Context)
 	handleAPI(r, "GET", "/internal/workflow-attempts/{attempt_id}/inputs/{material_id}", nil, remoteExecutorHandler.Input)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/artifact-files", nil, remoteExecutorHandler.UploadArtifactFile)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}/artifacts", nil, remoteExecutorHandler.SaveArtifact)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:heartbeat", nil, attemptHandler.Heartbeat)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:progress", nil, attemptHandler.Progress)

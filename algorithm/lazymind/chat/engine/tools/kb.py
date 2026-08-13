@@ -22,7 +22,6 @@ from lazymind.chat.engine.tools.infra import (
 )
 from lazymind.parsing.engine.transform import GeneralParser
 from lazymind.chat.service.utils import (
-    annotate_citations,
     basename_from_path,
     local_path_from_static_file_url,
     static_file_url_from_any,
@@ -262,20 +261,6 @@ def _serialize_kb_result(result: Any) -> Any:
     return truncate_text(result, 400)
 
 
-def _get_citation_state() -> dict:
-    agentic_config = lazyllm.globals.get('agentic_config') or {}
-    state = agentic_config.get('citation_state')
-    return state if isinstance(state, dict) else {}
-
-
-def _annotate_result_citations(result: Any) -> Any:
-    config = _get_citation_state()
-    if not config:
-        return result
-    annotate_citations(result, config)
-    return result
-
-
 def _string_list(value: Any) -> List[str]:
     if value is None:
         return []
@@ -498,7 +483,6 @@ class KBToolkit:
             image_topk=image_topk or _DEFAULT_IMAGE_TOPK,
         )
         serialized = _serialize_kb_result(result)
-        _annotate_result_citations(serialized)
         return tool_success(
             'kb_search',
             serialized,
@@ -540,7 +524,6 @@ class KBToolkit:
                 'total': 1 if parent else 0,
                 'items': [parent] if parent else [],
             }
-            _annotate_result_citations(result)
             return tool_success('kb_get_parent_node', result)
 
         result = {
@@ -550,7 +533,6 @@ class KBToolkit:
             'total': 0,
             'items': [],
         }
-        _annotate_result_citations(result)
         return tool_success('kb_get_parent_node', result)
 
     def kb_get_window_nodes(
@@ -588,14 +570,12 @@ class KBToolkit:
                 'total': len(nodes),
                 'items': [_serialize_doc_node_like(n) for n in nodes],
             }
-            _annotate_result_citations(result)
             return tool_success('kb_get_window_nodes', result)
 
         result = {
             'total': 0,
             'items': [],
         }
-        _annotate_result_citations(result)
         return tool_success('kb_get_window_nodes', result)
 
     def kb_keyword_search(
@@ -670,7 +650,6 @@ class KBToolkit:
                 'total': len(nodes),
                 'items': [_store_dict_to_result(n) for n in nodes],
             }
-            _annotate_result_citations(result)
             return tool_success('kb_keyword_search', result)
 
         return tool_success('kb_keyword_search', {
@@ -726,7 +705,6 @@ def kb_tmp_search(
         k_max=k_max or _DEFAULT_K_MAX,
     )
     serialized = _serialize_kb_result(result)
-    _annotate_result_citations(serialized)
     return tool_success(
         'kb_tmp_search',
         serialized,

@@ -158,5 +158,11 @@ def static_file_url_from_any(path: str) -> str:
         return ''
     if raw.startswith('/var/lib/lazymind/uploads/'):
         return static_file_url_from_full_path(local_path_from_static_file_url(raw))
+    if os.path.isabs(raw):
+        # Local/Desktop generation returns an absolute path under the configured
+        # upload root. Signing that path directly preserves its upload-relative
+        # portion; joining it again would produce
+        # <upload-root>/home/... and a valid signature for a nonexistent file.
+        return static_file_url_from_full_path(raw)
     joined = os.path.join(_upload_root(), raw.lstrip('/'))
     return static_file_url_from_full_path(joined)

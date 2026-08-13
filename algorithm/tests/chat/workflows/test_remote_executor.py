@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 
 import httpx
@@ -16,6 +17,67 @@ def test_remote_executor_preserves_ordinary_subagent_stream_event_shape():
 
 def test_remote_executor_ignores_non_json_stream_frames():
     assert RemoteWorkflowExecutor._parse_frame('event: heartbeat\n\n') is None
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_persists_artifact_before_task_center_event(monkeypatch, tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        task_artifact = None
+        workflow_artifact = None
+        uploaded = None
+
+        async def context(self, *_):
+            return {'metadata': {'task_id': 'task-1'}, 'inputs': {}}
+
+        async def execution_spec(self, *_):
+            return {'task': {'input_slots': [], 'output_slots': ['image_output']},
+                    'workspace_path': str(tmp_path / 'task-1'),
+                    'params': {}, 'steps': [], 'llm_config': {}}
+
+        async def heartbeat(self, *_):
+            return None
+
+        async def task_event(self, _client, _task, _lease, event):
+            if event.get('type') == 'artifact':
+                self.task_artifact = event
+
+        async def artifact(self, _client, _attempt, _lease, artifact):
+            self.workflow_artifact = artifact
+
+        async def upload_artifact_file(self, _client, attempt, lease, filename, content):
+            self.uploaded = (attempt, lease, filename, content)
+            return '/var/lib/lazymind/uploads/workflow-artifacts/session-1/attempt-1/result.png'
+
+        async def complete(self, *_):
+            return None
+
+        async def fail(self, *_):
+            pytest.fail('the attempt should not fail')
+
+    async def stream(**kwargs):
+        output = os.path.join(kwargs['task_spec']['workspace_path'], 'result.png')
+        with open(output, 'wb') as handle:
+            handle.write(b'png')
+        yield 'data: ' + json.dumps({
+            'type': 'artifact', 'slot': 'image_output', 'content_type': 'image',
+            'seq': 1, 'value': {'path': output},
+        }) + '\n\n'
+        yield 'data: {"type":"done","status":"succeeded","summary":"done"}\n\n'
+
+    from lazymind.chat.engine.subagent import runner
+    runtime = Runtime()
+    worker.runtime = runtime
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+
+    await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
+
+    task_value = runtime.task_artifact['value']['path']
+    workflow_value = runtime.workflow_artifact['value']['path']
+    assert task_value == '/var/lib/lazymind/uploads/workflow-artifacts/session-1/attempt-1/result.png'
+    assert task_value == workflow_value
+    assert runtime.uploaded == ('attempt-1', 'lease-1', 'result.png', b'png')
 
 
 @pytest.mark.asyncio

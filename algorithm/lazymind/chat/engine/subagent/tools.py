@@ -82,7 +82,7 @@ def _is_valid_image_ref(path: str) -> bool:
     p = (path or '').strip()
     if not p:
         return False
-    if p.startswith(('http://', 'https://', '/static-files/', 'data:image/')):
+    if p.startswith(('http://', 'https://', '/static-files/', '/api/core/static-files/', 'data:image/')):
         return True
     if p.startswith('/data/subagent/') or SUBAGENT_MARKER in p:
         return True

@@ -31,6 +31,16 @@ import {
   getRawLanguageFromClassName,
   highlightCode,
 } from "./syntaxHighlight";
+import {
+  type ChatSource,
+  findSourceByCitationId,
+  getSourceEvidenceText,
+  getSourceHref,
+  getSourceLabel,
+  getSourceSubtitle,
+  normalizeSourceMarkers,
+  stripRedundantSourceUrls,
+} from "@/modules/chat/utils/sourceAdapter";
 
 const SOURCE_PREFIXES = ["#source-", "#user-content-source-"];
 const BOLD_BARE_URL_PATTERN = /\*\*((?:https?:\/\/|www\.)[^\s*<>()]+)\*\*/g;
@@ -49,7 +59,7 @@ const markdownRehypeWorkflows = [
 
 const MarkdownRenderContext = createContext<{
   isStreaming: boolean;
-  markSources: any[];
+  markSources: ChatSource[];
 }>({
   isStreaming: false,
   markSources: [],
@@ -205,35 +215,51 @@ const LinkComponent = (props: any) => {
   const sourceIndex = getSourceIndex(href);
 
   if (sourceIndex) {
-    if (isStreaming) {
-      return (
-        <span
-          className="md-segment-index"
-          style={{ backgroundColor: "var(--color-text-description)" }}
-        >
-          {props.children}
-        </span>
-      );
+    const source = findSourceByCitationId(markSources, sourceIndex);
+    const sourceHref = source ? getSourceHref(source) : "";
+    const label = source
+      ? getSourceLabel(source)
+      : typeof props.title === "string" && props.title
+        ? props.title
+        : "Source";
+    const subtitle = source ? getSourceSubtitle(source) : "";
+    const chipContent = <span className="md-source-chip-label">{label}</span>;
+    const chip = source ? (
+      <a
+        className={classnames("md-source-chip", {
+          "md-source-chip--pending": isStreaming,
+          "md-source-chip--clickable": true,
+        })}
+        href={sourceHref}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        {chipContent}
+      </a>
+    ) : (
+      <span className="md-source-chip md-source-chip--pending">
+        {chipContent}
+      </span>
+    );
+
+    if (isStreaming || !source) {
+      return chip;
     }
 
     return (
       <Popover
-        title={props.title || ""}
+        mouseEnterDelay={0.2}
+        classNames={{ root: "md-source-popover" }}
+        title={subtitle ? `${label} · ${subtitle}` : label}
         content={
           <div className="md-content-card">
             <div className="md-content-card-content">
-              <MarkdownViewer>
-                {
-                  markSources.find(
-                    (source) => String(source.index) === sourceIndex,
-                  )?.content
-                }
-              </MarkdownViewer>
+              <MarkdownViewer>{getSourceEvidenceText(source)}</MarkdownViewer>
             </div>
           </div>
         }
       >
-        <span className="md-segment-index">{props.children}</span>
+        {chip}
       </Popover>
     );
   }
@@ -298,10 +324,14 @@ const MarkdownViewer = memo((props: any) => {
   } = props;
   const normalizedChildren =
     typeof children === "string"
-      ? normalizeBoldBareUrls(normalizeBareUrls(children))
+      ? normalizeBoldBareUrls(
+          normalizeBareUrls(
+            stripRedundantSourceUrls(normalizeSourceMarkers(children)),
+          ),
+        )
       : children;
 
-  const [markSources, setMarkSources] = useState<any[]>([]);
+  const [markSources, setMarkSources] = useState<ChatSource[]>([]);
 
   useEffect(() => {
     if (sources && sources.length > 0) {

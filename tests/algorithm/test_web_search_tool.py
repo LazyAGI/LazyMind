@@ -1,45 +1,110 @@
-from lazyllm.tools.tools.search import ArxivSearch, BingSearch, BochaSearch, GoogleSearch, WikipediaSearch
+from copy import deepcopy
+from inspect import signature
+import time
+
+import lazyllm
+import pytest
+from lazyllm.tools.agent.toolsManager import ToolManager
 
 from lazymind.chat.engine.tools import web_search as web_search_mod
+from lazymind.chat.engine.tools.infra import CitationResultMiddleware
+from lazymind.chat.service.utils.citations import (
+    CITATION_REFS_KEY,
+    materialize_source_views,
+    register_external_search_result,
+    reset_citation_state,
+)
 
 
-def test_lazyllm_search_public_apis_are_provider_specific():
-    base_apis = ['search', 'get_content', 'get_contents']
-    assert WikipediaSearch.__public_apis__ == base_apis
-    assert ArxivSearch.__public_apis__ == base_apis
-    assert GoogleSearch.__public_apis__ == base_apis
-    assert BingSearch.__public_apis__ == base_apis
-    assert BochaSearch.__public_apis__ == base_apis
+@pytest.fixture(autouse=True)
+def reset_web_tool_state():
+    previous = lazyllm.globals.get('agentic_config')
+    state = {}
+    reset_citation_state(state)
+    lazyllm.globals['agentic_config'] = {'citation_state': state}
+    try:
+        yield state
+    finally:
+        lazyllm.globals['agentic_config'] = previous or {}
 
 
-def test_lazymind_web_search_url_fetch_exists():
-    import inspect
-    assert inspect.isfunction(web_search_mod.url_fetch)
-    assert web_search_mod.url_fetch.__name__ == 'url_fetch'
+def test_url_fetch_registers_sources_and_follows_exact_target_url(monkeypatch, reset_web_tool_state):
+    assert list(signature(web_search_mod.url_fetch).parameters) == ['url']
+    search = register_external_search_result({
+        'title': 'Root from search',
+        'url': 'https://example.test/root',
+    }, reset_web_tool_state)
+    pages = {
+        'https://example.test/root': {
+            'title': 'Root',
+            'content': 'Root content',
+            'links': [{'text': 'Child', 'target_url': 'https://example.test/child'}],
+        },
+        'https://example.test/child': {
+            'title': 'Child',
+            'content': 'Child content',
+            'links': [{'text': 'Root', 'target_url': 'https://example.test/root'}],
+        },
+    }
 
-
-def test_url_fetch_batches_multiple_urls_and_preserves_partial_failures(monkeypatch):
     def fake_fetch(url):
-        if url.endswith('/bad'):
-            raise RuntimeError('unavailable')
-        return {'final_url': url, 'content': f'content:{url}'}
+        page = deepcopy(pages[url])
+        page.update({'status': 'ok', 'source_status': 'ok', 'url': url, 'final_url': url})
+        return page
 
     monkeypatch.setattr(web_search_mod, 'fetch_url_content', fake_fetch)
+    manager = CitationResultMiddleware(ToolManager([web_search_mod.url_fetch]))
 
-    payload = web_search_mod.url_fetch(urls=[
-        'https://example.test/one',
-        'https://example.test/bad',
-        'https://example.test/one',
-        'https://example.test/two',
-    ])
+    def fetch(url):
+        result = manager({
+            'function': {'name': 'url_fetch', 'arguments': {'url': url}},
+        })[0]
+        assert result['ok'] is True
+        return result['value']['result']
 
-    result = payload['result']
-    assert result['total'] == 3
-    assert result['succeeded'] == 2
-    assert result['failed'] == 1
-    assert [item['url'] for item in result['results']] == [
-        'https://example.test/one',
-        'https://example.test/bad',
-        'https://example.test/two',
+    root = fetch(url='https://example.test/root')
+    child = fetch(url=root['links'][0]['target_url'])
+
+    assert root['citation_index'] == search['citation_index'] == '1.1'
+    assert child['citation_index'] == '2.1'
+    assert root['links'] == [{
+        'text': 'Child',
+        'target_url': 'https://example.test/child',
+    }]
+    assert len(reset_web_tool_state[CITATION_REFS_KEY]) == 2
+    assert [source['source_roles'] for source in materialize_source_views(reset_web_tool_state)] == [
+        ['searched'], ['searched'],
     ]
-    assert result['results'][1]['success'] is False
+
+
+def test_parallel_url_fetch_calls_register_in_original_tool_call_order(
+    monkeypatch, reset_web_tool_state,
+):
+    def fake_fetch(url):
+        if url.endswith('/slow'):
+            time.sleep(0.04)
+        return {
+            'status': 'ok',
+            'source_status': 'ok',
+            'url': url,
+            'final_url': url,
+            'title': url.rsplit('/', 1)[-1],
+            'content': f'Content for {url}',
+            'links': [],
+        }
+
+    monkeypatch.setattr(web_search_mod, 'fetch_url_content', fake_fetch)
+    manager = CitationResultMiddleware(ToolManager([web_search_mod.url_fetch]))
+    calls = [
+        {'function': {'name': 'url_fetch', 'arguments': {'url': 'https://example.test/slow'}}},
+        {'function': {'name': 'url_fetch', 'arguments': {'url': 'https://example.test/fast'}}},
+    ]
+
+    results = manager(calls)
+
+    assert results[0]['value']['result']['ref'] == '[[1.1]]'
+    assert results[1]['value']['result']['ref'] == '[[2.1]]'
+    assert [source['url'] for source in materialize_source_views(reset_web_tool_state)] == [
+        'https://example.test/slow',
+        'https://example.test/fast',
+    ]

@@ -142,17 +142,28 @@ class RemoteWorkflowExecutor:
                 if event is None:
                     continue
                 kind = event.get('type')
-                if kind not in {'done', 'error'}:
+                if kind == 'artifact':
+                    artifact = {'slot': event.get('slot'), 'content_type': event.get('content_type'),
+                                'seq': event.get('seq', 1), 'value': event.get('value')}
+                    artifact['value'] = await self._persist_files(
+                        client, attempt_id, lease, artifact['value'],
+                        str(artifact.get('content_type') or ''), workspace)
+                    # The ordinary Task Center projection must receive the same
+                    # host-neutral value as the Workflow artifact sink.  A raw
+                    # path here points into this executor's temporary workspace
+                    # and is inaccessible to Core after the attempt finishes.
+                    await self.runtime.task_event(client, task_id, lease, {
+                        **event, 'value': artifact['value'],
+                    })
+                    await self.runtime.artifact(client, attempt_id, lease, artifact)
+                    artifacts.append(artifact)
+                elif kind not in {'done', 'error'}:
                     await self.runtime.task_event(client, task_id, lease, event)
+
                 if kind in {'task_start', 'progress'}:
                     await self.runtime.progress(client, attempt_id, lease, {
                         'progress': event.get('progress', 0),
                         'phase': event.get('current_phase', kind)})
-                elif kind == 'artifact':
-                    artifact = {'slot': event.get('slot'), 'content_type': event.get('content_type'),
-                                'seq': event.get('seq', 1), 'value': event.get('value')}
-                    await self.runtime.artifact(client, attempt_id, lease, artifact)
-                    artifacts.append(artifact)
                 elif kind == 'done':
                     terminal_event = event
                     summary = str(event.get('summary') or '')
@@ -199,6 +210,38 @@ class RemoteWorkflowExecutor:
             target = root / name
             target.write_bytes(base64.b64decode(str(value.get('content_base64') or '')))
             result[str(material)] = str(target)
+        return result
+
+    async def _persist_files(self, client: httpx.AsyncClient, attempt: str, lease: str,
+                             value: Any, content_type: str, workspace: str) -> Any:
+        if not isinstance(value, dict) or content_type not in {'file', 'file_list', 'image'}:
+            return value
+        result = dict(value)
+        keys = ['path'] if content_type in {'file', 'image'} else ['paths']
+        for key in keys:
+            paths = result.get(key)
+            scalar = isinstance(paths, str)
+            values = [paths] if scalar else paths if isinstance(paths, list) else []
+            persisted = []
+            for raw in values:
+                raw_text = str(raw)
+                if raw_text.startswith((
+                    'http://', 'https://', '/static-files/', '/api/core/static-files/',
+                )):
+                    persisted.append(raw_text)
+                    continue
+                path = pathlib.Path(raw_text)
+                if not path.is_absolute():
+                    path = pathlib.Path(workspace) / path
+                try:
+                    resolved = path.resolve(strict=True)
+                    resolved.relative_to(pathlib.Path(workspace).resolve())
+                    stable_path = await self.runtime.upload_artifact_file(
+                        client, attempt, lease, resolved.name, resolved.read_bytes())
+                    persisted.append(stable_path)
+                except (OSError, ValueError):
+                    persisted.append('')
+            result[key] = persisted[0] if scalar and persisted else persisted
         return result
 
     @staticmethod

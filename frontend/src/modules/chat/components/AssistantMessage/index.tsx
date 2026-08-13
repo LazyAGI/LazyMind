@@ -1,6 +1,6 @@
-import { Button, Divider, Flex, message, Spin, Tooltip } from "antd";
+import { Button, Divider, Drawer, Flex, message, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -12,12 +12,12 @@ import {
   ExclamationCircleOutlined,
   LikeFilled,
   LikeOutlined,
+  LinkOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import {
   ChatConversationsResponseFinishReasonEnum,
   FeedBackChatHistoryRequestTypeEnum,
-  Source,
 } from "@/api/generated/chatbot-client";
 import { AgentAppsAuth } from "@/components/auth";
 import { isAskPendingReadOnly } from "@/modules/chat/utils/message";
@@ -29,6 +29,16 @@ import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
+import {
+  type ChatSource,
+  type ChatSourceCollection,
+  getSearchSources,
+  getSourceDedupKey,
+  getSourceEvidenceText,
+  getSourceLabel,
+  getSourceSubtitle,
+  openSource,
+} from "@/modules/chat/utils/sourceAdapter";
 import { IdentityAvatar } from "@/modules/identityAvatar";
 
 async function copyTextToClipboard(text: string) {
@@ -205,6 +215,7 @@ const AssistantMessage = (props: any) => {
   } = props;
   const citeButtonRef = useRef<HTMLButtonElement | null>(null);
   const citeSelectionTextRef = useRef("");
+  const [drawerSources, setDrawerSources] = useState<ChatSource[]>([]);
   const onCiteMessageRef = useRef(onCiteMessage);
   onCiteMessageRef.current = onCiteMessage;
   // Debounced backend persistence for ask-card answers. Created once per component
@@ -406,78 +417,60 @@ const AssistantMessage = (props: any) => {
     );
   }
 
-  function getSourceDisplayIndex(source: any) {
-    const index = source?.index;
-    if (source?.display_index !== undefined && source?.display_index !== null) {
-      return source.display_index;
-    }
-    if (source?.document_index !== undefined && source?.document_index !== null) {
-      return source.document_index;
-    }
-    if (typeof index === "string" && index.includes(".")) {
-      return index.split(".")[0];
-    }
-    return index;
+  function handleOpenSource(source: ChatSource) {
+    openSource(source);
   }
 
-  function getSourceDocumentKey(source: any, sourceIndex: number) {
-    const displayIndex = getSourceDisplayIndex(source);
-    if (displayIndex !== undefined && displayIndex !== null) {
-      return `${source?.dataset_id || ""}:${source?.file_name || source?.document_id || ""}:${displayIndex}`;
-    }
-    if (source?.document_id) {
-      return `${source?.dataset_id || ""}:${source.document_id}`;
-    }
-    return `source-${sourceIndex}`;
-  }
-
-  function getDocumentSources(sources: Source[]) {
-    const seen = new Set<string>();
-    return Object.values(sources).filter((source: any, sourceIndex: number) => {
-      const key = getSourceDocumentKey(source, sourceIndex);
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    });
-  }
-
-  function openSource(source: any) {
-    if (source?.dataset_id === "default") {
-      message.error(t("chat.tempFileNotSupportJump"));
-      return;
-    }
-    const url = `/lib/knowledge/knowledge/${source.dataset_id}/${source.document_id}?group_name=${source.group_name}&segement_id=${source.segement_id}&number=${source.segment_number}&from=chat`;
-    window.open(url, "_blank");
-  }
-
-  function renderKnowledgeBase() {
-    const sources = item.sources as Source[];
-    if (!sources || sources.length < 1) {
-      return <></>;
-    }
+  function renderSourceButton(sources?: ChatSourceCollection) {
+    const displaySources = getSearchSources(sources);
+    if (!displaySources.length) return null;
     return (
-      <div className="chat-assistant-msg-knowledge-info">
-        {getDocumentSources(sources).map((source: Source, sourceIndex: number) => {
-          return (
-            <div
-              className="chat-assistant-msg-knowledge"
-              key={getSourceDocumentKey(source, sourceIndex)}
-            >
-              <span style={{ marginRight: "8px" }}>
-                {getSourceDisplayIndex(source)}
-              </span>
-              <span
-                className="knowledgeName"
-                onClick={() => openSource(source)}
+      <Tooltip title={t("chat.references")}>
+        <Button
+          className="tool-btn source-btn"
+          icon={<LinkOutlined />}
+          onClick={() => setDrawerSources(displaySources)}
+        >
+          {t("chat.references")} · {displaySources.length}
+        </Button>
+      </Tooltip>
+    );
+  }
+
+  function renderSourceDrawer() {
+    return (
+      <Drawer
+        className="chat-source-drawer"
+        title={`${t("chat.references")} · ${drawerSources.length}`}
+        placement="right"
+        width={400}
+        open={drawerSources.length > 0}
+        onClose={() => setDrawerSources([])}
+      >
+        <div className="chat-source-list">
+          {drawerSources.map((source, sourceIndex) => {
+            return (
+              <button
+                type="button"
+                className="chat-source-item"
+                key={getSourceDedupKey(source, sourceIndex)}
+                onClick={() => handleOpenSource(source)}
               >
-                {source.file_name}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+                <span className="chat-source-item-heading">
+                  <LinkOutlined />
+                  {getSourceSubtitle(source) || t("chat.references")}
+                </span>
+                <strong>{getSourceLabel(source)}</strong>
+                {getSourceEvidenceText(source) && (
+                  <span className="chat-source-item-content">
+                    {getSourceEvidenceText(source)}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </Drawer>
     );
   }
 
@@ -715,41 +708,6 @@ const AssistantMessage = (props: any) => {
       .catch(() => {});
   }
 
-  function renderAnswerKnowledgeBase(answerIndex: number) {
-    const answer = item.answers?.[answerIndex];
-    if (!answer) {
-      return null;
-    }
-
-    const sources = answer.sources as Source[];
-    if (!sources || sources.length < 1) {
-      return null;
-    }
-
-    return (
-      <div className="chat-assistant-msg-knowledge-info">
-        {getDocumentSources(sources).map((source: Source, sourceIndex: number) => {
-          return (
-            <div
-              className="chat-assistant-msg-knowledge"
-              key={getSourceDocumentKey(source, sourceIndex)}
-            >
-              <span style={{ marginRight: "8px" }}>
-                {getSourceDisplayIndex(source)}
-              </span>
-              <span
-                className="knowledgeName"
-                onClick={() => openSource(source)}
-              >
-                {source.file_name}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
   function renderAnswerFooter(answerIndex: number, showFullToolbar = false) {
     const answer = item.answers?.[answerIndex];
     if (!answer) {
@@ -766,7 +724,7 @@ const AssistantMessage = (props: any) => {
           style={{ margin: "12px 0" }}
         />
         <div className="chat-assistant-msg-tool-chat-toolbar">
-          <div>
+          <div className="chat-assistant-msg-tool-actions">
             <Tooltip title={t("chat.copy")}>
               <Button
                 className="tool-btn"
@@ -787,6 +745,7 @@ const AssistantMessage = (props: any) => {
                 />
               </Tooltip>
             )}
+            {renderSourceButton(answer.sources)}
           </div>
           {showFullToolbar && (
             <Flex>
@@ -838,7 +797,7 @@ const AssistantMessage = (props: any) => {
       <>
         <Divider className="chat-assistant-msg-tool-divider" />
         <div className="chat-assistant-msg-tool-chat-toolbar">
-          <div>
+          <div className="chat-assistant-msg-tool-actions">
             <Tooltip title={t("chat.copy")}>
               <Button
                 className="tool-btn"
@@ -859,6 +818,7 @@ const AssistantMessage = (props: any) => {
                 />
               </Tooltip>
             )}
+            {renderSourceButton(item.sources)}
           </div>
           <Flex>
             {currentFeedback ===
@@ -1072,12 +1032,6 @@ const AssistantMessage = (props: any) => {
                   ? renderAnswerFooter
                   : undefined
               }
-              renderKnowledgeBase={
-                item.finish_reason ===
-                ChatConversationsResponseFinishReasonEnum.FinishReasonStop
-                  ? renderAnswerKnowledgeBase
-                  : undefined
-              }
               initialSelectedIndex={item.selected_answer_index}
               initialPreference={item.answer_preference}
               isStreaming={
@@ -1104,6 +1058,7 @@ const AssistantMessage = (props: any) => {
           initialReason={modalFeedbackRecord?.reason}
           initialComment={modalFeedbackRecord?.expected_answer}
         />
+        {renderSourceDrawer()}
       </div>
     );
   }
@@ -1133,12 +1088,6 @@ const AssistantMessage = (props: any) => {
           {item.finish_reason ===
             ChatConversationsResponseFinishReasonEnum.FinishReasonStop &&
             !item.onboardingInfo &&
-            renderKnowledgeBase()}
-
-          {}
-          {item.finish_reason ===
-            ChatConversationsResponseFinishReasonEnum.FinishReasonStop &&
-            !item.onboardingInfo &&
             renderFooter()}
         </div>
         {(item.ask_pending || index === length - 1) && renderBottom()}
@@ -1159,6 +1108,7 @@ const AssistantMessage = (props: any) => {
         initialReason={modalFeedbackRecord?.reason}
         initialComment={modalFeedbackRecord?.expected_answer}
       />
+      {renderSourceDrawer()}
     </div>
   );
 };

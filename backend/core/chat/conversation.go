@@ -590,6 +590,7 @@ func resumeFromDBOnly(db *gorm.DB, convID string, flusher http.Flusher, w http.R
 		"delta":               stripThinkTags(stripToolTags(last.Result)),
 		"finish_reason":       "FINISH_REASON_STOP",
 		"history_id":          last.ID,
+		"sources":             retrievalSources(last.RetrievalResult),
 		"tool_call_turns":     last.ToolCallTurns,
 		"thinking_duration_s": last.ThinkingDurationS,
 	})
@@ -605,6 +606,7 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			"delta":               stripThinkTags(stripToolTags(last.Result)),
 			"finish_reason":       "FINISH_REASON_STOP",
 			"history_id":          last.ID,
+			"sources":             retrievalSources(last.RetrievalResult),
 			"tool_call_turns":     last.ToolCallTurns,
 			"thinking_duration_s": last.ThinkingDurationS,
 		})
@@ -628,6 +630,7 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			"delta":               stripThinkTags(stripToolTags(h.Result)),
 			"finish_reason":       finish,
 			"history_id":          h.ID,
+			"sources":             retrievalSources(h.RetrievalResult),
 			"tool_call_turns":     h.ToolCallTurns,
 			"thinking_duration_s": h.ThinkingDurationS,
 		})
@@ -640,6 +643,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 	}
 	var fullDelta, fullReasoning string
 	var intentUpdated *IntentUpdatedEvent
+	var sources []any
 	last := chunks[len(chunks)-1]
 	for _, ch := range chunks {
 		if ch == nil {
@@ -649,6 +653,9 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		fullReasoning += ch.ReasoningContent
 		if ch.IntentUpdated != nil {
 			intentUpdated = ch.IntentUpdated
+		}
+		if len(ch.Sources) > 0 {
+			sources = ch.Sources
 		}
 	}
 	if last == nil {
@@ -660,7 +667,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		HistoryID:        last.HistoryID,
 		Delta:            fullDelta,
 		ReasoningContent: fullReasoning,
-		Sources:          last.Sources,
+		Sources:          sources,
 		FinishReason:     last.FinishReason,
 		IntentUpdated:    intentUpdated,
 	}
@@ -1078,15 +1085,7 @@ func loadConversationHistories(ctx context.Context, convID string) []orm.ChatHis
 }
 
 func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
-	var sources any
-	if len(h.RetrievalResult) > 0 {
-		var rr struct {
-			Sources any `json:"sources"`
-		}
-		if err := json.Unmarshal(h.RetrievalResult, &rr); err == nil {
-			sources = rr.Sources
-		}
-	}
+	sources := retrievalSources(h.RetrievalResult)
 	var input any
 	var mentions any
 	var askPending any

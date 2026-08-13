@@ -178,6 +178,36 @@ func TestRemoteHandlerAcceptsDeclaredOptionalArtifactAndRejectsUnknown(t *testin
 	}
 }
 
+func TestRemoteHandlerPersistsArtifactFileUnderCoreUploadRoot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	value := AttemptContext{AttemptID: "attempt-1", SessionID: "session-1", StepID: "step-1"}
+	handler, _, claim := remoteHandlerFixture(t, value)
+	rec := remoteHandlerRequest(handler.UploadArtifactFile, http.MethodPost, "/artifact-files",
+		value.AttemptID, claim.LeaseToken, map[string]any{
+			"filename": "../result.png", "content_base64": base64.StdEncoding.EncodeToString([]byte("png")),
+		})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Path string `json:"path"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	wantDir := filepath.Join(root, "workflow-artifacts", "session-1", "attempt-1")
+	if filepath.Dir(envelope.Data.Path) != wantDir {
+		t.Fatalf("path=%q want directory %q", envelope.Data.Path, wantDir)
+	}
+	content, err := os.ReadFile(envelope.Data.Path)
+	if err != nil || string(content) != "png" {
+		t.Fatalf("persisted content=%q err=%v", content, err)
+	}
+}
+
 func TestRemoteHandlerCompletionRequiresDurableOutputs(t *testing.T) {
 	value := AttemptContext{AttemptID: "attempt-1", SessionID: "session-1", StepID: "step-1",
 		DeclaredOutputs: []string{"report"}, RequiredOutputs: []string{"report"}}

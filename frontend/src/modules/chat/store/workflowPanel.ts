@@ -352,6 +352,43 @@ export interface WorkflowUI {
   slots?: Record<string, Record<string, unknown>>;
 }
 
+/**
+ * The catalog keeps reusable slot metadata at the workflow root while UI tabs
+ * commonly reference a slot with only `{ id }`.  Hydrate those references so
+ * renderers can see properties such as `type`, `cardinality`, and `ordered`.
+ */
+export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): WorkflowUI {
+  if (!raw || typeof raw !== 'object') return {};
+  const spec = raw as Record<string, unknown>;
+  const rawUI = spec.ui;
+  if (!rawUI || typeof rawUI !== 'object' || Array.isArray(rawUI)) return {};
+
+  const ui = rawUI as WorkflowUI;
+  const slotDefs = new Map<string, SlotDef>();
+  if (Array.isArray(spec.slots)) {
+    for (const value of spec.slots) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const slot = value as SlotDef;
+      if (typeof slot.id === 'string' && slot.id) slotDefs.set(slot.id, slot);
+    }
+  }
+
+  const name = typeof spec.name === 'string' ? spec.name : fallbackName;
+  if (!Array.isArray(ui.tabs) || slotDefs.size === 0) {
+    return name === undefined ? ui : { ...ui, name };
+  }
+  return {
+    ...ui,
+    ...(name === undefined ? {} : { name }),
+    tabs: ui.tabs.map((tab) => ({
+      ...tab,
+      slots: Array.isArray(tab.slots)
+        ? tab.slots.map((slot) => ({ ...slotDefs.get(slot.id), ...slot }))
+        : [],
+    })),
+  };
+}
+
 export interface SlotVersionEntry {
   revision: number;
   change_source: "ai" | "human" | "provider_sync";
@@ -633,25 +670,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
         headers: lang ? { "Accept-Language": lang } : undefined,
       });
       const payload = res?.data?.data ?? res?.data ?? {};
-      const declaredSlots = new Map<string, Record<string, unknown>>(
-        (Array.isArray(payload.slots) ? payload.slots : [])
-          .filter((slot: unknown): slot is Record<string, unknown> => Boolean(
-            slot && typeof slot === "object" && typeof (slot as Record<string, unknown>).id === "string",
-          ))
-          .map((slot: Record<string, unknown>) => [String(slot.id), slot]),
-      );
-      const rawUI: WorkflowUI = payload.ui ?? {};
-      const ui: WorkflowUI = {
-        ...rawUI,
-        name: typeof payload.name === "string" ? payload.name : workflowId,
-        tabs: rawUI.tabs?.map((tab) => ({
-          ...tab,
-          slots: tab.slots.map((slot) => ({
-            ...(declaredSlots.get(slot.id) ?? {}),
-            ...slot,
-          })),
-        })),
-      };
+      const ui = hydrateWorkflowUI(payload, workflowId);
       set((state) => ({
         workflowUIByWorkflow: { ...state.workflowUIByWorkflow, [cacheKey]: ui },
       }));
