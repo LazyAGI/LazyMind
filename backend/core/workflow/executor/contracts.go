@@ -23,8 +23,9 @@ type AttemptContext struct {
 	WorkflowRevision    string            `json:"workflow_revision"`
 	Inputs              map[string]any    `json:"inputs,omitempty"`
 	DeclaredOutputs     []string          `json:"declared_outputs,omitempty"`
-	RequiredOutputs     []string          `json:"required_outputs,omitempty"`
 	OutputCardinalities map[string]string `json:"output_cardinalities,omitempty"`
+	DeclaredOutputTypes map[string]string `json:"declared_output_types,omitempty"`
+	RequiredOutputs     []string          `json:"required_outputs,omitempty"`
 	Capabilities        []string          `json:"capabilities,omitempty"`
 	LegacyTools         []string          `json:"legacy_tools,omitempty"`
 	Metadata            map[string]string `json:"metadata,omitempty"`

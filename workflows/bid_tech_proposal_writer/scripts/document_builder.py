@@ -389,6 +389,13 @@ def compose_proposal_docx(markdown_text: str, outline_json: str,
         first_match = HEADING.match(lines[first_index].strip())
         if first_match and _strip_heading_number(first_match.group(2)).rstrip('技术方案') == title.rstrip('技术方案'):
             lines[first_index] = ''
+            # Shared Writer reserves Markdown H1 for the document title. The cover
+            # already carries that title, so promote H2..H5 bid chapters to Word
+            # Heading 1..4 after removing the duplicate Markdown title.
+            for index, line in enumerate(lines):
+                heading = HEADING.match(line.strip())
+                if heading and len(heading.group(1)) >= 2:
+                    lines[index] = line.replace(heading.group(1), heading.group(1)[1:], 1)
     paragraph_count, heading_count, embedded = _render_markdown(document, '\n'.join(lines), images)
     settings = document.settings.element
     update_fields = OxmlElement('w:updateFields')

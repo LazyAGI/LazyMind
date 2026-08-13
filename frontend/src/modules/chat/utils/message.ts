@@ -26,6 +26,14 @@ export function stripAskUserReceipt(text: string | undefined, hasAskPending: boo
     : content;
 }
 
+export function isAskPendingReadOnly(
+  askAnswered: boolean | undefined,
+  isLatestMessage: boolean,
+  hasLaterUserMessage = false,
+) {
+  return !!askAnswered || (!isLatestMessage && hasLaterUserMessage);
+}
+
 interface ChatUserMessageLike {
   delta?: string;
   inputs?: Query[] | null;
@@ -205,7 +213,6 @@ export function buildChatMessageListFromHistory(
       thinking_time_s: record.thinking_time_s,
       tool_call_turns: record.tool_call_turns,
       intent_updated: (record as any).intent_updated,
-      is_history: true,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.

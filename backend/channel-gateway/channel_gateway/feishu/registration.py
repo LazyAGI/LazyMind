@@ -5,6 +5,15 @@ from collections.abc import Callable
 from typing import Any
 
 import lark_oapi
+from lark_oapi.api.application.v7 import (
+    AppAbilityBot,
+    BotMenuNode,
+    BotMenuUdIcon,
+    CreateApplicationPublishRequest,
+    CreateApplicationPublishRequestBody,
+    PatchApplicationAbilityRequest,
+    PatchApplicationAbilityRequestBody,
+)
 
 from channel_gateway.feishu.domain import (
     FeishuAppRegistration,
@@ -19,17 +28,128 @@ _ADDONS = {
             'im:message.p2p_msg:readonly',
             'im:resource',
             'cardkit:card:write',
+            'application:bot.menu:write',
+            'application:application:patch',
         ],
     },
     'events': {
         'items': {
-            'tenant': ['im.message.receive_v1'],
+            'tenant': [
+                'im.message.receive_v1',
+                'application.bot.menu_v6',
+            ],
         },
     },
     'callbacks': {
         'items': ['card.action.trigger'],
     },
 }
+
+_MENU_ITEMS = (
+    ('lazymind_capabilities', '能力', 'Capabilities', 'app_outlined'),
+    (
+        'lazymind_conversations',
+        '切换会话',
+        'Switch conversation',
+        'switch_outlined',
+    ),
+    ('lazymind_settings', '设置', 'Settings', 'setting_outlined'),
+    ('lazymind_assistant', '助理', 'Assistant', 'robot_outlined'),
+)
+
+
+def _menu_payload() -> list[BotMenuNode]:
+    return [
+        BotMenuNode.builder()
+        .menu_id(event_key)
+        .sort(index)
+        .default_name(zh_name)
+        .i18n_name({'zh_cn': zh_name, 'en_us': en_name})
+        .event_key(event_key)
+        .menu_content_type(2)
+        .ud_icon(
+            BotMenuUdIcon.builder()
+            .token(icon_token)
+            .color('blue')
+            .build()
+        )
+        .build()
+        for index, (event_key, zh_name, en_name, icon_token) in enumerate(
+            _MENU_ITEMS,
+            start=1,
+        )
+    ]
+
+
+def configure_bot_menu(
+    app_id: str,
+    app_secret: str,
+    *,
+    publish_version: str,
+) -> None:
+    client = (
+        lark_oapi.Client.builder()
+        .app_id(app_id)
+        .app_secret(app_secret)
+        .build()
+    )
+    menus = _menu_payload()
+    bot = (
+        AppAbilityBot.builder()
+        .enable(True)
+        .bot_menu_enable(True)
+        .bot_menus(menus)
+        .bot_menu_display_strategy(3)
+        .build()
+    )
+    request = (
+        PatchApplicationAbilityRequest.builder()
+        .app_id(app_id)
+        .request_body(
+            PatchApplicationAbilityRequestBody.builder()
+            .bot(bot)
+            .build()
+        )
+        .build()
+    )
+    try:
+        response = client.application.v7.application_ability.patch(request)
+    except Exception as exc:
+        raise FeishuRuntimeError(
+            'Feishu bot menu configuration request failed'
+        ) from exc
+    if not response.success():
+        raise FeishuRuntimeError(
+            'Feishu bot menu configuration failed '
+            f'code={response.code} msg={response.msg}'
+        )
+    publish_request = (
+        CreateApplicationPublishRequest.builder()
+        .app_id(app_id)
+        .request_body(
+            CreateApplicationPublishRequestBody.builder()
+            .mobile_default_ability('bot')
+            .pc_default_ability('bot')
+            .remark('LazyMind 原生菜单与对话接入')
+            .changelog('新增能力、切换会话、设置和助理悬浮菜单。')
+            .version(publish_version)
+            .build()
+        )
+        .build()
+    )
+    try:
+        publish_response = client.application.v7.application_publish.create(
+            publish_request
+        )
+    except Exception as exc:
+        raise FeishuRuntimeError(
+            'Feishu bot menu publish request failed'
+        ) from exc
+    if not publish_response.success():
+        raise FeishuRuntimeError(
+            'Feishu bot menu publish failed '
+            f'code={publish_response.code} msg={publish_response.msg}'
+        )
 
 
 class LarkAppRegistrar:

@@ -13,8 +13,8 @@
 1. **招标文件解析（`parse_bid_document`）**：用工作流专属解析器读取 DOCX、PDF、TXT、Markdown、HTML 或 RTF，保留标题、编号、表格和来源元数据。
 2. **技术要求提取（`extract_tech_requirements`）**：机械扫描与专家复核结合，形成 `BG/FUNC/PERF/SEC/SVC/IMPL-NNN` 稳定 ID 池。
 3. **废标项聚焦（`extract_disqualification_items`）**：区分明确否决条款和高风险提醒，保留原文、出处、指标及应答策略。
-4. **章节大纲与字数（`build_chapter_outline`）**：大纲最多四级、标题少于 10 字，叶子章节绑定需求/废标 ID，并完成字数分配和脚本校验。
-5. **逐章正文编写（`write_chapter_contents`）**：每个叶子章节单独保存，同时生成完整合稿；正文以解决方案专家视角、自信陈述式撰写。
+4. **章节大纲与字数（`build_chapter_outline`）**：复用 LazyMind Writer 生成/修改大纲，再执行投标专属的层级、ID 映射和字数校验；`outline_document` 可在卡片内人工编辑和保存版本。
+5. **逐章正文编写（`write_chapter_contents`）**：复用 LazyMind Writer 的章节规划、流式分章写作与结构化修订；`draft_document` 可在卡片内人工编辑、保存版本或选区改写。
 6. **架构图与效果图（`generate_proposal_images`）**：不调用文生图模型；使用本地 PIL 代码生成 1 张架构图和 5–10 张不同布局的 16:9 功能效果图。
 7. **技术方案合成（`compose_proposal_docx`）**：按投标文档样式规则生成完整 Markdown 和真实 `.docx`，嵌入所有选定图片及可更新目录。
 8. **文档结果校验（`validate_proposal`）**：检查总字数、章节完整性、技术要求覆盖、废标项应答、图像数量和 DOCX 包完整性。
@@ -26,6 +26,13 @@
 - 不写“不涉及 / 不包含 / 暂不提供 / 后续版本”等防御性表达。
 - 数字、标准、政策和产品能力只可来自招标原文或用户明确材料；不得编造。
 - 每个 `bid_requirements_refs` 与 `disqualification_refs` 必须在对应正文中明确覆盖。
+
+## Writer 复用与修订
+
+- 大纲和正文的语言模型规划、流式写作、AI 修改均调用 LazyMind 已有 Writer Toolkit；工作流只保留投标约束适配和文件落盘。
+- 用户可直接编辑 `outline_document.md` 和 `draft_document.md`。后续步骤始终读取最新选中修订，不使用隐藏副本。
+- 人工改动大纲后，正文步骤会重新构建并校验 `effective_outline`，确保 DOCX、配图和最终校验使用同一版大纲。
+- 工作流的选区改写调用 Writer 修订能力生成预览，用户确认后写入同一槽位的新版本。
 
 ## 注意事项
 

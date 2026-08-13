@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 import time
+from collections.abc import AsyncIterator
 from typing import Any, Dict, List, Optional
 
 import lazyllm
 from lazyllm import LOG, AutoModel
+from lazyllm.tools.tool_config_inject import inject_tool_config
 
-from lazymind.config import config as _cfg
-from lazymind.model_config import inject_model_config
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
     AgentExecutor,
@@ -25,7 +26,6 @@ from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.workflow.artifacts import build_artifact_context_section
 from lazymind.chat.workflow.script_tools import load_pinned_workflow_tools
-
 from lazymind.chat.service.component.tool_registry import (
     ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
@@ -34,12 +34,67 @@ from lazymind.chat.service.component.tool_registry import (
     filter_tools,
     tool_is_active,
 )
-from lazyllm.tools.tool_config_inject import inject_tool_config
+from lazymind.config import config as _cfg
+from lazymind.model_config import inject_model_config
 
-from .context import SubAgentContext, set_context, LARGE_TOOL_RESULT_THRESHOLD
-from .db import MemorySubAgentStore, SubAgentDB
-from . import tools as subagent_tools
 from . import SUBAGENT_ATTACHMENT_CONTEXT_KEY, SUBAGENT_CORE_TOOL_NAMES
+from . import tools as subagent_tools
+from .context import LARGE_TOOL_RESULT_THRESHOLD, SubAgentContext, set_context
+from .db import MemorySubAgentStore, SubAgentDB
+
+DRAFT_STREAM_EVENT_TYPES = frozenset({
+    'artifact_stream_start',
+    'artifact_stream',
+    'artifact_stream_end',
+    'artifact_stream_abort',
+})
+
+
+async def merge_agent_and_stream_events(
+    agent_events: AsyncIterator[Any],
+    stream_events: asyncio.Queue[dict[str, Any]],
+) -> AsyncIterator[tuple[str, Any]]:
+    """Yield tool-thread stream events while the Agent iterator is still running."""
+    iterator = agent_events.__aiter__()
+    agent_task: asyncio.Task[Any] | None = asyncio.create_task(iterator.__anext__())
+    stream_task: asyncio.Task[Any] | None = asyncio.create_task(stream_events.get())
+    agent_error: BaseException | None = None
+    try:
+        while agent_task is not None:
+            wait_for = {agent_task}
+            if stream_task is not None:
+                wait_for.add(stream_task)
+            done, _ = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
+
+            if stream_task is not None and stream_task in done:
+                yield 'stream', stream_task.result()
+                stream_task = asyncio.create_task(stream_events.get())
+
+            if agent_task in done:
+                try:
+                    item = agent_task.result()
+                except StopAsyncIteration:
+                    agent_task = None
+                except (asyncio.CancelledError, Exception) as exc:
+                    agent_error = exc
+                    agent_task = None
+                else:
+                    yield 'agent', item
+                    agent_task = asyncio.create_task(iterator.__anext__())
+
+        # Deliver callbacks queued immediately before the tool/agent future completed.
+        await asyncio.sleep(0)
+        if stream_task is not None and stream_task.done():
+            yield 'stream', stream_task.result()
+            stream_task = None
+        while not stream_events.empty():
+            yield 'stream', stream_events.get_nowait()
+        if agent_error is not None:
+            raise agent_error
+    finally:
+        for pending in (agent_task, stream_task):
+            if pending is not None and not pending.done():
+                pending.cancel()
 
 
 def _build_artifact_context_section(
@@ -527,8 +582,16 @@ async def run_subagent_stream(
     start_time = time.time()
     db: Optional[SubAgentDB] = None
     emitted: List[Dict[str, Any]] = []
+    stream_events: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
 
     def _emit(ev: Dict[str, Any]) -> None:
+        if ev.get('type') in DRAFT_STREAM_EVENT_TYPES:
+            try:
+                loop.call_soon_threadsafe(stream_events.put_nowait, dict(ev))
+            except RuntimeError as exc:
+                LOG.warning('[SubAgent] failed to enqueue Draft stream event: %s', exc)
+            return
         emitted.append(ev)
 
     def _sse(ev: Dict[str, Any]) -> str:
@@ -671,7 +734,17 @@ async def run_subagent_stream(
         _pending_think: str = ''
 
         executor = AgentExecutor()
-        async for kind, payload in executor.stream(llm, plan):
+        merged_events = merge_agent_and_stream_events(
+            executor.stream(llm, plan), stream_events,
+        )
+        async for source, merged_payload in merged_events:
+            if source == 'stream':
+                stream_event = dict(merged_payload)
+                stream_event['task_id'] = task_id
+                yield _sse(stream_event)
+                continue
+
+            kind, payload = merged_payload
             if kind == 'event':
                 item = payload
                 tag = item.get('tag')

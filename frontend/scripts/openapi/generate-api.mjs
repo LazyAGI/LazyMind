@@ -11,7 +11,12 @@ import {
   getOpenApiApis,
   getOpenApiCacheFilePath,
   hashFile,
+  normalizeOpenApiCacheEntry,
 } from "./openapi-manifest.mjs";
+import {
+  inspectGeneratedClientOutput,
+  postProcessGeneratedClient,
+} from "./generated-client-utils.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,8 +41,12 @@ if (target && selectedApis.length === 0) {
 
 const cacheFilePath = getOpenApiCacheFilePath(cwdPath);
 let cache = {};
-if (!skipCache && fs.existsSync(cacheFilePath)) {
-  cache = JSON.parse(fs.readFileSync(cacheFilePath, "utf-8"));
+if (fs.existsSync(cacheFilePath)) {
+  try {
+    cache = JSON.parse(fs.readFileSync(cacheFilePath, "utf-8"));
+  } catch {
+    cache = {};
+  }
 }
 
 function resolveOpenApiGeneratorCommand() {
@@ -81,76 +90,6 @@ function commandExists(command) {
   }
 }
 
-/**
- * Patch generated base.ts to use VITE_API_BASE_URL env variable instead of
- * the hardcoded "http://localhost" that the OpenAPI generator emits by default.
- */
-function patchBasePath(outputDir) {
-  const baseTsPath = path.resolve(outputDir, 'base.ts');
-  if (!fs.existsSync(baseTsPath)) return;
-
-  const original = fs.readFileSync(baseTsPath, 'utf-8');
-  const patched = original.replace(
-    /export const BASE_PATH\s*=\s*"[^"]*"\.replace\(.*?\);/,
-    'export const BASE_PATH = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) ? import.meta.env.VITE_API_BASE_URL.replace(/\\/+$/, "") : "http://localhost";',
-  );
-
-  if (patched !== original) {
-    fs.writeFileSync(baseTsPath, patched, 'utf-8');
-    console.log(`🔧 Patched BASE_PATH in ${path.relative(cwdPath, baseTsPath)}`);
-  }
-}
-
-function patchNullableRecursiveMemoryValue(outputDir) {
-  const apiTsPath = path.resolve(outputDir, "api.ts");
-  if (!fs.existsSync(apiTsPath)) return;
-
-  const original = fs.readFileSync(apiTsPath, "utf-8");
-  const patched = original.replace(
-    /export type CurrentMemoryDocumentValue = (?!null \| )/,
-    "export type CurrentMemoryDocumentValue = null | ",
-  );
-  if (patched !== original) {
-    fs.writeFileSync(apiTsPath, patched, "utf-8");
-    console.log(
-      `🔧 Preserved nullable CurrentMemoryDocumentValue in ${path.relative(cwdPath, apiTsPath)}`,
-    );
-  }
-}
-
-function removeUnusedGeneratedFiles(outputDir) {
-  const unusedFiles = ["git_push.sh"];
-
-  for (const filename of unusedFiles) {
-    const filePath = path.resolve(outputDir, filename);
-    if (fs.existsSync(filePath)) {
-      fs.rmSync(filePath);
-      console.log(`🧹 Removed unused generated file ${path.relative(cwdPath, filePath)}`);
-    }
-  }
-}
-
-function normalizeGeneratedTypeScript(outputDir) {
-  for (const filename of [
-    "api.ts",
-    "base.ts",
-    "common.ts",
-    "configuration.ts",
-    "index.ts",
-  ]) {
-    const filePath = path.resolve(outputDir, filename);
-    if (!fs.existsSync(filePath)) continue;
-
-    const original = fs.readFileSync(filePath, "utf-8");
-    const normalized = `${original
-      .replace(/[ \t]+$/gm, "")
-      .replace(/[\r\n]+$/u, "")}\n`;
-    if (normalized !== original) {
-      fs.writeFileSync(filePath, normalized, "utf-8");
-    }
-  }
-}
-
 let updated = false;
 const openApiGeneratorCommand = resolveOpenApiGeneratorCommand();
 for (const api of selectedApis) {
@@ -161,9 +100,14 @@ for (const api of selectedApis) {
     continue;
   }
   const currentHash = hashFile(api.input);
-  const prevHash = cache[api.name];
+  const cached = normalizeOpenApiCacheEntry(cache[api.name]);
+  const currentOutput = inspectGeneratedClientOutput(api.output);
+  const outputMatches =
+    !cached.strictOutput ||
+    (currentOutput.missingFiles.length === 0 &&
+      currentOutput.hash === cached.outputHash);
 
-  if (!skipCache && currentHash === prevHash) {
+  if (!skipCache && currentHash === cached.specHash && outputMatches) {
     console.log(`✅ ${api.name}: No changes detected.`);
     continue;
   }
@@ -176,11 +120,17 @@ for (const api of selectedApis) {
       `${openApiGeneratorCommand} generate --skip-validate-spec -c scripts/openapi/openapi-generator-config.json -i "${api.input}" -o "${api.output}"`,
       { stdio: "inherit", cwd: cwdPath },
     );
-    patchBasePath(api.output);
-    patchNullableRecursiveMemoryValue(api.output);
-    removeUnusedGeneratedFiles(api.output);
-    normalizeGeneratedTypeScript(api.output);
-    cache[api.name] = currentHash;
+    postProcessGeneratedClient(api.output, { cwdPath });
+    const generatedOutput = inspectGeneratedClientOutput(api.output);
+    if (generatedOutput.missingFiles.length > 0) {
+      throw new Error(
+        `Generated output is incomplete: ${generatedOutput.missingFiles.join(", ")}`,
+      );
+    }
+    cache[api.name] = {
+      specHash: currentHash,
+      outputHash: generatedOutput.hash,
+    };
     updated = true;
   } catch (error) {
     console.error(`❌ Failed to generate API "${api.name}":`, error);
@@ -188,7 +138,7 @@ for (const api of selectedApis) {
   }
 }
 
-if (!skipCache && updated) {
+if (updated) {
   fs.writeFileSync(cacheFilePath, JSON.stringify(cache, null, 2));
   console.log("💾 Cache updated");
 }

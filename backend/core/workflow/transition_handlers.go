@@ -310,7 +310,7 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 	}
 	var sessionID, taskID string
 	var response transitionCommandResponse
-	launchErr := store.DB().Transaction(func(tx *gorm.DB) error {
+	launchErr := common.TransactionWithSQLiteBusyRetry(r.Context(), store.DB(), func(tx *gorm.DB) error {
 		var err error
 		stepObjective := workflowStepObjective(nodeDef.Prompt, req.Objective, req.UserInput)
 		sessionID, taskID, _, err = launchWorkflowAttempt(r.Context(), tx, store.State(), req.ConversationID, req.TriggerHistoryID, req.UserID, req.TaskID, req.WorkflowID+":"+req.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
@@ -503,7 +503,9 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 	taskIDs := make([]string, 0, len(targets))
 	var response transitionCommandResponse
 	var rejection *transitionRejection
-	err := store.DB().Transaction(func(tx *gorm.DB) error {
+	err := common.TransactionWithSQLiteBusyRetry(r.Context(), store.DB(), func(tx *gorm.DB) error {
+		taskIDs = taskIDs[:0]
+		rejection = nil
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND dismissed = false", common.PathVar(r, "session_id")).First(&session).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return &transitionRejection{status: http.StatusNotFound, response: transitionCommandResponse{Accepted: false, CommandID: req.CommandID, Error: &transitionError{Code: "SESSION_NOT_FOUND", Message: "plugin session not found"}}}
@@ -710,6 +712,11 @@ func sessionIntentText(value string) string {
 func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, target transitionTarget,
 	node graphengine.CompiledNode, inputKeys []string, workflowMode string, now time.Time) error {
 	objective := workflowStepObjective(node.Prompt, target.Objective, target.UserInput)
+	refOrID := session.WorkflowRef
+	if refOrID == "" {
+		refOrID = session.WorkflowID
+	}
+	outputTypes := declaredWorkflowOutputTypes(ctx, tx, session.CreateUserID, refOrID, session.WorkflowRevisionID, node.Outputs)
 	var count int64
 	if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND step_id = ?", session.ID, target.TargetStepID).Count(&count).Error; err != nil {
 		return err
@@ -718,7 +725,7 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 		AttemptID: target.TaskID, StepID: target.TargetStepID, AttemptNo: int(count) + 1, Operation: "execute",
 		Objective: objective, Prompt: node.Prompt, Acceptance: node.Acceptance,
 		Instruction: target.RuntimeInstruction, PartialSelector: target.PartialIndices,
-		WorkflowRevision: session.WorkflowRevisionID, DeclaredOutputs: node.Outputs, RequiredOutputs: node.RequiredOutputs,
+		WorkflowRevision: session.WorkflowRevisionID, DeclaredOutputs: node.Outputs, DeclaredOutputTypes: outputTypes, RequiredOutputs: node.RequiredOutputs,
 		Capabilities: node.Capabilities, LegacyTools: node.LegacyTools}
 	payload, err := json.Marshal(value)
 	if err != nil {
@@ -735,6 +742,7 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 		"user_input": target.UserInput, "workflow_mode": workflowMode,
 		"retry_hint": target.RuntimeInstruction, "partial_indices": target.PartialIndices,
 		"required_output_artifact_keys": node.RequiredOutputs, "user_id": session.CreateUserID,
+		"output_slot_types": outputTypes,
 	})
 	inputs, _ := json.Marshal(inputKeys)
 	outputs, _ := json.Marshal(node.Outputs)

@@ -83,7 +83,7 @@ def _is_valid_image_ref(path: str) -> bool:
     p = (path or '').strip()
     if not p:
         return False
-    if p.startswith(('http://', 'https://', '/static-files/', 'data:image/')):
+    if p.startswith(('http://', 'https://', '/static-files/', '/api/core/static-files/', 'data:image/')):
         return True
     if p.startswith('/data/subagent/') or SUBAGENT_MARKER in p:
         return True
@@ -215,8 +215,14 @@ def _validate_declared_artifact_type(
     key: str,
     content_type: str,
 ) -> Optional[str]:
-    """Workflow slot type validation is enforced by the workflow runtime."""
-    _ = (ctx, key, content_type)
+    declared = (ctx.params or {}).get('output_slot_types') or {}
+    declared_type = str(declared.get(key) or '').strip() if isinstance(declared, dict) else ''
+    if declared_type == 'file' and content_type not in {'file', 'file_list'}:
+        return (
+            f'Artifact {key!r} is declared as a file slot and must be saved with '
+            'content_type="file" or "file_list". Save the exact path returned '
+            'by the producing tool instead of copying its contents.'
+        )
     return None
 
 
@@ -465,7 +471,24 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
         workflow_session_id = ''
 
     if workflow_session_id:
-        result = _get_public_workflow_artifacts(key, workflow_session_id, sort_order)
+        local = ctx.local_artifacts(keys=[key])
+        remote_path = (ctx.params.get('remote_inputs') or {}).get(key)
+        if local:
+            artifacts = local
+            if sort_order is not None:
+                artifacts = artifacts[sort_order - 1:sort_order] if sort_order > 0 else []
+            result = tool_success('get_artifact', {
+                'status': 'ok', 'key': key, 'artifacts': artifacts,
+            })
+        elif remote_path:
+            result = tool_success('get_artifact', {
+                'status': 'ok', 'key': key, 'artifacts': [{
+                    'slot': key, 'content_type': 'file',
+                    'value': {'path': str(remote_path), 'filename': os.path.basename(str(remote_path))},
+                }],
+            })
+        else:
+            result = _get_public_workflow_artifacts(key, workflow_session_id, sort_order)
     elif sort_order is not None:
         # Ordinary SubAgent: read from sub_agent_artifacts.
         rows = ctx.local_artifacts(keys=[key]) or ctx.db.load_artifacts(ctx.task_id, keys=[key])

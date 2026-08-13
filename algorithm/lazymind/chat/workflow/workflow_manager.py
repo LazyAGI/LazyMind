@@ -777,10 +777,13 @@ def resolve_workflow_injection(
         )
         if trigger_entry_tools:
             # Discovery mode: expose triggers directly so the model can route
-            # from the injected catalog without a gateway hop. Execution tools
-            # remain hidden until a Workflow is selected or active.
+            # from the injected catalog without a gateway hop. The tool set is
+            # fixed for the model turn, so Session tools must also be available
+            # for trigger -> advance execution in that same turn.
             tools = [
                 *trigger_entry_tools,
+                *_safe_session_tools(toolkit, lambda: session_holder.get('session_id', '')),
+                _handoff_tool(lambda: session_holder.get('session_id', '')),
                 authoring_group,
             ]
         else:
@@ -816,6 +819,11 @@ def resolve_workflow_injection(
             + 'means execute with advance_step and continue. Never ask whether to execute a Ready '
             + 'step merely because it requires approval; the approval checkpoint belongs to its result. '
             + 'Do not replace continued execution with a promise that later steps will run.\n'
+            + 'Artifact-mutation guard: when the user asks to change an Artifact already '
+            + 'owned by this active Workflow, including inserting, replacing, moving, or '
+            + 'deleting an image in the current document, rerun the earliest owning Workflow '
+            + 'step. Do not bypass the Workflow with generic file, image, artifact, or SubAgent '
+            + 'tools; media acquisition belongs inside the owning step.\n'
             + json.dumps(projection, ensure_ascii=False, default=str)
         )
         return WorkflowAgentContribution(

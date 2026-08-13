@@ -2,14 +2,14 @@
 
 ## Scope
 
-Use one artifact-backed WriterDocument workflow for compound creation and revision:
+Use one artifact-backed writing workflow for compound creation and revision. The same
+steps operate on either Markdown or WriterDocument IR:
 
 - read Feishu/Lark documents, uploaded files, and selected knowledge bases;
 - generate an outline or use a supplied outline;
 - generate, regenerate, or revise that same outline artifact;
 - plan sections and write a complete document;
-- generate, rewrite, or revise that same full-document artifact;
-- deliver a local outline or document as Markdown, or publish it to Feishu.
+- generate, rewrite, revise, and explicitly deliver that same full-document artifact.
 
 Do not route users between separate creation and revision workflows or expose separate
 revision cards. The ChatAgent chooses the applicable mode inside the current product step.
@@ -30,83 +30,74 @@ writing flow; require the missing URL.
 
 ### outline
 
-`outline` owns the single user-visible `outline_ir` slot.
+`outline` owns the single user-visible `outline_document` slot.
 
-- First run with a supplied outline → prepare it as outline IR.
+- First run with a supplied outline → preserve its Markdown or IR representation.
 - First run without a supplied outline → generate it.
 - User asks “change section X of the outline” → rerun `outline` and internally apply a
-  PatchSet to the latest selected `outline_ir`.
+  PatchSet for IR or StringReplaceSet for Markdown to the latest selected outline.
 - User edits in the frontend → the frontend saves a human revision of the same
-  `outline_ir` slot.
+  `outline_document` slot.
 
-Every result has stage="outline" and ui_editable=true. If the IR is bound to a cloud
+IR results have stage="outline" and are not UI-editable; Markdown results remain `.md`.
+If the IR is bound to a cloud
 document, AI or frontend revision synchronizes that document and stores the
 provider-confirmed IR as the next artifact revision.
 
 ### write_document
 
-`write_document` owns the single user-visible `final_document` slot and has two modes.
+`write_document` owns the single user-visible `draft_document` slot and has three modes.
 
 Generation/rewrite mode:
 
-1. read the latest selected `outline_ir`;
+1. read the latest selected `outline_document`;
 2. regenerate section instructions;
-3. draft all sections as Markdown;
-4. assemble the complete Markdown draft and convert it once to WriterDocument IR;
-5. save `final_document`.
+3. draft sections in the outline's representation;
+4. assemble the complete draft without changing representation;
+5. save `draft_document`.
 
 Targeted revision mode:
 
-1. use the latest selected `final_document`, or `source_ir` for direct revision;
+1. use the latest selected `draft_document`, or `source_document` for direct revision;
 2. locate the requested content;
-3. generate and apply a PatchSet;
-4. save the result as the next revision of `final_document`.
+3. generate and apply a PatchSet for IR or StringReplaceSet for Markdown;
+4. save the result as the next revision of `draft_document`.
+
+Image insertion, replacement, movement, and deletion in the current document are
+targeted revisions owned by this mode. Rerun the previously completed `write_document`
+step and let `writer_resolve_revision_media` acquire any newly requested image. Do not
+start a standalone image task, call generic image/file/artifact tools, invoke Writer
+toolkit methods directly, or create a generic subagent for these requests.
+
+Full-document rewrite mode:
+
+1. use the latest selected `draft_document`, falling back to the complete
+   `source_document`;
+2. generate section instructions directly, without generating or exposing an outline;
+3. stream newly generated draft sections in the source's IR or Markdown representation;
+4. assemble and save the new `draft_document`;
+5. for cloud-bound IR, replace the provider document once and save the provider-confirmed
+   IR; keep Markdown local.
 
 Do not run section planning for a targeted body revision. Do run it again whenever the
 body is generated or rewritten from a changed outline.
 
-Frontend edits are human revisions of the same `final_document` slot. AI body revisions
-remain local until `publish`, so generation and revision share the same write-back
-boundary.
-
-### publish (delivery)
-
-`publish` is the unified delivery step and always follows a completed document. Unless
-the user explicitly requested a Feishu destination or write-back operation, export the
-latest selected `final_document` as a downloadable Markdown file.
-
-A Feishu URL used only as a source or reference is not a publishing destination. Use
-Feishu delivery only when the request explicitly asks to update/write back the source,
-publish to Feishu, create/save as a Feishu document, append to a target, or supplies an
-explicit destination.
-
-- Markdown delivery regenerates the `.md` file from the latest WriterDocument, so it
-  includes revisions made after initial drafting.
-- A targeted revision of the original body applies its saved PatchSet.
-- A generated or rewritten body written back to its source replaces the source content.
-- Append is used only when the user explicitly requests append or continue-at-end.
-- “新建飞书文档” and “另存为” explicitly authorize creating a new target. Supplying
-  a folder or wiki parent as the write location also authorizes creation there.
-- An explicit request to write an unbound result to “我的飞书” authorizes creating a
-  new document in the user's Feishu root without another confirmation.
-- Creation and writing are separate operations: persist `target_document` immediately
-  after creation, then write to that exact target so a retry does not create duplicates.
-- A targeted body revision of an existing document must publish its saved PatchSet.
-  Appending a full document to that existing source is invalid because it duplicates
-  retained blocks and can undo deletions.
-- When append versus replace is ambiguous for a non-empty target, ask the user rather
-  than defaulting to append.
-- After a provider-confirmed write and read-back, return the browser URL as
-  `published_link` so the frontend can display the completed Feishu document link.
+When the first full `.lmd` draft is derived from a cloud-bound Feishu source, generation
+or direct revision writes it back once and replaces `draft_document` with the
+provider-confirmed IR. Every cloud-bound IR full rewrite also writes back exactly once.
+Markdown rewrites stay local. Frontend edits and later targeted AI body revisions are
+revisions of the same `draft_document` slot and remain local until the user explicitly
+writes them back.
+The initial provider write receives `resolved_media_assets` whenever the generated IR
+contains Image WriterBlocks.
 
 ## Supported paths
 
-- From scratch: `prepare → outline → write_document → publish` (Markdown delivery)
-- Supplied Feishu outline: `prepare → outline → write_document → publish`
-- Existing Feishu document revision: `prepare → write_document → publish`
+- From scratch: `prepare → outline → write_document`
+- Supplied Feishu outline: `prepare → outline → write_document`
+- Existing Feishu document revision: `prepare → write_document`
+- Existing Feishu document full rewrite: `prepare → write_document`
 - Outline only: `prepare → outline`
-- Publish outline: `prepare → outline → publish`
-- Publish local body: `prepare → outline → write_document → publish`
 
 Repeated AI changes rerun/rewind `outline` or `write_document`. Repeated frontend changes
 create human revisions in the same slot. Do not create a second document-version store or
@@ -114,13 +105,17 @@ a hidden current-document pointer.
 
 ## Artifact contract
 
-- All structured outline and body results use the same WriterDocument schema and
-  `.lmd` file suffix. Markdown draft sections remain internal `.md` artifacts.
-- `outline_ir`, `final_document`, and `published_document` have ui_editable=true.
-- `delivered_markdown` is the Markdown file regenerated from the latest selected
-  WriterDocument for local delivery.
-- `published_link` is the provider-confirmed Feishu/Lark browser URL.
-- Internal locate results, modify plans, PatchSets, section plans, and draft blocks are
+- From-scratch and Markdown inputs remain Markdown. Feishu and `.lmd` inputs remain IR.
+- `outline_document` and `draft_document` preserve that representation across steps.
+- IR draft documents have ui_editable=true; outline documents are not currently UI-editable.
+- During `write_document`, `writer_apply_revision` returns the authoritative next draft
+  under `draft_document`, using the canonical `.md` or `.lmd` filename. Save that exact path immediately; do not
+  query it as an artifact key or reconstruct the document with generic file tools.
+- A successful Feishu write produces a new provider-confirmed `draft_document` revision;
+  provider result metadata remains internal to the step.
+- An IR draft does not produce a parallel Markdown artifact. Markdown export from IR is
+  handled only by a separate user-initiated download flow.
+- Internal locate results, modify plans, revision sets, section plans, and draft blocks are
   persisted but are not exposed as separate product cards.
 - Workflow tools pass artifact paths and do not copy complete documents into ChatAgent
   responses.
@@ -134,8 +129,7 @@ a hidden current-document pointer.
 | Modify the current outline with AI | rerun `outline`, revision mode |
 | Write/rewrite the body from the current outline | `write_document`, generation mode |
 | Modify an existing/generated body with AI | rerun `write_document`, revision mode |
-| Deliver without an explicit cloud destination | `publish`, Markdown mode |
-| Write an unbound local result to Feishu | `publish` |
+| Insert/replace/move/delete an image in the current body | rerun `write_document`, targeted revision mode |
 
 When an outline change invalidates an existing body, rewind to `outline`; the next
 `write_document` execution replans sections from the newly selected outline revision.

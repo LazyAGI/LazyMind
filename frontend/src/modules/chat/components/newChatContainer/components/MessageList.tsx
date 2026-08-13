@@ -496,6 +496,13 @@ const MessageList: React.FC<MessageListProps> = ({
                   onCiteMessage={(text: string) =>
                     onCiteMessage?.(text, item.history_id || item.id)
                   }
+                  hasLaterUserMessage={messageList
+                    .slice(index + 1)
+                    .some(
+                      (nextItem) =>
+                        nextItem?.role === RoleTypes.USER &&
+                        !!String(nextItem?.display_delta || nextItem?.delta || "").trim(),
+                    )}
                   isLatestDualAnswer={
                     index === messageList.length - 1 &&
                     !!(

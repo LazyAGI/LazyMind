@@ -59,7 +59,7 @@ func ListUserWorkflowSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]map[string]any, 0, len(rows))
 	for _, v := range rows {
-		enabled := false
+		enabled := v.SourceType == "builtin" && v.OwnerUserID == ""
 		if v.Enabled != nil {
 			enabled = *v.Enabled
 		}
@@ -74,7 +74,7 @@ func EnabledCatalog(db *gorm.DB, userID string) ([]map[string]any, error) {
 		TreeHash string `gorm:"column:tree_hash"`
 	}
 	var rows []row
-	err := db.Table("plugins p").Select("p.*, pr.tree_hash").Joins("JOIN user_plugin_settings ups ON ups.plugin_ref=p.plugin_ref AND ups.user_id=? AND ups.enabled=true", userID).Joins("JOIN plugin_revisions pr ON pr.id=p.head_revision_id").Where("p.status='active' AND (p.owner_user_id=? OR p.owner_user_id='')", userID).Order("p.plugin_ref").Scan(&rows).Error
+	err := db.Table("plugins p").Select("p.*, pr.tree_hash").Joins("LEFT JOIN user_plugin_settings ups ON ups.plugin_ref=p.plugin_ref AND ups.user_id=?", userID).Joins("JOIN plugin_revisions pr ON pr.id=p.head_revision_id").Where("p.status='active' AND (p.owner_user_id=? OR p.owner_user_id='') AND (ups.enabled=true OR (ups.user_id IS NULL AND p.source_type='builtin' AND p.owner_user_id=''))", userID).Order("p.plugin_ref").Scan(&rows).Error
 	if err != nil {
 		if missingWorkflowTables(err) {
 			return []map[string]any{}, nil

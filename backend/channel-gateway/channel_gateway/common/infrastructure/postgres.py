@@ -21,6 +21,15 @@ from channel_gateway.common.domain.channel import (
 _JSON_NUL_ESCAPE = re.compile(r'(?<!\\)((?:\\\\)*)\\u0000')
 
 
+def _snapshot(value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
 class PostgresRuntimeLease:
     """Renewable database lease with a generation used to fence stale owners."""
 
@@ -1603,7 +1612,9 @@ class GatewayStore:
                         )
                     )
                     AND account.status = 'connected'
-                    AND NOT EXISTS (
+                    AND (
+                      inbox.provider_context ->> '_parallel_inbound' = 'true'
+                      OR NOT EXISTS (
                         SELECT 1
                         FROM channel_inbox AS earlier
                         WHERE earlier.account_id = inbox.account_id
@@ -1615,6 +1626,7 @@ class GatewayStore:
                               earlier.ingest_sequence
                                   < inbox.ingest_sequence
                           )
+                      )
                     )
                     ORDER BY inbox.ingest_sequence
                     FOR UPDATE SKIP LOCKED
@@ -1913,7 +1925,7 @@ class GatewayStore:
                 (
                     provider,
                     self._json(
-                        {'presentations': [{'kind': 'task'}]}
+                        {'task_monitor': True}
                     ),
                     max(1, limit),
                 ),
@@ -1927,35 +1939,145 @@ class GatewayStore:
             if outbound is not None
         ]
 
-    def save_sent_outbound_part_state(
+    def sync_task_artifact_outbounds(
+        self,
+        *,
+        parent: ClaimedOutbound,
+        part_index: int,
+        artifacts: list[dict[str, str]],
+    ) -> dict[str, int]:
+        prefix = f'task-artifact:{parent.outbox_id}:{part_index}:'
+        order_key = f'task-artifact:{parent.outbox_id}:{part_index}'
+        chat_id = str(
+            parent.provider_context.get('chat_id')
+            or parent.recipient_id
+        )
+        with self._connect() as connection:
+            for sequence, artifact in enumerate(artifacts):
+                artifact_key = str(artifact.get('artifact_key') or '')
+                source = str(artifact.get('source') or '')
+                delivery_id = str(artifact.get('delivery_id') or '')
+                if (
+                    len(artifact_key) != 64
+                    or not source
+                    or len(source) > 2048
+                    or not delivery_id
+                    or len(delivery_id) > 512
+                ):
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO channel_outbox(
+                        id, inbox_id, account_id, dedupe_key,
+                        provider, order_key, sequence,
+                        recipient_id, provider_context, text, intent_kind,
+                        purpose, metadata, rendered_parts, status
+                    )
+                    VALUES(
+                        %s, NULL, %s, %s,
+                        %s, %s, %s,
+                        %s, %s::jsonb, '', 'task_artifact',
+                        'task_artifact', %s::jsonb, %s::jsonb, 'pending'
+                    )
+                    ON CONFLICT(account_id, dedupe_key) DO NOTHING
+                    """,
+                    (
+                        f'co_{uuid.uuid4().hex}',
+                        parent.account_id,
+                        f'{prefix}{artifact_key}',
+                        parent.provider,
+                        order_key,
+                        sequence,
+                        parent.recipient_id,
+                        self._json({'chat_id': chat_id}),
+                        self._json({
+                            'task_artifact': True,
+                            'parent_outbox_id': parent.outbox_id,
+                            'parent_part_index': part_index,
+                        }),
+                        self._json([{
+                            'kind': 'image',
+                            'source': source,
+                            'alt': str(
+                                artifact.get('caption') or ''
+                            )[:300],
+                            'delivery_id': delivery_id,
+                        }]),
+                    ),
+                )
+            rows = connection.execute(
+                """
+                SELECT status, COUNT(*) AS item_count
+                FROM channel_outbox
+                WHERE account_id = %s
+                  AND dedupe_key LIKE %s
+                GROUP BY status
+                """,
+                (parent.account_id, f'{prefix}%'),
+            ).fetchall()
+        counts = {
+            str(row['status']): int(row['item_count'])
+            for row in rows
+        }
+        sent = counts.get('sent', 0)
+        dead = counts.get('dead', 0)
+        total = sum(counts.values())
+        return {
+            'total': total,
+            'sent': sent,
+            'dead': dead,
+            'inflight': total - sent - dead,
+        }
+
+    def compare_and_save_sent_task_monitor_state(
         self,
         *,
         outbox_id: str,
         part_index: int,
+        expected_revision: int,
         state: dict[str, Any],
-    ) -> bool:
+        complete: bool,
+    ) -> dict[str, Any] | None:
+        part_key = str(part_index)
         with self._connect() as connection:
             row = connection.execute(
                 """
+                SELECT provider_state, metadata
+                FROM channel_outbox
+                WHERE id = %s AND status = 'sent'
+                FOR UPDATE
+                """,
+                (outbox_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            provider_state = self._dict(row['provider_state'])
+            current = self._dict(provider_state.get(part_key))
+            monitor = self._dict(current.get('task_monitor'))
+            if int(monitor.get('monitor_revision') or 0) != expected_revision:
+                return current
+            next_state = dict(state)
+            next_monitor = self._dict(next_state.get('task_monitor'))
+            next_monitor['monitor_revision'] = expected_revision + 1
+            next_state['task_monitor'] = next_monitor
+            provider_state[part_key] = next_state
+            metadata = self._dict(row['metadata'])
+            metadata['task_monitor'] = not complete
+            connection.execute(
+                """
                 UPDATE channel_outbox
-                SET provider_state = jsonb_set(
-                        provider_state,
-                        ARRAY[%s],
-                        %s::jsonb,
-                        TRUE
-                    ),
+                SET provider_state = %s::jsonb,
+                    metadata = %s::jsonb,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = %s
-                  AND status = 'sent'
-                RETURNING id
+                WHERE id = %s AND status = 'sent'
                 """,
                 (
-                    str(part_index),
-                    self._json(state),
+                    self._json(provider_state),
+                    self._json(metadata),
                     outbox_id,
                 ),
-            ).fetchone()
-            return row is not None
+            )
+            return next_state
 
     def advance_outbound(
         self,
@@ -2232,6 +2354,387 @@ class GatewayStore:
             ).fetchone()
             return dict(row) if row else None
 
+    def get_feishu_workspace_state(
+        self,
+        account_id: str,
+        external_address_hash: str,
+    ) -> dict[str, Any]:
+        state = self.get_navigation_state(account_id, external_address_hash)
+        if not state:
+            return {}
+        snapshot = state.get('snapshot_json')
+        if isinstance(snapshot, str):
+            snapshot = json.loads(snapshot)
+        if not isinstance(snapshot, dict):
+            return {}
+        workspace = snapshot.get('feishu_workspace')
+        return dict(workspace) if isinstance(workspace, dict) else {}
+
+    def save_feishu_workspace_state_if_revision(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        state: dict[str, Any],
+        expected_revision: int,
+        *,
+        preserve_current_message: bool = True,
+    ) -> bool:
+        value = json.dumps(
+            state,
+            ensure_ascii=False,
+            separators=(',', ':'),
+        )
+        with self._connect() as connection:
+            if expected_revision == 0:
+                inserted = connection.execute(
+                    """
+                    INSERT INTO channel_navigation_states(
+                        account_id, external_address_hash, mode, snapshot_json
+                    )
+                    VALUES(
+                        %s, %s, 'active',
+                        jsonb_build_object(
+                            'feishu_workspace', %s::jsonb
+                        )
+                    )
+                    ON CONFLICT(account_id, external_address_hash) DO NOTHING
+                    RETURNING 1 AS saved
+                    """,
+                    (account_id, external_address_hash, value),
+                ).fetchone()
+                if inserted:
+                    return True
+            row = connection.execute(
+                """
+                UPDATE channel_navigation_states
+                SET snapshot_json = jsonb_build_object(
+                        'feishu_workspace',
+                        jsonb_set(
+                            %s::jsonb,
+                            '{message_id}',
+                            CASE
+                                WHEN %s THEN COALESCE(
+                                    to_jsonb(NULLIF(
+                                        snapshot_json
+                                            -> 'feishu_workspace'
+                                            ->> 'message_id',
+                                        ''
+                                    )),
+                                    %s::jsonb -> 'message_id',
+                                    '""'::jsonb
+                                )
+                                ELSE COALESCE(
+                                    %s::jsonb -> 'message_id',
+                                    '""'::jsonb
+                                )
+                            END,
+                            true
+                        )
+                    ),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE account_id = %s
+                    AND external_address_hash = %s
+                    AND COALESCE(
+                        snapshot_json -> 'feishu_workspace' ->> 'revision',
+                        '0'
+                    ) = %s::text
+                RETURNING 1 AS saved
+                """,
+                (
+                    value,
+                    preserve_current_message,
+                    value,
+                    value,
+                    account_id,
+                    external_address_hash,
+                    str(expected_revision),
+                ),
+            ).fetchone()
+        return bool(row)
+
+    def claim_feishu_workspace_and_ingest(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        state: dict[str, Any],
+        expected_revision: int,
+        expected_message_id: str,
+        expected_operation_id: str,
+        envelope: InboundEnvelope,
+        runtime_fence: RuntimeFence,
+    ) -> bool:
+        with self._connect() as connection:
+            self._lock_runtime_fence(connection, runtime_fence)
+            connection.execute(
+                'SELECT pg_advisory_xact_lock(hashtext(%s))',
+                (f'channel-navigation:{account_id}:{external_address_hash}',),
+            )
+            account = connection.execute(
+                """
+                SELECT status
+                FROM channel_accounts
+                WHERE id = %s
+                FOR SHARE
+                """,
+                (account_id,),
+            ).fetchone()
+            if not account or account['status'] != 'connected':
+                raise RuntimeError('channel account is not connected')
+            existing = connection.execute(
+                """
+                SELECT 1 AS present
+                FROM channel_inbox
+                WHERE account_id = %s AND message_key = %s
+                """,
+                (account_id, envelope.message_key),
+            ).fetchone()
+            if existing:
+                return False
+            if envelope.provider_context.get('_parallel_inbound') is not True:
+                active = connection.execute(
+                    """
+                    SELECT 1 AS present
+                    FROM channel_inbox
+                    WHERE account_id = %s AND order_key = %s
+                      AND status NOT IN ('completed', 'ignored', 'dead')
+                    LIMIT 1
+                    """,
+                    (account_id, envelope.order_key),
+                ).fetchone()
+                if active:
+                    return False
+            row = connection.execute(
+                """
+                SELECT snapshot_json
+                FROM channel_navigation_states
+                WHERE account_id = %s AND external_address_hash = %s
+                FOR UPDATE
+                """,
+                (account_id, external_address_hash),
+            ).fetchone()
+            snapshot = row.get('snapshot_json') if row else {}
+            if isinstance(snapshot, str):
+                snapshot = json.loads(snapshot)
+            if not isinstance(snapshot, dict):
+                snapshot = {}
+            current = snapshot.get('feishu_workspace')
+            if not isinstance(current, dict):
+                current = {}
+            if int(current.get('revision') or 0) != expected_revision:
+                return False
+            if (
+                str(current.get('message_id') or '')
+                != expected_message_id
+                or str(current.get('active_operation_id') or '')
+                != expected_operation_id
+            ):
+                return False
+            snapshot_json = self._json({'feishu_workspace': state})
+            connection.execute(
+                """
+                INSERT INTO channel_navigation_states(
+                    account_id, external_address_hash, mode, snapshot_json
+                )
+                VALUES(%s, %s, 'active', %s::jsonb)
+                ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                    snapshot_json = EXCLUDED.snapshot_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (account_id, external_address_hash, snapshot_json),
+            )
+            inserted = connection.execute(
+                """
+                INSERT INTO channel_inbox(
+                    id, account_id, provider, message_key, order_key,
+                    external_address_hash, owner_user_id, recipient_id,
+                    text, provider_context
+                )
+                VALUES(
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s::jsonb
+                )
+                ON CONFLICT(account_id, message_key) DO NOTHING
+                RETURNING id
+                """,
+                (
+                    f'ci_{uuid.uuid4().hex}',
+                    envelope.account_id,
+                    envelope.provider,
+                    envelope.message_key,
+                    envelope.order_key,
+                    envelope.external_address_hash,
+                    envelope.owner_user_id,
+                    envelope.recipient_id,
+                    envelope.text,
+                    self._json(envelope.provider_context),
+                ),
+            ).fetchone()
+            if not inserted:
+                raise RuntimeError('Feishu inbox claim was lost')
+            connection.execute(
+                """
+                UPDATE channel_accounts
+                SET runtime_status = 'running',
+                    last_poll_at = CURRENT_TIMESTAMP,
+                    last_error = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (account_id,),
+            )
+        return True
+
+    def has_active_inbound(
+        self,
+        account_id: str,
+        order_key: str,
+    ) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT 1 AS present
+                FROM channel_inbox
+                WHERE account_id = %s AND order_key = %s
+                  AND status NOT IN ('completed', 'ignored', 'dead')
+                LIMIT 1
+                """,
+                (account_id, order_key),
+            ).fetchone()
+            return row is not None
+
+    def patch_feishu_workspace_state(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        patch: dict[str, Any],
+        operation_id: str = '',
+    ) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT snapshot_json
+                FROM channel_navigation_states
+                WHERE account_id = %s AND external_address_hash = %s
+                FOR UPDATE
+                """,
+                (account_id, external_address_hash),
+            ).fetchone()
+            snapshot = row.get('snapshot_json') if row else {}
+            if isinstance(snapshot, str):
+                snapshot = json.loads(snapshot)
+            if not isinstance(snapshot, dict):
+                snapshot = {}
+            workspace = snapshot.get('feishu_workspace')
+            if not isinstance(workspace, dict):
+                workspace = {}
+            if operation_id and str(
+                workspace.get('active_operation_id') or ''
+            ) != operation_id:
+                return dict(workspace)
+            current_revision = max(
+                0,
+                int(workspace.get('revision') or 0),
+            )
+            workspace = {**workspace, **patch}
+            workspace['revision'] = current_revision + 1
+            value = json.dumps(
+                {'feishu_workspace': workspace},
+                ensure_ascii=False,
+                separators=(',', ':'),
+            )
+            connection.execute(
+                """
+                INSERT INTO channel_navigation_states(
+                    account_id, external_address_hash, mode, snapshot_json
+                )
+                VALUES(%s, %s, 'active', %s::jsonb)
+                ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                    snapshot_json = EXCLUDED.snapshot_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (account_id, external_address_hash, value),
+            )
+        return dict(workspace)
+
+    def save_feishu_workspace_message(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        message_id: str,
+        operation_id: str,
+        expected_message_id: str,
+        expected_revision: int | None = None,
+        *,
+        advance_revision: bool = True,
+    ) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT snapshot_json
+                FROM channel_navigation_states
+                WHERE account_id = %s AND external_address_hash = %s
+                FOR UPDATE
+                """,
+                (account_id, external_address_hash),
+            ).fetchone()
+            snapshot = row.get('snapshot_json') if row else {}
+            if isinstance(snapshot, str):
+                snapshot = json.loads(snapshot)
+            if not isinstance(snapshot, dict):
+                snapshot = {}
+            workspace = snapshot.get('feishu_workspace')
+            if not isinstance(workspace, dict):
+                workspace = {}
+            if operation_id and str(
+                workspace.get('active_operation_id') or ''
+            ) != operation_id:
+                return dict(workspace)
+            if str(workspace.get('message_id') or '') != expected_message_id:
+                return dict(workspace)
+            if (
+                expected_revision is not None
+                and int(workspace.get('revision') or 0) != expected_revision
+            ):
+                return dict(workspace)
+            workspace = dict(workspace)
+            workspace['message_id'] = message_id
+            if advance_revision:
+                workspace['revision'] = max(
+                    0,
+                    int(workspace.get('revision') or 0),
+                ) + 1
+            value = json.dumps(
+                workspace,
+                ensure_ascii=False,
+                separators=(',', ':'),
+            )
+            connection.execute(
+                """
+                INSERT INTO channel_navigation_states(
+                    account_id, external_address_hash, mode, snapshot_json
+                )
+                VALUES(
+                    %s, %s, 'active',
+                    jsonb_build_object(
+                        'feishu_workspace',
+                        %s::jsonb
+                    )
+                )
+                ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                    snapshot_json = jsonb_build_object(
+                        'feishu_workspace', %s::jsonb
+                    ),
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    account_id,
+                    external_address_hash,
+                    value,
+                    value,
+                ),
+            )
+        return workspace
+
     def begin_new_conversation(
         self,
         account_id: str,
@@ -2244,6 +2747,10 @@ class GatewayStore:
             separators=(',', ':'),
         )
         with self._connect() as connection:
+            connection.execute(
+                'SELECT pg_advisory_xact_lock(hashtext(%s))',
+                (f'channel-navigation:{account_id}:{external_address_hash}',),
+            )
             connection.execute(
                 """
                 DELETE FROM channel_routes
@@ -2266,11 +2773,9 @@ class GatewayStore:
                         %s::jsonb
                     ) || CASE
                         WHEN jsonb_typeof(channel_navigation_states.snapshot_json) = 'object'
-                          AND channel_navigation_states.snapshot_json ? 'pending_turn'
-                            THEN jsonb_build_object(
-                                'pending_turn',
-                                channel_navigation_states.snapshot_json->'pending_turn'
-                            )
+                            THEN channel_navigation_states.snapshot_json
+                                - 'selection'
+                                - 'new_conversation'
                         ELSE '{}'::jsonb
                     END,
                     snapshot_expires_at = NULL,
@@ -2298,6 +2803,7 @@ class GatewayStore:
         history_next_page_token: str | None = None,
         *,
         consume_pending_turn: bool = False,
+        preserve_selection: bool = False,
     ) -> None:
         history_conversation_id = (
             conversation_id
@@ -2306,6 +2812,10 @@ class GatewayStore:
         )
         history_token = history_next_page_token or None
         with self._connect() as connection:
+            connection.execute(
+                'SELECT pg_advisory_xact_lock(hashtext(%s))',
+                (f'channel-navigation:{account_id}:{external_address_hash}',),
+            )
             connection.execute(
                 """
                 INSERT INTO channel_routes(account_id, external_address_hash, conversation_id)
@@ -2327,18 +2837,29 @@ class GatewayStore:
                     mode = 'active',
                     snapshot_json = CASE
                         WHEN jsonb_typeof(channel_navigation_states.snapshot_json) = 'object'
-                            THEN CASE WHEN %s
+                            THEN CASE
+                            WHEN %s AND %s
                                 THEN channel_navigation_states.snapshot_json
-                                    - 'selection'
                                     - 'new_conversation'
                                     - 'pending_turn'
-                                ELSE channel_navigation_states.snapshot_json
-                                    - 'selection'
+                            WHEN %s
+                                THEN channel_navigation_states.snapshot_json
                                     - 'new_conversation'
+                                    - 'pending_turn'
+                                    - 'selection'
+                            WHEN %s
+                                THEN channel_navigation_states.snapshot_json
+                                    - 'new_conversation'
+                            ELSE channel_navigation_states.snapshot_json
+                                - 'new_conversation'
+                                - 'selection'
                             END
                         ELSE '{}'::jsonb
                     END,
-                    snapshot_expires_at = NULL,
+                    snapshot_expires_at = CASE WHEN %s
+                        THEN channel_navigation_states.snapshot_expires_at
+                        ELSE NULL
+                    END,
                     history_conversation_id = EXCLUDED.history_conversation_id,
                     history_next_page_token = EXCLUDED.history_next_page_token,
                     updated_at = CURRENT_TIMESTAMP
@@ -2349,6 +2870,10 @@ class GatewayStore:
                     history_conversation_id,
                     history_token,
                     consume_pending_turn,
+                    preserve_selection,
+                    consume_pending_turn,
+                    preserve_selection,
+                    preserve_selection,
                 ),
             )
 

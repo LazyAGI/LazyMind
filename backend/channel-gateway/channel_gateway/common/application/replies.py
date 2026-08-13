@@ -1,5 +1,7 @@
+import json
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from channel_gateway.common.application.conversations import ConversationResult
 from channel_gateway.common.domain.chat import CoreEvent
@@ -18,6 +20,11 @@ from channel_gateway.common.domain.outbound import (
     optional_int,
 )
 from channel_gateway.common.ports.repository import NavigationRepository
+
+
+_MAX_DURABLE_ARTIFACTS = 20
+_MAX_INLINE_ARTIFACT_BYTES = 2 * 1024 * 1024
+_MAX_DURABLE_SOURCES = 20
 
 
 def project_core_presentations(
@@ -39,57 +46,171 @@ def project_core_presentations(
 def _ask(payload: dict) -> AskPresentation | None:
     ask_id = str(payload.get('ask_id') or '')
     raw_questions = payload.get('questions')
-    questions = tuple(
-        AskQuestionPresentation(
-            text=str(question.get('text') or ''),
-            type=str(question.get('type') or 'text'),
-            choices=tuple(
-                str(choice)
-                for choice in (
-                    question.get('choices')
-                    if isinstance(question.get('choices'), list)
-                    else []
-                )
-                if str(choice)
-            ),
-        )
-        for question in (
-            raw_questions
-            if isinstance(raw_questions, list)
+    raw_questions = raw_questions if isinstance(raw_questions, list) else []
+    submittable = bool(ask_id and len(ask_id) <= 512)
+    if len(raw_questions) > 10:
+        submittable = False
+    bounded_questions: list[AskQuestionPresentation] = []
+    for question in raw_questions[:10]:
+        if not isinstance(question, dict):
+            submittable = False
+            continue
+        text = str(question.get('text') or '')
+        question_type = str(question.get('type') or 'text')
+        raw_choices = (
+            question.get('choices')
+            if isinstance(question.get('choices'), list)
             else []
         )
-        if isinstance(question, dict) and question.get('text')
+        if (
+            not text
+            or len(text) > 1000
+            or question_type not in {'text', 'single', 'multiple', 'boolean'}
+            or len(raw_choices) > 20
+            or any(len(str(choice)) > 200 for choice in raw_choices)
+        ):
+            submittable = False
+        if not text:
+            continue
+        bounded_questions.append(AskQuestionPresentation(
+            text=text[:1000],
+            type=(
+                question_type
+                if question_type in {'text', 'single', 'multiple', 'boolean'}
+                else 'text'
+            ),
+            choices=tuple(
+                str(choice)[:200]
+                for choice in raw_choices[:20]
+                if str(choice)
+            ),
+        ))
+    questions = tuple(
+        bounded_questions
     )
     if not ask_id or not questions:
         return None
     return AskPresentation(
         kind='ask',
-        ask_id=ask_id,
-        title=str(payload.get('title') or ''),
-        description=str(payload.get('description') or ''),
+        ask_id=ask_id[:512],
+        title=str(payload.get('title') or '')[:200],
+        description=str(payload.get('description') or '')[:1000],
         questions=questions,
+        submittable=submittable,
     )
 
 
 def _task(payload: dict) -> TaskPresentation | None:
     task_id = str(payload.get('task_id') or '')
-    if not task_id:
+    if not task_id or len(task_id) > 512:
         return None
     return TaskPresentation(
         kind='task',
         task_id=task_id,
-        conversation_id=str(payload.get('conversation_id') or ''),
-        title=str(payload.get('title') or '后台任务'),
-        mode=str(payload.get('mode') or ''),
-        status=str(payload.get('status') or '已创建'),
-        agent_type=str(payload.get('agent_type') or ''),
+        conversation_id=str(payload.get('conversation_id') or '')[:512],
+        title=str(payload.get('title') or '后台任务')[:200],
+        mode=str(payload.get('mode') or '')[:64],
+        status=str(payload.get('status') or '已创建')[:64],
+        agent_type=str(payload.get('agent_type') or '')[:64],
         progress=optional_int(
             payload.get('progress', payload.get('progress_pct'))
         ),
-        current_phase=str(payload.get('current_phase') or ''),
+        current_phase=str(payload.get('current_phase') or '')[:200],
         estimated_sec=optional_int(payload.get('estimated_sec')),
-        summary=str(payload.get('summary') or ''),
+        summary=str(payload.get('summary') or '')[:1000],
     )
+
+
+def _durable_core_events(
+    events: tuple[CoreEvent, ...],
+) -> tuple[dict[str, Any], ...]:
+    durable: list[dict[str, Any]] = []
+    for event in events:
+        if event.type != 'artifact_created' or len(durable) >= _MAX_DURABLE_ARTIFACTS:
+            continue
+        payload = event.payload
+        content_type = str(payload.get('content_type') or '').lower()
+        value = payload.get('value')
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+        if not isinstance(value, dict):
+            continue
+        bounded_value: dict[str, Any]
+        if content_type == 'text' and isinstance(value.get('text'), str):
+            text = value['text']
+            if len(text.encode('utf-8')) > _MAX_INLINE_ARTIFACT_BYTES:
+                continue
+            bounded_value = {'text': text}
+        elif content_type == 'json' and 'data' in value:
+            try:
+                encoded = json.dumps(
+                    value['data'],
+                    ensure_ascii=False,
+                    separators=(',', ':'),
+                ).encode('utf-8')
+            except (TypeError, ValueError):
+                continue
+            if len(encoded) > _MAX_INLINE_ARTIFACT_BYTES:
+                continue
+            bounded_value = {'data': value['data']}
+        elif content_type == 'file_list':
+            paths = value.get('paths')
+            bounded_value = {
+                'paths': [
+                    path
+                    for raw in (paths if isinstance(paths, list) else [])[:20]
+                    if len(path := str(raw or '')) <= 2048
+                    and urlsplit(path).path.startswith('/static-files/')
+                ]
+            }
+            if not bounded_value['paths']:
+                continue
+        elif content_type in {'image', 'file'} or content_type.startswith('image/'):
+            source = str(value.get('url') or '')
+            if (
+                not source
+                or len(source) > 2048
+                or not urlsplit(source).path.startswith('/static-files/')
+            ):
+                continue
+            bounded_value = {'url': source}
+        else:
+            continue
+        durable.append({
+            'type': 'artifact_created',
+            'payload': {
+                'content_type': content_type,
+                'filename': str(payload.get('filename') or '')[:255],
+                'value': bounded_value,
+            },
+        })
+    return tuple(durable)
+
+
+def _durable_sources(values: tuple[Any, ...]) -> tuple[dict[str, str], ...]:
+    result: list[dict[str, str]] = []
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        url = str(value.get('url') or value.get('link') or '').strip()
+        if (
+            not url
+            or len(url) > 2048
+            or urlsplit(url).scheme not in {'http', 'https'}
+        ):
+            continue
+        result.append({
+            'url': url,
+            'title': str(
+                value.get('title') or value.get('name') or '参考来源'
+            ).strip()[:200],
+        })
+        if len(result) >= _MAX_DURABLE_SOURCES:
+            break
+    return tuple(result)
 
 
 @dataclass(frozen=True)
@@ -99,7 +220,6 @@ class ChannelReply:
     core_events: tuple[dict[str, Any], ...] = ()
     sources: tuple[Any, ...] = ()
     presentations: tuple[ReplyPresentation, ...] = ()
-    suppress_text_when_presented: bool = False
 
 
 class ChannelReplyBuilder:
@@ -137,23 +257,17 @@ class ChannelReplyBuilder:
             return ChannelReply(
                 intent_kind=command_kind(command),
                 text=result.text,
-                core_events=tuple(
-                    event.to_dict()
-                    for event in (
-                        result.turn.events
-                        if result.turn is not None
-                        else ()
-                    )
+                core_events=_durable_core_events(
+                    result.turn.events
+                    if result.turn is not None
+                    else ()
                 ),
-                sources=(
+                sources=_durable_sources(
                     result.turn.sources
                     if result.turn is not None
                     else ()
                 ),
                 presentations=presentations,
-                suppress_text_when_presented=(
-                    result.suppress_text_when_presented
-                ),
             )
         intent_kind = command_kind(command)
         presentations = extra_presentations
@@ -163,15 +277,6 @@ class ChannelReplyBuilder:
             intent_kind=intent_kind,
             text=result,
             presentations=presentations,
-            suppress_text_when_presented=(
-                bool(presentations)
-                and intent_kind
-                in {
-                    ActionKind.CAPABILITY_LIST,
-                    ActionKind.CONVERSATION_SETTINGS,
-                    ActionKind.CONVERSATION_SETTINGS_UPDATE,
-                }
-            ),
         )
 
     def _selection(

@@ -1,5 +1,8 @@
 from lazymind.chat.engine.subagent.context import SubAgentContext, set_context
-from lazymind.chat.engine.subagent.tools import _build_artifact_value
+from lazymind.chat.engine.subagent.tools import (
+    _build_artifact_value,
+    _validate_declared_artifact_type,
+)
 
 
 def _context(workspace_path: str) -> SubAgentContext:
@@ -55,3 +58,22 @@ def test_text_artifact_unwraps_structured_text_value(tmp_path):
 
     assert content_type == 'text'
     assert value == {'text': '# Validation report'}
+
+
+def test_file_artifact_accepts_structured_path(tmp_path):
+    set_context(_context(str(tmp_path)))
+    source = tmp_path / 'outline.md'
+    source.write_text('# Outline', encoding='utf-8')
+
+    value, content_type = _build_artifact_value({'path': str(source)}, 'file')
+
+    assert content_type == 'file'
+    assert value['path'] == str(source)
+
+
+def test_workflow_file_slot_rejects_text(tmp_path):
+    ctx = _context(str(tmp_path))
+    ctx.params['output_slot_types'] = {'enhanced_image_output': 'file'}
+
+    assert _validate_declared_artifact_type(ctx, 'enhanced_image_output', 'text')
+    assert _validate_declared_artifact_type(ctx, 'enhanced_image_output', 'file') is None

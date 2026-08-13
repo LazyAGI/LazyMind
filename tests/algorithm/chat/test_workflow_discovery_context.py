@@ -81,8 +81,8 @@ def test_non_mentioned_workflows_are_available_for_chatagent_routing():
     assert 'trigger_image_workflow' in tool_names
     assert 'trigger_test_workflow' in tool_names
     assert authoring_group['lazy'] is True
-    assert 'advance_step' not in tool_names
-    assert 'advance_step_and_hand_off' not in tool_names
+    assert 'advance_step' in tool_names
+    assert 'advance_step_and_hand_off' in tool_names
     assert 'list_workflow_drafts' not in tool_names
     assert 'resume_workflow' not in tool_names
     assert 'Available Workflow Catalog' in contribution.runtime_context

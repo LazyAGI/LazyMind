@@ -3,16 +3,46 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/subagent"
 	"lazymind/core/workflow/attempt"
 	"lazymind/core/workflow/executor"
+	workflowstore "lazymind/core/workflow/store"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
+
+func declaredWorkflowOutputTypes(ctx context.Context, db *gorm.DB, owner, refOrID, revisionID string, outputs []string) map[string]string {
+	pkg, err := workflowstore.New(db).GetWorkflowPackage(ctx, owner, refOrID, revisionID)
+	if err != nil {
+		return nil
+	}
+	var spec struct {
+		Slots []struct {
+			ID   string `yaml:"id"`
+			Type string `yaml:"type"`
+		} `yaml:"slots"`
+	}
+	if yaml.Unmarshal(pkg.Files["workflow.yaml"], &spec) != nil {
+		return nil
+	}
+	allowed := make(map[string]bool, len(outputs))
+	for _, output := range outputs {
+		allowed[output] = true
+	}
+	types := map[string]string{}
+	for _, slot := range spec.Slots {
+		if allowed[slot.ID] && strings.TrimSpace(slot.Type) != "" {
+			types[slot.ID] = strings.TrimSpace(slot.Type)
+		}
+	}
+	return types
+}
 
 func enqueueCanonicalAttempt(ctx context.Context, db *gorm.DB, request subagent.RunRequest) error {
 	var step orm.WorkflowSessionStep
@@ -20,7 +50,7 @@ func enqueueCanonicalAttempt(ctx context.Context, db *gorm.DB, request subagent.
 		return err
 	}
 	var task orm.SubAgentTask
-	if err := db.WithContext(ctx).Select("objective", "output_slots").Where("id = ?", request.TaskID).First(&task).Error; err != nil {
+	if err := db.WithContext(ctx).Select("objective", "output_slots", "params").Where("id = ?", request.TaskID).First(&task).Error; err != nil {
 		return err
 	}
 	operation, _ := request.Params["operation"].(string)
@@ -30,6 +60,11 @@ func enqueueCanonicalAttempt(ctx context.Context, db *gorm.DB, request subagent.
 	value := executor.AttemptContext{ContractVersion: attempt.ContractVersion, SessionID: step.SessionID,
 		AttemptID: step.ID, StepID: step.StepID, AttemptNo: step.Attempt, Operation: operation, Objective: task.Objective}
 	_ = json.Unmarshal(task.OutputSlots, &value.DeclaredOutputs)
+	var taskParams struct {
+		OutputTypes map[string]string `json:"output_slot_types"`
+	}
+	_ = json.Unmarshal(task.Params, &taskParams)
+	value.DeclaredOutputTypes = taskParams.OutputTypes
 	if required, ok := request.Params["required_output_artifact_keys"].([]string); ok {
 		value.RequiredOutputs = required
 	}
