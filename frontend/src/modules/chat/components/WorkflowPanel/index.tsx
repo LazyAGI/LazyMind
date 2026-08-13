@@ -1,10 +1,17 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Popconfirm, Tooltip } from 'antd';
-import { FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
+import {
+  CloudUploadOutlined,
+  DownloadOutlined,
+  ExportOutlined,
+  FullscreenOutlined,
+  FullscreenExitOutlined,
+} from '@ant-design/icons';
 import { useWorkflowSession } from '@/modules/chat/hooks/useWorkflow';
 import { useWorkflowStore } from '@/modules/chat/store/workflowPanel';
+import { useTaskCenterStore, type SubAgentTask, type TaskArtifactStream } from '@/modules/chat/store/taskCenter';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
 import StateGraphModal from '@/components/StateGraphModal';
@@ -26,9 +33,50 @@ import {
   isWriterIrSource,
   SlotRenderer,
   SlotDownloadContext,
-  SlotEditingContext,
+  SlotMarkdownStream,
 } from './SlotComponents';
+import { WorkflowPanelTabActiveContext, SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
+import { findWriterArtifactStream } from './writerArtifactStream';
 import './WorkflowPanel.scss';
+
+const DOCUMENT_FOOTER_LINK_ORDER = 20;
+const EMPTY_TASK_CENTER_TASKS: SubAgentTask[] = [];
+
+type DocumentFooterItem =
+  | { kind: 'button'; key: string; order: number; action: SlotFooterAction }
+  | { kind: 'link'; key: string; order: number; href: string; label: string };
+
+function buildDocumentFooterItems(footerActions: Map<string, SlotFooterAction>): {
+  statusMessages: Array<{ key: string; text: string; tone?: SlotFooterAction['statusTone'] }>;
+  actionItems: DocumentFooterItem[];
+} {
+  const statusMessages: Array<{ key: string; text: string; tone?: SlotFooterAction['statusTone'] }> = [];
+  const actionItems: DocumentFooterItem[] = [];
+
+  for (const [key, action] of footerActions.entries()) {
+    if (action.statusText) {
+      statusMessages.push({ key: `${key}:status`, text: action.statusText, tone: action.statusTone });
+    }
+    if (action.statusLink) {
+      actionItems.push({
+        kind: 'link',
+        key: `${key}:link`,
+        order: DOCUMENT_FOOTER_LINK_ORDER,
+        href: action.statusLink.href,
+        label: action.statusLink.label,
+      });
+    }
+    actionItems.push({
+      kind: 'button',
+      key,
+      order: action.order ?? 100,
+      action,
+    });
+  }
+
+  actionItems.sort((left, right) => left.order - right.order);
+  return { statusMessages, actionItems };
+}
 
 /** Parse a JSON intent context string and return the text field, or '' if empty/invalid. */
 function parseIntentText(raw?: string): string {
@@ -297,7 +345,7 @@ function getTabStepId(tab: TabDef): string | undefined {
 }
 
 /**
- * Lock slot editing only while the workflow session is actively running.
+ * Lock slot editing only while the plugin session is actively running.
  * When idle (waiting / failed / completed), ui_editable artifacts stay editable
  * so the user can revise and re-run a later step from the updated content.
  */
@@ -882,6 +930,7 @@ function SortableImageList({
 function NamedTabSlot({
   slotDef,
   revisions,
+  artifactStream,
   session,
   onRefresh,
   onReference,
@@ -892,6 +941,7 @@ function NamedTabSlot({
   slotDef: SlotDef;
   revisions: SlotRevision[];
   session: WorkflowSession;
+  artifactStream?: TaskArtifactStream;
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
@@ -902,6 +952,9 @@ function NamedTabSlot({
   const slotLabel = slotDef.label ?? slotDef.id;
   const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
   const isDraggable = Boolean(slotDef.ordered) && !readOnly;
+  const showStream = Boolean(artifactStream && (
+    revisions.length === 0 || artifactStream.state !== 'ready'
+  ));
 
   return (
     <div className='workflow-panel__named-slot'>
@@ -910,7 +963,9 @@ function NamedTabSlot({
           <span className='workflow-panel__slot-label'>{slotLabel}</span>
         )}
       </div>
-      {revisions.length === 0 ? (
+      {showStream && artifactStream ? (
+        <SlotMarkdownStream stream={artifactStream} />
+      ) : revisions.length === 0 ? (
         <div
           className='workflow-panel__slot-placeholder'
           aria-label={`${slotLabel} pending`}
@@ -963,6 +1018,7 @@ function NamedTabSlot({
 function TabSlotGrid({
   tab,
   session,
+  tasks,
   onRefresh,
   onReference,
   onFocusSortOrder,
@@ -970,6 +1026,7 @@ function TabSlotGrid({
 }: {
   tab: TabDef;
   session: WorkflowSession;
+  tasks: SubAgentTask[];
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
@@ -1036,8 +1093,14 @@ function TabSlotGrid({
       {visibleSlots.map((slotDef) => {
         const artifactKey = slotDef.id;
         const revisions = getTabSlotRevisions(session, tab, artifactKey);
+        const artifactStream = findWriterArtifactStream(
+          session,
+          getTabStepId(tab),
+          slotDef.id,
+          tasks,
+        );
         const hideEmpty = Boolean(tab.composite_behavior?.hide_empty_columns);
-        if (hideEmpty && revisions.length === 0) {
+        if (hideEmpty && revisions.length === 0 && !artifactStream) {
           return null;
         }
         return (
@@ -1045,6 +1108,7 @@ function TabSlotGrid({
             key={slotDef.id}
             slotDef={slotDef}
             revisions={revisions}
+            artifactStream={artifactStream}
             session={session}
             onRefresh={onRefresh}
             onReference={onReference}
@@ -1094,6 +1158,11 @@ export function WorkflowPanel({
 }: WorkflowPanelProps) {
   const { t, i18n } = useTranslation();
   const { session, loading, refresh } = useWorkflowSession(conversationId);
+  const taskCenterTasks = useTaskCenterStore((state) =>
+    conversationId
+      ? state.tasksByConversation[conversationId] ?? EMPTY_TASK_CENTER_TASKS
+      : EMPTY_TASK_CENTER_TASKS,
+  );
   const bumpDismissedRefresh = useWorkflowStore((s) => s.bumpDismissedRefresh);
   const autoRunning = useWorkflowStore((s) =>
     conversationId ? (s.autoRunningByConversation[conversationId] ?? false) : false,
@@ -1119,6 +1188,7 @@ export function WorkflowPanel({
   const flushFns = useRef<Map<string, () => Promise<boolean>>>(new Map());
   const [anySlotEditing, setAnySlotEditing] = useState(false);
   const [actionPending, setActionPending] = useState(false);
+  const [footerActions, setFooterActions] = useState<Map<string, SlotFooterAction>>(new Map());
 
   const setExpandedMode = useCallback((nextExpanded: boolean) => {
     if (nextExpanded) setCollapsed(false);
@@ -1178,6 +1248,23 @@ export function WorkflowPanel({
     };
   }, []);
 
+  const registerFooterAction = useCallback((key: string, action: SlotFooterAction | null) => {
+    setFooterActions((previous) => {
+      const next = new Map(previous);
+      if (action) next.set(key, action);
+      else next.delete(key);
+      return next;
+    });
+    return () => {
+      setFooterActions((previous) => {
+        if (!previous.has(key)) return previous;
+        const next = new Map(previous);
+        next.delete(key);
+        return next;
+      });
+    };
+  }, []);
+
   const flushPendingEdits = useCallback(async (): Promise<boolean> => {
     const flushers = [...flushFns.current.values()];
     if (flushers.length === 0) return true;
@@ -1188,6 +1275,7 @@ export function WorkflowPanel({
   useEffect(() => {
     editingSlots.current.clear();
     flushFns.current.clear();
+    setFooterActions(new Map());
     setAnySlotEditing(false);
     setActionPending(false);
   }, [session?.session_id]);
@@ -1244,13 +1332,12 @@ export function WorkflowPanel({
     session.status === 'active' ||
     session.status === 'completed' ||
     session.status === 'failed';
-  const terminalSession = session.status === 'completed'
-    || session.status === 'failed'
-    || session.status === 'stopped';
-  // autoRunning is only an optimistic transport hint. A durable terminal
-  // session always wins, even if a delayed/replayed conversation event arrives.
-  const displayStatus = autoRunning && !terminalSession ? 'active' : session.status;
-  // Only block footer actions while the workflow is actually running (or flush-in-progress).
+  const documentFooter = useMemo(
+    () => buildDocumentFooterItems(footerActions),
+    [footerActions],
+  );
+  const displayStatus = autoRunning ? 'active' : session.status;
+  // Only block footer actions while the plugin is actually running (or flush-in-progress).
   // Dirty editors no longer disable retry — click flushes saves first, then proceeds.
   const sessionBusy = displayStatus === 'active' || autoRunning;
   const buttonsDisabled = sessionBusy || actionPending;
@@ -1301,8 +1388,16 @@ export function WorkflowPanel({
     void runFooterAction(() => onSendMessage?.(`${t('chat.workflowRollbackPrefix')}${stepId}`));
   }
 
+  const continueLabel = displayStatus === 'waiting'
+    ? t('chat.workflowSaveAndContinue')
+    : t('chat.workflowContinue');
+
   const panel = (
-    <SlotEditingContext.Provider value={{ setEditing: handleSlotEditingChange, registerFlush }}>
+    <SlotEditingContext.Provider value={{
+      setEditing: handleSlotEditingChange,
+      registerFlush,
+      registerFooterAction,
+    }}>
     <div
       className={`workflow-panel workflow-panel--${displayStatus}${collapsed ? ' workflow-panel--collapsed' : ''}${expanded ? ' workflow-panel--expanded' : ''}`}
       data-session-id={session.session_id}
@@ -1311,7 +1406,19 @@ export function WorkflowPanel({
       {/* Header */}
       <div className='workflow-panel__header'>
         <div className='workflow-panel__header-left'>
-          <span className='workflow-panel__title'>{session.workflow_id}</span>
+          <span className='workflow-panel__title'>{ui.name || session.workflow_id}</span>
+          {typeof session.pinned_revision_no === 'number' && session.pinned_revision_no > 0 && (
+            <span className='workflow-panel__revision'>
+              {t('chat.workflowPinnedVersion', { version: session.pinned_revision_no })}
+            </span>
+          )}
+          {typeof session.head_revision_no === 'number'
+            && typeof session.pinned_revision_no === 'number'
+            && session.head_revision_no > session.pinned_revision_no && (
+              <span className='workflow-panel__revision workflow-panel__revision--updated'>
+                {t('chat.workflowUpdateAvailable', { version: session.head_revision_no })}
+              </span>
+            )}
           <span
             className={`workflow-panel__status workflow-panel__status--${displayStatus}`}
             aria-label={t('chat.workflowStatusAria', { status: t(STATUS_KEY[displayStatus] ?? displayStatus) })}
@@ -1485,16 +1592,19 @@ export function WorkflowPanel({
                 role='tabpanel'
                 hidden={idx !== activeTabIdx}
               >
+                <WorkflowPanelTabActiveContext.Provider value={idx === activeTabIdx}>
                 <SlotDownloadContext.Provider value={idx === tabs.length - 1}>
                   <TabSlotGrid
                     tab={tab}
                     session={session}
+                    tasks={taskCenterTasks}
                     onRefresh={refresh}
                     onReference={onReference}
                     onFocusSortOrder={handleFocusSortOrder}
                     readOnly={sessionReadOnly}
                   />
                 </SlotDownloadContext.Provider>
+                </WorkflowPanelTabActiveContext.Provider>
               </div>
             ))
           ) : (
@@ -1511,6 +1621,71 @@ export function WorkflowPanel({
       {/* Footer */}
       {!collapsed && showActions && (
         <div className='workflow-panel__footer' role='group' aria-label={t('chat.workflowSessionControls')}>
+          {documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0 ? (
+            <div className='workflow-panel__footer-document'>
+              {documentFooter.statusMessages.length > 0 ? (
+                <div className='workflow-panel__footer-meta'>
+                  {documentFooter.statusMessages.map((message) => (
+                    <span
+                      key={message.key}
+                      className={
+                        message.tone === 'error'
+                          ? 'workflow-panel__footer-action-status workflow-panel__footer-action-status--error'
+                          : message.tone === 'success'
+                            ? 'workflow-panel__footer-action-status workflow-panel__footer-action-status--success'
+                            : 'workflow-panel__footer-action-status'
+                      }
+                      role={message.tone === 'error' ? 'alert' : 'status'}
+                    >
+                      {message.text}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {documentFooter.actionItems.length > 0 ? (
+                <div className='workflow-panel__footer-actions'>
+                  {documentFooter.actionItems.map((item) => {
+                    if (item.kind === 'link') {
+                      return (
+                        <a
+                          key={item.key}
+                          className='workflow-panel__action-btn workflow-panel__action-btn--secondary workflow-panel__action-btn--link'
+                          href={item.href}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                        >
+                          <ExportOutlined aria-hidden />
+                          {item.label}
+                        </a>
+                      );
+                    }
+
+                    const { action } = item;
+                    return (
+                      <button
+                        key={item.key}
+                        type='button'
+                        className={`workflow-panel__action-btn workflow-panel__action-btn--${action.tone ?? 'secondary'}`}
+                        disabled={actionPending || action.disabled}
+                        aria-disabled={actionPending || action.disabled}
+                        onClick={() => {
+                          if (action.flushBeforeAction) {
+                            void runFooterAction(action.onClick);
+                            return;
+                          }
+                          action.onClick();
+                        }}
+                      >
+                        {action.icon === 'write-back' ? <CloudUploadOutlined aria-hidden /> : null}
+                        {action.icon === 'download' ? <DownloadOutlined aria-hidden /> : null}
+                        {action.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {displayStatus === 'active' && onStop && (
             <button
               type='button'
@@ -1555,10 +1730,12 @@ export function WorkflowPanel({
                     ? t('chat.workflowSavingBeforeAction')
                     : buttonsDisabled
                       ? t('chat.workflowBtnDisabledHint')
-                      : t('chat.workflowContinue')
+                      : anySlotEditing
+                        ? t('chat.workflowContinueFlushHint')
+                        : continueLabel
               }
             >
-              {actionPending ? t('chat.workflowSavingBeforeAction') : t('chat.workflowContinue')}
+              {actionPending ? t('chat.workflowSavingBeforeAction') : continueLabel}
             </button>
           )}
           {showStepRollback && (

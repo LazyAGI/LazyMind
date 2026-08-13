@@ -36,7 +36,7 @@ func dispatchDB(t *testing.T, expanded bool) *gorm.DB {
 func seedDispatchStep(t *testing.T, db *gorm.DB, id string) {
 	t.Helper()
 	now := time.Now().UTC()
-	if err := db.Create(&orm.SubAgentTask{ID: "task-" + id, ConversationID: "conversation", AgentType: "workflow_step", Title: "step", Objective: "make report", Mode: "manual", Status: "pending", InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`["report"]`), CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+	if err := db.Create(&orm.SubAgentTask{ID: "task-" + id, ConversationID: "conversation", AgentType: "workflow_step", Title: "step", Objective: "make report", Mode: "manual", Status: "pending", Params: json.RawMessage(`{"output_slot_types":{"report":"file"}}`), InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`["report"]`), CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&orm.WorkflowSessionStep{ID: id, SessionID: "session", StepID: "step", Attempt: 1, TaskID: "task-" + id, Status: StepStatusPending, Validity: "effective", ProgressJSON: "{}", ResultJSON: "{}", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
@@ -62,7 +62,7 @@ func TestCanonicalQueueContainsNeutralContext(t *testing.T) {
 	if err := json.Unmarshal(row.PayloadJSON, &value); err != nil {
 		t.Fatal(err)
 	}
-	if value.AttemptID != "a1" || value.Operation != "execute" {
+	if value.AttemptID != "a1" || value.Operation != "execute" || value.DeclaredOutputTypes["report"] != "file" {
 		t.Fatalf("context=%#v", value)
 	}
 	text := string(row.PayloadJSON)

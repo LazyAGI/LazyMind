@@ -52,6 +52,17 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "tool config unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	if toolConfig == nil {
+		toolConfig = map[string]any{}
+	}
+	cloudToolConfig, err := modelconfig.LoadCloudToolConfig(r.Context(), task.CreateUserID)
+	if err != nil {
+		common.ReplyErr(w, "tool config unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	for name, credential := range cloudToolConfig {
+		toolConfig[name] = credential
+	}
 	steps, _ := LoadSteps(r.Context(), store.DB(), taskID)
 	stepDTOs := make([]stepDTO, 0, len(steps))
 	for i := range steps {
@@ -59,7 +70,7 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 	}
 	common.ReplyOK(w, map[string]any{"task": toTaskDTO(task), "params": task.Params,
 		"steps": stepDTOs, "create_user_id": task.CreateUserID, "llm_config": config,
-		"tool_config": toolConfig})
+		"tool_config": toolConfig, "workspace_path": task.WorkspacePath})
 }
 
 // InternalIngestTaskEvent preserves the ordinary LazyMind SubAgent task stream
@@ -76,6 +87,21 @@ func InternalIngestTaskEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	event.TaskID = taskID
+	if event.Type == "artifact" {
+		task, err := GetTask(r.Context(), store.DB(), taskID)
+		if err != nil {
+			common.ReplyErr(w, "task unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		var params struct {
+			OutputTypes map[string]string `json:"output_slot_types"`
+		}
+		_ = json.Unmarshal(task.Params, &params)
+		if params.OutputTypes[event.ArtifactKey] == "file" && event.ContentType != "file" && event.ContentType != "file_list" {
+			common.ReplyErr(w, "file slot requires file or file_list content type", http.StatusUnprocessableEntity)
+			return
+		}
+	}
 	if role, content := remoteStepContent(event); role != "" {
 		if err := AppendRemoteStep(r.Context(), store.DB(), taskID, role, content); err != nil {
 			common.ReplyErr(w, "persist task event failed", http.StatusServiceUnavailable)

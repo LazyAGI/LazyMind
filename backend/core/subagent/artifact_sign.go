@@ -61,6 +61,14 @@ func resolveArtifactPaths(raw json.RawMessage, workspacePath string) json.RawMes
 		if !filepath.IsAbs(resolved) {
 			resolved = filepath.Clean(filepath.Join(workspaceRoot, resolved))
 		}
+		// Remote Workflow outputs are persisted once in Core-managed storage.
+		// They intentionally sit outside the task workspace so the Workflow slot
+		// and Task Center can safely reference the same durable file.
+		uploadRoot := filepath.Clean(doc.UploadRoot())
+		if relative, err := filepath.Rel(uploadRoot, resolved); err == nil &&
+			relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return resolved
+		}
 		containmentRoot := workspaceRoot
 		containmentPath := resolved
 		if resolvedPath, err := filepath.EvalSymlinks(resolved); err == nil && workspaceResolveErr == nil {

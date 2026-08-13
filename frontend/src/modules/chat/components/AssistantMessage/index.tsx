@@ -201,6 +201,7 @@ const AssistantMessage = (props: any) => {
     onPreferenceSelect,
     isLatestDualAnswer,
     onCiteMessage,
+    hasLaterUserMessage,
   } = props;
   const citeButtonRef = useRef<HTMLButtonElement | null>(null);
   const citeSelectionTextRef = useRef("");
@@ -933,6 +934,7 @@ const AssistantMessage = (props: any) => {
       const isReadOnly = isAskPendingReadOnly(
         item.ask_answered,
         index === length - 1,
+        !!hasLaterUserMessage,
       );
       return (
         <AskCard

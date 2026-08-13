@@ -89,6 +89,7 @@ _REMOTE_ASSISTANT_ACTIONS = {
     'assistant.answer_page',
     'assistant.respond',
     'assistant.release',
+    'assistant.delete',
     'assistant.cancel',
 }
 
@@ -1052,6 +1053,7 @@ class FeishuRuntime:
             'assistant.answer_page': 'detail',
             'assistant.respond': 'detail',
             'assistant.release': 'detail',
+            'assistant.delete': 'detail',
         }.get(kind)
         if expected_mode and workspace.assistant_mode != expected_mode:
             return None
@@ -1093,6 +1095,7 @@ class FeishuRuntime:
                 'request_kind',
             },
             'assistant.release': {'thread_id'},
+            'assistant.delete': {'thread_id', 'conversation_id'},
         }.get(kind, set())
         if not required_values.issubset(values):
             return None
@@ -1117,6 +1120,7 @@ class FeishuRuntime:
                 'assistant.answer_page',
                 'assistant.respond',
                 'assistant.release',
+                'assistant.delete',
             }
             and action_thread_id
             and action_thread_id != workspace.assistant_selected_thread_id
@@ -1571,6 +1575,39 @@ class FeishuRuntime:
                 }:
                     return view
                 raise
+        if kind == 'assistant.delete':
+            view = self._read_assistant_detail(
+                owner_user_id=owner_user_id,
+                request_id=f'{request_id}_read',
+                provider=_ASSISTANT_PROVIDER,
+                thread_id=workspace.assistant_selected_thread_id,
+            )
+            conversation_id = detail_conversation_id(view)
+            if (
+                not conversation_id
+                or conversation_id
+                != str(values.get('conversation_id') or '')
+            ):
+                return view
+            if detail_run_status(view) in {
+                'running',
+                'waiting_for_input',
+                'releasing',
+                'release_failed',
+            }:
+                return view
+            self._core.delete_external_conversation(
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+                conversation_id=conversation_id,
+            )
+            workspace.leave_assistant_thread()
+            return self._load_assistant_threads(
+                workspace,
+                owner_user_id,
+                request_id,
+                workspace.assistant_threads_cursor,
+            )
         if kind == 'assistant.cancel':
             view = self._read_assistant_detail(
                 owner_user_id=owner_user_id,

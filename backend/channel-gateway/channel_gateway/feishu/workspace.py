@@ -2683,19 +2683,45 @@ def _detail(
                 else '<font color="grey">This session is running elsewhere and is read-only in Feishu.</font>'
             ),
         )
-    elements.extend([
-        {'tag': 'hr'},
-        {'tag': 'markdown', 'content': footer},
-        _button_row([{
-            'label': _localized(state, '返回项目会话', 'Project sessions'),
+    navigation_buttons = [{
+        'label': _localized(state, '返回项目会话', 'Project sessions'),
+        'disabled': busy,
+        'action': _action(
+            chat_id,
+            'assistant.back',
+            '返回项目会话',
+            thread_id=str(thread.get('id') or ''),
+        ),
+    }]
+    if conversation_id:
+        navigation_buttons.append({
+            'label': _localized(state, '删除会话', 'Delete session'),
+            'style': 'danger',
             'disabled': busy,
             'action': _action(
                 chat_id,
-                'assistant.back',
-                '返回项目会话',
+                'assistant.delete',
+                '删除 Codex 会话',
                 thread_id=str(thread.get('id') or ''),
+                conversation_id=conversation_id,
             ),
-        }]),
+            'confirm': {
+                'title': _localized(
+                    state,
+                    '确认删除会话？',
+                    'Delete this session?',
+                ),
+                'text': _localized(
+                    state,
+                    '该会话将从 Codex 项目列表归档，并从 LazyMind 中移除。',
+                    'This session will be archived in Codex and removed from LazyMind.',
+                ),
+            },
+        })
+    elements.extend([
+        {'tag': 'hr'},
+        {'tag': 'markdown', 'content': footer},
+        _button_row(navigation_buttons),
     ])
     return elements
 

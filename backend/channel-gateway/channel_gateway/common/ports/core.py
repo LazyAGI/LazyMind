@@ -157,6 +157,15 @@ class ExternalAgentClient(Protocol):
     ) -> None:
         ...
 
+    def delete_external_conversation(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        conversation_id: str,
+    ) -> None:
+        ...
+
     def respond_external_request(
         self,
         *,

@@ -6,7 +6,9 @@ the runtime Supervisor to launch an explicit Workflow SubAgent after acceptance.
 from __future__ import annotations
 
 import base64
+import logging
 import os
+import types
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +19,39 @@ from pydantic import BaseModel, ConfigDict, Field
 from lazymind.workflow_sdk import (
     AdvanceRequest, StepCommand, WorkflowClient, WorkflowClientError,
 )
+
+LOG = logging.getLogger(__name__)
+
+
+def load_workflow_package_tools(
+    package: Dict[str, Any], names: List[str], workflow_id: str, revision_id: str,
+) -> Dict[str, Any]:
+    """Load named callables from an already validated Workflow package."""
+    files = package.get('files') if isinstance(package.get('files'), dict) else {}
+    remaining = set(names)
+    resolved: Dict[str, Any] = {}
+    for path in sorted(files):
+        if not remaining:
+            break
+        if not path.startswith('scripts/') or not path.endswith('.py'):
+            continue
+        encoded = files[path]
+        source = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
+        module = types.ModuleType(
+            f'_lazymind_workflow_{revision_id.replace("-", "_")}_{len(resolved)}'
+        )
+        module.__file__ = f'{workflow_id}@{revision_id}/{path}'
+        exec(compile(source.decode('utf-8'), module.__file__, 'exec'), module.__dict__)
+        for name in tuple(remaining):
+            candidate = module.__dict__.get(name)
+            if callable(candidate):
+                if not str(getattr(candidate, '__doc__', '') or '').strip():
+                    candidate.__doc__ = f'Execute the published Workflow tool {name}.'
+                resolved[name] = candidate
+                remaining.remove(name)
+    if remaining:
+        LOG.warning('Workflow revision %s does not provide tools %s', revision_id, sorted(remaining))
+    return resolved
 
 
 class StepCommandInput(BaseModel):

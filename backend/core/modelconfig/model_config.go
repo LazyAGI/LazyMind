@@ -3,13 +3,87 @@ package modelconfig
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
+	"lazymind/core/common"
 	"lazymind/core/modelprovider"
 )
+
+const cloudToolTokenTimeout = 5 * time.Second
+
+var cloudToolProviders = []string{"feishu", "googledrive", "notion"}
+
+type cloudConnectionList struct {
+	Data struct {
+		Items []struct {
+			ConnectionID string `json:"connection_id"`
+		} `json:"items"`
+	} `json:"data"`
+}
+
+type cloudTokenResponse struct {
+	Data struct {
+		AccessToken string `json:"access_token"`
+	} `json:"data"`
+}
+
+// LoadCloudToolConfig loads current user-scoped cloud credentials at execution time.
+func LoadCloudToolConfig(ctx context.Context, userID string) (map[string]any, error) {
+	toolConfig := map[string]any{}
+	for _, provider := range cloudToolProviders {
+		tokens, err := LoadCloudProviderTokens(ctx, provider, userID)
+		if err != nil {
+			return nil, err
+		}
+		if len(tokens) == 1 {
+			toolConfig[provider] = tokens[0]
+		} else if len(tokens) > 1 {
+			toolConfig[provider] = tokens
+		}
+	}
+	return toolConfig, nil
+}
+
+func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]string, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	userID = strings.TrimSpace(userID)
+	if provider == "" || userID == "" {
+		return nil, nil
+	}
+	headers := map[string]string{}
+	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
+		headers["X-LazyMind-Internal-Token"] = token
+	}
+	listURL := fmt.Sprintf("%s/v1/cloud/connections/internal/chat-enabled?provider=%s&owner_user_id=%s",
+		common.AuthServiceBaseURL(), url.QueryEscape(provider), url.QueryEscape(userID))
+	var connections cloudConnectionList
+	if err := common.ApiGet(ctx, listURL, headers, &connections, cloudToolTokenTimeout); err != nil {
+		return nil, fmt.Errorf("list chat-enabled %s connections: %w", provider, err)
+	}
+	tokens := make([]string, 0, len(connections.Data.Items))
+	for _, item := range connections.Data.Items {
+		connectionID := strings.TrimSpace(item.ConnectionID)
+		if connectionID == "" {
+			continue
+		}
+		tokenURL := fmt.Sprintf("%s/v1/cloud/connections/%s/token?user_id=%s",
+			common.AuthServiceBaseURL(), url.PathEscape(connectionID), url.QueryEscape(userID))
+		var response cloudTokenResponse
+		if err := common.ApiGet(ctx, tokenURL, headers, &response, cloudToolTokenTimeout); err != nil {
+			continue
+		}
+		if token := strings.TrimSpace(response.Data.AccessToken); token != "" {
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens, nil
+}
 
 type SelectedRuntimeModel struct {
 	ModelType        string
