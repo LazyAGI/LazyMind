@@ -1,0 +1,320 @@
+initial: __start__
+start_route: all
+
+transitions:
+  __start__: [{to: parse_bid_document}]
+  parse_bid_document: [{to: extract_tech_requirements}]
+  extract_tech_requirements: [{to: extract_disqualification_items}]
+  extract_disqualification_items: [{to: build_chapter_outline}]
+  build_chapter_outline: [{to: write_chapter_contents}]
+  write_chapter_contents: [{to: generate_proposal_images}]
+  generate_proposal_images: [{to: compose_proposal_docx}]
+  compose_proposal_docx: [{to: validate_proposal}]
+  validate_proposal: [{to: __end__}]
+
+steps:
+  parse_bid_document:
+    label: 招标文件解析
+    prompt: |
+      {{runtime_instruction}}
+
+      Execute step 1 of the bid-tech-proposal pipeline. The Runtime Parameters section
+      contains remote_inputs, a mapping from material id to the actual local input path.
+      Take remote_inputs.bid_doc exactly as supplied; never guess, rewrite, or reuse a
+      path from the source skill.
+
+      Call parse_bid_document(input_path=<remote_inputs.bid_doc>). The tool performs the
+      format-specific deterministic parsing. Save the returned raw_text as raw_bid_text
+      with content_type="text" and returned metadata as raw_bid_meta with
+      content_type="json" in one save_artifacts call. Preserve full source clauses,
+      headings, numbered paragraphs, table rows and page markers. Do not replace the
+      parsed text with a summary and do not claim an unavailable parser was used.
+    tools: [parse_bid_document]
+    inputs:
+      - material: bid_doc
+        required: true
+    outputs:
+      - material: raw_bid_text
+      - material: raw_bid_meta
+    acceptance_criteria: |
+      raw_bid_text contains substantive source text, and raw_bid_meta identifies the
+      source filename, detected format, parser, section count and any honest warnings.
+
+  extract_tech_requirements:
+    label: 技术要求提取
+    prompt: |
+      {{runtime_instruction}}
+
+      Execute step 2. Read raw_bid_text, then call
+      extract_technical_requirements(raw_text=<complete parsed text>). Treat the script
+      result as a deterministic candidate set and review it as a solution expert:
+
+      - retain stable IDs in the BG/FUNC/PERF/SEC/SVC/IMPL-NNN namespaces;
+      - retain source line/page/section, trigger words, exact numbers, cited standards,
+        policy references, minimum original excerpt and suggested response chapter;
+      - add an actually missed actionable requirement only when it is present verbatim
+        in raw_bid_text; never invent a metric, standard or product capability;
+      - assign one primary category to each source paragraph and remove duplicates.
+
+      Save one complete Markdown artifact as technical_requirements with
+      content_type="text". This ID pool is authoritative for the outline and body.
+    tools: [extract_technical_requirements]
+    inputs:
+      - material: raw_bid_text
+        required: true
+      - material: raw_bid_meta
+        required: true
+    outputs:
+      - material: technical_requirements
+    acceptance_criteria: |
+      Every actionable requirement has one stable ID, evidence location, original
+      excerpt and response suggestion. Every number and standard is source-grounded.
+
+  extract_disqualification_items:
+    label: 废标项聚焦
+    prompt: |
+      {{runtime_instruction}}
+
+      Execute step 3. Read raw_bid_text and call
+      extract_disqualification_items(raw_text=<complete parsed text>). Review the
+      deterministic scan using the original skill's rules: explicit "废标/否决/否则视为
+      不响应/不接受偏离/★" clauses belong in the explicit section; ordinary mandatory,
+      qualification, schedule, service and security wording belongs in high-risk
+      reminders unless the source states a rejection consequence.
+
+      Preserve D-NNN IDs, original clause number/page, a minimal exact excerpt, critical
+      numbers, category, 1–5 star risk, required response and proposed outline location.
+      Merge duplicates without losing the strongest evidence. Save one Markdown artifact
+      as disqualification_items with content_type="text".
+    tools: [extract_disqualification_items]
+    inputs:
+      - material: raw_bid_text
+        required: true
+      - material: technical_requirements
+        required: true
+    outputs:
+      - material: disqualification_items
+    acceptance_criteria: |
+      Explicit rejection clauses and inferred risks are separated. Every D-NNN item has
+      a source reference, response strategy and risk rating without invented conditions.
+
+  build_chapter_outline:
+    label: 章节大纲与字数
+    prompt: |
+      {{runtime_instruction}}
+
+      Execute step 4 plus the original optional word-allocation substep. Read
+      technical_requirements, disqualification_items and word_target. Build a compact
+      JSON outline with project_name, project_full_name, total_word_target,
+      color_scheme="blue", and chapters.
+
+      Follow these hard rules:
+      - maximum four levels; number values follow 1 / 1.1 / 1.1.1 / 1.1.1.1;
+      - every title is a Chinese noun phrase shorter than 10 characters and contains no
+        filesystem-illegal character;
+      - target_words applies to leaves; parent values equal the sum of descendants;
+      - use bid_requirements_refs and disqualification_refs on leaves, mapping every ID;
+      - preserve any source-mandated chapter names/order, otherwise use the software
+        project skeleton: 项目背景、需求分析、总体架构、功能设计、集成接口、实施运维、
+        售后服务、项目价值 as applicable;
+      - keep the leaf count practical for the requested total, normally 12–30.
+
+      Call validate_and_allocate_outline(outline_json=<candidate>,
+      requirements_markdown=<requirements>, disqualification_markdown=<items>,
+      word_target=<target>). If valid is false, fix every reported error and call again.
+      Save only a valid normalized_outline as outline with content_type="json", and save
+      its Markdown report as outline_check_report with content_type="text" in one call.
+    tools: [validate_and_allocate_outline]
+    inputs:
+      - material: technical_requirements
+        required: true
+      - material: disqualification_items
+        required: true
+      - material: word_target
+        required: true
+    outputs:
+      - material: outline
+      - material: outline_check_report
+    acceptance_criteria: |
+      outline_check_report begins with PASS; the normalized outline satisfies level,
+      numbering, title, target allocation and complete requirement/disqualification
+      reference coverage constraints.
+
+  write_chapter_contents:
+    label: 逐章正文编写
+    prompt: |
+      {{runtime_instruction}}
+
+      Execute step 5 as a solution expert. Read the validated outline, technical
+      requirements and disqualification items. Traverse outline leaves in order and
+      write one complete Markdown section per leaf. Each list entry in chapter_contents
+      must start with the leaf title without a manual number and carry a caption such as
+      "4.2 智能预审". Save entries in outline order; use sort_order only when replacing
+      an existing position during a retry.
+
+      For every leaf:
+      1. Resolve every bid_requirements_refs and disqualification_refs ID to its source
+         excerpt before writing.
+      2. Expand functional content as: business scene -> 3–6 sub-capabilities -> for each
+         capability, design mechanism / operation flow / business rule / exception and
+         security / measurable value. Use only source-grounded numbers.
+      3. Explicitly cover every mapped ID. Include a compact "追溯：ID..." line at the
+         end so deterministic validation can locate it.
+      4. Respect target_words within ±10% and internally apply the original ten-point
+         review: no first person, requirement-echo opening, empty verbs, vague quantity,
+         emotional adverbs, uncertain tone, ambiguous subject or defensive wording.
+
+      Save each leaf as a separate chapter_contents text artifact. Also concatenate the
+      exact same sections, with outline-consistent Markdown heading levels, into one
+      complete_draft text artifact. Do not collapse chapter_contents to one item and do
+      not omit a short leaf. Multiple save_artifacts calls are allowed for the list, but
+      finish by saving complete_draft after every leaf has been persisted.
+    inputs:
+      - material: outline
+        required: true
+      - material: technical_requirements
+        required: true
+      - material: disqualification_items
+        required: true
+      - material: word_target
+        required: true
+    outputs:
+      - material: chapter_contents
+      - material: complete_draft
+    acceptance_criteria: |
+      chapter_contents has one ordered entry for every outline leaf; complete_draft has
+      the same headings and content in the same order. Each leaf stays within ±10% of its
+      target and explicitly covers all mapped IDs.
+
+  generate_proposal_images:
+    label: 架构图与效果图
+    prompt: |
+      {{runtime_instruction}}
+
+      Execute step 6 using local code only. Never call a text-to-image or image-generation
+      model. Derive truthful JSON specs from the outline, requirements and completed body.
+
+      First call render_proposal_image once with image_type="architecture" for a
+      4–6-layer system architecture and save its real PNG path as architecture_image.
+      Then select 5–10 effect types that match actual project functions from dashboard,
+      workbench, list, form, approval, analytics, mobile, admin, login and flow. Use at
+      least five distinct types; every image's main block, information density and visual
+      focus must differ from the others. Call render_proposal_image once per effect.
+
+      All specs use color_scheme="blue", 1920x1080, concise Chinese labels and only
+      source-grounded metrics. Save every returned effect PNG as one ordered effect_images
+      item with a distinct caption. Save image_manifest as JSON containing architecture
+      metadata and the ordered effect entries (type, title, source_chapter, filename).
+      PNG paths must be saved with content_type="image" and source_tool="render_proposal_image";
+      never save spec JSON, HTML, SVG or placeholder text in an image slot.
+    tools: [render_proposal_image]
+    inputs:
+      - material: outline
+        required: true
+      - material: technical_requirements
+        required: true
+      - material: complete_draft
+        required: true
+    outputs:
+      - material: architecture_image
+      - material: effect_images
+      - material: image_manifest
+    acceptance_criteria: |
+      One real 1920x1080 architecture PNG and 5–10 real 1920x1080 effect PNGs exist.
+      At least five effect layout types are used, all images share one palette and the
+      manifest order matches the effect_images order.
+
+  compose_proposal_docx:
+    label: 技术方案合成
+    prompt: |
+      {{runtime_instruction}}
+
+      Execute step 7. Read outline, complete_draft and image_manifest. Build the final
+      Markdown without rewriting or duplicating the approved body:
+      - one project title;
+      - the complete draft in outline order;
+      - place [[WORKFLOW_IMAGES]] alone immediately after the architecture-design portion;
+      - append compact requirement and disqualification traceability tables containing
+        IDs and mapped section numbers, not duplicate full source clauses.
+
+      Resolve the actual local path of architecture_image with find_artifact. Resolve
+      every effect_images item using sort_order=1..N from image_manifest. Call
+      compose_proposal_docx(markdown_text=<complete Markdown>, outline_json=<outline>,
+      image_paths_json=<ordered path/title/type objects>, output_name=<project Chinese
+      name + "_技术方案.docx">, add_toc=true). The workflow-specific builder applies
+      Heading 1–4 numbering, 宋体 14pt body, 1.5 spacing, first-line indent, page breaks,
+      centered 15 cm images and an updateable TOC.
+
+      Save the exact Markdown as final_proposal_markdown with content_type="text" and the
+      returned path as final_proposal with content_type="file" in one save_artifacts
+      call. Never store a path string as text or a base64 placeholder in the Word slot.
+    tools: [compose_proposal_docx]
+    inputs:
+      - material: outline
+        required: true
+      - material: complete_draft
+        required: true
+      - material: architecture_image
+        required: true
+      - material: effect_images
+        required: true
+      - material: image_manifest
+        required: true
+      - material: technical_requirements
+        required: true
+      - material: disqualification_items
+        required: true
+    outputs:
+      - material: final_proposal_markdown
+      - material: final_proposal
+    acceptance_criteria: |
+      final_proposal_markdown is complete and non-duplicated. final_proposal is an actual
+      non-empty `.docx` containing the complete body, updateable TOC and every selected
+      architecture/effect image.
+
+  validate_proposal:
+    label: 文档结果校验
+    prompt: |
+      {{runtime_instruction}}
+
+      Execute step 8 deterministically. Read final_proposal_markdown, outline,
+      technical_requirements, disqualification_items, image_manifest and word_target.
+      Use find_artifact to resolve final_proposal to a short local file path; never read,
+      echo or pass base64 binary content through the model.
+
+      Call validate_proposal_package(markdown_text=<final Markdown>,
+      docx_path=<resolved path>, outline_json=<outline>,
+      requirements_markdown=<requirements>,
+      disqualification_markdown=<items>, word_target=<target>,
+      image_manifest_json=<manifest>). Save returned report as validation_report with
+      content_type="text" and returned summary as validation_summary with
+      content_type="json" in one call.
+
+      Report overall and per-leaf Chinese-character deviations, missing headings,
+      uncovered requirement IDs, uncovered D-NNN items, actual embedded-image count,
+      DOCX extension/ZIP/package validity and actionable remediation. A total word-count
+      deviation above 5%, any missing leaf, any uncovered explicit rejection item, fewer
+      than six images, or an invalid DOCX must not be reported as PASS.
+    tools: [validate_proposal_package]
+    inputs:
+      - material: final_proposal_markdown
+        required: true
+      - material: final_proposal
+        required: true
+      - material: outline
+        required: true
+      - material: technical_requirements
+        required: true
+      - material: disqualification_items
+        required: true
+      - material: word_target
+        required: true
+      - material: image_manifest
+        required: true
+    outputs:
+      - material: validation_report
+      - material: validation_summary
+    acceptance_criteria: |
+      validation_report and validation_summary are internally consistent, verify the
+      actual DOCX package, and provide evidence for word count, chapters, ID coverage,
+      disqualification responses and image count.

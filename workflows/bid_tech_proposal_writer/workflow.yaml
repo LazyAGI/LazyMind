@@ -1,0 +1,222 @@
+id: bid_tech_proposal_writer
+name: 投标技术方案编写
+description: >
+  面向中文招标文件技术部分的内置八步工作流。按原始 bid-tech-proposal
+  模式完成文件解析、技术要求与废标项提取、可追溯大纲、逐章正文、
+  代码渲染架构图和 5–10 张差异化效果图、DOCX 合成及最终校验。
+
+when_to_use: >
+  当用户提供中文招标文件（优先支持 DOCX、PDF，也支持 TXT、Markdown、HTML、RTF），
+  希望生成完整投标技术方案、技术标正文或可下载 Word 技术方案时使用。
+  启动必须具备招标文件和目标总字数；缺少目标字数时先向用户询问。
+  不用于仅编写商务报价、资质证明或制作 PPT 的请求。
+
+tool_scripts:
+  - path: scripts/pipeline_tools.py
+    functions:
+      - parse_bid_document
+      - extract_technical_requirements
+      - extract_disqualification_items
+      - validate_and_allocate_outline
+      - validate_proposal_package
+  - path: scripts/visual_renderer.py
+    functions:
+      - render_proposal_image
+  - path: scripts/document_builder.py
+    functions:
+      - compose_proposal_docx
+
+steps:
+  - id: parse_bid_document
+    label: 招标文件解析
+  - id: extract_tech_requirements
+    label: 技术要求提取
+  - id: extract_disqualification_items
+    label: 废标项聚焦
+  - id: build_chapter_outline
+    label: 章节大纲与字数
+  - id: write_chapter_contents
+    label: 逐章正文编写
+  - id: generate_proposal_images
+    label: 架构图与效果图
+  - id: compose_proposal_docx
+    label: 技术方案合成
+  - id: validate_proposal
+    label: 文档结果校验
+
+slots:
+  - id: bid_doc
+    label: 招标文件
+    type: file
+    cardinality: single
+    external: true
+    exposed: false
+  - id: word_target
+    label: 目标总字数
+    type: text
+    cardinality: single
+    external: true
+    exposed: false
+
+  - id: raw_bid_text
+    label: 招标文件全文
+    type: text
+    cardinality: single
+    exposed: true
+  - id: raw_bid_meta
+    label: 解析元数据
+    type: json
+    cardinality: single
+    exposed: true
+  - id: technical_requirements
+    label: 技术要求清单
+    type: text
+    cardinality: single
+    exposed: true
+  - id: disqualification_items
+    label: 废标项清单
+    type: text
+    cardinality: single
+    exposed: true
+  - id: outline
+    label: 章节大纲
+    type: json
+    cardinality: single
+    exposed: true
+  - id: outline_check_report
+    label: 大纲检查报告
+    type: text
+    cardinality: single
+    exposed: true
+  - id: chapter_contents
+    label: 分章正文
+    type: text
+    cardinality: list
+    ordered: true
+    allow_manual_add: false
+    exposed: true
+  - id: complete_draft
+    label: 完整正文合稿
+    type: text
+    cardinality: single
+    exposed: true
+  - id: architecture_image
+    label: 系统架构图
+    type: image
+    cardinality: single
+    exposed: true
+  - id: effect_images
+    label: 功能效果图
+    type: image
+    cardinality: list
+    ordered: true
+    allow_manual_add: false
+    exposed: true
+  - id: image_manifest
+    label: 图像清单
+    type: json
+    cardinality: single
+    exposed: true
+  - id: final_proposal_markdown
+    label: 技术方案 Markdown
+    type: text
+    cardinality: single
+    exposed: true
+  - id: final_proposal
+    label: 技术方案 Word
+    type: file
+    cardinality: single
+    exposed: true
+  - id: validation_report
+    label: 最终校验报告
+    type: text
+    cardinality: single
+    exposed: true
+  - id: validation_summary
+    label: 校验摘要
+    type: json
+    cardinality: single
+    exposed: true
+
+ui:
+  slots:
+    raw_bid_text: {widgetType: text-markdown, readOnly: true, maxHeight: 560}
+    raw_bid_meta: {widgetType: json-block, readOnly: true, collapsed: false}
+    technical_requirements: {widgetType: text-markdown, readOnly: true}
+    disqualification_items: {widgetType: text-markdown, readOnly: true}
+    outline: {widgetType: json-block, readOnly: true, collapsed: false}
+    outline_check_report: {widgetType: text-markdown, readOnly: true}
+    chapter_contents: {widgetType: text-markdown, readOnly: true}
+    complete_draft: {widgetType: text-markdown, readOnly: true}
+    architecture_image: {widgetType: image-gallery, readOnly: true, itemWidth: 720, itemHeight: 405}
+    effect_images: {widgetType: image-gallery, readOnly: true, itemLayout: grid, gridMaxCols: 2, itemWidth: 520, itemHeight: 292}
+    image_manifest: {widgetType: json-block, readOnly: true, collapsed: true}
+    final_proposal_markdown: {widgetType: text-markdown, readOnly: true}
+    final_proposal: {widgetType: file-card, readOnly: true}
+    validation_report: {widgetType: text-markdown, readOnly: true}
+    validation_summary: {widgetType: json-block, readOnly: true, collapsed: false}
+  tabs:
+    - id: parse
+      step_id: parse_bid_document
+      label: 文件解析
+      layout: composite
+      slots: [{id: raw_bid_text}, {id: raw_bid_meta}]
+      composite_layout:
+        direction: row
+        children:
+          - {slot: raw_bid_text, weight: 2}
+          - {slot: raw_bid_meta, weight: 1}
+    - id: requirements
+      step_id: extract_tech_requirements
+      label: 技术要求
+      layout: list
+      slots: [{id: technical_requirements}]
+    - id: disqualification
+      step_id: extract_disqualification_items
+      label: 废标项
+      layout: list
+      slots: [{id: disqualification_items}]
+    - id: outline
+      step_id: build_chapter_outline
+      label: 章节大纲
+      layout: composite
+      slots: [{id: outline}, {id: outline_check_report}]
+      composite_layout:
+        direction: row
+        children:
+          - {slot: outline, weight: 2}
+          - {slot: outline_check_report, weight: 1}
+    - id: chapters
+      step_id: write_chapter_contents
+      label: 分章正文
+      layout: list
+      slots: [{id: chapter_contents}, {id: complete_draft}]
+    - id: images
+      step_id: generate_proposal_images
+      label: 方案配图
+      layout: grid
+      grid_cols: 2
+      slots: [{id: architecture_image}, {id: effect_images}, {id: image_manifest}]
+    - id: delivery
+      step_id: compose_proposal_docx
+      label: 方案交付
+      layout: list
+      slots: [{id: final_proposal_markdown}]
+    - id: validation
+      step_id: validate_proposal
+      label: 结果校验
+      layout: composite
+      slots: [{id: final_proposal}, {id: validation_report}, {id: validation_summary}]
+      composite_layout:
+        direction: row
+        children:
+          - {slot: final_proposal, weight: 1}
+          - direction: column
+            weight: 2
+            children:
+              - {slot: validation_report, weight: 2}
+              - {slot: validation_summary, weight: 1}
+
+i18n:
+  zh-CN:
+    name: 投标技术方案编写
