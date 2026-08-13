@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Modal, Select, message } from "antd";
+import { Button, Modal, Select, Tooltip, message } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type {
@@ -139,7 +139,7 @@ export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: Q
   };
 
   return <>
-    {capabilities.map(({ key, title, description }) => <div className="settings-dashboard-config-row" key={key}>
+    {capabilities.map(({ key, title, description }) => <div className="settings-dashboard-config-row settings-dashboard-model-row" key={key}>
       <div className="settings-dashboard-copy"><span>{t("settingsPage.models.moduleLabel")}</span><strong>{title}</strong><p>{description}</p></div>
       <div className="settings-dashboard-control settings-dashboard-model-control">
         {loadError ? <Button size="small" icon={<ReloadOutlined />} onClick={() => void load()}>{t("settingsPage.retry")}</Button> : <Select
@@ -147,9 +147,15 @@ export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: Q
           className="settings-dashboard-quick-select"
           disabled={saving !== null || (key === "embed_main" && !canConfigureEmbedding)}
           loading={loading || saving === key}
+          labelRender={({ label }) => (
+            <Tooltip mouseEnterDelay={0} title={label}><span>{label}</span></Tooltip>
+          )}
           notFoundContent={t("settingsPage.models.noModels")}
           onChange={(value: string) => requestChange(key, value)}
           optionFilterProp="label"
+          optionRender={(option) => (
+            <Tooltip mouseEnterDelay={0} title={option.label}><span>{option.label}</span></Tooltip>
+          )}
           options={options[key] || []}
           placeholder={key === "embed_main" && !canConfigureEmbedding ? t("settingsPage.models.adminOnly") : t("settingsPage.models.selectModel")}
           showSearch

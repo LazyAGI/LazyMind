@@ -50,6 +50,7 @@ type ToolView = "builtin" | "mcp";
 
 interface ToolManagementSectionProps {
   description?: string;
+  initialQuery?: string;
   layout?: "default" | "settings";
   refreshToken?: number;
   title?: string;
@@ -84,11 +85,11 @@ const resolveAllowedMcpToolIds = (server: McpServerAsset, tools: McpToolAsset[])
   return toolIds.filter((toolId) => allowedToolSet.has(toolId));
 };
 
-export default function ToolManagementSection({ description, layout = "default", refreshToken = 0, title, view }: ToolManagementSectionProps) {
+export default function ToolManagementSection({ description, initialQuery = "", layout = "default", refreshToken = 0, title, view }: ToolManagementSectionProps) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
-  const [searchInput, setSearchInput] = useState("");
-  const [query, setQuery] = useState("");
+  const [searchInput, setSearchInput] = useState(initialQuery);
+  const [query, setQuery] = useState(initialQuery);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_TOOL_PAGE_SIZE);
   const [toolAssets, setToolAssets] = useState<StructuredAsset[]>([]);
@@ -185,6 +186,11 @@ export default function ToolManagementSection({ description, layout = "default",
   useEffect(() => {
     setCurrentPage(1);
   }, [query, view]);
+
+  useEffect(() => {
+    setSearchInput(initialQuery);
+    setQuery(initialQuery);
+  }, [initialQuery]);
 
   const activeTotal = view === "mcp" ? mcpListTotal : toolListTotal;
   const mcpSummary = useMemo(() => ({

@@ -531,12 +531,14 @@ interface ExternalServicesPageProps {
   includeMcp?: boolean;
   includeBuiltinTools?: boolean;
   includeDependencies?: boolean;
+  visibleCategories?: ServiceCategoryKey[];
 }
 
 export default function ExternalServicesPage({
   includeMcp = true,
   includeBuiltinTools = true,
   includeDependencies = true,
+  visibleCategories,
 }: ExternalServicesPageProps = {}) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
@@ -1020,6 +1022,9 @@ export default function ExternalServicesPage({
   };
 
   const renderServiceCategory = (categoryKey: ServiceCategoryKey) => {
+    if (visibleCategories && !visibleCategories.includes(categoryKey)) {
+      return null;
+    }
     const category = serviceCategories.find((item) => item.key === categoryKey);
     if (!category) {
       return null;

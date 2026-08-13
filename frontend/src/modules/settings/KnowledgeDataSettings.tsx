@@ -33,6 +33,7 @@ interface ToolDefinition {
   id: string;
   name: string;
   description: string;
+  destination?: string;
 }
 
 interface ToolGroupDefinition {
@@ -98,10 +99,9 @@ export default function KnowledgeDataSettings({
       title: t("settingsPage.knowledge.groups.search.title"),
       description: t("settingsPage.knowledge.groups.search.description"),
       icon: <GlobalOutlined />,
-      destination: "/model-providers/tools",
       tools: [
-        { id: "web_search", name: t("settingsPage.knowledge.groups.search.webSearch.name"), description: t("settingsPage.knowledge.groups.search.webSearch.description") },
-        { id: "academic_search", name: t("settingsPage.knowledge.groups.search.academicSearch.name"), description: t("settingsPage.knowledge.groups.search.academicSearch.description") },
+        { id: "web_search", name: t("settingsPage.knowledge.groups.search.webSearch.name"), description: t("settingsPage.knowledge.groups.search.webSearch.description"), destination: "/settings?section=knowledge&tool=web-search" },
+        { id: "academic_search", name: t("settingsPage.knowledge.groups.search.academicSearch.name"), description: t("settingsPage.knowledge.groups.search.academicSearch.description"), destination: "/settings?section=knowledge&tool=academic-search" },
         { id: "wikipedia", name: t("settingsPage.knowledge.groups.search.wikipedia.name"), description: t("settingsPage.knowledge.groups.search.wikipedia.description") },
         { id: "url_fetch", name: t("settingsPage.knowledge.groups.search.urlFetch.name"), description: t("settingsPage.knowledge.groups.search.urlFetch.description") },
       ],
@@ -172,11 +172,8 @@ export default function KnowledgeDataSettings({
     }
   };
 
-  const openGroupDestination = (group: ToolGroupDefinition) => {
-    if (group.destination) navigate(group.destination);
-  };
-
   const renderTool = (definition: ToolDefinition, group: ToolGroupDefinition) => {
+    const destination = definition.destination || group.destination;
     const tool = toolsByID.get(definition.id);
     const pending = pendingTools.has(definition.id);
     const displayName = tool?.name || definition.name;
@@ -203,11 +200,11 @@ export default function KnowledgeDataSettings({
         loading={pending}
         onChange={(enabled: boolean) => { if (tool) void toggleTool(tool, enabled); }}
       />
-      {group.destination ? <Button
+      {destination ? <Button
         aria-label={t("settingsPage.knowledge.openConfigAria", { name: displayName })}
         className="settings-knowledge-detail-button"
         icon={<RightOutlined />}
-        onClick={() => openGroupDestination(group)}
+        onClick={() => navigate(destination)}
         type="text"
       /> : null}
     </div>;

@@ -36,8 +36,9 @@ import SettingsScheduleList from "@/modules/taskCenter/SettingsScheduleList";
 import { fetchUserUiPreferences, patchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
 import { isDesktopRuntime, isLocalRuntime } from "@/runtime/mode";
 import { setDeveloperModeActive } from "@/utils/developerMode";
-import MemoryCapabilitySettings, { MemoryEditQuickControl } from "./MemoryCapabilitySettings";
+import MemoryCapabilitySettings from "./MemoryCapabilitySettings";
 import KnowledgeDataSettings from "./KnowledgeDataSettings";
+import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSettings";
 import QuickModelSettings from "./QuickModelSettings";
 import UserSkillWorkflowSettings, { type ResourceTab } from "./UserSkillWorkflowSettings";
 import {
@@ -176,6 +177,10 @@ export default function SettingsPage() {
   const controls = useMemo(() => controlCopy(t), [t, i18n.language]);
   const candidate = searchParams.get("section") as SectionID | null;
   const section = navigationItems.some((item) => item.id === candidate) ? candidate! : "overview";
+  const knowledgeToolCandidate = searchParams.get("tool");
+  const knowledgeToolView = section === "knowledge" && isKnowledgeToolView(knowledgeToolCandidate)
+    ? knowledgeToolCandidate
+    : null;
   const headingRef = useRef<HTMLHeadingElement>(null);
   const latestRequest = useRef(0);
   const [overview, setOverview] = useState<SettingsOverview | null>(null);
@@ -444,7 +449,7 @@ export default function SettingsPage() {
           dashboardRow(t("settingsPage.sections.knowledge"), t("settingsPage.overview.knowledgeRetrieval"), t("settingsPage.overview.knowledgeRetrievalDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("knowledge")}>{t("settingsPage.quickConfig")}</Button>),
         ])}
         {dashboardCard("memory", <ExperimentOutlined />, t("settingsPage.sections.memory"), t("settingsPage.overview.memoryDesc"), [
-          dashboardRow(t("settingsPage.sections.memory"), t("settingsPage.overview.memoryEdit"), t("settingsPage.overview.memoryEditDesc"), <MemoryEditQuickControl onSaved={syncOverview} />),
+          dashboardRow(t("settingsPage.sections.memory"), t("settingsPage.overview.memoryEdit"), t("settingsPage.overview.memoryEditDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("memory")}>{t("settingsPage.quickConfig")}</Button>),
         ])}
         {dashboardCard("system_tools", <ToolOutlined />, t("settingsPage.sections.systemTools"), t("settingsPage.overview.systemToolsDesc"), [
           dashboardRow(t("settingsPage.sections.systemTools"), t("settingsPage.overview.builtinTools"), t("settingsPage.overview.builtinToolsDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("system_tools")}>{t("settingsPage.manageTools")}</Button>),
@@ -647,13 +652,21 @@ export default function SettingsPage() {
         {integratedSurface(<SettingsScheduleList masterEnabled={taskCenterEnabled} onChanged={syncOverview} />, "is-tasks")}
       </>;
     } else if (section === "knowledge") {
-      content = <KnowledgeDataSettings
-        controlsDisabled={saving !== null}
-        documentParsingEnabled={Boolean(overview?.controls.document_parsing_enabled)}
-        documentParsingSaving={saving === "document_parsing_enabled"}
-        headingRef={headingRef}
-        onDocumentParsingChange={(enabled) => requestMasterChange("document_parsing_enabled", enabled)}
-      />;
+      content = knowledgeToolView ? (
+        <KnowledgeToolSettings
+          headingRef={headingRef}
+          onBack={() => selectSection("knowledge")}
+          view={knowledgeToolView}
+        />
+      ) : (
+        <KnowledgeDataSettings
+          controlsDisabled={saving !== null}
+          documentParsingEnabled={Boolean(overview?.controls.document_parsing_enabled)}
+          documentParsingSaving={saving === "document_parsing_enabled"}
+          headingRef={headingRef}
+          onDocumentParsingChange={(enabled) => requestMasterChange("document_parsing_enabled", enabled)}
+        />
+      );
     } else if (section === "memory") {
       content = <MemoryCapabilitySettings headingRef={headingRef} />;
     } else if (section === "skills") {
