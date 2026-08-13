@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -75,12 +76,39 @@ func retrievalSources(raw json.RawMessage) []any {
 		return nil
 	}
 	var result struct {
-		Sources []any `json:"sources"`
+		Sources json.RawMessage `json:"sources"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil
 	}
-	return result.Sources
+	if len(result.Sources) == 0 || string(result.Sources) == "null" {
+		return nil
+	}
+
+	var sources []any
+	if err := json.Unmarshal(result.Sources, &sources); err == nil {
+		return sources
+	}
+
+	var sourceMap map[string]any
+	if err := json.Unmarshal(result.Sources, &sourceMap); err != nil {
+		return nil
+	}
+	indices := make([]string, 0, len(sourceMap))
+	for index := range sourceMap {
+		indices = append(indices, index)
+	}
+	sort.Strings(indices)
+	for _, index := range indices {
+		source := sourceMap[index]
+		if fields, ok := source.(map[string]any); ok {
+			if _, hasIndex := fields["index"]; !hasIndex {
+				fields["index"] = index
+			}
+		}
+		sources = append(sources, source)
+	}
+	return sources
 }
 
 func nonNegativeToolCallTurns(v int64) int {

@@ -16,7 +16,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { customSchema } from "./config";
@@ -36,10 +35,10 @@ import {
   type ChatSource,
   findSourceByCitationId,
   getSourceEvidenceText,
+  getSourceHref,
   getSourceLabel,
   getSourceSubtitle,
   normalizeSourceMarkers,
-  openSource,
   stripRedundantSourceUrls,
 } from "@/modules/chat/utils/sourceAdapter";
 
@@ -129,30 +128,16 @@ const ImageComponent = (props: any) => {
     };
   }, [props.src]);
 
-  const { node: _node, src: _src, ...imageProps } = props;
-  const fallbackHref =
-    resolvedSrc.startsWith("/") || /^https?:\/\//i.test(resolvedSrc)
-      ? resolvedSrc
-      : "";
-
   if (imageLoadError || !resolvedSrc) {
-    return (
-      <span className="md-image-fallback" role="status">
-        <span>{t("chat.imageLoadFailed")}</span>
-        {fallbackHref && (
-          <a href={fallbackHref} target="_blank" rel="noopener noreferrer">
-            {t("chat.openOriginalImage")}
-          </a>
-        )}
-      </span>
-    );
+    return null;
   }
+
+  const { node: _node, src: _src, ...imageProps } = props;
 
   return (
     <Image
       {...imageProps}
       src={resolvedSrc}
-      referrerPolicy="no-referrer"
       preview={{
         visible: previewVisible,
         onVisibleChange: setPreviewVisible,
@@ -224,115 +209,36 @@ const PreComponent = (props: any) => {
   return <pre {...props} />;
 };
 
-function containsPointer(element: Element | null, x: number, y: number) {
-  if (!element) return false;
-  const rect = element.getBoundingClientRect();
-  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
-}
-
-function useSourcePopoverHover() {
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLSpanElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const pointerRef = useRef({ x: 0, y: 0 });
-  const enteredPreviewRef = useRef(false);
-  const closeTimerRef = useRef<ReturnType<typeof setTimeout>>();
-
-  useEffect(() => {
-    if (!open) return;
-
-    const clearCloseTimer = () => {
-      if (closeTimerRef.current) {
-        clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = undefined;
-      }
-    };
-    const popup = () => contentRef.current?.closest(".ant-popover") || null;
-    const handlePointerMove = (event: PointerEvent) => {
-      pointerRef.current = { x: event.clientX, y: event.clientY };
-      if (containsPointer(popup(), event.clientX, event.clientY)) {
-        enteredPreviewRef.current = true;
-        clearCloseTimer();
-        return;
-      }
-      if (containsPointer(triggerRef.current, event.clientX, event.clientY)) {
-        clearCloseTimer();
-        return;
-      }
-      if (enteredPreviewRef.current) {
-        enteredPreviewRef.current = false;
-        setOpen(false);
-      }
-    };
-    const handleWheel = (event: WheelEvent) => {
-      const content = contentRef.current?.querySelector<HTMLElement>(
-        ".md-content-card-content",
-      );
-      if (!content || !containsPointer(popup(), event.clientX, event.clientY)) return;
-      event.preventDefault();
-      content.scrollBy({ left: event.deltaX, top: event.deltaY });
-    };
-
-    document.addEventListener("pointermove", handlePointerMove, { passive: true });
-    document.addEventListener("wheel", handleWheel, { passive: false });
-    return () => {
-      document.removeEventListener("pointermove", handlePointerMove);
-      document.removeEventListener("wheel", handleWheel);
-      clearCloseTimer();
-    };
-  }, [open]);
-
-  const onOpenChange = (nextOpen: boolean) => {
-    if (nextOpen) {
-      enteredPreviewRef.current = false;
-      setOpen(true);
-      return;
-    }
-    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = setTimeout(() => {
-      const { x, y } = pointerRef.current;
-      const popup = contentRef.current?.closest(".ant-popover") || null;
-      if (!containsPointer(triggerRef.current, x, y) && !containsPointer(popup, x, y)) {
-        setOpen(false);
-      }
-    }, 180);
-  };
-
-  return { contentRef, onOpenChange, open, triggerRef };
-}
-
 const LinkComponent = (props: any) => {
   const { isStreaming, markSources } = useContext(MarkdownRenderContext);
-  const sourcePopover = useSourcePopoverHover();
   const href = props.href;
   const sourceIndex = getSourceIndex(href);
 
   if (sourceIndex) {
     const source = findSourceByCitationId(markSources, sourceIndex);
+    const sourceHref = source ? getSourceHref(source) : "";
     const label = source
       ? getSourceLabel(source)
       : typeof props.title === "string" && props.title
         ? props.title
         : "Source";
     const subtitle = source ? getSourceSubtitle(source) : "";
-    const chip = (
-      <span
-        ref={sourcePopover.triggerRef}
+    const chipContent = <span className="md-source-chip-label">{label}</span>;
+    const chip = source ? (
+      <a
         className={classnames("md-source-chip", {
-          "md-source-chip--pending": isStreaming || !source,
-          "md-source-chip--clickable": Boolean(source),
+          "md-source-chip--pending": isStreaming,
+          "md-source-chip--clickable": true,
         })}
-        role={source ? "link" : undefined}
-        tabIndex={source ? 0 : undefined}
-        onClick={() => source && openSource(source)}
-        onKeyDown={(event) => {
-          if (source && (event.key === "Enter" || event.key === " ")) {
-            event.preventDefault();
-            openSource(source);
-          }
-        }}
+        href={sourceHref}
+        target="_blank"
+        rel="noopener noreferrer"
       >
-        <span className="md-source-chip-label">{label}</span>
+        {chipContent}
+      </a>
+    ) : (
+      <span className="md-source-chip md-source-chip--pending">
+        {chipContent}
       </span>
     );
 
@@ -342,14 +248,11 @@ const LinkComponent = (props: any) => {
 
     return (
       <Popover
-        open={sourcePopover.open}
-        onOpenChange={sourcePopover.onOpenChange}
         mouseEnterDelay={0.2}
-        mouseLeaveDelay={0}
         classNames={{ root: "md-source-popover" }}
         title={subtitle ? `${label} · ${subtitle}` : label}
         content={
-          <div ref={sourcePopover.contentRef} className="md-content-card">
+          <div className="md-content-card">
             <div className="md-content-card-content">
               <MarkdownViewer>{getSourceEvidenceText(source)}</MarkdownViewer>
             </div>

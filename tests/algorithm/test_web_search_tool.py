@@ -1,5 +1,6 @@
-import threading
 from copy import deepcopy
+from inspect import signature
+import time
 
 import lazyllm
 import pytest
@@ -27,61 +28,8 @@ def reset_web_tool_state():
         lazyllm.globals['agentic_config'] = previous or {}
 
 
-def test_url_fetch_batches_network_only_in_workers_and_registers_pages_in_order(
-    monkeypatch, reset_web_tool_state,
-):
-    fetch_threads = []
-    register_threads = []
-
-    def fake_fetch(url):
-        fetch_threads.append(threading.get_ident())
-        if url.endswith('/bad'):
-            raise RuntimeError('unavailable')
-        return {'final_url': url, 'content': f'content:{url}'}
-
-    original_register_page = web_search_mod._register_page
-
-    def track_register_page(page):
-        register_threads.append(threading.get_ident())
-        return original_register_page(page)
-
-    monkeypatch.setattr(web_search_mod, 'fetch_url_content', fake_fetch)
-    monkeypatch.setattr(web_search_mod, '_register_page', track_register_page)
-
-    manager = CitationResultMiddleware(ToolManager([web_search_mod.url_fetch]))
-    execution = manager({
-        'function': {
-            'name': 'url_fetch',
-            'arguments': {'urls': [
-                'https://example.test/one',
-                'https://example.test/bad',
-                'https://example.test/one',
-                'https://example.test/two',
-            ]},
-        },
-    })[0]
-    assert execution['ok'] is True
-    payload = execution['value']
-
-    result = payload['result']
-    assert result['total'] == 3
-    assert result['succeeded'] == 2
-    assert result['failed'] == 1
-    assert [item['url'] for item in result['results']] == [
-        'https://example.test/one',
-        'https://example.test/bad',
-        'https://example.test/two',
-    ]
-    assert result['results'][1]['success'] is False
-    assert all(item['result']['page_ref'] for item in result['results'] if item['success'])
-    assert len(set(register_threads)) == 1
-    assert set(register_threads).isdisjoint(fetch_threads)
-    assert [source['url'] for source in materialize_source_views(reset_web_tool_state)] == [
-        'https://example.test/one', 'https://example.test/two',
-    ]
-
-
-def test_url_fetch_registers_sources_and_follows_page_links(monkeypatch, reset_web_tool_state):
+def test_url_fetch_registers_sources_and_follows_exact_target_url(monkeypatch, reset_web_tool_state):
+    assert list(signature(web_search_mod.url_fetch).parameters) == ['url']
     search = register_external_search_result({
         'title': 'Root from search',
         'url': 'https://example.test/root',
@@ -90,12 +38,12 @@ def test_url_fetch_registers_sources_and_follows_page_links(monkeypatch, reset_w
         'https://example.test/root': {
             'title': 'Root',
             'content': 'Root content',
-            'links': [{'id': 1, 'text': 'Child', 'target_url': 'https://example.test/child'}],
+            'links': [{'text': 'Child', 'target_url': 'https://example.test/child'}],
         },
         'https://example.test/child': {
             'title': 'Child',
             'content': 'Child content',
-            'links': [{'id': 1, 'text': 'Root', 'target_url': 'https://example.test/root'}],
+            'links': [{'text': 'Root', 'target_url': 'https://example.test/root'}],
         },
     }
 
@@ -107,39 +55,56 @@ def test_url_fetch_registers_sources_and_follows_page_links(monkeypatch, reset_w
     monkeypatch.setattr(web_search_mod, 'fetch_url_content', fake_fetch)
     manager = CitationResultMiddleware(ToolManager([web_search_mod.url_fetch]))
 
-    def fetch(**arguments):
+    def fetch(url):
         result = manager({
-            'function': {'name': 'url_fetch', 'arguments': arguments},
+            'function': {'name': 'url_fetch', 'arguments': {'url': url}},
         })[0]
         assert result['ok'] is True
         return result['value']['result']
 
     root = fetch(url='https://example.test/root')
-    child = fetch(page_ref=root['page_ref'], link_id=1)
+    child = fetch(url=root['links'][0]['target_url'])
 
     assert root['citation_index'] == search['citation_index'] == '1.1'
     assert child['citation_index'] == '2.1'
+    assert root['links'] == [{
+        'text': 'Child',
+        'target_url': 'https://example.test/child',
+    }]
     assert len(reset_web_tool_state[CITATION_REFS_KEY]) == 2
     assert [source['source_roles'] for source in materialize_source_views(reset_web_tool_state)] == [
         ['searched'], ['searched'],
     ]
 
 
-def test_page_ref_expires_with_request_state_and_exact_url_can_be_refetched(monkeypatch):
-    monkeypatch.setattr(web_search_mod, 'fetch_url_content', lambda url: {
-        'status': 'ok',
-        'source_status': 'ok',
-        'url': url,
-        'final_url': url,
-        'content': f'Content for {url}',
-        'links': [{'id': 1, 'target_url': 'https://example.test/child'}],
-    })
+def test_parallel_url_fetch_calls_register_in_original_tool_call_order(
+    monkeypatch, reset_web_tool_state,
+):
+    def fake_fetch(url):
+        if url.endswith('/slow'):
+            time.sleep(0.04)
+        return {
+            'status': 'ok',
+            'source_status': 'ok',
+            'url': url,
+            'final_url': url,
+            'title': url.rsplit('/', 1)[-1],
+            'content': f'Content for {url}',
+            'links': [],
+        }
 
-    root = web_search_mod.url_fetch(url='https://example.test/root')['result']
-    lazyllm.globals['agentic_config']['web_navigation_state'] = {}
+    monkeypatch.setattr(web_search_mod, 'fetch_url_content', fake_fetch)
+    manager = CitationResultMiddleware(ToolManager([web_search_mod.url_fetch]))
+    calls = [
+        {'function': {'name': 'url_fetch', 'arguments': {'url': 'https://example.test/slow'}}},
+        {'function': {'name': 'url_fetch', 'arguments': {'url': 'https://example.test/fast'}}},
+    ]
 
-    with pytest.raises(ValueError, match='page_ref is invalid or expired'):
-        web_search_mod.url_fetch(page_ref=root['page_ref'], link_id=1)
+    results = manager(calls)
 
-    child = web_search_mod.url_fetch(url='https://example.test/child')['result']
-    assert child['final_url'] == 'https://example.test/child'
+    assert results[0]['value']['result']['ref'] == '[[1.1]]'
+    assert results[1]['value']['result']['ref'] == '[[2.1]]'
+    assert [source['url'] for source in materialize_source_views(reset_web_tool_state)] == [
+        'https://example.test/slow',
+        'https://example.test/fast',
+    ]

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ipaddress
-import re
 import socket
 from typing import Any, Dict, List
 from urllib.parse import urljoin, urlparse
@@ -16,12 +15,13 @@ _MAX_FETCH_TEXT_LEN = 4000
 _MAX_FETCH_BYTES = 1024 * 1024
 _MAX_REDIRECTS = 5
 _MAX_PAGE_LINKS = 50
-_MAX_PAGE_IMAGES = 20
 _ALLOWED_URL_SCHEMES = {'http', 'https'}
-_LOW_VALUE_REGION_PATTERN = re.compile(
-    r'cookie|subscribe|newsletter|share|social|related|recommend|advert|login|signup|comment|breadcrumb',
-    re.IGNORECASE,
-)
+_TEXT_CONTENT_TYPES = {
+    'application/atom+xml',
+    'application/json',
+    'application/rss+xml',
+    'application/xml',
+}
 
 
 def coerce_web_int(value: Any, default: int) -> int:
@@ -88,7 +88,6 @@ def read_limited_response(response: requests.Response, max_bytes: int = _MAX_FET
             truncated = True
             break
     response._content = b''.join(chunks)
-    response._lazymind_raw_bytes = total
     response._lazymind_response_truncated = truncated
 
 
@@ -133,78 +132,19 @@ def fetch_public_url(
 
 
 def _extract_readable_text(soup: BeautifulSoup) -> str:
-    content_root = (
-        soup.find('article')
-        or soup.find('main')
-        or soup.find(attrs={'role': 'main'})
-        or soup.body
-        or soup
-    )
-    for tag in content_root.find_all(['script', 'style', 'noscript', 'nav', 'header', 'footer', 'aside',
-                                      'form', 'button', 'iframe']):
+    content_root = soup.body or soup
+    for tag in content_root.find_all(['script', 'style', 'noscript']):
         tag.decompose()
-    for tag in content_root.find_all(True):
-        if tag.parent is None or tag.attrs is None:
-            continue
-        classes = tag.get('class') or []
-        if isinstance(classes, str):
-            classes = [classes]
-        marker = ' '.join([
-            str(tag.get('id') or ''),
-            ' '.join(str(value) for value in classes),
-        ])
-        if marker.strip() and _LOW_VALUE_REGION_PATTERN.search(marker):
-            tag.decompose()
-
-    lines: List[str] = []
-    for node in content_root.find_all(['h1', 'h2', 'h3', 'p', 'li', 'table', 'blockquote', 'pre', 'code']):
-        if node.name == 'code' and node.find_parent('pre') is not None:
-            continue
-        text = node.get_text(' ', strip=True)
-        if text:
-            lines.append(text)
-
-    if not lines:
-        text = content_root.get_text('\n', strip=True)
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-
-    deduped_lines: List[str] = []
-    seen: set[str] = set()
-    for line in lines:
-        if line in seen:
-            continue
-        seen.add(line)
-        deduped_lines.append(line)
-    return '\n'.join(deduped_lines)
-
-
-def extract_web_page_text(html: str) -> str:
-    return _extract_readable_text(BeautifulSoup(html, 'html.parser'))
+    text = content_root.get_text('\n', strip=True)
+    return '\n'.join(line.strip() for line in text.splitlines() if line.strip())
 
 
 def extract_web_page_title(soup: BeautifulSoup) -> str:
-    for attrs in ({'property': 'og:title'}, {'name': 'twitter:title'}):
-        tag = soup.find('meta', attrs=attrs)
-        if tag and tag.get('content'):
-            return str(tag['content']).strip()
     if soup.title and soup.title.string:
         return soup.title.string.strip()
     heading = soup.find('h1')
     if heading:
         return heading.get_text(' ', strip=True)
-    return ''
-
-
-def extract_web_page_description(soup: BeautifulSoup) -> str:
-    candidates = [
-        {'name': 'description'},
-        {'property': 'og:description'},
-        {'name': 'twitter:description'},
-    ]
-    for attrs in candidates:
-        tag = soup.find('meta', attrs=attrs)
-        if tag and tag.get('content'):
-            return str(tag['content']).strip()
     return ''
 
 
@@ -225,47 +165,12 @@ def _extract_page_links(soup: BeautifulSoup, base_url: str) -> List[Dict[str, An
             continue
         seen.add(normalized)
         links.append({
-            'id': len(links) + 1,
             'text': tag.get_text(' ', strip=True)[:200],
             'target_url': normalized,
         })
         if len(links) >= _MAX_PAGE_LINKS:
             break
     return links
-
-
-def _extract_page_metadata(soup: BeautifulSoup, page_url: str) -> Dict[str, Any]:
-    domain = (urlparse(page_url).hostname or '').lower()
-    canonical_tag = soup.select_one('link[rel~="canonical"]')
-    canonical_url = urljoin(page_url, canonical_tag.get('href')) if canonical_tag and canonical_tag.get('href') else ''
-    site_name_tag = soup.find('meta', attrs={'property': 'og:site_name'})
-    site_name = str(site_name_tag.get('content') or '').strip() if site_name_tag else ''
-    favicon_tag = soup.select_one('link[rel~="icon"], link[rel="apple-touch-icon"]')
-    favicon_url = urljoin(page_url, favicon_tag.get('href')) if favicon_tag and favicon_tag.get('href') else ''
-
-    images: List[Dict[str, Any]] = []
-    seen: set[str] = set()
-    for attrs in ({'property': 'og:image'}, {'name': 'twitter:image'}):
-        tag = soup.find('meta', attrs=attrs)
-        image_url = urljoin(page_url, str(tag.get('content') or '')) if tag else ''
-        if image_url and image_url not in seen:
-            seen.add(image_url)
-            images.append({'url': image_url, 'alt': '', 'source_url': page_url})
-    for tag in soup.find_all('img', src=True):
-        image_url = urljoin(page_url, str(tag.get('src') or ''))
-        if not image_url or image_url in seen:
-            continue
-        seen.add(image_url)
-        images.append({'url': image_url, 'alt': str(tag.get('alt') or '').strip()[:200], 'source_url': page_url})
-        if len(images) >= _MAX_PAGE_IMAGES:
-            break
-    return {
-        'domain': domain,
-        'canonical_url': canonical_url,
-        'site_name': site_name or domain,
-        'favicon_url': favicon_url,
-        'image_urls': images[:_MAX_PAGE_IMAGES],
-    }
 
 
 def _truncate_page_content(content: str, max_chars: int) -> tuple[str, bool]:
@@ -300,63 +205,35 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
         response.raise_for_status()
 
     content_type = str(response.headers.get('Content-Type') or '').lower()
-    raw_bytes = int(getattr(response, '_lazymind_raw_bytes', len(response.content)))
     response_truncated = bool(getattr(response, '_lazymind_response_truncated', False))
     final_url = response.url or normalized_url
-    if content_type.startswith('image/'):
-        return {
-            'status': 'ok',
-            'source_status': 'image',
-            'url': normalized_url,
-            'final_url': final_url,
-            'status_code': response.status_code,
-            'content_type': content_type,
-            'raw_bytes': raw_bytes,
-            'response_bytes_truncated': response_truncated,
-            'title': (urlparse(final_url).path.rsplit('/', 1)[-1] or 'Image')[:300],
-            'description': '',
-            'content': f'Image resource ({content_type.split(";", 1)[0]})',
-            'content_chars': 0,
-            'returned_content_chars': 0,
-            'content_max_chars': text_limit,
-            'content_truncated': False,
-            'truncation_strategy': 'none',
-            'links': [],
-            'metadata': {
-                'domain': (urlparse(final_url).hostname or '').lower(),
-                'image_urls': [{'url': final_url, 'alt': '', 'source_url': final_url}],
-            },
-        }
+    media_type = content_type.split(';', 1)[0].strip()
+    is_html = media_type in {'text/html', 'application/xhtml+xml'}
+    is_text = media_type.startswith('text/') or media_type in _TEXT_CONTENT_TYPES
+    if not is_html and not is_text:
+        display_content_type = media_type or 'unknown'
+        raise ValueError(f'unsupported url content type: {display_content_type}')
+
     response_text = decode_response_text(response)
-    if 'text/html' not in content_type and 'application/xhtml+xml' not in content_type:
+    if not is_html:
         raw_text = response_text.strip()
         content, content_truncated = _truncate_page_content(raw_text, text_limit)
         return {
             'status': 'ok',
             'source_status': 'non_html',
             'url': normalized_url,
-            'final_url': response.url,
+            'final_url': final_url,
             'status_code': response.status_code,
             'content_type': content_type,
-            'raw_bytes': raw_bytes,
-            'response_bytes_truncated': response_truncated,
             'title': '',
-            'description': '',
             'content': content,
-            'content_chars': len(raw_text),
-            'returned_content_chars': len(content),
-            'content_max_chars': text_limit,
-            'content_truncated': content_truncated,
-            'truncation_strategy': 'head',
+            'content_truncated': content_truncated or response_truncated,
             'links': [],
-            'metadata': {'domain': (urlparse(response.url).hostname or '').lower()},
         }
 
     soup = BeautifulSoup(response_text, 'html.parser')
     title = extract_web_page_title(soup)
-    description = extract_web_page_description(soup)
     links = _extract_page_links(soup, final_url)
-    metadata = _extract_page_metadata(soup, final_url)
     readable_content = _extract_readable_text(soup)
     content, content_truncated = _truncate_page_content(readable_content, text_limit)
     return {
@@ -366,16 +243,8 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
         'final_url': final_url,
         'status_code': response.status_code,
         'content_type': content_type,
-        'raw_bytes': raw_bytes,
-        'response_bytes_truncated': response_truncated,
-        'title': (title or metadata['domain'])[:300],
-        'description': description[:500],
+        'title': (title or (urlparse(final_url).hostname or ''))[:300],
         'content': content,
-        'content_chars': len(readable_content),
-        'returned_content_chars': len(content),
-        'content_max_chars': text_limit,
-        'content_truncated': content_truncated,
-        'truncation_strategy': 'head',
+        'content_truncated': content_truncated or response_truncated,
         'links': links,
-        'metadata': metadata,
     }

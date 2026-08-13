@@ -3,8 +3,8 @@ import pytest
 import lazyllm
 from lazymind.chat.service.component.tool_registry import (
     DEFAULT_TOOLS,
-    EXTERNAL_CITATION_OUTPUT_APPENDIX,
     IMAGE_MARKDOWN_OUTPUT_APPENDIX,
+    RETRIEVAL_CITATION_OUTPUT_APPENDIX,
     SKILL_TOOL_CONFIG,
     ToolConfig,
     _capability_is_denied,
@@ -220,9 +220,31 @@ def test_external_retrieval_tools_share_the_citation_output_contract():
     ]
     collected = collect_system_prompt_appendices(configs)
 
-    assert collected['output_contract'] == list(EXTERNAL_CITATION_OUTPUT_APPENDIX['output_contract'])
-    assert any('page_ref' in item and 'link_id' in item for item in collected['tool_policy'])
+    assert collected['output_contract'] == list(RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'])
+    assert any('exact `target_url`' in item for item in collected['tool_policy'])
     assert any('get_content' in item for item in collected['tool_policy'])
+
+
+def test_mixed_kb_and_web_tools_share_one_citation_output_contract():
+    configs = [
+        cfg for cfg in DEFAULT_TOOLS
+        if cfg.name in {'kb', 'web_search'}
+    ]
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': 'selected-kb'}}
+    collected = collect_system_prompt_appendices(configs)
+
+    citation_contracts = [
+        item for item in collected['output_contract']
+        if 'Retrieval evidence citation rules' in item
+    ]
+    assert citation_contracts == list(RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'])
+    contract = '\n'.join(citation_contracts)
+    assert 'copy that `ref` exactly' in contract
+    assert '[[document.chunk]]' not in contract
+    assert 'cite at least one result from each category' in contract
+
+    policy = '\n'.join(collected['tool_policy'])
+    assert 'cite at least one result from each category' not in policy
 
 
 def test_prompt_appendix_deduplication_normalizes_whitespace():

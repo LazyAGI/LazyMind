@@ -1,5 +1,3 @@
-import json
-
 from lazymind.chat.service.component import normalize_history_for_agent
 
 
@@ -79,34 +77,6 @@ def test_normalize_history_keeps_kb_tool_calls_and_sanitizes_results():
         },
         {'role': 'assistant', 'content': '最终答案。', 'reasoning_content': ''},
     ]
-
-
-def test_normalize_history_removes_expired_url_fetch_handles_but_keeps_urls():
-    history = [{
-        'role': 'assistant',
-        'content': (
-            '<tool_call>{"id":"fetch-1","name":"url_fetch","arguments":'
-            '{"page_ref":"page_old","link_id":2}}</tool_call>'
-            '<tool_result>{"id":"fetch-1","name":"url_fetch","result":'
-            '{"page_ref":"page_child","parent_page_ref":"page_old","via_link_id":2,'
-            '"depth":1,"source_action":"new_source","final_url":"https://example.test/child",'
-            '"links":[{"id":1,"text":"Next","target_url":"https://example.test/next"}]}}'
-            '</tool_result>'
-        ),
-    }]
-
-    normalized = normalize_history_for_agent(history)
-
-    arguments = json.loads(normalized[0]['tool_calls'][0]['function']['arguments'])
-    result = json.loads(normalized[1]['content'])
-    assert arguments == {}
-    assert result == {
-        'final_url': 'https://example.test/child',
-        'links': [{
-            'text': 'Next',
-            'target_url': 'https://example.test/next',
-        }],
-    }
 
 
 def test_normalize_history_drops_ephemeral_intentwrite_trace():

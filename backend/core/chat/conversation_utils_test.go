@@ -102,6 +102,25 @@ func TestRetrievalSourcesPreservesExternalSource(t *testing.T) {
 	}
 }
 
+func TestRetrievalSourcesSupportsLegacySourceMap(t *testing.T) {
+	raw := []byte(`{"sources":{` +
+		`"9.1":{"source_type":"external","title":"Legacy","url":"https://example.com"},` +
+		`"1.1":{"file_name":"guide.pdf","index":"existing"}` +
+		`}}`)
+	got := retrievalSources(raw)
+	if len(got) != 2 {
+		t.Fatalf("sources: got %d, want 2", len(got))
+	}
+	first := got[0].(map[string]any)
+	if first["index"] != "existing" || first["file_name"] != "guide.pdf" {
+		t.Fatalf("existing index should be preserved: %#v", first)
+	}
+	second := got[1].(map[string]any)
+	if second["index"] != "9.1" || second["title"] != "Legacy" {
+		t.Fatalf("map key should be restored as index: %#v", second)
+	}
+}
+
 // TestMergeChunksToFirstChunk_SkipNil skips nil entries in the slice.
 func TestMergeChunksToFirstChunk_SkipNil(t *testing.T) {
 	chunks := []*ChatChunkResponse{

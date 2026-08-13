@@ -29,7 +29,7 @@ describe('chat source adapter', () => {
     segment_number: 2,
   };
 
-  it('opens safe external and knowledge-base sources and rejects unsafe URLs', () => {
+  it('gives every displayed source a click target', () => {
     const open = vi.fn();
     vi.stubGlobal('window', { open });
 
@@ -38,7 +38,11 @@ describe('chat source adapter', () => {
     expect(open).toHaveBeenCalledWith(external.url, '_blank', 'noopener,noreferrer');
     expect(getSourceHref(knowledge)).toContain('/lib/knowledge/knowledge/kb-1/doc-1?');
     expect(getSourceHref(knowledge)).toContain('segement_id=segment-1');
-    expect(getSourceHref({ source_type: 'external', url: 'javascript:alert(1)' })).toBe('');
+    expect(getSourceHref({ source_type: 'external', url: 'not-yet-resolvable' })).toBe('not-yet-resolvable');
+    expect(getSourceHref({ source_type: 'external', url: 'javascript:alert(1)', index: '5.1' })).toBe('#source-5.1');
+    expect(getSourceHref({ url: 'https://legacy.example/page', index: '6.1' })).toBe('https://legacy.example/page');
+    expect(getSourceHref({ ...knowledge, dataset_id: 'default' })).toContain('/default/doc-1?');
+    expect(openSource({ file_name: 'temporary.txt', dataset_id: 'default' })).toBe(true);
 
     vi.unstubAllGlobals();
   });

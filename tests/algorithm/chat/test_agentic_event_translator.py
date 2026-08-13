@@ -106,7 +106,7 @@ def test_translator_merges_searched_and_cited_sources_with_roles():
     assert 'searched_sources' not in frames[-1]
 
 
-def test_final_sources_merge_explicit_roles_by_normalized_url():
+def test_final_sources_preserve_distinct_citation_indices_for_same_url():
     translator = AgentEventFrameTranslator(query='q')
     register_external_search_result({
         'title': 'Search result',
@@ -124,9 +124,10 @@ def test_final_sources_merge_explicit_roles_by_normalized_url():
         }],
     })
 
-    assert len(frames[-1]['sources']) == 1
-    assert frames[-1]['sources'][0]['index'] == '9.1'
-    assert frames[-1]['sources'][0]['source_roles'] == ['cited', 'searched']
+    assert [(source['index'], source['source_roles']) for source in frames[-1]['sources']] == [
+        ('9.1', ['cited']),
+        ('1.1', ['searched']),
+    ]
 
 
 def test_translator_counts_tool_call_turns_not_individual_calls():

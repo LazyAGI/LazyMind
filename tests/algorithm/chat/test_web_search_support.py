@@ -3,11 +3,12 @@ import requests
 from lazymind.chat.engine.tools.infra import web_search_support
 
 
-def test_fetch_url_content_extracts_metadata_links_images_and_observable_truncation(monkeypatch):
+def test_fetch_url_content_returns_basic_text_links_and_truncation(monkeypatch):
     body = ''.join(f'<p>Paragraph {index} ' + ('x' * 80) + '</p>' for index in range(100))
     html = f'''<!doctype html>
     <html>
       <head>
+        <title>Document title</title>
         <meta property="og:title" content="OG title">
         <meta name="description" content="Page description">
         <meta property="og:site_name" content="Example Site">
@@ -20,6 +21,7 @@ def test_fetch_url_content_extracts_metadata_links_images_and_observable_truncat
         <article>
           <h1>Article heading</h1>
           <div class="newsletter"><p>Remove newsletter text</p></div>
+          <script>ignore script text</script>
           {body}
           <a href="/child#section">Child</a>
           <a href="https://user:secret@example.test/private">Credential link</a>
@@ -33,7 +35,6 @@ def test_fetch_url_content_extracts_metadata_links_images_and_observable_truncat
     response.headers['Content-Type'] = 'text/html; charset=utf-8'
     response.encoding = 'utf-8'
     response._content = html.encode()
-    response._lazymind_raw_bytes = len(response.content)
     response._lazymind_response_truncated = False
 
     monkeypatch.setattr(web_search_support, 'validate_public_http_url', lambda url: url)
@@ -41,22 +42,34 @@ def test_fetch_url_content_extracts_metadata_links_images_and_observable_truncat
 
     page = web_search_support.fetch_url_content('https://example.test/original')
 
-    assert page['title'] == 'OG title'
-    assert page['description'] == 'Page description'
-    assert page['metadata']['canonical_url'] == 'https://example.test/canonical'
-    assert page['metadata']['favicon_url'] == 'https://example.test/favicon.ico'
-    assert page['metadata']['site_name'] == 'Example Site'
-    assert 'extraction_stats' not in page['metadata']
+    assert page['title'] == 'Document title'
     assert page['links'] == [
-        {'id': 1, 'text': 'Navigation', 'target_url': 'https://example.test/navigation'},
-        {'id': 2, 'text': 'Child', 'target_url': 'https://example.test/child'},
+        {'text': 'Navigation', 'target_url': 'https://example.test/navigation'},
+        {'text': 'Child', 'target_url': 'https://example.test/child'},
     ]
-    assert {item['url'] for item in page['metadata']['image_urls']} == {
-        'https://example.test/cover.png',
-        'https://example.test/body.png',
-    }
     assert page['content_truncated'] is True
-    assert 'Remove newsletter text' not in page['content']
-    assert page['truncation_strategy'] == 'head'
-    assert len(page['content']) == page['returned_content_chars'] == page['content_max_chars']
-    assert page['content_chars'] > page['returned_content_chars']
+    assert 'Remove newsletter text' in page['content']
+    assert 'ignore script text' not in page['content']
+    assert set(page) == {
+        'status', 'source_status', 'url', 'final_url', 'status_code',
+        'content_type', 'title', 'content', 'content_truncated', 'links',
+    }
+
+
+def test_fetch_url_content_rejects_binary_resources(monkeypatch):
+    response = requests.Response()
+    response.status_code = 200
+    response.url = 'https://example.test/image.jpg'
+    response.headers['Content-Type'] = 'image/jpeg'
+    response._content = b'\xff\xd8\xff\xe0binary'
+    response._lazymind_response_truncated = False
+
+    monkeypatch.setattr(web_search_support, 'validate_public_http_url', lambda url: url)
+    monkeypatch.setattr(web_search_support, 'fetch_public_url', lambda *args, **kwargs: response)
+
+    try:
+        web_search_support.fetch_url_content(response.url)
+    except ValueError as exc:
+        assert str(exc) == 'unsupported url content type: image/jpeg'
+    else:
+        raise AssertionError('binary resources must not be decoded as page text')

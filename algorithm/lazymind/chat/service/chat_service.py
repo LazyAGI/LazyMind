@@ -616,7 +616,6 @@ async def _handle_chat_impl(
         'user_id': user_id or '',
         'use_memory': personalization.use_memory,
         'citation_state': translator.citation_state,
-        'web_navigation_state': {},
         'mode': conversation.mode if conversation.mode in ('auto', 'manual') else 'auto',
         'has_subagents': bool(agent.has_subagents),
         'conversation_id': conversation_id,

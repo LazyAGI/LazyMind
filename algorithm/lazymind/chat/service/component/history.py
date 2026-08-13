@@ -22,9 +22,6 @@ _HISTORY_TAG_PATTERN = re.compile(
 )
 _WHITESPACE_BEFORE_PUNCT_PATTERN = re.compile(r'\s+([。！？，、.!?,;:])')
 _MULTI_SPACE_PATTERN = re.compile(r'[ \t]{2,}')
-_URL_FETCH_VOLATILE_RESULT_KEYS = {
-    'page_ref', 'parent_page_ref', 'via_link_id', 'depth', 'source_action',
-}
 
 
 def _history_message_content(message: dict[str, Any]) -> str:
@@ -41,42 +38,19 @@ def _strip_history_citations(text: str) -> str:
     return _MULTI_SPACE_PATTERN.sub(' ', text)
 
 
-def _sanitize_history_tool_result(result: Any, tool_name: str = '') -> Any:
+def _sanitize_history_tool_result(result: Any) -> Any:
     if isinstance(result, str):
         return _strip_history_citations(result)
     if isinstance(result, list):
-        return [_sanitize_history_tool_result(item, tool_name) for item in result]
+        return [_sanitize_history_tool_result(item) for item in result]
     if isinstance(result, dict):
         sanitized = {}
         for key, value in result.items():
             if key in ('citation_index', 'ref'):
                 continue
-            if tool_name == 'url_fetch' and key in _URL_FETCH_VOLATILE_RESULT_KEYS:
-                continue
-            if tool_name == 'url_fetch' and key == 'links' and isinstance(value, list):
-                sanitized[key] = [
-                    {
-                        item_key: _sanitize_history_tool_result(item_value, tool_name)
-                        for item_key, item_value in item.items()
-                        if item_key != 'id'
-                    }
-                    for item in value
-                    if isinstance(item, dict)
-                ]
-                continue
-            sanitized[key] = _sanitize_history_tool_result(value, tool_name)
+            sanitized[key] = _sanitize_history_tool_result(value)
         return sanitized
     return result
-
-
-def _sanitize_history_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    if tool_name != 'url_fetch':
-        return arguments
-    return {
-        key: value
-        for key, value in arguments.items()
-        if key not in {'page_ref', 'link_id'}
-    }
 
 
 def _parse_history_assistant_content(
@@ -271,7 +245,7 @@ def normalize_history_for_agent(
                         'function': {
                             'name': seg['name'],
                             'arguments': json.dumps(
-                                _sanitize_history_tool_arguments(seg['name'], seg['arguments']),
+                                seg['arguments'],
                                 ensure_ascii=False,
                             ),
                         },
@@ -292,10 +266,10 @@ def normalize_history_for_agent(
                         'tool_call_id': seg['id'],
                         'name': seg['name'],
                         'content': (
-                            _sanitize_history_tool_result(seg['result'], seg['name'])
+                            _sanitize_history_tool_result(seg['result'])
                             if isinstance(seg['result'], str)
                             else json.dumps(
-                                _sanitize_history_tool_result(seg['result'], seg['name']),
+                                _sanitize_history_tool_result(seg['result']),
                                 ensure_ascii=False,
                                 separators=(',', ':'),
                             )

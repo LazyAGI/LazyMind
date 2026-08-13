@@ -11,9 +11,7 @@ interface BaseChatSource {
   dataset_id?: string;
   group_name?: string;
   segment_number?: number;
-  favicon_url?: string;
   source_roles?: Array<"cited" | "searched">;
-  metadata?: Record<string, unknown>;
 }
 
 export interface ExternalChatSource extends BaseChatSource {
@@ -40,13 +38,12 @@ function externalHostname(source: ChatSource) {
   }
 }
 
-function safeExternalUrl(source: ChatSource) {
-  try {
-    const url = new URL(source.url || "");
-    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : "";
-  } catch {
-    return "";
+function externalSourceTarget(source: ChatSource) {
+  const target = source.url?.trim() || "";
+  if (target && !/^(?:javascript|data|vbscript):/i.test(target)) {
+    return target;
   }
+  return `#source-${encodeURIComponent(getSourceCitationId(source) || "unknown")}`;
 }
 
 function normalizedExternalUrl(source: ChatSource) {
@@ -63,7 +60,7 @@ function normalizedExternalUrl(source: ChatSource) {
 }
 
 export function isExternalSource(source?: ChatSource): source is ExternalChatSource {
-  return source?.source_type === "external";
+  return source?.source_type === "external" || Boolean(source?.url);
 }
 
 export function getSourceCitationId(source?: ChatSource) {
@@ -81,15 +78,6 @@ export function getSourceSubtitle(source: ChatSource) {
   return isExternalSource(source)
     ? externalHostname(source)
     : source.group_name?.trim() || "";
-}
-
-export function getSourceIcon(source: ChatSource) {
-  const metadataIcon = source.metadata?.favicon_url;
-  return typeof source.favicon_url === "string"
-    ? source.favicon_url
-    : typeof metadataIcon === "string"
-      ? metadataIcon
-      : undefined;
 }
 
 export function getSourceEvidenceText(source: ChatSource) {
@@ -141,25 +129,21 @@ export function getSearchSources(sources: ChatSourceCollection = []) {
 
 export function getSourceHref(source: ChatSource) {
   if (isExternalSource(source)) {
-    return safeExternalUrl(source);
+    return externalSourceTarget(source);
   }
-  if (!source.dataset_id || source.dataset_id === "default" || !source.document_id) {
-    return "";
-  }
+  const datasetId = source.dataset_id || "default";
+  const documentId = source.document_id || source.file_name || getSourceCitationId(source) || "unknown";
   const query = new URLSearchParams({
     group_name: source.group_name || "",
     segement_id: source.segement_id || "",
     number: String(source.segment_number ?? ""),
     from: "chat",
   });
-  return `/lib/knowledge/knowledge/${encodeURIComponent(source.dataset_id)}/${encodeURIComponent(source.document_id)}?${query}`;
+  return `/lib/knowledge/knowledge/${encodeURIComponent(datasetId)}/${encodeURIComponent(documentId)}?${query}`;
 }
 
 export function openSource(source: ChatSource) {
   const href = getSourceHref(source);
-  if (!href) {
-    return false;
-  }
   window.open(href, "_blank", "noopener,noreferrer");
   return true;
 }

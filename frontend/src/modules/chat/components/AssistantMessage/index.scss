@@ -278,6 +278,15 @@
   &:hover {
     background: #f5f7fa;
   }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.65;
+  }
+
+  &:disabled:hover {
+    background: transparent;
+  }
 }
 
 .chat-source-item-heading {
@@ -287,7 +296,6 @@
   color: #8d9ab2;
   font-size: 12px;
 
-  img,
   svg {
     width: 16px;
     height: 16px;

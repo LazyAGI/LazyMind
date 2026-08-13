@@ -34,10 +34,8 @@ import {
   getSearchSources,
   getSourceDedupKey,
   getSourceEvidenceText,
-  getSourceIcon,
   getSourceLabel,
   getSourceSubtitle,
-  isExternalSource,
   openSource,
 } from "@/modules/chat/utils/sourceAdapter";
 import { IdentityAvatar } from "@/modules/identityAvatar";
@@ -418,10 +416,6 @@ const AssistantMessage = (props: any) => {
   }
 
   function handleOpenSource(source: ChatSource) {
-    if (!isExternalSource(source) && source.dataset_id === "default") {
-      message.error(t("chat.tempFileNotSupportJump"));
-      return;
-    }
     openSource(source);
   }
 
@@ -453,7 +447,6 @@ const AssistantMessage = (props: any) => {
       >
         <div className="chat-source-list">
           {drawerSources.map((source, sourceIndex) => {
-            const icon = getSourceIcon(source);
             return (
               <button
                 type="button"
@@ -462,7 +455,7 @@ const AssistantMessage = (props: any) => {
                 onClick={() => handleOpenSource(source)}
               >
                 <span className="chat-source-item-heading">
-                  {icon ? <img src={icon} alt="" /> : <LinkOutlined />}
+                  <LinkOutlined />
                   {getSourceSubtitle(source) || t("chat.references")}
                 </span>
                 <strong>{getSourceLabel(source)}</strong>

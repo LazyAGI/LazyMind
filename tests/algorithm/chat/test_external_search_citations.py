@@ -4,12 +4,12 @@ import lazyllm
 from lazyllm.tools.agent.toolsManager import ToolManager
 from lazyllm.tools.tools.search import SearchBase
 
-from lazymind.chat.engine.tools.infra import CitationResultMiddleware, SearchProviderTools
+from lazymind.chat.engine.tools.infra import CitationResultMiddleware
 from lazymind.chat.service.utils.citations import CITATION_REFS_KEY, reset_citation_state
 
 
 class FakeSearch(SearchBase):
-    __public_apis__ = ['search', 'get_content', 'get_contents', 'meta_search', 'meta_catalog']
+    __public_apis__ = ['search', 'get_content', 'get_contents', 'meta_search']
 
     def __init__(self):
         super().__init__(source_name='fake', skip_auth=True)
@@ -28,16 +28,19 @@ class FakeSearch(SearchBase):
         return results
 
     def get_content(self, item: dict, offset: int = 0):
-        return f"Fetched {item['title']} from {offset}"
-
-    def get_contents(self, items: list):
-        return [self.get_content(item) for item in items]
+        """Return fetched content with the unchanged provider identity."""
+        return {
+            'title': item.get('title', ''),
+            'url': item.get('url', ''),
+            'snippet': item.get('snippet', ''),
+            'source': item.get('source', ''),
+            'extra': dict(item.get('extra') or {}),
+            'content': f"Fetched {item['title']} from {offset}",
+        }
 
     def meta_search(self, query: str = ''):
+        """Return fake metadata search results."""
         return {'items': self.search(query), 'total_count': 1}
-
-    def meta_catalog(self):
-        return {'fields': ['title']}
 
 
 def _setup_manager(provider=None):
@@ -45,7 +48,7 @@ def _setup_manager(provider=None):
     reset_citation_state(state)
     lazyllm.globals['agentic_config'] = {'citation_state': state}
     provider = provider or FakeSearch()
-    manager = CitationResultMiddleware(ToolManager([SearchProviderTools(provider)]))
+    manager = CitationResultMiddleware(ToolManager([provider]))
     return state, provider, manager
 
 
@@ -67,7 +70,6 @@ def test_search_and_meta_search_register_without_changing_envelopes_or_provider_
     assert results[0]['ref'] == meta['items'][0]['ref'] == '[[1.1]]'
     assert 'ref' not in raw_results[0]
     assert state[CITATION_REFS_KEY]['1.1']['content'] == 'Snippet for agents'
-    assert _call(manager, 'FakeSearch_meta_catalog', {}) == {'fields': ['title']}
 
 
 def test_ranked_duplicates_are_preserved_and_share_registry_ref():
@@ -133,16 +135,36 @@ def test_tavily_extra_images_are_attached_to_parent_source_only():
     }
 
 
-def test_get_content_and_get_contents_preserve_return_types_and_supplement_sources():
+def test_get_content_and_get_contents_return_identity_with_agent_visible_refs():
     state, provider, manager = _setup_manager()
     item = _call(manager, 'FakeSearch_search', {'query': 'agents'})[0]
 
     content = _call(manager, 'FakeSearch_get_content', {'item': item, 'offset': 3})
     batch = _call(manager, 'FakeSearch_get_contents', {'items': [item]})
 
-    assert content == 'Fetched Result for agents from 3'
-    assert batch == ['Fetched Result for agents from 0']
+    assert content['content'] == 'Fetched Result for agents from 3'
+    assert content['ref'] == '[[1.1]]'
+    assert batch[0]['content'] == 'Fetched Result for agents from 0'
+    assert batch[0]['ref'] == '[[1.1]]'
     assert state[CITATION_REFS_KEY]['1.1']['content'] == 'Fetched Result for agents from 0'
+
+
+def test_get_content_replaces_stale_history_ref_with_current_request_ref():
+    _, _, manager = _setup_manager()
+    historical_item = _call(manager, 'FakeSearch_search', {'query': 'historical'})[0]
+    assert historical_item['ref'] == '[[1.1]]'
+
+    current_state = {}
+    reset_citation_state(current_state)
+    lazyllm.globals['agentic_config'] = {'citation_state': current_state}
+    _call(manager, 'FakeSearch_search', {'query': 'current'})
+
+    fetched = _call(manager, 'FakeSearch_get_content', {'item': historical_item})
+
+    assert fetched['ref'] == '[[2.1]]'
+    assert fetched['citation_index'] == '2.1'
+    assert fetched['content'] == 'Fetched Result for historical from 0'
+    assert current_state[CITATION_REFS_KEY]['2.1']['url'] == historical_item['url']
 
 
 def test_parallel_tools_register_citations_in_original_tool_call_order():

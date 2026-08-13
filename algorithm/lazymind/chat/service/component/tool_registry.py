@@ -39,7 +39,6 @@ from lazymind.chat.engine.tools import (
     vocab_learn,
 )
 from lazymind.chat.engine.tools.memory import MemoryTools
-from lazymind.chat.engine.tools.infra import SearchProviderTools
 from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
 from lazymind.model_config import is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
@@ -77,26 +76,12 @@ VIDEO_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
         '(or use `video_url` when markdown is absent). Do not invent or rewrite signed URLs.',
     ),
 }
-KNOWLEDGE_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
+RETRIEVAL_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
     'output_contract': (
-        '# Knowledge evidence citation rules (mandatory)\n'
-        'When you use evidence retrieved from a knowledge base or uploaded document index, '
-        'you MUST cite that evidence in the user-visible final answer. Place the original '
-        '`[[document.chunk]]` marker immediately after each claim or paragraph it supports. '
-        'Every answer that relies on retrieved knowledge MUST contain at least one such marker. '
-        'Copy markers exactly from the corresponding retrieved evidence; do not invent, '
-        'renumber, rewrite, or fabricate citation markers. Do not replace these markers with '
-        'a manually written references list: the application converts valid markers into '
-        'inline citations and builds the references panel automatically.',
-    ),
-}
-EXTERNAL_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
-    'output_contract': (
-        '# External evidence citation rules (mandatory)\n'
-        'Web, academic, Wikipedia, and url_fetch results may contain a system-generated `ref` such as '
-        '`[[3.1]]`. When a claim relies on such a result, copy its `ref` exactly after the supported claim. '
-        'Never invent, renumber, or infer a ref, and do not replace a returned ref with a hand-written source list. '
-        'Only results that actually contain a `ref` are registered external sources.',
+        '# Retrieval evidence citation rules (mandatory)\n'
+        'For any used retrieval result containing `ref`, copy that `ref` exactly after its supported claim. '
+        'Never invent or rewrite refs. If relevant knowledge-base and external results both contain `ref`, '
+        'cite at least one result from each category.',
     ),
 }
 EXTERNAL_SEARCH_CONTENT_APPENDIX: SystemPromptAppendix = {
@@ -106,7 +91,7 @@ EXTERNAL_SEARCH_CONTENT_APPENDIX: SystemPromptAppendix = {
         'the unchanged result item to `get_content` or `get_contents`; these methods keep their provider return '
         'types, so cite the ref already present on the corresponding search result item.',
     ),
-    'output_contract': EXTERNAL_CITATION_OUTPUT_APPENDIX['output_contract'],
+    'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }
 ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
@@ -193,10 +178,7 @@ KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         "no relevant result.\n\n"
         "For papers, research topics, arXiv ids, abstracts, or author-related questions, "
         "still try the knowledge-base search first; after knowledge-base evidence is unavailable or "
-        "insufficient, prefer `AcademicSearchToolkit` over general web search tools. "
-        "When answering with knowledge-base evidence, cite with the original `[[document.chunk]]` "
-        "markers. For web search, Wikipedia, `url_fetch`, or `AcademicSearchToolkit`, copy only the "
-        "system-generated `ref` returned by the supporting result; never fabricate a marker.\n"
+        "insufficient, prefer `AcademicSearchToolkit` over general web search tools.\n"
     ),
 }
 WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -210,20 +192,19 @@ WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'does not contain, call `url_fetch` with that result URL and cite the returned ref. For Tavily image tasks, '
         'use `include_images=True`; use `include_raw_content=True` only when the extra page text is needed.',
     ),
-    'output_contract': EXTERNAL_CITATION_OUTPUT_APPENDIX['output_contract'],
+    'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }
 URL_FETCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Web Page Fetch Rules\n'
-        'Use only a URL supplied by the user or returned by a tool. To follow a fetched page link, copy the exact '
-        '`page_ref` and page-local `link_id` returned by url_fetch in the current Agent run; never guess either value. '
-        'These handles expire after the run. For a URL retained in conversation history, call `url_fetch(url=...)` '
-        'again using the exact `target_url` or `final_url`. A clicked page returns a new page_ref for its own links. '
+        'Use only a URL supplied by the user or returned by a tool. To follow a fetched page link, call '
+        '`url_fetch(url=...)` again using the exact `target_url`; never invent or rewrite the URL. To inspect multiple '
+        'pages, issue multiple url_fetch calls in the same tool-call turn so they can execute concurrently. '
         'Listed links are navigation candidates, not read or citable sources. '
         'When `content_truncated=true`, treat the page text as incomplete and do not conclude that omitted content '
         'is absent.',
     ),
-    'output_contract': EXTERNAL_CITATION_OUTPUT_APPENDIX['output_contract'],
+    'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }
 MEMORY_TOOLS_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
@@ -310,15 +291,15 @@ class ToolConfig:
 
 
 _WEB_SEARCH_ENGINE_INSTANCES: list = [
-    SearchProviderTools(GoogleSearch()),
-    SearchProviderTools(BingSearch()),
-    SearchProviderTools(BochaSearch()),
-    SearchProviderTools(TavilySearch()),
+    GoogleSearch(),
+    BingSearch(),
+    BochaSearch(),
+    TavilySearch(),
 ]
 
 _ACADEMIC_SEARCH_ENGINE_INSTANCES: list = [
-    SearchProviderTools(SciverseSearch()),
-    SearchProviderTools(ArxivSearch(skip_auth=True)),
+    SciverseSearch(),
+    ArxivSearch(skip_auth=True),
 ]
 
 
@@ -369,7 +350,7 @@ def _kb_prompt_appendix() -> SystemPromptAppendix:
     appendix: SystemPromptAppendix = {
         'output_contract': (
             *IMAGE_MARKDOWN_OUTPUT_APPENDIX['output_contract'],
-            *KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
+            *RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
         ),
     }
     agentic_config = lazyllm.globals.get('agentic_config') or {}
@@ -452,7 +433,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         label_en='Temporary File Search',
         description_en='Search relevant content in temporary files uploaded by the user.',
         appendix_system_prompt={
-            'output_contract': KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
+            'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
         },
     ),
     ToolConfig(
@@ -495,7 +476,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         name='wikipedia',
         label='Wikipedia 搜索',
         description='查询 Wikipedia 中稳定的百科背景和明确词条；不用于新闻、时效信息或开放网页搜索',
-        tool=SearchProviderTools(WikipediaToolkit(skip_auth=True)), module='retrieval',
+        tool=WikipediaToolkit(skip_auth=True), module='retrieval',
         label_en='Wikipedia Search',
         description_en=(
             'Look up stable encyclopedic background and named Wikipedia entries; not for news, '

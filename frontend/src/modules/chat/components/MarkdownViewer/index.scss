@@ -40,22 +40,6 @@
   pointer-events: none;
 }
 
-.md-image-fallback {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px dashed var(--color-border-muted);
-  border-radius: 6px;
-  padding: 8px 12px;
-  color: var(--color-fg-muted);
-  background: var(--color-canvas-subtle);
-  font-size: 13px;
-
-  > a {
-    color: var(--color-accent-fg);
-  }
-}
-
 .md-content-card {
   border-radius: 4px;
 
