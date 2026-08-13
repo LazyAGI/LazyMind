@@ -44,6 +44,12 @@ const DRAFT_LS_PREFIX = 'slotDraft:';
 
 const _drafts = new Map<string, DraftEntry>();
 
+// A write-back can finish while a session request that started earlier is still
+// in flight. Do not discard the refresh in that case: queue one follow-up load
+// so the selected artifact eventually converges to the new provider_sync revision.
+const _activeSessionLoads = new Map<string, Promise<void>>();
+const _queuedActiveSessionLoads = new Map<string, { silentError?: boolean }>();
+
 function _draftKey(sessionId: string, slotId: string, listIndex: number): string {
   return `${sessionId}:${slotId}:${listIndex}`;
 }
@@ -177,8 +183,22 @@ export interface SlotRevision {
   artifact_value?: any;
   /** Human-readable description for image/file artifacts. */
   caption?: string;
-  /** change_source: 'ai' (generated) or 'human' (manually edited). */
-  change_source?: "ai" | "human";
+  /** change_source: ai / human / provider_sync (Feishu-confirmed). */
+  change_source?: "ai" | "human" | "provider_sync";
+  /** Whether this draft has a server-owned Feishu baseline. */
+  write_back_ready?: boolean;
+  /** Whether the selected draft differs from that Feishu baseline. */
+  write_back_dirty?: boolean;
+  /** Server-owned delivery state for the selected draft. */
+  write_back_state?: 'initial_delivery' | 'synced_clean' | 'synced_dirty' | 'blocked';
+  /** Public Feishu document URL resolved by the server from source_document. */
+  write_back_url?: string;
+  /** Cloud provider bound to source_document, for example "feishu". */
+  provider?: string;
+  /** Stable cloud-document identity. It is never a local revision number. */
+  provider_document_id?: string;
+  /** Most recent local revision confirmed equal to the cloud document. */
+  last_synced_revision?: number;
   /** Number of revisions for this (slot_id, list_index) — used to show version badge. */
   revision_count?: number;
 }
@@ -187,6 +207,11 @@ export interface WorkflowSession {
   session_id: string;
   conversation_id: string;
   workflow_id: string;
+  /** Immutable package revision selected when this session was created. */
+  pinned_revision_id?: string;
+  pinned_revision_no?: number;
+  /** Current published package revision; absent for built-ins without a resource head. */
+  head_revision_no?: number;
   status: "active" | "completed" | "failed" | "waiting" | "stopped";
   current_step_id: string;
   /** Global intent/constraint for this session, JSON string e.g. {"text":"..."} */
@@ -321,6 +346,7 @@ export interface CompositeBehavior {
 }
 
 export interface WorkflowUI {
+  name?: string;
   tabs?: TabDef[];
   /** Global widget config keyed by slot id. */
   slots?: Record<string, Record<string, unknown>>;
@@ -328,9 +354,11 @@ export interface WorkflowUI {
 
 export interface SlotVersionEntry {
   revision: number;
-  change_source: "ai" | "human";
+  change_source: "ai" | "human" | "provider_sync";
   created_at: string;
   selected: boolean;
+  /** Whether this historical Writer revision was provider-confirmed. */
+  provider_synced?: boolean;
   content_snapshot?: any;
 }
 
@@ -378,6 +406,7 @@ interface WorkflowStore {
     value: any,
     contentType?: string,
     mode?: 'draft' | 'checkpoint',
+    baseRevision?: number,
   ) => Promise<number | undefined>;
   reorderSlotItems: (sessionId: string, slotId: string, newSortOrderSeq: number[], version: number) => Promise<void>;
   getSlotVersions: (sessionId: string, slotId: string, listIndex: number) => Promise<SlotVersionEntry[]>;
@@ -474,54 +503,80 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
 
   loadActiveSession: async (conversationId, options) => {
     if (!conversationId) return;
-    // Deduplicate concurrent calls for the same conversation.
-    if (get().loadingByConversation[conversationId]) return;
-    set((s) => ({
-      loadingByConversation: { ...s.loadingByConversation, [conversationId]: true },
-    }));
-    try {
-      const requestOptions = options?.silentError
-        ? ({ silentError: true } as never)
-        : undefined;
-      const res = await WorkflowSessionApi().getLatestSession(
-        conversationId,
-        requestOptions,
-      );
-      const session: WorkflowSession | null = res?.data?.data?.session ?? null;
-      // Runtime controls and rollback candidates come from Go's projection.
-      // Steps are attempt history only; they never define Past/Ready locally.
-      if (session?.session_id) {
-        try {
-          const [stepsRes, projectionRes] = await Promise.all([
-            WorkflowSessionApi().getSteps(session.session_id, requestOptions),
-            WorkflowSessionApi().getProjection(
-              session.session_id,
-              { silentError: true } as never,
-            ),
-          ]);
-          const rawSteps = stepsRes?.data?.data?.steps ?? [];
-          session.steps = rawSteps.filter((s: WorkflowSessionStep) => s.step_id !== '__end__');
-          session.projection = projectionRes?.data?.data?.projection ?? {};
-          session.status = reconcileWorkflowSessionStatus(session.status, session.projection);
-        } catch (error) {
-          session.steps = [];
-          session.projection = {};
-          const errorCode = extractErrorCode(error);
-          if (errorCode === "WORKFLOW_DEFINITION_CHANGED") {
-            session.runtime_error_code = errorCode;
-            session.runtime_error_message = getLocalizedErrorMessage(error);
+    const activeLoad = _activeSessionLoads.get(conversationId);
+    if (activeLoad) {
+      const queuedOptions = _queuedActiveSessionLoads.get(conversationId);
+      _queuedActiveSessionLoads.set(conversationId, {
+        silentError: queuedOptions
+          ? Boolean(queuedOptions.silentError && options?.silentError)
+          : options?.silentError,
+      });
+      await activeLoad;
+      return;
+    }
+
+    const load = (async () => {
+      set((s) => ({
+        loadingByConversation: { ...s.loadingByConversation, [conversationId]: true },
+      }));
+      try {
+        const requestOptions = options?.silentError
+          ? ({ silentError: true } as never)
+          : undefined;
+        const res = await WorkflowSessionApi().getLatestSession(
+          conversationId,
+          requestOptions,
+        );
+        const session: WorkflowSession | null = res?.data?.data?.session ?? null;
+        // Runtime controls and rollback candidates come from Go's projection.
+        // Steps are attempt history only; they never define Past/Ready locally.
+        if (session?.session_id) {
+          try {
+            const [stepsRes, projectionRes] = await Promise.all([
+              WorkflowSessionApi().getSteps(session.session_id, requestOptions),
+              WorkflowSessionApi().getProjection(
+                session.session_id,
+                { silentError: true } as never,
+              ),
+            ]);
+            const rawSteps = stepsRes?.data?.data?.steps ?? [];
+            session.steps = rawSteps.filter((s: WorkflowSessionStep) => s.step_id !== '__end__');
+            session.projection = projectionRes?.data?.data?.projection ?? {};
+            session.status = reconcileWorkflowSessionStatus(session.status, session.projection);
+          } catch (error) {
+            session.steps = [];
+            session.projection = {};
+            const errorCode = extractErrorCode(error);
+            if (errorCode === "WORKFLOW_DEFINITION_CHANGED") {
+              session.runtime_error_code = errorCode;
+              session.runtime_error_message = getLocalizedErrorMessage(error);
+            }
           }
         }
+        get().setSession(conversationId, session);
+        // Also refresh dismissed sessions so the restore button appears immediately on load.
+        get().fetchDismissedSessions(conversationId);
+      } catch {
+        // ignore
+      } finally {
+        set((s) => ({
+          loadingByConversation: { ...s.loadingByConversation, [conversationId]: false },
+        }));
       }
-      get().setSession(conversationId, session);
-      // Also refresh dismissed sessions so the restore button appears immediately on load.
-      get().fetchDismissedSessions(conversationId);
-    } catch {
-      // ignore
+    })();
+
+    _activeSessionLoads.set(conversationId, load);
+    try {
+      await load;
     } finally {
-      set((s) => ({
-        loadingByConversation: { ...s.loadingByConversation, [conversationId]: false },
-      }));
+      if (_activeSessionLoads.get(conversationId) === load) {
+        _activeSessionLoads.delete(conversationId);
+      }
+      const queuedOptions = _queuedActiveSessionLoads.get(conversationId);
+      if (queuedOptions) {
+        _queuedActiveSessionLoads.delete(conversationId);
+        await get().loadActiveSession(conversationId, queuedOptions);
+      }
     }
   },
 
@@ -577,7 +632,26 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       const res = await WorkflowInfoApi().getWorkflow(workflowId, {
         headers: lang ? { "Accept-Language": lang } : undefined,
       });
-      const ui: WorkflowUI = res?.data?.data?.ui ?? res?.data?.ui ?? {};
+      const payload = res?.data?.data ?? res?.data ?? {};
+      const declaredSlots = new Map<string, Record<string, unknown>>(
+        (Array.isArray(payload.slots) ? payload.slots : [])
+          .filter((slot: unknown): slot is Record<string, unknown> => Boolean(
+            slot && typeof slot === "object" && typeof (slot as Record<string, unknown>).id === "string",
+          ))
+          .map((slot: Record<string, unknown>) => [String(slot.id), slot]),
+      );
+      const rawUI: WorkflowUI = payload.ui ?? {};
+      const ui: WorkflowUI = {
+        ...rawUI,
+        name: typeof payload.name === "string" ? payload.name : workflowId,
+        tabs: rawUI.tabs?.map((tab) => ({
+          ...tab,
+          slots: tab.slots.map((slot) => ({
+            ...(declaredSlots.get(slot.id) ?? {}),
+            ...slot,
+          })),
+        })),
+      };
       set((state) => ({
         workflowUIByWorkflow: { ...state.workflowUIByWorkflow, [cacheKey]: ui },
       }));
@@ -591,9 +665,9 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     await WorkflowSessionApi().deleteSlotItem(sessionId, slotId, listIndex, orderVersion);
   },
 
-  patchSlotItemValue: async (sessionId, slotId, listIndex, value, contentType, mode) => {
+  patchSlotItemValue: async (sessionId, slotId, listIndex, value, contentType, mode, baseRevision) => {
     const res = await WorkflowSessionApi().patchSlotItem(
-      sessionId, slotId, listIndex, value, contentType, mode,
+      sessionId, slotId, listIndex, value, contentType, mode, baseRevision,
     );
     const revision = res?.data?.data?.revision;
     return typeof revision === 'number' ? revision : undefined;

@@ -5,8 +5,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"mime"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -113,6 +115,34 @@ func (h RemoteHandler) Input(w http.ResponseWriter, r *http.Request) {
 			remoteReply(w, 404, nil, "ATTEMPT_INPUT_NOT_FOUND", "artifact value was not found")
 			return
 		}
+		if artifact.ContentType == "file" || artifact.ContentType == "image" {
+			var file struct {
+				Filename string `json:"filename"`
+				Path     string `json:"path"`
+			}
+			if json.Unmarshal(artifact.Value, &file) != nil || file.Path == "" {
+				remoteReply(w, 404, nil, "ATTEMPT_INPUT_NOT_FOUND", "artifact file path was not found")
+				return
+			}
+			content, readErr := os.ReadFile(file.Path)
+			if readErr != nil {
+				remoteReply(w, 404, nil, "ATTEMPT_INPUT_NOT_FOUND", "artifact file was not found")
+				return
+			}
+			name := file.Filename
+			if name == "" {
+				name = filepath.Base(file.Path)
+			}
+			mediaType := mime.TypeByExtension(filepath.Ext(name))
+			if mediaType == "" {
+				mediaType = "application/octet-stream"
+			}
+			remoteReply(w, 200, map[string]any{"material_id": mux.Vars(r)["material_id"],
+				"resource_id": revision.ID, "revision": revision.Revision, "name": name,
+				"mime_type": mediaType, "size": len(content),
+				"content_base64": base64.StdEncoding.EncodeToString(content)}, "", "")
+			return
+		}
 		remoteReply(w, 200, map[string]any{"material_id": mux.Vars(r)["material_id"],
 			"resource_id": revision.ID, "revision": revision.Revision, "name": revision.Slot + ".json",
 			"mime_type": "application/json", "size": len(artifact.Value),
@@ -160,6 +190,10 @@ func (h RemoteHandler) SaveArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	if !declared {
 		remoteReply(w, 422, nil, "OUTPUT_SLOT_UNDECLARED", "artifact slot is not declared by the step")
+		return
+	}
+	if ctx.DeclaredOutputTypes[body.Slot] == "file" && body.ContentType != "file" && body.ContentType != "file_list" {
+		remoteReply(w, 422, nil, "OUTPUT_TYPE_MISMATCH", "file slot requires file or file_list content type")
 		return
 	}
 	if err := h.Artifacts.Save(r.Context(), ctx, body); err != nil {

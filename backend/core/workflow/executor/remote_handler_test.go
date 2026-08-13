@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -106,12 +108,28 @@ func TestRemoteHandlerReadsResourceAndArtifactInputs(t *testing.T) {
 		Validity: "effective", CreatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
+	draftPath := filepath.Join(t.TempDir(), "draft.md")
+	if err := os.WriteFile(draftPath, []byte("# Durable draft"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	draftID := "file-1"
+	draftValue, _ := json.Marshal(map[string]any{"filename": "draft.md", "path": draftPath})
+	if err := db.Create(&orm.WorkflowHumanArtifact{ID: draftID, SessionID: value.SessionID, Slot: "draft_document",
+		ContentType: "file", Value: draftValue, CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSlotRevision{ID: "revision-2", SessionID: value.SessionID, SlotID: "draft_document",
+		Revision: 1, Selected: true, HumanArtifactID: &draftID, Slot: "draft_document", StepID: "write", Attempt: 1,
+		Validity: "effective", CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		material string
 		binding  map[string]any
 		want     string
 	}{{"brief", map[string]any{"source_type": "input_resource", "source_id": resource.ID}, "brief"},
-		{"draft", map[string]any{"source_type": "artifact", "source_revision_id": "revision-1"}, `{"ok":true}`}}
+		{"draft", map[string]any{"source_type": "artifact", "source_revision_id": "revision-1"}, `{"ok":true}`},
+		{"draft_document", map[string]any{"source_type": "artifact", "source_revision_id": "revision-2"}, "# Durable draft"}}
 	for _, test := range tests {
 		t.Run(test.material, func(t *testing.T) {
 			ctx := value
@@ -139,21 +157,23 @@ func TestRemoteHandlerReadsResourceAndArtifactInputs(t *testing.T) {
 
 func TestRemoteHandlerAcceptsDeclaredOptionalArtifactAndRejectsUnknown(t *testing.T) {
 	value := AttemptContext{AttemptID: "attempt-1", SessionID: "session-1", StepID: "step-1",
-		DeclaredOutputs: []string{"optional"}, RequiredOutputs: nil}
+		DeclaredOutputs: []string{"optional"}, DeclaredOutputTypes: map[string]string{"optional": "file"}, RequiredOutputs: nil}
 	handler, _, claim := remoteHandlerFixture(t, value)
 	sink := &recordingArtifactSink{}
 	handler.Artifacts = sink
 	for _, test := range []struct {
 		slot   string
 		status int
-	}{{"optional", http.StatusOK}, {"unknown", http.StatusUnprocessableEntity}} {
+	}{{"optional", http.StatusUnprocessableEntity}, {"unknown", http.StatusUnprocessableEntity}} {
 		rec := remoteHandlerRequest(handler.SaveArtifact, http.MethodPost, "/artifacts", value.AttemptID,
 			claim.LeaseToken, map[string]any{"slot": test.slot, "content_type": "text", "value": map[string]any{"v": 1}})
 		if rec.Code != test.status {
 			t.Fatalf("slot=%s status=%d body=%s", test.slot, rec.Code, rec.Body.String())
 		}
 	}
-	if len(sink.values) != 1 || sink.values[0].Slot != "optional" || sink.values[0].Seq != 1 {
+	accepted := remoteHandlerRequest(handler.SaveArtifact, http.MethodPost, "/artifacts", value.AttemptID,
+		claim.LeaseToken, map[string]any{"slot": "optional", "content_type": "file", "value": map[string]any{"path": "/data/subagent/user/task/outline.md"}})
+	if accepted.Code != http.StatusOK || len(sink.values) != 1 || sink.values[0].Slot != "optional" || sink.values[0].Seq != 1 {
 		t.Fatalf("saved=%#v", sink.values)
 	}
 }
