@@ -182,6 +182,7 @@ const zhCN = {
       appId: "App ID",
       appIdRequired: "请输入 App ID",
       appIdPlaceholder: "请输入飞书 App ID",
+      notionAppIdPlaceholder: "请输入 Notion OAuth Client ID",
       appSecret: "App Secret",
       appSecretRequired: "请输入 App Secret",
       appSecretPlaceholder: "请输入 App Secret",

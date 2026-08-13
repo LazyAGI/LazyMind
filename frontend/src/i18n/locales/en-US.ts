@@ -194,6 +194,7 @@ const enUS = {
       appId: "App ID",
       appIdRequired: "App ID is required",
       appIdPlaceholder: "Enter Feishu App ID",
+      notionAppIdPlaceholder: "Enter Notion OAuth Client ID",
       appSecret: "App Secret",
       appSecretRequired: "App Secret is required",
       appSecretPlaceholder: "Enter App Secret",
